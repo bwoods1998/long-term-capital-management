@@ -472,7 +472,7 @@ def _mode_why(settings: Mapping[str, Any] | None, root: str | Path | None = None
               ) -> tuple[str, str | None]:
     """(THE EFFECTIVE MODE, why it is not the setting's own or None): `mode`'s rule. `legs`: the reader of the live
     legs: `live_ready` (the default: a leg it cannot read is not ready, so the mode reads "gate") or `_live_legs`
-    (which raises on one: `seat_standing` then says it cannot tell). It raises on a setting it cannot read: `mode`
+    (which raises on one: `seat_word` then says it cannot tell). It raises on a setting it cannot read: `mode`
     reads that as "off"."""
     if not _lane_on(settings):
         return "off", "the equity lanes are off (elane.mode)"
@@ -607,15 +607,32 @@ def live_ready(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[bo
         return False, f"the live legs cannot be read ({type(exc).__name__})"
 
 
-def seat_standing(root: str | Path) -> tuple[bool | None, str]:
+#: `seat_word`'s answers (league/equity/families.py `standing` hands them to the book): the lane is live; THE CAPTAIN'S
+#: SWITCH is under "live" (positive evidence: the book retires the instance and its lots exit at the next open); A
+#: STORE-SIDE LEG of the lane failed (its opens stop, its exits go on, nothing is retired: E4-SPEC 17); it cannot be told.
+SEAT_LIVE, SEAT_DEMOTED, SEAT_HELD, SEAT_UNKNOWN = "live", "demoted", "held", "unknown"
+
+
+def seat_word(root: str | Path) -> tuple[str, str]:
     """THE LANE'S OWN WORD ON A SEAT, for a panel program that is ALREADY SEATED (`bands.equity_seat_withdrawn`, which
     E1's `league.equity.families.EquityFamilies.standing` asks before the book retires an instance whose family has no
-    row): (True, "") while the effective mode is "live"; (False, why) on POSITIVE EVIDENCE that it is not: the box's
-    swarm.json and the panel's files were read, and a switch or a named leg of `live_ready` says so; (None, why) when
-    it cannot be told (a swarm.json, a manifest or a marker that is there and cannot be read: a file being rewritten;
-    a leg that raised). `mode` reads every one of those as "off", which is right for a seat not yet given and wrong
-    for one to take away: the book retires only on positive evidence (A8.5), so a file caught mid-write sells nothing.
-    Either way `bands.read` gives the family no row while the lane is not live, so it OPENS nothing. Never raises."""
+    row): (code, why).
+
+    - `SEAT_LIVE` while the effective mode is "live".
+    - `SEAT_DEMOTED` ONLY WHEN THE SETTING SAYS SO: the box's swarm.json was read and `elane.panel.mode` is under
+      "live", or `elane.mode` is not "gate" (the captain put a switch down: the rollback of E4-SPEC 15's patch 16).
+      The book retires the instance and its lots exit at the next open by E1's rule.
+    - `SEAT_HELD` when the setting is "live" and a STORE-SIDE LEG fails (the coverage verdict, the spreads' share, the
+      receipt, any leg of `live_ready`: the universe deploy, the tradable share, the universe's age, THE STORE'S
+      FRESHNESS, the nightly I6, the twin marker), the leg named. E4-SPEC 17: "`live_ready` False while a panel
+      instance is live: its opens stop, exits go on". Nothing is retired and nothing is sold on it: one restated bar
+      among 515 columns, a marker two sessions old or a share that slipped under its bound is no reason to liquidate
+      a basket the Gym twin goes on holding.
+    - `SEAT_UNKNOWN` when it cannot be told (a swarm.json, a manifest or a marker that is there and cannot be read:
+      a file being rewritten; a leg that raised). The book retires only on positive evidence (A8.5).
+
+    In every case but the first `bands.read` gives the family no row, so it OPENS nothing (`live._seat_block` holds
+    every entry at the send). Never raises."""
     try:
         root = Path(root)
         from . import settings as settings_mod
@@ -627,18 +644,30 @@ def seat_standing(root: str | Path) -> tuple[bool | None, str]:
                            (root / STORE_DIR / xbook.TWINS_FILE, "the twin marker")):
             try:
                 if not isinstance(json.loads(path.read_text(encoding="utf-8")), Mapping):
-                    return None, f"{what} is no object"
+                    return SEAT_UNKNOWN, f"{what} is no object"
             except FileNotFoundError:
                 continue  # no file: the policy alone decides; a missing manifest or marker is a leg of the rule
             except (OSError, ValueError) as exc:
-                return None, f"{what} could not be read ({type(exc).__name__})"
-        found, why = _mode_why(settings_mod.load(root), root, legs=_live_legs)
+                return SEAT_UNKNOWN, f"{what} could not be read ({type(exc).__name__})"
+        settings = settings_mod.load(root)
+        found, why = _mode_why(settings, root, legs=_live_legs)
         if found == "live":
-            return True, ""
-        return False, (f"the panel lane is not live (its mode reads \"{found}\"): "
-                       f"{why or 'elane.panel.mode is set so'}")[:300]
+            return SEAT_LIVE, ""
+        said = (f"the panel lane is not live (its mode reads \"{found}\"): "
+                f"{why or 'elane.panel.mode is set so'}")[:300]
+        if not _lane_on(settings) or cfg(settings)["mode"] != "live":
+            return SEAT_DEMOTED, said       # the captain's switch
+        return SEAT_HELD, said              # a store-side leg: opens stop, exits go on, nobody is retired
     except Exception as exc:  # noqa: BLE001 - no evidence either way
-        return None, f"the panel lane could not be read ({type(exc).__name__}: {str(exc)[:120]})"
+        return SEAT_UNKNOWN, f"the panel lane could not be read ({type(exc).__name__}: {str(exc)[:120]})"
+
+
+def seat_standing(root: str | Path) -> tuple[bool | None, str]:
+    """`seat_word` as three states: (True, "") while the lane is live; (False, why) on POSITIVE EVIDENCE that the
+    captain's switch is down; (None, why) when the seat is neither given nor taken away: a store-side leg failed
+    (held: the leg named) or the lane cannot be read. Never raises."""
+    code, why = seat_word(root)
+    return (True if code == SEAT_LIVE else False if code == SEAT_DEMOTED else None), why
 
 
 def is_panel(fam: Mapping[str, Any] | None) -> bool:
@@ -3427,7 +3456,7 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "UNIVERSE_MANIFEST", "DEFAULTS", "BOUNDS", "CENSUS_NOTE_MAX", "CENSUS_LABEL", "SCREEN_NULLS", "PANEL_AGENDA",
            "INPUTS", "BAR_XS", "FAILS_XS", "PROGRAM_FAILS", "JUDGED_XS", "MAP_LABEL", "K_BASE", "K_STRESS",
            "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "cfg", "pin", "receipt", "mode",
-           "live_ready", "seat_standing", "is_panel", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
+           "live_ready", "seat_word", "seat_standing", "is_panel", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
            "judged", "identity", "hidden_year_of", "card_errors", "cell_of", "family_cell", "cell_text",
            "closed_cells", "cell_looks", "forward_verdicts", "look_room", "probe_reading", "probed", "style_of",
            "assign", "run_spans", "seen_spans", "hidden_span", "agenda_text", "contract_text", "bar_text",

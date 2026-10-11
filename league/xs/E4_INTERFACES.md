@@ -385,12 +385,14 @@ after it carry 5ad1f01e's three. The xs identity is new (no band exists under an
   CANDIDATE no row while the lane's effective mode is under "live"; nothing held a family already at Probe, so a
   seated program went on buying after the mode was put down, the nightly I6 failed or the twin marker went stale.
   Now: `bands._read_equity` gives a panel family in a running band a row only while the lane is live;
-  `elane_xs.seat_standing` and `bands.equity_seat_withdrawn` give E1's `families.standing` the store's word
-  ("demoted" on positive evidence, "unknown" when the lane cannot be READ, so a file caught mid-write retires
-  nobody); and the book asks for the row at every SEND of a non-equity kind's entry (`live._seat_block`), so an entry
-  planned on a live evening is held the next morning. `elane_xs.mode` and `live_ready` answer as before (a live leg
+  `elane_xs.seat_word` and `bands.equity_seat_withdrawn` give E1's `families.standing` the store's word
+  ("demoted" ONLY when the captain's switch is down; "held" when the switch is up and a store-side leg failed: the
+  review's fix, E4-SPEC 17, its opens stop and its exits go on, nothing retired or sold, `families.HELD`; "unknown"
+  when the lane cannot be READ, so a file caught mid-write retires nobody); and the book asks for the row at every
+  SEND of a non-equity kind's entry (`live._seat_block`), so an entry planned on a live evening is held the next
+  morning. `elane_xs.mode` and `live_ready` answer as before (a live leg
   that cannot be read still reads "gate"): each is the never-raising reading of a core (`_mode_why`, `_live_legs`),
-  and `seat_standing` alone reads the legs with the one that raises. The family's band in the store is not moved (it
+  and `seat_word` alone reads the legs with the one that raises. The family's band in the store is not moved (it
   keeps its roster seat; when the lane is live again the same instance runs again).
   `league/equity/families.py` is a fifth E1 file E4 touches, beside H's four. Tests:
   `test_e4_integration.TheSeatOfASeatedPanelProgram`, `test_e4_e2e` step 9.

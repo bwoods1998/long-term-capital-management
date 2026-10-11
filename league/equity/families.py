@@ -20,7 +20,8 @@ rows, and the book never takes "no rows" from an unreadable store for "every pro
 cannot be computed each raise there and land in `last_error` (the plain read answers [] for all three, which the book
 once took for "every family gone"). `standing(family, version)` is the store's own word on ONE family, for an instance
 whose family has no row in a good read: the book retires only on what it says ("retired" | "demoted"), never on the
-absence alone (one family's code file or version row that cannot be read leaves it out of `read` too). `twins()` is the
+absence alone (one family's code file or version row that cannot be read leaves it out of `read` too), and never on
+"held" (release E4: its lane's switch is up and a store-side leg of the lane failed: its opens stop, its exits go on). `twins()` is the
 swarm store's `equity_twins` record (league/ops/twins.py writes it: {"eq:<lid>": {status, gap_bp, final, ...}}), EDM1's
 twin leg.
 
@@ -46,6 +47,9 @@ RUNNING_BANDS = ("probe", "sized")
 #: `standing`'s answers that are POSITIVE EVIDENCE a version no longer runs (the book retires its instance on these
 #: alone); "live" (the store shows it running) and "unknown" (it could not be read) change nothing.
 GONE = ("retired", "demoted")
+#: RELEASE E4: the family runs, its lane's switch is up, and a store-side leg of its lane failed (a panel family while
+#: `elane_xs.live_ready` does not hold): IT OPENS NOTHING, ITS EXITS GO ON, and the book retires nothing on it.
+HELD = "held"
 
 
 def validation_r_sd(state: Any, version: Any) -> float | None:
@@ -108,11 +112,14 @@ class EquityFamilies:
         `read`: (code, why), read on the swarm store itself and never inferred from the absence. "retired": its family
         is retired, is no equity-lane family, runs another banded version, or its band's proof is not the current
         equity identity (`bands.current_equity_evaluator`: an evidence release moved it); "demoted": its band is no
-        running band (a Candidate waiting for a seat, back in the Gym), or its lane gives it no seat now (release E4: a
-        panel family while the panel lane is not live, `bands.equity_seat_withdrawn`); "live": the store shows it alive
-        in a running band on this version with a current proof (the read left it out for a reason of its own: its code
-        file or its version row); "unknown": the family, its version, the equity identity or its lane's own word could
-        not be read. Never raises."""
+        running band (a Candidate waiting for a seat, back in the Gym), or its lane's SWITCH gives it no seat now
+        (release E4: a panel family whose `elane.panel.mode` the captain put under "live",
+        `bands.equity_seat_withdrawn`); `HELD`: it runs and its lane's switch is up, but a store-side leg of the lane
+        failed (the nightly I6, the twin marker, the store's freshness, the universe: the leg is named): its opens
+        stop, its exits go on, nothing is retired; "live": the store shows it alive in a running band on this version
+        with a current proof (the read left it out for a reason of its own: its code file or its version row);
+        "unknown": the family, its version, the equity identity or its lane's own word could not be read. Never
+        raises."""
         try:
             with self.lock:
                 store = self._db()
@@ -144,8 +151,9 @@ class EquityFamilies:
             if not current:
                 return "retired", "its band's proof is not the current equity identity"
             # RELEASE E4: a family whose LANE gives it no seat now (a panel family while the panel lane is not live:
-            # `bands.read` leaves it out) is "demoted" on the lane's positive word, "unknown" when the lane cannot be
-            # read; None for every other family, and the answer below is E1's own.
+            # `bands.read` leaves it out) is "demoted" when the lane's SWITCH is down, "held" when a store-side leg
+            # of the lane failed, "unknown" when the lane cannot be read; None for every other family, and the
+            # answer below is E1's own.
             seat = bands.equity_seat_withdrawn(self.root, fam)
             if seat is not None:
                 return seat
@@ -210,9 +218,11 @@ class MemoryEquityFamilies:
     `twin_rows` the twins record; set `last_error` to make `read` answer [] as an unreadable store does. `hidden`:
     families `read` leaves out although they run (a row the store could not read: `standing` then says "live");
     `standing` of a family with no row at all is "unknown" (the store never deletes a family: it retires it, band
-    "retired")."""
+    "retired"). `held` {family: why}: families whose LANE holds their opens on a failed leg (release E4): `read` leaves
+    them out and `standing` says `HELD`."""
 
     def __init__(self, rows: Iterable[Mapping[str, Any]] = ()):
+        self.held: dict[str, str] = {}
         self.rows = {str(r["family"]): dict(r) for r in rows}
         self.forward: dict[str, dict[str, dict]] = {}
         self.moves: list[tuple[str, str, str]] = []
@@ -226,7 +236,8 @@ class MemoryEquityFamilies:
             if self.last_error:
                 return []
             return [copy.deepcopy(r) for r in self.rows.values() if r.get("band") != "retired"
-                    and r["family"] not in self.hidden and (family is None or r["family"] == family)]
+                    and r["family"] not in self.hidden and r["family"] not in self.held
+                    and (family is None or r["family"] == family)]
 
     def standing(self, family: str, version: int) -> tuple[str, str]:
         with self.lock:
@@ -241,6 +252,8 @@ class MemoryEquityFamilies:
                 return "demoted", f"its band is {row.get('band') or 'none'}"
             if int(row.get("version") or 0) != int(version):
                 return "retired", f"superseded by version {row.get('version')}"
+            if str(family) in self.held:
+                return HELD, self.held[str(family)]
             return "live", "the store shows it running: its row could not be read (its code file)"
 
     def forward_rows(self, family: str) -> list[dict]:

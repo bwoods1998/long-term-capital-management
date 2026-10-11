@@ -39,12 +39,23 @@ FAILS (nothing written) only when a REF fails E1's audit or over `MASKED_MEMBERS
 THE NIGHTLY I6 (`i6_check`), both sides of each part built under ONE run key and ONE aid set: (1) the reference
 columns of `fetched_through` (REF and that day's members, run key `i6|<day>`) from the store's arrays against the
 same from the KEPT 16:20 fetch (`league.xs.book.kept`) when a panel instance decided that day, else from a fresh
-253-session fetch; (2) each live decision of that day (`eq_rebalances`, read-only) rebuilt from the store against the
-kept file, by E1's `_bars_verdict`. THE VENDOR'S CENTS: a live fetch and a later store are not byte-identical by
-assumption, so part 1's verdict is the bars' (`compare_bars`: sessions and raw prices exactly, the as-of prices of the
-decision day within `rounding_bound`, a volume-only difference a note), and the two ctx shas (`ctx_bytes(build(...))`
-of each side, the reference NEEDS) are reported beside it with `bytes_equal`. A False is a critical alarm. The job
-emits a boolean a part, two shas and counts, nothing else.
+253-session fetch; (2) each live decision of that day THAT READ BARS (`eq_rebalances` rows with a `bars_sha`,
+read-only) rebuilt from the store against the kept file, by E1's `_bars_verdict`, OVER THE COLUMNS IT HAD. THE
+VENDOR'S CENTS: a live fetch and a later store are not byte-identical by assumption, so part 1's verdict is the bars'
+(`compare_bars`: sessions and raw prices exactly, the as-of prices of the decision day within `rounding_bound`, a
+volume-only difference a note), and the two ctx shas (`ctx_bytes(build(...))` of each side, the reference NEEDS) are
+reported beside it with `bytes_equal`. A False is a critical alarm. The job emits a boolean a part, two shas and
+counts, nothing else.
+
+THE I6 IS FALSE ON A PRICE THAT DIFFERS AND ON NOTHING THE LIVE BOOK ITSELF TOLERATES (a False holds every open of the
+lane: `league.swarm.elane_xs.live_ready`). Three things the book decides on, each COUNTED beside the verdict and
+never a mismatch: LATE, a column the kept fetch held no bar of the day for and the store does (`xs.book.complete` let
+the decide go without it, B13, and the book's own morning audit calls it a note: `xs.book.same`); the rest of that
+column's history is still held to the store. ABSENT, a column one side has and the other lacks (a member tonight's
+universe run added or dropped as of the day, after the 16:20 columns were built: a membership gap the receipt shows,
+never a bar that differs). UNREAD, a decision that read bars and has no kept fetch to be held to: its `live` entry is
+None, never False (a failed decide whose fetch was never whole wrote no file and read no bars: it is not a row of
+this part at all; A17: a hold day the House could not ask is an alarm, never an exit).
 
 Data never leaves the House's state directory. The receipt carries counts and verdicts, never a price or a ticker.
 """
@@ -898,14 +909,15 @@ def _kept(root: str | Path, day: dt.date) -> tuple[tuple[str, ...], Any] | None:
 
 
 def _live_rows(path: str | Path | None, day: dt.date) -> list[dict[str, Any]]:
-    """The day's `eq_rebalances` rows of live.sqlite, read-only; [] with no book, no such table or no row."""
+    """The day's `eq_rebalances` rows of live.sqlite THAT READ BARS (a `bars_sha`: a decide the House could not make
+    for want of a whole fetch read none and kept no file), read-only; [] with no book, no such table or no row."""
     if path is None or not Path(path).is_file():
         return []
     db = sqlite3.connect(f"file:{Path(path)}?mode=ro", uri=True, timeout=5.0)
     db.row_factory = sqlite3.Row
     try:
         return [dict(r) for r in db.execute("SELECT instance, extra FROM eq_rebalances WHERE decided_day = ? "
-                                            "ORDER BY rid", (day.isoformat(),))]
+                                            "AND bars_sha IS NOT NULL ORDER BY rid", (day.isoformat(),))]
     except sqlite3.Error:
         return []
     finally:
@@ -925,17 +937,19 @@ def i6_check(root: str | Path, gateway: Any, day: dt.date, *, live: str | Path |
              blank: Sequence[Sequence[Any]] = (), sleep: Callable[[float], None] = time.sleep,
              count: dict[str, int] | None = None) -> dict[str, Any]:
     """The nightly I6 of `day` (the module docstring): {"day", "store_sha", "fetch_sha", "equal", "source": "kept" |
-    "fetch", "live": {instance: bool}} and, beside, "bytes_equal", "columns", "mismatch", "volume", "blanked" and
-    "why". `live`: live.sqlite's path (opened read-only), None: no live decision. `panel`, `assets`: the arrays the job
-    holds as the store's writer (None: read from `root`). `blank`: the audit's [(aid, day)] bars the store reads as
-    missing; the same cells are blanked on the fetch side and counted. It never raises: what it could not do is its
-    `why`, and `equal` is then None (never True)."""
+    "fetch", "live": {instance: True | False | None}} (None: a decision that read bars and has no kept fetch to be
+    held to: unread, never False) and, beside, "bytes_equal", "columns", "mismatch", "volume", "blanked", "late",
+    "absent" and "why". `equal` is False only on a column that differs (part 1) or a live decision whose own columns
+    differ (part 2). `live`: live.sqlite's path (opened read-only), None: no live decision. `panel`, `assets`: the
+    arrays the job holds as the store's writer (None: read from `root`). `blank`: the audit's [(aid, day)] bars the
+    store reads as missing; the same cells are blanked on the fetch side and counted. It never raises: what it could
+    not do is its `why`, and `equal` is then None (never True)."""
     from ..equity import store as eq_store
     from ..xs import config as xs_config
 
     out: dict[str, Any] = {"day": day.isoformat(), "store_sha": None, "fetch_sha": None, "equal": None,
                            "bytes_equal": None, "source": None, "live": {}, "columns": 0, "mismatch": 0, "volume": 0,
-                           "blanked": 0, "why": None}
+                           "blanked": 0, "late": 0, "absent": 0, "why": None}
     try:
         panel = panel if panel is not None else load_panel(root)
         assets = _assets(root, assets)
@@ -996,7 +1010,17 @@ def i6_check(root: str | Path, gateway: Any, day: dt.date, *, live: str | Path |
             fetch_raw, fetch_adj = grid.raw, grid.adj
             out["source"] = "fetch"
         out["blanked"] = blanked(fetch_raw, fetch_adj, order)
-        mismatch, volume = compare_bars(store_raw, store_adj, fetch_raw, fetch_adj)
+        held_raw, held_adj = store_raw, store_adj
+        if out["source"] == "kept":
+            # LATE: no bar of the day in the 16:20 fetch, one in the store. The decision read it as no bar (B13); the
+            # column is held to the store on every session before the day.
+            late = np.isfinite(store_raw[-1, :, 3]) & ~np.isfinite(fetch_raw[-1, :, 3])
+            if bool(late.any()):
+                held_raw, held_adj = np.array(store_raw, copy=True), np.array(store_adj, copy=True)
+                held_raw[-1, late, :] = np.nan
+                held_adj[-1, late, :] = np.nan
+                out["late"] = int(late.sum())
+        mismatch, volume = compare_bars(held_raw, held_adj, fetch_raw, fetch_adj)
         out.update(columns=len(order), mismatch=int(mismatch.sum()), volume=int(volume.sum()))
         equal = not bool(mismatch.any())
         # The two ctx shas (the reference NEEDS, one run key, one aid set), beside the bars' verdict.
@@ -1018,28 +1042,43 @@ def i6_check(root: str | Path, gateway: Any, day: dt.date, *, live: str | Path |
             out["why"] = "the panel's ctx is not built: the bars' verdict alone"
         except Exception as exc:  # noqa: BLE001 - a ctx that cannot be built from the day's bars is said, not raised
             out["why"] = f"the ctx could not be built: {type(exc).__name__}: {str(exc)[:160]}"
-        # Each live decision of the day: its columns from the store against the kept file, by E1's own verdict.
+        # Each live decision of the day that read bars: THE COLUMNS IT HAD, from the store against the kept file, by
+        # E1's own verdict. A decision with no kept fetch is unread (None): it cannot be shown equal, and it is not
+        # shown to differ.
         decided = _live_rows(live, day)
         if decided:
             from ..equity.live import _bars_verdict
 
             aid_of = dict(zip(symbols, order))
+            names, fetched = kept if kept is not None else ((), None)
+            readable = fetched is not None and \
+                [eq_store.from_ordinal(int(v)) for v in np.asarray(fetched.days).tolist()] == days
+            at = {s: k for k, s in enumerate(names)}
+            extras = []
             for row in decided:
-                instance = str(row.get("instance"))
                 try:
-                    extra = [str(s) for s in json.loads(row.get("extra") or "[]")]
+                    extras.append({str(s) for s in json.loads(row.get("extra") or "[]")})
                 except (TypeError, ValueError):
-                    extra = []
-                good = kept is not None  # a decision with no kept fetch cannot be shown equal
-                if good:
-                    names, fetched = kept
-                    at = {s: k for k, s in enumerate(names)}
-                    good = [eq_store.from_ordinal(int(v)) for v in np.asarray(fetched.days).tolist()] == days
-                for symbol in ([*symbols, *extra] if good else ()):
+                    extras.append(set())
+            others = set().union(*extras)
+            known = set(symbols)
+            # ABSENT, once for the day: a member of the store's day the 16:20 columns lacked, or a column of theirs
+            # the store holds no asset for.
+            absent = {s for s in symbols if s not in at} if readable else set()
+            verdicts: dict[str, bool | None] = {}
+            for row, extra in zip(decided, extras):
+                instance = str(row.get("instance"))
+                if not readable:
+                    verdicts.setdefault(instance, None)
+                    continue
+                good = True
+                for symbol in names:
+                    if symbol not in known and symbol not in extra and symbol in others:
+                        continue  # another instance's held name: no column of this decision
                     aid = aid_of.get(symbol, _aid_of(assets, symbol, day))
-                    if symbol not in at or aid is None or aid not in col:
-                        good = False
-                        break
+                    if aid is None or aid not in col:
+                        absent.add(symbol)
+                        continue
                     k_raw = np.array(np.asarray(fetched.raw, dtype=np.float64)[:, [at[symbol]]], copy=True)
                     k_adj = np.array(np.asarray(fetched.all, dtype=np.float64)[:, [at[symbol]]], copy=True)
                     hit = blanked(k_raw, k_adj, [aid])
@@ -1047,18 +1086,25 @@ def i6_check(root: str | Path, gateway: Any, day: dt.date, *, live: str | Path |
                     old_raw, old_all = _column_series(isos, k_raw[:, 0], k_adj[:, 0])
                     new_raw, new_all = _column_series(isos, np.asarray(panel.raw[first:t + 1, col[aid]]),
                                                       np.asarray(panel.adj[first:t + 1, col[aid]]))
+                    if isos[-1] not in old_raw and isos[-1] in new_raw:
+                        # LATE (as `xs.book.same` reads it): the decision read no bar of the day for it.
+                        new_raw.pop(isos[-1])
+                        new_all.pop(isos[-1], None)
+                        out["late"] += 1 if symbol not in known else 0   # (a member's is counted in part 1)
                     if not old_raw:
-                        good = not new_raw  # no bar in either reading: nothing differs
-                        if not good:
+                        if new_raw:
+                            good = False
                             break
-                        continue
+                        continue  # no bar in either reading: nothing differs
                     if _bars_verdict(old_raw, old_all, {d: dict(zip(RAW_FIELDS, v)) for d, v in new_raw.items()},
                                      {d: dict(zip(ADJ_FIELDS, v)) for d, v in new_all.items()},
                                      max(old_raw)) == "mismatch":
                         good = False
                         break
-                out["live"][instance] = bool(good)
-        out["equal"] = bool(equal and all(out["live"].values()))
+                verdicts[instance] = bool(good) and verdicts.get(instance, True) is not False
+            out["live"] = verdicts
+            out["absent"] = len(absent)
+        out["equal"] = bool(equal and all(v is not False for v in out["live"].values()))
     except NotImplementedError as exc:
         out["equal"], out["why"] = None, f"not built: {str(exc)[:160]}"
     except Exception as exc:  # noqa: BLE001 - the I6 never fails the job: what it could not do is said
@@ -1344,7 +1390,13 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
         ctx.alert("critical", f"equity_panel: the nightly I6 is False ({i6['mismatch']} of {i6['columns']} columns "
                               f"differ from the {i6['source']} bars; live decisions equal: "
                               f"{sum(1 for v in i6['live'].values() if v)} of {len(i6['live'])}): mode reads at most "
-                              "\"gate\"")
+                              "\"gate\" (a seated panel program opens nothing; its exits go on)")
+    unread = sum(1 for v in i6["live"].values() if v is None)
+    if i6.get("late") or i6.get("absent") or unread:
+        ctx.alert("warning", f"equity_panel: the nightly I6 counted {i6.get('late') or 0} bars served after the 16:20 "
+                             f"fetch, {i6.get('absent') or 0} columns one side lacked (a membership change learnt "
+                             f"after the decision) and {unread} live decisions with no kept fetch to be held to "
+                             "(notes: no price differs)")
     if revisions > REVISIONS_ALARM:
         ctx.alert("warning", f"equity_panel: {revisions} raw bars changed on a refetch (alarm above {REVISIONS_ALARM})")
     if audit["full_failures"] >= 2:
@@ -1363,7 +1415,9 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
             "hs_share": round(share, 6), "live_from": U._iso(live_from), "full_failed": bool(full_failed),
             "remasked": remasked,
             "i6": {k: i6[k] for k in ("equal", "bytes_equal", "source", "columns", "mismatch", "volume", "blanked")}
-            | {"live": len(i6["live"]), "live_equal": sum(1 for v in i6["live"].values() if v), "why": i6["why"]}}
+            | {"late": int(i6.get("late") or 0), "absent": int(i6.get("absent") or 0)}
+            | {"live": len(i6["live"]), "live_equal": sum(1 for v in i6["live"].values() if v),
+               "live_unread": sum(1 for v in i6["live"].values() if v is None), "why": i6["why"]}}
 
 
 __all__ = ["BARS", "WALL_S", "TRIES", "BACKOFF_S", "INCREMENTAL_SESSIONS", "FULL_EVERY_DAYS", "ACCEPT_SHARE",

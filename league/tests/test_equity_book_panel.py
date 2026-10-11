@@ -485,6 +485,72 @@ class TheCloseRotation(PanelCase):
         self.assertEqual(len(h.venue.sent), 6)
 
 
+# ------------------------------------------------------------------------------------------- the seat on a failed leg
+class ASeatHeldOnAFailedLeg(PanelCase):
+    """E4-SPEC 17: `live_ready` False while a panel instance is live: ITS OPENS STOP, ITS EXITS GO ON. A store-side leg
+    of the lane (the nightly I6, the twin marker, the store's freshness, the universe) gives the family no row and the
+    store's word is "held": the book keeps the instance, asks it at every close, sends its sells, holds its buys at the
+    send, and retires and sells nothing on it. (Before the fix a failed leg read "demoted": one restated bar among
+    515 columns sold the whole basket two opens later.)"""
+
+    WHY = 'the panel lane is not live (its mode reads "gate"): the last nightly I6 did not hold'
+
+    def setUp(self):
+        super().setUp()
+        self.basket()
+        self.h.plan(["N000", "N001", "N002", "N003", "N010"])        # the program sells N004 and buys N010
+        self.h.families.held[FAMILY] = self.WHY
+
+    def test_its_opens_stop_its_exits_go_on_and_nothing_is_retired(self):
+        h = self.h
+        synced = h.tick(16, 20, day=FRIDAY)                           # the band sync is the first thing of the evening
+        self.assertEqual(synced["seats_held"], f"{KEY} ({self.WHY}): opens stop, exits go on, nothing retired")
+        out = h.decide(FRIDAY, minutes=(21, 30))
+        inst = h.instance_now()
+        self.assertEqual((inst.retired_at, inst.band, inst.failed_decides), (None, "probe", 0))
+        [(level, said)] = h.said("OPENS NOTHING")
+        self.assertEqual(level, "error", "E4-SPEC 17: critical, the leg named")
+        self.assertIn(self.WHY, said)
+        self.assertEqual(h.said("it decides no more"), [], "nobody is retired on a failed leg")
+        self.assertEqual(out["decided"], [f"{KEY}: 2"], "it is still asked: its exits are its program's own")
+        self.assertEqual(sorted((i.kind, i.symbol, i.status) for i in h.panel_intents()),
+                         [("buy", "N010", "planned"), ("sell", "N004", "planned")])
+        self.assertEqual([i for i in h.panel_intents() if i.kind == "house_exit"], [], "no lot is sold on the leg")
+        h.run(MONDAY, (8, 31), (9, 26), (9, 31), (9, 33), (9, 40))
+        self.assertEqual([b["symbol"] for b in h.sent("sell")], ["N004"], "the exit goes on")
+        self.assertEqual(h.sent("buy"), [], "the open stops")
+        [buy] = [i for i in h.panel_intents() if i.kind == "buy"]
+        self.assertIn("holds no seat now", buy.why)
+        self.assertEqual(h.held(), ["N000", "N001", "N002", "N003"])
+        # THE NEXT CLOSES, still held: a hold day; the House's own exits are planned as ever (a name that left).
+        self.universe.end("N003", MONDAY)
+        out = h.decide(MONDAY)
+        self.assertEqual(len(h.said("OPENS NOTHING")), 2, "said once a decision day")
+        self.assertIsNone(h.instance_now().retired_at)
+        self.assertIn(("house_exit", "N003", "planned"),
+                      [(i.kind, i.symbol, i.status) for i in h.panel_intents(decided_day=MONDAY.isoformat())])
+        h.run(TUESDAY, (8, 31), (9, 26), (9, 31), (9, 33))
+        self.assertEqual([b["symbol"] for b in h.sent("sell")], ["N004", "N003"])
+        self.assertEqual(h.sent("buy"), [])
+        # THE LEG HOLDS AGAIN: the row is back, the same instance runs on, and the standing target buys what it owes.
+        del h.families.held[FAMILY]
+        h.decide(TUESDAY)
+        self.assertEqual(len(h.said("OPENS NOTHING")), 2)
+        h.run(WEDNESDAY, (8, 31), (9, 26), (9, 31), (9, 33))
+        self.assertEqual([b["symbol"] for b in h.sent("buy")], ["N010"])
+        self.assertEqual(h.held(), ["N000", "N001", "N002", "N010"])
+        self.assertEqual(h.said("runs again"), [], "it was never retired, so nothing was revived")
+
+    def test_the_sync_is_done_and_asks_the_store_once_a_day(self):
+        h = self.h
+        asked = []
+        standing = h.families.standing
+        h.families.standing = lambda family, version: (asked.append(family), standing(family, version))[1]
+        h.decide(FRIDAY, minutes=(20, 21, 22, 23, 30))
+        self.assertEqual(asked, [FAMILY], "a held seat is an answer: the sync is recorded done")
+        self.assertEqual(h.state.get("eq_synced"), FRIDAY.isoformat())
+
+
 # -------------------------------------------------------------------------------------------------------------- B8
 class TheCutBuyWaits(PanelCase):
     """An open-window sale that fills at 09:36 with $40 idle in the sleeve: its $111 buy waits and goes whole."""

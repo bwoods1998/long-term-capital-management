@@ -1974,6 +1974,7 @@ class EquityBook:
     #: seating pass last asked an instance again, and the decision day whose unconfirmed instances were alerted.
     _seat_tried: float = float("-inf")
     _unconfirmed_day: str = ""
+    _held_day: str = ""
 
     def _last_closed(self, now: float) -> dt.date | None:
         """The latest session whose 16:20 bars moment has passed (the decision day that is due or done)."""
@@ -2143,6 +2144,14 @@ class EquityBook:
         retirement is an alert. A retired instance whose row is back in a running band on the same version and program
         runs again, unless its version's demotion is sticky (EDM1).
 
+        HELD (release E4; E4-SPEC 17): a family the store says runs while a store-side leg of its LANE failed
+        (`families.HELD`: a panel family with the lane's switch at "live" and the nightly I6, the twin marker, the
+        store's freshness or the universe not holding) keeps its instance and its lots. ITS OPENS STOP (it has no row:
+        `_seat_block` holds every entry at the send) AND ITS EXITS GO ON (it is still asked at every close: its
+        program's sells, its ineligible lots, max hold and the failed-decides rule). Nothing is retired and nothing is
+        sold on a failed leg: only the captain's switch demotes. The owner is told once a decision day, critically,
+        with the leg named, and the sync is done.
+
         `late` (THE SEATING PASS, `_seat_step`): only a Candidate moves (to Probe, when it holds a free seat) and only a
         new instance is made, of a family none of whose versions runs. No demotion, no sizing up, no update of a
         running instance, no retirement, no revival: those are the decision's own, once a day."""
@@ -2227,16 +2236,19 @@ class EquityBook:
             self.state.put("eq_band_since", since)
         if late:
             return True
-        from .families import GONE
+        from .families import GONE, HELD
 
         by_family = {str(r["family"]): r for r in rows}
-        unconfirmed = []
+        unconfirmed, held = [], []
         for inst in self._instances(alive=True):
             if inst.id in wanted:
                 continue
             row = by_family.get(inst.family)
             if row is None:
                 code, why = self._standing(inst)
+                if code == HELD:
+                    held.append(f"{inst.id} ({why})")
+                    continue
                 if code not in GONE:
                     unconfirmed.append(f"{inst.id} ({why})")
                     continue
@@ -2250,6 +2262,13 @@ class EquityBook:
             self.record("equity.instance", {"instance": inst.id, "retired": True, "why": inst.why}, agent=inst.family)
             self.alert("warning", f"equity: {inst.id} is {inst.why}: it decides no more and its lots exit at the next "
                                   "open")
+        if held:
+            out["seats_held"] = f"{'; '.join(held)}: opens stop, exits go on, nothing retired"
+            if self._held_day != day:
+                self._held_day = day
+                self.alert("error", f"equity: {'; '.join(held)}: its lane is not ready, so it OPENS NOTHING; it keeps "
+                                    "its lots, its exits and the House's exit rules go on, and nothing was retired or "
+                                    "sold on it (only the captain's switch demotes)")
         if unconfirmed:
             out["families"] = f"no row and no word of the store on {'; '.join(unconfirmed)}: nothing retired"
             if self._unconfirmed_day != day:

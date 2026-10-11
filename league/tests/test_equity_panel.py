@@ -1183,7 +1183,7 @@ class TheNightlyI6(Fixture):
         self.assertEqual((i6["day"], i6["equal"], i6["source"], i6["columns"], i6["mismatch"], i6["live"]),
                          (LAST.isoformat(), True, "fetch", 12 + self.N, 0, {}))
         self.assertEqual(self.first["i6"]["equal"], True)
-        self.assertEqual(set(i6) - {"bytes_equal", "columns", "mismatch", "volume", "blanked", "why"},
+        self.assertEqual(set(i6) - {"bytes_equal", "columns", "mismatch", "volume", "blanked", "late", "absent", "why"},
                          {"day", "store_sha", "fetch_sha", "equal", "source", "live"})
 
     def test_a_fresh_fetch_of_the_253_sessions_in_chunks_of_thirty_nine(self):
@@ -1269,8 +1269,9 @@ class TheNightlyI6(Fixture):
         db.executescript(xs_book.SCHEMA)
         for instance, extra in rows:
             db.execute("INSERT INTO eq_rebalances (instance, family, version, decided_day, exec_day, at, called, targets, "
-                       "n_names, n_sells, n_buys, n_skipped, extra, status, created_at) VALUES (?, 'fam', 1, ?, ?, 'open', "
-                       "1, '[]', 0, 0, 0, 0, ?, 'planned', 0)", (instance, LAST.isoformat(), "2022-04-01", json.dumps(extra)))
+                       "n_names, n_sells, n_buys, n_skipped, extra, bars_sha, status, created_at) VALUES (?, 'fam', 1, ?, "
+                       "?, 'open', 1, '[]', 0, 0, 0, 0, ?, 'b', 'planned', 0)",
+                       (instance, LAST.isoformat(), "2022-04-01", json.dumps(extra)))
         db.execute("INSERT INTO eq_rebalances (instance, family, version, decided_day, exec_day, at, called, targets, "
                    "n_names, n_sells, n_buys, n_skipped, status, created_at) VALUES ('other-day', 'fam', 1, '2022-03-30', "
                    "'2022-03-31', 'open', 1, '[]', 0, 0, 0, 0, 'planned', 0)")
@@ -1301,8 +1302,92 @@ class TheNightlyI6(Fixture):
         self.assertEqual((out["equal"], out["live"], out["mismatch"]), (False, {"fam@1:r": False, "fam@2:r": True}, 0))
         with mock.patch.object(xs_book, "kept", return_value=None):
             out = self.check(live=path)
-        self.assertEqual((out["equal"], out["live"]), (False, {"fam@1:r": False, "fam@2:r": False}),
-                         "a decision with no kept fetch cannot be shown equal")
+        self.assertEqual((out["equal"], out["live"], out["source"]), (True, {"fam@1:r": None, "fam@2:r": None}, "fetch"),
+                         "a decision with no kept fetch cannot be shown equal, and is not shown to differ: UNREAD")
+
+    # ------------------------------------------------ what the live book itself tolerates is never a False I6
+    def test_a_bar_served_after_the_1620_fetch_is_late_counted_and_never_a_mismatch(self):
+        """B13: `xs.book.complete` lets a decide go with one or two names nobody holds lacking the day's bar, and the
+        book's own morning audit calls a bar served later a note (`xs.book.same`: "late"). The store at 21:45 has the
+        bar. The I6 read that as "sessions differ": False, and a False I6 holds every open of the lane."""
+        from league.equity import live as L
+
+        symbols, kept = self.kept_file()
+        at = len(xs_config.REF) + 3                       # a member column
+        late = xs_book.Fetched(days=kept.days, raw=np.array(kept.raw), all=np.array(kept.all), meta=dict(kept.meta))
+        late.raw[-1, at, :] = np.nan                      # no bar of the day at 16:20 ...
+        late.all[-1, at, :] = np.nan
+        cols = xs_book.Columns(symbols=tuple(symbols), aids=np.zeros(0, dtype=np.int32), ids=np.zeros(0, dtype=np.int32),
+                               elig0=np.array([False] * len(xs_config.REF) + [True] * (len(symbols) - len(xs_config.REF))),
+                               sector_perm=np.zeros(0, dtype=np.int8), dither_key=b"", extra=())
+        self.assertEqual(xs_book.complete(late, cols, [])[0], True, "the book decides on it")
+        diff = xs_book.same(late, kept, symbols, verdict=L._bars_verdict)   # ... and the morning's reading has it
+        self.assertEqual((diff["mismatch"], diff["late"]), ([], [symbols[at]]), "and its own audit calls it a note")
+        path = self.live_db([("fam@1:r", [])])
+        with mock.patch.object(xs_book, "kept", return_value=(symbols, late)):
+            out = self.check(live=path)
+        self.assertEqual((out["equal"], out["source"], out["mismatch"], out["late"], out["live"]),
+                         (True, "kept", 0, 1, {"fam@1:r": True}))
+        # The rest of the late column is still held to the store: a price of an earlier session that differs is False.
+        late.raw[40, at, 3] += 0.01
+        with mock.patch.object(xs_book, "kept", return_value=(symbols, late)):
+            out = self.check(live=path)
+        self.assertEqual((out["equal"], out["mismatch"], out["late"], out["live"]), (False, 1, 1, {"fam@1:r": False}))
+        # A FRESH fetch at night that lacks a bar the store holds is no late bar: it is a session that differs.
+        with mock.patch.object(P, "fetch_asof", side_effect=lambda *a, **k: {}):
+            none = self.check()                           # the venue serves no bar at all: every column differs
+        self.assertEqual((none["source"], none["late"], none["equal"], none["mismatch"]), ("fetch", 0, False, 12 + self.N))
+
+    def test_a_member_the_1620_columns_lacked_is_counted_and_fails_no_decision(self):
+        """Tonight's universe run applied a change row dated on or before the day (a row is applied after two reads
+        20 hours apart): the store's day has a member the kept 16:20 columns did not. The decision is rebuilt over THE
+        COLUMNS IT HAD; the membership gap is a count."""
+        path = self.live_db([("fam@1:r", [])])
+        with mock.patch.object(xs_book, "kept", return_value=self.kept_file(drop=("QAAC",))):
+            out = self.check(live=path)
+        self.assertEqual((out["equal"], out["source"], out["live"], out["absent"], out["mismatch"]),
+                         (True, "fetch", {"fam@1:r": True}, 1, 0))
+        # The other way round: a column of the decision's the store's day no longer lists is rebuilt from the store's
+        # own column all the same (its asset is known), and one the store knows no asset for is counted.
+        symbols, kept = self.kept_file(extra=("QAAC",))
+        ghost = (*symbols[:-1], "ZZZZ")
+        with mock.patch.object(xs_book, "kept", return_value=(ghost, kept)):
+            out = self.check(live=path)
+        self.assertEqual((out["equal"], out["live"], out["absent"]), (True, {"fam@1:r": True}, 1))
+        # And a price of a column it had that differs is still False.
+        short = self.kept_file(drop=("QAAC",))
+        short[1].raw[40, 14, 3] += 0.01
+        with mock.patch.object(xs_book, "kept", return_value=short):
+            out = self.check(live=path)
+        self.assertEqual((out["equal"], out["live"], out["absent"]), (False, {"fam@1:r": False}, 1))
+
+    def test_a_failed_decide_that_read_no_bars_is_no_row_of_the_i6(self):
+        """A17: a held name is halted, the fetch is not whole by 17:00, the book writes a "failed" row with no bars
+        and keeps no file: a hold day the House could not ask is an alarm and never an exit. The I6 read "a decision
+        with no kept fetch cannot be shown equal": False, and the whole basket was sold two opens later."""
+        path = self.live_db([])
+        db = sqlite3.connect(path)
+        db.execute("INSERT INTO eq_rebalances (instance, family, version, decided_day, exec_day, at, called, targets, "
+                   "n_names, n_sells, n_buys, n_skipped, status, why, created_at) VALUES ('fam@1:r', 'fam', 1, ?, "
+                   "'2022-04-01', 'open', 0, '[]', 0, 0, 0, 0, 'failed', 'the panel''s bars are not whole', 0)",
+                   (LAST.isoformat(),))
+        db.commit()
+        db.close()
+        with mock.patch.object(xs_book, "kept", return_value=None):
+            out = self.check(live=path)
+        self.assertEqual((out["equal"], out["source"], out["live"]), (True, "fetch", {}))
+
+    def test_the_notes_are_a_warning_and_the_receipt_counts_them(self):
+        notes = {"day": LAST.isoformat(), "store_sha": None, "fetch_sha": None, "equal": True, "bytes_equal": None,
+                 "source": "kept", "live": {"a": True, "b": None}, "columns": 36, "mismatch": 0, "volume": 0,
+                 "blanked": 0, "late": 2, "absent": 1, "why": None}
+        with mock.patch.object(P, "i6_check", return_value=notes):
+            receipt, ctx = self.run_job(NOW + 3600)
+        self.assertEqual((receipt["i6"]["equal"], receipt["i6"]["late"], receipt["i6"]["absent"], receipt["i6"]["live"],
+                          receipt["i6"]["live_equal"], receipt["i6"]["live_unread"]), (True, 2, 1, 2, 1, 1))
+        [note] = [a for a in ctx.alerts if "nightly I6 counted" in a["text"]]
+        self.assertEqual(note["level"], "warning")
+        self.assertEqual([a for a in ctx.alerts if "nightly I6 is False" in a["text"]], [])
 
     def test_no_book_no_table_and_no_row_are_no_live_part(self):
         self.assertEqual(self.check(live=self.state / "absent.sqlite")["live"], {})

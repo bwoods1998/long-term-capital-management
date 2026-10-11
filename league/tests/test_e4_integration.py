@@ -6,8 +6,9 @@ is the lane's one path from a birth to the Done meter; this module is what stand
   twin marker): nothing of E4 is born, runs, spends or takes a seat; and the data jobs are registered read-only.
 - `TheSeatOfASeatedPanelProgram`: the seat rule holds for a panel family ALREADY at Probe (the integrator's fix: the
   packages gave a Candidate no row while the lane is not live, and left a seated program buying): no row; the store's
-  word the book retires on is "demoted" on positive evidence and "unknown" when the lane cannot be read; an ETF family
-  is asked nothing of it.
+  word the book retires on is "demoted" ONLY when the captain's switch is down, "held" when a store-side leg of the
+  lane failed (E4-SPEC 17: its opens stop, its exits go on, nothing is retired) and "unknown" when the lane cannot be
+  read; an ETF family is asked nothing of it.
 - `TheLaneStopsWhereItsRuleSays`: with no contamination reading of the panel strata (release E3's file and package B's
   patch 18: owed) no look runs and none is spent (the captain's A22 (3)); with no twin marker (package J: owed) the
   effective mode is "gate" whatever the setting.
@@ -283,13 +284,19 @@ class TheSeatOfASeatedPanelProgram(_Root):
         self.assertEqual(families.standing("rev-probe", 1)[0], "live")
 
         # A LEG OF live_ready FAILS (the night's I6): no row for the panel family, the ETF family's as before, and
-        # the store's word is "demoted" with the leg named.
+        # the store's word is "held" with the leg named: E4-SPEC 17, ITS OPENS STOP AND ITS EXITS GO ON. The book
+        # retires on "retired" and "demoted" alone (`families.GONE`), so one restated bar sells no basket.
+        from league.equity.families import GONE, HELD
+
+        self.assertNotIn(HELD, GONE)
         self.manifest(i6={"day": FRIDAY.isoformat(), "equal": False, "source": "fetch", "live": {}})
         self.assertEqual(self.rows(), {"etf-probe": "probe"})
         code, why = families.standing("rev-probe", 1)
-        self.assertEqual(code, "demoted")
+        self.assertEqual(code, HELD)
         self.assertEqual(why, 'the panel lane is not live (its mode reads "gate"): the last nightly I6 did not hold '
                               "(the live ctx is not proved equal to the Gym's)")
+        self.assertEqual(elane_xs.seat_standing(self.root), (None, why), "neither given nor taken away")
+        self.assertEqual(elane_xs.seat_word(self.root), (elane_xs.SEAT_HELD, why))
         self.assertEqual(families.standing("etf-probe", 1)[0], "live", "an ETF family is asked nothing of the panel")
         self.assertIsNone(bands.equity_seat_withdrawn(self.root, self.store.family("etf-probe")))
         self.assertEqual(self.store.family("rev-probe")["band"], "probe", "its band in the store is not moved")
@@ -300,9 +307,19 @@ class TheSeatOfASeatedPanelProgram(_Root):
         self.marker(dt.date(2026, 10, 7))
         self.assertEqual(self.rows(), {"etf-probe": "probe"})
         self.assertEqual(families.standing("rev-probe", 1),
-                         ("demoted", 'the panel lane is not live (its mode reads "gate"): the twin marker is behind the '
-                                     "panel store (the forward record's nightly run stopped)"))
+                         (HELD, 'the panel lane is not live (its mode reads "gate"): the twin marker is behind the '
+                                "panel store (the forward record's nightly run stopped)"))
         self.marker()
+        # EVERY OTHER STORE-SIDE LEG is held the same way, whatever mode it lowers the lane to: the spreads' share
+        # slipping under its bound (it decays by construction as members join), a coverage verdict, a manifest gone.
+        whole = json.loads((self.store_root / "panel" / "PANEL_MANIFEST.json").read_text(encoding="utf-8"))
+        for change, mode_reads in (({"hs_share": 0.899}, "train"), ({"verdict": "insufficient"}, "off"),
+                                   ({"live_from": None}, "gate")):
+            self.manifest(**change)
+            self.assertEqual(elane_xs.mode(self.settings, self.root), mode_reads, change)
+            self.assertEqual((self.rows(), families.standing("rev-probe", 1)[0]), ({"etf-probe": "probe"}, HELD), change)
+            self.manifest(**{key: whole.get(key) for key in change})
+        self.assertEqual(self.rows(), {"rev-probe": "probe", "etf-probe": "probe"})
 
         # THE SWITCHES, each step down, and E1's own above them.
         for layer, word in (({"panel": {"mode": "gate"}}, '"gate"): elane.panel.mode is set so'),
@@ -313,6 +330,10 @@ class TheSeatOfASeatedPanelProgram(_Root):
             self.assertNotIn("rev-probe", self.rows(), layer)
             self.assertEqual(elane_xs.seat_standing(self.root),
                              (False, f"the panel lane is not live (its mode reads {word}"), layer)
+            self.assertEqual(families.standing("rev-probe", 1)[0], "demoted", "only the captain's SWITCH demotes")
+        # A SWITCH DOWN AND A LEG FAILED TOGETHER: the switch is positive evidence, whatever else reads.
+        self.manifest(i6={"day": FRIDAY.isoformat(), "equal": False, "source": "fetch", "live": {}})
+        self.assertEqual(families.standing("rev-probe", 1)[0], "demoted")
 
     def test_a_lane_that_cannot_be_read_gives_no_row_and_retires_nobody(self):
         self.family("rev-probe", band="probe")
@@ -346,10 +367,14 @@ class TheSeatOfASeatedPanelProgram(_Root):
         assets.write_bytes(whole)
         self.forget()
         self.assertEqual(self.rows(), {"rev-probe": "probe"})
-        # A file that is GONE is the rule's own word, not a failed read: no marker, no seat.
+        # A file that is GONE is the rule's own word, not a failed read: no marker, no seat; and a leg of the rule
+        # (the twin marker's): held, with the leg named, never retired.
         (self.store_root / xbook.TWINS_FILE).unlink()
         self.forget()
-        self.assertEqual(families.standing("rev-probe", 1)[0], "demoted")
+        self.assertEqual(families.standing("rev-probe", 1),
+                         ("held", 'the panel lane is not live (its mode reads "gate"): the twin marker is missing (the '
+                                  "forward record's nightly run has not written it: package J)"))
+        self.assertEqual(self.rows(), {})
 
     def test_the_proof_is_asked_before_the_seat(self):
         """A panel band whose proof is not the running files' identity is "retired" (an evidence release moved it),

@@ -317,13 +317,19 @@ step at a time, and each step is the rollback of the one above it):
    is HELD AT THE SEND (the book asks at every send: `league/equity/live.py` `_seat_block`) and missed at its
    cut-off; at the day's band sync (the 16:30 decide) the book retires its instance on the lane's own word
    ("demoted: the panel lane is not live ..."), it decides no more, and its lots exit at the next open by E1's rule.
-   THE SAME HAPPENS ON ITS OWN when a leg of `live_ready` fails with the switch left at "live" (the nightly I6 not
-   equal, the twin marker two sessions behind, the universe too old or too thin): the alert and the pre-open's
-   check 10 name the leg. The family's band in the swarm store is NOT moved, so it keeps its roster seat, and when
-   the lane is live again the same instance runs again (E1's revival rule); to free the seat for another program,
-   re-band or retire the family (`To stop a program`, below). **A switch or a file that cannot be READ retires
-   nobody:** a swarm.json, a panel manifest or a twin marker caught mid-write gives the family no row (so nothing
-   opens) and the store's word is "unknown" (so nothing is sold on it).
+   The family's band in the swarm store is NOT moved, so it keeps its roster seat, and when the lane is live again
+   the same instance runs again (E1's revival rule); to free the seat for another program, re-band or retire the
+   family (`To stop a program`, below). **ONLY THE SWITCH RETIRES. A LEG THAT FAILS ON ITS OWN STOPS THE OPENS AND
+   NOTHING ELSE** (the build spec's section 17: "its opens stop, exits go on"): with the switch left at "live" and
+   the nightly I6 not equal, the twin marker two sessions behind, the panel store stale, the universe too old or too
+   thin, the spreads' share under its bound or the coverage verdict gone, the family has no row (every entry is held
+   at the send) and the store's word on its instance is "held": the book KEEPS the instance and its lots, asks it at
+   every close as before (its program's sells, its ineligible lots, max hold and the two-failed-decides rule go on),
+   and sells nothing on the leg. The book says so once a decision day, critically, with the leg named, and the
+   pre-open's check 10 says it again each morning. When the leg holds again the row is back and the standing target
+   buys what it owes. To sell a held basket, put the switch down. **A switch or a file that cannot be READ retires
+   nobody either:** a swarm.json, a panel manifest or a twin marker caught mid-write gives the family no row (so
+   nothing opens) and the store's word is "unknown" (so nothing is sold on it).
 2. `elane.panel.mode=train`: no Validation try and no look; births and Train research go on.
 3. `elane.panel.mode=off`: no panel birth, no Train run, nothing of the panel in any request. The data jobs go on
    reading (they spend no model dollar and send no order).
@@ -357,9 +363,9 @@ equal (C: the mode reads at most "gate"); a panel decision's morning re-read "mi
 "unread" (W); the 16:20 fetch decided late and incomplete (W); the spreads table under its bound in mode "gate" or
 above (W); the zero-edge pass rate of the Train bar above 5% (W: the bar is too loose); an E4 job or a Train run
 found RUNNING at a wall (C); the xs identity moved while a panel lineage is in Probe (C, said before the deploy);
-`live_ready` false while a panel program is live (its entries are held at the send and, at the day's band sync, its
-instance is retired and its lots exit at the next open: the book's alert names the leg, and the pre-open's check 10
-says it again each morning); the twin marker a night behind (W) or two (C); a rebalance
+`live_ready` false while a panel program is live (C: its opens stop, its exits go on, and nothing is retired or sold
+on it: its entries are held at the send, the book's alert at the day's band sync names the leg, and the pre-open's
+check 10 says it again each morning); the twin marker a night behind (W) or two (C); a rebalance
 session whose live and twin orders disagree (W); a standing-target buy still unfilled after 5 sessions (W); a
 rebalance recorded late (W); two failed panel decides (C: E1's exit rule fires); the committed universe older than
 `universe_max_age_days` (W: an owner step); the pre-open's gateway and constitution lists differ (W, at most 10 names
