@@ -25,21 +25,61 @@ section 10). XS1's receipt is in the tree and pinned (`docs/benchmarks/equity_sc
 `elane.screens.equity_xs` is `league.xs.screen.pin` of it, written whole, so a rebuilt receipt lands as one file and
 one block and no line of code). One test takes the lane from a birth to the Done meter on every package's real code
 (`league/tests/test_e4_e2e.py`: a synthetic panel, a fake receipt, a fake venue); `league/tests/test_e4_integration.py`
-holds what stands around it. **Three things are not in this tree, by design:** package J (the forward twin) and
+holds what stands around it. **Three things were not in that tree, by design:** package J (the forward twin) and
 package B's probe strata are built on release E3, and the universe commit (R-E4b) waits for the House's own
-`tradable.json`. Each holds real money back where this page says.
+`tradable.json`. Each holds real money back where this page says. (The probe strata are built since: **The probe's
+panel strata**, below.)
 
 **The ship pass (Oct 11, 2026; nothing deployed): main is merged in, and the release ships in two steps.** Main's
 releases E2.2 and E3 (`7d2d3c84`) are merged under the lane (the record: `league/xs/E4_INTERFACES.md` section 12).
 STEP ONE is this tree with the lane's switch able to reach "train": the data jobs, panel births and the Train bar,
 so that information accrues. It moves no identity a judge binds to and no money rule (the options execution
 fingerprint, the equity identity and the money digest are main's; only the xs identity moves, and no panel band
-exists under it). STEP TWO is what a look and a seat still need, each owed and each the owner's deploy: the probe's
-panel strata with the look permit, and the receipt at the captain's bar, for a look; the forward twin (package J),
-the universe commit (R-E4b) and the money row of a panel sleeve for a seat. What the merge made true: a panel
+exists under it). STEP TWO is what a look and a seat still need, each the owner's deploy: for a look, the receipt
+at the captain's bar (owed) and the probe's panel strata with the look permit (BUILT: **The probe's panel strata**,
+below; a route's permit exists once the probe has published that route with them); for a seat, the forward twin
+(package J), the universe commit (R-E4b) and the money row of a panel sleeve (each owed). What the merge made true: a panel
 family is now born with a hidden year (E3's folds record in the committed policy); a scored panel version is NOT yet
 in E3's forward record (its registry takes ETF and stock programs; the panel's row and shadow are package J's);
 and the swarm no longer reads the contamination probe's own file (E3's seal forbids it: below, A22 (3)).
+
+**The probe's panel strata (package B's patch 18; built Oct 11, 2026; nothing deployed).** The House's
+`contam_probe` job is now `league/ops/contam_xs.py`: release E3's probe (`league/ops/contam_probe.py`, whose module
+still imports nothing of `league/xs`: E3's seal stands as written) with a PLAN of three more strata handed in.
+**P4**: an index member against its sector's fund, a month. **P5**: the same, a week. **P6**: the House panel
+factors (momentum, short-term reversal, beta: the top third of the index against the bottom third), a month. Each is
+asked in E3's three eras, a full grid a cell under E3's own hash rule, the same questions for every route.
+- **A prompt is built from names and the calendar only**, and every word of it is the probe's: the plan hands in
+  tickers (capitals and at most one dot: no figure can ride in one) and period names of the probe's own calendar,
+  or the run fails before any route is marked. The fund is not named (the House's sector is statistical, read from
+  prices). The members asked about were in the index, unmasked and under one ticker, through the whole era.
+- **Truth stays on the House** and comes from the panel store through its own windows: a 2017-19 or 2022-24 period
+  by a Train slice, a 2025 or 2026 period by the sealed "look" window alone, which opens only for the gate's
+  capability the job mints. No period of 2016, 2020 or 2021 is asked about or read, by base or by end (each Train
+  segment's first month and week are left out). A cell's truths are read only once its answers are in.
+- **The dollars are the probe's, capped as shipped:** the same `elane.contam.usd_run` a run inside E2's day line,
+  the same keys never sent twice, the same rows of E2's ledger. Nothing was raised. The panel adds about 800
+  questions to E3's about 1,100 at the shipped cell size (41 batches to 59), so a route's probe takes about 70%
+  more dollars and, a Saturday's line being what it is, that many more Saturdays.
+- **The result** carries the three strata under `cells` in the probe's own file, in E3's shape (aggregates only);
+  E3's own cells and questions are byte for byte what they were (`qset` is still E3's questions' sha; the panel's is
+  `panel_qset` beside it, so a membership revision drops a partial's panel cells and nothing of E3's).
+- **The permit** (`<state>/xs-look-permit.json`, 0600) is written from that file each time a result is published
+  and after every run that had a plan: one row for every route whose published result carries all three strata,
+  `at`, `model` and two words a cell (`readable`, `recalled`), no count and no rate. It is what a panel look waits
+  on (A22 (3), below). A recalled cell does not hold a look back: the reading is recorded beside the look.
+- **A route published before the panel's strata existed is due at once** (its result is not whole), E3's cells
+  asked again with it. **One route a Saturday** is E3's cadence, unmoved: with N routes the last route's permit is N
+  probes away, each of several Saturdays at the shipped line. The captain's levers are E3's (`elane.contam.usd_run`,
+  E2's day line) and a run by hand outside a session's walls (`python -m league.ops run contam_probe --state ...`).
+- **With `elane.panel.mode` "off", before a panel store and universe exist, or while the panel's coverage verdict is
+  "insufficient", the job is release E3's probe to the byte** (no panel stratum, no permit). With the lane on it
+  asks the quiet windows first, like every E4 job (its Saturday 00:10Z time never meets a wall), and a panel store
+  that cannot be read fails the job before any route is marked or dollar spent: the lane's switch is the way back
+  to E3's probe while the store is mended.
+- Measured on a synthetic panel of about 900 columns under the ops child's own limits, pinned to one core: the whole
+  job peaks at about 334 MB of the 500 MB the child may add (E3's probe alone: about 122 MB), and all nine cells'
+  truths take about 2 seconds of CPU. Not measured on the box.
 
 **Why a panel, and why a residual** (measured the week it was built, rule-level): a raw-P&L screen cannot be opened to
 single stocks or sectors, because an author who knows which symbol won a known year passes it far above the owner's
@@ -85,11 +125,12 @@ to the one before:
 `league/ops/forward_xs.py`, the registry row and the nightly shadow twin of a panel program) is built on release E3's
 forward modules; E3 is merged and J is not built (every function of that file is a stub). Until its nightly run has
 written the marker, **mode "live" reads as "gate"**: no panel program opens a position the forward record is not
-shadowing. (2) **No panel look runs until release E3's contamination probe has run once with the panel strata and
-written the look permit** (the captain's A22 (3), below; package B's patch to the probe, not built): mode "gate"
-scores Validation and keeps both Train series, and every look waits. So the order to a first live panel trade is:
-step one (this tree, the lane at "train"), the spreads backfill (about nine nights), the probe's panel strata and
-the twin, one forward night, the universe deploy with the money row, a free seat and room in the loss window.
+shadowing. (2) **No panel look runs until release E3's contamination probe has published the panel strata for the
+route that wrote the program and written the look permit** (the captain's A22 (3), below; package B's patch to the
+probe is built: **The probe's panel strata**, above): mode "gate" scores Validation and keeps both Train series, and
+a look waits on its route's permit. So the order to a first live panel trade is: step one (this tree, the lane at
+"train"), the spreads backfill (about nine nights), the probe's Saturdays for the route, the twin, one forward
+night, the universe deploy with the money row, a free seat and room in the loss window.
 
 **What a panel program sees and may do** (the pre-registered contract C-XS-1; `league/xs/ctx.py`, `program.py`,
 `engine.py`): after the close, one slot an eligible name (a member of the index today and for the next two sessions,
@@ -223,9 +264,10 @@ rules, the receipt is pinned as built):
    own file** (release E3's seal: that file holds counts and rates of the eras programs are judged on, and no module
    of `league/swarm` may name it or import the probe). It reads THE LOOK PERMIT, `<state>/xs-look-permit.json`, which
    the probe's job writes when it publishes a route's panel strata: for each route `at`, `model` and, a stratum and
-   era, the two words `readable` and `recalled`, and nothing else. The probe as it runs today asks four strata of
-   the ETF lanes and none of the panel's, and writes no permit: every panel look waits (package B's patch to the
-   probe, owed, adds the strata and the permit: `league/swarm/e4_patches/B.md`).
+   era, the two words `readable` and `recalled`, and nothing else. The probe on main asks four strata of the ETF
+   lanes and none of the panel's, and writes no permit; this tree's job asks P4-P6 with them while the lane is on
+   and writes it (`league/ops/contam_xs.py`; **The probe's panel strata**, above), so a look waits until its own
+   route's probe has been published with the three strata.
 4. **A ninth conformance vector**, for the 2022-24-alone floor cell, beside the study's eight
    (`league/tests/fixtures/xs1_conformance_c.json`; `league/tests/test_xs_screen.py`).
 
@@ -483,8 +525,9 @@ every panel run: `elane_xs_wall`);
 `live_ready` false while a panel program is live by the book at its band sync and by the pre-open. **Not built
 yet:** the three that read the forward record (the twin marker a night behind, a rebalance session whose live and
 twin orders disagree, the residual beside a close) arrive with package J. The run record's `factors` (the House's
-own panel factors) has no reader in this release: its readers are release E3's (the probe's stratum on them and
-the loadings beside XS1).
+own panel factors) are read by the loadings beside XS1; the probe's stratum P6 asks about the same factors and
+computes its truth by the same rule from the panel store (`league.ops.contam_xs.factor_days`, held equal to a real
+run's `factors` by `league/tests/test_contam_xs.py`), not from a run's record.
 
 **Memory of the panel job** (measured at 700 assets x 2,455 sessions under the ops child's own limit, its address
 space capped 500 MB above its start): the daily run peaks at about 384 MB of the 527 MB cap whatever the number of
@@ -631,6 +674,9 @@ change under `gateway/`; nothing waits in `PENDING_GATEWAY`).
   the options researchers' hourly pace does not read it as theirs. An answer the router's window fallback gave on
   another profile is scored by nothing (one route, one model). **The captain's call:** at `usd_run` 3.0 a probe may take the whole of that
   Saturday's equity research dollars; a smaller value (0.25 to 0.50) leaves the researchers their day.
+  **On a tree that carries release E4** the job's module is `league/ops/contam_xs.py`: this probe with the panel
+  strata P4-P6 asked after its own cells while `elane.panel.mode` is not "off" (**The probe's panel strata**, in
+  the panel lane's section above), inside the same dollars. With the lane off it is this probe and nothing else.
 - **Release receipts** (`release_receipts.py`, read by the stall job): a release declares the funnel metric it expects
   to move (`league/ops/release_receipts.json`); the House reads it back after its window and lists the verdict.
   Listed, never reverted. E3 declares two, each read after a week: program-sessions accrue, and out-of-fold rows.

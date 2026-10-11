@@ -42,8 +42,9 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
 - **Ships off.** policy.json `elane.panel.mode` "off": no birth, no run, no fetch of the live path, no model question.
   The ladder is "train", "gate", "live", each the captain's settings change and each falling back to the one before.
   **Mode "live" reads as "gate" until the forward twin exists** (package J, owed: it is built on release E3's forward
-  modules), and **no panel look runs until E3's contamination probe has published the panel strata and written the
-  look permit** (the captain's A22; package B's patch to the probe, owed).
+  modules), and **no panel look runs until E3's contamination probe has published the panel strata for the route
+  that wrote the program and written the look permit** (the captain's A22; package B's patch to the probe: built,
+  below).
 - **Before any real money on an XS1 pass** (A22): a style-open program takes no live seat on a pass alone (recorded
   and shadowed, never seated); at most 2 XS1 looks an agenda cell; the equity code review and the contamination probe
   before a look; a ninth conformance vector beside the study's eight.
@@ -78,14 +79,26 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   own word; a switch file caught mid-write retires nobody. The xs rounding bound is E1's own, re-exported.
 - **Owed, each holding real money back by design (step two):** package J (the forward twin and the forward row of
   a scored panel version, on release E3's modules: until then mode "live" reads as "gate" and no panel version is in
-  the forward record); package B's probe strata P4-P6 with the look permit the probe's job writes (patch 18, E3's
-  file: until then every panel look waits); the receipt at the captain's bar (A23); the universe commit R-E4b (needs
+  the forward record); the receipt at the captain's bar (A23); the universe commit R-E4b (needs
   the House's `tradable.json`; its gateway half is a patch for the owner) with the money row of a panel sleeve. And
   one thing for the captain to know before mode "live": at the Probe sleeve of 0.50 x E a five-name basket alone
   fills the $400 loss window (since the review's fixes it trades whole from flat, five names of $200, the basket
   scaled to the room; while it is held the other programs' new buys wait for room, and after any net loss in the
   window a partial rotation's new name is cut or refused at the send, so the program holds a name fewer than its
   Gym twin: pinned as built, a money decision for step two).
+- **The probe's panel strata P4-P6 and the look permit (package B's patch 18; Oct 11; nothing deployed; no id
+  moves).** The House's `contam_probe` job is `league/ops/contam_xs.py`: release E3's probe with a plan of three
+  more strata handed in (a member against its sector's fund by month and by week; the House panel factors by
+  month), asked after E3's own cells while `elane.panel.mode` is not "off", inside the SAME dollars a run
+  (`elane.contam.usd_run`, E2's day line: nothing raised; about 70% more questions, so a route's probe takes that
+  many more Saturdays). Prompts are names and the calendar only and every word is the probe's; truth comes from
+  the panel store through its own windows (2025 and 2026 through the sealed "look" window alone; never a period of
+  2016, 2020 or 2021); the result keeps E3's shape and E3's own cells byte for byte. After each publish the job
+  writes `<state>/xs-look-permit.json` (two words a cell, no figure), which is what `elane_xs.probed` reads: a
+  route's panel looks open once that route's probe is published with the three strata. E3's probe module imports
+  nothing of `league/xs` (its seal T1 is untouched: the panel's half is a module of its own and the registry row
+  points there; E3's identity test follows the row's module). With the lane off, or before a panel store exists,
+  the job is E3's probe to the byte. A route published before the strata existed is due again at once.
 - **The ship pass (Oct 11; nothing deployed; the three ids are main's on both Pythons, the xs identity moves).**
   MERGED: main's E2.2 and E3 (`7d2d3c84`); E3's six jobs then E4's six in the registry, the forward record's counts
   beside the asset-years in the funnel. WHAT THE MERGE MADE TRUE: a panel family is born with a hidden year (E3's

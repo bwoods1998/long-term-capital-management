@@ -559,3 +559,33 @@ rows' `first_attempted_at` and `attempts`. **Names added:** `elane_memory.HIDDEN
   good. What a standing absentee still costs: the first one or two days of its absence wait their three nights and
   are partial; FW2 goes on naming it. **Names added:** `forward_report._behind`. No table, column, event kind,
   setting or receipt key changed.
+
+## 13. What release E4's patch 18 added to the probe (Oct 11, 2026; additive: no signature, key or column above changed)
+
+Release E4's panel lane holds a look back until the probe has asked three strata of the panel (its A22 (3)). The
+probe gained a seam for them and nothing else of its behaviour moved: `run(ctx)` hands no plan and is this release's
+probe to the byte (`league/tests/test_contam_probe.py` passes unchanged).
+
+- **The import rule of section 1 stands as written.** `contam_probe.py` imports nothing of `league/xs`. The panel
+  store is opened by a module of release E4, `league/ops/contam_xs.py` (not one of this release's ops modules, so
+  the list above does not bind it; it is under `league/ops/`, behind the wall, and no sealed tree imports it:
+  `league/tests/test_contam_xs.py` holds both), which hands the probe a PLAN.
+- **THE HOUSE'S JOB.** The registry row `contam_probe` points at `league.ops.contam_xs` on a tree that carries
+  release E4 (`run` there is `contam_probe.probe(ctx, panel=contam_xs.plan)`); its triggers, grace, limits, flags
+  and owner are section 8.1's. `test_e3_identities` accepts either module for the row and nothing else.
+- **Names added in `contam_probe`:** `PANEL_STRATA` ("P4", "P5", "P6"), `FACTORS`, `FACTOR_WORDS`, `NAME`,
+  `panel_questions(panel, *, per_cell)`, `probe(ctx, *, panel=None)`; `Probe.__init__` takes `panel=None`; `WORDS`
+  and `WEEKLY` name the panel strata; `periods(stratum, era)` answers for them (the calendar's months and weeks);
+  `_grid` is the one hash rule `grid` and `panel_questions` share; `_owing` is the view `due` is shown while a
+  plan asks (a route whose published result lacks a panel stratum reads as never published: due at once).
+- **A plan** has `names(stratum, era)`, `periods(stratum, era)`, `truths(questions)` and `published(doc)`. The
+  probe builds every question from the names and period names it hands in (a name outside `NAME` or a period
+  outside `periods(stratum, era)` is a ValueError before any route is marked), asks the panel's cells after its
+  own and before the recall, and asks the plan for a cell's truths only once the cell's answers are in.
+- **The file.** `routes[route].cells` may carry "P4", "P5" and "P6" (the cell shape of section 9); a partial may
+  carry `panel_qset`. `qset` is still the sha of this release's own questions, so its cells never move with the
+  panel's. A partial's panel cells are dropped when the panel's question set moved or no plan is handed in.
+- **The receipt** gains `panel` and, on a publish, `permit`, only with a plan.
+- **The dollars, the keys, the ledger rows, the eras and one route a run are unchanged.** A probe with a plan asks
+  about 70% more questions inside the same `usd_run` and day line, so it is published that many runs later, and
+  CP1's 45 days of a route no probe finished on are reached sooner on a small line (section 10's "left open").

@@ -1,6 +1,6 @@
 # E4 patches authored by package B
 
-Package B (costs and counts) authors patch 11 (`league/ops/funnel.py`, `league/ops/twins.py`) and, AFTER release E3 is merged and never before, patch 18 (`league/ops/contam_probe.py`).
+Package B (costs and counts) authors patch 11 (`league/ops/funnel.py`, `league/ops/twins.py`) and, AFTER release E3 is merged and never before, patch 18 (`league/ops/contam_probe.py`, with the new `league/ops/contam_xs.py`: built, below).
 
 Each patch below: its number in `README.md`, the file, the anchor (a statement, never a line number), the exact
 unified diff against the integration head, and the test that holds it.
@@ -455,39 +455,53 @@ index c9d62216..ca35a1f0 100644
 
 ---
 
-## Patch 18 (OWED: after release E3 is merged, never before). `league/ops/contam_probe.py`: the panel strata
+## Patch 18 (BUILT Oct 11, 2026, after release E3 was merged). The probe's panel strata and the look's permit
 
-NOT WRITTEN, on purpose: the file is release E3's and does not exist at this build's base, and a diff against a
-branch that is still moving would be a diff against nothing. It is owed with release E4's first release after E3,
-and until it lands NO PANEL LOOK RUNS (the captain's A22 (3): `league.swarm.elane_xs.probed` holds every look back
-until the route that wrote the program has a published probe result with the panel strata).
+Built on `feat/equity-e4-p`; the commits are the record, not a diff here. What a panel look waits on (the captain's
+A22 (3): `league.swarm.elane_xs.probed`) is now written by the House's own job.
 
-What it adds, so its author starts from a decided shape (E4-SPEC 15, row 18; the names are the ones
-`elane_xs.PROBE_STRATA` already reads):
-- **P4** a random index member against its sector fund, a month ("Did X return more or less than <its sector's
-  fund> in <Month YYYY>?"); **P5** the same, a week; **P6** the House panel factors, a month (the run's `factors`:
-  momentum, short-term reversal and beta, each a top-minus-bottom tercile: "Did the highest-momentum third of the
-  index return more or less than the lowest third in <Month YYYY>?").
-- Truth stays on the House and comes from the PANEL STORE by era (`league.xs.store.PanelStore`: Train-era periods
-  with no capability; a 2025 or 2026 period only under E1's gate capability, minted under the probe's own reason, as
-  E3's S1-S4 mint theirs); the questions are built from names and the calendar only, as E3's are. The members asked
-  about are drawn by E3's own grid rule (`sha256("contam-1|<stratum>|<era>|<symbol>")`) over the era's members
-  (`Universe.members`), so the same questions are asked of every route.
-- The cells are written under the keys "P4", "P5" and "P6" of `routes[route].cells` in the probe's own file
-  under `<state>` (`contam_probe.FILE`: aggregates only, E3's own shape).
-- AND THE PROBE'S JOB WRITES THE PERMIT (decided when E4 was merged over E3: release E3's seal lets no module of
-  league/swarm name the probe's file or import the probe, so the swarm cannot read it, and must not: the file holds
-  counts and rates of the eras programs are judged on). Each time it publishes a route's result the job rewrites
-  `<state>/xs-look-permit.json` (`elane_xs.PROBE_FILE`; atomic, 600): {"version": "xs-look-permit-1"
-  (`elane_xs.PROBE_VERSION`), "routes": {route: {"at", "model", "cells": {"P4" | "P5" | "P6": {era: {"readable":
-  bool, "recalled": bool}}}}}},
-  one row for every route with a published result that carries all three panel strata, and NOTHING ELSE of a cell
-  (no n, no accuracy, no base rate, no p). That file is what `elane_xs.probed` reads; a file of another version, or
-  none, is no permit and every panel look waits.
-- Its test: the three strata's questions are pure of prices; a period of 2020 or 2021 is never asked about and never
-  read; truth for a 2025 period is refused without the capability; a route's published result carries the three
-  cells; E3's own S1-S4 cells are byte for byte what they were; the permit holds the two words a cell and no figure,
-  and `elane_xs.probed` reads None on it for a route with all three strata.
+WHERE IT LIVES, and why not all in E3's file. Release E3's seal T1 (`league/tests/test_e3_seal_imports.py`) lets
+`league/ops/contam_probe.py` import only what E3's contract lists, and nothing of `league/xs` is on that list. No
+seal test was changed. So:
+- **`league/ops/contam_probe.py`** (E3's, patched) owns the three strata's vocabulary and EVERY WORD OF A PROMPT
+  (`PANEL_STRATA`, `FACTORS`, `FACTOR_WORDS`, `NAME`, `panel_questions`), the one hash rule of a cell (`_grid`),
+  and a seam: `probe(ctx, panel=...)` and `Probe(panel=...)`. `run(ctx)` hands no plan and is E3's probe to the
+  byte. Every signature E3's contract pins is unchanged.
+- **`league/ops/contam_xs.py`** (new, package B's) owns what only the panel can say: `Plan` (the periods and the
+  members a stratum may ask, the truths from the panel store), `permit` / `write_permit`, and `run(ctx)`, which is
+  `contam_probe.probe(ctx, panel=plan)`.
+- **`league/ops/registry.py`**: the `contam_probe` row's module is `league.ops.contam_xs`; its times, limits and
+  owner are E3's. `league/tests/test_e3_identities.py` follows the row's module (either module is the row's).
+  THE ALTERNATIVE, not taken: keep the row on E3's module and let `contam_probe.run` import this one, which needs
+  one more name in the seal test's `OPS_MAY`. That is the captain's to choose; it is two lines either way.
+
+AS BUILT, against the shape decided before the build (each a departure, with its reason):
+- **The fund is not named in P4's and P5's questions** ("... than the Select Sector SPDR fund of its sector ..."):
+  the House's sector is statistical (`league.xs.ctx.derive`), read from prices, and a prompt is built from names
+  and the calendar only. The truth is against the fund of the House's sector at the period's base.
+- **The members asked about were in the index through the whole era** (unmasked, one asset, one ticker, on every
+  base day of the era's months and the last month's end), not any member of the era: every question of a cell's
+  grid then has a truth, and no question names a ticker for a month it was not in the index. Cost: survivors.
+- **A "2016-24" period lies, base and end, inside ONE Train segment of the panel** (2017-19, 2022-24): each
+  segment's first month and week are left out, so no row of 2016 or 2021 is read even as a base.
+- **A 2025 truth is read through the sealed "look" window**, as a 2026 one is: refused without the capability by the
+  store's own gate code (the panel store would open Validation's days without one).
+- **A partial keeps `panel_qset` beside `qset`** (which stays E3's own questions' sha), so a membership revision
+  drops the panel's cells of a probe under way and nothing of E3's.
+- **A route published without the panel strata is due at once** when a plan asks them (its E3 cells are asked
+  again with it): otherwise a look of its programs would wait out `every_days`.
+- **The permit is also rewritten after every run that had a plan**, not only at a publish (a lost permit is made
+  again), and a permit that cannot be written is a warning: the result stays published.
+- **P6's truth is computed from the panel store by the engine's own rule** (`contam_xs.factor_days`, held equal to a
+  real run's `factors` by a test), not read from a run's record: no run of a program exists for the months asked.
+
+NOT CHANGED: the dollars of a run (`elane.contam.usd_run` inside E2's day line), the keys (never sent twice), the
+ledger rows, one route a Saturday, E3's eras, the cell size. The panel adds about 800 questions to E3's about 1,100
+at the shipped cell size, so a route's probe takes about 70% more dollars and that many more Saturdays.
+
+Its tests: `league/tests/test_contam_xs.py` (the words; the plan on synthetic panels; the job on a scripted router;
+the House's job; the wiring and the seals), `test_contam_probe.py` unchanged, and `test_e4_integration.py`'s seal
+test (the strata the look reads are the probe's; the probe's module imports nothing of the panel).
 
 ---
 
