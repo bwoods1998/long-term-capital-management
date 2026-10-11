@@ -9,7 +9,8 @@ and the diagnostician are generators too, of the options lanes. This module is t
   mechanism, symbols, structure, mechanism words) and E2's own Train record (`elane_train.STATE_KEY`: each version's
   equity-v1 verdict on the Train years, and whether E2 refuted it on Train). Never its band, its retirement, its
   `validated_version`, `best_validation`, any state key in `SEALED_KEYS` (E1's try, look, floor, Train-r series and
-  sigma, the options validation views), a look row, a forward record or a graveyard lesson someone else wrote.
+  sigma, the options validation views, the seat rule's two counts), a look row, a forward record or a graveyard
+  lesson someone else wrote.
 - THE GRAVEYARD THE EQUITY GENERATORS READ is E2's own: the families E2 itself refuted on Train (`elane_train`), from
   its record, in its own words. The graveyard TABLE's rows of equity families (a retirement after a failed look writes
   one, with the options code's "best validation" words) reach no generator: `without_equity_rows` drops them from
@@ -59,11 +60,14 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from ..equity import BETA, EQUITY, LANES
 
-#: The family-state keys no generator reads of an equity family (E1's and the options code's outcome records).
+#: The family-state keys no generator reads of an equity family (E1's and the options code's outcome records, and,
+#: since release E5-A, the seat rule's two counts, `elane_seat`: K is written beside the look, so its presence alone
+#: says a look passed, and its counts hold the Validation year's activity; league/tests/test_equity_seats_seal.py
+#: holds every generator's reads to the same bytes whatever the counts are).
 SEALED_KEYS = frozenset({
     "elane_try", "elane_look", "elane_floor", "elane_train_r", "validation_r_sd_by_version", "validation_r_sd",
     "banded_evaluator", "validation_line", "validation_numbers", "validation_view", "validation", "gate_ready",
-    "gate_hold", "look_inflight", "look", "holdout", "forward", "band_reason", "submitted_run",
+    "gate_hold", "look_inflight", "look", "holdout", "forward", "band_reason", "submitted_run", "elane_seat",
 })
 #: The family columns no generator reads of an equity family.
 SEALED_COLUMNS = frozenset({"band", "band_since", "retired_at", "retire_reason", "validated_version", "best_validation",
