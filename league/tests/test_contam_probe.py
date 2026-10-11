@@ -46,9 +46,11 @@ def question_of(line: str) -> str:
 
 class ProbeRouter:
     """The swarm's router as the probe drives it, scripted: `answerer(question text) -> answer` for each numbered item of
-    a call's user text. Like the Provider, it answers a request key it has seen from its own store at no cost; a new
-    key costs `cost` dollars. `fails[profile]` is an exception that route's every call raises; `moves[profile]` is the
-    profile the router's own window fallback answers on in its place (league/swarm/models.py: the answer then says
+    a call's user text. A new key costs `cost` dollars. A REPEATED KEY is answered as the real router answers one
+    (league/swarm/models.py over ltcm/provider.py, held by `OnTheRealRouter` below): from its stored row, carrying
+    that row's ORIGINAL cost again, and with no text once `compact()` blanked the stored responses; `repeats` keeps
+    such keys (the probe must never send one). `fails[profile]` is an exception that route's every call raises;
+    `moves[profile]` is the profile the router's own window fallback answers on in its place (the answer then says
     so, and the fallback's call has a key of its own); `calls` keeps each call and `billed` the keys that cost."""
 
     def __init__(self, answerer=None, *, cost: float = 0.05):
@@ -58,8 +60,15 @@ class ProbeRouter:
         self.seen: dict[str, dict] = {}
         self.calls: list[dict] = []
         self.billed: list[str] = []
+        self.repeats: list[str] = []
         self.fails: dict[str, BaseException] = {}
         self.moves: dict[str, str] = {}
+
+    def compact(self) -> int:
+        """`ModelRouter.compact`: the stored responses of settled calls are blanked; their costs stay."""
+        for stored in self.seen.values():
+            stored["text"] = ""
+        return len(self.seen)
 
     def claude_enabled(self, role: str) -> bool:
         return False
@@ -72,13 +81,14 @@ class ProbeRouter:
         moved = self.moves.get(profile)
         key = kw["key"] if moved is None else f"{kw['key']}:fallback:{moved}"
         if key in self.seen:
-            return {**self.seen[key], "cost_usd": 0.0}
+            self.repeats.append(key)
+            return dict(self.seen[key])
         items = [line for line in kw["user"].split("\n\n", 1)[1].splitlines() if re.match(r"^\d+\. ", line)]
         answer = {"text": json.dumps([self.answerer(question_of(line)) for line in items]), "route": "sail",
                   "model": moved or profile, "cost_usd": self.cost}
         if moved is not None:
             answer["sail_fallback"] = {"from": profile, "to": moved, "why": "flagged"}
-        self.seen[key] = answer
+        self.seen[key] = dict(answer)
         self.billed.append(key)
         return answer
 
@@ -537,9 +547,11 @@ class TheJob(Jobs):
         doc = self.doc()
         self.assertEqual((doc["version"], list(doc["routes"]), len(doc["history"])), ("contam-1", ["sail:pro_asap"], 1))
         row = doc["routes"]["sail:pro_asap"]
-        self.assertEqual(set(row), {"at", "model", "usd", "probes", "attempted_at", "idle", "cells", "recall", "newly_recalled"})
+        self.assertEqual(set(row), {"at", "model", "usd", "probes", "attempts", "attempted_at", "first_attempted_at", "idle",
+                                    "cells", "recall", "newly_recalled"})
         self.assertEqual((row["at"], row["attempted_at"], row["model"], row["probes"], row["idle"], row["usd"]),
                          (schedule.iso(self.clock()), schedule.iso(self.clock()), "pro_asap", 1, 0, out["usd"]))
+        self.assertEqual((row["attempts"], row["first_attempted_at"]), (1, schedule.iso(self.clock())))
         self.assertEqual({s: list(eras) for s, eras in row["cells"].items()}, {s: list(P.ERAS) for s in P.STRATA})
         for eras in row["cells"].values():
             for got in eras.values():
@@ -558,10 +570,13 @@ class TheJob(Jobs):
         for call in self.router.calls:
             self.assertEqual((call["role"], call["system"], call["sail_profile"], call["openai_model"], call["claude"],
                               call["max_output"], call["effort"]), (P.ROLE, P.SYSTEM, "pro_asap", None, False, 2000, "low"))
-            self.assertEqual(call["key"], f"swarm:elane:probe:sail:pro_asap:1:{hashlib.sha256(call['user'].encode()).hexdigest()[:12]}")
+            self.assertEqual(call["key"], "swarm:elane:probe:sail:pro_asap:1:1:"
+                                          f"{hashlib.sha256(call['user'].encode()).hexdigest()[:12]}",
+                             "the prefix, the route, the probe, THE RUN, the batch's hash")
             keys.append(call["key"])
         self.assertEqual(len(keys), len(set(keys)))
         self.assertEqual(self.router.billed, keys)
+        self.assertTrue(all(len(key) <= 120 for key in keys), "whole in the swarm's spend rows (their detail keeps 120)")
 
     def test_the_dollars_are_booked_on_a_probe_row_inside_e2s_day_line(self):
         out, _ = self.probe()
@@ -596,10 +611,12 @@ class TheJob(Jobs):
         and goes on the next week; it is not skipped for want of the whole $3."""
         elane_yield.book(self.store, "sail:pro_asap", usd=7.8, known=True, purpose="research", answered=True, now=self.clock())
         out, _ = self.probe()
-        self.assertEqual((out["bound"], out["usd"], out["stopped"], out["finished"], out["asked"]), (0.2, 0.2, "usd", False, 4))
-        self.assertAlmostEqual(elane_yield.spent_today(self.store, self.clock()), 8.0, places=6)
-        self.assertEqual(self.probe()[0]["status"], "skipped", "the line is spent: the same day asks nothing more")
-        self.assertEqual(len(self.router.calls), 4)
+        # One cell (three batches at $0.05) fits the $0.20; the next would not, so it is not begun: no dollar is spent on
+        # a cell the run cannot finish.
+        self.assertEqual((out["bound"], out["usd"], out["stopped"], out["finished"], out["asked"], out["cells"]),
+                         (0.2, 0.15, "usd", False, 3, 1))
+        self.assertAlmostEqual(elane_yield.spent_today(self.store, self.clock()), 7.95, places=6)
+        self.assertEqual(len(self.router.calls), 3)
         self.clock.advance(WEEK)
         out, _ = self.probe()
         self.assertEqual((out["route"], out["bound"], out["finished"]), ("sail:pro_asap", 3.0, True))
@@ -625,15 +642,17 @@ class TheJob(Jobs):
         small["elane"]["e2"]["usd_day"] = 0.5
         self.clock.advance(86400)
         out, _ = self.probe(settings_=small)
-        self.assertEqual((out["route"], out["bound"], out["stopped"], out["usd"]), ("sail:glm_asap", 0.5, "usd", 0.5))
-        self.assertGreater(out["cells"], 0)
+        self.assertEqual((out["route"], out["bound"], out["stopped"], out["usd"]), ("sail:glm_asap", 0.5, "usd", 0.4))
+        self.assertEqual(out["cells"], 3, "three whole cells (the third a two-batch one); a fourth would pass the line")
+        self.assertEqual(self.router.repeats + busy.repeats, [], "no key was ever sent twice")
 
     def test_the_dollar_stop_leaves_a_partial_that_the_next_run_finishes(self):
         tight = settings(usd_run=0.3)
         first, _ = self.probe(settings_=tight)
         self.assertEqual((first["stopped"], first["finished"], first["asked"], first["usd"]), ("usd", False, 6, 0.3))
         row = self.doc()["routes"]["sail:pro_asap"]
-        self.assertEqual((row["idle"], row["partial"]["probe_n"], row["partial"]["usd"]), (0, 1, 0.3))
+        self.assertEqual((row["idle"], row["attempts"], row["partial"]["probe_n"], row["partial"]["usd"],
+                          row["partial"]["batch_usd"]), (0, 1, 1, 0.3, 0.05))
         self.assertNotIn("at", row, "nothing is published before the probe is whole")
         done = [(s, e) for s, eras in row["partial"]["cells"].items() for e in eras]
         self.assertEqual(len(done), first["cells"])
@@ -641,42 +660,149 @@ class TheJob(Jobs):
         runs = [first]
         while not runs[-1]["finished"]:
             self.clock.advance(WEEK)
-            before = (len(self.router.calls), len(self.router.billed))
+            self.router.compact()   # the swarm's loop blanks the stored answers of the week before
             out, _ = self.probe(settings_=tight)
             self.assertEqual(out["route"], "sail:pro_asap", "the probe under way goes on before another route starts")
-            again = self.router.calls[before[0]:]
-            self.assertEqual(len(again) - (len(self.router.billed) - before[1]), sum(c["key"] in self.router.billed[:before[1]]
-                                                                                    for c in again))
+            self.assertIsNone(out.get("error"))
             runs.append(out)
             self.assertLess(len(runs), 12)
         row = self.doc()["routes"]["sail:pro_asap"]
         self.assertNotIn("partial", row)
-        self.assertEqual((row["probes"], row["idle"]), (1, 0))
+        self.assertEqual((row["probes"], row["idle"], row["attempts"]), (1, 0, len(runs)))
+        self.assertEqual(self.router.repeats, [], "A KEY IS ASKED ONCE: no run sent a key an earlier run sent")
+        self.assertEqual(len(self.router.calls), len(self.router.billed))
         self.assertAlmostEqual(row["usd"], 0.05 * len(self.router.billed), places=6, msg="every batch was paid for once")
         self.assertAlmostEqual(sum(r["usd"] for r in runs), row["usd"], places=6)
+        self.assertAlmostEqual(elane_yield.ledger(self.store)["routes"]["probe:sail:pro_asap"]["usd"], row["usd"], places=6,
+                               msg="E2's ledger holds what was billed, no more")
         self.assertEqual(sum(r["cells"] for r in runs), 13)
+        for eras in row["cells"].values():
+            for got in eras.values():
+                self.assertEqual(got["skipped"], 0, "no cell was scored on a blanked answer")
         whole = ProbeRouter()
         self.root.joinpath(P.FILE).unlink()
         self.probe(router=whole)
-        self.assertEqual(set(self.router.billed), set(whole.billed), "the same batches as one whole run asks")
+        self.assertEqual(sorted(k.rsplit(":", 1)[1] for k in self.router.billed),
+                         sorted(k.rsplit(":", 1)[1] for k in whole.billed), "the same batches as one whole run asks, once each")
         self.assertEqual(self.doc()["routes"]["sail:pro_asap"]["cells"], row["cells"], "and the same aggregates")
 
-    def test_a_resumed_cell_re_reads_its_answered_batches_at_no_cost(self):
-        """A stop in the middle of a cell: its answered batches are not in the partial (aggregates only); the next run
-        asks them again under the same keys and the Provider answers from its store for nothing."""
-        tight = settings(usd_run=0.05, batch=5)   # one billed batch a run; a 24-question cell is five batches
-        tight["elane"]["e2"]["routes"] = ["sail:pro_asap"]
-        first, _ = self.probe(settings_=tight)
-        self.assertEqual((first["asked"], first["cells"], first["stopped"]), (1, 0, "usd"))
+    def test_a_cell_a_stop_cut_is_asked_again_whole_under_the_next_runs_keys(self):
+        """A stop in the middle of a cell (here E2's day runs out under the run): its answered batches are in no file
+        (aggregates only) and their keys are never sent again. The next run asks the whole cell under its own keys and
+        pays for it; the dollars the cut cell cost stay with the probe."""
+        store, clock = self.store, self.clock
+        only = settings(batch=5)   # a 24-question cell is five batches
+        only["elane"]["e2"]["routes"] = ["sail:pro_asap"]
+
+        class Meanwhile(ProbeRouter):
+            def ask(inner, **kw):   # noqa: N805
+                out = ProbeRouter.ask(inner, **kw)
+                if len(inner.calls) == 2:   # E2's research takes the rest of the day while the first cell is in flight
+                    elane_yield.book(store, "sail:k3", usd=elane_yield.room(store, only, clock()), known=True,
+                                     purpose="research", answered=True, now=clock())
+                return out
+        router = Meanwhile()
+        first, _ = self.probe(settings_=only, router=router)
+        self.assertEqual((first["asked"], first["cells"], first["stopped"], first["usd"]), (2, 0, "usd", 0.1))
         row = self.doc()["routes"]["sail:pro_asap"]
-        self.assertEqual((row["idle"], row["partial"]["cells"], row["partial"]["usd"]), (1, {}, 0.05),
+        self.assertEqual((row["idle"], row["attempts"], row["partial"]["cells"], row["partial"]["usd"]), (1, 1, {}, 0.1),
                          "no cell yet; the dollars stay with the probe that spent them")
         self.clock.advance(WEEK)
-        calls = len(self.router.calls)
-        second, _ = self.probe(settings_=tight)
-        again = self.router.calls[calls:]
-        self.assertEqual(again[0]["key"], self.router.calls[0]["key"], "the first batch, asked again under its own key")
-        self.assertEqual((second["asked"], second["usd"], len(self.router.billed)), (2, 0.05, 2), "one re-read free, one new")
+        router.compact()
+        second, _ = self.probe(settings_=only, router=router)
+        self.assertEqual((second["finished"], second["stopped"]), (True, None))
+        again = [c["key"] for c in router.calls[2:]]
+        self.assertEqual([k.rsplit(":", 1)[1] for k in again[:2]], [c["key"].rsplit(":", 1)[1] for c in router.calls[:2]],
+                         "the cut cell's batches, the same questions")
+        self.assertTrue(all(":1:2:" in k for k in again) and all(":1:1:" in c["key"] for c in router.calls[:2]),
+                        "under the second run's keys")
+        self.assertEqual(router.repeats, [])
+        row = self.doc()["routes"]["sail:pro_asap"]
+        self.assertAlmostEqual(row["usd"], 0.05 * len(router.billed), places=6, msg="the cut cell's two batches were paid twice")
+        self.assertEqual(row["cells"]["S1"]["2016-24"]["skipped"], 0)
+
+    def test_a_run_that_cannot_pay_for_a_cell_does_not_begin_it(self):
+        """The dearest batch the probe has paid for is kept with its partial: a run whose dollars do not cover the next
+        cell at that price spends nothing, adds no cell, and CP2 says so at the third."""
+        tight = settings(usd_run=0.15)   # a cell is three batches at $0.05
+        tight["elane"]["e2"]["routes"] = ["sail:pro_asap"]
+        first, _ = self.probe(settings_=tight)
+        self.assertEqual((first["asked"], first["cells"], first["usd"], first["stopped"]), (3, 1, 0.15, "usd"))
+        self.assertEqual(self.doc()["routes"]["sail:pro_asap"]["partial"]["batch_usd"], 0.05)
+        small = settings(usd_run=0.1)
+        small["elane"]["e2"]["routes"] = ["sail:pro_asap"]
+        alerts = []
+        for _ in range(3):
+            self.clock.advance(WEEK)
+            out, ctx = self.probe(settings_=small)
+            self.assertEqual((out["asked"], out["cells"], out["usd"], out["stopped"]), (0, 0, 0.0, "usd"))
+            alerts.append(ctx.alerts)
+        self.assertEqual(len(self.router.calls), 3, "not one call for a cell that could not be finished")
+        self.assertEqual((alerts[:2], len(alerts[2])), ([[], []], 1))
+        self.assertIn("CP2", alerts[2][0]["text"])
+        row = self.doc()["routes"]["sail:pro_asap"]
+        self.assertEqual((row["idle"], row["attempts"], row["partial"]["usd"]), (3, 4, 0.15), "the partial is kept whole")
+        self.clock.advance(WEEK)
+        self.assertTrue(self.probe()[0]["finished"], "with the dollars, it goes on from its first cell")
+
+    def test_an_answer_with_no_text_is_no_answer(self):
+        """A call that produced nothing (or a stored row whose response was blanked) is never a batch of skipped items:
+        its dollars are booked, the run ends, and the next run asks again under its own keys."""
+        only = settings()
+        only["elane"]["e2"]["routes"] = ["sail:pro_asap"]
+
+        class Mute(ProbeRouter):
+            mute = True
+
+            def ask(inner, **kw):   # noqa: N805
+                out = ProbeRouter.ask(inner, **kw)
+                return {**out, "text": "  "} if inner.mute and len(inner.calls) == 2 else out
+        router = Mute()
+        out, _ = self.probe(settings_=only, router=router)
+        self.assertEqual((out["stopped"], out["asked"], out["cells"], out["usd"], out["finished"]),
+                         ("error", 1, 0, 0.1, False))
+        self.assertIn("no text", out["error"])
+        book = elane_yield.ledger(self.store)["routes"]["probe:sail:pro_asap"]
+        self.assertEqual((book["answered"], book["failed"], book["usd"]), (1, 1, 0.1), "billed, and booked as unanswered")
+        self.assertEqual(self.doc()["routes"]["sail:pro_asap"]["partial"]["cells"], {}, "no cell was scored on it")
+        self.clock.advance(WEEK)
+        router.mute = False
+        out, _ = self.probe(settings_=only, router=router)
+        self.assertTrue(out["finished"])
+        self.assertEqual(router.repeats, [])
+        for eras in self.doc()["routes"]["sail:pro_asap"]["cells"].values():
+            for got in eras.values():
+                self.assertEqual(got["skipped"], 0)
+
+    def test_a_key_the_swarm_already_booked_is_not_asked_again(self):
+        """The file is lost and its counters begin again: the first run's keys would be the keys of the route's very
+        first run. The swarm's spend rows still carry them (the router books a Sail call under its request key), so
+        the run asks nothing; the next run's keys are new."""
+        only = settings()
+        only["elane"]["e2"]["routes"] = ["sail:pro_asap"]
+        store = self.store
+
+        class Booking(ProbeRouter):   # the real router's own spend row for a Sail call (league/swarm/models.py)
+            def ask(inner, **kw):   # noqa: N805
+                out = ProbeRouter.ask(inner, **kw)
+                store.add_spend("sail_model", out["cost_usd"], family="swarm",
+                                detail={"profile": kw["sail_profile"], "key": kw["key"][:120], "desk": "swarm"})
+                return out
+        router = Booking()
+        self.assertTrue(self.probe(settings_=only, router=router)[0]["finished"])
+        calls = len(router.calls)
+        self.root.joinpath(P.FILE).unlink()
+        self.clock.advance(WEEK)
+        router.compact()
+        out, _ = self.probe(settings_=only, router=router)
+        self.assertEqual((out["probe"], out["stopped"], out["asked"], out["usd"], out["cells"]), (1, "error", 0, 0.0, 0))
+        self.assertIn("booked before", out["error"])
+        self.assertEqual((len(router.calls), router.repeats), (calls, []), "nothing was sent")
+        self.clock.advance(WEEK)
+        out, _ = self.probe(settings_=only, router=router)
+        self.assertTrue(out["finished"])
+        self.assertTrue(all(":1:2:" in c["key"] for c in router.calls[calls:]), "the second run of the new file: new keys")
+        self.assertEqual(router.repeats, [])
 
     def test_the_time_stop_leaves_a_partial_too(self):
         ticks = iter([0.0] + [100.0] * 4 + [float(P.ASK_SECONDS)] * 50)
@@ -686,28 +812,35 @@ class TheJob(Jobs):
         self.assertEqual(sum(len(e) for e in self.doc()["routes"]["sail:pro_asap"]["partial"]["cells"].values()), 1,
                          "three batches made the first cell; the fourth was the second cell's first")
         self.clock.advance(WEEK)
+        self.router.compact()
         calls = len(self.router.calls)
         out, _ = self.probe()
         self.assertEqual((out["finished"], out["route"]), (True, "sail:pro_asap"))
-        self.assertEqual(self.router.calls[calls]["key"], self.router.calls[3]["key"], "the unfinished cell's batch again")
-        self.assertEqual(out["usd"], round(0.05 * (out["asked"] - 1), 6), "and it cost nothing the second time")
+        self.assertEqual(self.router.calls[calls]["key"].rsplit(":", 1)[1], self.router.calls[3]["key"].rsplit(":", 1)[1],
+                         "the unfinished cell's first batch again")
+        self.assertNotEqual(self.router.calls[calls]["key"], self.router.calls[3]["key"], "under this run's key")
+        self.assertEqual(out["usd"], round(0.05 * out["asked"], 6), "and it was paid for again: no key is re-read")
+        self.assertEqual(self.router.repeats, [])
         self.assertEqual(P.ASK_SECONDS, 2300)
 
-    def test_a_second_probe_sends_new_keys_and_a_resumed_one_repeats_them(self):
+    def test_a_second_probe_sends_new_keys_and_so_does_a_resumed_one(self):
         self.probe()
         first = [c["key"] for c in self.router.calls]
-        self.assertTrue(all(k.startswith("swarm:elane:probe:sail:pro_asap:1:") for k in first))
+        self.assertTrue(all(k.startswith("swarm:elane:probe:sail:pro_asap:1:1:") for k in first))
         self.clock.advance(29 * 86400)
         for _ in ROUTES:   # the other two routes, then the first again: its second probe
             self.probe()
             self.clock.advance(86400)
         second = [c["key"] for c in self.router.calls if c["sail_profile"] == "pro_asap"][len(first):]
         self.assertEqual(len(second), len(first))
-        self.assertTrue(all(k.startswith("swarm:elane:probe:sail:pro_asap:2:") for k in second))
+        self.assertTrue(all(k.startswith("swarm:elane:probe:sail:pro_asap:2:2:") for k in second),
+                        "its second probe, and the route's second run")
         self.assertEqual([k.rsplit(":", 1)[1] for k in second], [k.rsplit(":", 1)[1] for k in first], "the same questions")
         self.assertFalse(set(first) & set(second), "asked afresh, and billed")
-        self.assertEqual(self.doc()["routes"]["sail:pro_asap"]["probes"], 2)
+        self.assertEqual((self.doc()["routes"]["sail:pro_asap"]["probes"], self.doc()["routes"]["sail:pro_asap"]["attempts"]),
+                         (2, 2))
         self.assertEqual(len(self.router.billed), 4 * len(first))
+        self.assertEqual(self.router.repeats, [])
 
     def test_a_partial_made_on_another_question_set_is_dropped(self):
         first, _ = self.probe(settings_=settings(usd_run=0.3))
@@ -780,7 +913,10 @@ class TheJob(Jobs):
         row = self.doc()["routes"]["sail:pro_asap"]
         self.assertEqual((row["model"], row["idle"], row["probes"]), ("pro_asap", 0, 1))
         mine = [c["key"] for c in self.router.calls if c["sail_profile"] == "pro_asap"]
-        self.assertEqual(mine[1], mine[0], "the batch the fallback answered, asked again of the route itself")
+        self.assertEqual(mine[1].rsplit(":", 1)[1], mine[0].rsplit(":", 1)[1],
+                         "the batch the fallback answered, asked again of the route itself")
+        self.assertNotEqual(mine[1], mine[0], "under the second run's key")
+        self.assertEqual(self.router.repeats, [])
         self.assertAlmostEqual(row["usd"], 0.05 * (1 + out["asked"]), places=6, msg="the probe's dollars, the fallback's too")
 
     def test_a_fallback_that_names_the_routes_own_profile_is_the_routes_answer(self):
@@ -805,8 +941,9 @@ class TheJob(Jobs):
         self.assertEqual(alerts[:2], [[], []])
         self.assertEqual(alerts[2], [{"level": "warning", "text": "CP2: the contamination probe's route sail:k3 added no "
                                                                    "cell in its last 3 attempts"}])
-        self.assertEqual(len(self.router.billed), 1, "the fallback's stored answer is read again at no cost")
-        self.assertAlmostEqual(elane_yield.ledger(self.store)["routes"]["probe:sail:pro_asap"]["usd"], 0.05, places=6)
+        self.assertEqual((len(self.router.billed), self.router.repeats), (3, []),
+                         "each run's call is its own: the fallback answered, and billed, three times")
+        self.assertAlmostEqual(elane_yield.ledger(self.store)["routes"]["probe:sail:pro_asap"]["usd"], 0.15, places=6)
 
     def test_the_stores_trouble_keeps_what_is_scored_and_books_what_was_billed(self):
         real, seen = P.truth, []
@@ -842,7 +979,9 @@ class TheJob(Jobs):
         doc = self.doc()
         self.assertEqual(doc["routes"]["sail:pro_asap"]["probes"], 31)
         self.assertEqual((len(doc["history"]), doc["history"][-1]["probe_n"], doc["history"][0]["probe_n"]), (24, 31, 2))
-        self.assertTrue(all(c["key"].startswith("swarm:elane:probe:sail:pro_asap:31:") for c in self.router.calls))
+        self.assertTrue(all(c["key"].startswith("swarm:elane:probe:sail:pro_asap:31:1:") for c in self.router.calls))
+        self.assertEqual(doc["routes"]["sail:pro_asap"]["first_attempted_at"], schedule.iso(self.clock() - 30 * 86400.0),
+                         "a row of an earlier build: its last attempt is the oldest known")
 
     def test_a_model_that_recalls_the_market_is_read_as_recalling_it(self):
         table = self.oracle()
@@ -862,6 +1001,126 @@ class TheJob(Jobs):
                                       row["newly_recalled"] if name in judged])
         for alert in ctx.alerts:
             self.assertNotRegex(alert["text"], r"\d\.\d|%|\bbp\b", "ids, counts and names only")
+
+
+class OnTheRealRouter(Stores):
+    """The probe on the swarm's REAL `ModelRouter` over the real `Provider` (a scripted transport: no network), with
+    the swarm loop's `compact()` between two runs a week apart. What a repeated request key does there is the reason
+    for A KEY IS ASKED ONCE: it is answered from the stored row with that row's original cost, and with no text once
+    the row was compacted."""
+
+    def setUp(self):
+        from league.swarm.models import ModelRouter
+        from ltcm.provider import Provider
+
+        self.clock = fx.Clock()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.store = SwarmStore(self.root, clock=self.clock)
+        self.addCleanup(self.store.close)
+        self.posts: list[str] = []
+
+        def transport(method, route, body=None, idempotency_key=None):
+            """Every numbered item answered "higher" / "more" / 2, as a completed response with a usage (so a cost)."""
+            if method != "POST":
+                raise AssertionError(f"unexpected {method} {route}")
+            self.posts.append(idempotency_key)
+            items = re.findall(r"\\n(\d+)\. ([^\\]+)", json.dumps(body))
+            answers = ["higher" if "higher or lower" in q else ("more" if "more or less" in q else 2) for _, q in items]
+            return {"id": f"resp_{len(self.posts)}", "object": "response", "status": "completed", "model": body.get("model"),
+                    "output": [{"type": "message", "role": "assistant",
+                                "content": [{"type": "output_text", "text": json.dumps(answers)}]}],
+                    "usage": {"input_tokens": 20000, "input_tokens_details": {"cached_tokens": 0, "reasoning_tokens": 0},
+                              "output_tokens": 20000, "output_tokens_details": {"cached_tokens": 0, "reasoning_tokens": 0},
+                              "total_tokens": 40000}}
+        self.provider = Provider(self.root / "swarm-provider.sqlite", transport=transport, floor_cap_usd_per_day="60",
+                                 clock=self.clock)
+        self.router = ModelRouter(self.store, self.provider, settings=self.settings())
+
+    def settings(self, **contam) -> dict:
+        block = {"mode": "record", "usd_run": 3.0, "batch": 5, "questions_per_cell": 24, "every_days": 28, **contam}
+        return {"elane": {"mode": "gate", "contam": block, "e2": {"routes": ["sail:pro_asap"], "usd_day": 8.0}},
+                "researcher": {"floor_usd_day": 60.0, "family_usd_day": 60.0}}
+
+    def probe(self, settings_: dict) -> dict:
+        ctx = Context("contam_probe", root=self.root, due_at=self.clock(), clock=self.clock, config={}, settings_value={})
+        return P.Probe(ctx, store=self.store, settings=settings_, router=self.router, equity=self.equity(),
+                       symbols=UNIVERSE, clock=lambda: 0.0).run()
+
+    def a_week_later(self) -> int:
+        """A week passes and the swarm's loop compacts the Provider's file, as it does every guard pass."""
+        self.clock.advance(WEEK)
+        raw = sqlite3.connect(str(self.provider.path), isolation_level=None)
+        try:
+            raw.execute("UPDATE requests SET updated_at='2000-01-01T00:00:00'")   # a week old on the wall clock
+        finally:
+            raw.close()
+        return self.router.compact()
+
+    def one_batch(self, key: str = "swarm:elane:probe:warm-up") -> dict:
+        return elane_yield.ask_on(self.router, elane_yield.Route.of("sail:pro_asap"), role=P.ROLE, system=P.SYSTEM,
+                                  user="warm-up\n\n1. Did SPY finish January 2017 higher or lower than it finished the "
+                                       "month before?", key=key, max_output=2000, effort="low")
+
+    def test_what_the_router_does_with_a_repeated_key(self):
+        first = self.one_batch()
+        self.assertGreater(first["cost_usd"], 0)
+        self.assertEqual((first["text"], len(self.posts)), ('["higher"]', 1))
+        again = self.one_batch()
+        self.assertEqual(len(self.posts), 1, "the Provider answers a key it has seen from its store: nothing is sent")
+        self.assertEqual((again["text"], again["cost_usd"]), (first["text"], first["cost_usd"]),
+                         "and the answer carries the stored row's ORIGINAL cost again: not $0")
+        self.assertEqual(self.a_week_later(), 1)
+        blank = self.one_batch()
+        self.assertEqual((blank["text"], blank["cost_usd"], len(self.posts)), ("", first["cost_usd"], 1),
+                         "after the loop's compaction the re-read answer is empty, at the same cost")
+        self.assertGreater(elane_yield.booked_for(self.store, "swarm:elane:probe:warm-up"), 0,
+                           "the swarm's spend rows carry a key the router booked (what the probe checks before it asks)")
+
+    def test_a_probe_resumed_a_week_later_books_what_was_billed_and_scores_no_blank(self):
+        cost = float(self.one_batch()["cost_usd"])
+        self.posts.clear()
+        # Run 1 stops on its dollars after one batch, in the middle of its first cell (five batches).
+        first = self.probe(self.settings(usd_run=round(cost, 6)))
+        self.assertEqual((first["asked"], first["cells"], first["stopped"], len(self.posts)), (1, 0, "usd", 1))
+        self.assertGreater(self.a_week_later(), 0)
+        second = self.probe(self.settings(usd_run=10.0))
+        self.assertEqual((second["finished"], second["stopped"], second.get("error")), (True, None, None))
+        self.assertEqual(len(self.posts), len(set(self.posts)), "no request was sent twice")
+        self.assertEqual(second["asked"], len(self.posts) - 1, "every batch of run 2 was a call of its own, paid for")
+        book = elane_yield.ledger(self.store)["routes"]["probe:sail:pro_asap"]
+        self.assertEqual(book["requests"], len(self.posts), "one booked batch a billed call")
+        self.assertAlmostEqual(book["usd"], cost * len(self.posts), places=4, msg="E2's ledger: what was billed, no more")
+        row = json.loads((self.root / P.FILE).read_text())["routes"]["sail:pro_asap"]
+        self.assertAlmostEqual(row["usd"], cost * len(self.posts), places=4)
+        self.assertEqual((row["probes"], row["attempts"]), (1, 2))
+        for stratum, eras in row["cells"].items():
+            for era, got in eras.items():
+                self.assertEqual(got["skipped"], 0, f"{stratum}/{era}: no answer of a compacted row was read as skipped")
+        requests = sqlite3.connect(str(self.provider.path))
+        try:
+            keys = [r[0] for r in requests.execute("SELECT request_key FROM requests WHERE request_key LIKE ?",
+                                                   (P.KEY_PREFIX + ":sail:pro_asap:%",))]
+        finally:
+            requests.close()
+        self.assertEqual(len(keys), len(self.posts))
+        self.assertEqual({k.split(":")[6] for k in keys}, {"1", "2"}, "the run is in the key: 1 and 2 of probe 1")
+
+    def test_a_lost_file_never_makes_the_probe_re_read_an_old_row(self):
+        first = self.probe(self.settings(usd_run=10.0))
+        self.assertTrue(first["finished"])
+        sent = len(self.posts)
+        (self.root / P.FILE).unlink()
+        self.a_week_later()
+        out = self.probe(self.settings(usd_run=10.0))
+        self.assertEqual((out["probe"], out["stopped"], out["asked"], out["usd"], out["cells"]), (1, "error", 0, 0.0, 0))
+        self.assertIn("booked before", out["error"])
+        self.assertEqual(len(self.posts), sent)
+        book = elane_yield.ledger(self.store)["routes"]["probe:sail:pro_asap"]
+        self.assertEqual(book["requests"], sent, "nothing booked for a call that was not made")
+        self.clock.advance(WEEK)
+        self.assertTrue(self.probe(self.settings(usd_run=10.0))["finished"], "the next run's keys are new")
 
 
 class NoTruthLeavesTheHouse(Jobs):
@@ -914,7 +1173,8 @@ class NoTruthLeavesTheHouse(Jobs):
             else:
                 yield path, value
         allowed = {*P.CELL_KEYS, *P.RECALL_KEYS, "version", "routes", "history", "at", "model", "usd", "probes",
-                   "attempted_at", "idle", "cells", "recall", "partial", "probe_n", "qset", "route", "newly_recalled", "[]",
+                   "attempts", "attempted_at", "first_attempted_at", "idle", "cells", "recall", "partial", "probe_n",
+                   "qset", "batch_usd", "route", "newly_recalled", "[]",
                    *ROUTES, *P.STRATA, *P.ERAS}
         for text in (partial, (self.root / P.FILE).read_text()):
             doc = json.loads(text)

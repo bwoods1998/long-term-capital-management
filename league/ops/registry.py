@@ -185,7 +185,8 @@ JOBS: tuple[Job, ...] = (
              "(it leaves the counted days), and the registry's hash chain is verified"),
     # The contamination probe, Saturday 00:10Z (Friday evening in New York): the start of the UTC day, the equity
     # lanes' `usd_day` line still whole. One model route a run, at most `elane.contam.usd_run` dollars ($3), resumable
-    # (a route's answered batches are read again at $0), so never started twice for one occurrence.
+    # by its scored cells (every run's request keys are its own: none is asked twice), and paid, so never started twice
+    # for one occurrence.
     Job("contam_probe", "league.ops.contam_probe", (S.weekly(5, 0, 10),), grace=6 * HOUR, cpu=300, wall=3300,
         paid=True, retry=False, owner="E3 contamination",
         what="the contamination probe: one model route a week asked what it recalls of the eras programs are judged "

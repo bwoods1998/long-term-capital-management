@@ -398,10 +398,23 @@ Every signature of `test_e3_skeleton.SIGNATURES` stands. What other packages and
   base: (1) a run's BOUND is min(`elane.contam.usd_run`, `elane_yield.room` when it starts), and a run is skipped only
   when that room is zero (the spec's "skipped while room < usd_run" skips every run once E2's day line is under
   `usd_run`, which it is where E2 holds its day to a share of the swarm's Sail model line); (2) every request key
-  begins `contam_probe.KEY_PREFIX` ("swarm:elane:probe", then the route, `probe_n` and the batch's hash as specified),
+  begins `contam_probe.KEY_PREFIX` ("swarm:elane:probe", then the route, `probe_n`, the run and the batch's hash),
   the equity lanes' mark in the swarm's spend rows, so the swarm's meters count the probe as E2's and the options
   researchers' hourly pace does not read it as theirs. The ledger rows are "probe:<route>" (a window fallback's
   answer on the row of the profile that gave it).
+- **A probe's request key is asked once (the review's fix; the spec's 7.10, 8.2 and 12.1 said a resumed probe
+  "re-reads its answered batches at $0").** It does not: on the real router a repeated key is answered from the
+  Provider's stored row WITH THAT ROW'S ORIGINAL COST (ltcm/provider.py `_response_from_row`), and
+  `ModelRouter.compact` blanks the stored response of a settled call after an hour, so a week later the text is
+  empty. AS BUILT: `KEY = f"{KEY_PREFIX}:{route.key}:{probe_n}:{attempt}:{h}"`, `attempt` = the route's `attempts`
+  counter (its runs; written with `attempted_at` before any call; never truncated), so no run sends a key an earlier
+  run sent. A resumed probe keeps its SCORED CELLS; a cell a stop cut is asked again whole under the next run's keys
+  and paid for again. A cell is begun only when its batches at `partial.batch_usd` (the dearest batch the probe has
+  paid for) fit the run's bound and E2's day; a key `elane_yield.booked_for` already finds in the swarm's spend rows
+  is not asked ("stopped": "error"); an answer with no text is booked, ends the run ("stopped": "error") and is never
+  scored. The file's route row gains `attempts`, `first_attempted_at` (written once: CP1's clock for a route no
+  probe ever finished on) and `partial.batch_usd`. `test_contam_probe.OnTheRealRouter` holds this on the real
+  `ModelRouter` and `Provider` with a `compact()` between two runs.
 - **The probe's file (C: `contamination`, CP1, CP2).** `at` and `attempted_at` are ISO text (`schedule.iso`; read them
   with `schedule.epoch`). A published route also carries `newly_recalled` (the "stratum/era" cells recalled now and not
   in its result before) and a partial `model`; `contam_probe.read(root)` gives the file as the job keeps it;

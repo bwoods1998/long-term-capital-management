@@ -32,30 +32,47 @@ answerer) have p_perm <= 0.05 (else the cell cannot show recall: six months that
 and p_perm <= 0.05. The recall: `rho` = Pearson of stated against true; `p_perm` = the share of `PERMUTATIONS`
 permutations of the truths (seeded `sha256("contam-1|perm")`) with rho at least as large; and the sign accuracy.
 
-THE FILE: {"version": "contam-1", "routes": {route: {"at", "model", "usd", "probes", "attempted_at", "idle", "cells":
-{stratum: {era: {n, correct, ties, skipped, periods, symbols, acc, base, m, lo, hi, p_perm, readable, recalled}}},
-"recall": {n, rho, p_perm, sign_acc}, "partial": {"probe_n", "qset", "usd", "cells", "recall"}}}, "history": [the last
-24 route results]}.
+THE FILE: {"version": "contam-1", "routes": {route: {"at", "model", "usd", "probes", "attempts", "attempted_at",
+"first_attempted_at", "idle", "cells": {stratum: {era: {n, correct, ties, skipped, periods, symbols, acc, base, m, lo,
+hi, p_perm, readable, recalled}}}, "recall": {n, rho, p_perm, sign_acc}, "partial": {"probe_n", "qset", "usd",
+"batch_usd", "cells", "recall"}}}, "history": [the last 24 route results]}.
 
 THE JOB (`run`): skipped when the mode is "off", no route is due (`due`), or E2's day leaves it no dollar
 (`elane_yield.room(store, settings, now)`: THE BOUND below). One route a run: `router =
 models.build_router(ctx.root, store, settings, config=ctx.config)`; routes = `elane_yield.routes(settings, router)`.
 FIRST it writes the route's `attempted_at` and `idle` + 1 (`idle`: its attempts in a row that added no cell; a cell
 written sets it to 0), so a route that cannot move goes to the back of the line and never blocks the others.
-`probe_n` = 1 + the route's `probes` (its completed probes, a counter never truncated). Cell by cell in a fixed
-order, then the recall: each batch `elane_yield.ask_on(router, route, role=ROLE, system=SYSTEM, user=..., key=KEY,
-max_output=2000, effort="low")` with `KEY = f"{KEY_PREFIX}:{route.key}:{probe_n}:{h}"`, h = the first 12 hex of
-sha256(the batch's user text); booked `elane_yield.book(store, f"probe:{route.key}", usd=..., known=...,
-purpose="probe", answered=..., now=now)` (rows of their own, inside E2's day line; that function counts a purpose it
-does not name under `usd_research`). THE KEY: the Provider answers a request key it has seen from its store, at $0.
-So a resumed probe (the same `probe_n`) re-reads its own batches for nothing; a new probe (`probe_n` + 1) asks afresh
-and is billed; a batch whose questions changed has another hash and never meets an old answer. A cell whose batches
-are all in is scored and written at once to `routes[route].partial` (aggregates only, with `probe_n`, `qset` and the
-dollars so far); a partial with another `qset` is dropped. The run stops asking once its booked dollars reach its
-bound or `ASK_SECONDS` have passed; the next run of that route goes on from the partial. When every cell and the
-recall are in, the result is published (`at`, `model`, `usd`, `cells`, `recall`), `probes` + 1, `idle` 0, `partial`
-removed, `history` appended. Truths and answers are dropped before every write. A `MissingData` (the store being
-rewritten) ends the run with the cells already scored kept and the billed dollars booked.
+`probe_n` = 1 + the route's `probes` (its completed probes, a counter never truncated); `attempt` = the route's
+`attempts` + 1 (its runs, a counter never truncated either, written with the mark before any call). Cell by cell in a
+fixed order, then the recall: each batch `elane_yield.ask_on(router, route, role=ROLE, system=SYSTEM, user=...,
+key=KEY, max_output=2000, effort="low")` with `KEY = f"{KEY_PREFIX}:{route.key}:{probe_n}:{attempt}:{h}"`, h = the
+first 12 hex of sha256(the batch's user text); booked `elane_yield.book(store, f"probe:{route.key}", usd=...,
+known=..., purpose="probe", answered=..., now=now)` (rows of their own, inside E2's day line; that function counts a
+purpose it does not name under `usd_research`). A cell whose batches are all in is scored and written at once to
+`routes[route].partial` (aggregates only, with `probe_n`, `qset`, the dollars so far and `batch_usd`, the dearest
+batch the probe has paid for); a partial with another `qset` is dropped. The run stops asking once its booked dollars
+reach its bound or `ASK_SECONDS` have passed; the next run of that route goes on from the partial. When every cell and
+the recall are in, the result is published (`at`, `model`, `usd`, `cells`, `recall`), `probes` + 1, `idle` 0,
+`partial` removed, `history` appended. Truths and answers are dropped before every write. A `MissingData` (the store
+being rewritten) ends the run with the cells already scored kept and the billed dollars booked.
+
+A KEY IS ASKED ONCE (the review of the build; the first build repeated a resumed probe's keys to "re-read its batches
+at $0", which the router does not do). On the real router a repeated request key is answered from the Provider's
+stored row WITH THAT ROW'S ORIGINAL COST (ltcm/provider.py; league/swarm/models.py books nothing twice, but the
+answer carries the dollars again), and the swarm's loop blanks the stored responses of settled calls older than an
+hour (`ModelRouter.compact`): a week later the re-read text is empty. A repeated key would so be booked a second time
+on E2's ledger and against the run's own bound, and its cell scored with every answer of that batch missing. So:
+- every run has keys of its own (`attempt`): a run never sends a key an earlier run sent. What a resumed probe keeps
+  is its SCORED CELLS (the partial); a cell a stop cut is asked again whole by the next run, under that run's keys,
+  and paid for again. STATED COST: at most one cell's batches a stop.
+- to keep that rare, A CELL IS BEGUN ONLY WHEN THE RUN CAN PAY FOR IT: its batches at `batch_usd` (the dearest batch
+  this probe has paid for, kept in the partial; unknown before the probe's first batch) must fit both what is left of
+  the run's bound and E2's day as it stands. Otherwise the run stops there ("stopped": "usd") with its dollars unspent.
+- a key the swarm's spend rows already carry (`elane_yield.booked_for`: the file was lost and the counters began
+  again, say) is NOT asked: the run ends ("stopped": "error") and the next run's keys are new.
+- an answer with no text is no answer (a call that produced nothing, or a stored row whose response was blanked): its
+  dollars are booked, the run ends ("stopped": "error"), and no cell is scored on it. A model that answers and skips
+  items is another matter: those are the cell's `skipped`.
 
 AS BUILT, beside the words above.
 - THE BOUND of a run's dollars is min(`usd_run`, E2's room for the UTC day when the run starts), and a run is skipped
@@ -69,7 +86,7 @@ AS BUILT, beside the words above.
   by which the swarm's meters tell the equity lanes' model dollars from the options researchers' (where they read
   the spend rows by key: E2's own pace and the researchers' hourly one). Under it the probe's dollars sit in the
   equity lanes' meters, and one probe does not pause every options researcher for the hour after it. What makes a
-  key repeat or not is unchanged: the route, `probe_n` and the batch's hash.
+  key: the route, `probe_n`, the run (`attempt`) and the batch's hash.
 - THE UNIVERSE is the House's (`league.ops.equity_data.universe()`: every symbol the daily store is fetched for). S1's
   symbols are its index ETFs; S2's every ETF but SPY; S3's the stocks; S4's every symbol but SPY.
 - A PERIOD (`periods`) is a calendar month ("YYYY-MM") or, for S4, an ISO week named by the day it ends on; it belongs
@@ -79,9 +96,11 @@ AS BUILT, beside the words above.
 - A cell's `skipped` counts the questions with no usable answer, and "answered" in `readable` is the share of the
   cell's questions with one. A question whose truth is missing or a tie stays in the grid (the permutation needs it
   whole) and enters no share.
-- THE TIMES in the file (`at`, `attempted_at`) are ISO text (`league.ops.schedule.iso`); `due` reads either that or
-  epoch seconds. A published route also carries `newly_recalled` (the "stratum/era" cells recalled now and not in its
-  result before), which CP1 reads; a partial is kept from a route's first billed call, so its dollars are whole.
+- THE TIMES in the file (`at`, `attempted_at`, `first_attempted_at`) are ISO text (`league.ops.schedule.iso`); `due`
+  reads either that or epoch seconds. `first_attempted_at` is the route's first mark, written once and never moved
+  (CP1's 45 days of a route no probe ever finished on count from it: league/ops/forward_report.py). A published
+  route also carries `newly_recalled` (the "stratum/era" cells recalled now and not in its result before), which CP1
+  reads; a partial is kept from a route's first billed call, so its dollars are whole.
 - THE ALERTS the job raises itself (`ctx.alert`; ids, counts and names only): CP2 (warning) when the route's `idle`
   reaches `IDLE_ALARM`, CP1 (info) for each 2025 or 2026H1 cell newly recalled. A call that fails ends the run for
   that route ("stopped": "error"; its billed dollars booked); the next run goes on from the partial.
@@ -624,6 +643,11 @@ def due(doc: Mapping[str, Any] | None, routes: Sequence[str], *, now: float, eve
 
 
 # -------------------------------------------------------------------------------------------------------------- the job
+def _count(value: Any) -> int:
+    """A counter the file keeps (`probes`, `attempts`, `idle`): its integer, 0 for anything else."""
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
 class Probe:
     """One run of the job on one route (the module docstring), over what `run` opens: the swarm store (it books the
     dollars), the swarm's settings, the model router, the House's equity store opened with the gate's capability, and
@@ -668,8 +692,7 @@ class Probe:
                                                 "(elane.e2.usd_day)"}
         route = served[key]
         row = dict(doc["routes"].get(key) or {})
-        probe_n = 1 + (int(row["probes"]) if isinstance(row.get("probes"), int) and not isinstance(row.get("probes"), bool)
-                       and row["probes"] > 0 else 0)
+        probe_n = 1 + _count(row.get("probes"))
         asked_of = questions(self.symbols, per_cell=c["questions_per_cell"])
         recall = recall_questions()
         mine = qset([*asked_of, *recall])
@@ -683,37 +706,54 @@ class Probe:
         kept_recall = (partial or {}).get("recall") if isinstance((partial or {}).get("recall"), Mapping) else None
         before = _num((partial or {}).get("usd")) or 0.0
         answered_as = (partial or {}).get("model") if isinstance((partial or {}).get("model"), str) else None
-        # FIRST the attempt: a route that cannot move goes to the back of the line.
+        dearest = _num((partial or {}).get("batch_usd"))
+        # FIRST the attempt: a route that cannot move goes to the back of the line, and THIS RUN'S KEYS are its own.
+        attempt = 1 + _count(row.get("attempts"))
+        row["attempts"] = attempt
+        # Written once, never moved by a later attempt (a row of an earlier build: its last attempt is the oldest known).
+        row.setdefault("first_attempted_at", row["attempted_at"] if _epoch(row.get("attempted_at")) is not None
+                       else schedule.iso(now))
         row["attempted_at"] = schedule.iso(now)
-        row["idle"] = (int(row["idle"]) if isinstance(row.get("idle"), int) and not isinstance(row.get("idle"), bool)
-                       else 0) + 1
+        row["idle"] = _count(row.get("idle")) + 1
         if partial is not None:
-            row["partial"] = {"probe_n": probe_n, "qset": mine, "usd": round(before, 6), "model": answered_as,
-                              "cells": cells, "recall": kept_recall}
+            row["partial"] = {"probe_n": probe_n, "qset": mine, "usd": round(before, 6), "batch_usd": dearest,
+                              "model": answered_as, "cells": cells, "recall": kept_recall}
         doc["routes"][key] = row
         self.write(doc)
 
         began = self.clock()
         state: dict[str, Any] = {"spent": 0.0, "asked": 0, "stopped": None, "error": None, "model": answered_as,
-                                 "scored": 0}
+                                 "scored": 0, "dearest": dearest}
 
         def save() -> None:
             row["partial"] = {"probe_n": probe_n, "qset": mine, "usd": round(before + state["spent"], 6),
-                              "model": state["model"], "cells": cells, "recall": kept_recall}
+                              "batch_usd": state["dearest"], "model": state["model"], "cells": cells,
+                              "recall": kept_recall}
             doc["routes"][key] = row
             self.write(doc)
 
+        def left() -> float:
+            """The dollars this run may still spend: its bound, and E2's day as it stands NOW (the swarm's own equity
+            questions spend the same line meanwhile)."""
+            return min(bound - state["spent"], float(elane_yield.room(self.store, self.settings, now)))
+
         def ask(batch: Sequence[Mapping[str, Any]]) -> list[Any] | None:
             """One batch's answers, or None once the run stopped asking (`state["stopped"]` says why)."""
-            # THE BOUND, and E2's day as it stands NOW: the swarm's own equity questions spend the same line meanwhile.
-            if round(state["spent"], 6) >= bound or not elane_yield.room(self.store, self.settings, now) > 0:
+            if round(state["spent"], 6) >= bound or not left() > 0:  # THE BOUND
                 state["stopped"] = "usd"
                 return None
             if self.clock() - began >= ASK_SECONDS:
                 state["stopped"] = "time"
                 return None
             system, user = prompt(batch)
-            call = f"{KEY_PREFIX}:{route.key}:{probe_n}:{_digest(user)[:12]}"
+            call = f"{KEY_PREFIX}:{route.key}:{probe_n}:{attempt}:{_digest(user)[:12]}"
+            if elane_yield.booked_for(self.store, call) > 0:
+                # A KEY IS ASKED ONCE: the swarm's spend rows already carry this one (the file's counters began again).
+                # The router would answer it from the Provider's stored row, at that row's cost and maybe blanked.
+                state["stopped"] = "error"
+                state["error"] = (f"a request key of probe {probe_n}, run {attempt} was booked before: it is not asked "
+                                  "again (the next run's keys are new)")
+                return None
             try:
                 answer = elane_yield.ask_on(self.router, route, role=ROLE, system=system, user=user, key=call,
                                             max_output=MAX_OUTPUT, effort=EFFORT)
@@ -737,16 +777,29 @@ class Probe:
                 state["stopped"] = "fallback"
                 state["error"] = f"the router's window fallback answered on sail:{other}, not on {route.key}"
                 return None
-            elane_yield.book(self.store, f"probe:{route.key}", usd=usd, known=known, purpose="probe", answered=True,
+            text = answer.get("text") if isinstance(answer, Mapping) else None
+            said = isinstance(text, str) and bool(text.strip())
+            elane_yield.book(self.store, f"probe:{route.key}", usd=usd, known=known, purpose="probe", answered=said,
                              now=now)
             state["spent"] += usd
+            state["dearest"] = round(max(usd, state["dearest"] or 0.0), 6)
+            if not said:
+                # NO TEXT IS NO ANSWER: a call that produced nothing (or a stored row whose response was blanked) is
+                # never read as a batch of skipped items. Its dollars are booked; the next run asks under new keys.
+                state["stopped"], state["error"] = "error", f"route {route.key} answered a batch with no text"
+                return None
             state["asked"] += 1
-            if isinstance(answer, Mapping) and isinstance(answer.get("model"), str) and answer["model"]:
+            if isinstance(answer.get("model"), str) and answer["model"]:
                 state["model"] = answer["model"]
-            return parse(answer.get("text") if isinstance(answer, Mapping) else None, batch)
+            return parse(text, batch)
 
         def cell(batch_of: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
             """A cell's aggregates once all its batches are in: answers first, then its truths (dropped with them)."""
+            # A CELL IS BEGUN ONLY WHEN THE RUN CAN PAY FOR IT: a stop inside a cell costs its batches again next run.
+            batches = -(-len(batch_of) // c["batch"])
+            if state["dearest"] and round(batches * state["dearest"], 6) > round(left(), 6):
+                state["stopped"] = "usd"
+                return None
             answers: list[Any] = []
             for i in range(0, len(batch_of), c["batch"]):
                 got = ask(batch_of[i:i + c["batch"]])

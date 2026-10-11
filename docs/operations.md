@@ -75,10 +75,15 @@ E3 module is behind the updater's wall (`league/ops/`, and the three swarm modul
   the smaller of `usd_run` and what is left of the equity lanes' day when it starts (`elane_yield.room`, which E2
   holds to `elane.e2.pace_share` of the Sail model line: well under $3 a day at the shipped share), the room is read
   again before every call, and a run is skipped only when the room is zero; so a probe finishes over several
-  Saturdays, its answered batches read again at $0. Its request keys carry the equity lanes' mark
-  (`swarm:elane:probe:...`), so the swarm's meters count it as the equity lanes' spend and the options researchers'
-  hourly pace does not read it as theirs. An answer the router's window fallback gave on another profile is scored
-  by nothing (one route, one model). **The captain's call:** at `usd_run` 3.0 a probe may take the whole of that
+  Saturdays, keeping the cells it has scored. **A request key is asked once:** every run's keys are its own (the
+  route's `attempts` counter is in the key), because the router answers a repeated key from the provider's stored
+  row at that row's original cost, and the swarm's loop blanks stored answers after an hour. A cell that a stop cut
+  is asked again whole by the next run and paid for again (at most one cell a stop); to keep that rare a cell is
+  begun only when the run's dollars cover it at the price of the dearest batch so far, an answer with no text ends
+  the run and is never scored, and a key the swarm's spend rows already carry is not asked. Its request keys carry
+  the equity lanes' mark (`swarm:elane:probe:...`), so the swarm's meters count it as the equity lanes' spend and
+  the options researchers' hourly pace does not read it as theirs. An answer the router's window fallback gave on
+  another profile is scored by nothing (one route, one model). **The captain's call:** at `usd_run` 3.0 a probe may take the whole of that
   Saturday's equity research dollars; a smaller value (0.25 to 0.50) leaves the researchers their day.
 - **Release receipts** (`release_receipts.py`, read by the stall job): a release declares the funnel metric it expects
   to move (`league/ops/release_receipts.json`); the House reads it back after its window and lists the verdict.
