@@ -35,6 +35,16 @@ def problems(**rows):
     return equity_money_problems(changed(**rows))
 
 
+def e1_universe():
+    """The constitution's universe as release E1 shipped it, by class and in its order: `league.equity.config.UNIVERSE`,
+    an evidence module's constant that release E4 never changes. E4's universe (scripts/gen_universe.py) grows the
+    stock list around it, which moves the money digest and nothing else: a figure pinned for E1 is read with this put
+    back, and so holds before and after the universe deploy."""
+    from league.equity import config
+
+    return {klass: [s for s, k in config.UNIVERSE.items() if k == klass] for klass in config.CLASSES}
+
+
 class TheTable(unittest.TestCase):
     def test_the_block_as_e1_deploys_it_is_inside_its_bounds_and_switched_on(self):
         self.assertEqual(equity_money_problems(), [])
@@ -65,12 +75,25 @@ class TheTable(unittest.TestCase):
         self.assertTrue(hash(t))
 
     def test_the_universe_and_shares_are_the_lanes_constants(self):
-        """The constitution's universe is `league.equity.config.UNIVERSE` exactly (symbols and classes; `league.ci` holds
-        it to the gateway's STOCK_UNIVERSE), and no position share is above `config.POSITION_SHARE`."""
+        """`league.equity.config.UNIVERSE` (release E1's 35: hashed into the equity identity and into every ETF run, so
+        never changed) is INSIDE the constitution's universe, classes equal: every symbol the lane's own programs name
+        is one the money rule admits. Since release E4 the constitution's STOCK list may be the longer one: the
+        panel's tradable union, generated (scripts/gen_universe.py: 450 to 650 names, E1's 18 among them), which
+        `league.ci` holds to the gateway's STOCK_UNIVERSE. Its ETFs are E1's exactly, in E1's order. No position share
+        is above `config.POSITION_SHARE`."""
         from league.equity import config
 
         e = M.EquityTable.from_constitution()
-        self.assertEqual(dict(e.universe), config.UNIVERSE)
+        self.assertEqual({symbol: e.universe.get(symbol) for symbol in config.UNIVERSE}, config.UNIVERSE)
+        self.assertEqual(CONSTITUTION["equity_money"]["universe"]["etf"], e1_universe()["etf"])
+        beyond = [symbol for symbol in e.universe if symbol not in config.UNIVERSE]
+        self.assertEqual({e.universe[symbol] for symbol in beyond} - {"stock"}, set(), "what E4 adds is stocks")
+        stocks = CONSTITUTION["equity_money"]["universe"]["stock"]
+        if beyond:
+            self.assertTrue(450 <= len(stocks) <= 650, f"{len(stocks)} stocks: a generated union has 450 to 650")
+            self.assertEqual(stocks, sorted(stocks), "generated: sorted")
+        else:
+            self.assertEqual(stocks, e1_universe()["stock"], "release E1's list, in its order")
         for klass in config.CLASSES:
             self.assertLessEqual(e.position_share[klass], config.POSITION_SHARE[klass])
         self.assertEqual((e.min_hold_sessions, e.default_max_hold_sessions, e.max_hold_sessions, e.failed_decides_exit),
@@ -230,6 +253,13 @@ class TheGrantReRatifies(StandingCase):
         CONSTITUTION.pop("equity_money", None)
         return patcher
 
+    def setUp(self):
+        super().setUp()
+        # These digests are release E1's: read with E1's universe (release E4's is a digest of its own, below).
+        pin = patch.dict(CONSTITUTION["equity_money"], universe=e1_universe())
+        pin.start()
+        self.addCleanup(pin.stop)
+
     def pinned_before(self):
         patcher = self.pre_e1()
         try:
@@ -299,6 +329,76 @@ class TheGrantReRatifies(StandingCase):
         self.assertEqual(out["action"], "ratified")
         self.assertEqual(grant.current()["policy"]["constitution_digest"], self.BEFORE)
         self.assertTrue(grant.allows_live(2))
+
+
+class TheUniverseReRatifies(StandingCase):
+    """Release E4's universe (R-E4b: the panel's tradable union in `equity_money.universe.stock`, written by
+    scripts/gen_universe.py) is a money rule and NOTHING ELSE moves with it: a grant ratified on release E1's digest
+    holds nothing under the grown list until the standing grant re-ratifies it at the House's start, on the owner's
+    release change only; with E1's list put back the digest is E1's again, and the rollback to it is ratified the same
+    way. Invented tickers: the list the House generates is never in a test."""
+
+    GROWN = [f"ZZ{a}{b}" for a in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" for b in "ABCDEFGHIJKLMNOPQRST"]
+
+    def grown(self):
+        universe = e1_universe()
+        return {"etf": universe["etf"], "stock": sorted(universe["stock"] + self.GROWN)}
+
+    def ratified_on_e1(self):
+        with patch.dict(CONSTITUTION["equity_money"], universe=e1_universe()):
+            e1 = money_digest()
+            grant = self.enabled()
+            self.assertEqual(grant.current()["policy"]["constitution_digest"], e1)
+            self.assertTrue(grant.allows_live(2))
+        return grant, e1
+
+    def test_the_universe_moves_the_money_digest_and_nothing_else_does(self):
+        with patch.dict(CONSTITUTION["equity_money"], universe=e1_universe()):
+            e1, e1_full = money_digest(), copy.deepcopy(CONSTITUTION)
+        with patch.dict(CONSTITUTION["equity_money"], universe=self.grown()):
+            self.assertNotEqual(money_digest(), e1)
+            self.assertEqual(equity_money_problems(), [], "538 stocks sit inside the table's bounds")
+            table = M.EquityTable.from_constitution()
+            self.assertEqual(len(table.universe), 17 + 18 + 520)
+            self.assertEqual({table.universe[s] for s in self.GROWN}, {"stock"})
+            back = copy.deepcopy(CONSTITUTION)
+            back["equity_money"]["universe"] = e1_universe()
+            self.assertEqual(back, e1_full, "the list is all that differs")
+            self.assertEqual(money_digest(back), e1)
+        # The tree as it stands: E1's rules but for the stock list (the same figure before and after the deploy).
+        back = copy.deepcopy(CONSTITUTION)
+        back["equity_money"]["universe"] = e1_universe()
+        self.assertEqual(money_digest(back), e1)
+
+    def test_the_owners_deploy_re_ratifies_it_and_the_updater_alone_never_does(self):
+        grant, e1 = self.ratified_on_e1()
+        with patch.dict(CONSTITUTION["equity_money"], universe=self.grown()):
+            universe = money_digest()
+            self.assertFalse(grant.allows_live(2), "a moved universe is a moved money rule: nothing real until ratified")
+            out = self.standing(grant, release="main-abcdef123456", rows=updater_deploy(self.clock() - 60))
+            self.assertEqual(out["action"], "refused")
+            self.assertFalse(grant.allows_live(2))
+            self.assertEqual(grant.ratifications(), [])
+            out = self.standing(grant, release="r-e4b", rows=owner_deploy(self.clock() - 60, release="r-e4b"))
+            self.assertEqual((out["action"], out["triggers"]), ("ratified", ["digest"]))
+            self.assertIn(f"money digest {e1[:12]} -> {universe[:12]}", grant.ratifications()[-1]["why"])
+            self.assertEqual(grant.current()["policy"]["constitution_digest"], universe)
+            self.assertTrue(grant.allows_live(2))
+
+    def test_the_rollback_to_e1s_list_is_ratified_on_the_owners_deploy_of_it(self):
+        grant, e1 = self.ratified_on_e1()
+        with patch.dict(CONSTITUTION["equity_money"], universe=self.grown()):
+            self.standing(grant, release="r-e4b", rows=owner_deploy(self.clock() - 60, release="r-e4b"))
+            self.assertTrue(grant.allows_live(2))
+        self.clock.advance(HOUR)
+        with patch.dict(CONSTITUTION["equity_money"], universe=e1_universe()):
+            self.assertFalse(grant.allows_live(2))
+            back = [{"ts": self.clock() - 60, "deploy": "rollback@2", "release": "r-e4b", "stage": "rollback", "ok": True,
+                     "from": "r-e4b", "to": "r-e4a"}]
+            out = self.standing(grant, release="r-e4a", rows=back)
+            self.assertEqual(out["action"], "ratified")
+            self.assertEqual(grant.current()["policy"]["constitution_digest"], e1)
+            self.assertTrue(grant.allows_live(2))
 
 
 class ThePreopenEquityCheck(unittest.TestCase):
@@ -420,6 +520,154 @@ class ThePreopenEquityCheck(unittest.TestCase):
                 (root / rel).write_text((ci.REPO / rel).read_text(encoding="utf-8"), encoding="utf-8")
             h = PO.collect(root, root, root, Gateway(), now=1789000000.0, config={})
             self.assertEqual(h["money"]["equity_release_gateway"], [])
+
+    def test_a_live_panel_program_needs_the_panel_lane_ready(self):
+        """Release E4: while the equity book holds a panel program (not retired, or with a lot), the lane's own
+        readiness rule must hold; the leg that fails is named. With none, nothing of the panel is a bar."""
+        for h in (self.house(), self.house(panel={"instances": 0}), self.house(panel=None)):
+            ok, headline, info = self.check(h)
+            self.assertTrue(ok, headline)
+            self.assertIn("no live panel program (the panel lane's readiness is not read)", info)
+        from league.ops.preopen import check_equity
+
+        ready = self.house(panel={"instances": 2, "holding": 1, "ready": True, "why": None})
+        self.assertTrue(self.check(ready)[0])
+        self.assertIn((True, "2 live panel program(s), 1 holding a lot: the panel lane is ready (the universe deploy, the "
+                             "tradable share, the universe's age, the nightly I6, the twin marker)"), check_equity(ready).items)
+        ok, headline, _ = self.check(self.house(panel={"instances": 1, "holding": 1, "ready": False,
+                                                       "why": "the twin marker is two sessions behind"}))
+        self.assertEqual((ok, headline), (False, "1 live panel program(s), 1 holding a lot, and the panel lane is NOT ready: the "
+                                                 "twin marker is two sessions behind (its opens stop; exits go on)"))
+        # A reading with no verdict is no pass, and neither is a section that could not be read.
+        ok, headline, _ = self.check(self.house(panel={"instances": 1}))
+        self.assertEqual((ok, headline), (False, "1 live panel program(s), 0 holding a lot, and the panel lane is NOT ready: no "
+                                                 "leg named (its opens stop; exits go on)"))
+        self.assertFalse(self.check(self.house(panel={"instances": 1, "ready": "yes"}))[0], "True, and nothing like it")
+        ok, headline, _ = self.check(self.house(errors={"panel": "OperationalError: database is locked"}))
+        self.assertEqual((ok, headline), (False, "the panel lane could not be read (a live panel program cannot be ruled "
+                                                 "ready): OperationalError: database is locked"))
+
+    def test_collect_reads_the_panel_only_while_a_panel_program_is_live(self):
+        """`collect`'s panel section: no live book, a book from before the panel's live path (E1's own tables: no `kind`
+        column) and a book with no panel program read NOTHING of the panel (`live_ready` is not called: with every
+        E4 switch off nothing of E4 runs). A panel program that is not retired, or a retired one still holding a lot,
+        is live; then the lane's rule is asked once, and a rule that cannot answer is an error, never a pass."""
+        import sqlite3
+
+        from league.equity import live as book
+        from league.ops import preopen as PO
+        from league.swarm import elane_xs
+
+        source = (Path(book.__file__).resolve().parents[1] / "xs" / "book.py").read_text(encoding="utf-8")
+        self.assertIn('KIND = "panel"', source)
+        self.assertIn("INSTANCE_KIND_DDL = \"ALTER TABLE eq_instances ADD COLUMN kind TEXT NOT NULL DEFAULT 'equity'\"", source)
+        asked = []
+
+        def rule(root, settings):
+            asked.append((root, settings))
+            return False, "the universe deploy is not in force"
+
+        def instance(db, iid, *, kind=None, retired=None):
+            cols = "id, family, version, lane, run_sha, code, params, band, max_hold, created_at, retired_at"
+            row = (iid, iid.split("@")[0], 1, "equity", "sha", "", "{}", "probe", 20, 1.0, retired)
+            if kind is None:
+                db.execute(f"INSERT INTO eq_instances ({cols}) VALUES (?,?,?,?,?,?,?,?,?,?,?)", row)
+            else:
+                db.execute(f"INSERT INTO eq_instances ({cols}, kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (*row, kind))
+            db.commit()
+
+        def lot(db, iid, status):
+            db.execute("INSERT INTO eq_lots (instance, family, version, lane, symbol, class, qty, opened_qty, entry_px, "
+                       "entry_notional, entry_at, opened_at, opened_day, status) VALUES (?,?,1,'equity','ZZAA','stock','1',"
+                       "'1','10','10','open',1.0,'2031-03-04',?)", (iid, iid.split("@")[0], status))
+            db.commit()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(elane_xs, "live_ready", side_effect=rule):
+            root = Path(tmp)
+
+            def read():
+                h = PO.collect(root, root, root, None, now=1789000000.0, config={})
+                self.assertNotIn("panel", h["errors"], h["errors"])
+                return h["panel"]
+
+            self.assertEqual(read(), {"instances": 0}, "no live book")
+            db = sqlite3.connect(root / "live.sqlite")
+            self.addCleanup(db.close)
+            self.assertEqual(read(), {"instances": 0}, "a book with no equity table")
+            db.executescript(book.SCHEMA)
+            instance(db, "seed-a@1:r")
+            self.assertEqual(read(), {"instances": 0}, "release E1's tables: no kind column, so no panel program")
+            db.execute("ALTER TABLE eq_instances ADD COLUMN kind TEXT NOT NULL DEFAULT 'equity'")
+            instance(db, "seed-b@1:r", kind="equity")
+            instance(db, "xs-gone@1:r", kind="panel", retired=5.0)
+            lot(db, "xs-gone@1:r", "closed")
+            self.assertEqual(read(), {"instances": 0}, "an equity program, and a panel program retired and flat")
+            self.assertEqual(asked, [], "nothing of the panel was read")
+            instance(db, "xs-a@1:r", kind="panel")
+            self.assertEqual(read(), {"instances": 1, "holding": 0, "ready": False,
+                                      "why": "the universe deploy is not in force"})
+            self.assertEqual([r for r, _ in asked], [root])
+            self.assertIsInstance(asked[0][1], dict, "the swarm's settings as the swarm loads them")
+            lot(db, "xs-gone@1:r", "closing")
+            lot(db, "xs-a@1:r", "open")
+            lot(db, "xs-a@1:r", "open")
+            self.assertEqual(read(), {"instances": 2, "holding": 2, "ready": False,
+                                      "why": "the universe deploy is not in force"}, "a retired program still holding a lot is live")
+            ok, headline, _ = self.check({**self.house(), "panel": read()})
+            self.assertEqual((ok, headline), (False, "2 live panel program(s), 2 holding a lot, and the panel lane is NOT ready: "
+                                                     "the universe deploy is not in force (its opens stop; exits go on)"))
+            # No symbol and no long text leaves the section.
+            self.assertNotIn("ZZAA", repr(read()))
+            with patch.object(elane_xs, "live_ready", return_value=(True, None)):
+                self.assertEqual(read(), {"instances": 2, "holding": 2, "ready": True, "why": None})
+            with patch.object(elane_xs, "live_ready", return_value=(False, "x" * 900)):
+                self.assertEqual(len(read()["why"]), 200)
+            with patch.object(elane_xs, "live_ready", return_value=("ready", None)):
+                self.assertIs(read()["ready"], False, "True, and nothing like it")
+            # The rule itself failing (a release whose panel lane is not built, a store it cannot read).
+            with patch.object(elane_xs, "live_ready", side_effect=NotImplementedError("not built")):
+                h = PO.collect(root, root, root, None, now=1789000000.0, config={})
+            self.assertEqual(h["errors"]["panel"], "NotImplementedError: not built")
+            self.assertNotIn("panel", h)
+            ok, headline, _ = self.check({**self.house(), "errors": h["errors"]})
+            self.assertFalse(ok)
+            self.assertIn("the panel lane could not be read", headline)
+
+    def test_the_options_population_is_counted_by_the_stores_own_guard(self):
+        """Check 5 holds the OPTIONS population to its floor; an equity family is its own lane's, and a panel family
+        is one (release E4). The count reads `league.swarm.store.OPTIONS_ONLY_SQL`, the one guard the store's own
+        readers use, never a list of structures of its own: a panel family is out of it the day the store says so."""
+        import json
+        import sqlite3
+
+        from league.ops import preopen as PO
+        from league.swarm import store as swarm_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "swarm.json").write_text(json.dumps({"live": {}, "population": {"floor": 2}}))
+            (root / "swarm.heartbeat").write_text(json.dumps({"at": 1789000000.0, "status": {}}))
+            db = sqlite3.connect(root / "swarm.sqlite")
+            db.execute("CREATE TABLE families (id TEXT PRIMARY KEY, structure TEXT, retired_at TEXT)")
+            db.executemany("INSERT INTO families VALUES (?, ?, ?)",
+                           [("o1", "debit_vertical", None), ("o2", "long_single", None), ("o3", "long_single", "2031-03-04"),
+                            ("e1", "etf", None), ("e2", "stock", None), ("p1", "panel", None), ("p2", "panel", None)])
+            db.commit()
+
+            def alive():
+                h = PO.collect(root, root, root, None, now=1789000000.0, config={})
+                self.assertNotIn("swarm", h["errors"], h["errors"])
+                return h["swarm"]["alive"]
+
+            [(wanted,)] = db.execute(f"SELECT count(*) FROM families WHERE retired_at IS NULL AND "
+                                     f"{swarm_store.OPTIONS_ONLY_SQL}").fetchall()
+            db.close()
+            self.assertEqual(alive(), wanted)
+            with patch.object(swarm_store, "OPTIONS_ONLY_SQL", "structure NOT IN ('etf', 'stock', 'panel')"):
+                self.assertEqual(alive(), 2, "the two options families; neither panel family")
+            with patch.object(swarm_store, "OPTIONS_ONLY_SQL", "structure NOT IN ('etf', 'stock')"):
+                self.assertEqual(alive(), 4)
+
 
 
 if __name__ == "__main__":

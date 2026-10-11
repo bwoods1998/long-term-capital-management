@@ -22,7 +22,9 @@ REPO = Path(__file__).resolve().parents[2]
 #: was a3e2aa7c; the incubator's row (release B, Oct 1, 2026: `options_money.incubator`) moved it, then the incubator
 #: cap (Oct 8) to 1665c385, release L-D (Oct 9) to 0310779c, the Probe total at $800 (Oct 10, 2026) to fdf2ac7c, and
 #: release E1's `equity_money` (the equity lane, its Probe sleeve at 0.50 x E and its sizing-up step parked: one move)
-#: to this one.
+#: to this one. Release E4's universe (the panel's tradable union in `equity_money.universe.stock`,
+#: scripts/gen_universe.py) moves it once more and is the only row that does: the test below reads this figure with
+#: E1's universe put back, so it holds before that deploy and after it.
 MONEY_DIGEST = "7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a"
 
 #: One program, two sides: a long call first, then (once the call is held) a long put. The side rule here is a clock so the
@@ -78,7 +80,12 @@ class TheDeclaredType(unittest.TestCase):
             self.assertTrue(set(types) <= set(OPTIONS_REAL_TYPES))
 
     def test_the_money_table_and_its_digest_are_unchanged(self):
-        self.assertEqual(money_digest(), MONEY_DIGEST)
+        from league.equity import config
+
+        e1 = copy.deepcopy(CONSTITUTION)
+        e1["equity_money"]["universe"] = {klass: [s for s, k in config.UNIVERSE.items() if k == klass]
+                                          for klass in config.CLASSES}
+        self.assertEqual(money_digest(e1), MONEY_DIGEST)
         self.assertEqual(CONSTITUTION["options_money"]["real_types"], ["debit_vertical", "long_butterfly", "long_call", "long_put"])
         self.assertEqual(M.Table.from_constitution().real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put"))
         self.assertTrue(digest())

@@ -178,9 +178,17 @@ FORBIDDEN: tuple[str, ...] = (
 #: and the equity review and level rule (elane_review.py): selection constants and secrecy rules, like dlane.py. The
 #: updater never self-deploys a change to them from this release on; the gateway's merge route refuses them once its
 #: own follow-up adds the five to MERGE_FORBIDDEN (gateway/ ships separately, as it did for E1).
+#: THE PANEL LANE (release E4, Oct 2026): its swarm lane (league/swarm/elane_xs.py: the Train bar equity-xs-v1, the one
+#: Validation try, the look under the screen XS1, lineage, the look cap of an agenda cell and the seat rule that keeps
+#: a style-open passer out of a live seat, the captain's A22: selection constants and secrecy rules, like
+#: elane_train.py) and the universe generator (scripts/gen_universe.py: what writes the constitution's and the
+#: gateway's stock lists, so a money rule's author). The rest of the lane is behind the wall above already: league/xs/
+#: (the panel's evidence, its screen and its live adapter), league/ops/ (its data jobs) and docs/benchmarks/ (XS1's
+#: receipt). The two wait here with E2's five for the same gateway follow-up.
 PENDING_GATEWAY: tuple[str, ...] = (
     "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
     "league/swarm/elane_seal.py", "league/swarm/elane_review.py",
+    "league/swarm/elane_xs.py", "scripts/gen_universe.py",
 )
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
@@ -577,6 +585,17 @@ GATEWAY_STOCK_SWITCH = re.compile(r'^\s*"STOCK_BUYS_REAL"\s*:\s*"([^"\\]*)"\s*,?
 #: The gateway's per-symbol caps as a share of equity, by class (`account.stockCaps`): the House's
 #: `equity_money.position_share` never above them.
 GATEWAY_STOCK_SHARES = {"etf": "STOCK_ETF_EQUITY_SHARE", "stock": "STOCK_SINGLE_EQUITY_SHARE"}
+#: How many tickers a side `stock_agreement` names; the rest are counted. Release E4's universe is hundreds of stocks,
+#: deployed at the gateway before the House: were the two deploys not made between two pre-opens, the pre-open's
+#: warning (PUBLIC) would otherwise print every one of them, each morning.
+AGREEMENT_NAMES = 10
+
+
+def _named(entries: list[str]) -> str:
+    """At most `AGREEMENT_NAMES` of `entries`, and how many more there are and how many in all; "none" for none."""
+    if len(entries) <= AGREEMENT_NAMES:
+        return ", ".join(entries) or "none"
+    return f"{', '.join(entries[:AGREEMENT_NAMES])} and {len(entries) - AGREEMENT_NAMES} more ({len(entries)} in all)"
 
 
 def gateway_stock_universe(root: Path = REPO) -> tuple[dict[str, str], list[str]]:
@@ -609,7 +628,8 @@ def stock_agreement(table: Any, *, universe: Any, buys_on: Any, shares: Any, sou
     ONE comparison, read from the release's files by `gateway_stock_problems` and from the deployed gateway's
     `/v1/health` by the pre-open job (league/ops/preopen.py): the universe is exactly the constitution's, symbol and
     class; `enabled` True requires the gateway's buys on (the gateway may be on while `enabled` is False: that row is the
-    switch, A8); and each class's `position_share` is never above the gateway's share for it."""
+    switch, A8); and each class's `position_share` is never above the gateway's share for it. A difference names at
+    most `AGREEMENT_NAMES` tickers a side, in ticker order, and counts the rest."""
     from decimal import Decimal, InvalidOperation
 
     if not isinstance(table, dict):
@@ -622,8 +642,7 @@ def stock_agreement(table: Any, *, universe: Any, buys_on: Any, shares: Any, sou
         extra = sorted(f"{s} ({k})" for s, k in got.items() if wanted.get(s) != k)
         missing = sorted(f"{s} ({k})" for s, k in wanted.items() if got.get(s) != k)
         problems.append(f"{source}: the gateway's STOCK_UNIVERSE and equity_money.universe differ (gateway only: "
-                        f"{', '.join(extra) or 'none'}; constitution only: {', '.join(missing) or 'none'}): they change "
-                        "together")
+                        f"{_named(extra)}; constitution only: {_named(missing)}): they change together")
     if table.get("enabled") is True and buys_on is not True:
         problems.append(f"{source}: equity_money.enabled is true but the gateway's STOCK_BUYS_REAL admits no buy: switch "
                         "the gateway on first (the House's row is the switch)")

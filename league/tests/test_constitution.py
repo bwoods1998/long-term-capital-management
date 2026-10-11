@@ -152,17 +152,28 @@ class ConstitutionTest(unittest.TestCase):
         import copy
 
         from league.constitution import RISK_FREE, money_digest
+        from league.equity import config
 
-        self.assertEqual(money_digest(), "7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a")
-        self.assertEqual(PINNED_DIGEST, "e909eb1040231bc078e878df2d87fad7a1001d86ab3eac32be5f45f2b82c1895")
+        # RELEASE E4's UNIVERSE (R-E4b; scripts/gen_universe.py) grows `equity_money.universe.stock` around E1's 18 names
+        # and moves both digests again, AND NOTHING ELSE MOVES WITH IT: E1's figures below are read on the constitution
+        # with E1's universe put back (`league.equity.config.UNIVERSE`, which E4 never changes), so they hold before
+        # the universe deploy and after it, and a row that moved with the list would fail them.
+        e1 = copy.deepcopy(CONSTITUTION)
+        e1["equity_money"]["universe"] = {klass: [s for s, k in config.UNIVERSE.items() if k == klass]
+                                          for klass in config.CLASSES}
+        self.assertEqual(money_digest(e1), "7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a")
+        self.assertEqual(digest(e1), "e909eb1040231bc078e878df2d87fad7a1001d86ab3eac32be5f45f2b82c1895")
+        self.assertEqual(PINNED_DIGEST, digest())
+        if CONSTITUTION["equity_money"]["universe"] != e1["equity_money"]["universe"]:
+            self.assertNotEqual(money_digest(), money_digest(e1), "the universe is a money rule: the grant re-ratifies")
         before = copy.deepcopy(CONSTITUTION)
         del before["equity_money"]
         self.assertEqual(money_digest(before), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
-        off = copy.deepcopy(CONSTITUTION)
+        off = copy.deepcopy(e1)
         off["equity_money"]["enabled"] = False
         self.assertEqual(money_digest(off), "23f17a1467610f8d252b55c6d6748f8fb1311a0142e3f92c43d4bff710886579")
         # A20's rollback: the sleeve back at a quarter of E, the sizing-up step still parked, is a pair of its own...
-        quarter = copy.deepcopy(CONSTITUTION)
+        quarter = copy.deepcopy(e1)
         quarter["equity_money"]["probe"]["sleeve_share"] = "0.25"
         self.assertEqual(money_digest(quarter), "3a7c52d58911d0c1a39f58cbe79547e343683a18004355b52a9390c8aec04fd2")
         self.assertEqual(digest(quarter), "6d19fddd271cc46682e48e09ae14364976b76077ca084198874f47dbf4340b43")
@@ -171,7 +182,7 @@ class ConstitutionTest(unittest.TestCase):
         self.assertEqual(money_digest(quarter), "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367")
         self.assertEqual(digest(quarter), "65b0e025a08d4c3a8f78e487eb1a0f83ad9bfed307563c02acbd50ac4a6308bb")
         # The row alone (the sleeve at 0.50, sizing up as pre-registered) is the digest of the commit before the park.
-        unparked = copy.deepcopy(CONSTITUTION)
+        unparked = copy.deepcopy(e1)
         unparked["equity_money"]["sized"]["min_trades"] = 20
         self.assertEqual(money_digest(unparked), "d8c96f66d556c2123b9e797c901075f43af34ad182de3b965fceeca0a7c97f14")
         self.assertFalse(any(path[0] == "equity_money" for path in RISK_FREE))
