@@ -159,6 +159,23 @@ class TheIdentities(unittest.TestCase):
         for word in ("birth_share", "usd_day", "e2", "elane"):
             self.assertNotIn(f'"{word}"', text, "the constitution (so the money digest) knows nothing of E2's switches")
 
+    def test_e2s_own_events_stay_in_the_swarms_table(self):
+        # One kind for the equity pass and the Train round (every ten minutes while a family researches): the House's
+        # mirror skips it as it skips the researchers' cycles; before, the mirror dropped each as an unknown kind and
+        # told the owner so. Births and retirements are the public kinds every lane writes.
+        from league.ledger import KINDS
+        from league.swarm.hook import PUBLIC_KINDS, SKIPPED_KINDS
+
+        written: set[str] = set()
+        for rel in E2_FILES:
+            written |= set(re.findall(r"\.event\(\s*\"(swarm\.[a-z_]+)\"", (REPO / rel).read_text(encoding="utf-8")))
+        self.assertEqual(written, {"swarm.elane", "swarm.born", "swarm.status"})
+        self.assertIn("swarm.elane", SKIPPED_KINDS)
+        self.assertNotIn("swarm.elane", KINDS)
+        self.assertNotIn("swarm.elane", PUBLIC_KINDS)
+        self.assertIn("swarm.born", PUBLIC_KINDS)
+        self.assertIs(KINDS["swarm.status"], False, "an alert of E2's is a private row the House reads")
+
     def test_the_five_modules_are_protected(self):
         from league import ci
 

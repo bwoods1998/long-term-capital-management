@@ -4,7 +4,7 @@ This file was E2's list of changes for the integrator. It is now the record of w
 to do. E2 (`feat/equity-e2`) was merged into E1's final head 8e11986b on branch `feat/equity-e2-int`; E2's own files
 (`league/swarm/elane_births.py`, `elane_train.py`, `elane_yield.py`, `elane_seal.py`, `elane_review.py`, their tests,
 and its branches in `league/swarm/architect.py` and `league/swarm/researcher.py`) merged with no conflict, and each
-patch below went in as one commit, in this order. The numbers are the ones the code's comments and docstrings name
+patch below went in as one commit, in this order (11 was found by the full suite and added at the integration). The numbers are the ones the code's comments and docstrings name
 ("patch 5", "patch 9"). The design is in [ELANE_E2.md](ELANE_E2.md).
 
 | # | file | what | without it | applied |
@@ -19,6 +19,7 @@ patch below went in as one commit, in this order. The numbers are the ones the c
 | 8 | `league/ops/dlane_report.py` | the operator's yield-per-dollar record (`equity_yield`: `elane_yield.report`) | the record is in the store and no report prints it | as written |
 | 9 | `league/swarm/store.py` | `retire_gym`'s population floor counts the options families only | E2's families hold the options floor up, so the diagnostician can retire the options population toward zero | as written |
 | 10 | `league/ops/stall.py`, `league/ops/preopen.py` | the owner's alarms count the options lanes only: births, the living population, the Gym runs, the dry-births tally, the pre-open population check | E2's births hide a dead options architect, its families a population under its floor, its Train runs on the House (up to ~72 an hour) a stalled Gym | as written |
+| 11 | `league/swarm/hook.py` | `SKIPPED_KINDS` gains `swarm.elane` (E2's pass and Train-round events stay in the swarm's own table) | the House's mirror drops each row as an unknown kind and warns the owner; `test_swarm_hook` fails | added at the integration (E2's list did not have it) |
 
 **Patch 7, re-made.** The diff was written when E1's `PENDING_GATEWAY` still held E1's own four entries. E1's last
 commit moved those into `FORBIDDEN`'s own list and into the gateway's merge list, and left `PENDING_GATEWAY` empty, so

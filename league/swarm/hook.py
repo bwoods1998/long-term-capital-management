@@ -60,8 +60,11 @@ PUBLIC_KINDS = ("swarm.born", "swarm.retired", "swarm.band", "swarm.note")
 #: The strategist's runs (Sept 29, 2026) carry its section, evidence and cost: private, like the diagnostician's.
 #: THE LIBRARY's calls (Sept 29, 2026: a query and the ids served, a few hundred a day) stay in the swarm's table too.
 #: THE LEARNING GAME's looks queued (Oct 8, 2026; league/swarm/game.py) stay there as well: which family plays is private.
+#: THE EQUITY LANES' passes and Train rounds (release E2, Oct 2026; league/swarm/elane_births.py, elane_train.py) too: a
+#: round every ten minutes while a family researches, each carrying the route asked, its cost, the refusals and a
+#: family's Train step. A birth is still a `swarm.born` and a retirement a `swarm.retired`, mirrored like any other.
 SKIPPED_KINDS = ("swarm.cycle", "swarm.pool", "swarm.diagnostician", "swarm.robustness", "swarm.strategist", "swarm.research",
-                 "swarm.game")
+                 "swarm.game", "swarm.elane")
 MIRROR_CURSOR = "swarm-mirror.json"
 #: The run of failed mirrors in a row (its folded error, since when, how many, whether the House heard it). Kept on disk so
 #: a restart (a deploy) neither forgets a run nor dates it from the new process: the alert's `began_at` is the run's first
