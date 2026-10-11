@@ -1,11 +1,18 @@
 """STEP -1 of release E4: the coverage probe (scripts/panel_probe.py), against a recording fake gateway.
 
-Every bar and every spell here is invented (weekdays as sessions, round invented prices, invented tickers but the two
-the probe's fact 1 names): never market data, never a real membership date. What is held: the probe's ONLY request is
-a bars GET and NO request names a sealed year (the seal X5 of the release, for the probe: 2020, 2021, 2025, 2026);
-ended spells are asked with `asof` inside the spell and open ones with none; coverage is counted as E4-SPEC D19
-defines it; the receipt holds counts and shares, never a price and never a ticker; a failed request is tried again
-and then makes the verdict "incomplete", never a silent hole.
+Every bar and every spell here is invented (weekdays as sessions, round invented prices, invented spells): never
+market data, never a real membership date. What is held: the probe's ONLY request is a bars GET and NO request names
+a sealed year (the seal X5 of the release, for the probe: 2020, 2021, 2025, 2026); ended spells are asked with `asof`
+inside the spell and open ones with none; coverage is counted as E4-SPEC D19 defines it; the receipt holds counts
+and shares, never a price and never a ticker; a failed request is tried again and then makes the verdict
+"incomplete", never a silent hole.
+
+THE FIVE DEFECTS THE FIRST RUN ON THE HOUSE FOUND, AND A SIXTH IT DID NOT MEET (each held below by a test that failed
+before): fact 1's test names are read off the spell file (`TheTestNames`); its verdict keeps "asof resolves the
+ticker" apart from "the venue has the bars" (`FactOne`); the token's file is beside the release whatever `--root`
+is, and a missing token is said at once (`TheToken`); exit 2 means incomplete and nothing else (`TheExitCodes`); fact
+10 says whether the limit was found, and a passing failure is not the limit (`FactTen`); a request the venue REFUSES
+is never asked again and is no error (`ARefusal`).
 """
 
 from __future__ import annotations
@@ -22,14 +29,19 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from league.ops.context import GatewayError
 from scripts import panel_probe as P
 
 REPO = Path(__file__).resolve().parents[2]
 D = dt.date
+#: An invented stand-in for the gateway's token (no secret: made up here, long enough for the client's own check).
+INVENTED_TOKEN = "invented-probe-test-token-0123456789"
 #: Invented, distinctive prices: none may appear in anything the probe writes.
 PRICES = {"SPY": 431.17, "ZZTA": 123.45, "ZZTB": 67.89, "ZZTC": 55.55, "ZZTD": 91.23, "ZZTE": 44.44, "ZZTF": 33.33,
-          "FOX": 38.76, "Q": 77.31}
+          "ZZTX": 38.76, "ZZTQ": 77.31}
 VOLUME = 2_000_000.0
+#: The invented world's two reused tickers: an ended spell in the eras and a later spell of the same ticker.
+REUSED = ("ZZTX", "ZZTQ")
 
 
 def weekdays(first: dt.date, last: dt.date) -> list[dt.date]:
@@ -52,14 +64,17 @@ class FakeGateway:
     """A recording fake of the House's gateway client: `get(path, params)` only. `series[(symbol, regime)]` = the days
     the venue has a bar of that symbol; regime "asof" answers a request that names an asof, "today" one that does not
     (the ticker's holder today); a symbol with one regime only answers both. `page` rows a page; `max_symbols`: more
-    are refused; `fail`: {request number: error} raised once."""
+    are refused (HTTP 400, as the House's client raises it: `GatewayError` with its `status`); `fail`: {request
+    number: error} raised once; `refuse`: {(symbol, regime): status}: every request naming that symbol under that
+    regime ("asof", "today" or "any") is refused with that status, every time."""
 
     def __init__(self, series: dict, *, page: int = 5000, max_symbols: int = 10_000, fail: dict | None = None,
-                 honour_asof: bool = True, volumes: dict | None = None):
+                 honour_asof: bool = True, volumes: dict | None = None, refuse: dict | None = None):
         self.series, self.page, self.max_symbols = series, int(page), int(max_symbols)
         self.fail = dict(fail or {})
         self.honour_asof = honour_asof
         self.volumes = dict(volumes or {})
+        self.refuse = dict(refuse or {})
         self.calls: list[tuple[str, str, dict]] = []
 
     def post(self, path, body):  # the probe never posts
@@ -81,7 +96,11 @@ class FakeGateway:
             raise self.fail.pop(number)
         symbols = params["symbols"].split(",")
         if len(symbols) > self.max_symbols:
-            raise RuntimeError("HTTP 400 too many symbols")
+            raise GatewayError("GET bars: HTTP 400 too many symbols", status=400)
+        for symbol in symbols:
+            for regime in ("asof" if params.get("asof") is not None else "today", "any"):
+                if (symbol, regime) in self.refuse:
+                    raise GatewayError(f"GET bars: HTTP {self.refuse[(symbol, regime)]}", status=self.refuse[(symbol, regime)])
         start, end = D.fromisoformat(params["start"]), D.fromisoformat(params["end"])
         rows = []
         for symbol in sorted(symbols):
@@ -108,9 +127,10 @@ def world():
         P.Spell("ZZTD", D(2019, 6, 3), D(2023, 3, 1)),           # spans the reserve: both eras, asof in era B
         P.Spell("ZZTE", D(2023, 2, 1), None),                    # open, joined in era B
         P.Spell("ZZTF", D(2005, 1, 3), D(2015, 12, 31)),         # ended before the eras: never asked for
-        P.Spell("FOX", D(2013, 7, 1), D(2019, 3, 19)),           # the old company under a reused ticker
-        P.Spell("FOX", D(2019, 3, 19), None),                    # today's holder of the ticker
-        P.Spell("Q", D(2017, 8, 29), D(2017, 11, 15)),           # a short ended spell of a ticker reused since
+        P.Spell("ZZTX", D(2013, 7, 1), D(2019, 4, 9)),           # the old company under a reused ticker
+        P.Spell("ZZTX", D(2019, 4, 9), None),                    # today's holder of the ticker
+        P.Spell("ZZTQ", D(2017, 9, 5), D(2017, 12, 1)),          # a short ended spell of a ticker reused since ...
+        P.Spell("ZZTQ", D(2025, 6, 2), None),                    # ... by a spell after the eras: never asked for
     ]
     series = {
         ("SPY", "any"): SESSIONS,
@@ -118,16 +138,17 @@ def world():
         ("ZZTB", "any"): [d for d in SESSIONS if d < D(2018, 6, 15)],
         ("ZZTD", "any"): [d for d in SESSIONS if D(2019, 6, 3) <= d < D(2023, 3, 1)],
         ("ZZTE", "any"): [d for d in SESSIONS if d >= D(2023, 2, 1)],
-        ("FOX", "asof"): [d for d in SESSIONS if d < D(2019, 3, 19)],
-        ("FOX", "today"): [d for d in SESSIONS if d >= D(2019, 3, 19)],
-        ("Q", "asof"): [d for d in SESSIONS if D(2017, 8, 29) <= d < D(2017, 11, 15)],
-        ("Q", "today"): [],
+        ("ZZTX", "asof"): [d for d in SESSIONS if d < D(2019, 4, 9)],
+        ("ZZTX", "today"): [d for d in SESSIONS if d >= D(2019, 4, 9)],
+        ("ZZTQ", "asof"): [d for d in SESSIONS if D(2017, 9, 5) <= d < D(2017, 12, 1)],
+        ("ZZTQ", "today"): [],
     }
     return spells, series
 
 
 def run(spells, series, **kwargs):
-    fake_kwargs = {k: kwargs.pop(k) for k in ("page", "max_symbols", "fail", "honour_asof", "volumes") if k in kwargs}
+    fake_kwargs = {k: kwargs.pop(k) for k in ("page", "max_symbols", "fail", "honour_asof", "volumes", "refuse")
+                   if k in kwargs}
     gateway = FakeGateway(series, **fake_kwargs)
     waits: list[float] = []
     receipt, listing = P.run(gateway, spells, sleep=waits.append, clock=lambda: 1_760_000_000.0, **kwargs)
@@ -164,7 +185,7 @@ class TheSeal(unittest.TestCase):
     def test_ended_spells_are_asked_as_of_a_day_inside_them_and_open_spells_name_no_asof(self):
         spells, series = world()
         _, _, gateway, _ = run(spells, series, limit_probe=False)
-        ended = {s.ticker: s for s in spells if s.end is not None and s.ticker.startswith("ZZT")}
+        ended = {s.ticker: s for s in spells if s.end is not None and s.ticker not in REUSED}
         asked = {}
         for _, _, params in gateway.calls:
             for symbol in params["symbols"].split(","):
@@ -201,9 +222,12 @@ class TheCount(unittest.TestCase):
         self.assertEqual(listing, {"no_bars": ["ZZTC"], "reused": [], "error": []})
         self.assertFalse(receipt["pass"])
         self.assertEqual(receipt["verdict"], "fail", "2016 and 2017 hold a member with no bar")
-        self.assertEqual(receipt["facts"]["1"]["verdict"], "holds")
-        self.assertEqual(receipt["facts"]["1"]["asof_differs"], 2, "both test names answer differently without asof")
-        self.assertEqual((receipt["facts"]["1"]["test_spells"], receipt["facts"]["1"]["test_accepted"]), (2, 2))
+        fact = receipt["facts"]["1"]
+        self.assertEqual(fact["verdict"], "holds")
+        self.assertEqual((fact["asof_differs"], fact["differs_accepted"]), (2, 2),
+                         "both test names answer differently without asof, and both as an index member's series")
+        self.assertEqual((fact["test_names"], fact["test_names_from"], fact["test_spells"], fact["test_accepted"]),
+                         (2, "the spell file", 2, 2))
 
     def test_a_full_panel_passes(self):
         spells, series = world()
@@ -233,18 +257,20 @@ class TheCount(unittest.TestCase):
         self.assertEqual(P.judge(members, {d: (2.0, 1000.0) for d in members}), "reused",
                          "a full series that trades $2,000 a day is another company's")
 
-    def test_a_venue_that_ignores_asof_shows_as_a_reused_ticker_and_fact_1_fails(self):
+    def test_a_venue_that_ignores_asof_shows_as_a_reused_ticker_and_fact_1_is_not_shown(self):
         spells, series = world()
-        series[("Q", "today")] = series[("Q", "asof")]
-        receipt, listing, _, _ = run(spells, series, honour_asof=False, volumes={("Q", "today"): 1000.0})
-        self.assertIn("Q", listing["reused"])
-        self.assertIn("FOX", listing["no_bars"], "today's holder has no bar in the old spell")
-        self.assertEqual(receipt["facts"]["1"]["verdict"], "fails")
-        self.assertEqual(receipt["facts"]["1"]["asof_differs"], 0)
+        series[("ZZTQ", "today")] = series[("ZZTQ", "asof")]
+        receipt, listing, _, _ = run(spells, series, honour_asof=False, volumes={("ZZTQ", "today"): 1000.0})
+        self.assertIn("ZZTQ", listing["reused"])
+        self.assertIn("ZZTX", listing["no_bars"], "today's holder has no bar in the old spell")
+        fact = receipt["facts"]["1"]
+        self.assertEqual((fact["asof_differs"], fact["verdict"]), (0, "not_shown"),
+                         "no test spell answers differently without asof: nothing shows asof at work")
+        self.assertEqual((fact["test_spells"], fact["test_accepted"]), (2, 0), "and the bars are not there: its own line")
 
     def test_no_test_name_in_the_file_is_said_so(self):
         spells, series = world()
-        receipt, _, _, _ = run([s for s in spells if s.ticker.startswith("ZZT")], series)
+        receipt, _, _, _ = run([s for s in spells if s.ticker not in REUSED], series)
         self.assertEqual(receipt["facts"]["1"]["verdict"], "not_met")
 
 
@@ -285,7 +311,7 @@ class TheGateway(unittest.TestCase):
         spells = [P.Spell(s.ticker, SESSIONS[-30], None) for s in spells]
         receipt, _, gateway, _ = run(spells, series, max_symbols=60)
         self.assertEqual(receipt["facts"]["10"], {"asked": [39, 100], "answered": [39], "largest_ok": 39,
-                                                  "first_refused": 100})
+                                                  "first_refused": 100, "first_failed": None, "reading": "found"})
         self.assertEqual(receipt["requests_failed"], 0, "a refused ladder step is the datum, not a failed request")
         self.assertTrue(all(len(p["symbols"].split(",")) <= P.BATCH for _, _, p in gateway.calls[:-1]),
                         "the probe's own requests never depend on the limit it is measuring")
@@ -359,13 +385,294 @@ class TheReceipt(unittest.TestCase):
         self.assertEqual(json.loads(printed)["verdict"], "fail")
 
     def test_an_unreadable_spell_file_is_refused(self):
-        self.assertEqual(P.main(["--spells", "/nonexistent/spells.csv", "--no-write"], gateway=FakeGateway({})), 2)
+        self.assertEqual(P.main(["--spells", "/nonexistent/spells.csv", "--no-write"], gateway=FakeGateway({})),
+                         P.EXIT_CANNOT_RUN)
         for bad in ("ticker,start_date,end_date\n", "ZZTA\n", "ZZTA,2016-13-01,\n", "ZZTA,2018-01-02,2017-01-03\n",
                     "ZZTA,2016-01-04,,x,y\n"):
             with self.assertRaises(ValueError):
                 P.parse_spells(bad)
         self.assertEqual(P.parse_spells("ticker,start_date,end_date\nzzta,2016-01-04,\n\nZZTB,2012-03-01,2018-06-15\n"),
                          [P.Spell("ZZTA", D(2016, 1, 4), None), P.Spell("ZZTB", D(2012, 3, 1), D(2018, 6, 15))])
+
+
+def main(spells, series, extra=(), **fake):
+    """The command against a fake gateway: (exit code, the receipt printed or None, what went to stderr, the gateway,
+    the waits)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "spells.csv"
+        source.write_text("ticker,start_date,end_date\n" + "".join(
+            f"{s.ticker},{s.start.isoformat()},{s.end.isoformat() if s.end else ''}\n" for s in spells))
+        out, err, waits = io.StringIO(), io.StringIO(), []
+        gateway = FakeGateway(series, **fake)
+        with mock.patch.object(sys, "stderr", err):
+            code = P.main(["--spells", str(source), "--root", str(Path(tmp) / "state"), "--pause", "0", "--no-write",
+                           *extra], gateway=gateway, sleep=waits.append, clock=lambda: 1_760_000_000.0, out=out)
+        printed = out.getvalue()
+        receipt = json.JSONDecoder().raw_decode(printed)[0] if printed.strip().startswith("{") else None
+        return code, receipt, err.getvalue(), gateway, waits
+
+
+class TheTestNames(unittest.TestCase):
+    """DEFECT 1. The probe's two built-in test tickers were not ended spells in the real file, so the documented
+    command measured nothing ("not_met"). The names are now read off the spell file."""
+
+    def test_they_are_the_tickers_with_an_ended_spell_in_the_eras_and_a_later_spell(self):
+        spells, _ = world()
+        self.assertEqual(P.test_names(spells, SESSIONS), sorted(REUSED))
+        plain = [s for s in spells if s.ticker not in REUSED]
+        self.assertEqual(P.test_names(plain, SESSIONS), [], "a ticker used once is no test")
+        more = [*plain,
+                P.Spell("ZZTF", D(2018, 2, 1), None),             # ZZTF's ended spell lies before the eras: no test
+                P.Spell("ZZTG", D(2011, 1, 3), D(2016, 6, 1)), P.Spell("ZZTG", D(2016, 6, 1), D(2022, 9, 1)),
+                P.Spell("ZZTH", D(2023, 1, 3), None), P.Spell("ZZTH", D(2012, 1, 3), D(2022, 5, 2)),
+                P.Spell("ZZTI", D(2012, 1, 3), D(2020, 6, 1)),    # ended inside the reserve, used once
+                P.Spell("ZZTJ", D(2012, 1, 3), D(2021, 6, 1)), P.Spell("ZZTJ", D(2021, 6, 1), D(2021, 12, 1))]
+        self.assertEqual(P.test_names(more, SESSIONS), ["ZZTG", "ZZTH", "ZZTJ"],
+                         "the file's order does not matter; a later spell may itself have ended, or lie outside the eras")
+
+    def test_the_documented_command_measures_fact_1_with_no_names_given(self):
+        spells, series = world()
+        code, receipt, _, gateway, _ = main(spells, series, ["--no-limit-probe"])
+        fact = receipt["facts"]["1"]
+        self.assertEqual((fact["test_names"], fact["test_names_from"], fact["test_spells"]), (2, "the spell file", 2))
+        self.assertNotEqual(fact["verdict"], "not_met")
+        no_asof = [p for _, _, p in gateway.calls if p["symbols"] in ("ZZTX", "ZZTQ") and "asof" not in p]
+        self.assertEqual(len(no_asof), 2, "each test spell is asked a second time without asof")
+        self.assertNotIn("ZZTX", json.dumps(receipt), "the receipt names no ticker, the test names included")
+
+    def test_names_given_on_the_command_are_used_instead(self):
+        spells, series = world()
+        _, receipt, _, _, _ = main(spells, series, ["--no-limit-probe", "--names", "zztb, ZZTC"])
+        fact = receipt["facts"]["1"]
+        self.assertEqual((fact["test_names"], fact["test_names_from"], fact["test_spells"]), (2, "--names", 2))
+        _, receipt, _, _, _ = main(spells, series, ["--no-limit-probe", "--names", "NOSUCH"])
+        self.assertEqual(receipt["facts"]["1"]["verdict"], "not_met")
+
+
+class FactOne(unittest.TestCase):
+    """DEFECT 2. "holds" asked every test spell to be accepted, so one test spell the venue has no bars of read
+    "fails" though asof plainly worked on the others. Two questions, two lines."""
+
+    def world(self):
+        spells, series = world()
+        # A third reused ticker whose OLD spell the venue has nothing of, with asof or without: a coverage fact.
+        spells += [P.Spell("ZZTR", D(2012, 1, 3), D(2018, 2, 1)), P.Spell("ZZTR", D(2019, 5, 1), None)]
+        series[("ZZTR", "asof")] = []
+        series[("ZZTR", "today")] = [d for d in SESSIONS if d >= D(2019, 5, 1)]
+        return spells, series
+
+    def test_asof_holds_though_one_test_spell_has_no_bars(self):
+        spells, series = self.world()
+        receipt, listing, _, _ = run(spells, series, limit_probe=False)
+        fact = receipt["facts"]["1"]
+        self.assertEqual((fact["test_spells"], fact["test_accepted"]), (3, 2), "the venue has the bars of two of three")
+        self.assertEqual((fact["asof_differs"], fact["differs_accepted"]), (2, 2))
+        self.assertEqual(fact["verdict"], "holds", "every spell that answers differently without asof is accepted")
+        self.assertIn("ZZTR", listing["no_bars"], "the third is a spell with no bars: counted there, no verdict on asof")
+
+    def test_it_fails_when_a_spell_that_differs_is_not_an_index_members_series(self):
+        spells, series = self.world()
+        # asof answers for the old ZZTX with another company's thin series (a full series that trades too little).
+        receipt, listing, _, _ = run(spells, series, limit_probe=False, volumes={("ZZTX", "asof"): 1000.0})
+        fact = receipt["facts"]["1"]
+        self.assertIn("ZZTX", listing["reused"])
+        self.assertEqual((fact["asof_differs"], fact["differs_accepted"], fact["verdict"]), (2, 1, "fails"))
+
+    def test_it_is_not_shown_when_no_test_spell_differs_and_not_met_with_none(self):
+        spells, series = self.world()
+        same = {**series, ("ZZTX", "today"): series[("ZZTX", "asof")], ("ZZTQ", "today"): series[("ZZTQ", "asof")]}
+        receipt, _, _, _ = run(spells, same, limit_probe=False)
+        fact = receipt["facts"]["1"]
+        self.assertEqual((fact["test_spells"], fact["test_accepted"], fact["asof_differs"], fact["verdict"]),
+                         (3, 2, 0, "not_shown"))
+        plain, series = world()
+        receipt, _, _, _ = run([s for s in plain if s.ticker not in REUSED], series, limit_probe=False)
+        self.assertEqual((receipt["facts"]["1"]["test_spells"], receipt["facts"]["1"]["verdict"]), (0, "not_met"))
+
+
+class TheToken(unittest.TestCase):
+    """DEFECT 3. The environment file was looked for beside `--root`, so with any root but the House's own the token
+    was never found; the probe then counted three requests it never sent, waited 25 seconds and stopped on "no
+    calendar", which named no token."""
+
+    def test_the_file_is_beside_the_release_whatever_the_root(self):
+        self.assertEqual(P.env_file("/workspace/current"), Path("/workspace/.env"))
+        self.assertEqual(P.env_file("/workspace/current", "/somewhere/else.env"), Path("/somewhere/else.env"))
+        source = (REPO / "scripts" / "panel_probe.py").read_text()
+        self.assertNotIn('Path(root).parent / ".env"', source)
+        self.assertNotIn("Path(root).parent", source, "nothing of the token is read off --root")
+
+    def env_without_a_token(self):
+        clean = {k: v for k, v in os.environ.items() if k not in ("GATEWAY_TOKEN", "LEAGUE_ENV")}
+        return mock.patch.dict(os.environ, clean, clear=True)
+
+    def test_a_missing_token_is_said_at_once_and_nothing_is_sent(self):
+        with tempfile.TemporaryDirectory() as tmp, self.env_without_a_token():
+            missing = Path(tmp) / "nowhere" / ".env"
+            with self.assertRaises(P.NoGateway) as caught:
+                P.house_gateway(REPO, Path(tmp) / "state", missing)
+            self.assertIn("GATEWAY_TOKEN is not set", str(caught.exception))
+            self.assertIn(str(missing), str(caught.exception), "it names the file it looked in")
+            # the command: exit 3 at once, no request, no wait, and the words reach the terminal
+            spells = Path(tmp) / "spells.csv"
+            spells.write_text("ticker,start_date,end_date\nZZTA,2010-01-04,\n")
+            waits, err = [], io.StringIO()
+            with mock.patch.object(sys, "stderr", err):
+                code = P.main(["--spells", str(spells), "--root", str(Path(tmp) / "elsewhere"), "--release", str(REPO),
+                               "--env", str(missing), "--no-write"], sleep=waits.append)
+            self.assertEqual((code, waits), (P.EXIT_CANNOT_RUN, []))
+            self.assertIn("GATEWAY_TOKEN is not set", err.getvalue())
+            self.assertNotIn("no calendar", err.getvalue())
+
+    def test_the_releases_loader_finds_it_in_the_file_given_and_the_probe_keeps_none_of_it(self):
+        with tempfile.TemporaryDirectory() as tmp, self.env_without_a_token():
+            env = Path(tmp) / "house" / ".env"
+            env.parent.mkdir()
+            env.write_text(f"GATEWAY_TOKEN={INVENTED_TOKEN}\n")
+            env.chmod(0o600)
+            gateway = P.house_gateway(REPO, Path(tmp) / "another-root" / "state", env)
+            from league.ops.context import Gateway
+
+            self.assertIsInstance(gateway, Gateway)
+            self.assertEqual(gateway.calls, [])
+            held = [name for name, value in vars(P).items() if isinstance(value, str) and INVENTED_TOKEN in value]
+            self.assertEqual(held, [], "no name of the script holds the token")
+        source = (REPO / "scripts" / "panel_probe.py").read_text()
+        tree = ast.parse(source)
+        reads = [node for node in ast.walk(tree) if isinstance(node, ast.Subscript)
+                 and isinstance(node.slice, ast.Constant) and node.slice.value == "GATEWAY_TOKEN"]
+        self.assertEqual(reads, [], "the script never takes the token's value out of the environment")
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                 and getattr(node.func, "id", None) == "token_from_env"]
+        self.assertEqual(len(calls), 1, "the release's own check is asked once")
+        statements = [node.value for node in ast.walk(tree) if isinstance(node, ast.Expr)]
+        self.assertIn(calls[0], statements, "and its answer is dropped: bound to no name, passed to nothing")
+
+
+class TheExitCodes(unittest.TestCase):
+    """DEFECT 4. Exit 2 means "incomplete: run it again", and it was also returned where no rerun can help."""
+
+    def test_two_is_incomplete_and_nothing_else(self):
+        spells, series = world()
+        spells = [s for s in spells if s.ticker != "ZZTC"]
+        self.assertEqual((P.EXIT_PASS, P.EXIT_FAIL, P.EXIT_INCOMPLETE, P.EXIT_CANNOT_RUN), (0, 1, 2, 3))
+        code, receipt, _, calm, _ = main(spells, series, ["--no-limit-probe"])
+        self.assertEqual((code, receipt["verdict"]), (0, "pass"))
+        first = next(i for i, (_, _, p) in enumerate(calm.calls, start=1) if p["symbols"] == "ZZTB")
+        fail = {first + k: RuntimeError("HTTP 502") for k in range(P.TRIES)}
+        code, receipt, _, _, _ = main(spells, series, ["--no-limit-probe"], fail=fail)
+        self.assertEqual((code, receipt["verdict"]), (2, "incomplete"), "a request that kept failing: run it again")
+        code, receipt, _, _, _ = main(world()[0], series, ["--no-limit-probe"])
+        self.assertEqual((code, receipt["verdict"]), (1, "fail"))
+
+    def test_three_is_a_probe_that_could_not_run(self):
+        spells, series = world()
+        no_calendar = {k: v for k, v in series.items() if k[0] != "SPY"}
+        for extra, fake, word in ((["--no-limit-probe"], {"series": no_calendar}, "no calendar"),
+                                  (["--no-limit-probe", "--max-requests", "3"], {"series": series}, "cap of 3 requests"),
+                                  (["--no-limit-probe"], {"series": series, "refuse": {("SPY", "any"): 403}},
+                                   "refused (HTTP 403)")):
+            code, receipt, err, _, _ = main(spells, fake.pop("series"), extra, **fake)
+            self.assertEqual((code, receipt), (P.EXIT_CANNOT_RUN, None), word)
+            self.assertIn(word, err)
+            self.assertIn("running it again will not help", err)
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "spells.csv"
+            bad.write_text("ticker,start_date,end_date\nZZTA,2016-13-01,\n")
+            self.assertEqual(P.main(["--spells", str(bad), "--no-write"], gateway=FakeGateway({})), P.EXIT_CANNOT_RUN)
+
+
+class FactTen(unittest.TestCase):
+    """DEFECT 5. The ladder ended at 400 and 400 was answered: a lower bound read as the limit. And each step had one
+    try, so a passing failure would have been written down as the venue's limit."""
+
+    def world(self, n=420):
+        spells = [P.Spell(f"ZZ{i:03d}", SESSIONS[-30], None) for i in range(n)]
+        series = {("SPY", "any"): SESSIONS, **{(s.ticker, "any"): SESSIONS[-30:] for s in spells}}
+        return spells, series
+
+    def test_a_ladder_answered_to_its_end_is_at_least_and_says_the_limit_was_not_found(self):
+        receipt, _, _, _ = run(*self.world())
+        self.assertEqual(receipt["facts"]["10"], {"asked": list(P.LIMIT_LADDER), "answered": list(P.LIMIT_LADDER),
+                                                  "largest_ok": P.LIMIT_LADDER[-1], "first_refused": None,
+                                                  "first_failed": None, "reading": "at least"})
+
+    def test_a_refusal_is_the_limit_found_and_is_asked_once(self):
+        receipt, _, gateway, waits = run(*self.world(), max_symbols=150)
+        fact = receipt["facts"]["10"]
+        self.assertEqual((fact["largest_ok"], fact["first_refused"], fact["reading"]), (100, 200, "found"))
+        self.assertEqual(sum(1 for _, _, p in gateway.calls if len(p["symbols"].split(",")) == 200), 1)
+        self.assertEqual(waits, [], "a refusal is not waited on and not asked again")
+        self.assertEqual((receipt["requests_failed"], receipt["requests_refused"]), (0, 0),
+                         "a refused ladder step is the datum, not a request of the count")
+
+    def test_a_passing_failure_is_tried_again_and_is_not_the_limit(self):
+        spells, series = self.world()
+        calm = run(spells, series)[2]
+        step = next(i for i, (_, _, p) in enumerate(calm.calls, start=1) if len(p["symbols"].split(",")) == 100)
+        receipt, _, _, waits = run(spells, series, fail={step: TimeoutError("timed out")})
+        self.assertEqual(waits, [P.BACKOFF_S[0]])
+        self.assertEqual((receipt["facts"]["10"]["largest_ok"], receipt["facts"]["10"]["reading"]),
+                         (P.LIMIT_LADDER[-1], "at least"))
+        # a step that fails every try says nothing of the limit: not "refused", and the reading says so
+        fail = {step + k: TimeoutError("timed out") for k in range(P.LIMIT_TRIES)}
+        fact = run(spells, series, fail=fail)[0]["facts"]["10"]
+        self.assertEqual((fact["largest_ok"], fact["first_refused"], fact["first_failed"], fact["reading"]),
+                         (39, None, 100, "not measured"))
+        self.assertEqual(P.LIMIT_TRIES, 2)
+
+
+class ARefusal(unittest.TestCase):
+    """THE SIXTH (latent: every answer of the first run was a 200). Every failure was tried three times with its
+    waits, a permanent refusal too, and ended as an "error": an "incomplete" no rerun could cure."""
+
+    def test_a_refusal_is_never_asked_again_and_a_failure_is(self):
+        self.assertEqual([P.refusal(GatewayError("x", status=s)) for s in (400, 403, 404, 422, 429, 500, 502, None)],
+                         [400, 403, 404, 422, None, None, None, None])
+        self.assertIsNone(P.refusal(RuntimeError("HTTP 404 in its text only")))
+        self.assertIsNone(P.refusal(GatewayError("x", status=True)))
+        for status in (400, 403, 404, 422):
+            gateway = FakeGateway({("ZZTA", "any"): SESSIONS}, refuse={("ZZTA", "any"): status})
+            waits: list[float] = []
+            probe = P.Probe(gateway, sleep=waits.append)
+            with self.assertRaises(P.Refused) as caught:
+                probe.bars(["ZZTA"], SESSIONS[0], SESSIONS[9])
+            self.assertEqual((caught.exception.status, len(gateway.calls), waits), (status, 1, []))
+            self.assertEqual((probe.requests, probe.refused, probe.failed), (1, 1, 0))
+        for status in (429, 500, 503):
+            gateway = FakeGateway({("ZZTA", "any"): SESSIONS}, fail={1: GatewayError("x", status=status)})
+            waits = []
+            probe = P.Probe(gateway, sleep=waits.append)
+            self.assertEqual(len(probe.bars(["ZZTA"], SESSIONS[0], SESSIONS[9])["ZZTA"]), 10)
+            self.assertEqual((len(gateway.calls), waits, probe.refused), (2, [P.BACKOFF_S[0]], 0), status)
+        gateway = FakeGateway({}, fail={k: GatewayError("x", status=503) for k in (1, 2, 3)})
+        with self.assertRaises(RuntimeError) as caught:
+            P.Probe(gateway, sleep=lambda s: None).bars(["ZZTA"], SESSIONS[0], SESSIONS[9])
+        self.assertIn("GatewayError (HTTP 503)", str(caught.exception))
+
+    def test_a_refused_ended_spell_has_no_bars_and_the_verdict_is_not_incomplete(self):
+        spells, series = world()
+        spells = [s for s in spells if s.ticker != "ZZTC"]
+        code, receipt, _, gateway, waits = main(spells, series, ["--no-limit-probe", "--list"],
+                                                refuse={("ZZTB", "asof"): 422})
+        self.assertEqual((receipt["errors"], receipt["requests_failed"], receipt["requests_refused"]), (0, 0, 1))
+        self.assertEqual((receipt["no_bars"], receipt["verdict"], code), (1, "fail", 1),
+                         "a no-bars reason and a plain fail: no rerun is asked for what no rerun can change")
+        self.assertEqual(waits, [])
+        self.assertEqual(sum(1 for _, _, p in gateway.calls if p["symbols"] == "ZZTB"), 1)
+
+    def test_a_refused_batch_of_open_spells_is_asked_one_ticker_at_a_time(self):
+        spells, series = world()
+        spells = [s for s in spells if s.ticker != "ZZTC"]
+        clean, _, _, _ = run(spells, series, limit_probe=False)
+        receipt, listing, gateway, _ = run(spells, series, limit_probe=False, refuse={("ZZTE", "any"): 404})
+        self.assertEqual(listing, {"no_bars": ["ZZTE"], "reused": [], "error": []}, "only the name the venue refuses")
+        self.assertEqual(receipt["errors"], 0)
+        self.assertEqual(receipt["by_year"]["2016"], clean["by_year"]["2016"], "its neighbours kept their bars")
+        self.assertLess(receipt["by_year"]["2024"]["share"], 1.0)
+        alone = [p["symbols"] for _, _, p in gateway.calls if "asof" not in p and "," not in p["symbols"]]
+        self.assertIn("ZZTA", alone)
+        self.assertIn("ZZTE", alone)
 
 
 class TheScript(unittest.TestCase):
@@ -386,14 +693,12 @@ class TheScript(unittest.TestCase):
         self.assertFalse(any(n.startswith("league.xs") or n.startswith("numpy") for n in top | inner))
 
     def test_the_gateway_client_is_the_running_releases_own_and_building_it_asks_nothing(self):
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"LEAGUE_ENV": str(Path(tmp) / ".env")}):
-            os.environ.pop("GATEWAY_TOKEN", None)  # no token here: the client is built, and asked nothing
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"GATEWAY_TOKEN": INVENTED_TOKEN}):
             gateway = P.house_gateway(REPO, Path(tmp) / "state")
             from league.ops.context import Gateway
 
             self.assertIsInstance(gateway, Gateway)
-            self.assertEqual(gateway.calls, [])
-            self.assertNotIn("GATEWAY_TOKEN", os.environ)
+            self.assertEqual(gateway.calls, [], "building the client, and asking whether a token is set, sends nothing")
 
     def test_the_command_waits_before_every_request(self):
         spells, series = world()
