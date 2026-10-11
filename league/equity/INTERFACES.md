@@ -529,7 +529,14 @@ Decimal` (`Unreadable.shares_taken` raises).
   position back at its baseline (gates every real equity SALE); a SELL stage that ends its window unpassed is
   "failed" (an alarm with the owner's step; new real buys stop until it passes). Checked only by the equity book
   (options entries never wait on it). Client ids `lq-pp-...` (never `lv-`). `StockPaperProof` never waits for the
-  options route's proofs (no `after`); `_idle` minutes read nothing of the practice account.
+  options route's proofs (no `after`); `_idle` minutes read nothing of the practice account. An order the venue does
+  not show by its client id after `STOCK_LOST_AFTER_TRIES` (4) lookups or `STOCK_LOST_AFTER_S` (600) seconds is lost
+  (the book's `LOST_AFTER_TRIES`, `LOST_AFTER_S`; a test holds them equal): its record is {status "lost", terminal,
+  lost, lost_at, lookups}, nothing owned, one warning through `alert`; a lost buy returns the row to "waiting", a lost
+  sale goes again only while the position still reconciles; lost orders stay in the row's `orders` for
+  `STOCK_LOST_WATCH_DAYS` (3) and are looked up again in every minute the proof works (`_found`: found again is one
+  warning, `found` in the record, the attempt resumed at its last order or the stray's fills counted and the stray
+  cancelled). The options `PaperProof` is unchanged.
 - **venue.py**: `MarketData.bars(symbols, *, timeframe, start, end=None, adjustment="raw")` (the book reads "all" too).
 
 ### 6.3 `league/equity/kinds.py`, `league/equity/child.py` (stubs present)

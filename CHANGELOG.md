@@ -47,6 +47,16 @@ What they did find is fixed here, each with a test that failed before.
   different lineages never wait on each other, and other families are untouched. **Changed for the operator: a hold
   on the earlier seed now holds the later seed of its lineage too; retire the earlier seed to give the look to the
   later one.** Swarm-side only: neither fingerprint moves.
+- **A lost practice order no longer sticks the stock paper proof** (`league/live/paper.py` `StockPaperProof`). When
+  the one stage-BUY (or stage-SELL) POST was answered unknown and the practice account never showed the order, the
+  attempt stayed `buy_sent` for good: no new order, no alert, and so no real equity buy, ever. The proof now has the
+  equity book's own rule for an order not found by its client id (four lookups or ten minutes): it is lost, terminal,
+  nothing owned, one warning. A lost buy returns to waiting and the next open window tries again on a baseline read
+  then; a lost sale goes again only while the practice account still holds the lot. A lost order is looked for again
+  for three days, first of all before a new buy: one that surfaces with a fill is the practice lot it is (the attempt
+  resumes at it, or its fill is counted in the attempt that had begun), so it cannot corrupt the next attempt's
+  reconciliation. The options `PaperProof` is byte for byte as it was. `league/live` is hashed: **the options
+  execution fingerprint moves**, as it already does once with E1 (no further cost: one adoption at the E1 deploy).
 
 ### Release E1, the rehearsal on real data: the data job, the vendor's cents, the seeds' order, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
 

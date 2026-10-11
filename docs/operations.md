@@ -130,7 +130,14 @@ confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the Ho
   never do); its client ids are `lq-pp-...`. **Stage BUY never waits on the options route's own paper proofs**
   (`paper_proof`, `paper_proof_single`): it goes in the first open window after the deploy. While it has nothing to do
   (waiting outside its BUY window, or holding its lot outside the SELL stage's window) the proof makes no call to the
-  practice account. It tries once a session: a refused or unfilled practice buy costs a day.
+  practice account. It tries once a session: a refused or unfilled practice buy costs a day. **A practice order the
+  venue never shows** (its POST answered unknown) is looked up by its client id, never sent again blind, and by the
+  equity book's own rule it is LOST after four lookups or ten minutes: one warning, nothing owned by it. A lost buy
+  costs that session (the next open window buys again, on a baseline read then); a lost sale goes again at once
+  while the practice account still holds the lot, and not at all when it holds less (it may have filled: the SELL
+  stage then fails at the window's end, with its error alert, each session until the owner has looked). A lost order
+  is looked for again for three days: one the venue shows after all is a second warning, and its fills are the
+  practice lot's (no second buy when it is found before the next one).
 - **After a Sunday deploy**, each step needing the one before it: the seeds are validated and looked at on Sunday by
   the equity rounds (above), in the declared order; a seed that passes is seated at Probe and decided for Friday's
   close by the book's SEATING PASS (below), so a look passed AFTER the day's decision still trades the next session,

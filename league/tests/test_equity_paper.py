@@ -20,7 +20,9 @@ except ImportError:  # pragma: no cover
     HAVE = False
 
 if HAVE:
+    from league.equity import live as L
     from league.equity import schedule as S
+    from league.live import paper as P
     from league.live.paper import STOCK_BUY_KEY, STOCK_KEY, STOCK_SELL_KEY, StockPaperProof
     from league.live.state import LiveState
     from league.tests.live_fakes import MONDAY, Clock, Market, Venue, at, iso
@@ -68,8 +70,9 @@ if HAVE:
                                            "price": str(price), "transaction_time": iso(self.clock())})
 
 
-@unittest.skipUnless(HAVE, "numpy not installed")
-class TheStockProof(unittest.TestCase):
+class ProofCase(unittest.TestCase):
+    """The proof on a practice account of its own, stepped as the book's tick steps it."""
+
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.clock = Clock(at(MONDAY, 9, 0))
@@ -103,6 +106,9 @@ class TheStockProof(unittest.TestCase):
         self.assertEqual(row["status"], "held")
         self.assertTrue(self.proof.buy_passed())
 
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheStockProof(ProofCase):
     def test_stage_buy_in_the_open_window_then_stage_sell_at_the_next_open(self):
         self.assertEqual(self.step(MONDAY, 9, 30)["status"], "waiting")
         self.assertEqual(self.paper.sent, [], "not before 09:30:30")
@@ -275,6 +281,213 @@ class TheStockProof(unittest.TestCase):
         row = self.step(MONDAY, 9, 33)
         self.assertEqual(row["status"], "held", "its fill read by its client id")
         self.assertEqual(len(self.paper.sent), 1)
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class APracticeOrderTheVenueNeverShows(ProofCase):
+    """live-new-1 (the verification of E1): when the one stage-BUY (or stage-SELL) POST was answered unknown and the
+    practice account never showed the order, the attempt stayed `buy_sent` for good: no new order, no alert, and so no
+    real equity buy, ever. The proof now has the equity book's own rule for an order not found by its client id."""
+
+    def lost(self, day=MONDAY, minute=31):
+        """A practice order whose POST is answered unknown and which never reaches the venue, then the lookups that
+        give it up as lost; the row after the last of them."""
+        self.paper.submit_mode = "lost_absent"
+        row = self.step(day, 9, minute)
+        self.paper.submit_mode = "ok"
+        for i in range(P.STOCK_LOST_AFTER_TRIES):
+            row = self.step(day, 9, minute + 1 + i)
+        return row
+
+    def warnings(self):
+        return [text for level, text in self.alerts if level == "warning"]
+
+    def test_the_rule_is_the_equity_books_own(self):
+        self.assertEqual((P.STOCK_LOST_AFTER_TRIES, P.STOCK_LOST_AFTER_S), (L.LOST_AFTER_TRIES, L.LOST_AFTER_S))
+
+    def test_a_lost_buy_ends_with_nothing_owned_warns_once_and_is_tried_again_at_the_next_open(self):
+        self.paper.submit_mode = "lost_absent"
+        self.assertEqual(self.step(MONDAY, 9, 31)["status"], "buy_sent")
+        self.paper.submit_mode = "ok"
+        for mm in (32, 33, 34):
+            row = self.step(MONDAY, 9, mm)
+            self.assertEqual((row["status"], self.alerts), ("buy_sent", []), "looked up by its client id, not yet lost")
+        row = self.step(MONDAY, 9, 35)                              # the fourth lookup that finds nothing
+        self.assertEqual(row["status"], "waiting")
+        self.assertIn("lost", row["why"])
+        [work] = row["orders"]
+        self.assertEqual((work["status"], work["terminal"], work["filled"]), ("lost", True, "0"), "nothing owned")
+        [text] = self.warnings()
+        self.assertIn(work["cid"], text)
+        self.assertIn("lost", text)
+        self.assertEqual(len(self.alerts), 1, "one warning")
+        for hh, mm in ((9, 36), (9, 44), (12, 0), (15, 56)):
+            self.step(MONDAY, hh, mm)
+        self.assertEqual((len(self.paper.sent), len(self.alerts)), (1, 1), "one attempt a session, one warning")
+        self.assertFalse(self.proof.buy_passed())
+        self.step(TUESDAY, 9, 31)                                   # the next open window tries again
+        self.assertEqual(len(self.bodies("buy")), 2)
+        row = self.step(TUESDAY, 9, 32)
+        self.assertEqual(row["status"], "held")
+        self.assertTrue(self.proof.buy_passed(), "stage BUY passes on the new attempt: real equity buys may go")
+        self.step(WEDNESDAY, 9, 31)
+        self.assertEqual(self.step(WEDNESDAY, 9, 32)["status"], "passed")
+        self.assertEqual(len(self.alerts), 1)
+
+    def test_a_buy_not_found_for_ten_minutes_is_lost_whatever_the_number_of_lookups(self):
+        self.paper.submit_mode = "lost_absent"
+        self.step(MONDAY, 9, 31)
+        self.paper.submit_mode = "ok"
+        self.assertEqual(self.step(MONDAY, 9, 32)["status"], "buy_sent")
+        row = self.step(MONDAY, 9, 46)                              # the House was busy: only its second lookup
+        self.assertEqual((row["status"], row["orders"][-1]["status"]), ("waiting", "lost"))
+        self.assertEqual(len(self.warnings()), 1)
+
+    def test_a_lost_buy_that_surfaces_with_a_fill_is_the_practice_lot(self):
+        """It reached the venue after all and filled while the proof was idle: the next open window finds it by its
+        client id before anything is sent, and it is the attempt's lot (no second buy, the position reconciled to the
+        baseline read before it)."""
+        row = self.lost()
+        self.assertEqual(row["status"], "waiting")
+        [body] = self.paper.sent
+        order = self.paper._create(dict(body))                      # the venue shows it after all ...
+        self.paper._try_fill(order)                                 # ... and it filled
+        self.assertEqual(order["status"], "filled")
+        row = self.step(TUESDAY, 9, 31)
+        self.assertEqual(len(self.paper.sent), 1, "no second buy: the lost one is the practice lot")
+        self.assertEqual((row["status"], row["buy_witness"], row["hold_witness"]), ("held", True, True))
+        self.assertTrue(self.proof.buy_passed())
+        self.assertEqual(row["buy_day"], TUESDAY.isoformat(), "found on Tuesday: never sold in that session")
+        self.assertEqual(len(self.warnings()), 2, "lost, then found at the venue after all")
+        self.assertIn("after all", self.warnings()[1])
+        for hh, mm in ((9, 32), (12, 0), (15, 50)):
+            self.step(TUESDAY, hh, mm)
+        self.assertEqual(self.bodies("sell"), [])
+        self.step(WEDNESDAY, 9, 31)
+        row = self.step(WEDNESDAY, 9, 32)
+        self.assertEqual(row["status"], "passed", row.get("why"))
+        self.assertEqual(self.paper.held.get("SPY"), D(0))
+
+    def test_a_lost_buy_that_surfaces_after_the_next_attempt_began_cannot_corrupt_it(self):
+        """The next attempt read its baseline before the lost order's fill: that fill is the attempt's too (the
+        practice lot it is), so the position still reconciles and the whole of it is sold."""
+        self.lost()
+        [first] = self.paper.sent
+        self.step(TUESDAY, 9, 31)                                   # still not at the venue: the next attempt buys
+        self.assertEqual(len(self.bodies("buy")), 2)
+        order = self.paper._create(dict(first))                     # now the lost one surfaces, and fills
+        self.paper._try_fill(order)
+        row = self.step(TUESDAY, 9, 32)
+        self.assertEqual((row["status"], row["hold_witness"]), ("held", True), row.get("why"))
+        self.assertTrue(self.proof.buy_passed())
+        self.assertEqual(self.proof._owned(row), D(first["qty"]) + D(self.bodies("buy")[1]["qty"]))
+        self.step(WEDNESDAY, 9, 31)
+        [sale] = self.bodies("sell")
+        self.assertEqual(D(sale["qty"]), self.proof._owned(row), "both fills are the practice lot")
+        row = self.step(WEDNESDAY, 9, 32)
+        self.assertEqual(row["status"], "passed", row.get("why"))
+        self.assertEqual(self.paper.held.get("SPY"), D(0))
+
+    def test_a_lost_buy_that_never_surfaces_is_not_looked_for_past_the_watch(self):
+        self.lost()
+        day = MONDAY + dt.timedelta(days=7)                         # a week on: a fresh attempt, nothing carried
+        self.paper.stock_fill = "none"
+        self.step(day, 9, 31)
+        self.assertEqual([w["action"] for w in self.proof.status()["orders"]], ["buy"])
+
+    def test_a_lost_sale_goes_again_while_the_account_still_holds_the_lot(self):
+        self.bought_monday()
+        self.paper.submit_mode = "lost_absent"
+        self.assertEqual(self.step(TUESDAY, 9, 31)["status"], "sell_sent")
+        self.paper.submit_mode = "ok"
+        for mm in (32, 33, 34):
+            self.assertEqual(self.step(TUESDAY, 9, mm)["status"], "sell_sent")
+        self.assertEqual(self.alerts, [])
+        row = self.step(TUESDAY, 9, 35)                             # lost: nothing sold by it, the lot still held
+        self.assertEqual([w["status"] for w in row["orders"]][-2:], ["lost", "unknown"],
+                         "the sale went again in the same minute: the account still holds the lot")
+        self.assertEqual(len(self.warnings()), 1)
+        sales = self.bodies("sell")
+        self.assertEqual((len(sales), sales[1]["qty"]), (2, sales[0]["qty"]))
+        self.assertTrue(sales[1]["client_order_id"].endswith("-s2"))
+        row = self.step(TUESDAY, 9, 36)
+        self.assertEqual(row["status"], "passed", row.get("why"))
+        self.assertTrue(self.proof.sell_passed())
+        self.assertEqual(len(self.alerts), 1)
+
+    def test_a_lost_sale_that_may_have_filled_is_not_sent_again(self):
+        """The equity book's `_lost_sale_check`: had the lost sale filled, the account would hold less."""
+        self.bought_monday()
+        self.paper.submit_mode = "lost_absent"
+        self.step(TUESDAY, 9, 31)
+        self.paper.submit_mode = "ok"
+        self.paper.held["SPY"] = D(0)                               # the account no longer holds the lot
+        for mm in (32, 33, 34, 35, 36):
+            row = self.step(TUESDAY, 9, mm)
+        self.assertEqual((row["status"], len(self.bodies("sell"))), ("held", 1), "no second sale")
+        self.assertIn("lost", row["why"])
+        self.assertEqual(self.proof.sell_failed(), "", "not failed while its window is open")
+        self.step(TUESDAY, 15, 55, 3)
+        self.assertIn("SELL stage failed", self.proof.sell_failed())
+        self.assertEqual([level for level, _ in self.alerts], ["warning", "error"], "lost, then the stage's failure")
+        # The next session it still cannot sell: the stage fails again at that window's end, never silently.
+        row = self.step(WEDNESDAY, 9, 31)
+        self.assertEqual((row["status"], len(self.bodies("sell"))), ("held", 1))
+        self.step(WEDNESDAY, 15, 55, 3)
+        self.assertEqual(self.state.get(STOCK_SELL_KEY)["failures"], 2)
+        self.assertEqual([level for level, _ in self.alerts], ["warning", "error", "error"])
+
+    def test_a_lost_buy_that_surfaces_unfilled_and_ended_costs_nothing(self):
+        self.lost()
+        [body] = self.paper.sent
+        order = self.paper._create(dict(body))
+        order["status"], order["canceled_at"] = "expired", iso(self.clock())   # it reached the venue and expired unfilled
+        row = self.step(TUESDAY, 9, 31)
+        self.assertEqual((row["status"], len(self.bodies("buy"))), ("waiting", 1), "found ended and unfilled")
+        self.assertEqual(row["buy_day"], MONDAY.isoformat(), "no fill: no lot, and no session of it")
+        self.step(TUESDAY, 9, 32)
+        self.assertEqual(len(self.bodies("buy")), 2, "so this open window buys")
+        row = self.step(TUESDAY, 9, 33)
+        self.assertEqual((row["status"], row["buy_day"]), ("held", TUESDAY.isoformat()))
+        self.assertTrue(self.proof.buy_passed())
+        self.assertEqual([w["status"] for w in row["orders"]], ["filled"], "the ended order is not carried")
+
+    def test_a_restart_keeps_the_lookups_and_the_loss(self):
+        self.paper.submit_mode = "lost_absent"
+        self.step(MONDAY, 9, 31)
+        self.paper.submit_mode = "ok"
+        self.step(MONDAY, 9, 32)
+        self.step(MONDAY, 9, 33)
+        again = self.new_proof()
+        self.assertEqual(self.step(MONDAY, 9, 34, proof=again)["status"], "buy_sent")
+        row = self.step(MONDAY, 9, 35, proof=again)
+        self.assertEqual((row["status"], row["orders"][-1]["lookups"]), ("waiting", 4))
+        self.assertEqual(len(self.warnings()), 1)
+        self.step(TUESDAY, 9, 31, proof=self.new_proof())
+        self.assertEqual(len(self.bodies("buy")), 2)
+
+    def test_a_lost_sale_that_surfaces_filled_completes_the_round_trip(self):
+        self.bought_monday()
+        self.paper.submit_mode = "lost_absent"
+        self.step(TUESDAY, 9, 31)
+        self.paper.submit_mode = "ok"
+        [sale] = self.bodies("sell")
+        for mm in (32, 33, 34):
+            self.step(TUESDAY, 9, mm)
+        order = self.paper._create(dict(sale))                      # at the venue after all, and filled, before the
+        self.paper._try_fill(order)                                 # lookup that would have given it up
+        row = self.step(TUESDAY, 9, 35)
+        self.assertEqual(row["status"], "passed", row.get("why"))
+        self.assertEqual((len(self.bodies("sell")), self.alerts), (1, []))
+
+    def test_the_options_proofs_lookup_is_as_it_was(self):
+        """The options `PaperProof` keeps its own behaviour exactly: an order not found stays unresolved."""
+        import inspect
+
+        source = inspect.getsource(P.PaperProof)
+        self.assertNotIn("STOCK_LOST", source)
+        self.assertNotIn("lost", source.replace("a lost cancel answer", ""))
+        self.assertIn("the dispatched order is not yet found; its outcome remains unresolved", source)
 
 
 if __name__ == "__main__":
