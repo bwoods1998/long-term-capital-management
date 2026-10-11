@@ -48,9 +48,9 @@ seconds spent reach `cpu_seconds_night` or the clock is within 300 s of the next
 `forward_twins.finish`; one `fwd_runs` row (`programs` = the programs whose run completed THAT NIGHT, whichever start
 of the job ran them: what the registry's suspect rule reads beside `run_failed`, which is attributed the same way;
 `sessions`, `errors`, `stale` and `seconds` are this start's own: the run sessions it recomputed, what it left, the
-child seconds it spent; the receipt's `programs` is this start's too). Each league/ops/forward_twins.py call sits in its own try/except: a
-twins failure never loses a shadow day; so do the registry's sync, the controls and the finals, each named in the
-receipt when it failed.
+child seconds it spent; the receipt's `programs` is this start's too). Each league/ops/forward_twins.py call sits in
+its own try/except: a twins failure never loses a shadow day; so do the registry's sync, the controls and the finals,
+each named in the receipt when it failed.
 
 A LABEL THAT RETURNS. Every reader of the record takes the NEWEST engine id as the current series
 (`forward_db.engine_now`: the meters, the session caps of the stop rules, the twins). A label that already has a row
