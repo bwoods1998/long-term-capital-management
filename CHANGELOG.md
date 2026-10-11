@@ -26,8 +26,8 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
-Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
+The running House release is `20261011T114321Z-af12ca87b92f` (main `87f9fd0c`, release E2.2, 11:44Z Oct 11), the
+gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
 
 ### Release E3, record and measure: the forward record, the fill measurements, the hidden year and the contamination probe, on `feat/equity-e3` (unreleased; the gateway's merge list, then an owner deploy on main's E2.2; no identity moves; records only)
 
@@ -104,7 +104,53 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   `elane_folds` and `elane_review`) and one pin of `league/tests/test_e3_identities.py`. The three ids read on the
   merged tree are main's, on Python 3.11 and 3.14. `league/ops/E3_INTERFACES.md` section 12.
 
-### Release E2, integrated on E1: the swarm breeds share programs for the BETA and EQUITY lanes, on `feat/equity-e2-int` (unreleased; an owner deploy with or after E1; no identity moves; ships switched off)
+### 11:44Z Oct 11, 2026: release E2.2, the equity lanes read ctx as it is given (#538), House `20261011T114321Z-af12ca87b92f`, main `87f9fd0c`; gateway `0c093de7`
+
+Gateway first (`0c093de7`, 455/455; rollback `8a349b8e`): its merge list gains E2's five swarm modules, a tightening.
+Then the owner deploy: CI green on the exact head; no order in flight at 11:43:17Z; promoted 11:44:05Z (rollback
+`20261011T082429Z-ee10331072db`), nightly back 11:54Z, updater repointed. Verified 11:54Z: health clean, real money
+on, execution fingerprint `b60410ad`, constitution `e909eb10`, money `7e41909a`, gate contract `397b22b772b3`, all
+unchanged, so no grant ratification and no band reset; the two seeded programs keep their Probe seats.
+
+- Why it shipped alone: it was built to ship with the START check (E2.1) in one release; E2.1's independent check
+  was still running, and came back not ready an hour later. E2.1 is not deployed.
+- The release's own check found that the reading rule let through bars read "as a dict, else as rows" behind a
+  type check; fixed before the deploy (the last commit of #538), with the contract's list of exception names.
+- No deploy (`swarm.json`): 11:54Z `elane.e2.pace_share` 0.5 -> 1.5 and `elane.e2.usd_day` 12; 12:42Z by measured
+  yield per dollar `pace_share` 2.0, `usd_day` 16, `gym.max_boxes` 3 -> 2, `architect.every_seconds` 5400 -> 10800.
+- Seen on the House after: every version the researchers wrote under the new contract ran (none disqualified by
+  the misreading); the first bred family passed the Train bar 12:26Z, its Validation 12:28Z, and took its one
+  sealed look 12:28:51Z under S2, which it did not pass.
+
+### 08:25Z Oct 11, 2026: release E2, the swarm breeds share programs (#536), House `20261011T082429Z-ee10331072db`, main `5ad1f01e`
+
+Owner deploy only (the gateway's merge list for E2's modules followed with E2.2, above): CI green on the exact head;
+no order in flight at 08:24:18Z; promoted 08:25:13Z (rollback `20261011T071808Z-351f760913c3`), nightly back
+08:35Z, updater repointed. Verified 08:35Z: health clean, real money on, the four ids unchanged from E1's. It shipped
+switched off.
+
+- No deploy (`swarm.json`): 08:36Z equity births on: `elane.birth_share` 0.5, `elane.e2.pace_share` 0.5,
+  `births_every_seconds` 1800, `min_per_pass` 3, `max_alive` 48; the options lanes made small: `gym.max_boxes` 7 ->
+  3, `architect.every_seconds` 1800 -> 5400.
+- Seen in the first hour: most scored versions were disqualified by one misreading of the contract (a symbol's
+  bars read by key), and the lanes were held to about $4 a day by the pace bound. Both are E2.2's reason.
+
+### 07:18Z Oct 11, 2026: release E1, the share lane (#535), House `20261011T071808Z-351f760913c3`, main `05f83d9e`; gateway `8a349b8e`
+
+Gateway first (`8a349b8e`, 455/455; rollback `95e7a8d0`): its merge list gains `league/equity/`,
+`league/swarm/elane.py`, `league/xs/` and `ltcm/broker.py`. Then the owner deploy: CI green on the exact head; no
+order in flight at 07:17:57Z; promoted 07:18:52Z (rollback `20261010T214125Z-d4667186f969`, allowed only while no
+equity lot is open), nightly back 07:29Z, updater repointed. Verified 07:29Z: health clean, real money on;
+execution fingerprint `31a7e921` -> `b60410ad`, money `fdf2ac7c` -> `7e41909a` (the grant ratified on it
+07:19:26Z), constitution `e909eb10`, gate contract `397b22b772b3` unchanged; the `equity_data` job ran and its
+audit passed; the equity tables exist; the stage BUY practice proof waits for an open window.
+
+- No deploy (`swarm.json`): 07:29:55Z `elane.mode` "gate".
+- The three seeded programs took their looks in the registered order (decision A18): `seed-overnight-qqq` and
+  `seed-reversal-index` passed under S2 and hold Probe seats; `seed-overnight-spy` was refused its look as the
+  same lineage as the first. No share order was owed for Monday's open.
+
+### Release E2, integrated on E1: the swarm breeds share programs for the BETA and EQUITY lanes, on `feat/equity-e2-int` (DEPLOYED 08:25Z Oct 11; an owner deploy with or after E1; no identity moves; ships switched off)
 
 - **What it adds** (`league/swarm/ELANE_E2.md`): the architect's equity pass (families with their first program, on
   the model route chosen by measured yield per dollar), the Train bar equity-v1 on the Train years 2016-19 and 2022-24
@@ -161,7 +207,7 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
 - Operations: [docs/operations.md](docs/operations.md), "The equity lanes' births" (switch on, read, stop, the budget,
   the yield record).
 
-### Release E2.2: the equity lanes read ctx as it is given, and their pace is their own, on `feat/equity-e22-yield` (unreleased; an owner deploy; no identity moves; the shipped settings are unchanged)
+### Release E2.2: the equity lanes read ctx as it is given, and their pace is their own, on `feat/equity-e22-yield` (DEPLOYED 11:44Z Oct 11; an owner deploy; no identity moves; the shipped settings are unchanged)
 
 Two things seen in the equity births' first hour on the House, each fixed in E2's own modules and documents.
 
@@ -219,7 +265,7 @@ Two things seen in the equity births' first hour on the House, each fixed in E2'
   restart check; the rule's tables are held to E1's own definitions) and `league/tests/test_elane_e2_yield2.py` (a
   day at four lines against the real Sail guard a minute at a time, and the real loop at the guard's line).
 
-### Release E1, the verification's last fixes, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1)
+### Release E1, the verification's last fixes, on `feat/equity-e1` (DEPLOYED 07:18Z Oct 11; an owner deploy with the rest of E1)
 
 Two independent verifiers read E1 after the review's and the rehearsal's fixes and found no blocker and no major.
 What they did find is fixed here, each with a test that failed before.
@@ -269,7 +315,7 @@ What they did find is fixed here, each with a test that failed before.
   (`league/tests/test_equity_rehearsal.py` `ThePublicWording`). Comments, docstrings and docs only: no code and no
   fingerprint moves.
 
-### Release E1, the Probe sleeve at 0.50 x E (the captain's A20), on `feat/equity-e1` (merged from `feat/equity-e1-sleeve`, then set to the row the study's review adopted; unreleased; an owner deploy with the rest of E1; the money digest E1 deploys is `7e41909a`, one move with the block; no evidence reset)
+### Release E1, the Probe sleeve at 0.50 x E (the captain's A20), on `feat/equity-e1` (merged from `feat/equity-e1-sleeve`, then set to the row the study's review adopted; DEPLOYED 07:18Z Oct 11; an owner deploy with the rest of E1; the money digest E1 deploys is `7e41909a`, one move with the block; no evidence reset)
 
 - **The rule.** `equity_money.probe.sleeve_share` "0.25" -> "0.50" and its bound
   (`EQUITY_MONEY_BOUNDS["probe.sleeve_share"]`) ("0", "0.25") -> ("0", "0.50"), in `league/constitution.py`. Three
@@ -347,7 +393,7 @@ What they did find is fixed here, each with a test that failed before.
   `test_equity_fx_daily` `TheSizingUpStepIsParked` (the real book: 999 winning real closes, no band move, every
   close in the Probe tallies and in the shared budget's net figure).
 
-### Release E1, the rehearsal on real data: the data job, the vendor's cents, the seeds' order, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
+### Release E1, the rehearsal on real data: the data job, the vendor's cents, the seeds' order, on `feat/equity-e1` (DEPLOYED 07:18Z Oct 11; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
 
 Before the first deploy, E1's data job, its audit, the store, the three seeds' Train runs and the screen's floor were
 run once on the House box against real SIP bars (a temporary copy; nothing live touched; no Validation and no look),
@@ -407,7 +453,7 @@ real data, so no store was ever written.** Ten defects; every blocker and major 
   is the cent); the swarm fixer's seed order (SPY first) is replaced by the declared one; the look round's "one
   family's error never stops the others" holds, with the seeds' wait beside it.
 
-### Release E1, the review's fixes on the order path, the book's daily step and the options book's hooks, on `feat/equity-e1` (merged from `feat/equity-e1-fx-orders`, `-fx-daily`, `-fx-hooks`; unreleased; an owner deploy with the rest of E1; no money-digest move)
+### Release E1, the review's fixes on the order path, the book's daily step and the options book's hooks, on `feat/equity-e1` (merged from `feat/equity-e1-fx-orders`, `-fx-daily`, `-fx-hooks`; DEPLOYED 07:18Z Oct 11; an owner deploy with the rest of E1; no money-digest move)
 
 The other 38 of the review's 56 findings, both blockers among them. Each is fixed with a test that failed before
 (`league/tests/test_equity_fx_orders.py`, `test_equity_fx_daily.py`, `test_equity_fx_hooks.py`).
@@ -453,7 +499,7 @@ The other 38 of the review's 56 findings, both blockers among them. Each is fixe
   buys on a price mismatch only, notes a volume difference and marks each symbol on its own verdict; the sizing-up
   rule's buy-and-hold is priced on one adjustment basis.
 
-### Release E1, the review's fixes on the swarm, evidence, ops and docs side, on `feat/equity-e1` (merged from `feat/equity-e1-fx-swarm`; unreleased; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
+### Release E1, the review's fixes on the swarm, evidence, ops and docs side, on `feat/equity-e1` (merged from `feat/equity-e1-fx-swarm`; DEPLOYED 07:18Z Oct 11; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
 
 The adversarial review of `feat/equity-e1` (five reviewers, Oct 10) found 56 defects; these are the 18 on the swarm,
 evidence, ops and docs side (the order path's, the daily step's and the live hooks' are the entry above).
@@ -521,7 +567,7 @@ evidence, ops and docs side (the order path's, the daily step's and the live hoo
   fingerprint's file list), `test_equity_store` and `test_equity_runner` (the slice's `first`), `test_dlane_report_equity`
   (the funnel's fixture, A14's status words, the row's `label`).
 
-### Release E1, ready for review: S2 is the gate, the equity identity covers evidence only, the Done text pre-registered, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; no further money-digest move)
+### Release E1, ready for review: S2 is the gate, the equity identity covers evidence only, the Done text pre-registered, on `feat/equity-e1` (DEPLOYED 07:18Z Oct 11; an owner deploy with the rest of E1; no further money-digest move)
 
 - **S2 is the House's share screen** (the captain's A11). Both lanes' blocks of policy.json pin receipt 2
   (`docs/benchmarks/equity_screen_2.json`, the study's receipt copied verbatim, sha256 `45634dfc...`), and every look
@@ -572,7 +618,7 @@ evidence, ops and docs side (the order path's, the daily step's and the live hoo
   day), `test_equity_e2e` (a seeded program passes its look under the committed receipt 2), `test_equity_identity`,
   `test_equity_isolation`, `test_equity_decider` (A13), `test_dlane_report_equity` (A14, an S2 row), `test_ci`.
 
-### Release E1, the equity lane: ops, data, twins and the Done meter, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1)
+### Release E1, the equity lane: ops, data, twins and the Done meter, on `feat/equity-e1` (DEPLOYED 07:18Z Oct 11; an owner deploy with the rest of E1)
 
 - **The data job** `equity_data` (`league/ops/equity_data.py`, registered at the House's start and daily 22:30Z, in a
   pause too): Alpaca SIP daily bars of the equity universe through the gateway's bars route, adjustment=raw and
@@ -603,7 +649,7 @@ evidence, ops and docs side (the order path's, the daily step's and the live hoo
   route as the House sees it). Proof: `test_equity_data`, `test_equity_twins`, `test_dlane_report_equity`,
   `test_floor_box_equity`; `test_dlane_report`'s fixtures now count from the rule's inception explicitly.
 
-### Release E1 integrated: the seven packages agree, receipt 1 pinned (since replaced by receipt 2: S2, above), the staged stock proof, the switch on, on `feat/equity-e1` (unreleased; an owner deploy; the options execution fingerprint moves once, the money digest moves, a new equity identity)
+### Release E1 integrated: the seven packages agree, receipt 1 pinned (since replaced by receipt 2: S2, above), the staged stock proof, the switch on, on `feat/equity-e1` (DEPLOYED 07:18Z Oct 11; an owner deploy; the options execution fingerprint moves once, the money digest moves, a new equity identity)
 
 - The integration of the seven E1 packages (core, money, screen, book, hooks, swarm, ops) and `origin/main`. What the
   packages had built against each other's stubs now meets: `league/tests/test_equity_e2e.py` runs a seeded program from

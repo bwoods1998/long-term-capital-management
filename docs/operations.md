@@ -273,7 +273,7 @@ between. **Verified at the integration** (`league/tests/test_e3_end_to_end.py`, 
 synthetic market and a synthetic live book): a Train scoring to a Done checkpoint through every job, the generators'
 views byte for byte unchanged, and every job a skipped receipt that touches nothing with the three modes off.
 
-## The equity lanes' births (release E2, Oct 2026): `feat/equity-e2-int`, not deployed
+## The equity lanes' births (release E2, Oct 2026): deployed 08:25Z Oct 11 (E2.2 11:44Z Oct 11)
 
 E1 (the next section) gives the equity lanes their live path and three captain-seeded programs. E2 makes the swarm
 breed share programs itself, for the BETA and EQUITY lanes: the architect's **equity pass** proposes families with their
@@ -465,7 +465,7 @@ with no look-back reads the last 2021 session; sealing those bars too would
 be a change in E1's runner or store, the captain's call when the reserve's accessor is built. Post-earnings drift is
 named in the agenda and refused until earnings data exist.
 
-## The equity lane (release E1, Oct 2026): `feat/equity-e1`, not deployed
+## The equity lane (release E1, Oct 2026): deployed 07:18Z Oct 11
 
 The owner's goal of Oct 10, 2026, on the House's side: agent programs trade long-only ETFs (stocks later, E3) with real
 money through the House's own **EquityBook** (`league/equity/live.py`; its tables `eq_lots`, `eq_orders`, `eq_fills`,
