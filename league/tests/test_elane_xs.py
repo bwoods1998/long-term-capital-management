@@ -522,10 +522,10 @@ class NoThresholdReachesAGenerator(unittest.TestCase):
             for word in ("c_XS", "c_used", "c_p", "c_margin", "alpha_plac", "p_plac", "t_H", "fp_cap", "own_fp",
                          pinned.receipt_sha256[:12]):
                 self.assertNotIn(word, text, where)
-            for count in ("999", "119", "1000", "1,000"):  # the placebo draws and the bar on them (a year is no count)
-                if where == "the contract" and count == "999":
+            for count in ("999", "119", "1000", "1,000"):  # the placebo draws and the bar on them (a year is no count,
+                if where == "the contract" and count == "999":  # nor is a sleeve's dollars)
                     continue  # XS.md (package C's) says how many portfolios the screen draws: never the bar on them
-                self.assertIsNone(re.search(rf"(?<![\d.]){re.escape(count)}(?!\d)", text), (where, count))
+                self.assertIsNone(re.search(rf"(?<![\d.$]){re.escape(count)}(?!\d)", text), (where, count))
             for sentence in re.split(r"(?<=[.;:])\s+", " ".join(text.split())):
                 if not re.search(r"XS1|screen|Validation|\blook\b|holdout", sentence):
                     continue
