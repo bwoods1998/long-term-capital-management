@@ -193,6 +193,89 @@ class OnE1(unittest.TestCase):
         facts = guard.read(root / "swarm.sqlite", lambda db: ST.swarm_facts(db, self.clock()))
         self.assertEqual((facts["births"], facts["alive"], facts["gym_runs"]), (0, 1, 0))
 
+    def test_an_equity_validation_never_reads_a_stalled_options_validation_as_moving(self):
+        # The integration review's loop-4 and merge-3: patch 10 took the equity lanes out of the births, population and
+        # Gym counts; the `validations` cause still counted equity Validation runs and listed an E2 family between its
+        # Train pass and E1's try among those owed an OPTIONS Validation.
+        from league.ops import guard
+        from league.ops import stall as ST
+
+        root = Path(self.store.root)
+        self.store.add_family({"id": "opt-owed", "mechanism": "An invented options idea owed a Validation.",
+                               "structure": "debit_vertical", "roots": ["SPY"]}, origin="architect")
+        self.store.add_version("opt-owed", "def decide(ctx):\n    return []\n", {}, author="t")
+        self.store.update_family("opt-owed", best_version=1)
+
+        def facts() -> dict:
+            return guard.read(root / "swarm.sqlite", lambda db: ST.swarm_facts(db, self.clock()))
+
+        def stalled(f: dict) -> bool:
+            # The cause's own rule (league/ops/stall.py `checks`, "validations"), with no round on record.
+            return (f["validation_runs"] == 0 and f["judged"] == 0 and f["validation_inherited"] == 0
+                    and len(f["awaiting_ids"]) > 0)
+
+        before = facts()
+        self.assertEqual((before["validation_runs"], before["awaiting_ids"]), (0, ["opt-owed"]))
+        self.assertTrue(stalled(before))
+        # An E2 family passed Train (its best_version set by E2's review step) and waits for E1's try.
+        fx.e2_family(self.store, "e2-pass", code=fx.program(),
+                     record={"status": "passed", "passed_version": 1, "versions": {"1": {"passed": True, "fails": []}}})
+        self.store.update_family("e2-pass", best_version=1)
+        waiting = facts()
+        self.assertEqual((waiting["awaiting_ids"], waiting["equity_awaiting_ids"], waiting["train_bests"]),
+                         (["opt-owed"], ["e2-pass"], 1), "it is owed the equity round's Validation, not the options one")
+        # Its Validation runs on the House (E1's rows), and an inherited verdict's row beside it.
+        self.store.add_run("e2-pass", 1, {"run_id": "eqval-1", "status": "ok", "trials": 1, "summary": {}},
+                           window="validation", stress=1.0, purpose="validation")
+        self.store.add_run("e2-pass", 1, {"run_id": "eqval-2", "status": "ok", "trials": 0, "summary": {}},
+                           window="validation", stress=1.5, purpose="validation")
+        self.store.update_family("e2-pass", validated_version=1)
+        after = facts()
+        self.assertEqual((after["validation_runs"], after["validation_inherited"], after["last_validation_at"],
+                          after["equity_validation_runs"], after["awaiting_ids"]), (0, 0, None, 2, ["opt-owed"]))
+        self.assertTrue(stalled(after), "the options family is still owed one and no options Validation ran")
+        # An options Validation does move it.
+        self.store.add_run("opt-owed", 1, {"run_id": "optval-1", "status": "ok", "trials": 1, "summary": {}},
+                           window="validation", stress=1.0, purpose="validation")
+        moved = facts()
+        self.assertEqual((moved["validation_runs"], moved["equity_validation_runs"]), (1, 2))
+        self.assertIsNotNone(moved["last_validation_at"])
+        self.assertFalse(stalled(moved))
+
+    def test_done_item_7_counts_the_options_lanes_and_reports_the_equity_lanes_beside(self):
+        # loop-4, the Done rule's item 7 read (league/ops/dlane_report.py `Research247.day`): on a UTC day when only
+        # the equity lanes did anything it read births 1, Gym runs 5 and Validations 1, so a day when the options
+        # researchers were paused read as research running.
+        import time
+
+        from league.ops import dlane_report as R
+
+        day = time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
+        self.store.add_family({"id": "opt-0", "mechanism": "An invented options idea number zero.",
+                               "structure": "debit_vertical", "roots": ["SPY"]}, origin="architect")
+        eq = fx.e2_family(self.store, "eq-0", code=fx.program())
+        self.store.event("swarm.born", eq["id"], {"lane": "beta", "structure": "etf", "roots": ["SPY"]})
+        for i, k in enumerate((1.0, 1.0, 1.5, 1.5)):
+            self.store.add_run(eq["id"], 1, {"run_id": f"eqt-{i}", "status": "ok", "trials": 1, "summary": {}},
+                               window="train", stress=k, purpose="elane_train")
+        self.store.add_run(eq["id"], 1, {"run_id": "eqv-1", "status": "ok", "trials": 1, "summary": {}},
+                           window="validation", stress=1.0, purpose="validation")
+        read = R.Research247(self.store, Path(self.store.root)).day(day)
+        self.assertEqual((read["births"], read["gym_runs"], read["validations"]), (0, 0, 0))
+        self.assertEqual(read["equity"], {"births": 1, "train_runs": 4, "validations": 1})
+        self.assertFalse(read["holds"])
+        for word in ("no births", "no Gym runs", "no Validations"):
+            self.assertIn(word, read["why"])
+        # The options lanes' own day is counted as before, the equity rows beside it unchanged.
+        self.store.event("swarm.born", "opt-0", {"structure": "debit_vertical", "roots": ["SPY"]})
+        self.store.add_run("opt-0", None, {"run_id": "g-1", "status": "ok", "trials": 1, "summary": {}}, window="train",
+                           stress=1.0, purpose="research")
+        self.store.add_run("opt-0", None, {"run_id": "v-1", "status": "ok", "trials": 1, "summary": {}}, window="validation",
+                           stress=1.0, purpose="validation")
+        read = R.Research247(self.store, Path(self.store.root)).day(day)
+        self.assertEqual((read["births"], read["gym_runs"], read["validations"]), (1, 2, 1))
+        self.assertEqual(read["equity"], {"births": 1, "train_runs": 4, "validations": 1})
+
 
 @unittest.skipUnless(E1, "E1's equity lanes are not in this tree (the E2 branch's skeleton)")
 class StateOnE1(unittest.TestCase):

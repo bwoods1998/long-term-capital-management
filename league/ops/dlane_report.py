@@ -1484,6 +1484,12 @@ class Research247:
       2026) a day with none is not held ("no stall receipt"), as a day with no budget receipt is not: the stall job
       failing all day (an unreadable swarm store) or missed is a day nobody looked for an owner step, never a day with
       none waiting.
+    RELEASE E2, WHICH LANES THE RULE MEANS: the day's three counts are the OPTIONS lanes' (the pinned rule's "Gym runs"
+    are the Gym's, and it was written when every birth and Validation was an options one). The equity lanes' births,
+    their Train runs on the House and their Validations are reported BESIDE (`equity`), never a part of a count and
+    never a bar: an equity row must not make a day hold while the options researchers were paused (the integration
+    review's loop-4), and a day without an equity birth fails nothing. Counting the equity lanes in item 7 is the
+    owner's change of the pinned rule, not this reader's.
     A day holds when births, Gym runs and Validations are each above 0, `at_budget` is True, the day has a stall receipt
     and `owner` is empty; the window holds when every day does. The operator's edits of swarm.json and budget.json in the
     window are LISTED (`edits`, from their before-copies) beside it: the pinned rule reads "no captain" as no owner step
@@ -1518,12 +1524,19 @@ class Research247:
         start, end = f"{day}T00:00:00Z", (datetime.fromisoformat(day) + timedelta(days=1)).date().isoformat() + "T00:00:00Z"
         one = lambda sql, params: int((self.store._all(sql, params) or [{"n": 0}])[0]["n"] or 0)  # noqa: E731
         marks = ",".join("?" * len(NOT_RUN))
-        births = one("SELECT count(*) AS n FROM events WHERE kind='swarm.born' AND at>=? AND at<?", (start, end))
+        # THE OPTIONS LANES' counts (the class docstring): the stall facts' own filters (league/ops/stall.py).
+        from .stall import OPTIONS_BIRTHS, OPTIONS_RUNS
+
+        born = "SELECT count(*) AS n FROM events WHERE kind='swarm.born' AND at>=? AND at<?"
+        births = one(f"{born} AND {OPTIONS_BIRTHS}", (start, end))
         births += one("SELECT count(*) AS n FROM families WHERE origin='game' AND born_at>=? AND born_at<?", (start, end))
-        gym = one(f"SELECT count(*) AS n FROM runs WHERE at>=? AND at<? AND status NOT IN ({marks}) AND trials > 0",
-                  (start, end, *NOT_RUN))
-        validation_rows = one(f"SELECT count(*) AS n FROM runs WHERE \"window\"='validation' AND at>=? AND at<? AND "
-                              f"status NOT IN ({marks})", (start, end, *NOT_RUN))
+        ran = f"SELECT count(*) AS n FROM runs WHERE at>=? AND at<? AND status NOT IN ({marks})"
+        gym = one(f"{ran} AND trials > 0 AND {OPTIONS_RUNS}", (start, end, *NOT_RUN))
+        validation_rows = one(f"{ran} AND \"window\"='validation' AND {OPTIONS_RUNS}", (start, end, *NOT_RUN))
+        # THE EQUITY LANES, beside: their births, their Train runs on the House and their Validations.
+        equity = {"births": one(f"{born} AND NOT ({OPTIONS_BIRTHS})", (start, end)),
+                  "train_runs": one(f"{ran} AND \"window\"='train' AND NOT ({OPTIONS_RUNS})", (start, end, *NOT_RUN)),
+                  "validations": one(f"{ran} AND \"window\"='validation' AND NOT ({OPTIONS_RUNS})", (start, end, *NOT_RUN))}
         judged = 0
         for row in self.store._all("SELECT payload FROM events WHERE kind='swarm.tournament' AND at>=? AND at<?",
                                    (start, end)):
@@ -1563,7 +1576,7 @@ class Research247:
         if owner:
             whys.append(f"an owner step waiting ({', '.join(sorted(owner))})")
         out = {"day": day, "births": births, "gym_runs": gym, "validations": validation_rows + judged,
-               "validation_rows": validation_rows, "judged": judged, "at_budget": at_budget,
+               "validation_rows": validation_rows, "judged": judged, "equity": equity, "at_budget": at_budget,
                "limited_by": sorted(limits), "owner": sorted(owner), "stall_receipts": stalls,
                "holds": not whys, "why": "; ".join(whys) or None}
         self.days[day] = out
@@ -1589,8 +1602,9 @@ class Research247:
                  if failing else "no day in the window"),
                 "days": days, "edits": edits[-EDITS_LISTED:], "edits_count": len(edits),
                 "note": "DONE-RULE item 7 as pinned: births, Gym runs and Validations every UTC day, at the research "
-                        "budget (no taper), with no owner step waiting; the operator's edits of swarm.json and "
-                        "budget.json are listed beside it, never a bar"}
+                        "budget (no taper), with no owner step waiting; the counts are the options lanes' and the "
+                        "equity lanes' are reported beside each day (`equity`), never a bar; the operator's edits of "
+                        "swarm.json and budget.json are listed beside it, never a bar"}
 
 
 # ------------------------------------------------------------------------------------------------- the funnel
