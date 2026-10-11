@@ -779,7 +779,7 @@ def decide(ctx):
 #: anchor. A lot's weight in the sleeve is the asked share times the lot's own return times budget over equity, so the
 #: weight set against that return is the run's profit, and nothing static tells it from an honest weight cap. This
 #: program is a profit lock with no memory; the level rule and the restart check both pass it; the paid readers' rubric
-#: names the pattern.
+#: names the pattern, and since release E2.1 the Train bar's start check refuses it (test_elane_e2_start.py).
 WEIGHT_LOCK = '''NEEDS = {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 4}
 PARAMS = {"share": 0.5, "lock": 0.01, "small": 0.02}
 
@@ -1461,7 +1461,8 @@ class TheLockWithNoMemoryOnE1sEngine(unittest.TestCase):
         check = self.restart("weight", WEIGHT_LOCK)
         self.assertTrue(check["held"], check)
         self.assertEqual(check["matched"], check["sessions"])
-        self.assertIsNone(elane_train.check_code(WEIGHT_LOCK, ["SPY"]), "left to the two paid readers (the rubric)")
+        self.assertIsNone(elane_train.check_code(WEIGHT_LOCK, ["SPY"]),
+                          "left to the start check (test_elane_e2_start.py) and the two paid readers (the rubric)")
 
 
 class TheMemoryRule(unittest.TestCase):

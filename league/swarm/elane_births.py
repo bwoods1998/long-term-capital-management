@@ -239,6 +239,9 @@ price against its own moving average or recent high, the calendar fields), never
 sleeve's own dollars since the run began (ctx.equity, ctx.cash, ctx.budget, ctx.caps or a lot's value, pnl or qty against
 a constant, a PARAMS value, ctx.budget or what a lot cost: every judged run starts flat, live trading never restarts where
 a window does, and a rule whose trading depends on how far the run is ahead or behind is refused, whatever its spelling).
+The Train bar also RUNS every program again from later starts and fails one whose orders change with the day its run
+began (START, in the request): a program decides from ctx's bars, its calendar fields and each lot's own facts alone, and
+sizes a buy by a constant share of the sleeve.
 
 Reply with ONE JSON object: {"families": [{"slug": "short-kebab-name", "lane": "beta or equity", "agenda": "<one key of
 THE AGENDA>", "mechanism": "one or two sentences: why it should make money and who pays", "structure": "etf", "symbols":

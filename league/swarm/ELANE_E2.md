@@ -210,11 +210,13 @@ Stopping, from the lightest:
      A PASS JUDGED BEFORE THE CHECK EXISTED (a verdict with no `start` record) is not current until its version has
      had its Validation try: the next round Train-scores it again before E1 may validate it (kept with its start
      check on record, or withdrawn with the code START).
-     WHAT IT COSTS, measured (the build machine, a 16-core desktop, E1's decider in process): a version that meets
-     Y1-R1 and STATE is run four more times at 1.0x (the bar's own runs are four) and decided once more on every
-     session of each of its six 1.0x runs, 4,898 decides at the spans' real lengths; about half a second for the four
-     runs and one to one and a half for the decides of a one- to four-symbol program with a short look-back, about
-     as much again as the restart check. A version that fails Y1-R1 or STATE costs nothing more.
+     WHAT IT COSTS, measured (the build machine, a 16-core desktop; E1's decider in a real child and in process
+     gave the same within a tenth of a second): a version that meets Y1-R1 and STATE is run four more times at 1.0x
+     (the bar's own runs are four) and decided once more on every session of each of its six 1.0x runs, 4,898
+     decides at the spans' real lengths. For programs of one to four symbols with a look-back of 2 to 504 sessions:
+     0.3 to 0.7 seconds for the four runs and 1.0 to 2.1 for the decides, 1.4 to 2.6 seconds a version in all, one and
+     a half to two times the restart check (0.8 to 1.7 seconds; the bar's own four runs take 0.4 to 0.9). A version
+     that fails Y1-R1 or STATE costs nothing more.
      WHAT IT DOES NOT CATCH, stated: (1) a lock no Train run ever reaches (a threshold above anything the program
      earned on Train never changed an order there); (2) a lock that closes within a session or two of EVERY start,
      so that what differs stays inside the 1% and the 5% (such a program trades its token size on nearly every Train
@@ -470,6 +472,7 @@ the three identities do not move. A version that reaches it makes eight Train ru
 A15 added no patch: the Train spans and the restart check use what E1 already provides (the runner's
 `train(start, end)` and `decider`, the decider kinds, the ctx builder), and the restart check's instances live in the
 swarm's own decider child under keys of their own, dropped when it ends. Since A15 a version's Train run is four runs
-(two spans at two stresses), so E2's runs on the House are up to about 72 an hour. The A15 review's fixes added none
+(two spans at two stresses), so E2's runs on the House are up to about 72 an hour (since E2.1 a version that
+reaches the start check makes four more: 144 at most). The A15 review's fixes added none
 either: the restart check now also reads `stats.errors` from E1's decide answer, which E1's runner already gives
 beside `stats.calls` (an answer without it is the House's failure, never a pass).
