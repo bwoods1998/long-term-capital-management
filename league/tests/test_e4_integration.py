@@ -9,9 +9,10 @@ is the lane's one path from a birth to the Done meter; this module is what stand
   word the book retires on is "demoted" ONLY when the captain's switch is down, "held" when a store-side leg of the
   lane failed (E4-SPEC 17: its opens stop, its exits go on, nothing is retired) and "unknown" when the lane cannot be
   read; an ETF family is asked nothing of it.
-- `TheLaneStopsWhereItsRuleSays`: with no contamination reading of the panel strata (the probe's permit, which
-  package B's patch 18 writes from the probe's job: league/ops/contam_xs.py) no look runs and none is spent (the
-  captain's A22 (3)); with no twin marker (package J: owed) the effective mode is "gate" whatever the setting.
+- `TheLaneStopsWhereItsRuleSays`: with no contamination reading of the panel strata (the probe's permit; its writer
+  is package B's patch 18, league/ops/contam_xs.py, the plan the probe can be handed) no look runs and none is
+  spent (the captain's A22 (3)); with no twin marker (package J: owed) the effective mode is "gate" whatever the
+  setting.
 - `TheDataJobsOnTheRealStore`: package B's spreads and N_eff jobs on package C's real store (they were built against
   fakes of it), and package A's and the twins' readers of what they leave.
 - `TheLiveColumnsOnTheRealUniverse`: package H's columns on package C's real universe: the live eligibility is the
@@ -489,9 +490,9 @@ class TheLaneStopsWhereItsRuleSays(_Root):
         self.assertEqual(bands.read(self.root, lanes=LANES), [], "a panel Candidate is seatless")
 
     def test_without_the_probes_panel_strata_no_look_runs_and_none_is_spent(self):
-        """A22 (3): the contamination probe before a panel look. Until the probe's job has published the panel
-        strata for the route that wrote a program (package B's patch 18: league/ops/contam_xs.py writes the permit),
-        that program's look WAITS, nothing spent."""
+        """A22 (3): the contamination probe before a panel look. Until the probe has published the panel strata
+        for the route that wrote a program and the permit holds that route (package B's patch 18:
+        league/ops/contam_xs.py is the permit's writer), that program's look WAITS, nothing spent."""
         for strata in ((), ("P4", "P5")):                         # a permit with no panel stratum; and one short
             cells = self.probe["routes"][ROUTE]["cells"]
             doc = {**self.probe, "routes": {ROUTE: {**self.probe["routes"][ROUTE],
@@ -748,8 +749,8 @@ class TheSeams(unittest.TestCase):
         E3's seal forbids: no module of league/swarm names a file of the forward record or the probe's, nor imports
         an E3 ops module. So the swarm reads a PERMIT the probe's job writes (two words a stratum and era); the
         probe's own file opens no look, whatever it holds. The panel's strata are the probe's `PANEL_STRATA`, asked
-        only with the plan league/ops/contam_xs.py hands it (package B's patch 18), which also writes the permit:
-        E3's own `STRATA` are what they were, and the probe's module still imports nothing of the panel."""
+        only when it is handed the plan of league/ops/contam_xs.py (package B's patch 18), which also writes the
+        permit: E3's own `STRATA` are what they were, and the probe's module still imports nothing of the panel."""
         from league.ops import contam_probe, contam_xs, equity_neff, forward_db, forward_report
         from league.tests import test_e3_seal_imports as seal
 

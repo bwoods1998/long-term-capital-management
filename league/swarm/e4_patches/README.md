@@ -25,7 +25,7 @@ One author a file, so no two worktrees ever touch the same one. The whole contra
 | 15 | `league/constitution.py`, `gateway/lib/caps.mjs`, `gateway/test/stock-buys.test.mjs`, `league/tests/test_equity_money.py`, `league/ops/preopen.py` | I | THE UNIVERSE (moves the money digest; deployed separately): ONE commit, made LAST by the integrator; the gateway's half is the patch file the captain named, never an edit of gateway/ |
 | 16 | `league/ci.py`, `league/tests/test_ci.py`, `docs/operations.md`, `CHANGELOG.md` | I | the protected paths; `stock_agreement` names at most 10 tickers a side; the live rules by close date, word for word; the lane's switches and rollback; the captain's A22 as the House holds it (a style-open passer takes no seat on an XS1 pass alone; 2 looks an agenda cell; the review and the contamination probe before a look) |
 | 17 | E3's seven forward modules | J | OWED: after release E3 |
-| 18 | E3's `league/ops/contam_probe.py`, `league/ops/registry.py` (with the new `league/ops/contam_xs.py`) | B | BUILT after release E3: the probe's panel strata P4-P6 as a plan the probe is handed, the look's permit, and the job's row (`B.md`) |
+| 18 | E3's `league/ops/contam_probe.py` (with the new `league/ops/contam_xs.py`) | B | BUILT after release E3, NOT WIRED: the probe's panel strata P4-P6 as a plan the probe can be handed, and the look's permit; the House's job hands no plan until the captain allows its one import in E3's seal test (`B.md`) |
 
 Merge order on green CI: C0, A, B, C, D, E, G, H, then I (J after E3).
 
@@ -40,4 +40,4 @@ integrator's own edits, which no patch file carries (`league/equity/families.py`
 in `league/swarm/bands.py`, `elane_xs.py` and `league/equity/live.py`, the rounding re-export, the pre-open's class
 list): `league/xs/E4_INTERFACES.md` section 10 lists them with their tests. NOT applied, owed: patch 15's universe
 commit (R-E4b: it needs the House's `tradable.json` and the owner's gateway half) and patch 17 (package J, after
-release E3). Patch 18 (package B) was built after release E3 was merged: `B.md`.
+release E3). Patch 18 (package B) was built after release E3 was merged and is not wired to the House's job: `B.md`.

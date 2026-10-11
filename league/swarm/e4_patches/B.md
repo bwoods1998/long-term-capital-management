@@ -455,25 +455,27 @@ index c9d62216..ca35a1f0 100644
 
 ---
 
-## Patch 18 (BUILT Oct 11, 2026, after release E3 was merged). The probe's panel strata and the look's permit
+## Patch 18 (BUILT Oct 11, 2026, after release E3 was merged; NOT WIRED). The probe's panel strata and the look's permit
 
 Built on `feat/equity-e4-p`; the commits are the record, not a diff here. What a panel look waits on (the captain's
-A22 (3): `league.swarm.elane_xs.probed`) is now written by the House's own job.
+A22 (3): `league.swarm.elane_xs.probed`) has its writer; the House's job does not call it yet.
 
-WHERE IT LIVES, and why not all in E3's file. Release E3's seal T1 (`league/tests/test_e3_seal_imports.py`) lets
-`league/ops/contam_probe.py` import only what E3's contract lists, and nothing of `league/xs` is on that list. No
-seal test was changed. So:
+WHERE IT LIVES, and why not all in E3's file. Two of release E3's seal tests bind the build, and neither was changed:
+T1 (`league/tests/test_e3_seal_imports.py`) lets `league/ops/contam_probe.py` import only what E3's contract lists
+(nothing of `league/xs`, no other module), and `test_forward_report.TheReportShowsOnlyWhatItMay` lets no ops module
+outside the forward record's own import the probe. So neither module imports the other:
 - **`league/ops/contam_probe.py`** (E3's, patched) owns the three strata's vocabulary and EVERY WORD OF A PROMPT
   (`PANEL_STRATA`, `FACTORS`, `FACTOR_WORDS`, `NAME`, `panel_questions`), the one hash rule of a cell (`_grid`),
-  and a seam: `probe(ctx, panel=...)` and `Probe(panel=...)`. `run(ctx)` hands no plan and is E3's probe to the
-  byte. Every signature E3's contract pins is unchanged.
-- **`league/ops/contam_xs.py`** (new, package B's) owns what only the panel can say: `Plan` (the periods and the
-  members a stratum may ask, the truths from the panel store), `permit` / `write_permit`, and `run(ctx)`, which is
-  `contam_probe.probe(ctx, panel=plan)`.
-- **`league/ops/registry.py`**: the `contam_probe` row's module is `league.ops.contam_xs`; its times, limits and
-  owner are E3's. `league/tests/test_e3_identities.py` follows the row's module (either module is the row's).
-  THE ALTERNATIVE, not taken: keep the row on E3's module and let `contam_probe.run` import this one, which needs
-  one more name in the seal test's `OPS_MAY`. That is the captain's to choose; it is two lines either way.
+  and a seam: `probe(ctx, panel=...)` and `Probe(panel=...)`. `run(ctx)`, the job, hands no plan and is E3's probe
+  to the byte. Every signature E3's contract pins is unchanged, and so is the registry's row.
+- **`league/ops/contam_xs.py`** (new, package B's) owns what only the panel can say: `plan` (the maker), `Plan`
+  (the periods and the members a stratum may ask, the truths from the panel store), `permit` / `write_permit`. It
+  is handed the probe's calendar and the probe's file's content; it imports nothing of the probe.
+- **THE WIRING IS OWED, AND IS THE CAPTAIN'S.** `contam_probe.run` handing the maker to `probe` is two lines, and
+  the import they need (`from . import contam_xs`, inside `run`) wants one allowance in T1. The patch, with the
+  tests it flips and their expected results, is in the captain's scratch (`eqe4/p/wiring.patch`, `WIRING.md`).
+  Until then the House's probe is E3's, no permit is written and every panel look waits. The tests hold the wired
+  form (`contam_probe.probe(ctx, panel=contam_xs.plan)`) on a House state.
 
 AS BUILT, against the shape decided before the build (each a departure, with its reason):
 - **The fund is not named in P4's and P5's questions** ("... than the Select Sector SPDR fund of its sector ..."):
@@ -490,8 +492,8 @@ AS BUILT, against the shape decided before the build (each a departure, with its
   drops the panel's cells of a probe under way and nothing of E3's.
 - **A route published without the panel strata is due at once** when a plan asks them (its E3 cells are asked
   again with it): otherwise a look of its programs would wait out `every_days`.
-- **The permit is also rewritten after every run that had a plan**, not only at a publish (a lost permit is made
-  again), and a permit that cannot be written is a warning: the result stays published.
+- **The permit is also rewritten after every other run that had a plan**, not only at a publish (a lost permit is
+  made again), and a permit that cannot be written is a warning: the result stays published.
 - **P6's truth is computed from the panel store by the engine's own rule** (`contam_xs.factor_days`, held equal to a
   real run's `factors` by a test), not read from a run's record: no run of a program exists for the months asked.
 
@@ -500,8 +502,9 @@ ledger rows, one route a Saturday, E3's eras, the cell size. The panel adds abou
 at the shipped cell size, so a route's probe takes about 70% more dollars and that many more Saturdays.
 
 Its tests: `league/tests/test_contam_xs.py` (the words; the plan on synthetic panels; the job on a scripted router;
-the House's job; the wiring and the seals), `test_contam_probe.py` unchanged, and `test_e4_integration.py`'s seal
-test (the strata the look reads are the probe's; the probe's module imports nothing of the panel).
+the wired form on a House state, and the job as the tree leaves it; the seals as they stand), `test_contam_probe.py`
+unchanged, and `test_e4_integration.py`'s seal test (the strata the look reads are the probe's; the probe's module
+imports nothing of the panel).
 
 ---
 
