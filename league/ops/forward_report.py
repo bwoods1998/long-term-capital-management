@@ -72,7 +72,8 @@ locked that minute) is an info row under its id that says so, never silence and 
 - FW5 (warning): cey_day under its 20-day median for 10 forward days running while equity births continue.
 - FW6 (warning): a live instance with 5 or more priced closes whose mean twin gap is beyond the A14 bound either
   way, or with 20 or more sessions under the A14 agreement bound (before any checkpoint); the text names the instance
-  and the counts, no figure.
+  and the counts, no figure. A session whose intents differ counts against the bound whatever its cause (A14's rule is
+  not changed by it); the text says how many of them read other bars (the bars hash: a disagreement is data).
 - FW7 (warning): while `eq_instances` holds a live row: the live book's kv `eq_decide` for the last session is status
   "failed", or status "done" with no `why` and `at` later than that session's `close_at` + 2,400 s.
 - FW8 (warning): the equity fingerprint moved while a lineage is live (`identity_moved`).
@@ -526,11 +527,53 @@ def rc_pairs(db: sqlite3.Connection, day: str) -> list[dict[str, Any]]:
     return out
 
 
+def _write_day(root: str | Path, db: sqlite3.Connection, day: str, *, now: float, settings: Mapping[str, Any] | None,
+               cap: int, history: dict[tuple[str, ...], float | None]) -> dict[str, int]:
+    """One forward day's D6, D7, D8 and D9 rows, computed and then written in one transaction; the rows written."""
+    n = forward_stats.neff(_population(db, day, cap)[1])
+    cey_day = float(n["neff"]) / forward_stats.YEAR_SESSIONS
+    total = math.fsum([*(float(v) for v in guard.ids(db, "SELECT cey_day FROM fwd_cey WHERE day<?", (day,))), cey_day])
+    try:
+        sim_py: float | None = sim_program_years(root, db, day)
+    except Exception:  # noqa: BLE001 - an unread swarm store is None that day, never a zero
+        sim_py = None
+    try:
+        symbols = tuple(_needs_symbols(db, day) or _universe(settings))
+        if symbols not in history:
+            history[symbols] = hist_independent_years(root, symbols)
+        hist_iy = history[symbols]
+    except Exception:  # noqa: BLE001
+        hist_iy = None
+    meter, groups = _meter_row(db, day), _group_rows(db, day)
+    wrote = {"cey": 0, "meter": 0, "groups": 0}
+    with db:   # one transaction a day; the `fwd_cey` row is the day's mark and goes last
+        for g in groups:
+            wrote["groups"] += db.execute(
+                "INSERT OR IGNORE INTO fwd_groups(day, grp, n, mean_x, mean_r, mean_w, mean_x0, ugroups) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (g["day"], g["grp"], g["n"], g["mean_x"], g["mean_r"], g["mean_w"],
+                                                   g["mean_x0"], g["ugroups"])).rowcount
+        wrote["meter"] += db.execute(
+            "INSERT OR IGNORE INTO fwd_meter(day, m, bh, by_, min_p, controls_m, controls_bh, controls_by, "
+            "controls_p10, at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (day, meter["m"], meter["bh"], meter["by_"], meter["min_p"], meter["controls_m"], meter["controls_bh"],
+             meter["controls_by"], meter["controls_p10"], float(now))).rowcount
+        wrote["cey"] += db.execute(
+            "INSERT OR IGNORE INTO fwd_cey(day, n_w, members, neff, neff_raw, cey_day, cey_total, sim_py, hist_iy, "
+            "replay_multiple, at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (day, n["n_w"], n["members"], n["neff"], n["neff_raw"], cey_day, total, sim_py, hist_iy,
+             forward_stats.replay_multiple(sim_py, hist_iy, total), float(now))).rowcount
+    return wrote
+
+
 def meters(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapping[str, Any] | None
            ) -> dict[str, Any]:
     """The D6, D7, D8 and D9 rows of every forward day up to the last `fwd_runs` `through` that has no `fwd_cey` row,
-    in order (first write stands: a second call writes nothing): {"days", "cey", "meter", "groups" (rows written)}."""
-    out = {"days": 0, "cey": 0, "meter": 0, "groups": 0}
+    in order (first write stands: a second call writes nothing): {"days", "cey", "meter", "groups" (rows written)}.
+
+    A DAY THAT CANNOT BE WRITTEN STOPS THE PASS THERE: the answer then also holds "error": {"day", "why" (the
+    exception's name)}, nothing of that day is written (one transaction a day) and no later day is (CEY is a running
+    sum: a later day written first would stand without it for good). The next pass begins at that day again."""
+    out: dict[str, Any] = {"days": 0, "cey": 0, "meter": 0, "groups": 0}
     through = _one(db, "SELECT max(through) FROM fwd_runs WHERE through IS NOT NULL")
     if through is None:
         return out
@@ -540,37 +583,13 @@ def meters(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Ma
     for day in forward_days(forward_db.t0(), through):
         if day in have:
             continue
-        n = forward_stats.neff(_population(db, day, cap)[1])
-        cey_day = float(n["neff"]) / forward_stats.YEAR_SESSIONS
-        total = math.fsum([*(float(v) for v in guard.ids(db, "SELECT cey_day FROM fwd_cey WHERE day<?", (day,))), cey_day])
         try:
-            sim_py: float | None = sim_program_years(root, db, day)
-        except Exception:  # noqa: BLE001 - an unread swarm store is None that day, never a zero
-            sim_py = None
-        try:
-            symbols = tuple(_needs_symbols(db, day) or _universe(settings))
-            if symbols not in history:
-                history[symbols] = hist_independent_years(root, symbols)
-            hist_iy = history[symbols]
-        except Exception:  # noqa: BLE001
-            hist_iy = None
-        meter, groups = _meter_row(db, day), _group_rows(db, day)
-        with db:   # one transaction a day; the `fwd_cey` row is the day's mark and goes last
-            for g in groups:
-                out["groups"] += db.execute(
-                    "INSERT OR IGNORE INTO fwd_groups(day, grp, n, mean_x, mean_r, mean_w, mean_x0, ugroups) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (g["day"], g["grp"], g["n"], g["mean_x"], g["mean_r"], g["mean_w"],
-                                                       g["mean_x0"], g["ugroups"])).rowcount
-            out["meter"] += db.execute(
-                "INSERT OR IGNORE INTO fwd_meter(day, m, bh, by_, min_p, controls_m, controls_bh, controls_by, "
-                "controls_p10, at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (day, meter["m"], meter["bh"], meter["by_"], meter["min_p"], meter["controls_m"], meter["controls_bh"],
-                 meter["controls_by"], meter["controls_p10"], float(now))).rowcount
-            out["cey"] += db.execute(
-                "INSERT OR IGNORE INTO fwd_cey(day, n_w, members, neff, neff_raw, cey_day, cey_total, sim_py, hist_iy, "
-                "replay_multiple, at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (day, n["n_w"], n["members"], n["neff"], n["neff_raw"], cey_day, total, sim_py, hist_iy,
-                 forward_stats.replay_multiple(sim_py, hist_iy, total), float(now))).rowcount
+            wrote = _write_day(root, db, day, now=now, settings=settings, cap=cap, history=history)
+        except Exception as exc:  # noqa: BLE001 - named, and the pass stops: unread is never zero
+            out["error"] = {"day": day, "why": type(exc).__name__}
+            break
+        for key, rows in wrote.items():
+            out[key] += rows
         out["days"] += 1
     return out
 
@@ -734,12 +753,15 @@ def _fills(db: sqlite3.Connection) -> dict[str, Any]:
 
 
 def _instances(lots: Sequence[Mapping[str, Any]], twins: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """One row an instance of the twins' tables: its priced closes and their mean twin gap, its sessions."""
+    """One row an instance of the twins' tables: its priced closes and their mean twin gap, its readable sessions,
+    those that agreed and those that did not, by cause (`forward_db.CAUSES`: "bars" when the live decision read other
+    as-of bars than the store now gives; the vendor rounds adjusted prices to cents)."""
     out: dict[str, dict[str, Any]] = {}
 
     def slot(row: Mapping[str, Any]) -> dict[str, Any]:
         held = out.setdefault(str(row["instance"]), {"instance": str(row["instance"]), "pid": row["pid"], "lots": 0,
-                                                     "gaps": [], "sessions": 0, "agreed": 0, "unreadable": 0})
+                                                     "gaps": [], "sessions": 0, "agreed": 0, "unreadable": 0,
+                                                     "causes": {cause: 0 for cause in forward_db.CAUSES}})
         if held["pid"] is None:
             held["pid"] = row["pid"]
         return held
@@ -756,9 +778,13 @@ def _instances(lots: Sequence[Mapping[str, Any]], twins: Sequence[Mapping[str, A
         else:
             held["sessions"] += 1
             held["agreed"] += 1 if row["agree"] == 1 else 0
+            if row["agree"] == 0:   # a disagreement is data: counted with its cause (the bars hash), never an error
+                cause = row["cause"] if row["cause"] in held["causes"] else "unknown"
+                held["causes"][cause] += 1
     return [{"instance": v["instance"], "pid": None if v["pid"] is None else int(v["pid"]), "lots": v["lots"],
              "priced": len(v["gaps"]), "mean_twin_gap_bp": _mean(v["gaps"]), "sessions": v["sessions"],
-             "agreed": v["agreed"], "unreadable": v["unreadable"]} for _, v in sorted(out.items())]
+             "agreed": v["agreed"], "disagreed": v["sessions"] - v["agreed"], "causes": v["causes"],
+             "unreadable": v["unreadable"]} for _, v in sorted(out.items())]
 
 
 def _rc(db: sqlite3.Connection) -> dict[str, Any]:
@@ -927,7 +953,7 @@ def _twins_early(db: sqlite3.Connection, root: Path) -> list[dict[str, Any]]:
     out = []
     retired = _retired_instances(root)
     for row in _instances(_rows(db, "SELECT instance, pid, twin_gap_bp FROM fwd_lotgap"),
-                          _rows(db, "SELECT instance, pid, agree FROM fwd_twins")):
+                          _rows(db, "SELECT instance, pid, agree, cause FROM fwd_twins")):
         if row["instance"] in retired:
             continue
         gap = row["mean_twin_gap_bp"]
@@ -936,7 +962,8 @@ def _twins_early(db: sqlite3.Connection, root: Path) -> list[dict[str, Any]]:
                                    f"({'worse' if gap < 0 else 'better'} than the model)", f"instance {row['instance']} gap"))
         if row["sessions"] >= FW6_SESSIONS and row["agreed"] < forward_db.A14_AGREE * row["sessions"]:
             out.append(_row("FW6", f"{row['agreed']} of {row['sessions']} sessions agree with its twin, under the A14 "
-                                   "bound", f"instance {row['instance']} intents"))
+                                   f"bound ({row['causes']['bars']} of the {row['disagreed']} that differ read other bars "
+                                   "than the store now holds)", f"instance {row['instance']} intents"))
     return out
 
 
@@ -1231,24 +1258,37 @@ def alarms(root: str | Path, *, now: float, settings: Mapping[str, Any] | None =
 def run(ctx: Any) -> dict[str, Any]:
     """THE JOB (league/ops/registry.py). With the mode "off" it writes {"at", "mode": "off", "alarms": []} to `FILE`
     and returns skipped; else `meters`, then `section` written to `FILE`; each warning alarm is also a
-    `ctx.alert("warning", text)`. The receipt holds counts, never a figure."""
+    `ctx.alert("warning", text)`. The receipt holds counts, never a figure.
+
+    THE REPORT IS WRITTEN WHATEVER THE METERS DID: when a day's meters cannot be written (a store locked, a row that
+    cannot be read), that day and the days after it stay unwritten for the next run, the report and its alarms are
+    still written, and the receipt is `failed` with the day and the exception's name (the runner starts the job again
+    inside its grace)."""
     root, now = Path(ctx.root), float(ctx.now())
     settings = _settings(root, None, getattr(ctx, "config", None))
     if _mode(settings) == "off":
         write_json(root / FILE, {"at": S.iso(now), "mode": "off", "alarms": []})
         return {"status": "skipped", "why": "the forward record is off (elane.forward.mode)"}
-    db = forward_db.open_db(root)
+    wrote: dict[str, Any] = {"days": 0, "cey": 0, "meter": 0, "groups": 0}
     try:
-        wrote = meters(root, db, now=now, settings=settings)
-    finally:
-        db.close()
+        db = forward_db.open_db(root)
+        try:
+            wrote = meters(root, db, now=now, settings=settings)
+        finally:
+            db.close()
+    except Exception as exc:  # noqa: BLE001 - the report is written without today's meters; the receipt says so
+        wrote["error"] = {"day": None, "why": type(exc).__name__}
+    error = wrote.pop("error", None)
     doc = section(root, now=now, settings=settings)
     write_json(root / FILE, doc)
     for alarm in doc["alarms"]:
         if alarm["level"] == "warning":
             ctx.alert("warning", f"forward: {alarm['text']}")
-    return {"ok": True, "path": str(root / FILE), "through": doc["through"], **wrote,
-            "alarms": [alarm["id"] for alarm in doc["alarms"]]}
+    out = {"path": str(root / FILE), "through": doc["through"], **wrote, "alarms": [alarm["id"] for alarm in doc["alarms"]]}
+    if error is not None:
+        return {"status": "failed", "error": f"the meters of {error['day'] or 'the night'} could not be written "
+                                             f"({error['why']}); the report was written without them", **out}
+    return {"ok": True, **out}
 
 
 __all__ = ["FILE", "GATE_REASON", "STALE_HOURS", "SECTION_KEYS", "FUNNEL_KEYS", "ALARMS", "RC_PAIRS", "run", "meters",

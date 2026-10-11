@@ -842,7 +842,8 @@ class TheSection(Fixture):
                          ({"bars": 1, "program": 1, "unknown": 0}, 0.5, 0.95))
         # One row a LIVE instance (its registry row carries the "live" tag); the other is in the aggregates only.
         self.assertEqual(fills["by_instance"], [{"instance": "live-a@3:r", "pid": live, "lots": 3, "priced": 2,
-                                                 "mean_twin_gap_bp": -4.0, "sessions": 3, "agreed": 1, "unreadable": 1}])
+                                                 "mean_twin_gap_bp": -4.0, "sessions": 3, "agreed": 1, "disagreed": 2,
+                                                 "causes": {"bars": 1, "program": 1, "unknown": 0}, "unreadable": 1}])
 
 
 class ReadingTheSection(Fixture):
@@ -1153,13 +1154,13 @@ class EachForwardAlarm(Fixture):
                                 "exit_at, model_bp, twin_gap_bp, at) VALUES(?, ?, ?, 'SPY', ?, ?, 'open', 'open', 1.0, ?, "
                                 "1.0)", (start + i, instance, pid, DAYS[0], DAYS[1], gap))
 
-    def twins(self, instance: str, pid: int, agreed: int, sessions: int, unreadable: int = 0) -> None:
+    def twins(self, instance: str, pid: int, agreed: int, sessions: int, unreadable: int = 0, bars: int = 0) -> None:
         with self.db:
             for i in range(sessions + unreadable):
                 agree = None if i >= sessions else 1 if i < agreed else 0
+                cause = None if agree != 0 else "bars" if i < agreed + bars else "program"
                 self.db.execute("INSERT INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, at, cause) "
-                                "VALUES(?, ?, ?, '[]', '[]', ?, 1.0, ?)",
-                                (instance, DAYS[i], pid, agree, "program" if agree == 0 else None))
+                                "VALUES(?, ?, ?, '[]', '[]', ?, 1.0, ?)", (instance, DAYS[i], pid, agree, cause))
 
     def test_fw6_a_mean_twin_gap_beyond_the_bound_either_way(self):
         self.lots("a@1:r", self.pid_a, [-16.0] * 5)
@@ -1175,11 +1176,20 @@ class EachForwardAlarm(Fixture):
         self.assertTrue(all(R.text_ok(a["text"]) for a in rows), "the instance and the counts, no figure")
 
     def test_fw6_twenty_sessions_under_the_agreement_bound(self):
-        self.twins("a@1:r", self.pid_a, 18, 20)
+        self.twins("a@1:r", self.pid_a, 18, 20, bars=1)
         self.twins("b@1:r", 2, 19, 20)                              # 95 of 100: holds
         self.twins("c@1:r", 3, 10, 19, unreadable=5)                # nineteen readable sessions: not read yet
         (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW6"]
-        self.assertIn("FW6 instance a@1:r intents: 18 of 20 sessions agree with its twin, under the A14 bound", alarm["text"])
+        # A disagreement is data, counted with its cause: it still counts against the bound (A14's rule is unchanged).
+        self.assertEqual(alarm["text"], "FW6 instance a@1:r intents: 18 of 20 sessions agree with its twin, under the A14 "
+                                        "bound (1 of the 2 that differ read other bars than the store now holds)")
+
+    def test_fw6_a_disagreement_counts_whatever_its_cause(self):
+        self.twins("a@1:r", self.pid_a, 18, 20, bars=2)             # both for the bars alone: still 18 of 20
+        (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW6"]
+        self.assertIn("18 of 20 sessions agree", alarm["text"])
+        self.assertIn("(2 of the 2 that differ read other bars", alarm["text"])
+        self.assertTrue(R.text_ok(alarm["text"]))
 
     def test_fw6_is_about_living_instances(self):
         from league.live.state import LiveState
@@ -1417,6 +1427,52 @@ class TheJob(Fixture):
         again = R.run(ctx)
         self.assertEqual((again["days"], again["cey"]), (0, 0))
         self.assertEqual([a["new"] for a in read_json(self.root / R.FILE)["alarms"]], [False, False])
+
+    def test_the_report_is_written_whatever_the_meters_did(self):
+        self.series(self.register(), DAYS[:3], [0.01, -0.01, 0.02])
+        self.night(DAYS[1])
+        self.night(DAYS[2])
+        self.now = ny(DAYS[2], 19)
+        ctx = self.ctx(RECORD)
+        calls = []
+
+        def torn(db, day):
+            calls.append(day)
+            if day == DAYS[1]:
+                raise ValueError("a p-value is a number in [0, 1]; got 1.0000002")
+            return real(db, day)
+
+        real = R._meter_row
+        with mock.patch.object(R, "_meter_row", torn):
+            out = R.run(ctx)
+        self.assertEqual((out["status"], out["days"], out["through"]), ("failed", 1, DAYS[2]))
+        self.assertEqual(out["error"], f"the meters of {DAYS[1]} could not be written (ValueError); the report was written "
+                                       "without them")
+        self.assertEqual(calls, DAYS[:2], "the pass stops at the day that failed")
+        self.assertEqual((self.table("fwd_meter")[-1]["day"], self.table("fwd_groups")[-1]["day"]), (DAYS[0], DAYS[0]),
+                         "nothing of the failed day is written")
+        self.assertEqual([r["day"] for r in self.table("fwd_cey")], DAYS[:1], "no later day is written past the one that failed")
+        self.assertEqual(read_json(self.root / R.FILE)["at"], S.iso(self.now))
+        # The next run writes the days the failed one did not reach, in order.
+        again = R.run(ctx)
+        self.assertEqual((again["ok"], again["days"]), (True, 2))
+        self.assertEqual([r["day"] for r in self.table("fwd_cey")], DAYS[:3])
+
+    def test_a_forward_store_that_cannot_be_opened_is_a_failed_receipt_and_a_report(self):
+        self.now = ny(DAYS[2], 19)
+        ctx = self.ctx(RECORD)
+        real = forward_db.open_db
+
+        def locked(root, *, readonly=False):
+            if not readonly:
+                raise sqlite3.OperationalError("database is locked")
+            return real(root, readonly=True)
+
+        with mock.patch.object(forward_db, "open_db", locked):
+            out = R.run(ctx)
+        self.assertEqual((out["status"], out["days"]), ("failed", 0))
+        self.assertIn("the meters of the night could not be written (OperationalError)", out["error"])
+        self.assertEqual(read_json(self.root / R.FILE)["mode"], "record")
 
     def test_the_receipt_holds_counts_never_a_figure(self):
         self.series(self.register(), DAYS[:3], [0.0123456, -0.0234567, 0.0345678])
