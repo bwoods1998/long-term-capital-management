@@ -86,6 +86,60 @@ Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback,
 - **Also changed.** `league/ops/dlane_report.py`: A8.6's statement is built from the rows (`equity_probe_note`), no
   longer a sentence with A20's figures in it. The gateway is not edited.
 
+### Release E3.1: an exit's wait for the practice proof has an end, and the twin is re-based after a difference, on `feat/equity-e31-exits-twin` (unreleased; an owner deploy on main `e36c7e39`; no identity moves: the options execution fingerprint, the equity identity, the money digest and the constitution digest are main's; no evidence reset)
+
+Two rules the captain registered at 20:13Z Oct 11, 2026, from the rehearsal of the first real-money share session,
+**both before the first real share order** (and A29 before any twin row existed). Plumbing only: `league/equity/live.py`
+and `league/ops/forward_db.py`, `forward_twins.py`, `forward_report.py`; no file of `league/live`, `league/gym`, the
+equity evidence modules, the constitution or the gateway is edited.
+
+- **A28, an exit's wait for the practice proof has an end** (amends A10.1). Until now every real sale (a program's
+  own, the maximum-hold exit, the owner's flatten) waited for the stock paper proof's SELL stage with no end: if the
+  practice sale could not be witnessed, real lots stayed held for days and new buys stopped. From this release the
+  wait ends at the open window's entry cut-off (`schedule.Moments.entry_until`, the open + 900 s, the minute the
+  book stops trying open entries): after it every exit goes through the normal path, with one error alert a session
+  saying the sale path is unproven and naming the stage's own reason (kv `eq_sell_unproven`). A close-window sale
+  is past the cut-off by construction and never waits on the stage. Unchanged: stage BUY gates every real buy with
+  no end; a failed SELL stage stops new buys; the minimum hold, the kill switch and the stops. **Why:** an exit must
+  never be blocked; a proof exists to stop new risk, not to trap old risk. **Its cost, as the captain stated it:** a
+  real sale can go through a path the practice account did not prove that day. The proof's own alarm still says
+  "Real equity lots stay held" (`league/live/paper.py` is inside the options fingerprint and is not edited for a
+  sentence); docs/operations.md says which words stand.
+- **A29, the twin is re-based after a difference, so a miss counts once** (amends how A14's intent agreement is
+  computed, never its bounds). A14 compared each live session's intents with a replay twin that never misses a
+  fill; the rehearsal measured that ONE missed buy of a program that buys only when flat leaves it a session behind
+  its twin for good (about half its sessions differ from then on), and that one such program fails the pooled 95%
+  bound for every program at the checkpoint. From this release a session whose intent keys differ is counted as
+  differing, exactly as registered; THEN the twin's book is set to the live book as it stands after that session
+  (its lots, and what it had planned for the next session, read from `live.sqlite` read-only), so the sessions after
+  it are compared from the same state. A re-based twin that differs again counts again and is re-based again. The
+  95% bound, the 15 bp gap bound, the keys and the pooling do not move, and on a path with no difference the rows
+  are byte for byte the rows of the release before (their sha256, taken on main `e36c7e39`, is pinned in the
+  tests). The un-re-based shadow of every program (its forward record from registration) is still written every
+  night, unchanged, and the reports say beside each instance how many times its twin was re-based and the
+  un-re-based twin's own agreement (`fills.rebase`, each checkpoint's `a14.rebase`). **Why:** the clause asks
+  whether live execution matches replay; the number of sessions on which it did not is that measure. **Its cost, as
+  the captain stated it:** a program can run for weeks on other days than its unconditional replay and still read
+  consistent after the one counted difference; the forward record beside it says so.
+- **The store.** `forward.sqlite`'s `fwd_twins` gains two nullable columns (`rebased`, `base_agree`) and the forward
+  log one event kind (`twin_rebased`). A store made before them is migrated at its next writable open with `ALTER
+  TABLE ... ADD COLUMN`: no row is rewritten, the append-only triggers stand, and an older row reads no re-base.
+  Rows written before this release stand as written; a stored differing session re-bases the twin for the sessions
+  not yet written. No setting, job or alarm changes.
+- **How the re-based twin is made.** The engine's own account (`league.equity.engine._Account`), driven from ops
+  with the seeded lots bought by the engine in their own entry sessions and every decide asked of the night's
+  decider child; one instance of the program asked every session in order, so only the book is set. No program
+  text runs in the job's process and nothing of the engine is re-implemented.
+- **Measured on the rehearsal's harness** (the real book on a fake venue with invented prices, the real forward
+  stack). The week: a week in which the proof passes is order for order the week it was; with the practice account
+  listing no FILL activity, or the practice sale resting, Tuesday's sales and Thursday's maximum-hold exit go at
+  the cut-off and a flatten is out within two minutes (before: every lot still held on Friday). The thirty sessions
+  of the program that buys when flat: every buy filled, 28 of 28 sessions agree and nothing is re-based; Monday's
+  buy missed, one differing session, one re-base, then agreement (28 of 29; as registered 15 of 29); a later rebuy
+  missed once, the same (28 of 29; as registered 21 of 29).
+- **Roll back:** the previous House release. It ignores `eq_sell_unproven`, the two columns and the event (its
+  inserts name their columns), and its nights compare every session with the un-re-based twin again.
+
 ### Release E3, record and measure: the forward record, the fill measurements, the hidden year and the contamination probe, on `feat/equity-e3` (unreleased; the gateway's merge list, then an owner deploy on main's E2.2; no identity moves; records only)
 
 - **What it adds** (`league/ops/E3_INTERFACES.md`): a hash-chained registry of every equity version judged on the Train

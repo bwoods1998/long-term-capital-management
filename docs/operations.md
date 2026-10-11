@@ -76,7 +76,8 @@ change under `gateway/`; nothing waits in `PENDING_GATEWAY`).
 - **The fills** (`fill_minutes.py`, `forward_twins.py`): the send-minute 1Min bars of the universe; the live-like
   price beside each official open and close; the live-like re-price of every shadow day; for each closed live lot, its
   fill gap against E1's twin split into timing and execution; and, session by session, whether the live program's
-  intents were the ones a twin run started flat at its first decision gives.
+  intents were the ones a twin run started flat at its first decision gives (a twin set to the live book after each
+  session that differs, since the captain's A29: "The twin is re-based after a difference", below).
 - **The memory tables** (`league/swarm/elane_folds.py`, `elane_effects.py`, `elane_memory.py`; in the swarm store):
   **the hidden year**, below.
 - **The contamination probe** (`contam_probe.py`, Saturday 00:10Z, at most `elane.contam.usd_run` dollars a run, one
@@ -133,6 +134,54 @@ close):
   nights the forward job did not run are seen by nobody;
 - unmeasured, A14 does not hold and the checkpoint is not final. A checkpoint that held without A14 can only stop
   holding; none can start. The pinned Done rule is not edited.
+
+**The twin is re-based after a difference, so a miss counts once** (the captain's A29, 20:13Z Oct 11, 2026;
+registered before the first real share order and before any twin row existed; it amends how the intents half above
+is COMPUTED, never its bounds: the 95%, the 15 bp, the keys and the pooling are as registered;
+`league/ops/forward_twins.py` `live_seed`, `RebasedTwin`).
+- **Why.** As registered, every session was compared with a twin run that never misses a fill. The rehearsal of
+  the first real-money session measured that ONE missed buy of a program that buys only when flat leaves the live
+  book a session behind that twin for good (about half its sessions differ from then on), and that one such program
+  fails the pooled 95% bound for every program at the checkpoint. That counts one execution failure many times. The
+  clause asks whether live execution matches replay; the number of sessions on which it did not is that measure.
+- **The rule.** A session whose intent keys differ is counted as differing, exactly as registered (the same row,
+  whatever its cause). THEN the twin's book is set to the live book as it stands after that session, and the
+  sessions after it are compared from the same state. A re-based twin that differs again counts again and is
+  re-based again.
+- **The live book after a session** is read from `live.sqlite`, read-only: the instance's `eq_lots` rows opened on or
+  before that session and not closed by it, each with the size its own buy asked (`eq_intents.share` or `usd`), and
+  its `eq_intents` rows for the next session decided by then (the program's buys and sells, and the House's own
+  planned exits: the maximum hold, a carried exit, a flatten queued by then). No status is read.
+- **The re-based twin** is the engine's own account (the same fills at the official prices, the same sizing, fees,
+  corporate actions and hold rules): each held lot is bought by the engine in its own entry session for the size its
+  buy asked (the replay's lot on the Gym's sleeve: no dollar of the live account enters it), the planned intents are
+  executed the next session with no miss, and from then on the program decides. Only the BOOK is set: the program is
+  one instance asked every session in order, in the night's decider child. A lot the Gym cannot hold as the live
+  book does is counted (`unheld` in the event) and not held: the next session then differs and counts.
+- **What is written** (`forward.sqlite`, append-only as before): each session's row with two more columns, `rebased`
+  (the re-bases behind the twin it was compared with) and `base_agree` (the same session against the UN-RE-BASED
+  twin run, which is still made whole every night); one `twin_rebased` event a re-base (the lots it started from,
+  as symbols, days and fill points, and counts). A store from before this release gains the two columns at its next
+  writable open (`ALTER TABLE ... ADD COLUMN`: no row is rewritten; an older row reads no re-base and its own
+  `agree` as the un-re-based answer). The twin's book is stored nowhere: it is recomputed each night from the rows,
+  the live book and the store.
+- **Rows written before this release** stand as written and are read by the same rule: a stored differing session
+  re-bases the twin for the sessions not yet written (the latest one does; one with stored rows after it re-based
+  nothing then and re-bases nothing now).
+- **Unchanged.** Every program's un-re-based shadow (its forward record from registration, `fwd_days`) is written
+  every night as before, and so is participation (`fwd_part`), which is read against the un-re-based twin run. A
+  retired session is unreadable and re-bases nothing; a revived instance's new run starts flat. A session compared
+  with a re-based twin has no split rule (its inputs are the engine account's own, which holds a lot's quantity as
+  it was at each close); the split rule stands for sessions compared with the twin run.
+- **Read it.** Beside each instance, never in a rule: `fills.rebase` of the forward report (and of the `dlane`
+  report's `forward_record`) and `a14.rebase` of each Done checkpoint say how many times its twin was re-based and
+  the un-re-based twin's own agreement over the same sessions (`rebases`, `sessions`, `agreed`, `share`), so a
+  program whose live path has left its replay's days is seen, not hidden. The night's receipt counts `rebased`.
+- **Its cost, as the captain stated it.** A program can run for weeks on other days than its unconditional replay
+  and still read consistent after the one counted difference; the forward record beside it says so.
+- **On the rehearsal's three 30-session paths** (the real book on a fake venue, the real forward stack): the buy
+  fills, 28 of 28 and no re-base; Monday's buy missed, one differing session and one re-base, 28 of 29 (as
+  registered: 15 of 29); a later rebuy missed once, the same (as registered: 21 of 29).
 
 **The hidden year** (a loosening of the Train bar, reported in the report's `loosened`). A family born while
 `elane.memory.mode` is "record" is given one of the seven Train years as its hidden year, by rotation inside its cell
@@ -983,7 +1032,10 @@ options replay gap alone (that gap divides by the maximum loss, a long lot's who
 thousand basis points). The fill-gap half is the
 mean `gap_bp` of the counted equity closes with a final priced twin; the intents-agreement half is read from the
 forward record's twins (the live and the shadow intents, session by session); unmeasured, A14 does not hold and the
-reading says why. The close-date figures are not computed yet and no forward rule moves a seat. A reading with no
+reading says why. **The intents half is computed against a twin that is re-based after each differing session (the
+captain's A29, registered before the first real share order: **The forward record**, "The twin is re-based after a
+difference"); the three sentences below and both bounds are as registered.** The close-date figures are not computed
+yet and no forward rule moves a seat. A reading with no
 equity close is read by the pinned rule's own measure, as before. The Done rule itself is unchanged.
 - Done's "live fills consistent with their replay" is read at each Done checkpoint, over its counted closes: the mean
   fill gap against the official-price model is at most 15 bp a side AND the live and the shadow intents agree on at
