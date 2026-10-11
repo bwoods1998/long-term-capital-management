@@ -235,11 +235,11 @@ class TheHiddenYearNeverReachesItsFamily(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         # An invented market that pays the overnight hold every year, so the fixture's program meets Y1-R1 and the bar
         # reaches its restart check; and the same market with other opens inside the hidden year (the year's last
-        # `history` sessions and every close as they were).
+        # sessions the following stretch reads as look-back, and every close, as they were).
         cls.plain = synth.synthetic_store(Path(cls.tmp.name) / "plain" / elane.STORE_DIR, symbols=("SPY",),
                                           end=dt.date(2024, 12, 31), seed=5, drift=0.8, vol=0.04)
         cls.moved = e3.moved_store(cls.plain, Path(cls.tmp.name) / "moved" / elane.STORE_DIR, year=cls.YEAR,
-                                   keep_last=e3.CARRIES_HISTORY)
+                                   keep_last=e3.CARRIES_KEPT)
         cls.worlds = {}
 
     @classmethod
@@ -289,7 +289,9 @@ class TheHiddenYearNeverReachesItsFamily(unittest.TestCase):
         year = [i for i in range(a.n) if a.day(i).year == self.YEAR]
         changed = [i for i in range(a.n) if not (a.raw["SPY"][i] == b.raw["SPY"][i]).all()
                    or not (a.adj["SPY"][i] == b.adj["SPY"][i]).all()]
-        self.assertEqual(changed, year[:-e3.CARRIES_HISTORY], "the year's sessions before its last `history`, no other")
+        self.assertEqual(changed, year[:-e3.CARRIES_KEPT],
+                         "the year's sessions before the look-back of the stretch that follows, no other")
+        self.assertEqual(e3.CARRIES_KEPT, e3.CARRIES_HISTORY + 1)
         self.assertTrue((a.raw["SPY"][:, 3] == b.raw["SPY"][:, 3]).all() and (a.adj["SPY"][:, 3] == b.adj["SPY"][:, 3]).all(),
                         "the same closes everywhere")
 
@@ -320,7 +322,12 @@ class TheHiddenYearNeverReachesItsFamily(unittest.TestCase):
             w = self.world(name)
             rec = elane_train.record_of(w["store"].family("carries"))
             v1 = rec["versions"]["1"]
-            self.assertEqual((v1["passed"], v1["fails"], rec["passed_version"]), (True, [], 1), w["out"])
+            # THE WHOLE BAR: Y1-R1 and the restart check. E2's own review comes after it and may refuse a program that
+            # sizes from the sleeve's dollars (what this fixture does on purpose, to carry the year): passed or
+            # refused there, the bar was met, and the two markets read the same either way.
+            self.assertTrue(v1.get("bar_passed") or v1["passed"], w["out"])
+            self.assertIn(v1["fails"], ([], ["REVIEW"]), w["out"])
+            self.assertEqual(rec.get("passed_version"), 1 if v1["passed"] else None)
             self.assertEqual(sorted(v1["years"]), [str(y) for y in elane_folds.WORK_YEARS if y != self.YEAR],
                              "six seen years, never the hidden one")
             for year in (str(self.YEAR - 1), str(self.YEAR + 1)):

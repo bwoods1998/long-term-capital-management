@@ -18,8 +18,9 @@ run "no_data" when one of the program's symbols has no bar in it, and E2 reads t
 version is never scored. A whole Train span always holds a bar of such a symbol (XLC's first is in 2018), but a
 stretch the cut leaves may hold none (2016-17 once 2018 is hidden), and the family could then never be scored. So a
 year is RUNNABLE for a family's symbols only when every seen span of it AND its own span hold a bar of every symbol,
-on the House's equity store (read one Train span at a time, never a reserve session), and `birth_fields` draws by
-the same formula over the runnable years alone: `R[(k_c + h(cell)) % len(R)]`, R the runnable work years in order.
+by the House's equity store (its manifest's first and last bar day of each symbol: no bar is sliced and no price
+read, so no reserve session is touched), and `birth_fields` draws by the same formula over the runnable years alone:
+`R[(k_c + h(cell)) % len(R)]`, R the runnable work years in order.
 With all seven runnable (every symbol with a bar in each work year) that is the formula above exactly; with fewer,
 the cell's births still spread evenly over the years they can run. A family with no runnable year gets no hidden year
 (seven Train years, no out-of-fold row). On a House with no equity store yet there is no listing to read and the
@@ -41,8 +42,9 @@ seen years' own lots, P&L, t and exposure move with it, and no rebasing of a fil
 run a seen span the same two stores gave byte-identical seen results.
 
 WHAT STILL REACHES A SEEN RUN, stated as A15 states it for the reserve: the hidden year's BARS as look-back in the
-stretch that follows it (a program with NEEDS history h reads the year's last h sessions at most, as it would have
-live), and the store-file hashes of a stored run (they move with a refetch of any year and carry no figure). STATED
+stretch that follows it (a program reads the year's last sessions as it would have live: its NEEDS `history` of them
+and, where E1's slice holds it, the session its first decision is made at; never more than `history` + 1), and the
+store-file hashes of a stored run (they move with a refetch of any year and carry no figure). STATED
 COST: a hidden year inside a span starts the following stretch flat (no lot is carried across it), and a version
 costs up to 3 seen runs and 1 hidden run a k. THE LOOSENING, reported: such a family is judged on six seen years,
 not seven; more zero-edge versions pass Train, and the screen's false-positive rate per program is untouched (Train
@@ -117,12 +119,13 @@ def assign(store: Any, cell: Sequence[str]) -> int:
 
 
 def bar_years(root: Any, symbols: Sequence[str]) -> dict[str, frozenset[int]] | None:
-    """THE LISTING RULE's reading (the module docstring): each symbol's work years that hold at least one of its bars
-    in the House's equity store (`<root>/equity-daily`), read one Train span at a time, so never a reserve session.
-    None when there is nothing to read: no root, no symbol, or no equity store there yet. A store that is there and
-    cannot be read, or that holds no such symbol, raises (`league.equity.store.MissingData`)."""
-    from ..equity.store import STORE_DIR, EquityStore
-    from . import elane_train
+    """THE LISTING RULE's reading (the module docstring): each symbol's work years that hold a bar of it in the House's
+    equity store (`<root>/equity-daily`), from the store's MANIFEST alone: the work years from its first bar day's to
+    its last's (the House's data job holds every symbol to a bar on each session between the two:
+    league/ops/equity_data.py). No bar is sliced and no price read. None when there is nothing to read: no root, no
+    symbol, or no equity store there yet. A store that is there and cannot be read, or that holds no such symbol,
+    raises (`league.equity.store.MissingData`)."""
+    from ..equity.store import STORE_DIR, EquityStore, MissingData
 
     names = tuple(dict.fromkeys(str(s).strip().upper() for s in symbols or () if str(s).strip()))
     if root is None or not names:
@@ -130,15 +133,23 @@ def bar_years(root: Any, symbols: Sequence[str]) -> dict[str, frozenset[int]] | 
     path = Path(root) / STORE_DIR
     if not (path / "VERSION").is_file():
         return None
-    equity = EquityStore(path)
-    held: dict[str, set[int]] = {name: set() for name in names}
-    for first, last in elane_train.TRAIN_SPANS:
-        bars = equity.bars(names, "train", history=0, start=first, end=last)
-        years = [bars.day(i).year for i in range(bars.n)]
-        for name in names:
-            close = bars.raw[name][:, 3]
-            held[name].update(year for year, there in zip(years, (close == close).tolist()) if there)  # NaN: no bar
-    return {name: frozenset(year for year in found if year in WORK_YEARS) for name, found in held.items()}
+    rows = EquityStore(path).manifest()["symbols"]
+    held: dict[str, frozenset[int]] = {}
+    for name in names:
+        row = rows.get(name)
+        if not isinstance(row, Mapping):
+            raise MissingData(f"the equity store holds no {name}")
+        if row.get("first") is None and row.get("last") is None:
+            held[name] = frozenset()  # listed in the store with no bar at all
+            continue
+        try:
+            if not isinstance(row.get("first"), str) or not isinstance(row.get("last"), str):
+                raise ValueError("a bar day is an ISO day")
+            first, last = dt.date.fromisoformat(row["first"]), dt.date.fromisoformat(row["last"])
+        except ValueError:
+            raise MissingData(f"the equity store's manifest names no first and last bar day of {name}") from None
+        held[name] = frozenset(year for year in WORK_YEARS if first.year <= year <= last.year)
+    return held
 
 
 def runnable(hidden: int, held: Mapping[str, Collection[int]]) -> bool:

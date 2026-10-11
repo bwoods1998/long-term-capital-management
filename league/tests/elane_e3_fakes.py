@@ -71,8 +71,11 @@ def decide(ctx):
         out.append({"buy": "SPY", "usd": usd, "at": "close"})
     return out
 '''
-#: `CARRIES`' NEEDS history: the moved store keeps that many of the year's last sessions as they were.
+#: `CARRIES`' NEEDS history, and the sessions of the hidden year the moved store keeps as they were: the look-back the
+#: stretch after the year may read, its `history` and the session its first decision is made at (E1's slice holds
+#: `history` or `history` + 1 sessions before a run's first, by its release: one more kept is true of both).
 CARRIES_HISTORY = 3
+CARRIES_KEPT = CARRIES_HISTORY + 1
 
 
 def moved_store(source: str | Path, target: str | Path, *, year: int, keep_last: int, factor: float = 1.3) -> Path:
@@ -187,5 +190,5 @@ def dump(store: SwarmStore, *, less: tuple[str, ...] = ()) -> dict[str, list[dic
             if name not in less and not name.startswith("sqlite_")}
 
 
-__all__ = ["WIRED", "NOT_WIRED", "WORK_YEARS", "settings", "hidden_family", "CARRIES", "CARRIES_HISTORY", "moved_store",
-           "year_figures", "InventedMarket", "table", "dump"]
+__all__ = ["WIRED", "NOT_WIRED", "WORK_YEARS", "settings", "hidden_family", "CARRIES", "CARRIES_HISTORY", "CARRIES_KEPT",
+           "moved_store", "year_figures", "InventedMarket", "table", "dump"]

@@ -532,8 +532,8 @@ class TheJob(Jobs):
         asked = P.questions(UNIVERSE, per_cell=24)
         batches = sum(-(-n // 10) for n in [sum(1 for q in asked if (q["stratum"], q["era"]) == (s, e))
                                               for s in P.STRATA for e in P.ERAS]) + 3
-        self.assertEqual(out, {"route": "sail:pro_asap", "probe": 1, "usd": round(0.05 * batches, 6), "finished": True,
-                               "cells": 13, "asked": batches, "stopped": None})
+        self.assertEqual(out, {"route": "sail:pro_asap", "probe": 1, "usd": round(0.05 * batches, 6), "bound": 3.0,
+                               "finished": True, "cells": 13, "asked": batches, "stopped": None})
         doc = self.doc()
         self.assertEqual((doc["version"], list(doc["routes"]), len(doc["history"])), ("contam-1", ["sail:pro_asap"], 1))
         row = doc["routes"]["sail:pro_asap"]
@@ -553,11 +553,12 @@ class TheJob(Jobs):
 
     def test_each_call_is_one_route_one_role_and_a_key_of_its_own(self):
         self.probe()
+        self.assertEqual(P.KEY_PREFIX, "swarm:elane:probe", "the equity lanes' mark in the swarm's spend rows")
         keys = []
         for call in self.router.calls:
             self.assertEqual((call["role"], call["system"], call["sail_profile"], call["openai_model"], call["claude"],
                               call["max_output"], call["effort"]), (P.ROLE, P.SYSTEM, "pro_asap", None, False, 2000, "low"))
-            self.assertEqual(call["key"], f"contam:sail:pro_asap:1:{hashlib.sha256(call['user'].encode()).hexdigest()[:12]}")
+            self.assertEqual(call["key"], f"swarm:elane:probe:sail:pro_asap:1:{hashlib.sha256(call['user'].encode()).hexdigest()[:12]}")
             keys.append(call["key"])
         self.assertEqual(len(keys), len(set(keys)))
         self.assertEqual(self.router.billed, keys)
@@ -575,9 +576,10 @@ class TheJob(Jobs):
         self.assertEqual(self.probe(settings_=settings(mode="off"))[0], {"status": "skipped", "why": "elane.contam.mode is off"})
         self.assertEqual(self.probe(settings_=settings(usd_run=0))[0]["status"], "skipped", "no dollar, no probe, no idle mark")
         self.assertFalse((self.root / P.FILE).exists())
-        elane_yield.book(self.store, "sail:pro_asap", usd=6.0, known=True, purpose="research", answered=True, now=self.clock())
+        elane_yield.book(self.store, "sail:pro_asap", usd=8.0, known=True, purpose="research", answered=True, now=self.clock())
         out, _ = self.probe()
-        self.assertEqual(out["status"], "skipped", "$2 of the day's $8 are left, under the $3 a run may spend")
+        self.assertEqual(out["status"], "skipped", "the day's $8 are spent")
+        self.assertIn("elane.e2.usd_day", out["why"])
         self.assertEqual(self.router.calls, [])
         self.assertFalse((self.root / P.FILE).exists(), "a run that did not start marks no route")
         self.clock.advance(86400)   # the next UTC day: the line is whole
@@ -588,6 +590,26 @@ class TheJob(Jobs):
         no_routes = settings()
         no_routes["elane"]["e2"]["routes"] = ["claude:architect"]   # a Claude role this router does not serve
         self.assertEqual(self.probe(settings_=no_routes)[0]["status"], "skipped")
+
+    def test_a_run_never_takes_more_than_e2s_day_has_left(self):
+        """THE BOUND: min(`usd_run`, E2's room for the day). With $0.20 of the day's line left a $3 run spends $0.20
+        and goes on the next week; it is not skipped for want of the whole $3."""
+        elane_yield.book(self.store, "sail:pro_asap", usd=7.8, known=True, purpose="research", answered=True, now=self.clock())
+        out, _ = self.probe()
+        self.assertEqual((out["bound"], out["usd"], out["stopped"], out["finished"], out["asked"]), (0.2, 0.2, "usd", False, 4))
+        self.assertAlmostEqual(elane_yield.spent_today(self.store, self.clock()), 8.0, places=6)
+        self.assertEqual(self.probe()[0]["status"], "skipped", "the line is spent: the same day asks nothing more")
+        self.assertEqual(len(self.router.calls), 4)
+        self.clock.advance(WEEK)
+        out, _ = self.probe()
+        self.assertEqual((out["route"], out["bound"], out["finished"]), ("sail:pro_asap", 3.0, True))
+        # A day line under `usd_run` (E2 holds its day to a share of the swarm's model line) still lets a probe move.
+        small = settings()
+        small["elane"]["e2"]["usd_day"] = 0.5
+        self.clock.advance(86400)
+        out, _ = self.probe(settings_=small)
+        self.assertEqual((out["route"], out["bound"], out["stopped"]), ("sail:glm_asap", 0.5, "usd"))
+        self.assertGreater(out["cells"], 0)
 
     def test_the_dollar_stop_leaves_a_partial_that_the_next_run_finishes(self):
         tight = settings(usd_run=0.3)
@@ -657,14 +679,14 @@ class TheJob(Jobs):
     def test_a_second_probe_sends_new_keys_and_a_resumed_one_repeats_them(self):
         self.probe()
         first = [c["key"] for c in self.router.calls]
-        self.assertTrue(all(k.startswith("contam:sail:pro_asap:1:") for k in first))
+        self.assertTrue(all(k.startswith("swarm:elane:probe:sail:pro_asap:1:") for k in first))
         self.clock.advance(29 * 86400)
         for _ in ROUTES:   # the other two routes, then the first again: its second probe
             self.probe()
             self.clock.advance(86400)
         second = [c["key"] for c in self.router.calls if c["sail_profile"] == "pro_asap"][len(first):]
         self.assertEqual(len(second), len(first))
-        self.assertTrue(all(k.startswith("contam:sail:pro_asap:2:") for k in second))
+        self.assertTrue(all(k.startswith("swarm:elane:probe:sail:pro_asap:2:") for k in second))
         self.assertEqual([k.rsplit(":", 1)[1] for k in second], [k.rsplit(":", 1)[1] for k in first], "the same questions")
         self.assertFalse(set(first) & set(second), "asked afresh, and billed")
         self.assertEqual(self.doc()["routes"]["sail:pro_asap"]["probes"], 2)
@@ -803,7 +825,7 @@ class TheJob(Jobs):
         doc = self.doc()
         self.assertEqual(doc["routes"]["sail:pro_asap"]["probes"], 31)
         self.assertEqual((len(doc["history"]), doc["history"][-1]["probe_n"], doc["history"][0]["probe_n"]), (24, 31, 2))
-        self.assertTrue(all(c["key"].startswith("contam:sail:pro_asap:31:") for c in self.router.calls))
+        self.assertTrue(all(c["key"].startswith("swarm:elane:probe:sail:pro_asap:31:") for c in self.router.calls))
 
     def test_a_model_that_recalls_the_market_is_read_as_recalling_it(self):
         table = self.oracle()

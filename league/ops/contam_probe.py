@@ -37,26 +37,36 @@ THE FILE: {"version": "contam-1", "routes": {route: {"at", "model", "usd", "prob
 "recall": {n, rho, p_perm, sign_acc}, "partial": {"probe_n", "qset", "usd", "cells", "recall"}}}, "history": [the last
 24 route results]}.
 
-THE JOB (`run`): skipped when the mode is "off", no route is due (`due`), or `elane_yield.room(store, settings, now) <
-usd_run`. One route a run: `router = models.build_router(ctx.root, store, settings, config=ctx.config)`; routes =
+THE JOB (`run`): skipped when the mode is "off", no route is due (`due`), or E2's day leaves it no dollar
+(`elane_yield.room(store, settings, now)`: THE BOUND below). One route a run: `router = models.build_router(ctx.root, store, settings, config=ctx.config)`; routes =
 `elane_yield.routes(settings, router)`. FIRST it writes the route's `attempted_at` and `idle` + 1 (`idle`: its
 attempts in a row that added no cell; a cell written sets it to 0), so a route that cannot move goes to the back of
 the line and never blocks the others. `probe_n` = 1 + the route's `probes` (its completed probes, a counter never
 truncated). Cell by cell in a fixed order, then the recall: each batch `elane_yield.ask_on(router, route, role=ROLE,
-system=SYSTEM, user=..., key=KEY, max_output=2000, effort="low")` with `KEY = f"contam:{route.key}:{probe_n}:{h}"`, h =
-the first 12 hex of sha256(the batch's user text); booked `elane_yield.book(store, f"probe:{route.key}", usd=...,
+system=SYSTEM, user=..., key=KEY, max_output=2000, effort="low")` with `KEY =
+f"{KEY_PREFIX}:{route.key}:{probe_n}:{h}"`, h = the first 12 hex of sha256(the batch's user text); booked `elane_yield.book(store, f"probe:{route.key}", usd=...,
 known=..., purpose="probe", answered=..., now=now)` (rows of their own, inside E2's day line; that function counts a
 purpose it does not name under `usd_research`). THE KEY: the Provider answers a request key it has seen from its
 store, at $0. So a resumed probe (the same `probe_n`) re-reads its own batches for nothing; a new probe (`probe_n` +
 1) asks afresh and is billed; a batch whose questions changed has another hash and never meets an old answer. A cell
 whose batches are all in is scored and written at once to `routes[route].partial` (aggregates only, with `probe_n`,
 `qset` and the dollars so far); a partial with another `qset` is dropped. The run stops asking once its booked
-dollars reach `usd_run` or `ASK_SECONDS` have passed; the next run of that route goes on from the partial. When every
+dollars reach its bound or `ASK_SECONDS` have passed; the next run of that route goes on from the partial. When every
 cell and the recall are in, the result is published (`at`, `model`, `usd`, `cells`, `recall`), `probes` + 1, `idle` 0,
 `partial` removed, `history` appended. Truths and answers are dropped before every write. A `MissingData` (the store
 being rewritten) ends the run with the cells already scored kept and the billed dollars booked.
 
 AS BUILT, beside the words above.
+- THE BOUND of a run's dollars is min(`usd_run`, E2's room for the UTC day when the run starts), and a run is skipped
+  only when that room is zero. The probe's dollars are E2's (booked inside its day's line), so a run never takes
+  more than the day has left; where E2's day line is under `usd_run` (E2 holds its day to a share of the swarm's
+  Sail model line), a probe moves on by what each Saturday's line gives it and finishes over the next weeks, where
+  "skipped while the room is under `usd_run`" would have skipped every run and told nobody.
+- THE KEY's prefix is E2's own (`KEY_PREFIX`, "swarm:elane:probe"): the swarm tells the equity lanes' model dollars
+  from the options researchers' by a request key that begins "swarm:elane:" (league/swarm/elane_yield.py; the
+  loop's hourly pace), so the probe's dollars sit in the equity lanes' meters and one probe does not pause every
+  options researcher for the hour after it. What makes a key repeat or not is unchanged: the route, `probe_n` and
+  the batch's hash.
 - THE UNIVERSE is the House's (`league.ops.equity_data.universe()`: every symbol the daily store is fetched for). S1's
   symbols are its index ETFs; S2's every ETF but SPY; S3's the stocks; S4's every symbol but SPY.
 - A PERIOD (`periods`) is a calendar month ("YYYY-MM") or, for S4, an ISO week named by the day it ends on; it belongs
@@ -116,6 +126,8 @@ RECALL = "R2021"
 RECALL_MONTHS = ((2020, 1), (2021, 12))
 #: The role the probe's questions carry on a route (its cache key and the router's books).
 ROLE = "elane_probe"
+#: What every request key of the probe begins with: the equity lanes' own mark in the swarm's spend rows.
+KEY_PREFIX = "swarm:elane:probe"
 SYMBOLS_PER_CELL = 8
 PERMUTATIONS = 2000
 #: No new call after this many seconds of a run (the Provider bounds a call at 900 s; the job's wall is 3,300).
@@ -646,8 +658,11 @@ class Probe:
         key = due(doc, list(served), now=now, every_days=c["every_days"])
         if key is None:
             return {"status": "skipped", "why": "no route is due a probe"}
-        if elane_yield.room(self.store, self.settings, now) < c["usd_run"]:
-            return {"status": "skipped", "why": "E2's model dollars for the day leave no room for a probe (elane.e2.usd_day)"}
+        room = float(elane_yield.room(self.store, self.settings, now))
+        bound = round(min(float(c["usd_run"]), room), 6)  # THE BOUND: never more than E2's day has left
+        if not bound > 0:
+            return {"status": "skipped", "why": "E2's model dollars for the day are spent: no room for a probe "
+                                                "(elane.e2.usd_day)"}
         route = served[key]
         row = dict(doc["routes"].get(key) or {})
         probe_n = 1 + (int(row["probes"]) if isinstance(row.get("probes"), int) and not isinstance(row.get("probes"), bool)
@@ -687,14 +702,14 @@ class Probe:
 
         def ask(batch: Sequence[Mapping[str, Any]]) -> list[Any] | None:
             """One batch's answers, or None once the run stopped asking (`state["stopped"]` says why)."""
-            if state["spent"] >= c["usd_run"]:
+            if round(state["spent"], 6) >= bound:  # dollars to the ledger's own six places
                 state["stopped"] = "usd"
                 return None
             if self.clock() - began >= ASK_SECONDS:
                 state["stopped"] = "time"
                 return None
             system, user = prompt(batch)
-            call = f"contam:{route.key}:{probe_n}:{_digest(user)[:12]}"
+            call = f"{KEY_PREFIX}:{route.key}:{probe_n}:{_digest(user)[:12]}"
             try:
                 answer = elane_yield.ask_on(self.router, route, role=ROLE, system=system, user=user, key=call,
                                             max_output=MAX_OUTPUT, effort=EFFORT)
@@ -784,8 +799,8 @@ class Probe:
         if row["idle"] >= IDLE_ALARM:
             self.ctx.alert("warning", f"CP2: the contamination probe's route {key} added no cell in its last "
                                       f"{int(row['idle'])} attempts")
-        out = {"route": key, "probe": probe_n, "usd": round(state["spent"], 6), "finished": finished,
-               "cells": state["scored"], "asked": state["asked"], "stopped": state["stopped"]}
+        out = {"route": key, "probe": probe_n, "usd": round(state["spent"], 6), "bound": round(bound, 6),
+               "finished": finished, "cells": state["scored"], "asked": state["asked"], "stopped": state["stopped"]}
         if state["error"]:
             out["error"] = state["error"]
         return out
@@ -793,8 +808,9 @@ class Probe:
 
 def run(ctx: Any) -> dict[str, Any]:
     """THE JOB (the module docstring; league/ops/registry.py). The receipt: {"route", "probe" (its number), "usd",
-    "finished", "cells" (scored this run), "asked", "stopped" ("usd" | "time" | "error" | "data" | "fallback" | None)}
-    and, when a call or the store failed or another profile answered, "error"."""
+    "bound" (the run's dollars at most), "finished", "cells" (scored this run), "asked", "stopped" ("usd" | "time" |
+    "error" | "data" | "fallback" | None)} and, when a call or the store failed or another profile answered,
+    "error"."""
     from ..equity.store import STORE_DIR, EquityStore, MissingData, StoreRefused, mint_equity_gate_capability
     from ..swarm import settings as settings_mod
     from . import equity_data
@@ -824,6 +840,6 @@ def run(ctx: Any) -> dict[str, Any]:
 
 __all__ = ["FILE", "VERSION", "GATE_REASON", "ERAS", "STRATA", "RECALL", "RECALL_MONTHS", "ROLE", "SYMBOLS_PER_CELL",
            "PERMUTATIONS", "ASK_SECONDS", "READABLE_ANSWERED", "READABLE_PERIODS", "ALPHA", "HISTORY", "MODES",
-           "DEFAULTS", "BOUNDS", "SYSTEM", "AGAINST", "WORDS", "RECALL_ERA", "IDLE_ALARM", "JUDGED_ERAS", "CELL_KEYS",
+           "DEFAULTS", "BOUNDS", "SYSTEM", "KEY_PREFIX", "AGAINST", "WORDS", "RECALL_ERA", "IDLE_ALARM", "JUDGED_ERAS", "CELL_KEYS",
            "RECALL_KEYS", "cfg", "mode", "periods", "stratum_symbols", "grid", "questions", "recall_questions", "qset",
            "truth", "prompt", "parse", "wilson", "perm_p", "score", "read", "due", "Probe", "run"]

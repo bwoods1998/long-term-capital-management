@@ -248,28 +248,45 @@ class TheListingRule(unittest.TestCase):
         self.assertIsNone(elane_folds.bar_years(None, ["XLK"]))
         self.assertIsNone(elane_folds.bar_years(Path(self.tmp.name) / "nowhere", ["XLK"]), "a House with no equity store yet")
 
-    def test_it_reads_one_train_span_at_a_time_and_never_a_reserve_session(self):
+    def test_it_reads_the_manifest_alone_no_bar_and_so_no_reserve_session(self):
         from league.equity.store import EquityStore
 
-        asked = []
-        real = EquityStore.bars
-
-        def bars(store, symbols, window, **kw):
-            asked.append((window, kw["history"], kw["start"], kw["end"]))
-            out = real(store, symbols, window, **kw)
-            self.assertFalse({out.day(i).year for i in range(out.n)} & set(elane_folds.RESERVE_YEARS))
-            return out
-        with mock.patch.object(EquityStore, "bars", bars):
-            elane_folds.bar_years(self.house, ["XLC"])
-        self.assertEqual(asked, [("train", 0, first, last) for first, last in elane_train.TRAIN_SPANS])
-        # Two markets that differ only in the reserve (here: whether the symbol has a bar there at all) read the same.
+        def never(*args, **kwargs):
+            raise AssertionError("the listing rule sliced the store")
+        with mock.patch.object(EquityStore, "bars", never), mock.patch.object(EquityStore, "span", never), \
+                mock.patch.object(EquityStore, "_series", never):
+            held = elane_folds.bar_years(self.house, ["XLK", "XLC"])
+        self.assertEqual(held["XLC"], frozenset({2018, 2019, 2022, 2023, 2024}))
+        # Two markets that differ only in the reserve (here: whether the symbol has a bar there at all, and every
+        # price) read the same.
         from league.equity import synth
 
         other = Path(self.tmp.name) / "other"
         reserve = [d for d, _ in nyse_sessions(dt.date(2020, 1, 2), dt.date(2021, 12, 31))]
         before = [d for d, _ in nyse_sessions(dt.date(2016, 1, 4), self.LISTED - dt.timedelta(days=1))]
         synth.synthetic_store(other / elane.STORE_DIR, gaps={"XLC": before + reserve}, **{**self.market, "seed": 10})
-        self.assertEqual(elane_folds.bar_years(other, ["XLK", "XLC"]), elane_folds.bar_years(self.house, ["XLK", "XLC"]))
+        self.assertEqual(elane_folds.bar_years(other, ["XLK", "XLC"]), held)
+
+    def test_a_symbol_with_no_bar_at_all_has_no_year_and_a_manifest_without_its_days_raises(self):
+        from league.equity.store import EquityStore, MissingData
+
+        real = EquityStore.manifest
+
+        def manifest(store, **change):
+            out = real(store)
+            out["symbols"]["XLK"].update(change)
+            return out
+        with mock.patch.object(EquityStore, "manifest", lambda store: manifest(store, first=None, last=None, rows=0)):
+            self.assertEqual(elane_folds.bar_years(self.house, ["XLK"]), {"XLK": frozenset()})
+        for change in ({"first": "soon"}, {"last": None}, {"first": 20180619}):
+            with mock.patch.object(EquityStore, "manifest", lambda store, change=change: manifest(store, **change)):
+                with self.assertRaises(MissingData, msg=change):
+                    elane_folds.bar_years(self.house, ["XLK"])
+        # A first bar in the reserve: the first Train span holds none of it, so no year can be run.
+        with mock.patch.object(EquityStore, "manifest", lambda store: manifest(store, first="2021-03-01")):
+            held = elane_folds.bar_years(self.house, ["XLK"])
+        self.assertEqual(held, {"XLK": frozenset({2022, 2023, 2024})})
+        self.assertFalse(any(elane_folds.runnable(year, held) for year in elane_folds.WORK_YEARS))
 
     def test_a_store_that_cannot_be_read_raises(self):
         from league.equity.store import MissingData
