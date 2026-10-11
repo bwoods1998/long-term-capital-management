@@ -1151,8 +1151,10 @@ class TheResearchFunnel(Case):
             self.assertNotIn(word, posted, "the page prints no equity row")
         out, _ = self.run_at()
         json.dumps(out)  # the stall receipt is JSON
-        self.assertEqual(set(out), {"stalled", "cleared", "warned", "notice", "checks", "ceiling", "errors", "warning"},
-                         "the stall receipt's keys are as they were")
+        off = self.ctx()
+        off.settings = {"stall": {"elane": False}}
+        self.assertEqual(set(out), set(ST.run(off)), "the four add no key to the stall receipt: they are among its checks")
+        self.assertLessEqual({"stalled", "cleared", "warned", "notice", "checks", "ceiling", "errors", "warning"}, set(out))
 
     def test_a_funnel_that_cannot_be_read_is_an_error_there_and_never_a_zero(self):
         self.invented_day()
