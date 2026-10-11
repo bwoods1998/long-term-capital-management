@@ -133,8 +133,8 @@ equity lane, `elane_train:` lines while a family has a step to take, the heartbe
 **Not handled, stated.** E2's rounds start only while the Sail guard allows new research (THE GATE'S RESERVE and
 the brake hold them, as they hold every round that makes new research); the options Gym being down holds neither, since
 an equity Train run needs no Gym box. The restart check
-does not catch memory that changes fewer than 1% of sessions. The static rules do not follow a value through STATE or a
-level's digits (the two paid readers do), and the memory rule covers the programs the swarm breeds, not the seeds or
+does not catch memory that changes fewer than 1% of sessions. The static rules do not follow a tuple or a dict stored
+whole, a container read in another function than it was filled in, or a level's digits (the two paid readers do), and the memory rule covers the programs the swarm breeds, not the seeds or
 the options Gym's programs (the root is E1's, for its next identity move). **The reserve's bars reach Train as look-back**: no
 2020-21 session is run or scored, but a 2022-24 run reads its NEEDS `history` + 1 sessions before 2022-01-03 (up to
 505), so a program with look-back has 2022-24 Train figures that are functions of 2020-21 bars, and even a program

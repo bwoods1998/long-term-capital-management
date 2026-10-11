@@ -16,9 +16,12 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    average, a return) is scale-free and is not touched; a comparison with zero (a sign or a missing-bar check) is not
    either. The ratio of two DIFFERENT symbols' levels (QQQ over SPY) is not scale-free in time: held against a
    constant it is refused as a level is. A taint pass over the module (module constants, PARAMS, names, what
-   `ctx.bars.items()` and `.values()` yield, a lot's field by `[...]` or `.get`, a helper read again with each call's
-   own arguments, numpy's comparison, arithmetic and table functions as the operators they are, a constant written as
-   arithmetic or as text, comprehensions); what it cannot follow (a value through STATE, a level's digits, an unknown
+   `ctx.bars.items()` and `.values()` yield, a lot's field by `[...]` or `.get`, a helper or a named lambda read again
+   with each call's own arguments, numpy's comparison, arithmetic and table functions as the operators they are, a
+   constant written as arithmetic or as text, comprehensions, `zip` taken apart in a loop, and what the program puts
+   into a container of its own and reads back in the same function: `closes[s] = c[-1]`, `xs.append(px)`,
+   `STATE["px"] = px`, each string key of a dict kept apart so a counter beside a price stays a counter); what it
+   cannot follow (a tuple or a dict stored whole, a container read in another function, a level's digits, an unknown
    call) is left to the paid review, never refused on a guess.
    It runs in `elane_train.check_code`, so such a program is never stored or run: the researcher hears why.
 1b. RUN-START DEPENDENCE, in the same pass (the integration review's seal-1). Every judged run starts flat: each
@@ -29,7 +32,9 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    holds only for programs blind to their run's start. THE RUN'S DOLLARS are the sleeve's now (`ctx.equity`,
    `ctx.cash`, a lot's `value` and `pnl`, a closed lot's `net`) and the run's anchor (`ctx.budget`, `ctx.caps[sym]`).
    Refused: any of them compared with, offset by, bucketed by or clipped at a constant or a PARAMS value; and the
-   sleeve's dollars now held against the anchor in any way (compared, subtracted, divided: a ratio among them).
+   sleeve's dollars now held against the anchor in any way (compared, subtracted, divided, multiplied by its
+   reciprocal: a ratio among them). A constant over the run's dollars and their log are the run's dollars still
+   (`1000.0 / ctx.equity`, `math.log(ctx.equity)`: the same profit written another way).
    Allowed: sizing proportional to them (`"usd": 0.5 * ctx.equity`, `min(ctx.cash, ctx.caps[s])`), a sign or zero
    check (`lot["pnl"] < 0`, `ctx.caps[s] <= 0`), and the position's own state among the sleeve's dollars now
    (`ctx.cash / ctx.equity`, a lot's `value` over `ctx.equity`, `pnl` over `value`).
@@ -113,7 +118,7 @@ COMPARES = frozenset({"greater", "greater_equal", "less", "less_equal", "equal",
 #: numpy's arithmetic functions, by the operator each is.
 ARITHMETIC: dict[str, type] = {"add": ast.Add, "subtract": ast.Sub, "multiply": ast.Mult, "divide": ast.Div,
                                "true_divide": ast.Div, "floor_divide": ast.FloorDiv, "mod": ast.Mod, "remainder": ast.Mod,
-                               "fmod": ast.Mod, "power": ast.Pow, "float_power": ast.Pow}
+                               "fmod": ast.Mod, "power": ast.Pow, "float_power": ast.Pow, "divmod": ast.FloorDiv}
 #: Functions that place a value among the points of a table: a level placed among constants is a level bucket.
 BUCKETS = frozenset({"digitize", "searchsorted", "interp"})
 MODULES = frozenset({"np", "numpy", "math"})
@@ -130,6 +135,12 @@ _VIEWS = frozenset({_ITEMS, _VALUES, _ENUM})
 _NONE: frozenset[str] = frozenset()
 #: How deep a helper's call is followed with its call-site arguments.
 CALL_DEPTH = 6
+#: THE PROGRAM'S OWN CONTAINERS (`_Levels._store`). The methods that put ONE value in (the argument that is the value),
+#: the ones that put an iterable's values in, and the separator of a container's name and one string key of it in the
+#: pass's table of names (`STATE["px"]` is kept apart from `STATE["n"]`).
+PUTS = {"append": 0, "add": 0, "appendleft": 0, "insert": 1}
+PUTS_MANY = frozenset({"extend", "extendleft"})
+_SEP = "\x00"
 
 
 def _origin(tags: Iterable[str]) -> frozenset[str]:
@@ -250,6 +261,23 @@ class _Levels:
         for stmt in body:
             self._stmt(stmt, env)
 
+    def _twice(self, body: Sequence[ast.stmt], env: dict[str, set[str]], test: ast.AST | None = None) -> None:
+        """A body that may run again (a function's, a loop's) is read TWICE: the first reading only gathers what each
+        name can hold, so a name assigned late reaches the reads above it; refusals are kept on the second reading
+        alone. Kept on the first, a placeholder was read as the number it starts as (`prev = None` ... `px / prev - 1`
+        ... `prev = px`; `lo = 1e9` ... `if x < lo: lo = x`) and a scale-free program was refused for a level it
+        never holds against a constant."""
+        held, self.record = self.record, False
+        try:
+            if test is not None:
+                self._tag(test, env)
+            self._block(body, env)
+        finally:
+            self.record = held
+        if test is not None:
+            self._tag(test, env)
+        self._block(body, env)
+
     @staticmethod
     def _params(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) -> list[ast.arg]:
         args = node.args
@@ -264,8 +292,7 @@ class _Levels:
         for default in [*args.defaults, *[d for d in args.kw_defaults if d is not None]]:
             self._tag(default, env)
         self._ret.append(set())
-        for _ in range(2):  # loops: a name assigned late in the body reaches the reads above it
-            self._block(node.body, inner)
+        self._twice(node.body, inner)
         self.returns[node.name] = _norm(self._ret.pop())
         self.functions[node.name] = (node, env)
         env.setdefault(node.name, set()).add(_U)
@@ -276,7 +303,7 @@ class _Levels:
         a level; a level and a constant handed to `above(x, k)` meet inside it). A helper that calls itself, or a chain
         deeper than `CALL_DEPTH`, reads as the helper did with unknown arguments."""
         fn, home = self.functions[name]
-        memo = (name, tuple(args), tuple(sorted(keywords.items())))
+        memo = (name, tuple(args), tuple(sorted(keywords.items())), self.record)  # a silent reading records nothing
         if memo in self._memo:
             return self._memo[memo]
         if name in self._stack or len(self._stack) >= CALL_DEPTH:
@@ -298,8 +325,7 @@ class _Levels:
         self._ret.append(set())
         self._stack.append(name)
         try:
-            for _ in range(2):
-                self._block(fn.body, inner)
+            self._twice(fn.body, inner)
         finally:
             self._stack.pop()
             out = _norm(self._ret.pop())
@@ -310,6 +336,12 @@ class _Levels:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             self._function(node, env)
         elif isinstance(node, ast.Assign):
+            if isinstance(node.value, ast.Lambda):  # `last = lambda b: b.close[-1]`: a helper, read at each call
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        helper = ast.FunctionDef(name=target.id, args=node.value.args, decorator_list=[],
+                                                 body=[ast.copy_location(ast.Return(value=node.value.body), node.value)])
+                        self._function(ast.copy_location(helper, node.value), env)
             # A running extreme (`best = max(best, x)`, its start a sentinel such as -1e9) is no clip at a level.
             names = {t.id for t in node.targets if isinstance(t, ast.Name)}
             held, self._accum = self._accum, names if isinstance(node.value, ast.Call) else set()
@@ -332,14 +364,11 @@ class _Levels:
             if node.value is not None and self._ret:
                 self._ret[-1].update(self._tag(node.value, env))
         elif isinstance(node, (ast.For, ast.AsyncFor)):
-            self._bind(node.target, self._tag(node.iter, env), env)
-            for _ in range(2):
-                self._block(node.body, env)
+            self._loop(node.target, node.iter, env)
+            self._twice(node.body, env)
             self._block(node.orelse, env)
         elif isinstance(node, ast.While):
-            for _ in range(2):
-                self._tag(node.test, env)
-                self._block(node.body, env)
+            self._twice(node.body, env, test=node.test)
             self._block(node.orelse, env)
         elif isinstance(node, ast.If):
             self._tag(node.test, env)
@@ -369,6 +398,10 @@ class _Levels:
     def _assign(self, target: ast.AST, value: ast.AST | None, tag: frozenset[str], env: dict[str, set[str]]) -> None:
         if isinstance(target, ast.Name):
             env.setdefault(target.id, set()).update(tag or {"_free"})
+            if isinstance(value, ast.Dict):  # info = {"px": c[-1], "n": 20}: each string key is read back as itself
+                for k, v in zip(value.keys, value.values):
+                    if k is not None and _key(k) is not None:
+                        env.setdefault(target.id + _SEP + str(_key(k)), set()).update(self._tag(v, env) or {"_free"})
         elif isinstance(target, (ast.Tuple, ast.List)):
             if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
                 for t, v in zip(target.elts, value.elts):
@@ -378,8 +411,42 @@ class _Levels:
                     self._assign(t, None, self._element(tag) if tag else tag, env)
         elif isinstance(target, ast.Starred):
             self._assign(target.value, None, tag, env)
-        else:  # STATE["x"] = ..., an attribute: evaluated, never followed (left to the paid review)
+        elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+            self._tag(target.slice, env)  # closes[s] = c[-1], STATE["px"] = px: read back as what was put in
+            self._store(target.value.id, _key(target.slice), value, tag, env)
+        else:  # an attribute, a nested container: evaluated, never followed (left to the paid review)
             self._tag(target, env)
+
+    def _store(self, name: str, key: str | None, value: ast.AST | None, tag: frozenset[str],
+               env: dict[str, set[str]]) -> None:
+        """WHAT A PROGRAM PUTS INTO A CONTAINER OF ITS OWN IS WHAT IT READS BACK FROM IT (`closes[s] = c[-1]` then
+        `closes["SPY"] > 400`; `xs.append(px)`; `STATE["px"] = px`): the container's name carries the unit of what was
+        put in. A string key is kept apart from the others (`name<_SEP>key`), so a counter beside a price stays a
+        counter. Only a single value is followed: a tuple, a list or a dict stored whole mixes units (a symbol, a
+        return and a price in one row) and is left to the paid review, as is a container read in another function."""
+        if name == "PARAMS" or name in self.modules or isinstance(value, (ast.Tuple, ast.List, ast.Set, ast.Dict)):
+            return
+        if tag & {_LOT, _LOTS}:
+            unit = {_LOTS}  # the program's own list of lots: its rows are lots
+        elif tag & (_CONTAINERS | _VIEWS):
+            return
+        else:
+            unit = set(_norm(tag)) or {"_free"}
+        if key is None:  # by a key that is no string, or appended: whose level each is is not kept
+            unit = {t for t in unit if not t.startswith("@")} or {"_free"}
+        env.setdefault(name if key is None else name + _SEP + key, set()).update(unit)
+
+    def _loop(self, target: ast.AST, iterable: ast.AST, env: dict[str, set[str]]) -> None:
+        """A loop's (or a comprehension's) target over its iterable; `for s, px in zip(symbols, levels)` binds each name
+        to its own argument's elements."""
+        if (isinstance(iterable, ast.Call) and isinstance(iterable.func, ast.Name) and iterable.func.id == "zip"
+                and not iterable.keywords and isinstance(target, (ast.Tuple, ast.List))
+                and len(target.elts) == len(iterable.args)
+                and not any(isinstance(a, ast.Starred) for a in [*iterable.args, *target.elts])):
+            for t, a in zip(target.elts, iterable.args):
+                self._bind(t, self._tag(a, env), env)
+        else:
+            self._bind(target, self._tag(iterable, env), env)
 
     def _bind(self, target: ast.AST, tag: frozenset[str], env: dict[str, set[str]]) -> None:
         """A loop's (or a comprehension's) target over an iterable: `for s, b in ctx.bars.items()` gives the key and one
@@ -428,6 +495,27 @@ class _Levels:
         if marks:
             return frozenset(marks) | _origin(held)
         return _norm(t for t in held if t != "_free")
+
+    def _own(self, holder: ast.AST, key: str | None, env: dict[str, set[str]]) -> frozenset[str] | None:
+        """What the program itself put under one string key of a container of its own (`_store`, a dict literal), or
+        None when it put nothing there by that key."""
+        if key is None or not isinstance(holder, ast.Name) or holder.id + _SEP + key not in env:
+            return None
+        return self._name(holder.id + _SEP + key, env)
+
+    def _keyed(self, holder: ast.AST, base: frozenset[str], slice_: ast.AST | None,
+               env: dict[str, set[str]]) -> frozenset[str]:
+        """`holder[key]` (or `holder.get(key)`): what the program put under that string key itself (`_own`), else the
+        field or element of `base` (`_subscript`). A dict of levels the program built, read by a string key, is that
+        symbol's level (`closes["QQQ"] / closes["SPY"]` is a ratio of two different symbols')."""
+        key = _key(slice_) if slice_ is not None else None
+        own = self._own(holder, key, env)
+        if own is not None:
+            return own
+        out = self._subscript(base, key, slice_)
+        if key is not None and isinstance(holder, ast.Name) and _level(base) and _level(out):
+            out = frozenset(t for t in out if not t.startswith("@")) | {"@" + key}
+        return out
 
     def _field(self, base: frozenset[str], name: str | None) -> frozenset[str] | None:
         """A named field of one symbol's bars or of one lot (an attribute, a string key or a `.get`), or None for a base
@@ -548,7 +636,7 @@ class _Levels:
         if isinstance(node, ast.Subscript):
             base = self._tag(node.value, env)
             self._tag(node.slice, env)
-            return self._subscript(base, _key(node.slice), node.slice)
+            return self._keyed(node.value, base, node.slice, env)
         if isinstance(node, ast.Call):
             return self._call(node, env)
         if isinstance(node, ast.BinOp):
@@ -585,7 +673,7 @@ class _Levels:
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
             inner = {k: set(v) for k, v in env.items()}
             for gen in node.generators:
-                self._bind(gen.target, self._tag(gen.iter, inner), inner)
+                self._loop(gen.target, gen.iter, inner)
                 for cond in gen.ifs:
                     self._tag(cond, inner)
             if isinstance(node, ast.DictComp):
@@ -653,8 +741,29 @@ class _Levels:
                     return frozenset({_ITEMS if name == "items" else _VALUES}) | base
                 if name == "keys":
                     return frozenset({_U})
+            if name == "get" and node.args and isinstance(func.value, ast.Name) and not base & (_CONTAINERS | _VIEWS) \
+                    and (_held(base) or self._own(func.value, _key(node.args[0]), env) is not None):
+                # STATE.get("px", 0.0), closes.get("SPY"): what the program put there, or the default
+                return self._join([self._keyed(func.value, base, node.args[0], env), *raw[1:]])
             if name == "get" and node.args and (_key(node.args[0]) in LOT_FIELDS or _key(node.args[0]) in MONEY_KEYS):
                 return self._subscript(base, _key(node.args[0]), node.args[0])  # a lot's field by .get, as by [...]
+            if isinstance(func.value, ast.Name) and not base & (_CONTAINERS | _VIEWS):
+                holder = func.value.id  # a container of the program's own: what is put in is what is read back
+                if name in PUTS and len(node.args) > PUTS[name]:
+                    self._store(holder, None, node.args[PUTS[name]], raw[PUTS[name]], env)
+                elif name in PUTS_MANY and node.args:
+                    self._store(holder, None, None, self._element(raw[0]), env)
+                elif name == "setdefault" and len(node.args) >= 2:
+                    self._store(holder, _key(node.args[0]), node.args[1], raw[1], env)
+                elif name == "update":
+                    for k in node.keywords:
+                        if k.arg:
+                            self._store(holder, k.arg, k.value, named[k.arg], env)
+                    for a in node.args:
+                        if isinstance(a, ast.Dict):
+                            for dk, dv in zip(a.keys, a.values):
+                                if dk is not None:
+                                    self._store(holder, _key(dk), dv, self._tag(dv, env), env)
             method = not (isinstance(func.value, ast.Name) and func.value.id in self.modules)
             if method:
                 args = [base] + args  # a method of a value (close.mean()): the value is its first argument
@@ -702,12 +811,16 @@ class _Levels:
             first = units[0] if units else _NONE
             if _L in first:
                 return frozenset({_G}) | _origin(first)
-            return frozenset({_U}) if _G in first or _money(first) else first
+            if _money(first):
+                return first  # log(ctx.equity): the run's dollars still (against a constant, or the anchor's log)
+            return frozenset({_U}) if _G in first else first
         if name in EXP:
             first = units[0] if units else _NONE
             if _G in first:
                 return frozenset({_L}) | _origin(first)
-            return frozenset({_U}) if _L in first or _money(first) else first
+            if _money(first):
+                return first
+            return frozenset({_U}) if _L in first else first
         if name in KEEP:
             joined = _norm(t for u in units for t in u)
             if name in SPREAD and _G in joined:
@@ -771,13 +884,16 @@ class _Levels:
             if _money(a):
                 return a
             if _money(b):
-                return frozenset({_U})
+                return b  # 1000.0 / ctx.equity, 1 / ctx.budget: the run's dollars still, written as a reciprocal
             if _G in a:
                 return a
             return frozenset({_C}) if _const(a) and _const(b) else _NONE
         if isinstance(op, ast.Mult):
             if _U in a or _U in b or (_G in a and (_G in b or _L in b)) or (_L in a and _G in b):
                 return frozenset({_U})
+            if _meets(a, b):  # ctx.equity * (1 / ctx.budget): the ratio, written as a product
+                self._refuse(node, f"sets {ANCHORED}")
+                return frozenset({_X})
             if _money(a) or _money(b):
                 other = b if _money(a) else a
                 return (a if _money(a) else b) if (not other or _const(other)) else frozenset({_U})

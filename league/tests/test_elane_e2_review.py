@@ -219,6 +219,73 @@ def decide(ctx):
         return [{"buy": "SPY", "share": 0.5}]
     return []
 ''',
+    # The same class, found while the fix was read again: a level put into a container of the program's own and read
+    # back, `zip` taken apart in a loop, and a helper written as a lambda.
+    "a dict of the program's own filled in a loop": '''
+def decide(ctx):
+    closes = {}
+    for s in ctx.symbols:
+        closes[s] = ctx.bars[s].close[-1]
+    if closes["SPY"] > 400:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "a dict of the program's own read by get": '''
+def decide(ctx):
+    closes = {}
+    for s in ctx.symbols:
+        closes[s] = ctx.bars[s].close[-1]
+    if closes.get("SPY", 0.0) > PARAMS["x"]:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "a list the levels are appended to": '''
+def decide(ctx):
+    xs = []
+    for s in ctx.symbols:
+        xs.append(ctx.prices[s])
+    if xs[0] > 400:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "a level put in STATE and read back": '''
+STATE = {}
+def decide(ctx):
+    STATE["c"] = ctx.prices["SPY"]
+    if STATE["c"] > 400:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "a level put in STATE by setdefault and read by get": '''
+STATE = {}
+def decide(ctx):
+    STATE.setdefault("first", ctx.prices["SPY"])
+    if STATE.get("first", 0.0) > 400:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "the two symbols' closes of the program's own dict, one over the other": '''
+def decide(ctx):
+    closes = {s: ctx.bars[s].close[-1] for s in ctx.symbols}
+    if closes["QQQ"] / closes["SPY"] > 0.85:
+        return [{"buy": "QQQ", "share": 0.5}]
+    return []
+''',
+    "zip taken apart in a loop": '''
+def decide(ctx):
+    out = []
+    for s, px in zip(ctx.symbols, [ctx.prices[s] for s in ctx.symbols]):
+        if px > 400:
+            out.append({"buy": s, "share": 0.2})
+    return out
+''',
+    "a helper written as a lambda": '''
+def decide(ctx):
+    last = lambda b: b.close[-1]
+    if last(ctx.bars["SPY"]) > 400:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
 }
 
 #: The integration review's seal-1: a program that reads its own profit since the run began. The first is the
@@ -315,6 +382,47 @@ def decide(ctx):
     if ctx.equity / ctx.prices["SPY"] > 2.5:
         return [{"buy": "SPY", "share": 0.5}]
     return []
+''',
+    # The profit lock written so the rule's first version let it through (each returned no refusal): the reciprocal,
+    # the log, a product with the anchor's reciprocal, a dict of the program's own, divmod.
+    "a constant over equity against a PARAMS value": '''
+PARAMS = {"inv": 0.97}
+def decide(ctx):
+    share = 0.02 if 1000.0 / ctx.equity < PARAMS["inv"] else 0.5
+    return [{"buy": "SPY", "share": share}]
+''',
+    "equity times the budget's reciprocal": '''
+PARAMS = {"lock": 0.03}
+def decide(ctx):
+    ahead = ctx.equity * (1 / ctx.budget) - 1
+    return [{"buy": "SPY", "share": 0.02 if ahead >= PARAMS["lock"] else 0.5}]
+''',
+    "the log of equity against a constant": '''
+import math
+def decide(ctx):
+    if math.log(ctx.equity) > 6.94:
+        return []
+    return [{"buy": "SPY", "share": 0.5}]
+''',
+    "the log profit": '''
+import math
+PARAMS = {"lock": 0.03}
+def decide(ctx):
+    ahead = math.log(ctx.equity) - math.log(ctx.budget)
+    return [{"buy": "SPY", "share": 0.02 if ahead >= PARAMS["lock"] else 0.5}]
+''',
+    "equity kept in a dict of the program's own": '''
+def decide(ctx):
+    seen = {}
+    seen["e"] = ctx.equity
+    if seen["e"] > 1030.0:
+        return []
+    return [{"buy": "SPY", "share": 0.5}]
+''',
+    "equity through divmod": '''
+def decide(ctx):
+    steps, rest = divmod(ctx.equity, 10)
+    return [] if steps > 102 else [{"buy": "SPY", "share": 0.5}]
 ''',
 }
 
@@ -468,6 +576,122 @@ class TheLevelRule(unittest.TestCase):
 
     def test_a_file_that_does_not_parse_is_left_to_the_code_rules(self):
         self.assertEqual(level_refusals("def decide(ctx:"), [])
+
+    def test_a_placeholder_that_a_loop_fills_is_not_the_number_it_starts_as(self):
+        # A body that may run again is read twice and refusals are kept on the second reading alone. Kept on the first,
+        # each of these scale-free programs was refused for a level it never holds against a constant: the name was
+        # read as the placeholder it starts as (None, zero, a sentinel) before the loop gave it a price.
+        for name, body in {
+            "the prior close carried through a loop": '''
+def decide(ctx):
+    prev, out = None, []
+    for px in ctx.bars["SPY"].close[-5:]:
+        if prev is not None and px / prev - 1 > 0.01:
+            out.append({"buy": "SPY", "share": 0.1})
+        prev = px
+    return out
+''',
+            "a reference set at the end of the loop's body": '''
+def decide(ctx):
+    ref, out = 0.0, []
+    for s in ctx.symbols:
+        c = ctx.bars[s].close
+        if ref and c[-1] / ref - 1 > 0.01:
+            out.append({"buy": s, "share": 0.1})
+        ref = c[-2]
+    return out
+''',
+            "a running low kept by hand from a sentinel": '''
+def decide(ctx):
+    c = ctx.bars["SPY"].close
+    lo = 1e9
+    for x in c[-20:]:
+        if x < lo:
+            lo = x
+    return [{"buy": "SPY", "share": 0.2}] if c[-1] / lo - 1 < 0.01 else []
+''',
+            "a while loop over the same": '''
+def decide(ctx):
+    c = ctx.bars["SPY"].close
+    i, last, ups = 1, None, 0
+    while i <= 5:
+        if last is not None and c[-i] / last - 1 < 0:
+            ups += 1
+        last = c[-i]
+        i += 1
+    return [{"buy": "SPY", "share": 0.2}] if ups >= 3 else []
+''',
+        }.items():
+            with self.subTest(name):
+                self.assertEqual(level_refusals(HEAD + body), [])
+        # A level held against a constant inside such a loop, or in a helper called from one, is refused as before.
+        for name, body in {
+            "inside the loop": '''
+def decide(ctx):
+    prev, out = None, []
+    for px in ctx.bars["SPY"].close[-5:]:
+        if prev is not None and px > 400:
+            out.append({"buy": "SPY", "share": 0.1})
+        prev = px
+    return out
+''',
+            "in a helper called from the loop": '''
+def above(x, k):
+    return x > k
+def decide(ctx):
+    out = []
+    for s in ctx.symbols:
+        if above(ctx.prices[s], PARAMS["x"]):
+            out.append({"buy": s, "share": 0.1})
+    return out
+''',
+        }.items():
+            with self.subTest(name):
+                self.assertTrue(level_refusals(HEAD + body), name)
+
+    def test_containers_of_the_programs_own_keep_what_each_key_holds(self):
+        # What a program puts into a container of its own is read back as what it is, key by key: a counter beside a
+        # price stays a counter, a dict of returns stays scale-free, a trailing high is a level held only against the
+        # lot's own mark, and a row that mixes a symbol, a return and a price is not followed (the paid review reads it).
+        own = HEAD + '''
+STATE = {"n": 0, "px": None}
+def decide(ctx):
+    out = []
+    info = {"px": ctx.prices["SPY"], "n": 20}
+    STATE["n"] = STATE.get("n", 0) + 1
+    prev = STATE.get("px")
+    STATE["px"] = ctx.prices["SPY"]
+    if info["n"] > 3 and STATE["n"] > 5 and prev is not None and STATE["px"] / prev - 1.0 > 0.01:
+        out.append({"buy": "SPY", "share": 0.2})
+    rets, rows, peak = {}, [], STATE.setdefault("peak", {})
+    for s in ctx.symbols:
+        c = ctx.bars[s].close
+        rets[s] = c[-1] / c[-21] - 1.0
+        rows.append((rets[s], s, c[-1]))
+    rows.sort(reverse=True)
+    mom, top, px = rows[0]
+    if rets[top] > 0.02 and mom > PARAMS["x"] / 1e4:
+        out.append({"buy": top, "share": 0.2})
+    for lot in ctx.positions:
+        peak[lot["id"]] = max(peak.get(lot["id"], lot["mark"]), lot["mark"])
+        if lot["mark"] / peak[lot["id"]] - 1.0 < -0.05:
+            out.append({"sell": lot["id"]})
+    held = {lot["symbol"]: lot for lot in ctx.positions}
+    mine = []
+    for lot in ctx.positions:
+        mine.append(lot)
+    for s, w in zip(ctx.symbols, [0.5, 0.5]):
+        if s in held and held[s]["mark"] / held[s]["entry"] - 1.0 > 0.05 and w > 0.25:
+            out.append({"sell": held[s]["id"]})
+    weight = lambda lot: lot["value"] / ctx.equity
+    out.extend({"sell": lot["id"]} for lot in mine if weight(lot) > 0.6 or lot["pnl"] < 0)
+    return out
+'''
+        self.assertEqual(level_refusals(own), [])
+        # And the program's own list of lots is still lots: a lot's dollars against a constant are refused through it.
+        through = own.replace('weight(lot) > 0.6 or lot["pnl"] < 0', 'lot["pnl"] > 15')
+        self.assertNotEqual(through, own)
+        self.assertTrue(level_refusals(through))
 
     def test_the_natural_shapes_the_rule_missed_are_refused(self):
         # The integration review's seal-4: each of these returned no refusal, so only the two paid readers stood

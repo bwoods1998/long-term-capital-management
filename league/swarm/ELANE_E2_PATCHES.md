@@ -75,7 +75,8 @@ Each has a test that failed before and passes after; the blockers and majors fir
   switch value `usd_day` 8.0 is a cap above it.
 - **Pre-open check 6 failed once any equity family held a live band** (major; patch 13). E1's line.
 - **A bred program could read its own profit since the run began** (major). The level rule now refuses RUN-START
-  DEPENDENCE (the sleeve's dollars of the run against a constant, a PARAMS value or the run's anchor), and the rubric
+  DEPENDENCE (the sleeve's dollars of the run against a constant, a PARAMS value or the run's anchor; their
+  reciprocal, their log and a product with the anchor's reciprocal too), and the rubric
   and its facts name it. FOR THE CAPTAIN: the root is E1's screen (its floor's worlds never start flat while every
   judged window does), so the false-positive line beside a live trade is true only for programs blind to their run's
   start; the captain's seeds are (they read no dollar of the sleeve).
@@ -86,7 +87,10 @@ Each has a test that failed before and passes after; the blockers and majors fir
   with the same idea and the rebirth row.
 - **The level rule missed natural shapes** (`ctx.bars.items()`, a helper handed a level, a lot's `.get`, numpy's
   `greater`/`subtract`/`mod`/`digitize`/`searchsorted`, `float('400')`, `400 + 0`, the ratio of two different
-  symbols' prices). Each is refused now.
+  symbols' prices). Each is refused now, and so are the same level put into a container of the program's own and
+  read back (`closes[s] = c[-1]`, `xs.append(px)`, `STATE["px"] = px`), taken out of a `zip`, or read by a named
+  lambda. The pass also stopped refusing scale-free programs for a placeholder a loop fills (`prev = None` ...
+  `px / prev - 1`; a running low kept from a sentinel): refusals are kept on the second reading of a body.
 - **Memory in an object of numpy's** (`np.typecodes`) survived the restart check and was shared by every run in the
   decider child. E2's own static MEMORY rule refuses it for every bred program. NOT changed: league/gym/safety.py
   and E1's child (both in an identity); FOR E1's OWNER, with the next identity move: the same rule in safety.py or a

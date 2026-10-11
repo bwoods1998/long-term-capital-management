@@ -183,17 +183,23 @@ Stopping, from the lightest:
      or mark, a share volume, or the log of one) compared with, offset by, bucketed by or clipped at a constant or a
      PARAMS value is refused before the program is stored or run (`check_code`); a ratio of ONE symbol's levels is
      untouched, and the ratio of two different symbols' prices against a constant is refused as a level is. The pass
-     follows what `ctx.bars.items()` and `.values()` yield, a lot's field by `[...]` or `.get`, a helper with each
-     call's own arguments, numpy's comparison, arithmetic and table functions, `getattr` with a literal name, and a
-     constant written as arithmetic or text. What it cannot follow (a value through STATE, a level's digits) is the
-     paid review's.
+     follows what `ctx.bars.items()` and `.values()` yield, a lot's field by `[...]` or `.get`, a helper or a named
+     lambda with each call's own arguments, numpy's comparison, arithmetic and table functions, `getattr` with a
+     literal name, a constant written as arithmetic or text, `zip` taken apart in a loop, and what the program puts
+     into a container of its own and reads back in the same function (`closes[s] = c[-1]`, `xs.append(px)`,
+     `STATE["px"] = px`; each string key kept apart, so a counter beside a price stays a counter). A body that may run
+     again (a function's, a loop's) is read twice and refusals are kept on the second reading, so a placeholder a
+     loop fills (`prev = None` ... `px / prev - 1` ... `prev = px`) is not read as the number it starts as. What it
+     cannot follow (a tuple or a dict stored whole, a container read in another function, a level's digits, an
+     unknown call) is the paid review's.
    - RUN-START DEPENDENCE, in the same pass (the integration review's seal-1): every judged run starts flat with the
      same capital (`ctx.budget`, a constant in a replay), so a program that reads its own profit since the run began
      and sizes on it (a profit lock) trades one way from a fresh start and another mid-run, and the share screen's
      floor, built from windows of one long run, never sees it: its false-positive line holds only for programs blind
      to their run's start. Refused: `ctx.equity`, `ctx.cash`, `ctx.budget`, `ctx.caps` or a lot's `value`, `pnl` or
      `net` compared with, offset by, bucketed by or clipped at a constant or a PARAMS value, and the sleeve's dollars
-     now held against `ctx.budget` or `ctx.caps` in any way. Allowed: sizing proportional to them, a sign or zero
+     now held against `ctx.budget` or `ctx.caps` in any way (a constant over them and their log are the run's dollars
+     still: `1000.0 / ctx.equity`, `math.log(ctx.equity)`). Allowed: sizing proportional to them, a sign or zero
      check, and the position's own state among the sleeve's dollars now (cash over equity, a lot's value over
      equity). FOR THE CAPTAIN: the root is E1's (the floor's worlds never start flat while every judged window does);
      the static rule and the rubric below are the guard until the screen's floor sees fresh starts.
