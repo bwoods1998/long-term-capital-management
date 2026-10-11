@@ -290,6 +290,43 @@ class TheSeatRule(unittest.TestCase):
                     rule("panel")
 
 
+class ThePanelsOwnRunner(unittest.TestCase):
+    def test_it_is_built_once_a_root_over_its_own_niced_decider_with_the_evidence_hash_seed(self):
+        from league.live import decider as live_decider
+        from league.xs import runner as xrunner
+
+        made = []
+
+        class Decider:
+            hash_seed = None
+
+            def __init__(self, *, log):
+                self.log = Path(log)
+
+        class Isolated:
+            def __init__(self, decider, root, *, budget_seconds, nice):
+                self.decider, self.root, self.budget, self.nice = decider, Path(root), budget_seconds, nice
+                made.append(self)
+
+        store = F.new_store(self)
+        root = Path(store.root)
+        self.addCleanup(elane_xs._runners.pop, str(root.resolve()), None)
+        self.addCleanup(elane_xs._deciders.pop, str(root.resolve()), None)
+        with mock.patch.object(live_decider, "Decider", Decider), mock.patch.object(xrunner, "Isolated", Isolated):
+            first = elane_xs.runner(root, F.settings("train", run_budget_seconds=120))
+            again = elane_xs.runner(root, F.settings("train"))
+        self.assertIs(first, again)
+        self.assertEqual(len(made), 1, "built once a process and root")
+        self.assertEqual((first.root, first.budget, first.nice), (root / "equity-daily", 120.0, 19))
+        self.assertEqual(first.decider.log, root / "xs-decider.log", "its own child and its own log")
+        self.assertNotEqual(first.decider.log.name, "equity-decider.log", "never E1's evidence child")
+        self.assertEqual(first.decider.hash_seed, elane.EVIDENCE_HASH_SEED)
+        self.assertIs(elane_xs._decider_of(object(), root), first.decider)
+        owner = F.owner(store, F.World(), F.settings("train"))
+        owner.xs_runner = None
+        self.assertIs(elane_xs._runner_of(owner), first)
+
+
 class CardsAndCells(unittest.TestCase):
     def setUp(self):
         self.world = F.switch_on(self)

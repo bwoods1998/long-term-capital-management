@@ -9,15 +9,17 @@ X8  the salt never leaves (the swarm's half): the swarm opens no SALT file, asks
     and no request, brief, event, state, stored run or decider payload holds one;
 X14 the swarm reads only the twin marker (the swarm's half): ids and days of one JSON file, whatever else it holds,
     and never the forward record's own store.
-league.xs is faked at its interfaces (league/tests/elane_xs_fakes.py). THE ENGINE'S OWN HALF OF X7 (a run of the
-stretch after a hidden year reads that year's bars as look-back and nothing else of it) is the engine's to hold on
-its synthetic panels (packages C and D): here the engine is an invented one whose every run is a function of its own
-span alone, so what is proved is the swarm's conduct: which spans it asks for, and what of each answer it keeps where.
-Every family, program and number is invented."""
+league.xs is faked at its interfaces (league/tests/elane_xs_fakes.py): there the engine is an invented one whose
+every run is a function of its own span alone, so what is proved is the swarm's conduct (which spans it asks for, and
+what of each answer it keeps where). X7 IS ALSO HELD ON THE REAL ENGINE (`TheReserveAndTheHiddenYearOnTheRealEngine`:
+package C's store and synthetic panel, package D's engine and runner through the decider's own in-process double),
+from the moment those packages and package G's patches are in the tree; until then that class is skipped and says
+so. Every family, program and number is invented."""
 
 from __future__ import annotations
 
 import builtins
+import datetime as dt
 import json
 import re
 import sqlite3
@@ -248,6 +250,159 @@ class TheReserveAndTheHiddenYear(World):
         for hidden in (None, *xconfig.TRAIN_YEARS):
             for first, last in (*elane_xs.seen_spans(hidden), *((elane_xs.hidden_span(hidden),) if hidden else ())):
                 self.assertFalse(set(range(first.year, last.year + 1)) & {2016, 2020, 2021})
+
+
+def real_engine() -> str | None:
+    """Why the real-engine tests cannot run in this tree, or None: package G's patches are applied and packages C, D
+    and E are built (each of their functions raised NotImplementedError as a Step 0 stub)."""
+    if not F.PATCHED:
+        return F.HOLDS.format(n="1 and 7")
+    try:
+        from league.xs import results, style
+
+        xconfig.decision_due(dt.date(2024, 1, 2), "weekly", 0)
+        results.t_stat([0.0, 1.0, 2.0])
+        style.style_open(None)
+    except NotImplementedError:
+        return "packages C, D and E of release E4 are stubs in this tree: the real engine is not built"
+    return None
+
+
+REVERSAL = '''import math
+
+NEEDS = {"panel": "sp500", "history": 20, "max_names": 5, "rebalance": "weekly", "weekday": 0, "max_hold_sessions": 30}
+PARAMS = {"back": 5}
+
+
+def decide(ctx):
+    back = int(ctx.params["back"])
+    scored = []
+    for row in range(ctx.n):
+        total = 0.25 * float(ctx.iret[row][-1])
+        for value in ctx.ret[row][-back:]:
+            total += float(value)
+        if total == total:
+            scored.append((total, int(ctx.ids[row])))
+    scored.sort()
+    if len(scored) < 5:
+        return {"hold": True}
+    return {"target": {slot: 0.2 for _, slot in scored[:5]}, "at": "open"}
+'''
+
+
+@unittest.skipIf(real_engine(), real_engine() or "")
+class TheReserveAndTheHiddenYearOnTheRealEngine(unittest.TestCase):
+    """Seal X7 with the REAL engine (one run a seen span: no rebased view of a whole-span run could pass this). Two
+    synthetic markets that differ only INSIDE the hidden year, or only inside 2021 (the OPENS of the members' bars
+    from February through October: the year's closes, volumes and last sessions are the same, as release E3's fixture
+    keeps them, because the stretch after reads those as look-back: 252 returns of closes for the characteristics, a
+    program's `history` sessions for its fields), give the same Train record, map, brief and stored figures. The
+    hidden run does read the moved opens, into the sealed key alone. STATED: a stored run's id is a hash over the
+    store's files, so the two markets' run ids differ; every figure stored under them is compared."""
+
+    base: Path
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+
+        from league.xs import synth
+
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.base = Path(cls._tmp.name) / "base"
+        synth.synthetic_panel(cls.base / elane_xs.STORE_DIR, n_assets=30, seed=11)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def market(self, *, years_ok, moved=None):
+        """A state root holding the base panel, its manifest naming `years_ok` as the covered Train years, and (with
+        `moved` = (first, last)) every member bar's OPEN from `first` through `last` set to that bar's high."""
+        import hashlib
+        import shutil
+        import tempfile
+
+        import numpy as np
+
+        from league.equity.store import from_ordinal
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        shutil.copytree(self.base, root, dirs_exist_ok=True)
+        folder = root / elane_xs.STORE_DIR / "panel"
+        manifest = json.loads((root / elane_xs.STORE_DIR / elane_xs.PANEL_MANIFEST).read_text())
+        if moved is not None:
+            days = [from_ordinal(int(d)) for d in np.load(folder / "days.npy")]
+            raw, adj = np.load(folder / "raw.npy"), np.load(folder / "adj.npy")
+            rows = [i for i, day in enumerate(days) if moved[0] <= day <= moved[1]]
+            self.assertGreater(len(rows), 150)
+            members = slice(len(xconfig.REF), None)
+            opened, high = raw[rows, members, 0], raw[rows, members, 1]
+            ok = np.isfinite(opened) & np.isfinite(high) & (opened > 0)
+            self.assertTrue(bool(np.any(ok & (high > opened))), "the move changes something")
+            adj[rows, members, 0] = np.where(ok, adj[rows, members, 0] * np.where(ok, high / np.where(ok, opened, 1.0),
+                                                                                  1.0), adj[rows, members, 0])
+            raw[rows, members, 0] = np.where(ok, high, opened)
+            for name, array in (("raw.npy", raw), ("adj.npy", adj)):
+                np.save(folder / name, array)
+                manifest["sha256"][name] = hashlib.sha256((folder / name).read_bytes()).hexdigest()
+        manifest["train_years_ok"] = list(years_ok)
+        (root / elane_xs.STORE_DIR / elane_xs.PANEL_MANIFEST).write_text(json.dumps(manifest))
+        return root
+
+    def scored(self, root, *, hidden):
+        """The family's whole Train judgment on the market at `root`, on the real engine: what Train leaves of it."""
+        from league.live.decider import InlineDecider
+        from league.swarm.store import SwarmStore
+        from league.xs import runner as xrunner
+
+        store = SwarmStore(root, clock=F.Clock())
+        self.addCleanup(store.close)
+        settings = F.settings("train")
+        self.assertEqual(elane_xs.mode(settings, root), "train")
+        owner = F.owner(store, F.World(), settings)
+        owner.xs_runner = xrunner.Isolated(InlineDecider(), root / elane_xs.STORE_DIR, nice=None)
+        fam = F.panel_family(store, "rev-real", code=REVERSAL, hidden=hidden)
+        out = elane_xs.score(owner, fam, store.latest_version("rev-real"))
+        fam = store.family("rev-real")
+        record = fam["state"][elane_xs.STATE_KEY]
+        self.assertIn("1", record["versions"], out)
+        self.assertTrue(record["versions"]["1"]["facts"], "the bar read the real runs")
+        rows = store._all("SELECT run_id, \"window\", stress, status, summary FROM runs WHERE family='rev-real' ORDER BY rowid")
+        stored = []
+        for row in rows:
+            kept = store.run_result(row["run_id"])
+            stored.append([row["window"], row["stress"], row["status"], row["summary"],
+                           {k: kept.get(k) for k in ("status", "summary", "by_year", "pick_counts", "start", "end", "k")}])
+        return {"record": json.dumps(record, sort_keys=True), "brief": elane_xs.brief(owner, fam),
+                "map": elane_xs.train_map_text(store, settings), "runs": json.dumps(stored, sort_keys=True),
+                "sealed": json.dumps({k: fam["state"].get(k) for k in (elane_xs.HALVES_KEY, elane_xs.PLACEBO_KEY)},
+                                     sort_keys=True)}, fam["state"].get(elane_xs.OOF_KEY)
+
+    def test_a_market_that_differs_only_inside_the_hidden_year_gives_the_same_train(self):
+        years = [2017, 2018, 2019]
+        plain, oof = self.scored(self.market(years_ok=years), hidden=2018)
+        moved = self.market(years_ok=years, moved=(dt.date(2018, 2, 1), dt.date(2018, 10, 31)))
+        other, other_oof = self.scored(moved, hidden=2018)
+        for name in plain:
+            self.assertEqual(other[name], plain[name], f"the hidden year reached Train's {name}")
+        self.assertIsNotNone(oof)
+        self.assertNotEqual(other_oof, oof, "the hidden run did read the moved opens: into the sealed key alone")
+
+    def test_a_market_that_differs_only_inside_2021_gives_the_same_train(self):
+        plain, _ = self.scored(self.market(years_ok=[2022]), hidden=None)
+        moved = self.market(years_ok=[2022], moved=(dt.date(2021, 2, 1), dt.date(2021, 10, 29)))
+        other, _ = self.scored(moved, hidden=None)
+        for name in plain:
+            self.assertEqual(other[name], plain[name], f"2021 reached Train's {name}")
+
+    def test_a_seen_year_that_differs_does_move_train(self):
+        plain, _ = self.scored(self.market(years_ok=[2022]), hidden=None)
+        moved = self.market(years_ok=[2022], moved=(dt.date(2022, 2, 1), dt.date(2022, 10, 31)))
+        other, _ = self.scored(moved, hidden=None)
+        self.assertNotEqual(other["record"], plain["record"], "the test would see a leak")
 
 
 class TheSaltNeverLeaves(World):

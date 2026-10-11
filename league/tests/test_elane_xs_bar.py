@@ -427,6 +427,9 @@ class TheJudgment(ScoreCase):
         version = self.store.latest_version(fam["id"])
         self.assertEqual(scored[0], {"pass": "scored", "version": 1, "sha": version["sha"], "bar_passed": True,
                                      "fails": [], "objective": "equity-xs-v1", "judged": True, "structure": "panel"})
+        said = [e["payload"] for e in self.events("swarm.status") if e["payload"].get("action") == "elane_xs_train"]
+        self.assertEqual(said, [{"action": "elane_xs_train", "version": 1, "structure": "panel", "passed": True,
+                                 "fails": []}])
 
     def test_a_flat_program_fails_the_judged_rules_and_no_review_is_asked(self):
         fam = self.family(code=F.flat())
@@ -518,6 +521,31 @@ class TheJudgment(ScoreCase):
         self.assertIn("CPU is spent", self.score(fam)["skipped"])
         self.assertEqual(self.world.runner.calls, [])
 
+    def test_the_days_cpu_spent_before_noon_three_days_running_is_one_warning(self):
+        day = 86400.0
+        base = 1_790_380_800.0  # 2026-09-26T00:00:00Z
+        self.assertEqual(elane_xs._utc_day(base), "2026-09-26")
+
+        def spend(now):
+            self.store.put(elane_xs.CPU_KEY, {elane_xs._utc_day(now): 14400.0})
+            return elane_xs.may_run(self.store, self.settings, now)
+
+        def alerts():
+            return [e["payload"] for e in self.events("swarm.status") if e["payload"].get("action") == "elane_xs_cpu"]
+
+        for back in (2, 1):
+            self.assertIn("CPU is spent", spend(base - back * day + 6 * 3600))
+        self.assertEqual(alerts(), [], "two early days are not three")
+        spend(base + 13 * 3600)
+        self.assertEqual(alerts(), [], "spent after noon is the budget doing its work")
+        spend(base + 6 * 3600)
+        spend(base + 7 * 3600)
+        self.assertEqual(len(alerts()), 1, "three days running: one warning, once a day")
+        self.assertTrue(alerts()[0]["alert"])
+        zero = F.settings("train", cpu_seconds_day=0)
+        self.assertIn("CPU is spent", elane_xs.may_run(self.store, zero, base + 5 * day + 3600))
+        self.assertEqual(len(alerts()), 1, "a budget of zero is a switch, never an alarm")
+
     def test_the_quiet_rule_is_asked_before_each_run(self):
         fam = self.family(hidden=None)
         asked = []
@@ -564,6 +592,17 @@ class TheJudgment(ScoreCase):
         out = self.score(self.family())
         self.assertEqual(out["house"], "store")
         self.assertEqual(self.world.runner.calls, [])
+
+    def test_a_step_that_must_wait_goes_to_the_back_of_the_queue(self):
+        fam = self.family()
+        before = self.record(fam).get("last_at")
+        self.store.clock.advance(60)
+        self.world.quiet = "a wall is near"
+        out = elane_xs.step(self.owner, self.store.family(fam["id"]))
+        self.assertEqual(out, {"family": fam["id"], "skipped": "a wall is near"})
+        rec = self.record(fam)
+        self.assertNotEqual(rec["last_at"], before, "the least recently worked family is asked first")
+        self.assertEqual((rec["status"], rec["versions"]), ("researching", {}))
 
     def test_with_the_lane_off_nothing_runs(self):
         fam = self.family()
@@ -757,6 +796,31 @@ class E2sResearcherForwardsAPanelFamily(ScoreCase):
         self.assertEqual(elane_train.passed_version(self.store.family(fam["id"])), 1)
         self.assertTrue(r.idle() or not r.queue(), "a pass that stands asks for no further step")
         self.assertEqual(r.brief(self.store.family(fam["id"])), elane_xs.brief(r, self.store.family(fam["id"])))
+
+    def test_a_panel_family_that_cannot_move_takes_no_place_in_the_round(self):
+        from league.tests.elane_e2_fakes import e2_family
+
+        fam = self.family()
+        e2_family(self.store, "etf-a", code=None)
+        r = self.researcher()
+        self.assertEqual([f["id"] for f in r.queue()], [fam["id"], "etf-a"])
+        self.world.quiet = "a wall is near"
+        self.assertEqual([f["id"] for f in r.queue()], ["etf-a"], "the ETF family's research is not slowed")
+        self.assertEqual(len(self.world.quiet_asked), 1, "asked once a round, not once a family")
+        self.world.quiet = None
+        r.settings = F.settings("off")
+        self.assertEqual([f["id"] for f in r.queue()], ["etf-a"], "a closed panel lane (the rollback) the same")
+        self.assertEqual(elane_xs.blocked(r), "the panel lane is closed (elane.panel.mode)")
+
+    def test_the_restart_check_of_a_panel_family_is_the_panels_own(self):
+        fam = self.family()
+        r = self.researcher()
+        code = self.store.latest_version(fam["id"])["code"]
+        run = self.world.runner.train(code, {}, name=fam["id"], start=dt.date(2019, 1, 1), end=dt.date(2019, 12, 31),
+                                      k=1.5, calls=True)
+        out = r.restart(fam["id"], code, {}, [run])
+        self.assertEqual((out["calls"], out["held"], out["resets"]), (F.STATE_CALLS, True, [3, 7]),
+                         "by CALL, through the panel kind (the fake decider refuses any other kind)")
 
     def test_e2s_maps_never_count_a_panel_family(self):
         fam = self.family()

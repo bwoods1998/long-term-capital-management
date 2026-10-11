@@ -1428,8 +1428,34 @@ def may_run(store: Any, settings: Mapping[str, Any] | None, now: float) -> str |
     except Exception as exc:  # noqa: BLE001
         return f"the day's panel CPU cannot be read ({type(exc).__name__}): no run starts"
     if spent >= float(c["cpu_seconds_day"]):
+        if c["cpu_seconds_day"] > 0:
+            _cpu_alert(store, now)
         return "the day's panel Train CPU is spent (elane.panel.cpu_seconds_day): the round waits for the next UTC day"
     return None
+
+
+def _cpu_alert(store: Any, now: float) -> None:
+    """THE DAY'S CPU SPENT EARLY (E4-SPEC 17): spent before 12:00Z on three UTC days running is one warning (a
+    `swarm.status` alert, once a day; the days are kept in the kv `ALERTS_KEY`). Never raises."""
+    try:
+        if time.gmtime(float(now)).tm_hour >= 12:
+            return
+        day = _utc_day(now)
+        with store.atomic():
+            held = store.get(ALERTS_KEY)
+            held = dict(held) if isinstance(held, Mapping) else {}
+            early = [str(d) for d in (held.get("cpu_early") or []) if isinstance(d, str)]
+            if day in early:
+                return
+            early = sorted({*early, day})[-3:]
+            store.put(ALERTS_KEY, {**held, "cpu_early": early})
+        if all(_utc_day(float(now) - 86400.0 * back) in early for back in range(3)):
+            store.event("swarm.status", None, {
+                "action": "elane_xs_cpu", "alert": True,
+                "text": "the panel lane's CPU for the day (elane.panel.cpu_seconds_day) was spent before 12:00Z on "
+                        "three days running: its Train rounds wait most of each day"})
+    except Exception:  # noqa: BLE001 - an alert that cannot be written stops no round
+        pass
 
 
 def book_cpu(store: Any, seconds: float, now: float) -> None:
@@ -1751,6 +1777,13 @@ def state_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
             "held": matched >= need * calls - 1e-9, "first_miss": first_miss}
 
 
+def restart(researcher: Any, code: str, params: Mapping[str, Any] | None, *, name: str,
+            runs: Sequence[Any]) -> dict[str, Any]:
+    """THE RESTART CHECK of a panel version through the panel's own decider (E2's `EquityResearcher.restart` forwards a
+    panel family here): `state_check` on the k 1.5 seen-span runs."""
+    return state_check(_decider_of(_runner_of(researcher), _root_of(researcher)), code, params, name=name, runs=runs)
+
+
 def with_state(verdict: Mapping[str, Any], check: Mapping[str, Any]) -> dict[str, Any]:
     """A bar verdict with its restart check: as it was when the check held, else failed STATE (its Train facts kept).
     A check with no call compared never holds."""
@@ -1996,7 +2029,7 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
                 # THE RESTART CHECK: no pass without it (E2's rule: what stops it is the House's, or, for a child that
                 # keeps failing it while other programs are judged, the program's).
                 try:
-                    check = state_check(_decider_of(run_through, root), code, params, name=fid, runs=runs["stress"])
+                    check = restart(researcher, code, params, name=fid, runs=runs["stress"])
                 except Exception as exc:  # noqa: BLE001 - judged as a run's failure is
                     verdict, out = fault(researcher, fam, n, exc, check=True)
                     if out is not None:
@@ -2036,6 +2069,9 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
                                              "bar_passed": bool(entry["passed"]), "fails": list(entry["fails"]),
                                              "objective": OBJECTIVE, "judged": bool(entry["facts"]),
                                              "structure": STRUCTURE})
+            # ...and the lane's own status line (E4-SPEC 13: a count and a verdict, never a figure)
+            store.event("swarm.status", fid, {"action": "elane_xs_train", "version": n, "structure": STRUCTURE,
+                                              "passed": bool(entry["passed"]), "fails": list(entry["fails"])})
         except Exception:  # noqa: BLE001 - the verdict stands; the registry then dates the version from its sighting
             pass
     if entry["facts"] and hidden is not None:
@@ -2310,6 +2346,26 @@ def brief(researcher: Any, fam: Mapping[str, Any]) -> str:
     return "\n\n".join(lines)
 
 
+def blocked(researcher: Any) -> str | None:
+    """Why NO panel family may take a step now, or None: the lane is closed (the effective mode under "train"), or no
+    panel run may start (`may_run`: a wall is near, the day's CPU is spent). E2's researcher asks it once a round
+    (patch 7, `EquityResearcher.queue`): a panel family that cannot move takes no place in the round, so a closed
+    or waiting panel lane never slows the ETF families' research."""
+    try:
+        if MODES.index(mode(researcher.settings, _root_of(researcher))) < MODES.index("train"):
+            return "the panel lane is closed (elane.panel.mode)"
+        return may_run(researcher.store, researcher.settings, researcher.clock())
+    except Exception as exc:  # noqa: BLE001 - a lane that cannot be read does not move
+        return f"the panel lane cannot be read ({type(exc).__name__})"
+
+
+def _waits(store: Any, fid: str, why: str) -> dict[str, Any]:
+    """A step that could not be taken now: the family goes to the back of the researcher's queue (its record's
+    `last_at` moves; E2's queue works the least recently worked first), nothing else of it changes."""
+    _update(store, fid, lambda r: None)
+    return {"family": fid, "skipped": why}
+
+
 def step(researcher: Any, fam: Mapping[str, Any]) -> dict[str, Any]:
     """One step of a panel family (E2's `EquityResearcher.step` forwards it): re-score a stale pass; review a bar
     pass; score its newest unscored version (`may_run` first: a run that could still be working at a wall, or past
@@ -2319,7 +2375,7 @@ def step(researcher: Any, fam: Mapping[str, Any]) -> dict[str, Any]:
     store, settings = researcher.store, researcher.settings
     fid = str(fam["id"])
     if MODES.index(mode(settings, _root_of(researcher))) < MODES.index("train"):
-        return {"family": fid, "skipped": "the panel lane is closed (elane.panel.mode)"}
+        return _waits(store, fid, "the panel lane is closed (elane.panel.mode)")
     c, ec = cfg(settings), elane_train.cfg(settings)
     rec = record_of(fam)
     if rec.get("status") == "passed":
@@ -2330,7 +2386,7 @@ def step(researcher: Any, fam: Mapping[str, Any]) -> dict[str, Any]:
         if pass_current(store, fam):
             return {"family": fid, "skipped": "its pass stands"}
         why = may_run(store, settings, researcher.clock())
-        return {"family": fid, "skipped": why} if why is not None else score(researcher, fam, version, rescore=True)
+        return _waits(store, fid, why) if why is not None else score(researcher, fam, version, rescore=True)
     pending = rec.get("review") if isinstance(rec.get("review"), Mapping) else None
     if pending is not None and pending.get("version") is not None:
         return review_step(researcher, fam, int(pending["version"]))
@@ -2338,7 +2394,7 @@ def step(researcher: Any, fam: Mapping[str, Any]) -> dict[str, Any]:
     versions = versions_of(rec)
     if latest is not None and str(latest["n"]) not in versions:
         why = may_run(store, settings, researcher.clock())
-        return {"family": fid, "skipped": why} if why is not None else score(researcher, fam, latest)
+        return _waits(store, fid, why) if why is not None else score(researcher, fam, latest)
     if len(versions) >= c["train_budget"] or int(rec.get("attempts") or 0) >= ec["train_max_attempts"]:
         return finish(researcher, fam, "its Train budget is spent with no version passing")
     if elane_yield.room(store, settings, researcher.clock()) <= 0:
@@ -3313,9 +3369,10 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "closed_cells", "cell_looks", "forward_verdicts", "look_room", "probe_reading", "probed", "style_of",
            "assign", "run_spans", "seen_spans", "hidden_span", "agenda_text", "contract_text", "bar_text",
            "request_text", "researching", "quota", "check_code", "admit", "birth", "runner", "cpu_spent", "may_run",
-           "book_cpu", "outside", "train_score_xs", "same_targets", "state_check", "with_state", "program_fault",
+           "book_cpu", "outside", "train_score_xs", "same_targets", "state_check", "restart", "with_state",
+           "program_fault",
            "compact", "house_failure", "fault", "years_ok", "score", "rescored", "version_text", "restart_text",
            "style_text",
-           "train_facts", "brief", "step", "write", "review_question", "review_step", "review_failed", "rubric_sha",
+           "train_facts", "brief", "blocked", "step", "write", "review_question", "review_step", "review_failed", "rubric_sha",
            "finish", "pass_current", "may_validate", "zero_edge_rate", "train_map", "map_notes", "train_map_text",
            "same_lineage", "validate", "lineage_spent", "look", "beside_line", "view"]
