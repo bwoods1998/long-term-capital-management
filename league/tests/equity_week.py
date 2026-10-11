@@ -9,23 +9,27 @@ House, a broker, the gateway or a secret, and no price is a market's.
 WHY IT IS IN THE TREE. Release E4 put the panel kind into the live book (league/equity/live.py, package H). The ship
 check's warning was that one of its rules (the spec's decision 27, B8) changed the entry of EVERY instance. The
 captain's ruling: a share program's live behaviour is main's, order for order, at every position of the panel lane's
-switch. `record(tree)` ran these scenarios on main 81963c87 (the release the six programs were seated under) and kept
-what the book did (league/tests/fixtures/equity_etf_orders.json); the test runs them on the tree it is in and holds
-every intent, order, fill, lot, instance row, alert, record and minute's answer to that file. A LATER CHANGE OF THE ETF
-PATH FAILS IT: when the change is meant, record again on the new tree and say in the commit what moved.
+switch. `record(tree)` ran these scenarios on main 8ab31e32 (the release the six programs trade their first session
+under: the seat rule "activity-1-free", the exit wait's end, the re-based twin) and kept what the book did
+(league/tests/fixtures/equity_etf_orders.json); the test runs them on the tree it is in and holds every intent, order,
+fill, lot, instance row, seat plan, alert, record and minute's answer to that file, and for the scenarios that run
+the forward nights every twin row, re-base and reading. A LATER CHANGE OF THE ETF PATH FAILS IT: when the change is
+meant, record again on the new tree and say in the commit what moved.
 
     House                the wiring, in memory: `reader` "memory" (`MemoryEquityFamilies`, as the rehearsal ran) or
                          "store" (the REAL `EquityFamilies` over a real `SwarmStore` of six seated ETF families; `panel`:
                          the lane's switch in the root's swarm.json, and at "train" a panel family in Train research)
     Market, Venue        quotes by the clock; an Alpaca account's shapes, a fill `fill_delay` seconds after the POST
     SCENARIOS            name -> {kind, setup, ...}: "monday" (the open window), "next" (and Tuesday's), "week"
-                         (five sessions)
+                         (five sessions), "fortnight" (thirteen sessions: the seat rule's idle test needs ten), "twin"
+                         (eight sessions on a synthetic store's bars, with the forward record's night after each:
+                         league/ops/forward_twins.py `finish`, as the rehearsal's phase harness ran it)
     run, snapshot        one scenario on this tree; everything it left, as plain JSON
     record               every scenario of a tree, for the fixture:
                              python league/tests/equity_week.py --tree <a clean tree's root> --out <file>
 
 Every id is counted, never drawn (the venue's order ids, the state's nonce), so two runs of one tree are equal to the
-byte. Standard library only."""
+byte. Standard library only, but for a "twin" scenario's synthetic store (numpy, as the Gym's)."""
 
 from __future__ import annotations
 
@@ -58,6 +62,13 @@ from league.live.venue import Submitted  # noqa: E402
 
 NY = ZoneInfo("America/New_York")
 FRIDAY, MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY2 = (dt.date(2026, 10, d) for d in (9, 12, 13, 14, 15, 16))
+#: The fortnight's last session (thirteen sessions from Monday Oct 12) and the twin scenarios' (eight).
+FORTNIGHT_END, TWIN_END = dt.date(2026, 10, 28), dt.date(2026, 10, 21)
+#: The synthetic store a "twin" scenario's market and replay twins read (league/equity/synth.py; invented, seeded).
+SYMBOLS = ("SPY", "QQQ", "IWM", "DIA")
+STORE_START, STORE_END, STORE_SEED = dt.date(2026, 6, 1), dt.date(2026, 12, 18), 11
+#: The forward record's settings in a "twin" scenario (no minute bars exist here: the fill columns are off).
+FORWARD = {"elane": {"forward": {"mode": "record", "fill_minutes": False}}}
 WORKING = ("new", "accepted", "partially_filled")
 INF = float("inf")
 #: The panel lane's switch positions the comparison is held at ("" stands for no key at all: policy.json's "off").
@@ -432,6 +443,17 @@ PARAMS = {}
 def decide(ctx):
     return []
 '''
+#: A PASSED PROGRAM WAITING FOR A SEAT (THE SEAT RULE): `{symbol}` at 0.3 of the sleeve at the open when flat, each lot
+#: sold at the next open.
+WAIT = '''NEEDS = {"symbols": ["{symbol}"], "history": 5, "max_hold_sessions": 3}
+PARAMS = {}
+
+
+def decide(ctx):
+    if ctx.positions:
+        return [{"sell": p["id"], "at": "open", "tag": "wait"} for p in ctx.positions]
+    return [{"buy": "{symbol}", "share": 0.3, "at": "open", "tag": "wait"}]
+'''
 #: An invented panel program for the swarm's store at "train" (never run here: it is in Train research, band "gym").
 PANEL = '''NEEDS = {"panel": "sp500", "history": 30, "max_names": 5, "rebalance": "weekly", "weekday": 0}
 PARAMS = {}
@@ -442,12 +464,24 @@ def decide(ctx):
 '''
 
 
-def family_row(family: str, code: str, *, lane: str = "beta", seeded: bool = False, symbols=("QQQ",)) -> dict:
+def family_row(family: str, code: str, *, lane: str = "beta", seeded: bool = False, symbols=("QQQ",),
+               band: str = "probe", k: tuple[int, int] | None = None) -> dict:
     """A seated program's row as the swarm's reader gives it (a scenario's `candidates` are put back at "candidate":
-    passed their look, seated by the book's own band sync at the next decide)."""
-    return {"family": family, "band": "probe", "lane": lane, "structure": "etf", "symbols": list(symbols),
-            "seeded": seeded, "holdout_passed": True, "validation_passed": True, "version": 1, "code": code,
-            "params": {}, "run_sha": f"run-{family}-1", "validation_r_sd": None}
+    passed their look, seated by the book's own band sync at the next decide). `k` (THE SEAT RULE's scenarios): the
+    row carries what the reader's `queued` rows carry, `passed_at` (every look passed at the House's start) and
+    `seat_activity` (K's two counts: `k` Validation close days, and `k[1]` Train-era ones in 1000 sessions)."""
+    row = {"family": family, "band": band, "lane": lane, "structure": "etf", "symbols": list(symbols),
+           "seeded": seeded, "holdout_passed": True, "validation_passed": True, "version": 1, "code": code,
+           "params": {}, "run_sha": f"run-{family}-1", "validation_r_sd": None}
+    if k is not None:
+        row.update(passed_at=at(FRIDAY, 16, 0), seat_activity=activity(*k))
+    return row
+
+
+def activity(validation_days: int, train_days: int) -> dict:
+    """K's two counts as a family's state keeps them (league/swarm/elane.py `SEAT_KEY`), invented."""
+    return {"validation": {"close_days": int(validation_days), "sessions": 250},
+            "train": {"close_days": int(train_days), "sessions": 1000}}
 
 
 def six_programs(*, a_first: bool = True, roll: str = "", rotate: str = "") -> list[dict]:
@@ -465,6 +499,22 @@ def six_programs(*, a_first: bool = True, roll: str = "", rotate: str = "") -> l
             else family_row("bred-c-idle", IDLE, symbols=everything),
             family_row("bred-d-rotate", ROTATE.replace("{at}", rotate), symbols=("SPY", "IWM", "DIA")) if rotate
             else family_row("bred-d-idle", IDLE, symbols=everything)]
+
+
+def ranked_programs(waiting: int = 0) -> list[dict]:
+    """THE SEAT RULE's programs: the six seated ones, each with K's counts (the three that never ask are the idle
+    seats: the lowest K yields first, `bred-d-idle`, then the seeded `seed-reversal-index`, then `bred-c-idle`), and
+    `waiting` passed Candidates behind them (`bred-e-wait` ranks before `bred-f-wait`)."""
+    everything = ("SPY", "QQQ", "IWM", "DIA")
+    rows = [family_row("bred-a-hold3", HOLD3, symbols=("QQQ",), k=(80, 300)),
+            family_row("bred-b-range", RANGE, symbols=("SPY", "QQQ"), k=(120, 500)),
+            family_row("seed-overnight-qqq", OVERNIGHT, seeded=True, symbols=("QQQ",), k=(100, 420)),
+            family_row("seed-reversal-index", IDLE, seeded=True, symbols=everything, k=(25, 110)),
+            family_row("bred-c-idle", IDLE, symbols=everything, k=(40, 180)),
+            family_row("bred-d-idle", IDLE, symbols=everything, k=(12, 60))]
+    extra = [family_row("bred-e-wait", WAIT.replace("{symbol}", "DIA"), symbols=("DIA",), band="candidate", k=(60, 250)),
+             family_row("bred-f-wait", WAIT.replace("{symbol}", "IWM"), symbols=("IWM",), band="candidate", k=(30, 130))]
+    return rows + extra[:waiting]
 
 
 def sessions_from(first: dt.date, n: int) -> list[dt.date]:
@@ -530,6 +580,10 @@ def store_families(root: Path, programs: list[dict], clock: Clock, panel: str) -
             store.set_state(fam["id"], banded_version=version["n"], banded_at=clock(), gate="pass", holdout_passed=True,
                             banded_evaluator={"engine": identity["engine"], "equity_sha256": identity["equity"],
                                               "run_sha": sha})
+            if row.get("seat_activity") is not None:
+                # K's two counts beside the look (league/swarm/elane.py `SEAT_KEY`: this version's, this run sha's).
+                store.set_state(fam["id"], elane_seat={"version": version["n"], "run_sha": sha, "floor": "0.25",
+                                                       **row["seat_activity"], "at": clock(), "source": "invented"})
             store.set_band(fam["id"], "candidate", reason="an invented look")
             if row["band"] != "candidate":
                 store.set_band(fam["id"], row["band"], reason="an invented seat")
@@ -576,6 +630,8 @@ class House:
         self.proof = self.new_proof()
         self.book = self.new_book()
         self.ticks: list[tuple[float, dict]] = []
+        #: THE FORWARD RECORD beside the book (`Forward`; a "twin" scenario's), else None.
+        self.forward: Forward | None = None
 
     def _record(self, kind, payload, agent=None):
         self.events.append((self.clock(), kind, dict(payload)))
@@ -639,10 +695,108 @@ class House:
         return out
 
     def close(self) -> None:
+        if self.forward is not None:
+            self.forward.close()
         self.state.close()
         store = getattr(self.families, "_store", None)
         if store is not None:
             store.close()
+
+
+class Forward:
+    """THE FORWARD RECORD BESIDE THE HOUSE (a "twin" scenario; the rehearsal's phase harness, on the tree's own code):
+    a synthetic store at the root, whose invented bars are the market the book trades AND the bars its replay twins
+    read; every program in the real registry (`forward_db.append_registry`, reason "live"); each morning the equity
+    twins of the closed lots (league/ops/twins.py `equity_round`, into the swarm's store); each evening the night's
+    twins (league/ops/forward_twins.py `finish` over the real `forward_shadow.Shadow`: E1's engine in the decider's
+    equity kind). `left()` is what the forward store holds at the end."""
+
+    def __init__(self, house: House, programs: list[dict]):
+        from league.equity import synth
+        from league.equity.store import STORE_DIR, EquityStore, from_ordinal, mint_equity_gate_capability
+        from league.ops import forward_db, forward_shadow
+        from league.swarm import elane_train
+        from league.swarm.store import SwarmStore
+
+        self.house = house
+        root = house.root
+        store_root = synth.synthetic_store(root / STORE_DIR, symbols=SYMBOLS, start=STORE_START, end=STORE_END,
+                                           gate=True, seed=STORE_SEED)
+        capability = mint_equity_gate_capability(store_root, "the harness plays the market")
+        bars = EquityStore(store_root, gate=capability).bars(list(SYMBOLS), "forward", history=60, start=MONDAY, end=None)
+        for symbol in SYMBOLS:
+            house.market.bar_rows["raw"][symbol] = synth.bar_rows(bars, symbol, bars.n - 1, adjustment="raw")
+            house.market.bar_rows["all"][symbol] = synth.bar_rows(bars, symbol, bars.n - 1, adjustment="all")
+            for i in range(bars.n):
+                house.market.days[(from_ordinal(int(bars.days[i])), symbol)] = {
+                    "open": float(bars.raw[symbol][i, 0]), "close": float(bars.raw[symbol][i, 3])}
+        self.swarm = SwarmStore(root, clock=house.clock)
+        self.db = forward_db.open_db(root)
+        created = at(FRIDAY, 15, 0)
+        for row in programs:
+            forward_db.append_registry(self.db, {
+                "key": f"{row['family']}@{row['version']}", "family": row["family"], "version": int(row["version"]),
+                "lane": row["lane"], "reason": "live", "ugroup": "index", "lineage": f"{row['lane']}:{row['family']}",
+                "code": row["code"], "params": dict(row["params"]), "needs": elane_train.needs_literal(row["code"]),
+                "program_sha": hashlib.sha256(row["code"].encode()).hexdigest(), "run_sha": self.run_sha(row),
+                "author": "the harness", "created_at": created, "evidence": "registry",
+                "first_close": forward_db.first_close(created),
+                "first_day": forward_db.first_day(forward_db.first_close(created)), "registered_at": created,
+                "route": forward_db.E3_ROUTE, "alpha_f": forward_db.E3_ALPHA_F})
+        self.shadow = forward_shadow.Shadow(root, self.db, decider=InlineDecider(), settings=FORWARD, clock=house.clock)
+        self.nights: list[list] = []
+
+    def run_sha(self, row: dict) -> str:
+        """The run sha the BOOK holds for the program (the registry's must be it): the row's own through the test
+        double, the swarm store's through the real reader."""
+        if isinstance(self.house.families, MemoryEquityFamilies):
+            return str(row["run_sha"])
+        return str(next(r["run_sha"] for r in self.house.families.read() if r["family"] == row["family"]))
+
+    def morning(self, day: dt.date) -> None:
+        """09:00: the equity twins of the lots closed so far (EDM1's twin leg and A14's gap read them)."""
+        from league.ops import twins as TW
+
+        self.house.clock.set(at(day, 9, 0, 0))
+        TW.equity_round(self.house.root, now=self.house.clock(), store=self.swarm)
+        if isinstance(self.house.families, MemoryEquityFamilies):
+            self.house.families.twin_rows = dict(TW.equity_records(self.swarm))   # (what the real reader reads there)
+
+    def night(self, day: dt.date) -> None:
+        """18:35: the forward night that closed `day`: the twin rows of every session before it."""
+        from league.ops import forward_twins
+
+        self.house.clock.set(at(day, 18, 35, 0))
+        self.shadow.through, self.shadow.night_day = day, day.isoformat()
+        receipt = forward_twins.finish(self.house.root, self.db, self.shadow, now=self.house.clock())
+        self.nights.append([day.isoformat(), {k: v for k, v in sorted(receipt.items()) if v}])
+
+    def left(self) -> dict[str, Any]:
+        """What the forward store holds: every `fwd_twins`, `fwd_part` and `fwd_lotgap` row (every column), every twin
+        event (a re-base among them), each night's receipt, and A14's reading over each instance's closes and over
+        them all (`a14_reading`, with the re-bases beside)."""
+        from league.ops import dlane_report as DR
+        from league.ops import forward_db, forward_twins
+
+        def table(name: str, order: str) -> list[dict]:
+            return [dict(r) for r in self.db.execute(f"SELECT * FROM {name} ORDER BY {order}")]
+
+        kinds = sorted(k for k in forward_db.EVENT_KINDS if k.startswith("twin_") or k in ("live_bars", "no_minute"))
+        lots = [dict(r) for r in self.house.state.rows("SELECT * FROM eq_lots ORDER BY lid")]
+        counted = DR.equity_closes(lots, since=0.0)
+        by_instance = sorted({str(c["instance"]) for c in counted})
+        return {"twins": table("fwd_twins", "instance, day"), "twin_part": table("fwd_part", "instance, through"),
+                "twin_lotgap": table("fwd_lotgap", "1, 2"),
+                "twin_events": [[e["kind"], e["day"], e["pid"], e["payload"]]
+                                for kind in kinds for e in forward_db.events(self.db, kind)],
+                "twin_nights": self.nights,
+                "a14": [["all", forward_twins.a14_reading(self.house.root, counted)]]
+                + [[i, forward_twins.a14_reading(self.house.root, [c for c in counted if c["instance"] == i])]
+                   for i in by_instance]}
+
+    def close(self) -> None:
+        self.db.close()
+        self.swarm.close()
 
 
 # ------------------------------------------------------------------------------------------------------- the setups
@@ -848,10 +1002,54 @@ def sales_rest(symbols: tuple[str, ...], seconds: float):
     return setup
 
 
+def refused_all(day: dt.date, why: str = "the House is paused"):
+    """The House's `real_block` refuses every open through the whole of `day` (stage BUY passed long before)."""
+    def setup(house: House) -> None:
+        real_tick = house.tick
+
+        def tick(d, hh, mm):
+            house.blocked = why if d == day else None
+            return real_tick(d, hh, mm)
+        house.tick = tick
+    return setup
+
+
+def refused_open(day: dt.date, why: str = "the account could not be read this minute"):
+    """`real_block` refuses every open in the OPEN window of `day` (a buy planned for that open is missed)."""
+    def setup(house: House) -> None:
+        real_tick = house.tick
+
+        def tick(d, hh, mm):
+            house.blocked = why if d == day and hh < 10 else None
+            return real_tick(d, hh, mm)
+        house.tick = tick
+    return setup
+
+
+def withdrawn(family: str, day: dt.date):
+    """The swarm retires `family` before the decide of `day` (its seat is free at that band sync)."""
+    def setup(house: House) -> None:
+        real_tick = house.tick
+
+        def tick(d, hh, mm):
+            if (d, hh, mm) == (day, 16, 21):
+                if isinstance(house.families, MemoryEquityFamilies):
+                    house.families.rows[family]["band"] = "retired"
+                else:
+                    with house.families.lock:
+                        house.families._db().retire(family, "an invented retirement")
+            return real_tick(d, hh, mm)
+        house.tick = tick
+    return setup
+
+
 # ------------------------------------------------------------------------------------------------------ the scenarios
 #: name -> {kind, setup, and the House's own arguments}. "monday": Friday's decide and Monday's open window; "next":
 #: that, Monday's close and decide, and Tuesday's open window; "week": Monday to Friday, every open window, three
-#: minutes of the day, the close window and the decide (`flatten`: the owner's flatten that morning).
+#: minutes of the day, the close window and the decide (`flatten`: the owner's flatten that morning). "fortnight": the
+#: week's days for thirteen sessions, over `ranked_programs(waiting)` (THE SEAT RULE: an idle seat is named at the
+#: tenth seated session's decide). "twin": the week's days for eight sessions on a synthetic store's bars, with the
+#: forward record's morning and night (`Forward`; A29: the twin is re-based after a differing session).
 SCENARIOS: dict[str, dict[str, Any]] = {
     # the normal Monday
     "normal": {"kind": "monday"},
@@ -929,6 +1127,22 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "kind": "week", "rotate": "close", "setup": sales_rest(("SPY", "IWM", "DIA"), 130.0)},
     "week: a rolling and a rotating program, sales resting five minutes": {
         "kind": "week", "roll": "open", "rotate": "open", "setup": sales_rest(("SPY", "IWM", "DIA"), 300.0)},
+    # THE SEAT RULE (release E5-A, A24 with A30): the idle seat, the waiting programs, the return
+    "fortnight: nobody waits, the idle seats are kept": {"kind": "fortnight"},
+    "fortnight: an idle seat yields to the waiting program": {"kind": "fortnight", "waiting": 1},
+    "fortnight: two programs wait, one idle seat yields a decision day": {"kind": "fortnight", "waiting": 2},
+    "fortnight: the House refused every open one session, the idle clock leaves it out": {
+        "kind": "fortnight", "waiting": 1, "setup": refused_all(dt.date(2026, 10, 20))},
+    "fortnight: a yielded program returns into a seat the swarm freed": {
+        "kind": "fortnight", "waiting": 1, "setup": withdrawn("bred-b-range", dt.date(2026, 10, 26))},
+    "fortnight: a waiting program, stage SELL never passing": {
+        "kind": "fortnight", "waiting": 1, "setup": activities_late(INF)},
+    # THE FORWARD TWINS (release E3.1, A29): the nights' twin rows beside the book
+    "twin: every buy fills, nothing is re-based": {"kind": "twin"},
+    "twin: Monday's buys missed, the twins re-based": {"kind": "twin", "setup": first_post("rate")},
+    "twin: Wednesday's open refused, a rebuy missed and the twin re-based": {
+        "kind": "twin", "setup": refused_open(WEDNESDAY)},
+    "twin: the practice sale never witnessed, exits at the cut-off": {"kind": "twin", "setup": practice_sale_rests},
 }
 #: The scenarios run again through the REAL reader (`store_families`), at every position of the panel lane's switch:
 #: all of them.
@@ -955,25 +1169,35 @@ def run(name: str, *, reader: str = "memory", panel: str = "") -> dict[str, Any]
     spec = SCENARIOS[name]
     root = Path(tempfile.mkdtemp(prefix="equity-week-"))
     programs = six_programs(a_first=spec.get("a_first", True), roll=spec.get("roll", ""), rotate=spec.get("rotate", ""))
+    if spec["kind"] == "fortnight":
+        programs = ranked_programs(spec.get("waiting", 0))
     for row in programs:
         if row["family"] in spec.get("candidates", ()):
             row["band"] = "candidate"
     house = House(root, programs, cash=spec.get("cash", "2229"), lag=spec.get("lag", 8.0), reader=reader, panel=panel)
     try:
-        invented_week(house.market)
+        if spec["kind"] == "twin":
+            house.forward = Forward(house, programs)
+        else:
+            invented_week(house.market, through=FORTNIGHT_END if spec["kind"] == "fortnight" else FRIDAY2)
         house.tick(FRIDAY, 16, 21)      # Friday's bars, then its decide: the instances made, Monday's intents planned
         house.tick(FRIDAY, 16, 31)
         if spec.get("setup") is not None:
             spec["setup"](house)
-        if spec["kind"] == "week":
-            for day in (MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY2):
+        if spec["kind"] in ("week", "fortnight", "twin"):
+            last = {"week": FRIDAY2, "fortnight": FORTNIGHT_END, "twin": TWIN_END}[spec["kind"]]
+            for day in sessions_from(MONDAY, S.sessions_between(FRIDAY, last)):
                 house.tick(day, 8, 31)
+                if house.forward is not None:
+                    house.forward.morning(day)
                 if spec.get("flatten") == day:
                     house.state.put(L.OWNER_FLATTEN, {"why": "the harness's flatten", "by": "the owner", "at": 0})
                 open_window(house, day, (9, 50))
                 for hh in (11, 13, 15):
                     house.tick(day, hh, 0)
                 close_and_decide(house, day)
+                if house.forward is not None:
+                    house.forward.night(day)
         else:
             open_window(house, MONDAY, (9, 47))
             if spec["kind"] == "next":
@@ -996,9 +1220,12 @@ def _plain(value: Any) -> Any:
 def snapshot(house: House) -> dict[str, Any]:
     """EVERYTHING THE BOOK DID, in the order it did it: `posts` (every order POSTed to either account, refused ones
     too), `cancels`, `fills`; the book's rows at the end, every column (`intents`, `orders`, `lots`, `instances`,
-    `rebalances` when the table exists) and its own keys of the kv (`kv`: `eq_*` and the stock proof's); and what it
-    said on the way (`alerts`, `records`, each minute's answer `ticks`, and `errors`: the book's own events in the
-    state, an error it caught among them)."""
+    `rebalances` when the table exists) and its own keys of the kv (`kv`: `eq_*` and the stock proof's; the seat plan
+    `eq_seat`, the open note and the unproven-sale note are among them); what it said on the way (`alerts`,
+    `records`, each minute's answer `ticks`, and `errors`: the book's own events in the state, an error it caught
+    among them); `seats`: THE SEAT RULE as it went, each decision's line of the plan and every change of hands
+    (`seat_lines`); and, when the forward record ran beside it (`Forward.left`), `twins`, `twin_part`,
+    `twin_lotgap`, `twin_events`, `twin_nights` and `a14`."""
     rows = house.state.rows
     posts = sorted([(t, v.name, b) for v in (house.venue, house.paper) for b, t in zip(v.sent, v.sent_at)],
                    key=lambda r: (r[0], r[1]))
@@ -1024,8 +1251,23 @@ def snapshot(house: House) -> dict[str, Any]:
         "errors": [[r["kind"], (json.loads(r["payload"]) or {}).get("where")]
                    for r in rows("SELECT kind, payload FROM events WHERE kind LIKE 'equity.%' ORDER BY seq")],
         "tables": sorted(t for t in tables if t.startswith("eq_")),
+        "seats": seat_lines(house),
+        **(house.forward.left() if house.forward is not None else
+           {"twins": [], "twin_part": [], "twin_lotgap": [], "twin_events": [], "twin_nights": [], "a14": []}),
     }
     return _plain(out)
+
+
+def seat_lines(house: House) -> list[str]:
+    """THE SEAT RULE as the book said it, in order: each decision's line of the plan (the minute's `seats`: who holds
+    each seat, for how many sessions, who is idle, who waits and at what rank) and every `equity.seat` record (a seat
+    taken, yielded, returned into, a seating passed over, a waiting program demoted). The plan the book holds at the
+    end (`eq_seat`) is in `kv`."""
+    said_ = [(t, 0, f"{said(t)} plan: {tick['seats']}") for t, tick in house.ticks if tick.get("seats")]
+    said_ += [(t, 1, f"{said(t)} {p.get('action')}: {p.get('family')}"
+               + (f" for {p['for']}" if p.get("for") else "") + (f" (rank {p['rank']})" if p.get("rank") else "")
+               + f": {p.get('why')}") for t, kind, p in house.events if kind == "equity.seat"]
+    return [line for _, _, line in sorted(said_, key=lambda r: (r[0], r[1]))]
 
 
 #: WHAT RELEASE E4 ADDS TO THE STATE OF A BOOK THAT HOLDS NO PANEL PROGRAM, and nothing else: the column
@@ -1050,7 +1292,7 @@ def main_shape(snap: dict[str, Any]) -> dict[str, Any]:
 
 
 #: A snapshot's parts the fixture keeps WHOLE (what an operator reads first); the others it keeps as a digest.
-WHOLE = ("posts", "cancels", "fills", "alerts")
+WHOLE = ("posts", "cancels", "fills", "alerts", "seats")
 
 
 def digest(part: Any) -> str:
