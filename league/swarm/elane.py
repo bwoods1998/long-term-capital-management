@@ -127,7 +127,8 @@ ROUND_KEY = "elane_round_at"
 ROUND_SECONDS = 300.0
 #: The family state's key of its equity lineage's Validation try ({version, at, first, precheck, entered, retry_sha}).
 TRY_KEY = "elane_try"
-#: The family state's keys (league/equity/INTERFACES.md section 8.4): the one look ({version, at, verdict, beside}),
+#: The family state's keys (league/equity/INTERFACES.md section 8.4): the one look ({version, at, verdict, beside,
+#: activity: the invested-day shares `_invested_shares` records beside it, House-only}),
 #: the program floor by version, the looked version's Train daily series (House-only: never in a view), the version's
 #: lane-scoped template key, the last Validation ({version, passed, precheck, screen, status, at, result_sha, stale}),
 #: each version's Validation verdict ({str(n): {entered, at, stale}}) and EDM1's sigma by version.
@@ -959,6 +960,30 @@ def _segment_series(S: Any, runs: Sequence[Any]) -> tuple[list[Any], str | None]
     return [None if status == "no_data" else _series(S, run) for run, status in zip(runs, statuses)], None
 
 
+def _invested_shares(v: Any, segments: Sequence[Any]) -> dict[str, Any] | None:
+    """THE PROGRAM'S ACTIVITY, WHERE ITS FLOOR IS BUILT AND WHERE IT IS JUDGED: the share of sessions it was invested
+    on in Validation and on each Train-era span ({"validation", "train" [per span, None where it has no history],
+    "ratio": Validation over the Train-era mean}). A FIGURE BESIDE THE LOOK, NEVER A CONDITION OF IT: the screen's
+    floor is the program's own Train-era behaviour, so a program much sparser there than in the judged windows lowers
+    its own threshold (down to the receipt's floor, never below). The rule that would refuse on it is not written (it
+    needs a pre-registered factor: the review of the first non-seeded programs); until then the look records the
+    figures so that review can read them. House-only, never in a view. None when they cannot be computed."""
+    def share(series: Any) -> float | None:
+        invested = getattr(series, "invested", None)
+        values = [bool(x) for x in invested] if invested is not None else []
+        return round(sum(values) / len(values), 4) if values else None
+
+    try:
+        train = [share(s) for s in segments]
+        known = [x for x in train if x is not None]
+        validation = share(v)
+        mean = sum(known) / len(known) if known else None
+        ratio = round(validation / mean, 4) if validation is not None and mean else None
+        return {"validation": validation, "train": train, "ratio": ratio}
+    except Exception:  # noqa: BLE001 - a figure beside the look: never its condition
+        return None
+
+
 def _train_series(segments: Sequence[Any]) -> dict[str, list]:
     """The Train-era daily series a look keeps for THE LINEAGE: {"days": [int ordinal], "r": [float]}, every segment's
     sessions in order (House-only: never in a view)."""
@@ -1225,6 +1250,7 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
                 screen=screen)
         return None
     s1x = _s1x_floor(S, segments, receipt)  # S1-X's rate beside an S2 verdict: Train-era series only, before the look
+    activity = _invested_shares(v, segments)  # beside the look, never its condition
     marker = {"sha": sha, "n": n, "at": gate.clock(), "lane": lane}
     with store.atomic():
         current = store.family(fid) or {}
@@ -1287,7 +1313,8 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None)
         store.set_state(fid, gated_sha=sha, gate_ready=False, gate="pass" if passed else "fail", dormant_cycles=0,
                         gate_outcome={"sha": sha, "result": "passed" if passed else "failed", "at": gate.clock()},
-                        **{LOOK_KEY: {"version": n, "at": store.now(), "verdict": verdict, "beside": beside},
+                        **{LOOK_KEY: {"version": n, "at": store.now(), "verdict": verdict, "beside": beside,
+                                      "activity": activity},
                            FLOOR_KEY: {**dict(floors), str(n): floor},
                            TRAIN_R_KEY: train, TEMPLATE_KEY: template})
         current = store.family(fid) or {}
@@ -1296,7 +1323,7 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
                             banded_evaluator=proof)
             store.set_band(fid, "candidate", reason=f"passed its sealed look ({screen}, {label(lane)})")
     store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": passed, "lane": lane, "screen": screen,
-                                    "receipt": receipt.receipt_sha256, "_verdict": verdict})
+                                    "receipt": receipt.receipt_sha256, "_verdict": verdict, "_activity": activity})
     return passed
 
 

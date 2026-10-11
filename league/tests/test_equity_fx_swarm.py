@@ -930,3 +930,36 @@ class TheDoneMeterBesideEquityCloses(EquityFixture):
 
         self.assertIsNone(re.search(r"\d", DR.ZERO_EDGE_EQUITY_NOTE), "no figure for the share lanes is stated")
         self.assertEqual(DR.zero_edge(None), DR.zero_edge(None, equity_closes=0))
+
+
+class TheActivityBesideTheLook(FixCase):
+    """s2-5 (rule level, DEFERRED: the refusal needs a pre-registered factor). The look records, beside its verdict and
+    never as a condition, the share of sessions the program was invested on in Validation and on each Train-era span:
+    a program sparser where its floor is built than where it is judged lowers its own threshold."""
+
+    def test_the_look_records_the_invested_day_shares_and_never_waits_on_them(self):
+        version, sha = self.ready()
+        self.runner.ended = {"segment-1": "no_data"}
+        with screen():
+            self.assertTrue(self.gate.look(self.store.family("b1"), version, sha))
+        recorded = self.store.family("b1")["state"][elane.LOOK_KEY]["activity"]
+        self.assertEqual(recorded, {"validation": 1.0, "train": [None, 1.0], "ratio": 1.0})
+        (event,) = [e["payload"] for e in self.store.events_after(0, limit=100_000)
+                    if e["kind"] == "swarm.gate" and e["payload"].get("action") == "look"]
+        self.assertEqual(event["_activity"], recorded, "private: an underscore key never leaves the House")
+        self.assertNotIn("activity", elane.view(self.store.family("b1"), lane=BETA), "never in a view")
+
+    def test_shares_that_cannot_be_computed_cost_the_look_nothing(self):
+        import numpy as np
+
+        half = S.Series(days=np.arange(4, dtype=np.int32), r=np.zeros(4), w=np.ones(4), b=np.zeros(4),
+                        exits=np.zeros(4, dtype=int), invested=np.array([True, False, False, False]))
+        full = S.Series(days=np.arange(4, dtype=np.int32), r=np.zeros(4), w=np.ones(4), b=np.zeros(4),
+                        exits=np.zeros(4, dtype=int), invested=np.ones(4, dtype=bool))
+        self.assertEqual(elane._invested_shares(full, [half, None]), {"validation": 1.0, "train": [0.25, None], "ratio": 4.0})
+        self.assertEqual(elane._invested_shares(full, []), {"validation": 1.0, "train": [], "ratio": None})
+        self.assertIsNone(elane._invested_shares(object(), [object()])["ratio"])
+        version, sha = self.ready()
+        with screen(), mock.patch.object(elane, "_invested_shares", return_value=None):
+            self.assertTrue(self.gate.look(self.store.family("b1"), version, sha))
+        self.assertIsNone(self.store.family("b1")["state"][elane.LOOK_KEY]["activity"])
