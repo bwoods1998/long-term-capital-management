@@ -37,8 +37,9 @@ SHIFTS = tuple(BAR["start_shifts"])
 # ----------------------------------------------------------------------------------------------------------- the plan
 class ThePlan(unittest.TestCase):
     def test_the_rules_are_the_bars_constants(self):
-        self.assertEqual((SHIFTS, BAR["start_warm"], BAR["start_min"], BAR["start_match"], BAR["start_active"],
-                          BAR["start_sized"]), ((61, 127), 20, 120, 0.99, 0.95, 0))
+        self.assertEqual((SHIFTS, BAR["start_warm"], BAR["start_min"], BAR["start_match"]), ((61, 127), 20, 120, 0.99))
+        # The three rules the build added, one constant each (False, 0 and a large number: the rule as first written).
+        self.assertEqual((BAR["start_early"], BAR["start_active"], BAR["start_sized"]), (True, 0.95, 0))
         for shift in SHIFTS:  # two different primes: no clock's period divides both
             self.assertTrue(all(shift % p for p in range(2, shift)), shift)
         self.assertNotEqual(*SHIFTS)
@@ -273,6 +274,18 @@ class TheRule(unittest.TestCase):
         out = self.check(span(lots=lots, flags=differs_where_books_agree))
         self.assertEqual(self.rows(out), [(0, 61, 234, 17, 229, False), (0, 127, 168, 17, 163, False)])
         self.assertEqual(out["runs"][0]["misses"], [1, 3, 5, 7, 9], "counted from the later run's own first decision")
+
+    def test_the_rule_as_first_written_is_three_constants_away(self):
+        """`start_early` False, `start_active` 0 and a large `start_sized`: a later run is compared once warmed up and
+        held to the share of all its sessions alone."""
+        def flags(i: int, age: int, offset: int) -> str:
+            return "small" if offset and (age < 20 or age == 100) else ""
+        out = self.check(span(flags=flags))
+        self.assertEqual(self.rows(out), [(0, 61, 239, 22, 218, False), (0, 127, 173, 22, 152, False)])
+        with mock.patch.dict(BAR, {"start_early": False, "start_active": 0.0, "start_sized": 10 ** 9}):
+            out = self.check(span(flags=flags))
+        self.assertEqual(self.rows(out), [(0, 61, 217, 0, 216, True), (0, 127, 151, 0, 150, True)])
+        self.assertEqual((out["held"], out["resized"]), (True, 2))
 
     def test_once_warmed_up_every_session_is_compared_whatever_the_books(self):
         """A later run whose book never agrees with run A's (a hold counted from its own start) is not compared before
@@ -800,8 +813,10 @@ def decide(ctx):
     return out
 '''
 #: A program that waits five sessions after its own last exit before it enters again (a count kept in STATE). A later
-#: run starts with no wait behind it, so it may enter where the run from the span's start still waits: it differs on a
-#: session or two and then trades as that run does.
+#: run starts with no wait behind it, so it may enter where the run from the span's start still waits: on this market
+#: it differs on a session or two and then trades as that run does. (The restart check refuses such a count before the
+#: start check sees it; and on other invented markets a later run stayed out of step for weeks and failed START too:
+#: league/swarm/ELANE_E2.md says how often.)
 WAIT = '''import math
 
 NEEDS = {"symbols": ["SPY"], "history": 3, "max_hold_sessions": 4}
@@ -1062,6 +1077,9 @@ class StartOnE1(unittest.TestCase):
     def test_a_program_that_waits_after_its_own_last_exit_falls_in_step_again(self):
         out = self.check(WAIT)
         self.assert_passes(out, exactly=False)
+        state = elane_train.restart_check(self.check_decider(), WAIT, {}, name="p",
+                                          streams=[elane_train.state_inputs(run) for run in self.runs])
+        self.assertFalse(state["held"], "its count is memory a restart empties: the restart check's to refuse")
         misses = [k for r in out["runs"] for k in r["misses"]]
         self.assertTrue(0 < len(misses) <= 6, out)
         self.assertLess(max(misses), 40, "only near a later run's start: the run from the span's start was still waiting")
@@ -1182,10 +1200,10 @@ class StartOnE1(unittest.TestCase):
         late = [k for r in out["runs"] for k in r["misses"] if k >= out["warm"]]
         self.assertEqual(late, [], "nothing differs once a later run is warmed up")
         self.assertTrue(all(r["early"] > 500 for r in out["runs"]), "the same book from a later run's third session")
-        with mock.patch.object(elane_train, "same_book", lambda a, b: False):
+        with mock.patch.dict(BAR, {"start_early": False}):
             blind = self.check(LATCH)
         self.assertTrue(blind["held"], "the rule without the same-book sessions passes it")
-        self.assertEqual(blind["matched"], blind["sessions"])
+        self.assertEqual((blind["matched"], [r["early"] for r in blind["runs"]]), (blind["sessions"], [0, 0, 0]))
 
     def test_a_lock_on_a_program_that_trades_once_a_month_is_read_on_its_trades(self):
         self.assert_passes(self.check(MONTHLY_PLAIN))

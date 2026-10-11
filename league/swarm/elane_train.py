@@ -105,7 +105,7 @@ pattern; this check runs the program and looks.
   tag). With the same bars, calendar and book, nothing but the run's own standing (its equity, cash and caps, its
   lots' ids, sizes and tags, its memory) can make the two decides differ, so such a session is held to run A from the
   later run's first decision. Without (b) a lock that closes inside the warm-up was invisible, and a program chose its
-  own warm-up by declaring a long `history`.
+  own warm-up by declaring a long `history` (`start_early` False is the rule without it).
   WHAT MATCHES (`start_orders`, then the restart check's `same_intents`). The same list of orders in the same order:
   each order's kind, symbol and fill point; a buy's `share` or `usd` within `SIZE_TOL`; a sell names its lot's
   symbol (two runs number their lots apart); tags are ignored (a program's own words). A decide that failed in one run
@@ -243,16 +243,18 @@ TRAIN_LABEL = "Train years 2016-19 and 2022-24"
 #: The bar's rules (the design's 6b; rules, never market figures). `state_every`, `state_first`, `state_match`: THE
 #: RESTART CHECK (STATE emptied `state_first` sessions into a span, then every `state_every`; the share that must match).
 #: `state_first` shares no factor with `state_every`, so no counter's period keeps in phase with the resets.
-#: `start_shifts`, `start_warm`, `start_min`, `start_match`, `start_active`: THE START CHECK (the later starts, in
-#: decision sessions into a Train span: two different primes, so no clock's period divides both; the sessions added to
-#: a later run's warm-up; the warmed-up sessions a later run must have for its shift to be used; the share of its
-#: compared sessions that must match; the share that must match of those on which either run asked an order, so a
-#: program that trades on few sessions cannot hide what differs among the sessions that ask nothing; and `start_sized`,
-#: the sessions a later run may show the same book and ask the same orders as run A in ANOTHER SIZE: none).
+#: `start_shifts`, `start_warm`, `start_min`, `start_match`: THE START CHECK (the later starts, in decision sessions
+#: into a Train span: two different primes, so no clock's period divides both; the sessions added to a later run's
+#: warm-up; the warmed-up sessions a later run must have for its shift to be used; the share of its compared sessions
+#: that must match). `start_early`, `start_active`, `start_sized`: the three rules the build added to that (a later run
+#: is compared before its warm-up ends too, wherever it shows run A's book; the share that must match of the sessions on
+#: which either run asked an order, so a program that trades on few sessions cannot hide what differs among the sessions
+#: that ask nothing; the sessions a later run may show the same book and ask the same orders as run A in ANOTHER SIZE:
+#: none). False, 0 and a large number are the rule as first written.
 BAR: dict[str, Any] = {"min_active_years": 3, "year_min_trades": 40, "year_min_days": 20, "year_t_floor": -1.0,
                        "cost_ratio": 0.5, "state_every": 20, "state_first": 7, "state_match": 0.99,
                        "start_shifts": (61, 127), "start_warm": 20, "start_min": 120, "start_match": 0.99,
-                       "start_active": 0.95, "start_sized": 0}
+                       "start_early": True, "start_active": 0.95, "start_sized": 0}
 #: The decide limits the restart check loads its instances with (league/equity/EQUITY.md: 1 second a call, 25 errors).
 DECIDE_TIMEOUT, DECIDE_MAX_ERRORS = 1.0, 25
 #: THE SAME SIZE (the restart check): two buys' sizes within these are one size. A `share` within one part in a million
@@ -1385,7 +1387,7 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
                     if k < warm:
                         # Before its warm-up ends a later run is held to the base run only where both show the same
                         # book: there nothing but the run's own standing can make the two decides differ.
-                        if not alike:
+                        if not (alike and BAR["start_early"]):
                             continue
                         out["early"] += 1
                     rb, erred_b = answers[other["key"]]

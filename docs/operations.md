@@ -94,8 +94,7 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   brief says which sessions differed, what the two runs asked where they first differed, and that a program must
   decide from ctx alone, never from how its run stands. **What it costs:** a version that reaches it makes eight Train
   runs instead of four and is decided once more on every session of six of them (measured on the build machine,
-  one to four symbols and any look-back: 1.4 to 2.6 seconds a version, one and a half to two times the restart
-  check). **What stops it** is handled as for the restart
+  one to four symbols and any look-back: 1.4 to 2.8 seconds a version, about twice the restart check). **What stops it** is handled as for the restart
   check: a child that fails or restarts mid-check, a later run that gives no result, or spans that fit no later
   start are the House's, the version is not scored, and its third such failure is an alert, sent once
   (`elane_train_start`). **After the deploy** a Train pass judged before this check that has not had its Validation

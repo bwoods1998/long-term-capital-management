@@ -196,8 +196,12 @@ Stopping, from the lightest:
      trades its token size 97% of the time). But on each of those sessions the two runs see the same bars, the same
      calendar and the same lots and ask the same orders: a size that differs there can only have been taken from how
      the run stands, which is what a lock that shrinks its lots is, and no honest size does it (a size from the
-     bars, the calendar, the lots' own facts or a constant is the same in both runs). Each rule is one constant in
-     `BAR` (`start_active` 0 and a large `start_sized` switch the additions off).
+     bars, the calendar, the lots' own facts or a constant is the same in both runs). Each addition is one constant
+     in `BAR`: `start_early` False, `start_active` 0 and a large `start_sized` are the rule as first written. ON
+     INVENTED MARKETS (the build's trials on E1's synthetic stores: nine programs with a lock or a clock, eight
+     markets of each of two kinds, 144 runs of the check) the rule as first written passed 40 and the rule as built
+     1; of ten honest programs (the three seeds among them, 160 runs) the two rules passed as many of each: every
+     run of nine of them, and 9 of 16 of the tenth, the wait kept in STATE (below).
      WHAT FITS. A shift is used in a span that leaves its later run at least `start_min` (120) warmed-up sessions; a
      span too short goes without it and the record says so (`skipped`). On the Train spans (1,006 and 753 sessions)
      the 61-session start fits every program the contract allows; the 127-session start does not fit 2022-24 for a
@@ -223,10 +227,10 @@ Stopping, from the lightest:
      WHAT IT COSTS, measured (the build machine, a 16-core desktop; E1's decider in a real child and in process
      gave the same within a tenth of a second): a version that meets Y1-R1 and STATE is run four more times at 1.0x
      (the bar's own runs are four) and decided once more on every session of each of its six 1.0x runs, 4,898
-     decides at the spans' real lengths. For programs of one to four symbols with a look-back of 2 to 504 sessions:
-     0.3 to 0.7 seconds for the four runs and 1.0 to 2.1 for the decides, 1.4 to 2.6 seconds a version in all, one and
-     a half to two times the restart check (0.8 to 1.7 seconds; the bar's own four runs take 0.4 to 0.9). A version
-     that fails Y1-R1 or STATE costs nothing more.
+     decides at the spans' real lengths. For programs of one to four symbols with a look-back of 2 to 504 sessions,
+     in a real child: 0.3 to 0.7 seconds for the four runs and 1.1 to 2.1 for the decides, 1.4 to 2.8 seconds a
+     version in all, about twice the restart check (0.8 to 1.6 seconds; the bar's own four runs take 0.5 to 0.9). A
+     version that fails Y1-R1 or STATE costs nothing more.
      WHAT IT DOES NOT CATCH, stated: (1) a lock no Train run ever reaches (a threshold above anything the program
      earned on Train never changed an order there); (2) a lock that changes WHETHER the program trades and never
      how much (it skips sessions once ahead, at its full size when it does trade) and closes within days of every
@@ -250,8 +254,12 @@ Stopping, from the lightest:
      the room). (3) A weight cap or a rule on the cash share that binds often: allowed by the static rule, and
      run-dependent where it binds (a lot's weight is its asked share times its own return times capital over
      equity); it passes while it flips fewer than 1% of a later run's sessions. (4) A count kept in STATE across
-     lots (a wait after an exit): it differs for a session or two after a later start and passes (in the tests:
-     `WAIT`), unless the program trades so seldom that two differing sessions are over 5% of its trades.
+     lots (a wait of N sessions after an exit): the restart check refuses it before this check sees it (a restart
+     empties the count: the tests' `WAIT` fails STATE on every invented market tried). Held to START alone it
+     passes when a later run falls in step inside its warm-up, differing for a session or two (in the tests, on
+     one invented market), and fails when it stays out of step for weeks (five of eighteen invented markets in the
+     build's trials): a fresh run has no wait behind it, and the two stay apart until both happen to be idle
+     together.
    - WHAT A VERDICT IS: only the program's own doing is judged: its runs finished (the bar), it was disqualified by its
      own errors ("DQ"), the child refused to load it ("LOAD"), the child failed its run (or a check's runs or
      decides) `train_max_errors` times in a row while other programs' Train judgments completed ("RUN"), its

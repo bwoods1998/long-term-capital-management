@@ -61,8 +61,8 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   `elane_train_start`, once). **A pass judged before the check** that has not had its Validation try is scored again
   on the next round and kept or withdrawn, so none reaches Validation without it.
 - **Cost, measured on the build machine:** four more Train runs a version that reaches the check (eight instead of
-  four) and one more decide a session of six of them: 1.4 to 2.6 seconds a version (one to four symbols, any
-  look-back), one and a half to two times the restart check. Versions that fail Y1-R1 or STATE cost nothing more.
+  four) and one more decide a session of six of them: 1.4 to 2.8 seconds a version (one to four symbols, any
+  look-back), about twice the restart check. Versions that fail Y1-R1 or STATE cost nothing more.
 - **Not caught, stated** (`league/swarm/ELANE_E2.md`): a lock no Train run reaches, a lock that changes whether the
   program trades (never how much) and closes within days of every start, and what the two shares allow in other
   orders. **Refused though honest, stated:** a hold that simply ends at the House's maximum-hold exit and is bought
