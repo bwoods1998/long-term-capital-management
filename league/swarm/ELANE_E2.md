@@ -226,7 +226,12 @@ Stopping, from the lightest:
      number of shares times a price is dollars, dollars over a price a number of shares; a lot's own dollars now
      times or over anything but a constant read as what the lot cost: its `value` over its `mark` is its qty, its
      `value` over its own return its cost; the run's dollars stay the run's dollars through a product of two of
-     them, a reciprocal, an exponent, `pow`, their text and a call the pass does not know). The run's dollars
+     them, a reciprocal, an exponent, `pow`, their text and a call the pass does not know). The run's dollars come
+     first in a mixed value: plus, less, times or over a level, a log or a cross-symbol ratio they are the run's
+     dollars still, and so is a value that may hold them and a level (a list of both, the smaller of cash and a
+     price); read as the level, `(ctx.equity + px - px) / (ctx.budget + px - px)` was a ratio of two prices and
+     the lock passed. ctx's and a lot's counts (`ctx.weekday`, `held_sessions`) are of no unit and known to be; as
+     unknowns they took the run's dollars out of the pass's sight. The run's dollars
      written into an intent's `tag` are refused too: the House keeps a lot's tag across a restart, so the first
      equity a run saw, carried from lot to lot, is the lock's memory where the restart check cannot look (the same
      trades as the lock on synthetic stores, every session matched). Allowed: a lot's own return however it is
@@ -234,7 +239,9 @@ Stopping, from the lightest:
      entry of several lots (`sum(qty * entry) / sum(qty)` is a price), a sign check, a count of sessions held, a
      size from the sleeve or from `ctx.budget`, a label in a tag. The cost, stated: an honest program that writes a
      lot's weight through its qty (`qty * price / ctx.equity`), or scales a lot's value by a ratio before setting it
-     against the sleeve, is refused with the reason and must write the weight as `lot["value"] / ctx.equity`.
+     against the sleeve, is refused with the reason and must write the weight as `lot["value"] / ctx.equity`; and a
+     program that keeps a price and dollars in one value (a helper returning both in a tuple) and reads the price
+     back from it is refused where a price alone would pass.
    - **What the static rule cannot see.** Said plainly, because the two paid readers are the only guard here:
      1. THE POSITION'S OWN STATE USED AS THE ANCHOR. A lot's weight in the sleeve (`lot["value"] / ctx.equity`), a
         lot's `pnl` over `ctx.equity` and the sleeve's cash share (`ctx.cash / ctx.equity`) are allowed against a
@@ -246,7 +253,7 @@ Stopping, from the lightest:
      2. WHAT THE PASS CANNOT FOLLOW: a function reached through an expression (`(lambda d: d["qty"])(lot)`), a tuple
         or a dict stored whole, a container read in another function, a lot's tag read back as a number, a call the
         pass does not know on a value that is not the run's dollars. Such a value is unknown and is never refused on
-        a guess.
+        a guess, and the run's dollars plus, less, times or over it are unknown with it.
      3. MEMORY IN STATE: the first equity a run saw, kept in STATE, passes the static rule; the Train bar's restart
         check judges it (it fails a program whose trades change when STATE is emptied).
      4. WHAT THE HOUSE'S OWN ANSWERS TELL: `ctx.rejects` and an entry the House cut say something about the

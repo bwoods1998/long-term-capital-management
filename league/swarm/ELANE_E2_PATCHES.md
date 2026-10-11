@@ -130,7 +130,10 @@ done on E1's frozen head 05f83d9e:
   the run's anchor, follows the spellings (shares times a price, dollars over a price, a lot's dollars scaled by its
   own return, a product of dollars, a reciprocal, an exponent, `pow`, text, a call the pass does not know), and
   refuses the run's dollars written into a lot's `tag` (the House keeps a tag across a restart: the same lock, every
-  session of the restart check matched). A lot's own return however it is written, a stop on several lots' average
+  session of the restart check matched). Found while closing it, and closed with it: a value that mixed the run's
+  dollars with a level read as the level, so the reviewer's own lock written `(ctx.equity + px - px) / (ctx.budget +
+  px - px)` was a ratio of two prices and passed; and ctx's counts read as unknown, so equity and budget each times
+  `ctx.weekday + 1` passed too. The run's dollars now come first in a mixed value, and a count is of no unit. A lot's own return however it is written, a stop on several lots' average
   entry, a hold count and a size from `ctx.budget` pass as before. The rubric and its fact `run` name the capital
   rebuilt from a lot and end on the rule: a rule whose trading depends on how far the run is ahead or behind is
   refused, whatever its spelling. WHAT THE STATIC RULE STILL CANNOT SEE is in [ELANE_E2.md](ELANE_E2.md) under that

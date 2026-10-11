@@ -636,6 +636,29 @@ return [intent]'''),
     "equity times pow(budget, -1)": lot_lock('ahead = ctx.equity * pow(ctx.budget, -1) - 1.0'),
     "equity and budget read back from their text": lot_lock(
         'ahead = float(str(ctx.equity)) / float(str(ctx.budget)) - 1.0'),
+    # The run's dollars mixed with a level, a log, a cross-symbol ratio or a count. Each read as a ratio of two prices
+    # (or as unknown) and passed: the run's dollars come first in a mixed value, and a count is of no unit.
+    "equity and budget, each plus and less a price": lot_lock(
+        'px = ctx.prices["SPY"]\nahead = (ctx.equity + px - px) / (ctx.budget + px - px) - 1.0'),
+    "equity and budget, each plus a log price": lot_lock(
+        'g = math.log(ctx.prices["SPY"])\nahead = ((ctx.equity + g) - (ctx.budget + g)) / 10.0'),
+    "equity and budget, each times a cross-symbol ratio": lot_lock(
+        'k = ctx.prices["QQQ"] / ctx.prices["SPY"]\nahead = (ctx.equity * k) / (ctx.budget * k) - 1.0'),
+    "the smaller of equity and a price too large to bind": lot_lock(
+        'px = ctx.prices["SPY"]\nahead = min(ctx.equity, 1e9 * px) / min(ctx.budget, 1e9 * px) - 1.0'),
+    "equity and budget, each in a list with a price": lot_lock(
+        'px = ctx.prices["SPY"]\nahead = [ctx.equity, px][0] / [ctx.budget, px][0] - 1.0'),
+    "equity and budget in one array with a price": lot_lock(
+        'row = np.array([ctx.equity, ctx.budget, ctx.prices["SPY"]])\nahead = row[0] / row[1] - 1.0'),
+    "equity and budget, each times the weekday": lot_lock(
+        'ahead = (ctx.equity * (ctx.weekday + 1)) / (ctx.budget * (ctx.weekday + 1)) - 1.0'),
+    "equity and budget, each times a lot's sessions held": lot_lock(
+        'held = ctx.closed[0]["held_sessions"] if ctx.closed else 1\nahead = (ctx.equity * held) / (ctx.budget * held) - 1.0'),
+    "what a lot cost plus and less a price": lot_lock('''
+ahead = 0.0
+px = ctx.prices["SPY"]
+for lot in ctx.closed:
+    ahead = (ctx.cash + px - px) * ctx.params["share"] / (lot["qty"] * lot["entry"] + px - px) - 1.0'''),
 }
 
 #: Honest programs that read their lots for ordinary reasons: never refused. The first three are the captain's list (a

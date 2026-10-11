@@ -50,7 +50,12 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    `qty`); a lot's own dollars now times or over anything but a constant read as what the lot cost from there on (its
    `value` over its `mark` is its qty, its `value` over its own return what it cost); the run's dollars stay the run's
    dollars through a product of two of them, a reciprocal, an exponent, their text (`float(str(ctx.equity))`, an
-   f-string) and a call the pass does not know (`math.copysign(ctx.equity, 1)`). And THE RUN'S DOLLARS WRITTEN INTO
+   f-string) and a call the pass does not know (`math.copysign(ctx.equity, 1)`). THE RUN'S DOLLARS COME FIRST IN A
+   MIXED VALUE: plus, less, times or over a level, a log or a cross-symbol ratio they are the run's dollars still, and
+   so is a value that may hold them and a level (a list of both, one name given each, the smaller of cash and a
+   price). Read as the level, `(ctx.equity + px - px) / (ctx.budget + px - px)` was a ratio of two prices, and the
+   lock passed. ctx's and a lot's counts (`ctx.weekday`, a lot's `held_sessions`) are of no unit and known to be: as
+   unknowns they took the run's dollars out of sight (`ctx.equity * (ctx.weekday + 1)`). And THE RUN'S DOLLARS WRITTEN INTO
    AN INTENT'S "tag" are refused: the House keeps a lot's tag across a restart, so the first equity a run saw,
    carried from lot to lot, is the lock's memory where the restart check cannot see it (same trades as the lock on
    synthetic stores; the check matched every session).
@@ -60,7 +65,9 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    or from `ctx.budget`.
    THE COST, stated: an honest program that writes a lot's weight through its qty (`qty * price / ctx.equity`) or
    scales a lot's value by a ratio before setting it against the sleeve (`value * (1 - stop / mark) / ctx.equity`)
-   is refused with this reason, and must write the weight as `lot["value"] / ctx.equity` (allowed, below).
+   is refused with this reason, and must write the weight as `lot["value"] / ctx.equity` (allowed, below). So is one
+   that keeps a price and dollars in ONE value (a helper returning both in a tuple, one name used for each) and then
+   reads the price back from it: the value is the run's dollars.
    WHAT THIS RULE CANNOT SEE, AND THE PAID REVIEW MUST (`REVIEW`, "RUN-START DEPENDENCE"; ELANE_E2.md says it too).
    (a) The position's own state used as the anchor. A lot's weight in the sleeve (`lot["value"] / ctx.equity`) and
    the sleeve's cash share (`ctx.cash / ctx.equity`) are allowed against a constant, and a weight is the asked share
@@ -68,7 +75,8 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    it is the run's profit, and nothing static tells it from an honest weight cap. A program built on it trades as
    the lock does and passes this rule and the restart check. (b) What the pass cannot follow: a function reached
    through an expression, a tuple or a dict stored whole, a container read in another function, a lot's tag read
-   back as a number, a call the pass does not know on a value that is not the run's dollars. (c) Memory in STATE:
+   back as a number, a call the pass does not know on a value that is not the run's dollars; and the run's dollars
+   plus, less, times or over such a value are unknown with it, never refused on a guess. (c) Memory in STATE:
    the first equity a run saw, kept there, passes this rule; the Train bar's restart check judges it.
 1c. THE MEMORY RULE (`memory_refusals`; static, free; the integration review's seal-5). The swarm's one decider child
    runs every equity program and run in ONE interpreter (Train runs, the restart check, Validation, the sealed look),
@@ -126,6 +134,10 @@ ANCHOR_FIELDS = ("budget",)
 MONEY_KEYS = ("value", "pnl", "net")
 #: A lot's share count (the module docstring, 1d): the capital it was bought with over its fill price.
 QTY_KEY = "qty"
+#: ctx's and a lot's COUNTS: of no unit, and KNOWN to be (an unknown value would take the run's dollars out of the pass's
+#: sight: `ctx.equity * (ctx.weekday + 1) / (ctx.budget * (ctx.weekday + 1))`).
+CTX_COUNTS = ("weekday", "session_of_month", "sessions_to_month_end")
+LOT_COUNTS = ("held_sessions", "id")
 #: A constant this close to zero is a sign check or an epsilon, never a level.
 ZERO = 1e-6
 #: Functions whose result keeps the units of their arguments (a mean of prices is a price).
@@ -206,15 +218,13 @@ def _origin(tags: Iterable[str]) -> frozenset[str]:
 
 
 def _norm(tags: Iterable[str]) -> frozenset[str]:
-    """A value's unit: a level (L) over a log level (G), each with whose it is; then a cross-symbol ratio (K), the run's
-    dollars (X when the sleeve's dollars now and the run's anchor met, else M or B), unknown (U), a constant (C); empty
-    is unit-free."""
+    """A value's unit: the run's dollars (X when the sleeve's dollars now and the run's anchor met, else M or B, with
+    what rides with them: `_RIDERS`); then a level (L) over a log level (G), each with whose it is; a cross-symbol ratio
+    (K); unknown (U); a constant (C); empty is unit-free."""
     t = set(tags)
-    for mark in (_L, _G):
-        if mark in t:
-            return frozenset({mark}) | _origin(t)
-    if _K in t:
-        return frozenset({_K})
+    # THE RUN'S DOLLARS COME FIRST: a value that may hold them AND a level (a list of both, one name given each, the
+    # smaller of cash and a price) is the run's dollars. Read as the level, `(ctx.equity + px - px) / (ctx.budget + px
+    # - px)` was a ratio of two prices and the profit lock passed.
     if _X in t:
         return frozenset({_X})
     if _M in t and _B in t:
@@ -225,6 +235,11 @@ def _norm(tags: Iterable[str]) -> frozenset[str]:
         return frozenset({_M}) | (t & {_SLEEVE, _VALUE, _PNL, _SHARES, _INV})
     if _B in t:
         return frozenset({_B}) | (t & {_CTX, _SHARES, _INV})
+    for mark in (_L, _G):
+        if mark in t:
+            return frozenset({mark}) | _origin(t)
+    if _K in t:
+        return frozenset({_K})
     for mark in (_U, _C):
         if mark in t:
             return frozenset({mark})
@@ -663,7 +678,9 @@ class _Levels:
         if _BAR in base:
             return (frozenset({_L}) | _origin(base)) if name in BAR_FIELDS else _NONE if name == "ret" else frozenset({_U})
         if _LOT in base:
-            return frozenset({_L}) if name in LOT_FIELDS else _LOT_DOLLARS.get(str(name), frozenset({_U}))
+            if name in LOT_FIELDS:
+                return frozenset({_L})
+            return _NONE if name in LOT_COUNTS else _LOT_DOLLARS.get(str(name), frozenset({_U}))
         return None
 
     def _subscript(self, base: frozenset[str], key: str | None, slice_: ast.AST | None = None) -> frozenset[str]:
@@ -699,6 +716,8 @@ class _Levels:
             return frozenset({_CAPS})
         if attr in ("positions", "closed"):
             return frozenset({_LOTS})
+        if attr in CTX_COUNTS and not module:
+            return _NONE
         if attr in NOW_FIELDS and not module:
             return _NOW
         if attr in ANCHOR_FIELDS and not module:
@@ -1026,19 +1045,21 @@ class _Levels:
                 return frozenset({_G}) | _origin(a) | _origin(b)
             if _U in a or _U in b:
                 return frozenset({_U})
+            if _money(a) or _money(b):  # before a level's turn: the run's dollars plus a price are the run's dollars
+                if _lots_own(a) and _lots_own(b) and ((_VALUE in a and _PNL in b) or (_PNL in a and _VALUE in b)):
+                    return frozenset({_B})  # a lot's value less its pnl: what it cost (the capital it was bought with)
+                return _norm([*_dollars(a), *_dollars(b)])
             for mark in (_L, _G):
                 if mark in a or mark in b:
                     return a if mark in a else b
             if _K in a or _K in b:
                 return frozenset({_K})
-            if _money(a) or _money(b):
-                if _lots_own(a) and _lots_own(b) and ((_VALUE in a and _PNL in b) or (_PNL in a and _VALUE in b)):
-                    return frozenset({_B})  # a lot's value less its pnl: what it cost (the capital it was bought with)
-                return _norm([*_dollars(a), *_dollars(b)])
             return frozenset({_C}) if _const(a) and _const(b) else _NONE
         if isinstance(op, (ast.FloorDiv, ast.Mod)):
             if (_held(a) and (_const(b) or not b)) or (_held(b) and _const(a)):
                 self._refuse(node, f"buckets {_what(a if _held(a) else b)} by a constant or a PARAMS value (// or %)")
+            if _money(a) or _money(b):
+                return _norm([*_dollars(a), *_dollars(b)])
             return a if _held(a) else frozenset({_U}) if (_U in a or _U in b) else _norm([*a, *b])
         if isinstance(op, ast.Div):
             if _L in a and _L in b:
@@ -1053,16 +1074,16 @@ class _Levels:
                 return (_scaled(b, a) | {_SHARES}) ^ {_INV}
             if _U in a or _U in b or (_G in a and _L in b) or (_L in a and _G in b) or (_G in a and _G in b):
                 return frozenset({_U})
+            if _money(a):  # over a constant, a count, a log or a cross ratio: the run's dollars still
+                return _scaled(a, b)
+            if _money(b):
+                return _scaled(b, a) ^ {_INV}  # 1000.0 / ctx.equity, 1 / ctx.budget: the run's dollars still, inverted
             if _L in a or _L in b:
                 return frozenset({_L}) | _origin(a) | _origin(b)
             if _K in a and _K in b:
                 return _NONE
             if _K in a or _K in b:
                 return frozenset({_K})
-            if _money(a):
-                return _scaled(a, b)
-            if _money(b):
-                return _scaled(b, a) ^ {_INV}  # 1000.0 / ctx.equity, 1 / ctx.budget: the run's dollars still, inverted
             if _G in a:
                 return a
             return frozenset({_C}) if _const(a) and _const(b) else _NONE
@@ -1075,7 +1096,7 @@ class _Levels:
                 m, other = (a, b) if _money(a) else (b, a)
                 if _L in other:  # a number of shares times a price: dollars (a lot's qty times its entry: what it cost)
                     return _scaled(m, other) - {_SHARES}
-                return _scaled(m, other) if (not other or _const(other)) else frozenset({_U})
+                return _scaled(m, other)  # times a constant, a count, a log or a cross ratio: the run's dollars still
             if _L in a or _L in b:
                 return frozenset({_L}) | _origin(a) | _origin(b)
             if _G in a or _G in b:
@@ -1084,10 +1105,12 @@ class _Levels:
                 return frozenset({_K})
             return frozenset({_C}) if _const(a) and _const(b) else _NONE
         if isinstance(op, ast.Pow):
+            if _money(a) or _money(b):  # 1.001 ** ctx.equity, px ** ctx.cash: the run's dollars still
+                return _norm([*_dollars(a), *_dollars(b)])
             if _held(a):
                 return a
             if _held(b):
-                return b  # 1.001 ** ctx.equity: the run's dollars (or a level) still, written as an exponent
+                return b  # 1.001 ** px: a level still, written as an exponent
             return frozenset({_C}) if _const(a) and _const(b) else frozenset({_U}) if (_U in a or _U in b) else _NONE
         return frozenset({_U})
 

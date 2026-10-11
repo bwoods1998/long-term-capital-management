@@ -66,8 +66,10 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   lot's `qty` times its `entry` or `exit`, its `value` less its `pnl`, `exit` times `qty` less `net`) and holding the
   sleeve's cash or equity against it; a program that stops once ahead passes the share screen far more often than
   the screen's false-positive line says. The level rule now reads a lot's `qty` and what a lot cost as the run's
-  anchor, in every spelling it can follow, and refuses the run's dollars written into a lot's `tag`; a lot's own
-  return, a hold count and a size from `ctx.budget` pass as before. **What the static rule still cannot see** is said
+  anchor, in every spelling it can follow, and refuses the run's dollars written into a lot's `tag`; the run's
+  dollars mixed with a price, a log, a cross-symbol ratio or a count stay the run's dollars (the lock with a price
+  added to and taken from each side read as a ratio of two prices and passed); a lot's own return, a hold count and a
+  size from `ctx.budget` pass as before. **What the static rule still cannot see** is said
   plainly in `league/swarm/ELANE_E2.md`: above all a lot's weight in the sleeve set against its own return, which
   passes the static rule and the restart check, so the two paid readers are the only guard there; their rubric names
   the pattern and ends on the rule (a rule whose trading depends on how far the run is ahead or behind is refused,
