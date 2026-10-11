@@ -208,6 +208,17 @@ WATCH_EVERY = 3600.0
 #: An unknown order is lost when the venue still does not show it by its client id after this many lookups or seconds.
 LOST_AFTER_TRIES = 4
 LOST_AFTER_S = 600.0
+#: A LOST ORDER'S TAKE-BACK (`EquityBook._sync_orders`): an order given up as lost is still looked for in the venue's
+#: orders while its session's day is within this many calendar days of the New York day of the minute; one the venue
+#: shows after all is working again and its fills are booked to its instance's lot. After it the order path never
+#: books a fill of that order (shares nobody owns are the reconciliation's to find).
+LOST_TAKE_BACK_DAYS = 3
+#: ... and THE SEAT RULE reads a lost order as one that MAY STILL FILL for one day longer (`EquityBook._flat`; the
+#: captain's A30 (3)): the order path reads the day off the minute's `now` and the seat rule off the wall clock, which
+#: may already be the next New York day when the equity minute runs late, so the seat rule's window is the wider one
+#: by a whole day. A program is never read flat, and so never yields its seat, while the order path could still
+#: book a lot to it.
+LOST_HOLDS_SEAT_DAYS = LOST_TAKE_BACK_DAYS + 1
 #: A pending row younger than this is being sent right now (never looked up yet).
 PENDING_GRACE_S = 30.0
 #: Lookups by client id a minute, at most.
@@ -263,7 +274,22 @@ FEES_LATE_SESSIONS = 5
 SEAT_KEY = "eq_seat"
 YIELDED = "yielded"
 BUDGET_WORDS = "the shared loss budget has"
+#: THE OPEN NOTE (the captain's A30 (2); `EquityBook._open_note`, `_refused_days`): the kv in which the book keeps, a
+#: session and an entry window ("open": the minutes an open entry may go, 09:30:30 to 09:45; "close": 15:55 to
+#: 15:59:30), whether the House would have let a real equity open go at ANY minute it looked there: {day: {window:
+#: {"clear": bool, "why": the House-wide refusal it last met while never clear}}}. A session with a window the House
+#: looked in and never once would have opened in is A SESSION IN WHICH THE HOUSE REFUSED EVERY OPEN: it is left out of
+#: every program's seated and quiet sessions for the idle test. The answer is `_open_block`'s for ANY program (asked
+#: with `OPEN_PROBE`, an instance that is live by construction), so it is exactly what `_open_block` says before it
+#: looks at the instance; the book writes the note from that answer alone, every minute of the two windows, whether or
+#: not any program planned a buy. Nothing a program writes reaches it: not an intent, not a tag, not a reason. Kept
+#: only while the seat rule is in force (under "first-come" nothing is idle and the book asks nothing extra).
+OPEN_NOTE_KEY = "eq_open_note"
+#: Calendar days a refused session's note is kept (the idle test reads at most `idle_sessions` counted sessions back;
+#: a session every window of which was clear is dropped the day after: only a refusal is ever read).
+OPEN_NOTE_KEEP_DAYS = 400
 _SLUG = re.compile(r"[^a-z0-9-]+")
+_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def D(value: Any, default: Decimal | None = None) -> Decimal:
@@ -653,6 +679,11 @@ class Instance:
                    r["why"] or "")
 
 
+#: ANY PROGRAM, for the open note (`OPEN_NOTE_KEY`): an instance that is live whatever the book holds, so that
+#: `EquityBook._open_block` answers for the House alone.
+OPEN_PROBE = Instance("", "", 0, "", "", "", {}, LIVE_BANDS[0], False, 0)
+
+
 def instance_key(family: str, version: int) -> str:
     """`<family>@<version>:r`: the real evidence route's instance, as the options book's."""
     return f"{family}@{int(version)}{REAL_SUFFIX}"
@@ -676,6 +707,10 @@ def _bar_day(row: Mapping[str, Any]) -> str | None:
 
 def _iso(t: float) -> str:
     return dt.datetime.fromtimestamp(float(t), dt.timezone.utc).isoformat()
+
+
+class _NoYield(Exception):
+    """Raised inside `EquityBook._yield`'s transaction to roll it back: the swarm's store did not take the band."""
 
 
 class EquityBook:
@@ -1040,6 +1075,9 @@ class EquityBook:
                 ("decide", lambda: self._decide_step(now, out)),
                 # The stock proof before the windows (A10.1): in its SELL stage's window the practice sale goes first.
                 ("proof", lambda: self._proof_step(now, m, out)),
+                # The open note after the proof (a BUY stage that passes this minute opens this minute) and before the
+                # windows: what it reads is what this minute's entries are about to be told.
+                ("open_note", lambda: self._open_note(now, m, real_block, killed)),
                 ("windows", lambda: self._windows(now, m, out, real_block, killed)),
                 ("exports", lambda: self._export(out)),
                 ("fees", lambda: self._fees(now, out)),
@@ -1102,10 +1140,11 @@ class EquityBook:
     # ------------------------------------------------------------------ the venue's orders
     def _sync_orders(self, now: float, out: dict) -> None:
         """Bring every working order up to the venue's row (fills booked to lots), revive a lost order the venue shows
-        after all, and look up the unknown ones by client id."""
+        after all (for `LOST_TAKE_BACK_DAYS`; the seat rule's `_flat` reads the same window, and a day more), and look
+        up the unknown ones by client id."""
         working = self._orders(WORKING)
         lost = self._orders(("lost",))
-        lost = [o for o in lost if o.day >= (S.ny_day(now) - dt.timedelta(days=3)).isoformat()]
+        lost = [o for o in lost if o.day >= (S.ny_day(now) - dt.timedelta(days=LOST_TAKE_BACK_DAYS)).isoformat()]
         if not working and not lost:
             return
         shown: set[str] = set()
@@ -1470,6 +1509,49 @@ class EquityBook:
         if inst is None or not inst.live:
             return "the program is not at Probe or Sized"
         return None
+
+    def _open_note(self, now: float, m: S.Moments | None, real_block: Callable[..., str | None],
+                   killed: Callable[[], bool] | None) -> None:
+        """THE OPEN NOTE (`OPEN_NOTE_KEY`; the captain's A30 (2)), written every minute of a session's two entry
+        windows while the seat rule is in force: whether the House would let a real equity open of ANY program go
+        this minute (`_open_block` asked with `OPEN_PROBE`: grant, kill switch, stops, both reconciliations, the
+        pause, the account read, `equity_money.enabled`, the stock proof's BUY stage, a failed SELL stage, the
+        freezes). A window is CLEAR from the first minute it would; until then it carries the refusal's words. The
+        kv is written only when a window's answer changes (a handful of writes a session)."""
+        if m is None or B.seat_settings().first_come:
+            return
+        if m.open_send <= now < m.entry_until:
+            window = "open"
+        elif m.close_send <= now < m.close_until:
+            window = "close"
+        else:
+            return
+        why = self._open_block(real_block, OPEN_PROBE, killed)
+        held = self.state.get(OPEN_NOTE_KEY, {})
+        note = {str(k): dict(v) for k, v in held.items() if isinstance(v, Mapping)} if isinstance(held, Mapping) else {}
+        day = m.day.isoformat()
+        was = note.get(day, {}).get(window)
+        was = dict(was) if isinstance(was, Mapping) else None
+        if was is not None and was.get("clear"):
+            return
+        now_is = {"clear": True} if why is None else {"clear": False, "why": str(why)[:200]}
+        if was == now_is:
+            return
+        note.setdefault(day, {})[window] = now_is
+        floor = (m.day - dt.timedelta(days=OPEN_NOTE_KEEP_DAYS)).isoformat()
+        self.state.put(OPEN_NOTE_KEY, {d: w for d, w in sorted(note.items())
+                                       if d == day or (d > floor and _refused(w))})
+
+    def _refused_days(self) -> dict[str, str]:
+        """THE SESSIONS IN WHICH THE HOUSE REFUSED EVERY OPEN (`OPEN_NOTE_KEY`): {day: why}, a session with an entry
+        window the House looked in and never once would have opened in. A session it did not look at at all (the
+        House did not run in its windows, or ran under "first-come") is not one: nothing is known of it, and it
+        counts as any other."""
+        held = self.state.get(OPEN_NOTE_KEY, {})
+        if not isinstance(held, Mapping):
+            return {}
+        return {str(day): _refused(windows) for day, windows in held.items()
+                if _refused(windows) and _DAY.fullmatch(str(day))}
 
     def _quote(self, symbol: str) -> dict[str, Any]:
         if symbol not in self._quotes:
@@ -2091,12 +2173,14 @@ class EquityBook:
         before = (dumps(sticky), dumps(since))
         day = t.isoformat()
         rule = B.seat_settings()
+        #: {instance key: the session a seat taken in this (late) sync counts from}, filled by `_seat_bands`.
+        counts_from: dict[str, str] = {}
         if et is not None and et.enabled and not rule.first_come:
             # THE SEAT RULE in force (the module docstring): the book ranks the waiting programs itself. Its own trouble
             # (a row or a day it cannot read) moves no further seat and NEVER stops the day's decision: the programs
             # the book holds decide as they are, and the error is recorded each time.
             try:
-                self._seat_bands(rows, et, rule, sticky, since, day, now, out, late=late)
+                self._seat_bands(rows, et, rule, sticky, since, day, now, out, late=late, counts_from=counts_from)
             except Exception as exc:  # noqa: BLE001
                 self._error("seats", exc, out)
         elif et is not None and et.enabled:
@@ -2153,10 +2237,12 @@ class EquityBook:
                                 bool(row.get("seeded")), holds[1], created_at=now)
                 since.setdefault(key, {"band": inst.band, "day": day})
                 self.record("equity.instance", {"instance": key, "band": inst.band, "lane": inst.lane}, agent=inst.family)
-            elif late and not (not rule.first_come and inst.retired_at is not None and str(inst.why).startswith(YIELDED)):
+            elif late and not (inst.retired_at is not None and str(inst.why).startswith(YIELDED)):
                 # A running instance is the decision's own to update; a retired one its own to bring back. But a
                 # program that yielded an idle seat (THE SEAT RULE) holds nothing, and a seat it returns into in the
-                # seating pass is its own again at once: it falls through to the revival below.
+                # seating pass is its own again at once: it falls through to the revival below. Under "first-come"
+                # too (a rollback with a yielded program waiting): its band moved in this pass, and it is asked for
+                # the same close, not a decision later.
                 continue
             elif inst.retired_at is not None:
                 # The family runs this version again (the swarm banded it again; an instance retired on a read that
@@ -2175,6 +2261,11 @@ class EquityBook:
                     str(row.get("run_sha") or "")
                 inst.seeded = bool(row.get("seeded"))
             self._save_instance(inst)
+        for key, first in counts_from.items():
+            # (The revival above writes the mark again: a seat taken after its session's open keeps the session it
+            # counts from, `_seat_bands`.)
+            if isinstance(since.get(key), dict) and since[key].get("day") == day and since[key].get("band") in LIVE_BANDS:
+                since[key]["seat"] = first
         if not late or dumps(since) != before[1]:
             self.state.put("eq_band_since", since)
         if late:
@@ -2228,12 +2319,24 @@ class EquityBook:
         return table if roster is None else max(0, min(table, int(roster)))
 
     def _flat(self, key: str) -> bool:
-        """FLAT, structurally: the instance has no lot open or closing, no order pending, working or unknown, and no
-        intent planned or sent. Read from the book's own rows, every time it is asked."""
+        """FLAT, structurally: the instance has no lot open or closing, NO ORDER THAT MAY STILL FILL, and no intent
+        planned or sent. Read from the book's own rows, every time it is asked.
+
+        AN ORDER THAT MAY STILL FILL is one the order path may still bring up to a venue row (`_absorb`, the only way
+        a fill is booked, and a buy's fill the only way a lot is made): every order of `WORKING` (pending, working,
+        unknown), whatever its age, and an order GIVEN UP AS LOST for as long as `_sync_orders` may take it back and
+        a day more (`LOST_HOLDS_SEAT_DAYS`; the captain's A30 (3): a lost buy is not flat). Every other status is
+        the order's end: the order path never reads the venue for it again. So a program that yields its seat (THE
+        SEAT RULE: only a flat one can) has no order through which a lot could be booked to it afterwards
+        (league/tests/test_equity_seats_a30.py asks the order path itself, status by status)."""
         rows = self.state.rows
+        marks = ", ".join("?" for _ in WORKING)
+        horizon = (S.ny_day(self.clock()) - dt.timedelta(days=LOST_HOLDS_SEAT_DAYS)).isoformat()
         return not (rows("SELECT 1 AS x FROM eq_lots WHERE instance=? AND status IN ('open', 'closing') LIMIT 1", (key,))
-                    or rows("SELECT 1 AS x FROM eq_orders WHERE instance=? AND status IN ('pending', 'working', 'unknown') "
-                            "LIMIT 1", (key,))
+                    or rows(f"SELECT 1 AS x FROM eq_orders WHERE instance=? AND status IN ({marks}) LIMIT 1",
+                            (key, *WORKING))
+                    or rows("SELECT 1 AS x FROM eq_orders WHERE instance=? AND status='lost' AND day>=? LIMIT 1",
+                            (key, horizon))
                     or rows("SELECT 1 AS x FROM eq_intents WHERE instance=? AND status IN ('planned', 'sent') LIMIT 1",
                             (key,)))
 
@@ -2255,10 +2358,13 @@ class EquityBook:
                 break
         return max(days) if days else None
 
-    def _seat_facts(self, row: Mapping[str, Any], since: dict, flags: Mapping[str, Any], day: str) -> B.SeatFacts:
+    def _seat_facts(self, row: Mapping[str, Any], since: dict, flags: Mapping[str, Any], day: str,
+                    refused: Mapping[str, Any] | None = None) -> B.SeatFacts:
         """One passed program as the seat rule reads it (`bands.SeatFacts`): K from the row's two counts, its pass
-        time, its idle flag, and for a seated one its seat's day (`eq_band_since`: the decision day it was seated; a
-        holder with no mark gets today's), the sessions since, the sessions since its last asked buy, and `_flat`."""
+        time, its idle flag, and for a seated one its seat's day (`eq_band_since`: the decision day it was seated, or
+        its mark's `seat`, the session a seat taken after that session's open counts from; a holder with no mark gets
+        today's), the sessions since, the sessions since its last asked buy, and `_flat`. BOTH COUNTS LEAVE OUT THE
+        SESSIONS IN WHICH THE HOUSE REFUSED EVERY OPEN (`refused`: `_refused_days`; A30 (2), `_counted`)."""
         family = str(row["family"])
         key = instance_key(family, int(row["version"]))
         passed = row.get("passed_at")
@@ -2272,11 +2378,13 @@ class EquityBook:
         if not mark or mark.get("band") not in LIVE_BANDS or not mark.get("day"):
             mark = since[key] = {"band": str(row["band"]), "day": day}
         last = self._last_ask(key)
-        return replace(facts, seat_day=str(mark["day"]), seated_sessions=S.sessions_between(str(mark["day"]), day),
-                       quiet_sessions=None if last is None else S.sessions_between(last, day), flat=self._flat(key))
+        first = str(mark.get("seat") or mark["day"])
+        refused = refused or {}
+        return replace(facts, seat_day=first, seated_sessions=_counted(first, day, refused)[0],
+                       quiet_sessions=None if last is None else _counted(last, day, refused)[0], flat=self._flat(key))
 
     def _seat_bands(self, rows: list[dict], et: Any, rule: B.SeatSettings, sticky: dict, since: dict, day: str,
-                    now: float, out: dict, *, late: bool) -> None:
+                    now: float, out: dict, *, late: bool, counts_from: dict | None = None) -> None:
         """THE SEAT RULE "activity-1-free" AT A BAND SYNC (A24; the module docstring), on rows that hold every passed
         Candidate. In order: (1) the holders judged as before the rule (EDM1, sticky; the sizing-up step); (2) EDM1
         over the waiting programs that have a real record; (3) the plan (`bands.seat_plan`: the idle test, and who
@@ -2284,11 +2392,30 @@ class EquityBook:
         still wait, and none yielded today (`_yield`); (5) the seats now free, best-ranked first, falling through a
         seating that does not take. `late` (the seating pass): (5) only. `rows`, `sticky` and `since` are updated in
         place; the plan is written to `SEAT_KEY`. (The study's simulator ran the idle test before filling a free
-        seat; `bands.seat_plan` says what that changes and why A24's words decide it.)"""
+        seat; `bands.seat_plan` says what that changes and why A24's words, as A30 (1) reads them, decide it.)
+
+        THE IDLE CLOCK (A30 (2)): a holder's seated sessions and its sessions since its last asked buy leave out
+        every session in which the House refused every open (`_refused_days`). A SEAT'S FIRST SESSION: a seat taken
+        at the day's decision, or in the seating pass before the next session's open, counts from that next session;
+        one taken in the seating pass once that session's open has begun (09:30:30: its open entries can no longer
+        all go) counts from the session after it (`eq_band_since`'s `seat`, kept beside the mark's own `day`, which
+        stays the decision day every other reader of the mark knows), so the idle test never names a program before
+        it sat through `idle_sessions` whole sessions. A STALE FLAG: a program whose band is live holds a seat,
+        however it came by it (a rollback seats by pass time), and its idle flag is dropped."""
         memory = dict(self.state.get(SEAT_KEY, {}) or {})
         flags = {str(k): v for k, v in (memory.get("idle") or {}).items()} if isinstance(memory.get("idle"), Mapping) else {}
+        for row in rows:
+            if row.get("band") in LIVE_BANDS:
+                flags.pop(str(row["family"]), None)
         passed = dict(memory.get("passed") or {}) if isinstance(memory.get("passed"), Mapping) else {}
         last = memory.get("last")
+        refused = self._refused_days()
+        first_session = day
+        if late:
+            nxt = S.next_session(day)
+            mn = S.moments(nxt, self._offsets())
+            if mn is not None and now >= mn.open_send:
+                first_session = nxt.isoformat()
 
         def key_of(row: Mapping[str, Any]) -> str:
             return instance_key(row["family"], int(row["version"]))
@@ -2337,7 +2464,7 @@ class EquityBook:
         holders = [r for r in rows if r.get("band") in LIVE_BANDS]
         waiting = [r for r in rows if r.get("band") == "candidate" and r.get("holdout_passed") and key_of(r) not in sticky]
         seats = self._seat_count(et)
-        facts = {str(r["family"]): self._seat_facts(r, since, flags, day) for r in holders + waiting}
+        facts = {str(r["family"]): self._seat_facts(r, since, flags, day, refused) for r in holders + waiting}
 
         def plan_now(yielded: bool) -> dict[str, Any]:
             return B.seat_plan([facts[str(r["family"])] for r in holders], [facts[str(r["family"])] for r in waiting],
@@ -2353,7 +2480,7 @@ class EquityBook:
             if self._yield(row, why, str(plan["for"]), rule, since, memory, flags, day, now, out):
                 holders.remove(row)
                 waiting.append(row)
-                facts[goes.family] = self._seat_facts(row, since, flags, day)
+                facts[goes.family] = self._seat_facts(row, since, flags, day, refused)
                 last = memory.get("last")
             plan = plan_now(True)           # the queue as it stands: with the yielded program flagged, or without a yield
         free = max(0, seats - len(holders))
@@ -2376,7 +2503,11 @@ class EquityBook:
                 holders.append(row)
                 returned = flags.pop(f.family, None) is not None
                 passed.pop(f.family, None)
-                facts[f.family] = self._seat_facts(row, since, flags, day)
+                if first_session != day:
+                    since[key]["seat"] = first_session
+                    if counts_from is not None:
+                        counts_from[key] = first_session
+                facts[f.family] = self._seat_facts(row, since, flags, day, refused)
                 last = {"day": day, "action": "returned" if returned else "seated", "family": f.family, "rank": position,
                         "why": ("it returns into a free seat by rank, with no new look" if returned else
                                 "a free seat goes to the best-ranked waiting program") + f" (seat rule {rule.rule})"}
@@ -2385,8 +2516,18 @@ class EquityBook:
                 continue
             if band not in LIVE_BANDS and record_edm1(why):
                 # EDM1 named a waiting program at its seating (its twins were priced since the last sync): sticky, so
-                # the seat is not offered to it again.
+                # the seat is not offered to it again; the same record and the same alert as the day's own pass (2),
+                # its idle flag dropped, and it is out of the plan's waiting list at once (the plan is true).
                 sticky[key] = why[:300]
+                flags.pop(f.family, None)
+                passed.pop(f.family, None)
+                waiting.remove(row)
+                self.record("equity.seat", {"action": "waiting_demoted", "family": f.family, "version": row["version"],
+                                            "day": day, "rank": position, "rule": rule.rule, "why": sticky[key]},
+                            agent=f.family)
+                self.alert("warning", f"equity: {key} waited for a seat and is demoted ({sticky[key][:200]}): it "
+                                      "takes no seat again under this version")
+                continue
             if passed.get(f.family) != day:                    # said once a decision day a family, never each minute
                 passed[f.family] = day
                 self.record("equity.seat", {"action": "passed_over", "family": f.family, "version": row["version"],
@@ -2397,36 +2538,61 @@ class EquityBook:
         # What the plan SHOWS as idle is the test itself on each holder, in the seating pass too (which never acts on
         # it): a seated program that is idle and keeps its seat because nobody unflagged waits is said so.
         idle = [f for f in (str(r["family"]) for r in holders) if B.seat_idle(facts[f], rule)]
-        self._seat_note(memory, rule, seats, day, holders, waiting, facts, idle, sticky, out, late=late)
+        self._seat_note(memory, rule, seats, day, holders, waiting, facts, idle, sticky, out, late=late, refused=refused)
 
     def _yield(self, row: dict, why: str, taker: str, rule: B.SeatSettings, since: dict, memory: dict, flags: dict,
                day: str, now: float, out: dict) -> bool:
         """ONE IDLE SEAT YIELDS (THE SEAT RULE). Everything in ONE state transaction that first finds the instance
-        FLAT again (`_flat`): the band goes back to Candidate through the families reader (never sticky), the instance
-        is retired with the reason "yielded", the program is flagged idle and the plan's memory is written. A program
-        that is not flat, or whose row changed, yields nothing and keeps its seat. Nothing is sold, planned or
-        cancelled: there is nothing of it to sell."""
+        FLAT again (`_flat`: no lot, no order that may still fill, no intent to execute): the instance is retired
+        with the reason "yielded", the program is flagged idle, the plan's memory and the seat mark are written, and
+        LAST, still inside the transaction, the band goes back to Candidate through the families reader (never
+        sticky). A program that is not flat, or whose row changed, yields nothing and keeps its seat. Nothing is
+        sold, planned or cancelled: there is nothing of it to sell.
+
+        TWO DATABASES, ONE OUTCOME. The band lives in the swarm's store and everything else in the live state. The
+        swarm's write is the last statement before the commit, so a live write that fails (or a row that changed)
+        rolls the whole yield back with the band untouched; and should the commit itself fail after the swarm took
+        the band, the band is moved back to the seat's own (`_unyield`) before the error goes on. `row`, `since`,
+        `flags` and `memory` are changed only once the transaction has committed: a yield that did not happen leaves
+        the sync's own picture as it was. (A process that dies between the two commits leaves a Candidate whose
+        instance still runs and is flat: the next decision's band sync, which runs before any program is asked,
+        seats it again by rank or retires it with nothing to sell.)"""
         family = str(row["family"])
         key = instance_key(family, int(row["version"]))
         was = str(row.get("band"))
-        with self.state.transaction():
-            if not self._flat(key):
-                out.setdefault("bands", []).append(f"{family}: not flat; no yield")
-                return False
-            if not self.families.confirm_band(row, "candidate", why):
-                out.setdefault("bands", []).append(f"{family}: the row changed; no yield")
-                return False
-            inst = self._instance(key)
-            if inst is not None and inst.retired_at is None:
-                inst.retired_at, inst.why, inst.band = now, f"{YIELDED}: {why}"[:400], "candidate"
-                self._save_instance(inst)
-            row["band"] = "candidate"
-            since[key] = {"band": "candidate", "day": day}
-            flags[family] = {"day": day, "why": "it yielded an idle seat and waits for a free one"}
-            memory.update(idle=flags, yield_day=day,
-                          last={"day": day, "action": "yielded", "family": family, "for": taker, "why": why})
-            self.state.put(SEAT_KEY, memory)
-            self.state.put("eq_band_since", since)
+        mark = {"band": "candidate", "day": day}
+        flag = {"day": day, "why": "it yielded an idle seat and waits for a free one"}
+        last = {"day": day, "action": "yielded", "family": family, "for": taker, "why": why}
+        if getattr(self.state, "_depth", 0):
+            # The rollback below is the outermost transaction's: inside another the yield could be half written.
+            out.setdefault("bands", []).append(f"{family}: no yield inside another transaction")
+            return False
+        inst, moved = None, False
+        try:
+            with self.state.transaction():
+                if not self._flat(key):
+                    out.setdefault("bands", []).append(f"{family}: not flat; no yield")
+                    return False
+                inst = self._instance(key)
+                if inst is not None and inst.retired_at is None:
+                    inst.retired_at, inst.why, inst.band = now, f"{YIELDED}: {why}"[:400], "candidate"
+                    self._save_instance(inst)
+                self.state.put(SEAT_KEY, {**memory, "idle": {**flags, family: flag}, "yield_day": day, "last": last})
+                self.state.put("eq_band_since", {**since, key: mark})
+                moved = bool(self.families.confirm_band(row, "candidate", why))
+                if not moved:
+                    raise _NoYield
+        except _NoYield:
+            out.setdefault("bands", []).append(f"{family}: the row changed; no yield")
+            return False
+        except BaseException:
+            if moved:
+                self._unyield(row, was, key)
+            raise
+        row["band"] = "candidate"
+        since[key] = mark
+        flags[family] = flag
+        memory.update(idle=flags, yield_day=day, last=last)
         if inst is not None:
             self._drop(inst)
         self.record("equity.band", {"family": family, "version": row["version"], "from": was, "to": "candidate",
@@ -2441,18 +2607,36 @@ class EquityBook:
                               f"seat ({why[:200]})")
         return True
 
+    def _unyield(self, row: Mapping[str, Any], band: str, key: str) -> None:
+        """The live state did not take a yield the swarm's store already had (`_yield`: the commit failed): the band
+        goes back to the seat's own, so the store and the book say the same again. Never raises; when it cannot be
+        moved back the owner is told (the next decision's band sync then settles it: seated again by rank, or
+        retired with nothing to sell)."""
+        try:
+            back = bool(self.families.confirm_band({**row, "band": "candidate"}, band,
+                                                   "its yield could not be written: it keeps its seat"))
+        except Exception:  # noqa: BLE001 - said below
+            back = False
+        if not back:
+            self.alert("error", f"equity: {key} could not be written as yielded and its band could not be moved back "
+                                f"to {band}: the swarm shows it a Candidate while the book still runs it (it is flat). "
+                                "The next band sync seats it again by rank or retires it")
+
     def _seat_note(self, memory: dict, rule: B.SeatSettings, seats: int, day: str, holders: Sequence[Mapping[str, Any]],
                    waiting: Sequence[Mapping[str, Any]], facts: Mapping[str, B.SeatFacts], idle: Sequence[str],
-                   sticky: Mapping[str, Any], out: dict, *, late: bool) -> None:
+                   sticky: Mapping[str, Any], out: dict, *, late: bool, refused: Mapping[str, Any] | None = None) -> None:
         """THE PLAN as the sync leaves it, written to `SEAT_KEY` when it changed: who holds each seat (since when, how
-        many sessions, flat, quiet, idle, seeded), who waits and in what order (a rank POSITION, never K), who is
-        flagged idle, and the last change of hands with its reason. The day's decision also says it in one line of the
-        minute's summary (`out["seats"]`)."""
+        many sessions that count, how many left out because the House refused every open, flat, quiet, idle, seeded),
+        who waits and in what order (a rank POSITION, never K), who is flagged idle, the sessions left out of the
+        idle clock since the oldest seat (`left_out`: [{day, why}], the newest thirty), and the last change of hands
+        with its reason. The day's decision also says it in one line of the minute's summary (`out["seats"]`)."""
+        refused = refused or {}
+
         def held(row: Mapping[str, Any]) -> dict[str, Any]:
             f = facts[str(row["family"])]
             return {"family": f.family, "version": int(row["version"]), "band": str(row["band"]), "seeded": f.seeded,
                     "since": f.seat_day, "seated_sessions": f.seated_sessions, "quiet_sessions": f.quiet_sessions,
-                    "flat": f.flat, "idle": f.family in idle}
+                    "left_out": _counted(f.seat_day, day, refused)[1], "flat": f.flat, "idle": f.family in idle}
 
         rows = {str(r["family"]): r for r in waiting}
         queue = [{"family": f.family, "version": int(rows[f.family]["version"]), "rank": i, "seeded": f.seeded,
@@ -2461,12 +2645,15 @@ class EquityBook:
         plan = {**memory, "rule": rule.rule, "seats": seats, "idle_sessions": int(rule.idle_sessions),
                 "holders": sorted((held(r) for r in holders), key=lambda h: (h["since"], h["family"])), "waiting": queue,
                 "sticky": sorted(str(k).split("@", 1)[0] for k in sticky), "order": "the book's plan (equity_money.probe.seat)"}
+        oldest = min((h["since"] for h in plan["holders"]), default=day)
+        plan["left_out"] = [{"day": d, "why": str(refused[d])[:240]} for d in sorted(refused) if oldest < d <= day][-30:]
         was = self.state.get(SEAT_KEY)
         if not isinstance(was, Mapping) or {k: v for k, v in was.items() if k != "day"} != \
                 {k: v for k, v in plan.items() if k != "day"} or not late:
             self.state.put(SEAT_KEY, {**plan, "day": day})
         if not late:
             seated = "; ".join(f"{h['family']}{' (seeded)' if h['seeded'] else ''} seated {h['seated_sessions']} sessions"
+                               + (f" ({h['left_out']} more left out: the House refused every open)" if h["left_out"] else "")
                                + (" IDLE" if h["idle"] else "") for h in plan["holders"]) or "nobody seated"
             line = ", ".join(f"{w['family']} ({w['rank']}{', idle-flagged' if w['flagged'] else ''})" for w in queue)
             out["seats"] = f"equity seats ({rule.rule}, {len(plan['holders'])} of {seats}): {seated}; waiting: {line or 'nobody'}"
@@ -2480,7 +2667,13 @@ class EquityBook:
                           for r in rows if r.get("band") in LIVE_BANDS), key=lambda h: (h["since"], h["family"]))
         was = self.state.get(SEAT_KEY)
         was = dict(was) if isinstance(was, Mapping) else {}
-        plan = {**{k: v for k, v in was.items() if k in ("idle", "last", "yield_day")}, "rule": B.FIRST_COME,
+        kept = {k: v for k, v in was.items() if k in ("idle", "last", "yield_day")}
+        if isinstance(kept.get("idle"), Mapping) and kept["idle"]:
+            # A STALE FLAG: a program that yielded under the rule and is seated again here (first come, by pass time)
+            # waits no more, and the plan (the report's `idle_flagged`) never names a seated program.
+            seated = {h["family"] for h in holders}
+            kept["idle"] = {k: v for k, v in kept["idle"].items() if str(k) not in seated}
+        plan = {**kept, "rule": B.FIRST_COME,
                 "seats": int(et.probe_max_programs), "holders": holders, "waiting": None,
                 "order": "by pass time: the swarm's roster (first come)"}
         if {k: v for k, v in was.items() if k != "day"} != plan:
@@ -2826,6 +3019,7 @@ class EquityBook:
         day, nxt = t.isoformat(), S.next_session(t).isoformat()
         _, default_hold, cap, failed_exit = self._holds()
         n = 0
+        told: list[str] = []
         with self.state.transaction():
             for lot in self._lots():
                 pending = [Intent.of(r) for r in self.state.rows(
@@ -2839,6 +3033,13 @@ class EquityBook:
                 if inst is None or inst.retired_at is not None or inst.band not in LIVE_BANDS:
                     code = "demoted" if inst is not None and str(inst.why).startswith("demoted") else "retired"
                     reason, why = code, f"its program is {code}: {inst.why if inst else 'unknown to the book'}"
+                    if inst is not None and str(inst.why).startswith(YIELDED):
+                        # THE SEAT RULE NEVER ENDS IN A SALE (A24; A30 (3)): a program yields only while flat, and
+                        # `_flat` holds its seat for as long as an order of its own could still book a lot. A lot of
+                        # a program that yielded is therefore a fault of the book's, never the rule's doing: the lot
+                        # leaves by the House's own rule for a program that no longer runs (no stuck lot, A8.5), and
+                        # it is never silent.
+                        told.append(f"lot {lot.lid} ({lot.symbol}) of {lot.instance}")
                 elif inst.failed_decides >= failed_exit:
                     reason, why = "house", f"{inst.failed_decides} failed decides in a row"
                 else:
@@ -2854,6 +3055,12 @@ class EquityBook:
                     n += 1
         if n:
             self.record("equity.house_exits", {"day": day, "lots": n})
+        if told:
+            self.record("equity.alert", {"what": "a lot of a program that had yielded its seat", "lots": told, "day": day})
+            self.alert("error", f"equity: {'; '.join(told)}: the program had YIELDED its idle seat and a lot was booked to "
+                                "it afterwards. The seat rule must never end in a sale: this is a fault of the book's "
+                                "order path. The lot exits at the next open by the House's rule for a program that no "
+                                "longer runs; tell the captain")
         return n
 
     def _decide_failed(self, t: dt.date, now: float, why: str) -> None:
@@ -3422,6 +3629,25 @@ def _budget_asked(why: Any) -> bool:
     entry in its reason, in `BUDGET_WORDS`)."""
     text = str(why or "")
     return "sizing (budget)" in text or ("sizing (min_order)" in text and BUDGET_WORDS in text)
+
+
+def _refused(windows: Any) -> str:
+    """Why a session's open note (`OPEN_NOTE_KEY`: {window: {clear, why}}) says the House refused every open in one
+    of its entry windows ("" when no window says so: every window it names is clear, or it names none)."""
+    if not isinstance(windows, Mapping):
+        return ""
+    for name in sorted(windows, reverse=True):                   # "open" before "close": the session's order
+        entry = windows[name]
+        if isinstance(entry, Mapping) and not entry.get("clear"):
+            return f"{name} window: {str(entry.get('why') or 'refused')[:200]}"
+    return ""
+
+
+def _counted(first: str, last: str, refused: Mapping[str, Any]) -> tuple[int, int]:
+    """(the sessions in (first, last] that count for the idle test, those left out): `schedule.sessions_between`
+    less the sessions in which the House refused every open (`EquityBook._refused_days`; A30 (2))."""
+    out = sum(1 for day in refused if str(first) < str(day) <= str(last) and S.is_session(str(day)))
+    return S.sessions_between(first, last) - out, out
 
 
 def record_edm1(why: Any) -> bool:

@@ -749,7 +749,8 @@ class TheBook(SeatCase):
             self.assertNotIn(word, text)
         plan = health["seats"]
         self.assertEqual(set(plan["holders"][0]), {"family", "version", "band", "seeded", "since", "seated_sessions",
-                                                   "quiet_sessions", "flat", "idle"})
+                                                   "quiet_sessions", "left_out", "flat", "idle"})
+        self.assertEqual(plan["left_out"], [], "no session was left out of the idle clock")
         self.assertEqual(set(plan["waiting"][0]), {"family", "version", "rank", "seeded", "flagged", "ranked"})
         self.assertEqual((plan["rule"], plan["seats"], plan["idle_sessions"], plan["order"]),
                          ("activity-1-free", 3, 10, "the book's plan (equity_money.probe.seat)"))
@@ -1201,7 +1202,8 @@ class TheBook(SeatCase):
         f.h.tick(16, 40, day=f.days[2])
         self.assertEqual(sorted(f.holders()), ["busy-3", "fourth", "next"])
         self.assertEqual(f.seats()["sticky"], ["lost", "third"])
-        self.assertEqual([(e["action"], e["family"]) for e in f.events()[-2:]], [("passed_over", "third"), ("seated", "fourth")])
+        self.assertEqual([(e["action"], e["family"]) for e in f.events()[-2:]], [("waiting_demoted", "third"), ("seated", "fourth")],
+                         "the same record as the day's own pass (league/tests/test_equity_seats_a30.py)")
         f.h.families.rows["busy-3"]["band"] = "retired"
         f.run(3, 5)
         self.assertEqual(({f.band("lost"), f.band("third")}, sorted(f.holders())), ({"candidate"}, ["fourth", "next"]),
