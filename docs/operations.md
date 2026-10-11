@@ -86,9 +86,9 @@ full grid a cell under E3's own hash rule, the same questions for every route.
   permit). With the lane on it asks the quiet windows first, like every E4 job (the probe's Saturday 00:10Z time
   never meets a wall), and a panel store that cannot be read fails the job before any route is marked or dollar
   spent: the lane's switch is the way back to E3's probe while the store is mended.
-- Measured on a synthetic panel of about 900 columns under the ops child's own limits, pinned to one core: the whole
-  job peaks at about 334 MB of the 500 MB the child may add (E3's probe alone: about 122 MB), and all nine cells'
-  truths take about 2 seconds of CPU. Not measured on the box.
+- Measured on a synthetic panel of about 900 columns under the ops child's own limits, pinned to one core, with a
+  scripted router: the probe with the plan peaks at about 330 MB of the 500 MB the child may add (E3's probe alone:
+  about 120 MB), and the nine cells' truths take under 2 seconds of CPU. Not measured on the box.
 
 **Why a panel, and why a residual** (measured the week it was built, rule-level): a raw-P&L screen cannot be opened to
 single stocks or sectors, because an author who knows which symbol won a known year passes it far above the owner's

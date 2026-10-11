@@ -1065,7 +1065,8 @@ def probe(ctx: Any, *, panel: Callable[..., Any] | None = None) -> dict[str, Any
     return out
 
 
-__all__ = ["FILE", "VERSION", "GATE_REASON", "ERAS", "STRATA", "PANEL_STRATA", "FACTORS", "FACTOR_WORDS", "NAME", "RECALL", "RECALL_MONTHS", "ROLE", "SYMBOLS_PER_CELL",
+__all__ = ["FILE", "VERSION", "GATE_REASON", "ERAS", "STRATA", "PANEL_STRATA", "FACTORS", "FACTOR_WORDS", "NAME",
+           "RECALL", "RECALL_MONTHS", "ROLE", "SYMBOLS_PER_CELL",
            "PERMUTATIONS", "ASK_SECONDS", "READABLE_ANSWERED", "READABLE_PERIODS", "ALPHA", "HISTORY", "MODES",
            "DEFAULTS", "BOUNDS", "SYSTEM", "KEY_PREFIX", "AGAINST", "WORDS", "RECALL_ERA", "IDLE_ALARM", "JUDGED_ERAS", "CELL_KEYS",
            "RECALL_KEYS", "cfg", "mode", "periods", "stratum_symbols", "grid", "questions", "panel_questions",

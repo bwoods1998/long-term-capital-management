@@ -320,7 +320,8 @@ class ThePlan(Panels):
         rows = [{**asked[month], "symbol": gone} for month in ("2026-02", "2026-03", "2026-04")]
         self.assertEqual([t in ("more", "less") for t in plan.truths(rows)], [True, False, False],
                          "no close at the end, then none at the base either")
-        stranger = [{**asked["2026-02"], "symbol": "ZQZZ"}, {**asked["2026-02"], "symbol": universe.symbol(MASKED_AID, VANISHED_LAST)}]
+        stranger = [{**asked["2026-02"], "symbol": "ZQZZ"},
+                    {**asked["2026-02"], "symbol": universe.symbol(MASKED_AID, VANISHED_LAST)}]
         self.assertEqual(plan.truths(stranger), [None, None], "a name the plan never offered has no truth")
         self.assertEqual(X.thirds([1.0, 2.0], [True, True]), None, "a third would be empty")
         low, high = X.thirds([3.0, float("nan"), 1.0, 2.0, 2.0, 9.0, 5.0], [True, True, True, True, True, False, True])
@@ -995,7 +996,8 @@ class TheWiring(unittest.TestCase):
         plan's maker as a parameter."""
         probe, mine = REPO / "league" / "ops" / "contam_probe.py", REPO / "league" / "ops" / "contam_xs.py"
         reached = {module for module, _, _ in seal.imports(REPO, probe)}
-        self.assertFalse({m for m in reached if m.startswith("league.xs") or m in ("league.ops.contam_xs", "league.swarm.elane_xs")})
+        self.assertFalse({m for m in reached if m.startswith("league.xs")
+                          or m in ("league.ops.contam_xs", "league.swarm.elane_xs")})
         self.assertEqual(seal.outside(REPO, probe, seal.OPS_MAY), [])
         self.assertNotIn("contam_xs", seal.E3_OPS)
         self.assertFalse({m for m in seal.OPS_MAY if m.rsplit(".", 1)[-1].endswith("xs") or ".xs" in m},
