@@ -11,8 +11,9 @@ THE RECORD (`record`, `report`; kv `LEDGER_KEY`). One row a model route ("sail:<
 - `births`: the equity families its answers bore (each family remembers its birth route: spec `e2_route`; its Train
   revisions are asked on the same route, so a family's whole cost and yield sit on one row);
 - read from the families at report time: `train_scored` (families with a Train-scored version), `train_passes`
-  (families with a version that passed equity-v1), and, FOR THE OPERATOR ONLY, `validation_entries` (E1's `elane_try`
-  with its pre-check met), `looks`, `looks_passed` (E1's `elane_look`) and `live` (a family now in Probe or Sized).
+  (families with a version that passed equity-v1, its STATE and START checks among it, and the equity review), and,
+  FOR THE OPERATOR ONLY, `validation_entries` (E1's `elane_try` with its pre-check met), `looks`, `looks_passed` (E1's
+  `elane_look`) and `live` (a family now in Probe or Sized).
 `report` is what ops reads (league/ops: the dlane report, the funnel); nothing here writes outside the swarm store.
 
 THE ROUTE CHOICE (`choose`), for each equity request (a birth pass) and each new equity family's first program:

@@ -2535,7 +2535,8 @@ class EquityResearcher:
 
     def stall(self, fam: Mapping[str, Any], why: str) -> dict[str, Any]:
         """Retire a family STALLED on Train: no version of it was judged by the bar (its programs failed to run, to load,
-        or the review), so nothing is said of its mechanism: no graveyard row, no cell count, its record's `stalled`."""
+        the restart check, the start check or the review), so nothing is said of its mechanism: no graveyard row, no
+        cell count, its record's `stalled`."""
         fid = str(fam["id"])
         rec = record_of(fam)
         versions = versions_of(rec)
