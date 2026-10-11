@@ -23,6 +23,21 @@ or store and would cost a long-look-back program most of 2022 (the captain's cal
 THE LOOSENING, stated: the bar reads seven Train years, not the nine of 2016-2024, so "active in three years" is three
 of seven, "no year's t below the floor" has two years fewer to fail in, and the two P&L rules sum seven years.
 
+THE HIDDEN YEAR (release E3, D14; league/swarm/elane_folds.py). A family born while `elane.memory.mode` is "record"
+carries one of the seven Train years in its spec as its HIDDEN YEAR, for good. Its versions are run once a SEEN SPAN
+(`elane_folds.seen_spans`: the Train spans with that year cut out, two or three runs a k, each starting flat with a
+fresh STATE), and `combine`, `train_score`, the restart check and the stored runs read those runs and nothing else: no
+session of the hidden year is a run session of any of them, so no row, figure, lot, STATE or cash of it exists in the
+bar, the record, the brief or the Train map. THE HIDDEN RUN (one more run a k over the year alone) is made after the
+verdict is recorded, by `elane_memory.ingest`, and its result goes to the memory's sealed tables alone: never
+`add_run`, never the record. WHAT OF THE HIDDEN YEAR DOES REACH A SEEN RUN, stated as for the reserve: its BARS, as
+look-back in the stretch that follows it (never more than NEEDS `history` + 1 sessions), and the store-file hashes of
+a stored run. STATED COST: the stretch after the hidden year starts flat, and a version costs up to three seen runs
+and one hidden run a k. THE LOOSENING, stated: such a family's bar reads six seen years, not seven (Y1's three active
+years are three of six; Y2 has one year fewer to fail in; the two P&L rules sum six), so more zero-edge versions pass
+Train; the screen's false-positive rate per program is untouched (Train is in-sample). A family with no hidden year
+(every family born before E3, or with the mode off) reads the seven Train years exactly as before.
+
 THE BAR, equity-v1 (the design's section 6b on the Train years; `train_score`, then `restart_check`). The summed runs at
 1.0x and at 1.5x the half-spread (`league.equity.config.K_BASE`, `K_STRESS`). A version PASSES when all hold:
   Y1  ACTIVE in at least `min_active_years` (3) of the seven Train years: a year with at least `year_min_trades` (40)
@@ -149,7 +164,7 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from ..equity import BETA, EQUITY, LANES
 from ..equity import config as eqconfig
-from . import elane_review, elane_seal, elane_yield
+from . import elane_folds, elane_memory, elane_review, elane_seal, elane_yield
 
 # ----------------------------------------------------------------------------------------------------------- vocabulary
 OBJECTIVE = "equity-v1"
@@ -1537,6 +1552,8 @@ class EquityResearcher:
             if card.get(name):
                 lines.append(f"CARD {name.upper()}: {card[name]}")
         lines.append(bar_text())
+        if elane_folds.hidden_year(fam) is not None:  # RELEASE E3 (D14): said once, no year named
+            lines.append(elane_folds.BRIEF_NOTE)
         done = sorted(((int(k), v) for k, v in versions_of(rec).items()), key=lambda kv: kv[0])
         if done:
             lines.append(f"YOUR VERSIONS ON TRAIN ({TRAIN_LABEL}):\n" + "\n".join(f"- {version_text(n, v)}" for n, v in done))
@@ -1709,17 +1726,24 @@ class EquityResearcher:
         code, params = str(version.get("code") or ""), dict(version.get("params") or {})
         runs: dict[float, list[Any]] = {}
         verdict: dict[str, Any] | None = None
+        try:  # RELEASE E3 (D14): a family born with a hidden year runs its SEEN spans only; any other, TRAIN_SPANS
+            spans = elane_folds.seen_spans(elane_folds.hidden_year(fam))
+        except Exception as exc:  # noqa: BLE001 - the House's: nothing is scored on spans that cannot be read
+            self.store.event("swarm.status", fid, {"action": "elane_memory", "alert": True, "version": n,
+                                                   "text": f"the seen spans could not be read ({type(exc).__name__}): "
+                                                           f"v{n} is not scored"})
+            return self.house_failure(fam, n, f"the seen spans could not be read ({type(exc).__name__})", kind="store") or {}
         try:
             for k in (eqconfig.K_BASE, eqconfig.K_STRESS):
                 runs[float(k)] = [self.runner().train(code, params, name=fid, start=first, end=last, k=float(k))
-                                  for first, last in TRAIN_SPANS]
+                                  for first, last in spans]
         except Exception as exc:  # noqa: BLE001 - a refusal is the program's; a run failure is judged below
             verdict, out = self.fault(fam, n, exc)
             if out is not None:
                 return out
         if verdict is None:
             parts = {k: [dict(getattr(run, "result", run) or {}) for run in rs] for k, rs in runs.items()}
-            if any(outside_years(result, spans=[span]) for rs in parts.values() for result, span in zip(rs, TRAIN_SPANS)):
+            if any(outside_years(result, spans=[span]) for rs in parts.values() for result, span in zip(rs, spans)):
                 return self.house_failure(fam, n, f"a Train result carried a day outside its span of the {TRAIN_LABEL}",
                                           kind="window") or {}
             statuses = {str(result.get("status")) for rs in parts.values() for result in rs}
@@ -1767,6 +1791,19 @@ class EquityResearcher:
             if verdict["passed"] and r.get("passed_version") is None:
                 r["review"] = {"version": n, "unclear": {}, "at": at}  # THE REVIEW, before the pass is the try
         rec = _update(self.store, fid, put)
+        try:  # RELEASE E3: the forward registry's time evidence, as E2's own event kind (no new kind for the House mirror)
+            self.store.event("swarm.elane", fid, {"pass": "scored", "version": n, "sha": str(version.get("sha") or ""),
+                                                  "bar_passed": bool(verdict["passed"]), "fails": list(verdict["fails"]),
+                                                  "objective": OBJECTIVE, "judged": verdict.get("pnl_10") is not None})
+        except Exception:  # noqa: BLE001 - the verdict stands; the registry then dates the version from its own sighting
+            pass
+        try:  # RELEASE E3: record, never judge (the seen facts; the hidden year's own runs into the sealed tables)
+            elane_memory.ingest(self.store, fam, n, runner=self.runner(), code=code, params=params, seen=runs,
+                                verdict=verdict, settings=self.settings)
+        except Exception as exc:  # noqa: BLE001 - the verdict stands without the record
+            self.store.event("swarm.status", fid, {"action": "elane_memory", "alert": True, "version": n,
+                                                   "text": f"the memory ingest failed ({type(exc).__name__}): nothing "
+                                                           f"recorded for v{n}"})
         out: dict[str, Any] = {"family": fid, "version": n, "passed": bool(verdict["passed"]), "fails": verdict["fails"]}
         if verdict["passed"]:
             out["review"] = self.review_step(self.store.family(fid) or fam, n)

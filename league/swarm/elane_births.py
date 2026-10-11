@@ -53,7 +53,7 @@ from typing import Any, Mapping, Sequence
 
 from ..equity import BETA, EQUITY, LANES
 from ..equity import config as eqconfig
-from . import elane_seal, elane_train, elane_yield
+from . import elane_folds, elane_seal, elane_train, elane_yield
 from .elane_train import AGENDA, STATE_KEY
 from .elane_yield import ROLE
 
@@ -680,6 +680,17 @@ class EquityPass:
                 "lane": lane, "agenda": agenda, "rejection": " ".join(str(row.get("rejection") or "").split())[:400],
                 "sketch": " ".join(str(row.get("sketch") or "").split())[:800], "lessons": [],
                 "card_sha": cards.card_sha(card), elane_yield.ROUTE_KEY: route.key}
+        try:  # RELEASE E3 (D14): the hidden year, the genome id and the reserved forecast, stamped at birth
+            spec.update(elane_folds.birth_fields(self.store, self.settings, lane=lane, agenda=agenda, symbols=symbols,
+                                                 expected_oof=row.get("expected_oof")))
+        except Exception as exc:  # noqa: BLE001 - the birth goes on: seven Train years, no out-of-fold row
+            spec.update(elane_folds.FALLBACK)
+            try:
+                self.store.event("swarm.status", None, {"action": "elane_memory", "alert": True,
+                                                        "text": f"a birth got no hidden year ({type(exc).__name__}): "
+                                                                f"{slug} reads seven Train years"})
+            except Exception:  # noqa: BLE001
+                pass
         cited = [str(x) for x in (row.get("differs_from") or []) if str(x) in known_rows][:3] \
             if isinstance(row.get("differs_from"), list) else []
         try:
