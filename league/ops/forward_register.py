@@ -203,8 +203,8 @@ def _scored(store: Any, *, families: Mapping[str, Mapping[str, Any]] | None = No
             events: Mapping[tuple[str, int], Mapping[str, Any]] | None = None, known: Any = (),
             lookup: bool = False) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
     """(the rows of every version judged on the bar whose key is not in `known`, the refused as (key, cause)). With
-    `lookup`, a version with no event in `events` is looked up by its family in the whole log (an event the cursor
-    already passed)."""
+    `lookup` (`events` holds only the rows after the cursor), a version not yet registered is looked up by its family
+    in the whole log: its earliest event may be one the cursor already passed."""
     from ..swarm import elane_train
 
     families = _families(store) if families is None else families
@@ -220,10 +220,10 @@ def _scored(store: Any, *, families: Mapping[str, Mapping[str, Any]] | None = No
             if verdict.get("pnl_10") is None or key in known:   # not judged on the bar (RUN, DQ, LOAD, WINDOW): no figure
                 continue
             event = events.get((fid, n))
-            if event is None and lookup:
+            if lookup:                      # the EARLIEST event is the time (D2): one the cursor passed comes first
                 if older is None:
                     older = _earliest(_scored_events(store, family=fid))
-                event = older.get((fid, n))
+                event = older.get((fid, n), event)
             try:
                 rows.append(_row(store, fam, n, reason=None, event=event, verdict=verdict))
             except _Refused as exc:
@@ -621,29 +621,29 @@ def sync(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapp
             instances = []
             out["skipped"].append({"key": LIVE_DB, "why": f"the live book could not be read ({type(exc).__name__}): no "
                                                           "live instance registered or tagged this run"})
+        if readable and store is not None and instances:
+            try:    # a live instance's family may be no equity family of the swarm's any more: read it by its id
+                for fid in sorted({str(i["family"]) for i in instances} - set(families)):
+                    fam = store.family(fid)
+                    if fam is not None:
+                        families[fid] = fam
+            except sqlite3.Error as exc:
+                readable = False
+                out["skipped"].append({"key": SWARM_DB, "why": f"the swarm store could not be read ({type(exc).__name__}"
+                                                               "): no live instance registered or tagged this run"})
         for instance in instances:
             key = instance_key(instance["id"])
-            if key in known:
+            if key in known or not readable:    # its lineage is the swarm's to say: the next run that reads it registers
                 continue
             try:
-                row = _live_row(store if readable else None, families, instance)
+                row = _live_row(store, families, instance)
             except _Refused as exc:
                 _refuse(db, out, key, exc.cause, now=now)
                 continue
             _register(db, row, known, out, now=now)
         _controls(db, known, out, now=now, settings=settings)
         if readable:
-            try:
-                if store is not None and instances:
-                    # A live instance's family may be no equity family of the swarm's any more: read it by its id.
-                    for fid in {str(i["family"]) for i in instances} - set(families):
-                        fam = store.family(fid)
-                        if fam is not None:
-                            families[fid] = fam
-                _tags(db, families, instances, out, now=now)
-            except sqlite3.Error as exc:
-                out["skipped"].append({"key": SWARM_DB, "why": f"the swarm store could not be read ({type(exc).__name__}"
-                                                               "): nothing tagged this run"})
+            _tags(db, families, instances, out, now=now)
     finally:
         if store is not None:
             store.close()

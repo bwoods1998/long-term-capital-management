@@ -844,13 +844,29 @@ class TheCursor(unittest.TestCase):
         real = R._scored_events
         with mock.patch.object(R, "_scored_events", lambda store, **kw: read.append(kw) or real(store, **kw)):
             out = h.sync(at(h.days[2], 12))
-        self.assertEqual(read, [{"after": first}], "only the events after the cursor are read")
+        self.assertEqual(read, [{"after": first}, {"family": b}],
+                         "the events after the cursor, and the whole log of a family with a version still to register")
         self.assertEqual((out["registered"], h.row(f"{b}@1")["evidence"], F.kv_get(h.db, "scored_seq")),
                          (1, f"event:{second}", second))
         read.clear()
         with mock.patch.object(R, "_scored_events", lambda store, **kw: read.append(kw) or real(store, **kw)):
             self.assertEqual(h.sync()["registered"], 0)
-        self.assertEqual(read, [{"after": second}])
+        self.assertEqual(read, [{"after": second}], "with nothing to register, only the events after the cursor")
+
+    def test_the_earliest_event_is_the_time_even_when_the_cursor_passed_it(self):
+        h = House(self)
+        a = h.family("alpha", {1: FAILED})
+        path = h.root / h.swarm._one("SELECT path FROM versions WHERE family=?", (a,))["path"]
+        text = path.read_text()
+        path.write_text(text + "# unreadable as stored\n")
+        first = h.scored(a, 1, when=at(h.days[1], 11))
+        self.assertEqual(h.sync(at(h.days[2], 10))["registered"], 0)      # refused; the cursor passes its event
+        self.assertEqual(F.kv_get(h.db, "scored_seq"), first)
+        h.scored(a, 1, when=at(h.days[3], 11))                             # a second event for the same version
+        path.write_text(text)
+        self.assertEqual(h.sync(at(h.days[4], 10))["registered"], 1)
+        self.assertEqual((h.row(f"{a}@1")["evidence"], h.row(f"{a}@1")["created_at"]),
+                         (f"event:{first}", at(h.days[1], 11)))
 
     def test_a_verdict_seen_before_its_event_is_dated_by_the_registry(self):
         # The swarm writes the record, then the event: a run between the two registers the version at its own sighting,
@@ -909,6 +925,31 @@ class WhoseFailure(unittest.TestCase):
         self.assertEqual((out["stopped"], out["chain"]["ok"]), (1, True))
         self.assertEqual(F.events(h.db, "register_skipped"), [], "no version is refused for the House's failure")
         self.assertFalse(F.active(h.db, h.row(f"{fid}@1")["pid"]))
+
+    def test_a_live_instance_waits_for_a_run_that_can_read_its_lineage(self):
+        # The registry is append-only: a live instance is never registered under a lineage the swarm could not say.
+        h = House(self)
+        code = fx.program("IWM")
+        h.book({"id": "loner@1:r", "family": "loner", "version": 1, "code": code, "params": {},
+                "run_sha": run_sha({"sha": sha(code), "params": {}})})
+        with mock.patch.object(R, "_families", side_effect=sqlite3.OperationalError("database is locked")):
+            out = h.sync()
+        self.assertEqual((out["registered"], out["tagged"], [row["key"] for row in out["skipped"]]), (0, 0, [R.SWARM_DB]))
+        self.assertIsNone(h.row("loner@1"))
+        out = h.sync()
+        self.assertEqual((out["registered"], out["tagged"], out["skipped"]), (1, 1, []))
+        self.assertEqual(h.row("loner@1")["lineage"], "beta:loner")
+
+    def test_a_live_instances_lineage_is_its_familys(self):
+        h = House(self)
+        parent = h.family("alpha", {})
+        child = h.swarm.add_family({"id": "alpha-fork", "mechanism": "An invented fork of alpha: the same mechanism on IWM.",
+                                    "structure": "etf", "roots": ["IWM"], "symbols": ["IWM"], "lane": "equity"},
+                                   origin="fork", parent=parent)["id"]
+        h.swarm.add_version(child, fx.program("IWM"), {}, author="fake:author")
+        h.book(h.instance(child, 1, lane="equity"))
+        self.assertEqual(h.sync()["registered"], 1)
+        self.assertEqual(h.row(f"{child}@1")["lineage"], f"equity:{parent}", "the fork counts with its parent's lineage")
 
     def test_an_unreadable_live_book_is_the_houses(self):
         h = House(self)
