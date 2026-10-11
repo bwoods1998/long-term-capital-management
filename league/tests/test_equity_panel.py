@@ -16,6 +16,7 @@ import hashlib
 import inspect
 import json
 import math
+import os
 import re
 import sqlite3
 import tempfile
@@ -1731,6 +1732,91 @@ class TheRegistryRows(unittest.TestCase):
             self.assertIn("dlane", have)
         names = [job.name for job in self.registry.JOBS]
         self.assertEqual(len(names), len(set(names)))
+
+
+class TheJobFitsItsMemory(unittest.TestCase):
+    """The review's live-5, AT THE REAL PANEL'S SIZE (700 assets x 2,455 sessions) UNDER THE OPS CHILD'S OWN LIMIT
+    (`league.ops.__main__.limit`: the address space is capped 500 MB above the child's start, before the job's first
+    import). The daily run mapped the old store twice (`run`, and `incremental` again) beside the grid being built:
+    three copies of about 120 MB, 14 to 24 MB of room for a night's refetches, and a night with 25 names ex-dividend
+    failed with a MemoryError, left its restatements to the next night, and failed again. The world is
+    `league/tests/equity_panel_budget.py`'s (a formula, cheap to build); the job runs in a child of this test."""
+
+    EXTRA_MB = 500          # the registry row's default: `league.ops.runner` starts the child with it
+    RESTATED = 60           # open names ex-dividend on the night (a quarter-end's worth)
+    #: Of the cap, the daily run leaves at least this much address space unused (measured on the desk's Python 3.14 and
+    #: 3.11: about 140 MB, whatever the number of names restated). Mapped twice it left under 25 at best, and none on
+    #: this night.
+    HEADROOM_MB = 100
+
+    def test_a_daily_run_with_sixty_names_ex_dividend_fits_with_room_to_spare(self):
+        import subprocess
+        import sys
+
+        from league.ops import registry, runner
+        from league.tests import equity_panel_budget as B
+
+        self.assertEqual(runner.EXTRA_MB, self.EXTRA_MB, "the address space the runner gives every job's child")
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        state = Path(tmp.name) / "state"
+        built = B.build(state)
+        self.assertEqual((built["sessions"], built["assets"]), (2454, B.N_OPEN + B.N_ENDED))
+        env = {**os.environ, "PYTHONPATH": str(REPO), "PYTHONDONTWRITEBYTECODE": "1", "OPENBLAS_NUM_THREADS": "1",
+               "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}    # (as `league.ops.runner` starts its child)
+        done = subprocess.run([sys.executable, "-c", B.BOOT, str(state), str(self.EXTRA_MB), str(self.RESTATED)],
+                              cwd=REPO, env=env, capture_output=True, text=True, timeout=registry.by_name()["equity_panel"].wall)
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+        out = json.loads(done.stdout.strip().splitlines()[-1])
+        receipt = out["receipt"]
+        self.assertEqual((receipt.get("ok"), receipt.get("mode"), receipt.get("sessions"), receipt.get("assets")),
+                         (True, "incremental", 2455, B.N_OPEN + B.N_ENDED), out)
+        self.assertEqual((receipt["refetched"], receipt["fetched_through"], receipt["verdict"], receipt["revisions"]),
+                         (self.RESTATED, B.LAST.isoformat(), "ok", 0), out)
+        self.assertEqual((out["i6"]["equal"], out["i6"]["mismatch"]), (True, 0), out)
+        self.assertGreater(out["cap_mb"], 0, "the limit was set before the job's imports")
+        self.assertLessEqual(out["vm_peak_mb"], out["cap_mb"] - self.HEADROOM_MB,
+                             f"the daily run peaked at {out['vm_peak_mb']} MB of a cap of {out['cap_mb']} MB")
+        self.assertEqual(out["alerts"], [])
+
+    def test_one_reader_maps_the_old_store_at_a_time_and_a_whole_history_is_asked_eight_names_a_request(self):
+        fixture = Fixture("ctx")
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        receipt, _ = fixture.run_job()
+        self.assertTrue(receipt.get("ok"), receipt)
+        held: list[P.Panel] = []
+        load = P.load_panel
+
+        def loading(root):
+            for panel in held:
+                self.assertEqual(panel.raw.shape[0], 0, "a second reader mapped the store while the first still held it")
+            panel = load(root)
+            if panel is not None:
+                held.append(panel)
+            return panel
+
+        company = next(c for c in fixture.market.companies if c.name == "co-QAAB")
+        company.dividends[LAST] = 0.11                         # restated tonight: fetched again whole
+        fixture.market.requests.clear()
+        asked_while_mapped = []
+        get = fixture.market.get
+
+        def watched(path, params=None):
+            asked_while_mapped.append(any(panel.raw.shape[0] for panel in held))
+            return get(path, params)
+
+        with mock.patch.object(P, "load_panel", loading), mock.patch.object(fixture.market, "get", watched):
+            receipt, _ = fixture.run_job(NOW + 3600)
+        self.assertEqual((receipt["ok"], receipt["mode"], receipt["refetched"]), (True, "incremental", 1), receipt)
+        self.assertEqual(len(held), 2, "the job's own reading of the manifest and masks, and the daily run's bars")
+        self.assertEqual(asked_while_mapped.count(True), 0, "no answer is asked for while the old store is mapped")
+        self.assertEqual(P.WHOLE_BATCH, 8)
+        whole = P.requests(fixture.table, fixture.panel().days, batch=P.WHOLE_BATCH)
+        self.assertEqual(max(len(r.symbols) for r in whole), 8)
+        with mock.patch.object(P, "requests", wraps=P.requests) as planned:
+            P.full(fixture.root, fixture.market, LAST, sleep=lambda s: None)
+        self.assertEqual(planned.call_args.kwargs.get("batch"), P.WHOLE_BATCH)
 
 
 class TheWalls(unittest.TestCase):

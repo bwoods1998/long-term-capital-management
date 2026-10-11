@@ -395,6 +395,13 @@ a side: the two deploys were not made between two pre-opens). **Not every line o
 afterwards), and the three that read the forward record (the twin marker a night behind, a rebalance session whose
 live and twin orders disagree, the residual beside a close) arrive with package J.
 
+**Memory of the panel job** (measured at 700 assets x 2,455 sessions under the ops child's own limit, its address
+space capped 500 MB above its start): the daily run peaks at about 384 MB of the 527 MB cap whatever the number of
+names restated that night, a whole refetch at about 395 MB, the first fetch at about 346 MB. The old store is mapped
+by one reader at a time and never while a whole history's answer is held as rows, and a whole history is asked 8
+names a request (a page is 10,000 bars whatever the batch, so it costs no call). Each session adds about 0.1 MB.
+`league/tests/test_equity_panel.py` `TheJobFitsItsMemory` runs the job at that size under that limit.
+
 **Cost.** Data $0 while the coverage verdict is "ok" (Alpaca SIP through the gateway; the membership sources through
 its web reader); model spend stays inside E2's `elane.e2.usd_day` (a panel brief is about a quarter longer; no new
 cap); House CPU at most `cpu_seconds_day` of panel Train a day (4 h), the jobs a few minutes, the weekly zero-edge run

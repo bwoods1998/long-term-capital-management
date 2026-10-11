@@ -95,6 +95,10 @@ I6_NEEDS = {"panel": "sp500", "history": 252, "max_names": 12, "rebalance": "wee
             "max_hold_sessions": 60}
 #: Symbols a request of open assets (39 x 253 bars is one page: the live fetch's chunk), bars a page, pages a call.
 BATCH = 39
+#: Symbols a request of a WHOLE HISTORY (`full`, and the daily run's refetch of a restated asset): a request's answer
+#: is held as rows until it is placed, and 39 names x a span's 1,450 sessions is 56,000 rows, 40 MB and more beside
+#: the arrays. A page is 10,000 bars whatever the batch, so a smaller one costs no call: 8 names are two pages.
+WHOLE_BATCH = 8
 PAGE_LIMIT = 10000
 MAX_PAGES = 400
 #: An asset's bars are fetched from this many calendar days before its first spell (a year of look-back) to this many
@@ -351,7 +355,8 @@ class Grid:
 
 @dataclass
 class Panel:
-    """The panel store as its writer reads it back (every file checked against the manifest's sha256)."""
+    """The panel store as its writer reads it back (every file checked against the manifest's sha256). `raw` and `adj`
+    are MAPPED from the files (`load_panel`), every other array is a copy."""
 
     days: list[dt.date]
     early: np.ndarray
@@ -362,6 +367,17 @@ class Panel:
     tradable: np.ndarray
     hs: np.ndarray
     manifest: dict[str, Any]
+
+    def release(self) -> None:
+        """Drop the two mapped arrays (the store's bars: about 120 MB of the child's address space at the real panel's
+        size); the days, the aids, the masks and the manifest stay. THE JOB'S MEMORY (`league.ops.__main__.limit`: the
+        child's address space is capped 500 MB above its start): the old store is mapped by ONE reader at a time and
+        never while a whole history's answer is being held as rows. Mapped twice (by `run` and again by
+        `incremental`) beside the grid being built, a night with 25 names ex-dividend failed with a MemoryError and
+        left its restatements to the next night, which failed the same way."""
+        empty_raw = np.zeros((0, len(self.aids), 5))
+        empty_adj = np.zeros((0, len(self.aids), 4))
+        self.raw, self.adj = empty_raw, empty_adj
 
 
 def _days_of(values: np.ndarray) -> list[dt.date]:
@@ -405,7 +421,7 @@ def load_panel(root: str | Path) -> Panel | None:
     return Panel(days=_days_of(np.asarray(arrays["days"])), early=np.asarray(arrays["early"]).astype(bool),
                  aids=[int(a) for a in np.asarray(arrays["aids"]).tolist()], raw=arrays["raw"], adj=arrays["adj"],
                  member=np.asarray(arrays["member"]).astype(bool), tradable=np.asarray(arrays["tradable"]).astype(bool),
-                 hs=np.asarray(arrays["hs"]), manifest=manifest)
+                 hs=np.array(arrays["hs"]), manifest=manifest)
 
 
 def _fetch_into(grid: Grid, gateway: Any, wanted: Sequence[Request], *, sleep: Callable[[float], None],
@@ -436,15 +452,16 @@ def _assets(root: str | Path, assets: Mapping[str, Any] | None) -> Mapping[str, 
 
 def full(root: str | Path, gateway: Any, last: dt.date, *, assets: Mapping[str, Any] | None = None,  # noqa: A002
          sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
-    """The weekly whole refetch (one request series an asset), same shape as `incremental`. Raises on a call that
-    still fails after its tries: `run` then falls back to `incremental` and `full_at` does not move."""
+    """The weekly whole refetch (one request series an asset, `WHOLE_BATCH` open names a request), same shape as
+    `incremental`. Raises on a call that still fails after its tries: `run` then falls back to `incremental` and
+    `full_at` does not move. The old store is mapped only AFTER the fetch (to count the revisions) and released."""
     assets = _assets(root, assets)
     calendar = U.store_sessions(last)
     days = [d for d, _ in calendar]
     aids = U.columns(assets)
     grid = Grid(days, aids)
     count = {"calls": 0, "failed": 0}
-    _fetch_into(grid, gateway, requests(assets, days), sleep=sleep, count=count)
+    _fetch_into(grid, gateway, requests(assets, days, batch=WHOLE_BATCH), sleep=sleep, count=count)
     odd = grid.align()
     revisions = 0
     try:
@@ -457,6 +474,7 @@ def full(root: str | Path, gateway: Any, last: dt.date, *, assets: Mapping[str, 
         for k, aid in enumerate(before.aids):   # a column at a time: the two stores are never both copied
             if rows and aid in grid.col:
                 revisions += _revised(np.asarray(before.raw[rows, k]), grid.raw[mine, grid.col[aid]])
+        before.release()
     return {"days": days, "early": [bool(e) for _, e in calendar], "aids": aids, "raw": grid.raw, "adj": grid.adj,
             "vintage": {aid: last for aid in aids}, "revisions": revisions, "calls": count["calls"],
             "mode": "full", "refetched": len(aids), "appended": 0, "misaligned": odd, "dropped": grid.dropped}
@@ -508,6 +526,9 @@ def incremental(root: str | Path, gateway: Any, last: dt.date, *, assets: Mappin
         block = kept[at:at + JUMP_COLUMNS]
         grid.raw[:n_old, [grid.col[a] for a in block]] = before.raw[:, [old_col[a] for a in block]]
         grid.adj[:n_old, [grid.col[a] for a in block]] = before.adj[:, [old_col[a] for a in block]]
+    # The grid now holds every bar of the old store: its mapping is dropped BEFORE the first answer is asked for
+    # (`Panel.release`: the old store, the grid and a request's rows were once all three in the address space).
+    before.release()
     start = max(0, min(len(days) - INCREMENTAL_SESSIONS, n_old - (INCREMENTAL_SESSIONS - 1)))
     spans_of = [next((k for k, (first, end) in enumerate(U.spans()) if first <= d and (end is None or d <= end)), None)
                 for d in (days[start], days[-1])]
@@ -549,12 +570,13 @@ def incremental(root: str | Path, gateway: Any, last: dt.date, *, assets: Mappin
             vintage[aid] = last
     if again:
         whole = Grid(days, sorted(again))
-        _fetch_into(whole, gateway, requests(assets, days, only=again), sleep=sleep, count=count)
+        _fetch_into(whole, gateway, requests(assets, days, only=again, batch=WHOLE_BATCH), sleep=sleep, count=count)
         odd += whole.align()
         for aid in sorted(again):
             k, w = grid.col[aid], whole.col[aid]
             if aid in old_col:
-                revisions += _revised(before.raw[:, old_col[aid]], whole.raw[:n_old, w])
+                # (the grid's own column is still the old store's: an asset fetched again took no row of the window)
+                revisions += _revised(grid.raw[:n_old, k], whole.raw[:n_old, w])
             grid.raw[:, k] = whole.raw[:, w]
             grid.adj[:, k] = whole.adj[:, w]
             vintage[aid] = last
@@ -1236,6 +1258,9 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
     except ValueError as exc:  # a store that does not match its manifest is not grown: a whole refetch
         before = None
         ctx.alert("warning", f"equity_panel: the store on disk cannot be read ({str(exc)[:120]}): a whole refetch")
+    if before is not None:
+        before.release()   # its manifest, days, aids and masks are what this function reads; `full` and
+        #                    `incremental` map the bars themselves, one reader at a time (`Panel.release`)
     old = before.manifest if before is not None else {}
     audit_before = old.get("audit") if isinstance(old.get("audit"), Mapping) else {}
     reads = dict(audit_before.get("reads") or {})
@@ -1425,6 +1450,6 @@ __all__ = ["BARS", "WALL_S", "TRIES", "BACKOFF_S", "INCREMENTAL_SESSIONS", "FULL
            "ACCEPT_FIRST", "REUSED_USD", "INSANE_SHARE", "SECOND_READ_GAP", "MASKED_MEMBERS_MAX", "REVISIONS_ALARM",
            "I6_NEEDS", "fetch_asof", "plan", "incremental", "full", "acceptance", "second_read", "coverage",
            "hs_table", "i6_check", "run", "BATCH", "PAGE_LIMIT", "MAX_PAGES", "LOOKBACK_DAYS", "KEEP_ENDED_DAYS",
-           "MIN_SAMPLES", "JUMP_COLUMNS", "SECOND_READS_RUN", "LIVE_FROM_SHARE", "I6_FLOOR", "LIVE_DB", "SPREADS_FILE", "FAILURES_FILE", "live_panels", "Request",
+           "MIN_SAMPLES", "JUMP_COLUMNS", "WHOLE_BATCH", "SECOND_READS_RUN", "LIVE_FROM_SHARE", "I6_FLOOR", "LIVE_DB", "SPREADS_FILE", "FAILURES_FILE", "live_panels", "Request",
            "requests", "Grid", "Panel", "load_panel", "ratios_equal", "valid_bars", "sane_bars", "jumps", "hs_share",
            "compare_bars", "ref_audit", "tradable_rows"]
