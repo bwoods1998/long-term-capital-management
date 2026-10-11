@@ -649,6 +649,56 @@ def decide(ctx):
             with self.subTest(name):
                 self.assertTrue(level_refusals(HEAD + body), name)
 
+    def test_what_ctx_gives_is_never_the_programs_own_whatever_it_writes_there(self):
+        # The pass keeps what a program puts under a string key of a container of its own. A row the House gave is not
+        # the program's own: writing over a lot's field, or under a lot's field name in STATE, launders nothing, and a
+        # PARAMS value is a constant whatever number the file declares for it.
+        for name, body in {
+            "a zero written over a lot's entry after it was read": '''
+def decide(ctx):
+    out = []
+    for p in ctx.positions:
+        if p["entry"] > 400:
+            out.append({"sell": p["id"]})
+        p["entry"] = 0
+    return out
+''',
+            "the same in a helper handed the lot by sorted()": '''
+def rich(p):
+    seen = p["mark"] > 400
+    p["mark"] = 0
+    return seen
+def decide(ctx):
+    return [{"sell": p["id"]} for p in sorted(ctx.positions, key=rich)]
+''',
+            "the run's dollars kept in STATE under a lot's field name": '''
+STATE = {}
+def decide(ctx):
+    STATE["value"] = ctx.equity
+    return [] if STATE["value"] > 1030.0 else [{"buy": "SPY", "share": 0.5}]
+''',
+            "a level put under a key the file does not spell, read by one it does": '''
+def decide(ctx):
+    d = {"a": 1}
+    k = "a"
+    d[k] = ctx.prices["SPY"]
+    return [{"buy": "SPY", "share": 0.5}] if d["a"] > 400 else []
+''',
+            "a PARAMS value declared zero": '''
+PARAMS = {"x": 400.0, "floor": 0.0}
+def decide(ctx):
+    return [{"buy": "SPY", "share": 0.5}] if ctx.prices["SPY"] - PARAMS["floor"] > PARAMS["x"] else []
+''',
+        }.items():
+            with self.subTest(name):
+                self.assertTrue(level_refusals(HEAD + body), name)
+        declared_zero = HEAD + '''
+PARAMS = {"floor": 0.0}
+def decide(ctx):
+    return [{"buy": "SPY", "share": 0.5}] if ctx.prices["SPY"] > PARAMS["floor"] else []
+'''
+        self.assertTrue(level_refusals(declared_zero), "a PARAMS value is a constant, never the zero it is declared as")
+
     def test_containers_of_the_programs_own_keep_what_each_key_holds(self):
         # What a program puts into a container of its own is read back as what it is, key by key: a counter beside a
         # price stays a counter, a dict of returns stays scale-free, a trailing high is a level held only against the

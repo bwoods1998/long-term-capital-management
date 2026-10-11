@@ -141,6 +141,9 @@ CALL_DEPTH = 6
 PUTS = {"append": 0, "add": 0, "appendleft": 0, "insert": 1}
 PUTS_MANY = frozenset({"extend", "extendleft"})
 _SEP = "\x00"
+#: The entry of what a container holds under keys that are no string in the file (`closes[s] = ...`, an append): it
+#: may sit under any key, so every string key's reading holds it too.
+_ANY = _SEP + "*"
 
 
 def _origin(tags: Iterable[str]) -> frozenset[str]:
@@ -398,10 +401,13 @@ class _Levels:
     def _assign(self, target: ast.AST, value: ast.AST | None, tag: frozenset[str], env: dict[str, set[str]]) -> None:
         if isinstance(target, ast.Name):
             env.setdefault(target.id, set()).update(tag or {"_free"})
-            if isinstance(value, ast.Dict):  # info = {"px": c[-1], "n": 20}: each string key is read back as itself
+            if isinstance(value, ast.Dict) and target.id != "PARAMS":
+                # info = {"px": c[-1], "n": 20}: each string key is read back as itself (never PARAMS: a PARAMS value
+                # is a constant whatever number the file declares for it, zero included)
                 for k, v in zip(value.keys, value.values):
-                    if k is not None and _key(k) is not None:
-                        env.setdefault(target.id + _SEP + str(_key(k)), set()).update(self._tag(v, env) or {"_free"})
+                    if k is not None:
+                        slot = target.id + (_SEP + str(_key(k)) if _key(k) is not None else _ANY)
+                        env.setdefault(slot, set()).update(self._tag(v, env) or {"_free"})
         elif isinstance(target, (ast.Tuple, ast.List)):
             if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
                 for t, v in zip(target.elts, value.elts):
@@ -434,6 +440,7 @@ class _Levels:
             unit = set(_norm(tag)) or {"_free"}
         if key is None:  # by a key that is no string, or appended: whose level each is is not kept
             unit = {t for t in unit if not t.startswith("@")} or {"_free"}
+            env.setdefault(name + _ANY, set()).update(unit)
         env.setdefault(name if key is None else name + _SEP + key, set()).update(unit)
 
     def _loop(self, target: ast.AST, iterable: ast.AST, env: dict[str, set[str]]) -> None:
@@ -498,10 +505,14 @@ class _Levels:
 
     def _own(self, holder: ast.AST, key: str | None, env: dict[str, set[str]]) -> frozenset[str] | None:
         """What the program itself put under one string key of a container of its own (`_store`, a dict literal), or
-        None when it put nothing there by that key."""
-        if key is None or not isinstance(holder, ast.Name) or holder.id + _SEP + key not in env:
+        None when it put nothing there by that key. What ctx gives (its lots, bars, prices, caps, params) is never the
+        program's own, whatever the program writes into it (`_keyed`)."""
+        if key is None or not isinstance(holder, ast.Name) or holder.id == "PARAMS" or holder.id + _SEP + key not in env:
             return None
-        return self._name(holder.id + _SEP + key, env)
+        own = self._name(holder.id + _SEP + key, env)
+        if holder.id + _ANY in env:  # what went in under a key the file does not spell may sit under this one
+            own = self._join([own, self._name(holder.id + _ANY, env)])
+        return own
 
     def _keyed(self, holder: ast.AST, base: frozenset[str], slice_: ast.AST | None,
                env: dict[str, set[str]]) -> frozenset[str]:
@@ -510,10 +521,13 @@ class _Levels:
         symbol is (upper case), is that symbol's level (`closes["QQQ"] / closes["SPY"]` is a ratio of two different
         symbols'; `stats["hi"] / stats["lo"]` is not)."""
         key = _key(slice_) if slice_ is not None else None
-        own = self._own(holder, key, env)
-        if own is not None:
-            return own
+        own = None if base & (_CONTAINERS | _VIEWS) else self._own(holder, key, env)
         out = self._subscript(base, key, slice_)
+        if own is not None:
+            # The program's own key. Under a name the House uses for a lot's field ("entry", "pnl"), or in a value the
+            # pass cannot place (a helper's argument), it may be the House's row all the same: both readings hold, so
+            # writing a zero over a lot's entry launders nothing.
+            return self._join([own, out]) if (key in LOT_FIELDS or key in MONEY_KEYS or _U in base) else own
         if key and key == key.upper() and any(ch.isalpha() for ch in key) and isinstance(holder, ast.Name) \
                 and _level(base) and _level(out):
             out = frozenset(t for t in out if not t.startswith("@")) | {"@" + key}
