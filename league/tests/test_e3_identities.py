@@ -76,6 +76,11 @@ E3_JOBS = {
     "forward_audit": ((S.session_open(-25),), 40 * MINUTE, 120, 300, True, False, True, "E3 forward record"),
     "contam_probe": ((S.weekly(5, 0, 10),), 6 * HOUR, 300, 3300, False, True, False, "E3 contamination"),
 }
+#: A job whose module a later release put beside E3's own. Release E4: the probe's row points at
+#: league/ops/contam_xs.py, which is E3's probe (`contam_probe.probe`) with the panel strata's plan handed in (E3's
+#: seal lets `contam_probe` import nothing of league/xs: league/tests/test_e3_seal_imports.py). Either module is the
+#: row's, on a tree with or without E4; every other figure of the row is the spec's.
+E3_JOB_MODULES = {"contam_probe": ("league.ops.contam_probe", "league.ops.contam_xs")}
 #: Section 5's policy.json column: the three blocks inside `elane`, after `e2`.
 E3_POLICY = {
     "forward": {"mode": "record", "controls_per_group": 50, "cpu_seconds_night": 1800, "run_budget_seconds": 120,
@@ -299,9 +304,9 @@ class TheWiringIsWhole(unittest.TestCase):
         jobs = registry.by_name()
         for name, (triggers, grace, cpu, wall, in_pause, paid, retry, owner) in E3_JOBS.items():
             job = jobs[name]
-            self.assertEqual((job.module, job.triggers, job.grace, job.cpu, job.wall, job.in_pause, job.paid, job.retry,
-                              job.owner), (f"league.ops.{name}", triggers, grace, cpu, wall, in_pause, paid, retry, owner),
-                             name)
+            self.assertIn(job.module, E3_JOB_MODULES.get(name, (f"league.ops.{name}",)), name)
+            self.assertEqual((job.triggers, job.grace, job.cpu, job.wall, job.in_pause, job.paid, job.retry, job.owner),
+                             (triggers, grace, cpu, wall, in_pause, paid, retry, owner), name)
             self.assertGreater(len(job.what), 40, f"{name} says what it is")
         self.assertLessEqual(max(job.wall for job in registry.JOBS), 3600)
         self.assertGreaterEqual(jobs["grant"].grace, max(job.wall for job in registry.JOBS) + 5 * MINUTE)
@@ -311,6 +316,7 @@ class TheWiringIsWhole(unittest.TestCase):
 
         for name in E3_JOBS:
             self.assertTrue(callable(importlib.import_module(f"league.ops.{name}").run), name)
+            self.assertTrue(callable(importlib.import_module(jobs[name].module).run), name)
         for name in E3_JOBS:
             for trigger in jobs[name].triggers:
                 if trigger.kind == "after":

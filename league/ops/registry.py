@@ -187,11 +187,17 @@ JOBS: tuple[Job, ...] = (
     # lanes' `usd_day` line still whole. One model route a run, at most `elane.contam.usd_run` dollars ($3), resumable
     # by its scored cells (every run's request keys are its own: none is asked twice), and paid, so never started twice
     # for one occurrence.
-    Job("contam_probe", "league.ops.contam_probe", (S.weekly(5, 0, 10),), grace=6 * HOUR, cpu=300, wall=3300,
+    # ITS MODULE SINCE RELEASE E4 is league/ops/contam_xs.py: release E3's probe (`contam_probe.probe`) with the plan
+    # of the panel strata P4-P6 handed in, and the look's permit written after it. E3's seal lets the probe's own
+    # module import nothing of league/xs, so the panel's half lives beside it and the row points there; with
+    # `elane.panel.mode` "off", or before a panel store exists, that module runs E3's probe and nothing else. The
+    # row's times, limits and owner are E3's, unmoved.
+    Job("contam_probe", "league.ops.contam_xs", (S.weekly(5, 0, 10),), grace=6 * HOUR, cpu=300, wall=3300,
         paid=True, retry=False, owner="E3 contamination",
         what="the contamination probe: one model route a week asked what it recalls of the eras programs are judged "
-             "on, scored on the House against a permutation by whole period; aggregates only, into "
-             "<state>/contamination.json"),
+             "on (and, with the panel lane on, of the index's members and factors), scored on the House against a "
+             "permutation by whole period; aggregates only, into <state>/contamination.json, and the two words a "
+             "panel look waits on into <state>/xs-look-permit.json"),
     # THE PANEL LANE's data and measurement jobs (release E4, "breadth"; league/xs/E4_INTERFACES.md). WITH THE LANE'S
     # SWITCH OFF NONE OF THEM RUNS: each one's first statements are the switch (`league.ops.equity_universe.lane_off`:
     # `elane.panel.mode` "off" in the box's settings is a `skipped` receipt: no gateway call, no file) and
