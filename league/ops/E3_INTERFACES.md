@@ -127,8 +127,12 @@ Every existing name the spec calls was checked against 5a6906ff. Signatures matc
    slice's index `max(first - 1, 0)`. With the spec's `history=needs.history` a history-0 program has no session
    before `first_day` in its slice, so its first decision would fall at `first_day`'s close, a session later than D2
    says and than the live book decides, and a twin would have no decision at `d_first`. `Shadow.slice` therefore
-   takes `history=max(needs.history, 1)`. The ctx is unchanged: `ctx.inputs_from_bars` reads NEEDS' history, not the
-   slice's. B holds this with a test.
+   takes `history=needs.history + 1` (package B's finding, on E1's own builders: `ctx.inputs_from_bars` reads the
+   NEEDS history + 1 sessions ending at the decision WHEN THE SLICE HOLDS THEM, and a slice with `history` sessions
+   holds one fewer at the first decision, index `first - 1`; the live book's `ctx.inputs_from_fetch` always reads
+   history + 1. With one more session the first decision's ctx is byte for byte the live one's, so a program that
+   waits for its full history does not decide a session late in the shadow only, and a twin's bars hash at
+   `d_first` can equal the live decision's; every later decision is unchanged). B holds this with a test.
 3. **The engine's result statuses (B).** A result is "ok", "disqualified", "no_data" or "error". `fwd_days.status`
    holds the first two only. "error" (`results.failed`) is the child's failure, read as `runner.Isolated` reads it
    (`RunFailed`); "no_data" (a NEEDS symbol with no bar in the run) is the data's (`data_failed`, no row).

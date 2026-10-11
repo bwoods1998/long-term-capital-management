@@ -6,7 +6,7 @@ Owner: B (league/ops/E3_INTERFACES.md). Protected. After the daily store (`equit
 nothing.
 
 THE SHADOW RUN (D3). `cap = mint_equity_gate_capability(store_root, GATE_REASON)`; `bars = EquityStore(store_root,
-gate=cap).bars(needs.symbols, "forward", history=max(needs.history, 1), start=first_day(p), end=None)` (a forward slice
+gate=cap).bars(needs.symbols, "forward", history=needs.history + 1, start=first_day(p), end=None)` (a forward slice
 without the capability raises `StoreRefused`; one asked from before `forward_db.t0()` is refused here, a ValueError).
 The run is `decider.kind("equity", "run", {"code", "params", "name": key, "bars", "k", "capital": None},
 budget_seconds=run_budget_seconds)` at k = `config.K_BASE` and again at `config.K_STRESS`: E1's engine from
@@ -21,10 +21,14 @@ of the decision the day's orders came from (the Gym's inputs at the close of the
 `screen.excess`, which subtracts a window mean).
 
 THE FIRST DECISION (D2): a program first decides at the close of `first_close(p)`, the session before `first_day(p)`.
-E1's engine decides from the slice's index `max(first - 1, 0)`, so the slice carries at least one history session
-(`history=max(needs.history, 1)`): the ctx is the same (`ctx.inputs_from_bars` reads NEEDS' history, not the slice's),
-and a NEEDS history of 0 does not move the first decision to `first_day`'s close. A slice with no session before its
-first run session is refused (a ValueError: the store's calendar starts there).
+E1's engine decides from the slice's index `max(first - 1, 0)` on `ctx.inputs_from_bars`, which reads the NEEDS
+history + 1 sessions ending at the decision when the slice holds them. So the slice carries NEEDS history + 1 sessions
+before its first run session: a NEEDS history of 0 does not move the first decision to `first_day`'s close, and the
+first decision reads the SAME bars the live book reads at that close (`ctx.inputs_from_fetch`: history + 1 sessions;
+a slice with `history` sessions would give the first decision one bar fewer than every later one and than the live
+one, a program that waits for its full history would then decide a session late in the shadow only, and the twin's
+bars hash at an instance's first decision could never equal the live one). Every later decision is unchanged by it.
+A slice with no session before its first run session is refused (a ValueError: the store's calendar starts there).
 
 CHECKPOINTS (D4). A program's COUNTED days are its `fwd_days` rows of tonight's engine id with status "ok" and no
 `audit_mismatch` event, in day order (`forward_db.counted_days`); its STORED days are those rows of any status.
@@ -147,6 +151,13 @@ def _symbol_of(exc: BaseException, symbols: Sequence[str]) -> str | None:
     """The first of `symbols` the failure's text names (the store's and the screen's refusals name the symbol)."""
     named = set(_SYMBOL.findall(str(exc)))
     return next((str(s) for s in symbols if str(s) in named), None)
+
+
+def _barless(bars: Any) -> list[str]:
+    """The slice's symbols with no close on any run session (what the engine's "no_data" means)."""
+    import numpy as np
+
+    return [str(sym) for sym in bars.symbols if not np.isfinite(bars.raw[sym][int(bars.first):, 3]).any()]
 
 
 def _answered(answer: Any) -> bool:
@@ -337,7 +348,7 @@ class Shadow:
             raise RunFailed("the decider child returned no result")
         status = result.get("status")
         if status == "no_data":
-            raise MissingData(f"{name}: a NEEDS symbol has no bar in the run")
+            raise MissingData(f"{name}: {', '.join(_barless(bars)) or 'a NEEDS symbol'} has no bar in the run")
         if status not in STATUSES:
             raise RunFailed(str(result.get("reason") or f"the run ended {status!r}"))
         return dict(result)
@@ -416,7 +427,7 @@ class Shadow:
         """The program's forward `store.Bars` from `first_day` (its own when None) through `through`; None when that
         first day is after `through`. `MissingData`, `StoreRefused` and `ValueError` are the data's.
 
-        The slice carries max(NEEDS history, 1) sessions before its first run session (THE FIRST DECISION, the module
+        The slice carries NEEDS history + 1 sessions before its first run session (THE FIRST DECISION, the module
         docstring). A first day before `forward_db.t0()` is refused (a ValueError: no day before the look cap's next
         session is a forward day, whatever a registry row says), and so is a slice with no session to decide at."""
         first = as_date(program.first_day if first_day is None else first_day)
@@ -426,7 +437,7 @@ class Shadow:
             raise ValueError(f"{program.key}: {first.isoformat()} is before the first forward day "
                              f"{self._t0.isoformat()}")
         needs = parse_needs(program.needs)
-        bars = self.store.bars(needs.symbols, "forward", history=max(int(needs.history), 1), start=first, end=None)
+        bars = self.store.bars(needs.symbols, "forward", history=int(needs.history) + 1, start=first, end=None)
         if bars.n <= bars.first:
             return None
         if bars.first < 1:
