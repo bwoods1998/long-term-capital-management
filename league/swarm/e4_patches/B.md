@@ -76,10 +76,10 @@ themselves are held by `TheFunnelsRows` in that file, already on the package's b
 
 ```diff
 diff --git a/league/tests/test_equity_neff.py b/league/tests/test_equity_neff.py
-index 0b14d343..80c70c16 100644
+index 82a0d2b6..777f4095 100644
 --- a/league/tests/test_equity_neff.py
 +++ b/league/tests/test_equity_neff.py
-@@ -687,5 +687,66 @@ class TheFunnelsRows(unittest.TestCase):
+@@ -710,5 +710,66 @@ class TheFunnelsRows(unittest.TestCase):
          self.assertEqual(top, {"__future__", "datetime", "json", "math", "sqlite3", "pathlib", "typing"})
  
  
@@ -480,6 +480,38 @@ What it adds, so its author starts from a decided shape (E4-SPEC 15, row 18; the
 
 ---
 
+## What package B offers other packages' patches (no diff of B's own)
+
+- **Package H's report patch (13).** `league.ops.equity_neff.funnel_lines(rows)` turns the funnel's `asset_years`
+  rows into lines for the operator's report (one a lane and structure that ran: simulated program-years, the
+  independent asset-years under them, the replay multiple; counts and N_eff only). One call where the report prints
+  its funnel, if the integrator wants the figure seen; nothing reads it otherwise.
+- **Package I's docs pass (patch 16).** Text for `docs/operations.md`, to copy or rewrite:
+
+  > **The panel's costs and counts (release E4).** Three House jobs, read-only but for their own files under
+  > `<state>/equity-daily/`, each asking the quiet windows first with its own wall. `equity_spreads` (daily 06:30Z)
+  > samples each index member's quoted half-spread at 09:32:00 and 15:55:00 New York time on eight sessions of each
+  > Train year (2017-19, 2022-24; never another year), one two-second window a request, at most 6,000 requests a run
+  > (about nine nights in all, then a monthly look for new assets), into `spreads.json`; a sample above 100 bp is
+  > dropped and counted, and a dropped share above 10% at a fill point is a House warning. A failed receipt names why
+  > a run was ended (ten errors in a row; or the venue refusing more than a fifth of at least 50 requests, whose
+  > refusals are then not kept); the next run goes on from the file. `equity_neff` (first Saturday, 10:00Z) writes
+  > `neff.json`: how many independent names the panel holds on 2022-24, on monthly sector residuals. `french` (first
+  > Saturday, 11:00Z) is "skipped: no route to the French library from the House" until an operator places the
+  > library's daily files (its own zips, or their one member as text, named as the library names them) under
+  > `<state>/equity-daily/french/inbox/`: the next run keeps the days of 1926-2019 and 2022-2024 under `french/`,
+  > drops every line of 2020 and 2021 unparsed, counts the lines of 2025 on without writing them, and REMOVES the
+  > inbox file. The funnel carries `asset_years` (simulated program-years beside independent asset-years and the
+  > replay multiple, per equity lane and structure). A panel lot's replay twin is priced at the panel's own
+  > half-spreads by its fill points; while the panel store cannot be read such a lot waits and is not judged.
+
+  And for `CHANGELOG.md` ("Not yet deployed"): "Release E4, package B: the panel's half-spread table
+  (`equity_spreads`), its independent-name count (`equity_neff`), the French library's factor files when a route
+  exists (`french`: the line filter that drops 2020 and 2021 unparsed), independent asset-years in the funnel, and a
+  panel lot's half-spread in its replay twin. Proof: `test_equity_spreads`, `test_equity_neff`, `test_french`."
+
+---
+
 ## What package B needs of other packages (no diff: said here so the integrator can check it)
 
 - **Package A's registry rows** (patch 10) name `league.ops.equity_spreads`, `league.ops.equity_neff` and
@@ -490,4 +522,13 @@ What it adds, so its author starts from a decided shape (E4-SPEC 15, row 18; the
   the fallback), tested as D20's formula: the two must agree, and the integrator may make `hs_table` call it.
 - **Package C's `league.xs.store.Universe`** (`members`, `aid`), `PanelStore` (`verdict`, `train`) and
   `league.xs.ctx` (`inputs_from_panel`, `derive`) are called through their Step 0 signatures only; while one is a
-  stub the job that needs it answers a failed or skipped receipt, never a crash.
+  stub the job that needs it answers a failed or skipped receipt, never a crash. `league.xs.config.quiet` (C0) is
+  each job's first statement; a `quiet` that raises is "skipped" with a House warning (a job that cannot learn
+  whether it stands at a wall does not start).
+- **Facts for the captain to verify on the House** (E4-SPEC 19, fact 3): `v2/stocks/quotes` answers a two-second
+  historical window of one symbol with `limit` 50, `feed=sip`, `sort=asc` and `asof`, from 2017. The first night's
+  receipt shows it (`sampled` against `empty`, `refused` and `errors`), and its `early` block is fact 3's second half
+  (the median half-spread of 20 fixed names at 09:30:30 beside 09:32:00).
+- **No gateway change is needed.** The quotes route is already allowed. The French library's data route (`GET
+  /v1/data/french/<file>`, answering {"text": the file's one member}) is the owner's option of E4-SPEC 19 and is not
+  built: until it or an inbox file exists the job is skipped.
