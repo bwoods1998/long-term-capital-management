@@ -492,6 +492,19 @@ def current_equity_evaluator(state: Mapping[str, Any], sha: str, equity_sha: str
             and proof.get("equity_sha256") == equity_sha and proof.get("run_sha") == sha)
 
 
+def equity_proof_current(state: Mapping[str, Any], version: Mapping[str, Any]) -> bool | None:
+    """Whether an equity family's band proof (`current_equity_evaluator`) is the CURRENT equity identity for the program
+    of `version` (its versions row: `sha`, `params`); None when the identity cannot be computed (no answer either way).
+    The EquityBook's reader asks it about a family that has no row (league/equity/families.py `standing`)."""
+    equity_sha = _equity_sha()
+    if equity_sha is None:
+        return None
+    from .gate import run_sha
+
+    return current_equity_evaluator(state, run_sha({"sha": version["sha"], "params": version.get("params") or {}}),
+                                    equity_sha)
+
+
 class EquityUnreadable(RuntimeError):
     """`read(..., strict=True)`: the equity rows could not be READ (no store, a store that could not be read within its
     second, or no equity identity to check a band against). Never raised for a store that was read and holds no row."""
@@ -937,4 +950,4 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
 __all__ = ["read", "observe", "incubator", "incubator_refusal", "program_refusal", "owed_bars", "priority", "practice_tier",
            "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES",
            "seating", "waiting", "roster", "equity_seatable", "equity_seats", "equity_seating",
-           "current_equity_evaluator", "EquityUnreadable"]
+           "current_equity_evaluator", "equity_proof_current", "EquityUnreadable"]

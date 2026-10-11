@@ -135,13 +135,11 @@ class EquityFamilies:
             if row is None or not row.get("sha"):
                 return "unknown", f"its version {banded} cannot be read"
             from ..swarm import bands
-            from ..swarm.gate import run_sha
 
-            equity_sha = bands._equity_sha()
-            if equity_sha is None:
+            current = bands.equity_proof_current(state, row)
+            if current is None:
                 return "unknown", "the equity identity could not be computed"
-            sha = run_sha({"sha": row["sha"], "params": row.get("params") or {}})
-            if not bands.current_equity_evaluator(state, sha, equity_sha):
+            if not current:
                 return "retired", "its band's proof is not the current equity identity"
             return "live", "the store shows it running: its row could not be read (its code file)"
         except Exception as exc:  # noqa: BLE001 - no evidence either way
