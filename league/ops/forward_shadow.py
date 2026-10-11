@@ -50,6 +50,15 @@ recomputed; `seconds` = the child seconds spent). Each league/ops/forward_twins.
 twins failure never loses a shadow day; so do the registry's sync, the controls and the finals, each named in the
 receipt when it failed.
 
+A LABEL THAT RETURNS. Every reader of the record takes the NEWEST engine id as the current series
+(`forward_db.engine_now`: the meters, the session caps of the stop rules, the twins). A label that already has a row
+which is not the newest (the evidence identity went BACK to an earlier one after another series was opened: a
+rollback) would be written under its old id, and every reader would go on reading a series nobody writes any more,
+with no alarm. So a return opens a NEW series like any other move: its label in `fwd_engines` is `<label>~<the id it
+follows>` (`RETURNED`), with one `engine_moved` event and the whole history written again under the new id; the rows
+of the label's earlier series stay and are never read as the current one. While the identity then stays, the newest
+row is that label's own and nothing moves.
+
 WHOSE FAILURE (E2's RUN rule, carried over). A FAILURE NEVER MARKS A PROGRAM HERE: league/ops/forward_register.py
 reads the events.
 - The House's, before anything: `preflight` (the child answers `ping` AND `CANARY` runs "ok" over the store's last
@@ -140,6 +149,8 @@ OPEN_MARGIN_SECONDS = 300.0
 STATUSES = ("ok", "disqualified")
 #: A failure that is the data's (the module docstring): no row that night, one `data_failed` event, nobody marked.
 DATA_ERRORS = (MissingData, StoreRefused, ValueError)
+#: What joins a label that returns to the id of the series it follows (A LABEL THAT RETURNS); in no engine label.
+RETURNED = "~"
 
 _DECIMAL = re.compile(r"\d+\.\d+")
 _SYMBOL = re.compile(r"(?<![A-Za-z0-9_.])[A-Z]+(?:\.[A-Z]+)?(?![A-Za-z0-9_])")
@@ -318,10 +329,11 @@ class Shadow:
     # ------------------------------------------------------------------------------------------------ the engine id
     @property
     def engine(self) -> int:
-        """Tonight's engine id, read once a night: `forward_db.engine_id` of `forward_db.fwd_engine()`. A label seen
-        for the first time is one `engine_moved` event (once a label), whoever created its row."""
+        """Tonight's engine id, read once a night: `forward_db.engine_id` of tonight's label (`_label`). A label seen
+        for the first time is one `engine_moved` event (once a label), whoever created its row. It is always the
+        NEWEST id (`forward_db.engine_now`), which is the series every reader takes as the current one."""
         if self._engine is None:
-            label = forward_db.fwd_engine()
+            label = self._label()
             eid, _created = forward_db.engine_id(self.db, label, at=self.clock())
             before = self.db.execute("SELECT label FROM fwd_engines WHERE id < ? ORDER BY id DESC LIMIT 1",
                                      (int(eid),)).fetchone()
@@ -333,6 +345,19 @@ class Shadow:
             self._commit()
             self._engine = int(eid)
         return self._engine
+
+    def _label(self) -> str:
+        """Tonight's label as `fwd_engines` holds it: `forward_db.fwd_engine()`, or, for A LABEL THAT RETURNS (the
+        module docstring), that label with `RETURNED` and the id of the series it follows."""
+        label = forward_db.fwd_engine()
+        newest = forward_db.engine_now(self.db)
+        if newest is None:
+            return label
+        held = str(forward_db.engine_label(self.db, newest) or "")
+        if held == label or held.startswith(label + RETURNED):
+            return held                 # the newest series is this label's own (as it opened, or as it returned)
+        known = self.db.execute("SELECT 1 FROM fwd_engines WHERE label=?", (label,)).fetchone()
+        return label if known is None else f"{label}{RETURNED}{int(newest)}"
 
     def _commit(self) -> None:
         if self.db.in_transaction:

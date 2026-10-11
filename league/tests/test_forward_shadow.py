@@ -1558,6 +1558,31 @@ class EngineMoved(Case):
         self.assertLess(checks[0]["at"], checks[1]["at"])
         self.assertEqual(forward_db.engine_label(self.db, moved["engine"]), two)
 
+    def test_a_label_that_returns_opens_a_new_series_and_tonights_id_is_always_the_newest(self):
+        # A rollback: the evidence identity goes back to an earlier one. Every reader of the record takes the newest
+        # engine id as the current series (`forward_db.engine_now`), so a return is a move like any other.
+        pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
+        one, two = (EQUITY_ENGINE_VERSION + f"+{tag * 12}+" + forward_db.FWD_SERIES for tag in "ab")
+        nights = []
+        for label, through in ((one, FWD[3]), (two, FWD[4]), (one, FWD[5]), (one, FWD[6]), (two, FWD[7])):
+            with mock.patch.object(forward_db, "fwd_engine", lambda label=label: label):
+                receipt = self.night(through)
+            self.assertEqual(receipt["engine"], forward_db.engine_now(self.db), through)
+            nights.append((receipt["engine"], receipt["new_days"]))
+        first = nights[0][0]
+        self.assertEqual(nights, [(first, 4), (first + 1, 5), (first + 2, 6), (first + 2, 1), (first + 3, 8)])
+        self.assertEqual([forward_db.engine_label(self.db, first + k) for k in range(4)],
+                         [one, two, f"{one}~{first + 1}", f"{two}~{first + 2}"])
+        self.assertEqual([(e["payload"]["from"], e["payload"]["to"]) for e in self.events("engine_moved")],
+                         [(None, one), (one, two), (two, f"{one}~{first + 1}"),
+                          (f"{one}~{first + 1}", f"{two}~{first + 2}")])
+        # The earlier series of the label that returned stays as it was; the new one holds the whole history.
+        self.assertEqual([row["day"] for row in self.rows(pid, engine=first)], iso(FWD[:4]))
+        self.assertEqual([row["day"] for row in self.rows(pid, engine=first + 2)], iso(FWD[:7]))
+        self.assertEqual([row["day"] for row in self.rows(pid, engine=first + 3)], iso(FWD[:8]))
+        self.assertEqual(self.events("restated"), [])
+        self.assertEqual(self.count("fwd_runs"), 5)
+
     def test_a_program_stopped_before_the_move_keeps_its_old_series_and_gets_its_final(self):
         pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
         one, two = (EQUITY_ENGINE_VERSION + f"+{tag * 12}+" + forward_db.FWD_SERIES for tag in "ab")
