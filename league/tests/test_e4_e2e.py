@@ -31,8 +31,10 @@ The path (league/xs/E4_INTERFACES.md's packages, in order):
    be read retires nobody.
 
 WHAT THE TEST WRITES IN ANOTHER PACKAGE'S PLACE, and only that: the contamination probe's permit with the panel strata
-(package B's patch 18 to release E3's probe: owed), and the twin marker (package J's, on release E3: owed). Without
-either the lane stops where its rule says (no look; no live seat); `TheLaneStopsWhereItsRuleSays` holds both.
+(package B's patch 18 to release E3's probe: owed), and the twin marker (package J's panel night writes it,
+league/ops/forward_xs.py; no forward night runs in this test, so it is written here with that module's own writer:
+league/tests/test_forward_xs_twin.py holds the night itself). Without either the lane stops where its rule says (no
+look; no live seat); `TheLaneStopsWhereItsRuleSays` holds both.
 
 The market is synthetic (no figure here is a market result): the store's prices are seeded pseudo-random walks with a
 planted edge strong enough that the program passes its look, and the six sessions after the store's last are invented
@@ -357,10 +359,9 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         return doc
 
     def twin_marker(self, through: dt.date) -> None:
-        """PACKAGE J'S FILE (owed after release E3), written here as its nightly run will: ids and days only."""
-        (self.store_root / xbook.TWINS_FILE).write_text(json.dumps(
-            {"version": xbook.TWINS_VERSION, "through": through.isoformat(), "at": "2026-10-10T01:00:00Z",
-             "instances": {}}), encoding="utf-8")
+        """PACKAGE J'S FILE, written here in its panel night's place with that module's own writer: ids and days
+        only."""
+        forward_xs.write_marker(self.store_root, {}, through=through.isoformat(), at="2026-10-10T01:00:00Z")
         self.forget()
 
     def probe_file(self) -> None:
@@ -452,22 +453,26 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertEqual((review["objective"], review["rubric"]), (elane_xs.REVIEW_OBJECTIVE, elane_xs.rubric_sha()))
         return rec
 
-    def the_forward_record_passes_it_by(self) -> None:
-        """Release E3's registry beside this lane, the real job's `sync` on this store: a scored panel version is NOT
-        in the forward record. E3 registers the versions of E2's own Train record, of structure "etf" or "stock"; a
-        panel version's forward row, its nightly shadow and its twin are PACKAGE J's (league/ops/forward_xs.py: owed,
-        every function a stub). The registry neither registers nor refuses it, nothing fails and the hash chain holds:
-        the two releases run side by side, and until J lands a scored panel program is recorded by its own lane and
-        not shadowed. THE DAY J LANDS THIS READS ONE ROW, and this test is J's to change."""
+    def the_forward_record_registers_it(self) -> None:
+        """Release E3's registry beside this lane, the real job's `sync` on this store: THE SCORED PANEL VERSION IS IN
+        THE FORWARD RECORD (package J, league/ops/forward_xs.py). E3's own reader still takes the versions of E2's
+        Train record, of structure "etf" or "stock"; the panel's reader hands the registry the version this lane's
+        own bar judged, with the time of the scored event `elane_xs.score` wrote, its NEEDS, the route "XS1" and
+        alpha 0.03 in its hashed row. One row, once; the hash chain holds. Its nightly shadow and its twin are that
+        module's panel night (league/tests/test_forward_xs.py, test_forward_xs_twin.py)."""
         self.assertNotIn("panel", forward_register.STRUCTURES)
         db = forward_db.open_db(self.root)
         self.addCleanup(db.close)
-        for _ in range(2):
+        for n, registered in enumerate((1, 0)):
             out = forward_register.sync(self.root, db, now=self.clock(), settings=self.settings)
             self.assertEqual((out["registered"], out["skipped"], out["chain"]["ok"], out["chain"]["rows"]),
-                             (0, [], True, 0), out)
-        with self.assertRaises(NotImplementedError):
-            forward_xs.scored(self.store)
+                             (registered, [], True, 1), (n, out))
+        row = dict(db.execute("SELECT * FROM fwd_registry").fetchone())
+        self.assertEqual((row["key"], row["lane"], row["reason"], row["ugroup"], row["route"], row["alpha_f"]),
+                         (f"{SLUG}@1", "equity", "train_pass", "panel:sp500", "XS1", "0.03"))
+        self.assertTrue(row["evidence"].startswith("event:"), "dated by the scored event the lane's own bar wrote")
+        self.assertEqual(json.loads(row["needs"])["panel"], "sp500")
+        self.assertEqual([r["key"] for r in forward_xs.scored(self.store)], [f"{SLUG}@1"])
 
     def validated(self) -> dict:
         """4. The one Validation try."""
@@ -541,7 +546,7 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
 
         self.born()
         self.trained()
-        self.the_forward_record_passes_it_by()
+        self.the_forward_record_registers_it()
         self.validated()
         self.looked()
         # NO NAME REACHED THE EVIDENCE CHILD, and none is in what the swarm keeps of the program's runs.
@@ -592,7 +597,7 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
             [row] = state.rows("SELECT * FROM eq_rebalances WHERE decided_day=?", (day.isoformat(),))
             return row
 
-        # WITHOUT THE TWIN MARKER a Candidate holds no seat: mode "live" reads as "gate" (package J is owed).
+        # WITHOUT THE TWIN MARKER a Candidate holds no seat: mode "live" reads as "gate" (no panel night wrote one).
         tick(SUNDAY, 12, 30)
         self.assertEqual((self.store.family(SLUG)["band"], state.rows("SELECT id FROM eq_instances")), ("candidate", []))
         self.assertEqual(market.bar_calls, [], "and with no panel instance the book fetched nothing")
@@ -776,7 +781,9 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertIsNone(panel["date_t"], "five lots closed on one date are ONE observation: no t of one date")
         self.assertEqual((panel["decisions"], panel["audits"]), ({"planned": 2, "hold": 5}, {"ok": 7}))
         self.assertEqual(panel["xs1"]["beside"], sentence)
-        self.assertIsNone(panel["residual_x"], "the forward record's (package J): owed, never invented")
+        self.assertIsNone(panel["residual_x"], "the forward record's (package J): it holds no twin row of this "
+                                               "instance (no panel night ran here), and none is invented")
+        self.assertEqual(panel["owed"], DR.PANEL_OWED)
 
         # ---------------------------------------------------------------------------- 9. the way back
         # A swarm.json caught mid-write says nothing: the lane cannot be READ, so the book retires nobody on it (a

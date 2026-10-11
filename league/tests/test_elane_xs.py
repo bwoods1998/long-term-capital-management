@@ -366,7 +366,7 @@ class TheLiveLegs(unittest.TestCase):
 
     def test_the_twin_marker(self):
         F.write_manifest(self.root, live_from="2026-09-01")
-        self.assertIn("twin marker is missing", self.ready()[1], "with package J unmerged, live reads as gate")
+        self.assertIn("twin marker is missing", self.ready()[1], "with no panel night's marker, live reads as gate")
         F.write_twins(self.root, version="xs-twins-0")
         self.assertIn("twin marker is missing", self.ready()[1])
         F.write_twins(self.root, through="2026-10-08")

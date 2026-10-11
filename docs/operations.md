@@ -25,9 +25,10 @@ section 10). XS1's receipt is in the tree and pinned (`docs/benchmarks/equity_sc
 `elane.screens.equity_xs` is `league.xs.screen.pin` of it, written whole, so a rebuilt receipt lands as one file and
 one block and no line of code). One test takes the lane from a birth to the Done meter on every package's real code
 (`league/tests/test_e4_e2e.py`: a synthetic panel, a fake receipt, a fake venue); `league/tests/test_e4_integration.py`
-holds what stands around it. **Three things are not in this tree, by design:** package J (the forward twin) and
-package B's probe strata are built on release E3, and the universe commit (R-E4b) waits for the House's own
-`tradable.json`. Each holds real money back where this page says.
+holds what stands around it. **Two things are not in this tree, by design:** package B's probe strata are built
+on release E3's probe, and the universe commit (R-E4b) waits for the House's own `tradable.json`. Each holds real
+money back where this page says. (Package J, the forward twin, was the third: it is built: "The forward twin",
+below.)
 
 **The ship pass (Oct 11, 2026; nothing deployed): main is merged in, and the release ships in two steps.** Main's
 releases E2.2 and E3 (`7d2d3c84`) are merged under the lane (the record: `league/xs/E4_INTERFACES.md` section 12).
@@ -35,11 +36,12 @@ STEP ONE is this tree with the lane's switch able to reach "train": the data job
 so that information accrues. It moves no identity a judge binds to and no money rule (the options execution
 fingerprint, the equity identity and the money digest are main's; only the xs identity moves, and no panel band
 exists under it). STEP TWO is what a look and a seat still need, each owed and each the owner's deploy: the probe's
-panel strata with the look permit, and the receipt at the captain's bar, for a look; the forward twin (package J),
-the universe commit (R-E4b) and the money row of a panel sleeve for a seat. What the merge made true: a panel
-family is now born with a hidden year (E3's folds record in the committed policy); a scored panel version is NOT yet
-in E3's forward record (its registry takes ETF and stock programs; the panel's row and shadow are package J's);
-and the swarm no longer reads the contamination probe's own file (E3's seal forbids it: below, A22 (3)).
+panel strata with the look permit, and the receipt at the captain's bar, for a look; the universe commit (R-E4b) and
+the money row of a panel sleeve for a seat (the forward twin, package J, is built and rides step one: it records,
+it moves no money). What the merge made true: a panel family is now born with a hidden year (E3's folds record in
+the committed policy); a scored panel version IS in E3's forward record from the hour its Train verdict is written
+(package J: its own reader beside E3's, its own night after the panel store's); and the swarm no longer reads the
+contamination probe's own file (E3's seal forbids it: below, A22 (3)).
 
 **Why a panel, and why a residual** (measured the week it was built, rule-level): a raw-P&L screen cannot be opened to
 single stocks or sectors, because an author who knows which symbol won a known year passes it far above the owner's
@@ -81,15 +83,70 @@ to the one before:
 | "gate" | the one Validation try and the one look under XS1 | XS1's receipt pinned (no receipt, no look); the spreads table covering at least `spreads_min_share` of the Train eras' member-days (below it a Train pass is "provisional costs" and the mode reads "train") |
 | "live" | a passer may take one of E1's roster seats | `live_ready`: THE PANEL STORE FRESH BY THE CLOCK (its last session is the last closed session or the one before: one missed night is tolerated at the next morning's sends, a second holds every open), the universe deploy in force, today's tradable share of eligible names at least `live_min_tradable_share`, the committed universe younger than `universe_max_age_days`, the last nightly I6 equal, AND the forward twin's marker (`xs-twins.json`, itself no older than the session before the last closed one). Any one missing: the mode reads "gate" |
 
-**Two things are owed, and both hold real money back, by design.** (1) **The forward twin** (package J:
-`league/ops/forward_xs.py`, the registry row and the nightly shadow twin of a panel program) is built on release E3's
-forward modules; E3 is merged and J is not built (every function of that file is a stub). Until its nightly run has
-written the marker, **mode "live" reads as "gate"**: no panel program opens a position the forward record is not
-shadowing. (2) **No panel look runs until release E3's contamination probe has run once with the panel strata and
-written the look permit** (the captain's A22 (3), below; package B's patch to the probe, not built): mode "gate"
-scores Validation and keeps both Train series, and every look waits. So the order to a first live panel trade is:
-step one (this tree, the lane at "train"), the spreads backfill (about nine nights), the probe's panel strata and
-the twin, one forward night, the universe deploy with the money row, a free seat and room in the loss window.
+**Two things hold real money back, by design.** (1) **The twin marker.** Until the panel night of the forward
+record (package J: `league/ops/forward_xs.py`, the job `forward_xs`; "The forward twin", below) has written
+`xs-twins.json` through the panel store's last session, and whenever that marker is behind, **mode "live" reads as
+"gate"**: no panel program opens a position the forward record is not shadowing. (2) **No panel look runs until
+release E3's contamination probe has run once with the panel strata and written the look permit** (the captain's
+A22 (3), below; package B's patch to the probe, not built): mode "gate" scores Validation and keeps both Train
+series, and every look waits. So the order to a first live panel trade is: step one (this tree, the lane at
+"train"), the spreads backfill (about nine nights), the probe's panel strata, the universe deploy with the money
+row, one panel night with the instance's twin, a free seat and room in the loss window.
+
+**The forward twin (package J; `league/ops/forward_xs.py`, built on release E3's forward record; no identity and no
+digest moves).** With the lane's switch off, or `elane.forward.mode` off, none of it runs or writes.
+- **The registry.** Every panel version judged on the Train bar, passed or failed, is registered by the hourly
+  `forward_register` (the panel's own reader beside E3's): hash-chained with its code, its PARAMS and its NEEDS,
+  `ugroup` "panel:sp500", route "XS1" and alpha 0.03 in the hashed row, dated by the scored event its own bar wrote.
+  A style-open passer is a scored version like any other: recorded AND shadowed. No control group holds a panel row.
+- **The panel night** (job `forward_xs`, after each `equity_panel`; never inside 09:00-17:30 New York on a session):
+  E3's own night on the panel store, the "panel" kind in the forward job's own kind of decider child. It is NOT a
+  ride on `forward_shadow` (22:35Z): the panel store is a session behind at that hour, and the marker must be through
+  the store's last session by the next close, or the lane would read "twin marker behind" from every close to
+  22:35Z, the 16:30 decide included. ONE run a program a night at 1.0x: the pinned pre-registration's forward series
+  is the residual and the STRESS residual of one run, and the row's `r15` holds the second in E3's currency (no run
+  of the 1.5x-cost book is recorded forward). E3's checkpoints (20, 60, 120, 250 sessions), N_eff, CEY and the BH/BY
+  meter read a panel program through the same columns: its excess IS its residual against its matched cells.
+- **Rows lag one session, twins two.** The panel engine opens no lot on a slice's last session and reads membership
+  two sessions ahead, so with the store through P the night writes each program's rows through P - 1 and each twin's
+  rows for decisions through P - 2, and names its night by P - 1 (its own job in `fwd_runs`; E3's stop rules, FW2
+  and the funnel each read their own job's nights). COST, stated: once a panel program is registered a day's meters
+  (`fwd_cey`, `fwd_meter`, `fwd_groups`) wait for its panel rows: they are written at the morning report after the
+  panel night that holds them, the SECOND morning after the day (before: the evening of the day itself), and are
+  never partial for that cause.
+- **The budget, on one core.** The panel night spends what `forward_shadow` left that evening of
+  `elane.forward.cpu_seconds_night` (1,800 s: one budget a night, not raised); the programs it leaves stale go first
+  the next night, and FX3 says when two nights running left some. A live instance's twin run is outside it, bounded
+  by the night's deadline (08:55 New York). Estimated, not measured on the box: a 250-session program-night is about
+  4 s of the build machine's core and three times that on the box, so the whole budget covers about 150 such
+  programs a night. All of a night's runs read ONE open of the panel store (the ops child's address space is capped
+  500 MB above its start, and each open maps about 120 MB).
+- **The twin of a live panel instance.** The registered program run flat from the session after the instance's first
+  decision, under the instance's own id as run key (the ids, sector codes and dither the live ctx read). One row a
+  decision session: the same sells, the same buys, every buy's WEIGHT within 0.001 (weights, not dollars: the live
+  sleeve moves with the account). Not read: a decision whose morning re-read was a mismatch ("audit") and a retired
+  instance's sessions ("retired"). A disagreement is data, counted in the Done meter's A14 reading as any program's.
+  `fwd_part` and `fwd_lotgap` are E3's, for a panel lot too (no timing part: no minute bars for 500 names).
+- **The marker** (`<state>/equity-daily/xs-twins.json`): per alive panel instance `due` and `last`, and the panel
+  store's last session. Instance ids and days ONLY: the swarm's process reads that file and nothing else of the
+  forward record. A night whose preflight fails moves no marker.
+- **Beside a live panel program in the direction report** (never a rule): its shadow twin's residual over its own
+  sessions and its REBALANCE sessions agreed k of n with the days that differ; "not recorded yet" until a panel
+  night has written its twin.
+- **Verify after the deploy** (read-only): with `elane.panel.mode` "off" the job's receipts say `skipped` ("the panel
+  lane is off") and `fwd_engines` holds no label with "+xs."; after the first scored panel version is registered the
+  next night of either job writes ONE `engine_moved` event (the label gains "+xs." and 12 hex: every program's
+  history is written again under it, the older rows stay); the morning after a panel night `fwd_runs` has a row of
+  job `forward_xs` named by the session before the panel store's last, `xs-twins.json` is through that store's last
+  session, and the registry's chain is "ok".
+- **Rollback.** A release from before this one skips the job and stops reading panel rows (they stay, append-only);
+  E3's night then hands a registered panel program to its own engine and marks it `data_failed` each night (nobody
+  is stopped or tagged for it), and the engine label goes back (a new series, as any label that returns). The
+  marker stops moving, so mode "live" reads "gate" from the second session on.
+- **Not built, stated.** `fill_minutes` fetches no panel symbol (a panel lot's fill gap has no timing part). The
+  forward ROUTE's own verdict (the per-program bar c_FX and the placebo rank over the first n sessions) is a later
+  release's, on its own receipt: nothing here judges. No panel control exists, so no RC pair reads a panel group.
+  The replay multiple counts a panel family's Train runs and not the panel's independent history: it overstates.
 
 **What a panel program sees and may do** (the pre-registered contract C-XS-1; `league/xs/ctx.py`, `program.py`,
 `engine.py`): after the close, one slot an eligible name (a member of the index today and for the next two sessions,
@@ -480,11 +537,15 @@ universe's age, a store two nights stale) by the swarm loop at each equity round
 RUNNING at a wall, or a panel run found running inside a session, by a detector that looks AFTER the work
 (`equity_universe.watched` around all six jobs: a critical alert and `wall` in the receipt; `elane_xs._timed` around
 every panel run: `elane_xs_wall`);
-`live_ready` false while a panel program is live by the book at its band sync and by the pre-open. **Not built
-yet:** the three that read the forward record (the twin marker a night behind, a rebalance session whose live and
-twin orders disagree, the residual beside a close) arrive with package J. The run record's `factors` (the House's
-own panel factors) has no reader in this release: its readers are release E3's (the probe's stratum on them and
-the loadings beside XS1).
+`live_ready` false while a panel program is live by the book at its band sync and by the pre-open; **the three
+that read the forward record** by the forward report (`league/ops/forward_xs.py` `alarms`; each warning is also an
+alert of the `forward_report` job, and they ride the direction report's alarms): FX1 the twin marker behind the
+panel store (one session: a night missed; from two the lane holds every open, which the book says critically), or
+an alive instance's twin behind its due day; FX2 a REBALANCE session whose live and twin orders disagree (told
+once, with its cause); FX3 panel programs left stale two panel nights running. The residual beside a close is the
+direction report's line ("The forward twin", above). The run record's `factors` (the House's own panel factors)
+has no reader in this release: its readers are the probe's stratum on them (package B's patch 18, owed) and the
+loadings beside XS1.
 
 **Memory of the panel job** (measured at 700 assets x 2,455 sessions under the ops child's own limit, its address
 space capped 500 MB above its start): the daily run peaks at about 384 MB of the 527 MB cap whatever the number of
@@ -512,8 +573,8 @@ captain's first step up (`elane.panel.mode=train`), the next night's `equity_uni
 receipts with counts and a coverage verdict, and no price or ticker in them; the House's start re-ratifies no grant (the money digest did not move) and
 sends no ETF band and no options band back to the Gym (neither identity moved).
 
-**Not handled, stated.** No panel program is shadowed forward until package J lands, so a style-open passer is
-recorded and not yet shadowed. **The House runs XS1 at the bar of the receipt in the tree** (every threshold is read
+**Not handled, stated.** A panel program is shadowed forward from its registration (package J), a style-open
+passer too; what the forward route would do with that record is not built. **The House runs XS1 at the bar of the receipt in the tree** (every threshold is read
 from it at runtime): the captain's A23 sets that bar at 1.38, a rebuilt receipt he lands as one file and its pin
 before the lane's first look. A held lot's own `ret` (its raw close against its entry) still scatters against its
 slot's return path by about a cent over the price (a weaker channel than the one `range` had; the review measured
@@ -3851,8 +3912,9 @@ occurrences past its grace has a receipt was not in the old registry.
 | `forward_register` | at each House start, and hourly at :25 (release E3) | 70 min | the forward registry (**The forward record**, at the top): every equity version judged on the Train bar, each seed and live instance and the controls, hash-chained, into `<state>/forward.sqlite`; the tags and the stop rules; skipped while `elane.forward.mode` is off | runs |
 | `fill_minutes` | at each House start, and trading days, close + 45 min (release E3) | 3 h | the send-minute 1Min bars of the universe into `<state>/equity-fill-minutes/` (two bar requests a session); its start run fetches a missed day | runs |
 | `forward_shadow` | after each `equity_data` run (22:30; release E3); never inside 09:00-17:30 ET on a session | 3 h | every registered program recomputed whole on its forward days in the job's own decider child, the controls, the checkpoints, the live-like re-price and the live twins; at most `elane.forward.cpu_seconds_night` of child time | runs |
-| `forward_report` | after each `forward_shadow` run, and trading days, open − 35 min (release E3) | 3 h | the forward record's meters and `<state>/forward-report.json` with alarms FW1-FW8 (operator-only) | runs |
+| `forward_report` | after each `forward_shadow` run, and trading days, open − 35 min (release E3) | 3 h | the forward record's meters and `<state>/forward-report.json` with alarms FW1-FW8 and, while the panel lane's switch is up, FX1-FX3 (operator-only) | runs |
 | `forward_audit` | trading days, open − 25 min (release E3) | 40 min | a forward day whose bars the morning audit found different leaves the counted days; the registry's hash chain is verified | runs |
+| `forward_xs` | after each `equity_panel` run (01:55; release E4, package J); never inside 09:00-17:30 ET on a session | 3 h | the panel lane's forward night: every registered panel program recomputed whole on its forward days, each live panel instance's shadow twin, and the twin marker the lane reads before mode "live" (**The forward twin**, at the top); a `skipped` receipt while `elane.forward.mode` or `elane.panel.mode` is "off" | runs |
 | `contam_probe` | Saturdays 00:10 (release E3) | 6 h | the contamination probe: one model route a week, at most `elane.contam.usd_run` dollars; aggregates into `<state>/contamination.json`; never retried | skipped |
 | `equity_universe` | daily 01:40 (release E4; never at a House start) | 3 h | the point-in-time S&P 500 membership, the assets and their aids, the audit, into `<state>/equity-daily/universe/` (**The panel lane**, at the top); a `skipped` receipt while `elane.panel.mode` is "off", as each of the five below | runs |
 | `equity_panel` | daily 01:55 (release E4) | 3 h | the panel's daily bars through the venue's asof (never 2020), the coverage audit and its verdict, the half-spread table and the spreads' share, the nightly I6, into `<state>/equity-daily/panel/` | runs |

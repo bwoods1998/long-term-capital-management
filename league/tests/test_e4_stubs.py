@@ -35,7 +35,7 @@ VECTORS_SHA256 = "386995d8d8c86baec17f1c378b7c067be43ef39653c3879f71d059d0beae7e
 #: The synthetic inputs of V1-V6 and the plain reference's series (written at Step 0 from the study's own generator).
 INPUTS = FIXTURES / "xs1_conformance_inputs.npz"
 
-#: Every module release E4 adds, by the package that owns it (league/xs/E4_INTERFACES.md's table). J is owed.
+#: Every module release E4 adds, by the package that owns it (league/xs/E4_INTERFACES.md's table).
 MODULES = {
     "A": ("league.ops.equity_universe", "league.ops.equity_panel"),
     "B": ("league.ops.equity_spreads", "league.ops.equity_neff", "league.ops.french"),

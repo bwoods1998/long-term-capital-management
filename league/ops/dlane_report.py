@@ -173,6 +173,7 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
 - THE FORWARD RECORD (release E3; league/ops/forward_report.py): `forward_record` is that job's report as it last wrote
   it (None when absent or stale), and its alarms (FW1-FW8, RR1, RR2, CP1, CP2, MM1: ids, counts and dates only) ride
   this report's `alarms`, so the `dlane` stall cause mails a warning. Read only, and never this report's failure.
+  (Release E4, package J: the panel lane's FX1-FX3 ride with them, by their own two switches.)
 - P(DONE | ZERO EDGE) IS THE OPTIONS RULES' FIGURE (`ZERO_EDGE_EQUITY_NOTE`): it was never measured for share closes,
   and a delta-one lane's is far higher. A report that holds an equity close says so on the figure and in each
   checkpoint's `equity` block; no figure for the equity lanes is stated.
@@ -181,7 +182,9 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   (`EquityScreens.xs1`); beside its closes the distinct close dates and the date-clustered t (A14: one observation a
   close date), its same-risk buy-and-hold in SPY, its decisions and their morning re-reads, and what reading by date
   costs; and every recorded style-open passer with why it holds no seat (the captain's A22, `style_open_passers`). Its
-  residual and its twin's agreement are the forward record's, owed (`PANEL_OWED`). None of it is a rule.
+  residual and its twin's agreement on rebalance sessions are the forward record's (release E4's package J,
+  league/ops/forward_xs.py `beside`; `panel_forward` puts them beside the program, `PANEL_OWED` while that record
+  holds none of it yet). None of it is a rule.
 
 Standard library only, except the Probe envelope's figures (`fast_lane.probe_budget` and `real.probe_figures` read
 `league.live.real`, whose Gym legs need numpy, as the House box has): they are an `error` entry where that cannot load.
@@ -243,11 +246,16 @@ PANEL_BY_DATE = (
     "A panel program is read ONE OBSERVATION A CLOSE DATE: five lots bought on one date and sold on another share one "
     "market move and one fill minute. Done's meter counts a closed lot as one close; the distinct close dates and the "
     "date-clustered t ride beside it.")
-#: What the forward record owes a panel program (package J, after release E3), said wherever a figure of it is missing.
+#: What is said wherever the forward record holds no figure of a panel program yet (package J: league/ops/forward_xs.py).
 PANEL_OWED = (
-    "owed: a panel program's residual against its matched cells and its shadow twin (the rebalance sessions agreed) are "
-    "the forward record's, which does not read a panel program yet (package J, after release E3). Until it does a panel "
-    "program is recorded and NOT shadowed, and none takes a live seat (the lane's mode \"live\" reads as \"gate\").")
+    "not recorded yet: a panel program's residual against its matched cells and its shadow twin (the rebalance sessions "
+    "agreed) are the forward record's, written by its panel night (the job forward_xs, after each night's panel store). "
+    "No figure stands here until that night has written this program's twin; while its twin marker is missing or behind "
+    "no panel program takes a live seat (the lane's mode \"live\" reads as \"gate\").")
+#: What is said of a recorded style-open passer's forward days (the captain's A22 (1): recorded and shadowed, never seated).
+PANEL_SHADOWED = (
+    "shadowed: every scored panel version is registered in the forward record with its code frozen and recomputed on "
+    "its own forward days each panel night (the job forward_xs), this one too; the forward route is its way to a seat.")
 #: THE CAPTAIN'S A22 (1), said beside every recorded style-open passer.
 STYLE_OPEN_RULE = (
     "A22: a STYLE-OPEN program takes no live seat on an XS1 pass alone. The House reads each panel program's loadings on "
@@ -976,7 +984,7 @@ def style_open_passers(store: Any) -> list[dict[str, Any]]:
                 why = None
             out.append({"family": str(fam.get("id")), "version": _int(rec.get("version")), "passed": True, "seat": None,
                         "why": str(why or rec.get("why") or rec.get("seat_why") or "style-open"),
-                        "look_at": rec.get("at"), "shadow": PANEL_OWED})
+                        "look_at": rec.get("at"), "shadow": PANEL_SHADOWED})
     return sorted(out, key=lambda r: (r["family"], r["version"] or 0))
 
 
@@ -1013,6 +1021,33 @@ def panel_lane(root: Any, settings: Mapping[str, Any] | None) -> dict[str, Any]:
         return {"panel_lane": {"error": type(exc).__name__}}
 
 
+def panel_forward(out: dict[str, Any], root: Any) -> None:
+    """WHAT THE FORWARD RECORD SAYS BESIDE A LIVE PANEL PROGRAM (release E4, package J; never a rule): for each program
+    of `out["equity"]["panel"]`, `residual_x` (its shadow twin's residual over the instance's own sessions: the Gym
+    sleeve and the model's costs, said in `of`) and `rebalance_sessions_agreed` (its REBALANCE sessions agreed k of n,
+    with the days that differ), from league/ops/forward_xs.py `beside`; `owed` is then None. A program the forward
+    record holds nothing of keeps `PANEL_OWED`; a record that cannot be read says so in `owed` (never a figure)."""
+    panel = (out.get("equity") or {}).get("panel") if isinstance(out.get("equity"), Mapping) else None
+    programs = panel.get("programs") if isinstance(panel, Mapping) else None
+    if not isinstance(programs, Mapping) or not programs:
+        return
+    try:
+        from . import forward_xs
+
+        found = forward_xs.beside(root)
+    except Exception as exc:  # noqa: BLE001 - unread is said, never a zero
+        for row in programs.values():
+            row["owed"] = f"the forward record could not be read ({type(exc).__name__}): {PANEL_OWED}"
+        return
+    for key, row in programs.items():
+        mine = found.get(key)
+        if not isinstance(mine, Mapping):
+            continue
+        if mine.get("residual") is None and not (mine.get("rebalance") or {}).get("sessions"):
+            continue    # the record names the instance and holds no figure of it yet
+        row.update(residual_x=mine.get("residual"), rebalance_sessions_agreed=mine.get("rebalance"), owed=None)
+
+
 def panel_section(book: Mapping[str, Any], twins: Mapping[str, Mapping[str, Any]], screens: "EquityScreens", *,
                   unit: Mapping[str, Any] | None = None, constitution: Mapping[str, Any] | None = None
                   ) -> dict[str, Any] | None:
@@ -1026,7 +1061,8 @@ def panel_section(book: Mapping[str, Any], twins: Mapping[str, Mapping[str, Any]
       morning re-reads by verdict (`audits`: "none" counts the decisions recorded after 08:30, which have none), and
       10.5's cost sentence (`cost`);
     - `residual_x` and `rebalance_sessions_agreed`: its residual against its matched cells and its twin's agreement on
-      rebalance sessions are the forward record's (package J, owed): None, with `PANEL_OWED` said;
+      rebalance sessions are the forward record's: None here, with `PANEL_OWED` said, until `panel_forward` has put
+      that record's own lines beside the program;
     - `style_open`: every recorded style-open passer and why it holds no seat (`style_open_passers`), under A22's rule.
     Never a rule: nothing here is read by a band, a seat or the Done meter."""
     instances = _panel_instances(book)
@@ -2988,6 +3024,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
                                              and a.get("level") in ("info", "warning") and isinstance(a.get("text"), str)]
         except Exception:  # noqa: BLE001 - the report goes on without it
             out.setdefault("forward_record", None)
+        panel_forward(out, root)    # RELEASE E4 (package J): the forward record's lines beside a live panel program
     finally:
         store.close()
     return out

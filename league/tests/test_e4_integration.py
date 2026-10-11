@@ -10,8 +10,8 @@ is the lane's one path from a birth to the Done meter; this module is what stand
   lane failed (E4-SPEC 17: its opens stop, its exits go on, nothing is retired) and "unknown" when the lane cannot be
   read; an ETF family is asked nothing of it.
 - `TheLaneStopsWhereItsRuleSays`: with no contamination reading of the panel strata (the probe's permit and package B's
-  patch 18: owed) no look runs and none is spent (the captain's A22 (3)); with no twin marker (package J: owed) the
-  effective mode is "gate" whatever the setting.
+  patch 18: owed) no look runs and none is spent (the captain's A22 (3)); with no twin marker (package J's panel
+  night writes it: league/ops/forward_xs.py) the effective mode is "gate" whatever the setting.
 - `TheDataJobsOnTheRealStore`: package B's spreads and N_eff jobs on package C's real store (they were built against
   fakes of it), and package A's and the twins' readers of what they leave.
 - `TheLiveColumnsOnTheRealUniverse`: package H's columns on package C's real universe: the live eligibility is the
@@ -694,8 +694,9 @@ class TheSeams(unittest.TestCase):
                     found.add(path.name)
         # The stall job spells the equity structures out in code, held to the store's above. Release E3's forward
         # record spells out ITS OWN two, on purpose narrower: it registers ETF and stock programs and counts their
-        # runs (the registry's `STRUCTURES`, the report's replay multiple); a panel program's forward row and shadow
-        # are package J's (league/ops/forward_xs.py, owed). No other ops job names the structures.
+        # runs (the registry's `STRUCTURES`; the report's replay multiple, which names the panel beside them since
+        # package J); a panel program's forward row and shadow are package J's own reader's (league/ops/forward_xs.py:
+        # it spells no structure, it asks the panel lane). No other ops job names the structures.
         self.assertEqual(sorted(found), ["forward_register.py", "forward_report.py", "stall.py"])
         from league.ops import forward_register
 

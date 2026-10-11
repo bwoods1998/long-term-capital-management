@@ -187,12 +187,13 @@ class RunnerHolds(unittest.TestCase):
         # the direction lane's; (release E1) the equity lane's daily store and its twins' measurement records; and
         # (release E3) the five jobs of the forward record, which write only their own store and files (a forward day
         # not recorded is lost for good). Release E3's contamination probe spends model dollars: paid, never in a pause.
-        # (release E4) the panel lane's data and measurement jobs, which read the gateway and write their own files.
+        # (release E4) the panel lane's data and measurement jobs, which read the gateway and write their own files,
+        # and its half of the forward record (`forward_xs`: it writes the forward store and the twin marker alone).
         self.assertEqual({j.name for j in JOBS if j.in_pause}, {"budget", "budget_refresh", "clock", "preopen", "economics",
                                                                 "stall", "direction", "fast_lane", "game", "dlane",
                                                                 "equity_data", "equity_twins", "forward_register",
                                                                 "fill_minutes", "forward_shadow", "forward_report",
-                                                                "forward_audit", "equity_universe",
+                                                                "forward_audit", "forward_xs", "equity_universe",
                                                                 "equity_panel", "equity_spreads", "equity_neff",
                                                                 "french", "xs_zero_edge"})
         self.assertEqual({j.name for j in JOBS if j.paid}, {"postmortem", "agenda", "engineer", "contam_probe"})
