@@ -497,3 +497,43 @@ Open after the fixes, stated: a held lot's `ret` against its slot's path still s
 reviewer's weaker channel); a name whose ADJUSTED price is under about $2 is coarse in every field (the store could
 mask such bars: not built); a full basket at this account's size uses the whole loss window (a panel sleeve of its
 own is a money row); the equity roster with `seatless_why` is in the dlane report only while the lane's switch is up.
+
+## 12. The ship pass (Oct 11, 2026; `feat/equity-e4`; nothing pushed, nothing deployed)
+
+Main's releases E2.2 and E3 (`7d2d3c84`) are merged under the lane, and the release ships in TWO STEPS. Step one is
+this tree with the lane's switch able to reach "train" (the data jobs, panel births, the Train bar): it moves no
+identity a judge binds to and no money rule (the options execution fingerprint, the equity identity and the money
+digest are main's on both Pythons; the xs identity moves, and no panel band exists under it). Step two is what a
+look and a seat still need, each owed: the probe's panel strata with the look permit and the receipt at the
+captain's bar; the forward twin (package J), the universe commit and the money row of a panel sleeve.
+
+**What the merge changed in this contract** (sections 5, 8 and 10 above are records of their own day):
+
+| what | before the merge | now | where |
+|---|---|---|---|
+| the registry | E4's six rows after `dlane` | E3's six after `dlane`, then E4's six, last | `league/ops/registry.py` |
+| the gateway's merge list | owed seven entries (E2's five, E4's two) | E2's five and E3's three are in it; E4's two wait alone in `PENDING_GATEWAY` (the gateway's side is a patch in the captain's scratch) | `league/ci.py` |
+| a panel family's hidden year | none: `elane_xs.assign` answered None without E3 | drawn at birth while E3's folds record (the committed policy): one of the panel's six Train years; the bar reads the five seen, the hidden run goes to `elane_xs_oof` | `elane_xs.assign` |
+| the fold's three facts | `elane_xs` imported `elane_folds` inside two functions | spelled in `elane_xs` (`fold_recording`, `fold_hash`, `FOLD_GID0`), held equal to `elane_folds`' by a test: E3's seal lets only its Train module, its births and league/ops import the memory modules | `elane_xs`, `test_elane_xs` |
+| E3's count of a cell's births | counted any equity family with a hidden year | never a panel family (told by `elane_train.record_key`; the note of section 10 for the second integrator) | `elane_folds.born` |
+| the look's reading of the probe (A22 (3)) | the swarm read the probe's own file by name | THE LOOK PERMIT, `<state>/xs-look-permit.json` (`elane_xs.PROBE_FILE`, version `PROBE_VERSION`): {"routes": {route: {"at", "model", "cells": {P4, P5, P6: {era: {"readable", "recalled"}}}}}}, written by the probe's job when it publishes a route's panel strata (package B's patch 18, owed, now carries it). E3's seal lets no module of league/swarm name the probe's file or import the probe; the probe's own file opens no look | `elane_xs.probe_reading`, `probed`, `league/swarm/e4_patches/B.md` |
+| E3's forward record and a panel version | (E3 not merged) | a scored panel version is neither registered nor refused by E3's registry (it takes E2's Train record, structure "etf" or "stock"); the row, the shadow and the twin are package J's, still a stub | `test_e4_e2e`, `test_e4_integration` |
+
+**What the ship pass fixed or bounded**
+
+| what | before | now | where |
+|---|---|---|---|
+| `rows_to_arrays` (regress-1) | dropped every row whose field was not an int or a float; the House's venue client hands every price as a Decimal, so in mode "live" no bar was ever placed | a number is an int, a float or a Decimal, never a bool, never a string; `float()` of the Decimal is the double the nightly job's reader parses, so the store and the live read agree to the bit | `ctx.rows_to_arrays` |
+| the fake venues of the live path | handed floats | hand every answer through the client's own decoder (`test_xs_book.as_the_client`) | `test_e4_e2e`, `test_equity_book_panel`, `test_xs_book` |
+| the send after a window loss (spec-2) | the fixer's test read the planned intent | Monday's send is run and pinned AS BUILT: a held five-name basket is the whole window, so after a net loss a partial rotation's new name is cut or refused. No money rule changed; the row of a panel sleeve is step two's | `test_equity_book_panel.TheWholeBasketIsScaledToTheRoom` |
+| the manifest's `hs_share` (open point 10 of section 10) | today's members with 8 samples at both points: fell with the index's turnover for ever | the Train eras' member-days whose name has its own figure: `hs_share(root, member, days, aids, masked=)` | `equity_panel.hs_share` |
+| a panel run's wall | the two walls of a session (09:25-09:45, 15:50-16:35 ET) | the whole session (`config.RUN_SESSION_ET`, `quiet(now, need_s, session=True)`): the box has one core | `config.quiet`, `elane_xs.may_run`, `xs_zero_edge` |
+| `equity_spreads`' grace | six hours (done by 13:20Z: past a pre-open) | three (done by 10:20Z) | `league/ops/registry.py` |
+| the coverage probe | two built-in test tickers; one verdict for two questions; the token's file beside `--root`; exit 2 for everything; a ladder's end read as the limit; a refusal retried | the test names read off the spell file; `asof_differs` and `differs_accepted` apart from `test_accepted`; the file beside the release, a missing token said at once; exit 3 for a probe that could not run; `reading` "found", "at least" or "not measured"; a 4xx but 429 is refused once and is no error | `scripts/panel_probe.py` |
+
+Open after the ship pass, stated: package J; patch 18 with the look permit; the universe commit and the money row
+(a held basket uses the whole window: after a loss a partial rotation is a name short, and live and its twin part
+there); the receipt at the captain's bar; the gateway's follow-up for the two protected paths; a name that joined
+the index after 2024 is charged the universe's half-spread (sampling its own Train-era days is a spec change for
+package B); Validation and the look ask the quiet rule once for two or three runs (Train asks before each); every
+budget of the lane on the box's one core is an estimate until its first receipts are read.

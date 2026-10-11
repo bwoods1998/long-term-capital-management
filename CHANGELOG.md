@@ -29,7 +29,7 @@ any other deploy.
 The running House release is `20261011T114321Z-af12ca87b92f` (main `87f9fd0c`, release E2.2, 11:44Z Oct 11), the
 gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
 
-### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; two owner deploys: R-E4a research, no digest move, ships switched off; R-E4b the universe, one money-digest move, deployed separately)
+### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; main's E2.2 and E3 merged under it; TWO STEPS, each an owner deploy: step one research, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 
 - **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
   day's S&P 500 members by a symmetric cross-sectional rule, see salted slots with no ticker, no date and no price
@@ -42,7 +42,8 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
 - **Ships off.** policy.json `elane.panel.mode` "off": no birth, no run, no fetch of the live path, no model question.
   The ladder is "train", "gate", "live", each the captain's settings change and each falling back to the one before.
   **Mode "live" reads as "gate" until the forward twin exists** (package J, owed: it is built on release E3's forward
-  modules), and **no panel look runs until E3's contamination probe has run with the panel strata** (the captain's A22).
+  modules), and **no panel look runs until E3's contamination probe has published the panel strata and written the
+  look permit** (the captain's A22; package B's patch to the probe, owed).
 - **Before any real money on an XS1 pass** (A22): a style-open program takes no live seat on a pass alone (recorded
   and shadowed, never seated); at most 2 XS1 looks an agenda cell; the equity code review and the contamination probe
   before a look; a ninth conformance vector beside the study's eight.
@@ -60,7 +61,8 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   changes; `league/equity/config.py` `UNIVERSE` stays E1's 35 and inside it. The gateway deploys first; both deploys
   go between two pre-opens. Regenerated about once a year.
 - **CI:** `league/swarm/elane_xs.py` and `scripts/gen_universe.py` are FORBIDDEN (`PENDING_GATEWAY` until the
-  gateway's merge list names them: a gateway follow-up, with E2's five); the comparison of the gateway's stock list
+  gateway's merge list names them: a gateway follow-up; E2's five and E3's three are in that list already, so the
+  two wait alone); the comparison of the gateway's stock list
   with the constitution's names at most 10 tickers a side and counts the rest; the pre-open's check 5 counts the
   options population by the store's own guard (a panel family is its own lane's), and its check 10 holds the panel
   lane ready while a panel program is live.
@@ -74,12 +76,33 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   nightly I6 failed or its shadow twin stopped (the seat rule read Candidates only). Now a seated panel family has a
   row only while the lane is live, its planned entries are held at the send, and the book retires it on the lane's
   own word; a switch file caught mid-write retires nobody. The xs rounding bound is E1's own, re-exported.
-- **Owed, each holding real money back by design:** package J (the forward twin; after release E3: until then mode
-  "live" reads as "gate"); package B's probe strata P4-P6 (patch 18, E3's file: until then every panel look waits);
-  the universe commit R-E4b (needs the House's `tradable.json`; its gateway half is a patch for the owner). And one
-  thing for the captain to know before mode "live": at the Probe sleeve of 0.50 x E a five-name basket alone fills
-  the $400 loss window (since the review's fixes it trades whole, five names of $200, the basket scaled to the room;
-  while it is held the other programs' new buys wait for room).
+- **Owed, each holding real money back by design (step two):** package J (the forward twin and the forward row of
+  a scored panel version, on release E3's modules: until then mode "live" reads as "gate" and no panel version is in
+  the forward record); package B's probe strata P4-P6 with the look permit the probe's job writes (patch 18, E3's
+  file: until then every panel look waits); the receipt at the captain's bar (A23); the universe commit R-E4b (needs
+  the House's `tradable.json`; its gateway half is a patch for the owner) with the money row of a panel sleeve. And
+  one thing for the captain to know before mode "live": at the Probe sleeve of 0.50 x E a five-name basket alone
+  fills the $400 loss window (since the review's fixes it trades whole from flat, five names of $200, the basket
+  scaled to the room; while it is held the other programs' new buys wait for room, and after any net loss in the
+  window a partial rotation's new name is cut or refused at the send, so the program holds a name fewer than its
+  Gym twin: pinned as built, a money decision for step two).
+- **The ship pass (Oct 11; nothing deployed; the three ids are main's on both Pythons, the xs identity moves).**
+  MERGED: main's E2.2 and E3 (`7d2d3c84`); E3's six jobs then E4's six in the registry, the forward record's counts
+  beside the asset-years in the funnel. WHAT THE MERGE MADE TRUE: a panel family is born with a hidden year (E3's
+  folds record in the committed policy), and E3's count of a cell's births holds no panel family; a scored panel
+  version is neither registered nor refused by E3's registry (package J's, owed); three of E3's seal tests failed
+  on the lane and the LANE changed, no seal: it imports no memory module (the fold's switch, hash and genome id
+  are spelled in `elane_xs`, held equal by a test), and the swarm reads a LOOK PERMIT (`<state>/
+  xs-look-permit.json`: two words a stratum and era, written by the probe's job) where it read the contamination
+  probe's own file. FIXED: **the live panel fetch placed no bar** (`rows_to_arrays` refused the Decimal prices the
+  House's venue client hands; every fake venue handed floats, which is why the whole live week passed: the fakes
+  now decode as the client does). **The spreads' share fell with the index's turnover for ever** (it counted
+  today's members; a name that joined after 2024 can never be sampled): it is the share of the Train eras'
+  member-days whose name has its own figure. The coverage probe's five defects from its first run on the House,
+  and a sixth (a refused request was retried and counted an error). BOUNDED FOR THE BOX'S ONE CORE: no panel run
+  works while the market is open (a run's wall is the whole session, 09:25 to 16:35 ET), and the spreads job's
+  grace is three hours (with six it could hold the one ops child past a pre-open). STATED, NOT CHANGED: the send
+  after a window loss (above); every budget of the lane on the box is an estimate until its first receipts.
 - **The review's fixes (Oct 11; nineteen findings, three lenses; nothing deployed; no id but the xs identity
   moves, and no panel band exists under it).** LIVE SAFETY: a seated panel program is liquidated only by the
   captain's switch: a store-side leg that fails with the switch at "live" (the nightly I6, the twin marker, a stale
