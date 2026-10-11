@@ -192,6 +192,20 @@ JOBS: tuple[Job, ...] = (
         what="the contamination probe: one model route a week asked what it recalls of the eras programs are judged "
              "on, scored on the House against a permutation by whole period; aggregates only, into "
              "<state>/contamination.json"),
+    # THE PANEL LANE'S HALF OF THE FORWARD RECORD (release E4, package J; league/ops/forward_xs.py): the forward
+    # shadow's own night over the panel store, after `equity_panel` has written the night's store (01:55Z: the panel
+    # store is a session behind when `forward_shadow` runs at 22:35Z, and the lane's twin marker must be through the
+    # store's last session by the next close). Skipped while `elane.forward.mode` or `elane.panel.mode` is "off", and
+    # inside 09:00-17:30 New York on a session. Its decider child is the forward job's own kind of child (its limits
+    # are `forward_shadow`'s), and it spends what that night left of `elane.forward.cpu_seconds_night`. A night
+    # `equity_panel` fails or is skipped does not run it: the store did not move. Started at the latest three hours
+    # after the panel job ended, it is done hours before a pre-open. It writes only <state>/forward.sqlite and the
+    # twin marker, so it runs in a pause too.
+    Job("forward_xs", "league.ops.forward_xs", (S.after("equity_panel"),), grace=3 * HOUR, cpu=2700, wall=3300,
+        in_pause=True, owner="breadth",
+        what="the panel lane's forward night: every registered panel program recomputed whole on its own forward days "
+             "in the forward job's own decider child, the shadow twin of each live panel instance, and the twin "
+             "marker the lane reads before mode live (recorded, never a verdict)"),
     # THE PANEL LANE's data and measurement jobs (release E4, "breadth"; league/xs/E4_INTERFACES.md). WITH THE LANE'S
     # SWITCH OFF NONE OF THEM RUNS: each one's first statements are the switch (`league.ops.equity_universe.lane_off`:
     # `elane.panel.mode` "off" in the box's settings is a `skipped` receipt: no gateway call, no file) and
