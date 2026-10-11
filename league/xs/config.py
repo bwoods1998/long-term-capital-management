@@ -20,6 +20,7 @@ import math
 import re
 from decimal import Decimal
 from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 from ..equity.store import nyse_sessions
 
@@ -171,6 +172,8 @@ WALLS_ET = (("09:25", "09:45"), ("15:50", "16:35"))
 #: half day it moves with the close (15:50-16:35 becomes 12:50-13:35).
 CLOSE_ET = "16:00"
 EARLY_CLOSE_ET = "13:00"
+#: The exchange's zone (the zone `ltcm.data.NEW_YORK` names; league/xs imports nothing of ltcm: E4-SPEC 2.1).
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 def _clock(text: str) -> dt.time:
@@ -180,8 +183,6 @@ def _clock(text: str) -> dt.time:
 
 def _walls(day: dt.date, early: bool) -> list[tuple[dt.datetime, dt.datetime, str]]:
     """The walls of session `day` as New York datetimes with their label; a half day's close wall moved with its close."""
-    from ltcm.data import NEW_YORK
-
     close, early_close = _clock(CLOSE_ET), _clock(EARLY_CLOSE_ET)
     shift = dt.datetime.combine(day, close) - dt.datetime.combine(day, early_close)
     out = []
@@ -202,8 +203,6 @@ def quiet(now: float, need_s: float) -> str | None:
 
     It never raises (a House job's first statement): a clock or a need it cannot read is itself a reason not to
     start."""
-    from ltcm.data import NEW_YORK
-
     try:
         begin, need = float(now), float(need_s)
     except (TypeError, ValueError):
@@ -284,4 +283,4 @@ __all__ = ["SPANS", "TRAIN_SEGMENTS", "TRAIN_YEARS", "HISTORY_YEARS", "RESERVE_Y
            "CELL_SECTOR", "CELL_BETA", "UNIVERSE_CELL", "HS_FLOOR_BP", "HS_FALLBACK_BP", "HS_MAX_BP", "STRESS_SPREAD",
            "STRESS_FEES", "VANISH_SESSIONS", "VANISH_HAIRCUT", "VANISH_DEAL", "DITHER_HALF", "CTX_PLACES",
            "BETA_PLACES", "ID_BITS", "ADJUSTED_HALF_STEP", "ROUNDING_GUARD", "rounding_bound", "WALLS_ET", "CLOSE_ET",
-           "EARLY_CLOSE_ET", "quiet", "next_session", "rebalance_session", "decision_due"]
+           "EARLY_CLOSE_ET", "NEW_YORK", "quiet", "next_session", "rebalance_session", "decision_due"]
