@@ -35,6 +35,12 @@ SETTINGS (`cfg`; policy.json "elane", swarm.json over it; `DEFAULTS` is the roll
   (A9 D3; league/equity/screen.py `retry_permitted`);
 - `program_loss_usd` -300 (a tightening only: -300 to -25).
 
+THE ROUNDS RUN ON THEIR OWN (A3: no Gym box, no model dollar). The swarm's main loop starts the two equity rounds below on
+their own thread every `ROUND_SECONDS` while the lane is on (league/swarm/loop.py `Swarm.equity_rounds`: the
+tournament's step, then the gate's, so a version validated in a round takes its look in the same round). Neither the
+research budget's brake nor a Gym that is down or switched off holds them, and no options round carries them: an
+options Validation that fails or runs long never costs an equity family its turn.
+
 THE ROUND (who calls what). The tournament's equity round (league/swarm/tournament.py `Tournament.equity_round`) asks
 `validate` of each living Gym-band equity family's candidate version (`candidate`: its best, else its newest) while
 `try_open` allows it, and retires a family whose lineage is spent (`lineage_spent`). `validate` runs the version on
@@ -100,6 +106,11 @@ BETA_NOTE = "MARKET BETA: profit from market direction, reported beside the same
 SEEDED_NOTE = "seeded by the captain's build agents (A4), judged by the swarm's screen like any family"
 #: The store's kv key of the seeds already born ({seed id: family id}).
 SEEDS_KEY = "elane_seeds"
+#: THE EQUITY LANES' ROUNDS (league/swarm/loop.py `Swarm.equity_rounds`): the store's kv key of the last round's start,
+#: and the seconds between two rounds (the gate's own default pace: a Validation or a look is milliseconds a year of
+#: daily bars, and a look that waits for the data job is asked again each round).
+ROUND_KEY = "elane_round_at"
+ROUND_SECONDS = 300.0
 #: The family state's key of its equity lineage's Validation try ({version, at, first, precheck, entered, retry_sha}).
 TRY_KEY = "elane_try"
 #: The family state's keys (league/equity/INTERFACES.md section 8.4): the one look ({version, at, verdict, beside}),
@@ -1219,6 +1230,7 @@ __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_K
            "try_open", "lineage_spent",
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
+           "ROUND_KEY", "ROUND_SECONDS",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",
            "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LineageUnread", "LOSS_LINE",
            "loss_line"]

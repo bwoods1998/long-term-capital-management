@@ -179,7 +179,10 @@ model cannot spend every round; the next UTC day it is asked again (Claude's lin
 A complete answer is judged exactly as before; `grounded_answer` (league/gym) is untouched.
 
 THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). The options round above never sees an equity-lane family
-(`SwarmStore.families` leaves them out). The equity round (`equity_round`, while `elane.mode` is "gate") takes each
+(`SwarmStore.families` leaves them out), and `run` never calls the equity round: the swarm's loop runs it on a thread of
+its own, after the tournament's equity step, every `elane.ROUND_SECONDS`, under the brake and with the Gym down too
+(league/swarm/loop.py `Swarm.equity_rounds`; A3: an equity look needs no Gym box), so neither the options lanes' alarms
+nor a failed options round holds an equity look. The equity round (`equity_round`, while `elane.mode` is "gate") takes each
 living Gym-band equity family whose validated version entered the gate (the share screen's Validation pre-check passed:
 `Tournament.equity_round`), not held by the operator, not already done with (`gated_sha`) and with no look in flight,
 and `look` dispatches it to `elane.look`: the one sealed look ON THE HOUSE, in the decider-isolated child, with a freshly
@@ -190,7 +193,7 @@ refuses it (the look waits, nothing is spent), and so does a daily store that en
 (A12). The look records its lane, the screen that judged it ("S2"), the receipt, c_H,used (S1: c_used) and the line
 stated beside every live trade, in its `detail` and its `swarm.gate` event. An equity look is never
 counted by the options lanes' leakage alarms (`alarms`). A look in flight from a process that died (`look_inflight`
-older than this process) is owed again. A failure of the equity round never stops the options round.
+older than this process) is owed again.
 
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
@@ -886,12 +889,6 @@ class Gate:
         out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
         self._incubator_owed()  # a verdict an error kept from its bar last round: recorded first
         self._incubator_sweep()  # a look that landed, or a demotion, since the last round: its mark goes first
-        if elane.on(self.settings):
-            try:  # THE EQUITY LANES (release E1): their own round, apart from the options lanes' alarms
-                self.equity_round(out)
-            except Exception as exc:  # noqa: BLE001 - an equity failure never stops the options round
-                self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
-                                                      "text": str(exc)[:300]})
         if self.alarm():  # every lane's alarm (the lane off: the one alarm, alpha-line looks): the whole gate stops
             self._record_alarms(self.stopped_lanes() if dlane.on(self.settings) else None)
             out["alarm"] = True
@@ -1324,7 +1321,8 @@ class Gate:
     def equity_round(self, out: dict[str, Any]) -> None:
         """THE EQUITY LANES' round (the module docstring): each living Gym-band equity family whose validated version is
         gate-ready goes to `look` (so to `elane.look`), one look at a time; a look in flight from a dead process is owed
-        again. Its looks are listed in `out["looked"]` with their lane."""
+        again. Its looks are listed in `out["looked"]` with their lane. Called by the swarm's loop on the equity rounds'
+        own thread (`Swarm.equity_rounds`), never by `run`."""
         for fam in self.store.families(alive=True, lanes=elane.LANES):
             fid = str(fam["id"])
             state = fam.get("state") or {}

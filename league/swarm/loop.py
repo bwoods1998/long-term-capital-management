@@ -40,7 +40,11 @@ THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). At each start, b
 the equity identity's (`evaluator.adopt_equity` with `evaluator.equity_identity()`: equity families only; a failure is
 logged and never stops the start, and `bands.read` then reads no equity band as current). While `elane.mode` is "gate",
 each main-loop pass births the three captain-seeded programs not yet born (`equity_births`: `elane.birth_seeds`, once
-each, ever); their Validation and their one look are the tournament's and the gate's equity rounds.
+each, ever). THE EQUITY ROUNDS (`equity_rounds`, on their own thread every `elane.ROUND_SECONDS`): the tournament's
+equity step (Validation, the retirements), then the gate's (the one sealed look), so a version validated in a round
+takes its look in the same round. They run on the House in the decider child (A3): no Gym box and no model dollar, so
+the main loop starts them whatever the guard says and whether or not the Gym is up (`equity_due`), outside the branch
+that holds the options rounds, and no options round carries or delays them.
 
 The heartbeat (`<root>/swarm.heartbeat`, JSON) carries the pid, the release directory, the time, and a live
 status (families, cycles and spend in the last hour by kind, the guard, the pool): the House's `SwarmStep`
@@ -616,7 +620,16 @@ class Swarm:
                 "guard": getattr(self.guard, "last", {}), "braked": not self.guard.allows(), "pool": self.pool.status(),
                 "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive()),
                 "concurrency": self.concurrency_status(),
-                "funding": getattr(getattr(self, "funding", None), "last", {})}
+                "funding": getattr(getattr(self, "funding", None), "last", {}),
+                "equity": self.equity_status()}
+
+    def equity_status(self) -> dict[str, Any]:
+        """THE EQUITY LANES in the heartbeat: `elane.mode` and when the last equity round started (None before the first):
+        the operator sees the rounds running under the brake and with the Gym down."""
+        try:
+            return {"mode": elane.cfg(self.settings)["mode"], "round_at": self.store.get(elane.ROUND_KEY)}
+        except Exception as exc:  # noqa: BLE001 - the heartbeat never fails on it
+            return {"error": f"{type(exc).__name__}"}
 
     def library_status(self) -> dict[str, Any] | None:
         """THE LIBRARY in the heartbeat: on or off, and today's counted calls against `research.requests_day`."""
@@ -980,6 +993,10 @@ class Swarm:
         except Exception:  # noqa: BLE001 - a notice never stops the loop
             log(f"funding watch failed: {traceback.format_exc()[-600:]}")
         self.pool.manage()
+        # THE EQUITY ROUNDS (release E1, A3): on the House, no Gym box, no model dollar. Before and outside the branch
+        # below, so neither the brake nor a Gym that is down holds a seed's Validation or its look.
+        if self.equity_due():
+            self._round("equity", self.equity_rounds)
         if self.guard.allows() and self.gym_ready():
             if self.tournament.due():
                 self._round("tournament", self.tournament_round)
@@ -1033,6 +1050,40 @@ class Swarm:
         if born:
             log(f"equity lanes: seeded {len(born)} ({', '.join(born)}; {elane.SEEDED_NOTE})")
         return born
+
+    def equity_due(self) -> bool:
+        """THE EQUITY ROUNDS are due: `elane.mode` is "gate" and `elane.ROUND_SECONDS` have passed since the last one
+        started (the store's `elane.ROUND_KEY`). Never the guard, never the Gym (A3). False on any error (asked again
+        next pass)."""
+        try:
+            if not elane.on(self.settings):
+                return False
+            return self.clock() - float(self.store.get(elane.ROUND_KEY, 0.0) or 0.0) >= elane.ROUND_SECONDS
+        except Exception:  # noqa: BLE001 - a store that cannot say: nothing starts this pass
+            return False
+
+    def equity_rounds(self) -> dict[str, Any]:
+        """THE EQUITY ROUNDS (the module docstring): the tournament's equity step (`Tournament.equity_round`: Validation
+        by lane, the spent lineages and the program loss line retired), then the gate's (`Gate.equity_round`: the one
+        sealed look of each gate-ready family), on this one thread, so the two never meet a second copy of themselves.
+        Never raises: a failure of either is one private event, and the other still runs."""
+        self.store.put(elane.ROUND_KEY, self.clock())
+        out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
+        try:
+            step = self.tournament.equity_round()
+        except Exception as exc:  # noqa: BLE001 - `equity_round` never raises; whatever does costs the gate nothing
+            step = {"validated": {}, "retired": [], "errors": {"round": type(exc).__name__}}
+            self.store.event("swarm.status", None, {"action": "elane_round_error", "error": type(exc).__name__})
+        try:
+            self.gate.equity_round(out)
+        except Exception as exc:  # noqa: BLE001 - asked again next round; a look in flight is owed again
+            self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
+                                                  "text": str(exc)[:300]})
+            out["error"] = type(exc).__name__
+        return {"validated": {fid: bool(v.get("entered")) for fid, v in (step.get("validated") or {}).items()
+                              if isinstance(v, Mapping)},
+                "retired": list(step.get("retired") or []), "errors": dict(step.get("errors") or {}),
+                "looked": out["looked"], "held": out["held"], **({"error": out["error"]} if "error" in out else {})}
 
     def adopt_equity(self) -> dict[str, Any] | None:
         """THE EQUITY IDENTITY's adoption at the start (`evaluator.adopt_equity`, core's): equity families only. None on an

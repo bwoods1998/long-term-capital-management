@@ -7,6 +7,7 @@ SwarmStore, Tournament and Gate, `runner.Isolated` over an `InlineDecider`, the 
 
 from __future__ import annotations
 
+import json
 from unittest import mock
 
 from league.equity import BETA, EQUITY_ENGINE_VERSION
@@ -16,6 +17,7 @@ from league.swarm.evaluator import EQUITY_SELECTION_KEYS, adopt_equity
 from league.swarm.gate import run_sha
 from league.tests.test_elane import CODE, ON
 from league.tests.test_elane_gate import EquityCase, FakeRunner, screen
+from league.tests.test_swarm_loop import LoopCase
 
 #: The screen's own lineage rule (league/tests/test_elane_gate.py `screen` fakes it; these tests judge with the real one).
 REAL_SAME_LINEAGE = S.same_lineage
@@ -139,3 +141,80 @@ class LineageRecord(FixCase):
             self.assertIsNone(elane.same_lineage(self.store, self.store.family("b2"), BETA, "beta:x",
                                                  {"days": [1, 2, 3], "r": [0.1, 0.2, 0.3]}),
                               "a retired family's marker of a look that never landed: nothing was looked at")
+
+
+class EquityRoundsOnTheirOwn(LoopCase):
+    """s2-7: the equity Validation round and the equity look ran only inside the options rounds (`Tournament.run` after
+    the options Validation, `Gate.run`), which the loop starts only while the guard allows and the Gym is ready. A3: an
+    equity run needs no Gym box and no model dollar, so the brake, a Gym that is down and a failed options round must
+    not hold a seed's Validation or its look."""
+
+    def on(self, **gym):
+        """The lanes on in swarm.json (the loop reads it each pass), the Gym as given."""
+        self.settings["elane"] = {"mode": "gate"}
+        self.settings["gym"].update(gym)
+        (self.root / "swarm.json").write_text(json.dumps({"enabled": True, "gym": self.settings["gym"],
+                                                          "researcher": {"idle_seconds": 0}, "elane": {"mode": "gate"}}))
+        sw = self.swarm()
+        sw.tournament.equity_runner = sw.gate.equity_runner = FakeRunner()
+        return sw
+
+    def passed(self, sw):
+        """One main-loop pass with the screen faked at its interfaces, its rounds joined."""
+        with screen():
+            sw.step()
+            for thread in list(sw.rounds.values()):
+                thread.join(30)
+
+    def test_they_run_under_the_brake_and_with_the_gym_down(self):
+        sw = self.on(enabled=False, image_checkpoint=None)
+        self.guard.braked = True
+        self.guard.reason = "today's research is at its cap"
+        self.assertFalse(sw.gym_ready())
+        self.passed(sw)
+        self.assertEqual(set(sw.rounds), {"equity"}, "no options round starts under the brake; the equity rounds do")
+        self.assertIsNone(self.store.get("tournament_at"))
+        self.assertIsNone(self.store.get("gate_at"))
+        seeds = [f["id"] for f in self.store.families(lanes=elane.LANES)]
+        self.assertEqual(sorted(seeds), ["seed-overnight-qqq", "seed-overnight-spy", "seed-reversal-index"])
+        for fid in seeds:
+            fam = self.store.family(fid)
+            self.assertEqual((fam["validated_version"], fam["state"][elane.TRY_KEY]["entered"]), (1, True), fid)
+        looked = [(look["family"], look["passed"]) for look in self.store.looks()]
+        self.assertEqual(len(looked), 3, "validated and looked at in the same round")
+        self.assertEqual({f["band"] for f in self.store.families(lanes=elane.LANES)}, {"candidate"})
+        beat = json.loads((self.root / "swarm.heartbeat").read_text())["status"]
+        self.assertTrue(beat["braked"])
+        self.assertEqual((beat["equity"]["mode"], beat["equity"]["round_at"]), ("gate", self.store.get(elane.ROUND_KEY)))
+        # The funnel counts the round's verdicts from their own events (the hourly tournament row never held them).
+        from league.ops import funnel
+
+        counts = funnel.window(self.root, sw.clock() - 3600, sw.clock() + 1)["equity"]["beta"]
+        self.assertEqual((counts["births"], counts["validations"], counts["looks"]),
+                         (3, {"judged": 3, "passed": 3}, {"taken": 3, "passed": 3}))
+
+    def test_the_options_rounds_never_carry_them_and_a_failed_one_costs_them_nothing(self):
+        sw = self.on()
+        self.store.put("tournament_at", 0.0)
+        sw.tournament.validate = mock.Mock(side_effect=RuntimeError("the options Validation failed"))
+        with mock.patch.object(sw.tournament, "equity_round", wraps=sw.tournament.equity_round) as step, \
+                mock.patch.object(sw.gate, "equity_round", wraps=sw.gate.equity_round) as looks:
+            self.passed(sw)
+            self.assertEqual((step.call_count, looks.call_count), (1, 1), "once each: on the equity thread alone")
+        self.assertLessEqual({"tournament", "gate", "equity"}, set(sw.rounds))
+        sw.tournament.validate.assert_called_once()
+        self.assertEqual(len(self.store.looks()), 3, "the failed options round cost the seeds nothing")
+
+    def test_the_pace_and_the_switch(self):
+        sw = self.on()
+        self.assertTrue(sw.equity_due())
+        self.passed(sw)
+        self.assertFalse(sw.equity_due(), "one round every elane.ROUND_SECONDS")
+        self.store.put(elane.ROUND_KEY, sw.clock() - elane.ROUND_SECONDS - 1)
+        self.assertTrue(sw.equity_due())
+        sw.settings["elane"] = {"mode": "off"}
+        self.assertFalse(sw.equity_due(), "the lanes off: nothing runs")
+        sw.settings["elane"] = {"mode": "gate"}
+        with mock.patch.object(sw.tournament, "equity_round", side_effect=RuntimeError("boom")), screen():
+            out = sw.equity_rounds()
+        self.assertEqual(out["errors"], {"round": "RuntimeError"}, "never raises; the gate's step still ran")

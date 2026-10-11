@@ -325,8 +325,13 @@ class TheResearchFunnel(EquityFixture):
         self.store.event("swarm.born", "born-beta", {"lane": "beta"})
         self.store.event("swarm.born", "born-equity", {})
         self.store.event("swarm.born", "dir-a", {"lane": "direction"})
-        self.store.event("swarm.tournament", None, {"validation": {"judged": {"born-beta": {"passed": True},
+        # An equity verdict is the equity rounds' own event (`elane.validate`); the hourly tournament row holds options
+        # families only, so an equity id in it is never read as an equity verdict.
+        self.store.event("swarm.tournament", None, {"validation": {"judged": {"born-equity": {"passed": True},
                                                                               "dir-a": {"passed": False}}}})
+        self.store.event("swarm.status", "born-beta", {"action": "elane_validation", "version": 1, "lane": "beta",
+                                                       "entered": True})
+        self.store.event("swarm.status", "born-beta", {"action": "elane_validation_error", "version": 1, "lane": "beta"})
         self.store.add_look("born-beta", 1, "sha-1", passed=True, p_value=None, detail={"screen": "S1"})
         self.eq_close("born-beta", closed_at=self.now - 600)
         self.lid += 1
@@ -341,6 +346,7 @@ class TheResearchFunnel(EquityFixture):
         eq = out["equity"]
         self.assertEqual((eq["beta"]["births"], eq["equity"]["births"]), (1, 1))
         self.assertEqual(eq["beta"]["validations"], {"judged": 1, "passed": 1})
+        self.assertEqual(eq["equity"]["validations"], {"judged": 0, "passed": 0})
         self.assertEqual(eq["beta"]["looks"], {"taken": 1, "passed": 1})
         self.assertEqual((eq["beta"]["band_moves"]["probe"], eq["equity"]["band_moves"]["candidate"]), (1, 1),
                          "the fixture's band moves (`set_band`)")
