@@ -56,7 +56,6 @@ import json
 import os
 import re
 import sys
-import textwrap
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -85,6 +84,8 @@ WIDTH = 120
 #: How many tickers a refusal names (the rest are counted): a refusal is read on a terminal, never a list of 500.
 NAMED = 10
 #: What the generated blocks say of themselves (the count follows). No date: the block is a union, never a day's list.
+#: The tree's two blocks are held to the generator's output byte for byte (league/tests/test_gen_universe.py): a word
+#: changed here is a regeneration of both files (no digest moves by it, but the gateway's is an owner deploy).
 ABOUT = ("THE PANEL'S TRADABLE UNION (release E4; scripts/gen_universe.py): every symbol that was an S&P 500 member on any "
          "session of the 36 months before the generation day and was tradable, fractionable and unmasked that day, "
          "release E1's stocks among them. Sorted; no date, no weight, no history. The constitution's "
@@ -195,9 +196,15 @@ def _wrap(items: Sequence[str], indent: str) -> list[str]:
 
 
 def _about(indent: str, mark: str, count: int) -> list[str]:
-    """`ABOUT` and the count as comment lines (`mark`: the language's line comment) no wider than `WIDTH`."""
-    lines = textwrap.wrap(ABOUT, width=WIDTH - len(indent) - len(mark) - 1, break_long_words=False)
-    return [f"{indent}{mark} {line}" for line in (*lines, f"{count} stocks.")]
+    """`ABOUT` and the count as comment lines (`mark`: the language's line comment) no wider than `WIDTH`. Words are
+    packed greedily, by this loop and no library's: the committed blocks are held to this output byte for byte."""
+    lines, line = [], f"{indent}{mark}"
+    for word in ABOUT.split():
+        if len(line) + 1 + len(word) > WIDTH:
+            lines.append(line)
+            line = f"{indent}{mark}"
+        line += " " + word
+    return [*lines, line, f"{indent}{mark} {count} stocks."]
 
 
 def _block(symbols: Sequence[str], indent: str) -> list[str]:
