@@ -167,6 +167,12 @@ FORBIDDEN: tuple[str, ...] = (
     # secrecy rules, like dlane.py. In the gateway's merge list too since its follow-up of Oct 11, 2026.
     "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
     "league/swarm/elane_seal.py", "league/swarm/elane_review.py",
+    # THE EQUITY LANES' FOLDS, OUT-OF-FOLD EFFECTS AND MEMORY TABLES (release E3, Oct 2026): secrecy rules and a
+    # Train-bar input. elane_folds.py assigns a family's hidden Train year and cuts its seen spans, so it decides what
+    # the Train bar reads; elane_effects.py and elane_memory.py make and keep the hidden year's sealed tables, which
+    # no generator may read. In the gateway's merge list too, with the release (Oct 11, 2026). Release E3's other
+    # files were behind the wall already (league/ops/, docs/benchmarks/, league/swarm/policy.json).
+    "league/swarm/elane_folds.py", "league/swarm/elane_effects.py", "league/swarm/elane_memory.py",
 )
 #: THE EQUITY LANE (release E1, Oct 2026): its tree (the engine, the sizing, the bands, the screen and the book that
 #: trade real money, its evidence modules their own identity) and its swarm lane (births, the look, the roster) are
@@ -178,17 +184,10 @@ FORBIDDEN: tuple[str, ...] = (
 #: MERGE_FORBIDDEN, which gateway/test/merge.test.mjs holds to that list as written) cannot change in E1: gateway/ ships
 #: separately. A gateway follow-up adds them to MERGE_FORBIDDEN and moves them into the list above, leaving this
 #: empty; until then league/tests/test_ci.py allows exactly these in `FORBIDDEN` beyond the gateway's list. E1's own
-#: four entries made that move with its gateway follow-up, and release E2's five modules (the equity births, Train bar,
-#: route rule, seal and review) with theirs on Oct 11, 2026: what waits here now is release E3's.
-#: RELEASE E3: the folds, the out-of-fold effects and the memory tables: secrecy rules and a Train-bar input
-#: (league/swarm/elane_folds.py assigns a family's hidden Train year and cuts its seen spans, so it decides what the
-#: Train bar reads; elane_effects.py and elane_memory.py make and keep the hidden year's sealed tables, which no
-#: generator may read). The updater never self-deploys a change to them from this release on; the gateway's merge
-#: route refuses them once its own follow-up adds the three to MERGE_FORBIDDEN. Release E3's other files are already
-#: behind the wall (league/ops/, docs/benchmarks/, league/swarm/policy.json).
-PENDING_GATEWAY: tuple[str, ...] = (
-    "league/swarm/elane_folds.py", "league/swarm/elane_effects.py", "league/swarm/elane_memory.py",
-)
+#: four entries made that move with its gateway follow-up, release E2's five modules (the equity births, Train bar,
+#: route rule, seal and review) with theirs on Oct 11, 2026, and release E3's three (the folds, the out-of-fold
+#: effects and the memory tables) with the release itself, the same day: nothing waits here now.
+PENDING_GATEWAY: tuple[str, ...] = ()
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

@@ -10,6 +10,8 @@ pre-registered (`FGS_SHA`); and every E3 switch is off in code.
 11.1-11.3: six jobs in league/ops/registry.py, three blocks in league/swarm/policy.json, three paths behind the wall
 in league/ci.py) to the spec's tables, and to each other: all three applied, or none of them (the base the packages
 were built on). A release with its jobs registered and its settings missing, or its modules unprotected, fails here.
+The three paths are in the gateway's merge list too (gateway/lib/protected.mjs `MERGE_FORBIDDEN`, the one list of
+gateway/ the release changes: its gateway follow-up, made with it), so nothing waits in `ci.PENDING_GATEWAY`.
 
 `TheDeclaredReceipts` holds the release's declared receipts (the spec's 7.6: the file league/ops/release_receipts.py
 `DECLARATIONS` names) to the spec's text: two receipts, each a count the funnel's `forward_record` carries, read back
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,8 +58,11 @@ E3_PATCHED = ("league/ops/registry.py", "league/swarm/policy.json", "league/ci.p
               "league/swarm/elane_births.py", "league/swarm/elane_seal.py", "docs/operations.md", "CHANGELOG.md")
 #: The one E3 path that is documentation and nothing else: no judge, no wall.
 DOCUMENTATION = ("docs/operations.md",)
-#: What may not be edited at all (the spec's hard rules): trees and files.
+#: What may not be edited at all (the spec's hard rules): trees and files. Of gateway/ the release changes one list
+#: and nothing else: `GATEWAY_LIST`'s MERGE_FORBIDDEN gains the three swarm modules (`TheWiringIsWhole`).
 UNTOUCHED = ("league/equity/", "league/live/", "league/gym/", "gateway/", "league/constitution.py", *LEAGUE_FILES)
+#: The gateway's merge list (its `MERGE_FORBIDDEN`): no identity hashes it and no House process reads it.
+GATEWAY_LIST = "gateway/lib/protected.mjs"
 
 #: THE WIRING, as the spec writes it. 8.1: name -> (triggers, grace, cpu, wall, in_pause, paid, retry, owner).
 E3_JOBS = {
@@ -77,7 +83,7 @@ E3_POLICY = {
     "contam": {"mode": "record", "usd_run": 3.0, "every_days": 28, "batch": 20, "questions_per_cell": 120},
 }
 #: Section 10: what waited for the gateway's merge list before E3 (release E2's five, in that list since the gateway's
-#: follow-up of Oct 11, 2026) and what E3 adds.
+#: follow-up of Oct 11, 2026); E3's three (`E3_SWARM`) joined it with the release.
 E2_PENDING = ("league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
               "league/swarm/elane_seal.py", "league/swarm/elane_review.py")
 #: The forward screen's shape as the spec's section 4 writes it, and its sha.
@@ -104,6 +110,13 @@ RECEIPTS_LITERAL = {"schema": 1, "receipts": [
 def policy_elane() -> dict:
     """The committed policy.json's `elane` block (the House's; never the empty layer the tests load)."""
     return json.loads(Path(REAL_POLICY_PATH).read_text(encoding="utf-8"))["elane"]
+
+
+def merge_forbidden() -> set[str]:
+    """The gateway's `MERGE_FORBIDDEN`, read off its file as league/tests/test_ci.py reads it (comments dropped)."""
+    source = (REPO / GATEWAY_LIST).read_text(encoding="utf-8")
+    block = re.search(r"MERGE_FORBIDDEN = Object\.freeze\(\[([\s\S]*?)\]\);", source)
+    return set(re.findall(r"'([^']+)'", re.sub(r"//[^\n]*", "", block.group(1)))) if block else set()
 
 
 def under(path: str, entries) -> bool:
@@ -196,7 +209,7 @@ class TheJudgesDidNotMove(unittest.TestCase):
 
     def test_every_e3_file_that_is_code_or_a_declaration_is_behind_the_wall(self):
         # `ci.guard(path, None)` is the wall itself (`FORBIDDEN`, what the updater never self-deploys). The three
-        # swarm modules join it with the spec's 11.3 (`TheWiringIsWhole` holds that edit).
+        # swarm modules join it with the spec's 11.3 (`TheWiringIsWhole` holds that edit, and the gateway's list).
         waits = () if TheWiringIsWhole.wired() else E3_SWARM
         for path in (*E3_NEW, *E3_PATCHED):
             if path in DOCUMENTATION or path in waits:
@@ -239,7 +252,7 @@ class TheWiringIsWhole(unittest.TestCase):
         """How many of each edit's parts the tree holds: the six jobs, the three policy blocks, the three walled paths."""
         return {"jobs": sum(1 for name in E3_JOBS if name in registry.by_name()),
                 "policy": sum(1 for name in E3_POLICY if name in policy_elane()),
-                "wall": sum(1 for path in E3_SWARM if path in ci.PENDING_GATEWAY)}
+                "wall": sum(1 for path in E3_SWARM if path in ci.FORBIDDEN)}
 
     @classmethod
     def wired(cls) -> bool:
@@ -324,16 +337,19 @@ class TheWiringIsWhole(unittest.TestCase):
         self.assertEqual(settings.policy_shape({"elane": dict(elane)}), [], "no settings.py change is needed")
 
     def test_the_three_paths_behind_the_wall(self):
-        # Release E2's five left the waiting list with the gateway's follow-up of Oct 11, 2026: FORBIDDEN names them.
+        # Release E2's five left the waiting list with the gateway's follow-up of Oct 11, 2026, and E3's three never
+        # wait there: the gateway's merge list gains them with the release. FORBIDDEN names all eight, or the five.
+        gateway = merge_forbidden()
+        self.assertEqual(ci.PENDING_GATEWAY, (), "nothing waits for the gateway")
         for path in E2_PENDING:
             self.assertIn(path, ci.FORBIDDEN)
-            self.assertNotIn(path, ci.PENDING_GATEWAY)
+            self.assertIn(path, gateway)
         if not self.wired():
-            self.assertEqual(ci.PENDING_GATEWAY, (), "the base: nothing waits for the gateway")
+            self.assertFalse(set(E3_SWARM) & (set(ci.FORBIDDEN) | gateway), "the base: neither list names them")
             return
-        self.assertEqual(ci.PENDING_GATEWAY, E3_SWARM)
         for path in E3_SWARM:
             self.assertIn(path, ci.FORBIDDEN)
+            self.assertIn(path, gateway, "the gateway's merge route refuses it too")
             self.assertTrue(ci.guard([path], None), path)
             self.assertTrue(ci.guard([path.replace("league/swarm", "League/Swarm")], None), "whatever its case")
         from league.updater import protected_changes
