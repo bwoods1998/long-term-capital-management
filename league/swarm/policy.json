@@ -179,22 +179,33 @@
         "beside": "S2, c_R = 0 (no pooled-t bar), c_H,used = {c_H}; this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%); its holdout-only rate at c_H,used = {honly}% (the bound when 2025 is fully known); drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); a pass under S2 is weaker evidence of edge than under S1+F1; contamination: 2025 (all of Validation) and part of the 2026 holdout can be known to the authoring models, so the FP is a property of the procedure over 2010-19 and 2022-24 history, not a guarantee in this one world"
       },
       "equity_xs": {
-        "name": null,
-        "screen": null,
-        "receipt_sha256": null,
-        "c_XS": null,
-        "c_margin": null,
-        "alpha_plac": null,
-        "placebo_draws": null,
-        "rung": null,
-        "fp_cap": null,
-        "owner_wall": null,
-        "validation_tries": null,
-        "holdout_looks": null,
-        "retry": null,
-        "flags": null,
-        "screen_flags": null,
-        "beside": null
+        "name": "XS1",
+        "screen": "XS1",
+        "receipt_sha256": "98acbb83ffec165dcd4e831a6d5f123b99a6bc5c4ca3acb114e75782555e52e3",
+        "c_XS": 1.3,
+        "c_margin": 0.05,
+        "alpha_plac": 0.12,
+        "placebo_draws": 999,
+        "rung": "R0",
+        "fp_cap": 0.12,
+        "owner_wall": 0.15,
+        "validation_tries": 1,
+        "holdout_looks": 1,
+        "retry": false,
+        "flags": {
+          "X1": [],
+          "X2": [],
+          "X3": [],
+          "X4": [],
+          "X5": [],
+          "X6": [],
+          "X7": [],
+          "X8": []
+        },
+        "screen_flags": [
+          "style-open"
+        ],
+        "beside": "XS1 (panel screen): judged on the daily residual, this program's P&L minus the P&L of random portfolios that hold the same number of names at the same weights from the same sector x beta third x 12-1 momentum third cells on the same days. Bar: holdout t >= {c_used} (screen bar 1.30, own floor {c_p} + 0.05), ahead of 88% of 999 such portfolios, and positive at 1.5 times the spread with sell fees doubled. Measured false-positive rate at zero residual edge, own floor not credited: at most 11.2% in every cell, 95% upper bound 14.8% (cap 12%, owner's wall 15%); given a top-third 2025, up to 11.9%; rates of real-signal cells are understated by about 2.6 points (finite history). On its own Train-era worlds this program's holdout-only rate is {own_fp}% (in-sample: at most 12% by construction). Earlier XS1 looks in this program's mechanism cell: {n_cell}. A zero-edge mechanism given 8 such looks passed at least one in up to 63.1% of worlds. A pass says its picks beat random same-style picks after its costs; it does NOT say it beats the index: its P&L is {basket}, and market, sector, beta and momentum direction are not counted as edge. French factors: {label}. Contamination: 2025 (all of Validation) and part of the 2026 holdout may be known to its author; names and dates are hidden from the program, but sub-industry, size and value are not matched: a no-skill tilt to a style that won the holdout passed up to 34.9% of such worlds. Flags: {flags}."
       }
     },
     "val_tries": 1,
