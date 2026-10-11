@@ -205,6 +205,94 @@ class TheBirths(BirthCase):
         self.assertEqual(out["born"], [])
         self.assertIn("has its one Validation try", self.store.get(LAST_KEY)["refused"][0]["why"])
 
+    def test_a_declared_parent_never_hides_a_tried_lineage_of_the_same_idea(self):
+        # The integration review's seal-3, case 1: the seed's lineage has its try. The same mechanism on the same slice
+        # with no parent was refused; naming ANY untried equity family as its parent bore it in that family's lineage
+        # with a fresh Validation try (the refusal is shown back to the architect and the reply offers `parent`).
+        self.born_options(60)
+        mech = ("Index holders are paid for bearing overnight risk they cannot trade out of: buy SPY at the close and "
+                "sell at the next open.")
+        self.store.add_family({"id": "seed-overnight-spy", "mechanism": mech, "structure": "etf", "roots": ["SPY"],
+                               "symbols": ["SPY"], "lane": "beta"}, origin="seed")
+        other = fx.e2_family(self.store, "tom-dia", lane="beta", agenda="turn_of_month", symbols=("DIA",),
+                             mechanism="Invented turn of the month idea on DIA: payroll flows lift the last sessions.",
+                             record={"status": "stalled", "versions": {"1": {"fails": ["STATE"]}},
+                                     "stalled": {"at": "2026-10-10T00:00:00Z", "codes": ["STATE"], "versions": 1, "why": "x"}})
+        self.store.retire(other["id"], "STALLED on Train")
+        for parent in (None, "tom-dia"):
+            extra = {"parent": parent} if parent else {}
+            self.answers.append(fx.answer([fx.proposal("overnight-again", symbols=("SPY",), mechanism=mech,
+                                                       code=fx.program("SPY"), **extra)]))
+            out = self.pass_()
+            self.assertEqual(out["born"], [], f"parent {parent}")
+            why = self.store.get(LAST_KEY)["refused"][0]["why"]
+            self.assertIn("it continues seed-overnight-spy's lineage, which has its one Validation try", why)
+            self.clock.advance(4 * 3600)
+        # A different idea under the same declared parent is still born, in that parent's lineage.
+        self.answers.append(fx.answer([fx.proposal("tom-again", agenda="turn_of_month", symbols=("DIA",), parent="tom-dia",
+                                                   mechanism="Month-end rebalancing by pension funds lifts DIA over "
+                                                             "the last sessions of each month.",
+                                                   code=fx.program("DIA"))]))
+        out = self.pass_()
+        self.assertEqual(out["born"], ["tom-again"], self.store.get(LAST_KEY))
+        self.assertEqual(self.store.family("tom-again")["parent"], "tom-dia")
+
+    def test_a_newer_untried_family_of_the_slice_never_hides_an_older_tried_one(self):
+        # seal-3, case 2 (no parent declared): an older tried family and a newer untried dead family both hold the idea
+        # on the slice; the admission read the newest alone and bore the proposal.
+        self.born_options(60)
+        seed_idea = "Index holders earn the overnight premium: hold SPY from close until next open every session."
+        newer = "Hold SPY from close until next open only after a down day, when dealers demand extra compensation."
+        asked = "Overnight premium: hold SPY from close until next open every session after a down day."
+        from league.swarm.architect import same_idea
+
+        self.assertTrue(same_idea(asked, seed_idea) and same_idea(asked, newer), "the proposal holds both ideas")
+        self.store.add_family({"id": "seed-overnight-spy", "mechanism": seed_idea, "structure": "etf", "roots": ["SPY"],
+                               "symbols": ["SPY"], "lane": "beta"}, origin="seed")
+        self.clock.advance(60)
+        dead = fx.e2_family(self.store, "overnight-down", symbols=("SPY",), mechanism=newer,
+                            record={"status": "stalled", "versions": {"1": {"fails": ["STATE"]}},
+                                    "stalled": {"at": "2026-10-10T00:00:00Z", "codes": ["STATE"], "versions": 1, "why": "x"}})
+        self.store.retire(dead["id"], "STALLED on Train")
+        self.answers.append(fx.answer([fx.proposal("overnight-x", symbols=("SPY",), mechanism=asked,
+                                                   code=fx.program("SPY"))]))
+        out = self.pass_()
+        self.assertEqual(out["born"], [])
+        self.assertIn("it continues seed-overnight-spy's lineage", self.store.get(LAST_KEY)["refused"][0]["why"])
+
+    def test_a_rebirth_from_a_tried_lineage_is_refused_whatever_parent_it_declares(self):
+        # seal-3, the rebirth path: the row a card is reborn from was checked only while no parent was set.
+        from unittest import mock
+
+        from league.swarm import elane_births
+
+        self.born_options(60)
+        won = fx.e2_family(self.store, "won", lane="equity", agenda="reversal", symbols=("QQQ",),
+                           record={"status": "passed", "passed_version": 1, "versions": {"1": {"passed": True}}})
+        row = self.store.add_family({"id": "dead-child", "mechanism": "An invented trend idea on XLK that was refuted.",
+                                     "structure": "etf", "roots": ["XLK"], "symbols": ["XLK"], "lane": "equity",
+                                     "agenda": "trend", "e2_route": "sail:pro_asap"}, origin="architect", parent=won["id"])
+        self.assertEqual(row["lineage"], self.store.family("won")["lineage"], "the dead row sits in the tried lineage")
+        untried = fx.e2_family(self.store, "tom-dia", lane="beta", agenda="turn_of_month", symbols=("DIA",),
+                               mechanism="Invented turn of the month idea on DIA: payroll flows lift the last sessions.",
+                               record={"status": "stalled", "versions": {}, "stalled": {"at": "x", "codes": [], "versions": 0}})
+        self.store.retire(untried["id"], "STALLED on Train")
+
+        class Index:
+            def check(self, card, structure, mechanism, _, *, roots=None):
+                return {"ok": True, "rebirth": True, "row": "dead-child"}
+
+        for parent in (None, "tom-dia"):
+            extra = {"parent": parent} if parent else {}
+            self.answers.append(fx.answer([fx.proposal("reborn", lane="equity", agenda="trend", symbols=("XLF",),
+                                                       mechanism="A different invented trend idea on another sector "
+                                                                 "with a new input.", code=fx.program("XLF"), **extra)]))
+            with mock.patch.object(elane_births.EquityPass, "rebirth_index", lambda self: Index()):
+                out = self.pass_()
+            self.assertEqual(out["born"], [], f"parent {parent}")
+            self.assertIn("its rebirth continues dead-child's lineage", self.store.get(LAST_KEY)["refused"][0]["why"])
+            self.clock.advance(4 * 3600)
+
     def test_the_quota_bounds_the_pass_and_a_bad_program_is_born_without_it(self):
         rows = [fx.proposal("first", code="import os\n" + fx.program()), fx.proposal("second", symbols=("QQQ",),
                                                                                     code=fx.program("QQQ"))]

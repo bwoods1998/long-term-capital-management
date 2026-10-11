@@ -33,9 +33,9 @@ family in Train research holds the same idea on the same slice; its card is vali
 admission through `elane.card_errors`); THE GRAVEYARD BINDS (the design's lane-scoped REFUTED rows, PR #519): a card in
 the cell of a family E2 refuted on Train (its own lane's rows only: E1's `cards.RebirthIndex`, every other row excluded,
 so no row with an outcome lesson is read) needs a valid `card.rebirth` naming the row, as an options card does, while
-`architect.card_rebirth` is "refuse"; the lineage it continues (a named equity parent, or a dead family of its
-slice with the same idea) has taken no Validation try (no seeded program and no Train pass in it: an outcome-free
-rule, A9 D3); and THE EQUITY QUOTA admits it. Its spec carries `lane`, `symbols` (its `roots` too), `agenda`, the card's
+`architect.card_rebirth` is "refuse"; NO lineage it continues (the equity parent it names, EVERY family of its slice
+with the same idea, and the row it is reborn from) has taken a Validation try (no seeded program and no Train pass in
+any of them: an outcome-free rule, A9 D3; naming an untried parent hides no tried one); and THE EQUITY QUOTA admits it. Its spec carries `lane`, `symbols` (its `roots` too), `agenda`, the card's
 sha and `e2_route` (the route that bore it: its yield row, and the route its Train revisions are asked on). A program
 it carries that passes the static checks (league/swarm/elane_train.py `check_code`) is its version 1 (author
 "architect:<route>"); one that does not is recorded, and the equity researcher writes v1. Each birth is a `swarm.born`
@@ -600,18 +600,24 @@ class EquityPass:
             if busy:
                 self.refuse(slug, f"the same idea on the same symbols is in Train research: {busy[-1]['id']}")
                 continue
-            parent = None
+            # THE LINEAGE IT CONTINUES, every one of them: the parent it declares AND every family of its slice with the
+            # same idea (the admission checked ONE, the declared parent or else the newest of the slice, so naming any
+            # untried equity family as the parent, or a newer untried family of the slice, hid a lineage that has its
+            # try: the integration review's seal-3). Any of them tried refuses the birth; the lineage is assigned only
+            # once all are clear.
+            mother = None
             declared = str(row.get("parent") or "").strip()
             if declared:
-                mother = self.store.family(declared)
-                if mother is not None and elane_seal.lane_of_spec(mother.get("spec")) is not None:
-                    parent = mother
-            if parent is None and same_slice:
-                parent = same_slice[-1]
-            if parent is not None and self.lineage_tried(parent):
-                self.refuse(slug, f"it continues {parent['id']}'s lineage, which has its one Validation try "
+                found = self.store.family(declared)
+                if found is not None and elane_seal.lane_of_spec(found.get("spec")) is not None:
+                    mother = found
+            kin = ([mother] if mother is not None else []) + list(reversed(same_slice))
+            tried_kin = next((f for f in kin if self.lineage_tried(f)), None)
+            if tried_kin is not None:
+                self.refuse(slug, f"it continues {tried_kin['id']}'s lineage, which has its one Validation try "
                                   "(outcome sealed): propose a different idea")
                 continue
+            parent = mother if mother is not None else (same_slice[-1] if same_slice else None)
             card = dict(raw_card or {})
             card.update({"lane": lane, "structure": structure, "symbols": symbols})
             try:
@@ -636,12 +642,13 @@ class EquityPass:
                     checked = {k: v for k, v in checked.items() if k != "rebirth"}
                 if verdict.get("rebirth"):
                     reborn = self.store.family(str(verdict.get("row") or ""))
-                    if parent is None and reborn is not None:
-                        if self.lineage_tried(reborn):
+                    if reborn is not None:
+                        if self.lineage_tried(reborn):  # whatever parent it declared: the row it is reborn from binds
                             self.refuse(slug, f"its rebirth continues {reborn['id']}'s lineage, which has its one "
                                               "Validation try (outcome sealed): propose a different idea")
                             continue
-                        parent = reborn
+                        if parent is None:
+                            parent = reborn
                     note = getattr(index, "note_birth", None)
                     if callable(note):
                         note(checked, structure)
