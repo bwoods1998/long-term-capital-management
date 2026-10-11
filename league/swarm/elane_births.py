@@ -138,13 +138,14 @@ def researching(store: Any) -> int:
 
 
 def due(store: Any, settings: Mapping[str, Any] | None, *, now: float | None = None) -> bool:
-    """The equity pass is due: THE SWITCH is on, its day's dollars have room, and `births_every_seconds` passed since the
-    last pass (`births_refill_seconds` while fewer than `start` families are in Train research)."""
+    """The equity pass is due: THE SWITCH is on, E2 may ask a model now (its day's line has room and it is under its
+    hourly pace: `elane_yield.hold`), and `births_every_seconds` passed since the last pass (`births_refill_seconds`
+    while fewer than `start` families are in Train research)."""
     if not births_on(settings):
         return False
     now = time.time() if now is None else float(now)
     c = cfg(settings)
-    if elane_yield.room(store, settings, now) <= 0:
+    if elane_yield.hold(store, settings, now) is not None:
         return False
     last = _num(store.get(BIRTHS_AT_KEY)) or 0.0
     every = c["births_refill_seconds"] if researching(store) < c["start"] else c["births_every_seconds"]
@@ -470,8 +471,9 @@ class EquityPass:
         quota = EquityQuota(self.store, self.settings, now=began)
         if quota.want <= 0:
             return self.finish({"skipped": "full", "why": "no equity birth is wanted now", **quota.event()})
-        if elane_yield.room(self.store, self.settings, began) <= 0:
-            return self.finish({"skipped": "usd_day", "why": "E2's model dollars for the day are spent (elane.e2.usd_day)"})
+        held = elane_yield.hold(self.store, self.settings, began)
+        if held is not None:
+            return self.finish({"skipped": "usd_day" if held == elane_yield.DAY_SPENT else "pace", "why": held})
         candidates = elane_yield.routes(self.settings, self.router)
         turn = elane_yield.next_turn(self.store)
         first, why_route = elane_yield.choose(self.store, self.settings, candidates, turn=turn, train_key=STATE_KEY)

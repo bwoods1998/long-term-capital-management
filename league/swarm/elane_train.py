@@ -1368,8 +1368,9 @@ class EquityResearcher:
             return self.score(fam, latest)
         if len(versions) >= c["train_budget"] or int(rec.get("attempts") or 0) >= c["train_max_attempts"]:
             return self.finish(fam, "its Train budget is spent with no version passing")
-        if elane_yield.room(self.store, self.settings, self.clock()) <= 0:
-            return {"family": fid, "skipped": "E2's model dollars for the day are spent (elane.e2.usd_day)"}
+        held = elane_yield.hold(self.store, self.settings, self.clock())
+        if held is not None:  # the day's line, or E2's own hourly pace: no model is asked
+            return {"family": fid, "skipped": held}
         return self.write(fam)
 
     def brief(self, fam: Mapping[str, Any]) -> str:
@@ -1653,8 +1654,9 @@ class EquityResearcher:
         static = elane_review.level_text(code)
         if static is not None:
             return self.review_failed(fam, n, "the level rule", [static])
-        if elane_yield.room(self.store, self.settings, self.clock()) <= 0:
-            return {"family": fid, "version": n, "skipped": "E2's model dollars for the day are spent (elane.e2.usd_day)"}
+        held = elane_yield.hold(self.store, self.settings, self.clock())
+        if held is not None:  # the day's line, or E2's own hourly pace: no model is asked
+            return {"family": fid, "version": n, "skipped": held}
         rc = elane_review.cfg(self.settings)
         served = elane_yield.served([elane_yield.Route.of(k) for k in rc["review_routes"]], self.router)
         from . import cards, elane

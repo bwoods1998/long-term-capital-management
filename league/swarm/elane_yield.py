@@ -35,10 +35,26 @@ are recorded for the operator and are never read by `choose`: a route chosen on 
 the holdout back into which model writes the next programs. A Train pass is the first stage every route's programs
 reach alike, and it is a Train fact. (`choose` is tested to give the same route whatever those outcomes are.)
 
-THE DAY'S LINE (`usd_day`, `room`): E2's model dollars a UTC day (births, Train research and the equity review
-together); once spent, no equity question is asked until the next UTC day. A tightening beside the swarm's own pace and
-the guard. The equity review's dollars (league/swarm/elane_review.py) are booked on rows of their own ("review:<route>"),
-never on a birth route's row, so they move no route's yield.
+E2'S DOLLARS: A SHARE OF THE SWARM'S SAIL MODEL LINE, COUNTED APART (`pace_share`, `usd_day`; `hold`, `pace`, `room`).
+The budget rule gives the swarm ONE hourly line for Sail models (`researcher.sail_usd_per_hour` after the budget's
+overlay: `model_line`; $0.3333 an hour, $8.00 a day, at the owner's ceiling and $0.0667 an hour at the floor). E2's
+births, Train research and review are paid from that line and counted apart from the options researchers:
+- E2'S HOURLY PACE (`usd_hour`) is `pace_share` (0.25) of the line. Before every model call (the equity pass, a Train
+  write, a review or audit read) E2 reads what the swarm booked for its own request keys in the trailing hour
+  (`spent_since`: the spend rows whose key is "swarm:elane:...", holds for unanswered calls included) and asks nothing
+  at or over the pace (`hold`). The budget tightens it with the line: at the floor E2's pace is a quarter of the
+  floor's.
+- THE DAY'S LINE (`day_line`) is `usd_day` dollars a UTC day, and never more than a day at the hourly pace
+  (`pace_share` x the line x 24): once E2's day (`spent_today`: the larger of this ledger's day and the swarm's meter
+  for E2's keys, so a hold the ledger never heard of counts) reaches it, no equity question is asked until the next
+  UTC day.
+- THE OPTIONS RESEARCHERS' PACE (league/swarm/loop.py `Swarm.pace_status`) leaves E2's rows out of their own spend,
+  as it leaves the architect's (F1), and gives E2's dollars of the trailing hour, at most E2's hourly pace, back to
+  the line: the researchers pause at the line less what E2 took, so E2 never takes more than its share from them and
+  the two together fit the line. The Sail guard's day counts every dollar; `allocation.plan_usd_per_hour`, when set,
+  counts E2's dollars as research spend like any Sail model dollar.
+The equity review's dollars (league/swarm/elane_review.py) are booked on rows of their own ("review:<route>"), never on
+a birth route's row, so they move no route's yield.
 
 Standard library only.
 """
@@ -67,9 +83,17 @@ DEFAULTS: dict[str, Any] = {
     "sample_requests": 30,
     "explore_every": 3,
     "usd_day": 8.0,
+    "pace_share": 0.25,
 }
-#: Bounds of the numbers above (a value outside is its default).
-BOUNDS = {"min_births": (1, 1000), "sample_requests": (1, 10000), "explore_every": (2, 100), "usd_day": (0.0, 100.0)}
+#: Bounds of the numbers above (a value outside is its default). `pace_share`: at most half the line is ever E2's.
+BOUNDS = {"min_births": (1, 1000), "sample_requests": (1, 10000), "explore_every": (2, 100), "usd_day": (0.0, 100.0),
+          "pace_share": (0.0, 0.5)}
+#: HOW A SPEND ROW OF E2'S IS TOLD (the swarm's `spend` table): every model call's row carries its request key (`key`,
+#: `hold`, `settles` or `releases` in its detail), and E2's keys are "swarm:elane:<births|train|review|audit>:..." (a
+#: window fallback's key keeps the prefix). The loop's `ARCHITECT_KEY` is the same mark for the architect's pass.
+SPEND_MARK = ':"swarm:elane:'
+#: The spend kinds a model call of E2's is booked under (its routes: Sail, OpenAI, Claude).
+SPEND_KINDS = ("sail_model", "openai", "claude")
 #: The ledger rows of the equity review (league/swarm/elane_review.py): "review:<route>", apart from the birth routes.
 REVIEW_PREFIX = "review:"
 ROUTE_KINDS = ("sail", "openai", "claude")
@@ -221,13 +245,90 @@ def next_turn(store: Any) -> int:
     return out[0]
 
 
+def spent_since(store: Any, since: float, kinds: Sequence[str] = SPEND_KINDS) -> float:
+    """What the swarm booked for E2's own request keys since `since` (seconds): the spend rows of `kinds` whose detail
+    carries `SPEND_MARK`, holds for unanswered calls and their later true-ups included. 0 for a store with no spend
+    table (a fake)."""
+    kinds = [str(k) for k in kinds]
+    if not kinds:
+        return 0.0
+    try:
+        row = store._one(f"SELECT COALESCE(SUM(usd),0) AS usd FROM spend WHERE kind IN ({','.join('?' * len(kinds))}) "
+                         "AND epoch>=? AND instr(detail, ?) > 0", (*kinds, float(since), SPEND_MARK))
+    except Exception:  # noqa: BLE001 - no spend table to read: the ledger alone counts
+        return 0.0
+    return max(0.0, float(row["usd"])) if row else 0.0
+
+
+def _day_start(now: float) -> float:
+    return float(now) - float(now) % 86400.0
+
+
 def spent_today(store: Any, now: float) -> float:
-    return float(ledger(store)["days"].get(_today(now), 0.0))
+    """E2's model dollars this UTC day: the larger of the ledger's day (what `book` counted) and the swarm's meter for
+    E2's keys (`spent_since`), so a hold the router booked for a call that never answered counts though no answer was
+    booked here, and a store whose router books no spend row (a fake) reads the ledger."""
+    return max(float(ledger(store)["days"].get(_today(now), 0.0)), spent_since(store, _day_start(now)))
+
+
+def model_line(settings: Mapping[str, Any] | None) -> tuple[float, bool]:
+    """(THE SWARM'S SAIL MODEL LINE in dollars an hour, whether it could be read): `researcher.sail_usd_per_hour`, else
+    (absent or null) the legacy `researcher.usd_per_hour` (4.0 when that is absent too), exactly as the loop's
+    `Swarm.pace_status` reads its limit; the settings the loop holds carry the budget's overlay. A value that is no
+    finite number at or above zero is (0.0, False): the researchers pause on it, and so does E2."""
+    block = (settings or {}).get("researcher") if isinstance(settings, Mapping) else None
+    block = block if isinstance(block, Mapping) else {}
+    raw = block.get("sail_usd_per_hour")
+    raw = raw if raw is not None else block.get("usd_per_hour", 4.0)
+    try:
+        value = float(raw)
+        valid = not isinstance(raw, bool) and math.isfinite(value) and value >= 0
+    except (TypeError, ValueError, OverflowError):
+        value, valid = 0.0, False
+    return (value, True) if valid else (0.0, False)
+
+
+def usd_hour(settings: Mapping[str, Any] | None, line: float | None = None) -> float:
+    """E2'S HOURLY PACE in dollars: `pace_share` of the swarm's Sail model line (`line`: the loop's own reading, else
+    `model_line`)."""
+    if line is None:
+        line, _ = model_line(settings)
+    return max(0.0, float(cfg(settings)["pace_share"]) * max(0.0, float(line)))
+
+
+def day_line(settings: Mapping[str, Any] | None) -> float:
+    """THE DAY'S LINE: `usd_day`, never more than a day at E2's hourly pace (the budget's overlay tightens it with the
+    line)."""
+    return min(float(cfg(settings)["usd_day"]), usd_hour(settings) * 24.0)
 
 
 def room(store: Any, settings: Mapping[str, Any] | None, now: float) -> float:
     """E2's model dollars left this UTC day (THE DAY'S LINE)."""
-    return max(0.0, float(cfg(settings)["usd_day"]) - spent_today(store, now))
+    return max(0.0, day_line(settings) - spent_today(store, now))
+
+
+def pace(store: Any, settings: Mapping[str, Any] | None, now: float, *, line: float | None = None) -> dict[str, Any]:
+    """E2'S HOURLY PACE now: {limit_usd_per_hour, spent_last_hour_usd, paused, reason}. Paused at or over the limit (a
+    zero limit, from a zero share or a line that cannot be read, pauses at once)."""
+    limit = usd_hour(settings, line)
+    spent = spent_since(store, float(now) - 3600.0)
+    paused = spent >= limit
+    return {"limit_usd_per_hour": round(limit, 6), "spent_last_hour_usd": round(spent, 6), "paused": paused,
+            "share": float(cfg(settings)["pace_share"]),
+            "reason": (f"the equity lanes spent ${spent:.4f} on models in the last hour, at their ${limit:.4f} pace "
+                       "(elane.e2.pace_share of the Sail model line)" if paused else None)}
+
+
+#: Why E2 asks no model once its day's line is spent (`hold`; the rounds' skip text).
+DAY_SPENT = "E2's model dollars for the day are spent (elane.e2.usd_day)"
+
+
+def hold(store: Any, settings: Mapping[str, Any] | None, now: float) -> str | None:
+    """Why E2 may ask no model now, or None: THE DAY'S LINE is spent (`DAY_SPENT`), or E2 is at ITS HOURLY PACE. Read
+    before every model call of E2's (the equity pass, a Train write, a review or audit read)."""
+    if room(store, settings, now) <= 0:
+        return DAY_SPENT
+    return pace(store, settings, now)["reason"]
 
 
 # ------------------------------------------------------------------------------------------------------------ the yield
@@ -336,6 +437,8 @@ def report(store: Any, settings: Mapping[str, Any] | None, *, train_key: str) ->
                           for name in ("births", "train_passes", "validation_entries", "looks_passed", "live")}
         out[key] = row
     return {"routes": out, "review": review, "turn": book_["turn"], "days": book_["days"], "usd_day": cfg(settings)["usd_day"],
+            "day_line": round(day_line(settings), 6), "pace_share": cfg(settings)["pace_share"],
+            "usd_hour": round(usd_hour(settings), 6),
             "rule": "the route choice reads births, dollars and Train passes only (A9 D3)"}
 
 
@@ -388,7 +491,7 @@ def ask(router: Any, store: Any, settings: Mapping[str, Any] | None, *, first: R
     return None, None, errors
 
 
-__all__ = ["LEDGER_KEY", "ROUTE_KEY", "ROLE", "DEFAULTS", "BOUNDS", "REVIEW_PREFIX", "Route", "cfg", "e2_settings", "routes",
-           "served", "ledger", "book",
-           "book_births", "next_turn", "spent_today", "room", "answer_usd", "train_counts", "choose", "report", "ask_on",
-           "ask"]
+__all__ = ["LEDGER_KEY", "ROUTE_KEY", "ROLE", "DEFAULTS", "BOUNDS", "REVIEW_PREFIX", "SPEND_MARK", "SPEND_KINDS", "DAY_SPENT",
+           "Route", "cfg", "e2_settings", "routes", "served", "ledger", "book",
+           "book_births", "next_turn", "spent_since", "spent_today", "model_line", "usd_hour", "day_line", "room", "pace",
+           "hold", "answer_usd", "train_counts", "choose", "report", "ask_on", "ask"]

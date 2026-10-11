@@ -217,7 +217,8 @@
       "min_births": 10,
       "sample_requests": 30,
       "explore_every": 3,
-      "usd_day": 8.0
+      "usd_day": 8.0,
+      "pace_share": 0.25
     }
   },
   "engineer": {

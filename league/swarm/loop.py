@@ -68,7 +68,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from . import allocation as allocation_mod
-from . import elane, game
+from . import elane, elane_yield, game
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
 from .architect import AGENDA_KEY, Architect, GraveyardDigest, allowed_structures
 from .diagnostician import Diagnostician
@@ -530,7 +530,7 @@ class Swarm:
         self.started_at = clock()
         self.why_stopped = ""
         self._beat = float("-inf")
-        self._pace = (float("-inf"), "", 0.0)
+        self._pace = (float("-inf"), "", 0.0, 0.0)  # (read at, scope, the researchers' own spend, the equity lanes')
         self._concurrency: tuple[float, dict[str, Any]] | None = None  # THE CONCURRENCY, cached for 10 s
         self._concurrency_lock = threading.Lock()  # one refresh at a time (every worker reads it)
         self._threads = False  # run() started the researcher threads (step() may add workers up to the ceiling)
@@ -680,7 +680,12 @@ class Swarm:
 
     def pace_status(self) -> dict[str, Any]:
         """The funded researcher stream's trailing-hour spend; absent/null Sail limit keeps the legacy combined cap. The
-        architect's own pass is not in it (F1, `architect_spent`): one pass never pauses every researcher for an hour."""
+        architect's own pass is not in it (F1, `architect_spent`): one pass never pauses every researcher for an hour.
+        THE EQUITY LANES' DOLLARS (release E2; league/swarm/elane_yield.py) are counted apart too: E2's births, Train
+        research and review are paid from this same line, held to their own hourly pace (`elane.e2.pace_share` of the
+        limit, checked by E2 before each of its model calls), and their rows are not the researchers' spend. What E2
+        took of the line in the hour, at most its pace, comes off the researchers' limit (`equity`), so the two together
+        fit the line and E2 never takes more than its share from the researchers."""
         cfg = self.settings.get("researcher", {})
         sail_limit = cfg.get("sail_usd_per_hour")
         scope = "sail_model" if sail_limit is not None else "all_models"
@@ -695,15 +700,24 @@ class Swarm:
         cached = self._pace
         if now - cached[0] >= 10.0 or now < cached[0] or cached[1] != scope:
             kinds = ["sail_model"] if scope == "sail_model" else ["sail_model", "openai"]
-            # F1: the researchers' stream, the architect's own pass apart (`architect_spent`; the guard's day counts it).
-            spent = max(0.0, self.store.spent(kinds, since=now - 3600) - architect_spent(self.store, kinds, now - 3600))
-            cached = self._pace = (now, scope, spent)
-        paused = not valid or cached[2] >= limit
+            # F1: the researchers' stream, the architect's own pass apart (`architect_spent`; the guard's day counts it),
+            # and the equity lanes' own rows apart (E2: their keys are "swarm:elane:...", `elane_yield.SPEND_MARK`).
+            equity = elane_yield.spent_since(self.store, now - 3600, kinds)
+            spent = max(0.0, self.store.spent(kinds, since=now - 3600) - architect_spent(self.store, kinds, now - 3600)
+                        - equity)
+            cached = self._pace = (now, scope, spent, equity)
+        # What E2 took of the line in the hour, at most its own pace: the researchers' room is the line less that.
+        equity_pace = elane_yield.usd_hour(self.settings, limit) if valid else 0.0
+        taken = min(cached[3], equity_pace)
+        paused = not valid or cached[2] >= limit - taken
         label = "Sail models" if scope == "sail_model" else "Sail and OpenAI models"
         reason = (f"invalid researcher.{key}; research paused" if not valid else
-                  f"{label} spent ${cached[2]:.4f} in the last hour, at the ${limit:.4f} pace" if paused else None)
+                  (f"{label} spent ${cached[2]:.4f} in the last hour, at the ${limit:.4f} pace"
+                   + (f" (the equity lanes took ${taken:.4f} of it)" if taken > 0 else "")) if paused else None)
         return {"scope": scope, "limit_usd_per_hour": limit if valid else None,
-                "spent_last_hour_usd": round(cached[2], 6), "paused": paused, "reason": reason}
+                "spent_last_hour_usd": round(cached[2], 6), "paused": paused, "reason": reason,
+                "equity": {"spent_last_hour_usd": round(cached[3], 6), "limit_usd_per_hour": round(equity_pace, 6),
+                           "taken_usd": round(taken, 6), "paused": cached[3] >= equity_pace}}
 
     def over_pace(self) -> bool:
         """No new cycles/rewrites above their configured model pace (spend reads cached for at most 10 s)."""

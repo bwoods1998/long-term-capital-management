@@ -367,6 +367,98 @@ class TheLoop(LoopCase):
         self.assertEqual(record["routes"]["sail:pro_asap"]["families"], 1, record)
         self.assertEqual(record["usd_day"], 8.0)
 
+    # ------------------------------------------------------------------ E2's dollars and the researchers' pace
+    def unpace(self, sw) -> dict:
+        """The pace as a fresh read (its spend is cached for 10 s)."""
+        sw._pace = (float("-inf"), "", 0.0, 0.0)
+        return sw.pace_status()
+
+    def e2_row(self, usd: float, n: int) -> None:
+        """A model call of E2's as the router books it (kind `sail_model`, its request key in the detail)."""
+        key = f"swarm:elane:train:e2-wired:{n}:sail:pro_asap"
+        self.store.add_spend("sail_model", usd, family="e2-wired", detail={"profile": "pro_asap", "key": key, "desk": "e2-wired"})
+
+    def test_e2s_dollars_never_pause_the_researchers_and_e2_waits_at_its_own_pace(self):
+        # The review's blocker (loop-1, merge-1), on the real loop, router, Provider and the committed policy.json: E2's
+        # calls are booked as `sail_model` with keys "swarm:elane:...", the meter the researchers' hourly pace sums, and
+        # nothing held E2's own rounds. E2's first switch values gave it the whole pace: every options researcher slept.
+        from league.swarm.loop import architect_spent
+
+        row = fx.proposal("e2-wired", lane="beta", agenda="overnight", symbols=("DIA",), code=fx.program("DIA"))
+        self.sail.script = lambda body: {"text": json.dumps({"families": [row]})}
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        limit = sw.pace_status()["limit_usd_per_hour"]
+        share = elane_yield.cfg(sw.settings)["pace_share"]
+        self.assertGreater(limit, 0.0)
+        self.assertEqual(elane_yield.model_line(sw.settings), (limit, True), "E2 reads the line the loop's pace reads")
+        self.assertEqual(share, 0.25)
+        out = sw.architect.equity_pass()
+        self.assertEqual(out.get("born"), ["e2-wired"], json.dumps(out, default=str)[:600])
+        booked = elane_yield.spent_since(self.store, sw.clock() - 3600)
+        self.assertGreater(booked, 0.0)
+        self.assertAlmostEqual(booked, elane_yield.ledger(self.store)["routes"]["sail:pro_asap"]["usd"], places=6)
+        self.assertAlmostEqual(self.store.spent(["sail_model"], since=sw.clock() - 3600), booked, places=6)
+        self.assertEqual(architect_spent(self.store, ["sail_model"], sw.clock() - 3600), 0.0, "no key of the architect's")
+        pace = self.unpace(sw)
+        self.assertEqual((pace["spent_last_hour_usd"], pace["paused"]), (0.0, False), "E2's pass is not the researchers' spend")
+        self.assertAlmostEqual(pace["equity"]["spent_last_hour_usd"], booked, places=6)
+        self.assertAlmostEqual(pace["equity"]["limit_usd_per_hour"], share * limit, places=6)
+        # E2 at three times the whole line in the hour: the researchers are not paused, and E2 is, by its own pace.
+        self.e2_row(3 * limit, 1)
+        pace = self.unpace(sw)
+        self.assertFalse(sw.over_pace(), pace)
+        self.assertTrue(pace["equity"]["paused"])
+        self.assertAlmostEqual(pace["equity"]["taken_usd"], share * limit, places=6)
+        held = elane_yield.hold(self.store, sw.settings, sw.clock())
+        self.assertIsNotNone(held)
+        self.assertIn("pace", held)
+        # Neither of E2's rounds asks a model while it waits: no equity pass is due, and a family that needs a program
+        # is skipped, the reason named.
+        self.store.put(elane_births.BIRTHS_AT_KEY, 0)
+        self.assertFalse(sw.architect.equity_due())
+        names.clear()
+        sw.step()
+        self.assertNotIn("elane", names)
+        asked = len(self.asked())
+        self.assertEqual(sw.architect.equity_pass().get("skipped"), "pace")
+        fx.e2_family(self.store, "e2-needs-a-program")
+        steps = {s["family"]: s for s in sw.elane_train.run()["steps"]}
+        self.assertEqual(steps["e2-needs-a-program"].get("skipped"), held)
+        self.assertEqual(len(self.asked()), asked, "no model was asked")
+        # The researchers keep the line less E2's share, whatever E2 spent over it: under it they run, at it they pause.
+        self.store.add_spend("sail_model", (1 - share) * limit - 0.001, family="a-family",
+                             detail={"desk": "a-family", "key": "swarm:a-family:c3:m0:2", "profile": "flash_asap"})
+        self.assertFalse(self.unpace(sw)["paused"])
+        self.store.add_spend("sail_model", 0.002, family="a-family",
+                             detail={"desk": "a-family", "key": "swarm:a-family:c4:m0:2", "profile": "flash_asap"})
+        pace = self.unpace(sw)
+        self.assertTrue(pace["paused"])
+        self.assertTrue(sw.over_pace())
+        self.assertIn("the equity lanes took", pace["reason"])
+        self.assertAlmostEqual(pace["spent_last_hour_usd"], (1 - share) * limit + 0.001, places=6)
+
+    def test_with_e2_idle_the_researchers_have_the_whole_line(self):
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        limit = sw.pace_status()["limit_usd_per_hour"]
+        self.store.add_spend("sail_model", limit - 0.001, family="a-family",
+                             detail={"desk": "a-family", "key": "swarm:a-family:c3:m0:2", "profile": "flash_asap"})
+        pace = self.unpace(sw)
+        self.assertEqual((pace["paused"], pace["equity"]["taken_usd"]), (False, 0.0), "nothing is set aside for an idle E2")
+        self.e2_row(0.002, 1)
+        self.assertTrue(self.unpace(sw)["paused"], "the two together fit the line")
+
+    def test_the_budgets_floor_tightens_e2s_day_with_the_line(self):
+        # No budget.json under this root: the budget rule's floor. E2's day is a quarter of the floor's model dollars,
+        # whatever `elane.e2.usd_day` says (the review: at the floor E2's line was still $8 against a $4 research day).
+        from league.ops import budget
+
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        line = budget.knobs(budget.floor_usd_day("sail"), budget.floor_usd_day("claude"))["researcher.sail_usd_per_hour"]
+        self.assertAlmostEqual(sw.pace_status()["limit_usd_per_hour"], line, places=6)
+        self.assertAlmostEqual(elane_yield.day_line(sw.settings), 0.25 * line * 24, places=6)
+        self.assertLess(elane_yield.day_line(sw.settings), 8.0)
+        self.assertEqual(elane_yield.cfg(sw.settings)["usd_day"], 8.0)
+
 
 if __name__ == "__main__":
     unittest.main()

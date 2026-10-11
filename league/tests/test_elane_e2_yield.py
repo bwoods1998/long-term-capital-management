@@ -194,5 +194,91 @@ class TheLedger(YieldCase):
         self.assertIn("A9 D3", rep["rule"])
 
 
+class ThePace(YieldCase):
+    """E2'S DOLLARS: a share of the swarm's Sail model line, counted apart (the integration review's loop-1 and merge-1:
+    E2's dollars landed on the options researchers' hourly pace and E2 itself was held by no pace)."""
+
+    def e2_row(self, usd: float, key: str = "swarm:elane:train:f:1:sail:pro_asap", *, kind: str = "sail_model",
+               field: str = "key") -> None:
+        self.store.add_spend(kind, usd, family="f", detail={field: key, "profile": "pro_asap", "desk": "f"})
+
+    def lined(self, line, **e2) -> dict:
+        return {**fx.settings(**e2), "researcher": {"sail_usd_per_hour": line, "usd_per_hour": 5}}
+
+    def test_the_line_is_read_as_the_loop_reads_it(self):
+        nan, inf = float("nan"), float("inf")
+        for block, want in (({"sail_usd_per_hour": 0.34, "usd_per_hour": 5}, (0.34, True)),
+                            ({"sail_usd_per_hour": None, "usd_per_hour": 5}, (5.0, True)),
+                            ({"usd_per_hour": 2}, (2.0, True)), ({}, (4.0, True)), ({"sail_usd_per_hour": 0}, (0.0, True)),
+                            ({"sail_usd_per_hour": "x"}, (0.0, False)), ({"sail_usd_per_hour": True}, (0.0, False)),
+                            ({"sail_usd_per_hour": -1}, (0.0, False)), ({"sail_usd_per_hour": nan}, (0.0, False)),
+                            ({"sail_usd_per_hour": inf}, (0.0, False)), ({"sail_usd_per_hour": [1]}, (0.0, False))):
+            self.assertEqual(elane_yield.model_line({"researcher": block}), want, block)
+        self.assertEqual(elane_yield.model_line({}), (4.0, True))
+        self.assertEqual(elane_yield.model_line(None), (4.0, True))
+        self.assertEqual(elane_yield.model_line({"researcher": "x"}), (4.0, True))
+
+    def test_the_pace_is_a_share_of_the_line_and_the_day_never_more_than_a_day_at_it(self):
+        ceiling = self.lined(20.0 * 0.4 / 24)  # the owner's ceiling: Sail $20 a day, $8.00 of it for models
+        self.assertAlmostEqual(elane_yield.usd_hour(ceiling), 0.25 * 8.0 / 24)
+        self.assertAlmostEqual(elane_yield.day_line(ceiling), 2.0, msg="a quarter of the day's model dollars")
+        self.assertEqual(elane_yield.cfg(ceiling)["usd_day"], 8.0, "the captain's line is a cap above it, unchanged")
+        floor = self.lined(4.0 * 0.4 / 24)  # the budget's floor tightens E2 with the line
+        self.assertAlmostEqual(elane_yield.day_line(floor), 0.4)
+        self.assertAlmostEqual(elane_yield.day_line(self.lined(20.0 * 0.4 / 24, usd_day=0.5)), 0.5, msg="usd_day under it binds")
+        self.assertAlmostEqual(elane_yield.day_line(self.lined(20.0 * 0.4 / 24, pace_share=0.5)), 4.0)
+        self.assertAlmostEqual(elane_yield.usd_hour(ceiling, 1.0), 0.25, msg="the loop hands in its own reading of the line")
+        for raw in (0.51, -0.1, "x", True, None):
+            self.assertEqual(elane_yield.cfg(self.lined(1.0, pace_share=raw))["pace_share"], 0.25, raw)
+
+    def test_only_e2s_own_rows_count_and_they_leave_the_hour(self):
+        s = self.lined(0.4)  # E2's pace: 0.10 an hour, 2.40 a day
+        self.store.add_spend("sail_model", 5.0, family="opt", detail={"key": "swarm:opt-family:c1:m0:0"})
+        self.store.add_spend("sail_model", 5.0, family="swarm", detail={"key": "swarm:architect:1791030654"})
+        self.store.add_spend("gym_box", 5.0, detail={"key": "swarm:elane:never-a-box"})
+        self.assertEqual(elane_yield.spent_since(self.store, self.clock() - 3600), 0.0)
+        self.assertIsNone(elane_yield.hold(self.store, s, self.clock()))
+        self.e2_row(0.04)
+        self.e2_row(0.03, "swarm:elane:audit:f:1:0:sail:k3_balanced:fallback:pro_asap")  # a window fallback's key
+        self.assertIsNone(elane_yield.hold(self.store, s, self.clock()), "0.07 of 0.10")
+        self.e2_row(0.02, "swarm:elane:births:9:claude:architect", kind="claude", field="hold")
+        self.e2_row(0.02, "swarm:elane:births:8:openai:m", kind="openai", field="settles")
+        self.assertAlmostEqual(elane_yield.spent_since(self.store, self.clock() - 3600), 0.11)
+        self.assertAlmostEqual(elane_yield.spent_since(self.store, self.clock() - 3600, ["sail_model"]), 0.07)
+        pace = elane_yield.pace(self.store, s, self.clock())
+        self.assertEqual((pace["paused"], pace["limit_usd_per_hour"], pace["spent_last_hour_usd"]), (True, 0.1, 0.11))
+        held = elane_yield.hold(self.store, s, self.clock())
+        self.assertIn("pace", held)
+        self.assertNotEqual(held, elane_yield.DAY_SPENT)
+        self.clock.advance(3601)
+        self.assertIsNone(elane_yield.hold(self.store, s, self.clock()), "the hour passed: E2 may ask again")
+        self.assertAlmostEqual(room(self.store, s, self.clock()), 2.4 - 0.11, msg="the day still counts them")
+
+    def test_the_day_counts_what_the_swarm_booked_for_a_call_the_ledger_never_heard_of(self):
+        # A hold the router booked for a call that failed after it was sent (the review's loop-2): no answer was booked in
+        # the ledger, the swarm's meter has the row, and E2's day is the larger of the two.
+        s = self.lined(1.0, usd_day=0.2)
+        book(self.store, "sail:k3", usd=0.05, known=True, purpose="research", answered=True, now=self.clock())
+        self.assertAlmostEqual(elane_yield.spent_today(self.store, self.clock()), 0.05, msg="a fake router: the ledger alone")
+        self.e2_row(0.08, "swarm:elane:train:f:2:sail:k3")
+        self.e2_row(0.09, "swarm:elane:train:f:3:sail:pro_asap")
+        self.assertAlmostEqual(elane_yield.spent_today(self.store, self.clock()), 0.17)
+        self.assertAlmostEqual(room(self.store, s, self.clock()), 0.03)
+        self.e2_row(0.03, "swarm:elane:train:f:4:sail:glm_asap")
+        self.assertEqual(elane_yield.hold(self.store, s, self.clock()), elane_yield.DAY_SPENT)
+        self.clock.advance(86400)
+        self.assertIsNone(elane_yield.hold(self.store, s, self.clock()), "a new UTC day")
+
+    def test_no_share_or_an_unreadable_line_asks_nothing(self):
+        for s in (self.lined(0.4, pace_share=0.0), self.lined("x"), self.lined(0.0)):
+            self.assertEqual(elane_yield.usd_hour(s), 0.0)
+            self.assertIsNotNone(elane_yield.hold(self.store, s, self.clock()))
+
+    def test_the_report_names_the_line_e2_is_held_to(self):
+        rep = report(self.store, self.lined(20.0 * 0.4 / 24), train_key=STATE_KEY)
+        self.assertEqual((rep["usd_day"], rep["day_line"], rep["pace_share"]), (8.0, 2.0, 0.25))
+        self.assertAlmostEqual(rep["usd_hour"], 0.083333, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()
