@@ -819,3 +819,114 @@ class WhereTheSeedsCameFrom(FixCase):
             self.assertEqual(notes[2], f"where it came from: {fam['spec']['provenance']}")
         self.born("plain", seeded=False)
         self.assertEqual(elane.view(self.store.family("plain"), lane=BETA)["notes"], [elane.BETA_NOTE])
+
+
+from league.ops import dlane_report as DR  # noqa: E402
+from league.tests.test_dlane_report import ny  # noqa: E402
+from league.tests.test_dlane_report_equity import EquityFixture  # noqa: E402
+
+
+class TheDoneMeterBesideEquityCloses(EquityFixture):
+    """evidence-6, evidence-10, evidence-5 (league/ops/dlane_report.py; every figure invented)."""
+
+    def thirty(self, *, live_r: float, twin_r: float, status: str = "priced") -> dict:
+        """Thirty counted equity closes, fifteen each for two programs, net above zero, each with a final twin."""
+        for fid, lane in (("p-a", "beta"), ("p-b", "equity")):
+            self.eq_family(fid, lane=lane)
+        for i in range(30):
+            fam, lane = ("p-a", "beta") if i % 2 == 0 else ("p-b", "equity")
+            lid = self.eq_close(fam, cash="2.00", lane=lane, closed_at=ny("2026-10-14", 15, 56) + i)
+            self.twin(lid, live_r=live_r, twin_r=twin_r, status=status)
+        return self.report()["done"]["all"]["latest"]
+
+    def test_a_fill_gap_past_15_bp_a_side_fails_item_4_where_the_options_measure_let_it_through(self):
+        """evidence-6: for equity closes item 4 was the options measure (the replay gap within 0.10 of the maximum
+        loss, which for a long lot is its notional: a thousand basis points) against A14's 15 bp a side. Fills 40 bp a
+        side below their twins read consistent, and the reading held."""
+        cp = self.thirty(live_r=0.020, twin_r=0.028)  # each close 40 bp a side below its official-price twin
+        self.assertEqual(cp["at_close"], 30)
+        self.assertTrue(cp["items"]["3"], "30 closes, 15 each for two programs, net above zero")
+        for program in cp["by_program"]:
+            self.assertEqual((program["matched"], program["gap"], program["consistent"]), (15, -0.008, True),
+                             "the options measure: a gap of 0.008 of the notional, inside its 0.10")
+        a14 = cp["a14"]
+        self.assertEqual((a14["closes"], a14["priced"], a14["mean_gap_bp"], a14["bound_bp"]), (30, 30, -40.0, 15.0))
+        self.assertEqual((a14["fill_gap_ok"], a14["consistent"]), (False, False))
+        self.assertEqual((cp["items"]["4"], cp["consistent_ok"], cp["holds"]), (False, False, False))
+        self.assertIn("not consistent (A14)", cp["why"])
+        self.assertIn("40.0 bp a side", cp["why"])
+
+    def test_inside_the_bound_item_4_is_still_not_read_until_the_intents_half_has_a_reader(self):
+        cp = self.thirty(live_r=0.020, twin_r=0.021)  # 5 bp a side
+        a14 = cp["a14"]
+        self.assertEqual((a14["mean_gap_bp"], a14["fill_gap_ok"], a14["consistent"]), (-5.0, True, None))
+        self.assertEqual((a14["intents"]["agreement"], a14["intents"]["bound"]), (None, 0.95))
+        self.assertEqual((cp["items"]["4"], cp["holds"]), (False, False), "never True on equity closes before A14 is read")
+        self.assertIn("A14 pending", cp["why"])
+        self.assertIn("no reader yet", cp["why"])
+
+    def test_closes_with_no_priced_twin_are_counted_as_unmeasured_never_dropped(self):
+        cp = self.thirty(live_r=0.020, twin_r=0.021, status="no_bar")
+        a14 = cp["a14"]
+        self.assertEqual((a14["priced"], a14["unpriced"], a14["mean_gap_bp"], a14["fill_gap_ok"]), (0, 30, None, None))
+        self.assertFalse(cp["items"]["4"])
+        self.assertIn("no equity close of 30 has a final priced twin yet", cp["why"])
+
+    def test_a_reading_with_no_equity_close_is_read_by_the_pinned_measure_as_before(self):
+        self.assertIsNone(DR.a14_consistency([{"equity": False, "pid": 1}, {"pid": 2}]))
+        self.assertIsNone(DR.a14_consistency([]))
+        self.assertEqual((DR.A14_GAP_BP, DR.A14_AGREEMENT), (15.0, 0.95))
+        self.assertIn("at most 15 bp a side", DR.A14_CONSISTENCY)
+        self.assertIn("at least 95%", DR.A14_CONSISTENCY)
+
+    def test_the_screen_row_keeps_the_lanes_label_and_s1xs_label_apart(self):
+        """evidence-10: `EquityScreens.of` answered the look detail's `label`, which is the LANE's ("MARKET BETA"),
+        where the row's `label` was meant to be S1-X's (alpha or beta, the detail's `s1x`)."""
+        self.eq_family("p-a")
+        self.eq_family("p-e", lane="equity")
+        # The look's detail exactly as league/swarm/elane.py `look` writes it.
+        for fid, lane_label, s1x in (("p-a", "MARKET BETA", "beta"), ("p-e", "EQUITY", "alpha")):
+            self.store.add_look(fid, 1, f"sha-{fid}", passed=True, p_value=None,
+                                detail={"lane": "beta" if fid == "p-a" else "equity", "label": lane_label, "screen": "S2",
+                                        "receipt": "r" * 64, "c_pF1": 1.0, "c_H": 1.05, "s1x": s1x, "seeded": False,
+                                        "beside": "an invented line", "passed": True})
+        screens = DR.EquityScreens(self.store)
+        for fid, lane_label, s1x in (("p-a", "MARKET BETA", "beta"), ("p-e", "EQUITY", "alpha")):
+            row = screens.of(fid, 1)
+            self.assertEqual((row["s1x"], row["lane_label"]), (s1x, lane_label))
+            self.assertNotIn("label", row)
+        lid = self.eq_close("p-e", lane="equity")
+        self.twin(lid, live_r=0.01, twin_r=0.01)
+        out = self.report()
+        close = out["done"]["all"]["closes"][0]
+        self.assertEqual((close["label"], close["fp"]["s1x"], close["fp"]["lane_label"]), ("EQUITY", "alpha", "EQUITY"),
+                         "an EQUITY-lane program the screen labelled alpha keeps that label as a field")
+        (trade,) = [r for r in out["fp_beside_trades"]["closes"] if r["family"] == "p-e"]
+        self.assertEqual((trade["label"], trade["s1x"]), ("EQUITY", "alpha"))
+        # A look recorded only in the family's state (no detail): S1-X's label is the verdict's `label`.
+        self.eq_family("p-s")
+        self.store.set_state("p-s", elane_look={"version": 1, "at": "x", "beside": "an invented line",
+                                                "verdict": {"screen": "S2", "passed": True, "label": "beta"}})
+        row = DR.EquityScreens(self.store).of("p-s", 1)
+        self.assertEqual((row["s1x"], row["lane_label"]), ("beta", None))
+
+    def test_the_zero_edge_figure_says_it_is_the_options_rules_beside_equity_closes(self):
+        """evidence-5: `done.p_done_zero_edge` is the options Probe rules' simulation figure, printed unqualified beside
+        meters that count delta-one share closes."""
+        plain = self.report()["done"]["p_done_zero_edge"]
+        self.assertNotIn("equity_note", plain, "no equity close counted: the figure as before")
+        self.eq_family("seed-overnight-spy")
+        lid = self.eq_close("seed-overnight-spy")
+        self.twin(lid, live_r=0.01, twin_r=0.01)
+        out = self.report()
+        figure = out["done"]["p_done_zero_edge"]
+        self.assertEqual({k: v for k, v in figure.items() if k not in ("applies_to", "equity_closes", "equity_note")}, plain)
+        self.assertEqual((figure["applies_to"], figure["equity_closes"], figure["equity_note"]),
+                         ("the options Probe rules only", 1, DR.ZERO_EDGE_EQUITY_NOTE))
+        self.assertEqual(out["done"]["all"]["running"]["equity"]["zero_edge_note"], DR.ZERO_EDGE_EQUITY_NOTE)
+        for words in ("options Probe rules' simulation figure only", "never measured", "far higher", "weak evidence"):
+            self.assertIn(words, DR.ZERO_EDGE_EQUITY_NOTE)
+        import re
+
+        self.assertIsNone(re.search(r"\d", DR.ZERO_EDGE_EQUITY_NOTE), "no figure for the share lanes is stated")
+        self.assertEqual(DR.zero_edge(None), DR.zero_edge(None, equity_closes=0))

@@ -211,7 +211,8 @@ class WhatRidesBeside(EquityFixture):
         row = R.EquityScreens(self.store).of("p-s2", 1)
         self.assertEqual((row["screen"], row["beside"], row["receipt"]), ("S2", line, "r" * 64))
         self.assertEqual((row["c_R"], row["c_pF1"], row["c_H"], row["own_fp"], row["holdout_only"], row["drift_kept"],
-                          row["label"], row["fp_x"]), (0.0, 1.02, 1.07, 0.031, 0.094, 0.21, "beta", 0.04))
+                          row["s1x"], row["fp_x"]), (0.0, 1.02, 1.07, 0.031, 0.094, 0.21, "beta", 0.04))
+        self.assertNotIn("label", row, "S1-X's label is `s1x`; the lane's is `lane_label` (never one ambiguous `label`)")
         self.assertEqual((row["c_used"], row["c_p"]), (None, None), "S2 has no pooled-t bar")
         self.assertNotIn("fp_why", row)
         self.assertIn("no screen line", R.EquityScreens(self.store).of("p-s2", 2)["fp_why"], "another version: no look")
@@ -220,7 +221,8 @@ class WhatRidesBeside(EquityFixture):
         """A14 (the captain's pre-registration, before the first equity close): Done's "fills consistent" reading (15
         bp a side AND 95% of the counted sessions, at each checkpoint), the close-date figures beside every reading
         and the inactive forward seat rule are in the report, verbatim, and in docs/operations.md in the same words;
-        the status says plainly that none of the three is computed yet."""
+        the status says plainly what is computed (the fill-gap half) and what is not (the intents half, the
+        close-date figures, the seat rule)."""
         import re
         from pathlib import Path
 
@@ -237,7 +239,9 @@ class WhatRidesBeside(EquityFixture):
             self.assertIn(words, R.A14_BESIDE_DONE)
         for words in ("written and inactive", "fewer than 5 real closes", "never unseated", "except by EDM1"):
             self.assertIn(words, R.A14_SEAT_RULE)
-        self.assertIn("not computed yet", pre["status"])
+        for words in ("partly computed", "fill-gap half is computed", "intents-agreement half has no reader yet",
+                      "does not hold", "No reading carries the close-date figures"):
+            self.assertIn(words, pre["status"])
         page = re.sub(r"\s+", " ", (Path(R.__file__).resolve().parents[2] / "docs" / "operations.md").read_text())
         for sentence in (R.A14_CONSISTENCY, R.A14_BESIDE_DONE, R.A14_SEAT_RULE):
             self.assertIn(sentence, page)
