@@ -176,7 +176,10 @@ class EquityFamilies:
                     return False
                 if validation_r_sd(state, expected.get("version")) != expected.get("validation_r_sd"):
                     return False
-                row = next((r for r in self._rows(family) if r.get("family") == family), None)
+                try:
+                    row = next((r for r in self._rows(family) if r.get("family") == family), None)
+                except Exception:  # noqa: BLE001 - the row could not be read again (the read is strict): no write
+                    return False
                 if row is None or any(row.get(k) != expected.get(k) for k in CONFIRM_FIELDS):
                     return False
                 if band != fam["band"]:

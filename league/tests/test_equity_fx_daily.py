@@ -142,6 +142,16 @@ class TheStrictRead(SwarmCase):
         self.assertEqual([r["family"] for r in families.read()], [SPY])
         self.assertEqual(families.last_error, "")
 
+    def test_a_band_is_not_written_on_a_row_that_cannot_be_read_again(self):
+        self.born_validated_and_looked()
+        families = EquityFamilies(self.root)
+        [row] = families.read()
+        with self.unreadable_once():
+            self.assertFalse(families.confirm_band(row, "probe", "a seat is free"))
+        self.assertEqual(self.store.family(SPY)["band"], "candidate")
+        self.assertTrue(families.confirm_band(row, "probe", "a seat is free"))
+        self.assertEqual(self.store.family(SPY)["band"], "probe")
+
     def test_standing_is_the_stores_own_word(self):
         self.born_validated_and_looked()
         families = EquityFamilies(self.root)
@@ -428,6 +438,39 @@ class Seating(T.BookTest):
         self.assertEqual(h.state.get("eq_decide")["instances"], [key])
         self.assertEqual(len(h.intents(status="planned")), 1)
 
+    def test_the_retries_stop_at_the_next_sessions_pre_open(self):
+        """After it the book an instance holds is no longer the close's (lots sold and bought since): a program that
+        could not be asked overnight waits for the session's own decision; one seated now holds nothing and is asked."""
+        h = self.deployed()
+        key = self.passes(h, SPY)
+        h.decider.fail = True
+        h.tick(20, 0, day=SUNDAY)
+        h.tick(9, 24, day=MONDAY)                                   # still before the 09:25 pre-open: asked again
+        self.assertEqual(len(h.decider.jobs), 2)
+        h.decider.fail = False
+        h.tick(9, 40, day=MONDAY)
+        self.assertEqual(len(h.decider.jobs), 2, "not asked again once the session has begun")
+        self.assertEqual(h.book._instance(key).failed_decides, 1)
+        other = self.passes(h, QQQ, "QQQ")
+        h.tick(10, 0, day=MONDAY)
+        self.assertEqual([j["key"] for j in h.decider.jobs[-1]["jobs"]], [other])
+        self.assertEqual(h.state.get("eq_decide")["instances"], [other])
+
+    def test_a_new_version_of_a_running_family_waits_for_the_decision(self):
+        """The seating pass never runs two versions of one family in a session: the decision retires the old version
+        and starts the new one."""
+        h = self.deployed()
+        key = self.passes(h, SPY)
+        h.tick(20, 0, day=SUNDAY)
+        h.families.rows[SPY].update(version=2, band="probe", run_sha="r2")
+        h.decider.plans[key_of(SPY, 2)] = [{"buy": "SPY", "share": 0.5}]
+        h.tick(21, 0, day=SUNDAY)
+        self.assertEqual([i.id for i in h.book._instances()], [key])
+        self.assertEqual(len(h.decider.jobs), 1)
+        h.tick(16, 31, day=MONDAY)
+        self.assertEqual({i.id: i.retired_at is None for i in h.book._instances()}, {key: False, key_of(SPY, 2): True})
+        self.assertTrue(h.book._instance(key).why.startswith("retired: superseded by version 2"))
+
     def test_a_bar_read_again_for_a_later_decide_is_held_against_the_earlier_one(self):
         """The seating pass reads the day's bars again when a program seated since needs a symbol the day's fetch did
         not hold, and that read writes the day's rows again: a price that changed under a program that already decided
@@ -477,6 +520,18 @@ class RetiredOnEvidence(T.BookTest):
         h.decide_setup(TUESDAY)
         h.tick(16, 21, day=TUESDAY)
         self.assertEqual(h.state.get("eq_synced"), "2026-10-13")
+
+    def test_a_sync_the_decide_never_got_is_said_once(self):
+        h = self.harness()
+        inst = self.running(h)
+        h.families.last_error = "EquityUnreadable: OperationalError: database is locked"
+        for minute in (21, 25, 31, 32):
+            h.tick(16, minute)
+        self.assertIsNone(h.state.get("eq_synced"))
+        self.assertEqual(h.book._instance(inst.id).last_decided_day, "2026-10-12", "it decides as the book holds it")
+        [told] = warnings(h)
+        self.assertIn("the band sync of 2026-10-12", told)
+        self.assertIn("database is locked", told)
 
     def test_a_family_the_store_does_not_know_keeps_its_instance(self):
         """A swarm store that lost the family (a half-restored state) is no evidence that it stopped."""
@@ -670,6 +725,23 @@ class FailedDecides(T.BookTest):
                          sorted((lots[name].lid, "house", "2026-10-14", "open") for name in ("raises", "missing", "no-ctx")))
         self.assertEqual(sum(1 for load in h.decider.loads if load[0] == insts["missing"].id), 2)
 
+    def test_one_failed_decide_a_session_whatever_failed(self):
+        """The program's own decide failed on Monday, and Tuesday's morning audit finds Monday's bars changed: one
+        failed decide for that session, not two (two SESSIONS of failed decides exit a program's lots)."""
+        h = self.harness()
+        h.decider = Answers()
+        h.book = h.new_book()
+        h.families.rows = {SPY: T.family_row()}
+        inst = h.instance()
+        h.decider.answers = {inst.id: {"intents": [], "stats": {}, "ctx_sha": "c" * 64, "failed": True, "why": "boom"}}
+        h.decide_setup(MONDAY)
+        h.tick(16, 31)
+        h.market.bar_rows["raw"]["SPY"][-1]["c"] += 1.0
+        h.tick(8, 31, day=TUESDAY)
+        self.assertEqual(h.state.get("eq_decision")["audit"], "mismatch")
+        self.assertEqual(h.book._instance(inst.id).failed_decides, 1)
+        self.assertEqual(h.intents(kind="house_exit"), [])
+
     def test_a_failed_answers_intents_are_never_recorded(self):
         h = self.harness()
         h.decider = Answers()
@@ -749,6 +821,22 @@ class TheChildsAnswer(unittest.TestCase):
         broken = CH.handle("decide", {"jobs": [{"key": "k@1:r", "inputs": object()}]}, state)["results"]["k@1:r"]
         self.assertTrue(broken["failed"])
         self.assertTrue(broken["error"].startswith("ctx: "))
+
+
+class Marks(T.BookTest):
+    def test_a_late_decide_marks_only_the_lots_held_at_its_close(self):
+        """A catch-up for Monday's close that runs on Tuesday morning: a lot bought since is not marked with a price
+        from before it was bought (its open risk stays on its entry price)."""
+        h = self.harness()
+        h.families.rows = {SPY: T.family_row()}
+        inst = h.instance()
+        held = h.lot(inst, "SPY", "0.2", "590", opened=FRIDAY)
+        since = h.lot(inst, "SPY", "0.2", "601", opened=TUESDAY)
+        h.decide_setup(MONDAY)
+        h.tick(10, 0, day=TUESDAY)
+        self.assertEqual(h.book._instance(inst.id).last_decided_day, "2026-10-12")
+        self.assertEqual(h.book._lot(held.lid).mark, D(str(h.market.bar_rows["raw"]["SPY"][-1]["c"])))
+        self.assertIsNone(h.book._lot(since.lid).mark)
 
 
 # ------------------------------------------------------------------------------------- the House's exit rules
@@ -887,7 +975,8 @@ class Audit(T.BookTest):
         self.assertEqual(h.book._instance(key_of("reads-spy")).failed_decides, 0)
         self.assertEqual({r["audit"] for r in h.state.rows("SELECT audit FROM eq_bars WHERE day='2026-10-12'")}, {"ok"})
         self.assertEqual(h.alerts, [])
-        self.assertIsNone(h.state.get("eq_bars_audit"))
+        self.assertEqual(h.state.get("eq_bars_audit"),
+                         {"2026-10-12": {"symbols": [], "volume": ["SPY"], "at": T.at(TUESDAY, 8, 31)}})
         noted = [payload for kind, payload in h.events if kind == "equity.bars_audit"]
         self.assertEqual(noted, [{"day": "2026-10-12", "mismatch": [], "volume": ["SPY"], "programs": []}])
         h.tick(9, 31, day=TUESDAY)

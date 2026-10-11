@@ -1679,7 +1679,7 @@ class EquityBook:
         cut = mn is not None and now >= mn.close_send - 60
         if last == day:
             if not cut:
-                self._seat_step(now, t, mt, done, out)
+                self._seat_step(now, t, mt, mn, done, out)
             return
         if cut:
             self._decide_failed(t, now, "no decide ran before the next session's close window")
@@ -1696,6 +1696,12 @@ class EquityBook:
         bars = self._day_bars(now, t, mt, live, live, out)
         if bars is None:
             return
+        if (self.state.get("eq_synced") or "") != day and self._unconfirmed_day != day:
+            # The day's band sync never completed (the store could not be read): said once, never silent.
+            self._unconfirmed_day = day
+            self.alert("warning", f"equity: the families could not be read for the band sync of {day} "
+                                  f"({out.get('families') or 'no reading'}): no band moved and nobody was retired; the "
+                                  "programs the book holds decide as they are")
         if live:
             self._decide(t, live, bars, now, out)
         self._house_exits(t, now)
@@ -1705,14 +1711,15 @@ class EquityBook:
             record["why"] = "no live program"
         self.state.put("eq_decide", record)
 
-    def _seat_step(self, now: float, t: dt.date, mt: S.Moments, done: Mapping[str, Any], out: dict) -> None:
+    def _seat_step(self, now: float, t: dt.date, mt: S.Moments, mn: S.Moments | None, done: Mapping[str, Any],
+                   out: dict) -> None:
         """THE SEATING PASS, between a recorded decision and the next session's close window (`_decide_step`): the
         families read again (`_sync_instances(late=True)`: a Candidate holding a seat goes to Probe and gets its
         instance; nothing else moves, nobody is retired), then every live instance the day's record does not name is
         asked for the same close on the same bars (`_decide` skips one already asked). An instance the House could
-        not ask (no bar, the decider) is asked again every `SEAT_RETRY_S`; its failed decide is counted once a session.
-        The House's exit rules are the day's decision's own and are not run again here: a program seated now holds no
-        lot."""
+        not ask (no bar, the decider) is asked again every `SEAT_RETRY_S` until the next session's pre-open (after it
+        the book it holds is no longer the close's); its failed decide is counted once a session. The House's exit
+        rules are the day's decision's own and are not run again here: a program seated now holds no lot."""
         handled = done.get("instances")
         if done.get("status") != "done" or not isinstance(handled, list):
             return
@@ -1721,11 +1728,12 @@ class EquityBook:
             return
         self._sync_instances(now, t, out, late=True)
         live = [i for i in self._instances(alive=True) if i.live]
-        fresh = [i for i in live if i.id not in handled]
-        if not fresh:
-            return
         day = t.isoformat()
         counted = self.state.get("eq_failed", {}) or {}
+        again = mn is None or now < mn.preopen
+        fresh = [i for i in live if i.id not in handled and (again or counted.get(i.id) != day)]
+        if not fresh:
+            return
         if all(counted.get(i.id) == day for i in fresh) and now - self._seat_tried < SEAT_RETRY_S:
             return
         bars = self._day_bars(now, t, mt, live, fresh, out, held=False)
@@ -1790,8 +1798,8 @@ class EquityBook:
         runs again, unless its version's demotion is sticky (EDM1).
 
         `late` (THE SEATING PASS, `_seat_step`): only a Candidate moves (to Probe, when it holds a free seat) and only a
-        new instance is made. No demotion, no sizing up, no update of a running instance, no retirement, no revival:
-        those are the decision's own, once a day."""
+        new instance is made, of a family none of whose versions runs. No demotion, no sizing up, no update of a
+        running instance, no retirement, no revival: those are the decision's own, once a day."""
         et = self._et()
         rows = [dict(r) for r in self.families.read() if str(r.get("lane") or "") in _pkg.LANES]
         if getattr(self.families, "last_error", ""):
@@ -1837,9 +1845,12 @@ class EquityBook:
         for row in rows:
             if row.get("band") in LIVE_BANDS:
                 wanted[instance_key(row["family"], int(row["version"]))] = row
+        running = {i.family for i in self._instances(alive=True)} if late else set()
         for key, row in wanted.items():
             inst = self._instance(key)
             params = dict(row.get("params") or {})
+            if inst is None and str(row["family"]) in running:
+                continue   # another version of it still runs: the decision retires that one and starts this one
             if inst is None:
                 inst = Instance(key, str(row["family"]), int(row["version"]), str(row.get("lane") or ""),
                                 str(row.get("run_sha") or ""), str(row.get("code") or ""), params, str(row["band"]),
@@ -2117,7 +2128,9 @@ class EquityBook:
             for lot in self._lots():
                 close = closes.get(lot.symbol) or (A.dec(bars["raw"].get(lot.symbol, [{}])[-1].get("c"))
                                                    if bars["raw"].get(lot.symbol) else None)
-                if close is not None and close > 0:
+                # Session t's close marks a lot held at it (a decide that runs late, after the next open, never
+                # marks a lot bought since with a price from before it was bought).
+                if close is not None and close > 0 and lot.opened_day <= day:
                     lot.mark, lot.marked_at = close, now
                     self._save_lot(lot)
         lots = self._lots(instance=inst.id)
@@ -2342,6 +2355,7 @@ class EquityBook:
         if bad:
             self._mismatch(day, bad, now, volume=drift)
         elif drift:
+            self._audit_note(day, [], drift, now)
             self.record("equity.bars_audit", {"day": day, "mismatch": [], "volume": drift, "programs": []})
 
     def _stored_bars(self, symbols: Sequence[str], start: str, day: str) -> dict[tuple[str, str], dict[str, tuple]]:
@@ -2355,15 +2369,22 @@ class EquityBook:
             stored.setdefault((r["symbol"], r["adjustment"]), {})[r["day"]] = (r["o"], r["h"], r["l"], r["c"], r["v"])
         return stored
 
+    def _audit_note(self, day: str, bad: Sequence[str], volume: Sequence[str], now: float) -> None:
+        """The twin note of a decision day (kv `eq_bars_audit` {day: {symbols, volume, at}}, the last 30): `symbols` the
+        ones whose prices read again differ, `volume` the ones whose volume alone does."""
+        notes = dict(self.state.get("eq_bars_audit", {}) or {})
+        notes[day] = {"symbols": list(bad), "volume": list(volume), "at": now}
+        self.state.put("eq_bars_audit", dict(sorted(notes.items())[-30:]))
+
     def _mismatch(self, day: str, bad: Sequence[str], now: float, *, volume: Sequence[str] = (),
                   where: str = "read again") -> list[str]:
         """What it costs when the bars a decision of `day` used differ, in a price, from a later reading (A8.11, A8.5):
         the twin note (kv `eq_bars_audit`), the alarm, and for each program that decided on one of `bad`: its planned
-        buys of that decision canceled and one failed decide. Returns the programs hit."""
+        buys of that decision canceled and one failed decide (one a session, `eq_failed`: a program whose own decide
+        of that day already failed is not counted again). Returns the programs hit."""
         bad = list(bad)
-        notes = dict(self.state.get("eq_bars_audit", {}) or {})
-        notes[day] = {"symbols": bad, "volume": list(volume), "at": now}
-        self.state.put("eq_bars_audit", dict(sorted(notes.items())[-30:]))
+        counted = dict(self.state.get("eq_failed", {}) or {})
+        self._audit_note(day, bad, volume, now)
         self.alert("error", f"equity: the bars of {day} {where} differ for {', '.join(bad)}: that decision's buys "
                             "are canceled")
         hit = []
@@ -2379,10 +2400,14 @@ class EquityBook:
                 continue
             for intent in planned:
                 self._finish(intent, "canceled", f"the bars of {day} {where} differ ({', '.join(bad)})")
-            inst.failed_decides += 1
+            if counted.get(inst.id) != day:
+                inst.failed_decides += 1
+                counted[inst.id] = day
             inst.why = f"bars audit {day}: {', '.join(bad)}"
             self._save_instance(inst)
             hit.append(inst.id)
+        if hit:
+            self.state.put("eq_failed", counted)
         self.record("equity.bars_audit", {"day": day, "mismatch": bad, "volume": list(volume), "programs": hit})
         return hit
 
