@@ -1,6 +1,7 @@
 """THE EQUITY MEMORY's tables (release E3): what every scored version showed, seen and out of fold; recorded, not read.
 
-Owner: E (league/ops/E3_INTERFACES.md). Three append-only tables in the swarm store (`SCHEMA`, `ensure`; House only):
+Owner: E (league/ops/E3_INTERFACES.md). Three append-only tables in the swarm store (`SCHEMA`, `ensure`; House only;
+UPDATE and DELETE abort, and an insert of a key already written is dropped: the first write stands, `KEYS`):
 
 - `mem_seen`: one row a scored version, its SEEN-year facts (the cell, the measured horizon, whether the bar passed
   and its fails, the drift share, gross and cost in bp a round trip, round trips a year, `seen_sha`). No reader in
@@ -66,9 +67,18 @@ CREATE TABLE IF NOT EXISTS mem_series (sha TEXT PRIMARY KEY, days BLOB NOT NULL,
 _TRIGGERS_SQL = "".join(
     f"CREATE TRIGGER IF NOT EXISTS {t}_no_{verb.lower()} BEFORE {verb} ON {t} BEGIN SELECT RAISE(ABORT, "
     f"'{APPEND_ONLY_ERROR}'); END;\n" for t in TABLES for verb in ("UPDATE", "DELETE"))
-#: The three tables and their append-only triggers (idempotent). Complete from step 0: tests make an in-memory
+#: Each table's key. THE FIRST WRITE STANDS: SQLite fires no DELETE trigger for the row an `INSERT OR REPLACE` displaces
+#: (unless `recursive_triggers` is on), so the two triggers above alone would let a REPLACE overwrite a row. A third
+#: trigger a table drops any insert of a key already written, whatever its conflict clause.
+KEYS: dict[str, tuple[str, ...]] = {"mem_seen": ("family", "version"),
+                                    "mem_contrib": ("family", "version", "symset", "k"), "mem_series": ("sha",)}
+_FIRST_WRITE_SQL = "".join(
+    f"CREATE TRIGGER IF NOT EXISTS {t}_first_write BEFORE INSERT ON {t} WHEN EXISTS (SELECT 1 FROM {t} WHERE "
+    + " AND ".join(f"{column} = NEW.{column}" for column in KEYS[t]) + ") BEGIN SELECT RAISE(IGNORE); END;\n"
+    for t in TABLES)
+#: The three tables, their append-only triggers and their first-write triggers (idempotent). Tests make an in-memory
 #: database from it.
-SCHEMA = _TABLES_SQL + _TRIGGERS_SQL
+SCHEMA = _TABLES_SQL + _TRIGGERS_SQL + _FIRST_WRITE_SQL
 
 
 def _statements(script: str) -> list[str]:
@@ -85,8 +95,8 @@ def _statements(script: str) -> list[str]:
     return out
 
 
-#: Every object `SCHEMA` creates: the three tables and their two triggers each.
-_OBJECTS = frozenset({*TABLES, *(f"{t}_no_{verb}" for t in TABLES for verb in ("update", "delete"))})
+#: Every object `SCHEMA` creates: the three tables and their three triggers each.
+_OBJECTS = frozenset({*TABLES, *(f"{t}_{name}" for t in TABLES for name in ("no_update", "no_delete", "first_write"))})
 
 
 def ensure(store: Any) -> None:
@@ -204,5 +214,5 @@ def counts(db: sqlite3.Connection) -> dict[str, Any]:
     return out
 
 
-__all__ = ["TABLES", "SEALED_TABLES", "KIND_OWN", "SCHEMA", "APPEND_ONLY_ERROR", "ensure", "seen_sha", "ingest",
-           "counts"]
+__all__ = ["TABLES", "SEALED_TABLES", "KIND_OWN", "KEYS", "SCHEMA", "APPEND_ONLY_ERROR", "ensure", "seen_sha",
+           "ingest", "counts"]
