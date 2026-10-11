@@ -86,7 +86,8 @@ day, never half the researchers' line.
 The equity review's dollars (league/swarm/elane_review.py) are booked on rows of their own ("review:<route>"), never on
 a birth route's row, so they move no route's yield.
 
-Standard library only.
+Standard library only, and the repository's own ltcm/provider.py (itself standard library only) for the provider's
+output limit (`OUTPUT_LIMIT`).
 """
 
 from __future__ import annotations
@@ -95,6 +96,8 @@ import math
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
+
+from ltcm.provider import MAX_OUTPUT_TOKENS as OUTPUT_LIMIT
 
 from . import elane_seal
 
@@ -141,6 +144,14 @@ SPEND_KINDS = ("sail_model", "openai", "claude")
 #: The ledger rows of the equity review (league/swarm/elane_review.py): "review:<route>", apart from the birth routes.
 REVIEW_PREFIX = "review:"
 ROUTE_KINDS = ("sail", "openai", "claude")
+#: THE PROVIDER'S OWN OUTPUT LIMIT is `OUTPUT_LIMIT` (ltcm/provider.py `MAX_OUTPUT_TOKENS`, read from it and never copied:
+#: `Provider.build_body` refuses a request above it before anything is sent). The upper bound of E2's output settings
+#: (league/swarm/elane_births.py `births_max_output_tokens`, league/swarm/elane_train.py `train_max_output_tokens`): on
+#: Oct 11, 2026 both were bounded at 64,000, and a setting inside that bound failed every route of one births pass.
+#: THE REFUSALS A SETTING CAUSES (`setting_fault`): the Provider's codes for a request it refuses before it is sent, on
+#: every call alike, and the setting each names. Asking again changes nothing until the setting does.
+SETTING_FAULTS = (("provider_bad_output_limit", "output_limit"), ("provider_bad_reasoning_effort", "effort"),
+                  ("provider_unknown_profile", "routes"))
 #: The E1 family-state keys `report` reads for the operator (never `choose`).
 TRY_KEY, LOOK_KEY = "elane_try", "elane_look"
 LIVE_BANDS = ("probe", "sized")
@@ -613,6 +624,17 @@ def unsent(errors: Sequence[str]) -> bool:
     return not any(str(e).startswith(SENT_UNANSWERED) for e in errors)
 
 
+def setting_fault(errors: Sequence[str]) -> str | None:
+    """The setting EVERY route refused a question for ("output_limit", "effort" or "routes": `SETTING_FAULTS`), from
+    `ask`'s errors when no route answered; None when any route failed another way, or none failed. A closed word: the
+    routes' own error texts are never repeated."""
+    rows = [str(e) for e in errors if not str(e).startswith(SENT_UNANSWERED)]
+    for code, name in SETTING_FAULTS:
+        if rows and all(code in row for row in rows):
+            return name
+    return None
+
+
 def ask(router: Any, store: Any, settings: Mapping[str, Any] | None, *, first: Route | None, role: str, system: str,
         user: str, key: str, max_output: int, effort: str, purpose: str, now: float,
         family: str | None = None, candidates: Sequence[Route] | None = None,
@@ -668,4 +690,4 @@ __all__ = ["LEDGER_KEY", "ROUTE_KEY", "ROLE", "DEFAULTS", "BOUNDS", "REVIEW_PREF
            "book_births", "next_turn", "spent_since", "spent_today", "model_line", "usd_hour", "day_line", "room", "pace",
            "hold", "answer_usd", "train_counts", "choose", "report", "ask_on", "ask", "booked_for", "unsent", "UNCONFIRMED",
            "SENT_UNANSWERED", "LINE_SHARE_MAX", "SAIL_ROOM_USD", "GUARD_KEY", "SAIL_KINDS", "SAIL_DAY", "pace_hour",
-           "sail_spent_today", "sail_day"]
+           "sail_spent_today", "sail_day", "OUTPUT_LIMIT", "SETTING_FAULTS", "setting_fault"]

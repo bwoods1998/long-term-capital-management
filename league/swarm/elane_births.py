@@ -14,7 +14,8 @@ the ration), THE AGENDA (league/swarm/elane_train.py `AGENDA`: the mechanisms wi
 drift named and refused until earnings data exist), THE EQUITY QUOTA's lines, THE EQUITY TRAIN MAP (in-sample, the
 swarm's own Train runs), the equity graveyard that binds (E2's Train refutations and the CLOSED cells), the lineages
 whose one try is taken (seeded programs and Train passes, outcomes sealed), the equity families' Train facts, the card
-vocabulary and the last pass's refusals. Its route is chosen by measured yield per dollar
+vocabulary and the last pass's refusals in closed words (`last_text`: each by its class and the proposal's place in
+the answer, never a string the model wrote). Its route is chosen by measured yield per dollar
 (league/swarm/elane_yield.py `choose`), and its answer is booked to the route that gave it.
 
 THE EQUITY QUOTA (`EquityQuota`; `elane.birth_share`, the owner's switch). The equity lanes' share of the swarm's births
@@ -61,16 +62,23 @@ from .elane_yield import ROLE
 BIRTHS_AT_KEY = elane_train.BIRTHS_AT  # "elane_e2_births_at": the Train round's `due` reads it too
 LAST_KEY = "elane_e2_last"
 #: The equity pass's settings (`elane.e2` keys; defaults here, policy.json in ELANE_E2_PATCHES.md) and their bounds.
+#: `births_max_output_tokens` is held to the model provider's own limit (release E2.4; `elane_yield.OUTPUT_LIMIT`: it was
+#: bounded at 64,000, above what the provider takes, and on Oct 11, 2026 a setting inside the bound failed every route
+#: of one births pass).
 DEFAULTS: dict[str, Any] = {"births_every_seconds": 7200, "births_refill_seconds": 1800, "start": 8, "max_alive": 24,
                             "min_per_pass": 1, "max_per_pass": 6, "window_hours": 24, "births_max_output_tokens": 24000,
                             "births_effort": "medium", "families_shown": 30}
 BOUNDS: dict[str, tuple[float, float]] = {"births_every_seconds": (300, 86400), "births_refill_seconds": (300, 86400),
                                           "start": (0, 200), "max_alive": (0, 200), "min_per_pass": (0, 20),
                                           "max_per_pass": (1, 20), "window_hours": (1, 168),
-                                          "births_max_output_tokens": (4000, 64000), "families_shown": (0, 100)}
+                                          "births_max_output_tokens": (4000, elane_yield.OUTPUT_LIMIT),
+                                          "families_shown": (0, 100)}
 EFFORTS = elane_train.EFFORTS
 MIN_MECHANISM = 30
 REFUSALS_SHOWN = 12
+#: A PASS EVERY ROUTE REFUSED FOR A SETTING (`elane_yield.setting_fault`): the `elane.e2` key the pass's event names
+#: (`setting`), a closed word the stall alarm reads (league/ops/elane_health.py `SETTINGS`).
+SETTING_KEYS = {"output_limit": "births_max_output_tokens", "effort": "births_effort", "routes": "routes"}
 
 
 # ----------------------------------------------------------------------------------------------------------- settings
@@ -288,6 +296,27 @@ def _symbols_line(settings: Mapping[str, Any] | None) -> str:
     return " | ".join(parts) or "none (elane.universe is empty)"
 
 
+#: How the contract-in-brief names each universe group (`elane_train.symbols_group`) beside its half-spread.
+GROUP_WORDS = {"index": "the index ETFs", "sectors": "the sector ETFs", "defensive": "the defensive ETFs",
+               "stocks": "the stocks"}
+
+
+def _costs_line(settings: Mapping[str, Any] | None) -> str:
+    """The half-spread of each group of symbols `elane.universe` holds (league/equity/config.py `HALF_SPREAD_BP`), in
+    the universe's own symbols and no other (release E2.4): "1 bp the index ETFs SPY, QQQ, IWM and DIA". The line
+    named the costs of the code's whole universe ("3 bp the other ETFs, 5 bp TLT and GLD") whatever the universe held,
+    and a pass then proposed symbols the admission refuses."""
+    groups: dict[tuple[str, int], list[str]] = {}
+    for symbols in universe(settings).values():
+        for sym in symbols:
+            groups.setdefault((elane_train.symbols_group([sym]), int(eqconfig.HALF_SPREAD_BP[sym])), []).append(sym)
+    order = {group: i for i, group in enumerate(elane_train.GROUPS)}
+    rows = sorted(groups.items(), key=lambda row: (order.get(row[0][0], len(order)), row[0][1]))
+    named = lambda syms: syms[0] if len(syms) == 1 else f"{', '.join(syms[:-1])} and {syms[-1]}"  # noqa: E731
+    return "; ".join(f"{bp} bp {GROUP_WORDS.get(group, group)} {named(syms)}" for (group, bp), syms in rows) \
+        or "no symbol is open"
+
+
 def lanes_text(settings: Mapping[str, Any] | None) -> str:
     """THE LANES/EQUITY block: each lane's meaning and label, the universe, the contract in brief, the ration and the
     screen ("" while the births are off). Rules only."""
@@ -305,13 +334,13 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
         "(trend, momentum and rotation, short-term reversal, low volatility, a conditioned calendar effect); long only, "
         "never short, never margin.",
         f"- THE UNIVERSE (elane.universe; a family trades 1 to {eqconfig.MAX_SYMBOLS} of them and reads only its own): "
-        + _symbols_line(settings) + ".",
+        + _symbols_line(settings) + ". A proposal naming any other symbol is refused whole: the contract in your "
+        "system prompt speaks of every symbol the code knows, and only the symbols of this line are open.",
         "- THE CONTRACT IN BRIEF: decide(ctx) runs once a session after the close on daily bars (prices adjusted as of "
         "that day, never by a later event); an intent executes in the NEXT session, \"at\": \"open\" (default) or "
         "\"close\"; a lot is never sold in the session it was bought; the House exits a lot after its NEEDS "
-        "max_hold_sessions (at most 60); an ETF position is at most half the sleeve; fills pay the half-spread (1 bp "
-        "the index ETFs, 3 bp the other ETFs, 5 bp TLT and GLD) and sells the SEC and FINRA fees. The whole contract is "
-        "in your system prompt.",
+        "max_hold_sessions (at most 60); an ETF position is at most half the sleeve; fills pay the half-spread ("
+        + _costs_line(settings) + ") and sells the SEC and FINRA fees. The whole contract is in your system prompt.",
         "- " + elane_review.READING_CTX,
         "- THE RATION: ONE Validation try and ONE sealed look a LINEAGE. A family continuing an idea (its parent, or a "
         "dead family of the same slice and idea), the same template, or a program whose Train daily returns correlate "
@@ -321,12 +350,24 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
     ])
 
 
-def agenda_text() -> str:
-    """THE AGENDA: the mechanisms a card's `agenda` names, each with its published prior (no figure)."""
+#: Said after THE AGENDA while `elane.universe` holds no sector ETF (release E2.4): the agenda's rotation line speaks
+#: of sector ETFs whatever the universe holds (league/swarm/elane_train.py `AGENDA`, published priors, left as they
+#: are), and on Oct 11, 2026 a pass proposed only sector ETFs and bore nothing.
+NO_SECTORS = ("Where a mechanism above speaks of sector ETFs, read THE UNIVERSE's own symbols: no sector ETF is open "
+              "now, and a proposal naming a symbol outside THE UNIVERSE is refused whole.")
+
+
+def agenda_text(settings: Mapping[str, Any] | None = None) -> str:
+    """THE AGENDA: the mechanisms a card's `agenda` names, each with its published prior (no figure). `settings`: the
+    swarm's; while the universe they open holds no sector ETF, one sentence after the agenda says so (`NO_SECTORS`)."""
     lines = ["THE AGENDA (\"agenda\" names one key; each a published prior, a hypothesis for Train, never evidence):"]
     for key, row in AGENDA.items():
         lines.append(f"- {key}: {row['title']} ({row['lane']}): {row['text']}. Priors: {row['priors']}."
                      + ("" if row["available"] else " REFUSED until its data exist."))
+    if settings is not None:
+        groups = {elane_train.symbols_group([sym]) for symbols in universe(settings).values() for sym in symbols}
+        if "sectors" not in groups:
+            lines.append(NO_SECTORS)
     return "\n".join(lines)
 
 
@@ -453,14 +494,102 @@ def vocabulary_text(settings: Mapping[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
-def last_text(store: Any) -> str:
+#: WHY A PROPOSAL IS NOT BORN, BY CLASS (`EquityPass.admit` names the class of each refusal; the classes are
+#: league/ops/elane_health.py `REFUSALS`' own, and a test holds the two readings equal), and what THE NEXT REQUEST
+#: says of each (`last_text`). CLOSED WORDS (release E2.4): a refusal's own text repeats what the model wrote (its
+#: lane, structure, agenda key and symbols as it spelled them, its card's values), and the next request may be read by
+#: another route's model, so none of it is shown again: each class has the House's one sentence here, filled with the
+#: House's own values only (the settings' structures and universe, the agenda's keys, the card's field names, the
+#: symbols of the code's own universe).
+REFUSAL_SAID: dict[str, str] = {
+    "lane": "its \"lane\" must be \"beta\" or \"equity\", the same in the proposal and in its card",
+    "structure": "its \"structure\" must be one of {structures} (elane.structures; a beta family trades ETFs only)",
+    "symbols": "its symbols must be 1 to {max_symbols} of THE UNIVERSE ({universe}){foreign}",
+    "agenda": "its \"agenda\" must be one key of THE AGENDA whose data the House holds ({agenda})",
+    "mechanism": "its mechanism must be one or two sentences saying why it should make money",
+    "closed_cell": ("its cell (lane, agenda and universe group) is CLOSED: refuted on Train too often with no pass (THE "
+                    "EQUITY GRAVEYARD lists the closed cells)"),
+    "same_idea": "the same idea on the same symbols is in Train research already (EQUITY FAMILIES BORN BY THIS PASS)",
+    "tried_lineage": ("it continues a lineage that has its one Validation try (LINEAGES WITH THEIR TRY; the outcome is "
+                      "sealed): propose a different idea"),
+    "card": "its card failed the card checks{fields}",
+    "graveyard": ("a refuted row of THE EQUITY GRAVEYARD binds its cell: a card there needs a valid \"rebirth\" naming "
+                  "the row, with an input the dead row did not read"),
+    "quota": "the pass's births were born before it: it was one proposal more than the pass asked for",
+    "store": "the store did not take the birth (a fault of the House's, not of the proposal)",
+}
+OTHER_SAID = "refused for a reason the House keeps and this request does not repeat"
+#: The fields a card's problem may name (league/swarm/cards.py `validate`, league/swarm/elane.py `card_errors`: each
+#: problem begins "<field>: "). A closed list: a field outside it is counted, never named.
+CARD_FIELDS = ("card", "lane", "structure", "symbols", "hypothesis", "mechanism_class", "inputs", "holding", "cost",
+               "cost.hurdle", "cost.why", "comparison", "ablation", "falsification", "rebirth", "rebirth.different",
+               "rebirth.evidence")
+FOREIGN_SHOWN = 6
+
+
+def _closed_symbols(foreign: Sequence[Any]) -> dict[str, Any]:
+    """A symbols refusal's closed facts: the symbols named that THE CODE's universe holds and `elane.universe` does
+    not (league/equity/config.py UNIVERSE: a closed list), and how many others were named (never which)."""
+    known = [s for s in dict.fromkeys(str(x) for x in foreign) if s in eqconfig.UNIVERSE]
+    return {"known": known[:FOREIGN_SHOWN], "unknown": len(set(str(x) for x in foreign)) - len(known)}
+
+
+def _closed_fields(problems: Sequence[Any]) -> dict[str, Any]:
+    """A card refusal's closed facts: the card fields its problems name (`CARD_FIELDS`), each once, and how many
+    problems name another."""
+    names = [str(p).split(":", 1)[0].strip() for p in problems]
+    return {"fields": list(dict.fromkeys(n for n in names if n in CARD_FIELDS)),
+            "other_fields": sum(1 for n in names if n not in CARD_FIELDS)}
+
+
+def refusal_said(item: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str:
+    """One refusal of the last pass as THE NEXT REQUEST says it (`REFUSAL_SAID`), from the closed facts the admission
+    kept beside it (its class; for symbols, the code's own symbols named and a count of the rest; for a card, its
+    fields): never the refusal's own text."""
+    cls = item.get("cls")
+    if not isinstance(cls, str) or cls not in REFUSAL_SAID:
+        return OTHER_SAID
+    allowed = universe(settings)
+    foreign = ""
+    known = ([s for s in item["known"] if isinstance(s, str) and s in eqconfig.UNIVERSE]
+             if isinstance(item.get("known"), list) else [])
+    unknown = item.get("unknown") if type(item.get("unknown")) is int and item.get("unknown") > 0 else 0
+    if known:
+        foreign = f": {', '.join(known)} {'is' if len(known) == 1 else 'are'} known to the code and not open"
+    if unknown:
+        foreign += ((", and " if known else ": ")
+                    + f"{unknown} named {'is' if unknown == 1 else 'are'} no symbol the House knows")
+    fields = ([f for f in item["fields"] if isinstance(f, str) and f in CARD_FIELDS]
+              if isinstance(item.get("fields"), list) else [])
+    more = item.get("other_fields") if type(item.get("other_fields")) is int and item.get("other_fields") > 0 else 0
+    named = ((": " + ", ".join(fields)) if fields else "") + (f" (and {more} more)" if more and fields else "")
+    return REFUSAL_SAID[cls].format(
+        structures=" or ".join(allowed) or "none", max_symbols=eqconfig.MAX_SYMBOLS,
+        universe=", ".join(dict.fromkeys(s for symbols in allowed.values() for s in symbols)) or "none is open",
+        agenda=", ".join(k for k, row in AGENDA.items() if row["available"]), foreign=foreign, fields=named)
+
+
+def last_text(store: Any, settings: Mapping[str, Any] | None = None) -> str:
+    """YOUR LAST EQUITY PASS'S PROPOSALS NOT BORN, IN CLOSED WORDS (`REFUSAL_SAID`). Each proposal is named by its
+    POSITION in the last answer, and by its lane and agenda key where it named valid ones (closed values), NEVER BY ITS
+    SLUG: the House's slug rule (`architect.family_slug`, `store.slugify`) keeps a model's words, hyphenated and cut
+    at 36 characters, so a slug that passed it can still carry a sentence to the next reader; a position carries none.
+    A record the release before wrote (no class kept) is said in `OTHER_SAID`."""
     last = store.get(LAST_KEY)
     items = last.get("refused") if isinstance(last, Mapping) else None
     if not items:
         return ""
-    lines = [f"- {i.get('slug')}: {i.get('why')}"[:600] for i in items[:REFUSALS_SHOWN] if isinstance(i, Mapping)]
-    return (f"YOUR LAST EQUITY PASS'S PROPOSALS NOT BORN ({last.get('at')}; fix them or look elsewhere):\n"
-            + "\n".join(lines))
+    proposed = last.get("proposed") if type(last.get("proposed")) is int else None
+    lines = []
+    for item in items[:REFUSALS_SHOWN]:
+        if not isinstance(item, Mapping):
+            continue
+        n = item.get("n") if type(item.get("n")) is int and item.get("n") > 0 else None
+        who = ("a proposal" if n is None else f"proposal {n}" + (f" of {proposed}" if proposed else ""))
+        labels = [x for x in (item.get("lane"), item.get("agenda")) if isinstance(x, str) and (x in LANES or x in AGENDA)]
+        lines.append(f"- {who}" + (f" ({', '.join(labels)})" if labels else "") + f": {refusal_said(item, settings)}")
+    at = last.get("at") if isinstance(last.get("at"), str) and len(last.get("at")) <= 32 else "the last pass"
+    return (f"YOUR LAST EQUITY PASS'S PROPOSALS NOT BORN ({at}; fix them or look elsewhere):\n" + "\n".join(lines))
 
 
 # ----------------------------------------------------------------------------------------------------------- the pass
@@ -474,6 +603,7 @@ class EquityPass:
         self.settings = architect.settings
         self.clock = architect.clock
         self.refused: list[dict[str, Any]] = []
+        self.position, self.proposal = 0, None  # the proposal `admit` is at: its place in the answer, and the row
 
     def request(self, quota: EquityQuota) -> tuple[str, str]:
         """(the system prompt, the request)."""
@@ -487,14 +617,14 @@ class EquityPass:
 
         parts = [f"{lead}Propose {want} new EQUITY-LANE families (\"lane\": \"beta\" or \"equity\"), each with its card "
                  "and its first program; propose both lanes when you propose two or more.",
-                 lanes_text(self.settings), agenda_text(), quota.text(),
+                 lanes_text(self.settings), agenda_text(self.settings), quota.text(),
                  # RELEASE E4, THE PANEL BLOCK ("" while the panel lane bears nothing): what a panel program is, its
                  # contract in brief, the panel agenda, the panel quota and the closed panel cells; the panel Train
                  # map, with its ZERO-EDGE EXPECTED column, follows the equity one (`elane_train.train_map_text`).
                  elane_xs.request_text(self.store, self.settings, want),
                  elane_train.train_map_text(self.store, self.settings), graveyard_text(self.store, self.settings),
                  tried_text(self.store), families_text(self.store, self.settings), vocabulary_text(self.settings),
-                 last_text(self.store)]
+                 last_text(self.store, self.settings)]
         return SYSTEM + elane_train.contract_text(), "\n\n".join(p for p in parts if p)
 
     def run(self) -> dict[str, Any]:
@@ -523,13 +653,17 @@ class EquityPass:
             key=f"swarm:elane:births:{int(began)}", max_output=c["births_max_output_tokens"], effort=c["births_effort"],
             purpose="births", now=began)
         if answer is None or route is None:
+            # EVERY ROUTE REFUSED IT FOR A SETTING (release E2.4): said in the event in a closed word, the `elane.e2`
+            # key, so the stall alarm names it (asking again changes nothing until the setting does).
+            fault = SETTING_KEYS.get(str(elane_yield.setting_fault(errors)))
             return self.finish({"born": [], "error": "no route answered", "errors": errors[:4], "turn": turn,
-                                "route_chosen": first.key if first else None, **quota.event()})
+                                "route_chosen": first.key if first else None, **({"setting": fault} if fault else {}),
+                                **quota.event()})
         rows, lenient, recovered = read_families(answer)
         born = self.admit(rows or [], quota, route)
         elane_yield.book_births(self.store, route.key, len(born))
         self.store.put(LAST_KEY, {"at": self.store.now(), "born": born, "short": quota.short(), "route": route.key,
-                                  "refused": self.refused[:REFUSALS_SHOWN]})
+                                  "proposed": len(rows or []), "refused": self.refused[:REFUSALS_SHOWN]})
         out = {"born": born, "proposed": len(rows or []), "route": route.key, "route_chosen": first.key if first else None,
                "why_route": why_route, "turn": turn, "cost_usd": answer.get("cost_usd"),
                "truncated": bool(answer.get("truncated")),
@@ -550,8 +684,18 @@ class EquityPass:
         return out
 
     # ------------------------------------------------------------------ the admission
-    def refuse(self, slug: str, why: str) -> None:
-        self.refused.append({"slug": slug, "why": why[:600]})
+    def refuse(self, slug: str, why: str, cls: str | None = None, **closed: Any) -> None:
+        """One proposal not born: its slug and the reason (the House's record and the pass's event), and beside them
+        the CLOSED facts the next request is written from (`last_text`): the refusal's class (`REFUSAL_SAID`), the
+        proposal's place in the answer, its lane and agenda key when they are valid ones, and `closed` (the code's own
+        symbols it named, the card fields its problems name)."""
+        row = self.proposal if isinstance(self.proposal, Mapping) else {}
+        card = row.get("card") if isinstance(row.get("card"), Mapping) else {}
+        lane = str(card.get("lane") or row.get("lane") or "").strip().lower()
+        agenda = str(row.get("agenda") or "").strip().lower()
+        self.refused.append({"slug": slug, "why": why[:600], "cls": cls, "n": self.position,
+                             "lane": lane if lane in LANES else None, "agenda": agenda if agenda in AGENDA else None,
+                             **closed})
 
     def lineage_tried(self, parent: Mapping[str, Any]) -> bool:
         """Whether the lineage a proposal continues has its one Validation try (`tried`: outcome-free, A9 D3)."""
@@ -584,7 +728,8 @@ class EquityPass:
         known_rows = {r["id"] for r in elane_train.refuted_rows(self.store, limit=10 ** 6)}
         index = self.rebirth_index() if rows else None
         born: list[str] = []
-        for row in rows:
+        for place, row in enumerate(rows, 1):
+            self.position, self.proposal = place, row  # what `refuse` names a proposal by: never its slug
             if not isinstance(row, Mapping):
                 continue
             mechanism = " ".join(str(row.get("mechanism") or "").split())[:600]
@@ -592,11 +737,11 @@ class EquityPass:
             raw_card = row.get("card") if isinstance(row.get("card"), Mapping) else None
             lane = str((raw_card or {}).get("lane") or row.get("lane") or "").strip().lower()
             if lane not in LANES:
-                self.refuse(slug, f"lane: {lane or 'none'!r} is not \"beta\" or \"equity\"")
+                self.refuse(slug, f"lane: {lane or 'none'!r} is not \"beta\" or \"equity\"", "lane")
                 continue
             if raw_card is not None and raw_card.get("lane") and row.get("lane") and \
                     str(raw_card["lane"]).lower() != str(row["lane"]).lower():
-                self.refuse(slug, "lane: the proposal and its card declare different lanes")
+                self.refuse(slug, "lane: the proposal and its card declare different lanes", "lane")
                 continue
             structure = str(row.get("structure") or (raw_card or {}).get("structure") or "").strip().lower()
             if structure == elane_xs.STRUCTURE:
@@ -611,32 +756,34 @@ class EquityPass:
                 continue
             if structure not in allowed:
                 self.refuse(slug, f"structure: {structure or 'none'!r} is not one of {', '.join(allowed) or 'none'} "
-                                  "(elane.structures)")
+                                  "(elane.structures)", "structure")
                 continue
             if lane == BETA and structure != eqconfig.ETF:
-                self.refuse(slug, "structure: a beta family trades ETFs only")
+                self.refuse(slug, "structure: a beta family trades ETFs only", "structure")
                 continue
             named = row.get("symbols") if isinstance(row.get("symbols"), list) else (raw_card or {}).get("symbols")
             symbols = list(dict.fromkeys(str(s).upper() for s in (named or []) if str(s).strip()))
             foreign = [s for s in symbols if s not in allowed[structure]]
             if not symbols or len(symbols) > eqconfig.MAX_SYMBOLS or foreign:
                 self.refuse(slug, f"symbols: 1 to {eqconfig.MAX_SYMBOLS} of {', '.join(allowed[structure])}"
-                                  + (f" ({', '.join(foreign[:6])} not)" if foreign else ""))
+                                  + (f" ({', '.join(foreign[:6])} not)" if foreign else ""), "symbols",
+                            **_closed_symbols(foreign))
                 continue
             agenda = str(row.get("agenda") or "").strip().lower()
             if agenda not in AGENDA:
-                self.refuse(slug, f"agenda: {agenda or 'none'!r} is not one of {', '.join(AGENDA)}")
+                self.refuse(slug, f"agenda: {agenda or 'none'!r} is not one of {', '.join(AGENDA)}", "agenda")
                 continue
             if not AGENDA[agenda]["available"]:
-                self.refuse(slug, f"agenda: {agenda} needs data the House does not hold yet: {AGENDA[agenda]['text']}")
+                self.refuse(slug, f"agenda: {agenda} needs data the House does not hold yet: {AGENDA[agenda]['text']}",
+                            "agenda")
                 continue
             if len(mechanism) < MIN_MECHANISM:
-                self.refuse(slug, "mechanism: one or two sentences saying why it should make money")
+                self.refuse(slug, "mechanism: one or two sentences saying why it should make money", "mechanism")
                 continue
             cell = elane_train.cell_of(lane, agenda, symbols)
             if cell in closed:
                 self.refuse(slug, f"its cell {elane_train.cell_text(cell)} is CLOSED: refuted on Train too often with no "
-                                  "pass")
+                                  "pass", "closed_cell")
                 continue
             same_slice = [f for f in fams if elane_seal.lane_of_spec(f.get("spec")) == lane
                           and sorted((f.get("spec") or {}).get("symbols") or f.get("roots") or []) == sorted(symbols)
@@ -645,7 +792,7 @@ class EquityPass:
             busy = [f for f in same_slice if elane_train.e2_family(f)
                     and elane_train.record_of(f).get("status", "researching") == "researching"]
             if busy:
-                self.refuse(slug, f"the same idea on the same symbols is in Train research: {busy[-1]['id']}")
+                self.refuse(slug, f"the same idea on the same symbols is in Train research: {busy[-1]['id']}", "same_idea")
                 continue
             # THE LINEAGE IT CONTINUES, every one of them: the parent it declares AND every family of its slice with the
             # same idea (the admission checked ONE, the declared parent or else the newest of the slice, so naming any
@@ -662,7 +809,7 @@ class EquityPass:
             tried_kin = next((f for f in kin if self.lineage_tried(f)), None)
             if tried_kin is not None:
                 self.refuse(slug, f"it continues {tried_kin['id']}'s lineage, which has its one Validation try "
-                                  "(outcome sealed): propose a different idea")
+                                  "(outcome sealed): propose a different idea", "tried_lineage")
                 continue
             parent = mother if mother is not None else (same_slice[-1] if same_slice else None)
             card = dict(raw_card or {})
@@ -672,10 +819,10 @@ class EquityPass:
             except Exception as exc:  # noqa: BLE001 - a card that cannot be checked is not born
                 checked, problems = None, [f"the card could not be checked: {type(exc).__name__}"]
             if checked is None:
-                self.refuse(slug, "card: " + "; ".join(problems)[:500])
+                self.refuse(slug, "card: " + "; ".join(problems)[:500], "card", **_closed_fields(problems))
                 continue
             if index is False:
-                self.refuse(slug, "the equity graveyard's binding could not be read: not born unchecked")
+                self.refuse(slug, "the equity graveyard's binding could not be read: not born unchecked", "graveyard")
                 continue
             if index is not None:
                 try:
@@ -683,7 +830,8 @@ class EquityPass:
                 except Exception as exc:  # noqa: BLE001 - a binding that cannot be read admits nothing
                     verdict = {"ok": False, "reason": f"the graveyard's binding could not be read ({type(exc).__name__})"}
                 if not verdict.get("ok"):
-                    self.refuse(slug, "graveyard: " + str(verdict.get("reason") or "a refuted row binds its cell")[:500])
+                    self.refuse(slug, "graveyard: " + str(verdict.get("reason") or "a refuted row binds its cell")[:500],
+                                "graveyard")
                     continue
                 if verdict.get("dropped"):
                     checked = {k: v for k, v in checked.items() if k != "rebirth"}
@@ -692,7 +840,7 @@ class EquityPass:
                     if reborn is not None:
                         if self.lineage_tried(reborn):  # whatever parent it declared: the row it is reborn from binds
                             self.refuse(slug, f"its rebirth continues {reborn['id']}'s lineage, which has its one "
-                                              "Validation try (outcome sealed): propose a different idea")
+                                              "Validation try (outcome sealed): propose a different idea", "tried_lineage")
                             continue
                         if parent is None:
                             parent = reborn
@@ -700,7 +848,7 @@ class EquityPass:
                     if callable(note):
                         note(checked, structure)
             if not quota.admits(lane):
-                self.refuse(slug, quota.why_not(lane) or "the quota")
+                self.refuse(slug, quota.why_not(lane) or "the quota", "quota")
                 continue
             fid = self.birth(row, slug=slug, lane=lane, structure=structure, symbols=symbols, agenda=agenda,
                              mechanism=mechanism, card=checked, parent=parent, route=route, known_rows=known_rows)
@@ -751,7 +899,7 @@ class EquityPass:
                     record["refused"] = [{"at": self.store.now(), "why": f"the architect's program: {why_code}"}]
                 self.store.set_state(fid, **{STATE_KEY: record})
         except Exception as exc:  # noqa: BLE001 - not born; the next request names why
-            self.refuse(slug, f"not born: {type(exc).__name__}: {str(exc)[:200]}")
+            self.refuse(slug, f"not born: {type(exc).__name__}: {str(exc)[:200]}", "store")
             return None
         if spec["sketch"]:
             self.store.note(fid, f"The architect's sketch: {spec['sketch']}")
@@ -767,4 +915,5 @@ class EquityPass:
 
 __all__ = ["BIRTHS_AT_KEY", "LAST_KEY", "DEFAULTS", "BOUNDS", "SYSTEM", "cfg", "lane_cfg", "birth_share", "births_on",
            "universe", "researching", "due", "EquityQuota", "lanes_text", "agenda_text", "graveyard_text", "seeded_ids",
-           "tried", "tried_text", "families_text", "vocabulary_text", "last_text", "EquityPass"]
+           "tried", "tried_text", "families_text", "vocabulary_text", "last_text", "refusal_said", "REFUSAL_SAID",
+           "OTHER_SAID", "CARD_FIELDS", "NO_SECTORS", "SETTING_KEYS", "EquityPass"]

@@ -222,12 +222,15 @@ FAILS: dict[str, str] = {
     "R1": f"the 1.0x net P&L at or below zero, or the 1.5x P&L under {BAR['cost_ratio']:g} of it",
 }
 #: The researcher's settings (`elane.e2` keys; defaults here, policy.json in ELANE_E2_PATCHES.md) and their bounds.
+#: `train_max_output_tokens` is held to the model provider's own limit (release E2.4; `elane_yield.OUTPUT_LIMIT`: it was
+#: bounded at 64,000, above what the provider takes, so a setting inside the bound failed every route).
 DEFAULTS: dict[str, Any] = {"train_budget": 4, "train_max_attempts": 7, "train_max_errors": 3, "train_every_seconds": 600,
                             "train_per_round": 3, "train_max_output_tokens": 12000, "train_effort": "medium",
                             "refuted_cell_cap": 3}
 BOUNDS: dict[str, tuple[float, float]] = {"train_budget": (1, 12), "train_max_attempts": (1, 30),
                                           "train_max_errors": (1, 10), "train_every_seconds": (60, 86400),
-                                          "train_per_round": (1, 20), "train_max_output_tokens": (2000, 64000),
+                                          "train_per_round": (1, 20),
+                                          "train_max_output_tokens": (2000, elane_yield.OUTPUT_LIMIT),
                                           "refuted_cell_cap": (1, 50)}
 EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 STATUSES = ("researching", "passed", "refuted", "stalled", "closed")

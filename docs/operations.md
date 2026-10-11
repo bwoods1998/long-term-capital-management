@@ -756,7 +756,7 @@ equals `UNIVERSE`; since R-E4b it is the other way round (inside it), and the fi
 changed there moves the equity identity. Done's meter still counts a closed panel lot as one close; whether a panel
 program's closes count by distinct close dates is the owner's open decision, and the report shows both.
 
-## The forward record (release E3, Oct 2026): `feat/equity-e3`, not deployed
+## The forward record (release E3, Oct 2026): deployed 14:37Z Oct 11, 2026
 
 E1 (two sections down) gives the equity lanes their live path and E2 (the next section) makes the swarm breed share
 programs. E3 **records and measures**. From the first session after the look cap, every equity program the swarm judges
@@ -1177,12 +1177,208 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   `elane_train_window`, `elane_train_state`, and `elane_train_house` (the equity Train is not running: a version's
   third failure of the House's since it was last judged, the decider child failing every run or no equity store; at
   most once every six hours).
-- **The owner's alarms and Done.** The stall causes (births, population, Gym runs, Validations) and pre-open check 6
-  read the options lanes only; an equity family in a live band is check 10's, and an equity Validation never reads a
-  stalled options pipeline as moving (`equity_validation_runs` and `equity_awaiting_ids` are beside). Done's item 7
-  ("births, Gym runs and Validations every UTC day") counts the options lanes; each day's `equity` row (births, Train
-  runs, Validations) is reported beside it, never a bar. Counting the equity lanes in item 7 would be the owner's
-  change of the pinned rule.
+- **The owner's alarms and Done.** The options stall causes (births, population, Gym runs, Validations) and pre-open
+  check 6 read the options lanes only; an equity family in a live band is check 10's, and an equity Validation never
+  reads a stalled options pipeline as moving (`equity_validation_runs` and `equity_awaiting_ids` are beside). Done's
+  item 7 ("births, Gym runs and Validations every UTC day") counts the options lanes; each day's `equity` row (births,
+  Train runs, Validations) is reported beside it, never a bar. Counting the equity lanes in those three counts would
+  be the owner's change of the pinned rule. The equity lanes' own stall causes are the next bullet; item 7's other
+  half, "no owner step waiting", reads theirs like any cause's.
+- **The equity lanes' own alarms (release E2.4, `feat/equity-e24-health`, not deployed: the gateway first, then an
+  owner deploy; `league/ops/elane_health.py`).** On Oct 11 the lanes' first hours went wrong four ways (most scored
+  versions disqualified by one misreading of the contract, a births pass cut short, another refused whole for symbols
+  outside the universe, the lanes starved at their pace) and no alarm fired: the captain found each by hand. The
+  `stall` job now judges four equity causes at every run, read-only, and raises them like any cause: standing in
+  `stall.json`, a House warning, the notice at the job's pace, cleared at the first run where it no longer holds.
+  Each is judged only while the lanes are on (`elane.mode` "gate" and `elane.birth_share` above 0), the floor is not
+  paused, E2's dollars are not set to zero (`elane.e2.usd_day` or `elane.e2.pace_share` at 0 is the lanes paused by
+  setting) and the store holds an equity family or an equity pass at all; and only on evidence since THE RUNNING
+  RELEASE first started, so a release that fixes a fault is not judged on what the generators did under the one
+  before, and a restart of the same release (the watchdog's, a settings apply) resets nothing. The job keeps that
+  start in `stall.json` (`elane`: `release`, the release directory the swarm's heartbeat names, and `since`, the start
+  first seen under it) and, under it, what the four keep while that release runs and drop when it changes: `idle`
+  (the idle clock), `held` (the last run that read E2 held), `dq` (when `elane_dq` first stood), `unread` (when
+  unreadable lanes were last warned) and `broken` (the BROKEN kind `elane_idle` stands on, and since when).
+  Otherwise the check reads "Not judged" and says why. **A "Not judged" that is
+  no design is an error, and a House warning:** when the swarm's settings, one of E2's own readers, the store or the
+  lane's own reading of whether it may ask a model cannot be read, the receipt's `errors` name the class at every
+  run ("the equity lanes' readers could not be read (<class>): the four equity causes are not judged") and ONE House
+  warning says it every 12 h while it lasts ("stall: the equity lanes' alarm cannot see: ..."). The receipt's
+  `warning` flag alone reaches no one: the job's runner does not alert on it. How to read each, and what to do:
+  - `elane_dq`: more than half of the versions scored in the last 6 h (6 at least) could not be judged for a fault of
+    their own program: disqualified by its errors or timeouts, refused at load, or failed by the decider child, in at
+    least two families (one family's bad programs are no fault of the contract: the check reads clear and names the
+    family). No mechanism was judged in them. When fewer than 6 fall in the 6 h it judges the last 6 scored since the
+    running release started (inside 12 h); and it stands early, before the sixth version, once 4 of two families
+    could not be judged (they are most of six whatever comes). **Once it stood under a release it HOLDS** until
+    versions scored after it stood are judged by the bar in two families (the generators write programs that run),
+    or the release changes: it no longer clears as its window slides past a fault nothing fixed, or when one
+    family's bar fails sit beside the retired families' versions and read "half". While it holds for that alone its
+    sentence says since when and how many families the bar has judged since (`standing_since`,
+    `bar_families_since`). It names the first error's class (TypeError, KeyError, a malformed intent...) only when
+    one class is more than half of the disqualifications, else the classes that tie; and, for a class it names, the
+    reading rule's commonest sentence for it, or, with none on record, what that class most often is. **Your
+    step:** the text the generators read is wrong or silent about it: fix `league/equity/EQUITY.md` "Reading ctx"
+    and `elane_review.READING_CTX`, or make a static rule refuse the shape, in a release (Oct 11's was release
+    E2.2).
+  - `elane_births`: the last 3 equity passes that asked a model bore no family. It says how (every proposal refused,
+    none proposed, the answer cut short, no route answered, the pass raised), the commonest refusals in the House's
+    own closed words, and the symbols the code knows that `elane.universe` does not hold. Nothing to do for 6 h:
+    each pass tells the next its refusals. **After 6 h with no equity birth, your step when a setting clears it:**
+    widening `elane.universe` or `elane.structures` is your decision (closed cells and lineages with their try
+    bind by design); answers cut short want a higher `elane.e2.births_max_output_tokens` (at most the model
+    provider's own output limit, which the step names) or a lower `elane.e2.max_per_pass`; a pass that raises needs
+    a release. **At once, your step** when every route refused the request before it was sent for a setting (the
+    pass's event names the `elane.e2` key: an output limit above the provider's, an effort or a Sail profile the
+    provider does not know): asking again changes nothing until the setting does. Cards refused, an empty answer or
+    a route that did not answer stay information.
+  - `elane_idle`: **A BROKEN LANE, and only that** (the captain's rulings of Oct 11 on the second and the third
+    independent checks). BROKEN is judged first, by the lane's own record, two ways.
+    **By its answers, at any time.** Of the PROGRAM QUESTIONS the Train rounds asked a model in the last 6 h (8 at
+    least; with fewer in the 6 h, the last 8 asked since the running release started, inside 12 h; before the
+    eighth, once 5 are lost: they are most of eight whatever is still to be asked), more than half were LOST TO A
+    FAULT: the answer E2 paid for held no program (the round's own words, "the answer held no program": a
+    programless, an unreadable and a cut-short answer are all that refusal), or no route answered the question.
+    (A stop before any version was judged, the same program sent again and a program a rule refuses are answers
+    the lane could read and the generator's own, each in its author's next brief: none is lost to a fault.)
+    That is work lost to a fault, never to a setting and never to a rule, and the lane need not be idle for it: a
+    lane that still scores a version now and then while most of what it pays for holds no program stands too. A
+    question no route answered counts only once no route has answered a program question for 3 h WHILE THE LANES
+    KEPT ASKING: the questions none answered since the last one a route did answer, once the first of them is 3 h
+    old (less the time the swarm was down) and they span an hour and a half. A route's bad hour heals by itself (the
+    question is asked again after its backoff), and a bad quarter of an hour that a hold of E2's followed is not
+    three hours unanswered. **Your step** names the routes, each one of `elane.e2.routes` as the swarm loads them
+    (any other is "another route" in the sentence and unnamed in the step): for answers with no program, raise
+    `elane.e2.train_max_output_tokens` if they are cut short, or take a route out of `elane.e2.routes`; for
+    questions none answered, check the routes at the model provider or name routes that answer; else it needs a
+    fix, in a release. Before the third check such a lane read "STARVED BY A SETTING, not broken" under any hold,
+    pointed to `elane_refused` (which said none was refused) and was never mailed.
+    **By its failures, once it is idle.** Work is owed (families in Train research, or births wanted), no version
+    was scored for 3 h, and the record since shows two rounds that raised, two Train steps that failed on the
+    House's side (or a family waiting out a House backoff after two failures), or two steps that failed with an
+    error of their own. **Your step** when its rounds raise (the swarm log's "elane failed" and "elane_train
+    failed" lines), when its Train runs fail on the House's side (the `equity_data` job's receipt, the swarm's
+    `equity-decider.log`), or when its steps fail with errors (the swarm log's `elane_train` lines).
+    Either way it stands WHATEVER E2's own lines hold, with that kind's step, and a second sentence says the line
+    when E2 is also held ("BROKEN, whatever E2's own lines hold: ... E2 is also held now: ..."): a lane whose every
+    Train run fails, or whose every answer holds no program, scores nothing at any pace.
+    **Once it stood under a release it HOLDS** (`stall.json` `elane.broken`: the kind, since when, and for the
+    answers the routes it named) until a version is scored after it stood, the release changes or no work is owed.
+    While it stands on that alone its sentence says so ("it stood at ... and HOLDS until a version is scored or
+    the release changes", with what the hours read show now; `standing_since`, `kept_standing`). Before, a hold of
+    E2's that outlasted the 12 h of events the check reads turned a lane nothing had fixed into "STARVED BY A
+    SETTING, not broken": in the third check's replay a lane whose Train runs all failed lost its step for 21 hours
+    of a day under the Sail guard, and the reminder stopped.
+    **Why this cause and not `elane_refused`** (the ruling left the choice to what reads truest to an operator): a
+    lane that pays for answers and gets no program cannot do its work, which is what BROKEN says and what its step
+    is for (the routes, the output setting). `elane_refused` says the generators write programs ONE RULE refuses
+    and asks for that rule to be taught, and the gateway words it "by one rule": no rule refused an answer that
+    held no program, and a question no route answered wrote none.
+    Else, idle, it stands only when the lane MAY ASK A MODEL and still scores nothing: no hold of E2's was seen
+    for those 3 h (not now, not at an earlier run of the job, no Train step or equity pass skipped for want of
+    model dollars). **Your step** when no round starts or judges anything (the swarm log's `elane_train` lines);
+    questions no route answered and answers with no program that are too few to be most are told and are nobody's
+    step, programs refused before a run are `elane_refused`'s, and with no family left and barren passes it points
+    at `elane_births`.
+    **STARVATION BY A SETTING IS NO STANDING CAUSE.** A lane held by its own hourly pace, its day's dollars or the
+    House's Sail day is the budget you chose, at work: the check reads judged, clear, never stands, raises no House
+    warning and is never mailed, for an hour or for a whole day. What the setting costs is SAID, in the check's
+    sentence and numbers at every run (the receipt and the report): the Train steps due in the last 3 h, taken and
+    skipped by reason (`steps_due`, `steps_taken`, `steps_skipped`, `skipped_pace`, `skipped_usd_day`,
+    `skipped_sail_day`), whether E2 is held now and by which line (`held_now`), whether a hold was seen in the 3 h
+    (`held_lately`), the idle hours (`idle_hours`; `starved` true once they pass 3 on a held lane), and the lever:
+    the hourly pace (`elane.e2.pace_share`), or the day's line, which is `elane.e2.usd_day` only when that is under
+    24 hours at the hourly pace (at the release's settings it is not, and the lever is the pace again); where the
+    budget is at its floor (no usable `budget.json`) it says the budget's line binds before the share, before the
+    command (`python3 set_swarm.py elane.e2.pace_share=<lines> --apply`). The research funnel carries the same counts for
+    the day and the release (`train_steps`; the passes' `skipped`). **The cost of this ruling: a lane starved by a
+    setting is seen in the funnel and the receipt, not in the mail.** Read `train_steps` in the `scoreboard` job's
+    receipt when you set a pace: nothing will mail what it costs. And while a hold was seen in the 3 h only what
+    the record proves broken stands: programs refused before a run, one failure of a kind, rounds that judge
+    nothing, and questions no route answered or answers with no program that are too few to be most are said in
+    the held lane's sentence ("Since the lanes went idle ...") and its numbers, and stand on nothing there. A held
+    lane with program questions lost says how many and how many it takes (`questions_lost`, `questions_asked`;
+    "it stands BROKEN once they are 5 and more than half of those asked"), and does not say "not broken". The
+    funnel counts every one (`answers`: `by_rule.no_program`, `unanswered`).
+    The idle clock is kept per release (`stall.json` `elane.idle`): from the later of the last version scored and
+    when the work became owed, less the time the swarm was down (at a restart, from the heartbeat the last run read
+    to the new start), so a broken lane that is restarted every two hours is still judged idle; its hours say "at
+    least" unless they start at a version scored. Not judged while the swarm itself is not running (its heartbeat
+    ten minutes old), nor while the time taken off for restarts leaves under 3 h of running time (the check then
+    says how much was taken off).
+  - `elane_refused`: more than half of the programs the generators wrote in the last 6 h (8 at least) were refused
+    before a run by ONE static rule (the reading, level or memory rule, the code rules, NEEDS). It names the rule
+    and its commonest sentence. As `elane_dq`: when fewer than 8 fall in the 6 h (a slow lane writes one program an
+    hour) it judges the last 8 written since the running release started (inside 12 h), and it stands early once 5
+    were refused by one rule (most of eight whatever is still to be written). **Your step:** the generators are not
+    being taught that rule: teach it where they read it (the contract, the researcher's system prompt,
+    `elane_review.READING_CTX`), in a release.
+
+  **In the mail** each of the four is an entry of its own, under its own words (the gateway's, since its deploy
+  before this release: "most equity versions could not be judged", "the equity passes bear no family", "the equity
+  lanes are idle or starved", "most equity programs refused before a run by one rule") and keyed by its own name:
+  an equity owner step is mailed at once whatever the swarm's own alerts told, and theirs whatever these told.
+  (The gateway's words for `elane_idle` still say "idle or starved"; the gateway is not changed again for the
+  ruling, and a lane starved by a setting no longer reaches the mail under them.)
+  Nothing rides "the swarm raised alerts". An entry is the cause's sentence (its leading sentences whole inside the
+  mail's 400 characters; the receipt has all of it), its figures (the telling ones first; E2's dollar figures are in
+  the sentence, to the tenth of a cent, never among the mail's two-place numbers), what the floor is doing and your
+  step. **A House warning keeps your step whole:** where a cause's sentence, what the floor does and the step pass
+  the warning's 900 characters, what is shortened is what comes before the step.
+
+  **Read them** with no exec (`python3 scripts/desk_receipts.py`): the `stall` job's receipt holds the four among
+  its `checks`, each as it holds every cause (`stalled`, `what`, `numbers`, `doing`, `owner_step`); a check's
+  `numbers` say whether it was judged (`judged`), on what (`basis`), for `elane_dq` and `elane_refused` give
+  `examples` (the families, versions, lines and classes), and for `elane_dq` the contract's own sentence for the
+  class named (`hint`). The research funnel is in the `scoreboard` job's daily receipt, key
+  `equity` (`day` and `since_release`, each with `research`: equity passes asked, barren and cut short, proposals
+  refused by reason class, programs refused before a run by rule, the Train rounds' steps taken and skipped by
+  reason (`train_steps`: `pace`, `usd_day`, `sail_day`, `other`), versions scored, disqualified and failed by
+  code, bar passes, review refusals and passes, families retired, E2's model dollars by purpose). On the box,
+  read-only: `python3 -m league.ops.elane_health --state /workspace/state [--hours N] [--json]` prints the checks,
+  the funnel of the last N hours and each family's versions (fail codes, a disqualification's class and line) and
+  refusals (the rule and its sentence in closed words). No text a program or a model wrote is repeated in the
+  mail, the House's warning or a standing check's sentences: not an exception's text, not a program's source, not a
+  refused proposal's name, not a symbol a model made up. (A check's `examples` and the report name families by
+  their ids, and so does the sentence of an `elane_dq` that reads clear for one family.)
+
+  **What the architect is shown of a barren pass** (`league/swarm/elane_births.py` `last_text`), in closed words:
+  each refusal by its class, in the House's one sentence for the class with the House's own values (the structures
+  and universe the settings open, the agenda's keys, a card's field names, the symbols of the code's own universe
+  that are not open and a count of any others), and the proposal by its PLACE in the last answer (with its lane and
+  agenda key when it named valid ones). Never a lane, structure, agenda or symbol as the model spelled it, never its
+  card's text and never its slug: the House's slug rule keeps a model's words (hyphenated, cut at 36 characters), so
+  a slug can carry a sentence to the next reader, who may be another route's model. The House's own record of the
+  pass (kv `elane_e2_last`, the `swarm.elane` event) keeps the slugs and reasons, for the operator and this alarm.
+  And one sentence after THE AGENDA, while `elane.universe` holds no sector ETF: where a mechanism speaks of sector
+  ETFs, read THE UNIVERSE's own symbols. (The contract in the system prompt, `league/equity/EQUITY.md`, still lists
+  every symbol the code knows; the request's universe line says only its own are open.)
+
+  **Settings.** The release adds none to `swarm.json` and changes none: the thresholds are constants in
+  `league/ops/elane_health.py`, each with its reason. One switch is the owner's, in `ops.json`:
+  `{"stall": {"elane": false}}` stops the four from being judged and leaves the rest of the stall alarm as it is
+  (`jobs.stall.enabled` false still stops the whole job). The settings its steps name exist already and stay the
+  captain's: `elane.mode`, `elane.birth_share`, `elane.universe`, `elane.structures`, `elane.e2.pace_share`,
+  `elane.e2.usd_day`, `elane.e2.births_max_output_tokens`, `elane.e2.max_per_pass`, `elane.e2.refuted_cell_cap`,
+  `elane.e2.train_max_output_tokens`, `elane.e2.routes`.
+  **One bound is tighter:** `elane.e2.births_max_output_tokens` and `elane.e2.train_max_output_tokens` are held to
+  the model provider's own output limit (`ltcm/provider.py` `MAX_OUTPUT_TOKENS`, read from it; they were bounded at
+  64,000, above what the provider takes, and on Oct 11 a setting inside that bound failed every route of one births
+  pass). A value above the limit reads as the code's default (24,000 and 12,000), as any value outside a bound
+  does: check `swarm.json` for either before the deploy.
+  What else changes at the deploy with no setting: the four causes are judged and told; Done's item 7 counts an
+  equity owner step waiting; the funnel carries `equity.research` and the `scoreboard` job's receipt the funnel's
+  equity block; `stall.json` gains `elane`; the equity architect's request names the
+  costs of the universe's own symbols only and says a proposal naming any other is refused whole (it named "the
+  other ETFs", TLT and GLD whatever the universe held, and a pass then proposed sector ETFs the admission
+  refused), and tells the last pass's refusals in closed words. It reads, reports and notifies: no screen, bar,
+  budget, seat, money rule, graveyard or refusal rule changes, and the three identities do not move.
+
+  **Deploy order: the gateway first.** `gateway/lib/email.mjs` `STALL_CAUSES` words the four causes (the release's
+  one change under `gateway/`). A notice that names a cause the gateway does not word is refused whole (a 400:
+  nothing of that notice is mailed, the receipt's `errors` say "stall notice not sent" at every run, and the
+  House's warnings and `stall.json` go on), so the House release follows the gateway's deploy, never the other way.
+  The same holds for a gateway rollback past it while this release runs.
 
 **Stop it**, from the lightest (each read on the next loop pass, no deploy):
 1. `elane.birth_share=0`: no more births. The families already born finish their Train research, and one that passed
@@ -1296,9 +1492,9 @@ confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the Ho
 
 **The switches** (all three must be on for a real equity open; any one off stops new opens):
 - `equity_money.enabled` (league/constitution.py, a CON change: the money digest moves and the standing grant re-ratifies
-  at the House's start). E1 ships True (money digest `7e41909a`, with the Probe sleeve at 0.50 x E: **The Probe
-  sleeve** below); False (`23f17a14`) is the stop: the book keeps its tables, runs its exits and reconciles; no equity
-  open.
+  at the House's start). E1 shipped True on Oct 11 (money digest `7e41909a` at A20's design, three seats at a sleeve
+  of 0.50 x E; the digest of the seats and the sleeve in force is in **The seats and the sleeve** below); False
+  (`23f17a14` at A20's design) is the stop: the book keeps its tables, runs its exits and reconciles; no equity open.
 - `elane.mode` (league/swarm/policy.json, swarm.json over it): "off" (the rollback: no seeded birth, no equity look) or
   "gate".
 - `STOCK_BUYS_REAL` (gateway/wrangler.jsonc): deployed "on" with PR #532; while the House's `equity_money.enabled` is
@@ -1381,22 +1577,107 @@ the venue's overnight multiplier once a margin-interest row is metered.
 **The loss budget is shared** (A8.6). The options lane's `options_money.probe` rows ($400 net in any rolling 20 sessions,
 $800 net in total) bound every agent program's Probe opens in both lanes, read by one `probe_tally`: an open ETF lot
 counts 20% of its value, a stock 40%, an option its maximum loss, and ONE slot a program (never one a lot). The
-equity lane holds at most the LOWER of its Probe sleeves (`probe.max_programs` x `probe.sleeve_share` x E: 3 x 0.50 E)
-and the invested cap (`invested_share` x E: 1.00 E). Three one-ETF programs hold a lot of 0.25 x E each: 0.75 x E of
-ETFs, 0.15 x E of open risk, and no cross-program cap binds them. A program that holds several ETFs can fill its whole
-sleeve; three whole sleeves ask for more than the account holds, and the invested cap is the bound then: at most
-1.00 x E of ETFs, 0.20 x E of open risk. The options Probe lane keeps the window's rest, $400 less its realized loss
-less 0.20 x the equity lots: $400 - 0.15 x E against three one-ETF lots ($100 at E = $2,000, nothing from
-E = $2,667), and no room under the invested cap once the equity lane is invested to it: **effectively off** while the
-equity lane is full. From E = $2,667 the budget is what cuts the third one-ETF lot (each entry is cut to the budget's
-room over 0.20, so the lane stops at $2,000 of ETFs, less five times what the window has lost and the options lane
-has at risk). The `dlane` report says so with the figures (`equity.options_probe_room`: the lane's most, whose
-`bound` names which rule set it: the sleeves, the invested cap or the budget).
+equity lane holds at most the LOWER of its Probe sleeves (`probe.max_programs` x `probe.sleeve_share` x E) and the
+invested cap (`invested_share` x E: 1.00 E). A one-ETF program holds half a sleeve; a program that holds several ETFs
+can fill its whole sleeve, and where the sleeves ask for more than the account holds the invested cap is the bound:
+at most 1.00 x E of ETFs, 0.20 x E of open risk. The options Probe lane keeps the window's rest, $400 less its
+realized loss less 0.20 x the equity lots, and no room under the invested cap once the equity lane is invested to
+it: **effectively off** while the equity lane is full. Each entry is cut to the budget's room over 0.20, so the lane
+stops at $2,000 of ETFs, less five times what the window has lost and the options lane has at risk. **The seats and
+the sleeve** below states all of it in figures at the pair in force (the lots, how many fit under each cap, the E
+from which the window cuts one, what the options lane keeps). The `dlane` report says so with the figures
+(`equity.options_probe_room`: the lane's most, whose `bound` names which rule set it: the sleeves, the invested cap
+or the budget; its statement is built from the rows in force).
 
-**The Probe sleeve is 0.50 x E** (the captain's amendment A20, Oct 11, 2026; `equity_money.probe.sleeve_share`,
-league/constitution.py). The rule: a program that passed its look takes one of three seats, first come, with a sleeve
-of 0.50 x E; a program's position in one ETF is at most half its sleeve, so a one-ETF program's lot is 0.25 x E (it
-was 0.125 x E under the sleeve of 0.25 the branch carried before). Seats, seating and every other row are unchanged.
+**The seats and the sleeve are two numbers** (release E5-S, Oct 11, 2026; `equity_money.probe.max_programs` and
+`probe.sleeve_share`, league/constitution.py). A program that passed its look takes a seat, first come, with a sleeve
+of `sleeve_share` x E; its position in one ETF is at most half its sleeve. The pair is set by ONE mechanical step,
+`set_design SEATS SLEEVE`, which rewrites the two rows, the swarm's `elane.roster` (league/swarm/policy.json and the
+default in league/swarm/elane.py: the seats, written in three places and held equal by a test), `PINNED_DIGEST`, and
+the design blocks of four documents (the one below, the constitution's `probe` comment, league/equity/INTERFACES.md
+section 17 and the CHANGELOG entry), and nothing else; run again with the same pair it changes nothing. The design in
+force, in rule arithmetic of the two numbers:
+
+<!-- equity-design:begin -->
+THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
+(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.125 x E.
+A lot in every seat asks for 0.75 x E of ETFs; the lane holds at most 0.75 x E of them, 0.15 x E of
+open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 4 whole lots fit; the
+next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 6 of
+6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
+6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,666.
+Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
+0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
+the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
+equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
+collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
+0.50 x E.
+Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7e41909a` / `e909eb10`.
+<!-- equity-design:end -->
+
+- **Its source.** The pair is the captain's to set, before Monday's open, from the verdict of the pre-registered
+  study EQDONE-3 over seats 3, 4, 5, 6 x sleeve 0.50, 0.33, 0.25 (its design and decision rule pinned before its
+  run). The build that made the choice two numbers left a working pair in the tree and is not a release until the
+  verdict's pair is set. Every pair of the grid is held by `league/tests/test_equity_design.py` and
+  `test_equity_sleeve.py` through the House's own `size_entry`, and each pair's money digest is pinned
+  (`league/tests/equity_design.py` `DIGESTS`), so the pair the study names lands on a digest the tree already states.
+- **Why the two move together.** Done reads 30 real closes whose P&L sums above zero. More programs trading
+  at once make closes sooner, and a smaller lot a program keeps the same shared loss budget over them.
+- **Its cost, plainly.** A seat is one passed sealed look, so more seats put more programs, the screen's false
+  positives among them, on real money at once. A smaller lot pays the same spread and fees per dollar and earns a
+  loss back more slowly. Closes made sooner by long-only index ETFs are weak evidence of skill. **It buys closes, not
+  edge and not a higher expected profit.**
+- **What does not move.** The owner's caps and loss budget, each applied by `size_entry` to every entry at any pair
+  and named when it binds: an ETF at most 0.50 x E across all programs (`instrument`); at most 1.00 x E invested,
+  the options' open maximum loss included (`invested`); the House-wide cash reserve (`cash`); the shared loss budget,
+  $400 net in any rolling 20 sessions and $800 net in total (`budget`); the program's -$300 line, the kill switch,
+  the daily stop and the drawdown stop; the stock paper proof's gates. Long only. A seat only decides who may OPEN.
+- **What a pair can make bind that A20's did not** (the block's counts say where). When the seats' lots do not all
+  fit, the House cuts or refuses an entry that the Gym, which judges each program alone in its own sleeve, fills, and
+  Done's consistency clause (A14) reads that difference, as it did for A20's 0.66. When more programs sit in ONE ETF
+  than its whole lots, the later ones are refused there (at a sleeve of 0.33 the next one gets a lot of 0.005 x E,
+  which is above the $10 minimum from E = $2,000 on). An equity program with a lot takes one of the options lane's
+  eight Probe slots (`options_money.probe.max_open`). And `order_path.max_orders_day` (60 equity orders a day,
+  cancels counted, the loose end of its bound) was sized for three programs: N programs that each sell at the open
+  and buy at the close use 2 x N orders on a day every order fills at its first send, and up to 18 x N on a day
+  every order climbs its whole ladder (five sends and four cancels each), so with more than three seats a day in
+  which most orders are re-priced can run out of the count. Entries then wait and are recorded missed at their
+  cut-off; an exit is refused by the count only at 60, and is carried to the next session. Nothing is sold for it.
+- **At the deploy**, for the programs the House already holds:
+  - **A Candidate waiting for a seat is seated at the first band sync after the House starts on the release**: the
+    swarm's reader shows it once `elane.roster` has a free seat (first come: `banded_at`, then id), the seating pass
+    (every minute between a recorded decision and the next session's close window) moves it to Probe, makes its
+    instance and asks it for the same close, so its first order goes in the next session. Nothing else moves in
+    that pass. A `swarm.json` in the state root that writes `elane.roster` can only LOWER the seats: one that still
+    says 3 keeps three seats until it is raised or removed (`set_swarm.py`).
+  - **A buy already planned is sized at its send**, on the table in force then, never at the decision: a `share`
+    intent is that share of the sleeve in force; a `usd` intent is cut to that sleeve's own caps (`sleeve_cap`,
+    `sleeve_cash`). Its replay twin agrees at any size: the closed-form twin buys the lot's own entry notional and
+    reads returns, and the forward record's intent agreement keys a buy by its symbol and fill point, whatever its
+    size.
+  - **A lot larger than a smaller sleeve is never sold for it.** The House's own exits are the maximum hold, the
+    failed decides and a retired or demoted program (`_house_exits`), never a size. The program's next entries are
+    held to the sleeve in force: no more of that ETF while the lot is over half the sleeve (`sleeve_cap`), and of
+    another ETF only what the sleeve has left (`sleeve_cash`: nothing while the lot alone is over the whole
+    sleeve). Seats moved DOWN unseat nobody either: a Probe program keeps its seat, and no new one is given until
+    the count in force has room.
+- **Rollback**, one owner deploy: `set_design 3 0.50` is A20's design, and its money digest is `7e41909a` again, to
+  the last hex (the seats' bound may stay at six). The standing grant re-ratifies at the House's start; no
+  fingerprint moves and no evidence is reset. Programs seated beyond three keep their seats (above) and are sized
+  on the larger sleeve from then on, inside the same caps.
+- Proof: `league/tests/test_equity_design.py` (every pair of the grid at a stated E, through `size_entry`; the
+  design blocks held to the rows; the deploy's three cases through the real book and the real swarm store),
+  `test_equity_sleeve.py` (every pair against the rule written out), `test_constitution`, `test_ci` (the bounds, one
+  step past each, the gateway's day line by sleeve), `test_elane` (the seats' three places), `test_equity_money`
+  (a move of the pair is a digest of its own, ratified by the owner's deploy alone, and so is the move back).
+
+**A20: the Probe sleeve at 0.50 x E, three seats** (the captain's amendment A20, Oct 11, 2026: the design release E1
+deployed at 07:18Z Oct 11, kept here as that decision's record; where it and **The seats and the sleeve** above
+differ, that section is the tree. `equity_money.probe.sleeve_share`,
+league/constitution.py). The rule then: a program that passed its look took one of three seats, first come, with a
+sleeve of 0.50 x E; a program's position in one ETF is at most half its sleeve, so a one-ETF program's lot was
+0.25 x E (0.125 x E under the sleeve of 0.25 the branch carried before). Seats, seating and every other row were
+unchanged by it.
 - **Its source.** A pre-registered study (EQDONE-2: its design and decision rule pinned before any code or figure,
   its code before the run) and that study's review, both finished before the first live equity trade and before the
   result of the options lane's next close was known. Its question: Done reads the sum of the realized P&L of every
@@ -1439,19 +1720,19 @@ was 0.125 x E under the sleeve of 0.25 the branch carried before). Seats, seatin
 - **The sizing-up step is parked** (`equity_money.sized.min_trades` 1000, inside its bound and a tightening; the
   captain's decision on the study's review). The owner's loss budget ($400 net in any rolling 20 sessions, $800 net
   in total) covers all real money, and E1 as built leaves a Sized program's closes outside the Probe window, the
-  total and the -$300 line; with the Probe sleeve equal to the Sized cap (0.50) the step would size nothing up
-  anyway. With 1000 no equity program is Sized, so every equity close stays inside the loss budget's tallies. The
+  total and the -$300 line; with the Probe sleeve equal to the Sized cap (0.50, A20's design) the step would size
+  nothing up anyway. With 1000 no equity program is Sized, so every equity close stays inside the loss budget's
+  tallies, at any Probe sleeve. The
   sizing-up RULE stays pre-registered as written (**Sizing up and demotion** below); the row is switched back only
   together with a change that counts Sized closes in the budget.
-- **The money digest** is `7e41909a` (full digest `e909eb10`): one move with the E1 block, ratified at the House's
-  start on the owner's deploy. **Rollback of the sleeve**, one owner deploy: `sleeve_share` "0.25" (the bound may
-  stay; the sizing-up step stays parked) and `PINNED_DIGEST` re-pinned; the digest is then `3a7c52d5`, the grant
-  re-ratifies, no fingerprint moves and no evidence is reset. Lots already held are not resized: a sleeve applies to
-  the entries sized after it.
-- Proof: `league/tests/test_equity_sleeve.py` (three lots of 0.25 x E with no cap binding, the fourth lot against
-  the invested cap and the cash reserve, two programs in one ETF, the budget's cut, a Sized program's sleeve),
-  `test_constitution` and `test_ci` (the row, its bound and one step past it), `test_equity_bands_money`,
-  `test_equity_money`, `test_equity_e2e` (the real book's lot).
+- **The money digest** of A20's design is `7e41909a` (full digest `e909eb10`): one move with the E1 block, ratified
+  at the House's start on the owner's deploy (07:19Z Oct 11). A move of the sleeve or the seats since is
+  `set_design SEATS SLEEVE` (**The seats and the sleeve** above): three seats at 0.25 is `3a7c52d5`. Lots already
+  held are not resized: a sleeve applies to the entries sized after it.
+- Proof: `league/tests/test_equity_sleeve.py` (at A20's design, stated as a table of its own: three lots of
+  0.25 x E with no cap binding, the fourth lot against the invested cap and the cash reserve, two programs in one
+  ETF, the budget's cut, a Sized program's sleeve), `test_constitution` and `test_ci` (the bound and one step past
+  it), `test_equity_bands_money`, `test_equity_money`, `test_equity_e2e` (the real book's lot).
 
 **The schedule** (New York time; `league/equity/schedule.py`, the offsets in force in `equity_money.order_path`; half days
 by the same offsets from the 13:00 close):
@@ -1661,11 +1942,11 @@ rules read ONE PROGRAM VERSION's real record (`EquityRecord`, built by the book'
 in close order, each close's net return = its net cash (fees and dividends included) over its entry notional. The
 bands move once a day, at the decision's band sync (never in the seating pass, never at send time).
 - **Candidate to Probe**: a Candidate that passed its lane's sealed look takes a free roster seat (at most
-  `probe.max_programs` 3 live programs, first come): a sleeve of `probe.sleeve_share` x E (0.50 since the captain's
-  A20: **The Probe sleeve** above).
+  `probe.max_programs` live programs, first come): a sleeve of `probe.sleeve_share` x E (the two numbers in force:
+  **The seats and the sleeve** above).
 - **Probe to Sized** (`sized_up`), when ALL hold, checked in this order (the reason recorded names the first that
   fails). **PARKED at the table in force**: `sized.min_trades` is 1000, so no equity program is Sized and every
-  equity close stays inside the loss budget's tallies (**The Probe sleeve** above says why); the rule below is the
+  equity close stays inside the loss budget's tallies (**A20** above says why); the rule below is the
   rule as pre-registered, switched back only with a change that counts Sized closes in the budget:
   1. at least 20 real closes (`sized.min_trades` as pre-registered; 1000 in force);
   2. the closes have a spread (an sd above zero: closes with no spread at all never size up), their mean net return
@@ -1681,11 +1962,14 @@ bands move once a day, at the decision's band sync (never in the seating pass, n
   holds `sized.min_trades` closes; otherwise the figure is unpriced and `beat_bh` fails that day.
 - **The Sized sleeve** (`sized_sleeve_share`, read from the record each time an entry is sized): quarter Kelly on
   that lower bound (`sized.kelly_fraction` 0.25 x the lower bound / the variance of the per-close net return),
-  floored to four decimals of E, capped at 0.50 x E (`sized.sleeve_share`) and **never below the Probe's 0.50 x E**:
+  floored to four decimals of E, capped at 0.50 x E (`sized.sleeve_share`) and **never below the Probe's sleeve**:
   a Sized program never trades smaller than a Probe. As coded: max(the Probe's share, min(quarter Kelly, the cap)).
-  **Since A20 the cap (0.50) is the Probe's own share (0.50), so the answer is 0.50 x E for every record: a Sized
-  program would keep the Probe sleeve and size nothing up.** The rule and its row are left as pre-registered; raising
-  `sized.sleeve_share` is a later decision, with its bound. What Sized would still change: a lot bought while Sized
+  `sized.sleeve_share` stays 0.50 at every pair of **The seats and the sleeve** (`set_design` does not move it: the
+  floor is the Probe's in the code itself, and no Probe sleeve inside its bound is above 0.50). **Where the Probe
+  sleeve is 0.50 (A20's design) the cap is the Probe's own share, so the answer is 0.50 x E for every record: a
+  Sized program would keep the Probe sleeve and size nothing up; under a smaller Probe sleeve the rule could size a
+  program up to 0.50 x E, one more reason the step stays parked.** The rule and its row are left as pre-registered;
+  moving `sized.sleeve_share` is a later decision, with its bound. What Sized would still change: a lot bought while Sized
   carries no Probe mark, so its close joins neither the loss budget's realized figures nor the program's own -$300
   line; its open value still counts as open risk at the same weight.
 - **Sized stays Sized**: no rule steps a Sized version back to Probe; it leaves its band only by EDM1 (or its
@@ -1769,13 +2053,17 @@ a session carry it to the next open. A buy is an open for the shared day counts 
 `MAX_DAY_ORDERS` 300, both books together). The gateway's caps (50% of equity an ETF, 20% a stock, the margin line,
 buying power, 4x equity of buys a day) are the backstop under the House's tighter rules, never the rule the House sizes
 to. `/v1/health` `stock_buys` shows the switch, the shares, the day's buys and the buys in flight.
-**Against the lot of 0.25 x E** (A20; the gateway reads the account's equity, and E is never above it): one order and
-one ETF's position are under the gateway's 50%; the lane at its invested cap (1.00 x E) is at the gateway's book line
-on a multiplier of 1 (1.00 x equity), which the House's $50 cash reserve keeps it under; and the gateway's day line
-counts every buy it admits, a cancelled one too, so it admits sixteen sends of such a lot a day (it admitted 32 of the
-lot of 0.125 x E). Three entries a day sent once each use under a fifth of it; three entries can each climb the
-collar's whole ladder of five sends, with one send to spare, and a sixth send of each would meet `stock_day` and end
-refused (`league/tests/test_ci.py` holds the figures to the release's own gateway files).
+**Against the one-ETF lot** (half a Probe sleeve; the gateway reads the account's equity, and E is never above it):
+one order and one ETF's position are under the gateway's 50% at any sleeve inside its bound; the lane at its invested
+cap (1.00 x E) is at the gateway's book line on a multiplier of 1 (1.00 x equity), which the House's $50 cash reserve
+keeps it under; and the gateway's day line counts every buy it admits, a cancelled one too, so it admits 4 over the
+lot's share of E sends of such a lot a day: sixteen of a lot of 0.25 x E (A20's), twenty-four of 0.165 x E,
+thirty-two of 0.125 x E. Every seat's entry sent once uses a quarter of the line at most, at any pair. An entry can
+climb the collar's whole ladder of five sends; how many entries can do that on the same day is that count over five
+(three, four, six), and a send past the line meets `stock_day` and ends its entry refused: missed, never chased, and
+nothing sold. **The seats and the sleeve** (in the equity lane's section) states both counts at the pair in force,
+and `league/tests/test_ci.py` holds the figures to the release's own gateway files (`DAY_LINE` by sleeve;
+`WHOLE_LADDERS` names the pairs whose every seat can climb the whole ladder on one day).
 
 ## Real stock and ETF buys at the gateway (Oct 10, 2026): deployed 21:18Z Oct 10 (gateway `3cc811b0`, #532)
 
@@ -4056,7 +4344,7 @@ occurrences past its grace has a receipt was not in the old registry.
 | `preopen` | trading days, open − 60 min (12:30 summer, 13:30 winter) | 40 min | the nine pre-open checks (release, grant, gateway caps, account and kill switch, swarm, bands, mirror, backup, compute), read-only; each FAIL a warning | runs |
 | `economics` | trading days, close + 10 min | 3 h | the one-cutoff close economics (realized options P&L from the Sept 26 basis, every cost from T0, open lots at conservative marks, one Net, deposits never counted) and `p30`; private, `<state>/economics/<YYYYMMDD>-close/` | runs |
 | `scoreboard` | daily 23:30 | 2 h | the public-safe daily page with its Funnel table (**The stall alarm and the funnel**), committed to `docs/runs/desk/<date>.md` through the gateway | skipped |
-| `stall` | every 30 minutes, at :20 and :50, round the clock | 70 min | the stall alarm (**The stall alarm and the funnel**, below): read-only; one `stall` notice listing every cause (an owner step at once and every 12 h, the rest every 24 h); a House warning per cause every 12 h | runs (a pause left on 6 h is one of its causes) |
+| `stall` | every 30 minutes, at :20 and :50, round the clock | 70 min | the stall alarm (**The stall alarm and the funnel**, below; the equity lanes' own causes since release E2.4): read-only; one `stall` notice listing every cause (an owner step at once and every 12 h, the rest every 24 h); a House warning per cause every 12 h | runs (a pause left on 6 h is one of its causes) |
 | `drills` | first Saturday of the month, 15:00 and 17:00 | 6 h | the failure drills (below); never retried | skipped |
 | `postmortem` | Saturdays 14:00 | 6 h | the weekly post-mortem, and the cost review on the month's first Saturday (Phase 5; **The improvers**) | skipped |
 | `agenda` | daily 03:00 | 6 h | the strategist's agenda (Phase 2); not in this release | skipped |
@@ -4200,7 +4488,25 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `birth_yield` (no-captain) | over the last 3 h at least 4 passes asked a model and bore at most 1, or the card checks refused 80% of their proposals; or no birth in 2 h while 3 passes wanted one (from the `swarm.architect` events) | none (INFO); the jam above is the owner's step |
 | `swarm_alerts` (no-captain) | an owner kind whose condition stands now (`stall.alert_states`, from the swarm's settings and store, whatever its alert's age), or a `swarm.status` alert (`alert` true) in the last 12 h whose condition is not read or cleared, but the self-healing ones (`sail_window_stall`, `funding_alert`) alone | for `reader_cut`, `agenda_guard`, `policy_layer`, `train_span_pending`, `train_span_mismatch`, `gate_missing_data`, `gate_coverage`, `game_waits` while their condition stands, and `look_failed_three_times` on the UTC day it fired: the setting or fix each names (`stall.ALERT_STEPS`); none for the rest |
 | `underspend` (no-captain) | Sail's booked research today under 70% of what its day's figure buys by now at an even pace (from 6 h into the day, the guard braked under 2 h of it; Claude's reading is said, never a cause), or two settings that cannot both hold while they bind (`settings_binds` conflicts: the class cap once a direction card met it in the last 6 h); the settings that bind research are named either way | none (INFO): the settings named are the owner's to change |
+| `elane_dq` (release E2.4) | the equity lanes on and judged: more than half of the equity versions scored in the last 6 h (6 at least, since the running release started; fewer in the 6 h: the last 6 scored; before the sixth: 4 that could not be judged) could not be judged for a fault of their own program (disqualified, refused at load, failed by the decider child), in at least two families; once it stood under a release, until versions scored after are judged by the bar in two families or the release changes | "the equity generators misread the program contract, mostly <the class> (<what it most often is>): fix the text they read (league/equity/EQUITY.md "Reading ctx", elane_review.READING_CTX) or the static rule that should refuse it, in a release" |
+| `elane_births` (release E2.4) | the last 3 equity passes that asked a model (in the last 12 h, since the running release started) bore no family | none for 6 h (each pass tells the next its refusals); then, when a setting clears the main way they bore nothing: widening `elane.universe` or `elane.structures` (your decision), `elane.e2.births_max_output_tokens` or `elane.e2.max_per_pass` for answers cut short, a release for a pass that raises; at once for a setting every route refuses the request for; none for the rest |
+| `elane_idle` (release E2.4) | a BROKEN lane only. Whatever E2's lines hold: more than half of the program questions the Train rounds asked in the last 6 h (8 at least, since the running release started; fewer in the 6 h: the last 8 asked; before the eighth: 5 lost) were lost to a fault (the answer held no program, or no route answered for 3 h while the lanes kept asking), idle or not; or families in Train research or births wanted, no equity version scored for 3 h (the swarm's running time, kept per release), and the lane's own record shows two rounds that raised, two Train steps failed on the House's side or two step errors; and once either stood under a release, until a version is scored after it, the release changes or no work is owed. Else, idle so, only when no hold of E2's was seen in those 3 h. NEVER for a lane held by its own pace, its day's dollars or the House's Sail day: that reads judged clear and says the steps it cost | "the equity lanes pay for answers that hold no program (<the routes>): raise elane.e2.train_max_output_tokens if they are cut short, or take a route out of elane.e2.routes ...", "no model route answers the equity lanes' program questions (<the routes>): check the routes at the model provider, or name routes that answer in elane.e2.routes ...", "the equity lanes' rounds raise ...", "... Train runs fail on the House's side: check the equity_data job's receipt and the swarm's equity-decider.log", "... Train steps fail with errors", "... rounds run and judge nothing" or "... start no round"; none for lost answers too few to be most, programs refused before a run or barren passes |
+| `elane_refused` (release E2.4) | more than half of the programs the equity generators wrote in the last 6 h (8 at least, since the running release started; fewer in the 6 h: the last 8 written; before the eighth: 5 refused by one rule) were refused before a run by one static rule | "the equity generators are not being taught <the rule>: teach it where they read it (league/equity/EQUITY.md, the researcher's system prompt, elane_review.READING_CTX), in a release" |
 | `forward` (weekend fixes) | the nightly's ready file (`gym-forward.json`) does not carry the last session before today once the UTC day is 10 h in; `data/nightly.json` has carried an error 6 h or more (from the first run that saw it, kept in `stall.json`); or `data/nightly.stop` has stood 2 h or more | for a stop: "remove /workspace/state/data/nightly.stop ... the nightly forward replay, and with it the Done meter's replay twins, waits while it stands"; none for the rest |
+
+**The equity lanes' own causes** (release E2.4; the four `elane_` rows; `league/ops/elane_health.py`, which the
+stall job calls once): judged only while the lanes are on and not paused, on evidence since the running release first
+started (`stall.json` `elane`, with the clocks kept under it), else "Not judged" with the reason, and an `errors`
+entry and a House warning every 12 h when the lanes could not be read; `elane_idle` stands for a broken lane only
+(most of its program questions lost to a fault, or idle with its own record of failures; held once it stood until a
+version is scored), and a lane starved by a setting is read in the check's numbers and the research funnel, never in
+the mail;
+**The equity lanes' own alarms**, at the top, says how to read each and what to do. They are the last four of
+`stall.CAUSES`, causes like any other (`stall.json`, the House's warnings, the daily page's standing causes, the
+receipt's `checks`, the notice), and Done's item 7, which reads the receipts' checks, counts an owner step of theirs
+like any other's. The gateway words each (`STALL_CAUSES`, which its own test holds equal to `stall.CAUSES`; an
+unknown cause is a 400 for the whole notice: the gateway deploys first), so in the mail each is an entry of its own,
+keyed by its own name: none rides `swarm_alerts`, and neither holds back the other's mail.
 
 **The notice.** One `POST /v1/notify` kind `stall` a run at most, through the budget's own gateway client, listing
 EVERY cause standing, owner steps first: the subject `LTCM: needs you: <the causes with an owner step>` or `LTCM: stalled:
@@ -4235,7 +4541,10 @@ looks taken and passed, moves to Candidate, Probe and Sized and the bands now, r
 (and of them filled) and real closes by route (the agents' routes against the House's, as the close economics routes
 them), research spend by meter (Sail, Claude, OpenAI) and the hours the Sail guard braked, then the stalls standing
 (causes and since when). Counts and spend only, never a Validation or holdout figure, and the page passes the public
-filter as before. A section that cannot be read is n/a, never a zero.
+filter as before. A section that cannot be read is n/a, never a zero. The equity lanes' counts are in the funnel
+apart (`equity`), and since release E2.4 their research funnel with them (`equity.research`,
+`elane_health.research_counts`): the daily page prints no equity row, as before; the `scoreboard` job's receipt
+(private) carries the equity block for both windows (`equity`: `day`, `since_release`).
 
 ### Observing without exec
 

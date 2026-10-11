@@ -253,14 +253,20 @@ class TheEquityLaneEndToEnd(unittest.TestCase):
         self.assertLessEqual(lot.entry_notional, sleeve * D("0.5"), "the intent's half of a Probe sleeve, at most")
         [order] = state.rows("SELECT why, qty, limit_px FROM eq_orders")
         self.assertTrue(order["why"].startswith("entry (intent:"), order["why"])   # the intent bound, no cap cut it
-        # THE PROBE SLEEVE AT 0.50 (the captain's A20): a one-ETF program's lot is a quarter of E AT ITS LIMIT (the ask
-        # and the entry collar above it, to the cent), its shares floored to six places; it fills at the ask, under it.
-        self.assertEqual(table.equity.probe_sleeve_share, D("0.50"))
+        # THE PROBE SLEEVE IN FORCE (one of release E5-S's two numbers, read from the table's row): the seed asks for
+        # half its sleeve, which is also the sleeve's own cap on one ETF, so its lot is `sleeve_share` x 0.5 x E AT
+        # ITS LIMIT (the ask and the entry collar above it, to the cent), its shares floored to six places; it fills
+        # at the ask, under it.
+        from league.tests.equity_design import in_force
+
+        self.assertEqual(table.equity.probe_sleeve_share, D(in_force()[1]))
+        half = table.equity.probe_sleeve_share * D("0.5") * E
+        self.assertEqual(table.equity.position_share["etf"], D("0.50"), "the sleeve's own cap on one ETF is that half")
         limit = D(order["limit_px"])
-        self.assertEqual(D(order["qty"]), (D("0.25") * E / limit).quantize(D("0.000001"), rounding="ROUND_DOWN"))
+        self.assertEqual(D(order["qty"]), (half / limit).quantize(D("0.000001"), rounding="ROUND_DOWN"))
         self.assertEqual(lot.qty, D(order["qty"]))
-        self.assertLessEqual(lot.qty * limit, D("0.25") * E)
-        self.assertGreater(lot.qty * limit, D("0.25") * E - limit * D("0.000001"))
+        self.assertLessEqual(lot.qty * limit, half)
+        self.assertGreater(lot.qty * limit, half - limit * D("0.000001"))
         self.assertEqual(lot.entry_px, market.quotes["SPY"][1], "a marketable limit filled at the ask")
         # The shared loss budget counts the lot's open risk at the ETF weight (both lanes, one budget).
         _, _, _, at_risk, _ = R.probe_figures(state.rows, day=MONDAY.isoformat(), table=table)

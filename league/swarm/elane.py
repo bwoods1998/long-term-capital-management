@@ -21,8 +21,10 @@ SETTINGS (`cfg`; policy.json "elane", swarm.json over it; `DEFAULTS` is the roll
 - `universe` (inside league/equity/config.py UNIVERSE; the constitution's `equity_money.universe` bounds it),
   `structures` (["etf"] in E1);
 - `birth_share` 0 in E1 (taken out of the alpha share first, E2; bounded 0-0.5);
-- `roster` 3, which equals `equity_money.probe.max_programs` (a test holds them equal): equity Probe seats, apart from
-  `dlane.roster` (league/swarm/bands.py `seating`); a setting may only lower it (0-3), and 0 seats no equity program;
+- `roster`, which equals `equity_money.probe.max_programs` (a test holds them equal; the two are set together, with
+  the Probe sleeve, by `set_design SEATS SLEEVE`: the constitution's `probe` comment): equity Probe seats, apart from
+  `dlane.roster` (league/swarm/bands.py `seating`); a setting may only lower it (0 to the default), and 0 seats no
+  equity program;
 - `screens`: per lane the pinned receipt's block, read from the REPOSITORY's policy.json only (never swarm.json):
   {"name" and "screen" "S2", "receipt_sha256", "c_R" 0, "c_H_floor", "c_H_margin", "c_X", and the receipt's figures}
   (A11; receipt 1's block is {"name": "S1", "receipt_sha256", "c_R", "c_X", ...}). The block's `screen` (or `name`)
@@ -218,7 +220,7 @@ DEFAULTS: dict[str, Any] = {
     "universe": ["SPY", "QQQ", "IWM", "DIA"],
     "structures": ["etf"],
     "birth_share": 0.0,
-    "roster": 3,
+    "roster": 6,
     "screens": {BETA: {"name": "S1", "receipt_sha256": None, "c_R": None, "c_X": None, "fp_cap": None,
                        "owner_wall": None, "retry": False, "r4": {}, "beside": None},
                 EQUITY: {"name": "S1", "receipt_sha256": None, "c_R": None, "c_X": None, "fp_cap": None,
@@ -312,7 +314,7 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         "universe": words("universe", tuple(econfig.UNIVERSE), upper=True),
         "structures": words("structures", STRUCTURES),
         "birth_share": number("birth_share", 0.0, 0.5),
-        # The roster's bound is its default (== equity_money.probe.max_programs, 3): a setting may only lower it.
+        # The roster's bound is its default (== equity_money.probe.max_programs): a setting may only lower it.
         "roster": int(number("roster", 0, float(DEFAULTS["roster"]), count=True)),
         "screens": {**{lane: _screen_block(screens.get(lane)) for lane in LANES},
                     elane_xs.SCREEN_KEY: dict(panel.pop("screen"))},
@@ -913,7 +915,8 @@ _roster_lock = threading.Lock()
 
 
 def _policy_roster() -> int:
-    """`elane.roster` of the repository's policy.json, inside its bound (0-3); the default when none is written."""
+    """`elane.roster` of the repository's policy.json, inside its bound (0 to the default, which is
+    `equity_money.probe.max_programs`); the default when none is written."""
     try:
         from . import settings as settings_mod
 

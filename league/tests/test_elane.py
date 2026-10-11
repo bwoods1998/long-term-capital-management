@@ -22,9 +22,13 @@ from league.swarm import settings as settings_mod
 from league.swarm.gate import run_sha
 from league.swarm.store import OPTIONS_ONLY_SQL
 from league.tests import REAL_POLICY_PATH
+from league.tests.equity_design import in_force
 from league.tests.test_swarm_store import SPEC, StoreCase
 
 REPO = Path(__file__).resolve().parents[2]
+#: The equity roster's seats at the table in force (`equity_money.probe.max_programs`): release E5-S sets them with the
+#: Probe sleeve as two numbers, so no test here names the count.
+SEATS = in_force()[0]
 ON = {"elane": {"mode": "gate"}}
 SHA = "a" * 64
 #: The FAKE receipts (invented figures; league/tests/test_equity_screen.py's fixtures).
@@ -80,7 +84,8 @@ class Settings(StoreCase):
     def test_defaults_are_the_rollback(self):
         c = elane.cfg({})
         self.assertEqual((c["mode"], c["structures"], c["roster"], c["val_tries"], c["looks_per_lineage"]),
-                         ("off", ["etf"], 3, 1, 1))
+                         ("off", ["etf"], SEATS, 1, 1))
+        self.assertEqual(elane.DEFAULTS["roster"], SEATS, "the code's default is the table's seats (release E5-S)")
         self.assertFalse(elane.on({}))
         self.assertFalse(elane.on({"elane": {"mode": "shadow"}}), "a malformed mode reads off")
         self.assertTrue(elane.on(ON))
@@ -89,9 +94,12 @@ class Settings(StoreCase):
         c = elane.cfg({"elane": {"mode": "gate", "roster": 9, "val_tries": 4, "looks_per_lineage": 2,
                                  "program_loss_usd": -1000, "universe": ["spy", "XYZ", "qqq"], "structures": ["etf", "bond"],
                                  "birth_share": 0.9}})
-        self.assertEqual((c["roster"], c["val_tries"], c["looks_per_lineage"], c["program_loss_usd"]), (3, 1, 1, -300.0))
+        self.assertEqual((c["roster"], c["val_tries"], c["looks_per_lineage"], c["program_loss_usd"]),
+                         (SEATS, 1, 1, -300.0), "a roster above the table's seats is the table's seats")
         self.assertEqual((c["universe"], c["structures"], c["birth_share"]), (["SPY", "QQQ"], ["etf"], 0.5))
-        self.assertEqual(elane.cfg({"elane": {"roster": 1.5, "program_loss_usd": -10}})["roster"], 3)
+        self.assertEqual(elane.cfg({"elane": {"roster": SEATS + 1}})["roster"], SEATS, "one seat past the table's")
+        self.assertEqual(elane.cfg({"elane": {"roster": SEATS - 1}})["roster"], SEATS - 1, "a setting may lower it")
+        self.assertEqual(elane.cfg({"elane": {"roster": 1.5, "program_loss_usd": -10}})["roster"], SEATS)
         self.assertEqual(elane.cfg({"elane": {"program_loss_usd": -10}})["program_loss_usd"], -25.0)
         self.assertEqual(elane.cfg({"elane": {"roster": 0}})["roster"], 0)
 
@@ -102,10 +110,10 @@ class Settings(StoreCase):
         self.assertEqual(status["state"], "ok")
         block = layer["elane"]
         self.assertEqual((block["mode"], block["structures"], block["birth_share"], block["roster"], block["val_tries"],
-                          block["looks_per_lineage"], block["program_loss_usd"]), ("off", ["etf"], 0.0, 3, 1, 1, -300))
+                          block["looks_per_lineage"], block["program_loss_usd"]), ("off", ["etf"], 0.0, SEATS, 1, 1, -300))
         # RELEASE E4: beside the two lanes' blocks, the panel screen's pin (league/swarm/elane_xs.py `SCREEN_KEY`).
         self.assertEqual(sorted(block["screens"]), sorted([*LANES, "equity_xs"]))
-        self.assertEqual(elane.cfg({"elane": block})["roster"], 3)
+        self.assertEqual(elane.cfg({"elane": block})["roster"], SEATS)
 
     def test_the_roster_equals_the_constitutions_probe_programs(self):
         from league import constitution
@@ -113,6 +121,12 @@ class Settings(StoreCase):
         layer, _ = settings_mod.read_policy(REAL_POLICY_PATH)
         money = constitution.CONSTITUTION["equity_money"]
         self.assertEqual(layer["elane"]["roster"], money["probe"]["max_programs"])
+        # THE THREE PLACES THE SEATS ARE WRITTEN (release E5-S: `set_design` moves them together): the constitution's
+        # row, the policy's `elane.roster` and the code's default, which is also the setting's bound.
+        self.assertEqual(elane.DEFAULTS["roster"], money["probe"]["max_programs"])
+        self.assertEqual(elane._policy_roster(), money["probe"]["max_programs"])
+        self.assertLessEqual(money["probe"]["max_programs"],
+                             int(constitution.EQUITY_MONEY_BOUNDS["probe.max_programs"][1]))
 
     def test_a_pinned_receipt_is_the_files_bytes(self):
         """A11: S2 is the pinned screen of BOTH lanes, and each pin is the bytes of its screen's committed receipt
@@ -524,17 +538,17 @@ class RosterSeats(StoreCase):
         (self.root / "swarm.json").write_text(doc if isinstance(doc, str) else json.dumps(doc))
 
     def test_the_equity_roster_reads_fail_closed(self):
-        self.assertEqual(elane.roster_seats(self.root), 3, "no swarm.json: the policy's")
-        self.write({"dlane": {"roster": 5}})
-        self.assertEqual(elane.roster_seats(self.root), 3, "dlane.roster is not the equity roster")
+        self.assertEqual(elane.roster_seats(self.root), SEATS, "no swarm.json: the policy's, the table's seats")
+        self.write({"dlane": {"roster": SEATS + 2}})
+        self.assertEqual(elane.roster_seats(self.root), SEATS, "dlane.roster is not the equity roster")
         self.write({"elane": {"roster": 2}})
         self.assertEqual(elane.roster_seats(self.root), 2)
-        self.write({"elane": {"roster": 7}})
-        self.assertEqual(elane.roster_seats(self.root), 3, "a setting may only lower it")
+        self.write({"elane": {"roster": SEATS + 4}})
+        self.assertEqual(elane.roster_seats(self.root), SEATS, "a setting may only lower it")
         self.write({"elane": {"roster": "two"}})
-        self.assertEqual(elane.roster_seats(self.root), 3, "unreadable: the last good value")
+        self.assertEqual(elane.roster_seats(self.root), SEATS, "unreadable: the last good value")
         self.write("{not json")
-        self.assertEqual(elane.roster_seats(self.root), 3)
+        self.assertEqual(elane.roster_seats(self.root), SEATS)
         elane._roster_good.clear()
         self.assertEqual(elane.roster_seats(self.root), elane.ROSTER_CLOSED, "no last good value: no new seat")
         self.assertEqual(bands.equity_seats(0), bands.ROSTER_CLOSED, "0 seats no equity program at all")

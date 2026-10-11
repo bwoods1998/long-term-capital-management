@@ -144,7 +144,11 @@ class TheBirths(BirthCase):
         self.assertEqual(out["refused"]["count"], 1)
         self.assertIn("needs data the House does not hold", self.store.get(LAST_KEY)["refused"][0]["why"])
         _, again = EquityPass(self.arch).request(EquityQuota(self.store, self.settings, now=self.clock()))
-        self.assertIn("pead-spy: agenda: earnings_drift", again)
+        # The next request says the refusal in closed words (release E2.4): the proposal by its place, its lane and its
+        # agenda key, the House's sentence for the class; never its slug, never the refusal's own text.
+        self.assertIn("- proposal 3 of 3 (equity, earnings_drift): its \"agenda\" must be one key of THE AGENDA whose data "
+                      "the House holds (overnight, reversal, trend, rotation, low_vol, turn_of_month, other)", again)
+        self.assertNotIn("pead-spy", again)
         self.assertIn("EQUITY TRAIN MAP", again)
         call = self.router.calls[0]
         self.assertEqual((call["role"], call["sail_profile"], call["claude"]), ("elane", "pro_asap", False))

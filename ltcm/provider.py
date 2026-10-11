@@ -138,6 +138,11 @@ def _rejected_outright(code: str) -> bool:
     return 400 <= status < 500 and status not in (408, 425, 429)
 PENDING = frozenset({"queued", "in_progress"})
 EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+#: The output limit a request may ask (`Provider.build_body`: outside 16..MAX_OUTPUT_TOKENS it is refused before
+#: anything is sent, `provider_bad_output_limit`). Named so a caller's own setting can be held to it
+#: (league/swarm/elane_yield.py `OUTPUT_LIMIT`: Oct 11, 2026, a setting the equity lanes allowed above it failed every
+#: route of one births pass).
+MAX_OUTPUT_TOKENS = 32768
 RESPONSE_ID = re.compile(r"^resp_[A-Za-z0-9_-]{1,200}$")
 RETRY_STATUSES = (429, 503, 529)
 #: How long one foreground (asap) generation may take. A high-effort turn over a long context
@@ -744,7 +749,7 @@ class Provider:
             raise ProviderError("provider_unknown_profile")
         if reasoning_effort not in EFFORTS:
             raise ProviderError("provider_bad_reasoning_effort")
-        if type(max_output_tokens) is not int or not 16 <= max_output_tokens <= 32768:
+        if type(max_output_tokens) is not int or not 16 <= max_output_tokens <= MAX_OUTPUT_TOKENS:
             raise ProviderError("provider_bad_output_limit")
         input_items = list(items)
         if not input_items:
