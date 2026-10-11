@@ -2,15 +2,17 @@
 `elane_births`, `elane_idle`, `elane_refused`) raised through the stall job's machinery (league/ops/stall.py), each judged
 only while the lanes are on and on enough evidence counted from the running release's first start, with what the job
 keeps for them under that release (the idle clock, the last hold read, when `elane_dq` stood, the unreadable lanes'
-warning); the notice, in which each is an entry of its own under a cause the gateway words, and the House warning,
+warning, the BROKEN kind `elane_idle` stands on); the notice, in which each is an entry of its own under a cause the gateway words, and the House warning,
 which keeps an owner step whole; the Done meter's item 7 counting their owner steps; the lanes' research funnel
 (league/ops/funnel.py `equity.research`, the `scoreboard` job's receipt); the operator's report; what the equity
 architect's next request is shown of a barren pass, in closed words (league/swarm/elane_births.py `last_text`); and
 the lanes' output settings held to the model provider's own limit. The closed words are held to the code that writes
 the records (the equity pass, the Train round, the static rules, a disqualification's record) by running that code,
-and the replays of the two checks of Oct 11 (the morning at its pace and a healthy lane that spends its day, on
-neither of which the idle cause may stand; a lane whose Train runs fail on the House's side, broken at its pace; a
-slow lane's refusals) run the real equity pass, Train round and stall job (league/tests/elane_e24_house.py).
+and the replays of the three checks of Oct 11 (the morning at its pace and a healthy lane that spends its day, on
+neither of which the idle cause may stand; a lane whose Train runs fail on the House's side, broken at its pace, and
+through a day under the Sail guard; a lane whose every paid answer holds no program, with a hold in force and
+without; a healthy lane that loses one answer in ten; a slow lane's refusals) run the real equity pass, Train round
+and stall job (league/tests/elane_e24_house.py).
 
 Every family, program, refusal, dollar and number here is invented."""
 
@@ -1764,6 +1766,19 @@ class TheLanesAnswers(Case):
         self.assertFalse(check["stalled"])
         self.assertNotIn("questions_lost", check["numbers"])
 
+    def test_most_lost_beside_a_failure_of_another_kind_is_said_after_it(self):
+        house = lambda f: {"family": f, "version": 2, "house": "store", "why": "MissingData: invented",  # noqa: E731
+                           "retry_in": 600.0}
+        self.lane([lost_step] * 6 + [house] * 2)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["owner_step"], check["numbers"]["questions_lost"]),
+                         (True, "house", OwedWorkAndNothingScored.HOUSE, 6))
+        self.assertIn("BROKEN, whatever E2's own lines hold: 8 Train rounds ran; 2 steps failed on the House's side (store "
+                      "2); 6 answers held no program. 6 of the 6 program questions the equity lanes asked in the last 12 h "
+                      "were lost to a fault, not to a setting (6 answers held no program; by route: sail:pro_asap 6 of 6). E2 "
+                      "is also held now: ", check["what"])
+        self.assertTrue(check["what"].endswith("a broken lane scores nothing at any pace."))
+
     def scoring(self, lost) -> list[str]:
         """Three families and a Train round every half hour for the last five hours, one step each: a version scored
         (failing the bar), except the rounds `lost` names, whose answer held no program."""
@@ -1858,6 +1873,16 @@ class TheLanesAnswers(Case):
             self.assertNotIn("questions_lost", check["numbers"])
             self.assertIn("7 questions got no answer from a model route", check["what"])
             self.assertIn("STARVED BY A SETTING, not broken: " if held else "BROKEN, not starved: ", check["what"])
+        # A BAD QUARTER OF AN HOUR THAT A HOLD FOLLOWED: six questions none answered within ten minutes, three hours and
+        # a half ago, and none asked since (E2 held). Old enough, and no three hours of asking: they span ten minutes,
+        # and it takes `QUIET_SPAN_HOURS`. (At the floor's pace six are most of a window: the owner was mailed for it.)
+        self.assertEqual(EH.QUIET_SPAN_HOURS, EH.IDLE_HOURS / 2.0)
+        for every, stands in ((0.03, False), (0.31, True)):
+            self.setUp()
+            self.lane([self.silent] * 6, first=3.5, every=every)
+            check = self.equity()["elane_idle"]
+            self.assertEqual((check["stalled"], check["numbers"]["unanswered"], "questions_lost" in check["numbers"]),
+                             (stands, 6, stands), every)
         # HEALED: six questions none answered, then a route answers (a program a rule refuses is an answer), then two
         # more go unanswered within the hour. The six were healed by the answer; the two are a bad hour.
         self.setUp()
@@ -2891,13 +2916,15 @@ class TheOutputSettingsAreHeldToTheProvidersLimit(unittest.TestCase):
 
 # ---------------------------------------------------------------------------------------------- the replays
 class TheReplays(unittest.TestCase):
-    """The replays of the two independent checks of Oct 11, on an invented House where the real equity pass, Train
-    round, pace and stall job run (league/tests/elane_e24_house.py). THE RULING they hold: `elane_idle` alarms on a
+    """The replays of the three independent checks of Oct 11, on an invented House where the real equity pass, Train
+    round, pace and stall job run (league/tests/elane_e24_house.py). THE RULINGS they hold: `elane_idle` alarms on a
     broken lane only. A lane at its pace (the morning's trickle), a lane that spends its day (the 54-hour healthy
     lane) and a lane of one family (no step of whose is ever skipped) never stand and are never mailed, and what the
     settings cost is counted in the receipt and the funnel; a lane whose every Train run fails on the House's side
-    stands BROKEN with its owner step at any pace; and a slow lane's programs refused by one rule are told early and
-    do not lapse."""
+    stands BROKEN with its owner step at any pace, and KEEPS it through a day under the Sail guard; a lane whose paid
+    answers hold no program, or whose questions no route answers, stands BROKEN with a step that names the routes,
+    held or not, while one answer in ten raises nothing; and a slow lane's programs refused by one rule are told
+    early and do not lapse."""
 
     def write(self, code: str, usd: float) -> dict:
         return fx.answer([], cost=usd) | {"json": {"program": code, "note": "an invented note"}}
@@ -3276,9 +3303,10 @@ class TheReplays(unittest.TestCase):
     STEPS = ("^" + re.escape(TheLanesAnswers.STEP).replace(re.escape("(sail:pro_asap)"), r"\(sail:[a-z0-9_]+(, sail:[a-z0-9_]+)*\)")
              + "$")
 
-    def paid_for_nothing(self, e2: dict, write_usd: float, births_usd: float = 0.004) -> E24.House:
+    def paid_for_nothing(self, e2: dict, write_usd: float, births_usd: float = 0.004, unanswered: bool = False) -> E24.House:
         """The third check's break (its break1), on the real loop: the passes bear three families at a time, and every
-        Train question is ANSWERED AND PAID FOR with an answer that holds no program."""
+        Train question is ANSWERED AND PAID FOR with an answer that holds no program (`unanswered`: every route of the
+        settings' fails it instead, so none answers)."""
         house = E24.House(self, E24.at("2026-11-02T07:02:00Z"), e2=e2)
         births = itertools.count(1)
         agendas = ("trend", "reversal", "low_vol", "rotation", "turn_of_month", "other")
@@ -3294,6 +3322,8 @@ class TheReplays(unittest.TestCase):
                 return fx.answer([proposal(n * 10 + j, ("SPY", "QQQ", "IWM", "DIA")[(n + j) % 4]) for j in range(3)],
                                  cost=births_usd)
             if key.startswith("swarm:elane:train:"):
+                if unanswered:
+                    return RuntimeError(SECRET)
                 return fx.answer([], cost=write_usd) | {"json": {"note": "an invented note and no program"}}
             return fx.answer([], cost=0.0)
 
@@ -3392,6 +3422,24 @@ class TheReplays(unittest.TestCase):
                          [("07:20", "stall:owner:elane_idle"), ("19:20", "stall:owner:elane_idle")])
         retired = [f for f in house.store.families(alive=False, lanes=EH.LANES)]
         self.assertGreater(len(retired), 10, "families are retired with their attempts spent, and none was judged")
+        # NO ROUTE ANSWERS: every Train question fails on each route of the settings', and is asked again after its
+        # backoff. Three hours of asking with none answered (10:20), and it stands with the routes' own step, each
+        # route named and nothing of what a route said.
+        house = self.paid_for_nothing({"min_per_pass": 3}, 0.0, unanswered=True)
+        house.run(house.started + 9 * E24.HOUR)
+        idle = [(iso(row["at"])[11:16], row["checks"]["elane_idle"]) for row in house.rows]
+        self.assertEqual([at for at, check in idle if check["stalled"]], [at for at, _ in idle if at >= "10:20"])
+        first = dict(idle)["10:20"]
+        self.assertEqual((first["numbers"]["kind"], first["numbers"]["lost_no_program"],
+                          first["numbers"]["lost_unanswered"] == first["numbers"]["questions_asked"]), ("answers", 0, True))
+        self.assertEqual(first["owner_step"], TheLanesAnswers.SILENT.replace("(sail:pro_asap)",
+                                                                          "(sail:glm_asap, sail:k3, sail:pro_asap)"))
+        self.assertRegex(first["what"], r"questions got no answer from a model route, none answered for 3\.3 h; by route: ")
+        self.assertEqual((dict(idle)["09:50"]["stalled"], "questions_lost" in dict(idle)["09:50"]["numbers"]), (False, False))
+        self.assertEqual([(iso(mail["at"])[11:16], mail["key"]) for mail in house.gateway.mails if "elane_idle" in mail["owner"]],
+                         [("10:20", "stall:owner:elane_idle")])
+        for row in house.rows:
+            self.assertNotIn(SECRET, json.dumps(row))
 
     def test_a_healthy_lane_with_one_answer_in_ten_holding_no_program_raises_nothing(self):
         """The other side of the ruling: an occasional program-less answer is a model's bad answer, not a broken lane.

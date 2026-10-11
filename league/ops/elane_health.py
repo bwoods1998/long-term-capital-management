@@ -38,9 +38,10 @@ THE CAUSES (`CAUSES`; `checks`). Each has `what`, `numbers`, `doing` (what the f
   at `ANSWERS_EARLY` are `elane_refused`'s), more than `ANSWERS_SHARE` were LOST TO A FAULT: the answer the lane
   paid for held no program (the round's own words; a programless, an unreadable and a cut-short answer are all that
   refusal), or no route answered the question (counted only once no route has answered a program question for
-  `IDLE_HOURS`: a route's bad hour heals by itself). Work lost to a fault, never to a setting and never to a rule:
-  the lane need not be idle for it, and a lane that still scores a version now and then stands on it too. The
-  owner's step names the routes, each one of the settings' own (`elane.e2.routes`; any other is "another route").
+  `IDLE_HOURS` while the lanes kept asking, `QUIET_SPAN_HOURS`: a route's bad hour heals by itself). Work lost to a
+  fault, never to a setting and never to a rule: the lane need not be idle for it, and a lane that still scores a
+  version now and then stands on it too. The owner's step names the routes, each one of the settings' own
+  (`elane.e2.routes`; any other is "another route").
   BY ITS FAILURES, once it is idle: work is owed (families in Train research, or births wanted), no version was
   scored for `IDLE_HOURS` (the idle clock, below), and the record since shows `BROKEN_MIN_FAILS` rounds that raised,
   Train steps that failed on the House's side (or a family waiting out a House backoff after that many failures) or
@@ -96,9 +97,9 @@ the earlier one is not held against this one; a restart of the same release (the
 nothing and resets nothing. A cause with too little evidence says how much it has and how much it needs.
 WHAT THE JOB KEEPS UNDER A RELEASE (`KEPT`, beside {release, since}, dropped when
 the release changes): the idle clock, the last hold of E2's a run read, when `elane_dq` first stood, when the
-unreadable lanes were last warned, the BROKEN kind `elane_idle` stands on and since when. `checks` reads them and leaves in the same record what the next run needs; it
-writes no file itself. A lane is not judged idle while the swarm itself is not running (its heartbeat
-`BEAT_STALE_SECONDS` old): that is the options lanes' causes to tell.
+unreadable lanes were last warned, the BROKEN kind `elane_idle` stands on and since when. `checks` reads them and
+leaves in the same record what the next run needs; it writes no file itself. A lane is not judged idle while the swarm
+itself is not running (its heartbeat `BEAT_STALE_SECONDS` old): that is the options lanes' causes to tell.
 
 WHAT IT READS. The swarm's store, read-only, in one read transaction (`facts`): the equity families the equity pass
 bore and E2's own Train record of each (state `elane_e2`: versions with their fails and what a disqualification said,
@@ -214,6 +215,12 @@ ANSWERS_EARLY = int(ANSWERS_SHARE * ANSWERS_MIN) + 1
 #: cut-short answer are all that refusal), or no route answered the question.
 LOST_KINDS = ("no_program", "unanswered")
 LOST_WORDS = {"no_program": "answers held no program", "unanswered": "questions got no answer from a model route"}
+#: A QUESTION NO ROUTE ANSWERED counts only once no route has answered a program question for `IDLE_HOURS` WHILE THE
+#: LANES KEPT ASKING: the questions none answered since the last one a route did answer must span this many hours,
+#: half of them. A family asks again 20, 60 and 140 minutes after its first question none answered (the backoff of
+#: `elane_train`'s `unanswered`), so lanes that asked for three hours asked over more than two of them; a route's bad
+#: quarter of an hour followed by a hold of E2's (no question asked for hours after it) is not three hours unanswered.
+QUIET_SPAN_HOURS = IDLE_HOURS / 2.0
 #: Why a Train step or an equity pass is skipped for want of model dollars (`skip_kind`): E2's hourly pace, its day's
 #: line, the House's Sail day: THE SETTINGS' HOLDS, which never stand. Any other skip (a passing version that cannot
 #: be read) is none of them.
@@ -448,9 +455,9 @@ DOING = {
     "broken": ("The Train round comes every ten minutes while it has work; a failure of the House's backs its family off "
                "and is alerted once (elane_train_house); a question no route answered is asked again after its backoff. "
                "Nothing here repairs anything."),
-    "answers": ("An answer with no program costs its family a write attempt and E2 its dollars (a family whose attempts are "
-                "spent with nothing judged is retired STALLED); a question no route answered is asked again after its "
-                "backoff. Nothing here changes a route or a setting."),
+    "answers": ("An answer with no program costs its family a write attempt and E2 its dollars (a family whose attempts "
+                "are spent with nothing judged is retired STALLED); a question no route answered is asked again after "
+                "its backoff. Nothing here changes a route or a setting."),
     "not_judged": "Nothing: the cause is not judged.",
 }
 REPORT = "python3 -m league.ops.elane_health --state /workspace/state"
@@ -1207,7 +1214,8 @@ def _questions(f: Mapping[str, Any], start: float, now: float,
             step = step if isinstance(step, Mapping) else {}
             read = step_read(step)
             if read["answered"]:
-                rows.append((at, "no_program" if read["refused"] == "no_program" else None, (_route(step.get("route"), routes),)))
+                rows.append((at, "no_program" if read["refused"] == "no_program" else None,
+                             (_route(step.get("route"), routes),)))
             elif read["unanswered"] and step.get("version") is None:
                 errors = step.get("errors") if isinstance(step.get("errors"), list) else []
                 named = dict.fromkeys(_route(str(e).split(": ", 1)[0], routes) for e in errors)
@@ -1228,16 +1236,19 @@ def _lost_check(f: Mapping[str, Any], now: float, since: float | None, routes: S
     `ANSWERS_MIN` questions in it, the last `ANSWERS_MIN` asked since the release started (inside `LOOKBACK_HOURS`);
     with fewer than that, the lane is judged EARLY, and only once `ANSWERS_EARLY` are lost.
 
-    A QUESTION NO ROUTE ANSWERED COUNTS ONLY ONCE NO ROUTE HAS ANSWERED FOR `IDLE_HOURS`: the questions none answered
-    after the last program question a route did answer, once the first of them is `IDLE_HOURS` old (less `down`, the
-    time the swarm was down while idle). A route's bad hour heals by itself (the question is asked again after its
-    backoff), and a question none answered costs nothing, so E2's pace does not ration it as it rations the answers:
-    counted at once, twenty minutes without a route would be most of a slow lane's window for hours after."""
+    A QUESTION NO ROUTE ANSWERED COUNTS ONLY ONCE NO ROUTE HAS ANSWERED FOR `IDLE_HOURS` WHILE THE LANES KEPT ASKING:
+    the questions none answered after the last program question a route did answer, once the first of them is
+    `IDLE_HOURS` old (less `down`, the time the swarm was down while idle) and they span `QUIET_SPAN_HOURS`. A route's
+    bad hour heals by itself (the question is asked again after its backoff), and a question none answered costs
+    nothing, so E2's pace does not ration it as it rations the answers: counted at once, twenty minutes without a
+    route would be most of a slow lane's window for hours after; and counted on its age alone, so would a bad quarter
+    of an hour that a hold of E2's followed."""
     start, _ = _since(now, LOOKBACK_HOURS, since)
     rows = _questions(f, start, now, routes)
     last = max((i for i, row in enumerate(rows) if row[1] != "unanswered"), default=-1)
     quiet = max(0.0, (now - rows[last + 1][0]) - down) if last + 1 < len(rows) else 0.0
-    counted = quiet >= IDLE_HOURS * 3600.0
+    counted = (quiet >= IDLE_HOURS * 3600.0
+               and rows[-1][0] - rows[last + 1][0] >= QUIET_SPAN_HOURS * 3600.0)
     rows = [row for i, row in enumerate(rows) if row[1] != "unanswered" or (counted and i > last)]
     edge, span = _since(now, ANSWERS_HOURS, since)
     window, basis = [row for row in rows if row[0] >= edge], "window"
@@ -1455,6 +1466,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                        **{f"lost_{kind}": asked["by_kind"][kind] for kind in LOST_KINDS})
     judged = (f"{asked['said'][:1].upper()}{asked['said'][1:]}: it stands BROKEN once they are {ANSWERS_EARLY} and more "
               "than half of those asked.") if asked["lost"] and not asked["stands"] else ""
+    # Most lost, beside a failure of another kind that is named first: said after it.
+    also = [f"{asked['said'][:1].upper()}{asked['said'][1:]}."] if asked["stands"] else []
     # WHAT E2'S LINES COST, in sentences: the steps due, taken and skipped by reason; whether E2 is held now, or where
     # it was held; that this is no stall; the lever. Said by every reading that does not stand, when there is any.
     by = ", ".join(f"{STARVED_WORDS[k]} {work['skipped'][k]}" for k in STARVED_KINDS if work["skipped"][k])
@@ -1472,7 +1485,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
     spent = (f"E2's model dollars for the UTC day are spent ({_usd(held['spent_today_usd'])} of a day's line of "
              f"{_usd(held['day_line_usd'])})" if held is not None and held_now == "usd_day" else "")
     # WHY, since the lanes went idle: the Train rounds' own steps, the rounds that raised, the families waiting.
-    tally = {"rounds": 0, "house": 0, "unanswered": 0, "refused": 0, "no_program": 0, "errors": 0, "raised": 0, "passes": 0}
+    tally = {"rounds": 0, "house": 0, "unanswered": 0, "refused": 0, "no_program": 0, "errors": 0, "raised": 0,
+             "passes": 0}
     houses: dict[str, int] = {}
     for at, payload in f.get("rounds") or []:
         if at < idle_from:
@@ -1605,8 +1619,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
         # stands by itself), and nothing since says the lane works: no version was scored.
         numbers.update(standing_since=S.iso(stood), kept_standing=True)
         why = (f"BROKEN, whatever E2's own lines hold: it stood at {S.iso(stood)} under the running release "
-               f"({BROKEN_WORDS[kind]}) and HOLDS until a version is scored or the release changes. Since then no version "
-               "was scored; in the hours this check reads " + "; ".join(said) + ".")
+               f"({BROKEN_WORDS[kind]}) and HOLDS until a version is scored or the release changes. Since then no "
+               "version was scored; in the hours this check reads " + "; ".join(said) + ".")
     elif held_now:  # BROKEN by its record while E2 is also held: the line is said second, and is not the fault
         why = f"BROKEN, whatever E2's own lines hold: {record}."
     elif kind == "barren":
@@ -1632,7 +1646,7 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                               "lines)"),
                  }[kind] + f"; it needs a fix, in a release or on the box ({REPORT} prints each family's state)"
     parts = [lead, why, *([asked["early"]] if found == "answers" and asked["early"] else []),
-             *([judged] if kept_only and judged else []), *pace]
+             *(also if found != "answers" else []), *([judged] if kept_only and judged else []), *pace]
     return {
         "stalled": True, "judged": True, "what": " ".join(parts),
         "numbers": numbers, "owner_step": owner, "onset": idle_from if late else now if stood is None else stood,
@@ -2108,6 +2122,8 @@ __all__ = ["CAUSES", "SWITCH", "switched_off", "checks", "judge", "facts", "lane
            "rule_of", "sentences", "skip_kind", "step_read", "pass_read", "refusals_tally", "e2_families",
            "DQ_HOURS", "DQ_MIN_SCORED", "DQ_SHARE", "DQ_MIN_FAMILIES", "DQ_EARLY_FAULTED", "DQ_SHORT", "BIRTHS_HOURS",
            "BIRTHS_PASSES", "BIRTHS_OWNER_HOURS", "IDLE_HOURS", "BROKEN_MIN_FAILS", "BROKEN_KINDS", "STARVED_KINDS",
+           "ANSWERS_HOURS", "ANSWERS_MIN", "ANSWERS_SHARE", "ANSWERS_EARLY", "LOST_KINDS", "LOST_WORDS",
+           "QUIET_SPAN_HOURS", "BROKEN_WORDS", "ANOTHER_ROUTE",
            "BEAT_STALE_SECONDS", "SETTINGS", "STATE_FILE", "STATE_KEEP", "KEPT", "NOT_MAILED", "NO_STALL", "WARN_CHARS",
            "REFUSED_HOURS", "REFUSED_MIN_ANSWERS", "REFUSED_SHARE", "REFUSED_EARLY", "BLIND_WARN_SECONDS",
            "LOOKBACK_HOURS", "FUNNEL_HOURS", "REFUSALS",
