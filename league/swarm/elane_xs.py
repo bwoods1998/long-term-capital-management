@@ -3298,12 +3298,18 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
             train_x = train_u = None
         else:
             train_x, train_u, segments = _train_series(S, runs, n)
-            if S.floor_fits(cached, pinned):
-                floor = dict(cached)  # computed once a version under this receipt (an exact enumeration: no seed)
-            else:
-                floor = _plain(dict(S.floor(segments, receipt=pinned)))
-                if not S.floor_fits(floor, pinned):
-                    raise ValueError("the program floor does not fit the pinned receipt")
+            # THE FLOOR IS ALWAYS COMPUTED FROM THE SEGMENTS JUST RUN (an exact enumeration: no seed, and cheap beside
+            # the two runs it reads). A floor kept from an earlier attempt of this look was once reused whenever it fit
+            # the receipt's figures: nothing tied it to the Train series it was computed from, so after the panel job
+            # restated a name's adjusted history or the spreads job rewrote the half-spreads between two attempts (a
+            # look that waited on its lineage, on Validation, or lost its run once), the look was judged at the OLD
+            # k_used and its sentence stated the old c_p and own_fp beside every live trade. Validation has a staleness
+            # check (`result_sha`); the floor had none. What is kept under `FLOOR_KEY` is the record of the last one
+            # computed, never an input.
+            floor = _plain(dict(S.floor(segments, receipt=pinned)))
+            if not S.floor_fits(floor, pinned):
+                raise ValueError("the program floor does not fit the pinned receipt")
+            if floor != cached:
                 store.set_state(fid, **{FLOOR_KEY: {**dict(floors), str(n): floor}})
     except Exception as exc:  # noqa: BLE001 - no floor, no look (nothing spent)
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "floor",

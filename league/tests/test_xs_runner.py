@@ -689,6 +689,32 @@ class WithTheRealCore(unittest.TestCase):
         # the two runs are salted apart, so only what no id touches is compared)
         self.assertEqual(results.column(look.result, "day")[:250], results.column(validation.result, "day"))
 
+    def test_a_store_that_goes_past_the_looks_cap_gives_the_same_look(self):
+        """The review's evidence-5: THE PRODUCTION SHAPE from the next session on. Every synthetic panel of the tests
+        ended on `LOOK_CAP` itself (2026-10-09), so nothing held the cap in `PanelStore._span("look")`: without it
+        the look's run would carry forward sessions, `screen.split` would refuse them, and every one-shot look would
+        be spent and failed. A store through 2026-10-23: the look's slice ends on the cap, V is 250 sessions and H
+        194, and the forward days are the forward window's alone."""
+        from league.equity import config as e1
+
+        root = synth.synthetic_panel(Path(self.tmp) / "later" / "equity-daily", n_assets=40, seed=11, churn=0.10,
+                                     gate=True, end=dt.date(2026, 10, 23))
+        gate = mint_equity_gate_capability(root, "a look two weeks after the cap")
+        panel = store.PanelStore(root, gate=gate)
+        self.assertEqual(panel.fetched_through, dt.date(2026, 10, 23))
+        look_days = panel.sessions("look")
+        self.assertEqual((len(look_days), look_days[0], look_days[-1]),
+                         (250 + 194, dt.date(2025, 1, 2), e1.LOOK_CAP))
+        self.assertEqual(panel.sessions("forward")[-1], dt.date(2026, 10, 23), "the days after the cap are forward days")
+        self.assertEqual(panel._span("look"), (e1.WINDOWS["validation"][0], e1.LOOK_CAP))
+        look = runner.Isolated(self.decider, root, nice=None).look(REAL, None, name="reversal", gate=gate, placebos=20,
+                                                                   seed=3)
+        spans = look.result["placebo"]["spans"]
+        self.assertEqual((look.result["status"], spans["V"]["days"], spans["H"]["days"]), ("ok", 250, 194))
+        days = results.column(look.result, "day")
+        self.assertEqual((len(days), days[-1], look.result["end"]), (444, e1.LOOK_CAP.isoformat(), e1.LOOK_CAP.isoformat()))
+        self.assertFalse([d for d in days if d > e1.LOOK_CAP.isoformat()], "no forward session is in the look's run")
+
     def test_the_floors_segments(self):
         runs = self.iso.segments(REAL, None, name="reversal")
         self.assertEqual([r.result["summary"]["days"] for r in runs], [754, 753])

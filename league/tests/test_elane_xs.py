@@ -756,6 +756,36 @@ class TheLineage(GateCase):
         self.assertNotIn("rev-a", json.dumps(self.events("swarm.status", "elane_validation_refused")[0]).replace(
             "\"_twin\": \"rev-a\"", ""), "the twin's name is private")
 
+    def test_a_retired_family_is_still_a_lineage_comparator(self):
+        """The review's evidence-4. In production a refused pre-check or a failed look RETIRES the family, so a
+        retired comparator is the normal case: were `same_lineage` to read the alive families only, every clone of a
+        refused program would get a fresh Validation try and a fresh look."""
+        first = self.family("rev-a", code=F.good(tag="one"))
+        self.validate(first)
+        clone = self.family("mom-a", code=F.good(tag="two"), agenda="xs_momentum")
+        self.store.set_state(first["id"], **{elane_xs.PRECHECK_KEY: {"version": 1, "reached": True, "passed": False},
+                                            elane.TEMPLATE_KEY: self.template(clone)})
+        self.assertTrue(self.store.retire(first["id"], "its Validation pre-check refused it"))
+        self.assertIsNotNone(self.store.family(first["id"])["retired_at"])
+        self.assertNotIn(first["id"], [f["id"] for f in elane_xs.panel_families(self.store, alive=True)])
+        self.runner.calls.clear()
+        out = self.validate(clone)
+        self.assertEqual(out["refused"], elane_xs.SAME_LINEAGE_XS, "a retired twin spent the lineage's try all the same")
+        self.assertEqual(self.windows(), ["train", "train"], "its Train series, and no Validation run")
+        self.assertEqual(self.state(clone)[elane_xs.PRECHECK_KEY]["twin"], "rev-a")
+        # And by the series alone (no template in common): a retired family's kept Train series still bind.
+        a, b = self.series(11), self.series(12)
+        other = F.panel_family(self.store, "other")
+        self.store.set_state("other", **{elane.TEMPLATE_KEY: "equity:other-code",
+                                         elane_xs.PRECHECK_KEY: {"version": 1, "reached": True, "passed": False},
+                                         **self.kept(a, b)})
+        self.assertTrue(self.store.retire("other", "refused at its pre-check"))
+        mine = F.panel_family(self.store, "mine")
+        days = list(range(1000, 1300))
+        self.assertEqual(elane_xs.same_lineage(self.store, mine, template="equity:my-code",
+                                               train_x={"days": days, "x": a}, train_u={"days": days, "u": self.series(13)}),
+                         "other")
+
     def test_a_program_that_passed_its_precheck_and_was_not_looked_at_binds_nobody(self):
         first = self.family("rev-a", code=F.good(tag="one"))
         self.validate(first)
@@ -1038,6 +1068,24 @@ class TheCaptainsA22(TheLook):
         self.assertIsNotNone(self.look(other), "another cell has its own two")
         self.assertIsNone(elane_xs.look_room(self.store, ("equity", "xs_low_vol", "panel:sp500")))
 
+    def test_a_retired_familys_look_still_counts_toward_its_cell(self):
+        """The review's evidence-4: a failed look retires its family, so were `cell_looks` to count the alive
+        families only, the cap of two looks a cell (the captain's A22 (2)) would never bind."""
+        fams = [self.gated(f"rev-{i}") for i in range(3)]
+        self.assertIsNotNone(self.look(fams[0]))
+        self.assertIsNotNone(self.look(fams[1]))
+        for fam in fams[:2]:
+            self.store.retire(fam["id"], "its look failed") or self.assertIsNotNone(
+                self.store.family(fam["id"])["retired_at"])
+            self.assertIsNotNone(self.store.family(fam["id"])["retired_at"])
+        self.assertEqual([f["id"] for f in elane_xs.panel_families(self.store, alive=True)], ["rev-2"])
+        self.assertEqual(elane_xs.cell_looks(self.store, CELL), 2, "the cell's two looks are spent, their families gone")
+        self.runner.calls.clear()
+        self.assertIsNone(self.look(fams[2]))
+        self.assertEqual(self.runner.calls, [], "held back before any run")
+        self.assertEqual(len(self.store.looks()), 2)
+        self.assertIn("at most 2 a cell until a forward verdict exists", self.state(fams[2])["gate"])
+
     def test_a_look_in_flight_counts_toward_its_cell(self):
         fams = [self.gated(f"rev-{i}") for i in range(3)]
         self.look(fams[0])
@@ -1100,20 +1148,37 @@ class TheLooksRefusalsAndWaits(TheLook):
                          elane.FLOOR_INELIGIBLE)
         self.assertNotIn("look", self.windows())
 
-    def test_the_floor_is_kept_a_version_while_it_fits_the_receipt(self):
+    def test_the_floor_is_computed_from_the_segments_just_run_never_taken_from_an_earlier_attempt(self):
+        """The review's evidence-3. A floor kept from an earlier attempt of the look was reused whenever it fit the
+        receipt's figures: nothing tied it to the Train series it was computed from. Between two attempts (the look
+        waited on its lineage, on Validation, or lost its run once) the panel job restates a name's adjusted history
+        or the spreads job rewrites the half-spreads; the Train residual changes; the look was judged at the OLD
+        k_used and its sentence stated the old c_p and own_fp beside every live trade."""
         fam = self.gated()
         self.look(fam)
         self.assertEqual(self.world.screen.floors, 1)
         kept = self.state(fam)[elane_xs.FLOOR_KEY]["1"]
         self.assertEqual((kept["c_XS"], kept["c_used"]), (1.0, 1.0))
+        # A floor left by an earlier attempt, under THIS receipt's figures and from OTHER Train series (a higher own
+        # floor): it fits the receipt, and it is not the program's floor today.
         second = self.gated("mom-a", agenda="xs_momentum")
-        self.store.set_state("mom-a", **{elane_xs.FLOOR_KEY: {"1": {**kept, "c_p": 1.2, "c_used": 1.25}}})
-        self.look(second)
-        self.assertEqual(self.world.screen.floors, 1, "a floor that fits the receipt is not computed again")
+        stale = {**kept, "c_p": 1.2, "k_p": 120, "c_used": 1.25, "k_used": 125, "own_fp": 0.01}
+        self.store.set_state("mom-a", **{elane_xs.FLOOR_KEY: {"1": stale}})
+        figures = ("screen", "L", "fp_cap", "c_XS", "c_margin")
+        self.assertEqual([stale[k] for k in figures], [kept[k] for k in figures], "it fits the receipt as the first does")
+        self.assertIs(self.look(second), True)
+        self.assertEqual(self.world.screen.floors, 2, "computed again from the segments this attempt ran")
+        now = self.state(second)[elane_xs.FLOOR_KEY]["1"]
+        self.assertEqual((now["c_p"], now["c_used"], now["own_fp"]), (kept["c_p"], kept["c_used"], kept["own_fp"]),
+                         "the record is today's floor, and the look was judged on it")
+        look = self.state(second)[elane_xs.LOOK_KEY]
+        self.assertNotIn("1.25", look["beside"], "the sentence states the floor it was judged on")
+        # One kept under another receipt's figures is run again too (as before).
         third = self.gated("vol-a", agenda="xs_low_vol")
         self.store.set_state("vol-a", **{elane_xs.FLOOR_KEY: {"1": {**kept, "c_XS": 1.38}}})
         self.look(third)
-        self.assertEqual(self.world.screen.floors, 2, "one kept under another receipt's figures is run again")
+        self.assertEqual(self.world.screen.floors, 3)
+        self.assertEqual(self.state(third)[elane_xs.FLOOR_KEY]["1"]["c_XS"], kept["c_XS"])
 
     def test_the_same_lineage_at_the_look_is_refused_with_no_look(self):
         first = self.gated("rev-a", code=F.good(tag="one", common=0.99, family_noise="shared"))
