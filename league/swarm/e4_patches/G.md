@@ -17,6 +17,13 @@ patched file imports `elane_xs` INSIDE the function that forwards (no import cyc
 imported at a module's top). WITH `elane.panel.mode` "off" no patched statement changes what E1 or E2 does: no panel
 family exists, `elane_xs.is_panel` is False for every family, the quota's panel share is 0 and the PANEL block is "".
 
+CHECKED AGAINST THE BUILT ENGINE (not part of the merge): on a scratch branch that is the preview branch with
+packages C, D and E merged, package G's four test modules pass with none skipped (the class
+`test_elane_xs_seal.TheReserveAndTheHiddenYearOnTheRealEngine` runs there, over the real runner on a synthetic
+panel), and a smoke took one program through `score`, `validate` and `look` and six random-score programs through the
+zero-edge job over the real runner, results, placebo, style and screen modules (the in-process decider: the real
+child runs only in a root House, where the zero-edge job was seen to fail closed and count nothing).
+
 WHAT PACKAGE G NEEDS OF THE OTHER PACKAGES' PATCHES: package E's patch 3 (`evaluator.adopt_xs`; `adopt_equity` skips
 structure "panel": WITHOUT IT `adopt_equity`, at the first start after the EQUITY identity moves, would send a panel
 Candidate back to the Gym and clear its selection, judging its proof against the wrong identity) and package H's
@@ -761,13 +768,15 @@ standing; `elane_xs.may_validate`: its pass, the review under the panel rubric, 
 REVIEW of a panel program carries `elane_xs.REVIEW_XS`, the captain's A22 (3)). `queue` asks `elane_xs.blocked(self)`
 ONCE a round, when it meets a panel family: while the panel lane is closed (the rollback) or no panel run may start
 (a wall is near, the day's panel CPU is spent) a panel family takes no place in the round, so it never slows the ETF
-families' research (E2's queue takes the least recently worked `train_per_round` families). `train_map`, `closed_cells` (through
-it) and `refuted_rows` skip a panel family; `train_map_text` is followed by `elane_xs.train_map_text` (the panel's
-cells, each with its ZERO-EDGE EXPECTED column).
-HELD BY: `test_elane_xs_bar.E2sResearcherForwardsAPanelFamily` (five tests).
+families' research (E2's queue takes the least recently worked `train_per_round` families). `train_map`,
+`closed_cells` (through it) and `refuted_rows` skip a panel family; `train_map_text` is followed by
+`elane_xs.request_map_text` (the panel's cells, each with its ZERO-EDGE EXPECTED column; "" with no panel family and
+while the panel lane bears nothing, so the request shows the panel map once and a closed lane shows none).
+HELD BY: `test_elane_xs_bar.E2sResearcherForwardsAPanelFamily`, `test_elane_xs.ThePanelBirths
+.test_the_request_carries_the_panel_block_only_while_the_lane_bears` (the map once).
 ```diff
 diff --git a/league/swarm/elane_train.py b/league/swarm/elane_train.py
-index bc76727b..86bc056e 100644
+index bc76727b..93cb4124 100644
 --- a/league/swarm/elane_train.py
 +++ b/league/swarm/elane_train.py
 @@ -573,9 +573,17 @@ def bar_text() -> str:
@@ -841,11 +850,11 @@ index bc76727b..86bc056e 100644
  def train_map_text(store: Any, settings: Mapping[str, Any] | None, *, limit: int = 40) -> str:
 -    """THE EQUITY TRAIN MAP for the architect's equity request ("" with no E2 family yet). Train facts only."""
 +    """THE EQUITY TRAIN MAP for the architect's equity request ("" with no E2 family yet). Train facts only. RELEASE
-+    E4: the PANEL Train map follows it (`elane_xs.train_map_text`: the panel's cells, each with its ZERO-EDGE EXPECTED
-+    column; "" with no panel family)."""
++    E4: the PANEL Train map follows it (`elane_xs.request_map_text`: the panel's cells, each with its ZERO-EDGE
++    EXPECTED column; "" with no panel family, and while the panel lane bears nothing)."""
 +    from . import elane_xs
 +
-+    panel = elane_xs.train_map_text(store, settings, limit=limit)
++    panel = elane_xs.request_map_text(store, settings, limit=limit)
      rows = train_map(store)
      if not rows:
 -        return ""
