@@ -485,6 +485,54 @@ class TheCloseRotation(PanelCase):
         self.assertEqual(len(h.venue.sent), 6)
 
 
+# ----------------------------------------------------------------------------- the seating pass inside a session
+class TheSeatingPassNeverFetchesInsideASession(PanelCase):
+    """The review's live-6. Friday's decision was recorded without the panel program (it was seated afterwards, or
+    the House restarted): no kept fetch of Friday exists. The seating pass asked it for Friday's close whenever it
+    found it, the panel's whole chunked fetch first, the minutes of the open window included."""
+
+    def setUp(self):
+        super().setUp()
+        self.h.state.put("eq_decide", {"day": FRIDAY.isoformat(), "status": "done", "at": T.at(FRIDAY, 16, 30),
+                                       "instances": []})
+        self.h.plan(["N010", "N011", "N012", "N013", "N014"])
+
+    def chunks(self):
+        return [c for c in self.h.market.bar_calls if len(c[0]) > 12]
+
+    def test_from_the_pre_open_on_it_asks_nothing_of_the_venue_and_waits_for_the_close(self):
+        h = self.h
+        outs = [h.tick(hh, mm, day=MONDAY) for hh, mm in ((9, 26), (9, 31), (9, 35), (9, 44), (12, 0), (15, 51))]
+        self.assertEqual(self.chunks(), [], "no panel fetch in the pre-open, the open window, the session or the close's")
+        self.assertIn("not asked for inside a session", outs[2]["panel_bars"])
+        self.assertEqual((h.rebalance(FRIDAY), h.instance_now().failed_decides, h.sent("buy")), (None, 0, []))
+        self.assertEqual(h.said("failed"), [], "nothing is counted against a program that could not be asked yet")
+        h.decide(MONDAY)                                              # the next close's own 16:20 read
+        self.assertTrue(self.chunks())
+        self.assertEqual(h.rebalance(MONDAY)["status"], "hold", "asked at the next close (a hold day of its schedule)")
+        self.assertEqual(h.state.get("eq_decide")["instances"], [KEY])
+
+    def test_before_the_pre_open_it_reads_and_decides_as_ever(self):
+        h = self.h
+        h.run(MONDAY, (8, 0), (8, 1))
+        self.assertTrue(self.chunks(), "outside a session the catch-up reads the day's bars")
+        self.assertEqual(h.rebalance(FRIDAY)["status"], "planned")
+
+    def test_on_the_days_kept_fetch_it_is_asked_inside_a_session_too(self):
+        h = self.h
+        h.run(MONDAY, (8, 0), (8, 1))                                 # Friday's fetch is kept (by another instance's decide)
+        h.state.execute("DELETE FROM eq_rebalances")
+        h.state.execute("DELETE FROM eq_intents")
+        h.state.execute("UPDATE eq_instances SET last_decided_day=NULL")
+        h.state.put("eq_decide", {"day": FRIDAY.isoformat(), "status": "done", "at": T.at(FRIDAY, 16, 30),
+                                  "instances": []})
+        h.book = h.new_book()                                         # a restart: nothing of the day in memory
+        asked = len(self.chunks())
+        h.tick(9, 35, day=MONDAY)
+        self.assertEqual(len(self.chunks()), asked, "the bytes are on disk: no call")
+        self.assertIsNotNone(h.rebalance(FRIDAY))
+
+
 # ------------------------------------------------------------------------------------------- the seat on a failed leg
 class ASeatHeldOnAFailedLeg(PanelCase):
     """E4-SPEC 17: `live_ready` False while a panel instance is live: ITS OPENS STOP, ITS EXITS GO ON. A store-side leg
@@ -934,6 +982,33 @@ class TheLateBar(PanelCase):
             h.decide(MONDAY)
         self.assertEqual(json.loads(h.rebalance(MONDAY)["fetch"])["dropped"], 1)
         self.assertEqual([level for level, _ in h.said("dropped 1 rows")], ["warning"])
+
+    def test_the_second_failed_rebalance_day_counted_by_the_seating_pass_exits_the_lots_at_the_next_open(self):
+        """The review's live-7. The day's decision is recorded at 16:30 without the panel (it waits for its bars); at
+        17:01 the seating pass counts its failed decide. On the second rebalance day in a row that count reaches the
+        exit rule, the critical alert says "its lots exit at the next open", and `_house_exits` had already run with
+        the 16:30 decision: the exits were planned a session late."""
+        h = self.h
+        h.state.put("eq_decide", {"day": THURSDAY.isoformat(), "status": "done"})
+        h.state.execute("UPDATE eq_instances SET last_decided_day=NULL, failed_decides=1")   # last Friday's failed too
+        h.state.execute("DELETE FROM eq_rebalances")
+        h.market.tape.absent = {(s, FRIDAY.isoformat()) for s in ("N020", "N021", "N022")}
+        h.plan(["N000", "N001", "N002", "N003", "N010"])
+        h.decide(FRIDAY)
+        self.assertEqual(h.state.get("eq_decide")["day"], FRIDAY.isoformat(), "the day's decision is recorded")
+        self.assertEqual([i for i in h.panel_intents() if i.kind == "house_exit"], [], "before the count: nothing")
+        h.tick(17, 1, day=FRIDAY)                                     # the grace is over: the seating pass counts it
+        self.assertEqual(h.instance_now().failed_decides, 2)
+        self.assertEqual([level for level, _ in h.said("its lots exit at the next open")], ["error"])
+        exits = [i for i in h.panel_intents() if i.kind == "house_exit"]
+        self.assertEqual(sorted(i.symbol for i in exits), ["N000", "N001", "N002", "N003", "N004"])
+        self.assertEqual({(i.exec_day, i.at, i.tag, i.status) for i in exits}, {(MONDAY.isoformat(), "open", "house", "planned")})
+        h.run(FRIDAY, (17, 12), (17, 23))
+        self.assertEqual(len([i for i in h.panel_intents() if i.kind == "house_exit"]), 5, "planned once")
+        h.run(MONDAY, (8, 31), (9, 26), (9, 31), (9, 33))
+        self.assertEqual(sorted(b["symbol"] for b in h.sent("sell")), ["N000", "N001", "N002", "N003", "N004"],
+                         "at the NEXT open, as the alert says and as the Gym does")
+        self.assertEqual(h.held(), [])
 
     def test_three_missing_names_fail_a_called_decide_once_and_the_seating_pass_asks_again(self):
         h = self.h

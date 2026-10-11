@@ -110,7 +110,7 @@ import traceback
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, Decimal
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Collection, Mapping, Sequence
 
 from .. import equity as _pkg
 from ..live import money as M
@@ -2068,7 +2068,9 @@ class EquityBook:
         asked for the same close on the same bars (`_decide` skips one already asked). An instance the House could
         not ask (no bar, the decider) is asked again every `SEAT_RETRY_S` until the next session's pre-open (after it
         the book it holds is no longer the close's); its failed decide is counted once a session. The House's exit
-        rules are the day's decision's own and are not run again here: a program seated now holds no lot."""
+        rules are the day's decision's own and are not run again here (a program seated now holds no lot), BUT FOR
+        ONE: an instance whose failed decide THIS pass counted, and whose count reached the exit rule, has its lots'
+        exits planned now, for the next open."""
         handled = done.get("instances")
         if done.get("status") != "done" or not isinstance(handled, list):
             return
@@ -2088,7 +2090,12 @@ class EquityBook:
         if all(tried.get(i.id) == day for i in fresh) and now - self._seat_tried < SEAT_RETRY_S:
             return
         bars = self._day_bars(now, t, mt, live, fresh, out, held=False)
-        panel = self._panel_bars(now, t, mt, mn, [i for i in fresh if i.kind != EQUITY_KIND], out)
+        # THE PANEL'S FETCH IS NEVER MADE INSIDE A SESSION (the review's live-6): from the next session's pre-open on,
+        # a panel instance is asked only on the day's KEPT fetch; with none (the first panel program seated after the
+        # decision, a catch-up after a restart) it waits for the next close's own 16:20 read. Its 28 calls for 500
+        # columns ran here ahead of that minute's exits and entries, the open and close windows' minutes included,
+        # for a decision that could not be executed that session anyway.
+        panel = self._panel_bars(now, t, mt, mn, [i for i in fresh if i.kind != EQUITY_KIND], out, fetch=again)
         if bars is None:
             return
         if (panel or {}).get("wait"):
@@ -2097,6 +2104,20 @@ class EquityBook:
                 return
         self._seat_tried = now
         self._decide(t, fresh, bars, now, out, panel=panel)
+        # A FAILED DECIDE COUNTED HERE THAT REACHES THE EXIT RULE (the review's live-7): a panel decide whose bars are
+        # not whole is always recorded by this pass (the day's decision went ahead without it while it waited), and the
+        # House's exit rules ran with that decision, before the count. Its lots exit AT THE NEXT OPEN, as the alert
+        # says and as the Gym does, not a session late: the rules are run again for the instances just counted.
+        counted_now = self.state.get("eq_failed", {}) or {}
+        failed_exit = self._holds()[3]
+        due = set()
+        for i in fresh:
+            if counted_now.get(i.id) == day and counted.get(i.id) != day:
+                again_inst = self._instance(i.id)
+                if again_inst is not None and again_inst.failed_decides >= failed_exit:
+                    due.add(i.id)
+        if due and (mn is None or now < mn.open_send):
+            self._house_exits(t, now, only=due)
         asked = sorted(set(handled) | {i.id for i in fresh if i.last_decided_day == day})
         if asked != sorted(handled):
             record = {k: v for k, v in done.items() if k != "why"}
@@ -2661,10 +2682,11 @@ class EquityBook:
                 add("buy", "refused", "an intent is a buy, a sell or a cancel", tag=tag)
         return n
 
-    def _house_exits(self, t: dt.date, now: float) -> int:
+    def _house_exits(self, t: dt.date, now: float, *, only: Collection[str] | None = None) -> int:
         """THE HOUSE'S EXIT RULES (A8.5, identical in the Gym engine), planned at the decision of session t for the
         next open: a retired or demoted program's lots; a program with `failed_decides_exit` failed decides in a row;
-        a lot held its program's `max_hold_sessions` by the next open.
+        a lot held its program's `max_hold_sessions` by the next open. `only`: the instances whose lots are judged
+        (None: every lot; the seating pass hands the ones whose failed decide it has just counted).
 
         A rule that is due goes AT THE OPEN whatever its program planned for the close: the Gym sells a lot the House
         exits at the next open and then rejects the program's own close sell of it (league/equity/engine.py `_exits`),
@@ -2676,6 +2698,8 @@ class EquityBook:
         n = 0
         with self.state.transaction():
             for lot in self._lots():
+                if only is not None and lot.instance not in only:
+                    continue
                 pending = [Intent.of(r) for r in self.state.rows(
                     "SELECT * FROM eq_intents WHERE lid=? AND kind IN ('sell', 'house_exit') AND status IN "
                     "('planned', 'sent') ORDER BY iid", (int(lot.lid),))]
@@ -2790,14 +2814,15 @@ class EquityBook:
                 if lot.status != LOT_CLOSED or (lot.exit_day or "") > last}
 
     def _panel_bars(self, now: float, t: dt.date, mt: S.Moments, mn: S.Moments | None, asked: Sequence[Instance],
-                    out: dict) -> dict[str, Any] | None:
+                    out: dict, *, fetch: bool = True) -> dict[str, Any] | None:
         """THE PANEL'S BARS OF SESSION t (B3, B11, B13), for a decide of `asked` (None when it asks no panel instance:
         nothing is read). Each asked instance's columns (`adapter.columns`: the day's members and the names its lots
         hold), then ONE chunked fetch for the union of every panel instance's columns seen that day, a few chunks a
         minute (`adapter.fetch`); the day's kept file is used instead when it holds them (a restart, a program seated
         since). The answer: {adapter, cols {instance: Columns}, union, fetched, sha, failed {instance: why}} and
         - `ready`: the fetch may be decided on (`adapter.complete`); it is KEPT then (`adapter.keep`: the bytes a
-          decision read; the morning re-read and the nightly I6 compare it);
+          decision read; the morning re-read and the nightly I6 compare it). With `fetch` False (the seating pass from
+          the next session's pre-open on) NOTHING IS ASKED OF THE VENUE: the day's kept file or a wait;
         - `wait`: it is still being read (the fetch RETURNED unfinished), or, inside `BARS_GRACE_S` of `decide_at`, a
           bar is missing or the fetch RAISED: read again each minute, the panel instances are not asked this pass;
         - else `why`: past the grace the instances fail (the House could not ask) and the seating pass asks again every
@@ -2845,6 +2870,11 @@ class EquityBook:
         if state["fetched"] is not None:
             state["ok"], state["missing"] = adapter.complete(state["fetched"], union, held, last_ask=last_ask)
         reading, raised = False, None
+        if not state["ok"] and not fetch:
+            state["wait"] = True
+            out["panel_bars"] = (f"no whole kept fetch of {day}, and the panel's bars are not asked for inside a "
+                                 "session: its instances are asked at the next close")
+            return state
         if not state["ok"]:
             try:
                 got = adapter.fetch(self.market, union, t, progress=state["progress"], now=self.clock)
