@@ -44,7 +44,8 @@ each, ever). THE EQUITY ROUNDS (`equity_rounds`, on their own thread every `elan
 equity step (Validation, the retirements), then the gate's (the one sealed look), so a version validated in a round
 takes its look in the same round. They run on the House in the decider child (A3): no Gym box and no model dollar, so
 the main loop starts them whatever the guard says and whether or not the Gym is up (`equity_due`), outside the branch
-that holds the options rounds, and no options round carries or delays them.
+that holds the options rounds, and no options round carries or delays them. A Validation the House could not make is
+reported apart from a failed pre-check (`validation_errors`, in the round's log line and in the heartbeat).
 
 THE EQUITY LANES' BIRTHS AND TRAIN (release E2; league/swarm/ELANE_E2.md): two rounds of their own, `elane` (the
 architect's equity pass) and `elane_train` (the equity researcher), off unless `elane.mode` is "gate" (births also
@@ -534,6 +535,9 @@ class Swarm:
         self.stop = threading.Event()
         self.workers: list[threading.Thread] = []
         self.rounds: dict[str, threading.Thread] = {}
+        # THE EQUITY ROUNDS' Validations the House could not make in the last round ({family: error}; `equity_rounds`
+        # replaces the whole dict each round, `equity_status` shows it in the heartbeat).
+        self.equity_unmade: dict[str, str] = {}
         self.started_at = clock()
         self.why_stopped = ""
         self._beat = float("-inf")
@@ -636,9 +640,12 @@ class Swarm:
 
     def equity_status(self) -> dict[str, Any]:
         """THE EQUITY LANES in the heartbeat: `elane.mode` and when the last equity round started (None before the first):
-        the operator sees the rounds running under the brake and with the Gym down."""
+        the operator sees the rounds running under the brake and with the Gym down. `validation_errors` {family: error}
+        while the last round left any: Validations the House could not make (`equity_rounds`), never failed pre-checks."""
         try:
-            return {"mode": elane.cfg(self.settings)["mode"], "round_at": self.store.get(elane.ROUND_KEY)}
+            unmade = dict(self.equity_unmade)
+            return {"mode": elane.cfg(self.settings)["mode"], "round_at": self.store.get(elane.ROUND_KEY),
+                    **({"validation_errors": unmade} if unmade else {})}
         except Exception as exc:  # noqa: BLE001 - the heartbeat never fails on it
             return {"error": f"{type(exc).__name__}"}
 
@@ -1104,7 +1111,13 @@ class Swarm:
         """THE EQUITY ROUNDS (the module docstring): the tournament's equity step (`Tournament.equity_round`: Validation
         by lane, the spent lineages and the program loss line retired), then the gate's (`Gate.equity_round`: the one
         sealed look of each gate-ready family), on this one thread, so the two never meet a second copy of themselves.
-        Never raises: a failure of either is one private event, and the other still runs."""
+        Never raises: a failure of either is one private event, and the other still runs.
+
+        A VALIDATION THE HOUSE COULD NOT MAKE IS NOT A FAILED PRE-CHECK. `validated` {family: entered} holds the real
+        verdicts only (false there is a FAILED pre-check: the lineage's try is spent). A verdict that carries `error`
+        (the evidence child could not start, a run that ended with no data: no run recorded, no try spent, asked again
+        next round) or `refused` (no Validation was made) is under `validation_errors` {family: the error, or
+        "refused: why"}, in the round's log line and, until the next round, in the heartbeat (`equity_status`)."""
         self.store.put(elane.ROUND_KEY, self.clock())
         out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
         try:
@@ -1118,8 +1131,19 @@ class Swarm:
             self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
                                                   "text": str(exc)[:300]})
             out["error"] = type(exc).__name__
-        return {"validated": {fid: bool(v.get("entered")) for fid, v in (step.get("validated") or {}).items()
-                              if isinstance(v, Mapping)},
+        validated: dict[str, bool] = {}
+        unmade: dict[str, str] = {}
+        for fid, v in (step.get("validated") or {}).items():
+            if not isinstance(v, Mapping):
+                continue
+            if v.get("error"):
+                unmade[str(fid)] = str(v["error"])[:80]
+            elif v.get("refused"):
+                unmade[str(fid)] = f"refused: {str(v['refused'])[:120]}"
+            else:
+                validated[str(fid)] = bool(v.get("entered"))
+        self.equity_unmade = unmade
+        return {"validated": validated, **({"validation_errors": dict(unmade)} if unmade else {}),
                 "retired": list(step.get("retired") or []), "errors": dict(step.get("errors") or {}),
                 "looked": out["looked"], "held": out["held"],
                 **({"waits": dict(out["waits"])} if out.get("waits") else {}),

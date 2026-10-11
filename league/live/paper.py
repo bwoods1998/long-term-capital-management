@@ -40,6 +40,18 @@ and real exits wait for the pass). A SELL stage that ends its window without pas
 an alarm with the owner's step): real lots stay held and new real buys stop until it passes; the next open window buys
 again (stage BUY stays passed) and the one after sells. The durable attempt row is kv `paper_proof_stock`. Client ids
 `lq-pp-...` (the equity book's prefix: never `lv-`). Only the equity book waits on it; options entries never do.
+
+A PRACTICE ORDER THE VENUE NEVER SHOWS (the stock proof only; the options proofs above are as they were): an order
+whose POST was answered unknown is looked up by its client id, never sent again blind, and by the equity book's own
+rule (league/equity/live.py `LOST_AFTER_TRIES`, `LOST_AFTER_S`; here `STOCK_LOST_AFTER_TRIES`, `STOCK_LOST_AFTER_S`) one
+the venue still does not show after four lookups or ten minutes is LOST: terminal, nothing owned by it, one warning.
+A lost buy returns the attempt to waiting, and the next open window tries again on a baseline read then. A lost sale
+goes again only while the practice account still holds what the attempt's fills say (had it filled, the account would
+hold less: the book's `_lost_sale_check`). A lost order is looked for again by its client id for `STOCK_LOST_WATCH_DAYS`
+whenever the proof has work to do, first of all before a new buy: one the venue shows after all is brought up to the
+venue's row (a warning says so) and its fills are the practice lot's, whether the attempt was still its own (it
+resumes at that order) or a later one had begun (the fills count in that attempt's holding, and a stray still working
+is cancelled).
 """
 
 from __future__ import annotations
@@ -424,6 +436,14 @@ STOCK_COLLAR_BP, STOCK_COLLAR_STEP_BP, STOCK_MAX_COLLAR_BP = 10, 10, 50
 #: An unfilled sale is cancelled after this long (then sent again for what is left once it is terminal).
 STOCK_REPRICE_S = 60
 STOCK_TOLERANCE = Decimal("1e-9")
+#: A PRACTICE ORDER THE VENUE NEVER SHOWS is lost after this many lookups by its client id, or this many seconds: the
+#: equity book's own rule for its orders (league/equity/live.py `LOST_AFTER_TRIES`, `LOST_AFTER_S`; a test holds the two
+#: pairs equal, since league/live never imports league.equity). A lost order is looked for again for this many days
+#: (the book's own three), at most once every `STOCK_LOOK_AGAIN_S`.
+STOCK_LOST_AFTER_TRIES = 4
+STOCK_LOST_AFTER_S = 600.0
+STOCK_LOST_WATCH_DAYS = 3
+STOCK_LOOK_AGAIN_S = 60.0
 #: What each stage's pass needs (A10.1): BUY its fill, the attempt's own lot row and the position reconciled to it;
 #: SELL the whole lot sold, the account's FILL activities naming both orders, and the position back at its baseline.
 STOCK_BUY_WITNESSES = ("buy_witness", "hold_witness")
@@ -574,16 +594,10 @@ class StockPaperProof:
         self._put(row)
         return row
 
-    def _refresh(self, row: dict, *, late: bool) -> None:
-        """The last order brought up to the venue's answer by its client id; one still working when `late` (its window
-        ended) and a sale working past `STOCK_REPRICE_S` are cancelled (at most once a minute)."""
-        work = row["orders"][-1]
-        if work.get("terminal"):
-            return
-        answer = self.account.order_by_client_id(work["cid"])
-        if answer is None:
-            row["why"] = "the dispatched order is not yet found; its outcome remains unresolved"
-            return
+    @staticmethod
+    def _observe(work: dict, answer: Mapping[str, Any]) -> None:
+        """One order's record brought up to the venue's row for its client id (its id, status, cumulative fill and
+        average price); ValueError when the row is another order's or its fill is invalid or regressed."""
         if str(answer.get("client_order_id") or "") != work["cid"]:
             raise ValueError("the lookup returned another client order id")
         filled = dec(answer.get("filled_qty")) or Decimal(0)
@@ -592,6 +606,79 @@ class StockPaperProof:
         work.update(id=answer.get("id"), status=str(answer.get("status") or ""), filled=str(filled),
                     avg=answer.get("filled_avg_price"))
         work["terminal"] = work["status"] in TERMINAL
+
+    def _watched(self, work: Mapping[str, Any]) -> bool:
+        """Whether a lost order is still looked for by its client id (`STOCK_LOST_WATCH_DAYS` from its loss)."""
+        return bool(work.get("lost")) and self.clock() - float(work.get("lost_at") or 0) <= STOCK_LOST_WATCH_DAYS * 86400
+
+    def _lose(self, row: dict, work: dict) -> None:
+        """THE EQUITY BOOK'S RULE for an order the venue does not show by its client id (the module docstring): it is
+        LOST. Terminal, nothing owned by it (its recorded fill stays zero), one warning. `_advance` then returns a lost
+        buy's attempt to waiting, and sends a lost sale again only while the account still holds the lot."""
+        work.update(status="lost", terminal=True, lost=True, lost_at=self.clock())
+        self._event("order_lost", {"cid": work["cid"], "action": work["action"], "lookups": work.get("lookups")})
+        buying = work["action"] == "buy"
+        self.alert("warning", f"equity: the stock paper proof's practice {'buy' if buying else 'sale'} {work['cid']} is "
+                              "not at the venue by its client id: given up as lost, nothing is owned by it. "
+                              + ("The next open window buys again; real equity buys wait for stage BUY until then."
+                                 if buying else
+                                 "It is sent again while the practice account still holds the lot; real equity sales "
+                                 "wait for stage SELL."))
+
+    def _found(self, row: dict, today: dt.date) -> None:
+        """A LOST ORDER IS LOOKED FOR AGAIN (the equity book revives a lost order the venue shows after all): each
+        order of the row given up as lost (`_watched`), and each found again that is still working behind a later
+        order, is asked for by its client id, at most once every `STOCK_LOOK_AGAIN_S`. One the venue shows is brought
+        up to its row (`_observe`), with one warning. THE ATTEMPT'S LAST ORDER resumes the attempt at it (`buy_sent`
+        or `sell_sent`; a buy found on a later day than it was sent makes that day the lot's session, so it is never
+        sold in a session it may have filled in). AN ORDER BEHIND A LATER ONE is a stray: its fills count in the
+        attempt's holding (`_owned`), which is what keeps the position reconciled, and while it still works it is
+        cancelled. Raises as the venue's reads do (`step`: nothing is sent on unreadable evidence)."""
+        orders = row.get("orders") or []
+        now = self.clock()
+        for i, work in enumerate(orders):
+            last = i == len(orders) - 1
+            stray = bool(work.get("found")) and not work.get("terminal") and not last
+            if not (self._watched(work) or stray) or now - float(work.get("looked_at") or 0) < STOCK_LOOK_AGAIN_S:
+                continue
+            work["looked_at"] = now
+            answer = self.account.order_by_client_id(work["cid"])
+            if answer is None:
+                continue
+            self._observe(work, answer)
+            if work.pop("lost", None):
+                work["found"] = now
+                self._event("order_found", {"cid": work["cid"], "action": work["action"], "answer": dict(answer)})
+                self.alert("warning", f"equity: the stock paper proof's practice order {work['cid']}, given up as lost, "
+                                      f"is at the venue after all ({work['status']}, {work['filled']} filled): its "
+                                      "fills are the practice lot's")
+                if last:
+                    row.update(status=f"{work['action']}_sent", why="a lost order is at the venue after all")
+                if work["action"] == "buy" and not (work["terminal"] and Decimal(work["filled"]) <= 0):
+                    row["buy_day"] = max(str(row.get("buy_day") or ""), today.isoformat())
+            if not last and not work["terminal"] and work.get("id") \
+                    and now - float(work.get("cancel_at") or 0) >= STOCK_LOOK_AGAIN_S:
+                work["cancel_at"] = now
+                self._put(row)
+                ok, why = self.account.cancel(work["id"])
+                self._event("cancel", {"cid": work["cid"], "ok": ok, "why": why, "stray": True})
+
+    def _refresh(self, row: dict, *, late: bool) -> None:
+        """The last order brought up to the venue's answer by its client id; one still working when `late` (its window
+        ended) and a sale working past `STOCK_REPRICE_S` are cancelled (at most once a minute). One the venue does not
+        show after `STOCK_LOST_AFTER_TRIES` lookups or `STOCK_LOST_AFTER_S` seconds is lost (`_lose`)."""
+        work = row["orders"][-1]
+        if work.get("terminal"):
+            return
+        answer = self.account.order_by_client_id(work["cid"])
+        if answer is None:
+            work["lookups"] = int(work.get("lookups") or 0) + 1
+            if work["lookups"] >= STOCK_LOST_AFTER_TRIES or self.clock() - float(work["at"]) > STOCK_LOST_AFTER_S:
+                self._lose(row, work)
+            else:
+                row["why"] = "the dispatched order is not yet found; its outcome remains unresolved"
+            return
+        self._observe(work, answer)
         if work["terminal"]:
             self._event("order_observed", {"cid": work["cid"], "answer": dict(answer)})
             return
@@ -634,6 +721,7 @@ class StockPaperProof:
         if self._idle(row, today, now, window):
             return row
         try:
+            self._found(row, today)  # a lost order the venue shows after all, before anything else is read or sent
             if row.get("orders"):
                 work = row["orders"][-1]
                 ends = getattr(window, "entry_until" if work["action"] == "buy" else "exit_until", None)
@@ -681,8 +769,12 @@ class StockPaperProof:
             qty = (STOCK_USD / limit).quantize(STOCK_PLACES, rounding=ROUND_DOWN)
             row["attempts"] = int(row.get("attempts") or 0) + 1
             attempt = f"lq-pp-{today:%Y%m%d}-{self.state.nonce}-{row['attempts']}"
+            # A NEW ATTEMPT: the baseline is read now (`held`, this minute's reading, after `_found` looked for every
+            # lost order once more), so whatever an earlier order did before now is in it. Orders still lost stay in
+            # the row, owning nothing: one that surfaces later is found by its client id and its fills are counted.
             row.update(attempt=attempt, buy_day=today.isoformat(), tried_day=today.isoformat(), baseline=str(held),
-                       orders=[], sell_day=None, **{k: False for k in STOCK_WITNESSES})
+                       orders=[w for w in row.get("orders") or [] if self._watched(w)], sell_day=None,
+                       **{k: False for k in STOCK_WITNESSES})
             body = {"symbol": STOCK_SYMBOL, "qty": format(qty, "f"), "side": "buy", "type": "limit", "time_in_force": "day",
                     "limit_price": format(limit, "f"), "client_order_id": attempt + "-b"}
             return self._dispatch(row, body, action="buy")
@@ -692,7 +784,9 @@ class StockPaperProof:
         if status == "buy_sent":
             bought = self._filled(row, "buy")
             if bought <= 0:
-                row.update(status="waiting", why="the buy ended unfilled: the next session's open window tries again")
+                row.update(status="waiting", why=("the practice buy was lost (never at the venue by its client id): "
+                                                  if work.get("lost") else "the buy ended unfilled: ")
+                                                 + "the next session's open window tries again")
                 return row
             row["buy_witness"] = (bought != bought.to_integral_value() and work.get("avg") not in (None, "")
                                   and work["status"] in ("filled", "canceled", "expired", "done_for_day"))
@@ -723,6 +817,13 @@ class StockPaperProof:
             owned = self._owned(row)
             if owned <= STOCK_TOLERANCE:
                 row["status"] = "sold"
+                return row
+            if any(w.get("lost") for w in row["orders"] if w["action"] == "sell") and not self._reconciled(row, held):
+                # The equity book's `_lost_sale_check`: had the lost sale filled, the account would hold less.
+                row["why"] = (f"a practice sale was lost and the paper account's {STOCK_SYMBOL} is no longer this "
+                              "attempt's recorded fills: it may have filled, so nothing more is sold; it is looked "
+                              "for by its client id")
+                row["sell_day"] = today.isoformat()  # a session it could not sell in: the stage fails at its end
                 return row
             bid, _ = self._quote(market)
             sells = sum(1 for w in row["orders"] if w["action"] == "sell")

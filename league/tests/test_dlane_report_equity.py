@@ -287,14 +287,47 @@ class TheFunnelAndTheBudget(EquityFixture):
         self.assertEqual(out["bands_now"]["beta"]["probe"], 1)
 
     def test_the_shared_budget_leaves_the_options_probe_lane_little_room_a8_6(self):
+        """The lane holds the LOWER of its Probe sleeves and the invested cap. Since the captain's A20 (the sleeves at
+        0.66 x E) three sleeves ask for 1.98 x E, so the invested cap's 1.00 x E is the bound: 0.20 x E of open risk."""
+        from league.constitution import CONSTITUTION
+
         constitution = {"options_money": {"probe": {"loss_budget_usd": "400"}},
-                        "equity_money": {"probe": {"sleeve_share": "0.25", "max_programs": 3},
+                        "equity_money": {"probe": {"sleeve_share": "0.66", "max_programs": 3}, "invested_share": "1.00",
                                          "open_risk_weight": {"etf": "0.20", "stock": "0.40"}}}
+        em, probe = CONSTITUTION["equity_money"], CONSTITUTION["options_money"]["probe"]
+        self.assertEqual((em["probe"]["sleeve_share"], em["probe"]["max_programs"], em["invested_share"],
+                          em["open_risk_weight"]["etf"], probe["loss_budget_usd"]), ("0.66", 3, "1.00", "0.20", "400"),
+                         "the fixture is the table in force")
         room = R.options_probe_room(2000, constitution)
+        self.assertEqual(room, R.options_probe_room(2000), "and the table in force is read when none is passed")
+        self.assertEqual((room["open_risk_share_of_e"], room["invested_share_of_e"], room["bound"]),
+                         (0.2, 1.0, "invested_cap"))
+        self.assertEqual((room["equity_open_risk_usd"], room["options_window_room_usd"]), (400.0, 0.0))
+        room = R.options_probe_room(1000, constitution)
+        self.assertEqual((room["equity_open_risk_usd"], room["options_window_room_usd"], room["bound"]),
+                         (200.0, 200.0, "invested_cap"))
+        # Past E = $2,000 the window itself is the bound: every equity entry is cut to the budget's room.
+        room = R.options_probe_room(3000, constitution)
+        self.assertEqual((room["open_risk_share_of_e"], room["equity_open_risk_usd"], room["options_window_room_usd"],
+                          room["bound"]), (0.2, 400.0, 0.0, "budget"))
+        # Sleeves that fit under the invested cap bind by themselves (the quarter of E the block carried before A20).
+        quarter = {**constitution, "equity_money": {**constitution["equity_money"],
+                                                     "probe": {"sleeve_share": "0.25", "max_programs": 3}}}
+        room = R.options_probe_room(2000, quarter)
         self.assertEqual(room["open_risk_share_of_e"], 0.15)
-        self.assertEqual((room["equity_open_risk_usd"], room["options_window_room_usd"]), (300.0, 100.0))
+        self.assertEqual((room["equity_open_risk_usd"], room["options_window_room_usd"], room["bound"]),
+                         (300.0, 100.0, "sleeves"))
+        # A table with no invested_share row is read by its sleeves alone: the larger risk, never a smaller one.
+        bare = {**constitution, "equity_money": {k: v for k, v in constitution["equity_money"].items()
+                                                  if k != "invested_share"}}
+        room = R.options_probe_room(1000, bare)
+        self.assertEqual((round(room["open_risk_share_of_e"], 6), room["equity_open_risk_usd"],
+                          room["options_window_room_usd"], room["bound"], room["invested_share"]),
+                         (0.396, 396.0, 4.0, "sleeves", None))
         self.assertEqual(room["statement"], R.EQUITY_PROBE_NOTE)
         self.assertIn("effectively off", R.EQUITY_PROBE_NOTE)
+        self.assertIn("3 x 0.66 E", R.EQUITY_PROBE_NOTE)
+        self.assertIn("at most 0.20 x E", R.EQUITY_PROBE_NOTE)
         self.assertIn("why", R.options_probe_room(2000, {"options_money": {"probe": {"loss_budget_usd": "400"}}}))
         self.assertIn("why", R.options_probe_room(None, constitution))
         self.assertEqual(self.report()["equity"]["options_probe_room"]["statement"], R.EQUITY_PROBE_NOTE)

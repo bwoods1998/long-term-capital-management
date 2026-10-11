@@ -329,8 +329,8 @@ class NamedRunner(FS.PickyRunner):
 
 def own_series(lots, bars, *, universe, capital, first=None, last=None):
     """The gate harness's `series`, with the reversal seed on a Train series of its own, and so a family named
-    "own..." (the two overnight seeds, and any other family, share one: one lineage, as the rehearsal found the two
-    overnight seeds on real bars)."""
+    "own..." (the two overnight seeds, and any other family, share one: one lineage, as the two overnight seeds are
+    declared)."""
     days = {"segment-1": np.arange(0, 5), "segment-2": np.arange(10, 15)}.get(bars.window, np.arange(100, 105))
     r = np.linspace(-0.01, 0.01, len(days))
     if "reversal" in str(getattr(bars, "name", "")):
@@ -390,13 +390,19 @@ class TheSeedsDeclaredOrder(FS.FixCase):
     def waiting(self, fid=SPY):
         return self.store.family(fid)["state"].get(elane.SEED_WAIT_KEY)
 
-    def test_the_declared_order_and_its_reason_are_written_down(self):
+    def test_the_declared_order_and_whose_decision_it_was_are_written_down(self):
+        """The order, that it is one lineage, and whose decision it was and when (amendment A18). What it was decided
+        ON stays off a public file: no Train-era figure, and no finding about the seeds on real data
+        (`ThePublicWording`)."""
         self.assertEqual([spec["id"] for spec in seeds.EQUITY_SEEDS], [QQQ, REVERSAL, SPY])
         source = inspect.getsource(seeds)
         said = source[source.index("#: THE ORDER OF THIS LIST"):source.index("EQUITY_SEEDS: list")]
-        for words in ("ONE LINEAGE", "seed-overnight-qqq goes first", "the lower bar", "retired with that reason"):
+        for words in ("ONE LINEAGE", "seed-overnight-qqq goes first", "the captain's", "before any Validation or look",
+                      "from Train-era figures only", "amendment A18", "retired with that reason"):
             self.assertIn(words, " ".join(said.replace("#:", " ").split()))
-        self.assertNotRegex(said, r"\d\.\d\d", "the reason in words: no Train-era figure in a public file")
+        self.assertNotRegex(said, r"\d\.\d", "no Train-era figure in a public file")
+        for finding in ThePublicWording.FINDINGS:
+            self.assertNotRegex(said, finding)
         page = " ".join((REPO / "docs" / "operations.md").read_text().split())
         self.assertIn("seed-overnight-qqq, seed-reversal-index, seed-overnight-spy", page)
 
@@ -651,6 +657,76 @@ class TheSeedsDeclaredOrder(FS.FixCase):
         self.assertEqual((self.store.refusals(), [row["family"] for row in self.looks()]), ([], ["own1"]))
         out = self.rounds(elane.ROUND_SECONDS)
         self.assertEqual([row["family"] for row in out["looked"]], [QQQ, REVERSAL], "readable again: as declared")
+
+
+# ------------------------------------------------------------------------------------------- the public wording
+class ThePublicWording(unittest.TestCase):
+    """verify-evidence-3: the repository is public and the rehearsal read REAL vendor data. Its commits wrote counts
+    read from that data, and two findings about the seeds on real Train data (which of the two overnight seeds has
+    the lower bar at its look, and how their Train returns correlate), into public text. A public file says what a
+    rule IS and why (the daily bar's close is the closing cross; a flat bar of volume 0 is a session without a trade;
+    the vendor rounds its adjusted prices to the cent; the seeds' declared order is the captain's decision, made
+    before any Validation or look from Train-era figures only, amendment A18; the two overnight seeds share a
+    template and are one lineage). It never carries a count read from the vendor's data, nor either finding."""
+
+    #: The public texts the rehearsal's commits wrote in (the CHANGELOG: what is not yet deployed).
+    FILES = ("CHANGELOG.md", "docs/operations.md", "league/equity/INTERFACES.md", "league/equity/EQUITY.md",
+             "league/equity/config.py", "league/equity/engine.py", "league/equity/live.py", "league/ops/equity_data.py",
+             "league/swarm/seeds.py", "league/swarm/elane.py", "league/swarm/gate.py",
+             "league/tests/test_equity_data.py", "league/tests/test_equity_i6.py", "league/tests/test_equity_fx_daily.py",
+             "league/tests/test_equity_fx_swarm.py", "league/tests/test_equity_e2e.py", "league/tests/test_elane_seeds.py",
+             "league/tests/test_equity_rehearsal.py")
+    #: The two findings about the seeds on real Train data, as they were worded.
+    FINDINGS = (r"lower\s+bar", r"higher\s+power", r"correlate\s+at\s+or\s+above", r"one\s+lineage\s+on\s+real",
+                r"real\s+bars\s+found\s+(?:\*\*)?the\s+two", r"On\s+real\s+Train\s+series", r"as\s+the\s+rehearsal\s+found\s+the\s+two")
+    #: The counts read from the vendor's data, as they were worded (sessions, windows, symbols, ratio steps, events,
+    #: ex-dividend days, decision days, zero-volume bars).
+    COUNTS = (r"252\s+sessions", r"\b(?:all|on|the)\s+252\b", r"\b233\s+rolling", r"\b190\s+extended", r"\b43\s+unverified",
+              r"\b12\s+unverified", r"\b221\s+regular", r"\bon\s+13\b", r"\b18\s+of\s+them", r"\b103\s+of\b", r"\bon\s+67\b",
+              r"\b205\s+of\s+205", r"\b0\s+of\s+205", r"\b35\s+symbols", r"78,586", r"1,312\s+real", r"21,440", r"21,420",
+              r"1,185", r"2,190", r"\b0\s+to\s+2\s+of\b", r"two\s+(?:flat\s+)?bars\s+of\s+volume", r"two\s+such\s+bars",
+              r"two\s+sessions\s+of\s+2016", r"one\s+symbol,\s+two\s+sessions", r"\"count\s+2\"",
+              r"essentially\s+every\s+decision\s+day")
+
+    def texts(self):
+        """{file: its public text}: the whole file, but the CHANGELOG from "Not yet deployed" to the first deployed
+        entry, and this file without this class (it names the wordings it bars)."""
+        out = {}
+        for name in self.FILES:
+            text = (REPO / name).read_text()
+            if name == "CHANGELOG.md":
+                start = text.index("## Not yet deployed")
+                text = text[start:text.index("\n## ", start + 1)]
+            if name == "league/tests/test_equity_rehearsal.py":
+                text = text.replace(inspect.getsource(ThePublicWording), "")
+            out[name] = text
+        return out
+
+    def test_no_count_read_from_the_vendors_data_is_in_a_public_text(self):
+        for name, text in self.texts().items():
+            for pattern in self.COUNTS:
+                with self.subTest(file=name, pattern=pattern):
+                    self.assertNotRegex(text, pattern)
+
+    def test_neither_finding_about_the_seeds_on_real_data_is_in_a_public_text(self):
+        for name, text in self.texts().items():
+            for pattern in self.FINDINGS:
+                with self.subTest(file=name, pattern=pattern):
+                    self.assertNotRegex(text, pattern)
+
+    def test_what_a_rule_is_and_why_stays_said(self):
+        job = " ".join((REPO / "league" / "ops" / "equity_data.py").read_text().split())
+        for words in ("where the closing cross prints", "a session without a trade", "THE VOLUME IS NOT COMPARED"):
+            self.assertIn(words, job)
+        self.assertIn("rounded to the cent", " ".join((REPO / "league" / "equity" / "config.py").read_text().split()))
+        page = " ".join((REPO / "docs" / "operations.md").read_text().split())
+        for words in ("before any Validation or look, from Train-era figures only", "amendment A18",
+                      "The two overnight seeds share a template and are one lineage"):
+            self.assertIn(words, page)
+        log = " ".join(self.texts()["CHANGELOG.md"].split())
+        for words in ("The vendor rounds its adjusted prices to the cent", "a session without a trade",
+                      "where the closing cross prints", "from Train-era figures only"):
+            self.assertIn(words, log)
 
 
 # ------------------------------------------------------------------------------------------- the event tables

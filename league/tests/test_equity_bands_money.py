@@ -4,6 +4,7 @@ force. Invented returns only (no market figure); standard library only."""
 
 import math
 import unittest
+from dataclasses import replace
 from decimal import Decimal as D
 
 from league import stats
@@ -12,6 +13,10 @@ from league.equity.bands import EquityRecord, edm1, sized_sleeve_share, sized_up
 from league.live.money import EquityTable
 
 TABLE = EquityTable.from_constitution()
+#: The Sized sleeve's own arithmetic needs a Probe sleeve UNDER the Sized cap, where the Kelly leg and the cap can be
+#: reached: the quarter of E the block carried before the captain's A20 (Oct 11, 2026). At the table in force the Probe
+#: sleeve (0.66) is above the cap (0.50) and the rule answers the Probe's for every record (`AtTheTableInForce`).
+UNDER_THE_CAP = replace(TABLE, probe_sleeve_share=D("0.25"))
 
 
 def record(returns, *, pnl="50", bh_pnl="20", probe_sessions=10, realized_net="50", gaps=(), sd=None):
@@ -60,8 +65,6 @@ class SizingUp(unittest.TestCase):
         bounds = stats.mean_bounds(list(rec.returns), 0.2)
         self.assertGreater(bounds["lcb"], 0)
         self.assertTrue(sized_up(rec, TABLE)[0])
-        from dataclasses import replace
-
         strict = replace(TABLE, sized_confidence=0.99)
         self.assertLess(stats.mean_bounds(list(rec.returns), 0.01)["lcb"], 0)
         self.assertFalse(sized_up(rec, strict)[0])
@@ -69,20 +72,64 @@ class SizingUp(unittest.TestCase):
                         "beat_bh off (never, by the bounds) would not read the buy-and-hold")
 
 
+#: Records across the rule's legs: a strong bound (the cap), a Kelly between a quarter and a half of E, a bound barely
+#: above zero, a losing record, one close (no bound) and none.
+BETWEEN = alternating(0.0025, 0.03, 400)
+RECORDS = (GOOD, BETWEEN, alternating(0.0002, 0.06, 40), alternating(-0.01, 0.02, 40), [0.01], [])
+
+
 class SizedSleeve(unittest.TestCase):
+    """The rule as pre-registered: max(the Probe's sleeve, min(quarter Kelly on the lower bound, the Sized cap)), on a
+    table whose Probe sleeve is under the cap (`UNDER_THE_CAP`)."""
+
     def test_quarter_kelly_on_the_lower_bound_between_the_probes_and_the_cap(self):
-        returns = alternating(0.0025, 0.03, 400)
-        bounds = stats.mean_bounds(returns, 0.2)
+        bounds = stats.mean_bounds(BETWEEN, 0.2)
         kelly = stats.quarter_kelly(bounds["lcb"], bounds["sd"] ** 2, fraction=0.25, cap=0.5)
         self.assertTrue(0.25 < kelly < 0.5, kelly)
-        share = sized_sleeve_share(record(returns), TABLE)
+        share = sized_sleeve_share(record(BETWEEN), UNDER_THE_CAP)
         self.assertEqual(share, D(repr(kelly)).quantize(D("0.0001"), rounding="ROUND_DOWN"))
 
     def test_never_above_the_cap_nor_below_the_probes(self):
-        self.assertEqual(sized_sleeve_share(record(GOOD), TABLE), D("0.50"), "a strong bound is capped at 0.50 x E")
-        self.assertEqual(sized_sleeve_share(record(alternating(0.0002, 0.06, 40)), TABLE), D("0.25"), "the Probe's floor")
-        self.assertEqual(sized_sleeve_share(record(alternating(-0.01, 0.02, 40)), TABLE), D("0.25"))
-        self.assertEqual(sized_sleeve_share(record([0.01]), TABLE), D("0.25"), "one close: no bound, the Probe's share")
+        self.assertEqual(sized_sleeve_share(record(GOOD), UNDER_THE_CAP), D("0.50"), "a strong bound is capped at 0.50 x E")
+        self.assertEqual(sized_sleeve_share(record(alternating(0.0002, 0.06, 40)), UNDER_THE_CAP), D("0.25"),
+                         "the Probe's floor")
+        self.assertEqual(sized_sleeve_share(record(alternating(-0.01, 0.02, 40)), UNDER_THE_CAP), D("0.25"))
+        self.assertEqual(sized_sleeve_share(record([0.01]), UNDER_THE_CAP), D("0.25"),
+                         "one close: no bound, the Probe's share")
+
+
+class AtTheTableInForce(unittest.TestCase):
+    """THE PROBE SLEEVE AT 0.66 (the captain's A20, Oct 11, 2026): `sized.sleeve_share` 0.50 now sits BELOW
+    `probe.sleeve_share` 0.66, and the rule never sizes under the Probe's, so a Sized program keeps the Probe sleeve."""
+
+    def test_the_table_in_force(self):
+        self.assertEqual((TABLE.probe_sleeve_share, TABLE.sized_sleeve_share, TABLE.probe_max_programs),
+                         (D("0.66"), D("0.50"), 3))
+        self.assertLess(TABLE.sized_sleeve_share, TABLE.probe_sleeve_share)
+
+    def test_a_sized_programs_sleeve_is_the_probes_whatever_its_record(self):
+        for returns in RECORDS:
+            self.assertEqual(sized_sleeve_share(record(returns), TABLE), D("0.66"), returns[:2])
+        # ...the record that sizes up among them (every leg met), and one whose quarter Kelly alone is far past E.
+        self.assertTrue(sized_up(record(GOOD), TABLE)[0])
+        bounds = stats.mean_bounds(GOOD, 0.2)
+        self.assertGreater(stats.quarter_kelly(bounds["lcb"], bounds["sd"] ** 2, fraction=0.25, cap=10.0), 1.0)
+        self.assertEqual(sized_sleeve_share(record(GOOD), TABLE), D("0.66"), "the cap, then the Probe's floor: never E")
+
+    def test_a_sized_sleeve_is_never_below_the_probes_at_any_probe_sleeve_inside_the_bound(self):
+        """Never under the Probe's, and never above the larger of the Probe's and the Sized cap: at each Probe sleeve
+        from zero to the bound's loose end, for every record."""
+        from league.constitution import EQUITY_MONEY_BOUNDS
+
+        self.assertEqual(EQUITY_MONEY_BOUNDS["probe.sleeve_share"], ("0", "0.66"))
+        for probe in ("0", "0.10", "0.25", "0.4999", "0.50", "0.5001", "0.66"):
+            table = replace(TABLE, probe_sleeve_share=D(probe))
+            for returns in RECORDS:
+                share = sized_sleeve_share(record(returns), table)
+                self.assertGreaterEqual(share, D(probe), (probe, returns[:2]))
+                self.assertLessEqual(share, max(D(probe), table.sized_sleeve_share), (probe, returns[:2]))
+            # A strong record reaches the cap while the Probe's is under it, and is the Probe's from there on.
+            self.assertEqual(sized_sleeve_share(record(GOOD), table), max(D(probe), D("0.50")), probe)
 
 
 class EDM1(unittest.TestCase):
@@ -119,8 +166,6 @@ class EDM1(unittest.TestCase):
         for equal in (0.1, 0.07, 1 / 3, -0.0123456789):
             self.assertEqual(B.edm1_sigma(record([equal] * 10))[0], B.EDM1_FALLBACK_SIGMA, equal)
         # Nine closes: the record's own sd is not yet read; with the table's line at 5 the fallback is the sigma.
-        from dataclasses import replace
-
         five = replace(TABLE, demotion_min_trades=5)
         self.assertEqual(B.edm1_sigma(record([-0.02, -0.01] * 3))[0], B.EDM1_FALLBACK_SIGMA)
         self.assertIn("rule's fallback", edm1(record([-0.03] * 5), five))   # -0.15 < -1.645 x 0.02 x sqrt(5) = -0.0736

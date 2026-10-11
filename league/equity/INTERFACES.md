@@ -5,8 +5,9 @@ Branch `feat/equity-e1` (worktree `~/Work/ltcm-v3/eqe1`), from `origin/main` a48
 captain. The stubs it names exist on the branch now (bodies raise `NotImplementedError("<package>: <file> <name>")`;
 their docstrings say what each must do), so every package imports every other package's names from day one.
 
-**Sources, in order of authority.** The captain's amendments A1-A16 (a later one over an earlier: A11, the S2 screen,
-over A9's gate; A10 over A6 and A8.7; A12's look cap over A9 D6; A8, the design review's 13 decisions, over any brief),
+**Sources, in order of authority.** The captain's amendments A1-A16 and A20 (a later one over an earlier: A11, the S2
+screen, over A9's gate; A10 over A6 and A8.7; A12's look cap over A9 D6; A20's Probe sleeve over A5's; A8, the design
+review's 13 decisions, over any brief),
 then the design (DESIGN.md), then the package briefs. Where a brief and an amendment differ, this file follows the
 amendment and says so (section 13). THE HOUSE'S SHARE SCREEN IS S2 (A11: sscreen2-1010, receipt 2, pinned for both
 lanes; section 9). S1+F1, the pinned sscreen-1010 pre-registration with A9's fixes F1, D3, D5, D6, stays in code as
@@ -529,7 +530,14 @@ Decimal` (`Unreadable.shares_taken` raises).
   position back at its baseline (gates every real equity SALE); a SELL stage that ends its window unpassed is
   "failed" (an alarm with the owner's step; new real buys stop until it passes). Checked only by the equity book
   (options entries never wait on it). Client ids `lq-pp-...` (never `lv-`). `StockPaperProof` never waits for the
-  options route's proofs (no `after`); `_idle` minutes read nothing of the practice account.
+  options route's proofs (no `after`); `_idle` minutes read nothing of the practice account. An order the venue does
+  not show by its client id after `STOCK_LOST_AFTER_TRIES` (4) lookups or `STOCK_LOST_AFTER_S` (600) seconds is lost
+  (the book's `LOST_AFTER_TRIES`, `LOST_AFTER_S`; a test holds them equal): its record is {status "lost", terminal,
+  lost, lost_at, lookups}, nothing owned, one warning through `alert`; a lost buy returns the row to "waiting", a lost
+  sale goes again only while the position still reconciles; lost orders stay in the row's `orders` for
+  `STOCK_LOST_WATCH_DAYS` (3) and are looked up again in every minute the proof works (`_found`: found again is one
+  warning, `found` in the record, the attempt resumed at its last order or the stray's fills counted and the stray
+  cancelled). The options `PaperProof` is unchanged.
 - **venue.py**: `MarketData.bars(symbols, *, timeframe, start, end=None, adjustment="raw")` (the book reads "all" too).
 
 ### 6.3 `league/equity/kinds.py`, `league/equity/child.py` (stubs present)
@@ -601,7 +609,7 @@ moves and the standing grant re-ratifies at the House's start)
     "invested_share": "1.00",               # A1: cash only by choice; equity long + open equity buys + options open max loss <= E
     "cash_reserve_usd": "50",               # A8.1: above the gateway's $25 floor
     "open_risk_weight": {"etf": "0.20", "stock": "0.40"},
-    "probe": {"sleeve_share": "0.25", "max_programs": 3, "min_order_usd": "10"},             # A5
+    "probe": {"sleeve_share": "0.66", "max_programs": 3, "min_order_usd": "10"},             # A5; A20: the sleeve 0.66
     "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
               "beat_bh": True, "min_probe_sessions": 5},
     "demotion": {"rule": "edm1", "min_trades": 10, "z": "1.645", "program_loss_usd": "-300", "twin_gap_bp": "15",
@@ -620,11 +628,13 @@ moves and the standing grant re-ratifies at the House's start)
 
 Its comment says: THE LOSS BUDGET IS SHARED by both lanes: `options_money.probe.loss_budget_usd` ($400 net in any
 rolling 20 sessions) and `loss_total_usd` ($800 net in total) bound every agent program's Probe opens, options and
-equity, read by one `probe_tally`; while equity is invested at 3 x 0.25 E the options Probe lane has little window room
-left (A8.6, stated in docs and the dlane report). `EQUITY_MONEY_BOUNDS` (beside `OPTIONS_MONEY_BOUNDS`) with each
+equity, read by one `probe_tally`; three Probe sleeves of 0.66 x E (A20, section 16) ask for more than the account
+holds, so the invested cap bounds the lane: at most 1.00 x E of ETFs, 0.20 x E of open risk, and with the lane invested
+to that cap the options Probe lane keeps $400 - 0.20 x E of the window, nothing from E = $2,000 (A8.6, stated in docs
+and the dlane report). `EQUITY_MONEY_BOUNDS` (beside `OPTIONS_MONEY_BOUNDS`) with each
 row's owner's line at its loose end (tighten only): position_share.etf (0, 0.50], .stock (0, 0.20]; invested_share
 (0, 1.00]; cash_reserve_usd [50, 200]; open_risk_weight.etf [0.20, 1.00], .stock [0.40, 1.00]; probe.sleeve_share
-[0, 0.25], max_programs [0, 3], min_order_usd [10, 100]; sized.min_trades [20, 1000], confidence [0.80, 0.99],
+[0, 0.66] (A20: [0, 0.25] before it), max_programs [0, 3], min_order_usd [10, 100]; sized.min_trades [20, 1000], confidence [0.80, 0.99],
 kelly_fraction [0.125, 0.25], sleeve_share [0, 0.50], min_probe_sessions [5, 60], beat_bh exactly True;
 demotion.rule exactly "edm1", min_trades [1, 10], z [0, 1.645], program_loss_usd [-300, -25], twin_gap_bp [1, 15],
 twin_min_closes [1, 5]; holds.min_hold_sessions [1, 1], default_max_hold_sessions [1, 60], max_hold_sessions [1, 60],
@@ -956,7 +966,8 @@ receipts are judged only through the repository's pin (`test_the_committed_pin`,
   `MemoryEquityFamilies`-style double).
 - The money digest (`PINNED_DIGEST`) is re-pinned once, by money; any later constitution change goes through money.
 - A10.2 (applied at integration): `equity_money.enabled` ships True (one money-digest move with the block:
-  ad8c761b, full digest 65b0e025); `elane.mode` deploys "off" and the captain sets "gate" after the deploy is verified;
+  d6510685, full digest d397bc7c, since A20's sleeve of 0.66, section 16; ad8c761b and 65b0e025 with the sleeve at
+  0.25); `elane.mode` deploys "off" and the captain sets "gate" after the deploy is verified;
   receipt 2 is pinned for both lanes (A11: the S2 screen; receipt 1, A9's, stays in the repository, unused); nothing
   trades until a program passes its look AND the stock proof's BUY stage passes.
 
@@ -979,7 +990,7 @@ receipts are judged only through the repository's pin (`test_the_committed_pin`,
 | equity band rules | money brief and swarm brief both name league/equity/bands.py | one file, owned per function (section 1.1) |
 | "families.py carries lane, structure and validation_r_sd" | swarm brief | `bands.read(root, lanes=LANES)` rows carry lane, structure, symbols, seeded (swarm); league/equity/families.py adds `validation_r_sd` (book); league/live/families.py is unchanged |
 | `elane.roster` | swarm brief: in the policy.json block | in policy.json (3), with swarm.json over it, read failing closed as `dlane.roster` |
-| probe sleeve, invested share, cash reserve | DESIGN 5: 0.30, 0.90, $25 | A5: 0.25 and max 3 programs; A1: "1.00"; A8.1: "50" |
+| probe sleeve, invested share, cash reserve | DESIGN 5: 0.30, 0.90, $25 | A5: 0.25 and max 3 programs, then A20 (Oct 11, 2026): the sleeve 0.66, three programs still (section 16); A1: "1.00"; A8.1: "50" |
 | sizing caps Gym vs live | DESIGN: the same caps | `size_entry` applies the account cap AND the same share of the sleeve (`sleeve_cap`), so a live position is never a larger share of its sleeve than the Gym allows |
 | ltcm.data's NYSE calendar | the data job's audit "NYSE calendar has no gap" from 2016 | that calendar starts in 2022; `store.nyse_sessions` computes 2016-2021 by the same rules (core) |
 
@@ -992,8 +1003,11 @@ differ, this section is the code.
   `Swarm.equity_due()` (the lane on and `elane.ROUND_SECONDS`, 300, since the store's kv `elane.ROUND_KEY`
   "elane_round_at"; never the guard, never `gym_ready`) and `Swarm.equity_rounds()` (on the round thread "equity":
   `Tournament.equity_round()`, then `Gate.equity_round(out)`; never raises) -> {validated {family: entered}, retired,
-  errors, looked, held}. `Tournament.run` and `Gate.run` no longer call the equity steps, and the hourly
-  `swarm.tournament` row carries no `equity` key. The heartbeat's status carries `equity` {mode, round_at}.
+  errors, looked, held}. `validated` holds real verdicts only; a verdict carrying `error` or `refused` (no Validation
+  was made, no try spent) is under `validation_errors` {family: the error | "refused: why"}, present when any (the
+  verification's fix). `Tournament.run` and `Gate.run` no longer call the equity steps, and the hourly
+  `swarm.tournament` row carries no `equity` key. The heartbeat's status carries `equity` {mode, round_at, and the
+  last round's `validation_errors` when it left any (`Swarm.equity_unmade`)}.
 - **The order of a round** (swarm): `elane.round_order(store, fams) -> [fam]`: by the second of birth, then by id,
   the seeds as one block in `seeds.EQUITY_SEEDS`' declared order (section 15.4 says which). Both equity rounds walk it.
 - **Retirement causes** (swarm): `elane.SAME_LINEAGE`, `elane.FLOOR_INELIGIBLE`, `elane.REFUSED_BEFORE_LOOK`,
@@ -1041,7 +1055,9 @@ above and this section differ, this section is the code.
 ### 15.1 The order path (book; league/equity/live.py, league/equity/schedule.py, league/live/__main__.py)
 - **Key-values** (ADDS to 5.1): `owner_equity_flatten` and `owner_equity_clear_freeze` {why, at, by}: written only by
   the owner's command (league/live/__main__.py), read first every minute and deleted by the book (`EquityBook._owner`).
-  `eq_orders.answer` also carries `tick` (the minute's `now` the order was sent in; a re-price is aged from it) and
+  `eq_orders.answer` also carries `tick` (the minute's `now` the order was sent in; a re-price is aged from it in
+  whole House minutes, `live.house_minute(t)` = the wall minute a pass started in, since two minute starts are 60 s
+  apart give or take milliseconds; an order without it is aged in seconds from `placed_at`, exactly) and
   `retry` (true on a gateway refusal whose cap is in `RETRY_CAPS`); `eq_lots.info.exit_unread_told` (the day the
   owner was told).
 - **Constants** (ADDS to 5.2): `OWNER_FLATTEN`, `OWNER_CLEAR_FREEZE`, `RETRY_CAPS` (positions, orders, equity,
@@ -1116,8 +1132,9 @@ above and this section differ, this section is the code.
   failed audit's receipt carries `problems` {check: the first `RECEIPT_PROBLEMS` (5) texts, every decimal figure
   masked}.
 - **The seeds' order** (swarm; CHANGES section 14's): `seeds.EQUITY_SEEDS` is seed-overnight-qqq,
-  seed-reversal-index, seed-overnight-spy, the declared order of the looks (the two overnight seeds are one lineage on
-  real Train series; the reason is beside the list). `elane.round_order` walks the seeds as one block in that order,
+  seed-reversal-index, seed-overnight-spy, the declared order of the looks (the captain's decision before any
+  Validation or look, from Train-era figures only, amendment A18; the two overnight seeds share a template and are
+  one lineage). `elane.round_order` walks the seeds as one block in that order,
   standing where the first of them was born. WITHIN A LINEAGE THE ORDER IS STRICT (amendment A18; the verification's
   fix): each spec's `lineage` declares the lineage its seed is in ("overnight" for the two overnight seeds,
   "reversal"; read by the wait alone, no part of `equity_family_spec`). `elane.seed_owed(store, fam, settings) ->
@@ -1133,3 +1150,44 @@ above and this section differ, this section is the code.
   "seed order" for a seed, nothing spent); `elane.seed_waits_over(store, settings) -> [family]` closes the waits that
   ended without being asked again (`Gate.equity_round` calls it last). `Swarm.equity_rounds`' answer carries `waits`
   {family: the seed it waits for} when any waits.
+
+## 16. The Probe sleeve at 0.66 x E (the captain's A20, Oct 11, 2026; money; CHANGES 7.1, as built)
+
+One row of 7.1's block and its bound, and nothing else of the contract. Where a line above and this section differ,
+this section is the code.
+
+- **7.1** (CHANGES; money): `equity_money.probe.sleeve_share` "0.25" -> "0.66";
+  `EQUITY_MONEY_BOUNDS["probe.sleeve_share"]` ("0", "0.25") -> ("0", "0.66"). `probe.max_programs` 3 and first-come
+  seating are unchanged, as is every other row. `PINNED_DIGEST` is re-pinned: money digest d6510685, full digest
+  d397bc7c (the stop, `enabled` False: a782f11f; the rollback, the sleeve back at "0.25": ad8c761b). No file of
+  league/live or league/gym and no evidence module of league/equity changes: neither fingerprint moves.
+- **7.4** (unchanged code; what it now yields): `size_entry`'s "sleeve_cap" holds a program's position in one ETF to
+  `position_share.etf` (0.50) of its sleeve, so a one-ETF program's lot is 0.33 x E (0.125 x E before). The owner's
+  lines bind as before, by name: "instrument" (an ETF at most 0.50 x E across all programs: two programs in one ETF
+  hold 0.50 x E together), "invested" (at most 1.00 x E: three one-ETF lots are 0.99 x E, and a fourth entry is cut
+  to the rest or refused), "cash" (the $50 reserve: it cuts the last lot when E is the account's own equity),
+  "budget" (the shared loss budget's room over the ETF weight 0.20: from E = $2,000 it bounds the lane before the
+  invested cap does).
+- **7.5** (unchanged code; what it now yields): `sized_sleeve_share` is max(`probe_sleeve_share`, min(quarter Kelly
+  on the lower bound, `sized_sleeve_share`)), floored to four places. `sized.sleeve_share` stays "0.50", now UNDER the
+  Probe sleeve, so the answer is 0.66 for every record: a Sized program keeps the Probe sleeve and sizes nothing up.
+  A lot bought while Sized still carries no Probe mark (`eq_lots.probe` 0: its close joins neither `probe_figures`'
+  closes nor the record's `realized_net`); its open value still counts as open risk.
+- **10** (CHANGES; ops): `dlane_report.options_probe_room(equity_usd, constitution=None)` takes the LOWER of the
+  sleeves (`max_programs` x `sleeve_share`) and `invested_share` as the lane's largest share of E, and never reads its
+  open risk in dollars above the window's budget. ADDS to its answer: `invested_share` (str | None),
+  `invested_share_of_e` (float), `bound` ("sleeves" | "invested_cap" | "budget"). At the table in force:
+  `open_risk_share_of_e` 0.20 (it was 0.15), `bound` "invested_cap". `EQUITY_PROBE_NOTE` carries the new arithmetic.
+- **The gateway** (read only, unchanged): one order and one ETF's position of 0.33 x E are under
+  `STOCK_ETF_EQUITY_SHARE` (0.5 of the account's equity, which E is never above); the lane at 1.00 x E is inside its
+  book line on a multiplier of 1; `STOCK_DAY_EQUITY_MULTIPLE` (4x equity of buys a day, a cancelled one too) admits
+  twelve sends of such a lot a day (`league/tests/test_ci.py`).
+- **Tests** (money): `league/tests/test_equity_sleeve.py` (new: the lane by hand through the real `size_entry` at
+  the table in force: three lots and the invested cap, one ETF and the instrument cap, the cash reserve, the budget,
+  a Sized program's sleeve); the pins moved in `test_constitution`, `test_equity_money`, `test_equity_bands_money`,
+  `test_ci`, `test_dlane_report_equity`, `test_equity_e2e`, `test_live_long_single`. The book's harness
+  (`test_equity_book.equity_table`) keeps an INVENTED table (a sleeve of 0.25 x E, a stubbed Sized share), and says
+  so: its scenarios are built by hand on that sleeve's dollars and test the book's plumbing, not the table.
+- **Not changed, and stale by one comment:** `league/live/money.py` `EquityTable.probe_sleeve_share` is annotated
+  `"0.25" (A5)`. The file is in the options execution fingerprint, so the comment waits for the next release that
+  moves it. The value is read from the constitution.
