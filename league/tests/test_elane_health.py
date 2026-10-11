@@ -84,6 +84,15 @@ def refused_step(fid: str, why: str) -> dict:
     return {"family": fid, "refused": why, "route": ROUTE}
 
 
+#: The Train round's own words for a paid answer that held no program (`EquityResearcher.write`).
+NO_PROGRAM = "the answer held no program"
+
+
+def lost_step(fid: str, route: str = ROUTE) -> dict:
+    """A Train step whose paid answer held no program, as `EquityResearcher.write` returns it."""
+    return {"family": fid, "refused": NO_PROGRAM, "route": route}
+
+
 def scored_step(fid: str, n: int, *fails: str, passed: bool | None = None) -> dict:
     return {"family": fid, "version": n, "route": ROUTE,
             "score": {"family": fid, "version": n, "passed": (not fails) if passed is None else passed, "fails": list(fails)}}
@@ -900,7 +909,8 @@ class MostVersionsDisqualified(Case):
         self.assertEqual(EH.release_since({"release": two, "since": later + 9e9}, self.root, later), {"release": two, "since": None})
         # What is kept under a release goes with it: carried while the release is the same, dropped with another.
         carried = {"release": two, "since": later + 540.0, "dq": {"stood_at": later + 600.0}, "idle": {"from": later, "down": 0.0},
-                   "held": {"at": later, "kind": "pace"}, "unread": {"warned_at": later}, "another": {"key": 1}}
+                   "held": {"at": later, "kind": "pace"}, "unread": {"warned_at": later},
+                   "broken": {"kind": "house", "at": later}, "another": {"key": 1}}
         self.assertEqual(EH.release_since(carried, self.root, later + 900.0), {k: carried[k] for k in carried if k != "another"})
         self.beat(0.0, at=later + 900.0, release=two)
         self.assertEqual(set(EH.release_since(carried, self.root, later + 900.0)), {"release", "since", *EH.KEPT})
@@ -1317,7 +1327,7 @@ class OwedWorkAndNothingScored(Case):
         return self.equity()
 
     def test_what_the_taken_steps_show_decides_between_broken_and_held(self):
-        self.assertEqual((EH.BROKEN_MIN_FAILS, EH.BROKEN_KINDS), (2, ("raised", "house", "errors")))
+        self.assertEqual((EH.BROKEN_MIN_FAILS, EH.BROKEN_KINDS), (2, ("raised", "house", "errors", "answers")))
         by_key = refusal(BY_KEY)
         # Every taken step fails on the House's side, or with an error of its own: BROKEN, the owner's step, at a pace.
         for taken, kind, words in (
@@ -1330,15 +1340,10 @@ class OwedWorkAndNothingScored(Case):
             self.assertIn(f"for 7.0 h while 3 families are in Train research. BROKEN, whatever E2's own lines hold: {words}. "
                           "E2 is also held now: E2's hourly pace binds", check["what"])
             self.assertNotIn("an invented failure", json.dumps(check))
-        # Questions no route answered and programs a static rule refused are no failing lane: held, it does not stand
-        # (the routes heal by themselves; the refusals are `elane_refused`'s, which stands on them early).
-        # What the steps taken show is SAID all the same, in the sentence and the numbers.
-        checks = self.held_mixture(lambda f: {"family": f, "error": "no route answered", "errors": ["x"], "retry_in": 600.0})
-        self.assertEqual((checks["elane_idle"]["stalled"], checks["elane_idle"]["numbers"]["kind"],
-                          checks["elane_idle"]["numbers"]["unanswered"]), (False, "pace", 7))
-        self.assertIn("so no model is asked. Since the lanes went idle 7 Train rounds ran; 7 questions got no answer from a "
-                      "model route. Of the 12 equity Train steps due in the last 3 h, 4 were taken and 8 were skipped",
-                      checks["elane_idle"]["what"])
+        # Programs a static rule refused are no failing lane: held, it does not stand (the refusals are
+        # `elane_refused`'s, which stands on them early). What the steps taken show is SAID all the same, in the
+        # sentence and the numbers. (Questions no route answered, seven in five hours with none answered between, were
+        # read so too before the third check's ruling: they are work lost to a fault, `TheLanesAnswers` below.)
         checks = self.held_mixture(lambda f: refused_step(f, by_key))
         self.assertEqual((checks["elane_idle"]["stalled"], checks["elane_idle"]["numbers"]["refused_answers"]), (False, 7))
         self.assertIn("Since the lanes went idle 7 Train rounds ran; 7 programs were refused before a run (see elane_refused).",
@@ -1607,6 +1612,458 @@ class OwedWorkAndNothingScored(Case):
                           check["numbers"]["starved"]), ("pace", 0, True, True))
         self.assertIn("for at least 5.0 h while no family is in Train research and births are wanted. STARVED BY A SETTING, "
                       "not broken: E2's hourly pace binds", check["what"])
+
+
+# ---------------------------------------------------------------------------------------------- elane_idle: its answers
+class TheLanesAnswers(Case):
+    """THE CAPTAIN'S RULING on the third check of Oct 11 (`elane_idle`, BROKEN BY ITS ANSWERS): an answer the lane paid
+    for that holds no program, and a question no route answered, are WORK LOST TO A FAULT, never to a setting. When
+    most of the lane's program questions over the window are lost, and there are enough of them, the lane stands
+    BROKEN with an owner step that names the routes in closed words, whatever E2's lines hold. Before, such a lane read
+    "STARVED BY A SETTING, not broken" at every run under a hold and pointed to `elane_refused`, which said none was
+    refused; nothing was mailed."""
+
+    PACE = OwedWorkAndNothingScored.PACE
+    HELD = ("E2 is also held now: E2's hourly pace binds ($0.050 booked in the last hour against a pace of $0.017 an hour: "
+            "elane.e2.pace_share 0.25 of the Sail model line). That is its setting at work: an answer with no program "
+            "scores nothing at any pace.")
+    STEP = ("the equity lanes pay for answers that hold no program (sail:pro_asap): raise elane.e2.train_max_output_tokens "
+            "if they are cut short, or take a route out of elane.e2.routes (swarm.json; python3 set_swarm.py "
+            "elane.e2.<key>=<value> --apply); else it needs a fix, in a release (python3 -m league.ops.elane_health --state "
+            "/workspace/state prints each family's state)")
+    SILENT = ("no model route answers the equity lanes' program questions (sail:pro_asap): check the routes at the model "
+              "provider, or name routes that answer in elane.e2.routes (swarm.json; python3 set_swarm.py "
+              "elane.e2.<key>=<value> --apply); else it needs a fix, in a release (python3 -m league.ops.elane_health "
+              "--state /workspace/state prints each family's state)")
+    RULE = ": it stands BROKEN once they are 5 and more than half of those asked."
+
+    def silent(self, fid: str, *routes: str) -> dict:
+        """A program question no route answered, as `EquityResearcher.unanswered` returns it (each route's own error)."""
+        return {"family": fid, "error": "no route answered", "retry_in": 1200.0,
+                "errors": [f"{route}: RuntimeError: {SECRET}" for route in routes or (ROUTE,)]}
+
+    def lane(self, steps, *, first: float = 5.0, every: float = 0.6, held: bool = True, born: float = 9.0) -> list[str]:
+        """Three families born `born` hours ago with nothing scored, and a Train round every `every` hours from `first`
+        hours ago in which ONE step is taken (`steps`, each a function of the family, in turn) and, when `held`, two
+        are skipped at E2's pace, E2 being held now."""
+        fams = [self.bred(f"ans-{x}", hours=born) for x in "abc"]
+        for i, taken in enumerate(steps):
+            one = fams[i % 3]
+            self.round(first - i * every, taken(one),
+                       *([{"family": other, "skipped": self.PACE} for other in fams if other != one] if held else []))
+        if held:
+            self.spend(0.5, 0.05)
+        return fams
+
+    def test_most_paid_answers_holding_no_program_is_broken_whatever_e2s_lines_hold(self):
+        # The constants, named: the window is `elane_refused`'s, for its reasons.
+        self.assertEqual((EH.ANSWERS_HOURS, EH.ANSWERS_MIN, EH.ANSWERS_SHARE, EH.ANSWERS_EARLY), (6.0, 8, 0.5, 5))
+        self.assertEqual((EH.ANSWERS_HOURS, EH.ANSWERS_MIN, EH.ANSWERS_SHARE, EH.ANSWERS_EARLY),
+                         (EH.REFUSED_HOURS, EH.REFUSED_MIN_ANSWERS, EH.REFUSED_SHARE, EH.REFUSED_EARLY))
+        self.assertEqual(EH.rule_of(NO_PROGRAM), EH.LOST_KINDS[0])
+        self.lane([lost_step] * 8)
+        out, ctx = self.run_at()
+        checks = self.own(out)
+        check = checks["elane_idle"]
+        self.assertEqual({k: check["numbers"][k] for k in ("kind", "held_now", "idle_hours", "questions_lost", "questions_asked",
+                                                           "lost_no_program", "lost_unanswered", "questions_basis",
+                                                           "steps_skipped")},
+                         {"kind": "answers", "held_now": "pace", "idle_hours": 9.0, "questions_lost": 8, "questions_asked": 8,
+                          "lost_no_program": 8, "lost_unanswered": 0, "questions_basis": "window", "steps_skipped": 8})
+        self.assertEqual(check["what"], (
+            "No equity version was scored on Train for at least 9.0 h while 3 families are in Train research. BROKEN, "
+            "whatever E2's own lines hold: 8 of the 8 program questions the equity lanes asked in the last 6 h were lost to "
+            "a fault, not to a setting (8 answers held no program; by route: sail:pro_asap 8 of 8). " + self.HELD))
+        self.assertNotIn("STARVED", check["what"])
+        self.assertEqual((check["stalled"], check["owner_step"], check["doing"]), (True, self.STEP, EH.DOING["answers"]))
+        self.assertLessEqual(len(self.STEP), EH.STEP_CHARS)
+        # No static rule refused anything, and the idle cause no longer sends the reader to the cause that says so.
+        self.assertEqual((checks["elane_refused"]["stalled"], checks["elane_refused"]["numbers"]["refused_no_program"]),
+                         (False, 8))
+        self.assertTrue(checks["elane_refused"]["what"].startswith("None of the 8 programs the equity generators wrote"))
+        self.assertNotIn("see elane_refused", check["what"])
+        # Raised like any owner cause: standing, a House warning with the step whole, the mail keyed by its own name.
+        self.assertEqual((out["stalled"], out["notice"]["sent"], out["notice"]["notice_id"]),
+                         (["elane_idle"], True, "stall:owner:elane_idle"))
+        self.assertTrue(ctx.alerts[0]["text"].endswith(f" Owner step: {self.STEP}."), ctx.alerts[0]["text"])
+        self.assertLessEqual(len(ctx.alerts[0]["text"]), EH.WARN_CHARS)
+        entry = self.notify.entry("elane_idle")
+        self.assertEqual((entry["owner_step"], entry["doing"]), (self.STEP, EH.DOING["answers"]))
+        self.assertTrue(entry["what"].startswith(check["what"][:300]))
+        self.assertLessEqual(len(entry["what"]), EH.WHAT_CHARS)
+        self.assertEqual(list(entry["numbers"])[:6], ["kind", "idle_hours", "researching", "held_now", "questions_lost",
+                                                      "questions_asked"])
+        for name, value in list(entry["numbers"].items())[:EH.FIGURES]:
+            self.assertNotEqual(figure(value), "unknown", (name, value))
+        # WITHOUT A HOLD the same lane stands the same way, and says E2 may ask.
+        self.setUp()
+        self.lane([lost_step] * 8, held=False)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["held_now"], check["owner_step"]),
+                         (True, "answers", "none", self.STEP))
+        self.assertEqual(check["what"], (
+            "No equity version was scored on Train for at least 9.0 h while 3 families are in Train research. BROKEN, not "
+            "starved: E2 may ask a model now and 8 of the 8 program questions the equity lanes asked in the last 6 h were "
+            "lost to a fault, not to a setting (8 answers held no program; by route: sail:pro_asap 8 of 8)."))
+
+    def test_there_must_be_enough_of_them_and_they_must_be_most(self):
+        by_key = refusal(BY_KEY)
+        ruled = lambda f: refused_step(f, by_key)  # noqa: E731 - an answer that held a program (a rule refused it)
+        # HALF IS NOT MOST: four answers of eight held no program. Held, the lane reads starved by its setting, and no
+        # longer "not broken": it says how many were lost and how many it takes.
+        self.lane([lost_step, ruled] * 4)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["judged"], check["owner_step"], check["numbers"]["kind"],
+                          check["numbers"]["questions_lost"], check["numbers"]["questions_asked"]),
+                         (False, True, None, "pace", 4, 8))
+        self.assertIn("STARVED BY A SETTING: E2's hourly pace binds", check["what"])
+        self.assertNotIn("not broken", check["what"])
+        self.assertIn("Since the lanes went idle 8 Train rounds ran; 4 answers held no program; 4 programs were refused "
+                      "before a run (see elane_refused). 4 of the 8 program questions the equity lanes asked in the last 6 h "
+                      "were lost to a fault, not to a setting (4 answers held no program; by route: sail:pro_asap 4 of 8)"
+                      + self.RULE, check["what"])
+        # One more: five of nine are most.
+        self.setUp()
+        self.lane([lost_step, ruled] * 4 + [lost_step], every=0.5)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["questions_lost"],
+                          check["numbers"]["questions_asked"]), (True, "answers", 5, 9))
+        # EARLY: fewer than eight were asked. Four lost of four are not judged yet; five are most of eight whatever
+        # the next three are.
+        self.setUp()
+        self.lane([lost_step] * 4)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["questions_basis"]), (False, "early"))
+        self.assertIn("4 of the 4 program questions the equity lanes asked in the last 12 h were lost to a fault, not to a "
+                      "setting (4 answers held no program; by route: sail:pro_asap 4 of 4)" + self.RULE, check["what"])
+        self.setUp()
+        self.lane([lost_step] * 5)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["questions_basis"], check["owner_step"]),
+                         (True, "early", self.STEP))
+        self.assertIn("(5 answers held no program; by route: sail:pro_asap 5 of 5). Fewer than 8 were asked, and these 5 "
+                      "are already most of 8. E2 is also held now", check["what"])
+        # Five lost of seven asked, early: most. Five of eleven: enough of them, and not most.
+        for steps, stands in (([lost_step] * 5 + [ruled] * 2, True), ([lost_step] * 5 + [ruled] * 6, False)):
+            self.setUp()
+            self.lane(steps, every=0.4)
+            check = self.equity()["elane_idle"]
+            self.assertEqual((check["stalled"], check["numbers"]["questions_lost"], check["numbers"]["questions_asked"]),
+                             (stands, 5, len(steps)))
+        # A SLOW LANE: fewer than eight fall in the six hours, and the last eight asked are judged (it does not lapse).
+        self.setUp()
+        self.lane([lost_step] * 9, first=11.0, every=1.2)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["questions_basis"], check["numbers"]["questions_asked"]),
+                         (True, "last_asked", 8))
+        self.assertIn("8 of the last 8 program questions the equity lanes asked (over 9.8 h: fewer than 8 fall in the last "
+                      "6 h) were lost to a fault", check["what"])
+        # Questions asked before the running release started are not held against it.
+        self.beat(1.0)
+        check = self.equity()["elane_idle"]
+        self.assertFalse(check["stalled"])
+        self.assertNotIn("questions_lost", check["numbers"])
+
+    def scoring(self, lost) -> list[str]:
+        """Three families and a Train round every half hour for the last five hours, one step each: a version scored
+        (failing the bar), except the rounds `lost` names, whose answer held no program."""
+        fams = [self.bred(f"mix-{x}", hours=9) for x in "abc"]
+        versions: dict[str, dict] = {fid: {} for fid in fams}
+        for i in range(10):
+            hours, fid = 5.0 - i * 0.5, fams[i % 3]
+            if lost(i):
+                self.round(hours, lost_step(fid))
+                continue
+            n = len(versions[fid]) + 1
+            versions[fid][str(n)] = verdict(hours, "Y1")
+            self.round(hours, scored_step(fid, n, "Y1"))
+        for fid in fams:
+            self.record(fid, versions=versions[fid])
+        return fams
+
+    def test_a_lane_that_still_scores_stands_on_its_lost_answers_and_one_answer_in_ten_raises_nothing(self):
+        """Work lost to a fault is no idleness: a lane two of whose three answers hold no program is told while the
+        third is still scored (one route of the settings' that writes no program is most of what E2 pays for). And a
+        healthy lane with an occasional program-less answer says so in its receipt and raises nothing."""
+        self.scoring(lambda i: i % 3 != 0)  # the rounds 0, 3, 6 and 9 score a version: the last one half an hour ago
+        out, ctx = self.run_at()
+        check = self.own(out)["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["idle_hours"],
+                          check["numbers"]["questions_lost"], check["numbers"]["questions_asked"], check["owner_step"]),
+                         (True, "answers", 0.5, 6, 10, self.STEP))
+        self.assertEqual(check["what"], (
+            "The last equity version was scored 0.5 h ago, while 3 families are in Train research. BROKEN, not starved: E2 "
+            "may ask a model now and 6 of the 10 program questions the equity lanes asked in the last 6 h were lost to a "
+            "fault, not to a setting (6 answers held no program; by route: sail:pro_asap 6 of 10)."))
+        # It stands since this run saw it (the lane is not idle: no idle hours are told as how long).
+        self.assertEqual((self.notify.entry("elane_idle")["since"], out["notice"]["notice_id"]),
+                         (iso(NOW), "stall:owner:elane_idle"))
+        # ONE IN TEN: nothing stands, nothing is warned or mailed, and the receipt says the one and what it takes.
+        self.setUp()
+        self.scoring(lambda i: i == 4)
+        out, ctx = self.run_at()
+        checks = self.own(out)
+        check = checks["elane_idle"]
+        self.assertEqual([cause for cause in EH.CAUSES if checks[cause]["stalled"] or checks[cause]["owner_step"]], [])
+        self.assertEqual((self.notify.calls, ctx.alerts, out["stalled"]), ([], [], []))
+        self.assertEqual((check["judged"], check["numbers"]["questions_lost"], check["numbers"]["questions_asked"]),
+                         (True, 1, 10))
+        self.assertEqual(check["what"], (
+            "The last equity version was scored 0.5 h ago. The lanes are idle after 3 h with nothing scored. 1 of the 10 "
+            "program questions the equity lanes asked in the last 6 h were lost to a fault, not to a setting (1 answers held "
+            "no program; by route: sail:pro_asap 1 of 10)" + self.RULE))
+        # A lane that lost none says nothing of it: its receipt reads as it did before the ruling.
+        self.setUp()
+        self.scoring(lambda i: False)
+        check = self.equity()["elane_idle"]
+        self.assertEqual(check["what"], "The last equity version was scored 0.5 h ago. The lanes are idle after 3 h with "
+                                        "nothing scored.")
+        self.assertFalse([name for name in check["numbers"] if name.startswith(("questions_", "lost_"))])
+
+    def test_questions_no_route_answered_count_once_none_has_answered_for_three_hours(self):
+        """The earlier ruling's mixture (seven questions no route answered in five hours, E2 at its pace) read "the
+        routes heal by themselves" and stood on nothing. They did not heal: none was answered between. A route's bad
+        hour is still no fault to mail, and floods a slow lane's window (a question none answered costs nothing, so
+        E2's pace does not ration it): only the questions after the last one a route answered count, and only once
+        the first of them is `IDLE_HOURS` old."""
+        self.lane([self.silent] * 7, first=4.9, every=0.8)
+        out, _ = self.run_at()
+        check = self.own(out)["elane_idle"]
+        self.assertEqual({k: check["numbers"][k] for k in ("kind", "questions_lost", "questions_asked", "lost_no_program",
+                                                           "lost_unanswered", "questions_basis", "unanswered")},
+                         {"kind": "answers", "questions_lost": 7, "questions_asked": 7, "lost_no_program": 0,
+                          "lost_unanswered": 7, "questions_basis": "early", "unanswered": 7})
+        self.assertEqual(check["what"], (
+            "No equity version was scored on Train for at least 9.0 h while 3 families are in Train research. BROKEN, "
+            "whatever E2's own lines hold: 7 of the 7 program questions the equity lanes asked in the last 12 h were lost "
+            "to a fault, not to a setting (7 questions got no answer from a model route, none answered for 4.9 h; by "
+            "route: sail:pro_asap 7 of 7). Fewer than 8 were asked, and these 7 are already most of 8. " + self.HELD))
+        self.assertEqual((check["stalled"], check["owner_step"], check["doing"]), (True, self.SILENT, EH.DOING["answers"]))
+        self.assertLessEqual(len(self.SILENT), EH.STEP_CHARS)
+        self.assertNotIn(SECRET, json.dumps(out), "a route's own error text is never read past its name")
+        # Free to ask, the same lane: before, "told, nobody's step"; it is the owner's.
+        self.setUp()
+        self.lane([self.silent] * 7, first=4.9, every=0.8, held=False)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["owner_step"]), (True, "answers", self.SILENT))
+        self.assertIn("BROKEN, not starved: E2 may ask a model now and 7 of the 7 program questions", check["what"])
+        # A BAD HOUR: seven questions no route answered, the first two hours and a half ago. Not counted: held, the
+        # lane reads starved (and says them); free to ask, they are told and nobody's step, as before.
+        for held, stalled, kind in ((True, False, "pace"), (False, True, "unanswered")):
+            self.setUp()
+            self.lane([self.silent] * 7, first=2.5, every=0.3, held=held)
+            check = self.equity()["elane_idle"]
+            self.assertEqual((check["stalled"], check["numbers"]["kind"], check["owner_step"], check["numbers"]["unanswered"]),
+                             (stalled, kind, None, 7), held)
+            self.assertNotIn("questions_lost", check["numbers"])
+            self.assertIn("7 questions got no answer from a model route", check["what"])
+            self.assertIn("STARVED BY A SETTING, not broken: " if held else "BROKEN, not starved: ", check["what"])
+        # HEALED: six questions none answered, then a route answers (a program a rule refuses is an answer), then two
+        # more go unanswered within the hour. The six were healed by the answer; the two are a bad hour.
+        self.setUp()
+        ruled = lambda f: refused_step(f, refusal(BY_KEY))  # noqa: E731
+        self.lane([self.silent] * 6 + [ruled] + [self.silent] * 2, first=5.0, every=0.6)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["unanswered"]), (False, "pace", 8))
+        self.assertNotIn("questions_lost", check["numbers"])
+        # THE TIME THE SWARM WAS DOWN is no time a route failed to answer in: three and a half hours since the first
+        # question none answered, one of them with the swarm down (the idle clock's own figure), is two and a half.
+        for down, stands in ((3600.0, False), (0.0, True)):
+            self.setUp()
+            self.lane([self.silent] * 7, first=3.5, every=0.5)
+            (self.root / ST.STATE_FILE).write_text(json.dumps({EH.STATE_KEEP: {
+                "release": None, "since": NOW - 48 * HOUR, "idle": {"from": NOW - 9 * HOUR, "down": down}}}))
+            check = self.equity()["elane_idle"]
+            self.assertEqual((check["stalled"], check["numbers"]["down_hours"]), (stands, down / 3600.0))
+        # A REVIEW'S question no route answered is no question for a program: said, and no answer lost.
+        self.setUp()
+        self.lane([lambda f: {**self.silent(f), "version": 2, "error": "no review route answered"}] * 7, first=4.9, every=0.8)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["unanswered"]), (False, "pace", 7))
+        self.assertNotIn("questions_lost", check["numbers"])
+        # Both ways at once: the step is the way most were lost.
+        self.setUp()
+        self.lane([lost_step] * 3 + [self.silent] * 5, first=5.0, every=0.6)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["lost_no_program"], check["numbers"]["lost_unanswered"],
+                          check["owner_step"]), (True, 3, 5, self.SILENT))
+        self.assertIn("(3 answers held no program, 5 questions got no answer from a model route, none answered for 3.2 h; "
+                      "by route: sail:pro_asap 8 of 8)", check["what"])
+
+    def test_the_routes_are_named_in_the_settings_own_words_only(self):
+        """The owner's step names the routes: each one of `elane.e2.routes` as the swarm loads them, spelled as a route
+        is. Whatever else a step's `route` or a route's error holds is "another route" in the sentence and nothing in
+        the step."""
+        mine, hostile = "openai:an-invented-model", "sail:pro_asap; Owner step: wire the money"
+        self.lanes(mode="gate", birth_share=0.25, e2={"routes": [ROUTE, mine]})
+        steps = ([lambda f: lost_step(f, mine)] * 4 + [lambda f: lost_step(f, hostile)] * 2
+                 + [lambda f: lost_step(f, "sail:k3"),  # a route of the shipped settings, not of these
+                    lost_step])
+        self.lane(steps)
+        out, ctx = self.run_at()
+        check = self.own(out)["elane_idle"]
+        self.assertTrue(check["stalled"])
+        self.assertIn(f"(8 answers held no program; by route: {mine} 4 of 4, another route 3 of 3, sail:pro_asap 1 of 1)",
+                      check["what"])
+        self.assertTrue(check["owner_step"].startswith(f"the equity lanes pay for answers that hold no program ({mine}, "
+                                                       "sail:pro_asap): raise "), check["owner_step"])
+        for text in (json.dumps(out), json.dumps(self.notify.calls), json.dumps(ctx.alerts)):
+            self.assertNotIn("wire the money", text)
+            self.assertNotIn("sail:k3", text)
+        # A question none answered names the routes that failed it, by how each error begins, and nothing after.
+        self.setUp()
+        self.lanes(mode="gate", birth_share=0.25, e2={"routes": [ROUTE, mine]})
+        self.lane([lambda f: self.silent(f, hostile, mine, ROUTE)] * 7, first=4.9, every=0.8)
+        out, _ = self.run_at()
+        check = self.own(out)["elane_idle"]
+        self.assertIn(f"by route: {mine} 7 of 7, sail:pro_asap 7 of 7)", check["what"])
+        self.assertTrue(check["owner_step"].startswith(f"no model route answers the equity lanes' program questions ({mine}, "
+                                                       "sail:pro_asap): check the routes"))
+        self.assertNotIn("wire the money", json.dumps(out))
+        # THE STEP IS WHOLE inside the gateway's cut whatever the names: as many as fit, never cut inside its command.
+        names = [f"{kind}:{'x' * 40}" for kind in ("sail", "openai", "claude")]
+        for way in EH.LOST_KINDS:
+            step = EH._answers_step(names, way, names)
+            self.assertLessEqual(len(step), EH.STEP_CHARS)
+            self.assertTrue(step.endswith("(python3 -m league.ops.elane_health --state /workspace/state prints each family's "
+                                          "state)"), step)
+            self.assertIn(f"({names[0]})", step)
+            self.assertEqual(EH._answers_step(["sail:not-mine", 7, None], way, names).count("("), 2, "none is named")
+        self.assertEqual(EH._route("sail:pro_asap", ["sail:pro_asap"]), "sail:pro_asap")
+        for name in ("sail:pro_asap ", "sail:", "mail:pro_asap", "sail:pro asap", None, 7):
+            self.assertEqual(EH._route(name, ["sail:pro_asap", name]), EH.ANOTHER_ROUTE, name)
+        # Settings that cannot name a route (the checks called with none): every route is "another route".
+        self.assertEqual(EH._lost_check({"rounds": [(NOW - 60.0, {"steps": [lost_step("x")] * 5})]}, NOW, None, ())["routes"],
+                         [(EH.ANOTHER_ROUTE, 5, 5)])
+
+
+class ABrokenLaneHolds(Case):
+    """The third check's minor: a BROKEN lane's owner step lapsed to "STARVED BY A SETTING, not broken", with nothing
+    fixed, once a hold of E2's outlasted the twelve hours of events the check reads (a day under the Sail guard: the
+    failures aged out, the reminder stopped, and the receipt said "not broken" for 21 hours). ONCE A BROKEN KIND STOOD
+    UNDER A RELEASE IT HOLDS (`stall.json` `elane.broken`) until a version is scored after it stood, the release
+    changes or no work is owed."""
+
+    HOUSE = OwedWorkAndNothingScored.HOUSE
+    ONE = "/workspace/releases/an-invented-release"
+
+    def kept(self) -> dict:
+        return json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP]
+
+    def broken(self) -> str:
+        """Two families, the last version scored five hours ago, and two Train steps that failed on the House's side
+        two hours ago: BROKEN at NOW, under a release the heartbeat names."""
+        a = self.bred("alpha-one")
+        self.record(a, versions={"1": verdict(5.0, "Y1")})
+        self.bred("beta-two", lane="beta")
+        step = {"family": a, "version": 2, "house": "store", "why": "MissingData: invented", "retry_in": 600.0}
+        self.round(2.0, step, step)
+        self.beat(48, release=self.ONE)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["owner_step"]), (True, "house", self.HOUSE))
+        self.assertNotIn("kept_standing", check["numbers"])
+        self.assertEqual(self.kept()["broken"], {"kind": "house", "at": NOW})
+        return a
+
+    def test_its_owner_step_does_not_lapse_when_a_hold_outlasts_the_events_the_check_reads(self):
+        a = self.broken()
+        # THIRTEEN HOURS ON the Sail guard holds E2 and the failures are older than the hours of events read.
+        self.store.put(elane_yield.GUARD_KEY, {"braked": True, "reason": "an invented brake"})
+        later = NOW + 13 * HOUR
+        out, ctx = self.run_at(now=later)
+        check = self.own(out)["elane_idle"]
+        self.assertEqual({k: check["numbers"][k] for k in ("kind", "held_now", "idle_hours", "train_rounds", "house_failures",
+                                                           "standing_since", "kept_standing")},
+                         {"kind": "house", "held_now": "sail_day", "idle_hours": 18.0, "train_rounds": 0, "house_failures": 0,
+                          "standing_since": iso(NOW), "kept_standing": True})
+        self.assertEqual(check["what"], (
+            "No equity version was scored on Train for 18.0 h while 2 families are in Train research. BROKEN, whatever E2's "
+            f"own lines hold: it stood at {iso(NOW)} under the running release (its Train runs failed on the House's side) "
+            "and HOLDS until a version is scored or the release changes. Since then no version was scored; in the hours "
+            "this check reads 0 Train rounds ran. E2 is also held now: the House's Sail day holds E2 (the Sail guard is "
+            "braked). That is its setting at work: a broken lane scores nothing at any pace."))
+        self.assertEqual((check["stalled"], check["owner_step"], check["doing"]), (True, self.HOUSE, EH.DOING["broken"]))
+        self.assertNotIn("STARVED", check["what"])
+        self.assertIn("elane_idle", out["stalled"])
+        self.assertNotIn("elane_idle", out["cleared"])
+        self.assertEqual(self.kept()["broken"], {"kind": "house", "at": NOW}, "since when it first stood")
+        self.assertEqual(self.notify.entry("elane_idle")["owner_step"], self.HOUSE, "the reminder goes on")
+        # The operator's report reads the same record, and writes nothing.
+        before = (self.root / ST.STATE_FILE).read_text()
+        self.beat(48, at=later, release=self.ONE)
+        self.assertTrue(EH.report(self.root, now=later)["checks"]["elane_idle"]["stalled"])
+        self.assertEqual((self.root / ST.STATE_FILE).read_text(), before)
+        self.beat(48, release=self.ONE)
+        # WHAT THE RECORD DOES: the same run without it is the lapse the check found.
+        state = json.loads(before)
+        del state[EH.STATE_KEEP]["broken"]
+        (self.root / ST.STATE_FILE).write_text(json.dumps(state))
+        lapsed = self.equity(now=later)["elane_idle"]
+        self.assertEqual((lapsed["stalled"], lapsed["numbers"]["starved"]), (False, True))
+        self.assertIn("STARVED BY A SETTING, not broken: the House's Sail day holds E2", lapsed["what"])
+        (self.root / ST.STATE_FILE).write_text(before)
+        # A day on it still holds; then a version is scored (the lane works): the hold is over and the record dropped.
+        self.assertTrue(self.equity(now=NOW + 37 * HOUR)["elane_idle"]["stalled"])
+        self.record(a, versions={"2": verdict(-37.5, "Y1")})
+        check = self.equity(now=NOW + 38 * HOUR)["elane_idle"]
+        self.assertEqual((check["stalled"], check["judged"], check["numbers"]["idle_hours"]), (False, True, 0.5))
+        self.assertNotIn("broken", self.kept())
+
+    def test_a_new_release_and_a_lane_that_owes_no_work_drop_it(self):
+        a = self.broken()
+        # ANOTHER RELEASE: what the lane did under the one before is not held against it.
+        later = NOW + 13 * HOUR
+        (self.root / EH.HEARTBEAT).write_text(json.dumps({
+            "at": later, "started_at": later - 600.0, "release": "/workspace/releases/another-invented-release"}))
+        check = self.equity(now=later)["elane_idle"]
+        self.assertEqual((check["stalled"], check["judged"]), (False, False))
+        self.assertNotIn("broken", self.kept())
+        # NO WORK OWED: a lane with nothing to do is not broken; the record goes with the idle clock.
+        self.setUp()
+        a = self.broken()
+        self.record(a, status="passed", passed_version=1)
+        self.record(next(f["id"] for f in self.store.families(alive=True, lanes=EH.LANES) if f["id"] != a), status="passed")
+        check = self.equity(now=NOW + HOUR)["elane_idle"]
+        self.assertEqual((check["stalled"], check["judged"]), (False, False))
+        self.assertIn("no equity family is in Train research", check["what"])
+        self.assertEqual({key for key in ("idle", "broken") if key in self.kept()}, set())
+        # A record that is not one (another kind, a time ahead of now) holds nothing.
+        for record in ({"kind": "silent", "at": NOW}, {"kind": "house", "at": NOW + 99 * HOUR}, {"kind": "house"}, "x"):
+            self.setUp()
+            a = self.bred("alpha-one")
+            self.record(a, versions={"1": verdict(5.0, "Y1")})
+            self.store.put(elane_yield.GUARD_KEY, {"braked": True, "reason": "an invented brake"})
+            (self.root / ST.STATE_FILE).write_text(json.dumps({EH.STATE_KEEP: {"release": None, "since": NOW - 48 * HOUR,
+                                                                             "broken": record}}))
+            self.assertFalse(self.equity()["elane_idle"]["stalled"], record)
+
+    def test_a_lane_broken_by_its_answers_holds_with_the_routes_it_named(self):
+        fams = [self.bred(f"ans-{x}", hours=9) for x in "abc"]
+        for i in range(8):
+            self.round(5.0 - i * 0.6, lost_step(fams[i % 3]))
+        self.beat(48, release=self.ONE)
+        self.assertEqual(self.equity()["elane_idle"]["numbers"]["kind"], "answers")
+        self.assertEqual(self.kept()["broken"], {"kind": "answers", "at": NOW, "routes": [["sail:pro_asap", 8, 8]],
+                                                 "lost": "no_program"})
+        # Half a day under the Sail guard: no question is asked, the answers leave the hours read, and it holds, its
+        # step naming the routes it stood on.
+        self.store.put(elane_yield.GUARD_KEY, {"braked": True, "reason": "an invented brake"})
+        check = self.equity(now=NOW + 13 * HOUR)["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["owner_step"], check["doing"]),
+                         (True, "answers", TheLanesAnswers.STEP, EH.DOING["answers"]))
+        self.assertIn(f"it stood at {iso(NOW)} under the running release (most of its program questions were lost to a "
+                      "fault) and HOLDS until a version is scored or the release changes.", check["what"])
+        self.assertTrue(check["what"].endswith("That is its setting at work: an answer with no program scores nothing at any "
+                                               "pace."))
+        self.assertEqual(self.kept()["broken"]["routes"], [["sail:pro_asap", 8, 8]])
+        # What the record holds of the routes is held to the settings' own again when it is read.
+        state = json.loads((self.root / ST.STATE_FILE).read_text())
+        state[EH.STATE_KEEP]["broken"]["routes"] = [["sail:pro_asap; wire the money", 8, 8], "x", ["sail:glm_asap", 2, 3]]
+        (self.root / ST.STATE_FILE).write_text(json.dumps(state))
+        out, _ = self.run_at(now=NOW + 14 * HOUR)
+        step = self.own(out)["elane_idle"]["owner_step"]
+        self.assertTrue(step.startswith("the equity lanes pay for answers that hold no program (sail:glm_asap): raise "), step)
+        self.assertNotIn("wire the money", json.dumps(out))
 
 
 # ---------------------------------------------------------------------------------------------- elane_refused

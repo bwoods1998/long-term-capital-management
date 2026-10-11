@@ -32,17 +32,35 @@ THE CAUSES (`CAUSES`; `checks`). Each has `what`, `numbers`, `doing` (what the f
   born for `BIRTHS_OWNER_HOURS` and a setting clears the main way they bore nothing (`BIRTH_LEVERS`); at once when
   every route refused the request before it was sent for a setting (the pass's event names it, `SETTINGS`): asking
   again changes nothing until the setting does.
-- `elane_idle`: A BROKEN LANE, AND ONLY THAT. Work is owed (families in Train research, or births wanted) and no
-  version was scored for `IDLE_HOURS` (the idle clock, below). BROKEN IS JUDGED FIRST: the lane's own record since
-  it went idle shows `BROKEN_MIN_FAILS` rounds that raised, Train steps that failed on the House's side (or a family
-  waiting out a House backoff after that many failures) or steps that failed with an error of their own. It stands
-  with that kind's owner step WHATEVER E2's lines hold, and a second sentence says the line when E2 is also held (a
-  lane whose every Train run fails scores nothing at any pace). Else it stands only when THE LANE MAY ASK A MODEL
-  AND STILL SCORES NOTHING: no hold of E2's was seen in the last `IDLE_HOURS` (not now, not at an earlier run of
-  the job, which keeps its last reading in `stall.json` `elane.held`, and no Train step or equity pass skipped for
-  want of model dollars): questions no route answered and programs refused before a run (nobody's step: they heal
-  or are `elane_refused`'s), barren passes with no family left (`elane_births`'), rounds that run and judge
-  nothing or no round at all (the owner's step).
+- `elane_idle`: A BROKEN LANE, AND ONLY THAT. BROKEN IS JUDGED FIRST, by the lane's own record, two ways:
+  BY ITS ANSWERS, at any time (the captain's ruling on the third check of Oct 11): of the PROGRAM QUESTIONS the Train
+  rounds asked a model in the last `ANSWERS_HOURS` (`_lost_check`; the window, its `ANSWERS_MIN` and its early stand
+  at `ANSWERS_EARLY` are `elane_refused`'s), more than `ANSWERS_SHARE` were LOST TO A FAULT: the answer the lane
+  paid for held no program (the round's own words; a programless, an unreadable and a cut-short answer are all that
+  refusal), or no route answered the question (counted only once no route has answered a program question for
+  `IDLE_HOURS`: a route's bad hour heals by itself). Work lost to a fault, never to a setting and never to a rule:
+  the lane need not be idle for it, and a lane that still scores a version now and then stands on it too. The
+  owner's step names the routes, each one of the settings' own (`elane.e2.routes`; any other is "another route").
+  BY ITS FAILURES, once it is idle: work is owed (families in Train research, or births wanted), no version was
+  scored for `IDLE_HOURS` (the idle clock, below), and the record since shows `BROKEN_MIN_FAILS` rounds that raised,
+  Train steps that failed on the House's side (or a family waiting out a House backoff after that many failures) or
+  steps that failed with an error of their own.
+  Either stands with its kind's owner step WHATEVER E2's lines hold, and a second sentence says the line when E2 is
+  also held (a lane whose every Train run fails, or whose every answer holds no program, scores nothing at any
+  pace). ONCE ONE STOOD UNDER A RELEASE IT HOLDS (`stall.json` `elane.broken`: {kind, at}) until a version is scored
+  after it stood, the release changes or no work is owed: a hold of E2's that outlasts the hours of events this
+  check reads (a day under the Sail guard) turns no broken lane into a starved one.
+  WHY THIS CAUSE AND NOT `elane_refused` (the ruling left the choice to what reads truest to an operator): a lane
+  that pays for answers and gets no program is a lane that cannot do its work, which is what BROKEN says and what
+  its owner step is for (the routes, the output setting); `elane_refused` says the generators write programs ONE
+  RULE refuses and asks for that rule to be taught, and the gateway words it "by one rule": no rule refused an
+  answer that held no program, and a question no route answered wrote none.
+  Else, idle, it stands only when THE LANE MAY ASK A MODEL AND STILL SCORES NOTHING: no hold of E2's was seen in
+  the last `IDLE_HOURS` (not now, not at an earlier run of the job, which keeps its last reading in `stall.json`
+  `elane.held`, and no Train step or equity pass skipped for want of model dollars): questions no route answered
+  and answers with no program, too few to be most, and programs refused before a run (nobody's step: they heal or
+  are `elane_refused`'s), barren passes with no family left (`elane_births`'), rounds that run and judge nothing or
+  no round at all (the owner's step).
   STARVATION BY SETTINGS IS NO STANDING CAUSE. A lane held by its own hourly pace, its day's dollars or the House's
   Sail day (`elane_yield.hold`) is the budget the captain chose, at work: the cause reads JUDGED CLEAR, never
   stands and never mails, and its sentence and numbers say what the setting cost (the Train steps due in the last
@@ -78,7 +96,7 @@ the earlier one is not held against this one; a restart of the same release (the
 nothing and resets nothing. A cause with too little evidence says how much it has and how much it needs.
 WHAT THE JOB KEEPS UNDER A RELEASE (`KEPT`, beside {release, since}, dropped when
 the release changes): the idle clock, the last hold of E2's a run read, when `elane_dq` first stood, when the
-unreadable lanes were last warned. `checks` reads them and leaves in the same record what the next run needs; it
+unreadable lanes were last warned, the BROKEN kind `elane_idle` stands on and since when. `checks` reads them and leaves in the same record what the next run needs; it
 writes no file itself. A lane is not judged idle while the swarm itself is not running (its heartbeat
 `BEAT_STALE_SECONDS` old): that is the options lanes' causes to tell.
 
@@ -1359,9 +1377,10 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                 beat_age: float | None = None, since: float | None = None, kept: Any = None) -> dict[str, Any]:
     """`elane_idle` (the module docstring): A BROKEN LANE, and only that. Pure. `started`: the running swarm's own
     start; `since`: the running release's first start (the Train steps' window starts no earlier; `started` when none
-    is kept); `beat_age`: the age of the swarm's heartbeat in seconds, when known; `kept`: what the job keeps under
-    the release (`idle`, the clock; `held`, the last run that read E2 held). The answer's `keep` is what the next run
-    keeps."""
+    is kept); `beat_age`: the age of the swarm's heartbeat in seconds, when known; `c`: `lanes`' settings (its
+    `routes` are the only routes a sentence names); `kept`: what the job keeps under the release (`idle`, the clock;
+    `held`, the last run that read E2 held; `broken`, the BROKEN kind it stands on and since when). The answer's
+    `keep` is what the next run keeps."""
     since = started if since is None else since
     kept = kept if isinstance(kept, Mapping) else {}
     fams = f.get("families") or []
@@ -1612,7 +1631,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                  "no_round": ("the equity lanes owe work, may ask a model and start no round (the swarm log's elane_train "
                               "lines)"),
                  }[kind] + f"; it needs a fix, in a release or on the box ({REPORT} prints each family's state)"
-    parts = [lead, why, *([asked["early"]] if found == "answers" and asked["early"] else []), *pace]
+    parts = [lead, why, *([asked["early"]] if found == "answers" and asked["early"] else []),
+             *([judged] if kept_only and judged else []), *pace]
     return {
         "stalled": True, "judged": True, "what": " ".join(parts),
         "numbers": numbers, "owner_step": owner, "onset": idle_from if late else now if stood is None else stood,
@@ -1635,6 +1655,8 @@ def _answers_step(named: Sequence[Any], way: str, routes: Sequence[str]) -> str:
     tail += f" ({REPORT} prints each family's state)"
     said: list[str] = []
     for name in dict.fromkeys(_route(name, routes) for name in named):
+        if name == ANOTHER_ROUTE:  # no route of the settings' own: the sentence counts it, the step names none
+            continue
         if len(head) + len(tail) + len(" ()") + len(", ".join([*said, name])) > STEP_CHARS:
             break
         said.append(name)
