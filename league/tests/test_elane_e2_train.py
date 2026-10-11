@@ -284,6 +284,33 @@ class TheResearcher(ResearchCase):
         self.assertEqual(out["steps"][0]["fails"], ["REVIEW"])
         self.assertIn("stayed unclear", self.rec(fam["id"])["versions"]["1"]["review"]["reasons"][0])
 
+    def test_the_hold_is_read_again_before_the_audit(self):
+        # The verification's nit: E2's dollars were read once for the two calls of a step, so the audit was asked on
+        # dollars the review's own call had just used up. Here the review's answer spends the whole day's line.
+        fam = fx.e2_family(self.store, "held-audit", code=fx.program(share=0.42))
+        line = elane_yield.day_line(self.settings)
+        self.reviews.append(fx.review_answer("pass", model="pro_balanced", cost=line + 1.0))
+        out = self.researcher.run()
+        step = out["steps"][0]["review"]
+        self.assertEqual((step["skipped"], step["stage"]), (elane_yield.DAY_SPENT, "audit"))
+        asked = [c["key"].split(":")[2] for c in self.router.calls if fx.is_review(c)]
+        self.assertEqual(asked, ["review"], "the review alone: no audit on a spent day")
+        rec = self.rec(fam["id"])
+        self.assertEqual(rec["review"]["review"]["verdict"], "pass", "the review's pass is kept")
+        self.assertNotIn("audit", rec["review"])
+        self.assertIsNone(rec.get("passed_version"))
+        self.assertFalse(may_validate(self.store, self.store.family(fam["id"]), 1), "no try without the audit")
+        # The same day: nothing more is asked. The next UTC day the audit alone is asked, and the pass is the try.
+        self.researcher.run()
+        self.assertEqual(len([c for c in self.router.calls if fx.is_review(c)]), 1)
+        self.clock.t += 86400.0
+        self.researcher.run()
+        asked = [c["key"].split(":")[2] for c in self.router.calls if fx.is_review(c)]
+        self.assertEqual(asked, ["review", "audit"], "the audit alone: the review is not asked twice")
+        self.assertNotEqual(*[c["sail_profile"] for c in self.router.calls if fx.is_review(c)])
+        self.assertEqual(self.rec(fam["id"])["passed_version"], 1)
+        self.assertTrue(may_validate(self.store, self.store.family(fam["id"]), 1))
+
     def test_the_audit_is_another_model(self):
         settings = fx.settings(train_budget=3, review_routes=["sail:pro_balanced", "sail:pro_asap", "sail:k3_balanced"])
         researcher = EquityResearcher(self.store, self.router, settings, runner=self.runner, clock=self.clock)
@@ -680,6 +707,18 @@ class WhatAVerdictIs(ResearchCase):
         self.assertEqual(said("25 errors (first: 412.55 was the close)"), "25 errors in decide")
         self.assertEqual(said("an invented reason holding 412.55"), "its own errors or timeouts")
         self.assertEqual(said(None), "its own errors or timeouts")
+        # A disqualification with no count to name says its sentence once (it read "... by its own errors or timeouts:
+        # its own errors or timeouts." in the author's brief), and one with a count keeps both halves.
+        bare = elane_train.program_fault("DQ", "an invented reason holding 412.55", said=said("an invented reason"))
+        self.assertEqual(bare["said"], elane_train.FAILS["DQ"])
+        text = elane_train.version_text(1, elane_train.compact(bare, at="2026-10-10T00:00:00Z"))
+        self.assertEqual(text, "v1: the program was disqualified on Train by its own errors or timeouts.")
+        self.assertEqual(text.count("its own errors or timeouts"), 1)
+        counted = elane_train.program_fault("DQ", "25 errors (first: line 7: KeyError: 'XLK')",
+                                            said=said("25 errors (first: line 7: KeyError: 'XLK')"))
+        self.assertEqual(elane_train.version_text(2, elane_train.compact(counted, at="2026-10-10T00:00:00Z")),
+                         "v2: the program was disqualified on Train by its own errors or timeouts: 25 errors in decide, "
+                         "the first a KeyError at line 7.")
         # A run the child kept failing (RUN): the failure's class, never its text.
         verdict = elane_train.program_fault("RUN", "RunFailed: stderr held 412.55", said="a RunFailed")
         kept = elane_train.compact(verdict, at="2026-10-10T00:00:00Z")

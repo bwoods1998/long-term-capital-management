@@ -717,9 +717,12 @@ def program_fault(code: str, why: str, *, said: str | None = None) -> dict[str, 
     """The verdict of a version judged on its program alone (RUN, DQ, LOAD): no figure. `why` is the House's own record
     of the step; `said` is what the version's record keeps and its author reads in the next brief (`compact`): the
     House's own refusal text for LOAD (static, bounded: a program that would not load read no market data), counts and
-    an exception class for DQ (`dq_said`), the failure's class for RUN."""
+    an exception class for DQ (`dq_said`), the failure's class for RUN. A `said` that only repeats the end of the
+    failure's own sentence adds nothing and is said once (a disqualification with no count to name read "... by its own
+    errors or timeouts: its own errors or timeouts" in `version_text`)."""
+    told = FAILS[code] if said and FAILS[code].endswith(str(said)) else f"{FAILS[code]}: {said}"
     return {"objective": OBJECTIVE, "passed": False, "fails": [code], "why": f"{FAILS[code]}: {why}"[:400],
-            "said": f"{FAILS[code]}: {said}"[:400] if said else None, "score": None,
+            "said": told[:400] if said else None, "score": None,
             "years": {}, "active_years": 0, "pnl_10": None, "pnl_15": None, "ratio": None, "summary": {}, "beside": {}}
 
 
@@ -1815,7 +1818,11 @@ class EquityResearcher:
         (`asked`, counted once its outcome is handled): the Provider answers a repeated key from its store, so a key
         asked again would be booked a second time for one call, and once the router's hourly compaction has blanked the
         stored answer the re-read is empty. An answer with no text at all counts as no answer (at most
-        `review_max_unclear` times a stage; after that it is an unclear read)."""
+        `review_max_unclear` times a stage; after that it is an unclear read).
+
+        E2'S DOLLARS ARE READ BEFORE EVERY MODEL CALL (`elane_yield.hold`): before the review, and AGAIN before the audit
+        when the review was asked in this same step, for the review's own call may have used up the hour's pace or the
+        day's line. A held audit keeps the review's pass and is asked in a later step."""
         from .gate import run_sha
 
         fid = str(fam["id"])
@@ -1844,10 +1851,15 @@ class EquityResearcher:
         lane_label = elane.LABELS.get(facts["lane"], str(facts["lane"]).upper())
         train = version_text(n, versions_of(rec).get(str(n)) or {})
         unclear = dict(pending.get("unclear") or {})
+        asked_now = False
         for stage in ("review", "audit"):
             done = pending.get(stage)
             if isinstance(done, Mapping) and done.get("verdict") == "pass":
                 continue
+            if asked_now:  # the review was asked in this step: its dollars count before the audit is
+                held = elane_yield.hold(self.store, self.settings, self.clock())
+                if held is not None:
+                    return {"family": fid, "version": n, "skipped": held, "stage": stage}
             reader = (pending.get("review") or {}).get("route") if stage == "audit" else None
             taken = elane_review.model_of(str(reader or "")) if stage == "audit" else None
             if stage == "audit":
@@ -1870,6 +1882,7 @@ class EquityResearcher:
             # This question's outcome is handled from here on: the next one of this stage has a key of its own.
             asked[stage] = turn + 1
             pending["asked"] = asked
+            asked_now = True
             if answer is None or route is None:
                 _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))
                 return {"version": n, **self.unanswered(fid, stage, errors)}
