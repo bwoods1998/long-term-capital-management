@@ -16,6 +16,11 @@ it may import (`league.live.decider` `runtime_files`): the options decision's ow
 `LEAGUE_FILES`, league/gym's modules, every module of this package and of league/xs). A kind whose module imports
 anything else names it in `RUNTIME`, or the child cannot import it there (league/tests/test_equity_decider.py imports
 every kind's module from such a copy).
+
+THE PARENT SIDE (release E4): `BOOKS` names, for a kind the EquityBook does not run itself, the module the book asks
+on the House's side for that kind's columns, bars, decide jobs, intents and live record (league/equity/live.py
+`_adapter`; "panel" -> league/xs/book.py). It is imported by the book alone, never by the decider or its child, and
+only by name from here: league/equity names no module of league/xs. `kind_of` reads a family's structure as its kind.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 #: kind -> the importable module whose `handle(op, payload, state) -> dict` the child calls. "panel" is a slot (A13):
 #: league/xs/child.py refuses every op until the panel lane is built there.
@@ -36,6 +42,24 @@ KINDS: dict[str, str] = {"equity": "league.equity.child", "panel": "league.xs.ch
 RUNTIME: tuple[str, ...] = ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/stats.py",
                             "league/gym/", "league/equity/", "league/xs/", "ltcm/__init__.py", "ltcm/broker.py",
                             "ltcm/data/__init__.py")
+
+
+#: kind -> the importable module of its PARENT side (`book_for`): what the EquityBook asks for a kind that is not its
+#: own. The "equity" kind has none: the book runs it itself.
+BOOKS: dict[str, str] = {"panel": "league.xs.book"}
+
+
+def book_for(kind: str) -> ModuleType | None:
+    """The parent-side module of `kind` (imported once a process), or None for a kind that has none ("equity", and
+    any kind `BOOKS` does not name)."""
+    name = BOOKS.get(kind) if isinstance(kind, str) else None
+    return importlib.import_module(name) if name is not None else None
+
+
+def kind_of(structure: Any) -> str:
+    """The decider kind that runs a family of `structure` (league/swarm/store.py `EQUITY_STRUCTURES`): "panel" for
+    "panel", else "equity"."""
+    return "panel" if structure == "panel" else "equity"
 
 
 def module_for(kind: str) -> ModuleType:
@@ -58,4 +82,4 @@ def runtime_files(repo: str | Path) -> list[str]:
     return sorted(out)
 
 
-__all__ = ["KINDS", "RUNTIME", "module_for", "runtime_files"]
+__all__ = ["KINDS", "BOOKS", "RUNTIME", "module_for", "book_for", "kind_of", "runtime_files"]
