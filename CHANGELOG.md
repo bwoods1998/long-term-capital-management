@@ -133,7 +133,8 @@ equity evidence modules, the constitution or the gateway is edited.
 - **Measured on the rehearsal's harness** (the real book on a fake venue with invented prices, the real forward
   stack). The week: a week in which the proof passes is order for order the week it was; with the practice account
   listing no FILL activity, or the practice sale resting, Tuesday's sales and Thursday's maximum-hold exit go at
-  the cut-off and a flatten is out within two minutes (before: every lot still held on Friday). The thirty sessions
+  the cut-off, and a flatten queued before the open is out by the cut-off's next minute (before: every lot still
+  held on Friday). The thirty sessions
   of the program that buys when flat: every buy filled, 28 of 28 sessions agree and nothing is re-based; Monday's
   buy missed, one differing session, one re-base, then agreement (28 of 29; as registered 15 of 29); a later rebuy
   missed once, the same (28 of 29; as registered 21 of 29).
