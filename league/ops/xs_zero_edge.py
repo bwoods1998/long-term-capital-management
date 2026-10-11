@@ -197,7 +197,7 @@ def _folds_on(settings: Mapping[str, Any]) -> bool:
         return False
 
 
-def run(ctx: Any) -> dict[str, Any]:
+def _run(ctx: Any) -> dict[str, Any]:
     """The job. Its first statement is `league.xs.config.quiet(ctx.now(), WALL_S)`."""
     from ..xs import config as xconfig
 
@@ -289,6 +289,14 @@ def run(ctx: Any) -> dict[str, Any]:
         out["stopped"] = stopped
     return out
 
+
+
+def run(ctx: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """The job as the registry runs it: `_run` with the wall detector around it (`equity_universe.watched`: a job found
+    RUNNING at a wall says so, critically)."""
+    from .equity_universe import watched
+
+    return watched("xs_zero_edge", _run)(ctx, *args, **kwargs)
 
 __all__ = ["KV", "PROGRAMS_RUN", "KS", "SCHEDULES", "ALARM_RATE", "WALL_S", "CHUNK_S", "DECIDER_LOG", "WEEKS_KEPT",
            "PASS", "FAULT", "Stopped", "program_code", "week_of", "plan", "build_runner", "judge", "run"]

@@ -201,9 +201,11 @@ class TheJob(JobCase):
                           (1.5, 1, 0, False, False)})
         self.assertEqual({c["name"] for c in calls}, {f"xs-zero-{self.week()}-{i}" for i in range(3)})
         self.assertEqual(self.world.quiet_asked[0][1], 3000.0)
-        self.assertEqual({need for _, need in self.world.quiet_asked[1:]}, {600.0},
+        self.assertEqual({need for _, need in self.world.quiet_asked[1:-1]}, {600.0},
                          "before each run, as a panel Train run of the swarm asks")
-        self.assertEqual(len(self.world.quiet_asked), 1 + 24)
+        self.assertEqual(self.world.quiet_asked[-1][1], 0.0,
+                         "and AFTERWARDS the wall detector holds the job's own span to the rule (this clock stands still)")
+        self.assertEqual(len(self.world.quiet_asked), 1 + 24 + 1)
 
     def test_a_pass_is_counted_and_the_bars_restart_check_is_part_of_it(self):
         original = F.FakeRunner._result

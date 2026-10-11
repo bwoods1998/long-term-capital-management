@@ -1243,7 +1243,7 @@ def tradable_rows(days: Sequence[dt.date], aids: Sequence[int], assets: Mapping[
     return out
 
 
-def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
+def _run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
     """The job. Its first statements are the lane's switch (`equity_universe.lane_off`: with `elane.panel.mode` "off"
     nothing of E4 runs) and `league.xs.config.quiet(ctx.now(), WALL_S)`. {"ok": True, counts and verdicts} with the
     store written, {"status": "skipped", "why"}, or {"status": "failed", "error"} with nothing written and the last
@@ -1458,6 +1458,10 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
             | {"live": len(i6["live"]), "live_equal": sum(1 for v in i6["live"].values() if v),
                "live_unread": sum(1 for v in i6["live"].values() if v is None), "why": i6["why"]}}
 
+
+
+#: The job as the registry runs it: `_run` with the wall detector around it (`equity_universe.watched`).
+run = U.watched("equity_panel", _run)
 
 __all__ = ["BARS", "WALL_S", "TRIES", "BACKOFF_S", "INCREMENTAL_SESSIONS", "FULL_EVERY_DAYS", "ACCEPT_SHARE",
            "ACCEPT_FIRST", "REUSED_USD", "INSANE_SHARE", "SECOND_READ_GAP", "MASKED_MEMBERS_MAX", "REVISIONS_ALARM",

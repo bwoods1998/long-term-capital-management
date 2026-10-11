@@ -299,6 +299,62 @@ class WithEverySwitchOff(_Root):
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")
+class TheLaneSaysWhereItStands(_Root):
+    """The review's spec-6: the reason the lane's mode reads under its setting reached no status, heartbeat or alert,
+    a seatless panel Candidate was listed with no word on what it waits for, and nothing looked for a job at a wall."""
+
+    SWITCHES = {"elane": {"mode": "gate", "birth_share": 0.25, "panel": {"mode": "live"}}, "dlane": {"mode": "gate"}}
+
+    def test_the_heartbeat_the_report_and_the_roster_name_the_leg(self):
+        from league.ops import dlane_report
+        from league.swarm.loop import Swarm
+
+        self.family("rev-cand", band="candidate")
+        beat = Swarm.panel_status(SimpleNamespace(settings=self.settings, store=self.store))
+        self.assertEqual(beat, {"panel": {"setting": "live", "mode": "live", "why": None}})
+        self.assertEqual(bands.roster(self.root, lanes=LANES)["seatless"], [])
+        self.manifest(i6={"day": FRIDAY.isoformat(), "equal": False, "source": "fetch", "live": {}})
+        leg = "the last nightly I6 did not hold (the live ctx is not proved equal to the Gym's)"
+        beat = Swarm.panel_status(SimpleNamespace(settings=self.settings, store=self.store))
+        self.assertEqual(beat, {"panel": {"setting": "live", "mode": "gate", "why": leg}})
+        roster = bands.roster(self.root, lanes=LANES)
+        self.assertEqual(roster["seatless"], ["rev-cand"])
+        self.assertEqual(roster["seatless_why"], {"rev-cand": f'the panel lane is not live (set "live", it reads "gate"): {leg}'})
+        lane = dlane_report.panel_lane(self.root, self.settings)["panel_lane"]
+        self.assertEqual((lane["setting"], lane["mode"], lane["why"]), ("live", "gate", leg))
+        self.assertEqual(lane["roster"]["seatless_why"], roster["seatless_why"])
+        # The captain's own step down reads so too; and with the switch off nothing of the lane is read or said.
+        self.switch({"elane": {"mode": "gate", "birth_share": 0.25, "panel": {"mode": "gate"}}})
+        self.assertIn("elane.panel.mode is set so", bands.roster(self.root, lanes=LANES)["seatless_why"]["rev-cand"])
+        self.switch({"elane": {"mode": "gate", "birth_share": 0.25}})
+        self.assertEqual(Swarm.panel_status(SimpleNamespace(settings=self.settings, store=self.store)), {})
+        self.assertEqual(dlane_report.panel_lane(self.root, self.settings), {})
+
+    def test_a_job_found_running_at_a_wall_says_so_critically(self):
+        """E4-SPEC 17: every E4 job asks `quiet` before it starts; nothing looked afterwards."""
+        from league.ops import equity_universe as U
+        from league.ops import registry
+
+        times = iter([at(dt.date(2026, 10, 12), 9, 10), at(dt.date(2026, 10, 12), 9, 30)])   # 09:10 to 09:30 New York
+        ctx = SimpleNamespace(now=lambda: next(times), alerts=[])
+        ctx.alert = lambda level, text: ctx.alerts.append((level, text))
+        out = U.watched("equity_panel", lambda c: {"ok": True, "calls": 3})(ctx)
+        self.assertEqual(out, {"ok": True, "calls": 3, "wall": True})
+        [(level, text)] = ctx.alerts
+        self.assertEqual(level, "critical")
+        self.assertIn("equity_panel: found RUNNING at a wall of the session (1200 s from its start)", text)
+        quiet = SimpleNamespace(now=lambda: at(SUNDAY, 2, 30), alerts=[], alert=lambda *a: quiet.alerts.append(a))
+        self.assertEqual(U.watched("x", lambda c: {"ok": True})(quiet), {"ok": True})
+        self.assertEqual(U.watched("x", lambda c: {"status": "skipped", "why": "w"})(quiet), {"status": "skipped", "why": "w"})
+        self.assertEqual(quiet.alerts, [])
+        for name in E4_JOBS:                                     # every E4 job is run through the detector
+            module = importlib.import_module(registry.by_name()[name].module)
+            self.assertTrue(callable(getattr(module, "_run", None)), name)
+            text = Path(module.__file__).read_text(encoding="utf-8")
+            self.assertRegex(text, rf'watched\("{name}", _run\)', name)
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
 class TheSeatOfASeatedPanelProgram(_Root):
     SWITCHES = {"elane": {"mode": "gate", "birth_share": 0.25, "panel": {"mode": "live"}}, "dlane": {"mode": "gate"}}
 

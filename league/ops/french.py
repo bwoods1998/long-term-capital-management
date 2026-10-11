@@ -226,7 +226,7 @@ def _from_gateway(ctx: Any, stem: str) -> Iterator[str] | None:
     return iter(text.splitlines()) if isinstance(text, str) and text else None
 
 
-def run(ctx: Any) -> dict[str, Any]:
+def _run(ctx: Any) -> dict[str, Any]:
     """The job. Its first statement is `league.xs.config.quiet(ctx.now(), WALL_S)`. {"ok": True, "files": {stem:
     {"route", "days", "first", "last", "dropped", "sealed"}}, "missing": [stems with no route]}; {"status": "skipped",
     "why"} with no route at all (not an alarm) or inside a quiet window; {"status": "failed", "ok": False, "error",
@@ -289,6 +289,14 @@ def run(ctx: Any) -> dict[str, Any]:
                    error="; ".join(f"{stem}: {text}" for stem, text in sorted(problems.items()))[:600])
     return out
 
+
+
+def run(ctx: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """The job as the registry runs it: `_run` with the wall detector around it (`equity_universe.watched`: a job found
+    RUNNING at a wall says so, critically)."""
+    from .equity_universe import watched
+
+    return watched("french", _run)(ctx, *args, **kwargs)
 
 __all__ = ["ROUTES", "DIR", "DROPPED_YEARS", "SEALED_FROM", "FACTORS", "WALL_S", "STORE_DIR", "VERSION", "INBOX",
            "FILES", "INBOX_SUFFIXES", "MISSING_AT", "SKIPPED", "parse", "write", "inbox", "file_lines", "run"]

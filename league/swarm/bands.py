@@ -324,7 +324,10 @@ def _equity_seatable(root: str | Path) -> Any:
 def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
     """The roster as it stands, for reports: {seats, closed, probe, seated, waiting, seatless} (`seated`: the Probe
     families and the Candidates holding a seat). None when it is off or the store cannot be read. `lanes` (THE EQUITY
-    LANES: `LANES`): the equity roster (`elane.roster`) over the equity families, never off."""
+    LANES: `LANES`): the equity roster (`elane.roster`) over the equity families, never off; it also says WHY each
+    seatless Candidate holds no seat (`seatless_why` {family: words}: for a panel Candidate the leg its lane waits
+    for, `elane_xs.status`: a Candidate listed "seatless" with no word on what it waits for told the operator
+    nothing)."""
     equity = lanes is not None
     if equity:
         from . import elane
@@ -344,8 +347,40 @@ def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
     except (sqlite3.Error, OSError):
         return None
     seat = equity_seating(fams, seats, seatable=_equity_seatable(root)) if equity else seating(fams, seats)
-    return {"seats": max(seats, 0), "closed": seats == ROSTER_CLOSED, "probe": seat["probe"],
-            "seated": sorted(seat["probe"] + seat["seated"]), "waiting": seat["waiting"], "seatless": seat["seatless"]}
+    out = {"seats": max(seats, 0), "closed": seats == ROSTER_CLOSED, "probe": seat["probe"],
+           "seated": sorted(seat["probe"] + seat["seated"]), "waiting": seat["waiting"], "seatless": seat["seatless"]}
+    if equity:
+        out["seatless_why"] = _seatless_why(root, fams, seat["seatless"])
+    return out
+
+
+def _seatless_why(root: str | Path, fams: Sequence[Mapping[str, Any]], seatless: Sequence[str]) -> dict[str, str]:
+    """Why each seatless equity Candidate holds no seat, in words (never a rule: `equity_seating` decided). A PANEL
+    Candidate: its lane is not live, with the leg it waits for (`elane_xs.status`); any other: its structure."""
+    if not seatless:
+        return {}
+    by_id = {str(f["id"]): f for f in fams}
+    panel: str | None = None
+    out: dict[str, str] = {}
+    for fid in seatless:
+        fam = by_id.get(str(fid)) or {}
+        state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
+        if _finite(state.get("banded_at")) is None:
+            out[str(fid)] = "its band names no time it was banded at"
+        elif str(fam.get("structure") or "") == "panel":
+            if panel is None:
+                try:
+                    from . import elane_xs
+
+                    said = elane_xs.status(settings.load(root), root)
+                    panel = (f"the panel lane is not live (set \"{said['setting']}\", it reads \"{said['mode']}\"): "
+                             f"{said['why'] or 'elane.panel.mode is set so'}")[:300]
+                except Exception as exc:  # noqa: BLE001 - words only
+                    panel = f"the panel lane could not be read ({type(exc).__name__})"
+            out[str(fid)] = panel
+        else:
+            out[str(fid)] = f"its structure ({str(fam.get('structure') or 'none')[:40]}) takes no equity seat"
+    return out
 
 
 def _roster_seats(root: str | Path) -> int:

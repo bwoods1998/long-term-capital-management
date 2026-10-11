@@ -441,7 +441,7 @@ def _save(root: Path, state: dict[str, Any], exchange: Mapping[str, str], *, now
     return summary
 
 
-def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
+def _run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
     """The job. Its first statement is `league.xs.config.quiet(ctx.now(), WALL_S)`. {"ok": True, "calls", "sampled",
     "empty", "refused", "errors", "remaining", "done", "calls_total", "names", "full", "dropped", "early"} (counts,
     shares and the report's two medians: never a quote, a price or a ticker); {"status": "skipped", "why"} inside a
@@ -604,6 +604,14 @@ def panel_half_spread(root: str | Path) -> Callable[[str, str], tuple[float, flo
 
     return reader
 
+
+
+def run(ctx: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """The job as the registry runs it: `_run` with the wall detector around it (`equity_universe.watched`: a job found
+    RUNNING at a wall says so, critically)."""
+    from .equity_universe import watched
+
+    return watched("equity_spreads", _run)(ctx, *args, **kwargs)
 
 __all__ = ["QUOTES", "TIMES_ET", "EARLY_ET", "EARLY_NAMES", "WINDOW_S", "SESSIONS_YEAR", "LIMIT", "CALLS_RUN",
            "MIN_SAMPLES", "DROPPED_WARNING", "VERSION", "FILE", "WALL_S", "STORE_DIR", "POINTS", "PAUSE_S", "BUDGET_S",

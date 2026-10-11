@@ -241,7 +241,7 @@ def measure(bars: Any) -> dict[str, Any]:
     return out
 
 
-def run(ctx: Any) -> dict[str, Any]:
+def _run(ctx: Any) -> dict[str, Any]:
     """The job. Its first statement is `league.xs.config.quiet(ctx.now(), WALL_S)`. {"ok": True, "panel", "names",
     "sessions", "columns", "neff_rho", "neff_pr", "window", "dropped", "months", "months_skipped"} and neff.json
     written; {"status": "skipped", "why"} inside a quiet window, before the panel store exists, and while its
@@ -405,6 +405,14 @@ def funnel_lines(rows: Any) -> list[str]:
                          f"{'n/a' if multiple is None else multiple} times. Simulated years are compute, not evidence")
     return lines
 
+
+
+def run(ctx: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """The job as the registry runs it: `_run` with the wall detector around it (`equity_universe.watched`: a job found
+    RUNNING at a wall says so, critically)."""
+    from .equity_universe import watched
+
+    return watched("equity_neff", _run)(ctx, *args, **kwargs)
 
 __all__ = ["FILE", "WALL_S", "STORE_DIR", "SEGMENT", "RUN_KEY", "MIN_NAMES", "MIN_SESSIONS", "YEAR_SESSIONS",
            "TRAIN_YEARS", "ETF_NEFF_DEFAULT", "FORWARD_REPORT", "neff", "residuals", "formations", "panel_returns",

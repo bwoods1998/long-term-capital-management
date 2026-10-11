@@ -522,6 +522,86 @@ def mode(settings: Mapping[str, Any] | None, root: str | Path | None = None, *,
         return "off"
 
 
+def status(settings: Mapping[str, Any] | None, root: str | Path | None = None, *, now: float | None = None
+           ) -> dict[str, Any]:
+    """THE LANE'S MODE AS A REPORT SAYS IT (the swarm's heartbeat `equity.panel`, the dlane report's panel section):
+    {"setting": `elane.panel.mode` as set, "mode": the effective mode, "why": the leg that holds the effective mode
+    under the setting, or None}. The reason was computed by `_mode_why` and reached no status, heartbeat or alert:
+    a captain who set "gate" with the spreads' share under its bound read "train" nowhere, and no line said why.
+    Never raises (a status never fails its reader)."""
+    try:
+        setting = cfg(settings)["mode"]
+    except Exception:  # noqa: BLE001
+        setting = "off"
+    try:
+        legs = (lambda r, s: live_ready(r, s, now=now)) if now is not None else None
+        found, why = _mode_why(settings, root, legs=legs)
+    except Exception as exc:  # noqa: BLE001 - what `mode` reads as "off"
+        found, why = "off", f"the lane's settings or files could not be read ({type(exc).__name__})"
+    return {"setting": setting, "mode": found, "why": None if why is None else str(why)[:300]}
+
+
+#: `health`'s alarms (each a `swarm.status` alert, once a UTC day; the days are kept in the kv `ALERTS_KEY`).
+HEALTH = ("mode", "spreads", "universe_age", "stale")
+
+
+def health(store: Any, settings: Mapping[str, Any] | None, root: str | Path | None, now: float) -> list[str]:
+    """THE LANE'S OWN ALARMS (E4-SPEC 17; the review's spec-6: three of them had no detector, and a lane stopped by a
+    leg said so nowhere), raised by the swarm loop once an equity round and each said once a UTC day. All warnings
+    (what is critical while a panel program is live is the book's and the pre-open's): with the lane's switch up,
+    - "mode": the effective mode is under the setting, with the leg that holds it there;
+    - "spreads": the setting is "gate" or above and the spreads' share is under `spreads_min_share` (the lane reads
+      "train": no Validation, no look);
+    - "universe_age": the committed stock universe is older than `universe_max_age_days` (an owner step: regenerate);
+    - "stale": the panel store's last session is older than the session before the last closed one (the nightly
+      `equity_panel` job has not written it for two nights).
+    Returns the alarms it raised now. Never raises; with the switch off it reads nothing."""
+    raised: list[str] = []
+    try:
+        c = cfg(settings)
+        if c["mode"] == "off" or not _lane_on(settings) or root is None:
+            return raised
+        said = status(settings, root, now=now)
+        found: dict[str, str] = {}
+        if said["mode"] != said["setting"]:
+            found["mode"] = (f"elane.panel.mode is set \"{said['setting']}\" and the lane reads \"{said['mode']}\": "
+                             f"{said['why'] or 'no leg named'}")
+        manifest = _manifest(root)
+        if manifest is not None:
+            share = _num(manifest.get("hs_share"))
+            if MODES.index(c["mode"]) >= MODES.index("gate") and (share is None or share < c["spreads_min_share"]):
+                found["spreads"] = (f"the spreads' share ({'unknown' if share is None else f'{share:.3f}'}) is under "
+                                    f"elane.panel.spreads_min_share ({c['spreads_min_share']}): a Train pass is under "
+                                    "provisional costs, and no Validation try and no look runs")
+            through = _day(manifest.get("fetched_through"))
+            since = _day(manifest.get("live_from")) if manifest.get("live_from") else None
+            born = (_day(manifest.get("universe_at")) if manifest.get("universe_at") else None) or since
+            if through is not None and born is not None and (through - born).days > c["universe_max_age_days"]:
+                found["universe_age"] = ("the committed stock universe is older than elane.panel.universe_max_age_days "
+                                         f"({c['universe_max_age_days']}): regenerate it (an owner deploy)")
+            floor = _fresh_floor(now)
+            if through is not None and floor is not None and through < floor:
+                found["stale"] = (f"{STALE}: its last session is {through.isoformat()} (the nightly equity_panel job has "
+                                  "not written it for two nights)")
+        if not found:
+            return raised
+        day = _utc_day(now)
+        with store.atomic():
+            held = store.get(ALERTS_KEY)
+            held = dict(held) if isinstance(held, Mapping) else {}
+            told = dict(held.get("health") or {}) if isinstance(held.get("health"), Mapping) else {}
+            fresh = [name for name in HEALTH if name in found and told.get(name) != day]
+            if fresh:
+                store.put(ALERTS_KEY, {**held, "health": {**told, **{name: day for name in fresh}}})
+        for name in fresh:
+            store.event("swarm.status", None, {"action": f"elane_xs_{name}", "alert": True,
+                                                "text": f"the panel lane: {found[name]}"[:400]})
+            raised.append(name)
+    except Exception:  # noqa: BLE001 - an alarm that cannot be read or written stops no round
+        pass
+    return raised
+
+
 def _sessions_between(first: dt.date, last: dt.date) -> list[dt.date]:
     """The NYSE sessions from `first` through `last` (`league.equity.store.nyse_sessions`)."""
     from ..equity.store import nyse_sessions
@@ -2822,15 +2902,38 @@ def _status(run: Any) -> str:
 
 
 def _timed(store: Any, owner: Any, call: Callable[[], Any]) -> Any:
-    """`call()`, its seconds booked to the day's panel CPU whatever it does."""
-    began = time.monotonic()
+    """`call()`, its seconds booked to the day's panel CPU whatever it does. A RUN FOUND RUNNING AT A WALL (E4-SPEC
+    17, critical: a bug in `quiet`, which every run asks before it starts): the wall clock from its start to its end
+    is held to `league.xs.config.quiet` again, and a run that met a wall is one `swarm.status` alert a UTC day."""
+    began, started = time.monotonic(), time.time()
     try:
         return call()
     finally:
         try:
-            book_cpu(store, time.monotonic() - began, _now(owner))
+            seconds = time.monotonic() - began
+            book_cpu(store, seconds, _now(owner))
+            _wall_alert(store, started, seconds)
         except Exception:  # noqa: BLE001 - the books never fail a run
             pass
+
+
+def _wall_alert(store: Any, started: float, seconds: float) -> None:
+    """One critical `swarm.status` alert a UTC day when [started, started + seconds] (wall clock) met a wall."""
+    from ..xs import config as xconfig
+
+    met = xconfig.quiet(float(started), max(0.0, float(seconds)))
+    if met is None:
+        return
+    day = _utc_day(started)
+    with store.atomic():
+        held = store.get(ALERTS_KEY)
+        held = dict(held) if isinstance(held, Mapping) else {}
+        if held.get("wall") == day:
+            return
+        store.put(ALERTS_KEY, {**held, "wall": day})
+    store.event("swarm.status", None, {
+        "action": "elane_xs_wall", "alert": True, "level": "critical",
+        "text": f"a panel run was found RUNNING at a wall of the session ({seconds:.0f} s from its start): {met}"[:400]})
 
 
 def _by_session(series: Any, name: str) -> dict[int, float]:
@@ -3506,7 +3609,7 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "UNIVERSE_MANIFEST", "DEFAULTS", "BOUNDS", "CENSUS_NOTE_MAX", "CENSUS_LABEL", "SCREEN_NULLS", "PANEL_AGENDA",
            "INPUTS", "BAR_XS", "FAILS_XS", "PROGRAM_FAILS", "JUDGED_XS", "MAP_LABEL", "K_BASE", "K_STRESS",
            "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "cfg", "pin", "receipt", "mode",
-           "live_ready", "seat_word", "seat_standing", "is_panel", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
+           "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
            "judged", "identity", "hidden_year_of", "card_errors", "cell_of", "family_cell", "cell_text",
            "closed_cells", "cell_looks", "forward_verdicts", "look_room", "probe_reading", "probed", "style_of",
            "assign", "run_spans", "seen_spans", "hidden_span", "agenda_text", "contract_text", "bar_text",

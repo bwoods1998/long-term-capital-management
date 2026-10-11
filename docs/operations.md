@@ -203,8 +203,12 @@ rules, the receipt is pinned as built):
 action `elane_xs_train`, `elane_xs_window` or `xs_evaluator_adopted`, and `swarm.gate` look events with screen "XS1";
 a panel family's state key `elane_xs` (its Train record: each version's verdict, fails and facts); kv
 `elane_xs_cpu`, `elane_xs_zero_edge` (the weekly zero-edge pass rate of the bar: an alarm above 5%) and
-`elane_xs_alerts`; the House's events `equity.universe`, `equity.panel` and `equity.rebalance` (counts and verdicts
-only: never a price, never a ticker list); `<state>/equity-daily/panel/PANEL_MANIFEST.json` (coverage by year, the
+`elane_xs_alerts`; the ops receipts of `equity_universe` and `equity_panel` (the two jobs' own record: counts and
+verdicts only, never a price, never a ticker list; they record no House event) and the House's `equity.rebalance`
+events (`scaled` when a decision's budget was under its sleeve); **the lane's own state**: the swarm heartbeat's
+`equity.panel` ({`setting`, `mode`, `why`}: the mode as set, the EFFECTIVE mode, and the leg that holds it under the
+setting) and the dlane report's `equity.panel_lane` (the same, with the equity roster and why each seatless
+Candidate holds no seat); `<state>/equity-daily/panel/PANEL_MANIFEST.json` (coverage by year, the
 verdict, `hs_share`, the nightly `i6`, `live_from`); in `live.sqlite`, `eq_rebalances` (one row an instance and
 decision session) and `eq_instances.kind`.
 
@@ -426,10 +430,17 @@ check 10 says it again each morning); the twin marker a night behind (W) or two 
 session whose live and twin orders disagree (W); a standing-target buy still unfilled after 5 sessions (W); a
 rebalance recorded late (W); two failed panel decides (C: E1's exit rule fires); the committed universe older than
 `universe_max_age_days` (W: an owner step); the pre-open's gateway and constitution lists differ (W, at most 10 names
-a side: the two deploys were not made between two pre-opens). **Not every line of this list has a detector yet:**
-"an E4 job or a Train run found RUNNING at a wall" has none (each asks `quiet` before it starts; nothing looks
-afterwards), and the three that read the forward record (the twin marker a night behind, a rebalance session whose
-live and twin orders disagree, the residual beside a close) arrive with package J.
+a side: the two deploys were not made between two pre-opens). **Where each is raised:** the lane's own (its
+effective mode under its setting with the leg named, the spreads' share under its bound from "gate" up, the
+universe's age, a store two nights stale) by the swarm loop at each equity round, once a UTC day each
+(`elane_xs.health`: `swarm.status` alerts `elane_xs_mode`, `_spreads`, `_universe_age`, `_stale`); a job or a
+Train run found RUNNING at a wall by a detector that looks AFTER the work (`equity_universe.watched` around all six
+jobs: a critical alert and `wall` in the receipt; `elane_xs._timed` around every panel run: `elane_xs_wall`);
+`live_ready` false while a panel program is live by the book at its band sync and by the pre-open. **Not built
+yet:** the three that read the forward record (the twin marker a night behind, a rebalance session whose live and
+twin orders disagree, the residual beside a close) arrive with package J. The run record's `factors` (the House's
+own panel factors) has no reader in this release: its readers are release E3's (the probe's stratum on them and
+the loadings beside XS1).
 
 **Memory of the panel job** (measured at 700 assets x 2,455 sessions under the ops child's own limit, its address
 space capped 500 MB above its start): the daily run peaks at about 384 MB of the 527 MB cap whatever the number of

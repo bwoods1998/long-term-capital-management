@@ -976,6 +976,28 @@ def _one_basis(rows: Sequence[Mapping[str, Any]]) -> dict[str, Decimal] | None:
     return {d: c for d, c in out.items() if c is not None and c > 0} or None
 
 
+def panel_lane(root: Any, settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    """THE PANEL LANE'S OWN STATE in the report (release E4; the review's spec-6), while its switch is up: {"panel_lane":
+    {"setting", "mode", "why", "roster"}}: `elane.panel.mode` as set, the EFFECTIVE mode and the leg that holds it
+    under the setting (`league.swarm.elane_xs.status`: the reason reached no status, so a lane a leg had stopped said
+    so nowhere), and the equity roster with why each seatless Candidate holds no seat (`bands.roster(...,
+    lanes=LANES)`). {} with the switch off (nothing of E4 is read). Never raises."""
+    try:
+        from ..equity import LANES
+        from ..swarm import bands, elane_xs
+
+        if elane_xs.cfg(settings)["mode"] == "off":
+            return {}
+        said = elane_xs.status(settings, root)
+        try:
+            roster = bands.roster(root, lanes=LANES)
+        except Exception:  # noqa: BLE001 - the roster is words beside
+            roster = None
+        return {"panel_lane": {**said, "roster": roster}}
+    except Exception as exc:  # noqa: BLE001 - a report never fails on a status
+        return {"panel_lane": {"error": type(exc).__name__}}
+
+
 def panel_section(book: Mapping[str, Any], twins: Mapping[str, Mapping[str, Any]], screens: "EquityScreens", *,
                   unit: Mapping[str, Any] | None = None, constitution: Mapping[str, Any] | None = None
                   ) -> dict[str, Any] | None:
@@ -2881,8 +2903,8 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
             "program_loss": losses,
             "fp_beside_trades": trade_screens(store, lanes, settings, book["positions"], every, since=start,
                                               lots=book.get("lots") or (), screens=screens),
-            "equity": equity_section(book, every, eq_twins, count_from=count_from, unit=unit, seeded=seeded,
-                                     screens=screens),
+            "equity": {**equity_section(book, every, eq_twins, count_from=count_from, unit=unit, seeded=seeded,
+                                        screens=screens), **panel_lane(root, settings)},
             "equity_yield": equity_yield(store, settings),
             "direction_net": lane_net,
             "account": account(root, every, activity, previous, now=now),

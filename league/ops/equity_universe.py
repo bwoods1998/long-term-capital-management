@@ -234,6 +234,32 @@ def lane_off(root: str | Path) -> str | None:
     return LANE_OFF if mode == "off" else None
 
 
+def watched(name: str, job: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    """A panel job with THE WALL DETECTOR around it (E4-SPEC 17: "an E4 job found RUNNING at a wall", critical: a bug
+    in `quiet`). Every job asks `quiet` BEFORE it starts; this looks AFTERWARDS: the wall clock from the job's start
+    to its end, by the ctx's own clock, is held to the quiet rule again, and a job that met a wall says so in a
+    critical alert and in its receipt (`wall`: true). A skipped job ran nothing and is not read. The detector never
+    fails a job."""
+    def run(ctx: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        began = ctx.now()
+        out = job(ctx, *args, **kwargs)
+        try:
+            if isinstance(out, dict) and out.get("status") != "skipped":
+                seconds = max(0.0, float(ctx.now()) - float(began))
+                met = quiet_now(began, seconds)
+                if met is not None:
+                    ctx.alert("critical", f"{name}: found RUNNING at a wall of the session ({seconds:.0f} s from its "
+                                          f"start): {met}"[:600])
+                    out = {**out, "wall": True}
+        except Exception:  # noqa: BLE001 - the detector never fails the job it watches
+            pass
+        return out
+
+    run.__doc__ = job.__doc__
+    run.__wrapped__ = job  # type: ignore[attr-defined]
+    return run
+
+
 def _sha(data: bytes | str) -> str:
     return hashlib.sha256(data if isinstance(data, bytes) else data.encode("utf-8")).hexdigest()
 
@@ -1325,7 +1351,7 @@ def _joins(gateway: Any, root: Path, spells: Sequence[tuple], previous: Mapping[
     return out
 
 
-def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
+def _run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
     """The job (league/ops/context.py is the `ctx`). Its first statements are the lane's switch (`lane_off`: with
     `elane.panel.mode` "off" nothing of E4 runs) and `league.xs.config.quiet(ctx.now(), WALL_S)`: a start that could
     still be working at a wall answers {"status": "skipped", "why"}. Else {"ok": True, counts and verdicts} with the
@@ -1506,6 +1532,10 @@ def _version() -> str:
     return xs_store.UNIVERSE_VERSION
 
 
+
+#: The job as the registry runs it: `_run` with the wall detector around it (`watched`).
+run = watched("equity_universe", _run)
+
 __all__ = ["PIN", "REPO", "FILE", "RAW", "ATOM", "WEB", "ASSETS", "AGENT", "WALL_S", "MEMBERS_MIN", "MEMBERS_MAX",
            "ASSETS_MISSING_MAX", "RENAME_DAYS", "RENAME_SESSIONS", "CONFIRM_HOURS", "UNION_MONTHS", "CHECKS", "web",
            "parse_spells", "append_only", "latest_commit", "wiki_changes", "extend", "exits", "assets", "assign",
@@ -1514,6 +1544,6 @@ __all__ = ["PIN", "REPO", "FILE", "RAW", "ATOM", "WEB", "ASSETS", "AGENT", "WALL
            "FIRST_AID", "TICKER", "STORE_DIR", "SOURCE_FILE", "SPELLS_FILE", "ASSETS_FILE", "TRADABLE_FILE",
            "MANIFEST_FILE", "JOINS_FILE", "VENUE_FILE", "WALL_SHARE", "VENUE_KEEP_EVERY", "OutOfWall", "HASHED",
            "BAR_MASKS", "VENUE_MASK", "spans", "in_store", "store_sessions",
-           "quiet_now", "lane_off", "LANE_OFF", "known_through", "parse_changes", "row_key", "confirmed", "apply_changes", "usable",
+           "quiet_now", "lane_off", "LANE_OFF", "watched", "known_through", "parse_changes", "row_key", "confirmed", "apply_changes", "usable",
            "columns", "rename_candidates", "pair_key", "rename_test", "folder", "ensure_salt", "read_universe",
            "remask"]

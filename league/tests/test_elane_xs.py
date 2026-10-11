@@ -27,6 +27,9 @@ from league.swarm.tournament import Tournament
 from league.tests import elane_xs_fakes as F
 from league.xs import config as xconfig
 from league.xs import screen as xscreen
+
+#: The quiet rule itself (the fakes replace `xconfig.quiet` with the world's own answer for a test's life).
+REAL_QUIET = xconfig.quiet
 from league.xs import store as xstore
 
 REPO = Path(__file__).resolve().parents[2]
@@ -108,6 +111,72 @@ class TheEffectiveMode(unittest.TestCase):
         F.ready(self.root)
         self.assertEqual(self.mode("live"), "live")
         self.assertEqual(self.mode("gate"), "gate", "the setting is never exceeded")
+
+    def test_the_reason_the_mode_reads_lower_reaches_the_status_and_an_alarm(self):
+        """The review's spec-6: `_mode_why`'s reason reached no status, heartbeat or alert. The captain sets "gate";
+        the spreads' share is 0.89, so the lane reads "train": no Validation, no look, and no line said why."""
+        F.ready(self.root, hs_share=0.89)
+        wanted = F.settings("gate")
+        self.assertEqual(elane_xs.status(wanted, self.root),
+                         {"setting": "gate", "mode": "train",
+                          "why": "the spreads' share is under elane.panel.spreads_min_share"})
+        F.ready(self.root)
+        self.assertEqual(elane_xs.status(F.settings("live"), self.root), {"setting": "live", "mode": "live", "why": None})
+        self.assertEqual(elane_xs.status(F.settings("gate"), self.root), {"setting": "gate", "mode": "gate", "why": None})
+        self.assertEqual(elane_xs.status(None, self.root)["mode"], "off", "it never raises")
+        F.ready(self.root, i6={"equal": False})
+        said = elane_xs.status(F.settings("live"), self.root)
+        self.assertEqual((said["mode"], said["why"][:27]), ("gate", "the last nightly I6 did not"))
+        # THE ALARMS (`health`), each once a UTC day: the mode held under its setting, the spreads, the universe's
+        # age, a store two nights stale. With the switch off nothing is read and nothing is said.
+        now = F.NOW if hasattr(F, "NOW") else 1791720000.0
+
+        def alerts():
+            return [(e["payload"]["action"], e["payload"]["text"]) for e in self.store.events_after(0, limit=5000)
+                    if e["kind"] == "swarm.status" and e["payload"].get("alert")
+                    and str(e["payload"].get("action", "")).startswith("elane_xs_")]
+
+        self.assertEqual(elane_xs.health(self.store, F.settings("off"), self.root, now), [])
+        F.ready(self.root, hs_share=0.89, live_from="2025-01-02")
+        raised = elane_xs.health(self.store, F.settings("gate"), self.root, now)
+        self.assertEqual(raised, ["mode", "spreads", "universe_age"])
+        said = dict(alerts())
+        self.assertIn('set "gate" and the lane reads "train"', said["elane_xs_mode"])
+        self.assertIn("0.890", said["elane_xs_spreads"])
+        self.assertIn("regenerate it (an owner deploy)", said["elane_xs_universe_age"])
+        self.assertEqual(elane_xs.health(self.store, F.settings("gate"), self.root, now), [], "once a UTC day")
+        self.assertEqual(elane_xs.health(self.store, F.settings("gate"), self.root, now + 86400.0)[:2], ["mode", "spreads"])
+        F.ready(self.root)
+        late = dt.datetime(2026, 10, 16, 14, 0, tzinfo=dt.timezone.utc).timestamp()   # the store ends Friday the 9th
+        self.assertEqual(elane_xs.health(self.store, F.settings("train"), self.root, late), ["stale"])
+        self.assertIn("the panel store is stale: its last session is 2026-10-09", dict(alerts())["elane_xs_stale"])
+        self.assertEqual(elane_xs.health(self.store, F.settings("train"), self.root,
+                                         dt.datetime(2026, 10, 11, 14, 0, tzinfo=dt.timezone.utc).timestamp()), [],
+                         "a lane whose every leg holds says nothing")
+
+    def test_a_run_found_running_at_a_wall_is_a_critical_alert_once_a_day(self):
+        """E4-SPEC 17: "an E4 job or a Train run found RUNNING at a wall" (critical: a bug in `quiet`, which every
+        run asks before it starts). Nothing looked afterwards."""
+        monday_open = dt.datetime(2026, 10, 12, 13, 28, tzinfo=dt.timezone.utc).timestamp()      # 09:28 New York
+        patcher = mock.patch.object(xconfig, "quiet", REAL_QUIET)                                  # the rule itself
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        elane_xs._wall_alert(self.store, monday_open - 3600.0, 600.0)                             # 08:28-08:38: no wall
+        def walls():
+            return [e["payload"] for e in self.store.events_after(0, limit=5000)
+                    if e["kind"] == "swarm.status" and e["payload"].get("action") == "elane_xs_wall"]
+
+        self.assertEqual(walls(), [])
+        elane_xs._wall_alert(self.store, monday_open - 600.0, 900.0)                              # 09:18-09:33: the open's
+        elane_xs._wall_alert(self.store, monday_open, 60.0)
+        [alarm] = walls()
+        self.assertEqual((alarm["alert"], alarm["level"]), (True, "critical"))
+        self.assertIn("found RUNNING at a wall", alarm["text"])
+        with mock.patch.object(elane_xs.time, "time", return_value=monday_open), \
+                mock.patch.object(elane_xs.time, "monotonic", side_effect=[0.0, 5.0]):
+            self.assertEqual(elane_xs._timed(self.store, types.SimpleNamespace(clock=lambda: monday_open),
+                                             lambda: "ran"), "ran")
+        self.assertEqual(len(walls()), 1, "once a UTC day")
 
     def test_the_equity_lanes_own_switch_comes_first(self):
         F.ready(self.root)

@@ -646,9 +646,22 @@ class Swarm:
         try:
             unmade = dict(self.equity_unmade)
             return {"mode": elane.cfg(self.settings)["mode"], "round_at": self.store.get(elane.ROUND_KEY),
-                    **({"validation_errors": unmade} if unmade else {})}
+                    **({"validation_errors": unmade} if unmade else {}), **self.panel_status()}
         except Exception as exc:  # noqa: BLE001 - the heartbeat never fails on it
             return {"error": f"{type(exc).__name__}"}
+
+    def panel_status(self) -> dict[str, Any]:
+        """THE PANEL LANE in the heartbeat (release E4; the review's spec-6), only while its switch is up: {"panel":
+        {"setting", "mode", "why"}}: the mode as set, the EFFECTIVE mode, and the leg that holds it under the setting
+        (`elane_xs.status`). With the switch off: {} (nothing of E4 is read)."""
+        try:
+            from . import elane_xs
+
+            if elane_xs.cfg(self.settings)["mode"] == "off":
+                return {}
+            return {"panel": elane_xs.status(self.settings, getattr(self.store, "root", None))}
+        except Exception as exc:  # noqa: BLE001 - the heartbeat never fails on it
+            return {"panel": {"error": type(exc).__name__}}
 
     def library_status(self) -> dict[str, Any] | None:
         """THE LIBRARY in the heartbeat: on or off, and today's counted calls against `research.requests_day`."""
@@ -1120,6 +1133,12 @@ class Swarm:
         next round) or `refused` (no Validation was made) is under `validation_errors` {family: the error, or
         "refused: why"}, in the round's log line and, until the next round, in the heartbeat (`equity_status`)."""
         self.store.put(elane.ROUND_KEY, self.clock())
+        try:    # THE PANEL LANE'S OWN ALARMS (release E4: its mode held by a leg, its spreads, its universe, its store)
+            from . import elane_xs
+
+            elane_xs.health(self.store, self.settings, getattr(self.store, "root", None), self.clock())
+        except Exception:  # noqa: BLE001 - an alarm never costs a round
+            pass
         out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
         try:
             step = self.tournament.equity_round()
