@@ -89,8 +89,11 @@ THE EQUITY LANE (release E1; league/equity/live.py's `EquityBook`, reached only 
 to one), after the options path's own reads and in its own guard, so an equity failure never ends the options minute.
 The equity book asks `real_block(opening=True)` before any open, and its own freeze blocks options opens too (one
 account). Shares on the account (A8.2): what the equity book owns (its open lots and the filled part of its working
-orders) is never touched; every other us_equity quantity is UNATTRIBUTED: a short one is covered at once, a long one is
-sold after two consecutive readings with an alarm (`_close_shares`), both at market; an account below what the equity
+orders) is never touched; every other us_equity quantity is UNATTRIBUTED: a short account quantity is covered at once,
+by exactly the account's short (the gateway admits no larger buy on a symbol held short; shares of a program's lot the
+short swallowed are closed in the equity book once the cover has filled, `_lots_taken`); a long one is
+sold after two consecutive readings with an alarm (`_close_shares`), both at market, and on a symbol the equity book
+holds only the part an assignment or an exercise explains is ever sold; an account below what the equity
 book owns is reconciliation's mismatch, never an order. The SHARE-EVENT LEDGER (live state kv `shares`, {symbol:
 signed Decimal string}) books 100 shares a contract for each assignment and exercise (`_activities`), moves toward zero
 as the House's own share orders (`lv-shares-`) fill, and is what reconciliation expects beside the equity lots.
@@ -113,7 +116,7 @@ import time
 import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from zoneinfo import ZoneInfo
@@ -143,6 +146,8 @@ NEW_YORK = ZoneInfo("America/New_York")
 FAMILIES_EVERY = 300.0
 ACTIVITIES_EVERY = 300.0
 FLOWS_EVERY = 300.0
+#: A House share order (`lv-shares-`) still refused is alarmed again after this many seconds (`_share_order_refused`).
+SHARES_REFUSED_EVERY = 3600.0
 #: Funding types `ltcm.performance.ALPACA_FUNDING` classifies but Alpaca's activities endpoint does not accept as a
 #: filter: naming one fails the whole read with HTTP 422 "invalid activity type: WIRE" (the real account, Sept 28,
 #: 2026, the first session after the owner's deposit), and with no funding read the stops stay provisional and block
@@ -2190,46 +2195,97 @@ class OptionsLive:
     def _shares_filled(self) -> None:
         """The House's own share orders (`lv-shares-`, live state kv `shares_orders`) read back by client id: each new
         fill moves the share-event ledger toward zero (never past it: a sale of unexplained shares books nothing), and a
-        terminal order is forgotten. An order that cannot be read is asked again at the next reading."""
+        terminal order is forgotten. An order that cannot be read is asked again at the next reading. A cover that
+        swallowed shares of the equity book's lots (its `lots`) is kept once it has ended with a fill until the book
+        has closed them (`_lots_taken`)."""
         orders = dict(self.state.get("shares_orders", {}) or {})
         if not orders:
             return
         shares = dict(self.state.get("shares", {}) or {})
         for cid, row in list(orders.items()):
-            try:
-                answer = self.real.order_by_client_id(cid)
-            except Exception:  # noqa: BLE001
+            if not row.get("ended"):
+                try:
+                    answer = self.real.order_by_client_id(cid)
+                except Exception:  # noqa: BLE001
+                    continue
+                if answer is None:
+                    if self.clock() - float(row.get("at") or 0) > 600:
+                        orders.pop(cid)          # never reached the venue (its answer was lost, its id is not there)
+                    continue
+                filled = M.D(answer.get("filled_qty") or 0)
+                new = filled - M.D(row.get("filled") or 0)
+                if new > 0:
+                    symbol = str(row["symbol"])
+                    left = M.D(shares.get(symbol) or 0)
+                    # A cover takes delivered shares back, a sale received ones.
+                    if (row.get("side") == "buy") == (left < 0):
+                        step = min(abs(left), new)
+                        shares[symbol] = str(left - step if left > 0 else left + step)
+                    row["filled"] = str(filled)
+                if answer.get("filled_avg_price") not in (None, ""):
+                    row["avg"] = str(answer.get("filled_avg_price"))
+                if str(answer.get("status") or "") in WORKING:
+                    orders[cid] = row
+                    continue
+                row["ended"] = True
+            if row.get("lots") and M.D(row.get("filled") or 0) > 0 and not self._lots_taken(cid, row, shares):
+                orders[cid] = row                # the equity book could not close them: asked again at the next reading
                 continue
-            if answer is None:
-                if self.clock() - float(row.get("at") or 0) > 600:
-                    orders.pop(cid)          # never reached the venue (its answer was lost, its id is not there)
-                continue
-            filled = M.D(answer.get("filled_qty") or 0)
-            new = filled - M.D(row.get("filled") or 0)
-            if new > 0:
-                symbol = str(row["symbol"])
-                left = M.D(shares.get(symbol) or 0)
-                if (row.get("side") == "buy") == (left < 0):     # a cover takes delivered shares back, a sale received ones
-                    step = min(abs(left), new)
-                    shares[symbol] = str(left - step if left > 0 else left + step)
-                row["filled"] = str(filled)
-            if str(answer.get("status") or "") not in WORKING:
-                orders.pop(cid)
-            else:
-                orders[cid] = row
+            orders.pop(cid)
         self.state.put("shares", {k: v for k, v in shares.items() if M.D(v) != 0})
         self.state.put("shares_orders", orders)
+
+    def _lots_taken(self, cid: str, row: dict, shares: dict) -> bool:
+        """THE LOTS AN ASSIGNMENT SWALLOWED (A8.2, as the gateway allows it): the account was short the symbol while
+        the equity book owned `row["lots"]` shares of it, so those shares left with the assignment, and the cover (the
+        gateway admitted it and it filled: the short was real) bought back the account's short only. The equity book
+        closes them as "forced" at the cover's price (`equity_hook.shares_taken`), the share-event ledger moves toward
+        zero by as many (they were part of what the event delivered), and the owner is alerted. False when the equity
+        book could not close them (kept, and asked again at the next reading; alerted once)."""
+        symbol, lots = str(row["symbol"]), M.D(row["lots"])
+        try:
+            taken = equity_hook.shares_taken(self.equity, symbol, lots, row.get("avg"),
+                                             why=f"an assignment or exercise on {symbol}: the House's cover {cid}")
+        except Exception as exc:  # noqa: BLE001 - the lots stay as they are until the book can be read
+            if not row.get("lots_told"):
+                row["lots_told"] = True
+                self.alert("error", f"live: {symbol}: an assignment took {lots} shares of the equity book's lots and the "
+                                    f"book could not close them ({type(exc).__name__}): asked again at each reading")
+            return False
+        left = M.D(shares.get(symbol) or 0)
+        if taken > 0 and left < 0:
+            shares[symbol] = str(left + min(-left, taken))
+        self.record("live.shares", {"symbol": symbol, "lots_taken": str(taken), "lots_owned": str(lots), "cover": cid,
+                                    "_px": row.get("avg"), "why": "an assignment netted against the equity book's lots"})
+        if taken > 0:
+            self.alert("error", f"live: {symbol}: an assignment or exercise took {taken} shares of the equity book's lots "
+                                "(the account went short while a program held them): the House's cover bought back the "
+                                "account's short only, and the lots are closed in the equity book as forced at the "
+                                "cover's price")
+        return True
 
     def _close_shares(self) -> None:
         """THE ACCOUNT'S SHARES (A8.2): per us_equity symbol, the unattributed quantity is the account's less what the
         equity book owns (`equity_hook.expected_shares`: its open lots and the filled part of its working orders, read
-        after the positions in the same pass). A SHORT account quantity is covered at once, by its unattributed part
-        (the buy brings the account back to what the equity book owns, so an assignment netted against a program's lot
-        never consumes the lot); a LONG unattributed excess is sold once two consecutive readings showed one (kv
-        `unattributed_seen` {symbol: qty}), with an alarm; both with a market order, as before E1. A long account below
-        what the equity book owns is reconciliation's mismatch, never an order; a lot the equity book owns is never
-        touched, and a symbol with a working order in either book waits for the next reading. With the equity book
-        unreadable no long share is sold (what it owns cannot be told): only a short is covered, to flat."""
+        after the positions in the same pass).
+
+        A SHORT account quantity is covered at once with a market order for EXACTLY the account's short, never more:
+        the gateway admits a buy on a symbol held short only as a cover of at most the short (gateway/lib/router.mjs
+        `realOrder`, caps.mjs `closeLegsHeldError`: no buy both covers and opens), so a larger one is refused and the
+        short stays. A short of a share or more with a fraction (an assignment netted against a program's fractional
+        lot) is covered in whole shares first, the order the House sent before E1, and its fraction at the next
+        reading. Shares of the equity book's lots that the short swallowed are gone with the assignment: they are
+        never bought back here (an opening buy is the equity book's own limit order); once the cover has filled the
+        book closes them at its price (`_lots_taken`).
+
+        A LONG unattributed excess is sold once two consecutive readings showed one (kv `unattributed_seen` {symbol:
+        qty}), with an alarm and a market order, as before E1. On a symbol the equity book HOLDS only the part the
+        share-event ledger explains (an assignment's or an exercise's shares) is ever sold: the rest may be the lots'
+        own shares under a split or another corporate action the book has not booked yet (or a buy it gave up as lost
+        that filled), so it is alarmed (kv `unexplained_shares`) and left to reconciliation's freeze. A long account
+        below what the equity book owns is reconciliation's mismatch, never an order; a lot the equity book owns is
+        never touched, and a symbol with a working order in either book waits for the next reading. With the equity
+        book unreadable no long share is sold (what it owns cannot be told): only a short is covered, to flat."""
         if self.real is None:
             return
         self._shares_filled_safe()
@@ -2244,8 +2300,11 @@ class OptionsLive:
             working |= equity_hook.busy(self.equity)
         except Exception:  # noqa: BLE001 - the equity book's orders unread: the venue's open orders stand alone
             owned = None
+        ledger = {str(k).upper(): M.D(v) for k, v in (self.state.get("shares", {}) or {}).items()}
         seen = {str(k): M.D(v) for k, v in (self.state.get("unattributed_seen", {}) or {}).items()}
         excess: dict[str, Decimal] = {}
+        unexplained: dict[str, Decimal] = {}
+        present: set[str] = set()
         held = False
         for row in positions:
             if str(row.get("asset_class")) != "us_equity":
@@ -2253,19 +2312,32 @@ class OptionsLive:
             symbol = str(row.get("symbol") or "").upper()
             qty = M.D(row.get("qty") or 0)
             signed = -abs(qty) if str(row.get("side")) == "short" else qty
+            if signed != 0:
+                present.add(symbol)
             if signed < 0:
                 held = True
                 if symbol not in working:
-                    cover = (owned or {}).get(symbol, M.ZERO) - signed
-                    self._send_shares(row, "buy", cover, why="a short share position is covered at once")
+                    short = -signed
+                    whole = short.to_integral_value(rounding=ROUND_FLOOR)
+                    self._send_shares(row, "buy", whole if 0 < whole < short else short,
+                                      why="a short share position is covered at once",
+                                      lots=(owned or {}).get(symbol, M.ZERO))
                 continue
             if owned is None:
                 held = held or signed != 0
                 continue
-            over = signed - owned.get(symbol, M.ZERO)
+            lots = owned.get(symbol, M.ZERO)
+            over = signed - lots
             if over <= equity_hook.SHARE_TOLERANCE:
                 continue
             held = True
+            if lots > equity_hook.SHARE_TOLERANCE:
+                explained = min(over, max(ledger.get(symbol, M.ZERO), M.ZERO))
+                if over - explained > equity_hook.SHARE_TOLERANCE:
+                    unexplained[symbol] = over - explained
+                over = explained
+                if over <= equity_hook.SHARE_TOLERANCE:
+                    continue
             if symbol in working:
                 if symbol in seen:
                     excess[symbol] = seen[symbol]               # skipped this reading: a seen excess stays seen
@@ -2279,7 +2351,27 @@ class OptionsLive:
                 self.record("live.alert", {"what": f"{symbol}: {over} shares no program owns (first reading; sold at "
                                                    "the next if still there)"})
         self.state.put("unattributed_seen", {k: str(v) for k, v in excess.items()})
+        self._unexplained_told(unexplained)
+        refused = dict(self.state.get("shares_refused", {}) or {})
+        if any(symbol not in present for symbol in refused):
+            self.state.put("shares_refused", {k: v for k, v in refused.items() if k in present})
         self._stock_held = held
+
+    def _unexplained_told(self, unexplained: Mapping[str, Decimal]) -> None:
+        """Shares beyond the equity book's lots on a symbol it holds that no assignment or exercise explains (kv
+        `unexplained_shares` {symbol: qty}): alarmed when first seen and whenever the quantity changes, never sold."""
+        told = {str(k): str(v) for k, v in (self.state.get("unexplained_shares", {}) or {}).items()}
+        now = {symbol: str(qty) for symbol, qty in unexplained.items()}
+        for symbol, qty in now.items():
+            if told.get(symbol) != qty:
+                self.alert("error", f"live: {symbol}: {qty} shares beyond the equity book's lots that no assignment or "
+                                    "exercise explains (a split or another corporate action not booked yet, or a buy "
+                                    "given up as lost that filled): never sold by the House; reconciliation freezes real "
+                                    "entries until the equity book or the owner accounts for them")
+                self.record("live.alert", {"what": f"{symbol}: {qty} unexplained shares on a symbol the equity book "
+                                                   "holds: left to reconciliation, not sold"})
+        if now != told:
+            self.state.put("unexplained_shares", now)
 
     def _shares_filled_safe(self) -> None:
         try:
@@ -2287,9 +2379,12 @@ class OptionsLive:
         except Exception as exc:  # noqa: BLE001 - the ledger is read again at the next reading
             self.alert("warning", f"live: the share orders could not be read back ({type(exc).__name__})")
 
-    def _send_shares(self, row: Mapping[str, Any], side: str, qty: Decimal, *, why: str) -> None:
+    def _send_shares(self, row: Mapping[str, Any], side: str, qty: Decimal, *, why: str,
+                     lots: Decimal | None = None) -> None:
         """One House share order at market (`lv-shares-`), remembered (kv `shares_orders`) so its fills move the
-        share-event ledger."""
+        share-event ledger. `lots`: for a cover, the shares of the symbol the equity book owned when the short was
+        found (they left with the assignment: `_lots_taken` closes them once this cover has filled; kept on one order
+        a symbol). A refused order is an alarm (`_share_order_refused`), never only a row."""
         symbol = str(row["symbol"])
         cid = f"lv-shares-{symbol.lower()}-{int(self.clock())}"
         text = format(qty.normalize(), "f")
@@ -2297,13 +2392,49 @@ class OptionsLive:
                 "client_order_id": cid}
         orders = dict(self.state.get("shares_orders", {}) or {})
         orders[cid] = {"symbol": symbol.upper(), "side": side, "qty": text, "filled": "0", "at": self.clock()}
+        if (lots is not None and lots > equity_hook.SHARE_TOLERANCE
+                and not any(o.get("lots") and o.get("symbol") == symbol.upper() for o in orders.values())):
+            orders[cid]["lots"] = str(lots)
         self.state.put("shares_orders", orders)
         answer = self.real.submit(body, exit=True)
-        if not answer.ok and not answer.unknown:
+        refused = not answer.ok and not answer.unknown
+        if refused:
             orders.pop(cid, None)
             self.state.put("shares_orders", orders)
         self.record("live.shares", {"symbol": symbol, "qty": str(row.get("qty")), "sent": text, "side": side,
                                     "ok": answer.ok, "error": answer.error, "why": why})
+        self._share_order_refused(symbol.upper(), side, text, (answer.error or "refused") if refused else None)
+        if not refused:
+            # The account's shares may have moved already (a market order): the pass reads its positions again before
+            # it reconciles (`_real_pre`, `_quiet`), as after a fresh option event.
+            self._activities_changed = True
+
+    def _share_order_refused(self, symbol: str, side: str, qty: str, error: str | None) -> None:
+        """A House share order the gateway or the venue REFUSED (`error`; None: it went, which clears the symbol): an
+        error alert at the first refusal and once every `SHARES_REFUSED_EVERY` seconds while it is still refused (kv
+        `shares_refused` {symbol: {side, n, told_at, error}}), and the owner told at the first refusal of a cover: a
+        short the House cannot cover stays on the account until a person looks. The order goes again at each reading."""
+        told = dict(self.state.get("shares_refused", {}) or {})
+        if error is None:
+            if told.pop(symbol, None) is not None:
+                self.state.put("shares_refused", told)
+            return
+        now = self.clock()
+        last = dict(told.get(symbol) or {})
+        first = last.get("side") != side
+        n = 1 if first else int(last.get("n") or 0) + 1
+        told_at = float(last.get("told_at") or 0)
+        if first or now - told_at >= SHARES_REFUSED_EVERY:
+            told_at = now
+            what = "the cover of a short share position" if side == "buy" else "the sale of shares no program owns"
+            text = (f"live: {symbol}: {what} ({side} {qty} at market) was REFUSED ({error[:200]}); refused {n} time(s). "
+                    "The House sends it again at each reading and the position stays until one goes. Owner step: look "
+                    f"at the real account's {symbol} position and close it by hand if the House cannot.")
+            self.alert("error", text)
+            if first and side == "buy":
+                self._tell_owner("assignment", text)
+        told[symbol] = {"side": side, "n": n, "told_at": told_at, "error": error[:200]}
+        self.state.put("shares_refused", told)
 
     def _venue_rules(self, day: LiveDay, mi: int, out: dict) -> None:
         """Expiry-day closes, the open cutoff's cancels, tif expiries, and orphans' closes (exits: the kill switch only)."""

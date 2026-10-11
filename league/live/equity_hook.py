@@ -14,7 +14,8 @@ import is made inside a function: league/equity/live.py imports `league.live.rea
 Callers:
 - league/live/step.py: `build_book` (OptionsLive.__init__: `self.equity`), `expected_shares` (`_close_shares`, the
   assignment latch, both reconciliations), `frozen` (`real_block`), `busy` (one working order a symbol across both
-  books), `health` (`OptionsLive.health`);
+  books), `shares_taken` (`_lots_taken`: lots an assignment swallowed, closed once the House's cover has filled),
+  `health` (`OptionsLive.health`);
 - league/live/real.py: `is_equity_client_id` (`ingest`), `probe_figures` (`probe_tally`, `probe_realized`,
   `probe_figures`), `working_buys_worst` (the options reservation's available cash, A8.1), `orders_today`
   (`count_refusal`, `path_refusal`: the one day order count, A8.3), `invested` and `open_risk` (`RealBook.exposure`);
@@ -45,8 +46,8 @@ class Unreadable:
     """The House's equity book when it could not be built while the live state shows it holds or works shares (a bad
     release, a table that cannot be parsed): every reading fails closed. `frozen` names why (real_block refuses every
     real open, both lanes), `expected_shares` raises (reconciliation then sees every share as a mismatch, and
-    `_close_shares` sells no long share, since what is owned cannot be told), `tick` does nothing. A restart with a
-    working book is the way out; nothing here ever sends an order."""
+    `_close_shares` sells no long share, since what is owned cannot be told), `busy` and `shares_taken` raise, `tick`
+    does nothing. A restart with a working book is the way out; nothing here ever sends an order."""
 
     def __init__(self, why: str):
         self.why = str(why)[:300]
@@ -59,6 +60,9 @@ class Unreadable:
         raise RuntimeError(self.why)
 
     def busy(self) -> set[str]:
+        raise RuntimeError(self.why)
+
+    def shares_taken(self, symbol: str, qty: Decimal, px: Decimal | None, *, why: str) -> Decimal:
         raise RuntimeError(self.why)
 
     def tick(self, now: float, **_: Any) -> dict[str, Any]:
@@ -168,6 +172,20 @@ def busy(book: Any | None) -> set[str]:
     return {str(symbol).upper() for symbol in book.busy()}
 
 
+def shares_taken(book: Any | None, symbol: str, qty: Decimal, px: Decimal | None, *, why: str) -> Decimal:
+    """`EquityBook.shares_taken`: `qty` shares of `symbol` the book's lots held left the account in an option
+    assignment or exercise and the House's cover of the short has filled at `px` (None: unreadable); the lots are
+    closed for them as "forced". Returns the shares closed (0 with no book); raises when the book cannot be read (the
+    caller asks again at its next reading)."""
+    if book is None:
+        return ZERO
+    try:
+        price = None if px in (None, "") else Decimal(str(px))
+    except ArithmeticError:             # a price that is no number is no price: the book prices at its own mark
+        price = None
+    return Decimal(book.shares_taken(str(symbol).upper(), Decimal(str(qty)), price, why=str(why)))
+
+
 def health(book: Any | None) -> dict[str, Any] | None:
     """The equity book's health line (None with no book; {"error": ...} when it cannot be read)."""
     if book is None:
@@ -242,5 +260,5 @@ def band_for(row: Mapping[str, Any]) -> tuple[str, str]:
 
 
 __all__ = ["CLIENT_PREFIX", "LANES", "SHARE_TOLERANCE", "UNREADABLE", "Unreadable", "build_book", "is_equity_client_id",
-           "is_equity_row", "expected_shares", "frozen", "busy", "health", "probe_figures", "working_buys_worst",
-           "orders_today", "invested", "open_risk", "band_for"]
+           "is_equity_row", "expected_shares", "frozen", "busy", "shares_taken", "health", "probe_figures",
+           "working_buys_worst", "orders_today", "invested", "open_risk", "band_for"]

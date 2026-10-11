@@ -191,7 +191,7 @@ class Venue:
     natural, "none" rests, "partial" fills one structure a read, "uneven" fills the first leg only, "limit" fills whole
     AT its limit whatever the quotes (a resting order the market came through). A simple (single-leg) order carries
     `"legs": null`, as the venue answers one; every order carries the venue's `submitted_at`, `filled_at` and
-    `canceled_at` stamps."""
+    `canceled_at` stamps. A stock order on the real account meets the gateway's rule first (`stock_refusal`)."""
 
     def __init__(self, market: Market, *, venue: str = "alpaca", equity: str = "5481.65", last_equity: str | None = None,
                  clock: Clock | None = None):
@@ -272,6 +272,9 @@ class Venue:
                              "HTTP 403 Order maximum loss exceeds the per-order cap", status=403)
         if self.submit_mode == "ratelimited":
             return Submitted(False, None, "rate", sent=False)
+        refusal = self.stock_refusal(body)
+        if refusal:
+            return Submitted(False, {"error": refusal}, f"HTTP 400 {refusal}", status=400)
         order = self._create(body)
         if self.submit_mode == "lost":
             return Submitted(False, None, "no answer: timed out", unknown=True)
@@ -280,6 +283,25 @@ class Venue:
             return Submitted(False, None, "no answer: timed out", unknown=True)
         self._try_fill(order)
         return Submitted(True, self._public(order), "", status=200)
+
+    def stock_refusal(self, body: Mapping[str, Any]) -> str | None:
+        """The gateway's rule for a stock order on the REAL account (gateway/lib/router.mjs `realOrder`, caps.mjs
+        `closeLegsHeldError`), or None when it admits the order (or it is an option order, or this is the practice
+        account): a sale closes shares held long, at most what is held; a buy on a symbol held short is a cover of AT
+        MOST the short (no buy both covers and opens); any other buy opens a position and must be a limit order."""
+        symbol = str(body.get("symbol") or "")
+        if not self.real or body.get("legs") or not symbol or occ_parts(symbol):
+            return None
+        qty, have = Decimal(str(body["qty"])), self.held.get(symbol, Decimal(0))
+        if body.get("side") == "buy" and have >= 0:
+            return None if body.get("type") == "limit" else "A stock buy on the real account must be a limit order."
+        selling = body.get("side") == "sell"
+        if (have >= qty) if selling else (-have >= qty):
+            return None
+        held = "none" if have == 0 else f"{abs(have)} {'long' if have > 0 else 'short'}"
+        return (f"A stock order on the real account must close shares it holds: {symbol} {'long' if selling else 'short'} "
+                f"({qty} needed, {held} held). A sale of shares not held long would be a short sale, and a buy that "
+                "covers no short would open a position: refused.")
 
     cancel_delay = 0.0   # seconds a cancel shows as pending_cancel (still working) before it is done
 
