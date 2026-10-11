@@ -36,6 +36,13 @@ def calendar(n: int) -> list[dt.date]:
     return [dt.date(2030, 1, 1) + dt.timedelta(days=i) for i in range(n)]
 
 
+def draw_sessions(bars) -> list[dt.date]:
+    """The sessions a control's draw runs over on its slice (D5): S[0] is `first_close`, the session before the
+    slice's first run session, then every run session (the forward shadow hands the draw the same; a slice may hold
+    more history rows before it, which the draw never sees)."""
+    return [bars.day(t) for t in range(int(bars.first) - 1, bars.n)]
+
+
 def indexed(lots: list[dict], sessions: list[dt.date]) -> list[tuple]:
     """Lots as (lid, symbol, entry index, entry_at, exit index | None)."""
     where = {day.isoformat(): i for i, day in enumerate(sessions)}
@@ -320,8 +327,8 @@ class SkillFree(unittest.TestCase):
                 for group in elane_train.GROUPS:
                     symbols = C.group_symbols(group, UNIVERSE)
                     bars = store.bars(symbols, "forward", history=1, start=F.first_day(close))
-                    sessions = [bars.day(t) for t in range(bars.n)]
-                    self.assertEqual((sessions[0], sessions[1], bars.first), (close, F.t0(), 1))
+                    sessions = draw_sessions(bars)
+                    self.assertEqual((sessions[0], sessions[1], bars.day(bars.first)), (close, F.t0(), F.t0()))
                     for n in range(50):
                         made[group, n] = (C.control_lots(C.spec(group, n, symbols), sessions),
                                           float(bars.adj[symbols[0]][5, 3]))
@@ -350,6 +357,7 @@ class TheCostFreeSeries(unittest.TestCase):
         cls.tmp.cleanup()
 
     def slice(self, symbols):
+        """(the control's slice, the day of each of its rows): a by-hand lot names its days by the slice's own index."""
         bars = self.store.bars(symbols, "forward", history=1, start=self.first_day)
         return bars, [bars.day(t) for t in range(bars.n)]
 
@@ -421,17 +429,19 @@ class TheCostFreeSeries(unittest.TestCase):
         np.testing.assert_array_equal(C.cost_free([], bars, capital=self.capital), np.zeros(bars.n - bars.first))
 
     def test_only_a_cost_free_draw_is_taken(self):
-        bars, sessions = self.slice(list(INDEX))
+        bars, _ = self.slice(list(INDEX))
         spec = C.spec("index", 30, INDEX)
         for k in (1.0, 1.5):
             with self.assertRaises(ValueError):
-                C.cost_free(C.control_lots(spec, sessions, k=k), bars, capital=self.capital)
+                C.cost_free(C.control_lots(spec, draw_sessions(bars), k=k), bars, capital=self.capital)
 
     def test_costs_only_subtract_and_two_hundred_controls_have_no_skill(self):
         mean_x0, mean_x, turnover = [], [], 0
         for group in elane_train.GROUPS:
             symbols = C.group_symbols(group, UNIVERSE)
-            bars, sessions = self.slice(symbols)
+            bars = self.slice(symbols)[0]
+            sessions = draw_sessions(bars)
+            self.assertEqual((sessions[0], sessions[1]), (F.first_close(0.0), self.first_day))
             self.assertGreater(len(sessions), 450)
             for n in range(50):
                 spec = C.spec(group, n, symbols)

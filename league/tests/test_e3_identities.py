@@ -28,7 +28,7 @@ from league.equity import kinds, results
 from league.gym.driver import LEAGUE_FILES
 from league.ops import contam_probe, forward_db, forward_report, registry, release_receipts
 from league.ops import schedule as S
-from league.swarm import elane_folds
+from league.swarm import elane_folds, evaluator
 from league.swarm.evaluator import (EQUITY_EVIDENCE, EQUITY_GYM_FILES, equity_fingerprint, execution_fingerprint)
 from league.tests import REAL_POLICY_PATH
 from league.tests import test_equity_identity as A13
@@ -36,6 +36,11 @@ from league.tests import test_equity_identity as A13
 REPO = Path(__file__).resolve().parents[2]
 HOUR, MINUTE = 3600, 60
 
+#: EVERY FILE THE EQUITY IDENTITY HASHES (league/swarm/evaluator.py `equity_fingerprint`): the evidence modules, the
+#: league's own files, the Gym modules the evidence imports and, on a base that lists them (E1's follow-up after step
+#: 0), the calendar's files outside league/. Read from the evaluator's own lists, so the seal holds on either base.
+EQUITY_HASHED = (*(f"league/equity/{name}.py" for name in EQUITY_EVIDENCE), *LEAGUE_FILES, *EQUITY_GYM_FILES,
+                 *getattr(evaluator, "EQUITY_CALENDAR_FILES", ()))
 #: Release E3's NEW files that are not tests (league/ops/E3_INTERFACES.md, the ownership map).
 E3_OPS = tuple(f"league/ops/{name}.py" for name in (
     "forward_db", "forward_register", "forward_controls", "forward_shadow", "forward_audit", "forward_stats",
@@ -112,20 +117,19 @@ class TheJudgesDidNotMove(unittest.TestCase):
         execution_fingerprint.cache_clear()
 
     def test_every_new_file_exists_and_none_lies_where_an_identity_reads(self):
-        hashed = {*LEAGUE_FILES, *EQUITY_GYM_FILES, *(f"league/equity/{name}.py" for name in EQUITY_EVIDENCE)}
+        hashed = set(EQUITY_HASHED)
         for path in (*E3_NEW, *E3_PATCHED):
             self.assertTrue((REPO / path).is_file(), path)
             self.assertFalse(under(path, UNTOUCHED), f"{path} lies where release E3 edits nothing")
             self.assertNotIn(path, hashed)
-            self.assertFalse(path.startswith(("league/gym/", "league/live/", "league/equity/")), path)
+            self.assertFalse(path.startswith(("league/gym/", "league/live/", "league/equity/", "ltcm/")), path)
 
     def test_the_fingerprints_read_no_e3_file(self):
         # On a copy: the files both identities hash, and every E3 file beside them. Each E3 file is then changed.
-        evidence = [f"league/equity/{name}.py" for name in EQUITY_EVIDENCE]
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            for name in (*LEAGUE_FILES, *EQUITY_GYM_FILES, *evidence, "league/gym/engine.py", "league/live/step.py",
-                         "league/live/decider.py", *E3_NEW, *E3_PATCHED):
+            for name in (*EQUITY_HASHED, "league/gym/engine.py", "league/live/step.py", "league/live/decider.py",
+                         *E3_NEW, *E3_PATCHED):
                 A13.write(repo, name)
             options, equity = execution_fingerprint(repo), equity_fingerprint(repo)
             for name in (*E3_NEW, *E3_PATCHED):
@@ -143,7 +147,8 @@ class TheJudgesDidNotMove(unittest.TestCase):
             self.assertNotEqual(execution_fingerprint(repo), options)
 
     def test_the_real_fingerprints_hash_exactly_the_files_they_always_did(self):
-        files = sorted({*(f"league/equity/{name}.py" for name in EQUITY_EVIDENCE), *LEAGUE_FILES, *EQUITY_GYM_FILES})
+        files = sorted(set(EQUITY_HASHED))
+        self.assertEqual(len(files), len(EQUITY_HASHED))
         digest = hashlib.sha256()
         for name in files:
             digest.update(name.encode() + b"\0" + (REPO / name).read_bytes() + b"\0")
