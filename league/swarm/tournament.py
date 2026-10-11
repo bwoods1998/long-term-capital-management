@@ -54,8 +54,9 @@
    (`SwarmStore.families` leaves them out), and `run` never calls their step: the swarm's loop runs it on a thread of
    its own, every `elane.ROUND_SECONDS`, under the brake and with the Gym down too (league/swarm/loop.py
    `Swarm.equity_rounds`; A3: an equity Validation needs no Gym box). That step (`equity_round`, while `elane.mode` is
-   "gate") DISPATCHES VALIDATION BY LANE: each living Gym-band equity family's version due (`elane.next_try`: its candidate while its
-   lineage's one try is open and has no current verdict, else R3's pre-registered retry) is validated by
+   "gate") DISPATCHES VALIDATION BY LANE: each living Gym-band equity family's version due (`elane.next_try`: a tried
+   version whose verdict went stale, else its candidate while its lineage's one try is open and it has no current
+   verdict, else R3's pre-registered retry) is validated by
    `elane.validate`: on the House, in the decider-isolated child (A3: no Gym box), at k 1.0 and 1.5, the share screen's
    pre-check (S1's and S2's one rule) the entry to the gate. A family whose equity lineage has spent its try or its look retires (`elane.lineage_spent`:
    words only; no graveyard row, so no look outcome reaches a generator, A9 D3), and so does one at any band whose

@@ -1083,7 +1083,9 @@ class Swarm:
         return {"validated": {fid: bool(v.get("entered")) for fid, v in (step.get("validated") or {}).items()
                               if isinstance(v, Mapping)},
                 "retired": list(step.get("retired") or []), "errors": dict(step.get("errors") or {}),
-                "looked": out["looked"], "held": out["held"], **({"error": out["error"]} if "error" in out else {})}
+                "looked": out["looked"], "held": out["held"],
+                **({"look_errors": dict(out["errors"])} if out.get("errors") else {}),
+                **({"error": out["error"]} if "error" in out else {})}
 
     def adopt_equity(self) -> dict[str, Any] | None:
         """THE EQUITY IDENTITY's adoption at the start (`evaluator.adopt_equity`, core's): equity families only. None on an

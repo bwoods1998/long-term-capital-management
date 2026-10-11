@@ -154,7 +154,8 @@ class Bars:
     `days`: int32 ordinals of every session in the slice, oldest first (history sessions first, then the run's).
     `early`: bool per session (a 13:00 close). `first`: the index of the run's first session (before it: history
     only, never traded: `history` + 1 sessions where the store holds them, so the engine's first decision, at the close
-    of session `first` - 1, reads `history` + 1 rows as every later one and as a live decision does). `symbols`: the slice's symbols. `raw[sym]`: float64 (n, 5) open, high, low, close, volume
+    of session `first` - 1, reads `history` + 1 rows as every later one and as a live decision does). `symbols`: the
+    slice's symbols. `raw[sym]`: float64 (n, 5) open, high, low, close, volume
     (adjustment=raw; NaN where the symbol has no bar). `adj[sym]`: float64 (n, 4) open, high, low, close
     (adjustment=all, as of the store's fetch day). `window`: the run's window name. `data_version`: the hash of
     exactly the files read (`EquityStore.data_version`), part of every run's identity."""

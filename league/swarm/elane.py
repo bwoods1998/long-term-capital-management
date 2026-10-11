@@ -78,9 +78,10 @@ that uses the same template in its own lane (`TEMPLATE_KEY`: its code's sha, lan
 lineage: one look a lineage. The series and the template are THE LOOK'S LINEAGE RECORD: kept for good, an equity
 identity adoption included (league/swarm/evaluator.py `EQUITY_SELECTION_KEYS` leaves them), and the test FAILS CLOSED:
 a program already looked at that keeps no series has it written again from its looked version's Train-era runs
-(`_restore_train`), and where that cannot be done the look waits (`LineageUnread`). Look and Validation outcomes of share programs are never fed back to generators or the
-diagnostician: no graveyard row is written for an equity family in E1 (the options architect reads the graveyard), and
-no options reader sees an equity family (`SwarmStore.families`).
+(`_restore_train`), and where that cannot be done the look waits (`LineageUnread`). Look and Validation outcomes of
+share programs are never fed back to generators or the diagnostician: no graveyard row is written for an equity family
+in E1 (the options architect reads the graveyard), and no options reader sees an equity family
+(`SwarmStore.families`).
 
 LANE-SCOPED KEYS (A8.12): lineage, spent-root and graveyard keys carry the lane (`lineage_key`), so the options lanes'
 spent SPY/QQQ/IWM always-in roots never refuse an equity birth, and a REFUTED equity row binds only its own lane's cards
@@ -92,8 +93,8 @@ like any family. THEIR LOOKS ARE TAKEN IN THAT ORDER (`round_order`: both equity
 the seeds of one second in `EQUITY_SEEDS` order): under D3 the later of two seeds of one lineage is refused with no
 look, so which one is judged is the list's order, never the ids' alphabet or a clock tick. A version refused at the
 gate before its look retires for what happened (`REFUSED_CAUSES`: the same lineage, no eligible floor), not as a spent
-Validation try. Every report says plainly that these three were seeded by the captain's build agents (`SEEDED_NOTE`), and
-the Done meter reads Done with and without them (`seeded`).
+Validation try. Every report says plainly that these three were seeded by the captain's build agents (`SEEDED_NOTE`),
+and the Done meter reads Done with and without them (`seeded`).
 
 Standard library only at import (league/equity/__init__.py and config.py); the screen, the runner and the store (numpy)
 are imported where they are used, on the House.
@@ -1397,8 +1398,8 @@ __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_K
            "try_open", "lineage_spent",
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
-           "ROUND_KEY", "ROUND_SECONDS", "round_order", "LOST_KEY", "LOOK_SENDS", "EVIDENCE_HASH_SEED", "SAME_LINEAGE", "FLOOR_INELIGIBLE", "REFUSED_BEFORE_LOOK",
-           "REFUSED_CAUSES",
+           "ROUND_KEY", "ROUND_SECONDS", "round_order", "LOST_KEY", "LOOK_SENDS", "EVIDENCE_HASH_SEED", "SAME_LINEAGE",
+           "FLOOR_INELIGIBLE", "REFUSED_BEFORE_LOOK", "REFUSED_CAUSES",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",
            "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LineageUnread", "LOSS_LINE",
            "loss_line"]

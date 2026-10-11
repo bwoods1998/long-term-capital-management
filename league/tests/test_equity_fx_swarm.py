@@ -963,3 +963,32 @@ class TheActivityBesideTheLook(FixCase):
         with screen(), mock.patch.object(elane, "_invested_shares", return_value=None):
             self.assertTrue(self.gate.look(self.store.family("b1"), version, sha))
         self.assertIsNone(self.store.family("b1")["state"][elane.LOOK_KEY]["activity"])
+
+
+class OneFamilysErrorNeverStopsTheOthers(FixCase):
+    """s2-7, the gate's half: the equity look round stopped at the first family whose turn raised, so the seeds after
+    it in the order would never have been looked at while it kept raising."""
+
+    def test_a_look_that_raises_costs_the_families_after_it_nothing(self):
+        born = elane.birth_seeds(self.store, ON)
+        with screen():
+            self.tournament.equity_round()
+        real = elane.look
+
+        def look(gate, fam, version, sha):
+            if fam["id"] == "seed-overnight-spy":
+                raise RuntimeError("an unexpected failure in one family's look")
+            return real(gate, fam, version, sha)
+
+        out = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
+        with screen(), mock.patch.object(elane, "look", side_effect=look):
+            self.gate.equity_round(out)
+        self.assertEqual([row["family"] for row in out["looked"]], born[1:], "the two after it were looked at")
+        self.assertEqual(out["errors"], {"seed-overnight-spy": "RuntimeError"})
+        self.assertIn("equity_round_error", self.actions("seed-overnight-spy"))
+        state = self.store.family("seed-overnight-spy")["state"]
+        self.assertEqual((state["gate_ready"], state.get("look_inflight")), (True, None), "still owed: nothing was spent")
+        out = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
+        with screen():
+            self.gate.equity_round(out)
+        self.assertEqual([row["family"] for row in out["looked"]], ["seed-overnight-spy"], "and taken the next round")

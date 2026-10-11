@@ -1322,32 +1322,44 @@ class Gate:
         """THE EQUITY LANES' round (the module docstring): each living Gym-band equity family whose validated version is
         gate-ready goes to `look` (so to `elane.look`), one look at a time; a look in flight from a dead process is owed
         again. Its looks are listed in `out["looked"]` with their lane. Called by the swarm's loop on the equity rounds'
-        own thread (`Swarm.equity_rounds`), never by `run`."""
+        own thread (`Swarm.equity_rounds`), never by `run`. ONE FAMILY'S ERROR NEVER STOPS THE OTHERS (as the
+        tournament's equity step): it is one private event and `out["errors"][family]`, and the next family is asked."""
         # THE ORDER THE LOOKS ARE TAKEN IN is a decision under D3 (`elane.round_order`): by birth, the seeds as listed.
         for fam in elane.round_order(self.store, self.store.families(alive=True, lanes=elane.LANES)):
             fid = str(fam["id"])
+            try:
+                self._equity_look(fam, out)
+            except Exception as exc:  # noqa: BLE001 - the families after it in the order still get their looks
+                out.setdefault("errors", {})[fid] = type(exc).__name__
+                self.store.event("swarm.gate", fid, {"action": "equity_round_error", "error": type(exc).__name__,
+                                                     "text": str(exc)[:300]})
+
+    def _equity_look(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
+        """One family's turn in the equity round (`equity_round`): a look in flight from a dead process owed again, then
+        its one look when it is gate-ready, in the Gym band, not held and not already done with."""
+        fid = str(fam["id"])
+        state = fam.get("state") or {}
+        marker = state.get("look_inflight") or {}
+        if marker.get("sha") and float(marker.get("at") or 0) < self.started_at and not self.store.looked(marker["sha"]):
+            # Its look died with a process (the equity look runs in the round): owed again, nothing was recorded.
+            self.store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
+            self.store.event("swarm.gate", fid, {"action": "look_owed", "version": marker.get("n"), "lane": marker.get("lane")})
+            fam = self.store.family(fid) or fam
             state = fam.get("state") or {}
-            marker = state.get("look_inflight") or {}
-            if marker.get("sha") and float(marker.get("at") or 0) < self.started_at and not self.store.looked(marker["sha"]):
-                # Its look died with a process (the equity look runs in the round): owed again, nothing was recorded.
-                self.store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
-                self.store.event("swarm.gate", fid, {"action": "look_owed", "version": marker.get("n"), "lane": marker.get("lane")})
-                fam = self.store.family(fid) or fam
-                state = fam.get("state") or {}
-            if state.get("look_inflight") or fam["band"] != "gym" or not state.get("gate_ready"):
-                continue
-            if state.get("gate_hold"):
-                out["held"].append(fid)  # THE OPERATOR'S HOLD: nothing of it is looked at, its gate_ready stays
-                continue
-            version = self.store.version(fid, state.get("validation_version"))
-            if version is None or not version.get("code"):
-                continue
-            sha = run_sha(version)
-            if state.get("gated_sha") == sha:
-                continue
-            looked = self.look(fam, version, sha)
-            if looked is not None:
-                out["looked"].append({"family": fid, "passed": looked, "lane": elane.lane_of(self.store, fam)})
+        if state.get("look_inflight") or fam["band"] != "gym" or not state.get("gate_ready"):
+            return
+        if state.get("gate_hold"):
+            out["held"].append(fid)  # THE OPERATOR'S HOLD: nothing of it is looked at, its gate_ready stays
+            return
+        version = self.store.version(fid, state.get("validation_version"))
+        if version is None or not version.get("code"):
+            return
+        sha = run_sha(version)
+        if state.get("gated_sha") == sha:
+            return
+        looked = self.look(fam, version, sha)
+        if looked is not None:
+            out["looked"].append({"family": fid, "passed": looked, "lane": elane.lane_of(self.store, fam)})
 
     def look(self, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> bool | None:
         """The one holdout look. None when the gate box did not run it (no look is spent). The version is marked as
