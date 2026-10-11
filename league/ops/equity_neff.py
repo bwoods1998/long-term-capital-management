@@ -380,6 +380,28 @@ def funnel_rows(root: str | Path, db: sqlite3.Connection, start: float, end: flo
     return out
 
 
+def funnel_lines(rows: Any) -> list[str]:
+    """`funnel_rows`' answer as a report's lines, one a lane and structure that ran (counts, N_eff and the multiple:
+    never a return). A structure with no N_eff says "unmeasured"; rows that are not `funnel_rows`' shape give no
+    line. For the operator's report (the daily page prints from its own allowlist and shows none of it)."""
+    lines = []
+    for lane, structures in sorted(rows.items()) if isinstance(rows, Mapping) else ():
+        for structure, cell in sorted(structures.items()) if isinstance(structures, Mapping) else ():
+            if not isinstance(cell, Mapping) or not cell.get("train_runs"):
+                continue
+            head = (f"{lane} / {structure}: {cell.get('program_years')} simulated program-years in "
+                    f"{cell['train_runs']} Train runs")
+            if cell.get("independent_asset_years") is None:
+                lines.append(f"{head}; independent asset-years unmeasured (no N_eff for its data)")
+                continue
+            multiple = cell.get("replay_multiple")
+            lines.append(f"{head} on {cell['independent_asset_years']} independent asset-years "
+                         f"({cell.get('train_years')} Train years x N_eff {cell.get('neff')}, "
+                         f"{cell.get('neff_source')}): each asset-year replayed "
+                         f"{'n/a' if multiple is None else multiple} times. Simulated years are compute, not evidence")
+    return lines
+
+
 __all__ = ["FILE", "WALL_S", "STORE_DIR", "SEGMENT", "RUN_KEY", "MIN_NAMES", "MIN_SESSIONS", "YEAR_SESSIONS",
            "TRAIN_YEARS", "ETF_NEFF_DEFAULT", "FORWARD_REPORT", "neff", "residuals", "formations", "panel_returns",
-           "measure", "run", "panel_neff", "etf_neff", "funnel_rows"]
+           "measure", "run", "panel_neff", "etf_neff", "funnel_rows", "funnel_lines"]

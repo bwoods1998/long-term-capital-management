@@ -674,6 +674,29 @@ class TheFunnelsRows(unittest.TestCase):
         self.assertEqual(set(out["equity"]["panel"]), {"train_runs", "program_years", "train_years", "neff",
                                                        "neff_source", "independent_asset_years", "replay_multiple"})
 
+    def test_the_rows_as_a_reports_lines(self):
+        self.family("etf-eq", "equity", "etf")
+        self.family("panel-a", "equity", "panel")
+        self.family("stock-a", "equity", "stock")
+        self.family("idle", "beta", "etf")
+        for _ in range(40):
+            self.run_("etf-eq", 1764)
+        self.run_("panel-a", 754, trials=4)
+        self.run_("stock-a", 504)
+        self.neff_file(80.0)
+        lines = EN.funnel_lines(self.rows())
+        self.assertEqual(lines, [
+            "equity / etf: 280.0 simulated program-years in 40 Train runs on 16.1 independent asset-years (7.0 Train "
+            "years x N_eff 2.3, default): each asset-year replayed 17.39 times. Simulated years are compute, not "
+            "evidence",
+            "equity / panel: 11.97 simulated program-years in 1 Train runs on 480.0 independent asset-years (6.0 Train "
+            "years x N_eff 80.0, neff.json): each asset-year replayed 0.02 times. Simulated years are compute, not "
+            "evidence",
+            "equity / stock: 2.0 simulated program-years in 1 Train runs; independent asset-years unmeasured (no N_eff "
+            "for its data)"])
+        for odd in (None, [], {"equity": None}, {"equity": {"panel": None}}, {"beta": {"etf": {"train_runs": 0}}}):
+            self.assertEqual(EN.funnel_lines(odd), [])
+
     def test_the_module_imports_the_standard_library_alone(self):
         """The funnel imports `funnel_rows` and stays standard library only: numpy, league.xs and league.equity are
         imported inside the functions that need them."""
