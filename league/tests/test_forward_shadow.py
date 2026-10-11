@@ -897,8 +897,8 @@ class Restated(Case):
         self.assertEqual(sorted((e["day"], e["payload"]["bars"]) for e in events),
                          [(moved, "same"), (moved, "same"), (after, "moved")])
         self.assertEqual(len({e["payload"]["once"] for e in events if e["day"] == moved}), 2)
-        self.assertEqual({day: rows[day] for day in stored},
-                         {row["day"]: (row["r"], row["w"], row["at"]) for row in self.rows(pid) if row["day"] in stored})
+        self.assertEqual(
+            {row["day"]: (row["r"], row["w"], row["at"]) for row in self.rows(pid) if row["day"] in stored}, stored)
         for event in events:                                   # a payload holds no figure
             self.assertFalse([v for v in event["payload"].values() if isinstance(v, float)])
         self.assertEqual(self.count("fwd_runs"), 5)
@@ -947,9 +947,10 @@ class Checkpoints(Case):
         shadow = self.shadow(FWD[10])
         for who, series in ((pid, (0.01, 0.03, 0.01, 0.03)), (flat, (0.01, 0.01, 0.01, 0.01))):
             for day, value in zip(FWD, series):
-                self.db.execute("INSERT INTO fwd_days(pid, day, engine, r, w, b, r15, entries, exits, status, at, bars) "
-                                "VALUES (?,?,?,?,?,?,?,0,0,'ok',?,?)",
-                                (who, day.isoformat(), shadow.engine, value, 0.5, 0.01, value - 0.001, self.t, "0" * 16))
+                self.db.execute(
+                    "INSERT INTO fwd_days(pid, day, engine, r, w, b, r15, entries, exits, status, at, bars) "
+                    "VALUES (?,?,?,?,?,?,?,0,0,'ok',?,?)",
+                    (who, day.isoformat(), shadow.engine, value, 0.5, 0.01, value - 0.001, self.t, "0" * 16))
             forward_db.tag(self.db, who, "stopped", f"cap:{FWD[3].isoformat()}", at=self.t)
         self.assertEqual(shadow.finals(), 2)
         (check,) = self.checks(pid)

@@ -557,7 +557,8 @@ class Shadow:
                     new += 1
                 elif abs(float(old["r"]) - cols["r"][i]) > forward_db.TOL or \
                         abs(float(old["w"]) - cols["w"][i]) > forward_db.TOL:
-                    value = hashlib.sha256(f"{cols['r'][i]:.9f}|{cols['w'][i]:.9f}".encode()).hexdigest()[:8]
+                    value = hashlib.sha256(f"{round(cols['r'][i], 9) + 0.0:.9f}|{round(cols['w'][i], 9) + 0.0:.9f}"
+                                           .encode()).hexdigest()[:8]     # + 0.0: a negative zero is zero
                     seq = forward_db.event(
                         self.db, "restated", pid=pid, day=day, at=now, once=f"{engine}:{value}",
                         payload={"why": "the night's recompute differs from the stored row: the row stays",
