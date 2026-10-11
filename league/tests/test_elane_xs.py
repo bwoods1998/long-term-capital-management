@@ -1395,14 +1395,19 @@ class NoStructureLiteralOutsideTheStore(unittest.TestCase):
         self.assertEqual(store_mod.OPTIONS_ONLY_SQL, "structure NOT IN ('etf', 'stock', 'panel')")
         self.assertTrue(bands.equity_seatable("panel"))
 
-    def test_the_ops_two_copies_of_the_scope_know_the_panel(self):
+    def test_the_stall_monitors_copies_of_the_scope_know_the_panel(self):
         from league.ops import stall
 
         self.assertEqual(stall.OPTIONS_FAMILIES, store_mod.OPTIONS_ONLY_SQL)
         self.assertIn(store_mod.EQUITY_ONLY_SQL, stall.OPTIONS_RUNS)
-        self.assertIn(f"NULL AND {store_mod.OPTIONS_ONLY_SQL}",
-                      " ".join((REPO / "league" / "ops" / "preopen.py").read_text().replace('"\n', "").split()).replace(
-                          '" "', ""))
+
+    def test_the_pre_open_reads_the_stores_scope(self):
+        """league/ops/preopen.py is package I's to patch (e4_patches/I.md: both of its options scopes read
+        `store.OPTIONS_ONLY_SQL`). Held here once that patch is in the tree: it then spells no structure out."""
+        text = (REPO / "league" / "ops" / "preopen.py").read_text()
+        if "OPTIONS_ONLY_SQL" not in text:
+            self.skipTest("held once package I's patch of league/ops/preopen.py is applied (e4_patches/I.md)")
+        self.assertIsNone(self.LITERAL.search(text), "the pre-open spells the equity structures out")
 
     def test_a_panel_family_is_an_equity_family_with_no_root_and_only_in_the_equity_lane(self):
         store = F.new_store(self)

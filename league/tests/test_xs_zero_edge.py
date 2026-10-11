@@ -257,6 +257,33 @@ class TheJob(JobCase):
         self.assertEqual((out["status"], out["ran"], out["stopped"]), ("ok", 1, "a wall is near"))
         self.assertEqual(self.row()["programs"], 1, "the program cut off is not counted, and is run whole next time")
 
+    def test_a_chunk_starts_no_program_it_could_not_finish_inside_its_own_wall(self):
+        self.assertLess(Z.CHUNK_S, Z.WALL_S, "the chunk stops itself before the runner's wall would end it")
+        ticks = iter(range(0, 10 ** 6, 300))  # every reading of the job's clock is five minutes after the last
+        slow = SimpleNamespace(monotonic=lambda: float(next(ticks)))
+        judge = mock.Mock(return_value={"passed": False, "fails": ["XT1"]})
+        with mock.patch.object(Z, "time", slow), mock.patch.object(Z, "judge", judge), \
+                mock.patch.object(Z, "PROGRAMS_RUN", 8):
+            out = self.run_job()
+        # started 0; program 1 300-600 (no check before the first); program 2 asked at 900, 1200-1500; program 3 asked
+        # at 1800, 2100-2400; program 4 asked at 2700: 2700 worked + the slowest program's 300 is past the budget
+        self.assertEqual((out["status"], out["ran"], judge.call_count), ("ok", 3, 3))
+        self.assertIn("the chunk's own wall is near", out["stopped"])
+        self.assertEqual(self.row()["programs"], 3)
+        self.assertEqual(elane_xs.cpu_spent(self.store, self.store.clock()), 900.0, "each program's time is booked")
+        with mock.patch.object(Z, "judge", judge), mock.patch.object(Z, "PROGRAMS_RUN", 8):
+            out = self.run_job()
+        self.assertEqual((out["ran"], out["programs"], out.get("stopped")), (8, 11, None), "the next trigger resumes it")
+
+    def test_one_slow_program_always_runs(self):
+        ticks = iter(range(0, 10 ** 6, 5000))
+        slow = SimpleNamespace(monotonic=lambda: float(next(ticks)))
+        judge = mock.Mock(return_value={"passed": False, "fails": ["XT1"]})
+        with mock.patch.object(Z, "time", slow), mock.patch.object(Z, "judge", judge), \
+                mock.patch.object(Z, "PROGRAMS_RUN", 8):
+            out = self.run_job()
+        self.assertEqual((out["ran"], self.row()["programs"]), (1, 1), "a chunk is never stopped before its first")
+
     def test_a_failure_of_the_houses_counts_no_program(self):
         class RunFailed(RuntimeError):
             pass

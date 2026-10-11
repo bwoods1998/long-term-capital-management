@@ -30,7 +30,10 @@ failed, a restart check that could not finish) is not counted, and the job stops
 THE WALLS. The job's first statement is `league.xs.config.quiet(now, WALL_S)` (its own wall: a start that could
 still be working at a wall is skipped, and the chunk resumes at its next trigger), and every run asks
 `quiet(now, run_budget_seconds)` before it starts, as a panel Train run of the swarm does. With `elane.panel.mode`
-under "train" the job does nothing.
+under "train" the job does nothing. THE CHUNK'S OWN WALL: a chunk starts no further program once the time it has
+worked plus its slowest program's would pass `CHUNK_S` (the registry row's working budget, under `WALL_S`): it
+stops with what it has, the week's row already written, and the next trigger resumes it; the runner never has to
+end it.
 """
 
 from __future__ import annotations
@@ -48,6 +51,9 @@ SCHEDULES = ("weekly", "monthly")
 ALARM_RATE = 0.05
 #: The job's own wall (seconds): what `league.xs.config.quiet` is asked with (held equal to its registry row).
 WALL_S = 3000
+#: The chunk's working budget (seconds; the registry row's cpu figure, under `WALL_S`): no further program starts
+#: once the time the chunk has worked plus its slowest program's would pass it.
+CHUNK_S = 2400
 #: The job's decider log, under the state root (its own child: never the swarm's `xs-decider.log`).
 DECIDER_LOG = "xs-zero-decider.log"
 #: The weeks the kv keeps (half a year: the Train map's rate is over all of them).
@@ -234,7 +240,11 @@ def run(ctx: Any) -> dict[str, Any]:
             if why is not None:
                 raise Stopped(str(why))
 
+        started, slowest = time.monotonic(), 0.0
         for index in range(row["programs"], row["programs"] + todo):
+            if done and time.monotonic() - started + slowest > CHUNK_S:
+                stopped = "the chunk's own wall is near: the next trigger resumes the week"
+                break
             spec = plan(week, index, hidden=folds)
             code = program_code(spec["seed"], spec["k"], spec["rebalance"])
             began = time.monotonic()
@@ -251,7 +261,9 @@ def run(ctx: Any) -> dict[str, Any]:
                             "passes": row["passes"]}
                 break
             finally:
-                elane_xs.book_cpu(store, time.monotonic() - began, ctx.now())
+                took = time.monotonic() - began
+                slowest = max(slowest, took)
+                elane_xs.book_cpu(store, took, ctx.now())
             row["programs"] += 1
             row["passes"] += int(verdict["passed"])
             for code_ in ([PASS] if verdict["passed"] else verdict["fails"] or [FAULT]):
@@ -278,5 +290,5 @@ def run(ctx: Any) -> dict[str, Any]:
     return out
 
 
-__all__ = ["KV", "PROGRAMS_RUN", "KS", "SCHEDULES", "ALARM_RATE", "WALL_S", "DECIDER_LOG", "WEEKS_KEPT", "PASS",
-           "FAULT", "Stopped", "program_code", "week_of", "plan", "build_runner", "judge", "run"]
+__all__ = ["KV", "PROGRAMS_RUN", "KS", "SCHEDULES", "ALARM_RATE", "WALL_S", "CHUNK_S", "DECIDER_LOG", "WEEKS_KEPT",
+           "PASS", "FAULT", "Stopped", "program_code", "week_of", "plan", "build_runner", "judge", "run"]
