@@ -331,7 +331,7 @@ class TheSailDay(PaceCase):
                 e2_held = None
                 self.assertLess(self.sail_today(), guards_line() - elane_yield.SAIL_ROOM_USD + 1e-9,
                                 f"minute {minute}: E2 asked without a dollar of room under the guard's line")
-                answer, route, errors = elane_yield.ask(
+                answer, _, errors = elane_yield.ask(
                     router, self.store, settings, first=None, role=elane_yield.ROLE, system="s", user="u",
                     key=f"swarm:elane:train:f:{minute}:{out['asked']}", max_output=4000, effort="medium", purpose="research",
                     now=self.clock())

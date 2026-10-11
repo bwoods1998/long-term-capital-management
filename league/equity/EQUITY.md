@@ -123,8 +123,9 @@ def decide(ctx):
     return intents
 ```
 
-Common faults. Each fails in `decide`, and 25 errors disqualify the run; the swarm refuses the ones it can see in the
-source before a program is run (league/swarm/elane_review.py, the reading rule):
+Common faults. Most raise in `decide` or return an intent the House drops, and 25 such errors disqualify the run; the
+others trade on nothing without a word. The swarm refuses the ones it can see in the source before a program is run
+(league/swarm/elane_review.py, the reading rule):
 
 - **`ctx.bars[sym]["close"]` raises TypeError.** A symbol's bars are one object: write `ctx.bars[sym].close`.
 - **Bars are arrays, not rows.** There is no `for bar in ctx.bars[sym]`, no `len(ctx.bars[sym])`, no
