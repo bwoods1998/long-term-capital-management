@@ -740,7 +740,7 @@ def card_errors(card: Any, settings: Mapping[str, Any] | None, *, store: Any = N
     if rebalance == "weekly":
         if weekday is not None and (isinstance(weekday, bool) or not isinstance(weekday, int) or not 0 <= weekday <= 4):
             errors.append(f"weekday: 0 (Monday) to 4 (Friday) on a weekly card ({weekday!r} given)")
-    elif weekday is not None:
+    elif rebalance == "monthly" and weekday is not None:
         errors.append("weekday: only a weekly card declares one")
     agenda = card.get("agenda")
     if agenda is not None and agenda not in PANEL_AGENDA:
@@ -1152,10 +1152,10 @@ def quota(store: Any, settings: Mapping[str, Any] | None, births: int) -> int:
 PANEL_PROPOSAL = (
     "A PANEL proposal is an equity-lane family whose structure is \"panel\": {\"slug\", \"lane\": \"equity\", "
     "\"structure\": \"panel\", \"panel\": \"sp500\", \"agenda\": \"<one key of THE PANEL AGENDA>\", \"max_names\": "
-    "5..{max_names}, \"rebalance\": \"weekly\" or \"monthly\", \"weekday\": 0..4 (weekly only), \"mechanism\", "
-    "\"rejection\", \"sketch\", \"card\": {{\"lane\": \"equity\", \"structure\": \"panel\", \"panel\": \"sp500\", "
-    "\"max_names\": ..., \"rebalance\": ..., the card's other fields; NO \"symbols\"}}, \"program\": \"<the whole "
-    "Python file under THE PANEL CONTRACT>\"}}.")
+    "5..MAX_NAMES, \"rebalance\": \"weekly\" or \"monthly\", \"weekday\": 0..4 (weekly only), \"mechanism\", "
+    "\"rejection\", \"sketch\", \"card\": {\"lane\": \"equity\", \"structure\": \"panel\", \"panel\": \"sp500\", "
+    "\"max_names\": ..., \"rebalance\": ..., the card's other fields; NO \"symbols\"}, \"program\": \"<the whole "
+    "Python file under THE PANEL CONTRACT>\"}.")
 
 
 def request_text(store: Any, settings: Mapping[str, Any] | None, births: int) -> str:
@@ -1175,7 +1175,7 @@ def request_text(store: Any, settings: Mapping[str, Any] | None, births: int) ->
         "matched placebo portfolios (the same number of names at the same weights from the same sector, beta and "
         "momentum cells on the same days), by the bar below on Train and then by the screen XS1; market, sector, beta "
         "and momentum direction are not counted as edge, so a rule that only tilts to a style earns nothing here.",
-        PANEL_PROPOSAL.format(max_names=c["max_names"]),
+        PANEL_PROPOSAL.replace("MAX_NAMES", str(c["max_names"])),
         f"PANEL QUOTA: of this pass's births, {want} may be panel families (elane.panel.birth_share "
         f"{c['birth_share']:.0%} of the equity lanes' births over the window; panel families in Train research: "
         f"{researching(store)} of at most {c['max_alive']}). Rebalance schedules offered: {', '.join(c['rebalance'])}.",
