@@ -10,11 +10,14 @@ OPS:
            kept at state["runners"][key]; `params` the program's merged PARAMS, the live ctx's: I6); {ok: False,
            refused: True, error} when the program does not load;
 - "drop"   {key} -> {ok};
-- "decide" {jobs: [{key, inputs: league.equity.ctx.Inputs}]} -> {ok, results: {key: {intents, stats, ctx_sha}}}: the
-           ctx is `league.equity.ctx.build(inputs)`, exactly the Gym's (I6), and `ctx_sha` the sha256 of its
-           `ctx_bytes` (the decision's provenance), taken BEFORE the program sees the ctx; a key with no loaded runner
-           answers {intents: [], stats: None, missing: True}, and inputs the ctx cannot be built from {intents: [],
-           stats, error} (that job only: the rest of the batch goes on);
+- "decide" {jobs: [{key, inputs: league.equity.ctx.Inputs}]} -> {ok, results: {key: {intents, stats, ctx_sha,
+           failed}}}: the ctx is `league.equity.ctx.build(inputs)`, exactly the Gym's (I6), and `ctx_sha` the sha256 of
+           its `ctx_bytes` (the decision's provenance), taken BEFORE the program sees the ctx; `failed` is the runner's
+           `last_failed` (the program raised, ran past its limit or is disqualified: the Gym engine counts exactly this
+           toward A8.5's two failed decides, league/equity/engine.py `decide`, and the House counts the same answer),
+           with `why` when it did; a key with no loaded runner answers {intents: [], stats: None, missing: True,
+           failed: True}, and inputs the ctx cannot be built from {intents: [], stats, error, failed: True} (that job
+           only: the rest of the batch goes on): neither is the program's own failure, and both are failed decides;
 - "needs"  {code, params, name} -> {ok, needs, sha, run_sha, params} (load, read NEEDS, drop: the parent never
            executes a program to learn what to slice);
 - "run"    {code, params, name, bars: league.equity.store.Bars, k, capital} -> {ok, result}
@@ -48,6 +51,13 @@ def _identity(program: Any) -> dict[str, Any]:
             "params": json.loads(json.dumps(program.params))}
 
 
+def _why_failed(stats: Mapping[str, Any]) -> str:
+    """Why a runner's last decide failed, from its stats: its disqualification, else its latest error message."""
+    messages = stats.get("messages") or []
+    why = stats.get("disqualified") or (messages[-1] if messages else "")
+    return str(why or "its decide raised or ran past its limit")[:300]
+
+
 def _decide(payload: Mapping[str, Any], runners: Mapping[str, Any]) -> dict[str, Any]:
     from . import ctx as C
 
@@ -56,15 +66,23 @@ def _decide(payload: Mapping[str, Any], runners: Mapping[str, Any]) -> dict[str,
         key = str(job["key"])
         runner = runners.get(key)
         if runner is None:
-            results[key] = {"intents": [], "stats": None, "missing": True}
+            results[key] = {"intents": [], "stats": None, "missing": True, "failed": True}
             continue
         try:
             ctx = C.build(job["inputs"])
             ctx_sha = hashlib.sha256(C.ctx_bytes(ctx)).hexdigest()
         except Exception as exc:  # noqa: BLE001 - one job's inputs never cost the batch
-            results[key] = {"intents": [], "stats": runner.stats(), "error": f"ctx: {type(exc).__name__}: {str(exc)[:300]}"}
+            results[key] = {"intents": [], "stats": runner.stats(), "failed": True,
+                            "error": f"ctx: {type(exc).__name__}: {str(exc)[:300]}"}
             continue
-        results[key] = {"intents": runner.decide(ctx), "stats": runner.stats(), "ctx_sha": ctx_sha}
+        intents = runner.decide(ctx)
+        stats = runner.stats()
+        # A8.5's FAILED DECIDE, as the Gym engine counts it (`runner.last_failed`): the House reads this flag, so a
+        # program that raises, times out or is disqualified live leaves its lots by the same rule as in its replay.
+        failed = bool(runner.last_failed)
+        results[key] = {"intents": intents, "stats": stats, "ctx_sha": ctx_sha, "failed": failed}
+        if failed:
+            results[key]["why"] = _why_failed(stats)
     return {"ok": True, "results": results}
 
 

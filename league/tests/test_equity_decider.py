@@ -86,6 +86,9 @@ class ProbeDecider(D.Decider):
 
 # ------------------------------------------------------------------------------------------------ in process
 class FakeRunner:
+    #: `EquityRunner.last_failed`, which the child reports as each answer's `failed` (A8.5's failed decide).
+    last_failed = False
+
     def __init__(self, program):
         self.program, self.calls = program, 0
 
@@ -167,11 +170,13 @@ class TheEquityKindInProcess(unittest.TestCase):
         # Two jobs of one key: the last answer stands (the book sends one job a key); a broken ctx is that job's alone.
         self.assertEqual(result["seed@1:r"]["intents"], [])
         self.assertIn("ctx: ValueError", result["seed@1:r"]["error"])
-        self.assertEqual(result["gone@1:r"], {"intents": [], "stats": None, "missing": True})
+        self.assertEqual(result["gone@1:r"], {"intents": [], "stats": None, "missing": True, "failed": True})
+        self.assertTrue(result["seed@1:r"]["failed"], "a ctx that cannot be built is a failed decide")
         answer = self.decider.kind("equity", "decide", {"jobs": [{"key": "seed@1:r", "inputs": inputs}]})
         one = answer["results"]["seed@1:r"]
         self.assertEqual(one["intents"], [{"buy": "SPY", "share": 0.5, "at": "close", "tag": "seed"}])
         self.assertEqual(one["stats"]["calls"], 2, "the runner's memory is kept between requests")
+        self.assertIs(one["failed"], False)
         # The provenance is the ctx the program was given, before it could change it.
         self.assertEqual(one["ctx_sha"], hashlib.sha256(ctx_bytes(build(inputs))).hexdigest())
         self.decider.kind_drop("equity", "seed@1:r")
