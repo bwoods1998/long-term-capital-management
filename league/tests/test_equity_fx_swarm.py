@@ -1083,3 +1083,55 @@ class EquityRoundsBeforeTheGymsWork(LoopCase):
                 sw.rounds["equity"].join(30)
             self.assertGreater(self.store.get(elane.ROUND_KEY), 0.0, f"the equity round ran although the {broken} failed")
         self.assertEqual(len(self.store.looks()), 3)
+
+
+class TheSeedsThroughTheRoundsForReal(LoopCase):
+    """s2-7 and s2-6 with nothing faked but the market: the swarm's own loop object, the real store, tournament and gate,
+    `runner.Isolated` over the decider's in-process twin, the real S2 screen under the repository's pinned receipt, on
+    a SYNTHETIC store (invented prices with a strong drift, so a seed passes). With the brake on and the Gym off, one
+    equity round takes the three seeds from birth to their looks, SPY's first."""
+
+    def test_one_round_under_the_brake_validates_and_looks_at_the_seeds_in_the_lists_order(self):
+        from league.equity import synth
+        from league.equity.runner import Isolated
+        from league.live.decider import InlineDecider
+        from league.swarm import seeds
+        from league.swarm import settings as settings_mod
+        from league.swarm.evaluator import equity_fingerprint
+        from league.tests import REAL_POLICY_PATH
+
+        patcher = mock.patch.object(settings_mod, "POLICY_PATH", REAL_POLICY_PATH)  # the committed pin, as the House reads it
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.settings["elane"] = {"mode": "gate"}
+        self.settings["gym"].update(enabled=False, image_checkpoint=None)
+        root = synth.synthetic_store(self.root / elane.STORE_DIR, gate=True, seed=11, drift=0.9, vol=0.10)
+        sw = self.swarm()
+        sw.tournament.equity_runner = sw.gate.equity_runner = Isolated(InlineDecider(), root)
+        self.guard.braked = True
+        listed = [str(spec["id"]) for spec in seeds.EQUITY_SEEDS]
+        self.assertFalse(sw.gym_ready())
+        self.assertEqual(sw.equity_births(), listed)
+        self.assertTrue(sw.equity_due())
+        out = sw.equity_rounds()  # on this thread: the in-process decider's time limit needs the main one
+        self.assertEqual(sorted(out["validated"]), sorted(listed))
+        self.assertEqual(out["errors"], {})
+        self.assertNotIn("look_errors", out)
+        self.assertTrue(out["validated"]["seed-overnight-spy"], "the overnight seed enters on a drifting market")
+        looks = self.store.looks()
+        self.assertEqual(looks[0]["family"], "seed-overnight-spy", "SPY's overnight seed is looked at first")
+        self.assertEqual((looks[0]["passed"], looks[0]["detail"]["screen"]), (1, "S2"))
+        spy = self.store.family("seed-overnight-spy")
+        self.assertEqual(spy["band"], "candidate")
+        self.assertEqual(spy["state"]["banded_evaluator"]["equity_sha256"], equity_fingerprint())
+        self.assertEqual(sorted(spy["state"][elane.LOOK_KEY]["activity"]), ["ratio", "train", "validation"])
+        # Every other seed that entered the gate was judged in the same round: looked at, or refused before its look
+        # (D3 against SPY's seed, or its own floor); none is left waiting on an options round.
+        looked = {look["family"] for look in looks}
+        for fid in listed[1:]:
+            state = self.store.family(fid)["state"]
+            if out["validated"][fid]:
+                self.assertFalse(state["gate_ready"], fid)
+                self.assertTrue(fid in looked or self.store.refusals(fid), fid)
+        self.assertFalse(sw.equity_due(), "the next round is elane.ROUND_SECONDS away")
+        self.assertIsNone(self.store.get("tournament_at"), "no options round ran")

@@ -90,7 +90,8 @@ evidence, ops and docs side (the order path's, the daily step's and the live hoo
   went wrong, the sizing-up rule and EDM1 as pre-registered (sigma's order and the sleeve floor included), the equity
   freeze and the owner's two commands, the morning audit's real consequences, the Sunday-to-Monday timeline, the
   client ids.
-- Proof: `league/tests/test_equity_fx_swarm.py` (each test names its finding and fails on `feat/equity-e1` as it was).
+- Proof: `league/tests/test_equity_fx_swarm.py` (46 tests, each naming its finding; 44 fail on `feat/equity-e1` as it
+  was, and two are guards that hold on both).
   Existing tests changed where they held the defect: `test_equity_identity` (the adoption cleared the series; the
   fingerprint's file list), `test_equity_store` and `test_equity_runner` (the slice's `first`), `test_dlane_report_equity`
   (the funnel's fixture, A14's status words, the row's `label`).
