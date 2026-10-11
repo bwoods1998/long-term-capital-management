@@ -173,6 +173,12 @@ PENDING_GRACE_S = 30.0
 LOOKUP_LIMIT = 6
 #: A cancel is not sent again for the same order within this many seconds.
 CANCEL_AGAIN_S = 50.0
+#: THE OWNER'S COMMANDS (`python3 -m league.live --root <state> --flatten-equity "<why>"` and `--clear-equity-freeze
+#: "<why>"`, league/live/__main__.py): key-values only the owner's command writes ({why, at, by}). The tick reads them
+#: every minute, acts once in the House's own thread and deletes them (`EquityBook._owner`), as the options path reads
+#: `owner_clear_assignment`.
+OWNER_FLATTEN = "owner_equity_flatten"
+OWNER_CLEAR_FREEZE = "owner_equity_clear_freeze"
 #: A symbol whose equity order is working, or ended this recently, is not reconciled that minute.
 FLUX_S = 120.0
 #: An exit the gateway or the venue refused this many times in a session is carried to the next one (and alarmed).
@@ -826,6 +832,41 @@ class EquityBook:
         self.record("equity.flatten", {"why": why[:300], "lots": n})
         return n
 
+    def _owner(self, now: float, out: dict) -> None:
+        """THE OWNER'S COMMANDS (`OWNER_FLATTEN`, `OWNER_CLEAR_FREEZE`), read first every minute, whatever the phase:
+        `flatten` run in the House's own thread (a second process on live.sqlite would race the book's row ids), and
+        the corporate-action freeze `eq_freeze` lifted (the reconciliation's own freeze is never the owner's to lift:
+        two clean readings lift it). Each is done once and its key deleted; one that fails keeps its key and is tried
+        again the next minute (a flatten queues each lot once), and never stops the other."""
+        for key, act in ((OWNER_FLATTEN, self._owner_flatten), (OWNER_CLEAR_FREEZE, self._owner_clear_freeze)):
+            ask = self.state.get(key)
+            if not ask:
+                continue
+            ask = ask if isinstance(ask, Mapping) else {}
+            try:
+                act(f"{ask.get('by') or 'the owner'}: {ask.get('why') or 'no reason given'}", out)
+            except Exception as exc:  # noqa: BLE001 - again next minute
+                self._error(key, exc, out)
+
+    def _owner_flatten(self, why: str, out: dict) -> None:
+        n = self.flatten(why)
+        self.state.execute("DELETE FROM kv WHERE key=?", (OWNER_FLATTEN,))
+        out["flatten"] = n
+        self.alert("warning", f"equity: flatten, {n} lots queued to exit through the normal path ({why[:200]})")
+
+    def _owner_clear_freeze(self, why: str, out: dict) -> None:
+        was = self.state.get("eq_freeze")
+        with self.state.transaction():
+            self.state.execute("DELETE FROM kv WHERE key IN ('eq_freeze', ?)", (OWNER_CLEAR_FREEZE,))
+        out["freeze_cleared"] = bool(was)
+        if not was:
+            return
+        old = str(was.get("why") if isinstance(was, Mapping) else was)[:300]
+        self.record("equity.freeze", {"frozen": bool(self.frozen), "cleared": "eq_freeze", "by": why[:300],
+                                      "why": f"cleared (was: {old})",
+                                      "activity": was.get("activity") if isinstance(was, Mapping) else None})
+        self.alert("warning", f"equity: the corporate-action freeze is cleared ({why[:200]}); it was: {old[:200]}")
+
     # ------------------------------------------------------------------ the minute
     def tick(self, now: float, *, account_row: Mapping[str, Any] | None, positions: Sequence[Mapping[str, Any]] | None,
              open_orders: Sequence[Mapping[str, Any]] | None, real_block: Callable[..., str | None],
@@ -851,6 +892,7 @@ class EquityBook:
             today = S.ny_day(now)
             m = S.moments(today, self._offsets())
             steps: list[tuple[str, Callable[[], Any]]] = [
+                ("owner", lambda: self._owner(now, out)),
                 ("orders", lambda: self._sync_orders(now, out)),
                 ("activities", lambda: self._activities(now, m, out)),
                 ("reconcile", lambda: self._reconcile_step(now, m, out)),
