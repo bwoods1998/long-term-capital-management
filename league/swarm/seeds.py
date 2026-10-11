@@ -612,14 +612,27 @@ def family_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------- THE EQUITY SEEDS (release E1, A4)
 #: THE THREE BETA SEEDS (amendment A4; league/swarm/elane.py `birth_seeds`): each a program with a published prior,
 #: written by the captain's build agents under the EQUITY.md contract (league/equity/EQUITY.md: NEEDS, PARAMS,
-#: decide(ctx); math and numpy only, no date), before any data was seen, and judged by the swarm's screen like any
-#: family: born once as a beta-lane family (MARKET BETA), then Validation (2025) with the share screen's pre-check, then
-#: one sealed look under the pinned screen (S2, amendment A11). Their cards name the prior and no figure (no census or
-#: market result: the repository is public).
+#: decide(ctx); math and numpy only, no date), and judged by the swarm's screen like any family: born once as a
+#: beta-lane family (MARKET BETA), then Validation (2025) with the share screen's pre-check, then one sealed look under
+#: the pinned screen (S2, amendment A11). Their cards name the prior and no figure (no census or market result: the
+#: repository is public).
+#: WHERE EACH CAME FROM, stated as it is (`provenance` in each spec and in the family's record; the program's own
+#: header says the same without a year, since a program names no year even in a comment). The two overnight seeds are
+#: written from a published prior. The reversal seed is NOT blind on history: its theta and h are the cell a
+#: pre-registered census selected on earlier history, which overlaps the Train-era pools its own screen floor is built
+#: from. No session of 2020, 2021, 2025 or 2026 was used for any of the three, so Validation and the one sealed look
+#: are clean of that choice.
+_OVERNIGHT_PROVENANCE = "written from a published prior"
+_REVERSAL_PROVENANCE = ("its theta and h are the cell a pre-registered census selected on earlier history, which "
+                        "overlaps the Train-era pools its own screen floor is built from; no 2020, 2021, 2025 or 2026 "
+                        "session was used")
+_OVERNIGHT_WRITTEN = "Written from its published prior."
+_REVERSAL_WRITTEN = ("Its theta and h are the cell a pre-registered census selected on earlier history; the Validation "
+                     "year and the sealed holdout were never used. They are PARAMS.")
 EQUITY_OVERNIGHT = '''# {fid}: MARKET BETA (the beta lane). Seeded by the captain's build agents (A4) and judged by the swarm's screen
 # like any family.
 # Prior: {prior}.
-# {rule} Written before any data was seen.
+# {rule} {written}
 import math
 
 NEEDS = {needs}
@@ -647,7 +660,8 @@ def decide(ctx):
 EQUITY_REVERSAL = '''# {fid}: MARKET BETA (the beta lane). Seeded by the captain's build agents (A4) and judged by the swarm's screen
 # like any family.
 # Prior: {prior}.
-# {rule} Written before any data was seen; theta and h are PARAMS.
+# {rule}
+# {written}
 import math
 
 NEEDS = {needs}
@@ -693,7 +707,7 @@ _FALSIFICATION = ("refuted when its one sealed look fails the share screen S2: t
 EQUITY_SEEDS: list[dict[str, Any]] = [
     {"id": "seed-overnight-spy", "lane": "beta", "structure": "etf", "symbols": ["SPY"], "template": "overnight",
      "mechanism": "SPY's return accrues overnight: hold SPY from each close to the next open, every session (MARKET BETA).",
-     "prior": _OVERNIGHT_PRIOR,
+     "prior": _OVERNIGHT_PRIOR, "provenance": _OVERNIGHT_PROVENANCE,
      "rule": "Buy SPY at the next close, every session; sell each lot at the following open.",
      "needs": {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2}, "params": {"share": 0.5},
      "condition": "True",
@@ -709,6 +723,7 @@ EQUITY_SEEDS: list[dict[str, Any]] = [
      "mechanism": "QQQ's overnight return after a down close: hold QQQ from a close below the prior close to the next "
                   "open (MARKET BETA).",
      "prior": _OVERNIGHT_PRIOR + ", conditioned on short-term reversal (Connors and Alvarez 2008)",
+     "provenance": _OVERNIGHT_PROVENANCE,
      "rule": "Buy QQQ at the next close when QQQ closed below its prior close; sell each lot at the following open.",
      "needs": {"symbols": ["QQQ"], "history": 2, "max_hold_sessions": 2}, "params": {"share": 0.5},
      "condition": "last < prior",
@@ -724,7 +739,7 @@ EQUITY_SEEDS: list[dict[str, Any]] = [
      "template": "reversal", "mechanism": "Index ETF reversal: buy SPY, QQQ, IWM or DIA at the open after a close at least "
                                           "theta below its prior close, and sell it at the open h sessions later (MARKET "
                                           "BETA).",
-     "prior": _REVERSAL_PRIOR,
+     "prior": _REVERSAL_PRIOR, "provenance": _REVERSAL_PROVENANCE,
      "rule": "Buy a symbol at the next open after a close at least theta below its prior close; sell it at the open h "
              "sessions later.",
      "needs": {"symbols": ["SPY", "QQQ", "IWM", "DIA"], "history": 2, "max_hold_sessions": 10},
@@ -749,17 +764,19 @@ def equity_program_for(spec: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     common = {"fid": spec["id"], "prior": prior, "rule": spec["rule"], "needs": repr(dict(spec["needs"])),
               "params": repr(dict(spec["params"]))}
     if spec.get("template") == "reversal":
-        return EQUITY_REVERSAL.format(**common), {}
-    return EQUITY_OVERNIGHT.format(**common, symbol=spec["symbols"][0], condition=spec["condition"]), {}
+        return EQUITY_REVERSAL.format(**common, written=_REVERSAL_WRITTEN), {}
+    return EQUITY_OVERNIGHT.format(**common, written=_OVERNIGHT_WRITTEN, symbol=spec["symbols"][0],
+                                   condition=spec["condition"]), {}
 
 
 def equity_family_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
     """The family's record (what the store keeps) from an `EQUITY_SEEDS` spec: its lane, structure and symbols (the
-    store's roots), its prior, and `seeded` (the Done meter reads the three seeds apart, A8.12)."""
+    store's roots), its prior, where it came from (`provenance`, stated as it is), and `seeded` (the Done meter reads
+    the three seeds apart, A8.12)."""
     return {"id": spec["id"], "mechanism": spec["mechanism"], "structure": spec["structure"], "roots": list(spec["symbols"]),
             "symbols": list(spec["symbols"]), "lane": spec["lane"], "seeded": True, "template": spec["template"],
-            "prior": spec["prior"], "rejection": _FALSIFICATION, "needs": dict(spec["needs"]),
-            "params": dict(spec["params"])}
+            "prior": spec["prior"], "provenance": spec["provenance"], "rejection": _FALSIFICATION,
+            "needs": dict(spec["needs"]), "params": dict(spec["params"])}
 
 
 __all__ = ["SEEDS", "FOUNDERS", "LIBRARY", "program_for", "family_spec", "SIGNALS", "BUILDS", "EQUITY_SEEDS",

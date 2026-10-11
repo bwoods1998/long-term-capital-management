@@ -1359,6 +1359,8 @@ def view(fam: Mapping[str, Any], *, lane: str | None) -> dict[str, Any]:
     notes = [BETA_NOTE] if lane == BETA else []
     if out["seeded"]:
         notes.append(SEEDED_NOTE)
+        if isinstance(spec.get("provenance"), str) and spec["provenance"].strip():
+            notes.append(f"where it came from: {spec['provenance']}")  # as it is: the reversal seed is not blind
     out["notes"] = notes
     return out
 

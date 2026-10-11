@@ -776,3 +776,46 @@ class TheFirstDecisionsWindow(unittest.TestCase):
         bars = EquityStore(self.root).bars(["SPY"], "train", history=5)
         self.assertEqual((bars.first, bars.day(0)), (0, dt.date(2024, 6, 3)), "nothing before the store's first day")
 
+
+class WhereTheSeedsCameFrom(FixCase):
+    """evidence-7: the public seed source and each program's own header said "Written before any data was seen". For
+    seed-reversal-index that was untrue: its theta and h are the cell a pre-registered census selected on history."""
+
+    def test_no_seed_claims_to_be_written_blind_and_the_reversal_seed_says_how_it_was_chosen(self):
+        import re
+        from pathlib import Path
+
+        from league.equity.program import load_program
+        from league.swarm import seeds
+
+        source = Path(seeds.__file__).read_text()
+        block = source[source.index("THE EQUITY SEEDS (release E1, A4)"):]
+        self.assertNotIn("before any data", block)
+        for spec in seeds.EQUITY_SEEDS:
+            code, params = seeds.equity_program_for(spec)
+            with self.subTest(seed=spec["id"]):
+                self.assertNotIn("before any data", code)
+                self.assertIsNone(re.search(r"(?<![0-9])(?:19|20)[0-9]{2}(?![0-9])", code), "a program names no year")
+                self.assertEqual(load_program(code, name=spec["id"], params=params).needs.symbols, tuple(spec["symbols"]))
+                record = seeds.equity_family_spec(spec)
+                self.assertEqual(record["provenance"], spec["provenance"])
+                if spec["template"] == "reversal":
+                    self.assertIn("pre-registered census selected", code)
+                    self.assertIn("never used", code)
+                    for year in ("2020", "2021", "2025", "2026"):
+                        self.assertIn(year, record["provenance"])
+                    self.assertIn("overlaps the Train-era pools", record["provenance"])
+                else:
+                    self.assertIn("Written from its published prior.", code)
+                    self.assertEqual(record["provenance"], "written from a published prior")
+                self.assertIsNone(re.search(r"\d+(\.\d+)?\s*(%|bp)", record["provenance"]), "no figure")
+
+    def test_the_family_and_its_view_carry_it(self):
+        born = elane.birth_seeds(self.store, ON)
+        for fid in born:
+            fam = self.store.family(fid)
+            notes = elane.view(fam, lane=BETA)["notes"]
+            self.assertEqual(notes[:2], [elane.BETA_NOTE, elane.SEEDED_NOTE])
+            self.assertEqual(notes[2], f"where it came from: {fam['spec']['provenance']}")
+        self.born("plain", seeded=False)
+        self.assertEqual(elane.view(self.store.family("plain"), lane=BETA)["notes"], [elane.BETA_NOTE])
