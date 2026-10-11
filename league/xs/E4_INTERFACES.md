@@ -622,7 +622,8 @@ a night on the box, more while they are young. Past that the stale ones go first
 **What follows for the other packages.** G: nothing (the lane imports none of this; `live_ready` reads the marker
 as it did). H: `dlane_report.PANEL_OWED` now says "not recorded yet" and `PANEL_SHADOWED` stands beside a style-open
 passer. A: the registry has thirteen rows after `dlane` (E3's six, `forward_xs`, E4's six). E3's contract gains its
-own section 13 (league/ops/E3_INTERFACES.md): the import rule admits `league/ops/forward_xs.py` and holds it.
+own section (league/ops/E3_INTERFACES.md: 13 when this was written, 14 since section 18's merge, where main's
+release E3.1 keeps 13): the import rule admits `league/ops/forward_xs.py` and holds it.
 
 **Still owed after package J:** patch 18 with the look permit (built since, not wired: section 14); the universe
 commit and the money row; the receipt at the captain's bar (landed since: section 15); `fill_minutes`' panel
@@ -760,7 +761,7 @@ hand-over of the probe's plan (section 14).
 
 | where | package J | patch 18 | A23 | as merged |
 |---|---|---|---|---|
-| this file and `league/ops/E3_INTERFACES.md` | a section 13 in each | a section 13 in each | a section 13 here | here 13, 14, 15; there 13 (J) and 14 (patch 18); every reference follows its own section |
+| this file and `league/ops/E3_INTERFACES.md` | a section 13 in each | a section 13 in each | a section 13 here | here 13, 14, 15; there 13 (J) and 14 (patch 18), which section 18's merge made 14 and 15; every reference follows its own section |
 | release E3's import list (`test_e3_seal_imports.OPS_MAY`) | names `league.ops.forward_xs` (`E4_OPS`), held under the same seal | untouched; its `test_contam_xs.TheWiring` held that the list names nothing of the panel | | J's list stands. `TheWiring` holds that the list names that ONE module of the panel and that the probe imports none of it. The merge edited no seal test |
 | `test_e4_e2e`, `test_e4_integration` (docstrings), `test_e4_stubs` | the twin marker's writer is J's | the permit's writer is patch 18's | the vectors' sha256 | all three statements |
 | docs/operations.md, CHANGELOG.md, `league/swarm/E4.md`, `league/swarm/e4_patches/README.md` | | | | one release in two steps; what step two still needs |
@@ -902,3 +903,86 @@ Whether
 release E1's entry rule should change for share programs too (B8's reason holds for them: a cut buy's size is
 final) is a decision of its own, with a rehearsal of its own. The lane alarms of release E2.4 do not watch a panel
 family's Train stalls; the panel's own alarms and the funnel do.
+
+## 18. The merge with main's releases E5-A and E3.1 (Oct 11, 2026; `feat/equity-e4-m3`; nothing pushed, nothing deployed)
+
+Main moved again while section 17's tree was checked: `8ab31e32dc77a730d6d3397c222f530294dec632`, deployed 22:51Z
+Oct 11, 2026, carries release E5-A (the share lane's seat rule "activity-1-free": the captain's A24 with A30) and
+release E3.1 (A28, an exit's wait for the practice proof has an end; A29, the replay twin is re-based after a
+differing session). It is the release the six seated ETF programs trade their first session under. This section is
+the record of the merge, and it says what is true of the tree where an earlier section says otherwise.
+
+**1. Merged, every line of both kept.** Ten files conflicted (the two digest tests share a row below), and one test of
+main's failed without a conflict:
+
+| where the two met | main | E4 | as merged |
+|---|---|---|---|
+| `league/equity/live.py` | the seat rule's block of the docstring; `_open_note`, `_refused_days` after `_open_block`; `dataclasses.replace` | the panel kind's block; `_seat_block` at the same place; `Collection` | both blocks, both method groups. THE SHARE PATH IS MAIN'S CODE PATH: `_seat_bands`, `_yield`, `_open_note`, `_work_exit`, `_sell_unproven` and the lost order's take-back are untouched, and every E4 change stays behind `kind != "equity"` |
+| `league/swarm/bands.py` (the reader) | `queued`: a waiting Candidate has a row, with `passed_at` and `seat_activity`; `seat_plan`; the roster's `rule`, `plan`, `order` | a panel Candidate is seatless and a seated panel family hidden while the lane is not live; a panel look's sentence; the roster's `seatless_why` | all of it: `hidden` is main's by `queued`, then E4's panel rule on top, so a panel family has no row for the seat plan either |
+| `league/equity/families.py` | `MemoryEquityFamilies(seats=)` | `held` | both |
+| `league/ops/dlane_report.py` | the book's `seat_plan`; `equity_seats`; `root` | `rebalances`, `spy`; the panel section and its lane | both |
+| `league/ops/forward_db.py` | `ADDED_COLUMNS`, `has_column`, `_migrate` | `XS_ROUTE`, `PANEL_UGROUP` | both; one migration (point 4) |
+| `league/ops/E3_INTERFACES.md` | section 13: release E3.1 | sections 13 (J) and 14 (patch 18) | main's keeps 13; E4's are 14 and 15 |
+| `league/swarm/elane_seal.py` | `elane_seat` sealed | the panel's eight keys sealed | all nine |
+| `test_constitution`, `test_live_long_single` | `e1` (A20's design with the seat block left out) | E1's universe put back (a local helper of the same name) | two helpers, used together (`e1`, `narrow`) |
+| `league/tests/test_equity_seats.py` (no conflict; it failed) | a week recorded on release E5-S, every `eq_instances` column compared | the column `kind` | `kind` is held to "equity" on every row and left out of the comparison |
+| CHANGELOG.md | releases E5-A and E3.1 | release E4 | E4's entry, then the 22:51Z deploy entry and main's two, marked deployed |
+
+`league/constitution.py` is main's, byte for byte.
+
+**2. A share program's live path is main's, order for order, proved again on that main.**
+- The fixture (`league/tests/fixtures/equity_etf_orders.json`) was recorded again by the harness's own recorder on a
+  detached clone of `8ab31e32` (two records equal to the byte). Section 17's fixture was the main before it.
+- 75 scenarios. The 65 of section 17, of which main itself moved these: the five weeks in which stage SELL cannot
+  pass now sell at the 09:45 cut-off with one alert a session (they held every lot), and every scenario's keys
+  hold the seat plan and the open note. Ten the new main makes possible: SIX on the seat rule over thirteen
+  sessions (nobody waits and the idle seats are kept; an idle seat yields to the waiting program; two programs
+  wait and one seat yields a decision day; a session in which the House refused every open is left out of the
+  idle clock; a yielded program returns into a seat the swarm freed; no idle clock while the House refuses every
+  buy), and FOUR with the forward record's nights beside the book over eight sessions, on a synthetic store's bars
+  (the real registry, `forward_shadow.Shadow`, `forward_twins.finish`, `twins.equity_round`, `a14_reading`: every
+  buy fills and nothing is re-based; Monday's buys are missed and the twins are re-based; a rebuy is missed
+  mid-week; the practice sale is never witnessed).
+- Held equal: every POST to either account, cancel, fill, alert and line of the seat rule (each decision's plan and
+  every change of hands), whole; every intent, order, lot and instance row, the book's keys, every record, every
+  minute's answer, every `fwd_twins`, `fwd_part` and `fwd_lotgap` row, every twin event, each night's receipt and
+  the A14 reading of every instance, by digest. Through the test double of the swarm's reader, and every scenario
+  again through the real reader with the panel switch absent, "off" and at "train": 225 more runs.
+- The two differences allowed are section 17's (`eq_instances.kind`, "equity" on every row; `eq_rebalances`,
+  empty). The forward store has none.
+- Teeth, beside section 17's B8: a reader that hides the waiting Candidates (the reader as section 17 had it), an
+  exit that never waits for the practice sale and a twin that is never re-based are each caught by the scenarios
+  recorded for them.
+
+**3. What main's three rules do for a panel program** (decided; `league/swarm/E4.md` section 7;
+`league/tests/test_equity_panel_on_main.py`).
+- THE SEAT RULE. In step one a panel family never enters the seat plan, never counts against the six seats, never
+  holds or yields a seat. The book's plan is built from the reader's rows alone; the reader gives a panel family
+  none at any setting of the switch. Held with a panel family forced into the Candidate, Probe and Sized bands
+  (what step one cannot make): the reader's answer at five settings, thirteen sessions of the seat rule equal to
+  main's record, an ETF Candidate's seat not taken. Under the rollback "first-come" the swarm's roster counts the
+  Probe band as the store holds it; step one puts no panel family in a band.
+- THE EXIT WAIT'S END covers a basket's exits like any other (`_work_exit` reads no kind). The basket's buy of that
+  open waits with its own sales (B8) and is missed at the cut-off; the standing target plans it again.
+- THE TWIN'S RE-BASE IS NOT BUILT FOR THE PANEL TWIN. `forward_twins._one_instance` hands a panel instance to
+  `forward_xs.twin` before A29's loop; a panel twin row is written with the registered columns (NULL in `rebased`
+  and `base_agree`: read as never re-based), a differing session counts each time, no `twin_rebased` event.
+
+**4. The forward store: one migration.** Release E4 adds no table and no column to forward.sqlite:
+`forward_db.SCHEMA` is main's to the byte, and this lane's at section 17 was it less A29's two declarations (both
+held by the sha256 of the text). The migration is main's `ADDED_COLUMNS` through `_migrate`, alone.
+`league/tests/test_forward_store_two_builds.py`: a store as section 17's tree builds it (an ETF and a panel program
+in the registry, twin rows of both) gains the two columns with no row rewritten (rowids, columns, the bytes of the
+pages that hold twin rows), the chain verifies; a store as main builds it opens with nothing added and takes a panel
+row; two connections that both saw the column missing, and two threads opening either build together. The same was
+run once on stores each sha's own code built (a clone of each, the harness's twin scenario): no row changed in any
+table, and the next night under the merged tree re-based from the latest stored differing session.
+
+**5. The identities.** The options execution fingerprint (b60410ad...), the equity identity (78022ca6...), the
+money digest (11a1dc0c...) and the constitution digest (00c2bf6f...) are main's `8ab31e32` on both Pythons: E5-A
+moved the two digests on main, and E4 moves none. The xs identity is 2f0083bc..., as in sections 16 and 17: main
+changed no file it reads.
+
+**6. Open, for the captain** (none reachable in step one). The seat rule for a panel program in step two: K for a
+basket (the panel's look writes none of K's counts), and whether a panel program held on a failed leg counts its seat
+in the book's plan. The re-base of the panel twin. Section 17's open points stand.

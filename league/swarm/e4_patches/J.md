@@ -6,7 +6,8 @@ file is a record: each change, its anchor (a statement, never a line number) and
 diff is the branch's own (`git diff 4700fa1d -- league/ops/`).
 
 (This file lies under league/swarm, where release E3's seal lets no text name the forward store, its files or
-one of its tables: they are named by their role here, and by name in `league/ops/E3_INTERFACES.md` section 13.)
+one of its tables: they are named by their role here, and by name in `league/ops/E3_INTERFACES.md` section 14
+(13 until the merge with main's release E3.1, whose own section keeps that number).)
 
 Package J's design note, where it departs from the spec's patch 17: `league/xs/E4_INTERFACES.md` section 13. In one
 line: the panel's runs are NOT dispatched inside E3's night; the panel has its own night (E3's `Shadow.night` on a

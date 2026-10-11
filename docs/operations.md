@@ -19,24 +19,43 @@ by the screen **XS1**. The contract between the release's packages is `league/xs
 shown is `league/xs/XS.md`; the lane in the swarm is `league/swarm/E4.md`; what went into E1's and E2's files is
 `league/swarm/e4_patches/` (one file an author; a record once applied).
 
-**What ships (as merged, Oct 11, 2026; nothing deployed): ONE release, in two steps.** The tree holds the whole
-lane: the eight packages of the integration over E1 and E2, the review's and the ship pass's fixes, the three pieces
-built since and merged in this order (the forward twin, package J; the probe's panel strata, patch 18: built, not
-handed to the House's job; the receipt at the captain's bar, A23), main's releases through E5-S and E2.4
-(`81963c87`: six seats at a Probe sleeve of 0.25 x E, and the equity lanes' alarms) merged under all of it, and the
-ship check's fixes (below). The records are `league/xs/E4_INTERFACES.md` sections 10 to 17.
+**What ships (as merged, Oct 11, 2026; nothing of the lane deployed): ONE release, in two steps.** The tree holds
+the whole lane: the eight packages of the integration over E1 and E2, the review's and the ship pass's fixes, the
+three pieces built since and merged in this order (the forward twin, package J; the probe's panel strata, patch 18:
+built, not handed to the House's job; the receipt at the captain's bar, A23), the ship check's fixes (below), and
+MAIN AS IT RUNS merged under all of it: `8ab31e32`, deployed 22:51Z Oct 11, with releases E5-S and E2.4 (six seats
+at a Probe sleeve of 0.25 x E, the equity lanes' alarms), E5-A (the seat rule "activity-1-free") and E3.1 (an exit's
+wait for the practice proof has an end; the twin is re-based after a difference). The records are
+`league/xs/E4_INTERFACES.md` sections 10 to 18.
 - **A SHARE PROGRAM'S LIVE PATH IS MAIN'S, ORDER FOR ORDER, at every position of the lane's switch** (the captain's
   ruling at the ship check: six ETF programs hold real-money seats). The live equity book carries the panel kind
   (`league/equity/live.py`, package H), and one of its rules was written for every instance: the spec's decision
   27, B8, a buy cut by a cap waits while an exit of its own program is working. B8 is now the panel kind's alone
   (`EquityBook._cut_waits`). The proof is a recorded comparison (`league/tests/test_equity_etf_orders.py`): the
   rehearsal's harness of the lane's first Monday (the real book, schedule, sizing, stock proof and decider kind
-  over a fake venue and invented prices) runs 65 scenarios, the normal Monday, every way a buy can miss, the week
-  and its failing weeks, and programs that sell and buy in one window; and every one of them again through the real
-  swarm reader with the panel switch absent, "off" and at "train" (a panel family in Train research in the store). The
-  fixture was recorded on main `81963c87`; every POST, cancel, fill, alert, intent, order, lot, instance row,
-  record and minute's answer of this tree equals it. With B8 as the spec wrote it five scenarios differ, and the
-  test holds that it would see them.
+  over a fake venue and invented prices) runs 75 scenarios: the normal Monday, every way a buy can miss, the week
+  and its failing weeks, programs that sell and buy in one window, and what main's last release made possible: the
+  seat rule over thirteen sessions (an idle seat kept while nobody waits, yielded to a waiting program, one a
+  decision day, a session the House refused left out, a yielded program's return) and the forward record's nights
+  beside the book (the real registry, shadow and twins: nothing re-based, a missed buy and the twin re-based, the
+  practice sale never witnessed and the exits at the 09:45 cut-off); and every one of them again through the real
+  swarm reader with the panel switch absent, "off" and at "train" (a panel family in Train research in the store).
+  The fixture was recorded on main `8ab31e32`, the running release; every POST, cancel, fill, alert, line of the
+  seat rule, intent, order, lot, instance row, key of the book, record, minute's answer, twin row, twin event and
+  A14 reading of this tree equals it. With B8 as the spec wrote it five scenarios differ, and a tree that lost the
+  seat rule's read, the exit wait or the re-base differs in the scenarios recorded for each: the test holds that it
+  would see them.
+- **What main's three new rules do for a panel program** (decided at the merge; `league/swarm/E4.md` section 7;
+  `league/tests/test_equity_panel_on_main.py`). THE SEAT RULE: in step one a panel family never enters the seat
+  plan, never counts against the six seats and never holds or yields a seat: the book builds its plan from the
+  rows the swarm's reader gives it, and the reader gives a panel family none while the lane is not live, which
+  step one cannot be at any setting. (Under the rollback value "first-come" it is the swarm's roster that counts,
+  by the Probe band as the store holds it; step one puts no panel family in a band.) THE EXIT WAIT'S END covers a
+  basket's exits like any other: its sales and the House's exit of a name that left the eligible set wait for the
+  practice sale inside the open window and go at the 09:45 cut-off with the one alert. A basket's BUY of that open
+  waits with its own sales (B8) and the cut-off records it missed; the standing target plans it again at the next
+  close. THE TWIN'S RE-BASE IS NOT BUILT FOR THE PANEL TWIN: a panel instance is compared every session with its
+  twin as registered, each differing session counted, with no re-base event; its rows read as never re-based.
 - **What the deploy changes for a book that holds no panel program, and nothing else:** the live state gains the
   column `eq_instances.kind` ("equity" on every share program's row) and the empty table `eq_rebalances`, both made
   when the book starts; main's book reads neither and trades the same weeks on a state that holds them (checked:
@@ -959,7 +978,8 @@ close):
 - unmeasured, A14 does not hold and the checkpoint is not final. A checkpoint that held without A14 can only stop
   holding; none can start. The pinned Done rule is not edited.
 
-**The twin is re-based after a difference, so a miss counts once** (the captain's A29, 20:13Z Oct 11, 2026;
+**The twin is re-based after a difference, so a miss counts once** (release E3.1, deployed 22:51Z Oct 11, 2026; the
+captain's A29, 20:13Z Oct 11;
 registered before the first real share order and before any twin row existed; it amends how the intents half above
 is COMPUTED, never its bounds: the 95%, the 15 bp, the keys and the pooling are as registered;
 `league/ops/forward_twins.py` `live_seed`, `RebasedTwin`).
@@ -1657,7 +1677,8 @@ confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the Ho
   position: it gates every REAL equity BUY, with no end. Stage SELL (kv `paper_proof_stock_sell`) sells that lot in
   the next session's open window, first (real exits wait for it), and passes on the whole sale, the FILL activities
   and the position back at its baseline: it gates every REAL equity SALE, **and that wait has an end (the captain's
-  A28, registered before the first real share order): the session's entry cut-off, the open + 900 s (09:45 ET), the
+  A28, registered before the first real share order; release E3.1, deployed 22:51Z Oct 11, 2026): the session's
+  entry cut-off, the open + 900 s (09:45 ET), the
   minute the book stops trying open entries.** The practice sale is sent in the window's first minute and normally
   witnessed in its second, so a real exit normally waits one minute. From the cut-off on EVERY exit goes through the
   normal path whatever the stage says: a program's own sale, the maximum-hold exit, a demoted or retired program's
@@ -1729,7 +1750,7 @@ or the budget; its statement is built from the rows in force).
 
 **The seats and the sleeve are two numbers** (release E5-S, Oct 11, 2026; `equity_money.probe.max_programs` and
 `probe.sleeve_share`, league/constitution.py). A program that passed its look takes a seat (who takes a free one is
-**The seat rule**, below; it was first come until release E5-A), with a sleeve
+**The seat rule**, below; it was first come until release E5-A, deployed 22:51Z Oct 11), with a sleeve
 of `sleeve_share` x E; its position in one ETF is at most half its sleeve. The pair is set by ONE mechanical step,
 `set_design SEATS SLEEVE`, which rewrites the two rows, the swarm's `elane.roster` (league/swarm/policy.json and the
 default in league/swarm/elane.py: the seats, written in three places and held equal by a test), `PINNED_DIGEST`, and
@@ -2080,7 +2101,8 @@ The official-price model is the engine's fill (the session's official open or cl
 `league.equity.engine.fill_price`: what each equity twin is priced with); the shadow intents are the same program's
 decisions replayed on the same sessions. Closes that share a close date are one cluster of the t.
 
-**The seat rule** (release E5-A; the captain's A24, registered 13:42Z Oct 11, 2026, before the first live share close
+**The seat rule** (release E5-A, deployed 22:51Z Oct 11, 2026; the captain's A24, registered 13:42Z Oct 11, before
+the first live share close
 and before any program waited for a seat, and amended by the captain's A30 at 20:47Z the same day, before the rule
 was live; `equity_money.probe.seat` in league/constitution.py holds its name and constants: `rule`
 "activity-1-free", `k_floor` "0.25", `idle_sessions` 10). A24 WITH A30 IS THE RULE IN FORCE. It replaced A14's
