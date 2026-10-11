@@ -539,16 +539,30 @@ class TheDataJobsOnTheRealStore(unittest.TestCase):
         self.assertTrue(((table >= xconfig.HS_FLOOR_BP / 1e4) & (table <= xconfig.HS_MAX_BP / 1e4)).all())
         universe = xstore.Universe(self.root)
         today = [aid for aid, _ in universe.members(FRIDAY)]
-        share = equity_panel.hs_share(self.root, today)
-        # THE SHARE IS BELOW ONE BY CONSTRUCTION (E4_INTERFACES section 10, point 10): a name is sampled on a sample
-        # day only while it is a member, so the members with 8 samples at both points are exactly those that were
-        # members on 8 Train-era sample days, and every later joiner is charged the universe's default figure.
+        # A name is sampled on a sample day only while it is a member, so the names with 8 samples at both points
+        # are exactly those that were members on 8 Train-era sample days: every later joiner is charged the
+        # universe's figure, and of TODAY'S members the measured share is under one and falls with every change of
+        # the index (E4_INTERFACES section 10, point 10).
         days = [d for year in equity_spreads.sample_days(nyse_sessions(dt.date(2016, 1, 4), FRIDAY)).values() for d in year]
         sampled = [aid for aid in today if sum(1 for d in days if universe.member(aid, d)) >= equity_panel.MIN_SAMPLES]
-        self.assertEqual(share, len(sampled) / len(today))
-        self.assertTrue(0.5 < share < 1.0, share)
         late = sorted(set(today) - set(sampled))
         self.assertTrue(late and all(not universe.member(aid, days[-equity_panel.MIN_SAMPLES]) for aid in late))
+        self.assertTrue(0.5 < len(sampled) / len(today) < 1.0)
+        # THE SPREADS' SHARE the lane's bound reads is of the Train eras' member-days (the sessions the samples are
+        # for): on this store, whose backfill is whole, it is the share of those member-days whose name was a member
+        # on 8 sample days, and it is over the share of today's members: no joiner since 2024 is in it.
+        import numpy as np
+
+        members = [int(a) for a in panel.aids[len(xconfig.REF):]]
+        member = np.asarray(panel.member)[:, len(xconfig.REF):]
+        share = equity_panel.hs_share(self.root, member, panel.days, members)
+        train = [i for i, d in enumerate(panel.days) if d.year in xconfig.TRAIN_YEARS]
+        full = {aid for aid in members if sum(1 for d in days if universe.member(aid, d)) >= equity_panel.MIN_SAMPLES}
+        owed = int(member[train].sum())
+        measured = int(sum(member[train, k].sum() for k, aid in enumerate(members) if aid in full))
+        self.assertEqual(share, measured / owed)
+        self.assertGreater(share, len(sampled) / len(today))
+        self.assertGreater(share, 0.9)
         # The twins' reader (package B's patch 11): a panel lot's half-spreads at the open and at the close.
         reader = equity_spreads.panel_half_spread(self.root)
         got = reader(universe.symbol(sampled[0], FRIDAY), FRIDAY.isoformat())

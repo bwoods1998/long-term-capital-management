@@ -1004,8 +1004,9 @@ def write_panel(root: str | Path, *, days: Sequence[dt.date], early: Sequence[bo
     `coverage`: D19's block as `coverage()` returns it (package A hands its own, at the setting's floor); None: it is
     computed here at `COVERAGE_MIN`, with `masked` (bool an asset; None: no asset is). `vanished`: the aids whose bars
     end while they are members (None: computed, `_vanished`). `full_at`: the day of the last whole refetch.
-    `revisions`: the raw rows a refetch changed. `hs_share`: the share of today's eligible names with enough spread
-    samples at both fill points (None: unknown, which every reader takes as below any bound). `live_from`: the first
+    `revisions`: the raw rows a refetch changed. `hs_share`: the share of the Train eras' member-days whose name has
+    enough spread samples at both fill points (package A's `equity_panel.hs_share`; None: unknown, which every reader
+    takes as below any bound). `live_from`: the first
     session the universe deploy was in force (None until then). `i6`: the nightly I6's block (None before the first)."""
     root = Path(root)
     dates = [as_date(d) for d in days]

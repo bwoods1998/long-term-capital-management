@@ -458,14 +458,16 @@ file say the same):
    it read the list now in force), or the lane stops there.
 9. `equity_panel` has one trigger, `after("equity_universe")`: a night the universe job fails or is skipped, the
    panel's bars and the nightly I6 do not run either (A's open issue 5); the I6's age is not yet a leg of `live_ready`.
-10. THE SPREADS' SHARE CANNOT HOLD 0.90 FOR LONG, BY CONSTRUCTION (seen when package B's job first ran against
-    package C's real store at integration; a rule-level reading, no market figure). A name is sampled on a Train-era
-    sample day only while it is an index member that day (8 days a Train year, the last of them in 2024), and
-    `hs_share` counts today's members with 8 samples at both fill points. So every name that joined the index after
-    the first weeks of 2024 has under 8 and is charged the universe's default figure: `hs_share` starts near the
-    line and falls by the index's turnover each year, and under `spreads_min_share` (0.90) the mode reads "train"
-    (no Validation, no look). Two ways out, neither taken here: the setting (its bound is [0.5, 1.0]), or sampling a
-    name's Train-era days whether or not it was a member then (a spec change for package B).
+10. THE SPREADS' SHARE COULD NOT HOLD 0.90 FOR LONG, BY CONSTRUCTION (seen when package B's job first ran against
+    package C's real store at integration; a rule-level reading, no market figure). FIXED AT THE SHIP PASS, IN THE
+    MEASURE (section 12). A name is sampled on a Train-era sample day only while it is an index member that day (8
+    days a Train year, the last of them in 2024), and `hs_share` counted TODAY'S members with 8 samples at both
+    fill points. So every name that joined the index after the first weeks of 2024 had under 8 and the share fell
+    by the index's turnover each year, for ever; under `spreads_min_share` (0.90) the mode reads "train" (no
+    Validation, no look, a seated program's opens held). `hs_share` is now the share of THE TRAIN ERAS' MEMBER-DAYS
+    whose name has its own figure: the population the samples are for, which no later change of the index moves.
+    Not taken: loosening the setting; sampling a name's Train-era days whether or not it was a member then (it would
+    give a later joiner a figure of its own in place of the universe's: a spec change for package B, still open).
 
 ## 11. The review's fixes (Oct 11, 2026; `feat/equity-e4`; nothing pushed, nothing deployed)
 

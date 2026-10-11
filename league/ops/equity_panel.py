@@ -825,16 +825,44 @@ def _enough(count: Any) -> bool:
     return isinstance(count, (int, float)) and not isinstance(count, bool) and count >= MIN_SAMPLES
 
 
-def hs_share(root: str | Path, aids: Sequence[int]) -> float:
-    """The share of `aids` (today's unmasked members) with `MIN_SAMPLES` spread samples at both fill points; 0.0 with
-    no spreads file or no name."""
+def hs_share(root: str | Path, member: Any, days: Sequence[dt.date], aids: Sequence[int], *,
+             masked: Any = None) -> float:
+    """THE SPREADS' SHARE (the manifest's `hs_share`; the lane holds a Train pass to "provisional costs" under
+    `elane.panel.spreads_min_share`): OF THE TRAIN ERAS' MEMBER-DAYS, THE SHARE WHOSE NAME IS CHARGED ITS OWN MEASURED
+    HALF-SPREAD, that is, has `MIN_SAMPLES` kept samples at BOTH fill points (D20's first branch; every other
+    member-day is charged the universe's figure). `member`: bool (len(days), len(aids)), the store's membership of
+    the member columns (no REF column); the member-days counted are those of the sessions of
+    `league.xs.config.TRAIN_YEARS` among `days`, of the columns not `masked` (bool an aid; None: none is). 0.0 with
+    no spreads file, or a store that holds no Train-era member-day.
+
+    WHY NOT TODAY'S MEMBERS (what it read before, and E4-SPEC 7.3's words): a sample is taken on a Train-era session
+    of a name that is a member THAT day, and the Train eras end in 2024 (a cost table reads no sealed year). So a
+    name that joined the index since can never have a sample, and a share of today's members fell by the index's
+    turnover every year, by construction and for ever: under the bound the lane reads "train", takes no Validation
+    and no look, and holds a seated program's opens. The share's own job is the backfill's (the spec's gate G2: until
+    the cost table is measured, a pass is under provisional costs), and a table of nulls must still pull it down:
+    both are questions about the sessions the samples are FOR. Those are a fixed population: the share climbs as
+    the backfill fills the table, stands where the table is whole (under 1.0 by the names that were members on fewer
+    than `MIN_SAMPLES` sample days), and no later change of the index moves it. THE COST, stated: a name that joined
+    after the Train eras is charged the universe's figure (the 75th percentile of the measured names) in every run
+    and in its replay twin, whatever this share reads."""
+    from ..xs import config as xs_config
+
     table = _spreads(root)
-    if table is None or not aids:
+    if table is None or not len(aids):
         return 0.0
     names = table["names"]
-    full = sum(1 for aid in aids if isinstance(names.get(str(int(aid))), Mapping)
-               and _enough(names[str(int(aid))].get("n_open")) and _enough(names[str(int(aid))].get("n_close")))
-    return full / len(aids)
+    full = np.array([isinstance(names.get(str(int(aid))), Mapping) and _enough(names[str(int(aid))].get("n_open"))
+                     and _enough(names[str(int(aid))].get("n_close")) for aid in aids], dtype=bool)
+    era = np.array([d.year in xs_config.TRAIN_YEARS for d in days], dtype=bool)
+    inside = np.asarray(member, dtype=bool)
+    if inside.shape != (len(days), len(aids)):
+        raise ValueError("the membership is not one row a day and one column an aid")
+    inside = inside[era]
+    if masked is not None:
+        inside = inside & ~np.asarray(masked, dtype=bool)[None, :]
+    total = int(inside.sum())
+    return float(int((inside & full[None, :]).sum()) / total) if total else 0.0
 
 
 # ------------------------------------------------------------------------------------------------- the nightly I6
@@ -1387,7 +1415,7 @@ def _run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, 
             live_from = last  # the first run that reads the grown constitution universe
     tradable = tradable_rows(days, aids, assets, before, live_from=live_from, stock=stock, n_ref=n_ref)
     hs = hs_table(root, aids)
-    share = hs_share(root, unmasked_today)
+    share = hs_share(root, member[:, n_ref:], days, aids[n_ref:], masked=hidden[n_ref:])
     revisions = int(built["revisions"])
     audit = {"jumps": len(found["moves"]), "second_read": len(reads), "contradicted": contradicted,
              "zero_volume": zero_volume, "masked": dict(sorted(by_mask.items())),

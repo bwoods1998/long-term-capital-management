@@ -1073,9 +1073,19 @@ class HalfSpreads(unittest.TestCase):
         table = {"version": "xs-spreads-v1", "names": names, "default": default or {}}
         (self.root / P.SPREADS_FILE).write_text(json.dumps(table))
 
+    def share(self, aids, *, spells=None, last=D(2024, 12, 31), masked=None):
+        """`P.hs_share` of the member columns `aids` on the store's sessions through `last`. `spells`: {aid: (start,
+        end | None)}; an aid not named is a member the whole time."""
+        days = [d for d, _ in U.store_sessions(last)]
+        member = np.ones((len(days), len(aids)), dtype=bool)
+        for k, aid in enumerate(aids):
+            start, end = (spells or {}).get(aid, (days[0], None))
+            member[:, k] = [start <= d and (end is None or d < end) for d in days]
+        return P.hs_share(self.root, member, days, aids, masked=masked)
+
     def test_no_file_is_the_fallback(self):
         self.assertEqual(P.hs_table(self.root, [1, 100, 101]).tolist(), [[0.0010, 0.0005]] * 3)
-        self.assertEqual(P.hs_share(self.root, [100, 101]), 0.0)
+        self.assertEqual(self.share([100, 101]), 0.0)
         self.assertEqual(xs_config.HS_FALLBACK_BP, (10.0, 5.0))
 
     def test_a_names_own_figure_the_floor_and_the_universes_for_a_thin_name(self):
@@ -1089,7 +1099,110 @@ class HalfSpreads(unittest.TestCase):
                          [[7.5, 3.0], [12.0, 99.0], [12.0, 4.0], [12.0, 6.0]],
                          "never under the 3 bp floor; fewer than 8 samples at a point: the universe's figure there")
         self.assertEqual(xs_config.HS_FLOOR_BP, 3.0)
-        self.assertEqual(P.hs_share(self.root, [100, 101, 102, 103]), 0.25, "8 samples at BOTH points")
+        self.assertEqual(self.share([100, 101, 102, 103]), 0.25, "8 samples at BOTH points (four members throughout)")
+
+    def test_the_share_is_of_the_train_eras_member_days(self):
+        full = {"open_bp": 6.0, "close_bp": 4.0, "n_open": 8, "n_close": 8}
+        self.write({"100": full, "101": full, "102": {**full, "n_close": 7}})
+        # Member-days, not names: a name that was a member for one Train year of the six weighs a sixth of one that
+        # was a member throughout. 101 here is a member of 2024 alone.
+        year = sum(1 for d, _ in U.store_sessions(D(2024, 12, 31)) if d.year == 2024)
+        train = sum(1 for d, _ in U.store_sessions(D(2024, 12, 31)) if d.year in xs_config.TRAIN_YEARS)
+        got = self.share([100, 101, 102], spells={101: (D(2024, 1, 1), None)})
+        self.assertAlmostEqual(got, (train + year) / (2 * train + year), places=12)
+        # 2016 (history only), 2021 (inside a span, no Train year) and every session after 2024 are no part of it.
+        self.assertEqual(self.share([100, 101, 102], spells={101: (D(2024, 1, 1), None)}, last=D(2026, 10, 9)), got)
+        self.assertEqual(self.share([100, 102], spells={102: (D(2025, 1, 2), None)}, last=D(2026, 10, 9)), 1.0,
+                         "a name that joined after the Train eras has no member-day in them")
+        self.assertEqual(self.share([100, 102], last=D(2016, 12, 30)), 0.0, "a store with no Train-era session: unknown")
+        # A masked column is no member-day (its bars are no evidence either).
+        self.assertEqual(self.share([100, 102]), 0.5)
+        self.assertEqual(self.share([100, 102], masked=[False, True]), 1.0)
+        with self.assertRaises(ValueError):
+            P.hs_share(self.root, np.ones((3, 2), dtype=bool), [D(2024, 1, 2)], [100, 102])
+
+    def test_the_share_stands_through_a_year_of_index_turnover(self):
+        """THE MEASURE, OVER A YEAR OF INVENTED SESSIONS (the integration's open issue 10). An invented index of 40
+        names with the backfill whole: 36 members since 2016, two that joined late in 2024 (fewer than 8 sample days:
+        never a figure of their own) and two that left in 2017. Then from October 2025 a member leaves and a new
+        name joins every month, for a year. THE SHARE OF TODAY'S MEMBERS WITH A FIGURE (what the share was) starts
+        over the lane's bound and is under it within three months, for ever: a new member can never be sampled (a
+        sample is a Train-era session of a name that is a member that day). THE SHARE OF THE TRAIN ERAS'
+        MEMBER-DAYS is the same number on every session of the year."""
+        from league.ops import equity_spreads
+
+        bound = 0.90
+        last = D(2026, 10, 9)
+        sessions = U.store_sessions(last)
+        days = [d for d, _ in sessions]
+        sample_days = [d for year in equity_spreads.sample_days(sessions).values() for d in year]
+        self.assertEqual(len(sample_days), 8 * len(xs_config.TRAIN_YEARS))
+        self.assertEqual(max(sample_days).year, 2024, "no sample is ever taken after the Train eras")
+        spells: dict[int, tuple[dt.date, dt.date | None]] = {100 + k: (days[0], None) for k in range(36)}
+        spells.update({136: (D(2024, 9, 3), None), 137: (D(2024, 10, 1), None),
+                       138: (days[0], D(2017, 3, 1)), 139: (days[0], D(2017, 6, 1))})
+        year = [d for d in days if d >= D(2025, 10, 13)]
+        firsts = sorted({(d.year, d.month): d for d in reversed(year)}.values())[1:]     # each later month's first session
+        self.assertEqual(len(firsts), 12)
+        for m, day in enumerate(firsts):
+            start, _ = spells[100 + m]
+            spells[100 + m] = (start, day)                         # an old member leaves ...
+            spells[200 + m] = (day, None)                          # ... and a name the index never held joins
+        aids = sorted(spells)
+
+        def member_on(aid: int, day: dt.date) -> bool:
+            start, end = spells[aid]
+            return start <= day and (end is None or day < end)
+
+        # The table as the backfill leaves it: a sample at both points for every member of every sample day.
+        counts = {aid: sum(1 for d in sample_days if member_on(aid, d)) for aid in aids}
+        self.write({str(aid): {"open_bp": 6.0, "close_bp": 4.0, "n_open": n, "n_close": n} for aid, n in counts.items() if n})
+        self.assertEqual(sorted(aid for aid, n in counts.items() if 0 < n < P.MIN_SAMPLES), [136, 137, 138, 139])
+        self.assertTrue(all(counts[200 + m] == 0 for m in range(12)), "a new member has no sample and never will")
+        member = np.array([[member_on(aid, d) for aid in aids] for d in days], dtype=bool)
+        new, old = [], []
+        for day in year:
+            n = days.index(day) + 1
+            new.append(P.hs_share(self.root, member[:n], days[:n], aids))
+            today = [aid for aid in aids if member_on(aid, day)]
+            old.append(sum(1 for aid in today if counts[aid] >= P.MIN_SAMPLES) / len(today))
+        self.assertGreater(len(year), 245)
+        # what it was: over the bound on the first session, under it within three months, lower every month
+        self.assertGreaterEqual(old[0], bound)
+        self.assertLess(old[year.index(firsts[2])], bound)
+        self.assertEqual(old, sorted(old, reverse=True))
+        self.assertLess(old[-1], 0.65)
+        # what it is: one number the whole year, the Train eras' own
+        self.assertEqual(len(set(new)), 1, "no session of the year moves it")
+        train = [d for d in days if d.year in xs_config.TRAIN_YEARS]
+        owed = sum(1 for aid in aids for d in train if member_on(aid, d))
+        measured = sum(1 for aid in aids for d in train if member_on(aid, d) and counts[aid] >= P.MIN_SAMPLES)
+        self.assertEqual(new[0], measured / owed)
+        self.assertGreater(new[0], 0.98)
+        self.assertLess(new[0], 1.0, "under one by the four names with fewer than 8 sample days, and by nothing else")
+
+    def test_the_share_still_falls_when_the_table_is_not_measured(self):
+        """What the bound is FOR is kept: a backfill that has not reached a year, and a table of empty answers."""
+        from league.ops import equity_spreads
+
+        sessions = U.store_sessions(D(2024, 12, 31))
+        by_year = equity_spreads.sample_days(sessions)
+        aids = [100 + k for k in range(20)]
+        spells = {aid: ((D(2016, 1, 4), None) if aid < 110 else (D(2021, 6, 1), None)) for aid in aids}
+        steps = []
+        for through in (None, 2017, 2019, 2022, 2024):
+            done = [d for year, picked in by_year.items() for d in picked if through is not None and year <= through]
+            counts = {aid: sum(1 for d in done if spells[aid][0] <= d) for aid in aids}
+            self.write({str(aid): {"open_bp": 6.0, "close_bp": 4.0, "n_open": n, "n_close": n} for aid, n in counts.items()})
+            steps.append(self.share(aids, spells=spells))
+        self.assertEqual(steps[0], 0.0, "nothing sampled yet")
+        self.assertEqual(steps, sorted(steps), "it only climbs as the backfill goes on")
+        self.assertLess(steps[2], 0.90, "the names that joined in 2021 have no sample before 2022's days are taken")
+        self.assertEqual(steps[3], 1.0)
+        self.assertEqual(steps[4], 1.0)
+        # every window empty at the close (a wrong request, a dead feed): no name has a figure there, the share is 0
+        self.write({str(aid): {"open_bp": 6.0, "close_bp": None, "n_open": 48, "n_close": 0} for aid in aids})
+        self.assertEqual(self.share(aids, spells=spells), 0.0)
 
     def test_the_universes_figure_is_the_75th_percentile_of_the_names_with_enough(self):
         names = {str(100 + k): {"open_bp": float(10 + k), "close_bp": float(2 * k + 4), "n_open": 8, "n_close": 8}

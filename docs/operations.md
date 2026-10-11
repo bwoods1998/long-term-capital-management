@@ -66,7 +66,7 @@ to the one before:
 |---|---|---|
 | "off" | nothing | (the shipped value) |
 | "train" | the data jobs (from the SETTING alone); panel births in the equity pass, and the Train bar **equity-xs-v1** | `elane.mode` "gate" (E1's switch); the panel store written (`equity_panel`) with a coverage verdict that is not "insufficient" |
-| "gate" | the one Validation try and the one look under XS1 | XS1's receipt pinned (no receipt, no look); the spreads table covering at least `spreads_min_share` of the eligible names (below it a Train pass is "provisional costs" and the mode reads "train") |
+| "gate" | the one Validation try and the one look under XS1 | XS1's receipt pinned (no receipt, no look); the spreads table covering at least `spreads_min_share` of the Train eras' member-days (below it a Train pass is "provisional costs" and the mode reads "train") |
 | "live" | a passer may take one of E1's roster seats | `live_ready`: THE PANEL STORE FRESH BY THE CLOCK (its last session is the last closed session or the one before: one missed night is tolerated at the next morning's sends, a second holds every open), the universe deploy in force, today's tradable share of eligible names at least `live_min_tradable_share`, the committed universe younger than `universe_max_age_days`, the last nightly I6 equal, AND the forward twin's marker (`xs-twins.json`, itself no older than the session before the last closed one). Any one missing: the mode reads "gate" |
 
 **Two things are owed, and both hold real money back, by design.** (1) **The forward twin** (package J:
@@ -488,10 +488,14 @@ for a price level" is what stands against both. A panel family born before relea
 bar reads all six Train years, and the Train map says so. A panel program whose seat is withdrawn while the lane is
 not live keeps its roster seat (its band is not moved). A bar the data audit blanks in the store (a daily bar its
 minute bars contradict) is still in a live 16:20 fetch: the nightly I6 blanks the same cells before it compares, and
-the decision of that day read the bar. **The spreads' share falls with the index's turnover:** a name is sampled only
-on Train-era days it was a member (the last in 2024), so every later joiner is charged the universe's default figure
-and is not counted in `hs_share`; near or under `spreads_min_share` (0.90) the mode reads "train" and nothing is
-validated. Watch `hs_share` in the panel manifest from the backfill's first night; the setting's bound is [0.5, 1.0]. The screen does not match sub-industry, size or value: A22 (1) is the House's answer,
+the decision of that day read the bar. **The spreads' share is of the Train eras' member-days** (`hs_share` in the
+panel manifest: the share of them whose name has 8 samples at both fill points). A name is sampled only on Train-era
+days it was a member (the last in 2024), so the share climbs through the backfill's nights, stands once the table is
+whole (a little under 1.0: the names that were members on fewer than 8 sample days) and is moved by no later change
+of the index; under `spreads_min_share` (0.90) the mode reads "train", nothing is validated and a seated program's
+opens are held. It was first measured over today's members, where it fell with the index's turnover for ever; that
+measure is gone. Its cost stays: every name that joined after 2024 is charged the universe's figure (the 75th
+percentile of the measured names) in every run and in its twin. The screen does not match sub-industry, size or value: A22 (1) is the House's answer,
 and it withholds a seat from every momentum and low-volatility program. A member added to the index after the last
 universe deploy cannot be bought live until the next one (about 5% of names a year); the replay of such a day agrees,
 because the store records which symbols the constitution named that day. Membership is read two sessions ahead in the

@@ -236,7 +236,8 @@ HALVES = (0, 1)
 DECIDE_TIMEOUT, DECIDE_MAX_ERRORS = 1.0, 25
 WEIGHT_TOL = 1e-6
 #: The flags beside a Train verdict (never a bar): a pass that fails at a 100% vanish haircut; a verdict made while
-#: fewer than `spreads_min_share` of the eligible names had sampled half-spreads.
+#: fewer than `spreads_min_share` of the Train eras' member-days were charged a sampled half-spread of their own name
+#: (the manifest's `hs_share`: league/ops/equity_panel.py `hs_share`).
 FLAG_SURVIVORSHIP = "survivorship-sensitive"
 FLAG_COSTS = "provisional costs"
 #: The researcher's settings a panel family shares with E2 (`elane.e2`: attempts, errors, pace, tokens, the cap of
