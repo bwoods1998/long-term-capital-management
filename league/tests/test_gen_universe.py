@@ -353,6 +353,14 @@ class TheConstitutionsEdges(unittest.TestCase):
         self.assertEqual(lines[end + 2].strip(), '"position_share": {"etf": "0.50", "stock": "0.20"},')
         self.assertEqual(G.constitution_text(out, invented(450)), out)
 
+    def test_the_pin_keeps_its_quotes(self):
+        for quote in ("'", '"'):
+            text = mini().replace(f"PINNED_DIGEST = '{'0' * 64}'", f"PINNED_DIGEST = {quote}{'0' * 64}{quote}")
+            out = G.constitution_text(text, invented())
+            after = rules_of(out)
+            self.assertIn(f"\nPINNED_DIGEST = {quote}{after['digest'](after['CONSTITUTION'])}{quote}\n", out)
+            self.assertEqual(G.constitution_text(out, invented()), out)
+
     def test_a_file_with_no_single_literal_is_not_guessed_at(self):
         for text, why in (
                 (mini().replace('"COST"]},', '"COST"],\n                     },'), "no generated block and no single"),
@@ -706,6 +714,32 @@ class TheTreeAsItStands(unittest.TestCase):
                 shutil.copyfile(REPO / rel, Path(tmp) / rel)
             self.assertEqual(evaluator.equity_fingerprint(Path(tmp)), evaluator.equity_fingerprint())
             self.assertEqual(evaluator.execution_fingerprint(Path(tmp)), evaluator.execution_fingerprint())
+
+
+class ThePatchFile(unittest.TestCase):
+    """league/swarm/e4_patches/I.md, package I's changes to files that existed before E4: every diff names a file of
+    the tree; the constitution has NO diff (its list is generated from the House's file, never typed) and neither has
+    any file of gateway/ (the gateway's half is a patch file in the captain's scratch: no builder edits gateway/)."""
+
+    FILES = {"league/ci.py", "league/tests/test_ci.py", "league/ops/preopen.py", "docs/operations.md", "CHANGELOG.md",
+             "league/tests/test_equity_money.py", "league/tests/test_constitution.py",
+             "league/tests/test_live_long_single.py"}
+
+    def test_every_diff_names_a_file_of_the_tree_and_none_types_the_universe(self):
+        text = tree_text("league/swarm/e4_patches/I.md")
+        named = re.findall(r"^diff --git a/(\S+) b/(\S+)$", text, re.M)
+        self.assertGreaterEqual(len(named), len(self.FILES))
+        for old, new in named:
+            self.assertEqual(old, new)
+            self.assertTrue((REPO / new).is_file(), new)
+        self.assertEqual({new for _, new in named}, self.FILES)
+        self.assertNotIn(G.CONSTITUTION, self.FILES)
+        self.assertFalse([path for path in self.FILES if path.startswith("gateway/")])
+        self.assertEqual(text.count("```diff\n"), len(named), "one diff a block")
+        for heading in ("## Patch 16 (release R-E4a)", "## Patch 15 (release R-E4b): THE UNIVERSE (moves the money digest; "
+                        "deployed separately)"):
+            self.assertEqual(text.count(heading), 1, heading)
+        self.assertIn("python3 scripts/gen_universe.py --from tradable.json --gateway-patch", text)
 
 
 if __name__ == "__main__":

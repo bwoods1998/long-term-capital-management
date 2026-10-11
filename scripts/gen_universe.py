@@ -93,7 +93,7 @@ ABOUT = ("THE PANEL'S TRADABLE UNION (release E4; scripts/gen_universe.py): ever
          "two equal); `league.equity.config.UNIVERSE` stays release E1's and inside them. Regenerated about once a "
          "year: an owner deploy, the gateway first, both between two pre-opens; the money digest moves.")
 
-_PINNED = re.compile(r"^PINNED_DIGEST = '([0-9a-f]{64})'$", re.M)
+_PINNED = re.compile(r"""^PINNED_DIGEST = (['"])[0-9a-f]{64}\1$""", re.M)
 #: Release E1's literal, as it stands before the first run: the `"stock": [...]` list that closes `universe`.
 _LEGACY = re.compile(r'^(?P<indent>[ ]+)"stock": \[(?P<body>[^\]]*)\]\},[ ]*$', re.M)
 #: The gateway's list, as `league.ci.GATEWAY_STOCK_UNIVERSE` reads it (a test holds this to `league.ci`'s own reader).
@@ -295,7 +295,8 @@ def constitution_text(text: str, symbols: Sequence[str]) -> str:
     if len(_PINNED.findall(out)) != 1:
         raise Refused(f"{CONSTITUTION}: PINNED_DIGEST must be pinned once, on its own line")
     moved = _namespace(out, CONSTITUTION)
-    out = _PINNED.sub(f"PINNED_DIGEST = '{moved['digest'](moved['CONSTITUTION'])}'", out)
+    pinned = moved["digest"](moved["CONSTITUTION"])
+    out = _PINNED.sub(lambda found: f"PINNED_DIGEST = {found.group(1)}{pinned}{found.group(1)}", out)
     after = _namespace(out, CONSTITUTION)
     if _stocks(after) != names:
         raise Refused(f"{CONSTITUTION}: the rewritten block does not read back as the list")

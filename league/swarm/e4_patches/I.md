@@ -59,10 +59,10 @@ Anchors: the tuple `PENDING_GATEWAY` (its comment and its last entry); the const
   hundreds of names.
 
 ```diff
-diff --git c/league/ci.py w/league/ci.py
+diff --git a/league/ci.py b/league/ci.py
 index d540032..44afc96 100644
---- c/league/ci.py
-+++ w/league/ci.py
+--- a/league/ci.py
++++ b/league/ci.py
 @@ -178,9 +178,17 @@ FORBIDDEN: tuple[str, ...] = (
  #: and the equity review and level rule (elane_review.py): selection constants and secrecy rules, like dlane.py. The
  #: updater never self-deploys a change to them from this release on; the gateway's merge route refuses them once its
@@ -139,10 +139,10 @@ test before `test_every_file_of_the_decider_childs_sealed_runtime_is_protected`;
   named whole and the eleventh counted, and through the release's own files.
 
 ```diff
-diff --git c/league/tests/test_ci.py w/league/tests/test_ci.py
+diff --git a/league/tests/test_ci.py b/league/tests/test_ci.py
 index f6e9b29..1205f7c 100644
---- c/league/tests/test_ci.py
-+++ w/league/tests/test_ci.py
+--- a/league/tests/test_ci.py
++++ b/league/tests/test_ci.py
 @@ -280,10 +280,12 @@ class TheEquityLane(unittest.TestCase):
  
      def test_the_tree_and_the_swarm_lane_are_protected(self):
@@ -345,10 +345,10 @@ and the pinned pre-registration) while the other packages were being built. Wher
 otherwise (an event's name, a kv key, a job's figure), the code wins and this text is corrected.
 
 ```diff
-diff --git c/docs/operations.md w/docs/operations.md
+diff --git a/docs/operations.md b/docs/operations.md
 index 2e9facf..bc04035 100644
---- c/docs/operations.md
-+++ w/docs/operations.md
+--- a/docs/operations.md
++++ b/docs/operations.md
 @@ -8,6 +8,351 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
  what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
  is [archive/docs/operations.md](../archive/docs/operations.md).
@@ -722,10 +722,10 @@ Anchor: under "## Not yet deployed", a new entry before "### Release E2, integra
 the two digests (before and after) to this entry: they are the list's, so they are not known before the generator runs.
 
 ```diff
-diff --git c/CHANGELOG.md w/CHANGELOG.md
+diff --git a/CHANGELOG.md b/CHANGELOG.md
 index 6b5c72b..71ded49 100644
---- c/CHANGELOG.md
-+++ w/CHANGELOG.md
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
 @@ -29,6 +29,44 @@ any other deploy.
  The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
  Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
@@ -795,10 +795,10 @@ INTEGRATION HEAD (`feat/equity-e2-int` `a4514e83`) too: no hunk's context holds 
   panel while no panel program is live; the options population is counted by the store's guard (16.3).
 
 ```diff
-diff --git c/league/tests/test_equity_money.py w/league/tests/test_equity_money.py
+diff --git a/league/tests/test_equity_money.py b/league/tests/test_equity_money.py
 index c57a52d..78afc08 100644
---- c/league/tests/test_equity_money.py
-+++ w/league/tests/test_equity_money.py
+--- a/league/tests/test_equity_money.py
++++ b/league/tests/test_equity_money.py
 @@ -35,6 +35,16 @@ def problems(**rows):
      return equity_money_problems(changed(**rows))
  
@@ -1107,10 +1107,10 @@ the same rule applies to each (`money_digest()` -> `money_digest(e1)`, `PINNED_D
 the integration head" below has the hunk as it applies there.
 
 ```diff
-diff --git c/league/tests/test_constitution.py w/league/tests/test_constitution.py
+diff --git a/league/tests/test_constitution.py b/league/tests/test_constitution.py
 index ec71cf4..169f772 100644
---- c/league/tests/test_constitution.py
-+++ w/league/tests/test_constitution.py
+--- a/league/tests/test_constitution.py
++++ b/league/tests/test_constitution.py
 @@ -148,13 +148,24 @@ class ConstitutionTest(unittest.TestCase):
          import copy
  
@@ -1151,10 +1151,10 @@ universe put back, as in 15.2. AT THE INTEGRATION HEAD the literal and the comme
 test's hunk is the same (below).
 
 ```diff
-diff --git c/league/tests/test_live_long_single.py w/league/tests/test_live_long_single.py
+diff --git a/league/tests/test_live_long_single.py b/league/tests/test_live_long_single.py
 index 483dc67..8e1f2d8 100644
---- c/league/tests/test_live_long_single.py
-+++ w/league/tests/test_live_long_single.py
+--- a/league/tests/test_live_long_single.py
++++ b/league/tests/test_live_long_single.py
 @@ -21,7 +21,9 @@ REPO = Path(__file__).resolve().parents[2]
  #: The money digest the grant is pinned to: `long_single` is no money rule and must not move it. R10's (Sept 29, 2026)
  #: was a3e2aa7c; the incubator's row (release B, Oct 1, 2026: `options_money.incubator`) moved it, then the incubator
@@ -1333,10 +1333,10 @@ and the same tests pass there (the last section).
 `league/tests/test_constitution.py` (15.2 at the head):
 
 ```diff
-diff --git c/league/tests/test_constitution.py w/league/tests/test_constitution.py
+diff --git a/league/tests/test_constitution.py b/league/tests/test_constitution.py
 index c799981..91621c9 100644
---- c/league/tests/test_constitution.py
-+++ w/league/tests/test_constitution.py
+--- a/league/tests/test_constitution.py
++++ b/league/tests/test_constitution.py
 @@ -152,17 +152,28 @@ class ConstitutionTest(unittest.TestCase):
          import copy
  
@@ -1384,10 +1384,10 @@ index c799981..91621c9 100644
 `league/tests/test_live_long_single.py` (15.3 at the head):
 
 ```diff
-diff --git c/league/tests/test_live_long_single.py w/league/tests/test_live_long_single.py
+diff --git a/league/tests/test_live_long_single.py b/league/tests/test_live_long_single.py
 index ba079b8..254d7ba 100644
---- c/league/tests/test_live_long_single.py
-+++ w/league/tests/test_live_long_single.py
+--- a/league/tests/test_live_long_single.py
++++ b/league/tests/test_live_long_single.py
 @@ -22,7 +22,9 @@ REPO = Path(__file__).resolve().parents[2]
  #: was a3e2aa7c; the incubator's row (release B, Oct 1, 2026: `options_money.incubator`) moved it, then the incubator
  #: cap (Oct 8) to 1665c385, release L-D (Oct 9) to 0310779c, the Probe total at $800 (Oct 10, 2026) to fdf2ac7c, and
@@ -1451,7 +1451,7 @@ diff --git a/league/ops/preopen.py b/league/ops/preopen.py
 
 ## What was run (scratch copies of the tree; nothing here was pushed, deployed or sent anywhere)
 
-- **The generator** (`league.tests.test_gen_universe`, 46 tests): Python 3.14 and 3.11 (with numpy and without), on
+- **The generator** (`league.tests.test_gen_universe`, 48 tests): Python 3.14 and 3.11 (with numpy and without), on
   the base, at the integration head, with E1's list and with a generated one. 21 single-line faults put into
   `scripts/gen_universe.py` one at a time (an ETF let through, a size bound moved, E1's stocks not kept, another
   rule allowed to move, the pin not re-pinned, the read-back skipped, a write without the gateway's patch, a patch
@@ -1459,8 +1459,8 @@ diff --git a/league/ops/preopen.py b/league/ops/preopen.py
 - **The base (`24a52b11`) with this file's diffs and the gateway's static patch** (the R-E4a state): `test_ci`,
   `test_equity_money`, `test_constitution`, `test_live_long_single`, `test_gen_universe`, `test_ops_jobs`,
   `test_swarm_roster`, `test_e4_stubs`, `test_standing_grant`, `test_ld_release`, `test_equity_book`, `test_ops_stall`:
-  457 tests OK on 3.14 and on 3.11. `python3 -m league.ci --no-tests` passes. THE WHOLE LEAGUE SUITE on 3.14 was
-  still running when this was written (the builder's report has its result).
+  457 tests OK on 3.14 and on 3.11. `python3 -m league.ci --no-tests` passes. THE WHOLE LEAGUE SUITE on 3.14: 9048
+  tests OK, 29 skipped.
 - **The same tree with the UNIVERSE commit simulated** (the generator run on a stand-in list of 524 names, its
   gateway patch applied: exactly two files change, `league/constitution.py` and `gateway/lib/caps.mjs`): the same
   modules, 457 tests OK on 3.14 and on 3.11; `--check` holds; `league.ci --no-tests` passes; THE WHOLE LEAGUE SUITE on
