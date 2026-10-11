@@ -161,7 +161,8 @@ HEARTBEAT = "swarm.heartbeat"
 #: running release has run (`release_since`), and under it WHAT IS KEPT WHILE THAT RELEASE RUNS (`KEPT`): `idle` (the
 #: idle clock: `_idle_clock`), `held` (the last run that read E2 held: {at, kind}), `dq` (when `elane_dq` first stood:
 #: {stood_at}), `unread` (when the lanes that cannot be read were last warned: {warned_at}) and `broken` (the BROKEN
-#: kind `elane_idle` stands on and since when: {kind, at}, with the routes it named for the kind "answers").
+#: kind `elane_idle` stands on and since when: {kind, at}; for the kind "answers" also the routes it named and which
+#: way most were lost: {routes, lost}).
 STATE_FILE = "stall.json"
 STATE_KEEP = "elane"
 KEPT = ("idle", "held", "dq", "unread", "broken")

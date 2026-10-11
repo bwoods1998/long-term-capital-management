@@ -171,7 +171,8 @@ owner when the lanes next go wrong.
   refused before a run by several static rules with none most stay `elane_refused`'s to read (it stands on one
   rule only), and stand on nothing in a held lane. The third check's break and its Sail-guard day are tests on the
   invented House, with a healthy lane that loses one answer in ten. `gateway/` is not touched by this round, nor
-  `league/ops/stall.py`, `registry.py` or `funnel.py`.
+  `league/ops/registry.py` or `funnel.py`; of `league/ops/stall.py`, one sentence of its docstring (what a broken
+  lane is).
 - **Merged with main** (Oct 11; main at `7d2d3c84`: release E3 as deployed). Six files touched by both, each merged
   mechanically, every line of E3 and of this release kept; `league/ops/stall.py` keeps E3's release receipts and its
   receipt's keys (the four are among its `checks`), `league/ops/funnel.py` an import and one call,
