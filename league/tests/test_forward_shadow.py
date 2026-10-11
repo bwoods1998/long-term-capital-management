@@ -1173,11 +1173,35 @@ class WhoseFailure(Case):
         self.assertEqual([d.runs for d in made], [[("flip@1", 1.0)]])         # again, alone, in a fresh child
         self.assertEqual((len(self.rows(good)), self.rows(bad)), (4, []))
         self.assertEqual((self.count("fwd_tags"), self.events("run_failed", good)), (0, []))
-        # The same night again: the other program is already written, so nobody's run completes: nothing is added.
+        # The same night again (the runner's retry): the event is written once a (pid, night).
+        self.t += 900.0
         self.shadow(FWD[3], write=False, decider=Ticking(self, broken=("flip@1",)), fresh=fresh).night()
         self.assertEqual(len(self.events("run_failed")), 1)
         row = dict(self.db.execute("SELECT * FROM fwd_runs ORDER BY run").fetchall()[0])
         self.assertEqual((row["programs"], row["errors"], row["stale"], row["budget_hit"]), (1, 1, 0, 0))
+
+    def test_another_start_of_the_job_that_night_counts_what_the_first_completed(self):
+        # The first start is killed before its retry; the second finds only the failing program due. Another
+        # program's run DID complete that night: the event is written.
+        good = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
+        bad = register(self.db, "flip@1", FLIPPER, first_close=BEFORE)
+        control = register_control(self.db, "index", 40, SYMBOLS, first_close=BEFORE)
+        with self.assertRaises(Killed):
+            self.night(FWD[3], decider=Ticking(self, kill=("flip@1",)))
+        self.assertEqual((len(self.rows(good)), len(self.rows(control)), self.rows(bad)), (4, 4, []))
+        receipt = self.shadow(FWD[3], write=False, decider=Ticking(self, broken=("flip@1",)),
+                              fresh=lambda: Ticking(self, broken=("flip@1",))).night()
+        self.assertEqual((receipt["programs"], receipt["errors"], receipt["retried"]), (0, 1, 1))
+        (event,) = self.events("run_failed", bad)
+        self.assertEqual(event["payload"]["completed"], 1)     # the program, never the control's rows
+
+    def test_a_controls_rows_are_nobodys_completed_run(self):
+        bad = register(self.db, "flip@1", FLIPPER, first_close=BEFORE)
+        register_control(self.db, "index", 40, SYMBOLS, first_close=BEFORE)
+        receipt = self.night(FWD[3], decider=Ticking(self, broken=("flip@1",)),
+                             fresh=lambda: Ticking(self, broken=("flip@1",)))
+        self.assertEqual((receipt["controls"]["rows"], receipt["errors"]), (4, 1))
+        self.assertEqual(self.events("run_failed", bad), [])
 
     def test_one_that_fails_when_none_completes_gets_nothing(self):
         register(self.db, "always@1", ALWAYS, first_close=BEFORE)

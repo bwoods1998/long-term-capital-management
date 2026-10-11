@@ -133,7 +133,7 @@ STATUSES = ("ok", "disqualified")
 DATA_ERRORS = (MissingData, StoreRefused, ValueError)
 
 _DECIMAL = re.compile(r"\d+\.\d+")
-_SYMBOL = re.compile(r"[A-Z][A-Z.]*")
+_SYMBOL = re.compile(r"(?<![A-Za-z0-9_.])[A-Z]+(?:\.[A-Z]+)?(?![A-Za-z0-9_])")
 
 
 class NightFailed(RuntimeError):
@@ -707,6 +707,13 @@ class Shadow:
                                   "symbol": _symbol_of(exc, _symbols(program))})
         self._commit()
 
+    def _completed(self, but: int) -> int:
+        """How many OTHER programs' runs completed tonight: those with a row for the night under tonight's engine id
+        (a control's row has no bars hash and is not a run), whichever start of the job wrote it."""
+        return int(self.db.execute(
+            "SELECT COUNT(DISTINCT pid) FROM fwd_days WHERE day=? AND engine=? AND pid<>? AND bars IS NOT NULL",
+            (self.night_day, self.engine, int(but))).fetchone()[0])
+
     def _deadline(self, now: float) -> float:
         """The epoch after which no program is started: `OPEN_MARGIN_SECONDS` before the next session's 09:00 ET."""
         day = schedule.ny_day(now)
@@ -815,12 +822,13 @@ class Shadow:
                     twice.append((program, why))
             tally["errors"] += len(twice)
             for program, why in twice:
-                if tally["programs"] < 1:
-                    break       # nobody's run completed tonight: the House's, no program is named
+                completed = self._completed(program.pid)
+                if completed < 1:
+                    continue    # nobody else's run completed tonight: the House's, no program is named
                 forward_db.event(self.db, "run_failed", pid=program.pid, day=self.night_day, at=self.clock(),
                                  once="night", payload={"why": "failed again, alone, in a fresh child while another "
                                                                "program's run completed", "class": why,
-                                                        "completed": int(tally["programs"])})
+                                                        "completed": completed})
             self._commit()
         if stale:
             forward_db.event(self.db, "budget_hit", day=self.night_day, at=self.clock(), once="night",
