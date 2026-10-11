@@ -54,8 +54,8 @@
    (`SwarmStore.families` leaves them out). Its own step (`equity_round`, while `elane.mode` is "gate") DISPATCHES
    VALIDATION BY LANE: each living Gym-band equity family's version due (`elane.next_try`: its candidate while its
    lineage's one try is open and has no current verdict, else R3's pre-registered retry) is validated by
-   `elane.validate`: on the House, in the decider-isolated child (A3: no Gym box), at k 1.0 and 1.5, its S1 pre-check
-   the entry to the gate. A family whose equity lineage has spent its try or its look retires (`elane.lineage_spent`:
+   `elane.validate`: on the House, in the decider-isolated child (A3: no Gym box), at k 1.0 and 1.5, the share screen's
+   pre-check (S1's and S2's one rule) the entry to the gate. A family whose equity lineage has spent its try or its look retires (`elane.lineage_spent`:
    words only; no graveyard row, so no look outcome reaches a generator, A9 D3), and so does one at any band whose
    realized real net reached `elane.program_loss_usd` (-$300, `elane.loss_line`: its lots exit by the House's rules). An
    equity family never forks (`lane_forks`). A failure of the equity step never stops the round.

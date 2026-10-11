@@ -875,6 +875,27 @@ class S2Conformance(unittest.TestCase):
         self.assertIn("above 5.00", over["why"])
         self.assertEqual(over["c_pF1"], 0.94)
 
+    def test_the_committed_pin_runs_the_vectors_at_its_own_floor_and_margin(self):
+        """A11 final: the receipt both lanes pin has c_H_floor 0.95 and c_H_margin 0.05. Through the repository's pin
+        (the only way a committed receipt is judged here) the conformance pools give the same c_pF1, and c_H,used =
+        max(0.95, c_pF1 + 0.05): the floor binds where the vectors' 0.90 did (V2), the margin elsewhere."""
+        policy = json.loads(Path(REAL_POLICY_PATH).read_text())
+        for lane in ("beta", "equity"):
+            rc = screen.pinned_receipt(policy["elane"]["screens"][lane])
+            self.assertIsInstance(rc, screen.ReceiptS2, lane)
+            self.assertEqual((rc.c_R, rc.c_H_floor, rc.c_H_margin, rc.c_X, rc.fp_cap, rc.owner_wall, rc.retry),
+                             (0.0, 0.95, 0.05, 0.85, 0.12, 0.15, True), lane)
+            self.assertTrue(rc.receipt_sha256.startswith("45634dfc"), lane)
+        for name, c_h_used in (("V1", 1.25), ("V2", 0.95), ("V3", 0.99)):
+            want = CONFORMANCE[name]
+            fl = screen.floor_s2(conformance_segments(*want["n"]), receipt=rc)
+            self.assertEqual((fl["eligible"], fl["c_pF1"], fl["c_H_used"]), (True, want["c_pF1"], c_h_used), name)
+            self.assertEqual({cell: (row["T"]) for cell, row in fl["cells"].items()},
+                             {cell: row[0] for cell, row in want["cells"].items()}, name)
+            self.assertLessEqual(fl["holdout_only"], rc.fp_cap, "the holdout-only rate holds the cap at c_H,used")
+            self.assertTrue(screen.floor_fits(fl, rc), name)
+            self.assertFalse(screen.floor_fits(fl, receipt_s2()), "run at 0.95: not the fake receipt's 0.90 floor")
+
 
 def brute(pools, L, lv, null, edge, act):
     """Direct enumeration of every valid (V piece, V start, H piece, H start) tuple (house_ref's test T3): T, the

@@ -4,11 +4,12 @@ through every package's real code, with only the venue and its market data faked
 The path (league/equity/INTERFACES.md section 11's flows, in order):
 1. birth: `elane.birth_seeds` (swarm) writes the three A4 seeds as beta-lane families;
 2. Validation: `elane.validate` (swarm) runs seed-overnight-spy on 2025 through `runner.Isolated` (core) in the decider's
-   "equity" kind (hooks: `InlineDecider`, the child's own `_handle`, its pickle and JSON round trips), the S1 pre-check
-   (screen) on its `series`;
+   "equity" kind (hooks: `InlineDecider`, the child's own `_handle`, its pickle and JSON round trips), the screen's
+   pre-check on its `series`;
 3. the one sealed look: `elane.look` mints the gate's capability (core's store), runs the Train-era segments, the floor,
-   the holdout and `screen.verdict` under the receipt pinned in the repository's policy.json (A9), and makes the family a
-   Candidate proven on the equity identity (core's evaluator);
+   the holdout and `screen.verdict` under the receipt pinned in the repository's policy.json (A11: receipt 2, the S2
+   screen: its exact program floor, no pooled-t bar, t_H >= c_H,used), and makes the family a Candidate proven on the
+   equity identity (core's evaluator);
 4. the band decision: the EquityBook (book) reads the swarm's equity row (`bands.read(lanes=LANES)` through
    league/equity/families.py) and `bands.next_band` (swarm, money's `edm1` and `sized_up`) seats it at Probe;
 5. a live session: the 16:30 decide on Friday's close (the bars through `MarketData.bars`, `ctx.inputs_from_fetch`, the
@@ -65,7 +66,7 @@ SEED = "seed-overnight-spy"
 FRIDAY, MONDAY, TUESDAY, WEDNESDAY = (dt.date(2026, 10, 9), dt.date(2026, 10, 12), dt.date(2026, 10, 13),
                                       dt.date(2026, 10, 14))
 E = D("2229")
-#: The synthetic market (invented): a drift strong enough that the overnight seed passes S1, a calm volatility.
+#: The synthetic market (invented): a drift strong enough that the overnight seed passes the screen, a calm volatility.
 MARKET = {"seed": 11, "drift": 0.9, "vol": 0.10}
 #: The two sessions after the store's last (invented): (open, close) as multiples of the session before's close.
 NEXT = {MONDAY: (1.001, 1.002), TUESDAY: (1.003, 0.999)}
@@ -80,7 +81,7 @@ def stamp(day: dt.date) -> str:
 class TheEquityLaneEndToEnd(unittest.TestCase):
     def setUp(self):
         # The repository's committed policy.json, as the House reads it (the test package reads an empty one by
-        # default, league/tests/__init__.py): its pinned S1 receipt (A9) and `elane.roster`.
+        # default, league/tests/__init__.py): its pinned receipt (A11: receipt 2, the S2 screen) and `elane.roster`.
         patcher = mock.patch.object(settings_mod, "POLICY_PATH", REAL_POLICY_PATH)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -120,16 +121,39 @@ class TheEquityLaneEndToEnd(unittest.TestCase):
         look = fam["state"][elane.LOOK_KEY]
         self.assertTrue(look["verdict"]["passed"], look)
         pinned = elane.screen_effective(ON, "beta")
-        self.assertEqual(self.store.looks()[-1]["detail"]["receipt"], pinned["receipt"], "judged under the pinned receipt")
-        self.assertGreaterEqual(look["verdict"]["c_used"], pinned["c_R"])
-        self.assertIn("c_used", look["beside"])
+        detail, verdict = self.store.looks()[-1]["detail"], look["verdict"]
+        self.assertEqual(detail["receipt"], pinned["receipt"], "judged under the pinned receipt")
+        # THE HOUSE SCREEN IS S2 (A11): no pooled-t bar (c_R 0, so no c_used); the look is the pre-check, the holdout's
+        # sum above zero and t_H >= c_H,used = max(c_H_floor, c_pF1 + c_H_margin), the receipt's floor and margin and the
+        # program's own exact floor.
+        self.assertEqual((pinned["screen"], detail["screen"], verdict["screen"]), ("S2", "S2", "S2"))
+        self.assertEqual((verdict["c_R"], pinned["c_R"], pinned["c_H_floor"], pinned["c_H_margin"]), (0.0, 0.0, 0.95, 0.05))
+        self.assertNotIn("c_used", verdict)
+        self.assertNotIn("c_used", detail)
+        self.assertEqual(round(verdict["c_H"] * 100),
+                         max(round(pinned["c_H_floor"] * 100), round((verdict["c_pF1"] + pinned["c_H_margin"]) * 100)))
+        self.assertGreaterEqual(verdict["t_H"], verdict["c_H"])
+        self.assertGreater(verdict["sum_h"], 0)
+        self.assertEqual((detail["c_H"], detail["c_pF1"]), (verdict["c_H"], verdict["c_pF1"]))
+        self.assertTrue(look["beside"].startswith(f"S2, c_R = 0 (no pooled-t bar), c_H,used = {verdict['c_H']:.2f}; "),
+                        look["beside"])
+        self.assertNotIn("{", look["beside"], "every placeholder of the receipt's line is filled")
+        # S1-X's rate beside the S2 line is measured (an S1 floor of the same Train-era series), not "unmeasured".
+        self.assertIsNotNone(verdict["fp_x"])
+        self.assertNotIn("unmeasured", look["beside"])
         # The windows the receipt was calibrated for: Validation is calendar 2025's 250 sessions, and the holdout read
-        # 2026-01-02 through the store's last close, Friday Oct 9 (A9 D6): 194 sessions, the calibration's least.
-        self.assertEqual(look["verdict"]["windows"], {"validation": screen.V_LENGTH, "holdout": screen.H_LENGTHS[0],
-                                                      "ok": True, "why": None})
+        # 2026-01-02 through the look cap, Friday Oct 9 (A12): exactly the 194 sessions.
+        self.assertEqual(verdict["windows"], {"validation": screen.V_LENGTH, "holdout": screen.H_LENGTHS[0],
+                                              "ok": True, "why": None})
+        # The program floor is S2's own (the exact enumeration under receipt 2), the one the verdict was judged on.
         floor = fam["state"][elane.FLOOR_KEY]["1"]
         self.assertTrue(floor["eligible"])
-        self.assertEqual((floor["worlds"], sorted(floor["sets"])), (screen.WORLDS, sorted(screen.WORLD_SETS)))
+        self.assertEqual((floor["screen"], floor["method"], sorted(floor["sets"])),
+                         ("S2", screen.S2_METHOD, sorted(screen.S2_SETS)))
+        self.assertEqual((floor["fp_cap"], floor["c_H_floor"], floor["c_H_margin"], floor["c_H_used"], floor["c_pF1"]),
+                         (0.12, 0.95, 0.05, verdict["c_H"], verdict["c_pF1"]))
+        self.assertTrue(screen.floor_fits(floor, screen.pinned_receipt(pinned["block"])))
+        self.assertLessEqual(floor["holdout_only"], 0.12, "the holdout-only rate at c_H,used holds the cap by construction")
         identity = equity_identity()
         self.assertEqual(fam["state"]["banded_evaluator"],
                          {"engine": identity["engine"], "equity_sha256": identity["equity"], "run_sha": sha})

@@ -180,12 +180,15 @@ A complete answer is judged exactly as before; `grounded_answer` (league/gym) is
 
 THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). The options round above never sees an equity-lane family
 (`SwarmStore.families` leaves them out). The equity round (`equity_round`, while `elane.mode` is "gate") takes each
-living Gym-band equity family whose validated version entered the gate (its S1 Validation pre-check passed:
+living Gym-band equity family whose validated version entered the gate (the share screen's Validation pre-check passed:
 `Tournament.equity_round`), not held by the operator, not already done with (`gated_sha`) and with no look in flight,
 and `look` dispatches it to `elane.look`: the one sealed look ON THE HOUSE, in the decider-isolated child, with a freshly
-minted `EquityGateCapability`, judged by the share screen S1 (A9); a screen with no pinned receipt in the repository's
-policy.json refuses it (the look waits, nothing is spent). The look records its lane, the screen "S1", the receipt,
-c_used and the line stated beside every live trade, in its `detail` and its `swarm.gate` event. An equity look is never
+minted `EquityGateCapability`, judged by the lane's pinned share screen: S2 (the captain's A11: receipt 2, the program's
+exact floor, no pooled-t bar, t_H >= c_H,used); S1+F1 (A9) stays in code as receipt 1's screen, pinned by no lane. A
+screen with no pinned receipt in the repository's policy.json, or whose receipt file at hand is not the pinned bytes,
+refuses it (the look waits, nothing is spent), and so does a daily store that ends before the calibrated holdout
+(A12). The look records its lane, the screen that judged it ("S2"), the receipt, c_H,used (S1: c_used) and the line
+stated beside every live trade, in its `detail` and its `swarm.gate` event. An equity look is never
 counted by the options lanes' leakage alarms (`alarms`). A look in flight from a process that died (`look_inflight`
 older than this process) is owed again. A failure of the equity round never stops the options round.
 
@@ -1351,7 +1354,7 @@ class Gate:
         """The one holdout look. None when the gate box did not run it (no look is spent). The version is marked as
         looked at BEFORE the box runs it, so a slow look is never started twice; one that lands after the gate stopped
         waiting is recorded and judged when it lands (`finish`), against the validation it was sent for. An equity-lane
-        family's look is `elane.look` (on the House, the share screen S1)."""
+        family's look is `elane.look` (on the House, the lane's pinned share screen: S2, A11)."""
         if elane.lane_of(self.store, fam) is not None:
             return elane.look(self, fam, version, sha)
         n = int(version["n"])

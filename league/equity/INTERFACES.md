@@ -660,12 +660,16 @@ layer's shape holds it to an object)
 }
 ```
 
-E1 merges with "off" (the rollback); the switch-on (ON) sets "gate". THE INTEGRATOR (A9) copies the receipt
+E1 merges with "off" (the rollback); the switch-on (ON) sets "gate". THE INTEGRATOR (A9) copied the receipt
 `~/Work/.ltcm-main/scratch/eqlane-1010/equity_screen_1.json` VERBATIM to `docs/benchmarks/equity_screen_1.json` and
-pins it here: `receipt_sha256` (the file's bytes), `c_R`, `c_X`, `fp_cap`, `owner_wall`, `retry`
-(`R3_retry_permitted`), `r4` (`R4_flags`), `beside` (`stated_beside_every_live_trade`). A swarm test holds the sha to
-the file whenever both are present, and `roster` == `equity_money.probe.max_programs`. No package copies the receipt
-or pins it; until the integrator does, every equity look is refused (the screen working as built).
+pinned it here: `receipt_sha256` (the file's bytes), `c_R`, `c_X`, `fp_cap`, `owner_wall`, `retry`
+(`R3_retry_permitted`), `r4` (`R4_flags`), `beside` (`stated_beside_every_live_trade`). AS MERGED (A11) both lanes'
+blocks pin RECEIPT 2 instead (`docs/benchmarks/equity_screen_2.json`, copied verbatim the same way): `"name": "S2",
+"screen": "S2"`, `receipt_sha256`, `c_R` 0.0, `c_H_floor` 0.95, `c_H_margin` 0.05, `c_X`, `fp_cap`, `owner_wall`,
+`retry`, `r4`, `beside`; receipt 1's file stays, pinned by no lane. Swarm tests hold each pinned sha to its screen's
+file and each block to the file's figures, and `roster` == `equity_money.probe.max_programs`; at the look a receipt
+file at hand whose bytes are not the pinned sha256 refuses the screen (`elane._receipt`; no such file reaches the
+House box, where CI's pin of the exact commit stands for it). With no pinned receipt every equity look is refused.
 
 ### 8.2 `league/swarm/elane.py` (stubs present)
 `MODES`, `STRUCTURES`, `LABELS` {"beta": "MARKET BETA", "equity": "EQUITY"}, `BETA_NOTE`, `SEEDED_NOTE`, `SEEDS_KEY`
@@ -697,9 +701,10 @@ tournament's equity round validates now), `lineage_tries(store, fid)`, `card_lan
 - **cards.py**: cards declare `lane`, `structure` ("etf" | "stock") and `symbols`; `validate` admits an equity card
   through `elane.card_errors`; the graveyard is lane-scoped (a REFUTED row binds only its own lane's cards; keys
   through `elane.lineage_key`).
-- **gate.py**: an equity family's look goes to `elane.look` (on the House, `EquityGateCapability`, the S1 screen; a
-  screen with no pinned receipt refuses: no look spent); the look event records lane, screen "S1", receipt, c_used and
-  the beside line.
+- **gate.py**: an equity family's look goes to `elane.look` (on the House, `EquityGateCapability`, the lane's pinned
+  screen: S2 under A11; a screen with no pinned receipt refuses: no look spent); the look event records lane, the
+  screen that judged it ("S2"; "S1" under receipt 1), receipt, c_H (S2: c_H,used, with c_pF1; S1: with c_used) and the
+  beside line.
 - **tournament.py**: Validation dispatches by lane (equity -> `elane.validate`, run through the isolated runner on the
   House); `lane_forks` False for equity; one try a lineage (`elane.try_open`).
 - **settings.py**: the `elane` overlay (DEFAULTS block).
@@ -740,9 +745,13 @@ equity rows.
 
 ## 9. screen (A9: the share screen as adopted)
 
-**TODO (A11, integration):** the House screen is S2 (the captain's A11, final 23:30Z: receipt equity_screen_2.json,
-spec sscreen2-1010/HOUSE-RULE.md). Integration pinned S1+F1 with receipt 1 (fails safe); S2's code, its receipt's copy to
-`docs/benchmarks/equity_screen_2.json` and its pin (screen "S2") are still to land, and the seeds' looks wait for them.
+**THE HOUSE SCREEN IS S2 (A11, landed):** the captain's A11 (final 23:30Z: receipt equity_screen_2.json, spec
+sscreen2-1010/HOUSE-RULE.md). S2's code is in `league/equity/screen.py` beside S1's (below), its receipt is copied
+verbatim to `docs/benchmarks/equity_screen_2.json` (sha256 45634dfc...) and both lanes' blocks of policy.json pin it
+(`"name"` and `"screen"` "S2", `c_R` 0.0, `c_H_floor` 0.95, `c_H_margin` 0.05, `c_X` 0.85, `fp_cap` 0.12). The swarm's
+look runs `floor(segments, receipt=)`, keeps a version's floor only while `floor_fits` the pinned receipt, passes an S1
+floor of the same series as `s1_floor=` (S1-X's rate beside the S2 line) and records the screen that judged it
+(league/swarm/elane.py). What follows describes S1+F1, which stays as receipt 1's screen, pinned by no lane.
 
 `league/equity/screen.py` (stub present, already A9's): `SCREEN` "S1", `C_GRID_STEP` 0.01, `C_GRID_MAX` 5.00,
 `H_LENGTHS` (194, 251), `V_LENGTH` 250, `WORLDS` 20,000, `MIN_POOL` 300, `WORLD_SETS` {"IND22": 3, "IND1622": 5},
@@ -795,7 +804,7 @@ Tests: the accounting on golden synthetic series (open and close fills, fees), t
 guard), the floor on a synthetic store (both world sets, ineligibility), refusal without a receipt, one try and one
 look per lineage (R3), `same_lineage`, the beside-every-trade line.
 
-**S2 (amendment A11) exists beside S1** (branch feat/equity-e1-s2; spec sscreen2-1010/HOUSE-RULE.md). S1 and receipt 1
+**S2 (amendment A11) exists beside S1** (spec sscreen2-1010/HOUSE-RULE.md). S1 and receipt 1
 are unchanged and keep working. S2 is new code, not a settings switch: the look is the pre-check AND sum_H > 1e-12 AND
 t_H >= c_H,used = max(c_H_floor, c_pF1 + c_H_margin) in integer grid steps, c_R = 0 (the pooled t is reported, never a
 bar), c_pF1 by EXACT enumeration of holdout starts over IND22-NO and IND1622-NO at L 194 and 251; S1-X unchanged; the
@@ -811,12 +820,13 @@ drift_kept, cells}`, `look_s2(v, h, *, c_H)`, `verdict_s2(v, h, *, receipt, prog
 ROUTING: the pinned block's `screen` (or `name`) picks the screen, and every public entry point routes on the receipt it
 is handed: `pinned_receipt` (an "S2" block gives a `ReceiptS2`), `load_receipt(..., screen="S2")` (S1's default still
 refuses receipt 2), `floor(segments, receipt=)`, `verdict(..., s1_floor=None)` and `beside_line` (receipt 2's
-template). `floor(segments, fp_cap=)` with no receipt is S1's, as E1 calls it today, so the swarm's look must pass
-`receipt=` and key its cached floor with `floor_fits`. The integrator copies
-~/Work/.ltcm-main/scratch/eqlane-1010/equity_screen_2.json VERBATIM to `docs/benchmarks/equity_screen_2.json` and pins
-it in policy.json `elane.screens.<lane>` with `"screen": "S2"` (or `"name": "S2"`; HOUSE-RULE section 9's block:
-receipt_sha256, c_R 0.0, c_H_floor, c_H_margin, c_X, fp_cap, owner_wall, retry, r4, beside, each copied from the
-receipt). Tests use only league/tests/fixtures/equity_screen_2_fake.json (marked fake) and synthetic pools.
+template). `floor(segments, fp_cap=)` with no receipt is S1's, so the swarm's look passes `receipt=` and keys its
+cached floor with `floor_fits` (league/swarm/elane.py `look`; S1's `fp_cap=` call is only `_s1x_floor`'s, for S1-X's
+rate). The study's receipt is copied VERBATIM to `docs/benchmarks/equity_screen_2.json` and pinned in policy.json
+`elane.screens.<lane>` with `"name": "S2"` and `"screen": "S2"` (HOUSE-RULE section 9's block: receipt_sha256, c_R
+0.0, c_H_floor, c_H_margin, c_X, fp_cap, owner_wall, retry, r4, beside, each copied from the receipt). The screen's own
+tests use only league/tests/fixtures/equity_screen_2_fake.json (marked fake) and synthetic pools; the committed
+receipts are judged only through the repository's pin (`test_the_committed_pin`, league/tests/test_elane.py).
 
 ---
 
@@ -850,8 +860,9 @@ receipt). Tests use only league/tests/fixtures/equity_screen_2_fake.json (marked
   The Done meter reads an equity lot's fees as posted only when the book marks the lot `info.fee_basis` "broker" (book:
   set it once the venue's SEC/TAF fees for the lot are booked; until then a checkpoint holding it stays provisional).
   The Done meters count from Oct 10, 2026 (the goal; `dlane_report.DONE_FROM`), every lane, earlier closes beside.
-  The S1 line beside a trade is read from the passed look's `looks.detail` (`beside`, and the verdict's figures at the
-  top level or under `verdict`), else the family state's `elane_look` of that version (swarm, gate.py).
+  The screen's line beside a trade (S2's under A11) is read from the passed look's `looks.detail` (`beside`, `screen`,
+  and the verdict's figures at the top level or under `verdict`), else the family state's `elane_look` of that version
+  (swarm, elane.py `look`).
 - **funnel.py**: equity counts (births by lane, Validation tries, looks, passes, Probe programs, closes).
 - **scripts/floor_box.py** (A8.9): `deploy` and `rollback` refuse a release that lacks `EQUITY_BOOK_MARKERS =
   (("league/equity/live.py", "class EquityBook"),)` while the box's live.sqlite has an `eq_lots` row with status
@@ -898,7 +909,8 @@ receipt). Tests use only league/tests/fixtures/equity_screen_2_fake.json (marked
 - The money digest (`PINNED_DIGEST`) is re-pinned once, by money; any later constitution change goes through money.
 - A10.2 (applied at integration): `equity_money.enabled` ships True (one money-digest move with the block:
   ad8c761b, full digest 65b0e025); `elane.mode` deploys "off" and the captain sets "gate" after the deploy is verified;
-  the S1 receipt is pinned (A9); nothing trades until a program passes its look AND the stock proof's BUY stage passes.
+  receipt 2 is pinned for both lanes (A11: the S2 screen; receipt 1, A9's, stays in the repository, unused); nothing
+  trades until a program passes its look AND the stock proof's BUY stage passes.
 
 ## 13. Where the briefs disagreed, and what this file follows
 

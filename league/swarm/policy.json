@@ -137,9 +137,12 @@
     "roster": 3,
     "screens": {
       "beta": {
-        "name": "S1",
-        "receipt_sha256": "6fb84bd5b30927064af8b7fe01fef97e3263463171ed29a5bafac79f688f9e45",
-        "c_R": 1.49,
+        "name": "S2",
+        "screen": "S2",
+        "receipt_sha256": "45634dfce978f255b118eb9019121483f60fe81d21fda04753a76fe377a1a4bc",
+        "c_R": 0.0,
+        "c_H_floor": 0.95,
+        "c_H_margin": 0.05,
         "c_X": 0.85,
         "fp_cap": 0.12,
         "owner_wall": 0.15,
@@ -152,12 +155,15 @@
           "A5": [],
           "A6": []
         },
-        "beside": "S1-R, c_used = {c_used}, c_H = {c_H}, this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%), drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); contamination: 2025 and most of the 2026 holdout precede the authoring models' training cutoff"
+        "beside": "S2, c_R = 0 (no pooled-t bar), c_H,used = {c_H}; this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%); its holdout-only rate at c_H,used = {honly}% (the bound when 2025 is fully known); drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); a pass under S2 is weaker evidence of edge than under S1+F1; contamination: 2025 (all of Validation) and part of the 2026 holdout can be known to the authoring models, so the FP is a property of the procedure over 2010-19 and 2022-24 history, not a guarantee in this one world"
       },
       "equity": {
-        "name": "S1",
-        "receipt_sha256": "6fb84bd5b30927064af8b7fe01fef97e3263463171ed29a5bafac79f688f9e45",
-        "c_R": 1.49,
+        "name": "S2",
+        "screen": "S2",
+        "receipt_sha256": "45634dfce978f255b118eb9019121483f60fe81d21fda04753a76fe377a1a4bc",
+        "c_R": 0.0,
+        "c_H_floor": 0.95,
+        "c_H_margin": 0.05,
         "c_X": 0.85,
         "fp_cap": 0.12,
         "owner_wall": 0.15,
@@ -170,7 +176,7 @@
           "A5": [],
           "A6": []
         },
-        "beside": "S1-R, c_used = {c_used}, c_H = {c_H}, this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%), drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); contamination: 2025 and most of the 2026 holdout precede the authoring models' training cutoff"
+        "beside": "S2, c_R = 0 (no pooled-t bar), c_H,used = {c_H}; this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%); its holdout-only rate at c_H,used = {honly}% (the bound when 2025 is fully known); drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); a pass under S2 is weaker evidence of edge than under S1+F1; contamination: 2025 (all of Validation) and part of the 2026 holdout can be known to the authoring models, so the FP is a property of the procedure over 2010-19 and 2022-24 history, not a guarantee in this one world"
       }
     },
     "val_tries": 1,

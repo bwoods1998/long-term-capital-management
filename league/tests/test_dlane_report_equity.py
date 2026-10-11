@@ -173,7 +173,8 @@ class WhatRidesBeside(EquityFixture):
         self.assertEqual(close["fp"]["own_fp"], 0.11)
         other = next(c for c in out["done"]["all"]["closes"] if c["family"] == "p-b")
         self.assertIsNone(other["fp"]["beside"])
-        self.assertIn("no S1 line", other["fp"]["fp_why"])
+        self.assertIn("no screen line", other["fp"]["fp_why"])
+        self.assertIsNone(other["fp"]["screen"], "no look recorded: no screen is assumed")
         checkpoint = out["done"]["all"]["latest"]
         self.assertEqual(checkpoint["at_close"], 30)
         beside = checkpoint["equity"]
@@ -194,6 +195,26 @@ class WhatRidesBeside(EquityFixture):
         rows = out["fp_beside_trades"]["closes"]
         self.assertEqual({r["screen"] for r in rows if r["family"] == "p-a"}, {"S1"})
         self.assertEqual(len(out["fp_beside_trades"]["equity_trades"]), 30)
+
+    def test_a_look_judged_by_s2_rides_beside_as_s2s(self):
+        """A11: the House screen is S2. The row beside a trade names the screen that judged its program's look and
+        carries that verdict's figures (c_H = c_H,used, c_pF1, the own FP, the holdout-only and drift-kept rates)."""
+        self.eq_family("p-s2")
+        line = "S2, c_R = 0 (no pooled-t bar), c_H,used = 1.07; this program's FP at zero edge = 3.10% (invented line)"
+        self.store.add_look("p-s2", 1, "sha-s2", passed=True, p_value=None,
+                            detail={"screen": "S2", "lane": "beta", "receipt": "r" * 64, "c_pF1": 1.02, "c_H": 1.07,
+                                    "s1x": "beta", "beside": line, "passed": True})
+        self.store.set_state("p-s2", elane_look={"version": 1, "at": "2026-10-11T12:00:00Z", "beside": line,
+                                                 "verdict": {"screen": "S2", "passed": True, "c_R": 0.0, "c_pF1": 1.02,
+                                                             "c_H": 1.07, "own_fp": 0.031, "holdout_only": 0.094,
+                                                             "drift_kept": 0.21, "label": "beta", "fp_x": 0.04}})
+        row = R.EquityScreens(self.store).of("p-s2", 1)
+        self.assertEqual((row["screen"], row["beside"], row["receipt"]), ("S2", line, "r" * 64))
+        self.assertEqual((row["c_R"], row["c_pF1"], row["c_H"], row["own_fp"], row["holdout_only"], row["drift_kept"],
+                          row["label"], row["fp_x"]), (0.0, 1.02, 1.07, 0.031, 0.094, 0.21, "beta", 0.04))
+        self.assertEqual((row["c_used"], row["c_p"]), (None, None), "S2 has no pooled-t bar")
+        self.assertNotIn("fp_why", row)
+        self.assertIn("no screen line", R.EquityScreens(self.store).of("p-s2", 2)["fp_why"], "another version: no look")
 
     def test_done_is_read_with_and_without_the_three_seeded_programs(self):
         for fid in ("seed-overnight-spy", "agent-one"):

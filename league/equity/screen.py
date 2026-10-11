@@ -1,5 +1,5 @@
-"""THE SHARE SCREEN S1 as adopted (sscreen-1010 with its review's fixes F1, D3, D5, D6; amendment A9): S1-R gates,
-S1-X labels. Code only.
+"""THE SHARE SCREENS. S1 as adopted (sscreen-1010 with its review's fixes F1, D3, D5, D6; amendment A9): S1-R gates,
+S1-X labels; and, beside it, S2 (sscreen2-1010, amendment A11): THE HOUSE'S GATE. Code only.
 
 Owner: screen. This module implements the pinned pre-registration EXACTLY (its sections 2.2-2.5, 5, 6, 7 and 9 as they
 bind a program) with A9's fixes, and states its one deviation (`DEVIATIONS`) beside every verdict. Its calibrated
@@ -11,13 +11,13 @@ House box). A screen with no pinned receipt refuses every program (`pinned_recei
 states another pre-check). Receipt 2 (equity_screen_2.json, the follow-up study sscreen2-1010) landed as a new file and
 a new screen beside this one, S2 (amendment A11, below), never by editing receipt 1.
 
-TODO (A11, the captain's amendment of Oct 10, 23:10-23:30Z): THE HOUSE SCREEN IS S2 (sscreen2-1010: the gate is the
-pre-check AND sum_H > 1e-12 AND t_H >= c_H,used = max(c_H_floor, c_pF1 + c_H_margin), c_R = 0, c_pF1 by exact enumeration
-of holdout starts over IND22-NO and IND1622-NO at L 194 and 251; S1-X unchanged). Its receipt (equity_screen_2.json,
-sha256 45634dfc...) and its implementation spec (sscreen2-1010/HOUSE-RULE.md, with conformance vectors) are the
-captain's; S2 is new code not yet in this module, and this module's loader refuses receipt 2. Until S2 lands, S1+F1
-with receipt 1 stays pinned (it fails safe: A11 final says the seeds' looks wait for S2 code), and the captain swaps
-the pin before ON.
+THE HOUSE SCREEN IS S2 (A11, the captain's amendment of Oct 10, 23:10-23:30Z; sscreen2-1010: the gate is the pre-check
+AND sum_H > 1e-12 AND t_H >= c_H,used = max(c_H_floor, c_pF1 + c_H_margin), c_R = 0, c_pF1 by exact enumeration of
+holdout starts over IND22-NO and IND1622-NO at L 194 and 251; S1-X unchanged). Both lanes' blocks of the repository's
+policy.json pin its receipt (docs/benchmarks/equity_screen_2.json, the study's receipt copied verbatim, sha256
+45634dfc...: c_H_floor 0.95, c_H_margin 0.05, the look capped at 2026-10-09), so every look runs S2's code below
+(`floor_s2`, `verdict_s2`). S1+F1, the first half of this module, stays as receipt 1's screen: its receipt stays in the
+repository, its loader refuses receipt 2, and no lane pins it.
 
 THE DAILY SERIES (pre-registration section 2.2; `series`). Constant weights on the program's equity E0 (the engine's
 sleeve, `capital`): a lot's weight omega = its entry notional / E0 (the engine's `weight`). Prices o and c are the

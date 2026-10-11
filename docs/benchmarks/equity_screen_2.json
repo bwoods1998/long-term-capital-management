@@ -1,0 +1,2485 @@
+{
+ "name": "equity_screen_2",
+ "screen": "S2",
+ "study": "SSCREEN2-1010 share screen S2 (worlds where Validation and holdout never share a session), adopted Oct 10, 2026 as amendment A11 with its review's fixes (exact F1 floor, no joint 2-D floor, c_R 0)",
+ "replaces": "the gate of equity_screen_1 (S1+F1). Receipt 1 is not edited and stays pinned for S1. The series, the pre-check, the S1-X label, D3, D6 and the no-feedback rule carry over unchanged.",
+ "rule": "S2 (share screen), per program, one holdout look per lineage. Series as receipt 1: the program's daily P&L r_t on its equity E0 (constant weights at the goal's caps: ETF <= 0.50, stock <= 0.20, sum <= 1.00; half-spread 1 bp index ETFs / 3 bp others; SEC and FINRA TAF sell fees), effective exposure w_t, round trips RT (full exits) and invested days ID (a position held at the close). Pre-check (Validation, calendar 2025, 250 sessions): (RT >= 20 or ID >= 120) and sum_V r > 1e-12. Look (once, only after a passed pre-check): sum_H r > 1e-12 AND t_H = mean_H(r) / sd_H(r, ddof 1) x sqrt(L) >= c_H,used; a holdout sd below 1e-12 fails. c_R = 0: the pooled t over Validation + holdout is not a bar (a positive Validation sum and a positive holdout sum already make it positive). c_H,used = max(c_H_floor, c_pF1 + c_H_margin) on the 0.01 grid, where c_pF1 is the program's own F1 point by exact enumeration (floor). Label S1-X unchanged from receipt 1: the same pre-check and pooled t on x_t = r_t - w_t * mean_W(b) (b = equal-weight cost-free benchmark of the program's universe, W = the window) >= c_X, no floor: pass = alpha, fail = beta; never a gate.",
+ "fp_cap": 0.12,
+ "owner_wall": 0.15,
+ "c_R": 0.0,
+ "c_H_floor": 0.95,
+ "c_H_margin": 0.05,
+ "c_X": 0.85,
+ "precheck": {
+  "rt_min": 20,
+  "id_min": 120,
+  "rule": "(RT_V >= 20 or ID_V >= 120) and sum_V(r) > 1e-12"
+ },
+ "look": {
+  "rule": "pre-check passed AND sum_H(r) > 1e-12 AND t_H >= c_H,used; t_H = mean_H / sd_H(ddof 1) x sqrt(L), undefined (fails) when sd_H < 1e-12",
+  "c_H_used": "max(c_H_floor, c_pF1 + c_H_margin), in grid steps max(round(100 c_H_floor), k_F1 + round(100 c_H_margin)); a c_H,used above 5.00 makes the program ineligible",
+  "pooled_t": "report only, never a condition (c_R = 0)"
+ },
+ "floor": {
+  "method": "exact",
+  "c_pF1": "the largest, over the program's eligible floor cells (world set x L in {194, 251}), of each cell's smallest c on 0.00..5.00 (step 0.01) with P(sum_H r0 > 1e-12 AND sd_H >= 1e-12 AND t_H >= c) <= fp_cap, the probability taken exactly over the cell's world distribution (no pre-check)",
+  "world_sets": {
+   "IND22-NO": "pieces [the 2022-01-03..2024-12-31 pool]; eligible when that pool has >= 550 sessions",
+   "IND1622-NO": "pieces [the 2016-01-04..2019-12-31 pool, the 2022-01-03..2024-12-31 pool]; eligible when each pool has >= 251 sessions"
+  },
+  "pools": "the program's own series on each Train-era span (2016-01-04..2019-12-31, 2022-01-03..2024-12-31), from its first decision + 2 sessions to the span's last session; no 2020, 2021, 2025 or 2026 session",
+  "worlds": "a world is a Validation block V of 250 and a holdout block H of L consecutive sessions, each circular inside one piece, V and H sharing no session (in one piece of length n: (start_H - start_V) mod n in [250, n - L]); every valid (piece_V, start_V, piece_H, start_H) tuple is equally likely (the distribution of the study's IND-NO rejection sampler)",
+  "enumeration": "per piece k of length n_k: U_k = valid H starts per V start, W_k = valid V starts per H start (the other pieces' lengths that can hold the block, plus max(0, n_k - 250 - L + 1) in the same piece); T = the number of valid tuples; the holdout-only count at c = the sum of W_k over the H starts meeting the condition; rate = count / T, compared with fp_cap in exact integer arithmetic",
+  "null": "N0 per role: r0 = r - w kappa_role, kappa_V = sum_k U_k sum(r) / sum_k U_k sum(w), kappa_H = sum_k W_k sum(r) / sum_k W_k sum(w) (inclusion-weighted, review D4)",
+  "ineligible": "no eligible set, a cell with no valid tuple or no c <= 5.00, c_H,used above 5.00, zero exposure, a non-finite series, or a session outside the Train-era spans",
+  "seeds": "none: the floor is an exact enumeration (deterministic; review fix 3)",
+  "own_rates": "computed on the House by the same enumeration at c_H,used, the largest over the floor cells, never committed: own FP (the S2 gate under N0), the holdout-only rate (N0), and the drift-kept rate (the gate under N1: r - w (kappa_role - m_role), m_role the inclusion-weighted mean of b)"
+ },
+ "windows": {
+  "validation": "calendar 2025 (250 sessions)",
+  "holdout": "2026-01-02 .. 2026-10-09: exactly 194 sessions (the look cap, which replaces review fix D6's 2026-12-31); later sessions are forward days only",
+  "calibrated_L": "the floor covers L 194 and 251; with a fixed 194-session holdout the L 251 cells only make c_pF1 conservative"
+ },
+ "lineage": {
+  "holdout_looks": 1,
+  "validation_tries": 2,
+  "retry": "only after the first try FAILED its pre-check (no look spent), with the retry version hashed at the first try (R3)",
+  "same_lineage": "a program whose Train daily returns correlate >= 0.7 with a program already looked at, or that uses the same template, is the same lineage (review fix D3)",
+  "no_feedback": "look and Validation outcomes of share programs are never fed back to generators or the diagnostician (review fix D3)"
+ },
+ "R3_retry_permitted": true,
+ "R3_reading_B_max": 0.0702,
+ "R4_flags": {
+  "A1": [],
+  "A2": [],
+  "A3": [],
+  "A4": [],
+  "A5": [],
+  "A6": []
+ },
+ "study_program_floors": {
+  "note": "the study's 12 programs (archetypes A1-A6 and siblings) on their own study pools; the House computes every live program's own floor",
+  "A1": {
+   "c_pF1": 1.41,
+   "c_H_used": 1.46
+  },
+  "A2": {
+   "c_pF1": 1.02,
+   "c_H_used": 1.07
+  },
+  "A3": {
+   "c_pF1": 1.34,
+   "c_H_used": 1.39
+  },
+  "A4": {
+   "c_pF1": 1.47,
+   "c_H_used": 1.52
+  },
+  "A5": {
+   "c_pF1": 0.84,
+   "c_H_used": 0.95
+  },
+  "A6": {
+   "c_pF1": 0.88,
+   "c_H_used": 0.95
+  },
+  "A1s": {
+   "c_pF1": 1.34,
+   "c_H_used": 1.39
+  },
+  "A2s": {
+   "c_pF1": 1.06,
+   "c_H_used": 1.11
+  },
+  "A3s": {
+   "c_pF1": 1.43,
+   "c_H_used": 1.48
+  },
+  "A4s": {
+   "c_pF1": 0.68,
+   "c_H_used": 0.95
+  },
+  "A5s": {
+   "c_pF1": 0.57,
+   "c_H_used": 0.95
+  },
+  "A6s": {
+   "c_pF1": 1.16,
+   "c_H_used": 1.21
+  }
+ },
+ "fp_zero_edge": {
+  "A1": {
+   "IND13-NO|194": [
+    0.0074,
+    0.0062,
+    0.0086
+   ],
+   "IND13-NO|251": [
+    0.01,
+    0.0087,
+    0.0114
+   ],
+   "IND22-NO|194": [
+    0.0162,
+    0.0144,
+    0.018
+   ],
+   "IND22-NO|251": [
+    0.0301,
+    0.0279,
+    0.0326
+   ],
+   "CON22|194": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0076,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0018,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0126,
+    0.0111,
+    0.0141
+   ],
+   "IND1622-NO|251": [
+    0.0208,
+    0.0187,
+    0.0229
+   ]
+  },
+  "A2": {
+   "IND13-NO|194": [
+    0.0425,
+    0.0396,
+    0.0454
+   ],
+   "IND13-NO|251": [
+    0.0435,
+    0.0406,
+    0.0465
+   ],
+   "IND22-NO|194": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "IND22-NO|251": [
+    0.0008,
+    0.0004,
+    0.0012
+   ],
+   "CON22|194": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0303,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0493,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0483,
+    0.0453,
+    0.0513
+   ],
+   "IND1622-NO|251": [
+    0.0537,
+    0.0508,
+    0.0569
+   ]
+  },
+  "A3": {
+   "IND13-NO|194": [
+    0.0092,
+    0.0078,
+    0.0105
+   ],
+   "IND13-NO|251": [
+    0.0135,
+    0.0119,
+    0.015
+   ],
+   "IND22-NO|194": [
+    0.0227,
+    0.0206,
+    0.0249
+   ],
+   "IND22-NO|251": [
+    0.0067,
+    0.0056,
+    0.008
+   ],
+   "CON22|194": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0004,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0004,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0213,
+    0.0192,
+    0.0232
+   ],
+   "IND1622-NO|251": [
+    0.0238,
+    0.0217,
+    0.0259
+   ]
+  },
+  "A4": {
+   "IND13-NO|194": [
+    0.0177,
+    0.0159,
+    0.0198
+   ],
+   "IND13-NO|251": [
+    0.0198,
+    0.0181,
+    0.0219
+   ],
+   "IND22-NO|194": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "IND22-NO|251": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "CON22|194": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0093,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0053,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0328,
+    0.0304,
+    0.0352
+   ],
+   "IND1622-NO|251": [
+    0.0492,
+    0.0462,
+    0.052
+   ]
+  },
+  "A5": {
+   "IND13-NO|194": [
+    0.0473,
+    0.0443,
+    0.05
+   ],
+   "IND13-NO|251": [
+    0.048,
+    0.0452,
+    0.051
+   ],
+   "IND22-NO|194": [
+    0.0089,
+    0.0076,
+    0.0103
+   ],
+   "IND22-NO|251": [
+    0.0145,
+    0.0129,
+    0.0163
+   ],
+   "CON22|194": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0153,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0076,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0293,
+    0.0271,
+    0.0315
+   ],
+   "IND1622-NO|251": [
+    0.0231,
+    0.0212,
+    0.025
+   ]
+  },
+  "A6": {
+   "IND13-NO|194": [
+    0.0469,
+    0.0442,
+    0.0498
+   ],
+   "IND13-NO|251": [
+    0.0506,
+    0.0474,
+    0.0537
+   ],
+   "IND22-NO|194": [
+    0.012,
+    0.0104,
+    0.0134
+   ],
+   "IND22-NO|251": [
+    0.0009,
+    0.0005,
+    0.0014
+   ],
+   "CON22|194": [
+    0.0034,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0484,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.046,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0328,
+    0.0304,
+    0.0355
+   ],
+   "IND1622-NO|251": [
+    0.0436,
+    0.0408,
+    0.0463
+   ]
+  }
+ },
+ "fp_zero_edge_siblings": {
+  "A1s": {
+   "IND13-NO|194": [
+    0.0042,
+    0.0032,
+    0.0051
+   ],
+   "IND13-NO|251": [
+    0.0084,
+    0.007,
+    0.0097
+   ],
+   "IND22-NO|194": [
+    0.0146,
+    0.0129,
+    0.0163
+   ],
+   "IND22-NO|251": [
+    0.0052,
+    0.0043,
+    0.0061
+   ],
+   "CON22|194": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0029,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0091,
+    0.0077,
+    0.0103
+   ],
+   "IND1622-NO|251": [
+    0.0198,
+    0.018,
+    0.0218
+   ]
+  },
+  "A2s": {
+   "IND13-NO|194": [
+    0.0357,
+    0.033,
+    0.0382
+   ],
+   "IND13-NO|251": [
+    0.0452,
+    0.0422,
+    0.0479
+   ],
+   "IND22-NO|194": [
+    0.0003,
+    0.0001,
+    0.0005
+   ],
+   "IND22-NO|251": [
+    0.0013,
+    0.0008,
+    0.0018
+   ],
+   "CON22|194": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0374,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0552,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0284,
+    0.026,
+    0.0307
+   ],
+   "IND1622-NO|251": [
+    0.0219,
+    0.0199,
+    0.024
+   ]
+  },
+  "A3s": {
+   "IND13-NO|194": [
+    0.0365,
+    0.0338,
+    0.0392
+   ],
+   "IND13-NO|251": [
+    0.0293,
+    0.0271,
+    0.0317
+   ],
+   "IND22-NO|194": [
+    0.018,
+    0.0162,
+    0.0199
+   ],
+   "IND22-NO|251": [
+    0.0092,
+    0.0079,
+    0.0106
+   ],
+   "CON22|194": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0156,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0146,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0459,
+    0.043,
+    0.0488
+   ],
+   "IND1622-NO|251": [
+    0.0376,
+    0.035,
+    0.04
+   ]
+  },
+  "A4s": {
+   "IND13-NO|194": [
+    0.045,
+    0.0422,
+    0.0479
+   ],
+   "IND13-NO|251": [
+    0.0418,
+    0.0391,
+    0.0448
+   ],
+   "IND22-NO|194": [
+    0.0003,
+    0.0001,
+    0.0006
+   ],
+   "IND22-NO|251": [
+    0.0005,
+    0.0002,
+    0.0008
+   ],
+   "CON22|194": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0296,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0294,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0037,
+    0.0028,
+    0.0046
+   ],
+   "IND1622-NO|251": [
+    0.007,
+    0.006,
+    0.0082
+   ]
+  },
+  "A5s": {
+   "IND13-NO|194": [
+    0.0306,
+    0.028,
+    0.0329
+   ],
+   "IND13-NO|251": [
+    0.0264,
+    0.0242,
+    0.0286
+   ],
+   "IND22-NO|194": [
+    0.005,
+    0.004,
+    0.006
+   ],
+   "IND22-NO|251": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "CON22|194": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0129,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0167,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0134,
+    0.0118,
+    0.015
+   ],
+   "IND1622-NO|251": [
+    0.0022,
+    0.0016,
+    0.0029
+   ]
+  },
+  "A6s": {
+   "IND13-NO|194": [
+    0.0284,
+    0.0261,
+    0.0306
+   ],
+   "IND13-NO|251": [
+    0.0283,
+    0.026,
+    0.0306
+   ],
+   "IND22-NO|194": [
+    0.0043,
+    0.0034,
+    0.0053
+   ],
+   "IND22-NO|251": [
+    0.0031,
+    0.0024,
+    0.0039
+   ],
+   "CON22|194": [
+    0.0034,
+    null,
+    null
+   ],
+   "CON22|251": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194": [
+    0.0043,
+    null,
+    null
+   ],
+   "CON13W|251": [
+    0.0022,
+    null,
+    null
+   ],
+   "IND1622-NO|194": [
+    0.0277,
+    0.0255,
+    0.03
+   ],
+   "IND1622-NO|251": [
+    0.0406,
+    0.0377,
+    0.0432
+   ]
+  }
+ },
+ "fp_zero_edge_max": {
+  "archetypes_calibration_cells": {
+   "rate": 0.0506,
+   "program": "A6",
+   "cell": "IND13-NO|251|A"
+  },
+  "archetypes_all_sets_L194_251": {
+   "rate": 0.0634,
+   "program": "A1",
+   "cell": "IND22|251|ovl"
+  },
+  "siblings_all_sets_L194_251": {
+   "rate": 0.0696,
+   "program": "A3s",
+   "cell": "IND22|194|ovl"
+  },
+  "all_cells_any_L": {
+   "rate": 0.0751,
+   "program": "A2",
+   "cell": "IND1622|126|ovl"
+  },
+  "cells_over_fp_cap": 0
+ },
+ "holdout_only_zero_edge": {
+  "A1": {
+   "IND13-NO|194": 0.0127,
+   "IND13-NO|251": 0.0184,
+   "IND22-NO|194": 0.068,
+   "IND22-NO|251": 0.1046,
+   "CON22|194": 0.0,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.0088,
+   "CON13W|251": 0.0057,
+   "IND1622-NO|194": 0.0198,
+   "IND1622-NO|251": 0.0331
+  },
+  "A2": {
+   "IND13-NO|194": 0.0828,
+   "IND13-NO|251": 0.0843,
+   "IND22-NO|194": 0.0573,
+   "IND22-NO|251": 0.0635,
+   "CON22|194": 0.0,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.057,
+   "CON13W|251": 0.1012,
+   "IND1622-NO|194": 0.1005,
+   "IND1622-NO|251": 0.1104
+  },
+  "A3": {
+   "IND13-NO|194": 0.0181,
+   "IND13-NO|251": 0.0268,
+   "IND22-NO|194": 0.0909,
+   "IND22-NO|251": 0.0741,
+   "CON22|194": 0.0,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.0055,
+   "CON13W|251": 0.0137,
+   "IND1622-NO|194": 0.0423,
+   "IND1622-NO|251": 0.0495
+  },
+  "A4": {
+   "IND13-NO|194": 0.0348,
+   "IND13-NO|251": 0.0395,
+   "IND22-NO|194": 0.0,
+   "IND22-NO|251": 0.0,
+   "CON22|194": 0.0,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.0457,
+   "CON13W|251": 0.0628,
+   "IND1622-NO|194": 0.0606,
+   "IND1622-NO|251": 0.0941
+  },
+  "A5": {
+   "IND13-NO|194": 0.1059,
+   "IND13-NO|251": 0.1053,
+   "IND22-NO|194": 0.0707,
+   "IND22-NO|251": 0.0721,
+   "CON22|194": 0.0,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.1009,
+   "CON13W|251": 0.1223,
+   "IND1622-NO|194": 0.0626,
+   "IND1622-NO|251": 0.0509
+  },
+  "A6": {
+   "IND13-NO|194": 0.0944,
+   "IND13-NO|251": 0.1057,
+   "IND22-NO|194": 0.0297,
+   "IND22-NO|251": 0.0021,
+   "CON22|194": 0.0305,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.0875,
+   "CON13W|251": 0.0755,
+   "IND1622-NO|194": 0.0802,
+   "IND1622-NO|251": 0.1131
+  },
+  "A1s": {
+   "IND13-NO|194": 0.0072,
+   "IND13-NO|251": 0.0167,
+   "IND22-NO|194": 0.0938,
+   "IND22-NO|251": 0.1108,
+   "CON22|194": 0.0,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.0038,
+   "CON13W|251": 0.004,
+   "IND1622-NO|194": 0.0148,
+   "IND1622-NO|251": 0.038
+  },
+  "A2s": {
+   "IND13-NO|194": 0.074,
+   "IND13-NO|251": 0.0877,
+   "IND22-NO|194": 0.0335,
+   "IND22-NO|251": 0.0042,
+   "CON22|194": 0.0,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.0762,
+   "CON13W|251": 0.1093,
+   "IND1622-NO|194": 0.0786,
+   "IND1622-NO|251": 0.0645
+  },
+  "A3s": {
+   "IND13-NO|194": 0.0833,
+   "IND13-NO|251": 0.0655,
+   "IND22-NO|194": 0.111,
+   "IND22-NO|251": 0.0891,
+   "CON22|194": 0.0,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.0248,
+   "CON13W|251": 0.0345,
+   "IND1622-NO|194": 0.1062,
+   "IND1622-NO|251": 0.0829
+  },
+  "A4s": {
+   "IND13-NO|194": 0.1172,
+   "IND13-NO|251": 0.107,
+   "IND22-NO|194": 0.0018,
+   "IND22-NO|251": 0.0015,
+   "CON22|194": 0.2308,
+   "CON22|251": 0.1736,
+   "CON13W|194": 0.169,
+   "CON13W|251": 0.1709,
+   "IND1622-NO|194": 0.0122,
+   "IND1622-NO|251": 0.0215
+  },
+  "A5s": {
+   "IND13-NO|194": 0.0639,
+   "IND13-NO|251": 0.051,
+   "IND22-NO|194": 0.0244,
+   "IND22-NO|251": 0.0,
+   "CON22|194": 0.0,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.055,
+   "CON13W|251": 0.0531,
+   "IND1622-NO|194": 0.027,
+   "IND1622-NO|251": 0.0038
+  },
+  "A6s": {
+   "IND13-NO|194": 0.0546,
+   "IND13-NO|251": 0.0519,
+   "IND22-NO|194": 0.0998,
+   "IND22-NO|251": 0.0629,
+   "CON22|194": 0.0339,
+   "CON22|251": 0.0,
+   "CON13W|194": 0.0229,
+   "CON13W|251": 0.0281,
+   "IND1622-NO|194": 0.0664,
+   "IND1622-NO|251": 0.1073
+  }
+ },
+ "power": {
+  "A1": {
+   "IND13-NO|194|N0e05": [
+    0.0382,
+    0.0355,
+    0.0409
+   ],
+   "IND13-NO|194|N0e10": [
+    0.1855,
+    0.1799,
+    0.1912
+   ],
+   "IND13-NO|251|N0e05": [
+    0.071,
+    0.0675,
+    0.0746
+   ],
+   "IND13-NO|251|N0e10": [
+    0.2011,
+    0.1958,
+    0.2067
+   ],
+   "IND22-NO|194|N0e05": [
+    0.0798,
+    0.0759,
+    0.0833
+   ],
+   "IND22-NO|194|N0e10": [
+    0.1459,
+    0.1408,
+    0.1507
+   ],
+   "IND22-NO|251|N0e05": [
+    0.0725,
+    0.0688,
+    0.0759
+   ],
+   "IND22-NO|251|N0e10": [
+    0.1287,
+    0.1241,
+    0.1332
+   ],
+   "CON22|194|N0e05": [
+    0.0097,
+    null,
+    null
+   ],
+   "CON22|194|N0e10": [
+    0.0552,
+    null,
+    null
+   ],
+   "CON22|251|N0e05": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251|N0e10": [
+    0.0319,
+    null,
+    null
+   ],
+   "CON13W|194|N0e05": [
+    0.0286,
+    null,
+    null
+   ],
+   "CON13W|194|N0e10": [
+    0.1715,
+    null,
+    null
+   ],
+   "CON13W|251|N0e05": [
+    0.053,
+    null,
+    null
+   ],
+   "CON13W|251|N0e10": [
+    0.1815,
+    null,
+    null
+   ],
+   "IND1622-NO|194|N0e05": [
+    0.0579,
+    0.0544,
+    0.0612
+   ],
+   "IND1622-NO|194|N0e10": [
+    0.1965,
+    0.1912,
+    0.2018
+   ],
+   "IND1622-NO|251|N0e05": [
+    0.0991,
+    0.0951,
+    0.103
+   ],
+   "IND1622-NO|251|N0e10": [
+    0.2268,
+    0.221,
+    0.2324
+   ]
+  },
+  "A2": {
+   "IND13-NO|194|N0e05": [
+    0.1568,
+    0.1521,
+    0.1622
+   ],
+   "IND13-NO|194|N0e10": [
+    0.2881,
+    0.2819,
+    0.2945
+   ],
+   "IND13-NO|251|N0e05": [
+    0.1678,
+    0.1624,
+    0.1731
+   ],
+   "IND13-NO|251|N0e10": [
+    0.3261,
+    0.3195,
+    0.3324
+   ],
+   "IND22-NO|194|N0e05": [
+    0.0232,
+    0.0211,
+    0.0251
+   ],
+   "IND22-NO|194|N0e10": [
+    0.2182,
+    0.2125,
+    0.224
+   ],
+   "IND22-NO|251|N0e05": [
+    0.0272,
+    0.0248,
+    0.0295
+   ],
+   "IND22-NO|251|N0e10": [
+    0.19,
+    0.185,
+    0.1959
+   ],
+   "CON22|194|N0e05": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|194|N0e10": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251|N0e05": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251|N0e10": [
+    0.2115,
+    null,
+    null
+   ],
+   "CON13W|194|N0e05": [
+    0.1716,
+    null,
+    null
+   ],
+   "CON13W|194|N0e10": [
+    0.2998,
+    null,
+    null
+   ],
+   "CON13W|251|N0e05": [
+    0.1516,
+    null,
+    null
+   ],
+   "CON13W|251|N0e10": [
+    0.3123,
+    null,
+    null
+   ],
+   "IND1622-NO|194|N0e05": [
+    0.1605,
+    0.1559,
+    0.1655
+   ],
+   "IND1622-NO|194|N0e10": [
+    0.2951,
+    0.2883,
+    0.3014
+   ],
+   "IND1622-NO|251|N0e05": [
+    0.1818,
+    0.1763,
+    0.1873
+   ],
+   "IND1622-NO|251|N0e10": [
+    0.3227,
+    0.3167,
+    0.3291
+   ]
+  },
+  "A3": {
+   "IND13-NO|194|N0e05": [
+    0.0321,
+    0.0299,
+    0.0346
+   ],
+   "IND13-NO|194|N0e10": [
+    0.0899,
+    0.0862,
+    0.0939
+   ],
+   "IND13-NO|251|N0e05": [
+    0.0364,
+    0.0338,
+    0.0391
+   ],
+   "IND13-NO|251|N0e10": [
+    0.095,
+    0.0913,
+    0.0993
+   ],
+   "IND22-NO|194|N0e05": [
+    0.0445,
+    0.0418,
+    0.0476
+   ],
+   "IND22-NO|194|N0e10": [
+    0.0803,
+    0.0765,
+    0.0843
+   ],
+   "IND22-NO|251|N0e05": [
+    0.0244,
+    0.0221,
+    0.0264
+   ],
+   "IND22-NO|251|N0e10": [
+    0.0758,
+    0.0719,
+    0.0794
+   ],
+   "CON22|194|N0e05": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|194|N0e10": [
+    0.0033,
+    null,
+    null
+   ],
+   "CON22|251|N0e05": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251|N0e10": [
+    0.0,
+    null,
+    null
+   ],
+   "CON13W|194|N0e05": [
+    0.0029,
+    null,
+    null
+   ],
+   "CON13W|194|N0e10": [
+    0.0244,
+    null,
+    null
+   ],
+   "CON13W|251|N0e05": [
+    0.0027,
+    null,
+    null
+   ],
+   "CON13W|251|N0e10": [
+    0.0398,
+    null,
+    null
+   ],
+   "IND1622-NO|194|N0e05": [
+    0.0718,
+    0.0683,
+    0.0754
+   ],
+   "IND1622-NO|194|N0e10": [
+    0.1286,
+    0.1242,
+    0.133
+   ],
+   "IND1622-NO|251|N0e05": [
+    0.0605,
+    0.0572,
+    0.0638
+   ],
+   "IND1622-NO|251|N0e10": [
+    0.1494,
+    0.1447,
+    0.1542
+   ]
+  },
+  "A4": {
+   "IND13-NO|194|N0e05": [
+    0.0393,
+    0.0366,
+    0.0419
+   ],
+   "IND13-NO|194|N0e10": [
+    0.0751,
+    0.0717,
+    0.0786
+   ],
+   "IND13-NO|251|N0e05": [
+    0.0558,
+    0.0527,
+    0.0593
+   ],
+   "IND13-NO|251|N0e10": [
+    0.0819,
+    0.078,
+    0.0856
+   ],
+   "IND22-NO|194|N0e05": [
+    0.0109,
+    0.0095,
+    0.0126
+   ],
+   "IND22-NO|194|N0e10": [
+    0.0159,
+    0.0142,
+    0.0177
+   ],
+   "IND22-NO|251|N0e05": [
+    0.0165,
+    0.0149,
+    0.0185
+   ],
+   "IND22-NO|251|N0e10": [
+    0.0236,
+    0.0215,
+    0.0258
+   ],
+   "CON22|194|N0e05": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|194|N0e10": [
+    0.0234,
+    null,
+    null
+   ],
+   "CON22|251|N0e05": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251|N0e10": [
+    0.062,
+    null,
+    null
+   ],
+   "CON13W|194|N0e05": [
+    0.0508,
+    null,
+    null
+   ],
+   "CON13W|194|N0e10": [
+    0.094,
+    null,
+    null
+   ],
+   "CON13W|251|N0e05": [
+    0.0383,
+    null,
+    null
+   ],
+   "CON13W|251|N0e10": [
+    0.0926,
+    null,
+    null
+   ],
+   "IND1622-NO|194|N0e05": [
+    0.0805,
+    0.0769,
+    0.0843
+   ],
+   "IND1622-NO|194|N0e10": [
+    0.1135,
+    0.1095,
+    0.118
+   ],
+   "IND1622-NO|251|N0e05": [
+    0.0805,
+    0.0767,
+    0.0841
+   ],
+   "IND1622-NO|251|N0e10": [
+    0.113,
+    0.1086,
+    0.1175
+   ]
+  },
+  "A5": {
+   "IND13-NO|194|N0e05": [
+    0.1509,
+    0.1455,
+    0.1557
+   ],
+   "IND13-NO|194|N0e10": [
+    0.2881,
+    0.2821,
+    0.2941
+   ],
+   "IND13-NO|251|N0e05": [
+    0.1202,
+    0.1159,
+    0.1246
+   ],
+   "IND13-NO|251|N0e10": [
+    0.2817,
+    0.2759,
+    0.2882
+   ],
+   "IND22-NO|194|N0e05": [
+    0.0842,
+    0.0802,
+    0.0883
+   ],
+   "IND22-NO|194|N0e10": [
+    0.1865,
+    0.181,
+    0.1922
+   ],
+   "IND22-NO|251|N0e05": [
+    0.0941,
+    0.0903,
+    0.0982
+   ],
+   "IND22-NO|251|N0e10": [
+    0.2144,
+    0.2088,
+    0.22
+   ],
+   "CON22|194|N0e05": [
+    0.0303,
+    null,
+    null
+   ],
+   "CON22|194|N0e10": [
+    0.2121,
+    null,
+    null
+   ],
+   "CON22|251|N0e05": [
+    0.0,
+    null,
+    null
+   ],
+   "CON22|251|N0e10": [
+    0.2315,
+    null,
+    null
+   ],
+   "CON13W|194|N0e05": [
+    0.1324,
+    null,
+    null
+   ],
+   "CON13W|194|N0e10": [
+    0.3136,
+    null,
+    null
+   ],
+   "CON13W|251|N0e05": [
+    0.091,
+    null,
+    null
+   ],
+   "CON13W|251|N0e10": [
+    0.3013,
+    null,
+    null
+   ],
+   "IND1622-NO|194|N0e05": [
+    0.0795,
+    0.0758,
+    0.0835
+   ],
+   "IND1622-NO|194|N0e10": [
+    0.2849,
+    0.2788,
+    0.291
+   ],
+   "IND1622-NO|251|N0e05": [
+    0.0833,
+    0.0793,
+    0.0874
+   ],
+   "IND1622-NO|251|N0e10": [
+    0.2879,
+    0.2819,
+    0.2944
+   ]
+  },
+  "A6": {
+   "IND13-NO|194|N0e05": [
+    0.1165,
+    0.1121,
+    0.121
+   ],
+   "IND13-NO|194|N0e10": [
+    0.2218,
+    0.216,
+    0.2275
+   ],
+   "IND13-NO|251|N0e05": [
+    0.1283,
+    0.1237,
+    0.1331
+   ],
+   "IND13-NO|251|N0e10": [
+    0.2344,
+    0.2285,
+    0.2404
+   ],
+   "IND22-NO|194|N0e05": [
+    0.046,
+    0.0431,
+    0.0488
+   ],
+   "IND22-NO|194|N0e10": [
+    0.0906,
+    0.0866,
+    0.0944
+   ],
+   "IND22-NO|251|N0e05": [
+    0.0355,
+    0.0326,
+    0.0382
+   ],
+   "IND22-NO|251|N0e10": [
+    0.1381,
+    0.1331,
+    0.1429
+   ],
+   "CON22|194|N0e05": [
+    0.0542,
+    null,
+    null
+   ],
+   "CON22|194|N0e10": [
+    0.1559,
+    null,
+    null
+   ],
+   "CON22|251|N0e05": [
+    0.0042,
+    null,
+    null
+   ],
+   "CON22|251|N0e10": [
+    0.0504,
+    null,
+    null
+   ],
+   "CON13W|194|N0e05": [
+    0.1288,
+    null,
+    null
+   ],
+   "CON13W|194|N0e10": [
+    0.2252,
+    null,
+    null
+   ],
+   "CON13W|251|N0e05": [
+    0.1112,
+    null,
+    null
+   ],
+   "CON13W|251|N0e10": [
+    0.2287,
+    null,
+    null
+   ],
+   "IND1622-NO|194|N0e05": [
+    0.1019,
+    0.0979,
+    0.1062
+   ],
+   "IND1622-NO|194|N0e10": [
+    0.1991,
+    0.1935,
+    0.2045
+   ],
+   "IND1622-NO|251|N0e05": [
+    0.1186,
+    0.1141,
+    0.123
+   ],
+   "IND1622-NO|251|N0e10": [
+    0.2309,
+    0.2251,
+    0.2364
+   ]
+  }
+ },
+ "comparison_S1_F1": {
+  "fp_zero_edge": {
+   "A1": {
+    "IND13-NO|194": [
+     0.0032,
+     0.0025,
+     0.004
+    ],
+    "IND13-NO|251": [
+     0.0046,
+     0.0037,
+     0.0056
+    ],
+    "IND22-NO|194": [
+     0.0008,
+     0.0004,
+     0.0013
+    ],
+    "IND22-NO|251": [
+     0.0034,
+     0.0026,
+     0.0042
+    ],
+    "CON22|194": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|251": [
+     0.0,
+     null,
+     null
+    ],
+    "IND1622-NO|194": [
+     0.0047,
+     0.0038,
+     0.0057
+    ],
+    "IND1622-NO|251": [
+     0.0091,
+     0.0078,
+     0.0106
+    ]
+   },
+   "A2": {
+    "IND13-NO|194": [
+     0.0141,
+     0.0125,
+     0.0158
+    ],
+    "IND13-NO|251": [
+     0.016,
+     0.0143,
+     0.0179
+    ],
+    "IND22-NO|194": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "IND22-NO|251": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "CON22|194": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|251": [
+     0.0,
+     null,
+     null
+    ],
+    "IND1622-NO|194": [
+     0.0149,
+     0.0131,
+     0.0167
+    ],
+    "IND1622-NO|251": [
+     0.0169,
+     0.0152,
+     0.0187
+    ]
+   },
+   "A3": {
+    "IND13-NO|194": [
+     0.0068,
+     0.0057,
+     0.008
+    ],
+    "IND13-NO|251": [
+     0.0066,
+     0.0055,
+     0.0077
+    ],
+    "IND22-NO|194": [
+     0.0155,
+     0.0139,
+     0.0173
+    ],
+    "IND22-NO|251": [
+     0.0052,
+     0.0042,
+     0.0062
+    ],
+    "CON22|194": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|251": [
+     0.0,
+     null,
+     null
+    ],
+    "IND1622-NO|194": [
+     0.0134,
+     0.0118,
+     0.0152
+    ],
+    "IND1622-NO|251": [
+     0.0132,
+     0.0117,
+     0.0147
+    ]
+   },
+   "A4": {
+    "IND13-NO|194": [
+     0.0076,
+     0.0064,
+     0.0088
+    ],
+    "IND13-NO|251": [
+     0.0089,
+     0.0076,
+     0.0103
+    ],
+    "IND22-NO|194": [
+     0.0002,
+     0.0001,
+     0.0004
+    ],
+    "IND22-NO|251": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "CON22|194": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194": [
+     0.0059,
+     null,
+     null
+    ],
+    "CON13W|251": [
+     0.0067,
+     null,
+     null
+    ],
+    "IND1622-NO|194": [
+     0.0133,
+     0.012,
+     0.0149
+    ],
+    "IND1622-NO|251": [
+     0.014,
+     0.0124,
+     0.0157
+    ]
+   },
+   "A5": {
+    "IND13-NO|194": [
+     0.009,
+     0.0076,
+     0.0102
+    ],
+    "IND13-NO|251": [
+     0.0118,
+     0.0103,
+     0.0133
+    ],
+    "IND22-NO|194": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "IND22-NO|251": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "CON22|194": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|251": [
+     0.0,
+     null,
+     null
+    ],
+    "IND1622-NO|194": [
+     0.0013,
+     0.0008,
+     0.0018
+    ],
+    "IND1622-NO|251": [
+     0.0013,
+     0.0008,
+     0.0019
+    ]
+   },
+   "A6": {
+    "IND13-NO|194": [
+     0.0067,
+     0.0056,
+     0.0078
+    ],
+    "IND13-NO|251": [
+     0.0116,
+     0.0101,
+     0.0131
+    ],
+    "IND22-NO|194": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "IND22-NO|251": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "CON22|194": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194": [
+     0.003,
+     null,
+     null
+    ],
+    "CON13W|251": [
+     0.0004,
+     null,
+     null
+    ],
+    "IND1622-NO|194": [
+     0.0057,
+     0.0047,
+     0.0068
+    ],
+    "IND1622-NO|251": [
+     0.0059,
+     0.0048,
+     0.007
+    ]
+   }
+  },
+  "power": {
+   "A1": {
+    "IND13-NO|194|N0e05": [
+     0.0267,
+     0.0247,
+     0.029
+    ],
+    "IND13-NO|194|N0e10": [
+     0.1245,
+     0.1201,
+     0.1293
+    ],
+    "IND13-NO|251|N0e05": [
+     0.0467,
+     0.0439,
+     0.0496
+    ],
+    "IND13-NO|251|N0e10": [
+     0.1502,
+     0.1453,
+     0.1549
+    ],
+    "IND22-NO|194|N0e05": [
+     0.0288,
+     0.0265,
+     0.031
+    ],
+    "IND22-NO|194|N0e10": [
+     0.0936,
+     0.0901,
+     0.0975
+    ],
+    "IND22-NO|251|N0e05": [
+     0.0365,
+     0.034,
+     0.0391
+    ],
+    "IND22-NO|251|N0e10": [
+     0.0859,
+     0.082,
+     0.0898
+    ],
+    "CON22|194|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|194|N0e10": [
+     0.0552,
+     null,
+     null
+    ],
+    "CON22|251|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e10": [
+     0.0398,
+     null,
+     null
+    ],
+    "CON13W|194|N0e05": [
+     0.0139,
+     null,
+     null
+    ],
+    "CON13W|194|N0e10": [
+     0.1295,
+     null,
+     null
+    ],
+    "CON13W|251|N0e05": [
+     0.0274,
+     null,
+     null
+    ],
+    "CON13W|251|N0e10": [
+     0.1179,
+     null,
+     null
+    ],
+    "IND1622-NO|194|N0e05": [
+     0.0398,
+     0.037,
+     0.0425
+    ],
+    "IND1622-NO|194|N0e10": [
+     0.1524,
+     0.1473,
+     0.1571
+    ],
+    "IND1622-NO|251|N0e05": [
+     0.0712,
+     0.0678,
+     0.0746
+    ],
+    "IND1622-NO|251|N0e10": [
+     0.1902,
+     0.1844,
+     0.1958
+    ]
+   },
+   "A2": {
+    "IND13-NO|194|N0e05": [
+     0.0924,
+     0.0885,
+     0.0965
+    ],
+    "IND13-NO|194|N0e10": [
+     0.2328,
+     0.227,
+     0.2387
+    ],
+    "IND13-NO|251|N0e05": [
+     0.1043,
+     0.1,
+     0.1086
+    ],
+    "IND13-NO|251|N0e10": [
+     0.2737,
+     0.2676,
+     0.2799
+    ],
+    "IND22-NO|194|N0e05": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "IND22-NO|194|N0e10": [
+     0.049,
+     0.046,
+     0.052
+    ],
+    "IND22-NO|251|N0e05": [
+     0.0001,
+     0.0,
+     0.0001
+    ],
+    "IND22-NO|251|N0e10": [
+     0.0289,
+     0.0265,
+     0.0314
+    ],
+    "CON22|194|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|194|N0e10": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e10": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194|N0e05": [
+     0.0626,
+     null,
+     null
+    ],
+    "CON13W|194|N0e10": [
+     0.2701,
+     null,
+     null
+    ],
+    "CON13W|251|N0e05": [
+     0.0841,
+     null,
+     null
+    ],
+    "CON13W|251|N0e10": [
+     0.2962,
+     null,
+     null
+    ],
+    "IND1622-NO|194|N0e05": [
+     0.0894,
+     0.0853,
+     0.0932
+    ],
+    "IND1622-NO|194|N0e10": [
+     0.225,
+     0.219,
+     0.2308
+    ],
+    "IND1622-NO|251|N0e05": [
+     0.1098,
+     0.1054,
+     0.1141
+    ],
+    "IND1622-NO|251|N0e10": [
+     0.263,
+     0.2571,
+     0.2692
+    ]
+   },
+   "A3": {
+    "IND13-NO|194|N0e05": [
+     0.0203,
+     0.0184,
+     0.0224
+    ],
+    "IND13-NO|194|N0e10": [
+     0.0503,
+     0.0475,
+     0.0535
+    ],
+    "IND13-NO|251|N0e05": [
+     0.0204,
+     0.0185,
+     0.0223
+    ],
+    "IND13-NO|251|N0e10": [
+     0.0529,
+     0.0499,
+     0.0561
+    ],
+    "IND22-NO|194|N0e05": [
+     0.0308,
+     0.0284,
+     0.0333
+    ],
+    "IND22-NO|194|N0e10": [
+     0.0479,
+     0.045,
+     0.051
+    ],
+    "IND22-NO|251|N0e05": [
+     0.0172,
+     0.0154,
+     0.0191
+    ],
+    "IND22-NO|251|N0e10": [
+     0.0442,
+     0.0414,
+     0.0473
+    ],
+    "CON22|194|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|194|N0e10": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e10": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194|N0e05": [
+     0.0017,
+     null,
+     null
+    ],
+    "CON13W|194|N0e10": [
+     0.0063,
+     null,
+     null
+    ],
+    "CON13W|251|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|251|N0e10": [
+     0.019,
+     null,
+     null
+    ],
+    "IND1622-NO|194|N0e05": [
+     0.0371,
+     0.0345,
+     0.0398
+    ],
+    "IND1622-NO|194|N0e10": [
+     0.0677,
+     0.0645,
+     0.0712
+    ],
+    "IND1622-NO|251|N0e05": [
+     0.0343,
+     0.032,
+     0.0367
+    ],
+    "IND1622-NO|251|N0e10": [
+     0.0854,
+     0.0818,
+     0.0892
+    ]
+   },
+   "A4": {
+    "IND13-NO|194|N0e05": [
+     0.0183,
+     0.0165,
+     0.02
+    ],
+    "IND13-NO|194|N0e10": [
+     0.0338,
+     0.0314,
+     0.0362
+    ],
+    "IND13-NO|251|N0e05": [
+     0.0262,
+     0.0239,
+     0.0284
+    ],
+    "IND13-NO|251|N0e10": [
+     0.0453,
+     0.0424,
+     0.0481
+    ],
+    "IND22-NO|194|N0e05": [
+     0.004,
+     0.0031,
+     0.0049
+    ],
+    "IND22-NO|194|N0e10": [
+     0.008,
+     0.0068,
+     0.0092
+    ],
+    "IND22-NO|251|N0e05": [
+     0.0027,
+     0.0021,
+     0.0035
+    ],
+    "IND22-NO|251|N0e10": [
+     0.0073,
+     0.0061,
+     0.0085
+    ],
+    "CON22|194|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|194|N0e10": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e10": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194|N0e05": [
+     0.0377,
+     null,
+     null
+    ],
+    "CON13W|194|N0e10": [
+     0.047,
+     null,
+     null
+    ],
+    "CON13W|251|N0e05": [
+     0.016,
+     null,
+     null
+    ],
+    "CON13W|251|N0e10": [
+     0.0245,
+     null,
+     null
+    ],
+    "IND1622-NO|194|N0e05": [
+     0.0277,
+     0.0257,
+     0.03
+    ],
+    "IND1622-NO|194|N0e10": [
+     0.0432,
+     0.0406,
+     0.0461
+    ],
+    "IND1622-NO|251|N0e05": [
+     0.027,
+     0.0246,
+     0.0293
+    ],
+    "IND1622-NO|251|N0e10": [
+     0.0503,
+     0.0472,
+     0.0534
+    ]
+   },
+   "A5": {
+    "IND13-NO|194|N0e05": [
+     0.049,
+     0.0459,
+     0.0518
+    ],
+    "IND13-NO|194|N0e10": [
+     0.157,
+     0.152,
+     0.162
+    ],
+    "IND13-NO|251|N0e05": [
+     0.0536,
+     0.0507,
+     0.0566
+    ],
+    "IND13-NO|251|N0e10": [
+     0.1705,
+     0.1653,
+     0.1758
+    ],
+    "IND22-NO|194|N0e05": [
+     0.0001,
+     0.0,
+     0.0003
+    ],
+    "IND22-NO|194|N0e10": [
+     0.0171,
+     0.0152,
+     0.0188
+    ],
+    "IND22-NO|251|N0e05": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "IND22-NO|251|N0e10": [
+     0.0279,
+     0.0257,
+     0.0303
+    ],
+    "CON22|194|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|194|N0e10": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e10": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194|N0e05": [
+     0.0301,
+     null,
+     null
+    ],
+    "CON13W|194|N0e10": [
+     0.1467,
+     null,
+     null
+    ],
+    "CON13W|251|N0e05": [
+     0.0147,
+     null,
+     null
+    ],
+    "CON13W|251|N0e10": [
+     0.1739,
+     null,
+     null
+    ],
+    "IND1622-NO|194|N0e05": [
+     0.0238,
+     0.0217,
+     0.0259
+    ],
+    "IND1622-NO|194|N0e10": [
+     0.1333,
+     0.1288,
+     0.1378
+    ],
+    "IND1622-NO|251|N0e05": [
+     0.028,
+     0.026,
+     0.0301
+    ],
+    "IND1622-NO|251|N0e10": [
+     0.1512,
+     0.1466,
+     0.156
+    ]
+   },
+   "A6": {
+    "IND13-NO|194|N0e05": [
+     0.0411,
+     0.0385,
+     0.0437
+    ],
+    "IND13-NO|194|N0e10": [
+     0.1081,
+     0.1038,
+     0.1126
+    ],
+    "IND13-NO|251|N0e05": [
+     0.05,
+     0.0473,
+     0.0533
+    ],
+    "IND13-NO|251|N0e10": [
+     0.1278,
+     0.1229,
+     0.1326
+    ],
+    "IND22-NO|194|N0e05": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "IND22-NO|194|N0e10": [
+     0.0001,
+     0.0,
+     0.0001
+    ],
+    "IND22-NO|251|N0e05": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "IND22-NO|251|N0e10": [
+     0.0001,
+     0.0,
+     0.0003
+    ],
+    "CON22|194|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|194|N0e10": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e05": [
+     0.0,
+     null,
+     null
+    ],
+    "CON22|251|N0e10": [
+     0.0,
+     null,
+     null
+    ],
+    "CON13W|194|N0e05": [
+     0.0425,
+     null,
+     null
+    ],
+    "CON13W|194|N0e10": [
+     0.1373,
+     null,
+     null
+    ],
+    "CON13W|251|N0e05": [
+     0.046,
+     null,
+     null
+    ],
+    "CON13W|251|N0e10": [
+     0.1398,
+     null,
+     null
+    ],
+    "IND1622-NO|194|N0e05": [
+     0.0319,
+     0.0295,
+     0.0344
+    ],
+    "IND1622-NO|194|N0e10": [
+     0.0931,
+     0.0889,
+     0.0973
+    ],
+    "IND1622-NO|251|N0e05": [
+     0.0352,
+     0.0326,
+     0.0377
+    ],
+    "IND1622-NO|251|N0e10": [
+     0.1128,
+     0.1085,
+     0.1171
+    ]
+   }
+  }
+ },
+ "limits": [
+  "the holdout-only rate is <= 12% on each program's own floor cells by construction, not on other history: with c_H_floor 0.95 it stays above 12% only on contiguous-window worlds: the A4s archetype 17-23%, the A5 archetype 12.2% (their gate FP there is at most 3.0%)",
+  "S2 lets more zero-edge programs pass than S1+F1 (1.3-7.3 times on 2010-19 + 2022-24 worlds, L 194); a pass under S2 is weaker evidence of edge, and live results and the demotion rule carry that",
+  "every world construction is a recombination of 2010-19 and 2022-24 history; none is the truth for 2025 and 2026"
+ ],
+ "stated_beside_every_live_trade": "S2, c_R = 0 (no pooled-t bar), c_H,used = {c_H}; this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%); its holdout-only rate at c_H,used = {honly}% (the bound when 2025 is fully known); drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); a pass under S2 is weaker evidence of edge than under S1+F1; contamination: 2025 (all of Validation) and part of the 2026 holdout can be known to the authoring models, so the FP is a property of the procedure over 2010-19 and 2022-24 history, not a guarantee in this one world",
+ "note": "rates are fractions [point, world-bootstrap 2.5%, 97.5%] on the study's worlds (20,000 independent-block worlds per cell, seed A; CON cells enumerate every contiguous window once and carry no CI); worlds recombine 2010-19, 2016-19 and 2022-24 history; zero-edge and injected-edge (+5%, +10% a year per invested dollar) rows only; no per-world, per-day, drift-kept or as-traded row",
+ "sha256": {
+  "PREREG.md": "ec296bc1d6cd497ae9e79ddc223229e72bf235d1bca0c49ecee027b156d5a20a",
+  "RESULT.md": "4fc261f677fddebe51d35c84c933b3a0210e4105490d5b48f90b55bc25a4175c",
+  "ADOPTION.md": "2a97766ad9365432f08f9540cdc69797fd0cdf73f00f41966c497006a72c08f8",
+  "HOUSE-RULE.md": "26464d3e77faee246d08f02b9d2bc70e099309c969678dd990e196c9ae214889",
+  "receipt.json": "de1fb5ba48f1f07df6eb4ad1a48f7141636fbbbebf4b13c9be63fc2f3a065e18",
+  "decision.json": "26eaf20b6ef114937fed28235ee769fa1734be32425aed102f26942a67d0eea0",
+  "code": {
+   "data.py": "30050738146d7e9ba8796680a8c19d413e521fb91d4590015485c23b53324f0f",
+   "programs.py": "47bff82c6e62e9ebc751373a84ddee6bd445b05199d2070c26d7255cd17fc443",
+   "worlds.py": "fdfc499efc45c8034ae5da875cc93d774bb1380039e1bb7a23b441296d8d2697",
+   "screen.py": "b2061acfdc18be22c77f5345d65012d13678fb7cb5ed3bf34c070c5778cdf91d",
+   "synth.py": "350a60107e9ed4e352def91651b7bd3a5adfb5d64b42af0e0785b04e71b8dd6d",
+   "worlds2.py": "2ece6a54c274546d51afee3c61c0bfc7d34f8347a597e8b590a5178f26525c29",
+   "screen2.py": "99e4c1eeba009b0d75b899ca9f5ccd80811d7719b1deb24a4998c84c0ab625d8",
+   "run2.py": "438bd1de2ffd36968d94c8c513de47d68ca9f6529e9f5bc8a4d2b2d19eee419d",
+   "decide2.py": "08dda415b5c905b66e1f9ab534e12d9584c0e58e4852a544dd73e194f768f9df",
+   "ref_floor.py": "9cb42d557e040de153c41872383177b187fa2d1826dd1e76695a4a2ae56d653b",
+   "test_s2.py": "715ecb5054e916639981b5e44ed76e91516701dec5401967d1d3f06d3decf229",
+   "adopt/adopt_fp.py": "1492323294f6ae03b6f00fe679e87cd2435f94bfab6b82d7748e6a2f5eb1878e",
+   "adopt/house_ref.py": "b0860566af0e1d229e1b1b55a2957740a8b2ef45e3632d0e3283796d71284122",
+   "adopt/test_house_ref.py": "87977c05164305ea5600b7a49af3c117526b45b6142cc463dfa7ffde730f6da8",
+   "adopt/conformance.py": "6410a2c504036e09d6e5cfd97907867856f084abe1524a13753116b226e77ef0",
+   "adopt/build_receipt.py": "bbd5466171a2fb5e25b36e1fa888b4d091e1123afa9cc025ceb72f5246e76362"
+  }
+ }
+}

@@ -1,14 +1,22 @@
 """THE EQUITY LANES' Validation and sealed look (release E1; league/swarm/elane.py `validate` and `look`, dispatched by
 league/swarm/tournament.py `Tournament.equity_round` and league/swarm/gate.py `Gate.equity_round`): Validation on the
-House at k 1.0 and 1.5 with the S1 pre-check as its entry, one try a lineage; the one sealed look with the gate's
-capability, refused with no look spent when no receipt is pinned, when the program floor is ineligible or when it is
-the same lineage (A9 D3); a pass makes a Candidate proven on the equity identity; the options leakage alarm never counts
-an equity look. The runner and the screen are other packages' (core's, screen's): faked here at their interfaces."""
+House at k 1.0 and 1.5 with the screen's pre-check as its entry, one try a lineage; the one sealed look with the gate's
+capability, under the lane's pinned receipt (S2's floor and verdict for receipt 2, amendment A11; S1's for receipt 1),
+refused or waiting with no look spent when no receipt is pinned, when a receipt file at hand is not the pin's bytes,
+when the program floor is ineligible or does not fit the receipt, when the daily store ends before the calibrated
+holdout (A12) or when it is the same lineage (A9 D3); a pass makes a Candidate proven on the equity identity; the options
+leakage alarm never counts an equity look. The runner and the screen are other packages' (core's, screen's): faked here
+at their interfaces."""
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import itertools
+import json
+import shutil
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -20,11 +28,14 @@ from league.equity.runner import Run
 from league.swarm import elane
 from league.swarm.gate import Gate, run_sha
 from league.swarm.tournament import Tournament
-from league.tests.test_elane import CODE, ON, SHA, equity_spec, pinned_block
+from league.tests.test_elane import CODE, ON, SHA, equity_spec, pinned_block, pinned_block_s2
 from league.tests.test_swarm_store import StoreCase
 
 EQUITY_SHA = "f" * 64
 _N = itertools.count(1)
+#: A release root with no docs/ (the House box's: docs/benchmarks/ never reaches it), so no receipt file is at hand.
+NO_DOCS = Path(__file__).resolve().parent / "fixtures" / "no-such-release-root"
+FAKE_S2 = Path(__file__).resolve().parent / "fixtures" / "equity_screen_2_fake.json"
 
 
 class FakeRunner:
@@ -63,6 +74,22 @@ def receipt():
                      beside="c_used {c_used}", fp={})
 
 
+def receipt_s2():
+    return S.pinned_receipt_s2(pinned_block_s2())
+
+
+def floor_s1(eligible=True):
+    """A floor as S1's `screen.floor` writes it (its screen and the fp_cap it ran at: `screen.floor_fits`)."""
+    return {"screen": "S1", "eligible": eligible, "why": None if eligible else "no 300-session pool", "c_p": 1.2,
+            "c_H": 0.4, "fp_cap": 0.12}
+
+
+def floor_s2(eligible=True):
+    """A floor as `screen.floor_s2` writes it under `receipt_s2()` (exact; the receipt's fp_cap, floor and margin)."""
+    return {"screen": "S2", "method": "exact", "eligible": eligible, "why": None if eligible else "no eligible floor set",
+            "c_pF1": 0.92, "c_H_used": 0.97, "fp_cap": 0.12, "c_H_floor": 0.9, "c_H_margin": 0.05}
+
+
 def series(lots, bars, *, universe, capital, first=None, last=None):
     days = {"segment-1": np.arange(0, 5), "segment-2": np.arange(10, 15)}.get(bars.window, np.arange(100, 105))
     return S.Series(days=days.astype(np.int32), r=np.linspace(-0.01, 0.01, len(days)), w=np.ones(len(days)),
@@ -70,25 +97,36 @@ def series(lots, bars, *, universe, capital, first=None, last=None):
 
 
 @contextlib.contextmanager
-def screen(*, precheck=True, eligible=True, passed=True, same=False, pinned=True):
-    """The screen package's functions at their interfaces, the receipt pinned in the repository's policy (or not), the
-    gate's capability and the equity identity (core's)."""
+def screen(*, precheck=True, eligible=True, passed=True, same=False, pinned=True, s2=False, floor=None, gap=None,
+           repo=NO_DOCS, s1x=None):
+    """The screen package's functions at their interfaces, the receipt pinned in the repository's policy (or not; `s2`:
+    receipt 2's block, else receipt 1's), the gate's capability, the equity identity (core's) and the daily store's
+    last day (`gap`: why it ends before the look's holdout; core's store). `repo` is where a receipt file would be at
+    hand (none by default, as on the House box); `s1x` the S1 floor measured for S1-X's rate beside an S2 verdict. The
+    routing (`screen_of`, `receipt_path`, `floor_fits`) is the screen's own. The yielded mock is the capability's mint;
+    its `.floor` and `.verdict` are the screen's, its `.s1x` elane's `_s1x_floor`."""
     with contextlib.ExitStack() as stack:
         enter = stack.enter_context
-        enter(mock.patch.object(elane, "_policy_block", return_value=pinned_block() if pinned else {}))
-        enter(mock.patch.object(S, "pinned_receipt", return_value=receipt()))
+        block = (pinned_block_s2() if s2 else pinned_block()) if pinned else {}
+        enter(mock.patch.object(elane, "_policy_block", return_value=block))
+        enter(mock.patch.object(elane, "REPO", repo))
+        enter(mock.patch.object(elane, "_holdout_gap", return_value=gap))
+        measured = enter(mock.patch.object(elane, "_s1x_floor", return_value=s1x))
+        enter(mock.patch.object(S, "pinned_receipt", return_value=receipt_s2() if s2 else receipt()))
         enter(mock.patch.object(S, "series", side_effect=series))
         enter(mock.patch.object(S, "precheck", return_value={"passed": precheck, "checks": {"activity": precheck}}))
-        floor = {"eligible": eligible, "why": None if eligible else "no 300-session pool", "c_p": 1.2, "c_H": 0.4}
+        if floor is None:
+            floor = floor_s2(eligible) if s2 else floor_s1(eligible)
         floored = enter(mock.patch.object(S, "floor", return_value=floor))
-        enter(mock.patch.object(S, "verdict", return_value={"passed": passed, "c_used": 1.5, "c_H": 0.4, "t": 2.0,
-                                                          "label": "beta"}))
-        enter(mock.patch.object(S, "beside_line", return_value="c_used 1.5"))
+        answer = ({"screen": "S2", "passed": passed, "c_pF1": 0.92, "c_H": 0.97, "t_H": 1.4, "label": "beta"} if s2
+                  else {"screen": "S1", "passed": passed, "c_used": 1.5, "c_H": 0.4, "t": 2.0, "label": "beta"})
+        judged = enter(mock.patch.object(S, "verdict", return_value=answer))
+        enter(mock.patch.object(S, "beside_line", return_value="c_H,used 0.97" if s2 else "c_used 1.5"))
         enter(mock.patch.object(S, "same_lineage", return_value=same))
         enter(mock.patch.object(S, "retry_permitted", return_value=False))
         mint = enter(mock.patch("league.equity.store.mint_equity_gate_capability", return_value="CAPABILITY"))
         enter(mock.patch("league.swarm.evaluator.equity_fingerprint", return_value=EQUITY_SHA))
-        mint.floor = floored
+        mint.floor, mint.verdict, mint.s1x = floored, judged, measured
         yield mint
 
 
@@ -259,6 +297,135 @@ class Look(EquityCase):
             self.assertIsNone(self.gate.look(self.store.family("b3"), version, sha))
         self.assertEqual(self.store.refusals("b3")[0]["stage"], "same lineage", "the same template in its own lane")
 
+    def test_the_floor_is_the_pinned_receipts_and_is_kept_only_while_it_fits_it(self):
+        """S2-MERGE step 2: the look runs `screen.floor(segments, receipt=)` (the pinned receipt's own floor), never
+        S1's `fp_cap=` floor, and a floor kept for the version under another receipt is run again BEFORE the look."""
+        version, sha = self.ready()
+        with screen() as mint:
+            self.assertTrue(self.gate.look(self.store.family("b1"), version, sha))
+        (call,) = mint.floor.call_args_list
+        self.assertEqual((len(call.args), sorted(call.kwargs)), (1, ["receipt"]), "the floor is asked by the receipt")
+        self.assertEqual(call.kwargs["receipt"], receipt())
+        self.assertEqual(self.store.family("b1")["state"][elane.FLOOR_KEY]["1"], floor_s1())
+        # The same version under receipt 2 (the pin moved, A11): S1's kept floor is not S2's, so S2's is run and kept.
+        version, sha = self.ready("b2", code=CODE + "# another program\n")
+        self.store.set_state("b2", **{elane.FLOOR_KEY: {"1": floor_s1()}})
+        with screen(s2=True) as mint:
+            self.assertTrue(self.gate.look(self.store.family("b2"), version, sha))
+        (call,) = mint.floor.call_args_list
+        self.assertEqual(call.kwargs, {"receipt": receipt_s2()})
+        self.assertEqual(self.store.family("b2")["state"][elane.FLOOR_KEY]["1"], floor_s2())
+        self.assertEqual(mint.verdict.call_args.kwargs["program_floor"], floor_s2(), "judged on the floor that fits")
+        # An S2 floor run at another floor or margin than the pinned receipt's is not kept either.
+        version, sha = self.ready("b3", code=CODE + "# a third program\n")
+        self.store.set_state("b3", **{elane.FLOOR_KEY: {"1": {**floor_s2(), "c_H_floor": 0.95}}})
+        with screen(s2=True) as mint:
+            self.gate.look(self.store.family("b3"), version, sha)
+        self.assertEqual(mint.floor.call_count, 1)
+        version, sha = self.ready("b4", code=CODE + "# a fourth program\n")
+        self.store.set_state("b4", **{elane.FLOOR_KEY: {"1": floor_s2()}})
+        with screen(s2=True) as mint:
+            self.gate.look(self.store.family("b4"), version, sha)
+        self.assertEqual(mint.floor.call_count, 0, "a floor that fits the receipt is computed once a version")
+
+    def test_a_floor_that_does_not_fit_the_receipt_spends_no_look(self):
+        """The verdict refuses a floor of another screen or of other figures than the receipt's: were the look taken
+        first it would be spent on a certain failure. It is not taken."""
+        for i, bad in enumerate((floor_s1(), {**floor_s2(), "fp_cap": 0.10}, {**floor_s2(), "c_H_margin": 0.0},
+                                 {**floor_s2(), "method": "worlds"}, {"c_pF1": 0.92}, "not a floor")):
+            fid = f"m{i}"
+            version, sha = self.ready(fid, code=CODE + f"# program {i}\n")
+            with screen(s2=True, floor=bad) as mint:
+                self.assertIsNone(self.gate.look(self.store.family(fid), version, sha), bad)
+            self.assertEqual((mint.call_count, mint.verdict.call_count), (0, 0), bad)
+            self.assertNotIn(("look", fid, "CAPABILITY"), self.runner.calls)
+            state = self.store.family(fid)["state"]
+            self.assertEqual((state["gate_ready"], state.get("look_inflight"), state.get(elane.FLOOR_KEY)),
+                             (True, None, None), "owed again: nothing kept, nothing spent")
+            self.assertIsNone(elane.lineage_spent(self.store, self.store.family(fid), ON))
+        self.assertEqual(self.looks(), [])
+
+    def test_a_look_under_receipt_2_is_recorded_as_s2s(self):
+        version, sha = self.ready()
+        with screen(s2=True, s1x={"eligible": True, "screen": "S1"}) as mint:
+            self.assertTrue(self.gate.look(self.store.family("b1"), version, sha))
+        mint.s1x.assert_called_once()
+        self.assertEqual(mint.s1x.call_args.args[2], receipt_s2())
+        self.assertEqual(mint.verdict.call_args.kwargs["s1_floor"], {"eligible": True, "screen": "S1"},
+                         "S1-X's rate beside an S2 verdict comes from an S1 floor of the same Train-era series")
+        self.assertEqual(mint.verdict.call_args.kwargs["receipt"], receipt_s2())
+        (look,) = self.looks()
+        detail = look["detail"]
+        self.assertEqual((detail["screen"], detail["receipt"], detail["c_pF1"], detail["c_H"], detail["beside"]),
+                         ("S2", SHA, 0.92, 0.97, "c_H,used 0.97"))
+        self.assertNotIn("c_used", detail, "S2 has no pooled-t bar")
+        fam = self.store.family("b1")
+        self.assertEqual(fam["band"], "candidate")
+        events = [e["payload"] for e in self.store.events_after(0)
+                  if e["kind"] == "swarm.gate" and e["payload"].get("action") == "look"]
+        self.assertEqual([e["screen"] for e in events], ["S2"])
+        self.assertEqual(elane.view(fam, lane=BETA)["screen"], "S2", "the view names the screen that judged the look")
+        self.assertIsNone(elane.view({"state": {}}, lane=BETA)["screen"])
+
+    def test_s1xs_rate_is_measured_only_under_receipt_2_and_never_stops_a_look(self):
+        segments = [S.Series(days=np.arange(5, dtype=np.int32), r=np.zeros(5), w=np.ones(5), b=np.zeros(5),
+                             exits=np.zeros(5, dtype=int), invested=np.ones(5, dtype=bool))]
+        with mock.patch.object(S, "floor", return_value={"screen": "S1", "eligible": True, "curves": {}}) as floored:
+            self.assertIsNone(elane._s1x_floor(S, segments, receipt()), "receipt 1's own floor carries the curve")
+            self.assertEqual(floored.call_count, 0)
+            self.assertEqual(elane._s1x_floor(S, segments, receipt_s2()),
+                             {"screen": "S1", "eligible": True, "curves": {}})
+            self.assertEqual(floored.call_args.kwargs, {"fp_cap": 0.12}, "S1's floor at the receipt's cap")
+        with mock.patch.object(S, "floor", return_value={"screen": "S1", "eligible": False, "why": "no pool"}):
+            self.assertIsNone(elane._s1x_floor(S, segments, receipt_s2()), "an ineligible S1 floor: unmeasured")
+        with mock.patch.object(S, "floor", side_effect=RuntimeError("numpy")):
+            self.assertIsNone(elane._s1x_floor(S, segments, receipt_s2()))
+
+    def test_a_receipt_file_whose_bytes_are_not_the_pinned_sha_spends_no_look(self):
+        """A11's pin: where the receipt file is at hand, its bytes are the pinned sha256 or the screen refuses (the
+        look waits; nothing is spent, nothing is retired)."""
+        version, sha = self.ready()
+        with tempfile.TemporaryDirectory(dir=self.dir.name) as root:
+            path = Path(root) / S.RECEIPT_PATH_S2
+            path.parent.mkdir(parents=True)
+            shutil.copy(FAKE_S2, path)
+            good = hashlib.sha256(path.read_bytes()).hexdigest()
+            block = pinned_block_s2(receipt_sha256=good)
+            doc = json.loads(path.read_text())
+            doc["c_H_floor"] = 0.5                              # the file edited after it was pinned
+            path.write_text(json.dumps(doc))
+            with screen(s2=True, repo=Path(root)) as mint:
+                with mock.patch.object(elane, "_policy_block", return_value=block), \
+                        mock.patch.object(S, "pinned_receipt", return_value=S.pinned_receipt_s2(block)):
+                    self.assertIsNone(self.gate.look(self.store.family("b1"), version, sha))
+                    self.assertEqual((self.looks(), mint.call_count, mint.floor.call_count), ([], 0, 0))
+                    state = self.store.family("b1")["state"]
+                    self.assertEqual((state["gate_ready"], state["gate_outcome"]["result"]), (True, "waiting"))
+                    self.assertIn("is not the pinned", state["gate"])
+                    self.assertIsNone(elane.lineage_spent(self.store, self.store.family("b1"), ON))
+                    # The file as it was pinned: the look goes ahead.
+                    shutil.copy(FAKE_S2, path)
+                    self.assertTrue(self.gate.look(self.store.family("b1"), version, sha))
+        self.assertEqual(len(self.looks()), 1)
+
+    def test_the_look_waits_while_the_store_ends_before_the_calibrated_holdout(self):
+        """A12: a look reads exactly the 194 calibrated sessions; a store that ends earlier would spend the lineage's
+        one look on a certain failure (the verdict's windows), so the look waits for the data job."""
+        version, sha = self.ready()
+        with screen(gap="the daily store ends 2026-10-08") as mint:
+            self.assertIsNone(self.gate.look(self.store.family("b1"), version, sha))
+        self.assertEqual((self.looks(), mint.call_count), ([], 0))
+        self.assertNotIn(("look", "b1", "CAPABILITY"), self.runner.calls)
+        state = self.store.family("b1")["state"]
+        self.assertEqual((state["gate_ready"], state["gate_outcome"]["result"], state.get("look_inflight")),
+                         (True, "waiting", None))
+        with screen() as mint:
+            with mock.patch.object(elane, "_holdout_gap", side_effect=RuntimeError("no manifest")):
+                self.assertIsNone(self.gate.look(self.store.family("b1"), version, sha), "an unreadable store: no look")
+            self.assertEqual(mint.call_count, 0)
+        with screen():
+            self.assertTrue(self.gate.look(self.store.family("b1"), version, sha))
+
     def test_a_validation_that_does_not_reproduce_goes_back_to_the_tournament(self):
         version, sha = self.ready()
         self.runner.result_sha = "another-sha"
@@ -314,3 +481,30 @@ class Look(EquityCase):
         for i in range(10):
             self.store.add_look(f"opt{i}", 1, f"osha-{i}", passed=True, p_value=0.01, detail={})
         self.assertTrue(self.gate.alarm(), "the options looks alone still raise it")
+
+
+class HoldoutGap(StoreCase):
+    """`elane._holdout_gap` on real (synthetic) daily stores: the look's span is the calibrated holdout, whole (A12)."""
+
+    def test_a_store_that_ends_before_the_look_cap_makes_the_look_wait(self):
+        import datetime as dt
+
+        from league.equity import config, synth
+        from league.equity.store import MissingData, StoreRefused
+
+        root = Path(self.dir.name)
+        with self.assertRaises((MissingData, StoreRefused, OSError), msg="no store: no look"):
+            elane._holdout_gap(root)
+        synth.synthetic_store(root / elane.STORE_DIR, symbols=("SPY",), start=dt.date(2026, 9, 1),
+                              end=dt.date(2026, 10, 9), as_of=dt.date(2026, 10, 8))
+        why = elane._holdout_gap(root)
+        self.assertIn("ends 2026-10-08", why)
+        self.assertIn(config.LOOK_CAP.isoformat(), why)
+        other = Path(self.dir.name) / "whole"
+        synth.synthetic_store(other / elane.STORE_DIR, symbols=("SPY",), start=dt.date(2026, 9, 1),
+                              end=dt.date(2026, 10, 9))
+        self.assertIsNone(elane._holdout_gap(other), "through the look cap: the 194 calibrated sessions are all there")
+        later = Path(self.dir.name) / "later"
+        synth.synthetic_store(later / elane.STORE_DIR, symbols=("SPY",), start=dt.date(2026, 9, 1),
+                              end=dt.date(2026, 10, 14))
+        self.assertIsNone(elane._holdout_gap(later), "forward days after the cap never enter a look")

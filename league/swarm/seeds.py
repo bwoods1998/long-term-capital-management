@@ -613,8 +613,9 @@ def family_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
 #: THE THREE BETA SEEDS (amendment A4; league/swarm/elane.py `birth_seeds`): each a program with a published prior,
 #: written by the captain's build agents under the EQUITY.md contract (league/equity/EQUITY.md: NEEDS, PARAMS,
 #: decide(ctx); math and numpy only, no date), before any data was seen, and judged by the swarm's screen like any
-#: family: born once as a beta-lane family (MARKET BETA), then Validation (2025) with the S1 pre-check, then one sealed
-#: look. Their cards name the prior and no figure (no census or market result: the repository is public).
+#: family: born once as a beta-lane family (MARKET BETA), then Validation (2025) with the share screen's pre-check, then
+#: one sealed look under the pinned screen (S2, amendment A11). Their cards name the prior and no figure (no census or
+#: market result: the repository is public).
 EQUITY_OVERNIGHT = '''# {fid}: MARKET BETA (the beta lane). Seeded by the captain's build agents (A4) and judged by the swarm's screen
 # like any family.
 # Prior: {prior}.
@@ -685,8 +686,9 @@ _OVERNIGHT_PRIOR = ("the overnight effect: index returns accrue mostly from the 
 _REVERSAL_PRIOR = "short-term reversal in index ETFs after a sharp down close (Connors and Alvarez 2008)"
 _COMPARISON = ("the same-exposure buy-and-hold of the same ETFs over the same sessions (the screen's S1-X label); a pass "
                "that does not beat it is labelled beta, never alpha")
-_FALSIFICATION = ("refuted when its one sealed look fails S1: the pooled daily t over Validation and the holdout below "
-                  "c_used, the holdout's sum not above zero, or the holdout-only t below c_H")
+_FALSIFICATION = ("refuted when its one sealed look fails the share screen S2: the holdout's summed daily P&L not above "
+                  "zero, or the holdout-only daily t below c_H,used (the larger of the receipt's floor and the program's "
+                  "own floor plus the receipt's margin)")
 
 EQUITY_SEEDS: list[dict[str, Any]] = [
     {"id": "seed-overnight-spy", "lane": "beta", "structure": "etf", "symbols": ["SPY"], "template": "overnight",

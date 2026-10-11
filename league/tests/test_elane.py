@@ -1,12 +1,15 @@
 """THE EQUITY LANES' swarm side (release E1, Oct 2026; league/swarm/elane.py): the settings and their bounds, card
 admission, the lane-scoped graveyard and lineages (A8.12), one Validation try and one look per lineage (and R3's retry),
-the receipt refusal, the equity roster's seats apart from dlane's, the options readers skipping equity families, and the
-band rules swarm owns in league/equity/bands.py (with `league.live.money.band_for`'s forward)."""
+the pinned screen (A11: S2 for both lanes, receipt 2's bytes; S1 stays as receipt 1's, unused) and the receipt refusal,
+the equity roster's seats apart from dlane's, the options readers skipping equity families, and the band rules swarm
+owns in league/equity/bands.py (with `league.live.money.band_for`'s forward)."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import tempfile
 from decimal import Decimal
 from pathlib import Path
 from unittest import mock
@@ -24,6 +27,9 @@ from league.tests.test_swarm_store import SPEC, StoreCase
 REPO = Path(__file__).resolve().parents[2]
 ON = {"elane": {"mode": "gate"}}
 SHA = "a" * 64
+#: The FAKE receipts (invented figures; league/tests/test_equity_screen.py's fixtures).
+FAKE_S1 = Path(__file__).resolve().parent / "fixtures" / "equity_screen_fake.json"
+FAKE_S2 = Path(__file__).resolve().parent / "fixtures" / "equity_screen_2_fake.json"
 CODE = "NEEDS = {'symbols': ['SPY'], 'history': 2}\nPARAMS = {}\n\n\ndef decide(ctx):\n    return []\n"
 
 
@@ -34,7 +40,7 @@ def card(lane: str = BETA, **over):
            "mechanism_class": "calendar_flow", "inputs": ["clock"], "holding": "days_1_3",
            "cost": {"hurdle": 0.0003, "why": "two half-spreads and the SEC and TAF fees on the sale"},
            "comparison": "the same-exposure buy-and-hold of SPY over the same sessions (S1-X)",
-           "falsification": "refuted when its one sealed look fails S1 (the pooled t below c_used)"}
+           "falsification": "refuted when its one sealed look fails the share screen (the holdout t below c_H,used)"}
     out.update(over)
     return out
 
@@ -49,6 +55,25 @@ def pinned_block(**over):
              "retry": True, "r4": {}, "beside": "c_used {c_used}, c_H {c_H}, own FP {own_fp}"}
     block.update(over)
     return block
+
+
+def block_of(path: Path, **over):
+    """A lane's screen block as the integrator pins a receipt file (A9, A11): its screen and figures, its bytes' sha."""
+    doc = json.loads(path.read_text())
+    block = {"receipt_sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "c_R": doc["c_R"], "c_X": doc["c_X"],
+             "fp_cap": doc["fp_cap"], "owner_wall": doc["owner_wall"], "retry": doc["R3_retry_permitted"],
+             "r4": doc["R4_flags"], "beside": doc["stated_beside_every_live_trade"]}
+    if doc.get("screen") == "S2":
+        block = {"name": "S2", "screen": "S2", **block, "c_H_floor": doc["c_H_floor"], "c_H_margin": doc["c_H_margin"]}
+    else:
+        block = {"name": "S1", **block}
+    block.update(over)
+    return block
+
+
+def pinned_block_s2(**over):
+    """Receipt 2's block (the FAKE fixture's figures: c_H_floor 0.90, c_H_margin 0.05), pinned to `SHA`."""
+    return block_of(FAKE_S2, **{"receipt_sha256": SHA, **over})
 
 
 class Settings(StoreCase):
@@ -89,14 +114,43 @@ class Settings(StoreCase):
         self.assertEqual(layer["elane"]["roster"], money["probe"]["max_programs"])
 
     def test_a_pinned_receipt_is_the_files_bytes(self):
+        """A11: S2 is the pinned screen of BOTH lanes, and each pin is the bytes of its screen's committed receipt
+        (docs/benchmarks/equity_screen_2.json, copied verbatim from the study), with the figures the receipt states."""
         layer, _ = settings_mod.read_policy(REAL_POLICY_PATH)
-        path = REPO / S.RECEIPT_PATH
         for lane in LANES:
-            pinned = layer["elane"]["screens"][lane]["receipt_sha256"]
-            if pinned is None:
-                continue  # E1 merges with none pinned: the integrator pins the study's receipt
+            block = layer["elane"]["screens"][lane]
+            self.assertEqual((block["name"], block["screen"], S.screen_of(block)), ("S2", "S2", "S2"), lane)
+            self.assertEqual(S.receipt_path(block), "docs/benchmarks/equity_screen_2.json")
+            path = REPO / S.receipt_path(block)
             self.assertTrue(path.exists(), "a pinned receipt names a file the repository holds")
-            self.assertEqual(pinned, hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertEqual(block["receipt_sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertEqual(block, block_of(path), "the block is the receipt's figures, nothing else")
+            self.assertEqual((block["c_R"], block["c_H_floor"], block["c_H_margin"], block["c_X"], block["fp_cap"],
+                              block["owner_wall"], block["retry"]), (0.0, 0.95, 0.05, 0.85, 0.12, 0.15, True))
+            receipt = S.pinned_receipt(block)
+            self.assertIsInstance(receipt, S.ReceiptS2, lane)
+            self.assertIsNone(elane._receipt_file_refusal(S, receipt, REPO), "the committed file is the pin's")
+        self.assertEqual(layer["elane"]["screens"][BETA], layer["elane"]["screens"][EQUITY], "one receipt, both lanes")
+        # Receipt 1 stays in the repository, read by S1's code, pinned by no lane (A11: kept, unused).
+        first = REPO / S.RECEIPT_PATH
+        loaded = S.load_receipt(first, pinned_sha256=hashlib.sha256(first.read_bytes()).hexdigest())
+        self.assertIsInstance(loaded, S.Receipt)
+        self.assertNotIn("S1", {S.screen_of(layer["elane"]["screens"][lane]) for lane in LANES})
+
+    def test_the_screens_a_block_may_name_are_the_screen_modules(self):
+        """elane reads a block's screen without numpy (`_screen_name`); the screen module's `screen_of` is the rule."""
+        self.assertEqual(elane.SCREENS, S.SCREENS)
+        self.assertEqual(elane.SCREEN, S.SCREEN)
+        for block in ({}, {"name": "S1"}, {"name": "S2"}, {"screen": "S2"}, {"name": "S2", "screen": "S2"},
+                      {"name": "S1", "screen": "S2"}, {"name": "S3"}, {"screen": "D2"}, {"name": ["S2"]},
+                      {"name": None}, {"screen": 2}, pinned_block(), pinned_block_s2()):
+            self.assertEqual(elane._screen_name(block), S.screen_of(block), block)
+        self.assertEqual(elane._screen_name(None), "S1")
+        self.assertEqual(elane.screen_name(BETA, policy={"elane": {"screens": {BETA: pinned_block_s2()}}}), "S2")
+        self.assertEqual(elane.screen_name(BETA, policy={"elane": {"screens": {}}}), "S1")
+        self.assertIsNone(elane.screen_name(BETA, policy={"elane": {"screens": {BETA: {"name": "S9"}}}}))
+        real, _ = settings_mod.read_policy(REAL_POLICY_PATH)
+        self.assertEqual({elane.screen_name(lane, policy=real) for lane in LANES}, {"S2"}, "the committed policy pins S2")
 
 
 class Cards(StoreCase):
@@ -345,13 +399,32 @@ class Receipt(StoreCase):
         self.assertIsNone(eff["receipt"])
         self.assertIn("no receipt sha256 is pinned", eff["why"])
         real, _ = settings_mod.read_policy(REAL_POLICY_PATH)
-        committed = hashlib.sha256((REPO / S.RECEIPT_PATH).read_bytes()).hexdigest()
         for lane in LANES:
-            # The integrator pinned the study's receipt (A9): the committed policy reads it whole, both lanes.
+            # The integrator pinned the study's receipt 2 (A11): the committed policy reads it whole, both lanes.
+            block = real["elane"]["screens"][lane]
+            committed = hashlib.sha256((REPO / S.receipt_path(block)).read_bytes()).hexdigest()
             eff = elane.screen_effective(ON, lane, policy=real)
-            self.assertEqual((eff["receipt"], eff["why"], eff["screen"]), (committed, None, "S1"), lane)
+            self.assertEqual((eff["receipt"], eff["why"], eff["screen"]), (committed, None, "S2"), lane)
+            self.assertEqual((eff["c_R"], eff["c_H_floor"], eff["c_H_margin"], eff["c_X"]), (0.0, 0.95, 0.05, 0.85), lane)
+            receipt, why = elane._receipt(ON, lane, policy=real)
+            self.assertIsNone(why)
+            self.assertEqual((type(receipt), receipt.receipt_sha256, receipt.c_H_floor, receipt.c_H_margin),
+                             (S.ReceiptS2, committed, 0.95, 0.05), lane)
         eff = elane.screen_effective(ON, BETA, policy={"elane": {"screens": {BETA: pinned_block()}}})
         self.assertEqual((eff["receipt"], eff["why"], eff["c_R"], eff["screen"]), (SHA, None, 1.5, "S1"))
+        self.assertEqual((eff["c_H_floor"], eff["c_H_margin"]), (None, None), "receipt 1 has neither")
+        eff = elane.screen_effective(ON, BETA, policy={"elane": {"screens": {BETA: pinned_block_s2()}}})
+        self.assertEqual((eff["receipt"], eff["why"], eff["c_R"], eff["c_H_floor"], eff["c_H_margin"], eff["screen"]),
+                         (SHA, None, 0.0, 0.9, 0.05, "S2"))
+        for over in ({"c_H_floor": None}, {"c_H_margin": "0.05"}, {"c_H_floor": 5.5}, {"c_X": None}, {"beside": ""}):
+            eff = elane.screen_effective(ON, BETA, policy={"elane": {"screens": {BETA: pinned_block_s2(**over)}}})
+            self.assertIn("S2 refused", eff["why"], over)
+            self.assertIn("incomplete", eff["why"], over)
+            self.assertIsNone(eff["receipt"], over)
+        for over in ({"name": "S3", "screen": "S3"}, {"name": "S1"}, {"screen": None}):
+            eff = elane.screen_effective(ON, BETA, policy={"elane": {"screens": {BETA: pinned_block_s2(**over)}}})
+            self.assertIn("names no screen this code runs", eff["why"], over)
+            self.assertEqual((eff["receipt"], eff["screen"]), (None, None), over)
         eff = elane.screen_effective(ON, BETA, policy={"elane": {"screens": {BETA: pinned_block(c_R=None)}}})
         self.assertIn("incomplete", eff["why"])
         self.assertIsNone(eff["receipt"])
@@ -369,13 +442,72 @@ class Receipt(StoreCase):
 
     def test_the_screen_judges_whether_the_pinned_block_is_a_receipt(self):
         policy = {"elane": {"screens": {BETA: pinned_block()}}}
+        nowhere = Path(self.dir.name) / "a-release-with-no-docs"       # the House box's: no receipt file at hand
         with mock.patch.object(S, "pinned_receipt", return_value=None):
-            receipt, why = elane._receipt(ON, BETA, policy=policy)
+            receipt, why = elane._receipt(ON, BETA, policy=policy, repo=nowhere)
         self.assertIsNone(receipt)
         self.assertIn("does not accept", why)
-        with mock.patch.object(S, "pinned_receipt", return_value="R") as pinned:
-            self.assertEqual(elane._receipt(ON, BETA, policy=policy), ("R", None))
+        made = S.Receipt(receipt_sha256=SHA, c_R=1.5, c_X=0.9, fp_cap=0.12, owner_wall=0.15, retry=True, r4={},
+                         beside="c_used {c_used}", fp={})
+        with mock.patch.object(S, "pinned_receipt", return_value=made) as pinned:
+            self.assertEqual(elane._receipt(ON, BETA, policy=policy, repo=nowhere), (made, None))
         self.assertEqual(pinned.call_args.args[0]["receipt_sha256"], SHA)
+        with mock.patch.object(S, "pinned_receipt", return_value="R"):
+            receipt, why = elane._receipt(ON, BETA, policy=policy, repo=nowhere)
+        self.assertIsNone(receipt, "what the screen hands back must be a receipt of a screen")
+        self.assertIn("names no screen", why)
+        # An S2 block the screen does not accept (c_R is not 0: S2 has no pooled-t bar) pins nothing.
+        policy = {"elane": {"screens": {BETA: pinned_block_s2(c_R=1.49)}}}
+        receipt, why = elane._receipt(ON, BETA, policy=policy, repo=nowhere)
+        self.assertIsNone(receipt)
+        self.assertIn("S2 refused: the screen does not accept", why)
+        receipt, why = elane._receipt(ON, BETA, policy={"elane": {"screens": {BETA: pinned_block_s2()}}}, repo=nowhere)
+        self.assertEqual((type(receipt), why), (S.ReceiptS2, None))
+
+    def test_a_receipt_file_at_hand_must_be_the_pinned_bytes_and_figures(self):
+        """A11's pin, at the look (`_receipt`): where the screen's receipt file is at hand, its bytes are the pinned
+        sha256 and its figures the block's, else the screen refuses; where none is (the House box: docs/benchmarks/
+        never reaches it), CI's pin of the exact commit stands for it."""
+        for fake in (FAKE_S2, FAKE_S1):
+            with tempfile.TemporaryDirectory(dir=self.dir.name) as root:
+                block = block_of(fake)
+                name = block["name"]
+                policy = {"elane": {"screens": {BETA: block}}}
+                path = Path(root) / S.receipt_path(block)
+                receipt, why = elane._receipt(ON, BETA, policy=policy, repo=root)
+                self.assertEqual((S.screen_of(receipt), why), (name, None), "no file at hand: the pin stands")
+                path.parent.mkdir(parents=True)
+                shutil.copy(fake, path)
+                receipt, why = elane._receipt(ON, BETA, policy=policy, repo=root)
+                self.assertEqual((S.screen_of(receipt), receipt.receipt_sha256, why),
+                                 (name, block["receipt_sha256"], None))
+                # One byte more: the same JSON, another sha256.
+                path.write_bytes(fake.read_bytes() + b"\n")
+                receipt, why = elane._receipt(ON, BETA, policy=policy, repo=root)
+                self.assertIsNone(receipt, name)
+                self.assertIn(f"{name} refused", why)
+                self.assertIn("is not the pinned", why)
+                # The file's figures edited and the sha re-pinned, the block's figures left: not the receipt's.
+                doc = json.loads(fake.read_text())
+                doc["c_X"] = 0.5
+                path.write_text(json.dumps(doc))
+                moved = {**block, "receipt_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                receipt, why = elane._receipt(ON, BETA, policy={"elane": {"screens": {BETA: moved}}}, repo=root)
+                self.assertIsNone(receipt, name)
+                self.assertIn("are not the receipt file's", why)
+                # A receipt of the other screen under this screen's name and path is refused by its loader.
+                other = FAKE_S1 if fake is FAKE_S2 else FAKE_S2
+                shutil.copy(other, path)
+                swapped = {**block, "receipt_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                receipt, why = elane._receipt(ON, BETA, policy={"elane": {"screens": {BETA: swapped}}}, repo=root)
+                self.assertIsNone(receipt, name)
+                self.assertIn("refuse", why)
+                # Whatever sits at the receipt's path must be the receipt: a directory there cannot be read, so refuses.
+                path.unlink()
+                path.mkdir()
+                receipt, why = elane._receipt(ON, BETA, policy=policy, repo=root)
+                self.assertIsNone(receipt, name)
+                self.assertIn("cannot be read", why)
 
 
 class RosterSeats(StoreCase):

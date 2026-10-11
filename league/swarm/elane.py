@@ -1,5 +1,6 @@
 """THE EQUITY LANES (release E1, Oct 2026): agent programs that trade long-only ETFs (and later stocks), beside the
-options lanes, judged by the share screen S1 and traded by the House's EquityBook.
+options lanes, judged by the pinned share screen (S2, the captain's amendment A11: receipt 2; S1+F1 stays in code as
+receipt 1's screen, unused while no lane pins it) and traded by the House's EquityBook.
 
 Owner: swarm. Protected like league/swarm/dlane.py (league/ci.py FORBIDDEN; the gateway's MERGE_FORBIDDEN in a later
 gateway PR). The lanes' one swarm-side home: their settings and bounds, the card box, the screen they use, the ration
@@ -22,9 +23,13 @@ SETTINGS (`cfg`; policy.json "elane", swarm.json over it; `DEFAULTS` is the roll
 - `birth_share` 0 in E1 (taken out of the alpha share first, E2; bounded 0-0.5);
 - `roster` 3, which equals `equity_money.probe.max_programs` (a test holds them equal): equity Probe seats, apart from
   `dlane.roster` (league/swarm/bands.py `seating`); a setting may only lower it (0-3), and 0 seats no equity program;
-- `screens`: per lane {"name": "S1", "receipt_sha256", "c_R", "c_X", and the receipt's figures}: read from the
-  REPOSITORY's policy.json only (never swarm.json); a test holds the sha to docs/benchmarks/equity_screen_1.json; with
-  no pinned receipt the screen refuses every program (`screen_effective`, league/equity/screen.py `pinned_receipt`);
+- `screens`: per lane the pinned receipt's block, read from the REPOSITORY's policy.json only (never swarm.json):
+  {"name" and "screen" "S2", "receipt_sha256", "c_R" 0, "c_H_floor", "c_H_margin", "c_X", and the receipt's figures}
+  (A11; receipt 1's block is {"name": "S1", "receipt_sha256", "c_R", "c_X", ...}). The block's `screen` (or `name`)
+  picks the screen (`SCREENS`; league/equity/screen.py `screen_of`). Tests hold the sha to the screen's file
+  (docs/benchmarks/equity_screen_2.json for S2, equity_screen_1.json for S1) and the block's figures to the file's; with
+  no pinned receipt the screen refuses every program (`screen_effective`, league/equity/screen.py `pinned_receipt`),
+  and so does a receipt file at hand whose bytes are not the pinned sha256 (`_receipt`: THE RECEIPT'S BYTES);
 - `val_tries` 1 and `looks_per_lineage` 1 (whatever is written), plus R3's one Validation-only retry when the
   receipt permits it and the first try FAILED its pre-check, the retry version's hash recorded at the first try
   (A9 D3; league/equity/screen.py `retry_permitted`);
@@ -34,12 +39,15 @@ THE ROUND (who calls what). The tournament's equity round (league/swarm/tourname
 `validate` of each living Gym-band equity family's candidate version (`candidate`: its best, else its newest) while
 `try_open` allows it, and retires a family whose lineage is spent (`lineage_spent`). `validate` runs the version on
 Validation (2025) at k 1.0 and 1.5 in the decider-isolated child on the House (`isolated_runner`, A3: no Gym box),
-records both runs (each a trial), the version's per-trade net-return sd (`SIGMA_KEY`: EDM1's sigma) and the S1
-pre-check, and the lineage's try (`TRY_KEY`); a passed pre-check makes the version gate-ready. The gate's equity round
-(league/swarm/gate.py `Gate.equity_round`) asks `look` of each gate-ready equity family: the screen's pinned receipt
-(none: refused, no look spent), the program floor from its Train-era runs (ineligible: refused, no look spent), THE
-LINEAGE (below), the recorded Validation run reproduced and pre-checked again, then the ONE sealed look with a freshly
-minted `EquityGateCapability`, judged by `screen.verdict`; a pass makes the family a Candidate whose band proof is the
+records both runs (each a trial), the version's per-trade net-return sd (`SIGMA_KEY`: EDM1's sigma) and the
+screen's pre-check (S1's and S2's are one rule), and the lineage's try (`TRY_KEY`); a passed pre-check makes the version
+gate-ready. The gate's equity round (league/swarm/gate.py `Gate.equity_round`) asks `look` of each gate-ready equity
+family: the screen's pinned receipt (none: refused, no look spent), the program floor from its Train-era runs under
+that receipt (`screen.floor(segments, receipt=)`: S2's exact floor for receipt 2; ineligible: refused, no look spent; a
+floor kept for the version under another receipt is run again, `screen.floor_fits`), THE LINEAGE (below), the recorded
+Validation run reproduced and pre-checked again, the daily store holding the look's whole calibrated holdout
+(`_holdout_gap`: else the look waits), then the ONE sealed look with a freshly minted `EquityGateCapability`, judged by
+`screen.verdict` under the same receipt; a pass makes the family a Candidate whose band proof is the
 equity identity (`banded_evaluator` {"engine", "equity_sha256", "run_sha"}). From there the EquityBook moves its band
 (league/equity/bands.py `next_band`), inside `roster` seats.
 
@@ -60,8 +68,8 @@ spent SPY/QQQ/IWM always-in roots never refuse an equity birth, and a REFUTED eq
 (league/swarm/cards.py: an equity card's cell is "<lane>:etf", and `RebirthIndex` reads each lane's rows apart).
 
 THE SEEDS (A4; league/swarm/seeds.py `EQUITY_SEEDS`): seed-overnight-spy, seed-overnight-qqq, seed-reversal-index,
-each born once as an agent-authored family (`birth_seeds`), then Validation, the S1 pre-check and one sealed look like
-any family. Every report says plainly that these three were seeded by the captain's build agents (`SEEDED_NOTE`), and
+each born once as an agent-authored family (`birth_seeds`), then Validation, the screen's pre-check and one sealed look
+like any family. Every report says plainly that these three were seeded by the captain's build agents (`SEEDED_NOTE`), and
 the Done meter reads Done with and without them (`seeded`).
 
 Standard library only at import (league/equity/__init__.py and config.py); the screen, the runner and the store (numpy)
@@ -70,6 +78,7 @@ are imported where they are used, on the House.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import re
@@ -101,9 +110,17 @@ TEMPLATE_KEY = "elane_template"
 VALIDATION_KEY = "elane_validation"
 VERDICTS_KEY = "elane_verdicts"
 SIGMA_KEY = "validation_r_sd_by_version"
-#: The equity screen (A7 as amended by A9) and the daily store's directory under the House's state root.
+#: The share screens a lane's block may pin (league/equity/screen.py `SCREENS`; a test holds the two lists equal): "S2"
+#: is the House's gate (amendment A11, receipt 2); "S1" (A7 as amended by A9, receipt 1) stays in code, unused while no
+#: lane pins it. `SCREEN` is the screen of a block that names none (receipt 1's blocks may be written so).
+SCREENS = ("S1", "S2")
 SCREEN = "S1"
+#: The daily store's directory under the House's state root.
 STORE_DIR = "equity-daily"
+#: Where a receipt's file is looked for (the repository's root: `screen.receipt_path` is relative to it). The House
+#: box's release carries league/, ltcm/, playbooks/, scripts/ and deploy/ only (scripts/floor_box.py `UPLOAD_TREES`), so
+#: no receipt file is ever at hand there.
+REPO = Path(__file__).resolve().parents[2]
 #: The author every seeded version carries (A4: written by the captain's build agents, judged like any family).
 SEED_AUTHOR = "captain-build-agent"
 #: The mechanism classes an equity card may name: the options vocabulary's (league/swarm/cards.py `MECHANISM_CLASSES`)
@@ -151,10 +168,24 @@ def _token(value: Any) -> str:
     return re.sub(r"[\s\-]+", "_", str(value or "").strip().lower())
 
 
+def _screen_name(raw: Any) -> str | None:
+    """The screen a lane's block names, read as league/equity/screen.py `screen_of` reads a block (a test holds the two
+    equal; that module needs numpy, and this one is read where numpy is not): its `screen` or its `name`, `SCREEN` when
+    it names neither; None when the two disagree or name no screen of `SCREENS`."""
+    raw = raw if isinstance(raw, Mapping) else {}
+    named = [raw[key] for key in ("screen", "name") if key in raw]
+    if not named:
+        return SCREEN
+    if not all(isinstance(x, str) for x in named) or len(set(named)) != 1:
+        return None
+    return named[0] if named[0] in SCREENS else None
+
+
 def _screen_block(raw: Any) -> dict[str, Any]:
-    """A lane's screen block as written: name "S1"; a 64-hex receipt sha else None; `c_R`, `c_X` finite in [0, 5] else
-    None; `fp_cap` and `owner_wall` in (0, 0.15] (the owner's wall) else None; `retry` True only when written so; `r4` a
-    mapping of archetype -> list of words; `beside` a non-empty template string else None."""
+    """A lane's screen block as written: `name` the screen it names (`_screen_name`: "S1" | "S2", None for no screen
+    this code runs); a 64-hex receipt sha else None; `c_R`, `c_X` and S2's `c_H_floor`, `c_H_margin` finite in [0, 5]
+    else None; `fp_cap` and `owner_wall` in (0, 0.15] (the owner's wall) else None; `retry` True only when written so;
+    `r4` a mapping of archetype -> list of words; `beside` a non-empty template string else None."""
     raw = raw if isinstance(raw, Mapping) else {}
     sha = raw.get("receipt_sha256")
 
@@ -168,8 +199,9 @@ def _screen_block(raw: Any) -> dict[str, Any]:
     r4 = {str(k): [str(x) for x in v] for k, v in r4.items() if isinstance(v, (list, tuple))} \
         if isinstance(r4, Mapping) else {}
     beside = raw.get("beside")
-    return {"name": SCREEN, "receipt_sha256": sha if isinstance(sha, str) and _SHA.match(sha) else None,
+    return {"name": _screen_name(raw), "receipt_sha256": sha if isinstance(sha, str) and _SHA.match(sha) else None,
             "c_R": bounded("c_R", 0.0, 5.0), "c_X": bounded("c_X", 0.0, 5.0),
+            "c_H_floor": bounded("c_H_floor", 0.0, 5.0), "c_H_margin": bounded("c_H_margin", 0.0, 5.0),
             "fp_cap": bounded("fp_cap", 0.0, 0.15, open_low=True), "owner_wall": bounded("owner_wall", 0.0, 0.15, open_low=True),
             "retry": raw.get("retry") is True, "r4": r4,
             "beside": beside if isinstance(beside, str) and beside.strip() else None}
@@ -336,43 +368,95 @@ def _policy_block(policy: Mapping[str, Any] | None, lane: str) -> Mapping[str, A
     return screens.get(lane) if isinstance(screens.get(lane), Mapping) else {}
 
 
+#: The figures a pinned block must carry beside its sha256, per screen (`screen_effective`: one missing pins nothing).
+_PINNED_FIGURES = {"S1": ("c_R", "c_X", "fp_cap", "beside"),
+                   "S2": ("c_R", "c_H_floor", "c_H_margin", "c_X", "fp_cap", "beside")}
+
+
+def screen_name(lane: str, *, policy: Mapping[str, Any] | None = None) -> str | None:
+    """The screen the lane's block of the REPOSITORY's policy.json names ("S2" under A11; "S1" for receipt 1's block or
+    one naming none; None for a block naming no screen this code runs): what a Validation, a look and their events
+    record."""
+    return _screen_name(_policy_block(policy, lane))
+
+
 def screen_effective(settings: Mapping[str, Any] | None, lane: str, *,
                      policy: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """The screen an equity family's look uses: {lane, screen "S1", receipt (sha or None), c_R, c_X, figures, why}:
-    the pinned receipt of the REPOSITORY's policy.json `elane.screens.<lane>` (`policy`: its parsed document; default
-    `settings.read_policy()`), `why` naming the refusal when none is pinned."""
+    """The screen an equity family's look uses: {lane, screen ("S2", A11; "S1" for receipt 1's block; None for a block
+    naming no screen this code runs), receipt (sha or None), c_R, c_X, c_H_floor and c_H_margin (S2's; None under S1),
+    figures, why}: the pinned receipt of the REPOSITORY's policy.json `elane.screens.<lane>` (`policy`: its parsed
+    document; default `settings.read_policy()`), `why` naming the refusal when none is pinned."""
     raw = dict(_policy_block(policy, lane))
     block = _screen_block(raw)
-    out = {"lane": lane, "screen": SCREEN, "receipt": block["receipt_sha256"], "c_R": block["c_R"], "c_X": block["c_X"],
+    name = block["name"]
+    said = name or "the share screen"
+    out = {"lane": lane, "screen": name, "receipt": block["receipt_sha256"], "c_R": block["c_R"], "c_X": block["c_X"],
+           "c_H_floor": block["c_H_floor"], "c_H_margin": block["c_H_margin"],
            "figures": {"fp_cap": block["fp_cap"], "owner_wall": block["owner_wall"], "retry": block["retry"],
                        "r4": block["r4"]},
            "block": raw, "why": None}
     if lane not in LANES:
-        out["why"] = f"S1 refused: {lane!r} is not an equity lane"
+        out["why"] = f"{said} refused: {lane!r} is not an equity lane"
     elif not on(settings):
-        out["why"] = "S1 refused: the equity lanes are off (elane.mode)"
+        out["why"] = f"{said} refused: the equity lanes are off (elane.mode)"
+    elif name is None:
+        out["why"] = (f"the share screen refused: the repository's policy.json names no screen this code runs "
+                      f"(elane.screens.{lane}: one of {', '.join(SCREENS)}, its `screen` and `name` agreeing)")
     elif block["receipt_sha256"] is None:
-        out["why"] = f"S1 refused: no receipt sha256 is pinned in the repository's policy.json (elane.screens.{lane})"
-    elif None in (block["c_R"], block["c_X"], block["fp_cap"], block["beside"]):
-        out["why"] = f"S1 refused: the pinned receipt's figures are incomplete in the repository's policy.json (elane.screens.{lane})"
+        out["why"] = f"{said} refused: no receipt sha256 is pinned in the repository's policy.json (elane.screens.{lane})"
+    elif any(block[key] is None for key in _PINNED_FIGURES[name]):
+        out["why"] = f"{said} refused: the pinned receipt's figures are incomplete in the repository's policy.json (elane.screens.{lane})"
     if out["why"] is not None:
         out["receipt"] = None
     return out
 
 
-def _receipt(settings: Mapping[str, Any] | None, lane: str, *, policy: Mapping[str, Any] | None = None) -> tuple[Any, str | None]:
-    """(the screen's `Receipt`, None) or (None, why): `screen_effective`, then `league.equity.screen.pinned_receipt`."""
+def _receipt_file_refusal(S: Any, receipt: Any, repo: str | Path) -> str | None:
+    """THE RECEIPT'S BYTES: why the receipt file at hand is not the pinned receipt, or None. Where anything sits at the
+    pinned screen's path under `repo` (`screen.receipt_path`: docs/benchmarks/equity_screen_<n>.json),
+    `screen.load_receipt` must read it under the pinned sha256 (its BYTES are the pin's, and it is that screen's
+    well-formed receipt) to the very figures the policy block pins. Where nothing is there, there is nothing to compare:
+    docs/benchmarks/ never reaches the House box, and CI holds the pin to the file on the exact commit the box runs
+    (league/tests/test_equity_screen.py `test_the_committed_pin`, league/tests/test_elane.py)."""
+    rel = S.receipt_path(receipt)
+    if not rel:
+        return "the pinned receipt names no screen"
+    path = Path(repo) / rel
+    if not path.exists():
+        return None
+    try:
+        loaded = S.load_receipt(path, pinned_sha256=receipt.receipt_sha256, screen=S.screen_of(receipt))
+    except S.ScreenRefused as exc:
+        return str(exc)
+    if dataclasses.replace(loaded, fp={}) != dataclasses.replace(receipt, fp={}):
+        return f"the share screen refuses: the figures pinned in policy.json are not the receipt file's ({rel})"
+    return None
+
+
+def _receipt(settings: Mapping[str, Any] | None, lane: str, *, policy: Mapping[str, Any] | None = None,
+             repo: str | Path | None = None) -> tuple[Any, str | None]:
+    """(the screen's receipt, None) or (None, why): `screen_effective`, then `league.equity.screen.pinned_receipt` (an
+    "S1" block gives a `Receipt`, an "S2" block a `ReceiptS2`), then THE RECEIPT'S BYTES (`_receipt_file_refusal`, under
+    `repo`: default `REPO`): a receipt file at hand whose bytes are not the pinned sha256 refuses the screen, so no
+    Validation retry is granted and no look is spent under it."""
     eff = screen_effective(settings, lane, policy=policy)
     if eff["why"] is not None:
         return None, eff["why"]
+    said = eff["screen"] or "the share screen"
     from ..equity import screen as S
 
     try:
         receipt = S.pinned_receipt(eff["block"])
     except Exception as exc:  # noqa: BLE001 - a receipt that cannot be read judges nothing
-        return None, f"S1 refused: the pinned receipt cannot be read ({type(exc).__name__})"
+        return None, f"{said} refused: the pinned receipt cannot be read ({type(exc).__name__})"
     if receipt is None:
-        return None, f"S1 refused: the screen does not accept the pinned receipt (elane.screens.{lane})"
+        return None, f"{said} refused: the screen does not accept the pinned receipt (elane.screens.{lane})"
+    try:
+        why = _receipt_file_refusal(S, receipt, REPO if repo is None else repo)
+    except Exception as exc:  # noqa: BLE001 - a receipt file that cannot be judged judges nothing
+        return None, f"{said} refused: the receipt file cannot be checked ({type(exc).__name__})"
+    if why is not None:
+        return None, f"{said} refused: {why}"
     return receipt, None
 
 
@@ -668,12 +752,14 @@ def _plain(value: Any, depth: int = 0) -> Any:
 def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]) -> dict[str, Any]:
     """An equity family's Validation (tournament.py dispatches here by lane): the isolated runner's 2025 run at k 1.0
     and 1.5, recorded as the tournament records a Validation (its `validation_r_sd_by_version`: the per-trade net
-    return sd), the S1 pre-check (`league.equity.screen.precheck`) as its line, the lineage's try recorded
-    (`TRY_KEY`). Returns the tournament's verdict dict."""
+    return sd), the screen's pre-check (`league.equity.screen.precheck`: S1's and S2's one rule) as its line, the lineage's
+    try recorded (`TRY_KEY`). `screen` in its answer, its state and its event is the lane's pinned screen
+    (`screen_name`). Returns the tournament's verdict dict."""
     store, settings = tournament.store, tournament.settings
     fid, n = str(fam["id"]), int(version["n"])
     lane = lane_of(store, fam)
-    out: dict[str, Any] = {"version": n, "passed": False, "entered": False, "screen": SCREEN, "lane": lane}
+    screen = screen_name(lane) if lane is not None else None
+    out: dict[str, Any] = {"version": n, "passed": False, "entered": False, "screen": screen, "lane": lane}
     if lane is None:
         return {**out, "refused": "not an equity-lane family"}
     if not on(settings):
@@ -743,14 +829,14 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
         store.update_family(fid, validated_version=n)
         store.bump(fid, validations=1)
         store.set_state(fid, validation_version=n, gate_ready=entered and not looked,
-                        **{VALIDATION_KEY: {"version": n, "passed": entered, "precheck": checks, "screen": SCREEN,
+                        **{VALIDATION_KEY: {"version": n, "passed": entered, "precheck": checks, "screen": screen,
                                             "status": status, "at": store.now(), "result_sha": result.get("result_sha"),
                                             "stale": False},
                            SIGMA_KEY: sigma, VERDICTS_KEY: verdicts,
                            TRY_KEY: {"version": n, "at": store.now(), "first": first, "precheck": bool(pre.get("passed")),
                                      "entered": entered, "retry_sha": retry_sha}})
     store.event("swarm.status", fid, {"action": "elane_validation", "version": n, "lane": lane, "label": label(lane),
-                                     "screen": SCREEN, "entered": entered, "first": first, "checks": checks})
+                                     "screen": screen, "entered": entered, "first": first, "checks": checks})
     return {**out, "passed": entered, "entered": entered, "first": first}
 
 
@@ -806,47 +892,82 @@ def same_lineage(store: Any, fam: Mapping[str, Any], lane: str, template: str,
     return None
 
 
-def _refuse(gate: Any, fid: str, n: int, sha: str, stage: str, why: str) -> None:
+def _refuse(gate: Any, fid: str, n: int, sha: str, stage: str, why: str, *, screen: str | None) -> None:
     """A refusal before the look (no look spent): the refusal row, `gated_sha` with `gate_ready` cleared (the gate is
-    done with this version), the outcome, and one private `swarm.gate` event."""
+    done with this version), the outcome, and one private `swarm.gate` event (`screen`: the lane's pinned screen)."""
     store = gate.store
     store.refuse(fid, n, stage, why)
     store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False)
     store.set_state(fid, gate_outcome={"sha": sha, "result": "refused", "at": gate.clock()}, gate=f"refused ({why})")
     store.event("swarm.gate", fid, {"action": "refused", "version": n, "stage": stage, "lane": lane_of(store, store.family(fid)),
-                                    "screen": SCREEN, "why": why})
+                                    "screen": screen, "why": why})
 
 
-def _wait(gate: Any, fid: str, n: int, sha: str, why: str) -> None:
+def _wait(gate: Any, fid: str, n: int, sha: str, why: str, *, screen: str | None) -> None:
     """The look waits (no look spent, `gate_ready` stays): its outcome "waiting" and one private event."""
     gate.store.set_state(fid, gate_outcome={"sha": sha, "result": "waiting", "at": gate.clock()}, gate=f"waiting ({why})")
-    gate.store.event("swarm.gate", fid, {"action": "equity_look_waits", "version": n, "screen": SCREEN, "why": why})
+    gate.store.event("swarm.gate", fid, {"action": "equity_look_waits", "version": n, "screen": screen, "why": why})
+
+
+def _holdout_gap(root: str | Path) -> str | None:
+    """Why the daily store under the state root cannot give the sealed look its whole calibrated holdout yet, or None.
+    A12 fixes every look at the sessions `config.LOOK_FIRST` .. `config.LOOK_CAP` (the 194 the screens are calibrated
+    on), and `Isolated.look` reads through min(the store's last close, the cap): a store that ends before the cap would
+    spend the lineage's one look on a certain failure (the verdict's windows refuse a shorter holdout). The store's
+    last day is its manifest's, never a bar (no capability is minted to read it). Raises as the store does when it
+    cannot be read."""
+    from ..equity.store import EquityStore
+
+    through = EquityStore(Path(root) / STORE_DIR).fetched_through
+    if through >= econfig.LOOK_CAP:
+        return None
+    return (f"the daily store ends {through.isoformat()}: the sealed look reads the calibrated holdout through "
+            f"{econfig.LOOK_CAP.isoformat()} (A12), so it waits for the data job")
+
+
+def _s1x_floor(S: Any, segments: Sequence[Any], receipt: Any) -> Mapping[str, Any] | None:
+    """An S1 floor of the same Train-era series, for the S1-X label's FP beside an S2 verdict (`screen.verdict_s2`
+    reads `fp_x` from an eligible S1 floor's "X" curve at c_X; without one the line says "unmeasured"). Train-era
+    series only, deterministic (S1's seeds), and never a condition of the look: None under receipt 1 (its own floor
+    carries the curve), when S1's floor is not eligible, or on any error."""
+    if S.screen_of(receipt) != "S2":
+        return None
+    try:
+        floor = _plain(dict(S.floor(segments, fp_cap=float(receipt.fp_cap))))
+    except Exception:  # noqa: BLE001 - a label's rate that cannot be measured is stated as unmeasured
+        return None
+    return floor if isinstance(floor, Mapping) and floor.get("eligible") is True else None
 
 
 def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> bool | None:
-    """An equity family's ONE sealed look, on the House (gate.py dispatches here by lane): refused when no receipt is
-    pinned; the floor from the program's Train-era runs (`Isolated.segments` -> `screen.series` -> `screen.floor`);
-    the look with a freshly minted `EquityGateCapability` (`Isolated.look`); `screen.verdict` and `screen.beside_line`
-    recorded with the look. True passed (the family becomes a Candidate), False failed, None not run (no look spent)."""
+    """An equity family's ONE sealed look, on the House (gate.py dispatches here by lane), under the lane's pinned
+    receipt (`_receipt`: S2's under A11; waits, nothing spent, when none is pinned or its file's bytes are not the
+    pin's): the floor from the program's Train-era runs (`Isolated.segments` -> `screen.series` -> `screen.floor(...,
+    receipt=)`, kept a version while `screen.floor_fits` the receipt; a floor the verdict would refuse spends no look);
+    the look with a freshly minted `EquityGateCapability` (`Isolated.look`), only once the daily store holds its whole
+    calibrated holdout (`_holdout_gap`); `screen.verdict` and `screen.beside_line` recorded with the look, under the
+    screen that judged it. True passed (the family becomes a Candidate), False failed, None not run (no look spent)."""
     store, settings = gate.store, gate.settings
     fid, n = str(fam["id"]), int(version["n"])
     lane = lane_of(store, fam)
     if lane is None or not on(settings):
         return None
+    screen = screen_name(lane)
     receipt, why = _receipt(settings, lane)
     if receipt is None:
-        _wait(gate, fid, n, sha, why or "S1 refused: no pinned receipt")
+        _wait(gate, fid, n, sha, why or "the share screen refused: no pinned receipt", screen=screen)
         return None
     c = cfg(settings)
     if store.looked(sha) or store.lineage_looks(fid, include_inflight=True) >= c["looks_per_lineage"]:
-        _refuse(gate, fid, n, sha, "rations", "the equity lineage's one sealed look is spent")
+        _refuse(gate, fid, n, sha, "rations", "the equity lineage's one sealed look is spent", screen=screen)
         return None
     state = fam.get("state") or {}
     held = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else {}
     if held.get("version") != n or held.get("entered") is not True or state.get("validation_version") != n:
         return None  # not this version's entry: the tournament owes its Validation first
     if not seeded(store, fid) and not reviewed(state, sha):
-        _wait(gate, fid, n, sha, "an equity look of a program the captain did not seed needs the equity review (E2)")
+        _wait(gate, fid, n, sha, "an equity look of a program the captain did not seed needs the equity review (E2)",
+              screen=screen)
         return None
     from ..equity import screen as S
     from ..equity.store import mint_equity_gate_capability
@@ -863,16 +984,22 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     try:
         segments = [_series(S, run) for run in runner.segments(code, params, name=fid)]
         cached = floors.get(str(n))
-        if isinstance(cached, Mapping) and cached.get("fp_cap") == float(receipt.fp_cap) and "eligible" in cached:
-            floor = dict(cached)  # the floor's 20,000 worlds a set, computed once a version (deterministic: its seeds)
+        if S.floor_fits(cached, receipt):
+            floor = dict(cached)  # computed once a version under this receipt (deterministic: S2 exact, S1 its seeds)
         else:
-            floor = {**_plain(dict(S.floor(segments, fp_cap=float(receipt.fp_cap)))), "fp_cap": float(receipt.fp_cap)}
+            # The pinned receipt's own floor (A11: `floor_s2` for receipt 2). A floor kept for the version under
+            # another receipt (S1's, or other figures) is not this screen's: the verdict would refuse it AFTER the
+            # look was spent, so it is run again here, and one that still does not fit spends no look.
+            floor = _plain(dict(S.floor(segments, receipt=receipt)))
+            if not S.floor_fits(floor, receipt):
+                raise ValueError("the program floor does not fit the pinned receipt")
             store.set_state(fid, **{FLOOR_KEY: {**dict(floors), str(n): floor}})
     except Exception as exc:  # noqa: BLE001 - no floor, no look (nothing spent)
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "floor", "error": type(exc).__name__})
         return None
     if not floor.get("eligible"):
-        _refuse(gate, fid, n, sha, "screen floor", f"S1's program floor is not eligible: {floor.get('why') or 'no reason given'}")
+        _refuse(gate, fid, n, sha, "screen floor",
+                f"{screen}'s program floor is not eligible: {floor.get('why') or 'no reason given'}", screen=screen)
         return None
     template = lineage_key(lane, str(version.get("sha") or ""))
     train = _train_series(segments)
@@ -883,7 +1010,8 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         return None
     if twin is not None:
         _refuse(gate, fid, n, sha, "same lineage",
-                f"the same lineage as {twin}, already looked at (A9 D3: Train correlation >= 0.7 or the same template)")
+                f"the same lineage as {twin}, already looked at (A9 D3: Train correlation >= 0.7 or the same template)",
+                screen=screen)
         return None
     try:
         recorded = runner.validation(code, params, name=fid, k=econfig.K_BASE)
@@ -903,8 +1031,18 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         store.event("swarm.gate", fid, {"action": "equity_validation_moved", "version": n})
         return None
     if not pre.get("passed"):
-        _refuse(gate, fid, n, sha, "precheck", "S1's Validation pre-check does not pass on the recorded run")
+        _refuse(gate, fid, n, sha, "precheck", f"{screen}'s Validation pre-check does not pass on the recorded run",
+                screen=screen)
         return None
+    try:
+        gap = _holdout_gap(store.root)
+    except Exception as exc:  # noqa: BLE001 - a store that cannot be read gives no look (nothing spent)
+        store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "store", "error": type(exc).__name__})
+        return None
+    if gap is not None:
+        _wait(gate, fid, n, sha, gap, screen=screen)
+        return None
+    s1x = _s1x_floor(S, segments, receipt)  # S1-X's rate beside an S2 verdict: Train-era series only, before the look
     marker = {"sha": sha, "n": n, "at": gate.clock(), "lane": lane}
     with store.atomic():
         current = store.family(fid) or {}
@@ -917,15 +1055,18 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     try:
         capability = mint_equity_gate_capability(Path(store.root) / STORE_DIR, reason=f"the equity look of {fid} v{n}")
         h = _series(S, runner.look(code, params, name=fid, gate=capability))
-        verdict = _plain(S.verdict(v, h, receipt=receipt, program_floor=floor))
+        verdict = _plain(S.verdict(v, h, receipt=receipt, program_floor=floor, s1_floor=s1x))
         beside = str(S.beside_line(verdict, receipt))
     except Exception as exc:  # noqa: BLE001 - the look did not land: owed again next round (no look row)
         store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "look", "error": type(exc).__name__})
         return None
     passed = bool(verdict.get("passed"))
-    detail = {"lane": lane, "label": label(lane), "screen": SCREEN, "receipt": receipt.receipt_sha256,
-              "c_used": verdict.get("c_used"), "c_H": verdict.get("c_H"), "s1x": verdict.get("label"),
+    # The screen that judged it: S1's verdict carries c_used (= max(c_R, c_p)); S2's has no pooled-t bar, and its
+    # c_H is c_H,used (= max(c_H_floor, c_pF1 + c_H_margin)).
+    figures = {"c_pF1": verdict.get("c_pF1")} if screen == "S2" else {"c_used": verdict.get("c_used")}
+    detail = {"lane": lane, "label": label(lane), "screen": screen, "receipt": receipt.receipt_sha256,
+              **figures, "c_H": verdict.get("c_H"), "s1x": verdict.get("label"),
               "seeded": seeded(store, fid), "beside": beside, "passed": passed}
     with store.atomic():
         store.add_look(fid, n, sha, passed=passed, p_value=None, detail=detail)
@@ -939,8 +1080,8 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         if passed and current.get("band") == "gym" and not current.get("retired_at"):
             store.set_state(fid, banded_version=n, banded_sha=version.get("sha"), banded_at=gate.clock(),
                             banded_evaluator=proof)
-            store.set_band(fid, "candidate", reason=f"passed its sealed look ({SCREEN}, {label(lane)})")
-    store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": passed, "lane": lane, "screen": SCREEN,
+            store.set_band(fid, "candidate", reason=f"passed its sealed look ({screen}, {label(lane)})")
+    store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": passed, "lane": lane, "screen": screen,
                                     "receipt": receipt.receipt_sha256, "_verdict": verdict})
     return passed
 
@@ -988,13 +1129,15 @@ def birth_seeds(store: Any, settings: Mapping[str, Any] | None) -> list[str]:
 
 # ----------------------------------------------------------------------------------------------------------- views
 def view(fam: Mapping[str, Any], *, lane: str | None) -> dict[str, Any]:
-    """The lane's line in a status or report: {lane, label, seeded, screen, try, look, beside} (labels always; figures
-    only where the reader may see them)."""
+    """The lane's line in a status or report: {lane, label, seeded, screen (the screen that judged its recorded look;
+    None before it), try, look, beside} (labels always; figures only where the reader may see them)."""
     state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
     spec = fam.get("spec") if isinstance(fam.get("spec"), Mapping) else {}
     held = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else None
     looked = state.get(LOOK_KEY) if isinstance(state.get(LOOK_KEY), Mapping) else None
-    out = {"lane": lane, "label": label(lane), "seeded": spec.get("seeded") is True, "screen": SCREEN,
+    judged = (looked.get("verdict") or {}).get("screen") if looked else None
+    out = {"lane": lane, "label": label(lane), "seeded": spec.get("seeded") is True,
+           "screen": judged if judged in SCREENS else None,
            "try": {"version": held.get("version"), "entered": bool(held.get("entered"))} if held else None,
            "look": {"version": looked.get("version"), "passed": bool((looked.get("verdict") or {}).get("passed"))}
            if looked else None,
@@ -1007,7 +1150,8 @@ def view(fam: Mapping[str, Any], *, lane: str | None) -> dict[str, Any]:
 
 
 __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_KEY", "TRY_KEY", "DEFAULTS", "cfg", "on",
-           "lane_of", "label", "card_errors", "lineage_key", "screen_effective", "try_open", "lineage_spent",
+           "lane_of", "label", "card_errors", "lineage_key", "screen_effective", "screen_name", "SCREENS", "REPO",
+           "try_open", "lineage_spent",
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",

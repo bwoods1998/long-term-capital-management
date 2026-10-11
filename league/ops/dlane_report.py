@@ -138,8 +138,10 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
 - BESIDE EVERY EQUITY CLOSE AND EVERY CHECKPOINT (`equity_beside`): the lane's label (MARKET BETA or EQUITY,
   `league.swarm.elane.LABELS`), the same-risk buy-and-hold over the same sessions (the lot's own symbol, delta one, from
   its twin's record) and MTE (the close's net return less it), the screen's false-positive line recorded at the
-  program's look (S1's `beside` line, league/equity/screen.py `beside_line`), "profit from market direction" said
-  plainly (`EQUITY_DIRECTION`), and whether the program was seeded by the captain's build agents.
+  program's look (the pinned receipt's `beside` line, league/equity/screen.py `beside_line`: S2's under the captain's
+  A11, with the program's own FP at zero edge, its holdout-only rate and its drift-kept rate at c_H,used; S1's for a
+  look judged under receipt 1), "profit from market direction" said plainly (`EQUITY_DIRECTION`), and whether the
+  program was seeded by the captain's build agents.
 - DONE WITH AND WITHOUT THE THREE SEEDED PROGRAMS (A8.12): `done.without_seeded` repeats both meters over the closes of
   every program but the seeded ones (the swarm store's kv `elane_seeds` and the book's `eq_instances.seeded`).
 - THE SHARED BUDGET'S CONSEQUENCE (A8.6): `equity.options_probe_room` says plainly that while the equity lane holds its
@@ -1788,7 +1790,7 @@ def trade_screens(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, 
     screens = screens if screens is not None else EquityScreens(store)
 
     def equity_screen(family: str, version: int | None, lane: Any) -> dict[str, Any]:
-        # AN EQUITY TRADE (release E1, A9): beside it, the S1 line its program's one look recorded.
+        # AN EQUITY TRADE (release E1, A9 and A11): beside it, the screen's line its program's one look recorded.
         return {**screens.of(family, version), "lane": lane, "label": lane_label(lane)}
 
     closes_rows = [{"pid": c["pid"], "family": c["family"], "route": c.get("code") or c["route"], "version": c["version"],
@@ -1817,11 +1819,15 @@ def trade_screens(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, 
 class EquityScreens:
     """THE SCREEN BESIDE EVERY EQUITY TRADE (release E1; the captain's A9: "stated beside every live trade: the
     receipt's line, with the program's own FP, c_used, c_H, the drift-kept rate from its own floor run, the S1-X label
-    and the contamination sentence"): the line its version's one passed look recorded (the `looks` row's detail, else the
-    family state's `elane_look` of that version; league/swarm/gate.py writes both with the look, from
-    league/equity/screen.py `beside_line`), read once a program. Never computed here: the look's own figures."""
+    and the contamination sentence"; under A11 the receipt is S2's: c_R 0, c_H = c_H,used, the program's own FP, its
+    holdout-only rate and its drift-kept rate from its own exact floor): the line its version's one passed look recorded
+    (the `looks` row's detail, else the family state's `elane_look` of that version; league/swarm/elane.py `look`
+    writes both with the look, from league/equity/screen.py `beside_line`), under the screen that judged it (`screen`:
+    "S2" or "S1" as recorded, never assumed), read once a program. Never computed here: the look's own figures."""
 
-    KEYS = ("passed", "c_R", "c_p", "c_H", "c_used", "own_fp", "drift_kept", "label", "fp_x")
+    #: The verdict's figures a row carries (S1's `c_p` and `c_used`, S2's `c_pF1` and `holdout_only`; None where the
+    #: screen that judged the look has none).
+    KEYS = ("passed", "c_R", "c_p", "c_pF1", "c_H", "c_used", "own_fp", "holdout_only", "drift_kept", "label", "fp_x")
 
     def __init__(self, store: Any):
         self.store = store
@@ -1852,12 +1858,12 @@ class EquityScreens:
         verdict = detail.get("verdict") or recorded.get("verdict") or {}
         verdict = verdict if isinstance(verdict, Mapping) else {}
         beside = detail.get("beside") or recorded.get("beside")
-        out = {"screen": detail.get("screen") or verdict.get("screen") or "S1", "beside": beside,
+        out = {"screen": detail.get("screen") or verdict.get("screen"), "beside": beside,
                "look_at": (look or {}).get("at") or recorded.get("at"),
                "receipt": detail.get("receipt") or verdict.get("receipt"),
                **{k: detail.get(k) if detail.get(k) is not None else verdict.get(k) for k in self.KEYS}}
         if not beside:
-            out["fp_why"] = ("no S1 line is recorded at this version's look (league/swarm/gate.py records it with the "
+            out["fp_why"] = ("no screen line is recorded at this version's look (league/swarm/elane.py records it with the "
                              "look): none is stated")
         return out
 
