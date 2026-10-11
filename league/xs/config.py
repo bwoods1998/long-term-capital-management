@@ -22,6 +22,7 @@ from decimal import Decimal
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
+from ..equity.config import ADJUSTED_HALF_STEP, ROUNDING_GUARD, rounding_bound  # E1's own, re-exported (below)
 from ..equity.store import nyse_sessions
 
 # ------------------------------------------------------------------------------------------------ sessions and spans
@@ -141,28 +142,11 @@ ID_BITS = 31
 # ------------------------------------------------------------------------------------------ the vendor's rounding
 #: THE VENDOR'S CENTS (found on real SIP bars after the designs): the adjustment=all series is rounded to the cent
 #: (the raw series is the tape's own), so one adjusted price is off by up to half a cent, and a ratio or product built
-#: from several by up to half a cent over each of them, summed. E1 gained `league.equity.config.rounding_bound` for it
-#: AFTER this build's base (E1 547206fa): these three are league/xs's OWN copy, same names and same figures, so the
-#: integrator can make them a re-export once E1's is in the base. Every as-of price, split and dividend reading of
-#: league/xs takes this bound, never a fixed tolerance.
-ADJUSTED_HALF_STEP = 0.005
-ROUNDING_GUARD = 1.5
-
-
-def rounding_bound(*adjusted: float) -> float:
-    """The largest relative move the cent rounding of these adjustment=all prices explains in a ratio or product built
-    from them: `ROUNDING_GUARD` x `ADJUSTED_HALF_STEP` x the sum of 1 / price. ValueError for no price or one that is
-    not a positive finite number (the caller decides what an unreadable price means; it is never "all rounding").
-    BUILT (not a stub): one shared helper, so no package writes a second."""
-    if not adjusted:
-        raise ValueError("the rounding bound of no price")
-    parts = []
-    for price in adjusted:
-        value = float(price)
-        if not (math.isfinite(value) and value > 0):
-            raise ValueError(f"an adjusted price is a positive finite number, not {price!r}")
-        parts.append(1.0 / value)
-    return ROUNDING_GUARD * ADJUSTED_HALF_STEP * math.fsum(parts)
+#: from several by up to half a cent over each of them, summed. ONE BOUND FOR BOTH LANES: `rounding_bound`,
+#: `ADJUSTED_HALF_STEP` and `ROUNDING_GUARD` are E1's own (`league.equity.config`, E1 547206fa: the bound its engine
+#: reads a ratio step with and its book's morning audit compares two readings with), re-exported here under the same
+#: names, so the panel's Gym, the panel's data audit and the book's audit of a panel decision (`_bars_verdict`) cannot
+#: drift apart. Every as-of price, split and dividend reading of league/xs takes this bound, never a fixed tolerance.
 
 
 # ------------------------------------------------------------------------------------------------- quiet windows

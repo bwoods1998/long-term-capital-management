@@ -38,8 +38,8 @@ manifest LAST; files 600, directories 700; a reader verifies every file's sha256
 
 THE CENTS (a binding fact of the vendor, found on real SIP bars after the designs): adjustment=all prices are served
 rounded to the cent. So an as-of price, a split or a dividend read from the adj/raw ratio is exact only to that
-rounding: every comparison of two such readings takes `config.rounding_bound` (league/xs's own copy of the helper E1
-gained after this build's base, same name, same figures), never a fixed tolerance, and a live fetch's ctx equals a
+rounding: every comparison of two such readings takes `config.rounding_bound` (E1's own helper, re-exported: one
+bound for both lanes), never a fixed tolerance, and a live fetch's ctx equals a
 later store's only within it, never byte for byte by assumption (the nightly I6 measures it). It is also why the
 ctx's dither is drawn on the ADJUSTED price's own cent grid (league/xs/ctx.py): that is the grid a ratio of two
 history prices keeps.
