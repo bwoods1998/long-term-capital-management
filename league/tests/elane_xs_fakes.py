@@ -101,11 +101,11 @@ def program(*, names: int = 5, rebalance: str = "weekly", weekday: int = 0, body
 
 #: A program whose residual has an invented edge in every year (it passes the fake bar), and one with none.
 def good(**params: Any) -> str:
-    return program(edge=0.0012, sd=0.004, **params)
+    return program(**{"edge": 0.0012, "sd": 0.004, **params})
 
 
 def flat(**params: Any) -> str:
-    return program(edge=0.0, sd=0.004, **params)
+    return program(**{"edge": 0.0, "sd": 0.004, **params})
 
 
 #: An invented program that counts its calls in STATE: its targets change when STATE is emptied.
@@ -119,7 +119,8 @@ COUNTER_BODY = ("    STATE[\"n\"] = STATE.get(\"n\", 0) + 1\n"
 def counter(every: int, **params: Any) -> str:
     """A program with a call counter of period `every` in STATE (2, 4, 5, 10: the periods a naive reset keeps in phase
     with)."""
-    return program(edge=0.0012, sd=0.004, every=int(every), body=COUNTER_BODY, state="STATE = {}", **params)
+    return program(**{"edge": 0.0012, "sd": 0.004, "every": int(every), **params}, body=COUNTER_BODY,
+                   state="STATE = {}")
 
 
 RAISES_BODY = "    raise ValueError(\"an invented failure\")\n"

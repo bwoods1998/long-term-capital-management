@@ -22,7 +22,7 @@ names is at least `live_min_tradable_share`, the committed universe is younger t
 nightly `i6.equal` is True, AND THE TWIN MARKER (`league.xs.book.TWINS_FILE`, package J's): the file exists, its
 `through` is the panel store's `fetched_through` or the session before, and no listed instance is more than one
 session behind its `due` day. So with J unmerged, or its nightly run stopped for two nights, "live" reads as "gate".
-The swarm process reads that one file and never forward.sqlite.
+The swarm process reads that one file and never the forward record's own store (release E3's seal T1).
 
 THE TRAIN BAR equity-xs-v1 (in-sample filter; never evidence; E4-SPEC 8.3). One run a SEEN SPAN (`seen_spans`), each
 starting flat; per span the full universe at k 1.0 and at k 1.5 (the 1.5 run with `placebos_train` placebos and
@@ -845,8 +845,8 @@ def map_notes(root: str | Path | None) -> list[str]:
             if (_num((coverage.get(str(y)) or {}).get("share")) or 1.0) < DEFAULTS["coverage_min"]]
     if thin:
         notes.append(f"thin look-back in the first months after {', '.join(thin)}")
-    universe = _read_json(Path(root) / STORE_DIR / UNIVERSE_MANIFEST) if root is not None else None
-    exits = universe.get("exits") if isinstance(universe, Mapping) and isinstance(universe.get("exits"), Mapping) else {}
+    listed = _read_json(Path(root) / STORE_DIR / UNIVERSE_MANIFEST) if root is not None else None
+    exits = listed.get("exits") if isinstance(listed, Mapping) and isinstance(listed.get("exits"), Mapping) else {}
     unknown = exits.get("unknown")
     if isinstance(unknown, int) and not isinstance(unknown, bool) and unknown > 0:
         notes.append(f"{unknown} index exits of unknown kind take the vanish haircut")
@@ -2955,7 +2955,8 @@ def _membership_gap(root: str | Path, settings: Mapping[str, Any] | None) -> str
     through = _day(manifest.get("fetched_through"))
     if through is None:
         return "the panel manifest names no last session"
-    stale = int(Universe(Path(root) / STORE_DIR).stale_days(through))
+    universe = Universe(Path(root) / STORE_DIR)
+    stale = int(universe.stale_days(through))
     if stale > int(cfg(settings)["membership_max_stale_days"]):
         return (f"the index membership is {stale} days behind the panel store (elane.panel.membership_max_stale_days): "
                 "no look until the universe job has caught up")
