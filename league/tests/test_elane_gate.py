@@ -412,10 +412,11 @@ class Look(EquityCase):
         """A12: a look reads exactly the 194 calibrated sessions; a store that ends earlier would spend the lineage's
         one look on a certain failure (the verdict's windows), so the look waits for the data job."""
         version, sha = self.ready()
+        ran = len(self.runner.calls)
         with screen(gap="the daily store ends 2026-10-08") as mint:
             self.assertIsNone(self.gate.look(self.store.family("b1"), version, sha))
-        self.assertEqual((self.looks(), mint.call_count), ([], 0))
-        self.assertNotIn(("look", "b1", "CAPABILITY"), self.runner.calls)
+        self.assertEqual((self.looks(), mint.call_count, mint.floor.call_count), ([], 0, 0))
+        self.assertEqual(len(self.runner.calls), ran, "it waits before any run: no segment, no Validation, no look")
         state = self.store.family("b1")["state"]
         self.assertEqual((state["gate_ready"], state["gate_outcome"]["result"], state.get("look_inflight")),
                          (True, "waiting", None))

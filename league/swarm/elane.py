@@ -42,11 +42,11 @@ Validation (2025) at k 1.0 and 1.5 in the decider-isolated child on the House (`
 records both runs (each a trial), the version's per-trade net-return sd (`SIGMA_KEY`: EDM1's sigma) and the
 screen's pre-check (S1's and S2's are one rule), and the lineage's try (`TRY_KEY`); a passed pre-check makes the version
 gate-ready. The gate's equity round (league/swarm/gate.py `Gate.equity_round`) asks `look` of each gate-ready equity
-family: the screen's pinned receipt (none: refused, no look spent), the program floor from its Train-era runs under
-that receipt (`screen.floor(segments, receipt=)`: S2's exact floor for receipt 2; ineligible: refused, no look spent; a
-floor kept for the version under another receipt is run again, `screen.floor_fits`), THE LINEAGE (below), the recorded
-Validation run reproduced and pre-checked again, the daily store holding the look's whole calibrated holdout
-(`_holdout_gap`: else the look waits), then the ONE sealed look with a freshly minted `EquityGateCapability`, judged by
+family: the screen's pinned receipt (none: refused, no look spent), the daily store holding the look's whole calibrated
+holdout (`_holdout_gap`, A12: else the look waits), the program floor from its Train-era runs under that receipt
+(`screen.floor(segments, receipt=)`: S2's exact floor for receipt 2; ineligible: refused, no look spent; a floor kept
+for the version under another receipt is run again, `screen.floor_fits`), THE LINEAGE (below), the recorded Validation
+run reproduced and pre-checked again, then the ONE sealed look with a freshly minted `EquityGateCapability`, judged by
 `screen.verdict` under the same receipt; a pass makes the family a Candidate whose band proof is the
 equity identity (`banded_evaluator` {"engine", "equity_sha256", "run_sha"}). From there the EquityBook moves its band
 (league/equity/bands.py `next_band`), inside `roster` seats.
@@ -973,6 +973,16 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     from ..equity.store import mint_equity_gate_capability
     from .evaluator import equity_fingerprint
 
+    screen = S.screen_of(receipt) or screen  # the screen that judges it is the receipt's own
+    # A12, before any run: the look reads the whole calibrated holdout or it waits (`_holdout_gap`).
+    try:
+        gap = _holdout_gap(store.root)
+    except Exception as exc:  # noqa: BLE001 - a store that cannot be read gives no look (nothing spent)
+        store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "store", "error": type(exc).__name__})
+        return None
+    if gap is not None:
+        _wait(gate, fid, n, sha, gap, screen=screen)
+        return None
     try:
         proof = {"engine": EQUITY_ENGINE_VERSION, "equity_sha256": equity_fingerprint(), "run_sha": sha}
     except Exception as exc:  # noqa: BLE001 - no identity, no band proof: no look
@@ -1033,14 +1043,6 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     if not pre.get("passed"):
         _refuse(gate, fid, n, sha, "precheck", f"{screen}'s Validation pre-check does not pass on the recorded run",
                 screen=screen)
-        return None
-    try:
-        gap = _holdout_gap(store.root)
-    except Exception as exc:  # noqa: BLE001 - a store that cannot be read gives no look (nothing spent)
-        store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "store", "error": type(exc).__name__})
-        return None
-    if gap is not None:
-        _wait(gate, fid, n, sha, gap, screen=screen)
         return None
     s1x = _s1x_floor(S, segments, receipt)  # S1-X's rate beside an S2 verdict: Train-era series only, before the look
     marker = {"sha": sha, "n": n, "at": gate.clock(), "lane": lane}

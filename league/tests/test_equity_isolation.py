@@ -123,6 +123,18 @@ class TheOneCall(unittest.TestCase):
         self.assertEqual(text.count("equity_hook.build_book("), 1)
         self.assertEqual(len(re.findall(r"self\.equity\s*=", text)), 1)
 
+    def test_the_options_path_never_names_the_stock_paper_proof(self):
+        """A10.1: the staged stock proof (kv `paper_proof_stock_buy`, `paper_proof_stock_sell`) is checked only by the
+        equity book; an options entry never waits on either stage. In league/live it is defined in paper.py and handed
+        to the EquityBook by equity_hook.py, and no other module of the options path names it."""
+        words = ("StockPaperProof", "stock_proof", "paper_proof_stock", "STOCK_KEY", "STOCK_BUY_KEY", "STOCK_SELL_KEY")
+        named = {path.relative_to(LIVE).as_posix() for path in sorted(LIVE.rglob("*.py"))
+                 if any(word in path.read_text(encoding="utf-8") for word in words)}
+        self.assertEqual(named, {"paper.py", "equity_hook.py"})
+        book = (EQUITY / "live.py").read_text(encoding="utf-8")
+        for call in ("stock_proof.buy_passed()", "stock_proof.sell_failed()", "stock_proof.sell_passed()"):
+            self.assertIn(call, book, "the equity book's own gates: BUY for every real buy, SELL for every real sale")
+
 
 class TheEvidenceModules(unittest.TestCase):
     def test_they_import_nothing_of_the_live_path_or_the_swarm(self):
