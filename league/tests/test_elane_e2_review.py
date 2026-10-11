@@ -683,6 +683,11 @@ def decide(ctx):
     for s, w in zip(ctx.symbols, [0.5, 0.5]):
         if s in held and held[s]["mark"] / held[s]["entry"] - 1.0 > 0.05 and w > 0.25:
             out.append({"sell": held[s]["id"]})
+    stats = {}
+    for name, fn in (("hi", np.max), ("lo", np.min)):
+        stats[name] = fn(ctx.bars["SPY"].close[-20:])
+    if stats["hi"] / stats["lo"] > 1.05:
+        out.append({"buy": "SPY", "share": 0.1})
     weight = lambda lot: lot["value"] / ctx.equity
     out.extend({"sell": lot["id"]} for lot in mine if weight(lot) > 0.6 or lot["pnl"] < 0)
     return out

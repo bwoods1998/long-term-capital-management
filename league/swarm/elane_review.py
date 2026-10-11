@@ -506,14 +506,16 @@ class _Levels:
     def _keyed(self, holder: ast.AST, base: frozenset[str], slice_: ast.AST | None,
                env: dict[str, set[str]]) -> frozenset[str]:
         """`holder[key]` (or `holder.get(key)`): what the program put under that string key itself (`_own`), else the
-        field or element of `base` (`_subscript`). A dict of levels the program built, read by a string key, is that
-        symbol's level (`closes["QQQ"] / closes["SPY"]` is a ratio of two different symbols')."""
+        field or element of `base` (`_subscript`). A dict of levels the program built, read by a key written as a
+        symbol is (upper case), is that symbol's level (`closes["QQQ"] / closes["SPY"]` is a ratio of two different
+        symbols'; `stats["hi"] / stats["lo"]` is not)."""
         key = _key(slice_) if slice_ is not None else None
         own = self._own(holder, key, env)
         if own is not None:
             return own
         out = self._subscript(base, key, slice_)
-        if key is not None and isinstance(holder, ast.Name) and _level(base) and _level(out):
+        if key and key == key.upper() and any(ch.isalpha() for ch in key) and isinstance(holder, ast.Name) \
+                and _level(base) and _level(out):
             out = frozenset(t for t in out if not t.startswith("@")) | {"@" + key}
         return out
 
