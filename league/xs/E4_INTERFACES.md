@@ -9,12 +9,21 @@ new module as an importable stub with its public names, the shared dataclasses a
 Base: commit 0e8bbaa7 (E1's share lane and E2's births, integrated). E1 and E2 were still receiving review fixes when
 this was written: build against what the base has, and anchor every patch by statement, never by line.
 
-**Authority, in order.** The captain's amendments (A1-A20) and his rulings on this build (section 3); the pinned
-pre-registration XSCREEN-1, revision 2 (sha256 c46aec17..., pinned 2026-10-11 03:03:08Z), WHERE IT SPEAKS (section 4);
-the build spec E4-SPEC revision 2; the roadmap; the design. The spec and the pre-registration were revised in parallel
-without seeing each other. Where they disagree on the program contract and inputs, the residual and its cells, the
-stress leg, the House exit law, the gate, the lineage rule or the forward checkpoints, THE PRE-REGISTRATION WINS, and
-the stubs already say what it says. Where the spec names existing code and the code differs, THE CODE WINS (section 5).
+**Authority, in order.** The captain's amendments (A1-A22) and his rulings on this build (section 3); the pinned
+pre-registration XSCREEN-1, revision 2 (sha256 c46aec17..., pinned 2026-10-11 03:03:08Z), WHERE IT SPEAKS (section 4),
+with its study's implementer's rule (HOUSE-RULE-XS1) and receipt; the build spec E4-SPEC revision 2; the roadmap; the
+design. The spec and the pre-registration were revised in parallel without seeing each other. Where they disagree on
+the program contract and inputs, the residual and its cells, the stress leg, the House exit law, the gate, the
+lineage rule or the forward checkpoints, THE PRE-REGISTRATION WINS, and the stubs already say what it says. Where
+the spec names existing code and the code differs, THE CODE WINS (section 5).
+
+**THE STUDY IS DONE** (2026-10-11 07:00Z): XS1 is ADOPTED by its own mechanical rule, at rung R0. Its receipt
+(`equity_screen_xs_1.json`, sha256 98acbb83ffec165dcd4e831a6d5f123b99a6bc5c4ca3acb114e75782555e52e3) is copied
+VERBATIM to `docs/benchmarks/equity_screen_xs_1.json` and pinned in policy.json `elane.screens.equity_xs` BY THE
+INTEGRATOR, in one commit, so the tree never holds a receipt without its pin. The captain may later replace it with
+a rebuilt receipt at another c_XS: READ EVERY THRESHOLD FROM THE RECEIPT AT RUNTIME, NEVER WRITE ONE IN CODE OR IN A
+TEST (a test that needs a figure reads the file, or the fake). Until the pin lands, a screen with no pinned receipt
+refuses every program. The captain's amendment A22 came with the study's review: section 4a.
 
 **Rules for every package.** The repository is public: no market data, no price or return of a real year, no census
 figure, no per-program outcome, no membership history (the point-in-time table lives on the House only; the one
@@ -38,16 +47,17 @@ in this build. Package J (the forward twin) waits for release E3: it is OWED (se
 | B costs and counts | **`league/ops/equity_spreads.py`**, **`league/ops/equity_neff.py`**, **`league/ops/french.py`**; tests **`test_equity_spreads.py`**, **`test_equity_neff.py`**, **`test_french.py`** | `league/ops/funnel.py` (independent asset-years), `league/ops/twins.py` (a panel lot's half-spread); after release E3 and never before: `league/ops/contam_probe.py` |
 | C xs core | C0, merged first and alone: **`league/xs/config.py`** whole and **`league/xs/store.py`**'s writer (`write_panel`, the layout, the 2020 refusal) with **`test_xs_store.py`**'s writer tests. Then the rest of `store.py`, **`ctx.py`**, **`program.py`**, **`synth.py`**, **`XS.md`** (the contract shown to authors), `league/xs/__init__.py`; tests **`test_xs_ctx.py`**, **`test_xs_program.py`**, **`test_xs_seal.py`** | none |
 | D xs engine | **`league/xs/engine.py`**, **`results.py`**, **`placebo.py`**, **`runner.py`**, `league/xs/child.py` (the A13 stub, now written); tests **`test_xs_engine.py`**, **`test_xs_placebo.py`**, **`test_xs_runner.py`**, **`test_xs_i6.py`** | `league/tests/test_equity_decider.py` (the panel kind now serves five ops) |
-| E xs screen | **`league/xs/screen.py`**, **`league/xs/identity.py`**; fixture **`league/tests/fixtures/equity_screen_xs_fake.json`**; tests **`test_xs_screen.py`**, **`test_xs_identity.py`** | `league/swarm/evaluator.py` (`adopt_xs`; `adopt_equity` skips panel families) |
+| E xs screen | **`league/xs/screen.py`**, **`league/xs/identity.py`**, **`league/xs/style.py`** (A22: the style reading and its rule); fixtures **`league/tests/fixtures/equity_screen_xs_fake.json`** (shaped as the real receipt: `screen.RECEIPT_KEYS`) and **`league/tests/fixtures/xs1_conformance_c.json`** (A22 (4): the ninth vector, by hand); tests **`test_xs_screen.py`**, **`test_xs_identity.py`**, **`test_xs_style.py`** | `league/swarm/evaluator.py` (`adopt_xs`; `adopt_equity` skips panel families) |
 | G swarm | **`league/swarm/elane_xs.py`**, **`league/ops/xs_zero_edge.py`**, **`league/swarm/E4.md`**; tests **`test_elane_xs.py`**, **`test_elane_xs_bar.py`**, **`test_elane_xs_seal.py`**, **`test_xs_zero_edge.py`** | `league/swarm/store.py`, `bands.py`, `elane.py`, `cards.py`, `dlane.py` (one structure literal), `elane_births.py`, `elane_train.py`, `elane_seal.py`, `elane_yield.py`, `settings.py`, `policy.json`, `loop.py` |
 | H live | **`league/xs/book.py`**; tests **`test_xs_book.py`**, **`test_equity_book_panel.py`** | `league/equity/kinds.py` (`BOOKS`, `book_for`, `kind_of`), `league/equity/live.py` (B1-B15 less B7 and B12, ONE patch), `league/ops/dlane_report.py` (a panel close's lines) |
 | I money and universe | **`scripts/gen_universe.py`**; tests **`league/tests/test_gen_universe.py`** | R-E4a: `league/ci.py` and `league/tests/test_ci.py` (protected paths; `stock_agreement` names at most 10 tickers a side), `docs/operations.md`, `CHANGELOG.md`. R-E4b, THE UNIVERSE (moves the money digest; deployed separately): `league/constitution.py`, `league/tests/test_equity_money.py`, `league/ops/preopen.py`, and the gateway's `gateway/lib/caps.mjs` and `gateway/test/stock-buys.test.mjs` AS A PATCH FILE in the captain's scratch, never an edit of `gateway/` |
 | J forward (OWED) | **`league/ops/forward_xs.py`** (a stub exists); tests **`test_forward_xs.py`**, **`test_forward_xs_twin.py`** | E3's seven forward modules, after E3 is merged |
-| the integrator | `league/xs/E4_INTERFACES.md` (this file), `league/tests/test_e4_stubs.py`, `league/swarm/e4_patches/README.md` | applies every patch file, in `README.md`'s order |
+| the integrator | `league/xs/E4_INTERFACES.md` (this file), `league/tests/test_e4_stubs.py`, `league/swarm/e4_patches/README.md`, the study's fixtures `league/tests/fixtures/xs1_conformance.json` and `xs1_conformance_inputs.npz` (read by D and E, edited by no one), `docs/benchmarks/equity_screen_xs_1.json` (the receipt, verbatim) | applies every patch file, in `README.md`'s order; then fills policy.json's `elane.screens.equity_xs` from the receipt (`screen.PIN_SOURCES`) in the commit that lands the receipt; `league/tests/test_equity_isolation.py` (the A13 slot test, changed at Step 0: the package is flat and keeps its child) |
 
 Files no package edits: `league/live/**`, `league/gym/**`, `gateway/**`, the evidence modules of league/equity,
 `league/equity/INTERFACES.md`, `docs/benchmarks/equity_screen_2.json`, `league/ops/equity_data.py`, anything under
-`<state>`. `docs/benchmarks/equity_screen_xs_1.json` is the captain's: he lands it when the study finishes.
+`<state>`. `docs/benchmarks/equity_screen_xs_1.json` is the study's receipt: the integrator lands it, no package
+writes or edits it.
 
 No path is in two rows. A package that needs a change to a file it does not own asks its owner (a line in its
 report), or the integrator when the file is a shared shape of section 6.
@@ -65,12 +75,12 @@ Seven authors appending to one file from seven worktrees would conflict at every
 
 ## 3. The captain's rulings on this build (binding)
 
-1. **Package F is not built here.** A separate team runs XSCREEN-1 from the pinned pre-registration.
-   `league/xs/screen.py` is written from the pre-registration and reads its thresholds from the receipt
-   `docs/benchmarks/equity_screen_xs_1.json`, which lands later. Until then tests use a fake receipt, and A SCREEN WITH
-   NO PINNED RECEIPT REFUSES EVERY PROGRAM. The study's own numpy reference and its conformance vectors
-   (HOUSE-RULE-XS1.md, conformance_xs1.json) land with the receipt; `test_xs_screen.TheStudyVectors` and
-   `test_xs_placebo.TheStudyVectors` (skipped until then) must reproduce them.
+1. **Package F is not built here.** A separate team ran XSCREEN-1 from the pinned pre-registration; it is done
+   (above). `league/xs/screen.py` is written from the pre-registration and the study's implementer's rule and reads
+   its thresholds from the receipt at runtime. Tests use a fake receipt, and A SCREEN WITH NO PINNED RECEIPT REFUSES
+   EVERY PROGRAM. THE STUDY'S CONFORMANCE VECTORS ARE IN THE TREE (section 9): `test_xs_screen.TheStudyVectors` and
+   `test_xs_placebo.TheStudyVectors` reproduce all eight, and package E adds a ninth by hand (A22 (4)). The study's
+   reference code is private and is not committed; neither implementation is rewritten to fit the other.
 2. **Package J waits for release E3.** Its stub is kept, and the rule stands exactly as the spec has it: WHILE J IS
    NOT MERGED, OR ITS NIGHTLY RUN HAS NOT WRITTEN THE MARKER (`league.xs.book.TWINS_FILE`), `elane.panel.mode` "live"
    READS AS "gate" (`elane_xs.live_ready`). J is owed: patches 17 and 18 with it.
@@ -106,6 +116,14 @@ The stubs' docstrings are already written to these. Each line: the spec's text, 
 | 9.1 (4): the sentence's fields | **the sentence of 10.2**, its placeholders {c_used}, {c_p}, {own_fp}, {n_cell}, {basket}, {label}, {flags} | `screen.BESIDE_FIELDS`, `screen.beside_line` |
 | 10.6: a panel row's forward route | **the checkpoints of section 11**: 20, 60, 120 and 250 forward sessions; pass = t_n >= c_FX AND sum x > 0 AND sum x15 > 0 AND the placebo rank <= alpha_f (0.12 fresh, 0.03 after an XS1 look) | `screen.CHECKPOINTS`, `ALPHA_F`; package J (owed) |
 
+**The receipt as built** agrees with the stubs: its keys are `screen.RECEIPT_KEYS` and two more (`eligibility`,
+`beside_calibrated_reading`: the loader lets a receipt carry more, and refuses one that lacks a key); its sentence's
+placeholders are `screen.BESIDE_FIELDS`; its policy pin is `screen.PIN_KEYS` (`validation_tries` and `holdout_looks`
+among them, each read from the place `screen.PIN_SOURCES` names); the cell id is 100 x sector + 10 x beta group +
+momentum group, 9999 for the pooled cell (`config.CELL_SECTOR`, `CELL_BETA`, `SMALL_CELL`); the floor's cells are
+named "both", "D" and "C" (`screen.FLOOR_CELLS`). On the House's two Train segments (754 and 753 sessions) all three
+floor cells exist; the study's worlds had the first two.
+
 **The duties the pre-registration gives the House** (package G keeps them; `elane_xs`'s module docstring):
 1. keep BOTH Train series (the residual x and the universe excess u, by session) of every program that reaches the
    pre-check, passed or refused: `elane_xs.TRAIN_X_KEY`, `TRAIN_U_KEY`, with `PRECHECK_KEY`;
@@ -119,6 +137,20 @@ deploy, the switch, sizing and the live rules by close date. And the spec's STAN
 is planned again each close until the next called decision): the pre-registration is silent on it; it is kept, and
 such a buy is a lot with its own decision day and cell.
 
+## 4a. The captain's A22: what the House holds before any real money on an XS1 pass (binding)
+
+From the study's review. The receipt is pinned as built; these four are HOUSE rules, and the contract carries them.
+
+| A22 | the rule | who builds what |
+|---|---|---|
+| (1) | **A STYLE-OPEN PROGRAM TAKES NO LIVE SEAT ON AN XS1 PASS ALONE.** The House computes each panel program's loadings on size, beta, 12-1 momentum and volatility from its Train holdings and marks it style-open by one fixed, tested rule (`league/xs/style.py`: a lot's rank among the day's eligible names at its decision close; a program's loading is the weighted mean over its Train lots; style-open when any |loading| is at least `style.TILT`, or when fewer than `style.MIN_LOTS` lots could be read). A style-open passer is RECORDED AND SHADOWED, NEVER SEATED: it takes no band and no proof | E: `style.py` whole and `test_xs_style.py` (the rule on hand-built holdings: a uniform picker is not open, a top-third and a bottom-third picker of each characteristic are, too few lots is, a malformed reading is). D: `engine.run(..., style=True)` and `runner.Isolated.train(..., style=True)` put `style.block(bars, log)` in the result: one call. G: `score` asks the seen spans' full-universe k 1.0 runs for it and keeps `style.style_open(style.pooled(blocks))` in the Train record (`elane_xs.STYLE_FIELD`); `look` seats a passer only when `style.seat_refusal(elane_xs.style_of(fam))` is None, else records the pass with `seat` "style-open" and gives no band. H: the report's panel lines name every recorded style-open passer and why (patch 13) |
+| (2) | **At most 2 XS1 looks an agenda cell** until a forward verdict exists in that cell (`elane_xs.MAX_CELL_LOOKS`, `look_room`). No forward verdict can exist before the forward route is measured, so the cap is flat in this release. A look the cap holds back is not spent | G |
+| (3) | **The equity code review (no embedded return table, no calendar recognition) and the contamination probe run BEFORE a panel look.** The review's rubric for a panel program is `elane_xs.REVIEW_XS` (G's patch 7). The probe is release E3's (`league/ops/contam_probe.py`) with the panel strata P4-P6 of patch 18: `elane_xs.probed` holds a look back until the route that wrote the program has a published result with those strata. SO NO PANEL LOOK RUNS UNTIL RELEASE E3 AND PATCH 18 ARE MERGED AND THE PROBE HAS RUN ONCE (stated in section 8) | G (`probed`, the rubric); B (patch 18, after E3) |
+| (4) | **A conformance vector for the 2022-24 floor cell alone**, beside the study's eight | E (`league/tests/fixtures/xs1_conformance_c.json`, by hand; `test_xs_screen` holds `floor` to it) |
+
+PENDING with the captain at integration: whether the House runs at the receipt as registered or at a rebuilt one with
+a higher c_XS. Nothing in the build depends on the answer: every threshold is read from the pinned receipt.
+
 ## 5. Where the code at the base differs from the spec's words (the code wins)
 
 - `league.swarm.elane.card_errors(card, structure, symbols, settings)` takes four arguments;
@@ -127,6 +159,11 @@ such a buy is a lot with its own decision day and cell.
   fails closed with `LineageUnread`. `elane_xs.same_lineage` does the same (the spec said bool).
 - `elane.mode` is a SETTING (`elane.MODES` = ("off", "gate"); the reader is `elane.on(settings)`). The effective panel
   mode is `elane_xs.mode`.
+- E2's `cell_of(lane, agenda, symbols)` and `e2_family(fam)` live in `league/swarm/elane_train.py` (with `train_map`,
+  `closed_cells` and `refuted_rows`), not in `elane_births.py`; `league/swarm/cards.py` has another `cell_of(key)`.
+- `CodeRefused` is `league.gym.safety`'s (E1's `program` imports it); `NeedsRefused` is `league.equity.program`'s.
+- `set_swarm.py` is the captain's own tool, not a file of the repository: a switch is a value in `<state>/swarm.json`
+  over policy.json.
 - `league.swarm.elane_train.restart_check(decider, code, params, *, name, streams, every, first)` resets by SESSION
   (`BAR` `state_every` 20, `state_first` 7). The panel's `elane_xs.state_check` resets by CALL (after 3, 10, 13, 20...).
 - `league.swarm.bands.equity_seating(fams, seats)` has no `seatable` keyword yet (G's patch 2 adds it);
@@ -154,6 +191,12 @@ such a buy is a lot with its own decision day and cell.
   nightly I6 measures the real thing.
 - E3's modules (`elane_folds`, `forward_*`, `fill_minutes`, `contam_probe`) do not exist at this base: import them
   inside the function that needs them, and handle their absence (`elane_xs.assign` answers None without them).
+- THE TABLES. The spec's section 4.3 has ONE new table, `eq_rebalances` in live.sqlite (`league.xs.book.SCHEMA`),
+  and one new column, `eq_instances.kind`. Release E4 creates no table in forward.sqlite and no memory table:
+  package J (owed) writes E3's own `fwd_` tables through E3's modules.
+- `league/tests/test_equity_isolation.py` held league/xs to exactly two files ("nothing else until the panel lane is
+  built"). It now holds that the package still has its `__init__` and its child, stays flat, and that no module of
+  it names league.live or league.swarm.
 - The integration branch moved one commit past the base while this was written (an E2 budget fix in the swarm's
   loop), and E1's branch three (the vendor's cents; the seeds' look order; the data job's audit): G's and H's anchors
   are by statement for that reason.
@@ -173,9 +216,10 @@ such a buy is a lot with its own decision day and cell.
 | `Isolated`, `Run`, `state_stream`, the run failures (E1's own classes) | `league/xs/runner.py` (D) | G, J, `xs_zero_edge` |
 | `child.handle`: ops "load", "drop", "decide", "needs", "run" | `league/xs/child.py` (D) | the decider; H (the decide answer: `hold`, `target`, `at`, `orders`, `rejects`, `ineligible`, `stats`, `ctx_sha`, `failed`) |
 | `ReceiptXS`, `pinned_receipt`, `series`, `split`, `precheck`, `floor`, `verdict`, `same_lineage`, `beside_line` | `league/xs/screen.py` (E) | G |
+| `CHARACTERISTICS`, `TILT`, `MIN_LOTS`, `block`, `pooled`, `style_open`, `seat_refusal` (A22) | `league/xs/style.py` (E) | D (`engine.run` calls `block`), G (`score`, `look`), H (the report) |
 | `xs_fingerprint`, `xs_identity`, the lists | `league/xs/identity.py` (E) | G (`bands._xs_sha`), E's `adopt_xs`, J |
 | `SCHEMA` (`eq_rebalances`), `INSTANCE_KIND_DDL`, `Columns`, `Fetched`, `kept`, the twin marker's name | `league/xs/book.py` (H) | A (the nightly I6 reads the kept fetch and the table, read-only), G (`live_ready` reads the marker), J |
-| the lane's settings, keys and names; `mode`, `live_ready`, `is_panel`, `seatable`, `validate`, `look` | `league/swarm/elane_xs.py` (G) | G's patches; H's report (`beside_line`) |
+| the lane's settings, keys and names; `mode`, `live_ready`, `is_panel`, `seatable`, `validate`, `look`; A22's `MAX_CELL_LOOKS`, `look_room`, `probed`, `style_of`, `REVIEW_XS` | `league/swarm/elane_xs.py` (G) | G's patches; H's report (`beside_line`, `style_of`) |
 | the universe files, `tradable`, the panel manifest's `coverage`, `verdict`, `hs_share`, `i6`, `live_from` | `league/ops/equity_universe.py`, `equity_panel.py` (A) | C's `Universe` and `PanelStore` read them; G's `mode`; I (tradable.json) |
 | spreads.json, neff.json | `league/ops/equity_spreads.py`, `equity_neff.py` (B) | A (`hs_table`), B's funnel patch |
 
@@ -213,9 +257,8 @@ Each is a place the two texts had to be reconciled at Step 0; the stub says whic
    the pre-registration's 5.3, "data validity, never a return"); live cannot. Package D counts such refusals.
 7. **A program's ctx carries no event flag** (FOMC, CPI, jobs), unlike an E1 program's: the registered contract's
    calendar is four counts. G's brief and E2's review rubric for a panel program must not offer them.
-8. **The cell id's formula** is what the study's reference draft uses; the pre-registration fixes the order of the
-   draws by "cells in ascending id" and the study's HOUSE-RULE-XS1.md will fix the ids. D and E re-check on its landing.
-9. **`screen.RECEIPT_KEYS`** is the pre-registration's table; the real receipt's exact key list is the study's.
+8. **The cell id's formula** is now the study's own (its implementer's rule, section 2): settled.
+9. **`screen.RECEIPT_KEYS`** is the pre-registration's table and the real receipt carries every key of it: settled.
 10. **"Asset id" in the pre-registration's orderings is the COLUMN ORDER on the House.** Its ties (beta, then asset
     id), a cell's member list (ascending asset id) and a cell's lots (weight descending, asset id ascending) name the
     study's asset id, a ticker's rank. The decider child holds no aid, by the seal: its member columns are in
@@ -226,6 +269,23 @@ Each is a place the two texts had to be reconciled at Step 0; the stub says whic
     adversary still does: the lattice search, continued fractions and the dither-range bound are run on the five
     scale-free fields, and must recover every close with the dither switched off and none with it on.
 
+12. **The style rule's two figures are Step 0's** (`style.TILT` 1/3, `style.MIN_LOTS` 40), fixed before any panel
+    program exists and calibrated by no study: A22 asks for "a fixed, tested rule" and names none. THE RULE IS
+    HOLDINGS-BASED AND DIRECTION-BLIND. Its cost: a momentum or a low-volatility program is style-open by
+    construction and is seated only by the forward route. A direction-aware rule would open a program only on a tilt
+    whose measured no-skill pass rate (the receipt's `style_known_rate`, one figure a tilt and direction) is above
+    the owner's wall; on the receipt as built that would leave the highest-momentum and the lowest-beta tilts
+    seatable. It was NOT taken: the amendment names no direction, one study's point rates are noisy, and the error
+    here only withholds a seat. The captain may refix the rule before mode "live"; it is one module and its test.
+13. **No panel look until release E3 and its panel probe strata are merged** (A22 (3), `elane_xs.probed`): mode
+    "gate" scores Validation and keeps both Train series, and every look waits. If the captain reads A22 (3) as "when
+    the probe exists", `probed` is the one function to loosen.
+14. **A style-open passer has no band**, so it is in no roster and no seat queue; it reaches the forward record as
+    every scored version does (package J, owed). Until J lands it is recorded and NOT shadowed: said in the report.
+15. **The conformance inputs are a 1.1 MB binary fixture** (five synthetic price sets in float64, bit for bit): the
+    study's vectors carry no input price (its review's defect 4), and regenerating them needs the study's private
+    generator and numpy's stream.
+
 ## 9. Tests
 
     mkdir -p /dev/shm/eqe4-<key> && TMPDIR=/dev/shm/eqe4-<key> \
@@ -235,3 +295,31 @@ Python 3.14 with numpy 2.5 there; Python 3.11 with numpy 2.4 is `~/Work/ltcm-v3/
 leg: every new test passes on both). The seals each package owes are named in E4-SPEC section 14 (X1-X17); the
 pre-registration's own tests T2 (the hand-checked vector of its 3.6), T5 (the placebo law and the exit law), T8 (119
 passes and 120 fails) and T15 (u is the one-cell residual) are D's and E's to reproduce on synthetic panels.
+
+**The study's conformance vectors** (synthetic inputs; no market data; `test_e4_stubs.TheStudysVectors` holds the two
+files to each other):
+- `league/tests/fixtures/xs1_conformance.json`: the study's file, byte for byte (sha256 386995d8...). Vectors "V1
+  pass", "V2 fail", "V3 pre-check", "V4 stress", "V5 own floor", "V6 ineligible" (each: `inputs`, `lots`, `placebos`,
+  `series`, `floor`, `look`), "CH" (characteristics on a 253-session window and the cells of 100 names: literal
+  inputs) and "H" (the hand vector: literal inputs). Validation is sessions 0..249, the holdout 250..443; the
+  vectors' screen bar is `k_XS` in the file and their placebo seed is `inputs.placebo_seed` (the receipt's sha taken
+  as 64 zeros and the code's as 64 f's).
+- `league/tests/fixtures/xs1_conformance_inputs.npz` (numpy `load`): key `manifest` (JSON bytes: per vector its
+  `world`, the vector whose prices it reads) and, per vector tag `V1`..`V6`, arrays `<tag>/<name>`: `O`, `C` (444 x
+  24 total-return opens and closes, NaN invalid), `U` (the eligible set), `entry_ok`, `sector`, `beta`, `momb` (the
+  GIVEN characteristics: momentum at decision d is `momb[d // 21]`); the holdings log as of the look: `lot_name`
+  (the column), `lot_weight`, `lot_d`, `lot_e`, `lot_ea` (0 open, 1 close), `lot_q` (-1: none yet), `lot_qa` (-1
+  none), `lot_cell`, and each lot's cell members `member[member_start[i]:member_start[i + 1]]` with
+  `member_leave` (the session at whose open the member leaves, -1 never); the Train pools `pool_d_x`, `pool_d_w`,
+  `pool_c_x`, `pool_c_w` (absent where the vector has none); and the plain reference's answers: `r`, `B`, `x`, `x15`,
+  `s`, `f`, `w`, `exits`, `invested` (sessions 0..443), `u` (the universe excess: the same residual with one cell,
+  every name of U at the lot's decision that passes entry validity), `placebo_t_H` (the 999 placebo t's on the
+  holdout, NaN undefined), `pos_draw_0`, `pos_draw_998` (each lot's counterpart position in its member list).
+- WHO REPRODUCES WHAT. D (`test_xs_placebo.TheStudyVectors`): from `O`, `C` and the lots, the series (every integer
+  exactly, floats to 1e-12), `u`, the counterpart positions of draws 0 and 998 and their sum over all draws, the
+  placebo t's to 1e-9, vector H; and CH through `ctx.derive`'s arithmetic (C's functions, D's or C's test). E
+  (`test_xs_screen.TheStudyVectors`): from the pools, the floor (T, k_cell, HO[0], HO[k_used], kappa_H, k_p, k_used,
+  own_fp); from the series and the placebo t's, the pre-check, the look's legs, the grid index, the placebo count and
+  the verdict; whether a look was spent; and its own ninth vector. The names 0..23 are the columns, in that order.
+- THE VECTORS RUN UNDER THEIR OWN BAR: a receipt whose c_XS is the vector file's `k_XS` / 100, never the pinned
+  receipt's, so a rebuilt receipt at another c_XS moves no vector.
