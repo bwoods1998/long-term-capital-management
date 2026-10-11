@@ -468,9 +468,12 @@ def _settings_of(root: str | Path | None, settings: Mapping[str, Any] | None) ->
 
 
 def _mode_why(settings: Mapping[str, Any] | None, root: str | Path | None = None, *,
-              policy: Mapping[str, Any] | None = None) -> tuple[str, str | None]:
-    """(THE EFFECTIVE MODE, why it is not the setting's own or None). `mode`'s rule, and it RAISES on what it cannot
-    read: `mode` reads that as "off", `seat_standing` as "cannot say"."""
+              policy: Mapping[str, Any] | None = None, legs: Callable[..., tuple[bool, str | None]] | None = None
+              ) -> tuple[str, str | None]:
+    """(THE EFFECTIVE MODE, why it is not the setting's own or None): `mode`'s rule. `legs`: the reader of the live
+    legs: `live_ready` (the default: a leg it cannot read is not ready, so the mode reads "gate") or `_live_legs`
+    (which raises on one: `seat_standing` then says it cannot tell). It raises on a setting it cannot read: `mode`
+    reads that as "off"."""
     if not _lane_on(settings):
         return "off", "the equity lanes are off (elane.mode)"
     c = cfg(settings)
@@ -495,7 +498,7 @@ def _mode_why(settings: Mapping[str, Any] | None, root: str | Path | None = None
         if pinned is None:
             cap, why = min(cap, MODES.index("train")), refusal  # NO RECEIPT, NO LOOK
     if min(wanted, cap) > MODES.index("gate"):
-        ready, leg = _live_legs(root, settings) if root is not None else (False, None)
+        ready, leg = (legs or live_ready)(root, settings) if root is not None else (False, None)
         if not ready:
             cap, why = min(cap, MODES.index("gate")), leg
     return MODES[min(wanted, cap)], (why if cap < wanted else None)
@@ -629,7 +632,7 @@ def seat_standing(root: str | Path) -> tuple[bool | None, str]:
                 continue  # no file: the policy alone decides; a missing manifest or marker is a leg of the rule
             except (OSError, ValueError) as exc:
                 return None, f"{what} could not be read ({type(exc).__name__})"
-        found, why = _mode_why(settings_mod.load(root), root)
+        found, why = _mode_why(settings_mod.load(root), root, legs=_live_legs)
         if found == "live":
             return True, ""
         return False, (f"the panel lane is not live (its mode reads \"{found}\"): "

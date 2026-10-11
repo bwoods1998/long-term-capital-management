@@ -330,6 +330,20 @@ class TheSeatOfASeatedPanelProgram(_Root):
             path.write_text(whole, encoding="utf-8")
             self.forget()
             self.assertEqual(self.rows(), {"rev-probe": "probe"})
+        # A LEG that cannot be read (the universe's own file): the mode reads "gate", as it always did (Validation and
+        # looks go on; nobody is seated), `live_ready` says so, and the seat's word is "unknown".
+        assets = self.store_root / "universe" / "assets.json"
+        whole = assets.read_bytes()
+        assets.write_bytes(whole[:100])
+        self.forget()
+        self.assertEqual(elane_xs.mode(self.settings, self.root), "gate")
+        ready, why = elane_xs.live_ready(self.root, self.settings)
+        self.assertEqual((ready, why[:30]), (False, "the live legs cannot be read ("))
+        self.assertIsNone(elane_xs.seat_standing(self.root)[0])
+        self.assertEqual((self.rows(), families.standing("rev-probe", 1)[0]), ({}, "unknown"))
+        assets.write_bytes(whole)
+        self.forget()
+        self.assertEqual(self.rows(), {"rev-probe": "probe"})
         # A file that is GONE is the rule's own word, not a failed read: no marker, no seat.
         (self.store_root / xbook.TWINS_FILE).unlink()
         self.forget()
