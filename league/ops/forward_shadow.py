@@ -94,7 +94,9 @@ of a half-sleeve lot, at prices from 51 to 670), which would be one event a stor
 payload counts them: `days`, `first`, `last`, and by cause `moved` (a day with the bars hash of a decision on or
 before it moved: the store's history was restated, the routine ex-day case) and `same` (the day's own figures moved
 with every decision's inputs as they were: a correction of that day's own mark, or a recompute that is not
-deterministic); `"bars"` is "same" when any day is, else "moved" (a control reads no bar: "same").
+deterministic); `"bars"` is "same" when any day is, else "moved". A CONTROL decides nothing and reads no bar, so
+its restatement cannot be told apart this way: `"bars"` "none", `moved` and `same` 0 (its marks move on the same
+ex-days as every holder's, so "same" there would name the routine case as the notable one).
 
 The receipt: {through, engine, programs, sessions, new_days, restated, checks, stale, errors, data_failed,
 disqualified, retried, budget_hit, seconds, controls, twins, head, finals, register, house}: counts and verdicts,
@@ -643,6 +645,7 @@ class Shadow:
                     (i for i in range(differ[-1] + 1) if days[i] in stored and stored[days[i]]["bars"] is not None
                      and str(stored[days[i]]["bars"]) != bars_at(i)), None)
                 moved = sum(1 for i in differ if first_moved is not None and first_moved <= i)
+                same = 0 if bars_at is None else len(differ) - moved
                 value = hashlib.sha256("\n".join(      # + 0.0: a negative zero is zero
                     f"{days[i]}|{round(cols['r'][i], 9) + 0.0:.9f}|{round(cols['w'][i], 9) + 0.0:.9f}" for i in differ
                 ).encode()).hexdigest()[:8]
@@ -650,8 +653,8 @@ class Shadow:
                     self.db, "restated", pid=pid, day=days[differ[0]], at=now, once=f"{engine}:{value}",
                     payload={"why": "the night's recompute differs from the stored rows: the rows stay",
                              "engine": engine, "night": self.night_day, "days": len(differ), "first": days[differ[0]],
-                             "last": days[differ[-1]], "moved": moved, "same": len(differ) - moved,
-                             "bars": "same" if moved < len(differ) else "moved"})
+                             "last": days[differ[-1]], "moved": moved, "same": same,
+                             "bars": "none" if bars_at is None else ("same" if same else "moved")})
                 restated = 1 if seq else 0
             checks = self._checkpoints(pid, known=len(stored) + new)
             if status == "disqualified":

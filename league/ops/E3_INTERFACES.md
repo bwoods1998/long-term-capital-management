@@ -103,8 +103,9 @@ an error. What step 0 fixed for it:
   moves nearly every stored day of every holder past `TOL` on each ex-day (the vendor rescales the whole adjusted
   history), so `restated` is ONE event a program and cause, not one a day: `day` is the first restated day, the
   payload counts `days`, `first`, `last`, `moved` and `same`, and `"bars"` is "same" when any restated day has no
-  moved bars behind it (the notable case), else "moved" (the routine ex-day one). The hash is about 17 bytes a row
-  on top of the spec's measured 85.
+  moved bars behind it (the notable case), else "moved" (the routine ex-day one); on a control's event, which has
+  no decision to compare, it is "none" with `moved` and `same` 0. The hash is about 17 bytes a row on top of the
+  spec's measured 85.
 - `fwd_twins.shadow_bars`, `live_bars`, `cause` (D): the twin decision's hash, the live decision's (NULL when not
   known), and on a row with `agree` 0 one of `forward_db.CAUSES`: "bars" (both known, they differ), "program" (they
   are equal), "unknown" (the live one is not known). `forward_twins.shadow_bars`, `live_bars` and `cause` are D's

@@ -942,6 +942,7 @@ class Restated(Case):
         # whole adjusted history at a dividend, so on the ex-day nearly every stored day of a holder moves past TOL.
         holder = register(self.db, "always@1", ALWAYS, first_close=BEFORE)             # half a sleeve of SPY
         other = register(self.db, "flip@1", FLIPPER, first_close=BEFORE)               # trades QQQ only
+        control = register_control(self.db, "index", 40, ("SPY",), first_close=BEFORE)
         dividend = {"SPY": [(FWD[11], 1.5)]}
         receipts = []
         for through in FWD[10:14]:                             # the night before, the ex-day, two nights after
@@ -950,7 +951,8 @@ class Restated(Case):
             receipts.append(self.shadow(through, write=False).night())
         self.assertEqual([r["restated"] for r in receipts], [0, 1, 0, 0])
         self.assertEqual([r["programs"] for r in receipts], [2, 2, 2, 2])
-        (event,) = self.events("restated")
+        self.assertEqual(self.events("restated", other), [])
+        (event,) = self.events("restated", holder)
         payload = event["payload"]
         self.assertEqual((event["pid"], payload["bars"], payload["same"], payload["night"]),
                          (holder, "moved", 0, FWD[11].isoformat()))
@@ -959,6 +961,13 @@ class Restated(Case):
         self.assertLessEqual(FWD[0].isoformat(), payload["first"])
         self.assertLessEqual(payload["last"], FWD[10].isoformat())
         self.assertEqual((len(self.rows(holder)), len(self.rows(other))), (14, 14))
+        # A control's marks move on the same ex-day. It decides nothing and reads no bar, so its event cannot say
+        # which: "none", never the "same" that names a correction or a recompute that is not deterministic.
+        self.assertEqual([r["controls"]["restated"] for r in receipts], [0, 1, 0, 0])
+        (event,) = self.events("restated", control)
+        self.assertEqual({k: event["payload"][k] for k in ("bars", "moved", "same", "night")},
+                         {"bars": "none", "moved": 0, "same": 0, "night": FWD[11].isoformat()})
+        self.assertGreaterEqual(event["payload"]["days"], 1)
 
     def test_a_difference_inside_the_tolerance_is_not_restated(self):
         pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
