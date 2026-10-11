@@ -8,6 +8,96 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The equity lanes' births (release E2, Oct 2026): `feat/equity-e2-int`, not deployed
+
+E1 (the next section) gives the equity lanes their live path and three captain-seeded programs. E2 makes the swarm
+breed share programs itself, for the BETA and EQUITY lanes: the architect's **equity pass** proposes families with their
+first program, a minimal **equity researcher** revises each on Train alone, and the first version that passes the
+Train bar **equity-v1** AND the **equity review** becomes its lineage's one Validation try. From there the family is
+E1's: Validation, one sealed look by the pinned share screen **S2** (A11), then Probe. The design is
+`league/swarm/ELANE_E2.md`; what went into E1's files is `league/swarm/ELANE_E2_PATCHES.md` (applied; a record).
+
+**It is swarm-side only.** Nothing under `league/live/`, `league/gym/`, `league/equity/` or `league/constitution.py`
+changes, so the options execution fingerprint, the equity evidence identity (A13) and the money digest are the ones E1
+ships (read before the merge and after it; `league/tests/test_elane_e2_switch.py` holds that no E2 file is in any of
+them). No evidence is reset, no grant re-ratifies. Train runs happen on the House in the swarm's own decider child
+(A3: no Gym box, no data leaves the state dir), never on the live book's.
+
+**Switch it on** (after E1 is live: `elane.mode` "gate", the daily store written, the seeds born). On the owner's
+machine: `python3 set_swarm.py elane.birth_share=0.25 elane.e2.usd_day=8.0 --apply` (the captain's first values, A16).
+Read on the next loop pass; no deploy. The release itself ships `elane.mode` "off" and `elane.birth_share` 0 in
+policy.json, and with either one off NOTHING in E2 acts: neither round starts, no key is written, no event is made, no
+model is asked (the test runs E1's real loop on the committed policy). The bounds are in code: `elane.birth_share` 0
+to 0.5 (above reads 0.5; a value that is no number reads 0, so births stay off); `elane.e2.usd_day` 0 to 100 (outside
+reads the default 8); every other `elane.e2` key has its own bound and a malformed value is its default.
+
+**What it then does, on its own cadence:**
+- The equity pass (`elane` round; every 2 h, every 30 min while fewer than 8 families are in Train research) asks ONE
+  model route for the births that bring the equity lanes to `birth_share` of the last 24 h of births, 1 to 6 a pass,
+  never past 24 families in Train research. **Equity births are counted apart from options births** (their own
+  population): an options population at its ceiling stops no equity birth, an equity birth takes no options place, and
+  the options birth quota, floor and stall alarms count the options lanes only.
+- The equity researcher (`elane_train` round; every 10 min, 3 families a round) gives each family one step: score its
+  newest version on Train, review a pass, ask its birth route for a program or a revision, or retire it (REFUTED on
+  Train with a graveyard row in E2's own words, or STALLED when no version could be judged).
+- **Train is 2016-19 and 2022-24** (A15): seven years, two runs a stress, summed. **2020-21 is the reserve**: no E2
+  run has a session in it and a result carrying a row of it is refused whole (alert `elane_train_window`). The
+  loosening, stated: the bar reads seven years, not nine.
+- The bar ends with **STATE, the restart check** (A15): the program is run again with its memory emptied every 20
+  sessions and must give the same intents on 99% of sessions, because the decider child restarts on every deploy. A
+  check that cannot finish three times in a row is the House's failure and an alert (`elane_train_state`); it is never
+  a pass.
+- **Nothing after Train reaches a generator** (A9 D3): no Validation or look outcome, no band, no retirement after the
+  look. The equity generators read Train facts only, and no options generator reads an equity graveyard row.
+
+**The budget.** `elane.e2.usd_day` (8 dollars a UTC day at the first switch-on) caps E2's MODEL dollars: births, Train
+research and the equity review together. They are Sail research dollars inside the swarm's research budget and under
+THE GATE'S RESERVE like any new research, never beside it; once the day's line is spent no equity question is asked
+until the next UTC day. Per family: at most 4 Train-scored versions and 7 write attempts. Train runs spend no model
+dollar (House CPU: up to about 72 short daily-bar runs an hour). After a Train pass the costs are E1's (Validation and
+the look on the House; real money only at Probe, inside the shared loss budget).
+
+**Read it** (read-only, on the box):
+- The swarm log: one `elane: {...}` line a pass (born, proposed, route, refusals) and one `elane_train: {...}` line a
+  round (each family's step; `house` marks a failure of the House's with its retry).
+- `swarm.sqlite`: events of kind `swarm.elane` (private) and `swarm.born` with `lane` "beta" or "equity"; kv
+  `elane_e2_last` (the last pass's births and refusals), `elane_e2_births_at`, `elane_e2_train_at`; a family's state
+  key `elane_e2` (its Train record: each version's verdict and fails, `status` researching, passed, refuted, stalled or
+  closed).
+- **The yield record**: the `dlane` report's `equity_yield` (kv `elane_yield`). One row a model route
+  ("sail:<profile>"): requests, answers, failures, dollars (births, research), births, families, Train-scored, Train
+  passes, and, for the operator only, Validation entries, looks, looks passed and live programs, each per dollar; the
+  review's dollars are on rows of their own ("review:<route>"); `days` is the spend by UTC day against `usd_day`. The
+  route for the next question is chosen from births, dollars and Train passes ONLY, never from a later stage (a choice
+  made on look outcomes would feed the holdout back into which model writes programs).
+- Alerts (House warnings through the swarm's status events): `elane_train_window`, `elane_train_state`.
+
+**Stop it**, from the lightest (each read on the next loop pass, no deploy):
+1. `elane.birth_share=0`: no more births. The families already born finish their Train research, and one that passed
+   Train and the review still takes its Validation try and its look in E1's rounds.
+2. `elane.e2.usd_day=0` with it: no model is asked at all (no program written, no review).
+3. `elane.mode=off`: everything E2 does stops. It is E1's swarm-side rollback too (no seeded birth, no Validation, no
+   look). It is not the money switch: a program already at Probe trades on by its band until `equity_money.enabled`
+   is false (E1's **Roll back** below).
+
+**Deploy class.** An owner deploy with or after E1 (`league/swarm/policy.json`, `league/ops/`, `league/swarm/store.py`,
+`tournament.py`, `game.py` and `league/ci.py` are FORBIDDEN to the updater). E2's five modules
+(`league/swarm/elane_births.py`, `elane_train.py`, `elane_yield.py`, `elane_seal.py`, `elane_review.py`) are FORBIDDEN
+from this release on: no role changes them and the updater never self-deploys them. **One follow-up at the gateway**:
+its merge list (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) gains the five in its next deploy; until then they wait
+in `league/ci.py` `PENDING_GATEWAY`.
+
+**Verify after the deploy** (read-only): `policy.json` on the box has the `elane.e2` block and `elane.birth_share` 0;
+before the switch the swarm log has no `elane:` or `elane_train:` line and `swarm.sqlite` no `swarm.elane` event; the
+three identities are E1's. After the switch: an `elane:` line within the first loop passes, `swarm.born` events with an
+equity lane, `elane_train:` lines every 10 minutes while a family researches, and the `dlane` report's `equity_yield`
+with a row for the route that answered.
+
+**Not handled, stated.** E2's rounds start only while the options Gym is configured and the Sail guard allows
+research, like every round that makes new research, though an equity Train run needs no Gym box. The restart check
+does not catch memory that changes fewer than 1% of sessions. Post-earnings drift is named in the agenda and refused
+until earnings data exist.
+
 ## The equity lane (release E1, Oct 2026): `feat/equity-e1`, not deployed
 
 The owner's goal of Oct 10, 2026, on the House's side: agent programs trade long-only ETFs (stocks later, E3) with real

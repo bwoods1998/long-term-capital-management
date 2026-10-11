@@ -29,6 +29,31 @@ any other deploy.
 The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
 Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
 
+### Release E2, integrated on E1: the swarm breeds share programs for the BETA and EQUITY lanes, on `feat/equity-e2-int` (unreleased; an owner deploy with or after E1; no identity moves; ships switched off)
+
+- **What it adds** (`league/swarm/ELANE_E2.md`): the architect's equity pass (families with their first program, on
+  the model route chosen by measured yield per dollar), the Train bar equity-v1 on the Train years 2016-19 and 2022-24
+  with its STATE restart check (A15; 2020-21 is the reserve and no run touches it), a minimal equity researcher, the
+  equity review (a static level rule and two paid readers) before a version may be its lineage's one Validation try,
+  the seal that keeps every Validation, look and holdout outcome from every generator (A9 D3), the Train map, and the
+  operator's yield-per-dollar record in the `dlane` report (`equity_yield`). After Train a family is E1's: Validation,
+  one sealed look by the pinned share screen S2 (A11), Probe.
+- **Ships off.** policy.json keeps `elane.mode` "off" and `elane.birth_share` 0 and gains the `elane.e2` block (every
+  value the code's default). With either switch off nothing in E2 acts (a test on E1's real loop). The captain's first
+  switch-on, after the deploy and with no deploy of its own: `elane.birth_share` 0.25 and `elane.e2.usd_day` 8.0 in
+  swarm.json. Equity births are counted apart from options births.
+- **In E1's files** (`league/swarm/ELANE_E2_PATCHES.md`, the record): the loop's two rounds; the options birth quota,
+  population floor, stall facts and pre-open check counting the options lanes only; `visible_graveyard` dropping
+  equity rows; the tournament validating an E2 family only with its Train pass and review; the five E2 modules
+  FORBIDDEN (`league/ci.py` `PENDING_GATEWAY` until the gateway's merge list names them: a gateway follow-up).
+- **Fixed at the integration:** the equity architect was told the share screen S1 judges (it is S2); with the lanes on
+  and the share at zero the equity Train round ran empty every ten minutes (it now waits for a family of its own).
+- **No identity moves:** nothing under `league/live/`, `league/gym/`, `league/equity/` or `league/constitution.py`
+  changes. The options execution fingerprint, the equity evidence identity and the money digest read the same before
+  the merge and after it; no evidence is reset and no grant re-ratifies.
+- Operations: [docs/operations.md](docs/operations.md), "The equity lanes' births" (switch on, read, stop, the budget,
+  the yield record).
+
 ### Release E1, ready for review: S2 is the gate, the equity identity covers evidence only, the Done text pre-registered, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; no further money-digest move)
 
 - **S2 is the House's share screen** (the captain's A11). Both lanes' blocks of policy.json pin receipt 2

@@ -8,12 +8,30 @@ not seed), and the model routes are chosen by measured yield per dollar. No figu
 or in the code: the bar's constants are rules, and the Train map shown to agents is computed on the House from the
 swarm's own Train runs.
 
+**The screen is S2** (the captain's amendment A11). The Validation try and the one sealed look of every share program,
+seeded or bred, are judged by E1's pinned share screen S2 (league/equity/screen.py; policy.json `elane.screens` pins
+its receipt for both lanes; docs/operations.md states the rule and its cost). E2 judges nothing after Train and names
+no threshold of the screen: the architect's system text says only that the screen is S2 and that its rule and
+false-positive cap were pinned before any look.
+
 ## The switch
 
-`elane.mode` "gate" (E1) AND `elane.birth_share` above zero. E1 ships the lanes with `mode` "off" and `birth_share`
-0.0, so E2 does nothing until the captain sets both in swarm.json. The equity researcher (Train) needs `mode` "gate"
-alone, so families already born finish their Train research if births are paused. Rollback: `elane.birth_share` 0.0
-stops births at once; `elane.mode` "off" stops everything E2 does (E1's own rollback).
+`elane.mode` "gate" (E1) AND `elane.birth_share` above zero. The release ships the lanes with `mode` "off" and
+`birth_share` 0.0 in policy.json, so E2 does nothing until the captain sets both in swarm.json: with either one off
+neither of E2's rounds starts, no key is written, no event is made and no model is asked
+(league/tests/test_elane_e2_switch.py runs E1's real loop on the committed policy to hold that). At the first
+switch-on the captain sets `elane.birth_share` 0.25 and `elane.e2.usd_day` 8.0 (amendment A16); the equity births are
+counted apart from the options births (their own population).
+
+Stopping, from the lightest:
+- `elane.birth_share` 0.0 stops BIRTHS at once. The families already born finish their Train research (the equity
+  researcher needs `mode` "gate" alone), and a family that passed Train and the review still takes its Validation try
+  and its look in E1's rounds.
+- `elane.e2.usd_day` 0.0 with it: no model is asked at all (no program written, no review); what is left is the free
+  Train scoring of versions already written.
+- `elane.mode` "off" stops everything E2 does. It is E1's own swarm-side rollback, so E1's seeded births, Validations
+  and looks stop with it; it is not the money switch (a program already live trades on by its band until
+  `equity_money.enabled` is false: docs/operations.md).
 
 ## The design
 
@@ -151,29 +169,33 @@ stops births at once; `elane.mode` "off" stops everything E2 does (E1's own roll
 | `league/swarm/researcher.py` | equity rows out of the `graveyard` tool |
 | `league/tests/test_elane_e2_*.py`, `elane_e2_fakes.py` | births, Train (the seven years, the restart check), review, seal (D3 and the reserve), yield; E1's names faked as INTERFACES fixes them |
 | `league/tests/test_elane_e2_e1.py` | E2 on E1's own code with the patches (skipped on the skeleton): patch 5 in E1's `equity_round`, E1's `reviewed`, adoption, the lane-scoped graveyard, patches 9 and 10; A15 on E1's runner, ctx builder and decider (in process and a real child killed mid-check) |
+| `league/tests/test_elane_e2_switch.py` | the release as it ships on E1: the shipped switches and the settings' bounds, E1's real loop standing still while the lanes are off or the share is zero, one equity pass on the real router, the three identities unmoved, the generators' text naming the pinned screen and no threshold |
 
-## Settings (`elane.e2`; every default in code, the policy.json block in patch 6)
+## Settings (`elane.e2`; every default in code, and policy.json carries the same block)
 
 Births: `births_every_seconds`, `births_refill_seconds` (while fewer than `start` families research), `start`,
 `max_alive`, `min_per_pass`, `max_per_pass`, `window_hours`, `births_max_output_tokens`, `births_effort`,
 `families_shown`. Train: `train_budget`, `train_max_attempts`, `train_max_errors`, `train_every_seconds`,
 `train_per_round`, `train_max_output_tokens`, `train_effort`, `refuted_cell_cap`. Review: `review_routes`,
 `review_max_output_tokens`, `review_effort`, `review_max_unclear`. Routes: `routes`, `min_births`, `sample_requests`,
-`explore_every`, `usd_day`. Each is held to its bound in code; a malformed value is its default.
+`explore_every`, `usd_day`. Each is held to its bound in code; a malformed value is its default. The box's swarm.json
+overrides one key at a time (the settings layers merge deep): `usd_day` is held to 0 to 100 dollars a UTC day, and
+E1's `elane.birth_share` to 0 to 0.5 (a value above reads 0.5; one that is no number reads 0).
 
 ## The patches (league/swarm/ELANE_E2_PATCHES.md)
 
-E2 edits no file E1 owns. Nine patches for the integrator, each an exact unified diff against the E1 head the patch
-file names (feat/equity-e1), applied together to a tree of that head plus this branch's files and tested there (the
-patch file says which modules): the loop's two rounds; the birth quota's window skipping equity births;
-`game.visible_graveyard` dropping equity rows and the learning game's ceiling counting options families; the tournament
-validating an E2 family only where `elane_train.may_validate` allows; the `elane.e2` policy block; the five modules
-protected (E1's `PENDING_GATEWAY`); the operator's yield record in the dlane report; the options population's floor in
-`store.retire_gym`; the operator's stall facts and the pre-open population check counting the options lanes only.
-E1 already scopes `dlane._born` by lane, so the release before's patch 2 is gone. The isolated runner is shared by E1's
-tournament and E2's Train round; E1 hooks' decider serializes its calls under one lock.
+E2 was built on E1's early skeleton and edited no file E1 owned; what it needed there was written as numbered patches.
+They are applied: `feat/equity-e2-int` is E1's final head with E2 merged and the patches in, one commit each, and the
+patch file is now the record of that (which went in as written, which was re-made, and what is still open at the
+gateway). In one line each: the loop's two rounds (1); the options birth quota's window skipping equity births (3);
+`game.visible_graveyard` dropping equity rows (4); the tournament validating an E2 family only where
+`elane_train.may_validate` allows (5); the `elane.e2` policy block (6); the five modules protected (7); the operator's
+yield record in the dlane report (8); the options population's floor in `store.retire_gym` (9); the operator's stall
+facts and the pre-open population check counting the options lanes only (10). E1 already scopes `dlane._born` by lane,
+so there is no patch 2. The isolated runner is shared by E1's tournament and E2's Train round; E1's decider serializes
+its calls under one lock.
 
-A15 added no patch and changed no diff: the Train spans and the restart check use what E1 already provides (the
-runner's `train(start, end)` and `decider`, the decider kinds, the ctx builder; the patch file lists them), and the
-restart check's instances live in the swarm's own decider child under keys of their own, dropped when it ends. Only
-patch 10's description moved (a version is four Train runs now, so E2's runs an hour doubled).
+A15 added no patch: the Train spans and the restart check use what E1 already provides (the runner's
+`train(start, end)` and `decider`, the decider kinds, the ctx builder), and the restart check's instances live in the
+swarm's own decider child under keys of their own, dropped when it ends. Since A15 a version's Train run is four runs
+(two spans at two stresses), so E2's runs on the House are up to about 72 an hour.
