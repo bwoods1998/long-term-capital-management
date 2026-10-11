@@ -509,7 +509,8 @@ def _migrate(db: sqlite3.Connection) -> int:
 
 def open_db(root: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
     """`<root>/forward.sqlite`, rows as `sqlite3.Row`. Writable: creates the file 0600 (WAL), runs `SCHEMA`, adds the
-    columns a store from an earlier release lacks (`_migrate`: no row is rewritten) and, when `fgs_prereg` is absent, writes that kv (`kv_first`: `FGS_SHA`) and one `prereg` event holding the sha and `FGS`.
+    columns a store from an earlier release lacks (`_migrate`: no row is rewritten) and, when `fgs_prereg` is absent,
+    writes that kv (`kv_first`: `FGS_SHA`) and one `prereg` event holding the sha and `FGS`.
     `readonly`: `guard.connect_ro` (it raises `sqlite3.OperationalError` when the file is absent).
 
     THE FIRST VALUE STANDS: a store whose `fgs_prereg` is another sha than this release's `FGS_SHA` keeps it, and this

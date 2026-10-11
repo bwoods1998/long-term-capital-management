@@ -614,7 +614,7 @@ def read_book(live_path: str | Path) -> dict[str, Any]:
     return guard.read(live_path, read)
 
 
-# ------------------------------------------------------------------------------- A29: the twin re-based on the live book
+# ----------------------------------------------------------------------------- A29: the twin re-based on the live book
 def _size(row: Mapping[str, Any] | None) -> dict[str, float] | None:
     """A buy's size as its program gave it ({"share": s} | {"usd": u}; league/equity/program.py's rule: exactly one, a
     share in (0, 1] or dollars above zero), from its `eq_intents` row; None when the row holds no such size (the book
@@ -1222,9 +1222,9 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
             """One transaction: the sessions gathered so far in day order and, the first time, the night's
             participation of the run the book holds now (an earlier run's stands as written)."""
             with db:
-                db.executemany("INSERT OR IGNORE INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, why, "
-                               "at, live_bars, shadow_bars, cause, rebased, base_agree) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                               rows)
+                db.executemany("INSERT OR IGNORE INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, "
+                               "why, at, live_bars, shadow_bars, cause, rebased, base_agree) "
+                               "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
                 if parting.pop():
                     db.execute("INSERT OR IGNORE INTO fwd_part(instance, through, pid, matched, missed, extra, at) "
                                "VALUES(?,?,?,?,?,?,?)",
@@ -1248,10 +1248,12 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
                     # A29: THE TWIN'S BOOK IS SET TO THE LIVE BOOK AS IT STOOD AFTER THE DIFFERING SESSION, and the
                     # sessions after it are compared from there: when the session to compare is not written yet,
                     # or when the re-base is on record (its event: an earlier night compared the next session with
-                    # it, and tonight's twin is made the same way). A stored differing session that neither holds
-                    # of (a row from before this release, with stored rows after it) re-based nothing then and
-                    # re-bases nothing now; the latest one re-bases the sessions not yet written.
-                    if differed is not None and not gone and (day not in stored or wanted[differed] in based):
+                    # it, and tonight's twin is made the same way; a twin already re-based tonight goes on in order).
+                    # A stored differing session that none of these holds of (a row from before this release, with
+                    # stored rows after it) re-based nothing then and re-bases nothing now; the latest one re-bases
+                    # the sessions not yet written.
+                    if differed is not None and not gone and (day not in stored or wanted[differed] in based
+                                                              or chain is not None):
                         # What is gathered is written first: a re-base that cannot be made tonight never costs
                         # the rows before it.
                         flush()
@@ -1260,15 +1262,14 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
                         info = chain.rebase(seed)
                         for between in wanted[differed + 1:i]:
                             chain.step(between)     # stored sessions since: the twin goes through them in order
+                        payload = {"instance": iid, "unheld": info["unheld"],
+                                   "held": [[lot["symbol"], lot["entry_day"], lot["entry_at"]] for lot in seed["lots"]],
+                                   "planned": {k: len(seed[k]) for k in ("buys", "sells", "exits")},
+                                   "why": "the live and the twin intents differed at this session (its row is counted "
+                                          "as registered): the twin's book is the live book as it stood after it, and "
+                                          "the sessions after it are compared from the same state"}
                         if forward_db.event(db, "twin_rebased", pid=pid, day=wanted[differed], at=float(now), once=iid,
-                                            payload={
-                                "instance": iid, "held": [[lot["symbol"], lot["entry_day"], lot["entry_at"]]
-                                                          for lot in seed["lots"]],
-                                "unheld": info["unheld"],
-                                "planned": {k: len(seed[k]) for k in ("buys", "sells", "exits")},
-                                "why": "the live and the twin intents differed at this session (its row is counted "
-                                       "as registered): the twin's book is the live book as it stood after it, and "
-                                       "the sessions after it are compared from the same state"}):
+                                            payload=payload):
                             out["rebased"] += 1
                         based = sorted({*based, wanted[differed]})
                         differed = None

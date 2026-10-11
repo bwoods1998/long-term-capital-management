@@ -951,7 +951,8 @@ def _rebase(twins: Sequence[Mapping[str, Any]], live: set[int]) -> dict[str, Any
             held["sessions"] += 1
             held["agreed"] += 1 if int(first) == 1 else 0
     rows = [{**held, "pid": None if held["pid"] is None else int(held["pid"]),
-             "share": held["agreed"] / held["sessions"] if held["sessions"] else None} for _, held in sorted(out.items())]
+             "share": held["agreed"] / held["sessions"] if held["sessions"] else None}
+            for _, held in sorted(out.items())]
     sessions, agreed = sum(r["sessions"] for r in rows), sum(r["agreed"] for r in rows)
     return {"rebases": sum(r["rebases"] for r in rows), "sessions": sessions, "agreed": agreed,
             "share": agreed / sessions if sessions else None,

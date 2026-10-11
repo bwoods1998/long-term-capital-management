@@ -1675,7 +1675,8 @@ class EquityBook:
         said = self._sell_stage_says()[:300]
         self.state.put("eq_sell_unproven", {"day": today, "why": said, "at": self.clock()})
         what = ("the sale path is unproven today: the stock paper proof's SELL stage had not passed by the entry "
-                f"cut-off ({said}); real equity exits no longer wait for it this session and go through the normal path")
+                f"cut-off ({said}); real equity exits no longer wait for it this session and go through the normal "
+                "path")
         self.record("equity.alert", {"what": what, "day": today})
         self.alert("error", f"equity: {what} (A28). New real equity buys stay stopped while the stage is failed. Owner "
                             "step: look at the practice account (alpaca-paper), its SPY position and orders")
