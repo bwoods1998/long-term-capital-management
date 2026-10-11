@@ -14,13 +14,14 @@ of `<state>/forward.sqlite` (league/ops/forward_db.py).
   - THE NOTE: the book's own record of each audit that failed, kv `eq_bars_audit` = {day: {"symbols": [the symbols
     whose bars differed], "at"}}, kept for its last 30 such days. A day the note names is marked for THOSE symbols.
   - THE ROWS: `eq_bars.audit` "mismatch". A day the note does not name is marked for every symbol with such a row.
-  WHY THE NOTE FIRST (measured on E1's own book, two symbols fetched, one differing): the book writes "mismatch" on
-  EVERY `eq_bars` row of the day when any one symbol differs, and that evening's fetch, which writes the whole
-  history again, sets a row whose values changed back to unaudited: the symbol that did differ. Read from the rows
-  alone, a program that held only a symbol whose bar was right would lose the day (the book itself cancels only the
-  buys of programs whose NEEDS hold a symbol that differed), and a morning that could not read the book would find
-  the next day the innocent rows still marked and the guilty one gone. The note names what differed and keeps it, so
-  a morning that was missed is made up on a later one.
+  WHY THE NOTE FIRST (measured on E1's own book, two symbols fetched, one differing): that evening's fetch, which
+  writes the whole history again, sets a row whose values changed back to unaudited: the raw row of the symbol that
+  did differ. Read from the rows alone, a morning that could not read the book would find the next day a guilty row
+  gone. The note names what differed and keeps it, so a morning that was missed is made up on a later one. (When this
+  module was written the book also marked EVERY `eq_bars` row of the day when any one symbol differed, so a program
+  that held only a symbol whose bar was right would have lost the day by its rows; E1's review made the mark each
+  audited symbol's own verdict, "ok" or "mismatch", and a test here holds the book to that. A note the book writes
+  for a volume-only difference names no symbol: its day is read from the rows, which then say "ok".)
 - THE CHAIN: `forward_db.verify_chain` -> one `chain_ok` or `chain_broken` event, and for a broken chain a
   `ctx.alert("warning", ...)` (owner step: stop the forward jobs and compare with the backup). The alert's text
   holds ids, counts and dates only.

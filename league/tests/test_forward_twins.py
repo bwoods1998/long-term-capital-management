@@ -219,15 +219,15 @@ class Shadow:
     """A FAKE of package B's `forward_shadow.Shadow`, to its stub's docstring: `store` (the `EquityStore` opened with
     the capability), `through`, `official` (the store's raw open or close) and `run_from` (D3's run started flat at a
     first day: E1's engine through the decider child's "run" op, `screen.series` of its lots), with the constructor's
-    `decider` and `settings`. `lookback`: the history sessions its slice carries before the first day (default NEEDS'
-    history + 1: the first decision then reads what the live decision read)."""
+    `decider` and `settings`. `lookback`: the history it asks the store for (default NEEDS' own: E1's store hands
+    history + 1 sessions before the first day, so the first decision reads what the live decision read)."""
 
     def __init__(self, store_root, *, through, decider=None, settings=SETTINGS, lookback=None):
         self.store = EquityStore(store_root, gate=mint_equity_gate_capability(store_root, "forward-shadow"))
         self.through = through if isinstance(through, dt.date) else dt.date.fromisoformat(through)
         self.decider = decider if decider is not None else InlineDecider()
         self.settings = settings
-        self.lookback = lookback or (lambda needs: int(needs.get("history") or 0) + 1)
+        self.lookback = lookback or (lambda needs: int(needs.get("history") or 0))
         self.runs: list[tuple[str, str]] = []
 
     def official(self, symbol, day, at_):
@@ -1501,10 +1501,11 @@ class TheBarsOfADecision(WithAStore):
         self.assertNotEqual(row["live_bars"], row["shadow_bars"], "the rounding moved the bars and not the intent")
 
     def test_a_slice_one_session_short_makes_the_first_decision_read_other_bars(self):
-        # E1's Gym gives a run's FIRST decision the slice's history sessions and nothing before them: with a slice of
-        # NEEDS' history (not history + 1) the twin's first ctx is one row short of the live one. The hash says so.
+        # E1's Gym gives a run's FIRST decision the slice's history sessions and nothing before them: with a slice
+        # that carries NEEDS' history sessions (not history + 1) the twin's first ctx is one row short of the live
+        # one. The hash says so. (E1's store hands history + 1 for NEEDS' own history: one fewer is asked for here.)
         book, iid, pid, run = self.live_instance("fake-reversal@1", REVERSAL)
-        short = self.shadow("2026-10-30", lookback=lambda needs: max(int(needs["history"]), 1))
+        short = self.shadow("2026-10-30", lookback=lambda needs: int(needs["history"]) - 1)
         thin = short.run_from(fake_program(self.db, "fake-reversal@1"), schedule.next_session(T0))
         full, cut = forward_twins.shadow_bars(run), forward_twins.shadow_bars(thin)
         self.assertNotEqual(cut[D1], full[D1])

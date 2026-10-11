@@ -6,7 +6,7 @@ Owner: B (league/ops/E3_INTERFACES.md). Protected. After the daily store (`equit
 nothing.
 
 THE SHADOW RUN (D3). `cap = mint_equity_gate_capability(store_root, GATE_REASON)`; `bars = EquityStore(store_root,
-gate=cap).bars(needs.symbols, "forward", history=needs.history + 1, start=first_day(p), end=None)` (a forward slice
+gate=cap).bars(needs.symbols, "forward", history=needs.history, start=first_day(p), end=None)` (a forward slice
 without the capability raises `StoreRefused`; one asked from before `forward_db.t0()` is refused here, a ValueError).
 The run is `decider.kind("equity", "run", {"code", "params", "name": key, "bars", "k", "capital": None},
 budget_seconds=run_budget_seconds)` at k = `config.K_BASE` and again at `config.K_STRESS`: E1's engine from
@@ -22,12 +22,16 @@ of the decision the day's orders came from (the Gym's inputs at the close of the
 
 THE FIRST DECISION (D2): a program first decides at the close of `first_close(p)`, the session before `first_day(p)`.
 E1's engine decides from the slice's index `max(first - 1, 0)` on `ctx.inputs_from_bars`, which reads the NEEDS
-history + 1 sessions ending at the decision when the slice holds them. So the slice carries NEEDS history + 1 sessions
-before its first run session: a NEEDS history of 0 does not move the first decision to `first_day`'s close, and the
-first decision reads the SAME bars the live book reads at that close (`ctx.inputs_from_fetch`: history + 1 sessions;
-a slice with `history` sessions would give the first decision one bar fewer than every later one and than the live
+history + 1 sessions ending at the decision when the slice holds them. So the slice must carry NEEDS history + 1
+sessions before its first run session: a NEEDS history of 0 does not move the first decision to `first_day`'s close,
+and the first decision reads the SAME bars the live book reads at that close (`ctx.inputs_from_fetch`: history + 1
+sessions; with one session fewer the first decision would read one bar fewer than every later one and than the live
 one, a program that waits for its full history would then decide a session late in the shadow only, and the twin's
-bars hash at an instance's first decision could never equal the live one). Every later decision is unchanged by it.
+bars hash at an instance's first decision could never equal the live one). E1'S STORE HANDS THEM ITSELF since its
+review (league/equity/store.py `_slice`: `history` + 1 sessions before a run's first, for every run), so the slice
+asks for NEEDS' own history and adds nothing: a second session added here would be a bar no decision reads. A test
+holds the slice to history + 1 sessions before its first and the first decision's bars hash to the live one, so a
+store that went back to `history` sessions fails by name. Every later decision is unchanged by it.
 A slice with no session before its first run session is refused (a ValueError: the store's calendar starts there).
 
 CHECKPOINTS (D4). A program's COUNTED days are its `fwd_days` rows of tonight's engine id with status "ok" and no
@@ -530,9 +534,10 @@ class Shadow:
         """The program's forward `store.Bars` from `first_day` (its own when None) through `through`; None when that
         first day is after `through`. `MissingData`, `StoreRefused` and `ValueError` are the data's.
 
-        The slice carries NEEDS history + 1 sessions before its first run session (THE FIRST DECISION, the module
-        docstring). A first day before `forward_db.t0()` is refused (a ValueError: no day before the look cap's next
-        session is a forward day, whatever a registry row says), and so is a slice with no session to decide at."""
+        The slice carries NEEDS history + 1 sessions before its first run session, which E1's store hands for NEEDS'
+        own history (THE FIRST DECISION, the module docstring). A first day before `forward_db.t0()` is refused (a
+        ValueError: no day before the look cap's next session is a forward day, whatever a registry row says), and so
+        is a slice with no session to decide at."""
         first = as_date(program.first_day if first_day is None else first_day)
         if first > self.through:
             return None
@@ -540,7 +545,7 @@ class Shadow:
             raise ValueError(f"{program.key}: {first.isoformat()} is before the first forward day "
                              f"{self._t0.isoformat()}")
         needs = parse_needs(program.needs)
-        bars = self.store.bars(needs.symbols, "forward", history=int(needs.history) + 1, start=first, end=None)
+        bars = self.store.bars(needs.symbols, "forward", history=int(needs.history), start=first, end=None)
         if bars.n <= bars.first:
             return None
         if bars.first < 1:
@@ -573,9 +578,9 @@ class Shadow:
             return None
         when = as_date(day)
         bars = self.store.bars([sym], "forward", history=0, start=when, end=when)
-        if bars.n != 1:
+        if bars.n - bars.first != 1:       # the slice's own run session (the store hands a session of look-back too)
             return None
-        return eq_engine.official(bars, sym, 0, at)
+        return eq_engine.official(bars, sym, int(bars.first), at)
 
     def run_program(self, program: Program) -> tuple[ShadowRun, Mapping[str, Any]]:
         """(the k 1.0 run, the k 1.5 result) of one program on its forward days. Raises E1's `runner.RunFailed` or

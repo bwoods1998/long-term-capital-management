@@ -721,7 +721,8 @@ class NoDayBeforeItsCodeExisted(Case):
     def test_a_program_that_waits_for_its_full_history_decides_at_first_close(self):
         # E1's Gym hands a run's first decision the sessions its slice holds before the run. With NEEDS history
         # sessions there, that decision would read one bar fewer than the live book does and this program would buy a
-        # session late, in the shadow only.
+        # session late, in the shadow only. E1's store hands history + 1 itself (league/equity/store.py `_slice`), so
+        # the shadow asks for NEEDS' own history: history + 1 before the first, neither a session fewer nor one more.
         pid = register(self.db, "waits@1", WAITS, first_close=FWD[2])
         shadow = self.shadow(FWD[6])
         bars = shadow.slice(self.program(pid))
@@ -811,7 +812,8 @@ class TheSealedDaysNeedTheCapability(Case):
             plain.bars(["SPY"], "forward", history=1, start=T0)
         with self.assertRaises(StoreRefused):
             plain.sessions("forward")
-        self.assertEqual(gated(self.root).bars(["SPY"], "forward", history=1, start=T0).day(1), T0)
+        bars = gated(self.root).bars(["SPY"], "forward", history=1, start=T0)
+        self.assertEqual(bars.day(bars.first), T0)
 
     def test_the_shadow_opens_its_store_with_the_gates_capability(self):
         pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
@@ -900,8 +902,9 @@ class TwoNights(Case):
     def test_official_is_the_stores_raw_open_or_close(self):
         shadow = self.shadow(FWD[6], gaps={"DIA": [FWD[2]]})
         bars = shadow.store.bars(["SPY"], "forward", history=0, start=FWD[2], end=FWD[2])
-        self.assertEqual(shadow.official("SPY", FWD[2], "open"), float(bars.raw["SPY"][0, 0]))
-        self.assertEqual(shadow.official("spy", FWD[2].isoformat(), "close"), float(bars.raw["SPY"][0, 3]))
+        self.assertEqual((bars.n - bars.first, bars.day(bars.first)), (1, FWD[2]))     # the one session asked for
+        self.assertEqual(shadow.official("SPY", FWD[2], "open"), float(bars.raw["SPY"][bars.first, 0]))
+        self.assertEqual(shadow.official("spy", FWD[2].isoformat(), "close"), float(bars.raw["SPY"][bars.first, 3]))
         self.assertNotEqual(shadow.official("SPY", FWD[2], "open"), shadow.official("SPY", FWD[2], "close"))
         self.assertIsNone(shadow.official("DIA", FWD[2], "open"))          # no bar that session
         self.assertIsNone(shadow.official("AAPL", FWD[2], "open"))         # not in the store
@@ -1230,11 +1233,12 @@ class WhoseFailure(Case):
         self.shadow(FWD[7], decider=decider).preflight()
         ((kind_, op, name, bars, budget),) = seen
         self.assertEqual((kind_, op, name, budget), ("equity", "run", "forward-canary", 120.0))
-        self.assertEqual((bars.symbols, bars.first), (("SPY",), 1))
+        # The canary's NEEDS history is 1: its slice carries history + 1 sessions before its first, as any program's.
+        self.assertEqual((bars.symbols, bars.first), (("SPY",), 2))
         self.assertEqual([bars.day(i) for i in range(bars.first, bars.n)], FWD[3:8])
         seen.clear()
         self.shadow(FWD[1], decider=decider).preflight()       # two forward days in the store: both, none before t0
-        self.assertEqual([seen[0][3].day(i) for i in range(1, seen[0][3].n)], FWD[:2])
+        self.assertEqual([seen[0][3].day(i) for i in range(seen[0][3].first, seen[0][3].n)], FWD[:2])
         self.assertEqual(self.events("night_failed"), [])
 
     def test_a_missing_bar_is_the_datas_and_the_days_fill_when_it_returns(self):

@@ -235,8 +235,10 @@ class TheBooksOwnNote(Audit):
             return {(row["symbol"], row["adjustment"]): row["audit"] for row in harness.state.rows(
                 "SELECT symbol, adjustment, audit FROM eq_bars WHERE day=?", (monday.isoformat(),))}
 
-        # THE FACT this module is built on: every row of the day is marked, the note names what differed.
-        self.assertEqual(set(audits().values()), {"mismatch"})
+        # THE FACT this module is built on: the book marks each audited symbol's rows on its own verdict (since E1's
+        # review; before it every row of the day was marked), and the note names what differed.
+        self.assertEqual(audits(), {("SPY", "raw"): "mismatch", ("SPY", "all"): "mismatch",
+                                    ("QQQ", "raw"): "ok", ("QQQ", "all"): "ok"})
         self.assertEqual(harness.state.get(forward_audit.NOTE_KEY)[monday.isoformat()]["symbols"], ["SPY"])
         live = self.root / forward_audit.LIVE_DB
         self.assertEqual(forward_audit.mismatches(live), [(monday.isoformat(), "SPY")])
@@ -245,7 +247,9 @@ class TheBooksOwnNote(Audit):
                 rows = harness.market.bar_rows[name][symbol]
                 rows.append({**rows[-1], "t": f"{tuesday.isoformat()}T04:00:00Z"})
         harness.tick(16, 31, day=tuesday)
-        self.assertEqual((audits()[("SPY", "raw")], audits()[("QQQ", "raw")]), (None, "mismatch"))
+        # AND WHY THE NOTE IS READ FIRST: that evening's fetch writes the row whose values changed again, unaudited
+        # (the guilty symbol's own raw row); the note still names it.
+        self.assertEqual((audits()[("SPY", "raw")], audits()[("QQQ", "raw")]), (None, "ok"))
         self.assertEqual(forward_audit.mismatches(live), [(monday.isoformat(), "SPY")])
         self.t = morning(schedule.next_session(tuesday))
         self.assertEqual(forward_audit.run(self.ctx())["mismatched"], 1)
