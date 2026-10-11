@@ -65,9 +65,10 @@ Stopping, from the lightest:
    2022-01-03..2024-12-31), each starting flat, summed. 2020-2021 is THE RESERVE, kept for a later accessor: E2 runs no
    session of it, and a result that carries a row of 2020 or 2021 is refused whole exactly as one of 2025 or 2026 is, so
    no 2020-2021 P&L reaches a family's record, the Train map, the yield ledger or a generator. The Train map, the
-   briefs and the architect's text say "Train years 2016-19 and 2022-24". (The 2022 run's first decisions look back on
-   2021's bars as history, as a Validation run looks back on 2024's; no session of the reserve is ever traded or
-   scored.)
+   briefs and the architect's text say "Train years 2016-19 and 2022-24". What of the reserve does reach Train: its
+   bars, as look-back. The 2022-2024 run reads the bars before 2022-01-03 as history (NEEDS `history`, up to 504
+   sessions), as a Validation run looks back on 2024's, so a program with look-back has 2022-2024 Train figures that
+   are functions of reserve bars; no session of the reserve is ever traded or scored (section 4 says what is tested).
 
    THE BAR equity-v1 (the design's 6b, on the Train years), on the summed runs at 1.0x and 1.5x the half-spread: at
    least 40 closed lots and 20 entry days in each of three or more of the seven Train years; no Train year's daily t
@@ -84,25 +85,52 @@ Stopping, from the lightest:
      and REVIEW it judges a program, never the mechanism, so it refutes nothing). Why: the House's decider child
      restarts on every deploy and a restart empties a program's memory, so a program whose decisions hang on STATE
      would trade live other than its replay. A program that keeps nothing passes; one that counts sessions in STATE
-     fails; one that only caches values it can recompute from ctx passes. How: through E1's decider kinds (`kind_load`,
-     "decide", `kind_drop`), per Train span, instance A is loaded once and instance B is loaded fresh every 20
-     sessions; at every decision session both read the same ctx, built by E1's ctx builder from the span's own 1.0x
-     run (its bars, open lots, closed lots, cash, equity and caps), so only memory can make their intents differ.
+     fails, whatever its clock's period; one that only caches values it can recompute from ctx passes; one whose
+     decide fails once its STATE is gone fails. How: through E1's decider kinds (`kind_load`, "decide", `kind_drop`),
+     per Train span, instance A is loaded once and instance B is loaded with it and then loaded fresh; at every
+     decision session both read the same ctx, built by E1's ctx builder from the span's own 1.0x run (its bars, open
+     lots, closed lots, cash, equity and caps), so only memory can make their answers differ.
+     THE RESETS ARE OFF THE SPAN'S START (the A15 review): B is emptied 7 sessions into a span (`state_first`) and
+     every 20 after (`state_every`): decision sessions 7, 27, 47 and on. Counted from the first session, where A
+     starts too, the resets left a session counter whose period divides 20 (a weekly clock of 5, or 2, 4, 10, 20) in
+     phase with its reset twin on every session, and it passed; with 7 and 20, a counter of any period falls out of
+     phase.
+     WHAT MATCHES (the A15 review): a session matches when the two decides ended alike: the same orders in the same
+     order, every buy the same size, and the same count of errors in that call (E1's `stats.errors`). A decide that
+     raises because STATE was emptied answers nothing, as the uninterrupted one may, so the intents alone would agree;
+     live, two failed decides in a row exit the program's lots. Two buys are the same size within one part in a
+     million of the sleeve for a `share` (six places, the engine's quantity precision) and a cent for `usd`
+     (`SIZE_TOL`): a cache that holds the value ctx gives, summed in another order, differs in the last digits only
+     and passes. DECIDED, and the captain may move it (one constant): a value carried from session to session and
+     updated in place (a running sum, an average, a peak since entry) fails. ctx's history is adjusted as of each
+     session and rounded to four places (EQUITY.md), so the carried value is not the one ctx gives now: on E1's
+     synthetic store with dividends such a program's sizes differ past the sixth place on most sessions, and the
+     uninterrupted replay is the one that has drifted. The gap is cents on a sleeve, but a program that passes STATE
+     is then restart-invariant to six places, whatever compares live with replay later (A14), and the cure is one
+     line (recompute from ctx.bars at every call). The bar's text and the researcher's system prompt say so before a
+     program is written, and a failed version's brief says how many sessions differed in a buy's size alone and by
+     how much, and on how many sessions a decide failed in one run and not the other.
      NEVER A SILENT PASS: each answer's `stats.calls` must equal the decides its instance was asked since its load, so
      an instance the child reloaded is caught whether or not the decider counted a restart (E1's `Decider` reloads its
      instances into a child that died between two requests without counting one); a check that cannot run or finish
-     (no decider, no call count in the answer, a reloaded or missing instance, a span with no session) is the House's:
-     the version is not scored, cannot pass, and the `train_max_errors`-th (third) failure in a row is an alert
-     (`elane_train_state`). A session an instance was disqualified at matches nothing. What the check does not
-     catch, stated: memory that changes the intents of fewer than 1% of the sessions, and whatever the run's record
-     does not keep for the ctx (the intents the engine refused: `ctx.rejects` is empty for both instances).
+     (no decider, no call count or no error count in the answer, a reloaded or missing instance, a span with no
+     session) is the House's: the version is not scored, cannot pass, and its `train_max_errors`-th (third) such
+     failure since the version was last judged is an alert, sent once (`elane_train_state`). A session an instance was
+     disqualified at matches nothing. What the check does not catch, stated: memory that changes the answers of fewer
+     than 1% of the sessions (a clock kept in STATE of a hundred sessions or more that moves a few decisions a year),
+     and whatever the run's record does not keep for the ctx (the intents the engine refused: `ctx.rejects` is empty
+     for both instances).
    - WHAT A VERDICT IS: only the program's own doing is judged: its runs finished (the bar), it was disqualified by its
      own errors ("DQ"), the child refused to load it ("LOAD"), the child failed its run (or its restart check's
-     decides) `train_max_errors` times while other programs' Train judgments completed ("RUN"), or its intents changed
-     when its STATE was emptied ("STATE"). A failure of the House's (no equity store yet, the store being rewritten, a
-     decider child that could not start, a restart check that could not run or finish, "no_data", a result outside the
-     Train years) scores nothing, spends no budget and asks no model: the family backs off (doubling, at most six
-     hours) and is tried again; a result outside the Train years is also an alert.
+     decides) `train_max_errors` times in a row while other programs' Train judgments completed ("RUN"), or its
+     intents changed when its STATE was emptied ("STATE"). A failure of the House's (no equity store yet, the store
+     being rewritten, a decider child that could not start, a restart check that could not run or finish, "no_data", a
+     result outside the Train years) scores nothing, spends no budget and asks no model: the family backs off
+     (doubling with every failure, at most six hours) and is tried again; a result outside the Train years is also an
+     alert. The House's failures are counted by kind (the A15 review): "in a row" for RUN means the child's failures
+     of the version one after another, so a restart check the House interrupted, or a store being rewritten, in
+     between starts the row again and never counts toward RUN (a standing pass being scored again is not withdrawn
+     on them either); the restart check's alert counts its own kind, whatever failed in between.
    - THE RESEARCHER (`EquityResearcher`, minimal): each round gives a few families one step: re-score a stale pass,
      review a bar pass, score the newest version, or ask the family's birth route for its first program or a revision
      (the brief holds the card, the agenda prior, the bar and the family's own Train versions and review reasons only),
@@ -139,9 +167,17 @@ Stopping, from the lightest:
    (architect.py: the digest, `graves`, `unseen`, `graveyard_ids`; researcher.py: the `graveyard` tool; game.py's
    `visible_graveyard` by patch 4, for the diagnostician). The test is invariance: two stores that differ only in what
    happened after Train give the same equity request, researcher brief, route choice, Train map and options graveyard
-   reads (league/tests/test_elane_e2_seal.py). THE RESERVE (A15) is tested the same way: two markets that differ only
-   in 2020-2021 give every E2 record, stored run, map, ledger and generator read byte for byte the same, none holds a
-   figure or a row of those years, and a runner that leaks a 2020 row is refused whole.
+   reads (league/tests/test_elane_e2_seal.py). THE RESERVE (A15), what is tested and what is not: E2 asks the runner
+   for the two Train spans only, so no reserve session is run or scored; no record, stored run, map, ledger or
+   generator read holds a figure, a row or a day of 2020-2021, whatever the reserve's P&L would have been; a runner
+   that leaks a 2020 row is refused whole. It is NOT true that two markets that differ only in 2020-2021 give every
+   E2 record byte for byte the same: on E1's runner the 2022-2024 run reads the bars before 2022-01-03 as look-back
+   (up to 504 sessions), so a program with look-back has 2022-2024 Train rows, P1/R1 sums, a pooled t and a Train-map
+   best t that are functions of reserve bars. Its 2016-2019 rows are the same in both markets, and a program that
+   reads no history is the same throughout (league/tests/test_elane_e2_e1.py, on E1's runner). FOR THE CAPTAIN: if
+   the later Thresholdout accessor needs the reserve's bars unseen too, the look-back before 2022-01-03 must be
+   blanked by a hook in E1's runner or store (E2 cannot do it from its own files), at the cost of most of 2022 for a
+   long-look-back program.
 
 5. **Yield per dollar** (`league/swarm/elane_yield.py`). One ledger row a model route ("sail:<profile>",
    "openai:<model>", "claude:<role>"): requests, answers, failures, dollars (births and research), births; the Train
@@ -168,7 +204,7 @@ Stopping, from the lightest:
 | `league/swarm/architect.py` | `equity_due`, `equity_pass`; equity rows out of the digest, `graves`, `unseen`, `graveyard_ids` |
 | `league/swarm/researcher.py` | equity rows out of the `graveyard` tool |
 | `league/tests/test_elane_e2_*.py`, `elane_e2_fakes.py` | births, Train (the seven years, the restart check), review, seal (D3 and the reserve), yield; E1's names faked as INTERFACES fixes them |
-| `league/tests/test_elane_e2_e1.py` | E2 on E1's own code with the patches (skipped on the skeleton): patch 5 in E1's `equity_round`, E1's `reviewed`, adoption, the lane-scoped graveyard, patches 9 and 10; A15 on E1's runner, ctx builder and decider (in process and a real child killed mid-check) |
+| `league/tests/test_elane_e2_e1.py` | E2 on E1's own code with the patches (skipped on the skeleton): patch 5 in E1's `equity_round`, E1's `reviewed`, adoption, the lane-scoped graveyard, patches 9 and 10; A15 on E1's runner, ctx builder and decider (in process and a real child killed mid-check): the clocks of 5, 10 and 20 sessions, the decide that fails on an empty STATE, the in-place cache with and without dividends, and what of the reserve reaches Train (look-back) |
 | `league/tests/test_elane_e2_switch.py` | the release as it ships on E1: the shipped switches and the settings' bounds, E1's real loop standing still while the lanes are off or the share is zero, one equity pass on the real router, the three identities unmoved, the generators' text naming the pinned screen and no threshold |
 
 ## Settings (`elane.e2`; every default in code, and policy.json carries the same block)
@@ -198,4 +234,6 @@ its calls under one lock.
 A15 added no patch: the Train spans and the restart check use what E1 already provides (the runner's
 `train(start, end)` and `decider`, the decider kinds, the ctx builder), and the restart check's instances live in the
 swarm's own decider child under keys of their own, dropped when it ends. Since A15 a version's Train run is four runs
-(two spans at two stresses), so E2's runs on the House are up to about 72 an hour.
+(two spans at two stresses), so E2's runs on the House are up to about 72 an hour. The A15 review's fixes added none
+either: the restart check now also reads `stats.errors` from E1's decide answer, which E1's runner already gives
+beside `stats.calls` (an answer without it is the House's failure, never a pass).

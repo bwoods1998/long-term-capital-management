@@ -31,11 +31,29 @@ them. **Still open, outside this release:** the gateway's own merge list (`gatew
 moves them out of `PENDING_GATEWAY`, as E1's did. Until then `league/tests/test_ci.py` allows exactly these five in
 `FORBIDDEN` beyond the gateway's list.
 
-**A15 (the reserve and the restart check) needed no patch.** Everything it reads, E1 provides: the isolated runner's
-`train(start, end)` and `decider`, the decider kinds (`kind_load`, `kind(..., "decide", ...)`, `kind_drop`), the decide
-answer's `stats.calls`, and the ctx builder. A hook that is missing fails safe: the restart check is then the House's
-failure (the version is not scored and cannot pass; the third in a row raises the `elane_train_state` alert), never a
-pass.
+**A15 (the reserve and the restart check) and its review's fixes needed no patch.** Everything they read, E1
+provides: the isolated runner's `train(start, end)` and `decider`, the decider kinds (`kind_load`,
+`kind(..., "decide", ...)`, `kind_drop`), the decide answer's `stats.calls` and `stats.errors`, and the ctx builder. A
+hook that is missing fails safe: the restart check is then the House's failure (the version is not scored and cannot
+pass; the third such failure of a version raises the `elane_train_state` alert, once), never a pass.
+
+## Carried from E2's A15 review, for the captain (nothing here is a patch today)
+
+- **The reserve's bars reach Train as look-back.** E2 runs no session of 2020-2021 and keeps no row, figure or day of
+  it. But E1's runner hands a 2022-2024 run its NEEDS `history` before 2022-01-03 (up to 504 sessions), so the
+  2022-2024 Train figures of a program with look-back are functions of 2020-2021 bars
+  (league/tests/test_elane_e2_e1.py `ReserveOnE1` says exactly what holds). If the later Thresholdout accessor needs
+  those bars unseen too, that is a new change in E1's runner or store (a blanked look-back, e.g. a `history_floor`
+  day), which E2's files cannot make; it would cost a long-look-back program most of its 2022.
+- **For E1's owner: a program's own failed decide, live.** The Gym engine exits a program's lots after two failed
+  decides in a row (EQUITY.md). Live, the child's decide answer carries no such flag, and `EquityBook._decide` treats
+  only a failed decider request, a missing result or `ok` False as failed, so a program whose own decide raises twice
+  keeps its lots until `max_hold_sessions`. E2 does not lean on either behaviour (its restart check compares
+  `stats.errors`), so a program whose decide fails only after a restart is refused on Train whichever way E1 settles
+  it.
+- **Decided in E2, and the captain may move it (one constant):** a value a program carries from session to session and
+  updates in place (a running sum, a peak since entry) fails STATE, because ctx's history is re-adjusted each session;
+  the cure for an author is to recompute from `ctx.bars` at every call.
 
 ## What the integration added beside the patches
 
@@ -65,5 +83,6 @@ pass.
   `review`; E2's round restores both for a pass that stands).
 - The isolated runner, shared by E1's tournament and E2's Train round (E1's decider serializes its calls under one
   lock): `Isolated.train(code, params, name=, start=, end=, k=)` for each Train span, and for the restart check its
-  `decider`, the decider kinds, `ctx.inputs_from_bars`, `ctx.lot_row` and `ctx.closed_row`. E2's instances are keyed
+  `decider`, the decider kinds, the decide answer's `stats.calls`, `stats.errors` and `stats.disqualified`,
+  `ctx.inputs_from_bars`, `ctx.lot_row` and `ctx.closed_row`. E2's instances are keyed
   "e2-state:<family>:<span>:<a|bN>" and dropped when the check ends.
