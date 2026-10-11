@@ -1160,6 +1160,92 @@ class TheTwins(WithAStore):
         self.assertEqual(out["twins"], 3)
 
 
+class TheLiveSide(WithAStore):
+    """`live_intents`: D12's live rule on the book's own `eq_intents` rows, through the one key rule."""
+
+    def setUp(self):
+        super().setUp()
+        self.live = self.book()
+        self.iid = self.live.instance("fake-overnight@1", OVERNIGHT, created=at(D1, 16, 25))
+        self.live.lot(11, self.iid, "SPY", D2, "close", exit_day=D3, exit_at="open")
+        self.live.lot(12, self.iid, "QQQ", D3, "open")
+
+    def keys(self, needs=("SPY", "QQQ")):
+        return forward_twins.live_intents(self.live.path, self.iid, needs=needs)
+
+    def test_a_buy_in_needs_and_a_sell_of_a_lot_through_its_row(self):
+        self.live.intent(self.iid, D1, "buy", at_="close", symbol="SPY")
+        self.live.intent(self.iid, D2, "sell", at_="open", symbol="SPY", lid=11)
+        self.live.intent(self.iid, D2, "buy", symbol="QQQ", status="missed")
+        self.assertEqual(self.keys(), {D1: ["B|SPY|close"], D2: [f"S|SPY|open|{D2}", "B|QQQ|open"]})
+
+    def test_a_rows_status_is_not_read(self):
+        for status in ("planned", "sent", "filled", "refused", "missed", "canceled"):
+            self.live.intent(self.iid, D1, "buy", symbol="SPY", status=status)
+        self.assertEqual(self.keys(), {D1: ["B|SPY|open"] * 6})
+
+    def test_what_the_book_records_and_the_rule_drops(self):
+        self.live.intent(self.iid, D2, "buy", status="refused")                              # a malformed intent
+        self.live.intent(self.iid, D2, "buy", symbol="IWM", status="refused")                # a buy outside NEEDS
+        self.live.intent(self.iid, D2, "sell", status="refused")                             # a sell of an unknown lot
+        self.live.intent(self.iid, D2, "cancel", status="refused")
+        self.live.intent(self.iid, D2, "cancel", symbol="SPY", lid=11, status="done")        # a cancel that worked
+        self.live.intent(self.iid, D2, "house_exit", symbol="SPY", lid=11)                   # the House's own exit rule
+        self.assertEqual(self.keys(), {D2: []}, "a decided session with no kept row is the empty set")
+        self.assertEqual(self.keys(needs=("SPY", "QQQ", "IWM")), {D2: ["B|IWM|open"]})
+
+    def test_a_second_sell_of_the_same_lot_is_kept_too(self):
+        self.live.intent(self.iid, D2, "sell", symbol="SPY", lid=11)
+        self.live.intent(self.iid, D2, "sell", at_="close", symbol="SPY", lid=11, status="refused")
+        self.assertEqual(self.keys(), {D2: [f"S|SPY|open|{D2}", f"S|SPY|close|{D2}"]})
+
+    def test_a_house_exit_alone_is_no_decision_of_the_program(self):
+        self.live.intent(self.iid, D3, "house_exit", symbol="QQQ", lid=12)
+        self.assertEqual(self.keys(), {}, "the House's exit is not an intent: that day has no row to read")
+
+    def test_another_instances_rows_and_a_sell_whose_lot_row_is_gone(self):
+        other = self.live.instance("fake-other@1", OVERNIGHT, created=at(D1, 16, 25))
+        self.live.intent(other, D1, "buy", symbol="SPY")
+        self.live.intent(self.iid, D1, "sell", symbol="SPY", lid=999)                        # no such lot row
+        self.assertEqual(self.keys(), {D1: []})
+        self.assertEqual(forward_twins.live_intents(self.live.path, other, needs=("SPY",)), {D1: ["B|SPY|open"]})
+
+    def test_a_book_from_before_the_share_lane(self):
+        old = self.root / "old-live.sqlite"
+        db = sqlite3.connect(old)
+        db.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        db.commit()
+        db.close()
+        self.assertEqual(forward_twins.live_intents(old, self.iid, needs=("SPY",)), {})
+        self.assertEqual(forward_twins.read_book(old), {"instances": [], "lots": {}, "intents": {}, "decision_day": None})
+        self.assertIsNone(forward_twins.live_bars(old, self.iid, D1, needs={"symbols": ["SPY"], "history": 1}))
+
+    def test_the_book_as_the_night_reads_it(self):
+        self.live.intent(self.iid, D1, "buy", at_="close", symbol="SPY")
+        self.live.intent(self.iid, D2, "house_exit", symbol="SPY", lid=11)
+        self.live.put("eq_decision", {"day": D2, "start": D1, "shas": {}})
+        book = forward_twins.read_book(self.live.path)
+        self.assertEqual([i["id"] for i in book["instances"]], [self.iid])
+        self.assertEqual([lot["lid"] for lot in book["lots"][self.iid]], [11, 12])
+        self.assertEqual([(r["decided_day"], r["kind"]) for r in book["intents"][self.iid]], [(D1, "buy")])
+        self.assertEqual(book["decision_day"], D2)
+
+    def test_the_twins_keys_are_the_fills_its_own_run_made(self):
+        # The decide loop on E2's ctx stream asks what the engine's own run was asked: every kept buy is a lot bought
+        # in the next session, every kept sell a lot sold in it.
+        register(self.db, "fake-reversal@1", REVERSAL)
+        run = self.shadow("2026-10-30").run_from(fake_program(self.db, "fake-reversal@1"), schedule.next_session(T0))
+        keys = forward_twins.shadow_intents(self.decider, run)
+        bought = {(schedule.next_session(d).isoformat(), k.split("|")[1], k.split("|")[2])
+                  for d, ks in keys.items() for k in ks if k.startswith("B|")}
+        sold = {(schedule.next_session(d).isoformat(), k.split("|")[1], k.split("|")[3])
+                for d, ks in keys.items() for k in ks if k.startswith("S|")}
+        lots = run.result["lots"]
+        self.assertEqual(bought, {(lot["entry_day"], lot["symbol"], lot["entry_at"]) for lot in lots})
+        self.assertEqual(sold, {(lot["exit_day"], lot["symbol"], lot["entry_day"]) for lot in lots if lot["exit_day"]})
+        self.assertGreater(len(lots), 3)
+
+
 class NeverASilentReload(WithAStore):
     """A twin whose decides were interrupted writes no row that night, one event, and is tried again the next."""
 
