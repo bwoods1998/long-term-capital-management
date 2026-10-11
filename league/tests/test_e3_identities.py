@@ -365,6 +365,20 @@ class TheDeclaredReceipts(unittest.TestCase):
             self.assertGreater(receipt["window_hours"], release_receipts.READ_AFTER_HOURS)
             self.assertGreater(len(receipt["why"]), 40, "it says why the metric should move")
 
+    def test_the_declarations_reach_the_house(self):
+        # The stall job reads `<release>/DECLARATIONS` on the House box, whose release is made of these trees only
+        # (scripts/floor_box.py `UPLOAD_TREES`; league/updater.py `TREES` for a self-deploy): a declaration kept
+        # anywhere else is never at hand there, and no receipt would ever be declared or read, in silence.
+        from league import updater
+        from league.tests.test_floor_box_equity import FB as floor_box
+
+        tree = DECLARATIONS.split("/")[0]
+        self.assertIn(tree, floor_box.UPLOAD_TREES, f"{DECLARATIONS} is not in a tree the release carries to the House")
+        self.assertIn(tree, updater.TREES)
+        self.assertIn(DECLARATIONS, {path.as_posix() for path in floor_box.code_files()},
+                      "the deploy's own file list holds it")
+        self.assertTrue(ci.guard([DECLARATIONS], None), "and it is behind the wall there")
+
     def test_the_module_that_reads_them_keeps_both(self):
         if not _built(release_receipts.declarations, REPO):
             self.skipTest("league/ops/release_receipts.py is another package's and not built on this tree")

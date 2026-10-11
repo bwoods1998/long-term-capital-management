@@ -141,6 +141,56 @@ JOBS: tuple[Job, ...] = (
         what="the direction lane's report (operator-only): the funnel per lane, the Probe envelope, the DONE meter of the "
              "pinned rule (done_screen, done_all) beside the same-risk buy-and-hold, alarms A1-A9, PL1 and K5, into "
              "<state>/dlane-report.json; the program loss line (A1.3), the lane off too"),
+    # THE FORWARD RECORD (release E3, "record and measure"; league/ops/forward_db.py): six jobs that record clean
+    # evidence and measure it. They move no money, gate nothing, show no generator anything and write no verdict; each
+    # is skipped (a `skipped` receipt) while its switch is off (`elane.forward.mode`, `elane.contam.mode`). The five of
+    # the record read the House's stores read-only and write only <state>/forward.sqlite, the fill minutes and the
+    # report, so they run in a pause too: a forward day not recorded is lost for good. No wall is over an hour (the
+    # grant's hourly grace waits behind the longest).
+    # The registry, hourly at :25 (off the grant's :05, the stall alarm's :20 and :50, the refresh's :35 and the
+    # engineer's :40) and at the House's start: a version's forward window opens at the first close after it was scored,
+    # so it is registered within the hour. Seconds a run; idempotent (each row one transaction with its chain link).
+    Job("forward_register", "league.ops.forward_register", (S.at_start(), S.hourly(25)), grace=70 * MINUTE, cpu=120,
+        wall=300, in_pause=True, owner="E3 forward record",
+        what="the forward registry: every equity version judged on the Train bar (passed or failed), each seed and live "
+             "instance and the skill-free controls, hash-chained with its forward route and alpha; the tags learned "
+             "later and the stop rules; into <state>/forward.sqlite"),
+    # The send-minute 1Min bars, 45 minutes after each close (13:45 ET on a half day) and at the House's start (its
+    # backfill fetches a missed day): two bar requests a session on the free SIP route.
+    Job("fill_minutes", "league.ops.fill_minutes", (S.at_start(), S.session_close(45)), grace=3 * HOUR, cpu=120,
+        wall=300, in_pause=True, owner="E3 forward record",
+        what="the send-minute 1Min bars of the universe (the minutes after the open send and before the close) for the "
+             "live-like price beside each official fill, into <state>/equity-fill-minutes/"),
+    # The nightly recompute, after the daily store (22:30Z: about 18:35 ET until Nov 1, 17:35 ET after); the job itself
+    # never runs inside 09:00-17:30 ET on a session. Its decider child is its own (never the live process's), inherits
+    # this RLIMIT_CPU and the nice, and its preflight makes a child that cannot start a failed job, never a damaged
+    # record. `cpu_seconds_night` (1,800 s of child time) is its own budget inside the 2,700.
+    Job("forward_shadow", "league.ops.forward_shadow", (S.after("equity_data"),), grace=3 * HOUR, cpu=2700, wall=3300,
+        in_pause=True, owner="E3 forward record",
+        what="the forward shadow: every registered program recomputed whole on its own forward days in the job's own "
+             "decider child, the controls beside them, checkpoints at 20, 60, 120 and 250 sessions, the live-like "
+             "re-price and the live twins (recorded, never a verdict)"),
+    # The day's meters and the report file, after the shadow and again 35 minutes before each open (the FW1 read: a
+    # forward day owed and not recorded by 09:00 ET).
+    Job("forward_report", "league.ops.forward_report", (S.after("forward_shadow"), S.session_open(-35)),
+        grace=3 * HOUR, cpu=300, wall=600, in_pause=True, owner="E3 forward record",
+        what="the forward record's meters (clean evidence-years, the replay multiple, the BH/BY meter, the group "
+             "means) and its report with alarms FW1-FW8, into <state>/forward-report.json (operator-only)"),
+    # The morning marks, 25 minutes before each open (after the book's re-fetch of the last decision's bars at open -
+    # 60 and the twins at open - 40): a day whose bars the audit found different leaves the counted days; then the
+    # registry's chain is read whole.
+    Job("forward_audit", "league.ops.forward_audit", (S.session_open(-25),), grace=40 * MINUTE, cpu=120, wall=300,
+        in_pause=True, owner="E3 forward record",
+        what="the forward record's morning marks: a forward day whose bars the morning audit found different is marked "
+             "(it leaves the counted days), and the registry's hash chain is verified"),
+    # The contamination probe, Saturday 00:10Z (Friday evening in New York): the start of the UTC day, the equity
+    # lanes' `usd_day` line still whole. One model route a run, at most `elane.contam.usd_run` dollars ($3), resumable
+    # (a route's answered batches are read again at $0), so never started twice for one occurrence.
+    Job("contam_probe", "league.ops.contam_probe", (S.weekly(5, 0, 10),), grace=6 * HOUR, cpu=300, wall=3300,
+        paid=True, retry=False, owner="E3 contamination",
+        what="the contamination probe: one model route a week asked what it recalls of the eras programs are judged "
+             "on, scored on the House against a permutation by whole period; aggregates only, into "
+             "<state>/contamination.json"),
 )
 
 

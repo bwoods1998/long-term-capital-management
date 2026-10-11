@@ -988,14 +988,21 @@ class TheDoneMeterBesideEquityCloses(EquityFixture):
         self.assertIn("not consistent (A14)", cp["why"])
         self.assertIn("40.0 bp a side", cp["why"])
 
-    def test_inside_the_bound_item_4_is_still_not_read_until_the_intents_half_has_a_reader(self):
+    def test_inside_the_bound_item_4_holds_only_with_the_intents_half_read(self):
+        """RELEASE E3 landed the intents half's reader (league/ops/forward_twins.py `a14_reading`, through
+        `dlane_report.a14_of`). A fill gap inside the bound is half of A14: with no shadow session recorded for these
+        closes the intents are unmeasured, and unmeasured never holds and is never final."""
         cp = self.thirty(live_r=0.020, twin_r=0.021)  # 5 bp a side
         a14 = cp["a14"]
-        self.assertEqual((a14["mean_gap_bp"], a14["fill_gap_ok"], a14["consistent"]), (-5.0, True, None))
-        self.assertEqual((a14["intents"]["agreement"], a14["intents"]["bound"]), (None, 0.95))
-        self.assertEqual((cp["items"]["4"], cp["holds"]), (False, False), "never True on equity closes before A14 is read")
-        self.assertIn("A14 pending", cp["why"])
-        self.assertIn("no reader yet", cp["why"])
+        self.assertEqual((a14["mean_gap_bp"], a14["fill_gap_ok"]), (-5.0, True))
+        self.assertEqual((a14["applies"], a14["holds"], a14["consistent"], a14["final"]), (True, False, False, False))
+        self.assertEqual((cp["items"]["4"], cp["holds"], cp["final"]), (False, False, False), "unmeasured never holds")
+        self.assertIn("A14 (live fills consistent with their replay)", cp["why"])
+        self.assertIn("A14: a twin or a shadow session has not landed", cp["final_why"])
+        # The running figures (never a Done reading) are handed no A14: still not read there.
+        running = self.report()["done"]["all"]["running"]
+        self.assertEqual((running["a14"]["consistent"], running["items"]["4"]), (None, False))
+        self.assertIn("is read at each checkpoint (release E3)", running["why"])
 
     def test_closes_with_no_priced_twin_are_counted_as_unmeasured_never_dropped(self):
         cp = self.thirty(live_r=0.020, twin_r=0.021, status="no_bar")

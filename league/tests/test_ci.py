@@ -280,17 +280,20 @@ class TheEquityLane(unittest.TestCase):
 
     def test_the_tree_and_the_swarm_lane_are_protected(self):
         # E1's four entries are in the gateway's merge list since its follow-up; release E2's five modules (the equity
-        # births, Train bar, route rule, seal and review) wait here for the gateway's next one.
+        # births, Train bar, route rule, seal and review) wait here for the gateway's next one, and with them release
+        # E3's three (the folds, the out-of-fold effects and the memory tables: secrecy rules and a Train-bar input).
         self.assertEqual(ci.PENDING_GATEWAY, ("league/swarm/elane_births.py", "league/swarm/elane_train.py",
                                               "league/swarm/elane_yield.py", "league/swarm/elane_seal.py",
-                                              "league/swarm/elane_review.py"))
+                                              "league/swarm/elane_review.py", "league/swarm/elane_folds.py",
+                                              "league/swarm/elane_effects.py", "league/swarm/elane_memory.py"))
         for entry in ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py", *ci.PENDING_GATEWAY):
             self.assertIn(entry, ci.FORBIDDEN)
         for path in ("league/equity/sizing.py", "league/equity/live.py", "league/equity/INTERFACES.md",
                      "League/Equity/bands.py", "league/swarm/elane.py", "league/xs/child.py", "league/xs/__init__.py",
                      "league/xs/engine.py", "ltcm/broker.py", "league/swarm/elane_births.py",
                      "league/swarm/elane_train.py", "league/swarm/elane_yield.py", "league/swarm/elane_seal.py",
-                     "league/swarm/elane_review.py", "League/Swarm/Elane_Train.py"):
+                     "league/swarm/elane_review.py", "League/Swarm/Elane_Train.py", "league/swarm/elane_folds.py",
+                     "league/swarm/elane_effects.py", "league/swarm/elane_memory.py", "League/Swarm/Elane_Memory.py"):
             self.assertTrue(ci.guard([path], None), path)
             for role in ci.ROLE_PATHS:
                 self.assertTrue(ci.guard([path], role), (path, role))

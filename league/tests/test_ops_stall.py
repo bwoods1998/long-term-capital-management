@@ -580,7 +580,9 @@ class Telling(Base):
         size = db.stat().st_size
         self.run_at()
         after = {p: p.stat().st_mtime_ns for p in self.root.rglob("*") if p.is_file()}
-        self.assertEqual(sorted(set(after) - set(before)), [self.root / ST.STATE_FILE])
+        # Its own state file and, since release E3, the release receipts' own store (league/ops/release_receipts.py: the
+        # running release's declarations, declared the first time the job sees them; listed, never an act).
+        self.assertEqual(sorted(set(after) - set(before)), [self.root / "release-receipts.sqlite", self.root / ST.STATE_FILE])
         self.assertEqual({p: after[p] for p in before if p.name.startswith("swarm.sqlite")},
                          {p: before[p] for p in before if p.name.startswith("swarm.sqlite")})
         self.assertEqual(db.stat().st_size, size)

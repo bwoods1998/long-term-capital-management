@@ -178,9 +178,15 @@ FORBIDDEN: tuple[str, ...] = (
 #: and the equity review and level rule (elane_review.py): selection constants and secrecy rules, like dlane.py. The
 #: updater never self-deploys a change to them from this release on; the gateway's merge route refuses them once its
 #: own follow-up adds the five to MERGE_FORBIDDEN (gateway/ ships separately, as it did for E1).
+#: RELEASE E3: the folds, the out-of-fold effects and the memory tables: secrecy rules and a Train-bar input
+#: (league/swarm/elane_folds.py assigns a family's hidden Train year and cuts its seen spans, so it decides what the
+#: Train bar reads; elane_effects.py and elane_memory.py make and keep the hidden year's sealed tables, which no
+#: generator may read). They ride here with E2's five until the same gateway follow-up; release E3's other files are
+#: already behind the wall (league/ops/, docs/benchmarks/, league/swarm/policy.json).
 PENDING_GATEWAY: tuple[str, ...] = (
     "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
     "league/swarm/elane_seal.py", "league/swarm/elane_review.py",
+    "league/swarm/elane_folds.py", "league/swarm/elane_effects.py", "league/swarm/elane_memory.py",
 )
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:

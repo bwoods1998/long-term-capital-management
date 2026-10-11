@@ -1662,8 +1662,8 @@ class TheReportShowsOnlyWhatItMay(Fixture):
             "sail:fake_a": {"at": S.iso(self.now - 50 * 86400), "probes": 1, "idle": 3, "cells": {}}}})
         (self.root / "swarm.json").write_text(json.dumps(RECORD))
         self.release = self.base / "release"
-        (self.release / "docs" / "benchmarks").mkdir(parents=True)
-        (self.release / "docs" / "benchmarks" / "release_receipts.json").write_text(json.dumps({"schema": 1, "receipts": []}))
+        (self.release / RR.DECLARATIONS).parent.mkdir(parents=True)
+        (self.release / RR.DECLARATIONS).write_text(json.dumps({"schema": 1, "receipts": []}))
         return Context("forward_report", root=self.root, due_at=self.now, base=self.base, release=self.release, config={},
                        clock=lambda: self.now)
 

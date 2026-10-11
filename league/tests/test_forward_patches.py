@@ -103,7 +103,7 @@ changes no setting, starts and stops nothing. It runs in a maintenance pause too
 `clock`), so a pause left on is itself reported.
 
 RELEASE RECEIPTS (release E3; league/ops/release_receipts.py `step`): each run declares the running release's receipts
-(`docs/benchmarks/release_receipts.json`: the funnel metric a deploy expects to move) the first time it sees them and
+(`league/ops/release_receipts.json`: the funnel metric a deploy expects to move) the first time it sees them and
 reads each back once its window has closed, into `<state>/release-receipts.sqlite`; the run's receipt carries what it
 declared, read and could not (`receipts`). Listed, never reverted; no cause of `CAUSES`; a failure there is an entry of
 `receipts.errors` and the stall alarm goes on.
@@ -615,7 +615,7 @@ class TheStallJobReadsTheReceipts(unittest.TestCase):
         self.addCleanup(self.case.doCleanups)
         self.case.healthy()
         self.release = self.case.base / "releases" / "20261012-2000-e3"
-        (self.release / "docs" / "benchmarks").mkdir(parents=True)
+        (self.release / release_receipts.DECLARATIONS).parent.mkdir(parents=True)
 
     def declare(self, *receipts) -> None:
         (self.release / release_receipts.DECLARATIONS).write_text(json.dumps({"schema": 1, "receipts": list(receipts)}))

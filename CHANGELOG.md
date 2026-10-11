@@ -29,6 +29,37 @@ any other deploy.
 The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
 Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
 
+### Release E3, record and measure: the forward record, the fill measurements, the hidden year and the contamination probe, on `feat/equity-e3` (unreleased; an owner deploy with or after E2; no identity moves; records only)
+
+- **What it adds** (`league/ops/E3_INTERFACES.md`): a hash-chained registry of every equity version judged on the Train
+  bar, passed or failed, with each seed, each live instance and 50 skill-free controls a universe group
+  (`<state>/forward.sqlite`, append-only); a nightly recompute of each on its own forward days in the job's own
+  decider child, with checkpoints at 20, 60, 120 and 250 sessions; the send-minute bars, the live-like re-price and
+  the fill gap of every closed live lot; live and shadow intents compared session by session; one hidden Train year a
+  new family, its out-of-fold run kept in sealed tables; a weekly contamination probe of the model routes; release
+  receipts read back after a deploy; and the report (`<state>/forward-report.json`, a `forward_record` section and
+  alarms in the `dlane` report, counts in the funnel).
+- **It records and measures only.** No money moves, nothing is gated, no generator is shown anything new and no
+  forward verdict is written. Forward days begin the session after the look cap (2026-10-12).
+- **Pre-registered:** every program row carries its forward route and alpha (S2, 0.03) inside the hash chain and the
+  forward screen's shape is pinned in the store at its creation, so no rule can be chosen after the outcomes it judges.
+- **Two readings change, both stated.** Done's "live fills consistent with their replay" (A14) is computed: the size of
+  the mean fill gap within 15 bp a side, either way, and the intents agreeing on 95% of the counted sessions; unmeasured,
+  it does not hold (a tightening). A family born with a hidden year is judged on six Train years, not seven, each
+  stretch its own run (a loosening of the Train bar; the share screen's false-positive rate per program is unchanged).
+- **Six House jobs** (`league/ops/registry.py`): `forward_register` (hourly), `fill_minutes`, `forward_shadow`,
+  `forward_report`, `forward_audit` (all five run in a pause) and `contam_probe` (Saturdays, paid, at most $3 a run).
+- **Switches:** policy.json ships `elane.forward.mode`, `elane.memory.mode` and `elane.contam.mode` at "record"
+  (an unrecorded forward day is lost for good); swarm.json "off" is the rollback of each. With the forward mode off
+  A14 is unmeasured, so no Done checkpoint holding an equity close can hold; a family already born with a hidden year
+  keeps it whatever the memory mode.
+- **No identity moves:** nothing under `league/live/`, `league/gym/`, `league/equity/` or `league/constitution.py`
+  changes, no decider kind is added and nothing of E3 enters the equity evidence's import closure. The three new swarm
+  modules join `league/ci.py` `PENDING_GATEWAY` (a gateway follow-up).
+- Operations: [docs/operations.md](docs/operations.md), "The forward record" (what is recorded, the switches and what
+  each does not reach, A14 as coded, the hidden year, the stop rules and their undo, the alarms, the facts to verify
+  on the House).
+
 ### Release E2, integrated on E1: the swarm breeds share programs for the BETA and EQUITY lanes, on `feat/equity-e2-int` (unreleased; an owner deploy with or after E1; no identity moves; ships switched off)
 
 - **What it adds** (`league/swarm/ELANE_E2.md`): the architect's equity pass (families with their first program, on

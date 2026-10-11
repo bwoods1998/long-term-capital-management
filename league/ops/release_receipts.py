@@ -4,8 +4,10 @@ Owner: C (league/ops/E3_INTERFACES.md). Protected. A release declares what it ex
 metric back and lists the verdict. Listed, never reverted: a receipt changes no setting and rolls nothing back.
 
 A DECLARATION is an object {"id", "release", "metric", "direction": "up" | "down", "min_delta", "window_hours",
-"why"} in `<release>/docs/benchmarks/release_receipts.json` (`DECLARATIONS`: {"schema": 1, "receipts": [...]};
-protected, rule-level; `window_hours` is `READ_AFTER_HOURS` when left out). `metric` is a dotted path into
+"why"} in `<release>/league/ops/release_receipts.json` (`DECLARATIONS`: {"schema": 1, "receipts": [...]};
+protected, rule-level; under league/, because the House box's release carries league/, ltcm/, playbooks/, scripts/
+and deploy/ only (scripts/floor_box.py `UPLOAD_TREES`): a file under docs/ is never at hand there; `window_hours` is
+`READ_AFTER_HOURS` when left out). `metric` is a dotted path into
 `funnel.window(root, start, end)` that resolves to a number (`metric`).
 
 THE READ (`step`, called by league/ops/stall.py `run`, which is read-only on the swarm store; the receipts live in
@@ -47,7 +49,7 @@ from typing import Any, Mapping
 
 DB = "release-receipts.sqlite"
 #: Where a release declares its receipts, relative to the release directory.
-DECLARATIONS = "docs/benchmarks/release_receipts.json"
+DECLARATIONS = "league/ops/release_receipts.json"
 #: A declaration's default window in hours.
 READ_AFTER_HOURS = 72
 #: A receipt still unread this many hours after its window closed is `unread`.
@@ -128,7 +130,7 @@ def _read(release_dir: str | Path | None) -> tuple[list[dict[str, Any]], list[st
 
 
 def declarations(release_dir: str | Path) -> list[dict[str, Any]]:
-    """The declarations of `<release_dir>/docs/benchmarks/release_receipts.json`, each with its `window_hours`. A
+    """The declarations of `<release_dir>/league/ops/release_receipts.json`, each with its `window_hours`. A
     malformed entry is dropped and named (`step` lists it in its `errors` and never declares it). [] when the file is
     absent or unreadable."""
     return _read(release_dir)[0]
