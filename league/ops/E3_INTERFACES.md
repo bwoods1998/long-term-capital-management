@@ -174,6 +174,27 @@ Every existing name the spec calls was checked against 5a6906ff. Signatures matc
 13. **Two run shas.** `fwd_registry.run_sha` and `eq_instances.run_sha` are both the swarm's `gate.run_sha(version)`
     (the code sha with the version's params), which is what D compares. E1's `EquityProgram.run_sha` (the code sha
     with the MERGED params) is another value: never compare the two.
+14. **Which bars the morning audit found different (B; measured on E1's own book).** E1's `_audit` writes "mismatch"
+    on EVERY `eq_bars` row of the decision's day when any one symbol differs, and that evening's fetch sets a row
+    whose values changed (the symbol that did differ) back to unaudited. The book's kv `eq_bars_audit` ({day:
+    {"symbols", "at"}}, its last 30 failed audits) names the symbols that differed. `forward_audit` marks a day
+    the note names for THOSE symbols and reads the rows only for a day the note does not name, so a program whose
+    bars were right keeps its day and a morning that was missed is made up later.
+15. **A label that returns (B).** Every reader takes the newest engine id (`forward_db.engine_now`) as the current
+    series. A label that already has a row which is not the newest (a rollback of an evidence module) would be
+    written under its old id while every meter read a series nobody writes. The shadow opens a NEW series for it,
+    `<label>~<the id it follows>` in `fwd_engines`, with one `engine_moved` event: tonight's engine id is always
+    `engine_now`, and `engine_label` of such an id carries the suffix.
+16. **`fwd_runs.programs` (B)** counts the programs whose run completed THAT NIGHT, whichever start of the job ran
+    them (the DDL's comment), as `run_failed`'s `completed` does; `sessions`, `errors`, `stale` and `seconds` are the
+    start's own. A second start of a night therefore never writes `programs` 0 beside a `run_failed` event.
+17. **The shadow's receipt and its one warning (B).** Beside the spec's keys the receipt holds `finals`, `register`
+    (the sync's counts) and `house`: the programs left without rows by a failure of the House's own (in `errors`);
+    `controls` holds `checks`, `restated`, `errors` and `data_failed` too. The job raises ONE `ctx.alert("warning")`
+    a night for what leaves no event (`forward_shadow.house_failures`): `house`, the controls left without rows by
+    anything but the data, and each step that raised (the sync, the controls, the final checkpoints, the twins).
+    A `restated` event is one a program and cause (section 3): FW3 counts restatements, and their days are the
+    payloads' `days`; `"bars": "moved"` is the routine ex-day one, `"same"` the one worth a warning.
 
 Readings step 0 fixed where the spec was silent (each is in its stub's docstring): `forward_db.events(..., since=)`
 takes an epoch and returns the rows with `at >= since`, each a dict with its `payload` parsed; `tags` lists each
