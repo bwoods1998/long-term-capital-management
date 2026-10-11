@@ -298,17 +298,21 @@ def append_only(old: Sequence[tuple], new: Sequence[tuple], known_through: dt.da
         return spell[2] is not None and spell[2] <= first
 
     problems: list[str] = []
-    closed: set[tuple] = set()
+    read: set[tuple] = set()  # the new file's spells the first pass has judged
     for ticker, start, end in sorted(was - now, key=lambda s: (s[0], s[1])):
         if dead((ticker, start, end)):
             continue
-        later = ends.get((ticker, start))
-        if end is None and later is not None and later > known_through:
-            closed.add((ticker, start, later))
-            continue
-        problems.append(f"{ticker}: {'an open' if end is None else 'an ended'} spell of the old pin is gone or changed")
+        if (ticker, start) in ends:
+            later = ends[(ticker, start)]
+            read.add((ticker, start, later))
+            if end is None and later is not None and later > known_through:
+                continue  # an open spell ended after the old pin's last date: the file grown
+            problems.append(f"{ticker}: {'an open' if end is None else 'an ended'} spell of the old pin has another "
+                            "end")
+        else:
+            problems.append(f"{ticker}: {'an open' if end is None else 'an ended'} spell of the old pin is gone")
     for ticker, start, end in sorted(now - was, key=lambda s: (s[0], s[1])):
-        if (ticker, start, end) in closed or dead((ticker, start, end)) or start > known_through:
+        if (ticker, start, end) in read or dead((ticker, start, end)) or start > known_through:
             continue
         problems.append(f"{ticker}: a spell the old pin does not have starts on or before its last date")
     return problems
@@ -1331,6 +1335,14 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
                 candidate = (newest, new_text, parse_spells(new_text))
             except ValueError as exc:
                 pin["refused"] = f"the newer file could not be read: {str(exc)[:120]}"
+            if candidate is not None:
+                grown = append_only(filed, candidate[2], known_through(filed))
+                if grown:  # refused before anything is asked of the venue for it
+                    candidate = None
+                    pin["refused"] = f"the newer file is not the old one grown ({len(grown)} differences)"
+            if pin.get("refused"):
+                ctx.alert("warning", f"equity_universe: the source's newer commit is not adopted ({pin['refused']}); "
+                                     "the old pin stays")
     venue_cache: dict[str, Any] = {}
     counts = {"venue_asked": 0, "venue_failed": 0}
     wiki_cache: dict[dt.date, dict[str, Any]] = {}
@@ -1380,9 +1392,8 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
             else:
                 failed_checks = [n for n, c in trial["audit"]["checks"].items() if not c["passed"]]
                 pin["refused"] = f"the audit failed on the newer file ({', '.join(failed_checks)})"
-        if candidate is not None and built is None:
-            ctx.alert("warning", f"equity_universe: the source's newer commit is not adopted ({pin['refused']}); the "
-                                 "old pin stays")
+                ctx.alert("warning", f"equity_universe: the source's newer commit is not adopted ({pin['refused']}); "
+                                     "the old pin stays")
         if built is None:
             built = attempt(commit, text, filed, None)
     except Exception as exc:  # noqa: BLE001 - a gateway error mid-way writes nothing (joins.json keeps its answers)
