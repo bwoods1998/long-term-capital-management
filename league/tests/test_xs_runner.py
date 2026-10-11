@@ -305,6 +305,14 @@ class TheChildsOps(fx.EngineCase):
         self.assertTrue(answer["fine"]["error"].startswith("ctx: "))
         self.assertEqual((answer["fine2"]["failed"], answer["fine2"]["hold"]), (False, False),
                          "one job's inputs never cost the batch")
+        # a held lot whose column is no member column of the decision: the parent's fault, on a hold day too
+        stray = [{"lid": 1, "col": 3, "qty": 1.0, "value": 200.0, "entry_value": 200.0, "held_sessions": 2,
+                  "at": "open", "tag": ""}]
+        for called in (True, False):
+            row = self.ask("decide", {"jobs": [{"key": "fine", "inputs": self.inputs(40, stray), "called": called,
+                                               "standing": {"target": {"1": 0.2}, "at": "open"}}]})["results"]["fine"]
+            self.assertEqual((row["failed"], row["orders"]), (True, []), called)
+            self.assertIn("no member column", row["error"])
 
     def test_run_answers_the_whole_record_and_raises_its_niceness_once(self):
         seen = []

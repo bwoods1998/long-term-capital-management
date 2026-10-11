@@ -77,6 +77,15 @@ def _why_failed(stats: Mapping[str, Any]) -> str:
     return str(why or "its decide raised or ran past its limit")[:300]
 
 
+def _slot(ids: list[int], ref: int, col: Any) -> int:
+    """The salted id of a held lot's column (a name that left the index keeps its column and its id); ValueError for
+    a column that is no member column of the decision (the parent's fault: that job answers an error)."""
+    at = int(col) - ref
+    if not 0 <= at < len(ids):
+        raise ValueError(f"a held lot's column {col!r} is no member column of the decision")
+    return ids[at]
+
+
 def _blank(called: bool) -> dict[str, Any]:
     return {"hold": True, "target": None, "at": None, "orders": [], "rejects": [], "ineligible": [], "stats": None,
             "ctx_sha": None, "failed": False, "called": bool(called), "standing": False}
@@ -102,7 +111,7 @@ def _decide(payload: Mapping[str, Any], runners: Mapping[str, Any]) -> dict[str,
             derived = C.derive(inputs)
             row["ineligible"] = [int(lid) for lid in C.ineligible(inputs, derived)]
             ids, ref = [int(i) for i in inputs.ids], int(inputs.ref)
-            lots = [{"lid": int(p["lid"]), "id": ids[int(p["col"]) - ref], "pending": False}
+            lots = [{"lid": int(p["lid"]), "id": _slot(ids, ref, p["col"]), "pending": False}
                     for p in inputs.positions]
             budget = float(inputs.budget)
             ctx = ctx_sha = None
