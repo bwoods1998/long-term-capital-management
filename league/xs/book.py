@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS eq_rebalances (
     budget TEXT,                        -- the sleeve budget the decision's ctx carried (a buy's weight = usd / budget)
     extra TEXT NOT NULL DEFAULT '[]',   -- JSON [symbol]: the columns beside REF and the day's members (lots held or
                                         -- closed that day whose name is no member): what rebuilds the decision's columns
-    ctx_sha TEXT, bars_sha TEXT, fetch TEXT NOT NULL DEFAULT '{}',   -- {calls, seconds, symbols, missing, late}
+    ctx_sha TEXT, bars_sha TEXT, fetch TEXT NOT NULL DEFAULT '{}',   -- {calls, seconds, symbols, missing, late, dropped}
     audit TEXT,                         -- NULL | ok | mismatch | unread (the 08:30 re-read)
     status TEXT NOT NULL,               -- planned | hold | failed | late
     why TEXT, created_at REAL NOT NULL,
@@ -170,7 +170,8 @@ class Columns:
 @dataclass(frozen=True)
 class Fetched:
     """A day's fetch as arrays in a `Columns`' order: `days` int32 (n,) (the 253 sessions through the day), `raw`
-    float64 (n, m, 5), `all` float64 (n, m, 4), `meta` {calls, seconds, symbols, missing, late, fetched_at}."""
+    float64 (n, m, 5), `all` float64 (n, m, 4), `meta` {calls, seconds, symbols, missing, late, dropped (rows the
+    venue served on a day that is no session or with a field that is no number: `ctx.rows_to_arrays`), fetched_at}."""
 
     days: np.ndarray
     raw: np.ndarray
@@ -327,7 +328,8 @@ def fetch(market: Any, cols: Columns | Sequence[str], day: dt.date, *, progress:
     `FETCH_CHUNK` symbols, each chunk turned into numpy (`ctx.rows_to_arrays`) and its dicts dropped before the next
     is asked for. It keeps its place in `progress` between calls and makes at most `FETCH_TICK_S` seconds of calls a
     call (always one chunk): None while unfinished. A call that raises keeps its place: the next call asks the same
-    chunk again."""
+    chunk again. (So `progress` is filled before the first call is made: a caller tells "still being read" from
+    "could not be read" by whether the call RETURNED None, never by `progress` alone.)"""
     day = _day(day)
     symbols = tuple(str(s) for s in getattr(cols, "symbols", cols))
     clock = now or time.time
@@ -336,7 +338,7 @@ def fetch(market: Any, cols: Columns | Sequence[str], day: dt.date, *, progress:
     if state.get("key") != key:
         sessions = sessions_through(day)
         state.clear()
-        state.update(key=key, next=0, calls=0, seconds=0.0, start=sessions[0].isoformat(),
+        state.update(key=key, next=0, calls=0, seconds=0.0, dropped=0, start=sessions[0].isoformat(),
                      end=(day + dt.timedelta(days=1)).isoformat(),
                      days=np.array([ES.ordinal(d) for d in sessions], dtype=np.int32),
                      raw=np.full((len(sessions), len(symbols), 5), np.nan, dtype=np.float64),
@@ -352,14 +354,14 @@ def fetch(market: Any, cols: Columns | Sequence[str], day: dt.date, *, progress:
         t0 = clock()
         raw_rows = market.bars(chunk, timeframe="1Day", start=state["start"], end=state["end"], adjustment="raw")
         all_rows = market.bars(chunk, timeframe="1Day", start=state["start"], end=state["end"], adjustment="all")
-        days, raw, adj = X.rows_to_arrays(raw_rows or {}, all_rows or {}, day=day, columns=chunk)
+        days, raw, adj = X.rows_to_arrays(raw_rows or {}, all_rows or {}, day=day, columns=chunk, count=state)
         del raw_rows, all_rows
         _place(state, at, np.asarray(days), np.asarray(raw, dtype=np.float64), np.asarray(adj, dtype=np.float64))
         state["calls"] += 2
         state["seconds"] += max(0.0, clock() - t0)
         state["next"] = at + len(chunk)
     meta = {"calls": int(state["calls"]), "seconds": round(float(state["seconds"]), 3), "symbols": len(symbols),
-            "missing": None, "late": False, "fetched_at": float(clock())}
+            "missing": None, "late": False, "dropped": int(state.get("dropped") or 0), "fetched_at": float(clock())}
     return Fetched(days=state["days"], raw=state["raw"], all=state["all"], meta=meta)
 
 
@@ -791,7 +793,7 @@ def rebalance_row(*, instance: str, family: str, version: int, decided_day: str,
             "equity": money(equity), "budget": money(budget),
             "extra": json.dumps(list(cols.extra) if cols is not None else [], separators=(",", ":")),
             "ctx_sha": ctx_sha, "bars_sha": bars_sha,
-            "fetch": json.dumps({k: fetch[k] for k in ("calls", "seconds", "symbols", "missing", "late", "sha")
+            "fetch": json.dumps({k: fetch[k] for k in ("calls", "seconds", "symbols", "missing", "late", "dropped", "sha")
                                  if k in fetch}, separators=(",", ":"), default=str),
             "status": status, "why": None if why is None else str(why)[:400], "created_at": float(now)}
 

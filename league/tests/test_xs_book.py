@@ -96,7 +96,16 @@ def ids_for(aids, key, *, table):
     return np.array([given[int(a)] for a in aids], dtype=np.int32)
 
 
-def rows_to_arrays(raw_rows, all_rows, *, day, columns):
+def rows_to_arrays_counting(raw_rows, all_rows, *, day, columns, count=None):
+    """`rows_to_arrays` below with the real one's count of the rows on a day that is no session (a weekend's)."""
+    weekend = [r for rows in raw_rows.values() for r in rows if dt.date.fromisoformat(r["t"][:10]).weekday() > 4]
+    if count is not None:
+        count["dropped"] = int(count.get("dropped") or 0) + len(weekend)
+    keep = {s: [r for r in rows if r not in weekend] for s, rows in raw_rows.items()}
+    return rows_to_arrays(keep, all_rows, day=day, columns=columns)
+
+
+def rows_to_arrays(raw_rows, all_rows, *, day, columns, count=None):
     """The venue's rows as arrays over the sessions the chunk itself carries (never the whole window: the adapter
     places a chunk by session)."""
     days = sorted({r["t"][:10] for rows in raw_rows.values() for r in rows if r["t"][:10] <= day.isoformat()})

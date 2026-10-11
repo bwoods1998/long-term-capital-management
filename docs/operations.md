@@ -103,8 +103,13 @@ planned again at each following close until the next called decision, in the Gym
 - **The nightly I6** (`equity_panel`, after the bars): the last session's 253-session window read again from the
   venue and compared with the store, column by column. `i6.equal` is the BARS' verdict within the vendor's cents
   (sessions and raw prices exact; adjusted prices within `rounding_bound`; a volume that went on counting is a
-  note), and it also says, for each live panel decision of that day, whether the bars it read (the kept file) are
-  the store's by the book's own rule. `i6.bytes_equal` rides beside it: whether the two ctx are the same bytes, which
+  note), and it also says, for each live panel decision of that day that read bars, whether the bars it read (the
+  kept file) are the store's by the book's own rule, over the columns it had. **It is False on a price that differs
+  and on nothing the live book itself tolerates**, each of these a count beside it and a warning: `late` (a bar
+  served after the 16:20 fetch, which the book decided without and its own morning audit calls a note), `absent` (a
+  member tonight's universe run added or dropped as of the day, after the decision's columns were built), and a
+  decision with no kept fetch to be held to (its `live` entry is null: unread, never False). A failed decide that
+  read no bars is no row of the I6 at all. `i6.bytes_equal` rides beside it: whether the two ctx are the same bytes, which
   a restatement between the store's vintage and the fetch can break while the bars still agree. The lane's readiness
   reads `equal`.
 - **The vendor's cents are one bound for both lanes:** `league.xs.config.rounding_bound` IS E1's
@@ -190,8 +195,14 @@ decision session) and `eq_instances.kind`.
 **A session of a live panel program.** From 16:20 ET the chunked fetch of the day's columns (about 28 gateway calls
 over two or three ticks; only while a panel program is live), kept as that day's file; at 16:30 the decide in the
 live process's decider (no program code on a hold day; the eligibility of every held name is read every day); at
-08:30 the bars are read again and compared with the kept file (a price that differs cancels that decision's planned
-buys); next session E1's own windows send the intents, sells first. Every buy goes through E1's sizing as a stock:
+08:30 the bars are read again and compared with the kept file (a price that differs VOIDS that decision whole: its
+planned buys and its program's own planned sells are cancelled together, so the book is never left selling a name at
+one open that the standing target of the decision before buys back at the next; the House's own exits stand); next
+session E1's own windows send the intents, sells first. A 16:20 fetch that RAISES (the bars route down, a chunk the
+House refuses) is read again each minute inside the half-hour grace and is then a decide the House could not make:
+one failed decide on a rebalance day, the hold day's alarm on a hold day, asked again every ten minutes and never
+after the pre-open. A row the venue serves on a day that is no session, or with a field that is no number, is dropped
+and counted (a warning), as the nightly job reads the same answer. Every buy goes through E1's sizing as a stock:
 at most 20% of the sleeve and of equity, the invested cap, the House's cash rule, **the shared loss budget with a
 stock weighing 0.40**, the $10 minimum. Every wall of E1 holds: long only, cash only, the kill switch and the stops,
 never a forced or hand-placed trade. For a panel program a HOLD-day fetch failure of a held name is an alarm and

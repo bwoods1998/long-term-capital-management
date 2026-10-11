@@ -858,6 +858,83 @@ class TheLateBar(PanelCase):
         self.assertEqual(json.loads(h.rebalance(MONDAY)["fetch"])["missing"], 2)
         self.assertEqual(h.panel_intents(), [])
 
+    def test_a_fetch_that_raises_is_not_being_read_it_fails_the_decide_once_and_is_asked_every_ten_minutes(self):
+        """`adapter.fetch` fills its `progress` before its first call, and `_panel_bars` took a filled `progress` for
+        a fetch in progress: a bars route answering 5xx waited for ever, counted no failed decide, said nothing, and
+        was asked every minute through the next session."""
+        h = self.h
+        h.market.tape.absent = set()
+        h.state.execute("UPDATE eq_instances SET last_decided_day=NULL")
+        h.state.execute("DELETE FROM eq_rebalances WHERE decided_day=?", (FRIDAY.isoformat(),))
+        h.state.put("eq_decide", {"day": THURSDAY.isoformat(), "status": "done"})
+        h.book._panel = {}
+        h.plan(["N000", "N001", "N002", "N003", "N010"])              # Friday is a called day
+        real, asked = h.market.bars, []
+
+        def bars(symbols, **kw):
+            if len(symbols) > 12:                                     # the panel's chunk (the book's own read is the lots')
+                asked.append(h.clock())
+                raise RuntimeError("HTTP 503 from the gateway")
+            return real(symbols, **kw)
+
+        h.market.bars = bars
+        out = h.decide(FRIDAY, minutes=(20, 21, 30, 45, 59))
+        self.assertEqual(len(asked), 5, "inside the grace it is read again each minute")
+        self.assertEqual(out["panel_bars"], "reading the panel's bars")
+        self.assertEqual((h.instance_now().failed_decides, h.rebalance(FRIDAY)), (0, None))
+        h.tick(17, 1, day=FRIDAY)                                     # the grace is over: the House could not ask
+        inst = h.instance_now()
+        self.assertEqual((inst.failed_decides, inst.last_decided_day), (1, None), "one failed decide on a called day")
+        self.assertIn("could not be read: RuntimeError: HTTP 503", inst.why)
+        row = h.rebalance(FRIDAY)
+        self.assertEqual((row["status"], row["called"], row["bars_sha"]), ("failed", 1, None))
+        self.assertEqual([level for level, _ in h.said(f"the decide of {FRIDAY.isoformat()} failed for {KEY}")], ["warning"])
+        self.assertEqual(h.state.get("eq_decide")["instances"], [], "the day's decision is recorded without it")
+        tries = len(asked)
+        h.run(FRIDAY, (17, 2), (17, 3), (17, 6), (17, 10))
+        self.assertEqual(len(asked), tries, "then asked again every ten minutes, not every minute")
+        h.run(FRIDAY, (17, 11), (17, 12), (17, 13), (17, 21), (17, 23))
+        self.assertEqual(len(asked), tries + 2)
+        self.assertEqual(h.instance_now().failed_decides, 1, "counted once a session")
+        self.assertEqual(len(h.said(f"the decide of {FRIDAY.isoformat()} failed for {KEY}")), 1, "and said once")
+        tries = len(asked)
+        h.run(MONDAY, (9, 26), (9, 31), (9, 32), (9, 40), (11, 0), (13, 0), (15, 30))
+        self.assertEqual(len(asked), tries, "and never after the pre-open: the open window's minutes are the orders'")
+        self.assertEqual(h.instance_now().failed_decides, 1)
+
+    def test_a_fetch_that_raises_on_a_hold_day_is_the_hold_days_alarm(self):
+        h = self.h
+        h.market.tape.absent = set()
+        real = h.market.bars
+        h.market.bars = lambda symbols, **kw: (_ for _ in ()).throw(RuntimeError("boom")) if len(symbols) > 12 \
+            else real(symbols, **kw)
+        h.decide(MONDAY, minutes=(20, 30, 59))
+        h.tick(17, 1, day=MONDAY)
+        self.assertEqual(h.instance_now().failed_decides, 0, "A17: a hold day counts toward no exit")
+        self.assertEqual([level for level, _ in h.said("could not be asked on the hold day")], ["warning"])
+        self.assertEqual(h.rebalance(MONDAY)["status"], "failed")
+        h.market.bars = real
+        h.run(MONDAY, (17, 2), (17, 11), (17, 12))                    # the route answers: the same close is decided
+        self.assertEqual(h.rebalance(MONDAY)["status"], "hold")
+        self.assertEqual(h.state.get("eq_decide")["instances"], [KEY])
+
+    def test_a_row_the_venue_serves_on_no_session_is_dropped_counted_and_said(self):
+        h = self.h
+        h.market.tape.absent = set()
+        real = h.market.bars
+
+        def bars(symbols, **kw):
+            rows = real(symbols, **kw)
+            if "N020" in rows and kw.get("adjustment") == "raw":
+                rows["N020"] = [*rows["N020"], {**rows["N020"][-1], "t": "2026-10-10T04:00:00Z"}]   # a Saturday
+            return rows
+
+        h.market.bars = bars
+        with mock.patch.object(adapter.X, "rows_to_arrays", wraps=XB.rows_to_arrays_counting):
+            h.decide(MONDAY)
+        self.assertEqual(json.loads(h.rebalance(MONDAY)["fetch"])["dropped"], 1)
+        self.assertEqual([level for level, _ in h.said("dropped 1 rows")], ["warning"])
+
     def test_three_missing_names_fail_a_called_decide_once_and_the_seating_pass_asks_again(self):
         h = self.h
         h.state.put("eq_decide", {"day": THURSDAY.isoformat(), "status": "done"})
@@ -952,6 +1029,18 @@ class TheMismatchCancels(PanelCase):
         self.assertEqual(h.instance_now().failed_decides, 1)
         self.assertIsNone(adapter.standing(h.book._rebalances(KEY), self.cols(), h.book._lots(instance=KEY), TUESDAY))
 
+    def test_the_houses_own_exits_of_a_void_decision_stand(self):
+        h = self.h                                                    # (setUp: a hold day's row with an ineligible exit)
+        lot = h.book._lots(instance=KEY)[0]
+        h.book._plan_exit(lot, exec_day=TUESDAY.isoformat(), at="open", reason="max_hold", why="a test's",
+                          decided_day=MONDAY.isoformat())
+        h.market.tape.moved = {("N020", "2026-09-15"): 7.77}
+        h.tick(8, 31, day=TUESDAY)
+        got = {(i.kind, i.symbol, i.tag): i.status for i in h.panel_intents()}
+        self.assertEqual(got[("house_exit", lot.symbol, "max_hold")], "planned")
+        self.assertEqual(got[("house_exit", "N003", "ineligible")], "planned")
+        self.assertEqual(got[("buy", "N010", "xs")], "canceled")
+
     def sha(self) -> str:
         kept = adapter.kept(self.root / STORE_DIR, MONDAY)
         return json.dumps(adapter.bars_sha(kept[1], kept[0]))
@@ -988,6 +1077,37 @@ class TheMismatchCancels(PanelCase):
             out = h.tick(8, 31, day=TUESDAY)
         self.assertTrue([e for e in out["errors"] if e.startswith("panel audit")], "its trouble is said")
         self.assertEqual((h.state.get("eq_decision") or {}).get("audit"), "ok", "and the book's own audit goes on")
+
+
+class AMismatchedRebalanceIsVoidWhole(PanelCase):
+    """B11 on a REBALANCE day (the review's live-3): the decision's buys AND its program's own sells are cancelled."""
+
+    def test_a_called_decision_that_differs_is_void_whole_its_sells_are_cancelled_with_its_buys(self):
+        """Friday's called decision holds N000-N004 and plans: sell N004, buy N010. Monday 08:31 a member's old bar
+        reads differently. With the buy cancelled and the sell left to go, N004 was sold at Monday's open and, the
+        mismatched row never standing, Thursday's standing target (which still names N004) bought it back on Tuesday."""
+        h = self.h
+        self.basket()
+        h.planned(THURSDAY, ["N000", "N001", "N002", "N003", "N004"])
+        h.plan(["N000", "N001", "N002", "N003", "N010"])
+        h.decide(FRIDAY)
+        mine = lambda **kw: sorted((i.kind, i.symbol, i.status) for i in h.panel_intents(**kw))  # noqa: E731
+        self.assertEqual((mine(), h.rebalance(FRIDAY)["status"]),
+                         ([("buy", "N010", "planned"), ("sell", "N004", "planned")], "planned"))
+        h.market.tape.moved = {("N020", "2026-09-15"): 7.77}
+        h.tick(8, 31, day=MONDAY)
+        self.assertEqual(h.rebalance(FRIDAY)["audit"], "mismatch")
+        self.assertEqual(mine(), [("buy", "N010", "canceled"), ("sell", "N004", "canceled")], "the decision is void, whole")
+        self.assertEqual(h.instance_now().failed_decides, 1)
+        self.assertIn("its program's own sells with them", h.said("read differ when read again")[0][1])
+        h.market.tape.moved = {}
+        h.run(MONDAY, (9, 26), (9, 31), (9, 32), (9, 33), (9, 34), (9, 46))
+        self.assertEqual((h.venue.sent, h.held()), ([], ["N000", "N001", "N002", "N003", "N004"]), "nothing is traded on it")
+        h.decide(MONDAY)                                              # a hold day: Thursday's target stands, all held
+        self.assertEqual((mine(decided_day=MONDAY.isoformat()), h.rebalance(MONDAY)["standing"]), ([], 0))
+        h.run(TUESDAY, (8, 31), (9, 26), (9, 31), (9, 32), (9, 33))
+        self.assertEqual((h.venue.sent, h.held()), ([], ["N000", "N001", "N002", "N003", "N004"]),
+                         "no name is sold at one open and bought back at the next")
 
 
 # ------------------------------------------------------------------------------------------------------------- B15

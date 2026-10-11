@@ -931,7 +931,7 @@ class TheInputs(Panel):
         _, again, _ = ctx.rows_to_arrays(rows, case["all_rows"], day=day, columns=[columns[0], "NOSUCH"])
         self.assertTrue(np.array_equal(again[:, 0], raw[:, 0], equal_nan=True) and np.isnan(again[:, 1]).all())
 
-    def test_rows_that_cannot_be_placed_are_refused(self):
+    def test_rows_that_cannot_be_placed_are_refused_or_dropped_and_counted(self):
         case = synth.same_ctx_cases(self.root, history=20, count=1, seed=1)[0]
         day, symbol = case["day"], case["columns"][0]
         rows = case["raw_rows"][symbol]
@@ -940,12 +940,30 @@ class TheInputs(Panel):
         self.assertIn("twice", str(caught.exception))
         saturday = day - dt.timedelta(days=(day.weekday() + 2) % 7 or 7)
         self.assertEqual(saturday.weekday(), 5)
-        weekend = {**rows[-1], "t": synth._stamp(saturday)}
-        with self.assertRaises(ValueError) as caught:
-            ctx.rows_to_arrays({symbol: [*rows, weekend]}, case["all_rows"], day=day, columns=[symbol])
-        self.assertIn("not a session", str(caught.exception))
         with self.assertRaises(ValueError):
             ctx.rows_to_arrays(case["raw_rows"], case["all_rows"], day=saturday, columns=[symbol])
+        # A BAR ON A DAY THAT IS NO SESSION, or with a field that is no finite number, is DROPPED AND COUNTED, as the
+        # nightly job's `Grid.place` reads the same answer (it raised here once, and one such bar among 515 columns
+        # stopped every live decide of the lane while the store's job only counted it).
+        _, whole, whole_adj = ctx.rows_to_arrays({symbol: rows}, case["all_rows"], day=day, columns=[symbol])
+        weekend = {**rows[-1], "t": synth._stamp(saturday)}
+        broken = {**rows[-2], "c": float("nan")}
+        worded = {**rows[-3], "h": "12.5"}
+        count: dict = {}
+        _, got, got_adj = ctx.rows_to_arrays({symbol: [*rows[:-3], worded, broken, rows[-1], weekend]}, case["all_rows"],
+                                             day=day, columns=[symbol], count=count)
+        self.assertEqual(count, {"dropped": 3})
+        self.assertTrue(np.isnan(got[-3:-1]).all(), "never half a bar")
+        self.assertTrue(np.array_equal(got[:-3], whole[:-3], equal_nan=True) and np.array_equal(got[-1], whole[-1]))
+        self.assertTrue(np.array_equal(got_adj, whole_adj, equal_nan=True))
+        ctx.rows_to_arrays({symbol: rows}, case["all_rows"], day=day, columns=[symbol], count=count)
+        self.assertEqual(count, {"dropped": 3}, "a clean chunk adds nothing")
+        from league.ops import equity_panel
+
+        grid = equity_panel.Grid(ctx.fetch_sessions(day), [7])
+        grid.place({symbol: [*rows[:-3], worded, broken, rows[-1], weekend]}, {symbol: 7}, "raw")
+        self.assertEqual(grid.dropped, 3, "the nightly job drops and counts the same three rows")
+        self.assertTrue(np.array_equal(grid.raw[:, 0], got[:, 0], equal_nan=True), "and its store holds the same bars")
 
     def test_the_live_inputs_are_refused_when_they_cannot_be_a_decisions(self):
         case = synth.same_ctx_cases(self.root, history=20, count=1, seed=2)[0]

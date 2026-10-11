@@ -761,16 +761,21 @@ def _row_day(row: Mapping[str, Any]) -> dt.date:
 
 def rows_to_arrays(raw_rows: Mapping[str, Sequence[Mapping[str, Any]]],
                    all_rows: Mapping[str, Sequence[Mapping[str, Any]]], *, day: dt.date,
-                   columns: Sequence[str]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+                   columns: Sequence[str], count: dict | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(days, raw (n, len(columns), 5), adj (n, len(columns), 4)) of the venue's 1Day rows {t, o, h, l, c, v} per symbol
     (one chunk at a time), for the sessions through `day` (`fetch_sessions`); NaN where a symbol has no bar. Parent
-    side only: `columns` are symbols. A row after `day` is dropped (the fetch may run past the decision's session);
-    ValueError for a symbol whose rows name a day twice or a day that is no session."""
+    side only: `columns` are symbols. A row after `day` is dropped (the fetch may run past the decision's session).
+    A ROW ON A DAY THAT IS NO SESSION, OR WITH A FIELD THAT IS NO FINITE NUMBER, IS DROPPED AND COUNTED (`count`
+    ["dropped"]; never half a bar), exactly as the nightly job's `league.ops.equity_panel.Grid.place` reads the same
+    answer: the store then holds what the live decision read, and one malformed bar among 515 columns never stops
+    every decide of the lane (it raised here once: the live path sat blind where the night's job only counted).
+    ValueError for a symbol whose rows name a day twice (two prices for one bar: nothing to decide on)."""
     t = as_date(day)
     sessions = fetch_sessions(t)
     index = {d: i for i, d in enumerate(sessions)}
     raw = np.full((len(sessions), len(columns), 5), np.nan)
     adj = np.full((len(sessions), len(columns), 4), np.nan)
+    dropped = 0
     for col, symbol in enumerate(columns):
         for which, rows, target, keys in (("raw", raw_rows.get(symbol), raw, ("o", "h", "l", "c", "v")),
                                           ("all", all_rows.get(symbol), adj, ("o", "h", "l", "c"))):
@@ -784,10 +789,15 @@ def rows_to_arrays(raw_rows: Mapping[str, Sequence[Mapping[str, Any]]],
                 seen.add(at)
                 i = index.get(at)
                 if i is None:
-                    if at >= sessions[0]:
-                        raise ValueError(f"{symbol} has a bar on {at}, not a session")
+                    dropped += 1 if at >= sessions[0] else 0   # (before the window: not asked for, not counted)
                     continue
-                target[i, col, :] = [float(row[k]) for k in keys]
+                values = [row.get(k) for k in keys]
+                if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in values):
+                    dropped += 1
+                    continue
+                target[i, col, :] = [float(v) for v in values]
+    if count is not None:
+        count["dropped"] = int(count.get("dropped") or 0) + dropped
     return np.array([ordinal(d) for d in sessions], dtype=np.int32), raw, adj
 
 

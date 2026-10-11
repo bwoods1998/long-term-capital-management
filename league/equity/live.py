@@ -2789,11 +2789,16 @@ class EquityBook:
         since). The answer: {adapter, cols {instance: Columns}, union, fetched, sha, failed {instance: why}} and
         - `ready`: the fetch may be decided on (`adapter.complete`); it is KEPT then (`adapter.keep`: the bytes a
           decision read; the morning re-read and the nightly I6 compare it);
-        - `wait`: it is still being read, or a bar is missing inside `BARS_GRACE_S` of `decide_at`: read again each
-          minute, the panel instances are not asked this pass;
+        - `wait`: it is still being read (the fetch RETURNED unfinished), or, inside `BARS_GRACE_S` of `decide_at`, a
+          bar is missing or the fetch RAISED: read again each minute, the panel instances are not asked this pass;
         - else `why`: past the grace the instances fail (the House could not ask) and the seating pass asks again every
           `SEAT_RETRY_S` until the next pre-open. FROM THE LAST ASK BEFORE IT (`SEAT_RETRY_S` before the pre-open) a
-          held name may be among the adapter's few missing names: it is then read as the Gym reads a store with no bar."""
+          held name may be among the adapter's few missing names: it is then read as the Gym reads a store with no bar.
+          A FETCH THAT RAISES IS NEVER "STILL BEING READ": `adapter.fetch` fills its `progress` before its first call,
+          so a route that answers 5xx, or a chunk it refuses, once read as a fetch in progress for ever: no failed
+          decide was counted, nothing was said, and the fetch was tried every minute through the next session. Past
+          the grace it is `why` like a fetch that is not whole: one failed decide on a called day (A8.5), the hold
+          day's alarm on a hold day (A17), asked again every `SEAT_RETRY_S` and not after the pre-open."""
         if not asked:
             return None
         day = t.isoformat()
@@ -2830,15 +2835,16 @@ class EquityBook:
         last_ask = mn is not None and now >= mn.preopen - SEAT_RETRY_S
         if state["fetched"] is not None:
             state["ok"], state["missing"] = adapter.complete(state["fetched"], union, held, last_ask=last_ask)
-        reading = False
+        reading, raised = False, None
         if not state["ok"]:
             try:
                 got = adapter.fetch(self.market, union, t, progress=state["progress"], now=self.clock)
-            except Exception as exc:  # noqa: BLE001 - read again next minute from the chunk it stopped at
+            except Exception as exc:  # noqa: BLE001 - read again from the chunk it stopped at (the docstring)
                 got = None
+                raised = f"{type(exc).__name__}: {str(exc)[:160]}"
                 self._error("panel bars", exc, out)
             if got is None:
-                reading = bool(state["progress"])
+                reading = raised is None      # it RETURNED unfinished: a fetch that raised is not being read
             else:
                 state.update(fetched=got, kept=False, sha=None, progress={})
                 state["ok"], state["missing"] = adapter.complete(got, union, held, last_ask=last_ask)
@@ -2848,6 +2854,8 @@ class EquityBook:
                 state["wait"] = True
                 out["panel_bars"] = ("reading the panel's bars" if reading or state["fetched"] is None else
                                      f"waiting for {len(missing)} of the panel's bars")
+            elif raised is not None:
+                state["why"] = f"the panel's bars of {day} could not be read: {raised}"
             else:
                 state["why"] = (f"the panel's bars of {day} are not whole: {len(missing)} missing"
                                 f" ({', '.join(missing[:5])}{', ...' if len(missing) > 5 else ''})")
@@ -2868,6 +2876,11 @@ class EquityBook:
         if state["sha"] is None:
             state["sha"] = adapter.bars_sha(fetched, union)
         state["ready"] = True
+        if int((fetched.meta or {}).get("dropped") or 0) and "dropped" not in state["told"]:
+            state["told"].add("dropped")
+            self.alert("warning", f"equity: the panel's fetch of {day} dropped {int(fetched.meta['dropped'])} rows the "
+                                  "venue served on a day that is no session or with a field that is no number (each "
+                                  "is read as no bar, as the nightly job reads it)")
         if late and "late" not in state["told"]:
             state["told"].add("late")
             self.alert("warning", f"equity: the panel's bars of {day} were decided on late and incomplete at the last ask: "
@@ -3067,7 +3080,8 @@ class EquityBook:
         again (ONE chunked fetch for every instance, a few chunks a minute) and compared with the kept file
         (`adapter.same`, by `_bars_verdict`: the book's own rule and tolerance). No price differs: "ok" (a volume that
         went on counting and a bar served late are notes). A PRICE DIFFERS in a symbol among a row's columns:
-        "mismatch", and that decision pays what the book's own pays (`_panel_mismatch`). Not read by the pre-open, no
+        "mismatch", and that decision pays what the book's own pays and is void whole (`_panel_mismatch`: its buys
+        AND its program's sells). Not read by the pre-open, no
         kept file, or a kept file that is not the one a row read: "unread", a warning. A decision recorded after the
         audit's moment (a late ask) has no morning re-read: its `audit` stays NULL, and the report counts it."""
         if not _has_table(self.state.rows, "eq_rebalances"):
@@ -3134,9 +3148,15 @@ class EquityBook:
     def _panel_mismatch(self, row: Mapping[str, Any], bad: Sequence[str], now: float) -> None:
         """What it costs when the bars a panel decision read differ, in a price, from the morning's reading: the book's
         own cost of a mismatch (A8.11, A8.5: the alarm, that decision's planned buys cancelled, one failed decide a
-        session) and one thing of the panel's: its planned `ineligible` exits of the differing symbols are cancelled
-        too (the lot stays; the next close judges it again). A17: on a hold day's row it is the hold day's alarm and
-        counts toward no exit. A row marked so never stands as the standing target (`adapter.standing`)."""
+        session) and two things of the panel's. Its planned `ineligible` exits of the differing symbols are cancelled
+        too (the lot stays; the next close judges it again). AND THE DECISION IS VOID, WHOLE: its program's own
+        planned SELLS are cancelled with its buys, as a rebalance recorded late plans neither (B9). A row marked so
+        never stands as the standing target (`adapter.standing`), so the target that stands is the one before, which
+        names the very lots the program wanted to sell: with the buys cancelled and the sells left to go, the book
+        sold a name at one open and the old standing target bought it back at the next (a round trip of costs on a
+        decision the House itself had thrown out). The House's own exits stand (max hold, a retired program, an
+        ineligible name whose own bars agree). A17: on a hold day's row it is the hold day's alarm and counts toward
+        no exit."""
         day, key = str(row["decided_day"]), str(row["instance"])
         inst = self._instance(key)
         adapter = self._adapter(inst.kind if inst is not None and inst.kind != EQUITY_KIND else next(iter(K.BOOKS)))
@@ -3144,10 +3164,10 @@ class EquityBook:
         with self.state.transaction():
             self.state.execute("UPDATE eq_rebalances SET audit='mismatch' WHERE rid=?", (row["rid"],))
             for r in self.state.rows("SELECT * FROM eq_intents WHERE instance=? AND decided_day=? AND status='planned' "
-                                     "AND (kind='buy' OR (kind='house_exit' AND tag=?))",
+                                     "AND (kind IN ('buy', 'sell') OR (kind='house_exit' AND tag=?))",
                                      (key, day, getattr(adapter, "INELIGIBLE", "ineligible"))):
                 intent = Intent.of(r)
-                if intent.kind == "buy" or intent.symbol in set(bad):
+                if intent.kind in ("buy", "sell") or intent.symbol in set(bad):
                     self._finish(intent, "canceled", f"the bars of {day} read again differ ({len(bad)} symbols)")
             if inst is not None and inst.retired_at is None:
                 counts = bool(int(row["called"] or 0)) or getattr(adapter, "HOLD_DAY_FAILS_EXIT", True)
@@ -3159,7 +3179,8 @@ class EquityBook:
                 inst.why = f"bars audit {day}: {len(bad)} symbols differ"
                 self._save_instance(inst)
         self.alert("error", f"equity: the bars {key}'s decision of {day} read differ when read again for {len(bad)} "
-                            f"symbols ({names}): that decision's buys are canceled")
+                            f"symbols ({names}): that decision's buys are canceled, and its program's own sells with "
+                            "them (the decision is void; the House's exits stand)")
 
     def _panel_record_of(self, kind: str, key: str, lots: Sequence[Lot], row: Mapping[str, Any] | None,
                          refetch: bool) -> Any:
