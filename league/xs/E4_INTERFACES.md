@@ -238,7 +238,8 @@ keys of `elane_xs.SEALED`; kv `xs_evaluator`, `elane_xs_cpu`, `elane_xs_zero_edg
   the shared loss budget with stocks weighing 0.40, the kill switch and the stops, never a forced or hand-placed
   trade). The panel reaches the venue only through E1's EquityBook.
 - With every E4 switch off (`elane.panel.mode` "off", as policy.json ships it) nothing of E4 runs, spends or trades:
-  no birth, no run, no fetch of the live path. The data jobs are registered and read only.
+  no birth, no run, no fetch of the live path, and no data job (each answers `skipped` before its first gateway
+  call: `league.ops.equity_universe.lane_off`, section 11; the jobs read only when they run).
 
 ## 8. Open points, for the captain and the integrator
 

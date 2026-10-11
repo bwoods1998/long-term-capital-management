@@ -395,8 +395,9 @@ step at a time, and each step is the rollback of the one above it):
    nothing opens) and the store's word is "unknown" (so nothing is sold on it).
 2. `elane.panel.mode=train`: no Validation try and no look; births and Train research go on.
 3. `elane.panel.mode=off`: no panel birth, no Train run, nothing of the panel in any request, and no data job (each
-   answers `skipped`: the store stays as it is and goes stale; a lane switched on again later starts with a whole
-   refetch the first night).
+   answers `skipped`: the store stays as it is and goes stale; a lane switched on again later picks up where it
+   stopped: the daily run appends the sessions it missed, and a whole refetch runs when the last one is over six
+   and a half days old).
 4. E1's switches stand above all of it: `elane.mode=off` stops every equity round, the panel's too; and
    `equity_money.enabled` false (a constitution change) stops every equity open. Exits never wait on a switch.
 A panel lot is an equity lot: **Roll back: flatten first** (the next section) is the rule for a House rollback while
@@ -466,7 +467,13 @@ receipts with counts and a coverage verdict, and no price or ticker in them; the
 sends no ETF band and no options band back to the Gym (neither identity moved).
 
 **Not handled, stated.** No panel program is shadowed forward until package J lands, so a style-open passer is
-recorded and not yet shadowed. A panel family born before release E3 has no hidden year (the fold is E3's): its Train
+recorded and not yet shadowed. **The House runs XS1 at the bar of the receipt in the tree** (every threshold is read
+from it at runtime): the captain's A23 sets that bar at 1.38, a rebuilt receipt he lands as one file and its pin
+before the lane's first look. A held lot's own `ret` (its raw close against its entry) still scatters against its
+slot's return path by about a cent over the price (a weaker channel than the one `range` had; the review measured
+a rank correlation of 0.45 with one over the price on synthetic panels), and a name whose ADJUSTED price is under
+about two dollars (a later split of forty for one and more) is coarse in every field: the code review's "no search
+for a price level" is what stands against both. A panel family born before release E3 has no hidden year (the fold is E3's): its Train
 bar reads all six Train years, and the Train map says so. A panel program whose seat is withdrawn while the lane is
 not live keeps its roster seat (its band is not moved). A bar the data audit blanks in the store (a daily bar its
 minute bars contradict) is still in a live 16:20 fetch: the nightly I6 blanks the same cells before it compares, and
