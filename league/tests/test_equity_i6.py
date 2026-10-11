@@ -4,6 +4,17 @@ ET fetch would return them (Alpaca 1Day rows for adjustment=raw and adjustment=a
 byte-identical to the Gym's, and the decider child's provenance sha (the "equity" kind's `ctx_sha`, after the inputs
 crossed the pickle boundary) is the Gym ctx's own.
 
+WHAT I6 SAYS AND WHAT IT DOES NOT (the rehearsal on real SIP bars, Oct 11, 2026). It holds the two BUILDERS to the same
+bytes for the same bars, and the synthetic store's adjusted series is unrounded. The vendor rounds its adjustment=all
+prices to the cent, and restates the whole series at every later dividend or split, so a live decision's ctx does NOT
+reproduce byte for byte from a later store: its as-of prices move by up to the rounding of the adjusted prices they are
+built from (`league.equity.config.rounding_bound`; league/tests/test_equity_rehearsal.py `TheCtxOfALaterStore` holds
+the bound), and a live `ctx_sha` is not expected to match a later replay's. On the rehearsal's Train history the as-of
+closes of a later store differed from the day's own at four decimals on essentially every decision day of the four
+index ETFs, and a seed's own condition flipped on 0 to 2 of about 2,190 decision days a symbol. A14's intent-agreement
+reading (the live and the shadow intents agree on at least 95% of the counted sessions) is what polices it. Building
+as-of prices from raw bars and per-event factors is owed before E2's births depend on it.
+
 Cross-package (core): `league.equity.synth`, `store`, `program`, `ctx`; nothing is faked, since the point is the two
 real builders."""
 

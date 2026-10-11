@@ -1122,6 +1122,7 @@ class Swarm:
                               if isinstance(v, Mapping)},
                 "retired": list(step.get("retired") or []), "errors": dict(step.get("errors") or {}),
                 "looked": out["looked"], "held": out["held"],
+                **({"waits": dict(out["waits"])} if out.get("waits") else {}),
                 **({"look_errors": dict(out["errors"])} if out.get("errors") else {}),
                 **({"error": out["error"]} if "error" in out else {})}
 

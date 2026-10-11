@@ -2236,15 +2236,17 @@ class EquityBook:
                     sha = _sha(series)
                     shas.setdefault(symbol, {})[name] = sha
                     for d, o, h, l, c, v in series:
-                        # A day fetched again keeps its morning audit while its row is unchanged (the twins judge
-                        # a lot on its entry and exit days' audited bars); a changed row is unaudited again.
+                        # A day fetched again keeps its morning audit while its PRICES are unchanged (the twins judge
+                        # a lot on its entry and exit days' audited bars); a changed price is unaudited again. The
+                        # volume is not part of it, as it is not part of the audit: the next day's fetch reads a
+                        # session's final volume, which is never the 16:20 figure, and would unmark every day.
                         self.state.execute(
                             "INSERT INTO eq_bars(day, symbol, adjustment, o, h, l, c, v, fetched_at, sha, audit) "
                             "VALUES(?,?,?,?,?,?,?,?,?,?,NULL) ON CONFLICT(day, symbol, adjustment) DO UPDATE SET "
                             "o=excluded.o, h=excluded.h, l=excluded.l, c=excluded.c, v=excluded.v, "
                             "fetched_at=excluded.fetched_at, sha=excluded.sha, audit=CASE WHEN eq_bars.o IS excluded.o "
                             "AND eq_bars.h IS excluded.h AND eq_bars.l IS excluded.l AND eq_bars.c IS excluded.c "
-                            "AND eq_bars.v IS excluded.v THEN eq_bars.audit ELSE NULL END",
+                            "THEN eq_bars.audit ELSE NULL END",
                             (d, symbol, name, *(None if x is None else str(x) for x in (o, h, l, c, v)), now, sha))
             self.state.put("eq_decision", {"day": day, "start": start, "end": end, "symbols": sorted(present),
                                            "shas": shas, "audit": None, "fetched_at": now})
@@ -3099,16 +3101,15 @@ def _bars_verdict(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fr
     return "ok"
 
 
-#: Half a step of the vendor's price grid (four decimals): the most one of its rounded prices is off.
-VENDOR_HALF_STEP = 5e-5
-
-
 def _as_of_equal(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fresh_raw: Mapping[str, Mapping],
                  fresh_all: Mapping[str, Mapping], day: str) -> bool:
     """Whether two readings of the adjustment=all series give the same as-of prices at `day`: within a millionth, or
-    within what the vendor's four-decimal rounding allows when that is more. An as-of price is all_s x raw_t / all_t of
-    prices each rounded to 0.0001, so two readings of one series that a later event rescaled differ by up to half a
-    step x (raw_t / all_t) x (1 + all_s / all_t) each: under a millionth of a $600 price, over it below about $100."""
+    within what the vendor's rounding allows when that is more. The vendor rounds its adjusted prices to the cent (the
+    rehearsal on real SIP bars, Oct 11, 2026), and an as-of price is all_s x raw_t / all_t, so two readings of one
+    series that an event restated in between (every ex-dividend morning) differ by the rounding of the four adjusted
+    prices they are built from: `config.rounding_bound`, the bound the engine reads a ratio step with, so the Gym and
+    this audit cannot drift apart. Compared to a millionth alone, every ex-dividend morning read as a mismatch, which
+    cancels the decision's buys and counts a failed decide. A price that cannot be read is a difference."""
     try:
         old_c, new_c = float(old_all[day][3]), float(fresh_all[day]["c"])
         old_t = float(old_raw[day][3]) / old_c
@@ -3122,13 +3123,13 @@ def _as_of_equal(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fre
         for i, k in enumerate(("o", "h", "l", "c")):
             try:
                 x, y = float(values[i]), float(row[k])
-            except (TypeError, ValueError):
+                rounding = config.rounding_bound(x, old_c, y, new_c)
+            except (KeyError, TypeError, ValueError):
                 return False
             a, b = x * old_t, y * new_t
             if not math.isfinite(a) or not math.isfinite(b):
                 return False
-            rounding = VENDOR_HALF_STEP * (abs(old_t) * (1 + abs(x / old_c)) + abs(new_t) * (1 + abs(y / new_c)))
-            if abs(a - b) > max(rounding, 1e-6 * max(abs(a), abs(b), 1.0)):
+            if abs(a - b) > max(1e-6, rounding) * max(abs(a), abs(b), 1.0):
                 return False
     return True
 

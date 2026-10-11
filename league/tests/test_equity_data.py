@@ -234,11 +234,30 @@ class TheAudit(unittest.TestCase):
 
     def test_a_missing_volume_fails(self):
         raw, adj = bars()
-        raw["SPY"][4] = {**raw["SPY"][4], "v": 0}
+        raw["SPY"][4] = {**raw["SPY"][4], "v": 0}  # a bar of volume 0 that shows a range: prints with no volume
         raw["QQQ"][9] = {**raw["QQQ"][9], "v": None}
         out = self.check(raw, adj)
         self.assertFalse(out["checks"]["volume"]["passed"])
         self.assertEqual(out["checks"]["volume"]["count"], 2)
+        self.assertEqual(out["checks"]["volume"]["zero"], {}, "neither is the flat bar of a session without a trade")
+        raw, adj = bars()
+        flat = raw["QQQ"][9]["c"]
+        raw["QQQ"][9] = {**raw["QQQ"][9], "o": flat, "h": flat, "l": flat, "c": flat, "v": -1}
+        self.assertEqual(self.check(raw, adj)["checks"]["volume"]["count"], 1, "a flat bar must say volume 0 exactly")
+
+    def test_a_flat_bar_of_volume_zero_is_a_session_without_a_trade_and_passes_listed(self):
+        """rehearsal-1: the real history holds two such bars (one symbol, two sessions), and history never changes, so
+        refusing them failed the audit on every run: no store, no Validation, no look, no trade."""
+        raw, adj = bars()
+        for i in (4, 9):
+            flat = raw["QQQ"][i]["c"]
+            raw["QQQ"][i] = {**raw["QQQ"][i], "o": flat, "h": flat, "l": flat, "c": flat, "v": 0}
+            adj["QQQ"][i] = {**adj["QQQ"][i], "o": flat, "h": flat, "l": flat, "c": flat}
+        out = self.check(raw, adj)
+        self.assertTrue(out["passed"], out["checks"])
+        volume = out["checks"]["volume"]
+        self.assertEqual((volume["passed"], volume["count"], volume["problems"]), (True, 0, []))
+        self.assertEqual(volume["zero"], {"QQQ": [DAYS[4].isoformat(), DAYS[9].isoformat()]}, "listed, never hidden")
 
     def test_the_regular_verdict_extended_fails_and_unverified_passes_recorded(self):
         raw, adj = bars()
@@ -278,28 +297,92 @@ class TheRegularSession(unittest.TestCase):
         self.assertEqual(out["verdict"], "regular", out)
         self.assertEqual((out["compared"], out["mismatches"]), (20, []))
 
-    def test_a_daily_bar_with_the_premarket_open_is_extended(self):
-        days = DAYS[-20:]
-        early = dict(CAL)
-        daily = [session_bar(d, early[d]) for d in days]
-        daily[5] = {**daily[5], "o": minutes(days[5], False)[0]["o"], "l": minutes(days[5], False)[0]["l"]}
-        out = self.run_check(self.gateway(days, daily={"SPY": daily}), days)
-        self.assertEqual(out["verdict"], "extended")
-        fields = {(m["field"], m["matches"]) for m in out["mismatches"]}
-        self.assertIn(("o", "extended"), fields)
-        self.assertIn(("l", "extended"), fields)
+    def cross(self, day, *, base=100.0, low=-0.5, high=2.6):
+        """The closing minute of `day` (16:00; 13:00 on a half day), where the closing cross prints."""
+        hour = 13 if dict(CAL)[day] else 16
+        return {"t": stamp(day, hour, 0), "o": base + 1.25, "h": base + high, "l": base + low, "c": base + 1.3, "v": 9000}
 
-    def test_a_close_that_matches_neither_is_unverified_and_a_missing_day_too(self):
+    def test_the_two_crosses_and_the_days_own_volume_are_the_regular_session(self):
+        """rehearsal-2: the first rule ended the session before the closing minute and compared the volume, so on real
+        bars "regular" could never be the verdict and a close-set high was "extended", which fails the audit."""
+        days = DAYS[-20:]
+        early = dict(CAL)
+        daily, mins = [], []
+        for d in days:
+            rows = minutes(d, early[d]) + [self.cross(d)]
+            mins += sorted(rows, key=lambda r: r["t"])
+            bar = session_bar(d, early[d])
+            # The open inside the 09:30 minute's range (the opening cross), the close inside the closing minute's and
+            # the day's high (a close-set high no earlier minute shows), a volume no sum of minutes gives.
+            daily.append({**bar, "o": bar["o"] + 0.4, "c": bar["c"] + 1.2, "h": bar["c"] + 1.2, "v": bar["v"] * 3 + 17})
+        gw = Gateway(raw={"SPY": daily}, minute={"SPY": mins})
+        out = self.run_check(gw, days)
+        self.assertEqual((out["verdict"], out["compared"], out["mismatches"]), ("regular", 20, []), out)
+        self.assertEqual((out["extended_days"], out["mismatch_days"]), (0, 0))
+        # A close that happens to equal an after-hours print is still the closing minute's: never "extended".
+        daily[3] = {**daily[3], "c": 100.0 + 2.6, "h": 100.0 + 2.6}
+        after = {"t": stamp(days[3], 17, 30), "o": 102.6, "h": 102.6, "l": 102.6, "c": 102.6, "v": 10}
+        gw = Gateway(raw={"SPY": daily}, minute={"SPY": sorted(mins + [after], key=lambda r: r["t"])})
+        self.assertEqual(self.run_check(gw, days)["verdict"], "regular")
+
+    def extended_bar(self, bar, day):
+        """`bar` with the pre-market's open and low: what a 1Day bar built from the whole day would hold."""
+        before = minutes(day, False)[0]
+        return {**bar, "o": before["o"], "l": before["l"]}
+
+    def test_more_than_two_days_of_twenty_with_the_extended_days_prices_are_extended(self):
         days = DAYS[-20:]
         early = dict(CAL)
         daily = [session_bar(d, early[d]) for d in days]
-        daily[0] = {**daily[0], "c": daily[0]["c"] + 0.07}  # an auction print the last minute does not show
+        for i in (5, 9, 14):
+            daily[i] = self.extended_bar(daily[i], days[i])
         out = self.run_check(self.gateway(days, daily={"SPY": daily}), days)
-        self.assertEqual(out["verdict"], "unverified")
-        self.assertEqual(out["mismatches"][0]["matches"], "neither")
+        self.assertEqual((out["verdict"], out["extended_days"], out["mismatch_days"]), ("extended", 3, 3))
+        fields = {(m["field"], m["matches"]) for m in out["mismatches"]}
+        self.assertEqual(fields, {("o", "extended"), ("l", "extended")})
+        self.assertIn("a stop for E1", out["why"])
+
+    def test_one_or_two_such_days_are_never_regular_and_a_short_reading_allows_none(self):
+        days = DAYS[-20:]
+        early = dict(CAL)
+        daily = [session_bar(d, early[d]) for d in days]
+        for n, i in enumerate((5, 9), start=1):
+            daily[i] = self.extended_bar(daily[i], days[i])
+            out = self.run_check(self.gateway(days, daily={"SPY": daily}), days)
+            self.assertEqual((out["verdict"], out["extended_days"]), ("unverified", n), "listed and warned, not a stop")
+            self.assertIn(f"{n} of them the extended day's", out["why"])
+        # Fewer than REGULAR_DAYS days: one extended day is the verdict (the allowance is the job's full reading).
+        short = days[4:9]
+        out = self.run_check(self.gateway(short, daily={"SPY": daily[4:9]}), short)
+        self.assertEqual((out["verdict"], out["extended_days"]), ("extended", 1))
+
+    def test_a_print_no_minute_shows_is_a_stray_day_two_pass_and_a_missing_day_never(self):
+        days = DAYS[-20:]
+        early = dict(CAL)
+        daily = [session_bar(d, early[d]) for d in days]
+        daily[0] = {**daily[0], "c": daily[0]["c"] + 0.07}  # a late print: not the last minute's, no closing minute
+        out = self.run_check(self.gateway(days, daily={"SPY": daily}), days)
+        self.assertEqual((out["verdict"], out["mismatch_days"], out["extended_days"]), ("regular", 1, 0))
+        self.assertEqual((out["mismatches"][0]["field"], out["mismatches"][0]["matches"]), ("c", "neither"))
+        self.assertIn("1 of 20 days hold a print no minute bar shows", out["why"])
+        daily[7] = {**daily[7], "h": daily[7]["h"] + 0.5}   # a high above every minute, and not the extended day's
+        self.assertEqual(self.run_check(self.gateway(days, daily={"SPY": daily}), days)["verdict"], "regular")
+        daily[11] = {**daily[11], "l": daily[11]["l"] - 0.5}
+        out = self.run_check(self.gateway(days, daily={"SPY": daily}), days)
+        self.assertEqual((out["verdict"], out["mismatch_days"]), ("unverified", 3), "a third stray day is not regular")
         gw = self.gateway(days[1:])
         out = self.run_check(gw, days)
         self.assertEqual((out["verdict"], out["compared"]), ("unverified", 19))
+
+    def test_a_high_that_is_only_the_after_hours_high_is_extended(self):
+        days = DAYS[-20:]
+        early = dict(CAL)
+        daily = [session_bar(d, early[d]) for d in days]
+        for i in (1, 2, 3):
+            daily[i] = {**daily[i], "h": minutes(days[i], False)[-1]["h"]}  # 17:00's high, above every session print
+        out = self.run_check(self.gateway(days, daily={"SPY": daily}), days)
+        self.assertEqual((out["verdict"], out["extended_days"]), ("extended", 3))
+        self.assertEqual({(m["field"], m["matches"]) for m in out["mismatches"]}, {("h", "extended")})
 
     def test_a_half_days_session_ends_at_13_00(self):
         late = calendar(dt.date(2025, 11, 24), dt.date(2025, 12, 1))
@@ -409,6 +492,28 @@ class TheJob(unittest.TestCase):
         out = self.run_job(self.data(spoil=gap))
         self.assertEqual((out["status"], out["ok"]), ("failed", False))
         self.assertIn("calendar", out["error"])
+        self.assertEqual(self.written, [])
+        # rehearsal-7: the receipt names what failed (the real failure's said "count 2" and nothing else).
+        self.assertEqual(set(out["problems"]), {"calendar"})
+        self.assertIn("QQQ", out["problems"]["calendar"][0])
+        self.assertIn(str(DAYS[12]), " ".join(out["problems"]["calendar"]))
+
+    def test_a_failed_receipt_lists_five_problems_a_check_and_no_figure(self):
+        def spoil(raw, adj):
+            for i in range(8):
+                raw["QQQ"][i] = {**raw["QQQ"][i], "v": None}
+            # An adjustment no split explains: its problem text holds the ratio's jump.
+            for i in range(30):
+                adj["QQQ"][i] = {**adj["QQQ"][i], **{f: adj["QQQ"][i][f] / 2.0 for f in ("o", "h", "l", "c")}}
+
+        out = self.run_job(self.data(spoil=spoil))
+        self.assertEqual(out["status"], "failed")
+        self.assertEqual(set(out["problems"]), {"volume", "splits"}, "the failed checks, no other")
+        self.assertEqual((len(out["problems"]["volume"]), out["audit"]["volume"]["count"]), (ED.RECEIPT_PROBLEMS, 8))
+        self.assertIn("QQQ raw 2025-01-02: no volume", out["problems"]["volume"])
+        (split,) = out["problems"]["splits"]
+        self.assertIn("jumps by #", split, "the ratio is masked")
+        self.assertNotRegex(json.dumps(out["problems"]), r"\d\.\d", "symbols, days and verdict words: never a figure")
         self.assertEqual(self.written, [])
 
     def test_a_gateway_error_writes_nothing(self):

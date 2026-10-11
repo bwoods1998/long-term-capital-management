@@ -704,21 +704,16 @@ _FALSIFICATION = ("refuted when its one sealed look fails the share screen S2: t
                   "zero, or the holdout-only daily t below c_H,used (the larger of the receipt's floor and the program's "
                   "own floor plus the receipt's margin)")
 
+#: THE ORDER OF THIS LIST IS THE ORDER THE SEEDS' LOOKS ARE TAKEN IN (league/swarm/elane.py `round_order`, `seed_ahead`),
+#: and it is a decision (the captain's, Oct 11, 2026, before any Validation or look, from Train-era figures only). The
+#: rehearsal on real bars found the two overnight seeds to be ONE LINEAGE under the lane's own rule (their Train daily
+#: returns correlate at or above the rule's 0.7), so only one of them is ever looked at (D3: one look a lineage) and the
+#: other is refused its look and retired as the same lineage. Which one must not be the ids' alphabet or a clock tick:
+#: seed-overnight-qqq goes first because its own floor sets it the lower bar of the two at the look, so the lineage's
+#: one look has the higher power there; seed-reversal-index, a lineage of its own, follows; seed-overnight-spy is last
+#: and, with seed-overnight-qqq looked at, is refused its look as the same lineage and retired with that reason,
+#: plainly reported.
 EQUITY_SEEDS: list[dict[str, Any]] = [
-    {"id": "seed-overnight-spy", "lane": "beta", "structure": "etf", "symbols": ["SPY"], "template": "overnight",
-     "mechanism": "SPY's return accrues overnight: hold SPY from each close to the next open, every session (MARKET BETA).",
-     "prior": _OVERNIGHT_PRIOR, "provenance": _OVERNIGHT_PROVENANCE,
-     "rule": "Buy SPY at the next close, every session; sell each lot at the following open.",
-     "needs": {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2}, "params": {"share": 0.5},
-     "condition": "True",
-     "card": {"lane": "beta", "structure": "etf", "symbols": ["SPY"],
-              "hypothesis": "Most of the index's long-run return has accrued overnight, between the close and the next "
-                            "open: holders who carry the overnight gap bear the news that arrives while the market is "
-                            "shut and are paid for it (Cliff, Cooper and Gulen 2008; Lou, Polk and Skouras 2019).",
-              "mechanism_class": "calendar_flow", "inputs": ["clock"], "holding": "days_1_3",
-              "cost": {"hurdle": 0.0003, "why": "a round trip pays two SPY half-spreads at the close and the open, and "
-                                                "the SEC and TAF fees on the sale"},
-              "comparison": _COMPARISON, "falsification": _FALSIFICATION}},
     {"id": "seed-overnight-qqq", "lane": "beta", "structure": "etf", "symbols": ["QQQ"], "template": "overnight-down",
      "mechanism": "QQQ's overnight return after a down close: hold QQQ from a close below the prior close to the next "
                   "open (MARKET BETA).",
@@ -751,6 +746,20 @@ EQUITY_SEEDS: list[dict[str, Any]] = [
               "mechanism_class": "reversal_liquidity", "inputs": ["underlying_price"], "holding": "days_4_10",
               "cost": {"hurdle": 0.0003, "why": "a round trip pays two index-ETF half-spreads at the opens, and the SEC "
                                                 "and TAF fees on the sale"},
+              "comparison": _COMPARISON, "falsification": _FALSIFICATION}},
+    {"id": "seed-overnight-spy", "lane": "beta", "structure": "etf", "symbols": ["SPY"], "template": "overnight",
+     "mechanism": "SPY's return accrues overnight: hold SPY from each close to the next open, every session (MARKET BETA).",
+     "prior": _OVERNIGHT_PRIOR, "provenance": _OVERNIGHT_PROVENANCE,
+     "rule": "Buy SPY at the next close, every session; sell each lot at the following open.",
+     "needs": {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2}, "params": {"share": 0.5},
+     "condition": "True",
+     "card": {"lane": "beta", "structure": "etf", "symbols": ["SPY"],
+              "hypothesis": "Most of the index's long-run return has accrued overnight, between the close and the next "
+                            "open: holders who carry the overnight gap bear the news that arrives while the market is "
+                            "shut and are paid for it (Cliff, Cooper and Gulen 2008; Lou, Polk and Skouras 2019).",
+              "mechanism_class": "calendar_flow", "inputs": ["clock"], "holding": "days_1_3",
+              "cost": {"hurdle": 0.0003, "why": "a round trip pays two SPY half-spreads at the close and the open, and "
+                                                "the SEC and TAF fees on the sale"},
               "comparison": _COMPARISON, "falsification": _FALSIFICATION}},
 ]
 

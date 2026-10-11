@@ -1064,8 +1064,9 @@ class Audit(T.BookTest):
 
 
 class AsOf(unittest.TestCase):
-    """Two readings of one adjustment=all series, the second rescaled by an event after t (the vendor rounds each price
-    to four decimals): the same as-of prices, to the rounding."""
+    """Two readings of one adjustment=all series, the second rescaled by an event after t: the same as-of prices, to
+    the vendor's rounding. The bound is the cent's (`config.rounding_bound`: the rehearsal on real bars found the
+    adjusted series rounded to the cent, league/tests/test_equity_rehearsal.py), so the finer grid here agrees too."""
 
     def readings(self, price: float, factor: float, rescale: float):
         days = [f"2026-10-{d:02d}" for d in (5, 6, 7, 8, 9)]
@@ -1083,10 +1084,12 @@ class AsOf(unittest.TestCase):
                 self.assertEqual(L._bars_verdict(raw, old_all, fresh_raw, fresh_all, day), "ok")
 
     def test_a_price_that_really_changed_does_not(self):
+        # A cent on one adjusted close is the vendor's own rounding (two cent-rounded prices on either side of a
+        # restatement differ by that much); a move of a fifth of a percent is not, at any of these prices.
         for price in (600.0, 41.07):
             raw, old_all, fresh_raw, fresh_all, day = self.readings(price, 0.9871, 0.9925)
             first = sorted(fresh_all)[0]
-            fresh_all[first]["c"] = round(fresh_all[first]["c"] + 0.01, 4)      # a cent on one adjusted close
+            fresh_all[first]["c"] = round(fresh_all[first]["c"] * 1.002, 4)
             self.assertFalse(L._as_of_equal(raw, old_all, fresh_raw, fresh_all, day), price)
             self.assertEqual(L._bars_verdict(raw, old_all, fresh_raw, fresh_all, day), "mismatch")
 

@@ -97,7 +97,10 @@ class TheEquityLaneEndToEnd(unittest.TestCase):
     # ------------------------------------------------------------------------------------------- the swarm's part
     def born_validated_and_looked(self) -> dict:
         born = elane.birth_seeds(self.store, ON)
-        self.assertEqual(born, ["seed-overnight-spy", "seed-overnight-qqq", "seed-reversal-index"])
+        # Born in the declared order of the looks (league/swarm/seeds.py says why). This test follows SPY's seed, the
+        # one that buys at every close, through the lane's parts by asking for its look directly; in a round the look
+        # order is the declared one (league/tests/test_equity_rehearsal.py `TheSeedsDeclaredOrder`).
+        self.assertEqual(born, ["seed-overnight-qqq", "seed-reversal-index", "seed-overnight-spy"])
         fam = self.store.family(SEED)
         version = self.store.version(SEED, fam["best_version"])
         self.assertEqual((fam["structure"], fam["spec"]["lane"], fam["band"]), ("etf", "beta", "gym"))

@@ -23,15 +23,37 @@ THE AUDIT (`audit`; each a named check, all must pass; each lists at most `PROBL
   split the raw close shows (a move of the raw close by the jump's factor, within `SPLIT_RAW_TOLERANCE`: the day's own
   move), and no raw close moves by more than `RAW_JUMP` with no ratio jump (a split the all series did not adjust);
   the splits found are listed per symbol (`found`);
-- volumes present: every raw bar has a finite volume > 0;
+- volumes present: every raw bar has a finite volume > 0, or is a FLAT bar of volume 0 (open = high = low = close: a
+  session without a trade, the venue carrying the last price), which passes and is listed per symbol (`zero`);
 - THE REGULAR SESSION (the design's fact 1; `regular_session_check`): on `REGULAR_DAYS` (20) sessions of SPY, the 1Day
-  bar's open, high, low, close and volume against its 1Min bars of 09:30-16:00 (13:00 on a half day) aggregated, and
-  against the whole 04:00-20:00 day's: "regular" when every field of every day matches the session's within
-  `REGULAR_TOLERANCE` (relative); "extended" when some day's bar matches only the extended day (its open or close is the
-  extended day's and not the session's, or its range reaches outside the session's); "unverified" otherwise (fewer days
-  compared, or a field that matches neither: an auction print, a condition the two aggregations treat apart). The
-  verdict and every mismatch are in the manifest's audit. "extended" FAILS the audit: the store must then be built from
-  1Min bars, a stop for E1, reported, never patched. "unverified" passes, recorded, and the job raises a House warning.
+  bar's open, high, low and close against its 1Min bars. The session's prints are the minutes from 09:30 through the
+  CLOSING MINUTE (16:00; 13:00 on a half day), where the closing cross prints. A day's bar agrees when its open is the
+  first session minute's open or lies inside the 09:30 minute's range (the opening cross), its close is the last
+  session minute's close or lies inside the closing minute's range, and its high and low lie between the extreme of
+  the minutes before the closing minute and the extreme with it. A field that does not agree is "extended" when it is
+  the whole 04:00-20:00 day's figure and no print of the session shows it, else "neither" (a late or out-of-sequence
+  print the minute bars do not hold). THE VOLUME IS NOT COMPARED: the 1Day bar counts prints the 1Min bars leave out.
+  The verdict: "extended" when more than `STRAY_DAYS_MAX` (2) of the 20 days hold an extended field; "regular" when
+  every day was compared, at most 2 hold any mismatch and none is extended; "unverified" otherwise. A reading of
+  fewer than `REGULAR_DAYS` days allows no stray day. The verdict and every mismatch are in the manifest's audit.
+  "extended" FAILS the audit: the store must then be built from 1Min bars, a stop for E1, reported, never patched.
+  "unverified" passes, recorded, and the job raises a House warning.
+
+WHY THE TWO CHECKS READ AS THEY DO (the rehearsal on the House box against real SIP data, Oct 11, 2026; counts only).
+As first written both were wrong about real data and the job could never write a store; what follows corrects the
+checks and loosens no evidence. Volume: the history holds two bars of volume 0, both flat (one symbol, two sessions of
+2016); history never changes, so a check that refused them failed every run. The regular session: the first rule
+ended the session before the closing minute and compared the volume. On the 252 sessions of one Train year the daily
+open lay inside the 09:30 minute's range on 252 and the daily close inside the closing minute's range on 252, the
+close equalled the last minute before it on 13, the daily volume equalled the minutes' sum on none, and the bar
+called extended on 18 of them was a close-set high or low or a close that happened to equal an after-hours print;
+"regular" was unreachable. On the 233 rolling 20-session windows of that year the first rule read 190 extended (the
+audit fails), 43 unverified and 0 regular; this rule reads 0 extended, 12 unverified and 221 regular. A bar truly
+built from extended hours still fails: on that year a pre-market print alone lay below the 1Day bar's low on 103 of
+the 252 sessions and above its high on 67, far more than 2 of 20.
+
+A FAILED AUDIT'S RECEIPT names what failed: the first `RECEIPT_PROBLEMS` problems of each failed check (`problems`:
+symbols, days and verdict words; every decimal figure is masked, so no ratio and no price leaves in a receipt).
 
 Data never leaves the House's state directory (the vendor's terms; a public repository): nothing here is committed,
 printed in full, or sent anywhere but the store. The receipt carries counts and verdicts, never a price.
@@ -41,6 +63,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
@@ -63,6 +86,13 @@ SPLIT_RAW_TOLERANCE = 0.25
 RAW_JUMP = 0.30
 #: Each check lists at most this many problems (it counts them all).
 PROBLEMS_LISTED = 20
+#: A failed audit's receipt lists this many problems of each failed check (`_receipt_problems`).
+RECEIPT_PROBLEMS = 5
+#: THE REGULAR SESSION on real SIP data (the rehearsal of Oct 11, 2026): the vendor builds its 1Day bar from more prints
+#: than its 1Min bars hold (the closing cross in the closing minute, late and out-of-sequence prints), so a stray day whose
+#: high or low no minute shows proves nothing. More than this many "extended" days of the `REGULAR_DAYS` is the verdict
+#: "extended"; at most this many days with any mismatch is still "regular" (they stay listed in the manifest).
+STRAY_DAYS_MAX = 2
 #: Bars a page (the venue's maximum).
 PAGE_LIMIT = 10000
 NEW_YORK = ZoneInfo("America/New_York")
@@ -105,6 +135,13 @@ def _same(a: float | None, b: float | None) -> bool:
     if a is None or b is None:
         return False
     return abs(a - b) <= REGULAR_TOLERANCE * max(abs(b), 1.0)
+
+
+def _inside(value: float | None, low: float | None, high: float | None) -> bool:
+    """`value` lies in [low, high] within `REGULAR_TOLERANCE` (False when any of them is missing)."""
+    if value is None or low is None or high is None:
+        return False
+    return low * (1 - REGULAR_TOLERANCE) <= value <= high * (1 + REGULAR_TOLERANCE)
 
 
 class _Check:
@@ -184,16 +221,17 @@ def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, float | None]:
 
 
 def regular_session_check(gateway: Any, symbol: str, days: Sequence[dt.date]) -> dict[str, Any]:
-    """The design's fact 1 on `days`: {verdict "regular" | "extended" | "unverified", days, mismatches: [...]}.
+    """The design's fact 1 on `days`: {verdict "regular" | "extended" | "unverified", days, compared, mismatches: [...],
+    extended_days, mismatch_days}.
 
-    Per day: the symbol's 1Day bar (raw) against its 1Min bars (raw) of the regular session, 09:30 to the close (16:00,
-    13:00 on a half day: `league.equity.store.nyse_sessions`), aggregated (first open, highest high, lowest low, last
-    close, summed volume), and of the whole 04:00-20:00 day. Each field of each day is "regular" (it matches the
-    session's within `REGULAR_TOLERANCE`), "extended" (it matches only the whole day's; or, for the high and the low,
-    it lies outside the session's range), or "neither"; a mismatch row {day, field, daily, regular, extended, matches}
-    is kept for every field that is not "regular". The verdict is the module docstring's. A day whose bars cannot be
-    read is a mismatch {day, field: "bars", why} and is not compared. Never raises for the venue's answers: a gateway
-    error is the "unverified" verdict with its `error`."""
+    Per day: the symbol's 1Day bar (raw) against its 1Min bars (raw): the minutes from 09:30 to the closing minute
+    (16:00, 13:00 on a half day: `league.equity.store.nyse_sessions`) aggregated (first open, highest high, lowest low,
+    last close), the 09:30 minute and the closing minute on their own (the two crosses), and the whole 04:00-20:00 day.
+    A field agrees as the module docstring says; a mismatch row {day, field, daily, regular, extended, matches
+    ("extended" | "neither")} is kept for every field that does not. The volume is not compared. The verdict is the
+    module docstring's (`STRAY_DAYS_MAX`). A day whose bars cannot be read is a mismatch {day, field: "bars", why} and
+    is not compared. Never raises for the venue's answers: a gateway error is the "unverified" verdict with its
+    `error`."""
     from ..equity import store as eq_store
 
     days = sorted({d if isinstance(d, dt.date) else dt.date.fromisoformat(str(d)) for d in days})
@@ -228,40 +266,57 @@ def regular_session_check(gateway: Any, symbol: str, days: Sequence[dt.date]) ->
             continue
         open_at = dt.time(9, 30)
         close_at = dt.time(13, 0) if early[day] else dt.time(16, 0)
-        session = [r for r in minutes if open_at <= ny_moment(r["t"]).time() < close_at
-                   and ny_moment(r["t"]).date() == day]
-        whole = [r for r in minutes if ny_moment(r["t"]).date() == day]
+        today = [(ny_moment(r["t"]), r) for r in minutes]
+        today = [(m.time(), r) for m, r in today if m.date() == day]
+        session = [r for t, r in today if open_at <= t < close_at]
+        first = _aggregate([r for t, r in today if t == open_at])     # the opening cross prints in the 09:30 minute
+        last = _aggregate([r for t, r in today if t == close_at])     # the closing cross prints in the closing minute
+        whole = [r for _, r in today]
         reg, ext = _aggregate(session), _aggregate(whole)
         if not session:
             out["mismatches"].append({"day": day.isoformat(), "field": "bars", "why": "no minute bar in the session"})
             continue
         out["compared"] += 1
+        # The session's prints are the minutes 09:30 .. the closing minute (its cross is the official close).
+        highs = [x for x in (reg["h"], last["h"]) if x is not None]
+        lows = [x for x in (reg["l"], last["l"]) if x is not None]
+        hi, lo = (max(highs) if highs else None), (min(lows) if lows else None)
         extended = False
-        for field in FIELDS:
+        for field in ("o", "h", "l", "c"):                             # the volume is not compared (see the docstring)
             value = _num(bar.get(field))
-            if _same(value, reg[field]):
-                continue
-            if field == "h" and value is not None and reg["h"] is not None:
-                beyond = value > reg["h"] * (1 + REGULAR_TOLERANCE)
-            elif field == "l" and value is not None and reg["l"] is not None:
-                beyond = value < reg["l"] * (1 - REGULAR_TOLERANCE)
+            if field == "o":
+                ok = _same(value, reg["o"]) or _inside(value, first["l"], first["h"])
+            elif field == "c":
+                ok = _same(value, reg["c"]) or _inside(value, last["l"], last["h"])
+            elif field == "h":
+                ok = _inside(value, reg["h"], hi)
             else:
-                beyond = False
-            only_extended = _same(value, ext[field]) and field in ("o", "c", "h", "l")
-            matches = "extended" if (only_extended or beyond) else "neither"
+                ok = _inside(value, lo, reg["l"])
+            if ok:
+                continue
+            # "extended": the bar's figure is the extended day's AND no print of the session shows it.
+            matches = "extended" if (_same(value, ext[field]) and not _inside(value, lo, hi)) else "neither"
             extended = extended or matches == "extended"
             out["mismatches"].append({"day": day.isoformat(), "field": field, "daily": value, "regular": reg[field],
                                       "extended": ext[field], "matches": matches})
         extended_days += 1 if extended else 0
-    if extended_days:
+    stray = len({m["day"] for m in out["mismatches"]})
+    # The stray-day allowance is the job's (a full `REGULAR_DAYS` reading); a shorter reading allows none.
+    allowed = STRAY_DAYS_MAX if len(days) >= REGULAR_DAYS else 0
+    out["extended_days"], out["mismatch_days"] = extended_days, stray
+    if extended_days > allowed:
         out["verdict"] = "extended"
         out["why"] = (f"on {extended_days} of {out['compared']} days the 1Day bar holds prices from outside the regular "
-                      "session: the store must be built from 1Min bars (a stop for E1)")
-    elif out["compared"] == len(days) and not out["mismatches"]:
+                      f"session (at most {allowed} stray days pass): the store must be built from 1Min bars (a stop for "
+                      "E1)")
+    elif out["compared"] == len(days) and stray <= allowed and not extended_days:
         out["verdict"] = "regular"
+        if stray:
+            out["why"] = f"{stray} of {len(days)} days hold a print no minute bar shows (listed; at most {allowed} pass)"
     else:
-        out["why"] = (f"{out['compared']} of {len(days)} days compared; {len(out['mismatches'])} fields or days do not "
-                      "match the regular session's minutes, none of them only the extended day's")
+        out["why"] = (f"{out['compared']} of {len(days)} days compared; {stray} days hold a field or a bar that does not "
+                      f"match the regular session's minutes, {extended_days} of them the extended day's (at most "
+                      f"{allowed} stray days pass, none of them extended)")
     return out
 
 
@@ -305,6 +360,7 @@ def audit(calendar: Sequence[tuple[dt.date, bool]], raw: Mapping[str, Sequence[M
     index = {d: i for i, d in enumerate(sessions)}
     cal, ohlc, splits, volume = checks["calendar"], checks["ohlc"], checks["splits"], checks["volume"]
     splits.extra["found"] = {}
+    volume.extra["zero"] = {}
     if not sessions:
         cal.add("the calendar has no session")
     if CALENDAR_SYMBOL not in raw:
@@ -338,7 +394,12 @@ def audit(calendar: Sequence[tuple[dt.date, bool]], raw: Mapping[str, Sequence[M
                     ohlc.add(f"{symbol} {label} {day}: not 0 < low <= open, close <= high")
         for day in sorted(r_rows):
             v = _num(r_rows[day].get("v"))
-            if v is None or v <= 0:
+            prices = {_num(r_rows[day].get(k)) for k in ("o", "h", "l", "c")}
+            if v == 0 and len(prices) == 1 and None not in prices:
+                # A session without a trade: the venue carries the last price in a flat bar of volume 0 (it passes,
+                # listed; a bar of volume 0 that shows a range, or a volume that cannot be read, still fails).
+                volume.extra["zero"].setdefault(symbol, []).append(day.isoformat())
+            elif v is None or v <= 0:
                 volume.add(f"{symbol} raw {day}: no volume")
         # Splits: the raw/all close ratio's jumps against the raw close's own moves, on the symbol's own sessions.
         common = [d for d in days if d in a_rows]
@@ -383,6 +444,16 @@ def audit(calendar: Sequence[tuple[dt.date, bool]], raw: Mapping[str, Sequence[M
 
 
 # ------------------------------------------------------------------------------------------------- the job
+_FIGURE = re.compile(r"\d+\.\d+")
+
+
+def _receipt_problems(checks: Mapping[str, Mapping[str, Any]], failed: Sequence[str]) -> dict[str, list[str]]:
+    """What a failed audit's receipt says of each failed check: its first `RECEIPT_PROBLEMS` problems (symbols, days and
+    verdict words), every decimal figure masked: a receipt carries no ratio and no price."""
+    return {name: [_FIGURE.sub("#", str(text))[:200] for text in (checks[name].get("problems") or [])[:RECEIPT_PROBLEMS]]
+            for name in failed}
+
+
 def universe(constitution: Mapping[str, Any] | None = None) -> dict[str, str]:
     """{symbol: class} the job fetches: `config.UNIVERSE`, bounded by the constitution's `equity_money.universe` when the
     constitution carries one (a symbol both name, with the same class), in `config.UNIVERSE`'s order."""
@@ -432,7 +503,7 @@ def _cut(rows: Mapping[str, Sequence[Mapping[str, Any]]], last: dt.date) -> dict
 
 def run(ctx: Any) -> dict[str, Any]:
     """The job (the module docstring): {"ok": True, "symbols", "sessions", "fetched_through", "audit", "regular"} or
-    {"status": "failed", "ok": False, "error"}."""
+    {"status": "failed", "ok": False, "error"} (a failed audit's also carries `audit`, `regular` and `problems`)."""
     from ..equity import store as eq_store
 
     root = Path(ctx.root)
@@ -456,6 +527,7 @@ def run(ctx: Any) -> dict[str, Any]:
     if not result["passed"]:
         failed = [name for name, c in result["checks"].items() if not c["passed"]]
         return {"status": "failed", "ok": False, "audit": counts, "regular": verdict,
+                "problems": _receipt_problems(result["checks"], failed),
                 "error": f"the audit failed ({', '.join(failed)}): nothing written, the last good store stays"}
     try:
         series = {s: series_of(raw[s], adj[s], last=last) for s in symbols if raw.get(s)}
@@ -475,4 +547,4 @@ def run(ctx: Any) -> dict[str, Any]:
 
 __all__ = ["FIRST_DAY", "STORE_DIR", "BARS", "MAX_PAGES", "SPLIT_JUMP", "REGULAR_DAYS", "REGULAR_TOLERANCE", "fetch",
            "regular_session_check", "audit", "run", "universe", "last_closed", "regular_days", "series_of", "ny_day",
-           "SOURCE", "CALENDAR_SYMBOL", "SPLIT_RAW_TOLERANCE", "RAW_JUMP", "CHECKS"]
+           "SOURCE", "CALENDAR_SYMBOL", "SPLIT_RAW_TOLERANCE", "RAW_JUMP", "CHECKS", "STRAY_DAYS_MAX", "RECEIPT_PROBLEMS"]

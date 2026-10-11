@@ -21,6 +21,8 @@ constitution's universe equal to the gateway's `STOCK_UNIVERSE` (gateway/lib/cap
   2026-01-02..2026-09-25, forward after; the holdout and forward are sealed (`store.EquityGateCapability`). The one
   sealed look reads 2026-01-02 through min(the last close before the look, 2026-10-09) (A9 D6 as amended by A12:
   `LOOK_FIRST`, `LOOK_CAP`).
+- THE VENDOR'S ROUNDING (`rounding_bound`, `ADJUSTED_HALF_STEP`, `ROUNDING_GUARD`): the adjustment=all prices are
+  rounded to the cent; the engine's reading of a ratio step and the book's morning audit share this one bound.
 - TRAIN-ERA SEGMENTS for the screen's per-program floor (`TRAIN_ERA_SEGMENTS`): 2016-2019 and 2022-2024, never
   2020-2021, never 2025-2026 (A9 D5: the floor's world sets IND22 and IND1622).
 
@@ -30,6 +32,7 @@ Standard library only.
 from __future__ import annotations
 
 import datetime as dt
+import math
 from decimal import ROUND_CEILING, Decimal
 
 ETF, STOCK = "etf", "stock"
@@ -97,6 +100,13 @@ TRAIN_ERA_SEGMENTS: tuple[tuple[dt.date, dt.date], ...] = (
 
 CENT = Decimal("0.01")
 
+#: THE VENDOR'S ROUNDING OF ITS ADJUSTED PRICES (the rehearsal on real SIP bars, Oct 11, 2026): the adjustment=all
+#: series is rounded to the cent (the raw series is the tape's own), so one adjusted price is off by up to half a cent,
+#: and a ratio or product built from several by up to half a cent over each of them, summed. A move inside
+#: `ROUNDING_GUARD` times that bound is the vendor's rounding, never an event (`rounding_bound`).
+ADJUSTED_HALF_STEP = 0.005
+ROUNDING_GUARD = 1.5
+
 
 def class_of(symbol: str) -> str | None:
     """"etf", "stock", or None when `symbol` is not in `UNIVERSE`."""
@@ -132,6 +142,24 @@ def sell_fees(proceeds: Decimal, shares: Decimal) -> Decimal:
     return sec + taf
 
 
+def rounding_bound(*adjusted: float) -> float:
+    """THE VENDOR'S ROUNDING, one bound for the engine and the book (league/equity/engine.py `ratio_tolerance`: which
+    step of the all/raw ratio is an event; league/equity/live.py `_as_of_equal`: whether two readings of the adjusted
+    series give the same as-of prices), so the two cannot drift apart: the largest relative move the cent rounding of
+    these adjustment=all prices explains in a ratio or product built from them, `ROUNDING_GUARD` x
+    `ADJUSTED_HALF_STEP` x the sum of 1 / price. ValueError for no price or one that is not a positive finite number
+    (the caller decides what an unreadable price means; it is never read as "all rounding")."""
+    if not adjusted:
+        raise ValueError("the rounding bound of no price")
+    total = 0.0
+    for price in adjusted:
+        value = float(price)
+        if not (math.isfinite(value) and value > 0):
+            raise ValueError(f"an adjusted price is a positive finite number, not {price!r}")
+        total += 1.0 / value
+    return ROUNDING_GUARD * ADJUSTED_HALF_STEP * total
+
+
 def max_hold_due(held_sessions: int, max_hold_sessions: int) -> bool:
     """THE MAXIMUM-HOLD RULE (A8.5), one predicate for the engine and the book (league/equity/live.py `_house_exits`):
     a lot is held at most its program's `max_hold_sessions`. At a decision close its `held_sessions`
@@ -151,4 +179,5 @@ __all__ = ["ETF", "STOCK", "CLASSES", "UNIVERSE", "INDEX_ETFS", "HALF_SPREAD_BP"
            "SEC_FEE_PER_MILLION", "TAF_PER_SHARE", "TAF_MAX", "POSITION_SHARE", "SLEEVE_USD", "MAX_SYMBOLS",
            "MAX_HISTORY", "MAX_INTENTS", "MIN_HOLD_SESSIONS", "DEFAULT_MAX_HOLD", "MAX_HOLD_CAP", "FAILED_DECIDES_EXIT",
            "QTY_PLACES", "WINDOWS", "SEALED", "LOOK_FIRST", "LOOK_CAP", "TRAIN_ERA_SEGMENTS", "class_of", "half_spread",
-           "sell_fees", "DEFAULT_HISTORY", "MIN_ORDER_USD", "CENT", "max_hold_due", "may_sell"]
+           "sell_fees", "DEFAULT_HISTORY", "MIN_ORDER_USD", "CENT", "max_hold_due", "may_sell", "ADJUSTED_HALF_STEP",
+           "ROUNDING_GUARD", "rounding_bound"]
