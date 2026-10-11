@@ -88,14 +88,19 @@ LANE-SCOPED KEYS (A8.12): lineage, spent-root and graveyard keys carry the lane 
 spent SPY/QQQ/IWM always-in roots never refuse an equity birth, and a REFUTED equity row binds only its own lane's cards
 (league/swarm/cards.py: an equity card's cell is "<lane>:etf", and `RebirthIndex` reads each lane's rows apart).
 
-THE SEEDS (A4; league/swarm/seeds.py `EQUITY_SEEDS`): seed-overnight-spy, seed-overnight-qqq, seed-reversal-index,
+THE SEEDS (A4; league/swarm/seeds.py `EQUITY_SEEDS`): seed-overnight-qqq, seed-reversal-index, seed-overnight-spy,
 each born once as an agent-authored family (`birth_seeds`), then Validation, the screen's pre-check and one sealed look
-like any family. THEIR LOOKS ARE TAKEN IN THAT ORDER (`round_order`: both equity rounds walk the families by birth,
-the seeds of one second in `EQUITY_SEEDS` order): under D3 the later of two seeds of one lineage is refused with no
-look, so which one is judged is the list's order, never the ids' alphabet or a clock tick. A version refused at the
-gate before its look retires for what happened (`REFUSED_CAUSES`: the same lineage, no eligible floor), not as a spent
-Validation try. Every report says plainly that these three were seeded by the captain's build agents (`SEEDED_NOTE`),
-and the Done meter reads Done with and without them (`seeded`).
+like any family. THEIR LOOKS ARE TAKEN IN THAT DECLARED ORDER, and the order is a decision (the captain's, Oct 11,
+2026, from Train-era figures only, before any Validation or look; the reason is beside the list): the two overnight
+seeds are one lineage under D3, so only the first of them declared is ever judged and the other is refused with no
+look and retired as the same lineage. Two rules hold it: `round_order` (both equity rounds walk the seeds as one block,
+in the list's order, whatever second each was born in) and `seed_wait` (a seed's look is not taken while a seed
+declared before it still has its look to come, so a look the House owes again never hands the lineage to the later
+seed; the wait is bounded at `SEED_WAIT_SECONDS`, past which the later seed is looked at with a House warning, and the
+operator's hold on the earlier seed releases the later ones at once). A version refused at the gate before its look
+retires for what happened (`REFUSED_CAUSES`: the same lineage, no eligible floor), not as a spent Validation try. Every
+report says plainly that these three were seeded by the captain's build agents (`SEEDED_NOTE`), and the Done meter
+reads Done with and without them (`seeded`).
 
 Standard library only at import (league/equity/__init__.py and config.py); the screen, the runner and the store (numpy)
 are imported where they are used, on the House.
@@ -127,6 +132,10 @@ SEEDS_KEY = "elane_seeds"
 #: daily bars, and a look that waits for the data job is asked again each round).
 ROUND_KEY = "elane_round_at"
 ROUND_SECONDS = 300.0
+#: THE SEEDS' DECLARED ORDER ACROSS ROUNDS (`seed_wait`): the family state's key of a seed's wait for the seeds declared
+#: before it ({for, since, passed}), and the longest it waits (six rounds; a run owed again is made within two).
+SEED_WAIT_KEY = "elane_seed_wait"
+SEED_WAIT_SECONDS = 1800.0
 #: The family state's key of its equity lineage's Validation try ({version, at, first, precheck, entered, retry_sha}).
 TRY_KEY = "elane_try"
 #: The family state's keys (league/equity/INTERFACES.md section 8.4): the one look ({version, at, verdict, beside,
@@ -393,21 +402,85 @@ def seeded(store: Any, fid: str) -> bool:
     return isinstance(spec, Mapping) and spec.get("seeded") is True
 
 
+def _seed_places(store: Any) -> dict[str, int]:
+    """{family id: its place in `seeds.EQUITY_SEEDS`} of the seeds born in this store (`SEEDS_KEY`)."""
+    from . import seeds
+
+    rank = {str(spec["id"]): i for i, spec in enumerate(seeds.EQUITY_SEEDS)}
+    return {str(fid): rank[str(sid)] for sid, fid in (store.get(SEEDS_KEY) or {}).items() if str(sid) in rank}
+
+
 def round_order(store: Any, fams: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     """THE ORDER OF AN EQUITY ROUND, which is the order the looks are taken in. D3 makes it a decision: of two programs
-    of one lineage the second is refused with no look. Oldest first by the second of birth, then the captain-seeded
-    programs in `seeds.EQUITY_SEEDS` order (the three are born in one call, so in one second: by id alone the order was
-    the alphabet's, or a clock tick's when a second ended between two births), then by id. A store that cannot say
-    which families are seeds leaves the order as given."""
+    of one lineage the second is refused with no look. Oldest first by the second of birth, then by id; THE
+    CAPTAIN-SEEDED PROGRAMS ARE ONE BLOCK IN THE DECLARED ORDER of `seeds.EQUITY_SEEDS`, standing where the first of
+    them was born, whatever second each was born in (by birth and id alone their order was the ids' alphabet, or a
+    clock tick's when a second ended between two births). A store that cannot say which families are seeds leaves the
+    order as given."""
     try:
-        from . import seeds
-
-        rank = {str(spec["id"]): i for i, spec in enumerate(seeds.EQUITY_SEEDS)}
-        place = {str(fid): rank[str(sid)] for sid, fid in (store.get(SEEDS_KEY) or {}).items() if str(sid) in rank}
+        place = _seed_places(store)
     except Exception:  # noqa: BLE001
         return list(fams)
-    return sorted(fams, key=lambda f: (str(f.get("born_at") or ""), place.get(str(f.get("id")), len(rank)),
-                                       str(f.get("id"))))
+    block = min((str(f.get("born_at") or "") for f in fams if str(f.get("id")) in place), default="")
+
+    def key(f: Mapping[str, Any]) -> tuple:
+        fid = str(f.get("id"))
+        if fid in place:
+            return (block, 0, place[fid], fid)
+        return (str(f.get("born_at") or ""), 1, 0, fid)
+
+    return sorted(fams, key=key)
+
+
+def seed_ahead(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
+    """The seed declared before `fam` in `seeds.EQUITY_SEEDS` whose one look is still to come (alive, not held by the
+    operator, its lineage not spent: `lineage_spent` is None while it is owed its try or its look), or None. A family
+    that is no seed has none ahead."""
+    place = _seed_places(store)
+    mine = place.get(str(fam["id"]))
+    if mine is None:
+        return None
+    for fid in sorted((f for f, rank in place.items() if rank < mine), key=lambda f: place[f]):
+        other = store.family(fid)
+        if not other or other.get("retired_at") or (other.get("state") or {}).get("gate_hold"):
+            continue
+        if lineage_spent(store, other, settings) is None:
+            return fid
+    return None
+
+
+def seed_wait(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
+    """THE DECLARED ORDER HOLDS ACROSS ROUNDS: the earlier-declared seed `fam`'s look waits for now (`seed_ahead`), or
+    None when its look may be taken. The wait spends nothing (league/swarm/gate.py `_equity_look`): of two seeds of one
+    lineage the first declared is the one judged, also in a round where its look is owed again (a run the House could
+    not make, a turn that raised) and the later seed's could be taken. IT IS BOUNDED, so one seed whose look can never
+    be taken does not starve the seeds after it (the review's s2-7): `SEED_WAIT_SECONDS` from the first round `fam`
+    waited (`SEED_WAIT_KEY` {for, since, passed} in its state); past that its look is taken whatever the earlier
+    seed's state, said once as a House warning. THE OPERATOR'S HOLD on the earlier seed (`gate_hold`) releases the
+    later ones at once. A store that cannot say holds nothing back."""
+    try:
+        ahead = seed_ahead(store, fam, settings)
+        if ahead is None:
+            return None
+        fid = str(fam["id"])
+        state = fam.get("state") or {}
+        held = dict(state[SEED_WAIT_KEY]) if isinstance(state.get(SEED_WAIT_KEY), Mapping) else None
+        now = float(store.clock())
+        if held is None:
+            store.set_state(fid, **{SEED_WAIT_KEY: {"for": ahead, "since": now}})
+            return ahead
+        if held.get("passed") is None and now - float(held.get("since") or now) < SEED_WAIT_SECONDS:
+            return ahead
+        if held.get("passed") is None:
+            store.set_state(fid, **{SEED_WAIT_KEY: {**held, "for": ahead, "passed": now}})
+            store.event("swarm.status", fid, {  # a House warning (the swarm's alerts are its status rows)
+                "action": "equity_seed_order_passed", "alert": True, "ahead": ahead,
+                "text": f"the equity seed {fid} waited {int(SEED_WAIT_SECONDS // 60)} minutes for the look of {ahead}, "
+                        "declared before it, and is looked at first: the declared order of the seeds' looks did not "
+                        "hold"})
+    except Exception:  # noqa: BLE001
+        return None
+    return None
 
 
 def candidate(fam: Mapping[str, Any], store: Any = None) -> int | None:
@@ -1399,7 +1472,8 @@ __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_K
            "try_open", "lineage_spent",
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
-           "ROUND_KEY", "ROUND_SECONDS", "round_order", "LOST_KEY", "LOOK_SENDS", "EVIDENCE_HASH_SEED", "SAME_LINEAGE",
+           "ROUND_KEY", "ROUND_SECONDS", "round_order", "seed_ahead", "seed_wait", "SEED_WAIT_KEY", "SEED_WAIT_SECONDS",
+           "LOST_KEY", "LOOK_SENDS", "EVIDENCE_HASH_SEED", "SAME_LINEAGE",
            "FLOOR_INELIGIBLE", "REFUSED_BEFORE_LOOK", "REFUSED_CAUSES",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",
            "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LineageUnread", "LOSS_LINE",

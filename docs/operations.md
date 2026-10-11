@@ -19,8 +19,9 @@ side `league/swarm/elane.py`, its contract `league/equity/INTERFACES.md` and `le
 `equity_money.enabled` TRUE (the captain's A10.2: the switch ships on), `elane.mode` "off" (the captain sets "gate" with
 set_swarm.py once the deploy is verified) and the S2 screen's receipt pinned for both lanes (A11); nothing trades until
 a program passes its sealed look AND the stock paper proof's BUY stage passes. In E1 the
-lane's programs are the three captain-seeded BETA programs (`seed-overnight-spy`, `seed-overnight-qqq`,
-`seed-reversal-index`: agent-written, judged by the swarm's screen like any family, and said plainly to be seeded);
+lane's programs are the three captain-seeded BETA programs (`seed-overnight-qqq`, `seed-reversal-index`,
+`seed-overnight-spy`, in the order their looks are taken: agent-written, judged by the swarm's screen like any family,
+and said plainly to be seeded);
 architect and researcher births in the beta and equity lanes are E2.
 
 **The equity rounds run on their own** (A3: an equity Validation or look runs on the House in the decider child; no Gym
@@ -33,13 +34,30 @@ equity family nothing. They need only the swarm process running (`enabled` in sw
 heartbeat's `status.equity` shows the mode and when the last equity round started; the swarm's log has one `equity:`
 line a round (who was validated, who was looked at).
 
-**The order of the looks** is the seed list's (`league/swarm/seeds.py` `EQUITY_SEEDS`, `elane.round_order`):
-`seed-overnight-spy`, then `seed-overnight-qqq`, then `seed-reversal-index`. It matters under D3: of two programs of one
-lineage (Train daily returns correlating at 0.7 or more, or the same template) the later one is refused with no look.
-So if the two overnight seeds are one lineage, SPY's is the one judged. A program refused at the gate before its look
-retires with that cause said (`elane.SAME_LINEAGE`, `elane.FLOOR_INELIGIBLE`), not as a spent Validation try. After the
-first look, read the refusal rows on the box to see whether QQQ's seed was refused as SPY's lineage (the figure stays
-on the House).
+**The order of the looks** is the seed list's DECLARED order (`league/swarm/seeds.py` `EQUITY_SEEDS`,
+`elane.round_order`): `seed-overnight-qqq, seed-reversal-index, seed-overnight-spy`. It is a decision (the captain's,
+Oct 11, 2026, before any Validation or look, from Train-era figures only), because it matters under D3: of two programs
+of one lineage (Train daily returns correlating at 0.7 or more, or the same template) the later one is refused with no
+look. The rehearsal on real bars found **the two overnight seeds to be one lineage**, so only one of them is ever looked
+at. `seed-overnight-qqq` goes first because its own floor sets it the lower bar of the two at the look, so the
+lineage's one look has the higher power there; `seed-reversal-index`, a lineage of its own, follows;
+`seed-overnight-spy` is last and, once `seed-overnight-qqq` has been looked at (passed OR failed: the lineage's look
+is spent either way), it is refused its look as the same lineage and retired with that cause said
+(`elane.SAME_LINEAGE`), plainly reported. **The consequence to know: SPY's overnight seed, the one that buys at every
+close, is not expected to trade.** `seed-overnight-qqq` buys at a close only after a down close of QQQ, and
+`seed-reversal-index` only after a close at least theta below the prior one, so a session with no such close has no
+equity buy. Two rules hold the order (`league/swarm/elane.py`):
+- `round_order`: both equity rounds walk the seeds as one block in the declared order, whatever second each was born
+  in (the store's own order is by the second of birth and then the id: the alphabet's, or a clock tick's);
+- `seed_wait`: a seed's look is not taken while a seed declared before it still has its own look to come, so a look
+  the House owes again (a run it could not make, a turn that raised) never hands the lineage to the later seed. The
+  wait spends nothing, shows in the round's `waits`, and is bounded at 30 minutes (`SEED_WAIT_SECONDS`, six rounds):
+  past that the later seed is looked at whatever the earlier one's state, with a House warning ("the declared order of
+  the seeds' looks did not hold"), so one seed that can never be looked at does not starve the rest. **The operator's
+  hold on the earlier seed (`gate_hold`) releases the later ones at once.** A family that is no seed waits for none.
+A program refused at the gate before its look retires with its cause said (`elane.SAME_LINEAGE`,
+`elane.FLOOR_INELIGIBLE`), not as a spent Validation try. After the first look, read the refusal rows on the box to
+confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the House).
 
 **What a look does with a run that went wrong** (`league/swarm/elane.py` `look`):
 - a holdout run its own errors ended ("disqualified") is a look SPENT AND FAILED, never judged on its partial series;

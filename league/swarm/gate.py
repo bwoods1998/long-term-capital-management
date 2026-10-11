@@ -1324,7 +1324,7 @@ class Gate:
         again. Its looks are listed in `out["looked"]` with their lane. Called by the swarm's loop on the equity rounds'
         own thread (`Swarm.equity_rounds`), never by `run`. ONE FAMILY'S ERROR NEVER STOPS THE OTHERS (as the
         tournament's equity step): it is one private event and `out["errors"][family]`, and the next family is asked."""
-        # THE ORDER THE LOOKS ARE TAKEN IN is a decision under D3 (`elane.round_order`): by birth, the seeds as listed.
+        # THE ORDER THE LOOKS ARE TAKEN IN is a decision under D3 (`elane.round_order`): by birth, the seeds as declared.
         for fam in elane.round_order(self.store, self.store.families(alive=True, lanes=elane.LANES)):
             fid = str(fam["id"])
             try:
@@ -1336,7 +1336,8 @@ class Gate:
 
     def _equity_look(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
         """One family's turn in the equity round (`equity_round`): a look in flight from a dead process owed again, then
-        its one look when it is gate-ready, in the Gym band, not held and not already done with."""
+        its one look when it is gate-ready, in the Gym band, not held, not already done with and, for a seed, when no
+        seed declared before it still has its look to come (`out["waits"]`: {family: the seed it waits for})."""
         fid = str(fam["id"])
         state = fam.get("state") or {}
         marker = state.get("look_inflight") or {}
@@ -1356,6 +1357,12 @@ class Gate:
             return
         sha = run_sha(version)
         if state.get("gated_sha") == sha:
+            return
+        # THE SEEDS' DECLARED ORDER holds across rounds (`elane.seed_wait`): a seed's look waits, nothing spent, while a
+        # seed declared before it still has its own look to come (a bounded wait; the operator's hold releases it).
+        ahead = elane.seed_wait(self.store, fam, self.settings)
+        if ahead is not None:
+            out.setdefault("waits", {})[fid] = ahead
             return
         looked = self.look(fam, version, sha)
         if looked is not None:

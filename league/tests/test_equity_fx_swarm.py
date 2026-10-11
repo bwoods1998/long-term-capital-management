@@ -240,8 +240,11 @@ class EquityRoundsOnTheirOwn(LoopCase):
 
 class TheOrderOfTheLooks(FixCase):
     """s2-6 and evidence-9 (one defect): the seeds' looks ran in (born_at, id) order with born_at to the second, so in
-    the ids' alphabet (QQQ before SPY), or by a clock tick; under D3 the later of two seeds of one lineage is refused
-    with no look, and it then retired as "used its one Validation try", which is not what happened."""
+    the ids' alphabet, or by a clock tick; under D3 the later of two seeds of one lineage is refused with no look, and
+    it then retired as "used its one Validation try", which is not what happened. The order is the seed list's, and
+    which order the list declares is the captain's decision after the rehearsal on real bars (rehearsal-5,
+    league/tests/test_equity_rehearsal.py `TheSeedsDeclaredOrder`): seed-overnight-qqq, seed-reversal-index,
+    seed-overnight-spy."""
 
     def seeded(self):
         born = elane.birth_seeds(self.store, ON)
@@ -254,7 +257,8 @@ class TheOrderOfTheLooks(FixCase):
         from league.swarm import seeds
 
         listed = [str(spec["id"]) for spec in seeds.EQUITY_SEEDS]
-        self.assertEqual(listed[:2], ["seed-overnight-spy", "seed-overnight-qqq"], "SPY's overnight seed goes first")
+        self.assertEqual(listed, ["seed-overnight-qqq", "seed-reversal-index", "seed-overnight-spy"],
+                         "the declared order: QQQ's overnight seed spends the overnight lineage's look")
         self.assertNotEqual(listed, sorted(listed), "the list's order is not the alphabet's")
         self.assertEqual(self.seeded(), listed)
         fams = self.store.families(alive=True, lanes=elane.LANES)
@@ -262,12 +266,12 @@ class TheOrderOfTheLooks(FixCase):
         self.assertEqual([f["id"] for f in elane.round_order(self.store, fams)], listed)
         self.runner.calls.clear()
         out, mint = self.gate_round()  # every seed's Train series is the harness's one series: one lineage
-        self.assertEqual(out["looked"], [{"family": "seed-overnight-spy", "passed": True, "lane": BETA}])
-        self.assertEqual([c[1] for c in self.runner.calls if c[0] == "look"], ["seed-overnight-spy"])
+        self.assertEqual(out["looked"], [{"family": "seed-overnight-qqq", "passed": True, "lane": BETA}])
+        self.assertEqual([c[1] for c in self.runner.calls if c[0] == "look"], ["seed-overnight-qqq"])
         for fid in listed[1:]:
             (refusal,) = self.store.refusals(fid)
             self.assertEqual(refusal["stage"], "same lineage")
-            self.assertIn("seed-overnight-spy", refusal["reason"])
+            self.assertIn("seed-overnight-qqq", refusal["reason"])
 
     def test_a_later_birth_keeps_its_place_and_an_unseeded_family_follows_the_seeds(self):
         self.born("aaa-first")  # born before the seeds: its turn is first, whatever its id
@@ -287,14 +291,14 @@ class TheOrderOfTheLooks(FixCase):
         self.gate_round()
         with screen():
             out = self.tournament.equity_round()
-        self.assertEqual(out["retired"], ["seed-overnight-qqq", "seed-reversal-index"])
+        self.assertEqual(out["retired"], ["seed-reversal-index", "seed-overnight-spy"])
         for fid in out["retired"]:
             fam = self.store.family(fid)
             self.assertEqual(fam["retire_reason"], elane.SAME_LINEAGE)
             self.assertNotEqual(fam["retire_reason"], elane.SPENT_TRY, "its try was not what ended it")
         self.assertNotRegex(elane.SAME_LINEAGE + elane.FLOOR_INELIGIBLE + elane.REFUSED_BEFORE_LOOK, r"seed-|\$",
                             "public causes: the rule's words, no family and no figure")
-        self.assertEqual(self.store.family("seed-overnight-spy")["band"], "candidate", "the one that was judged")
+        self.assertEqual(self.store.family("seed-overnight-qqq")["band"], "candidate", "the one that was judged")
 
     def test_an_ineligible_floor_and_a_failed_recheck_have_their_own_causes(self):
         version, sha = self.ready("b1")
@@ -1034,32 +1038,47 @@ class TheActivityBesideTheLook(FixCase):
 
 
 class OneFamilysErrorNeverStopsTheOthers(FixCase):
-    """s2-7, the gate's half: the equity look round stopped at the first family whose turn raised, so the seeds after
-    it in the order would never have been looked at while it kept raising."""
+    """s2-7, the gate's half: the equity look round stopped at the first family whose turn raised, so the families after
+    it in the order would never have been looked at while it kept raising. (For the seeds among themselves the declared
+    order adds a bounded wait: league/tests/test_equity_rehearsal.py `TheSeedsDeclaredOrder`.)"""
 
-    def test_a_look_that_raises_costs_the_families_after_it_nothing(self):
-        born = elane.birth_seeds(self.store, ON)
-        with screen():
-            self.tournament.equity_round()
+    def raising(self, fid):
         real = elane.look
 
         def look(gate, fam, version, sha):
-            if fam["id"] == "seed-overnight-spy":
+            if fam["id"] == fid:
                 raise RuntimeError("an unexpected failure in one family's look")
             return real(gate, fam, version, sha)
 
-        out = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
-        with screen(), mock.patch.object(elane, "look", side_effect=look):
-            self.gate.equity_round(out)
-        self.assertEqual([row["family"] for row in out["looked"]], born[1:], "the two after it were looked at")
-        self.assertEqual(out["errors"], {"seed-overnight-spy": "RuntimeError"})
-        self.assertIn("equity_round_error", self.actions("seed-overnight-spy"))
-        state = self.store.family("seed-overnight-spy")["state"]
-        self.assertEqual((state["gate_ready"], state.get("look_inflight")), (True, None), "still owed: nothing was spent")
+        return mock.patch.object(elane, "look", side_effect=look)
+
+    def round(self):
         out = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
         with screen():
             self.gate.equity_round(out)
-        self.assertEqual([row["family"] for row in out["looked"]], ["seed-overnight-spy"], "and taken the next round")
+        return out
+
+    def test_a_look_that_raises_costs_the_families_after_it_nothing(self):
+        for fid in ("b1", "b2", "b3"):
+            self.ready(fid, code=CODE + f"# {fid}\n")
+        with self.raising("b1"):
+            out = self.round()
+        self.assertEqual([row["family"] for row in out["looked"]], ["b2", "b3"], "the two after it were looked at")
+        self.assertEqual(out["errors"], {"b1": "RuntimeError"})
+        self.assertIn("equity_round_error", self.actions("b1"))
+        state = self.store.family("b1")["state"]
+        self.assertEqual((state["gate_ready"], state.get("look_inflight")), (True, None), "still owed: nothing was spent")
+        self.assertEqual([row["family"] for row in self.round()["looked"]], ["b1"], "and taken the next round")
+
+    def test_the_last_seeds_look_raising_costs_the_seeds_before_it_nothing(self):
+        born = elane.birth_seeds(self.store, ON)
+        with screen():
+            self.tournament.equity_round()
+        with self.raising(born[-1]):
+            out = self.round()
+        self.assertEqual([row["family"] for row in out["looked"]], born[:2])
+        self.assertEqual(out["errors"], {born[-1]: "RuntimeError"})
+        self.assertEqual([row["family"] for row in self.round()["looked"]], [born[-1]], "and taken the next round")
 
 
 class EquityRoundsBeforeTheGymsWork(LoopCase):

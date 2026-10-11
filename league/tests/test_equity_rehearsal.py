@@ -22,16 +22,30 @@ Every price here is invented (round numbers and a few cents), never a market's."
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 import random
 import unittest
 from decimal import Decimal
 from fractions import Fraction
+from pathlib import Path
+from unittest import mock
 
-from league.equity import config, engine
+import numpy as np
+
+from league.equity import BETA, config, engine
 from league.equity import live as L
+from league.equity import screen as S
 from league.equity.engine import run, split_factor
+from league.equity.runner import RunFailed
+from league.swarm import elane, seeds
 from league.tests import test_equity_book as T
 from league.tests import test_equity_engine as E
+from league.tests import test_equity_fx_swarm as FS
+from league.tests.test_elane import CODE, ON
+from league.tests.test_elane_gate import screen
+
+REPO = Path(__file__).resolve().parents[2]
+QQQ, REVERSAL, SPY = "seed-overnight-qqq", "seed-reversal-index", "seed-overnight-spy"
 
 D = Decimal
 MONDAY, TUESDAY = T.MONDAY, T.TUESDAY
@@ -289,6 +303,175 @@ class TheNextDaysFetch(T.BookTest):
         marks = {(r["adjustment"], r["audit"]) for r in h.state.rows(
             "SELECT adjustment, audit FROM eq_bars WHERE day=? AND symbol='SPY'", (MONDAY.isoformat(),))}
         self.assertEqual(marks, {("raw", None), ("all", "ok")})
+
+
+# ------------------------------------------------------------------------------------- the seeds' declared order
+class NamedRunner(FS.PickyRunner):
+    """`PickyRunner` whose runs say whose they are (so each family can have its own Train series), and whose sealed
+    look the House cannot make for the families in `unmade` (no look is spent: it is owed again)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.unmade: set[str] = set()
+
+    def _run(self, name, window, k):
+        made = super()._run(name, window, k)
+        made.bars.name = name
+        return made
+
+    def look(self, code, params, *, name, gate, k=1.0):
+        if name in self.unmade:
+            self.calls.append(("look", name, gate))
+            raise RunFailed("the decider child could not be started")
+        return super().look(code, params, name=name, gate=gate, k=k)
+
+
+def own_series(lots, bars, *, universe, capital, first=None, last=None):
+    """The gate harness's `series`, with the reversal seed on a Train series of its own (the two overnight seeds, and
+    any other family, share one: one lineage, as the rehearsal found the two overnight seeds on real bars)."""
+    days = {"segment-1": np.arange(0, 5), "segment-2": np.arange(10, 15)}.get(bars.window, np.arange(100, 105))
+    r = np.linspace(-0.01, 0.01, len(days))
+    if "reversal" in str(getattr(bars, "name", "")):
+        r = np.asarray([0.01, -0.01, 0.012, -0.008, 0.0])[:len(days)]
+    return S.Series(days=days.astype(np.int32), r=r, w=np.ones(len(days)), b=np.zeros(len(days)),
+                    exits=np.zeros(len(days), dtype=int), invested=np.ones(len(days), dtype=bool))
+
+
+class TheSeedsDeclaredOrder(FS.FixCase):
+    """rehearsal-5: on real Train series the two overnight seeds are one lineage, so D3 gives only one of them a look,
+    and which one was left to the store's order. The captain decided it before any Validation or look: the declared
+    order of `seeds.EQUITY_SEEDS` is the order of the looks, and it is seed-overnight-qqq, seed-reversal-index,
+    seed-overnight-spy."""
+
+    def setUp(self):
+        super().setUp()
+        self.runner = NamedRunner()
+        self.tournament.equity_runner = self.gate.equity_runner = self.runner
+
+    def seeded(self):
+        born = elane.birth_seeds(self.store, ON)
+        with screen():
+            self.tournament.equity_round()
+        return born
+
+    def round(self):
+        """One equity round of the gate: D3 by the screen's real rule, each family on its own Train series."""
+        out = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
+        with screen(), mock.patch.object(S, "same_lineage", FS.REAL_SAME_LINEAGE), \
+                mock.patch.object(S, "series", side_effect=own_series):
+            self.gate.equity_round(out)
+        return out
+
+    def looks_asked(self):
+        return [c[1] for c in self.runner.calls if c[0] == "look"]
+
+    def test_the_declared_order_and_its_reason_are_written_down(self):
+        self.assertEqual([spec["id"] for spec in seeds.EQUITY_SEEDS], [QQQ, REVERSAL, SPY])
+        source = inspect.getsource(seeds)
+        said = source[source.index("#: THE ORDER OF THIS LIST"):source.index("EQUITY_SEEDS: list")]
+        for words in ("ONE LINEAGE", "seed-overnight-qqq goes first", "the lower bar", "retired with that reason"):
+            self.assertIn(words, " ".join(said.replace("#:", " ").split()))
+        self.assertNotRegex(said, r"\d\.\d\d", "the reason in words: no Train-era figure in a public file")
+        page = " ".join((REPO / "docs" / "operations.md").read_text().split())
+        self.assertIn("seed-overnight-qqq, seed-reversal-index, seed-overnight-spy", page)
+
+    def test_the_declared_order_is_the_look_order(self):
+        self.assertEqual(self.seeded(), [QQQ, REVERSAL, SPY])
+        self.runner.calls.clear()
+        out = self.round()
+        self.assertEqual(out["looked"], [{"family": QQQ, "passed": True, "lane": BETA},
+                                         {"family": REVERSAL, "passed": True, "lane": BETA}])
+        self.assertEqual(self.looks_asked(), [QQQ, REVERSAL], "the second overnight seed is never looked at")
+        (refusal,) = self.store.refusals(SPY)
+        self.assertEqual(refusal["stage"], "same lineage")
+        self.assertIn(QQQ, refusal["reason"])
+        self.assertEqual(self.store.refusals(REVERSAL), [], "a lineage of its own")
+        self.assertNotIn("waits", out)
+        with screen():
+            self.assertEqual(self.tournament.equity_round()["retired"], [SPY])
+        fam = self.store.family(SPY)
+        self.assertEqual(fam["retire_reason"], elane.SAME_LINEAGE, "retired with that reason, plainly")
+        self.assertEqual({self.store.family(f)["band"] for f in (QQQ, REVERSAL)}, {"candidate"})
+
+    def test_the_seconds_they_were_born_in_do_not_change_it(self):
+        self.seeded()
+        # The store's own order would now put SPY's seed first: born a second before the others.
+        self.store.update_family(SPY, born_at="2026-10-11T00:00:00Z")
+        self.store.update_family(REVERSAL, born_at="2026-10-11T00:00:01Z")
+        self.store.update_family(QQQ, born_at="2026-10-11T00:00:02Z")
+        fams = self.store.families(alive=True, lanes=elane.LANES)
+        self.assertEqual([f["id"] for f in fams], [SPY, REVERSAL, QQQ])
+        self.assertEqual([f["id"] for f in elane.round_order(self.store, fams)], [QQQ, REVERSAL, SPY])
+        self.round()
+        self.assertEqual(self.looks_asked()[:1], [QQQ])
+        self.assertEqual(self.store.refusals(SPY)[0]["stage"], "same lineage")
+
+    def test_a_look_owed_again_never_hands_the_lineage_to_the_later_seed(self):
+        self.seeded()
+        self.runner.calls.clear()
+        self.runner.unmade = {QQQ}                    # the House cannot make its sealed run in this round
+        out = self.round()
+        self.assertEqual(out["looked"], [])
+        self.assertEqual(out["waits"], {REVERSAL: QQQ, SPY: QQQ})
+        self.assertEqual(self.looks_asked(), [QQQ], "nothing sealed was run for the seeds after it")
+        self.assertEqual((self.looks(), self.store.refusals()), ([], []), "a wait: no look and no try is spent")
+        for fid in (QQQ, REVERSAL, SPY):
+            state = self.store.family(fid)["state"]
+            self.assertEqual((state["gate_ready"], state.get("look_inflight")), (True, None), fid)
+        self.runner.unmade = set()
+        self.clock.advance(elane.ROUND_SECONDS)
+        out = self.round()
+        self.assertEqual([row["family"] for row in out["looked"]], [QQQ, REVERSAL], "the next round, as declared")
+        self.assertIn(QQQ, self.store.refusals(SPY)[0]["reason"])
+
+    def test_the_wait_is_bounded_and_said_once(self):
+        """One seed whose look can never be taken does not starve the seeds after it (the review's s2-7)."""
+        self.seeded()
+        self.runner.unmade = {QQQ}
+        self.assertEqual(self.round()["waits"], {REVERSAL: QQQ, SPY: QQQ})
+        self.clock.advance(elane.SEED_WAIT_SECONDS - 1)
+        self.assertEqual(self.round()["waits"], {REVERSAL: QQQ, SPY: QQQ})
+        self.clock.advance(1)
+        out = self.round()
+        self.assertEqual([row["family"] for row in out["looked"]], [REVERSAL, SPY])
+        self.assertNotIn("waits", out)
+        warned = [e for e in self.store.events_after(0, limit=100_000)
+                  if e["kind"] == "swarm.status" and e["payload"].get("action") == "equity_seed_order_passed"]
+        self.assertEqual([(e["family"], e["payload"]["ahead"], e["payload"]["alert"]) for e in warned],
+                         [(REVERSAL, QQQ, True), (SPY, QQQ, True)])
+        self.assertIn("the declared order of the seeds' looks did not hold", warned[0]["payload"]["text"])
+        self.runner.unmade = set()
+        self.clock.advance(elane.ROUND_SECONDS)
+        self.round()
+        self.assertEqual(self.store.refusals(QQQ)[0]["stage"], "same lineage", "the lineage's look was spent by then")
+
+    def test_the_operators_hold_on_the_earlier_seed_releases_the_later_ones(self):
+        self.seeded()
+        self.store.set_state(QQQ, gate_hold=True)
+        out = self.round()
+        self.assertEqual((out["held"], [row["family"] for row in out["looked"]]), ([QQQ], [REVERSAL, SPY]))
+        self.assertNotIn("waits", out)
+
+    def test_a_seed_whose_lineage_is_spent_or_that_is_retired_holds_nobody_back(self):
+        self.seeded()
+        self.store.set_state(QQQ, gate_ready=False, **{elane.TRY_KEY: {"version": 1, "precheck": False,
+                                                                        "entered": False}})
+        self.assertEqual(elane.lineage_spent(self.store, self.store.family(QQQ), ON), elane.SPENT_TRY)
+        self.assertIsNone(elane.seed_ahead(self.store, self.store.family(REVERSAL), ON))
+        self.store.retire(REVERSAL, "retired by hand")
+        out = self.round()
+        self.assertEqual([row["family"] for row in out["looked"]], [SPY], "the lineage's look is the next seed's")
+
+    def test_a_family_that_is_no_seed_waits_for_no_seed(self):
+        self.seeded()
+        self.ready("b1", code=CODE + "# not a seed\n")
+        self.runner.unmade = {QQQ}
+        out = self.round()
+        self.assertEqual([row["family"] for row in out["looked"]], ["b1"])
+        self.assertEqual(out["waits"], {REVERSAL: QQQ, SPY: QQQ})
+        self.assertIsNone(elane.seed_ahead(self.store, self.store.family("b1"), ON))
+        with mock.patch.object(self.store, "get", side_effect=RuntimeError("unreadable")):
+            self.assertIsNone(elane.seed_wait(self.store, self.store.family(SPY), ON), "a store that cannot say")
 
 
 if __name__ == "__main__":
