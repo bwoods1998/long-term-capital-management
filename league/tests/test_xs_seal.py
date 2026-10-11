@@ -212,18 +212,19 @@ def simplest_between(low: float, high: float) -> Fraction:
     return whole + 1 / rest
 
 
-def lattice(ret, oret, spread, *, low: int = 100, high: int = 1_000_000):
+def lattice(ret, oret, spread, *, low: int = 100, high: int = 1_000_000, slack: float = 0.0):
     """(a) THE LATTICE SEARCH. Every candidate last close from $1 to $10,000 in cents; walk back through the
     sessions: the close before (x / (1 + ret)), the open (the close before x (1 + oret)) and the day's range (range x
     the close) must each sit on a whole number of cents, to within what the fields' own 6-decimal rounding moves
     them (half a millionth of the price: above about $9,400 that is half a cent, and the rounding alone hides the
-    grid). The candidates that survive every session, ascending."""
+    grid). `slack`: cents more allowed, for a search that knows how far a dither moved each price. The candidates
+    that survive every session, ascending."""
     candidates = np.arange(low, high + 1, dtype=np.float64)
     x = candidates.copy()
     for s in range(len(ret) - 1, 0, -1):
         if not (math.isfinite(ret[s]) and math.isfinite(oret[s]) and math.isfinite(spread[s])):
             return candidates[:0]
-        tol = 0.002 + 0.53e-6 * x
+        tol = 0.002 + 0.53e-6 * x + slack
         wick = spread[s] * x
         before = x / (1.0 + ret[s])
         whole = np.rint(before)
@@ -499,6 +500,37 @@ class TheLevelCannotBeSearched(unittest.TestCase):
                     candidates, x = candidates[keep], np.rint(before)[keep]
                 self.assertFalse(self.near(float(candidates[0]) if candidates.size else None, truth))
         self.assertEqual(len({row["slot"] for row in self.seen["book"]}), 1)
+
+    def test_why_the_dither_sits_on_the_adjusted_grid_and_not_on_the_raw_one(self):
+        """E4-SPEC D7's words move each bar's RAW price by half a raw cent. The vendor serves adjustment=all rounded
+        to the cent, so after a 4-for-1 split the adjusted history is a quarter of the raw one AND on the cent grid:
+        half a raw cent is an eighth of an adjusted cent, and the lattice search, allowed that much, finds the level
+        to the cent or two. Moved by half a cent of the adjusted grid (what `ctx.build` does) nothing survives."""
+        rng = np.random.default_rng(17)
+        n = 120
+        raw_close = np.round(412.0 * np.exp(np.cumsum(rng.normal(0.0, 0.012, n))), 2)
+        raw_open = np.round(np.concatenate([[raw_close[0]], raw_close[:-1]]) * np.exp(rng.normal(0.0, 0.004, n)), 2)
+        raw_high = np.round(np.maximum(raw_open, raw_close) * (1.0 + np.abs(rng.normal(0.0, 0.004, n))), 2)
+        raw_low = np.round(np.minimum(raw_open, raw_close) * (1.0 - np.abs(rng.normal(0.0, 0.004, n))), 2)
+        raw = np.stack([raw_open, raw_high, raw_low, raw_close], axis=1)
+        adj = np.round(raw / 4.0, 2)                               # the vendor's cents, on a quarter of the price
+        u = rng.uniform(-0.005, 0.005, raw.shape)
+        truth = int(round(adj[-1, 3] * 100.0))
+
+        def fields(prices):
+            o, h, low, c = prices.T
+            ret, oret = np.full(n, np.nan), np.full(n, np.nan)
+            ret[1:], oret[1:] = c[1:] / c[:-1] - 1.0, o[1:] / c[:-1] - 1.0
+            return np.round(ret, 6).tolist(), np.round(oret, 6).tolist(), np.round((h - low) / c, 6).tolist()
+
+        bare = lattice(*fields(adj), high=60_000)
+        self.assertEqual(int(bare[0]), truth)
+        on_the_raw_grid = lattice(*fields(adj * (1.0 + u / raw)), high=60_000, slack=0.27)   # two eighths of a cent
+        self.assertTrue(on_the_raw_grid.size and abs(float(on_the_raw_grid[0]) / truth - 1.0) < 0.01,
+                        "half a raw cent leaves the adjusted grid in sight")
+        on_its_own_grid = fields(adj + u)
+        for slack in (0.0, 0.27, 0.45):
+            self.assertFalse(lattice(*on_its_own_grid, high=60_000, slack=slack).size, slack)
 
     def test_the_dither_covers_the_adjusted_grid_whatever_a_later_dividend_or_split_made_of_it(self):
         """The grid a ratio of two history prices keeps is the ADJUSTED price's own cent grid (the vendor rounds
