@@ -181,7 +181,44 @@
     },
     "val_tries": 1,
     "looks_per_lineage": 1,
-    "program_loss_usd": -300
+    "program_loss_usd": -300,
+    "e2": {
+      "births_every_seconds": 7200,
+      "births_refill_seconds": 1800,
+      "start": 8,
+      "max_alive": 24,
+      "min_per_pass": 1,
+      "max_per_pass": 6,
+      "window_hours": 24,
+      "births_max_output_tokens": 24000,
+      "births_effort": "medium",
+      "families_shown": 30,
+      "train_budget": 4,
+      "train_max_attempts": 7,
+      "train_max_errors": 3,
+      "train_every_seconds": 600,
+      "train_per_round": 3,
+      "train_max_output_tokens": 12000,
+      "train_effort": "medium",
+      "refuted_cell_cap": 3,
+      "review_routes": [
+        "sail:pro_balanced",
+        "sail:k3_balanced",
+        "sail:glm_balanced"
+      ],
+      "review_max_output_tokens": 6000,
+      "review_effort": "medium",
+      "review_max_unclear": 3,
+      "routes": [
+        "sail:pro_asap",
+        "sail:glm_asap",
+        "sail:k3"
+      ],
+      "min_births": 10,
+      "sample_requests": 30,
+      "explore_every": 3,
+      "usd_day": 8.0
+    }
   },
   "engineer": {
     "enabled": true
