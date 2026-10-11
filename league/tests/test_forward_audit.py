@@ -1,12 +1,14 @@
 """Release E3, package B (league/ops/forward_audit.py): the morning marks of the forward record and the registry's
-chain check. A bar the equity book's morning re-fetch found different (`eq_bars.audit` "mismatch") marks that day for
-every program whose NEEDS hold the symbol and whose forward days hold the day, once; a marked day leaves the counted
-days and its row stays; a control is never marked; the chain is read whole each morning, and a broken one is an event
-and a warning that names ids and counts only; a book that cannot be read marks nobody.
+chain check. A bar the equity book's morning re-fetch found different marks that day for every program whose NEEDS
+hold the symbol and whose forward days hold the day, once; which bars differed is read from the book's own note
+first (the symbols that differed) and from its `eq_bars.audit` marks for a day the note does not name; a marked day
+leaves the counted days and its row stays; a control is never marked; the chain is read whole each morning, and a
+broken one is an event and a warning that names ids and counts only; a book that cannot be read marks nobody.
 
-The live book here is an empty SQLite file made from E1's own DDL (league/equity/live.py `SCHEMA`) with invented rows;
-every program, registry row and day is invented. The `forward_db` functions (package A's) are faked only while they
-are still step 0's stubs: league/tests/test_forward_shadow.py, THE FAKES."""
+The live book here is an empty SQLite file made from E1's own DDL (league/equity/live.py `SCHEMA`) with invented rows,
+and in `TheBooksOwnNote.test_on_e1s_own_book` E1's real `EquityBook` on its own test harness (invented prices); every
+program, registry row and day is invented. The `forward_db` functions (package A's) are faked only while they are
+still step 0's stubs: league/tests/test_forward_shadow.py, THE FAKES."""
 
 from __future__ import annotations
 
@@ -61,6 +63,17 @@ class Audit(unittest.TestCase):
                 db.execute("INSERT OR REPLACE INTO eq_bars(day, symbol, adjustment, o, h, l, c, v, fetched_at, sha, "
                            "audit) VALUES (?,?,?,'1','1','1','1','1',?,'an invented sha',?)",
                            (day.isoformat(), symbol, adjustment, self.t, audit))
+            db.commit()
+        finally:
+            db.close()
+
+    def note(self, value: Any) -> None:
+        """The book's kv `eq_bars_audit` as the House state keeps a value (JSON text); a str is written as it is."""
+        db = sqlite3.connect(self.root / forward_audit.LIVE_DB)
+        try:
+            db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            db.execute("INSERT OR REPLACE INTO kv(key, value) VALUES (?,?)",
+                       (forward_audit.NOTE_KEY, value if isinstance(value, str) else json.dumps(value)))
             db.commit()
         finally:
             db.close()
@@ -128,6 +141,116 @@ class TheMarks(Audit):
         self.book((FWD[3], "SPY", "raw", "mismatch"), (FWD[3], "QQQ", "raw", "mismatch"))
         receipt = forward_audit.run(self.ctx())
         self.assertEqual((receipt["marked"], receipt["mismatched"], self.marks(control)), (0, 2, []))
+
+
+class TheBooksOwnNote(Audit):
+    """WHICH BARS DIFFERED: E1's morning audit writes "mismatch" on EVERY `eq_bars` row of the day when one symbol
+    differs, and the next evening's fetch sets the row that changed (the symbol that did differ) back to unaudited.
+    The book's own note names the symbols that differed, and keeps them."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.on_spy = fx.register(self.db, "always@1", fx.ALWAYS, first_close=BEFORE)
+        self.on_qqq = fx.register(self.db, "qqq@1", ON_QQQ, first_close=BEFORE)
+        self.both = fx.register(self.db, "flip@1", fx.FLIPPER, first_close=BEFORE)           # SPY and QQQ
+        self.db.commit()
+        self.day = FWD[3].isoformat()
+
+    def test_a_day_the_note_names_is_marked_for_the_symbols_that_differed(self):
+        # As the book leaves it the morning SPY's bar differed: every row of the day marked, the note naming SPY.
+        self.book((FWD[3], "SPY", "raw", "mismatch"), (FWD[3], "SPY", "all", "mismatch"),
+                  (FWD[3], "QQQ", "raw", "mismatch"), (FWD[3], "QQQ", "all", "mismatch"))
+        self.note({self.day: {"symbols": ["SPY"], "at": self.t}})
+        self.assertEqual(forward_audit.mismatches(self.root / forward_audit.LIVE_DB), [(self.day, "SPY")])
+        receipt = forward_audit.run(self.ctx())
+        self.assertEqual((receipt["marked"], receipt["mismatched"], receipt["marks"]), (2, 1, "ok"))
+        self.assertEqual(sorted(self.marks()), [(self.on_spy, self.day), (self.both, self.day)])
+        self.assertEqual(self.marks(self.on_qqq), [])          # its bar was right: it keeps the day
+        self.assertEqual({e["payload"]["symbol"] for e in forward_db.events(self.db, "audit_mismatch")}, {"SPY"})
+
+    def test_a_missed_morning_is_made_up_from_the_note(self):
+        # The morning after could not read the book. By the next one the evening's fetch has set the row that
+        # changed (SPY's) back to unaudited; the rows that did not change still say "mismatch".
+        self.book((FWD[3], "SPY", "raw", None), (FWD[3], "SPY", "all", None),
+                  (FWD[3], "QQQ", "raw", "mismatch"), (FWD[3], "QQQ", "all", "mismatch"))
+        self.note({self.day: {"symbols": ["SPY"], "at": self.t}})
+        self.t = morning(FWD[6])
+        self.assertEqual(forward_audit.run(self.ctx())["marked"], 2)
+        self.assertEqual(sorted(self.marks()), [(self.on_spy, self.day), (self.both, self.day)])
+        self.t = morning(FWD[7])
+        self.assertEqual(forward_audit.run(self.ctx())["marked"], 0)           # once a (pid, day)
+
+    def test_a_day_the_note_does_not_name_is_read_from_its_rows(self):
+        self.book((FWD[3], "SPY", "raw", "mismatch"), (FWD[3], "QQQ", "raw", "mismatch"),
+                  (FWD[4], "QQQ", "raw", "mismatch"), (FWD[4], "SPY", "raw", "ok"))
+        self.note({self.day: {"symbols": ["spy "], "at": self.t}})
+        self.assertEqual(forward_audit.mismatches(self.root / forward_audit.LIVE_DB),
+                         [(self.day, "SPY"), (FWD[4].isoformat(), "QQQ")])
+        forward_audit.run(self.ctx())
+        self.assertEqual(sorted(self.marks()), sorted([(self.on_spy, self.day), (self.both, self.day),
+                                                       (self.on_qqq, FWD[4].isoformat()),
+                                                       (self.both, FWD[4].isoformat())]))
+
+    def test_a_note_with_no_row_left_still_marks(self):
+        # Thirty failed audits are kept; the day's rows may all have been fetched again and changed since.
+        self.book((FWD[3], "SPY", "raw", None))
+        self.note({self.day: {"symbols": ["SPY", "IWM"], "at": self.t}, FWD[1].isoformat(): {"symbols": ["QQQ"]}})
+        self.assertEqual(forward_audit.run(self.ctx())["mismatched"], 3)
+        self.assertEqual(sorted(self.marks()), sorted([(self.on_spy, self.day), (self.both, self.day),
+                                                       (self.on_qqq, FWD[1].isoformat()),
+                                                       (self.both, FWD[1].isoformat())]))
+
+    def test_a_note_that_cannot_be_read_leaves_the_rows(self):
+        rows = ((FWD[3], "SPY", "raw", "mismatch"), (FWD[3], "QQQ", "raw", "mismatch"))
+        both_symbols = [(self.day, "QQQ"), (self.day, "SPY")]
+        for note in ("not JSON {", ["a list"], {self.day: "SPY"}, {self.day: {"symbols": []}},
+                     {self.day: {"symbols": "SPY"}}, {self.day: {"symbols": ["SPY", 7]}}, {self.day: {"at": 1}}, None):
+            self.book(*rows)
+            self.note(note)
+            self.assertEqual(forward_audit.mismatches(self.root / forward_audit.LIVE_DB), both_symbols, note)
+        ctx = self.ctx()
+        self.assertEqual((forward_audit.run(ctx)["marked"], ctx.alerts), (3, []))
+
+    def test_on_e1s_own_book(self):
+        # E1's REAL book through one decision, its morning audit and the next evening's fetch (its own test harness;
+        # invented prices): two symbols fetched, SPY's close differing at the re-fetch.
+        from league.tests import test_equity_book as book
+
+        monday, tuesday = book.MONDAY, book.TUESDAY
+        on_spy = fx.register(self.db, "spy-live@1", fx.ALWAYS, first_close=schedule.previous_session(monday))
+        on_qqq = fx.register(self.db, "qqq-live@1", ON_QQQ, first_close=schedule.previous_session(monday))
+        self.db.commit()
+        harness = book.Harness(self.root)
+        self.addCleanup(harness.state.close)
+        harness.families.rows = {"seed-overnight-spy": book.family_row(symbols=("SPY", "QQQ"))}
+        instance = harness.instance()
+        harness.decider.needs[instance.id] = {"symbols": ["SPY", "QQQ"], "history": 5, "max_hold_sessions": 20}
+        harness.decide_setup(monday, symbols=("SPY", "QQQ"))
+        harness.tick(16, 31)
+        self.assertEqual(harness.state.get("eq_decision")["symbols"], ["QQQ", "SPY"])
+        harness.market.bar_rows["raw"]["SPY"][-1]["c"] += 1.0
+        harness.tick(8, 31, day=tuesday)
+
+        def audits() -> dict[tuple[str, str], str | None]:
+            return {(row["symbol"], row["adjustment"]): row["audit"] for row in harness.state.rows(
+                "SELECT symbol, adjustment, audit FROM eq_bars WHERE day=?", (monday.isoformat(),))}
+
+        # THE FACT this module is built on: every row of the day is marked, the note names what differed.
+        self.assertEqual(set(audits().values()), {"mismatch"})
+        self.assertEqual(harness.state.get(forward_audit.NOTE_KEY)[monday.isoformat()]["symbols"], ["SPY"])
+        live = self.root / forward_audit.LIVE_DB
+        self.assertEqual(forward_audit.mismatches(live), [(monday.isoformat(), "SPY")])
+        for name in ("raw", "all"):
+            for symbol in ("SPY", "QQQ"):
+                rows = harness.market.bar_rows[name][symbol]
+                rows.append({**rows[-1], "t": f"{tuesday.isoformat()}T04:00:00Z"})
+        harness.tick(16, 31, day=tuesday)
+        self.assertEqual((audits()[("SPY", "raw")], audits()[("QQQ", "raw")]), (None, "mismatch"))
+        self.assertEqual(forward_audit.mismatches(live), [(monday.isoformat(), "SPY")])
+        self.t = morning(schedule.next_session(tuesday))
+        self.assertEqual(forward_audit.run(self.ctx())["mismatched"], 1)
+        self.assertEqual((self.marks(on_spy), self.marks(on_qqq)), ([(on_spy, monday.isoformat())], []))
+        self.assertEqual(self.marks(self.on_qqq), [])          # no holder of QQQ alone, whenever it was registered
 
 
 class TheChain(Audit):

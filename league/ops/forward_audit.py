@@ -4,13 +4,23 @@ Owner: B (league/ops/E3_INTERFACES.md). Protected. 25 minutes before each open (
 re-fetch of the last decision's bars, A8.11); in a pause too. It reads the live book read-only and writes only events
 of `<state>/forward.sqlite` (league/ops/forward_db.py).
 
-- THE AUDIT MARKS: for each `eq_bars` row of the live book with `audit` "mismatch" (the re-fetch found the bar
-  different from the one a decision used) and each registered program whose NEEDS hold the symbol and whose forward
-  days hold the day, one `audit_mismatch` event (once a (pid, day)). A marked day leaves the program's COUNTED days
+- THE AUDIT MARKS: for each bar of the live book that its morning re-fetch found different from the one a decision
+  used, and each registered program whose NEEDS hold the symbol and whose forward days hold the day, one
+  `audit_mismatch` event (once a (pid, day)). A marked day leaves the program's COUNTED days
   (`forward_db.counted_days`); its row stays. A program's forward days hold a day from its `first_day` on, whether its
   row for that day is written yet or not (a program left stale that night is marked before its row comes), stopped or
-  not. A CONTROL IS NEVER MARKED: it reads no bar and decides nothing. Every mismatch row the book still holds is
-  read each morning, so a morning that could not read the book is made up the next.
+  not. A CONTROL IS NEVER MARKED: it reads no bar and decides nothing.
+- WHICH BARS DIFFERED (`mismatches`), read from the book as E1 built it (league/equity/live.py `_audit`):
+  - THE NOTE: the book's own record of each audit that failed, kv `eq_bars_audit` = {day: {"symbols": [the symbols
+    whose bars differed], "at"}}, kept for its last 30 such days. A day the note names is marked for THOSE symbols.
+  - THE ROWS: `eq_bars.audit` "mismatch". A day the note does not name is marked for every symbol with such a row.
+  WHY THE NOTE FIRST (measured on E1's own book, two symbols fetched, one differing): the book writes "mismatch" on
+  EVERY `eq_bars` row of the day when any one symbol differs, and that evening's fetch, which writes the whole
+  history again, sets a row whose values changed back to unaudited: the symbol that did differ. Read from the rows
+  alone, a program that held only a symbol whose bar was right would lose the day (the book itself cancels only the
+  buys of programs whose NEEDS hold a symbol that differed), and a morning that could not read the book would find
+  the next day the innocent rows still marked and the guilty one gone. The note names what differed and keeps it, so
+  a morning that was missed is made up on a later one.
 - THE CHAIN: `forward_db.verify_chain` -> one `chain_ok` or `chain_broken` event, and for a broken chain a
   `ctx.alert("warning", ...)` (owner step: stop the forward jobs and compare with the backup). The alert's text
   holds ids, counts and dates only.
@@ -24,6 +34,7 @@ Standard library only.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any, Mapping
@@ -34,17 +45,40 @@ from . import forward_db, guard
 LIVE_DB = "live.sqlite"
 #: `eq_bars.audit` of a bar the book's morning re-fetch found different.
 MISMATCH = "mismatch"
+#: The book's kv key of THE NOTE (the module docstring).
+NOTE_KEY = "eq_bars_audit"
+
+
+def _noted(db: sqlite3.Connection) -> dict[str, set[str]]:
+    """THE NOTE (the module docstring): {day: the symbols the book's audit of that day found different}. An entry that
+    is not {"symbols": [a symbol, ...]} is left out (its day is then read from THE ROWS); {} with no note at all."""
+    row = db.execute("SELECT value FROM kv WHERE key=?", (NOTE_KEY,)).fetchone()
+    try:
+        note = json.loads(row[0]) if row is not None else None
+    except (TypeError, ValueError):
+        note = None
+    out: dict[str, set[str]] = {}
+    for day, entry in (note.items() if isinstance(note, Mapping) else ()):
+        symbols = entry.get("symbols") if isinstance(entry, Mapping) else None
+        if isinstance(symbols, (list, tuple)) and symbols and all(isinstance(s, str) and s.strip() for s in symbols):
+            out[str(day)[:10]] = {s.strip().upper() for s in symbols}
+    return out
 
 
 def mismatches(live_path: str | Path) -> list[tuple[str, str]]:
-    """(day, symbol) of every `eq_bars` row the book's morning audit marked "mismatch", in order, each once (the raw
-    and the all row of a bar are one bar); [] when the book has no such table. `sqlite3.Error` when it cannot be
-    read."""
+    """(day, symbol) of every bar the book's morning audit found different (WHICH BARS DIFFERED, the module
+    docstring), in order, each once: a day THE NOTE names gives the note's symbols; any other day with a row marked
+    "mismatch" gives every such row's symbol (the raw and the all row of a bar are one bar). [] when the book has
+    neither table. `sqlite3.Error` when it cannot be read."""
     def read(db: sqlite3.Connection) -> list[tuple[str, str]]:
-        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='eq_bars'").fetchone() is None:
-            return []
-        return [(str(row[0])[:10], str(row[1]).strip().upper()) for row in db.execute(
-            "SELECT DISTINCT day, symbol FROM eq_bars WHERE audit=? ORDER BY day, symbol", (MISMATCH,)).fetchall()]
+        tables = {str(row[0]) for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        noted = _noted(db) if "kv" in tables else {}
+        marked: dict[str, set[str]] = {}
+        if "eq_bars" in tables:
+            for day, symbol in db.execute("SELECT DISTINCT day, symbol FROM eq_bars WHERE audit=?",
+                                          (MISMATCH,)).fetchall():
+                marked.setdefault(str(day)[:10], set()).add(str(symbol).strip().upper())
+        return sorted((day, symbol) for day, symbols in {**marked, **noted}.items() for symbol in symbols)
 
     return guard.read(live_path, read)
 
@@ -128,4 +162,4 @@ def run(ctx: Any) -> dict[str, Any]:
         db.close()
 
 
-__all__ = ["LIVE_DB", "MISMATCH", "mismatches", "mark", "run"]
+__all__ = ["LIVE_DB", "MISMATCH", "NOTE_KEY", "mismatches", "mark", "run"]
