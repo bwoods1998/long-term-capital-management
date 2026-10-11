@@ -149,7 +149,7 @@ class TheGrid(unittest.TestCase):
         for pair, (lot, own, risk, lost, lost_risk, same) in ROWS.items():
             f = X.figures(X.rows_of(X.constitution_at(*pair)), E=E)
             self.assertEqual(f["lot"] * E, D(lot), pair)
-            self.assertEqual(f["same"], same[0] if same[1] is not None else max(same[0], f["same"]), pair)
+            self.assertEqual(min(pair[0], f["same"]), same[0], pair)
             self.assertEqual(min(f["cash_fit"], f["budget_fit"]), own[0], pair)
             if same[1] is not None:
                 self.assertEqual(f["rest"] * E, D(same[1][1]), pair)

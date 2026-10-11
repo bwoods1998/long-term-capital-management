@@ -1235,9 +1235,11 @@ Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback,
   the constitution's `probe` comment between `# <equity-design>` and `# </equity-design>`, docs/operations.md and
   CHANGELOG.md between `<!-- equity-design:begin -->` and `<!-- equity-design:end -->`). Run again with the same
   pair it changes nothing; `set_design 3 0.50` restores A20's design and E1's money digest (7e41909a) exactly. It
-  refuses a pair outside the bounds and a tree whose blocks it did not write. `sized.sleeve_share` is NOT moved: the
-  Sized sleeve's floor is the Probe's in `sized_sleeve_share` itself, and no Probe sleeve inside its bound is above
-  0.50, so the row is never under the Probe's at any pair (7.5 below).
+  refuses, changing nothing, a pair outside THE GRID below (the tests pin each of its pairs' digests and hold the
+  tree to one of them) and a design block whose words are not the tree's own; a block whose figures alone are stale
+  it rewrites. `sized.sleeve_share` is NOT moved: the Sized sleeve's floor is the Probe's in `sized_sleeve_share`
+  itself, and no Probe sleeve inside its bound is above 0.50, so the row is never under the Probe's at any pair
+  (7.5 below).
 - **7.1** (CHANGES; money): `EQUITY_MONEY_BOUNDS["probe.max_programs"]` ("0", "3") -> ("0", "6"); the sleeve's bound
   stays ("0", "0.50"). The bounds are not part of the constitution's digests: a pair alone moves them. The
   constitution's `probe` comment keeps A20's record and says what the two numbers are, why, and their cost.
