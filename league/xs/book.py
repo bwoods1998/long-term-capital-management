@@ -224,12 +224,21 @@ def sessions_through(day: dt.date, n: int = config.DERIVE_SESSIONS) -> list[dt.d
 
 
 # ------------------------------------------------------------------------------------------------------- the columns
-def columns(root: str | Path, instance: str, day: dt.date, *, held: Sequence[str] | Mapping[str, Any] = ()) -> Columns:
+def columns(root: str | Path, instance: str, day: dt.date, *, held: Sequence[str] | Mapping[str, Any] = (),
+            renamed: Mapping[str, str] | None = None) -> Columns:
     """The instance's columns of `day` (`store.Universe`, the House salt, run key = the instance id). `held`: the
     symbols of its lots that are open, or were closed since its last called decision; as a mapping {symbol: the day its
     lot was opened} a name the universe no longer lists on `day` is found by the day it was bought. A held symbol no
     asset ever traded under is `ColumnsRefused`. The class of the month is not applied here (`eligible`: it reads the
-    fetch)."""
+    fetch).
+
+    `renamed` {the lot's symbol now: the symbol it was bought under} (A TICKER CHANGE INSIDE A HELD LOT: E1 books the
+    venue's NC activity onto the lot the day it posts, and the membership job reads the new ticker days later, after
+    two reads of its sources). A held symbol the universe does not know is then found by the one it was bought
+    under, and its column carries the lot's symbol NOW (the name the venue serves its bars by): the member column of
+    its asset when the index still lists the old ticker, else a column of its own. Its id is its asset's, so the lot
+    keeps the slot it was bought under. Without this every decide of the instance was "the House could not ask"
+    until the universe caught up: the lot was judged by nothing but its maximum hold."""
     day = _day(day)
     universe = XS.Universe(root)
     members: dict[str, int] = {}
@@ -245,21 +254,33 @@ def columns(root: str | Path, instance: str, day: dt.date, *, held: Sequence[str
         except (LookupError, ValueError):
             break   # past what the membership knows: as at the last day it knows (the pre-registration's 3.1)
     opened = dict(held) if isinstance(held, Mapping) else {str(s): None for s in held}
+    before = {str(new).upper(): str(old).upper() for new, old in (renamed or {}).items() if old}
     extra: dict[str, int] = {}
-    for symbol in sorted(str(s).upper() for s in opened):
-        if symbol in members or symbol in config.REF:
-            continue
-        aid = None
-        for when in (day, opened.get(symbol)):
+
+    def find(name: str, lot_symbol: str) -> int | None:
+        for when in (day, opened.get(lot_symbol)):
             if when is None:
                 continue
             try:
-                aid = int(universe.aid(symbol, _day(when)))
-                break
+                return int(universe.aid(name, _day(when)))
             except (LookupError, ValueError):
                 continue
+        return None
+
+    for symbol in sorted(str(s).upper() for s in opened):
+        if symbol in members or symbol in config.REF:
+            continue
+        aid = find(symbol, symbol)
+        if aid is None and symbol in before:
+            old = before[symbol]
+            if old in members:                 # the index still lists the old ticker: the asset's column, renamed
+                members[symbol] = members.pop(old)
+                continue
+            aid = find(old, symbol)
         if aid is None:
             raise ColumnsRefused(f"the held symbol {symbol} is no asset of the panel's universe on {day.isoformat()}")
+        if aid in members.values():
+            raise ColumnsRefused(f"the held symbol {symbol} names an asset the day's members hold under another ticker")
         extra[symbol] = aid
     tradable = {str(s) for s in universe.tradable(day)}
     side = {**members, **extra}

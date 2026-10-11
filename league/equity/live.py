@@ -2813,6 +2813,17 @@ class EquityBook:
         return {lot.symbol: lot.opened_day for lot in self._lots(instance=inst.id, open_only=False)
                 if lot.status != LOT_CLOSED or (lot.exit_day or "") > last}
 
+    def _panel_renamed(self, inst: Instance) -> dict[str, str]:
+        """{a lot's symbol now: the symbol it was bought under} for the instance's lots a ticker change was booked on
+        (`_book_activity`'s rename: `info.renamed_from`): the adapter finds such a lot's column by the old ticker
+        while the membership job has not read the new one."""
+        out: dict[str, str] = {}
+        for lot in self._lots(instance=inst.id, open_only=False):
+            old = (lot.info or {}).get("renamed_from") if isinstance(lot.info, Mapping) else None
+            if old and str(old).upper() != str(lot.symbol).upper():
+                out[lot.symbol] = str(old)
+        return out
+
     def _panel_bars(self, now: float, t: dt.date, mt: S.Moments, mn: S.Moments | None, asked: Sequence[Instance],
                     out: dict, *, fetch: bool = True) -> dict[str, Any] | None:
         """THE PANEL'S BARS OF SESSION t (B3, B11, B13), for a decide of `asked` (None when it asks no panel instance:
@@ -2851,7 +2862,8 @@ class EquityBook:
             if inst.id in state["cols"] or not self._ensure_loaded(inst):
                 continue
             try:
-                state["cols"][inst.id] = adapter.columns(root, inst.id, t, held=self._panel_held(inst, adapter, day))
+                state["cols"][inst.id] = adapter.columns(root, inst.id, t, held=self._panel_held(inst, adapter, day),
+                                                         renamed=self._panel_renamed(inst))
                 state["failed"].pop(inst.id, None)
             except Exception as exc:  # noqa: BLE001 - that instance's decide fails; the others go on
                 state["failed"][inst.id] = f"columns: {type(exc).__name__}: {str(exc)[:200]}"

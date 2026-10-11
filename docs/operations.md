@@ -223,6 +223,13 @@ at most 20% of the sleeve and of equity, the invested cap, the House's cash rule
 stock weighing 0.40**, the $10 minimum. Every wall of E1 holds: long only, cash only, the kill switch and the stops,
 never a forced or hand-placed trade. For a panel program a HOLD-day fetch failure of a held name is an alarm and
 never counts toward the two-failed-decides exit (the captain's A17); a failed decide on a rebalance day still counts.
+**A ticker change inside a held lot** (a few a year across the index): the equity book books the venue's NC activity
+onto the lot the day it posts and FREEZES BOTH LANES' OPENS (`eq_freeze`: every equity entry and every options open)
+until the owner's `--clear-equity-freeze`; exits go on. The panel's decide goes on too: the lot keeps its column and
+its slot under its new symbol, found by the ticker it was bought under until the membership job has read the new
+one (`league/xs/book.py` `columns(renamed=)`); the new ticker is not on the constitution's list, so the lot is not
+eligible and the House exits it at the next open. The seating pass asks a panel program only on a close's kept
+fetch once the next session's pre-open has passed: the panel's bars are never fetched inside a session.
 
 **The panel's live rules (PRE-REGISTERED before `elane.panel.mode` may be "live").** Goal item 4 asks that live
 results decide sizing up and demotion by a rule fixed before the first live trade. The text below is the build

@@ -265,6 +265,34 @@ class TheColumns(Case):
         self.assertEqual(cols.ids.tolist(), sorted(cols.ids.tolist()), "the extra column sits in id order too")
         self.assertNotIn("N007", book.columns(self.root, "fam@1:r", DAY, held=()).symbols)
 
+    def test_a_ticker_change_inside_a_held_lot_keeps_its_column(self):
+        """The review's live-8. E1 books the venue's NC activity onto the lot (its symbol is the new one, its
+        `info.renamed_from` the old) the day it posts; the membership job reads the new ticker days later. Until
+        then the lot's symbol was "no asset of the panel's universe": every decide refused, the lot judged by
+        nothing."""
+        before = book.columns(self.root, "fam@1:r", DAY, held={"N007": "2026-10-06"})
+        with self.assertRaises(book.ColumnsRefused):
+            book.columns(self.root, "fam@1:r", DAY, held={"N7NEW": "2026-10-06"})
+        with self.assertRaises(book.ColumnsRefused, msg="a rename that names nothing the universe knows is refused too"):
+            book.columns(self.root, "fam@1:r", DAY, held={"N7NEW": "2026-10-06"}, renamed={"N7NEW": "ZZZZ"})
+        cols = book.columns(self.root, "fam@1:r", DAY, held={"N7NEW": "2026-10-06"}, renamed={"N7NEW": "N007"})
+        self.assertNotIn("N007", cols.symbols)
+        self.assertEqual(book.slots(cols)["N7NEW"], book.slots(before)["N007"], "the slot its lot was bought under")
+        self.assertEqual({s: i for s, i in book.slots(cols).items() if s != "N7NEW"},
+                         {s: i for s, i in book.slots(before).items() if s != "N007"}, "no other id moves")
+        self.assertEqual((cols.extra, len(cols.symbols)), ((), len(before.symbols)), "the asset's own member column")
+        self.assertFalse(cols.elig0[cols.symbols.index("N7NEW")],
+                         "the new ticker is not on the constitution's list: no candidate, and the House exits the lot")
+        self.assertEqual(cols.ids.tolist(), sorted(cols.ids.tolist()))
+        # THE NAME HAS LEFT THE INDEX too: a column of its own, by the ticker it was bought under.
+        self.universe.end("N007", DAY)
+        gone = book.columns(self.root, "fam@1:r", DAY, held={"N7NEW": "2026-10-06"}, renamed={"N7NEW": "N007"})
+        self.assertEqual((gone.extra, book.slots(gone)["N7NEW"]), (("N7NEW",), book.slots(before)["N007"]))
+        # ONCE THE UNIVERSE HAS READ THE CHANGE the lot's symbol is a member's and the old one is nobody's.
+        self.universe.spells[107] = [("N007", dt.date(2016, 1, 4), dt.date(2026, 10, 8)), ("N7NEW", dt.date(2026, 10, 8), None)]
+        known = book.columns(self.root, "fam@1:r", DAY, held={"N7NEW": "2026-10-06"}, renamed={"N7NEW": "N007"})
+        self.assertEqual((known.extra, book.slots(known)["N7NEW"]), ((), book.slots(before)["N007"]))
+
     def test_a_held_symbol_no_asset_traded_under_is_refused(self):
         with self.assertRaises(book.ColumnsRefused):
             book.columns(self.root, "fam@1:r", DAY, held=["ZZZZ"])
