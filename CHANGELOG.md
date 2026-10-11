@@ -29,6 +29,25 @@ any other deploy.
 The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
 Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
 
+### Release E1, the verification's last fixes, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1)
+
+Two independent verifiers read E1 after the review's and the rehearsal's fixes and found no blocker and no major.
+What they did find is fixed here, each with a test that failed before.
+
+- **The seeds' look order is strict within a lineage** (`league/swarm/elane.py` `seed_wait`, `seed_owed`,
+  `league/swarm/seeds.py` `lineage`; amendment A18). The rehearsal's fix held a later seed for 30 minutes at most,
+  once, on a clock that ran even while no look could be taken; after it ran out, one sealed run of the earlier seed
+  the House could not make handed the lineage's one look to the later seed for good. Now each seed declares its
+  lineage (the two overnight seeds are one; the reversal seed is its own), and a seed's look is never taken while a
+  seed declared before it in the same lineage is alive without a verdict: it waits until the earlier one has been
+  looked at (D3 then refuses the later one), has failed its Validation pre-check with no retry owed, or is retired.
+  There is no timeout. The wait is asked at the look's last step before the sealed run, so its clock counts only the
+  rounds in which the later seed's own look was otherwise ready; 30 counted minutes raise one House warning naming
+  both seeds and why the earlier one has no verdict yet (again at most daily), cleared when the wait ends. Seeds of
+  different lineages never wait on each other, and other families are untouched. **Changed for the operator: a hold
+  on the earlier seed now holds the later seed of its lineage too; retire the earlier seed to give the look to the
+  later one.** Swarm-side only: neither fingerprint moves.
+
 ### Release E1, the rehearsal on real data: the data job, the vendor's cents, the seeds' order, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
 
 Before the first deploy, E1's data job, its audit, the store, the three seeds' Train runs and the screen's floor were
@@ -79,8 +98,8 @@ real data, so no store was ever written.** Ten defects; every blocker and major 
   before any Validation or look, from Train-era figures only: `seed-overnight-qqq`, `seed-reversal-index`,
   `seed-overnight-spy`. QQQ's overnight seed spends the lineage's one look (its own floor sets it the lower bar, so
   the look has the higher power there); SPY's is then refused as the same lineage and retired with that reason. A
-  seed's look also waits (30 minutes at most, a House warning past it; the operator's hold releases it) while a seed
-  declared before it still has its own look to come. **Stated cost: SPY's every-close seed is not expected to trade;
+  seed's look also waits while a seed declared before it in its lineage has no verdict (strict, with no timeout: the
+  verification's fixes above). **Stated cost: SPY's every-close seed is not expected to trade;
   the seeds that can pass buy only after a down close.**
 - **Stated, not built** (minors; the captain's decisions): a live decision's ctx does not reproduce byte for byte
   from a later store, because of the same rounding (a seed's own condition flipped on 0 to 2 of about 2,190 decision
@@ -90,7 +109,7 @@ real data, so no store was ever written.** Ten defects; every blocker and major 
   are extended with verified dates before any event-conditioned program is born.
 - The review's fixes that met here: the daily fixer's as-of comparison assumed a four-decimal grid (the measured grid
   is the cent); the swarm fixer's seed order (SPY first) is replaced by the declared one; the look round's "one
-  family's error never stops the others" holds, with the seeds' bounded wait beside it.
+  family's error never stops the others" holds, with the seeds' wait beside it.
 
 ### Release E1, the review's fixes on the order path, the book's daily step and the options book's hooks, on `feat/equity-e1` (merged from `feat/equity-e1-fx-orders`, `-fx-daily`, `-fx-hooks`; unreleased; an owner deploy with the rest of E1; no money-digest move)
 

@@ -1039,8 +1039,8 @@ class TheActivityBesideTheLook(FixCase):
 
 class OneFamilysErrorNeverStopsTheOthers(FixCase):
     """s2-7, the gate's half: the equity look round stopped at the first family whose turn raised, so the families after
-    it in the order would never have been looked at while it kept raising. (For the seeds among themselves the declared
-    order adds a bounded wait: league/tests/test_equity_rehearsal.py `TheSeedsDeclaredOrder`.)"""
+    it in the order would never have been looked at while it kept raising. (For the seeds of one lineage the declared
+    order adds a wait: league/tests/test_equity_rehearsal.py `TheSeedsDeclaredOrder`.)"""
 
     def raising(self, fid):
         real = elane.look

@@ -1118,10 +1118,18 @@ above and this section differ, this section is the code.
 - **The seeds' order** (swarm; CHANGES section 14's): `seeds.EQUITY_SEEDS` is seed-overnight-qqq,
   seed-reversal-index, seed-overnight-spy, the declared order of the looks (the two overnight seeds are one lineage on
   real Train series; the reason is beside the list). `elane.round_order` walks the seeds as one block in that order,
-  standing where the first of them was born. `elane.seed_ahead(store, fam, settings) -> str | None` (the seed
-  declared before `fam` whose look is still to come) and `elane.seed_wait(store, fam, settings) -> str | None` (the
-  seed `fam`'s look waits for now; bounded by `elane.SEED_WAIT_SECONDS` 1800 from the first round it waited, family
-  state `elane.SEED_WAIT_KEY` "elane_seed_wait" {for, since, passed}; a `swarm.status` alert
-  "equity_seed_order_passed" when the bound passes; the operator's `gate_hold` on the earlier seed releases the later
-  ones). `Gate._equity_look` asks it before a look; `Swarm.equity_rounds`' answer carries `waits` {family: the seed
-  it waits for} when any waits.
+  standing where the first of them was born. WITHIN A LINEAGE THE ORDER IS STRICT (amendment A18; the verification's
+  fix): each spec's `lineage` declares the lineage its seed is in ("overnight" for the two overnight seeds,
+  "reversal"; read by the wait alone, no part of `equity_family_spec`). `elane.seed_owed(store, fam, settings) ->
+  str | None` (why a seed has no verdict yet; None once it is retired, was looked at, or failed its Validation
+  pre-check with no retry owed), `elane.seed_ahead(store, fam, settings) -> str | None` (the first seed declared
+  before `fam` in its own declared lineage that is alive without a verdict) and `elane.seed_wait(store, fam,
+  settings) -> str | None` (the seed `fam`'s look waits for; NO TIMEOUT; family state `elane.SEED_WAIT_KEY`
+  "elane_seed_wait" {for, why, since, at, waited, asks, alerted}, `waited` counting only asks at most
+  `SEED_WAIT_GAP_SECONDS` 600 apart; a `swarm.status` alert "equity_seed_waits" {ahead, why, minutes, repeat} once
+  `waited` reaches `SEED_WAIT_SECONDS` 1800 and again every `SEED_WAIT_REPEAT_SECONDS` 86400 while it lasts;
+  "equity_seed_wait_over" with `alert` false when a warned wait ends). `elane.look` asks it at its last step before
+  the sealed run (the look waits: `gate_outcome` "waiting"; an order that cannot be read is a `look_failed` at stage
+  "seed order" for a seed, nothing spent); `elane.seed_waits_over(store, settings) -> [family]` closes the waits that
+  ended without being asked again (`Gate.equity_round` calls it last). `Swarm.equity_rounds`' answer carries `waits`
+  {family: the seed it waits for} when any waits.
