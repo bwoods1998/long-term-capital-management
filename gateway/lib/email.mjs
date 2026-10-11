@@ -142,6 +142,15 @@ export const STALL_CAUSES = {
   birth_yield: 'few births while the architect keeps asking',
   swarm_alerts: 'the swarm raised alerts',
   underspend: 'research under its budget or bound by a setting',
+  // Oct 11, 2026 (release E2.4): the equity lanes' own causes (league/ops/elane_health.py), which no alarm watched in
+  // their first hours: most scored versions unjudged for a fault of their own program, equity passes that bear no
+  // family, work owed and not done (nothing scored for hours, or most Train steps skipped for want of model dollars)
+  // and most programs refused before a run by one static rule. Each keys its own notice. Deploy the gateway first, as
+  // above.
+  elane_dq: 'most equity versions could not be judged',
+  elane_births: 'the equity passes bear no family',
+  elane_idle: 'the equity lanes are idle or starved',
+  elane_refused: 'most equity programs refused before a run by one rule',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;

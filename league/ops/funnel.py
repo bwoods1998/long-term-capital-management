@@ -33,6 +33,11 @@ THE EQUITY LANES (release E1, Oct 2026), apart, under `equity` (the daily page's
   never carries an equity family), looks taken and passed (the `looks`
   rows), moves to Candidate, Probe and Sized (`equity_counts`); the equity families in each band now (`bands_now`'s
   `equity`: the Probe programs among them);
+- `research` (release E2.4; league/ops/elane_health.py `research_counts`): the lanes' RESEARCH funnel in the window:
+  equity passes (asked, barren, cut short, skipped by reason) and families born, proposals refused by reason class,
+  programs refused before a run by rule, the Train rounds' steps taken and skipped by reason (`train_steps`),
+  versions scored, disqualified and failed by code, bar passes, review refusals and passes, families retired
+  (stalled, refuted) and E2's own model dollars. A read that fails is {"error": ...} there, never a zero;
 - from the live book (`book_counts`'s `equity`): the EquityBook's orders placed and filled, lots opened and closed (a
   close is one lot fully closed), and the programs holding a lot now.
 
@@ -50,6 +55,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Mapping
 
+from . import elane_health
 from . import guard
 from . import schedule as S
 
@@ -153,6 +159,7 @@ def swarm_counts(db: sqlite3.Connection, start: float, end: float) -> dict[str, 
                 spend[meter] += float(row["usd"] or 0.0)
     out["spend_usd"] = {meter: round(usd, 2) for meter, usd in spend.items()}
     out["equity"] = equity_counts(db, start, end)
+    out["equity"]["research"] = elane_health.research(db, start, end)  # release E2.4: the lanes' research funnel
     return out
 
 
