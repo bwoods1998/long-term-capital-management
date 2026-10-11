@@ -29,6 +29,63 @@ any other deploy.
 The running House release is `20261011T114321Z-af12ca87b92f` (main `87f9fd0c`, release E2.2, 11:44Z Oct 11), the
 gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
 
+### Release E5-S: the seats and the sleeve of the share lane are two numbers, on `feat/equity-e5s-seats` (unreleased; an owner deploy on main `7d2d3c84`; THE MONEY DIGEST MOVES with the pair, the grant re-ratifies; no fingerprint moves, no evidence reset)
+
+- **What it is.** `equity_money.probe.max_programs` (the seats) and `probe.sleeve_share` are set together by one
+  mechanical step, `set_design SEATS SLEEVE` (the captain's tool, kept beside the build's record, not in the tree).
+  It rewrites the two rows, `elane.roster` (league/swarm/policy.json and the default in league/swarm/elane.py),
+  `PINNED_DIGEST`, and the design blocks of four documents (below, the constitution's `probe` comment,
+  docs/operations.md and league/equity/INTERFACES.md section 17), and nothing else; run again it changes nothing.
+  The seats' bound goes from three to six (`EQUITY_MONEY_BOUNDS["probe.max_programs"]`, Claude's decision under goal
+  item 4, its cost in the constitution's comment); the sleeve's bound stays 0.50; `sized.sleeve_share` stays 0.50
+  at every pair (the Sized sleeve's floor is the Probe's in the code itself; the step stays parked).
+- **The pair in force**, in rule arithmetic of the two numbers:
+
+<!-- equity-design:begin -->
+THE DESIGN IN FORCE: 3 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.50 x E
+(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.25 x E.
+A lot in every seat asks for 0.75 x E of ETFs; the lane holds at most 0.75 x E of them, 0.15 x E of
+open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 2 whole lots fit; the
+next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 3 of
+3 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
+3 of 3 in the $400 window alone; the window alone holds all 3 up to E = $2,666.
+Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
+0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
+the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
+equity of buys a day, a cancelled one too) admits 16 sends of such a lot: 3 entries can each climb the
+collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.50 x E and
+0.50 x E.
+Money digest `7e41909a`, full digest `e909eb10` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7e41909a` / `e909eb10`.
+<!-- equity-design:end -->
+
+- **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over
+  seats 3, 4, 5, 6 x sleeve 0.50, 0.33, 0.25. The build left a working pair in the tree; the branch is not a
+  release until the verdict's pair is set by the same step. Why more seats at a smaller sleeve: Done reads 30 real
+  closes whose P&L sums above zero, more programs trading at once make closes sooner, and a smaller lot a program
+  keeps the same shared loss budget over them. Its cost: more programs, the screen's false positives among them, on
+  real money at once; the same spread and fees per dollar on a lot that earns a loss back more slowly; closes made
+  sooner by long-only index ETFs are weak evidence of skill. It buys closes, not edge.
+- **No owner line moves.** An ETF at most 0.50 x E across all programs, at most 1.00 x E invested, the cash reserve,
+  the shared loss budget ($400 net in any rolling 20 sessions, $800 net in total), the program's -$300 line, the
+  stops and the kill switch, the stock proof's gates: `size_entry` and the book apply each at every pair
+  (`league/tests/test_equity_design.py`, `test_equity_sleeve.py`: every pair of the grid through the House's own
+  sizing function). A seat only decides who may open: no lot is ever sold because a number changed.
+- **At the deploy.** A Candidate waiting for a seat is seated at the first band sync, first come, and asked for the
+  same close; a buy already planned is sized at its send under the sleeve in force; a lot larger than a smaller
+  sleeve keeps its own exits and its program opens nothing until it is back inside the sleeve. All three are the
+  code as it was, now tested through the real book and the real swarm store.
+- **What a pair can make bind** (docs/operations.md, **The seats and the sleeve**): cut or refused entries where the
+  seats' lots do not all fit (the Gym fills them; A14 reads the difference); the day's 60 equity orders, sized for
+  three programs, on a day most orders are re-priced; the gateway's day line on a day every entry climbs its whole
+  ladder, at the pairs `league/tests/test_ci.py` names. None sells anything.
+- **Identities.** The options execution fingerprint (`b60410ad`) and the equity identity (`78022ca6`) are main's: no
+  file of league/live, league/gym or the equity evidence modules is edited (league/live/money.py's two comments on
+  the table's rows stay as A20 wrote them for that reason). The money digest and `PINNED_DIGEST` are the pair's, in
+  the block above; every pair of the grid is pinned in `league/tests/equity_design.py`, and `set_design 3 0.50` is
+  E1's `7e41909a` / `e909eb10` again, to the last hex (the rollback, one owner deploy).
+- **Also changed.** `league/ops/dlane_report.py`: A8.6's statement is built from the rows (`equity_probe_note`), no
+  longer a sentence with A20's figures in it. The gateway is not edited.
+
 ### Release E3, record and measure: the forward record, the fill measurements, the hidden year and the contamination probe, on `feat/equity-e3` (unreleased; the gateway's merge list, then an owner deploy on main's E2.2; no identity moves; records only)
 
 - **What it adds** (`league/ops/E3_INTERFACES.md`): a hash-chained registry of every equity version judged on the Train
