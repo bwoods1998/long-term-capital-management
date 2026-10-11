@@ -250,13 +250,27 @@ class TheStyleOpenPassers(PanelFixture):
         self.assertEqual(panel["programs"], {}, "it holds no seat: it has no instance and no lot")
 
     def test_a_rule_that_cannot_be_read_here_leaves_the_looks_own_word(self):
+        from league.swarm import elane_xs
+
+        def unreadable(fam, version=None):
+            raise RuntimeError("the Train record's style verdict cannot be read here")
+
+        # The rule is made unreadable HERE (with packages E and G in the tree it reads: a family with no style verdict
+        # is "style-open: unmeasured", the next test).
+        with mock.patch.object(elane_xs, "style_of", unreadable):
+            passers = R.style_open_passers(self.store)
+            self.assertEqual([(p["family"], p["why"]) for p in passers], [("xs-momentum", "style-open")])
+            self.store.set_state("xs-momentum", elane_xs_look={"1": {"passed": True, "seat": "style-open",
+                                                                     "why": "style-open: its own word"},
+                                                               "2": {"passed": False}})
+            self.assertEqual([(p["version"], p["why"]) for p in R.style_open_passers(self.store)],
+                             [(1, "style-open: its own word")], "a record kept by version reads the same")
+
+    def test_a_passer_with_no_style_verdict_is_read_by_the_rule_as_unmeasured(self):
+        """The built lane and rule (`elane_xs.style_of`, `league.xs.style.seat_refusal`): a passer whose Train record
+        carries no style verdict is style-open because it is UNMEASURED, and the report says so."""
         passers = R.style_open_passers(self.store)
-        self.assertEqual([(p["family"], p["why"]) for p in passers], [("xs-momentum", "style-open")])
-        self.store.set_state("xs-momentum", elane_xs_look={"1": {"passed": True, "seat": "style-open",
-                                                                 "why": "style-open: unmeasured"},
-                                                           "2": {"passed": False}})
-        self.assertEqual([(p["version"], p["why"]) for p in R.style_open_passers(self.store)],
-                         [(1, "style-open: unmeasured")], "a record kept by version reads the same")
+        self.assertEqual([(p["family"], p["why"]) for p in passers], [("xs-momentum", "style-open: unmeasured")])
 
     def test_an_unreadable_store_is_no_passer(self):
         class Broken:

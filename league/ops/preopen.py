@@ -595,8 +595,10 @@ def check_equity(h: Mapping[str, Any]) -> Check:
     if not isinstance(sb, dict):
         c.req(False, f"the gateway reports no stock route (/v1/health stock_buys): {g.get('health_error') or 'missing'}")
     else:
+        from ..constitution import EQUITY_CLASSES  # the money table's classes (a panel lot's is "stock")
+
         symbols = sb.get("symbols") if isinstance(sb.get("symbols"), dict) else {}
-        universe = {s: k for k in ("etf", "stock") for s in (symbols.get(k) if isinstance(symbols.get(k), list) else [])}
+        universe = {s: k for k in EQUITY_CLASSES for s in (symbols.get(k) if isinstance(symbols.get(k), list) else [])}
         bad = stock_agreement(table, universe=universe, buys_on=sb.get("enabled") is True,
                               shares={"etf": sb.get("etf_equity_share"), "stock": sb.get("stock_equity_share")},
                               source="the deployed gateway")
