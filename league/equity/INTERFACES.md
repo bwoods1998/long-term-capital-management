@@ -425,7 +425,8 @@ activity types the venue refused), `eq_preopen_activities`. The book reads the h
   True)` is None, `table.equity.enabled`, `stock_proof.buy_passed()` and not `stock_proof.sell_failed()` (A10.1,
   integration), not `frozen`, the program's band and seat, the loss budget's room (`budget_room` = the lower of the
   window's and the total's room, from `league.live.real.probe_figures` with the equity rows unioned in),
-  `size_entry` > 0. Exits wait only on `killed()`, the min hold and `stock_proof.sell_passed()` (A10.1).
+  `size_entry` > 0. Exits wait only on `killed()`, the min hold and `stock_proof.sell_passed()` (A10.1), the last
+  only while `now < schedule.Moments.entry_until` (A28: the wait ends the minute open entries end).
 - **Exports**: a closed lot -> `families.add_forward(family, "real", [{"id": "eq-<lid>", "version", "day" (exit day),
   "opened_day", "symbol", "class", "lane", "pnl" (net cash, float), "max_loss" (entry notional, float: so generic
   readers' pnl / max_loss is the net return on notional), "notional", "fees", "div", "return", "hold_sessions",
@@ -527,9 +528,14 @@ Decimal` (`Unreadable.shares_taken` raises).
   On `alpaca-paper`: stage BUY buys a fractional SPY marketable limit from the open window's first send to the entry
   cut-off and passes on its fill, its lot row and the reconciled position (gates every real equity BUY); stage SELL
   sells it in the next session's open window, first, and passes on the whole sale, the FILL activities and the
-  position back at its baseline (gates every real equity SALE, until the book's entry cut-off at the latest: from
-  09:45 on the book's exits go whatever the stage says, league/equity/live.py `_sell_unproven`); a SELL stage that ends
-  its window unpassed is "failed" (an alarm with the owner's step; new real buys stop until it passes). Checked only by the equity book
+  position back at its baseline (gates every real equity SALE, AND THE WAIT HAS AN END, A28: `EquityBook._work_exit`
+  holds an exit on `_sell_proof()` only while `now < m.entry_until`, the comparison `_work_entry` ends open entries
+  on; from that minute every exit kind goes through the normal path, and `_sell_unproven(today)` tells the owner once
+  a session: one error alert "the sale path is unproven today ..." with the stage's own reason (`_sell_stage_says`:
+  `sell_failed()`, else `status()`'s status and why), one `equity.alert` record, kv `eq_sell_unproven` {day, why,
+  at}; a close-window sale is past the cut-off by construction and never waits on the stage; stage BUY gates every
+  real buy with no end); a SELL stage that ends its window unpassed is "failed" (an alarm with the owner's step; new
+  real buys stop until it passes). Checked only by the equity book
   (options entries never wait on it). Client ids `lq-pp-...` (never `lv-`). `StockPaperProof` never waits for the
   options route's proofs (no `after`); `_idle` minutes read nothing of the practice account. An order the venue does
   not show by its client id after `STOCK_LOST_AFTER_TRIES` (4) lookups or `STOCK_LOST_AFTER_S` (600) seconds is lost

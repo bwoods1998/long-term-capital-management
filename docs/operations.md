@@ -584,16 +584,27 @@ confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the Ho
 - The stock paper proof, STAGED (A8.7 as amended by A10.1; `league/live/paper.py` `StockPaperProof`, run by the equity
   book in its own OPEN window): stage BUY (kv `paper_proof_stock_buy`) buys a fractional SPY marketable limit on
   `alpaca-paper` from 09:30:30 ET to the 09:45 entry cut-off and passes on its fill, its lot row and the reconciled
-  position: it gates every REAL equity BUY. Stage SELL (kv `paper_proof_stock_sell`) sells that lot in the next
-  session's open window, first (real exits wait for it), and passes on the whole sale, the FILL activities and the
-  position back at its baseline: it gates every REAL equity SALE **until the entry cut-off (09:45) at the latest**. The
-  practice sale is sent in the window's first minute and normally witnessed in its second; a real exit waits for that
-  pass and no longer than the open window's fifteen minutes: from 09:45 on every exit goes whatever the stage says
-  (a program's sale, the max-hold rule, a demoted program's lots, the owner's flatten), with one error alert a
-  session (kv `eq_sell_unproven`; `league/equity/live.py` `_sell_unproven`). An exit is never held on the practice
-  account past it. A SELL stage that ends its window unpassed is "failed": an error alert with the owner's step (look
-  at the practice account's SPY position and orders; its words "real equity lots stay held" are from before the
-  cut-off rule) and new real buys stop until it passes; the next open window buys again and the one after sells. The attempt row is kv `paper_proof_stock`. Only the equity book waits on it (options entries
+  position: it gates every REAL equity BUY, with no end. Stage SELL (kv `paper_proof_stock_sell`) sells that lot in
+  the next session's open window, first (real exits wait for it), and passes on the whole sale, the FILL activities
+  and the position back at its baseline: it gates every REAL equity SALE, **and that wait has an end (the captain's
+  A28, registered before the first real share order): the session's entry cut-off, the open + 900 s (09:45 ET), the
+  minute the book stops trying open entries.** The practice sale is sent in the window's first minute and normally
+  witnessed in its second, so a real exit normally waits one minute. From the cut-off on EVERY exit goes through the
+  normal path whatever the stage says: a program's own sale, the maximum-hold exit, a demoted or retired program's
+  lots, a carried exit, the owner's flatten, and a close-window sale (its window, the close - 300 s, is past the
+  cut-off by construction, on a half day too: it never waits on the stage). The normal path is unchanged: its
+  collar, one working order a symbol, the day's order count, the minimum hold, the gateway's kill switch. The owner
+  is told ONCE A SESSION, by one error alert that begins "the sale path is unproven today" and names the stage's own
+  reason (its failure, or where its attempt stands), with one `equity.alert` record (kv `eq_sell_unproven` {day, why,
+  at}; `league/equity/live.py` `_sell_unproven`). **Why:** an exit must never be blocked; a proof exists to stop new
+  risk, not to trap old risk (before A28 a stage that could not pass held every real lot for days, the maximum-hold
+  exit and the flatten among them, while it also stopped every new buy). **Its cost, stated:** a real sale can go
+  through a path the practice account did not prove that day. A SELL stage that ends its window unpassed is
+  "failed": an error alert with the owner's step (look at the practice account's SPY position and orders; that
+  alert's words "Real equity lots stay held" are the proof's own, from before A28, and are no longer true past the
+  cut-off: `league/live/paper.py` is inside the options execution fingerprint and is not edited for a sentence) and
+  **new real buys stop until it passes** (unchanged); the next open window buys again and the one after sells. The
+  attempt row is kv `paper_proof_stock`. Only the equity book waits on it (options entries
   never do); its client ids are `lq-pp-...`. **Stage BUY never waits on the options route's own paper proofs**
   (`paper_proof`, `paper_proof_single`): it goes in the first open window after the deploy. While it has nothing to do
   (waiting outside its BUY window, or holding its lot outside the SELL stage's window) the proof makes no call to the
@@ -1070,7 +1081,11 @@ options fingerprint) or the equity evidence modules.
    reason is required). The command only writes a key-value (`owner_equity_flatten`); the book reads it first at its
    next minute, in the House's own thread, and runs `EquityBook.flatten` once: every open lot queued to exit at the
    next window through the normal order path (never a market order; the min hold stands, so a lot bought today leaves
-   at the next open), recorded as `equity.flatten` with who and why. `python3 -m league.live --root /workspace/state
+   at the next open), recorded as `equity.flatten` with who and why. **The stock paper proof never holds a flatten
+   past the entry cut-off (A28):** a flatten read inside the open window before 09:45 ET, on a day the proof's SELL
+   stage has not passed, waits with every other exit until the 09:45 minute and is sent in it; read at any later
+   minute it is sent in that minute, each time with the session's one "the sale path is unproven today" alert. A
+   passed SELL stage holds nothing. `python3 -m league.live --root /workspace/state
    --status` shows the command under `equity.pending_owner_actions` until the House has read it (within a minute; it
    stays pending while the House runs no equity book, and on a minute the equity book skips). A flatten that fails
    keeps its key and is tried again the next minute. Run it again if a lot appears afterwards (a buy that was still
