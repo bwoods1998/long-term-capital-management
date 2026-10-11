@@ -430,12 +430,18 @@ def seat_plan(holders: Sequence[SeatFacts], waiting: Sequence[SeatFacts], *, sea
     are its inputs and answers; a second implementation of the rule must give them all). `holders`: the seated
     programs AFTER the sync's demotions; `waiting`: the passed programs with no seat that are not sticky; `seats`: the
     seats there are; `late`: the seating pass (free seats only); `yielded_today`: a seat already yielded at this
-    decision day. -> {"idle": the idle holders, "yields": the one that yields (or None), "for": the best-ranked
-    unflagged waiting program it yields to (named as the reason, not as the seat's owner), "queue": the waiting
-    programs best first (the yielded one among them, flagged), "seat": the first of the queue that the free seats
-    take, in order}. THE BOOK APPLIES IT AND MAY FALL THROUGH: a seating that does not take passes to the next of
-    the queue. Under "first-come" the queue is by pass time and nothing is idle (the book does not call this then: its
-    band sync is release E5-S's own; the answer is here for the vectors).
+    decision day. -> {"idle": the idle holders, "yields": the one that yields (or None), "for": the unflagged waiting
+    program it yields to (the best-ranked of those no free seat takes; named as the reason, not as the seat's owner),
+    "queue": the waiting programs best first (the yielded one among them, flagged), "seat": the first of the queue
+    that the free seats take, in order}. THE BOOK APPLIES IT AND MAY FALL THROUGH: a seating that does not take
+    passes to the next of the queue. Under "first-come" the queue is by pass time and nothing is idle (the book does
+    not call this then: its band sync is release E5-S's own; the answer is here for the vectors).
+
+    FREE SEATS FIRST (A24's words: an idle seat yields "when an unflagged program WAITS"; a program a free seat takes
+    does not wait). The study's simulator (EQDONE-3) ran the idle test before the seating, so with a seat free and
+    one unflagged arrival it made the idle program yield and seated it again in the same sync, its clock restarted:
+    the same programs seated, a yield nobody needed. Here that program keeps its seat and its clock, and yields as
+    soon as an unflagged program has no seat to take.
 
     WHAT IT NEVER SAYS: that a program holding a lot, a working order or a planned intent leaves its seat (an idle
     program is flat by definition), or that a better-ranked arrival takes a held seat (outranking is not adopted)."""
@@ -446,10 +452,13 @@ def seat_plan(holders: Sequence[SeatFacts], waiting: Sequence[SeatFacts], *, sea
         return {"idle": [], "yields": None, "for": None, "queue": [p.family for p in queue],
                 "seat": [p.family for p in queue[:free]]}
     idle = [] if late else [p for p in holders if seat_idle(p, settings)]
-    fresh = [p for p in waiting if not p.flagged]
+    # FREE SEATS FIRST: a program that a free seat takes does not wait. An idle seat yields only for an unflagged
+    # program that would STILL wait once every free seat is filled.
+    free = max(0, int(seats) - len(holders))
+    fresh = [p for p in seat_order(waiting)[free:] if not p.flagged]
     goes = taker = None
     if idle and fresh and len(holders) <= int(seats) and not yielded_today:
-        goes, taker = seat_yielder(idle), seat_order(fresh)[0]
+        goes, taker = seat_yielder(idle), fresh[0]
         holders = [p for p in holders if p.family != goes.family]
         waiting = waiting + [SeatFacts(family=goes.family, k=goes.k, passed_at=goes.passed_at, flagged=True,
                                        seeded=goes.seeded)]

@@ -1811,6 +1811,192 @@
      "hi"
     ]
    }
+  },
+  {
+   "name": "FREE SEATS FIRST: a free seat and an idle seat, one unflagged program: it takes the free seat and nobody yields (the simulator of EQDONE-3 yields and re-seats the idle program here; A24's words win)",
+   "source": "A24 item 3 (yields when an unflagged program WAITS)",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare"
+    ],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w"
+    ],
+    "seat": [
+     "w"
+    ]
+   }
+  },
+  {
+   "name": "a free seat and an idle seat, two unflagged programs: the better takes the free seat and the idle seat yields to the other, which would still wait",
+   "source": "A24 items 2 and 3",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "lo",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "hi",
+     "k": 60,
+     "passed_at": 9.5,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare"
+    ],
+    "yields": "rare",
+    "for": "lo",
+    "queue": [
+     "hi",
+     "lo",
+     "rare"
+    ],
+    "seat": [
+     "hi",
+     "lo"
+    ]
+   }
+  },
+  {
+   "name": "a free seat, an idle seat, one unflagged and one idle-flagged program waiting: the unflagged one takes the free seat; only a flagged program is left, so nobody yields",
+   "source": "A24 item 3",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "old-rare",
+     "k": 250,
+     "passed_at": 0.1,
+     "flagged": true,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare"
+    ],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w",
+     "old-rare"
+    ],
+    "seat": [
+     "w"
+    ]
+   }
   }
  ]
 }

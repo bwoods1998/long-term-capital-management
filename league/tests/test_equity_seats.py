@@ -20,6 +20,7 @@ Everything is invented (programs, prices, K): no figure here is a market's, an a
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
 import datetime as dt
@@ -37,6 +38,7 @@ from league.constitution import (CONSTITUTION, EQUITY_MONEY_BOUNDS, EQUITY_MONEY
                                  equity_money_problems, money_digest)
 from league.equity import bands as B
 from league.equity import config
+from league.equity import ctx as C
 from league.equity import live as L
 from league.equity import schedule as S
 from league.equity import sizing as Z
@@ -57,6 +59,9 @@ except ImportError:  # pragma: no cover - the repository's own tests install it
 
 #: The real functions `T.BookTest` stubs at their interface (read at import, before any test patches them).
 REAL_SIZE, REAL_AVAILABLE, REAL_NEXT_BAND, REAL_SIZED_SHARE = Z.size_entry, M.available_cash, B.next_band, B.sized_sleeve_share
+#: Core's fee and ctx constructors, which `T.BookTest` also stubs for the book's tests: the real engine needs its own.
+REAL_CORE = ((config, "sell_fees", config.sell_fees), (C, "inputs_from_fetch", C.inputs_from_fetch),
+             (C, "lot_row", C.lot_row), (C, "closed_row", C.closed_row))
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 REPO = Path(__file__).resolve().parents[2]
 SUNDAY, FRIDAY, MONDAY = dt.date(2026, 10, 11), T.FRIDAY, T.MONDAY
@@ -64,6 +69,15 @@ E = D("2229")
 ETFS = ("SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE", "XLV")
 SETTINGS = B.SeatSettings(B.ACTIVITY_FREE, D("0.25"), 10)
 ON = {"elane": {"mode": "gate"}, "dlane": {"mode": "gate"}}
+
+
+@contextlib.contextmanager
+def real_engine():
+    """Core's real functions for the body (a run of the real engine inside a test whose book stubs them)."""
+    with contextlib.ExitStack() as stack:
+        for target, name, value in REAL_CORE:
+            stack.enter_context(mock.patch.object(target, name, value))
+        yield
 
 
 def sessions(first: dt.date, n: int) -> list[dt.date]:
@@ -245,7 +259,7 @@ class TheRanks(unittest.TestCase):
 class TheVectors(unittest.TestCase):
     def test_every_conformance_vector(self):
         doc = json.loads((FIXTURES / "equity_seat_vectors.json").read_text(encoding="utf-8"))
-        self.assertGreaterEqual(len(doc["vectors"]), 28)
+        self.assertGreaterEqual(len(doc["vectors"]), 31)
         names = [v["name"] for v in doc["vectors"]]
         self.assertEqual(len(set(names)), len(names))
         for v in doc["vectors"]:
@@ -266,7 +280,8 @@ class TheVectors(unittest.TestCase):
                 self.assertLessEqual(len(plan["seat"]), max(0, v["seats"] - len(holders) + (1 if plan["yields"] else 0)))
                 if plan["yields"]:
                     self.assertIn(plan["yields"], plan["idle"])
-                    self.assertEqual(plan["seat"][0], plan["for"], "the program it yields to takes the seat")
+                    self.assertEqual(plan["seat"][-1], plan["for"], "the program it yields to takes the seat it frees")
+                    self.assertEqual(len(plan["seat"]), v["seats"] - len(holders) + 1, "after every free seat is filled")
 
     def test_no_arrival_however_ranked_unseats_a_program_that_is_not_idle(self):
         """A property over random books: a holder that holds a lot, or asked inside the clock, or is inside its first
@@ -287,8 +302,11 @@ class TheVectors(unittest.TestCase):
                 goes = by[plan["yields"]]
                 self.assertTrue(goes.flat and goes.seated_sessions >= 10
                                 and (goes.quiet_sessions is None or goes.quiet_sessions >= 10))
-                self.assertTrue(any(not w.flagged for w in waiting))
-                self.assertLessEqual(len(holders), seats)
+                free = seats - len(holders)
+                self.assertGreaterEqual(free, 0)
+                left = B.seat_order(waiting)[free:]
+                self.assertTrue(any(not w.flagged for w in left), "an unflagged program is left waiting after the free seats")
+                self.assertEqual(plan["for"], next(w.family for w in left if not w.flagged))
             self.assertLessEqual(len(holders) - (1 if plan["yields"] else 0) + len(plan["seat"]), max(seats, len(holders)))
             self.assertEqual(sorted(plan["queue"]), sorted([w.family for w in waiting] + ([plan["yields"]] if plan["yields"] else [])))
 
@@ -1362,6 +1380,322 @@ class FirstCome(SeatCase):
             self.assertEqual((inst.retired_at, inst.band), (None, "probe"))
         self.assertEqual(f.h.intents(kind="house_exit"), [])
         self.assertEqual([b for b in f.h.venue.sent if b["side"] == "sell"], [])
+
+
+# ==================================================================================================== the deploy night
+#: Invented programs for the deploy night, as the House's engine reads them. A program's NEEDS name one ETF.
+OVERNIGHT = ("NEEDS = {{'symbols': ['{symbol}'], 'history': 2, 'max_hold_sessions': 60}}\nPARAMS = {{}}\n\n\n"
+             "def decide(ctx):\n"
+             "    out = [{{'sell': lot['id'], 'at': 'open'}} for lot in ctx.positions]\n"
+             "    out.append({{'buy': '{symbol}', 'share': 0.5, 'at': 'close'}})\n"
+             "    return out\n# {fid}\n")
+SWING = ("NEEDS = {{'symbols': ['{symbol}'], 'history': 2, 'max_hold_sessions': 60}}\nPARAMS = {{}}\n\n\n"
+         "def decide(ctx):\n"
+         "    if ctx.positions:\n"
+         "        return [{{'sell': lot['id'], 'at': 'open'}} for lot in ctx.positions if int(lot['held_sessions']) >= {hold}]\n"
+         "    return [{{'buy': '{symbol}', 'share': {share}, 'at': 'open'}}]\n# {fid}\n")
+REVERSAL = ("NEEDS = {{'symbols': ['{symbol}'], 'history': 3, 'max_hold_sessions': 60}}\nPARAMS = {{}}\n\n\n"
+            "def decide(ctx):\n"
+            "    if ctx.positions:\n"
+            "        return [{{'sell': lot['id'], 'at': 'open'}} for lot in ctx.positions if int(lot['held_sessions']) >= 2]\n"
+            "    close = ctx.bars['{symbol}'].close\n"
+            "    if len(close) >= 2 and float(close[-2]) > 0 and float(close[-1]) / float(close[-2]) - 1.0 <= -0.03:\n"
+            "        return [{{'buy': '{symbol}', 'share': 0.5, 'at': 'open'}}]\n"
+            "    return []\n# {fid}\n")
+#: THE BOOK THE BASE LEAVES: (family, its ETF, its program, seeded), in the order their looks passed. Six seats, first
+#: come: these five are seated; one is a rare reversal trader.
+SEATED = (("seed-overnight", "SPY", OVERNIGHT, {}, True), ("bred-swing", "QQQ", SWING, {"hold": 2, "share": 0.5}, False),
+          ("seed-reversal", "IWM", REVERSAL, {}, True), ("bred-slice", "DIA", SWING, {"hold": 0, "share": 0.25}, False),
+          ("bred-overnight", "QQQ", OVERNIGHT, {}, False))
+#: The programs that pass their looks after the release, in the order they pass.
+LATER = (("late-sixth", "IWM", SWING, {"hold": 4, "share": 0.5}), ("late-slow", "DIA", SWING, {"hold": 20, "share": 0.5}),
+         ("late-fast", "SPY", SWING, {"hold": 0, "share": 0.5}))
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheDeployNight(SeatCase):
+    """THE STATE THAT WILL EXIST, AND THIS RELEASE APPLIED TO IT. Release E5-S runs six seats first come: five programs
+    passed their looks and are seated (two of them seeded, one a rare reversal trader), four hold a lot. The real
+    swarm store and its real reader, the real book and a fake venue, the real runner on an invented market for the
+    backfill; the programs' live decisions are played by the fake decider."""
+
+    def setUp(self):
+        super().setUp()
+        from league.equity import synth
+        from league.equity.runner import Isolated
+        from league.live.decider import InlineDecider
+        from league.swarm.store import SwarmStore
+        from league.tests.swarm_fakes import Clock as SwarmClock
+
+        self.state_root = self.fresh()
+        self.store = SwarmStore(self.state_root, clock=SwarmClock())
+        self.addCleanup(self.store.close)
+        # An invented market of ordinary prices (a share stays in the hundreds of dollars over the decade).
+        self.store_root = synth.synthetic_store(self.state_root / elane.STORE_DIR, gate=True, seed=11, drift=0.06, vol=0.15)
+        self.runner = Isolated(InlineDecider(), self.store_root)
+        elane._seat_failed.clear()
+        self.addCleanup(elane._seat_failed.clear)
+        self.codes: dict[str, str] = {}
+
+    # ------------------------------------------------------------------------------------------------ the swarm
+    def passes(self, fid: str, symbol: str, template: str, params: dict, *, at: float, seeded: bool = False,
+               stored: bool = True, counted: bool = False) -> None:
+        """A family whose look passed, as release E5-S's own `elane.look` left it: banded on its version 1 under the
+        equity identity in force, its Validation recorded (and its run kept in full, unless `stored` is False: a
+        file that is gone), a look record with no seat counts. `counted`: a look taken AFTER this release, which
+        writes the counts itself."""
+        from league.swarm import evaluator
+        from league.swarm.gate import run_sha
+
+        code = template.format(symbol=symbol, fid=fid, **params)
+        self.codes[fid] = code
+        spec = {"id": fid, "mechanism": f"An invented program on {symbol}, long only (MARKET BETA).", "structure": "etf",
+                "roots": [symbol], "symbols": [symbol], "lane": "beta", **({"seeded": True} if seeded else {})}
+        self.store.add_family(spec, origin="seed")
+        version = self.store.add_version(fid, code, {}, author="test")
+        sha = run_sha(version)
+        with real_engine():
+            validation = self.runner.validation(code, {}, name=fid, k=config.K_BASE)
+            segments = self.runner.segments(code, {}, name=fid) if counted else []
+        self.assertEqual(validation.result["status"], "ok", fid)
+        if stored:
+            self.store.add_run(fid, 1, dict(validation.result), window="validation", stress=config.K_BASE,
+                               purpose="validation")
+        identity = evaluator.equity_identity()
+        seat = {}
+        if counted:
+            seat = {elane.SEAT_KEY: elane._seat_record(self.store, 1, sha, validation.result, segments, source="look",
+                                                       validation_run="look")}
+        self.store.set_state(fid, banded_version=1, banded_at=float(self.store.clock()) + at, validation_version=1,
+                             banded_evaluator={"engine": identity["engine"], "equity_sha256": identity["equity"],
+                                               "run_sha": sha},
+                             **{elane.VALIDATION_KEY: {"version": 1, "passed": True, "status": "ok", "stale": False,
+                                                       "result_sha": validation.result["result_sha"]},
+                                elane.LOOK_KEY: {"version": 1, "at": self.store.now(), "beside": "S2 (an invented look)",
+                                                 "verdict": {"passed": True, "screen": "S2"}, "activity": None}, **seat})
+        self.store.set_band(fid, "candidate", reason="passed its sealed look")
+
+    def k_by_hand(self, fid: str) -> Fraction:
+        code = self.codes[fid]
+        with real_engine():
+            return B.seat_k(B.seat_counts(self.runner.validation(code, {}, name=fid).result,
+                                          [r.result for r in self.runner.segments(code, {}, name=fid)], floor=D("0.25")))
+
+    # ------------------------------------------------------------------------------------------------ the House
+    def house(self) -> T.Harness:
+        h = T.Harness(self.state_root, cash=str(E), E=str(E), table=M.Table.from_constitution().equity)
+        self.addCleanup(h.state.close)
+        h.families = EquityFamilies(self.state_root)
+        self.addCleanup(lambda: h.families._store is not None and h.families._store.close())
+        h.book = h.new_book()
+        self.days = sessions(MONDAY, 14)
+        fake = Floor.__new__(Floor)
+        fake.h, fake.days = h, self.days
+        for symbol in ETFS[:4]:
+            Floor.bars(fake, symbol, n=60)
+        for fid, symbol, *_ in (*SEATED, *LATER):
+            h.decider.needs[L.instance_key(fid, 1)] = {"symbols": [symbol], "history": 5, "max_hold_sessions": 60}
+        h.state.execute("DELETE FROM kv WHERE key='eq_decide'")
+        return h
+
+    def snapshot(self, h: T.Harness) -> dict:
+        return {"instances": [dict(r) for r in h.state.rows("SELECT * FROM eq_instances ORDER BY id")],
+                "intents": [dict(r) for r in h.state.rows("SELECT * FROM eq_intents ORDER BY iid")],
+                "lots": [{k: v for k, v in dict(r).items() if k not in ("mark", "marked_at")}
+                         for r in h.state.rows("SELECT * FROM eq_lots ORDER BY lid")],
+                "orders": len(h.state.rows("SELECT eid FROM eq_orders")),
+                "bands": {fid: self.store.family(fid)["band"] for fid, *_ in SEATED},
+                "since": h.state.get("eq_band_since"), "sticky": h.state.get("eq_sticky"), "sent": len(h.venue.sent)}
+
+    def the_base(self) -> T.Harness:
+        """Release E5-S on Sunday and Monday morning: six seats, first come. The five are seated in the order they
+        passed and asked for Friday's close; four buy a lot at Monday's open; the reversal trader plans nothing."""
+        for i, (fid, symbol, template, params, seeded) in enumerate(SEATED):
+            self.passes(fid, symbol, template, params, at=float(i), seeded=seeded, stored=fid != "bred-slice")
+        with X.seat_rule("first-come"):
+            h = self.house()
+            self.key = {fid: L.instance_key(fid, 1) for fid, *_ in (*SEATED, *LATER)}
+            for fid, symbol, *_ in SEATED:
+                if fid != "seed-reversal":
+                    h.decider.plans[self.key[fid]] = [{"buy": symbol, "share": 0.5, "at": "open"}]
+            for hh, mm in ((14, 0), (14, 1), (14, 2)):
+                h.tick(hh, mm, day=SUNDAY)
+            h.decider.plans.clear()
+            for hh, mm in ((9, 31), (9, 33)):
+                h.tick(hh, mm, day=MONDAY)
+            self.assertEqual(h.book.seats()["rule"], "first-come")
+        self.assertEqual({fid: self.store.family(fid)["band"] for fid, *_ in SEATED}, {fid: "probe" for fid, *_ in SEATED})
+        self.assertEqual(sorted(lot.family for lot in h.lots(open_only=True)),
+                         ["bred-overnight", "bred-slice", "bred-swing", "seed-overnight"])
+        self.assertEqual({v["day"] for v in h.state.get("eq_band_since").values()}, {FRIDAY.isoformat()},
+                         "seated for Friday's close: the seat's own day")
+        self.assertFalse(any(elane.SEAT_KEY in (self.store.family(fid)["state"] or {}) for fid, *_ in SEATED),
+                         "the base's looks kept no seat counts")
+        return h
+
+    def decision(self, h: T.Harness, n: int, *, windows: bool = True) -> dict:
+        day = self.days[n]
+        if windows:
+            for hh, mm in ((9, 31), (9, 33)):
+                h.tick(hh, mm, day=day)
+        out = {}
+        for hh, mm in ((16, 21), (16, 31), (16, 32)):
+            out.update(h.tick(hh, mm, day=day))
+        return out
+
+    def test_the_release_on_the_state_the_base_leaves(self):
+        from league.swarm.gate import Gate
+
+        h = self.the_base()
+        before = self.snapshot(h)
+        # ---- THE DEPLOY (Monday, midday): the same state, this release's book, the rule in force.
+        self.assertEqual(B.seat_settings().rule, "activity-1-free")
+        h.book = h.new_book()
+        out = h.tick(12, 0, day=MONDAY)                      # the first band sync on the release (the seating pass)
+        self.assertEqual(self.snapshot(h), before, "NOBODY IS UNSEATED AT THE DEPLOY: no band, instance, intent, lot or "
+                                                   "order moved")
+        self.assertNotIn("errors", out)
+        self.assertEqual([e for kind, e in h.events if kind == "equity.seat"], [], "no seat changed hands")
+        self.assertFalse([e for kind, e in h.events if kind == "equity.instance" and e.get("retired")])
+        plan = h.book.seats()
+        self.assertEqual((plan["rule"], plan["seats"], len(plan["holders"]), plan["waiting"]), ("activity-1-free", 6, 5, []))
+        self.assertEqual({x["since"] for x in plan["holders"]}, {FRIDAY.isoformat()}, "each seat keeps its own day")
+        self.assertEqual(sorted(x["family"] for x in plan["holders"] if x["seeded"]), ["seed-overnight", "seed-reversal"])
+        # Before the swarm's round has run, no program has its counts: every one of them ranks as unreadable, and
+        # nothing depends on it (nobody waits; nobody is unseated by a rank).
+        self.assertTrue(all(r["seat_activity"] is None for r in h.families.read()))
+
+        # ---- THE BACKFILL (the swarm's next equity round): K's two counts for every passed program, seated or not.
+        gate = Gate(self.store, None, None, ON, clock=self.store.clock)
+        gate.equity_runner = self.runner
+        from league.equity import runner as runner_mod
+        from league.equity import store as store_mod
+
+        sealed = mock.Mock(side_effect=AssertionError("the backfill never takes a look"))
+        with real_engine(), mock.patch.object(store_mod, "mint_equity_gate_capability", sealed), \
+                mock.patch.object(runner_mod.Isolated, "look", sealed):
+            round_out: dict = {"looked": [], "held": []}
+            gate.equity_round(round_out)
+        sealed.assert_not_called()
+        self.assertEqual(sorted(round_out["seat_counts"]), sorted(fid for fid, *_ in SEATED))
+        k = {}
+        for fid, *_ in SEATED:
+            held = self.store.family(fid)["state"][elane.SEAT_KEY]
+            self.assertEqual((held["source"], held["validation_run"]),
+                             ("backfill", "rerun" if fid == "bred-slice" else "stored"), fid)
+            k[fid] = B.seat_k(held)
+            self.assertEqual(k[fid], self.k_by_hand(fid), fid)
+        self.assertEqual(self.snapshot(h)["bands"], before["bands"], "a count is no band move")
+        self.assertEqual(len(self.store.looks()), 0, "and no look")
+        rows = {r["family"]: r for r in h.families.read()}
+        self.assertEqual({fid: B.seat_k(rows[fid]["seat_activity"]) for fid in k}, k, "the book's rows carry them")
+        # THE RANKS ARE AS THE RULE SAYS: the two overnight programs close a half-sleeve lot nearly every session;
+        # the slice of exactly a quarter sleeve counts (every other session); the reversal trader is the rarest.
+        self.assertGreater(k["seed-overnight"], 200)
+        self.assertGreater(k["bred-overnight"], 200)
+        self.assertGreater(k["bred-slice"], 100, "a lot of exactly the floor counts")
+        self.assertLess(k["bred-slice"], k["seed-overnight"])
+        self.assertEqual(min(k, key=k.get), "seed-reversal")
+        self.assertLess(k["seed-reversal"], 25)
+
+        # ---- Monday's decision on the release, then the week: nobody is unseated; the later passers arrive.
+        self.decision(h, 0, windows=False)
+        self.assertEqual(sorted(x["family"] for x in h.book.seats()["holders"]), sorted(fid for fid, *_ in SEATED))
+        for i, (fid, symbol, template, params) in enumerate(LATER):
+            self.passes(fid, symbol, template, params, at=100.0 + i, counted=True)      # their looks write their counts
+            k[fid] = self.k_by_hand(fid)
+            self.assertEqual(B.seat_k(self.store.family(fid)["state"][elane.SEAT_KEY]), k[fid])
+        self.assertGreater(k["late-fast"], k["late-slow"], "the one that passed LAST trades far more often")
+        h.decider.plans[self.key["late-sixth"]] = [{"buy": "IWM", "share": 0.5, "at": "open"}]
+        self.decision(h, 1)
+        h.decider.plans.clear()
+        plan = h.book.seats()
+        # The sixth seat was FREE: it went to the best-ranked of the three that waited, not to the first that passed.
+        best = max(("late-sixth", "late-slow", "late-fast"), key=lambda fid: k[fid])
+        self.assertEqual(best, "late-fast")
+        self.assertEqual(sorted(x["family"] for x in plan["holders"]), sorted([*(fid for fid, *_ in SEATED), "late-fast"]))
+        rest = sorted(("late-sixth", "late-slow"), key=lambda fid: (-k[fid], fid))
+        self.assertEqual([(w["family"], w["rank"], w["flagged"]) for w in plan["waiting"]],
+                         [(rest[0], 1, False), (rest[1], 2, False)])
+        self.assertIsNone(h.book._instance(self.key[rest[0]]), "a waiting program has no instance")
+        # A seated program trades on as before: bred-swing sells its lot itself on Wednesday and buys again on Thursday.
+        [lot] = h.book._lots(instance=self.key["bred-swing"])
+        h.decider.plans[self.key["bred-swing"]] = [{"sell": lot.lid, "at": "open"}]
+        self.decision(h, 2)
+        h.decider.plans[self.key["bred-swing"]] = [{"buy": "QQQ", "share": 0.5, "at": "open"}]
+        self.decision(h, 3)
+        h.decider.plans.clear()
+        for n in range(4, 9):
+            self.decision(h, n)
+        self.assertEqual(self.days[8], dt.date(2026, 10, 22))
+        rare = {x["family"]: x for x in h.book.seats()["holders"]}["seed-reversal"]
+        self.assertEqual((rare["seated_sessions"], rare["flat"], rare["idle"], rare["quiet_sessions"]), (9, True, False, None),
+                         "nine sessions of its seat: it keeps it, though two programs wait")
+        self.assertEqual([e["action"] for kind, e in h.events if kind == "equity.seat"], ["seated"])
+
+        # ---- TEN SESSIONS OF ITS SEAT (Friday Oct 23): the idle reversal trader yields to the best-ranked waiting one.
+        out = self.decision(h, 9)
+        plan = h.book.seats()
+        self.assertEqual(sorted(x["family"] for x in plan["holders"]),
+                         sorted([fid for fid, *_ in SEATED if fid != "seed-reversal"] + ["late-fast", rest[0]]))
+        self.assertEqual([(w["family"], w["rank"], w["flagged"]) for w in plan["waiting"]],
+                         [(rest[1], 1, False), ("seed-reversal", 2, True)])
+        self.assertEqual((self.store.family("seed-reversal")["band"], self.store.family(rest[0])["band"]), ("candidate", "probe"))
+        inst = h.book._instance(self.key["seed-reversal"])
+        self.assertTrue(inst.retired_at is not None and inst.why.startswith("yielded:"), inst.why)
+        self.assertNotIn(self.key["seed-reversal"], h.state.get("eq_sticky") or {})
+        self.assertEqual([(e["action"], e["family"], e.get("for")) for kind, e in h.events if kind == "equity.seat"][-2:],
+                         [("yielded", "seed-reversal", rest[0]), ("seated", rest[0], None)])
+        self.assertEqual(sorted(x["family"] for x in plan["holders"] if x["seeded"]), ["seed-overnight"],
+                         "the report's line: the seeds now hold one seat")
+        self.assertIn("seed-overnight (seeded) seated 10 sessions", out["seats"])
+        # The swarm's roster reports the book's own plan (one source), and says its own lists are by pass time.
+        roster = swarm_bands.roster(self.state_root, lanes=elane.LANES)
+        self.assertEqual((roster["rule"], roster["plan"]["waiting"], roster["waiting"]),
+                         ("activity-1-free", plan["waiting"], sorted([rest[1], "seed-reversal"])))
+        self.assertIn("NOT who is next", roster["order"])
+        # ---- NOTHING WAS EVER FORCED: the only sale of the fortnight is bred-swing's own.
+        self.assertEqual(h.intents(kind="house_exit"), [])
+        self.assertEqual([(i.instance, i.status) for i in h.intents(kind="sell")], [(self.key["bred-swing"], "done")])
+        self.assertEqual(len([b for b in h.venue.sent if b["side"] == "sell"]), 1)
+        self.assertEqual(sorted(lot.family for lot in h.lots(open_only=True)),
+                         ["bred-overnight", "bred-slice", "bred-swing", "seed-overnight"])
+        self.assertEqual(h.book._lots(instance=self.key["seed-reversal"], open_only=False), [], "it never held a lot")
+        text = json.dumps([h.book.health(), [e for _, e in h.events], h.alerts], default=str)
+        self.assertNotIn("close_days", text)
+        self.assertNotIn("seat_activity", text)
+
+    def test_ten_sessions_on_the_idle_trader_keeps_its_seat_when_nobody_unflagged_waits(self):
+        """The same deploy with no later passer: six seats, five held. The reversal trader is idle from Friday Oct 23
+        and KEEPS its seat (the plan says idle); nothing moves for three more sessions. A program then passes: there
+        is a free seat, so it takes that one, and the idle trader still keeps its own. Only when all six are held and
+        one more waits does it yield."""
+        from league.swarm.gate import Gate
+
+        h = self.the_base()
+        h.book = h.new_book()
+        gate = Gate(self.store, None, None, ON, clock=self.store.clock)
+        gate.equity_runner = self.runner
+        with real_engine():
+            gate.equity_round({"looked": [], "held": []})
+        for n in range(0, 12):
+            self.decision(h, n, windows=False)
+        self.assertEqual(self.days[11], dt.date(2026, 10, 27))
+        plan = h.book.seats()
+        rare = {x["family"]: x for x in plan["holders"]}["seed-reversal"]
+        self.assertEqual((rare["idle"], rare["seated_sessions"], len(plan["holders"]), plan["waiting"]), (True, 12, 5, []))
+        self.assertEqual([e for kind, e in h.events if kind == "equity.seat"], [], "nobody waits: no seat changed hands")
+        self.passes("late-sixth", "IWM", SWING, {"hold": 4, "share": 0.5}, at=100.0, counted=True)
+        self.decision(h, 12, windows=False)
+        plan = h.book.seats()
+        self.assertEqual(len(plan["holders"]), 6)
+        self.assertEqual(self.store.family("seed-reversal")["band"], "probe", "a seat was free: nobody had to yield")
+        self.passes("late-slow", "DIA", SWING, {"hold": 20, "share": 0.5}, at=101.0, counted=True)
+        self.decision(h, 13, windows=False)
+        self.assertEqual((self.store.family("seed-reversal")["band"], self.store.family("late-slow")["band"]),
+                         ("candidate", "probe"), "six held and one unflagged program waiting: the idle seat yields at once")
+        self.assertEqual(h.intents(kind="house_exit"), [])
+        self.assertEqual([b for b in h.venue.sent if b["side"] == "sell"], [])
 
 
 if __name__ == "__main__":
