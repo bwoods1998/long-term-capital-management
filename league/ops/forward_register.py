@@ -85,7 +85,9 @@ SCORED_KIND = "swarm.elane"
 SCORED_PASS = "scored"
 #: The real route's instance suffix (league/equity/live.py `REAL_SUFFIX`): an instance's registry key is its id less it.
 REAL_SUFFIX = ":r"
-#: An equity family's structures (league/swarm/elane.py `STRUCTURES`).
+#: The structures the forward record registers: an ETF or a stock program's (E1's and E2's). Release E4's third equity
+#: structure, "panel" (league/swarm/elane.py `STRUCTURES`), is not among them on purpose: a panel version's row, its
+#: nightly shadow and its twin are package J's (league/ops/forward_xs.py, owed).
 STRUCTURES = ("etf", "stock")
 #: A control's author and the NEEDS beside its symbols.
 CONTROL_AUTHOR = "house"

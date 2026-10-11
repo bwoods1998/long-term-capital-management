@@ -73,8 +73,9 @@ if HAVE:
     from league.live.state import LiveState
     from league.ops import dlane_report as DR
     from league.ops import equity_panel as EP
+    from league.ops import forward_db, forward_register, forward_xs
     from league.ops import twins as TW
-    from league.swarm import bands, elane, elane_xs
+    from league.swarm import bands, elane, elane_folds, elane_xs
     from league.swarm import settings as settings_mod
     from league.swarm.architect import Architect
     from league.swarm.elane_train import EquityResearcher
@@ -398,8 +399,15 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertEqual((fam["structure"], fam["roots"], fam["band"], fam["spec"]["lane"], fam["spec"]["agenda"]),
                          ("panel", [], "gym", "equity", "xs_reversal"))
         self.assertEqual(self.store.latest_version(SLUG)["n"], 1)
-        # The hidden year is release E3's fold (`elane_folds`): not merged, so the bar reads all six Train years.
-        self.assertIsNone(fam["spec"]["hidden_year"])
+        # THE HIDDEN YEAR is release E3's fold (`elane_folds`), merged under this lane and recording in the committed
+        # policy (`elane.memory.mode` "record"): the family is born with one of the panel's six Train years held out,
+        # drawn by its cell as `elane_xs.assign` says (the first family of its cell), and its bar reads the other five.
+        cell = elane_xs.cell_of("equity", "xs_reversal", "sp500")
+        self.assertEqual(elane_folds.mode(self.settings), "record")
+        self.assertEqual(fam["spec"]["hidden_year"],
+                         xconfig.TRAIN_YEARS[elane_folds.cell_hash(cell) % len(xconfig.TRAIN_YEARS)])
+        self.assertEqual(elane_xs.hidden_year_of(fam), fam["spec"]["hidden_year"])
+        self.assertEqual(fam["spec"]["gid"], elane_folds.GID0)
         return fam
 
     def trained(self) -> dict:
@@ -414,7 +422,17 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         entry = rec["versions"]["1"]
         self.assertEqual((entry["verdict"], entry["fails"]), ("pass", []))
         self.assertEqual(entry["facts"]["rules"], {rule: True for rule in ("XA0", "XH1", "XP1", "XR1", "XT1", "XY1")})
-        self.assertEqual(entry["facts"]["seen_years"], len(xconfig.TRAIN_YEARS))
+        # The bar read the five years the family may see; its hidden year went to the sealed out-of-fold row, after
+        # the verdict, and nowhere else (release E3's fold under this lane).
+        hidden = elane_xs.hidden_year_of(self.store.family(SLUG))
+        self.assertEqual(entry["facts"]["seen_years"], len(xconfig.TRAIN_YEARS) - 1)
+        self.assertIn(hidden, xconfig.TRAIN_YEARS)
+        oof = self.store.family(SLUG)["state"][elane_xs.OOF_KEY]["1"]
+        self.assertEqual(sorted(oof), ["1", "1.5"], "one hidden run at each cost multiple")
+        for row in oof.values():
+            self.assertEqual((row["status"], sorted(row)), ("ok", ["days", "status", "sum_x", "t_x"]))
+            self.assertGreater(row["days"], 240, "the hidden year's own sessions")
+        self.assertNotIn(elane_xs.OOF_KEY, json.dumps(rec), "the record a generator's views are built from holds none of it")
         # THE RESTART CHECK asked the program again from fresh memory and met the same targets (it keeps no state).
         self.assertEqual((entry["state"]["matched"], entry["state"]["share"]), (entry["state"]["calls"], 1.0))
         # A22 (1): the House's own reading of its Train holdings' loadings; this program tilts to none of the four.
@@ -427,6 +445,23 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         review = self.store.family(SLUG)["state"]["review"]
         self.assertEqual((review["objective"], review["rubric"]), (elane_xs.REVIEW_OBJECTIVE, elane_xs.rubric_sha()))
         return rec
+
+    def the_forward_record_passes_it_by(self) -> None:
+        """Release E3's registry beside this lane, the real job's `sync` on this store: a scored panel version is NOT
+        in the forward record. E3 registers the versions of E2's own Train record, of structure "etf" or "stock"; a
+        panel version's forward row, its nightly shadow and its twin are PACKAGE J's (league/ops/forward_xs.py: owed,
+        every function a stub). The registry neither registers nor refuses it, nothing fails and the hash chain holds:
+        the two releases run side by side, and until J lands a scored panel program is recorded by its own lane and
+        not shadowed. THE DAY J LANDS THIS READS ONE ROW, and this test is J's to change."""
+        self.assertNotIn("panel", forward_register.STRUCTURES)
+        db = forward_db.open_db(self.root)
+        self.addCleanup(db.close)
+        for _ in range(2):
+            out = forward_register.sync(self.root, db, now=self.clock(), settings=self.settings)
+            self.assertEqual((out["registered"], out["skipped"], out["chain"]["ok"], out["chain"]["rows"]),
+                             (0, [], True, 0), out)
+        with self.assertRaises(NotImplementedError):
+            forward_xs.scored(self.store)
 
     def validated(self) -> dict:
         """4. The one Validation try."""
@@ -500,6 +535,7 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
 
         self.born()
         self.trained()
+        self.the_forward_record_passes_it_by()
         self.validated()
         self.looked()
         # NO NAME REACHED THE EVIDENCE CHILD, and none is in what the swarm keeps of the program's runs.

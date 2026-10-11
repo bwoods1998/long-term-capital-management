@@ -678,8 +678,15 @@ class TheSeams(unittest.TestCase):
                 elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs \
                         and literal.search(node.value):
                     found.add(path.name)
-        self.assertEqual(sorted(found), ["stall.py"],
-                         "only the stall job spells the structures out in code, held to the store's above")
+        # The stall job spells the equity structures out in code, held to the store's above. Release E3's forward
+        # record spells out ITS OWN two, on purpose narrower: it registers ETF and stock programs and counts their
+        # runs (the registry's `STRUCTURES`, the report's replay multiple); a panel program's forward row and shadow
+        # are package J's (league/ops/forward_xs.py, owed). No other ops job names the structures.
+        self.assertEqual(sorted(found), ["forward_register.py", "forward_report.py", "stall.py"])
+        from league.ops import forward_register
+
+        self.assertEqual(forward_register.STRUCTURES, tuple(s for s in store_mod.EQUITY_STRUCTURES if s != "panel"),
+                         "the forward record's structures are the store's less the panel (package J's)")
 
     def test_no_stub_is_left_on_a_built_path(self):
         left = []
