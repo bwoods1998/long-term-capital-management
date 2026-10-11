@@ -48,6 +48,17 @@ counts), without the clock's `at` and the `identity`: the same figures give the 
 `mem_contrib.run_sha` is the hidden run's own (E1's `EquityProgram.run_sha`: the code with its merged PARAMS), never
 the swarm's `gate.run_sha`. `fails` is a JSON list. A hidden run already recorded at a k is not run again.
 
+A HIDDEN YEAR THE FAMILY HAS SEEN IS VOID (`seen_hidden`; the review's fix). The seal is the code's: a release that
+does not carry it (a rollback to a tree before release E3, the owner's or the deploy watch's own) judges a hidden-year
+family on the whole Train spans, keeps the hidden year's row in the version's verdict (`compact` keeps `years`) and
+shows it in the family's brief. When E3's code returns, that family's researcher HAS SEEN the year: a hidden run of
+its later versions would be written as out-of-fold and is not. So before any hidden run `ingest` reads the family's
+record and the verdict in hand for a `years` row of the hidden year. Found: no hidden run and no `mem_contrib` row,
+from that version on; the version's `mem_seen` row carries `hidden_year` NULL (the column says what was hidden from
+the family WHEN THE VERSION WAS SCORED), and the first such row of a family raises one `swarm.status` alert (action
+"elane_memory": MM1), so the exposure is recorded once and the rows written before it, which were out of fold when
+they were written, stand. The family's bar does not move: its Train stays its seen spans.
+
 `league.swarm.elane_train` and `elane_seal` are imported INSIDE FUNCTIONS only (`elane_train` imports this module at
 the top), and so are E1's `league.equity.runner` and `league.live.decider` (`hidden_runner` alone: the child it
 starts). Standard library and numpy only (numpy inside functions).
@@ -192,6 +203,21 @@ def hidden_runner(runner: Any) -> Iterator[Any]:
         child.close()  # the process that held the hidden year's bars ends here, before any other run is made
 
 
+def seen_hidden(fam: Mapping[str, Any], verdict: Mapping[str, Any] | None, hidden: int) -> list[str]:
+    """The versions of a family whose recorded verdict holds a row of its hidden year (A HIDDEN YEAR THE FAMILY HAS SEEN
+    IS VOID, the module docstring): the record's, by number, and "this" for the verdict in hand. [] for a family whose
+    every verdict was judged on its seen spans."""
+    from . import elane_train
+
+    year = str(int(hidden))
+    versions = elane_train.record_of(fam).get("versions")
+    held = [str(n) for n, kept in (versions.items() if isinstance(versions, Mapping) else ())
+            if isinstance(kept, Mapping) and isinstance(kept.get("years"), Mapping) and year in kept["years"]]
+    if isinstance(verdict, Mapping) and isinstance(verdict.get("years"), Mapping) and year in verdict["years"]:
+        held.append("this")
+    return sorted(held)
+
+
 def ingest(store: Any, fam: Mapping[str, Any], version: int, *, runner: Any, code: str, params: Mapping[str, Any],
            seen: Mapping[float, Any], verdict: Mapping[str, Any], settings: Mapping[str, Any] | None,
            now: str | None = None) -> dict[str, Any]:
@@ -213,6 +239,10 @@ def ingest(store: Any, fam: Mapping[str, Any], version: int, *, runner: Any, cod
     hidden = elane_folds.hidden_year(fam)
     out["hidden_year"] = hidden
     ensure(store)
+    # A HIDDEN YEAR THE FAMILY HAS SEEN IS VOID: no hidden run, no out-of-fold row, and the seen row says so.
+    held = seen_hidden(fam, verdict, hidden) if hidden is not None else []
+    first_void = bool(held) and store._one("SELECT 1 AS ok FROM mem_seen WHERE family=? AND hidden_year IS NULL",
+                                           (str(fam["id"]),)) is None
     facts = elane_seal.train_facts(fam, elane_train.STATE_KEY)
     cell = elane_train.cell_text(elane_train.cell_of(facts["lane"], facts["agenda"], facts["symbols"]))
     spec = fam.get("spec") if isinstance(fam.get("spec"), Mapping) else {}
@@ -222,7 +252,8 @@ def ingest(store: Any, fam: Mapping[str, Any], version: int, *, runner: Any, cod
     base, stress = by_k.get(float(config.K_BASE), []), by_k.get(float(config.K_STRESS), [])
     cost = elane_effects.costs(base, stress)
     beside = verdict.get("beside") if isinstance(verdict.get("beside"), Mapping) else {}
-    row = (fid, n, cell, elane_effects.horizon([lot for r in base for lot in (r.get("lots") or ())]), hidden, gid,
+    row = (fid, n, cell, elane_effects.horizon([lot for r in base for lot in (r.get("lots") or ())]),
+           None if held else hidden, gid,
            int(bool(verdict.get("passed"))), json.dumps([str(f) for f in (verdict.get("fails") or [])]),
            _real(beside.get("drift_share")), _real(cost["gross_bp"]), _real(cost["cost_bp"]),
            _real(cost["rt_per_year"]), seen_sha(verdict), at)
@@ -232,6 +263,14 @@ def ingest(store: Any, fam: Mapping[str, Any], version: int, *, runner: Any, cod
             "drift_share, gross_bp, cost_bp, rt_per_year, seen_sha, at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             row).rowcount))
     if hidden is None:
+        return out
+    if held:
+        if first_void and out["seen"]:
+            store.event("swarm.status", fid, {
+                "action": "elane_memory", "alert": True, "version": n,
+                "text": f"the hidden year of {fid} is void: its record holds a verdict judged on that year (version "
+                        f"{', '.join(held)}: scored by a release without the seal, a code rollback); no out-of-fold "
+                        f"row is written for v{n} or any later version of it"})
         return out
     # THE HIDDEN RUN, after the verdict is recorded: its result goes to `contribution` and nowhere else.
     first, last = elane_folds.hidden_span(hidden)
@@ -275,4 +314,4 @@ def counts(db: sqlite3.Connection) -> dict[str, Any]:
 
 
 __all__ = ["TABLES", "SEALED_TABLES", "KIND_OWN", "KEYS", "SCHEMA", "APPEND_ONLY_ERROR", "HIDDEN_LOG",
-           "HiddenRunRefused", "ensure", "seen_sha", "hidden_runner", "ingest", "counts"]
+           "HiddenRunRefused", "ensure", "seen_sha", "hidden_runner", "seen_hidden", "ingest", "counts"]

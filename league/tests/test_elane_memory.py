@@ -206,6 +206,91 @@ class TheIngest(Base):
                          ("g0", None, None, None, None))
 
 
+class AHiddenYearTheFamilyHasSeenIsVoid(Base):
+    """The seal is the code's: a release without it (a rollback) judges a hidden-year family on the whole spans and
+    shows it the year. When release E3's code is back, no later version of that family leaves an out-of-fold row."""
+
+    def exposed(self, slug: str = "rolled", hidden: int = 2018):
+        """A family born with a hidden year whose v1 a release without the seal judged on all seven years."""
+        fam, seen, verdict, market = self.scored(slug, hidden)
+        whole = {k: [market.train(self.code, {}, name=slug, start=first, end=last, k=k)
+                     for first, last in elane_train.TRAIN_SPANS] for k in K}
+        old = elane_train.train_score(elane_train.combine([r.result for r in whole[1.0]]),
+                                      elane_train.combine([r.result for r in whole[1.5]]))
+        self.assertIn(str(hidden), old["years"], "the old release's verdict holds the hidden year's row")
+        self.store.set_state(fam["id"], **{elane_train.STATE_KEY: {
+            "status": "researching", "versions": {"1": elane_train.compact(old, at=self.store.now())}}})
+        self.store.add_version(fam["id"], self.code + "\n# v2\n", {}, author="elane:test")
+        market.calls.clear()
+        return self.store.family(fam["id"]), seen, verdict, market
+
+    def alerts(self) -> list[dict]:
+        return [e["payload"] for e in self.store.events_after(0)
+                if e["kind"] == "swarm.status" and e["payload"].get("action") == "elane_memory"]
+
+    def test_which_versions_hold_the_hidden_year(self):
+        fam, seen, verdict, market = self.exposed()
+        self.assertEqual(elane_memory.seen_hidden(fam, verdict, 2018), ["1"])
+        self.assertEqual(elane_memory.seen_hidden(fam, verdict, 2019), ["1", "this"], "a seen year is in every verdict")
+        self.assertEqual(elane_memory.seen_hidden(fam, {**verdict, "years": {**verdict["years"], "2018": {}}}, 2018),
+                         ["1", "this"])
+        clean, _, clean_verdict, _ = self.scored("clean", 2018)
+        self.assertEqual(elane_memory.seen_hidden(clean, clean_verdict, 2018), [])
+        for odd in ({}, {"state": {elane_train.STATE_KEY: {"versions": [1, 2]}}},
+                    {"state": {elane_train.STATE_KEY: {"versions": {"1": {"years": None}, "2": "x"}}}}):
+            self.assertEqual(elane_memory.seen_hidden(odd, None, 2018), [])
+
+    def test_no_hidden_run_and_no_out_of_fold_row_once_the_record_holds_the_year(self):
+        fam, seen, verdict, market = self.exposed()
+        out = elane_memory.ingest(self.store, fam, 2, runner=market, code=self.code, params={}, seen=seen, verdict=verdict,
+                                  settings=self.settings)
+        self.assertEqual(out, {"seen": 1, "contrib": 0, "hidden_year": 2018})
+        self.assertEqual((market.calls, market.hidden_runners), ([], 0), "no hidden run, and no child started for one")
+        self.assertEqual(self.rows("mem_contrib") + self.rows("mem_series"), [])
+        (row,) = self.rows("mem_seen")
+        self.assertEqual((row["family"], row["version"], row["hidden_year"]), ("rolled", 2, None),
+                         "the seen row says nothing was hidden from the family when this version was scored")
+        (alert,) = self.alerts()
+        self.assertEqual((alert["alert"], alert["version"]), (True, 2))
+        self.assertIn("the hidden year of rolled is void", alert["text"])
+        self.assertIn("version 1", alert["text"])
+        self.assertNotIn("2018", alert["text"], "the year itself is not named")
+        # Said once a family: a second ingest, and every later version, write no second alert and no row.
+        elane_memory.ingest(self.store, fam, 2, runner=market, code=self.code, params={}, seen=seen, verdict=verdict,
+                            settings=self.settings)
+        self.store.add_version(fam["id"], self.code + "\n# v3\n", {}, author="elane:test")
+        out = elane_memory.ingest(self.store, self.store.family(fam["id"]), 3, runner=market, code=self.code, params={},
+                                  seen=seen, verdict=verdict, settings=self.settings)
+        self.assertEqual(out, {"seen": 1, "contrib": 0, "hidden_year": 2018})
+        self.assertEqual((len(self.alerts()), market.calls, self.rows("mem_contrib")), (1, [], []))
+        self.assertEqual([r["hidden_year"] for r in self.rows("mem_seen")], [None, None])
+
+    def test_the_rows_written_before_the_exposure_stand(self):
+        fam, seen, verdict, market = self.scored("before", 2018)
+        self.assertEqual(self.ingest(fam, seen, verdict, market), {"seen": 1, "contrib": 2, "hidden_year": 2018})
+        before = self.rows("mem_contrib")
+        whole = elane_train.train_score(
+            elane_train.combine([market.train(self.code, {}, name="before", start=a, end=b, k=1.0).result
+                                 for a, b in elane_train.TRAIN_SPANS]),
+            elane_train.combine([market.train(self.code, {}, name="before", start=a, end=b, k=1.5).result
+                                 for a, b in elane_train.TRAIN_SPANS]))
+        record = elane_train.record_of(fam)
+        self.store.set_state(fam["id"], **{elane_train.STATE_KEY: {
+            **record, "versions": {**record["versions"], "2": elane_train.compact(whole, at=self.store.now())}}})
+        market.calls.clear()
+        out = elane_memory.ingest(self.store, self.store.family(fam["id"]), 3, runner=market, code=self.code, params={},
+                                  seen=seen, verdict=verdict, settings=self.settings)
+        self.assertEqual((out["contrib"], market.calls), (0, []))
+        self.assertEqual(self.rows("mem_contrib"), before, "out of fold when they were written")
+        self.assertEqual([(r["version"], r["hidden_year"]) for r in self.rows("mem_seen")], [(1, 2018), (3, None)])
+        self.assertEqual(len(self.alerts()), 1)
+
+    def test_a_family_with_no_hidden_year_is_never_void(self):
+        fam, seen, verdict, market = self.scored("seven", None)
+        self.assertEqual(self.ingest(fam, seen, verdict, market), {"seen": 1, "contrib": 0, "hidden_year": None})
+        self.assertEqual(self.alerts(), [])
+
+
 class TheHiddenRunsOwnChild(Base):
     """`hidden_runner`: the hidden run is never made on the runner the seen runs were made on (a program's memory
     outlives a run wherever its interpreter does, and the swarm's one evidence child runs the next version's seen

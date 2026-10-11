@@ -203,7 +203,7 @@ raised.
 | RR2 | info | a release receipt read "flat" or "wrong_way" |
 | CP1 | info | a model route unprobed for 45 days, or a readable 2025 or 2026 cell newly "recalled" |
 | CP2 | warning | a route whose last three probe attempts added no cell |
-| MM1 | warning | the swarm reported a memory failure (a birth without its hidden year, an ingest that failed) in the last 24 h |
+| MM1 | warning | the swarm reported a memory failure (a birth without its hidden year, an ingest that failed, a hidden year found void after a code rollback) in the last 24 h |
 
 **Deploy** (an owner deploy of protected files; no order path changes; CI green on the exact head). After it, verify
 on the House, none of which blocks the build: (1) a decider child started from an ops job answers `ping` and runs the
@@ -217,7 +217,14 @@ with what each does not reach. A CODE rollback (the previous release) leaves `fo
 the memory tables where they are: nothing of the older release reads them, a family born with a hidden year is then
 scored on E2's two whole spans again (its bar moves: prefer the switches), and when the release returns the shadow
 fills every missed day; were an equity evidence module rolled back too, the engine label that returns opens a new
-series (above). **Verified at the integration** (`league/tests/test_e3_end_to_end.py`, the real modules together on a
+series (above). **A code rollback VOIDS the hidden year of every hidden-year family scored meanwhile:** the older
+release judges such a family on all seven years, keeps the hidden year's row in the version's verdict and shows it in
+the family's brief, so that family's researcher has seen the year. Nothing restores it. When release E3's code
+returns, the family is judged on its seen spans as before, but `elane_memory.ingest` finds the year in its record and
+writes no out-of-fold row for any later version of it (their `mem_seen` rows carry `hidden_year` NULL), with one
+`swarm.status` alert a family (MM1); the out-of-fold rows written before the rollback stand. The deploy watch's own
+rollback in a release's first ten minutes is such a rollback: after one, expect MM1 once for each family scored in
+between. **Verified at the integration** (`league/tests/test_e3_end_to_end.py`, the real modules together on a
 synthetic market and a synthetic live book): a Train scoring to a Done checkpoint through every job, the generators'
 views byte for byte unchanged, and every job a skipped receipt that touches nothing with the three modes off.
 

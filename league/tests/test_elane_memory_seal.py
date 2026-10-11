@@ -829,6 +829,31 @@ class TheWiring(unittest.TestCase):
         self.assertEqual(e3.table(self.store, "mem_contrib"), [])
         self.assertEqual(len(self.store.runs("h", window="train")), 2 * len(elane_folds.seen_spans(2018)))
 
+    def test_a_version_scored_by_a_release_without_the_seal_voids_the_familys_hidden_year(self):
+        """A code rollback: the old `score` knows no hidden year and judges the family on the whole spans (here: the
+        fold read as none while v1 is scored). With release E3's code back, v2 is judged on the seen spans as before
+        and leaves no out-of-fold row; one alert says so."""
+        fam = e3.hidden_family(self.store, "h", 2018, code=fx.program())
+        with mock.patch.object(elane_folds, "hidden_year", lambda fam: None), \
+                mock.patch.object(elane_memory, "ingest", lambda *a, **k: {}):
+            self.researcher().score(fam, self.store.version("h", 1))
+        rec = elane_train.record_of(self.store.family("h"))
+        self.assertIn("2018", rec["versions"]["1"]["years"], "the rolled-back release judged, and showed, the year")
+        self.assertIn("2018", self.researcher().brief(self.store.family("h")))
+        self.runner.calls.clear()
+        second = self.store.add_version("h", fx.program() + "\n# again\n", {}, author="elane:test")
+        self.runner.hidden = 2018
+        self.researcher().score(self.store.family("h"), second)
+        rec = elane_train.record_of(self.store.family("h"))
+        self.assertNotIn("2018", rec["versions"]["2"]["years"], "its bar does not move: the seen spans")
+        self.assertEqual(self.runner.calls, [(k, *span) for k in K for span in elane_folds.seen_spans(2018)],
+                         "no hidden run")
+        self.assertEqual(e3.table(self.store, "mem_contrib"), [])
+        self.assertEqual([(r["version"], r["hidden_year"]) for r in e3.table(self.store, "mem_seen")], [(2, None)])
+        alerts = [p for p in self.events("swarm.status") if p.get("alert") and p.get("action") == "elane_memory"]
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("is void", alerts[0]["text"])
+
     def births(self, settings, n: int = 3, forecast: float | None = None, symbol: str = "SPY") -> list[dict]:
         rows = [fx.proposal(f"born-{i}", lane="beta", agenda="overnight", symbols=(symbol,), code=fx.program(symbol),
                             mechanism=f"Invented overnight idea number {i}: index holders are paid for risk they cannot trade.",
