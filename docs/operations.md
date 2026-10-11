@@ -26,11 +26,15 @@ on the E1/E2 tree this release is built on (`feat/equity-e2-int` at `5ad1f01e`) 
 tree the packages were cut from (`5a6906ff`) and on that tree with the five packages merged. Between those two bases
 all three DID move, by E1's and E2's own review fixes (the first-decision look-back in the store, the engine's
 rounding tolerance, the live book, the money table): that is E1's and E2's deploy to state, not this release's.
+**Merged with main** (Oct 11, 2026; main at `87f9fd0c`: releases E1, E2 and E2.2): this tree carries every line of
+E2.2 (the reading rule, the contract's worked example, the equity lanes' own pace), and the three ids read on it are
+main's, on Python 3.11 and 3.14.
 **The forward record is ops only, by process:** `league/swarm`,
 `league/equity`, `league/live` and `league/gym` import no E3 ops module and never name the forward store or one of its
 tables (`league/tests/test_e3_seal_imports.py`), so no architect, researcher or reviewer can read a forward row. Every
-E3 module is behind the updater's wall (`league/ops/`, and the three swarm modules in `league/ci.py`
-`PENDING_GATEWAY` until the gateway's merge list names them).
+E3 module is behind the updater's wall (`league/ops/`, and the three swarm modules in `league/ci.py` `FORBIDDEN`),
+and the gateway's merge list names the three too (`gateway/lib/protected.mjs` `MERGE_FORBIDDEN`: the release's one
+change under `gateway/`; nothing waits in `PENDING_GATEWAY`).
 
 **What is recorded.**
 - **The registry** (`<state>/forward.sqlite`, 0600, append-only by trigger; `league/ops/forward_db.py`,
@@ -193,9 +197,16 @@ without a live instance; no group difference is shown before its pair's own 60th
 **The meter's floor:** BH, BY and the reading are shown once the family holds 5 lineages (the controls' side once it
 holds 5 controls); under it the report shows the family's size and "too few lineages to read", and the funnel's `bh`
 and `by` are 0 (over one or two lineages the count is a verdict on a program). **A day's meters wait for its rows:**
-a day is written once no registered program owed it is still without its row (a night the budget cut, a late vendor
-bar), or after 3 later nights, then as it stands with a `meter_partial` event; the receipt says which day waits and
-for how many programs, and FW5 reads no partial day.
+a day is written once no registered program owed it is still awaited for its row (a night the budget cut, a late
+vendor bar), or after 3 later nights, then as it stands with a `meter_partial` event; the receipt says which day
+waits and for how many programs, and FW5 reads no partial day. **Only an absence the next nights can fill is
+awaited:** one that began that day (the program had its row the session before), whatever its cause, or one of
+fewer than 3 sessions running of a program that is neither suspect nor behind in the queue. A standing absentee (a
+holder of a halted symbol, which has no row until the bar comes; a program that hangs every night) is awaited at the
+start of its absence, one or two days, and never again: the days after are written the night itself, are no partial
+days, and FW5 reads them; FW2 goes on naming a program that fails night after night. (Awaited without end, one such
+program made every later day three sessions late and partial for good, and FW5 read nothing.) A control without its
+row is awaited by the same rule when the night said its data failed.
 
 **What nobody may read yet** (recorded in release E3, shown to no one: no generator, no report, and not the captain
 either, who writes seeds and agendas and is therefore an author too):
@@ -235,7 +246,9 @@ CP and MM.
 | CP2 | warning | a route whose last three probe attempts added no cell |
 | MM1 | warning | the swarm reported a memory failure (a birth without its hidden year, an ingest that failed, a hidden year found void after a code rollback) in the last 24 h |
 
-**Deploy** (an owner deploy of protected files; no order path changes; CI green on the exact head). After it, verify
+**Deploy** (an owner deploy of protected files; no order path changes; CI green on the exact head). The gateway
+first, as for E2's five modules: its merge list gains the three swarm modules (a tightening only; no route, cap or
+key changes). After it, verify
 on the House, none of which blocks the build: (1) a decider child started from an ops job answers `ping` and runs the
 canary (else `forward_shadow` fails at its preflight every night, FW1 says so and nothing is marked: the fix is a
 deploy); (2) the gateway serves 1Min bars with `vw` for the universe 45 minutes after the close (else the fallback
@@ -430,9 +443,9 @@ the look on the House; real money only at Probe, inside the shared loss budget).
 **Deploy class.** An owner deploy with or after E1 (`league/swarm/policy.json`, `league/ops/`, `league/swarm/store.py`,
 `tournament.py`, `game.py` and `league/ci.py` are FORBIDDEN to the updater). E2's five modules
 (`league/swarm/elane_births.py`, `elane_train.py`, `elane_yield.py`, `elane_seal.py`, `elane_review.py`) are FORBIDDEN
-from this release on: no role changes them and the updater never self-deploys them. **One follow-up at the gateway**:
-its merge list (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) gains the five in its next deploy; until then they wait
-in `league/ci.py` `PENDING_GATEWAY`.
+from this release on: no role changes them and the updater never self-deploys them. **One follow-up at the gateway**,
+made Oct 11, 2026: its merge list (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) names the five, and they are in
+`league/ci.py` `FORBIDDEN`'s own list (`PENDING_GATEWAY`, where they waited, is empty).
 
 **Verify after the deploy** (read-only): `policy.json` on the box has the `elane.e2` block and `elane.birth_share` 0;
 before the switch the swarm log has no `elane:` or `elane_train:` line and `swarm.sqlite` no `swarm.elane` event; the

@@ -29,7 +29,7 @@ any other deploy.
 The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
 Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
 
-### Release E3, record and measure: the forward record, the fill measurements, the hidden year and the contamination probe, on `feat/equity-e3` (unreleased; an owner deploy with or after E2; no identity moves; records only)
+### Release E3, record and measure: the forward record, the fill measurements, the hidden year and the contamination probe, on `feat/equity-e3` (unreleased; the gateway's merge list, then an owner deploy on main's E2.2; no identity moves; records only)
 
 - **What it adds** (`league/ops/E3_INTERFACES.md`): a hash-chained registry of every equity version judged on the Train
   bar, passed or failed, with each seed, each live instance and 50 skill-free controls a universe group
@@ -56,7 +56,9 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   keeps it whatever the memory mode.
 - **No identity moves:** nothing under `league/live/`, `league/gym/`, `league/equity/` or `league/constitution.py`
   changes, no decider kind is added and nothing of E3 enters the equity evidence's import closure. The three new swarm
-  modules join `league/ci.py` `PENDING_GATEWAY` (a gateway follow-up). Read with the repository's own functions at the
+  modules are in `league/ci.py` `FORBIDDEN` and in the gateway's merge list (`gateway/lib/protected.mjs`
+  `MERGE_FORBIDDEN`: the release's one change under `gateway/`, so the gateway deploys first, as for E2's five);
+  `PENDING_GATEWAY` is empty. Read with the repository's own functions at the
   integration: the execution fingerprint, the equity identity and the money digest are equal on the E1/E2 tree it is
   built on (`feat/equity-e2-int` at `5ad1f01e`) and on its head. (All three moved between `5a6906ff`, where the
   packages were cut, and `5ad1f01e`: E1's and E2's own review fixes, theirs to state at their deploy.)
@@ -89,6 +91,18 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   retirement and gets a twin of its own; the meters and the night's queue fit the ops child's address space at the
   settings' bounds. Four event kinds are new (`run_behind`, `twin_retired`, `twin_revived`, `meter_partial`); no
   table or column is. `league/ops/E3_INTERFACES.md` section 11 lists each fix against the spec.
+- **After its verification (Oct 11; an independent verifier: no blocker and no major left; one minor finding,
+  fixed with a test that failed before):** one program that never got a row again (a holder of a halted symbol, a
+  program that hangs every night) was awaited by every later day's meters, so each came three sessions late and was
+  marked partial, for good, and FW5, which reads no partial day, read nothing from then on. Only an absence the
+  next nights can fill is awaited now: one that began that day, or one of fewer than three sessions running of a
+  program that is neither suspect nor behind in the queue; a day is marked partial, and left out of FW5, only for
+  those; a control whose data failed is awaited the same way. No table, column or event kind is new.
+- **Merged with main (Oct 11; main at `87f9fd0c`: releases E1, E2 and E2.2).** Every line of E2.2 (below) and of E3
+  is kept. Resolved by hand: `league/ci.py` and `league/tests/test_ci.py` (E2's five modules are in `FORBIDDEN`'s
+  own list as main has them, E3's three beside them), the import line of `league/swarm/elane_births.py` (both
+  `elane_folds` and `elane_review`) and one pin of `league/tests/test_e3_identities.py`. The three ids read on the
+  merged tree are main's, on Python 3.11 and 3.14. `league/ops/E3_INTERFACES.md` section 12.
 
 ### Release E2, integrated on E1: the swarm breeds share programs for the BETA and EQUITY lanes, on `feat/equity-e2-int` (unreleased; an owner deploy with or after E1; no identity moves; ships switched off)
 
@@ -106,7 +120,8 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
 - **In E1's files** (`league/swarm/ELANE_E2_PATCHES.md`, the record): the loop's two rounds; the options birth quota,
   population floor, stall facts and pre-open check counting the options lanes only; `visible_graveyard` dropping
   equity rows; the tournament validating an E2 family only with its Train pass and review; the five E2 modules
-  FORBIDDEN (`league/ci.py` `PENDING_GATEWAY` until the gateway's merge list names them: a gateway follow-up).
+  FORBIDDEN (`league/ci.py` `PENDING_GATEWAY` until the gateway's merge list names them: a gateway follow-up, made
+  Oct 11, 2026, which left `PENDING_GATEWAY` empty).
 - **Fixed at the integration:** the equity architect was told the share screen S1 judges (it is S2); with the lanes on
   and the share at zero the equity Train round ran empty every ten minutes (it now waits for a family of its own).
 - **Fixed after the integration's review** (three reviewers, Oct 10-11; `league/swarm/ELANE_E2_PATCHES.md` lists each

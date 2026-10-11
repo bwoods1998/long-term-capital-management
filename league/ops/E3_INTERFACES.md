@@ -3,7 +3,8 @@
 Branch `feat/equity-e3` (worktree `~/Work/ltcm-v3/eqe3`), cut from `feat/equity-e2-int` at 5a6906ff: release E1 (the
 share lane) and release E2 (the swarm breeds share programs) merged, E2's patches applied. INTEGRATED since (section
 10): the five packages, `feat/equity-e2-int` at 5ad1f01e and every patch of section 5; where a section below speaks of
-the base as it stood at step 0, section 10 says what moved. This file is step 0's: every
+the base as it stood at step 0, section 10 says what moved. MERGED WITH MAIN since (section 12: releases E1, E2 and
+E2.2 at 87f9fd0c, the gateway's merge list, the verification's one fix). This file is step 0's: every
 package builds against it and changes it only through the integrator. The stubs it names exist on the branch now
 (bodies raise `NotImplementedError("<package>: <file> <name>")`; their docstrings say what each must do), so every
 package imports every other package's names from day one. `league/tests/test_e3_skeleton.py` holds the imports, the
@@ -525,3 +526,36 @@ are now A, B, C, D), all in `ONCE_KINDS`. **No table or column was added**; the 
 rows' `first_attempted_at` and `attempts`. **Names added:** `elane_memory.HIDDEN_LOG`, `HiddenRunRefused`,
 `hidden_runner`, `seen_hidden`; `forward_shadow.RETRY_RUNS`, `Shadow.late`, `Shadow.deadline`;
 `forward_stats.BLOCK_ROWS`; `forward_report.METER_MIN`, `METER_WAIT_NIGHTS`, `METER_UNREAD`, `OFF_KEYS`, `raised`.
+
+## 12. The merge with main, the gateway's list and the verification's fix (Oct 11, 2026)
+
+- **What this tree carries now.** The branch at 45ea8143 (sections 10 and 11) merged with main at 87f9fd0c, which
+  holds releases E1, E2 and E2.2 as deployed and E2's gateway follow-up (a11bd338). Every line of both sides is kept.
+  Three hunks were resolved by hand: `league/ci.py` and `league/tests/test_ci.py` (E2's five modules in `FORBIDDEN`'s
+  own list, as main has them) and the import line of `league/swarm/elane_births.py` (`elane_folds` and
+  `elane_review`); one pin followed (`test_e3_identities.TheWiringIsWhole.test_the_three_paths_behind_the_wall`).
+  E2.2 also changed `league/swarm/elane_train.py` and docs/operations.md, which this release patches (11.7, 11.10):
+  those merged without a conflict, and E2.2's own tests and this release's pass on the merged tree.
+- **The three ids** (section 10) are main's on the merged tree, read with the same functions on Python 3.11 and
+  3.14: release E2.2 moved none, and neither does anything below.
+- **The gateway's merge list (11.3, as shipped).** The three swarm modules are in `ci.FORBIDDEN`'s own list and in
+  `gateway/lib/protected.mjs` `MERGE_FORBIDDEN`, as E2's five are since a11bd338; `ci.PENDING_GATEWAY` is `()`.
+  That list is the ONE change under `gateway/` in this release (the hard rule above bound the five packages; this is
+  the release's gateway follow-up, made with it). `test_ci` holds the two lists to each other from the league's
+  side, `gateway/test/merge.test.mjs` from the gateway's, and `test_e3_identities` reads the gateway's file for the
+  three. The gateway deploys before the House.
+- **The verification's one finding (minor; `forward_report._awaited`, live-3's rule completed).** Section 11's live-3
+  awaited every active program without its row, so ONE program that never got a row again (a holder of a halted
+  symbol, the shadow's STATED LIMIT; a program that hangs every night) made every later day's meters
+  `METER_WAIT_NIGHTS` sessions late and `meter_partial` for good, and FW5, which reads no partial day, read nothing
+  from then on. As fixed: a program without its row for a day is awaited when its absence began that day (it has
+  its row, under any engine, for the session before, which it was owed too), whatever the cause; or when it has been
+  without one for fewer than `METER_WAIT_NIGHTS` owed sessions running and is neither suspect
+  (`forward_db.suspect`) nor behind in the queue (`forward_report._behind`: a `run_failed` or `run_behind` event
+  newer than every row of its own, as `Shadow._behind` reads it; a test holds the two to each other). A day is
+  marked partial, and left out of FW5, only for a row still awaited when its wait ends. A control without its row
+  is awaited by the same rule when its data failed (a `data_failed` event of its own for that night or a later
+  one); a control was never awaited before, and a late vendor bar left the day's control group short of it for
+  good. What a standing absentee still costs: the first one or two days of its absence wait their three nights and
+  are partial; FW2 goes on naming it. **Names added:** `forward_report._behind`. No table, column, event kind,
+  setting or receipt key changed.
