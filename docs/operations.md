@@ -22,8 +22,10 @@ shown is `league/xs/XS.md`; the lane in the swarm is `league/swarm/E4.md`; what 
 **As integrated (Oct 11, 2026; nothing deployed).** Eight packages are merged on `feat/equity-e4` over E1 and E2 with
 their review fixes, and every patch to E1's and E2's files is applied (the record: `league/xs/E4_INTERFACES.md`
 section 10). XS1's receipt is in the tree and pinned (`docs/benchmarks/equity_screen_xs_1.json`; policy.json
-`elane.screens.equity_xs` is `league.xs.screen.pin` of it, written whole, so a rebuilt receipt lands as one file and
-one block and no line of code). One test takes the lane from a birth to the Done meter on every package's real code
+`elane.screens.equity_xs` is `league.xs.screen.pin` of it, written whole, so a rebuilt receipt lands as one file,
+one block and its conformance vectors, and no line of code that judges; the captain's A23 has since landed one, at
+c_XS 1.38: **The screen XS1**, below). One test takes the lane from a birth to the Done meter on every package's
+real code
 (`league/tests/test_e4_e2e.py`: a synthetic panel, a fake receipt, a fake venue); `league/tests/test_e4_integration.py`
 holds what stands around it. **Three things are not in this tree, by design:** package J (the forward twin) and
 package B's probe strata are built on release E3, and the universe commit (R-E4b) waits for the House's own
@@ -35,7 +37,8 @@ STEP ONE is this tree with the lane's switch able to reach "train": the data job
 so that information accrues. It moves no identity a judge binds to and no money rule (the options execution
 fingerprint, the equity identity and the money digest are main's; only the xs identity moves, and no panel band
 exists under it). STEP TWO is what a look and a seat still need, each owed and each the owner's deploy: the probe's
-panel strata with the look permit, and the receipt at the captain's bar, for a look; the forward twin (package J),
+panel strata with the look permit, for a look (the receipt at the captain's bar, which a look also needs, is in
+this tree since A23 was landed); the forward twin (package J),
 the universe commit (R-E4b) and the money row of a panel sleeve for a seat. What the merge made true: a panel
 family is now born with a hidden year (E3's folds record in the committed policy); a scored panel version is NOT yet
 in E3's forward record (its registry takes ETF and stock programs; the panel's row and shadow are package J's);
@@ -164,9 +167,10 @@ planned again at each following close until the next called decision, in the Gym
   with six it could hold the one ops child from 12:30Z to 13:20Z, past the pre-open's 40 minutes).
 
 **The screen XS1** (`league/xs/screen.py`; its receipt `docs/benchmarks/equity_screen_xs_1.json`, the study
-XSCREEN-1's, copied verbatim and pinned by sha256 in policy.json `elane.screens.equity_xs`; CI holds the pin to the
-file). **Every threshold is read from the pinned receipt at runtime; none is written in code.** With no pinned
-receipt the screen refuses every program. The rule, per program:
+XSCREEN-1's receipt rebuilt at the captain's bar by the study's own builder (A23, below) and pinned by sha256 in
+policy.json `elane.screens.equity_xs`; CI holds the pin to the file). **Every threshold is read from the pinned
+receipt at runtime; none is written in code.** With no pinned receipt the screen refuses every program. The rule,
+per program:
 - **The pre-check**, on Validation (calendar 2025): 20 lots fully exited or 120 sessions with a lot held, AND the
   residual's sum above zero. A failed pre-check spends no look, and it spends the lineage's only try: there is no
   Validation-only retry.
@@ -187,9 +191,52 @@ receipt the screen refuses every program. The rule, per program:
   the program beats the index or makes money: market, sector, beta and momentum direction are not counted as edge.
   The receipt's sentence says so beside every live panel trade, with the study's measured false-positive figures and
   what the screen does not match (sub-industry, size, value).
-- **The receipt may be replaced.** XS1 was adopted at the bar the study registered; the captain may land a rebuilt
-  receipt at a higher bar. That is one file and its pin (a CI test holds the two together); no code changes, and the
-  conformance vectors run under their own bar, so none moves.
+- **The bar the House runs is c_XS 1.38 (the captain's A23, Oct 11), not the 1.30 the study registered.**
+  - **Why.** The study's mechanical rule adopted 1.30. The study also measured that every real-signal cell's rate is
+    understated by a finite-pool bias (up to 2.6 points at 1.30), and reported beside its decision the threshold its
+    own rule gives once that bias is added to those cells: 1.38 (the registered receipt's
+    `cost_of_rule.c_XS_with_finite_pool_bias`). A known bias left out of a bar is a loosened rule, so the House runs
+    the rule's own answer with the bias in. 1.38 is the study's figure; nothing was chosen in this tree.
+  - **What moved.** The receipt file: the study's receipt rebuilt at 1.38 by the study's own report and receipt
+    builder from its saved run (sha256 `f7ce98b1...`; the registered one, `98acbb83...`, stays the study's result
+    and the new file names it under `house_bar`, with how it was built). Every figure the receipt reads "at the
+    adopted threshold" is read at 1.38 from the simulations the study saved; none was estimated. Its rule, stratum,
+    margin, placebo bar, windows, lineage rule, flags, limits and note are the registered receipt's, word for word.
+    The pin: `receipt_sha256`, `c_XS` and the sentence. The conformance vectors: computed again at 1.38 by the
+    study's own vector builder (the smallest planted drift that passes, and the t between the screen's bar and the
+    own floor, are other worlds at another bar), the inputs file made again from them, and the two by-hand vectors
+    derived again (their own floors bind above either bar). The xs identity (0493e206... to 6c4cfa28...: two
+    docstrings of `league/xs`; no panel band exists under either).
+  - **What did not move.** No line that judges, sizes or trades. The options execution fingerprint, the equity
+    identity and the money digest are main's. A22's four rules, below, are unchanged.
+  - **The cost: about two points of power at +10% a year.** The two receipts' own rows, `power.<archetype>` at
+    `XH|N0-S|e10`, first figure (the full gate, own floors on, a planted net residual edge of +10% a year):
+
+    | archetype | at 1.30 | at 1.38 | lost, points |
+    |---|---|---|---|
+    | X1 | 44.33% | 41.91% | 2.42 |
+    | X2 | 46.41% | 44.57% | 1.84 |
+    | X3 | 49.83% | 47.35% | 2.48 |
+    | X4 | 69.98% | 68.40% | 1.58 |
+    | X5 | 28.08% | 26.12% | 1.96 |
+    | X6 | 33.86% | 33.47% | 0.39 |
+    | X7 | 52.87% | 50.28% | 2.59 |
+    | X8 | 67.58% | 65.56% | 2.02 |
+
+    Over the 48 rows of the three calibration sets the holdout-only power falls by 0.29 to 2.64 points (median
+    1.93) and the full gate's by 0.25 to 2.59; at +4% a year the full gate's falls by 0.10 to 1.94 (median 1.22),
+    from a level that was already low.
+  - **What it buys** (`fp_zero_edge_max`, `beside_calibrated_reading`): the largest zero-edge rate of any
+    calibration cell is 10.02% (11.15% at 1.30) and its largest 95% bound 13.11% (14.82%); over twenty more
+    bootstrap seeds the worst bound no longer reaches the owner's 15% wall (2 seeds of 20 at 1.30, none at 1.38).
+    It does not close what A22 holds: the largest style-known rate is still 30.0% (34.9%), and one zero-edge
+    mechanism given eight looks still passes at least one in up to 54.9% of worlds (63.1%).
+- **A receipt at another bar lands the same way, in one commit:** the file; its pin, by `league.xs.screen.pin`; the
+  vector file from the study's vector builder at the new bar, the inputs file made again from it and the two
+  by-hand vectors derived again; and the vector file's sha256 in `league/tests/test_e4_stubs.py`. CI holds the pin
+  to the file and the three vector files' bar to the pin's (`test_xs_screen.TheCommittedPin`). The vectors
+  themselves read no pin: each runs under the bar its own file states. A floor cached under the old bar is run
+  again (`screen.floor_fits`).
 
 **The three duties the pre-registration gives the House** (`league/swarm/elane_xs.py`):
 1. **Both Train series of every program that reaches the pre-check are kept**, passed or refused: the residual and the
@@ -201,7 +248,9 @@ receipt the screen refuses every program. The rule, per program:
    selection-led, its style label and its flags. The `dlane` report prints it under the label EQUITY (PANEL).
 
 **The captain's A22: what the House holds before any real money on an XS1 pass** (from the study's review; House
-rules, the receipt is pinned as built):
+rules: the first three are enforced in `league/swarm/elane_xs.py` `look` and held by `league/tests/test_elane_xs.py`
+`TheCaptainsA22`, the fourth is a fixture `league/tests/test_xs_screen.py` holds the floor to; A23, above, then
+moved the receipt's bar and changed none of them):
 1. **A STYLE-OPEN program takes no live seat on an XS1 pass alone.** The study measured that a no-skill tilt to a
    style that happened to win the holdout passes far above the owner's wall. So the House computes each panel
    program's loadings on size, beta, 12-1 momentum and volatility from its Train holdings (`league/xs/style.py`: a
@@ -514,8 +563,11 @@ sends no ETF band and no options band back to the Gym (neither identity moved).
 
 **Not handled, stated.** No panel program is shadowed forward until package J lands, so a style-open passer is
 recorded and not yet shadowed. **The House runs XS1 at the bar of the receipt in the tree** (every threshold is read
-from it at runtime): the captain's A23 sets that bar at 1.38, a rebuilt receipt he lands as one file and its pin
-before the lane's first look. A held lot's own `ret` (its raw close against its entry) still scatters against its
+from it at runtime): the captain's A23 set that bar at 1.38, and the rebuilt receipt is in the tree with its pin
+and its vectors. Two of the receipt's rows are not from saved simulations: the study had saved its two report-only
+arms (takeovers and collapses; no-skill style tilts) at its own bar only, so they were run again at 1.38 by the
+study's own command, after the same command at 1.30 gave the saved results again; they decide nothing. A held
+lot's own `ret` (its raw close against its entry) still scatters against its
 slot's return path by about a cent over the price (a weaker channel than the one `range` had; the review measured
 a rank correlation of 0.45 with one over the price on synthetic panels), and a name whose ADJUSTED price is under
 about two dollars (a later split of forty for one and more) is coarse in every field: the code review's "no search
