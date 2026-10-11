@@ -59,15 +59,18 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   the profit lock again, and the restart check passed it. A lot's own return, however it is written, a count of
   sessions held and a size from `ctx.budget` are untouched); and the MEMORY rule (no object of `numpy` or `math` held as memory: it would
   outlive a restart and be shared by every program in the decider child).
-- **What the static rule cannot see is the two paid readers' to refuse.** A lot's weight in the sleeve (its `value`
-  over `ctx.equity`) and the sleeve's cash share are allowed against a constant, because a weight cap is an honest
-  rule; set against the lot's own return, the same weight is the run's profit, and a program built on it locks its
-  profit, keeps no memory, and passes the static rule and the restart check. The same holds for a value the pass
-  cannot follow, and for the first equity a run saw kept in STATE (the restart check judges that one). The readers'
-  rubric names the pattern and ends on the rule: a rule whose trading depends on how far the run is ahead or behind is
-  refused, whatever its spelling (`league/swarm/ELANE_E2.md`, "What the static rule cannot see"). So a profit lock
-  the two readers both miss reaches the screen, whose false-positive line does not hold for it: read a bred program's
-  first live weeks with that in mind until E1's screen floor sees fresh starts.
+- **What the static rule cannot see is the START check's to refuse, and behind it the two paid readers'.** A lot's
+  weight in the sleeve (its `value` over `ctx.equity`) and the sleeve's cash share are allowed against a constant,
+  because a weight cap is an honest rule; set against the lot's own return, the same weight is the run's profit, and
+  a program built on it locks its profit, keeps no memory, and passes the static rule and the restart check. The same
+  holds for a value the pass cannot follow, and for the first equity a run saw kept in STATE (the restart check
+  judges that one). Since release E2.1 the bar runs every version that meets the rest of it again from later starts
+  (START, below) and refuses these. The readers' rubric still names the pattern and ends on the rule: a rule whose
+  trading depends on how far the run is ahead or behind is refused, whatever its spelling
+  (`league/swarm/ELANE_E2.md`, "What the static rule cannot see"). What START does not catch (a lock no Train run
+  reaches, a lock that changes whether the program trades and closes within days of every start, what its two
+  shares allow) reaches the screen only if both readers miss it too, and the screen's false-positive line does not hold for such a program:
+  read a bred program's first live weeks with that in mind until E1's screen floor sees fresh starts.
 - **Train is 2016-19 and 2022-24** (A15): seven years, two runs a stress, summed. **2020-21 is the reserve**: no E2
   run has a session in it and a result carrying a row of it is refused whole (alert `elane_train_window`). The
   loosening, stated: the bar reads seven years, not nine.
@@ -76,6 +79,27 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   each buy the same size, the same count of failed decides), because the decider child restarts on every deploy. A
   check that cannot run or finish is the House's failure, never a pass: the version is not scored, and its third such
   failure is an alert, sent once (`elane_train_state`).
+- Then **START, the start check** (release E2.1): a program's decisions must not depend on when its run started,
+  because the House starts every program live on a fresh date and every judged window starts flat. Each Train span is
+  run again from 61 and 127 decision sessions in (each run starting flat), and every later run must give the orders
+  of the run from the span's first session (each order's kind, symbol and fill point, each buy's size; tags apart)
+  on 99% of its compared sessions and on 95% of those on which either run asked an order, and never the same orders
+  in another size while the two runs hold the same lots (one such session fails it: that is a size taken from how
+  the run stands, the form every profit lock found so far takes). A later run is compared once it has warmed up
+  (the longer of the program's `history` and maximum hold, and 20 sessions more) and, before that, wherever the two
+  runs hold the same lots. A version that fails it fails the bar with the code **START**:
+  the program's fault, like STATE (no Validation try is spent, nothing is said of the mechanism, and a family whose
+  versions only failed START or STATE retires STALLED, never REFUTED). Its record (`start`) keeps the counts by later
+  run and the sessions that differed, counted from the later run's own first decision, never a day; the author's next
+  brief says which sessions differed, what the two runs asked where they first differed, and that a program must
+  decide from ctx alone, never from how its run stands. **What it costs:** a version that reaches it makes eight Train
+  runs instead of four and is decided once more on every session of six of them (measured on the build machine,
+  one to four symbols and any look-back: 1.4 to 2.8 seconds a version, about twice the restart check). **What stops it** is handled as for the restart
+  check: a child that fails or restarts mid-check, a later run that gives no result, or spans that fit no later
+  start are the House's, the version is not scored, and its third such failure is an alert, sent once
+  (`elane_train_start`). **After the deploy** a Train pass judged before this check that has not had its Validation
+  try is scored again on the next round (its `elane_train:` line says `rescored` "kept" or "withdrawn"), so no
+  program reaches Validation without it.
 - **Nothing after Train reaches a generator** (A9 D3): no Validation or look outcome, no band, no retirement after the
   look. The equity generators read Train facts only, and no options generator reads an equity graveyard row.
 
@@ -101,7 +125,8 @@ $0.0667 an hour at the floor), and E2 is paid from it, counted apart from the op
 Per family: at most 4 Train-scored versions and 7 write attempts. A question no route answered backs the family off
 (20 minutes, doubling to six hours); a Sail call that timed out after it was sent is booked at its hold and no other
 route is asked the same question. Train runs spend no model
-dollar (House CPU: up to about 72 short daily-bar runs an hour). After a Train pass the costs are E1's (Validation and
+dollar (House CPU: up to about 72 short daily-bar runs an hour, and four more for each version that reaches the start
+check, so 144 at most). After a Train pass the costs are E1's (Validation and
 the look on the House; real money only at Probe, inside the shared loss budget).
 
 **Read it** (read-only, on the box):
@@ -118,7 +143,7 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   route for the next question is chosen from births, dollars and Train passes ONLY, never from a later stage (a choice
   made on look outcomes would feed the holdout back into which model writes programs).
 - Alerts (House warnings through the swarm's status events, in the owner's `swarm_alerts` cause):
-  `elane_train_window`, `elane_train_state`, and `elane_train_house` (the equity Train is not running: a version's
+  `elane_train_window`, `elane_train_state`, `elane_train_start`, and `elane_train_house` (the equity Train is not running: a version's
   third failure of the House's since it was last judged, the decider child failing every run or no equity store; at
   most once every six hours).
 - **The owner's alarms and Done.** The stall causes (births, population, Gym runs, Validations) and pre-open check 6
@@ -152,7 +177,12 @@ equity lane, `elane_train:` lines while a family has a step to take, the heartbe
 **Not handled, stated.** E2's rounds start only while the Sail guard allows new research (THE GATE'S RESERVE and
 the brake hold them, as they hold every round that makes new research); the options Gym being down holds neither, since
 an equity Train run needs no Gym box. The restart check
-does not catch memory that changes fewer than 1% of sessions. The static rules do not follow a tuple or a dict stored
+does not catch memory that changes fewer than 1% of sessions. The start check does not catch a lock no Train run
+ever reaches, a lock that changes whether the program trades (never how much) and closes within days of every start,
+or what its two shares allow (other orders on 1% of a later run's sessions, 5% of its trades); and it refuses three
+honest shapes, each with the cure in the author's brief: a hold that simply ends at the House's maximum-hold exit and
+is bought again at once (its days are counted from the run's first session), a buy sized in dollars worked out from the
+sleeve's equity, cash or room (size by a constant share), and a weight cap that binds on more than 1% of sessions. The static rules do not follow a tuple or a dict stored
 whole, a container read in another function than it was filled in, or a level's digits (the two paid readers do), and the memory rule covers the programs the swarm breeds, not the seeds or
 the options Gym's programs (the root is E1's, for its next identity move). **The reserve's bars reach Train as look-back**: no
 2020-21 session is run or scored, but a 2022-24 run reads its NEEDS `history` + 1 sessions before 2022-01-03 (up to

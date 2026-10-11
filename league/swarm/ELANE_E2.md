@@ -101,8 +101,9 @@ Stopping, from the lightest:
 
    THE BAR equity-v1 (the design's 6b, on the Train years), on the summed runs at 1.0x and 1.5x the half-spread: at
    least 40 closed lots and 20 entry days in each of three or more of the seven Train years; no Train year's daily t
-   below -1.0; net P&L above zero at 1.5x; the 1.5x P&L at least half the 1.0x P&L (which must be above zero); and
-   STATE, the restart check below. Beside it, never a bar: the same-exposure buy-and-hold, MTE and the drift share.
+   below -1.0; net P&L above zero at 1.5x; the 1.5x P&L at least half the 1.0x P&L (which must be above zero); then
+   STATE, the restart check below; then START, the start check below (release E2.1). Beside it, never a bar: the
+   same-exposure buy-and-hold, MTE and the drift share.
 
    THE LOOSENING, stated (A15): the Train bar reads 7 years, not 9. The design's 6b read 2016-2024; without 2020-2021
    a year's t has two years fewer to fall below the floor in, the two P&L rules sum seven years instead of nine, and
@@ -149,22 +150,138 @@ Stopping, from the lightest:
      than 1% of the sessions (a clock kept in STATE of a hundred sessions or more that moves a few decisions a year),
      and whatever the run's record does not keep for the ctx (the intents the engine refused: `ctx.rejects` is empty
      for both instances).
+   - START, THE START CHECK (release E2.1; `start_check`, `later_runs`, `start_run`), run once STATE holds: A
+     PROGRAM'S DECISIONS MUST NOT DEPEND ON WHEN ITS RUN STARTED. Each Train span is run again from 61 and 127
+     decision sessions in, every run starting flat, and each later run must give the orders of the run from the span's
+     first session; else the version fails with code START (the program's fault, like STATE: it judges a program,
+     never the mechanism, so it refutes nothing, closes no cell and spends no Validation try).
+     THE HOLE IT CLOSES. A program can stop or shrink its trading once its own run is ahead (a profit lock). E1's
+     screen builds a program's floor from slices of long Train runs, which start flat once, while Validation and the
+     sealed look each start flat: a lock passes a positive-sum, t-above-a-floor screen far more often than the
+     screen's stated rate. The static rule refuses the spellings it can follow, the paid readers' rubric names the
+     pattern, and the verification showed spellings neither catches for certain ("What the static rule cannot see",
+     below). This check runs the program and looks. WHY IT IS THE RIGHT PROPERTY and not only a patch: the House
+     starts every program live on a fresh date, so a program whose decisions depend on its run's start cannot agree
+     with its own replay, which Done's consistency clause reads (A14).
+     THE RUNS. Per Train span: run A, the bar's own 1.0x run from the span's first session, and one later run a shift
+     (`BAR["start_shifts"]`, 61 and 127: two different primes, so a clock of any period above one is out of phase
+     with run A in at least one), each one more run of E1's isolated runner (`Isolated.train(start, end)`) that starts
+     FLAT on the session after run A's decision number `shift` and ends with the span. One instance a run is then
+     loaded through E1's decider kinds, never reset, and at every decision session each decides on ITS OWN run's ctx
+     (E1's ctx builder over that run's bars, lots, cash, equity and caps: `state_inputs`, the restart check's
+     stream). A later run is the check's own: kept in no record, stored as no run.
+     WHAT IS COMPARED. A later run's session is held to run A's same session (a) once the later run has WARMED UP,
+     its own first max(NEEDS `history`, NEEDS `max_hold_sessions`) + `start_warm` (20) decision sessions behind it:
+     run A may hold lots a fresh run does not, and they are gone inside the maximum hold; and (b) BEFORE that,
+     wherever the two runs show their program THE SAME BOOK (`same_book`: the same open lots, each by symbol, fill
+     point, sessions held, entry price and mark, and the same lots closed since the last call; never a lot's id,
+     quantity, value, pnl or tag). With the same bars, calendar and book, only the run's own standing can make two
+     decides differ. (b) IS THE BUILD'S ADDITION to the rule as first written, and why: the sessions right after a
+     fresh start are where a lock that closes quickly differs from the run that started earlier, and a program
+     chooses its own warm-up by declaring a long `history` (504 sessions of look-back it never reads gave a lock 524
+     sessions to close in; in the tests `LATCH` matches everywhere under (a) alone and fails with (b)).
+     WHAT MATCHES. The same list of orders in the same order: each order's kind, symbol and fill point, a buy's
+     `share` or `usd` within the restart check's `SIZE_TOL`; a sell names its lot's SYMBOL (two runs number their
+     lots apart); tags are ignored. A decide that failed in one run and not the other, and a session an instance was
+     disqualified at, match nothing.
+     THE RULE. A version passes START when EVERY later run (1) matches run A on at least `start_match` (99%) of its
+     compared sessions, (2) matches it on at least `start_active` (95%) of those on which either run asked an order,
+     and (3) on NO session (`start_sized` 0) shows the same book as run A and asks the same orders in another size.
+     (2) AND (3) ARE THE BUILD'S ADDITIONS, and why. (2): a program that trades once a week asks nothing on four
+     sessions in five, one that trades once a month on nineteen in twenty, so on all sessions alone a fifth of a
+     monthly program's trades could differ inside the 1% (in the tests `MONTHLY_LOCKED` has a later run that differs
+     on under 1% of its sessions and over 5% of its trades). (3): a lock that closes within a few trades of every
+     start differs from the earlier run on a handful of sessions, inside both shares (in the tests `LATCH` on a
+     market that pays every session: at most nine sessions of some nine hundred in each later run, and on Train it
+     trades its token size 97% of the time). But on each of those sessions the two runs see the same bars, the same
+     calendar and the same lots and ask the same orders: a size that differs there can only have been taken from how
+     the run stands, which is what a lock that shrinks its lots is, and no honest size does it (a size from the
+     bars, the calendar, the lots' own facts or a constant is the same in both runs). Each addition is one constant
+     in `BAR`: `start_early` False, `start_active` 0 and a large `start_sized` are the rule as first written. ON
+     INVENTED MARKETS (the build's trials on E1's synthetic stores: nine programs with a lock or a clock, eight
+     markets of each of two kinds, 144 runs of the check) the rule as first written passed 40 and the rule as built
+     1; of ten honest programs (the three seeds among them, 160 runs) the two rules passed as many of each: every
+     run of nine of them, and 9 of 16 of the tenth, the wait kept in STATE (below).
+     WHAT FITS. A shift is used in a span that leaves its later run at least `start_min` (120) warmed-up sessions; a
+     span too short goes without it and the record says so (`skipped`). On the Train spans (1,006 and 753 sessions)
+     the 61-session start fits every program the contract allows; the 127-session start does not fit 2022-24 for a
+     program with `history` above 486.
+     WHAT THE RECORD KEEPS (`start`), and what its author reads: the counts by later run, the first six sessions
+     that differed in each, counted from the later run's own first decision (never a day), what the two runs asked
+     where they first differed, and how many sessions differed in a buy's size alone. The next brief says so and
+     says what a program may decide from: ctx's bars, its calendar fields and each lot's own facts, never how its
+     run stands (`start_text`, `START_ADVICE`); the bar's text and the researcher's system prompt say the same
+     before a program is written. THE WORDS ARE A CLOSED VOCABULARY (`_order_text`), as a disqualification's are: an
+     order's kind, a symbol only when it is one of the program's own NEEDS, the two fill points, a size to two
+     significant digits. A program chooses its tags, its symbols' text and its sizes, and it reads the reserve's
+     bars as look-back, so nothing it writes freely reaches a record or a brief.
+     NEVER A SILENT PASS, exactly as the restart check (one reader, `_decided`): an instance the child reloaded or
+     lost, a decider that restarted, an answer without its counts, a later run that ended in no result, left its
+     span or does not share the span's sessions, and spans that fit no later start are the House's
+     (`StartCheckInterrupted`): the version is not scored, cannot pass, and its third such failure since it was last
+     judged is an alert, once (`elane_train_start`). A child that fails a later run or a decide is judged as a run's
+     failure is.
+     A PASS JUDGED BEFORE THE CHECK EXISTED (a verdict with no `start` record) is not current until its version has
+     had its Validation try: the next round Train-scores it again before E1 may validate it (kept with its start
+     check on record, or withdrawn with the code START).
+     WHAT IT COSTS, measured (the build machine, a 16-core desktop; E1's decider in a real child and in process
+     gave the same within a tenth of a second): a version that meets Y1-R1 and STATE is run four more times at 1.0x
+     (the bar's own runs are four) and decided once more on every session of each of its six 1.0x runs, 4,898
+     decides at the spans' real lengths. For programs of one to four symbols with a look-back of 2 to 504 sessions,
+     in a real child: 0.3 to 0.7 seconds for the four runs and 1.1 to 2.1 for the decides, 1.4 to 2.8 seconds a
+     version in all, about twice the restart check (0.8 to 1.6 seconds; the bar's own four runs take 0.5 to 0.9). A
+     version that fails Y1-R1 or STATE costs nothing more.
+     WHAT IT DOES NOT CATCH, stated: (1) a lock no Train run ever reaches (a threshold above anything the program
+     earned on Train never changed an order there); (2) a lock that changes WHETHER the program trades and never
+     how much (it skips sessions once ahead, at its full size when it does trade) and closes within days of every
+     start: while it is open the fresh run holds lots the earlier run does not, so before the warm-up ends the two
+     books differ and nothing is compared, and once warmed up both runs are locked (in the tests: `SKIPS`; a
+     program that stops trading altogether once ahead is a case of it, held back only by the bar's forty lots a
+     year); (3) what the two shares allow in general: a later run may differ in its ORDERS on 1% of its sessions and
+     5% of its trades; (4) what the run's record does not keep for the ctx (`ctx.rejects` is empty for every
+     instance: a program steered by the House's refusals is decided here without them). The two paid readers and
+     E1's screen remain behind it, and the root stays E1's: a screen floor built from fresh starts would not need
+     any of this.
+     WHAT IT REFUSES THAT IS HONEST, stated: (1) a hold that simply ends at the House's maximum-hold exit and is
+     bought again at once (always in the market in lots of N sessions): its trading days are counted from the run's
+     first session, a later run never falls in step, and live it would trade on other days than any replay; the cure
+     is to exit and re-enter on ctx's calendar or a market condition, and the brief says so (the architect's
+     request says it too, before a first program is written). A trend or signal program that the House's exit
+     interrupts falls in step again at its next flat stretch and passes (in the tests: `TREND`); A SLOW TREND THAT
+     NEVER BREAKS while a later run warms up is the first case all the same: on a steadily rising invented market,
+     holders with a look-back of 63 to 200 sessions that wait for the House's exit failed 18 of the build's 36
+     trials (on two other invented markets 2 of 96), and their twins that sell and buy again on the month's last
+     close failed none of 144. (2) A buy sized in dollars worked out from `ctx.equity`, `ctx.cash` or `ctx.caps`
+     (compounding the sleeve, "what is left", the House's room), or from the cash share or a lot's weight: the
+     static rule allows it and this check refuses it at the first session two runs hold the same lots, since such a
+     size differs between two runs; size by a constant `share` (the House sizes a share on the sleeve itself and
+     cuts it to the cash and the room). (3) A weight cap or a rule on the cash share that binds often: allowed by the static rule, and
+     run-dependent where it binds (a lot's weight is its asked share times its own return times capital over
+     equity); it passes while it flips fewer than 1% of a later run's sessions. (4) A count kept in STATE across
+     lots (a wait of N sessions after an exit): the restart check refuses it before this check sees it (a restart
+     empties the count: the tests' `WAIT` fails STATE on every invented market tried). Held to START alone it
+     passes when a later run falls in step inside its warm-up, differing for a session or two (in the tests, on
+     one invented market), and fails when it stays out of step for weeks (five of eighteen invented markets in the
+     build's trials): a fresh run has no wait behind it, and the two stay apart until both happen to be idle
+     together.
    - WHAT A VERDICT IS: only the program's own doing is judged: its runs finished (the bar), it was disqualified by its
-     own errors ("DQ"), the child refused to load it ("LOAD"), the child failed its run (or its restart check's
-     decides) `train_max_errors` times in a row while other programs' Train judgments completed ("RUN"), or its
-     intents changed when its STATE was emptied ("STATE"). WHAT ITS AUTHOR READS OF IT: a LOAD refusal's own text
+     own errors ("DQ"), the child refused to load it ("LOAD"), the child failed its run (or a check's runs or
+     decides) `train_max_errors` times in a row while other programs' Train judgments completed ("RUN"), its
+     intents changed when its STATE was emptied ("STATE"), or its orders changed with the day its run started
+     ("START"). WHAT ITS AUTHOR READS OF IT: a LOAD refusal's own text
      (the House's static refusal; a program that did not load read no market data); of a disqualification only
      counts, a line of its own file and a known exception class, never the exception's text (a program can put a bar
      of the reserve it reads as look-back there); of a RUN only the failure's class. A failure of the House's (no equity store yet, the store
-     being rewritten, a decider child that could not start, a restart check that could not run or finish, "no_data", a
-     result outside the Train years) scores nothing, spends no budget and asks no model: the family backs off
+     being rewritten, a decider child that could not start, a restart check or a start check that could not run or
+     finish, "no_data", a result outside the Train years) scores nothing, spends no budget and asks no model: the family backs off
      (doubling with every failure, at most six hours) and is tried again; a result outside the Train years is also an
      alert. A STANDING failure of the House's is an alert too (`elane_train_house`): a version's third failure of
      kind "run" (the child fails every program) or "store" (no equity store) since it was last judged, at most once
      every six hours for the lanes; the owner's `swarm_alerts` cause carries it. The House's failures are counted by kind (the A15 review): "in a row" for RUN means the child's failures
      of the version one after another, so a restart check the House interrupted, or a store being rewritten, in
      between starts the row again and never counts toward RUN (a standing pass being scored again is not withdrawn
-     on them either); the restart check's alert counts its own kind, whatever failed in between.
+     on them either); the restart check's alert and the start check's each count their own kind, whatever failed in
+     between.
    - THE RESEARCHER (`EquityResearcher`, minimal): each round gives a few families one step: re-score a stale pass,
      review a bar pass, score the newest version, or ask the family's birth route for its first program or a revision
      (the brief holds the card, the agenda prior, the bar and the family's own Train versions and review reasons only),
@@ -209,9 +326,10 @@ Stopping, from the lightest:
      to their run's start. Refused: `ctx.equity`, `ctx.cash`, `ctx.budget`, `ctx.caps` or a lot's `value`, `pnl` or
      `net` compared with, offset by, bucketed by or clipped at a constant or a PARAMS value, and the sleeve's dollars
      now held against `ctx.budget` or `ctx.caps` in any way (a constant over them and their log are the run's dollars
-     still: `1000.0 / ctx.equity`, `math.log(ctx.equity)`). Allowed: sizing proportional to them, a sign or zero
-     check, and the position's own state among the sleeve's dollars now (cash over equity, a lot's value over
-     equity). FOR THE CAPTAIN: the root is E1's (the floor's worlds never start flat while every judged window does);
+     still: `1000.0 / ctx.equity`, `math.log(ctx.equity)`). Allowed by this rule: sizing proportional to them, a sign
+     or zero check, and the position's own state among the sleeve's dollars now (cash over equity, a lot's value over
+     equity). (Since E2.1 the bar's START check refuses a SIZE taken from them all the same, where two runs differ
+     in nothing else: see START, above.) FOR THE CAPTAIN: the root is E1's (the floor's worlds never start flat while every judged window does);
      the static rule and the rubric below are the guard until the screen's floor sees fresh starts.
    - THE RUN'S CAPITAL FROM A LOT, in the same pass (the verification's seal-1 residual). The anchor need not come
      from ctx. The House sizes an entry as the asked share of the run's capital, so what a lot cost is that capital
@@ -242,14 +360,17 @@ Stopping, from the lightest:
      against the sleeve, is refused with the reason and must write the weight as `lot["value"] / ctx.equity`; and a
      program that keeps a price and dollars in one value (a helper returning both in a tuple) and reads the price
      back from it is refused where a price alone would pass.
-   - **What the static rule cannot see.** Said plainly, because the two paid readers are the only guard here:
+   - **What the static rule cannot see.** Said plainly. Until release E2.1 the two paid readers were the only guard
+     here; since E2.1 the Train bar's START check runs every version that meets the rest of the bar from later
+     starts and refuses the ones whose orders change with the run's standing (the programs named below fail it in
+     the tests: league/tests/test_elane_e2_start.py), and the readers stand behind it for what it does not catch:
      1. THE POSITION'S OWN STATE USED AS THE ANCHOR. A lot's weight in the sleeve (`lot["value"] / ctx.equity`), a
         lot's `pnl` over `ctx.equity` and the sleeve's cash share (`ctx.cash / ctx.equity`) are allowed against a
         constant: a weight cap is an honest rule. But a weight is the asked share times the lot's own return times
         budget over equity, so a weight set against the lot's own return, or read in the lot's entry session, is the
         run's profit. Nothing static tells that from the honest cap. A program built on it (in the tests:
         `WEIGHT_LOCK`) shrinks its entries once the run is ahead as the lock does, keeps no memory, and passes the
-        static rule AND the restart check.
+        static rule AND the restart check. THE START CHECK refuses it.
      2. WHAT THE PASS CANNOT FOLLOW: a function reached through an expression (`(lambda d: d["qty"])(lot)`), a tuple
         or a dict stored whole, a container read in another function, a lot's tag read back as a number, a call the
         pass does not know on a value that is not the run's dollars. Such a value is unknown and is never refused on
@@ -266,7 +387,8 @@ Stopping, from the lightest:
      spellings it does not list: a rule whose trading depends on how far the run is ahead or
      behind is refused, whatever its spelling. A reader's failure that cites it binds (a verbatim excerpt, the
      reference `run`, a counterexample). The root stays E1's: until the screen's floor sees fresh starts, a profit
-     lock the readers miss is judged by a screen whose false-positive line does not hold for it.
+     lock that both the start check and the readers miss (what the check does not catch is listed under START,
+     above) is judged by a screen whose false-positive line does not hold for it.
    - THE MEMORY RULE (static, free; seal-5): an object that belongs to `numpy` or `math` (`np.typecodes`) is shared
      by every program and run in the swarm's one decider child and survives the restart check's fresh load. A bred
      program calls a module's functions and reads its constants and types; any other object of a module read as a
@@ -331,7 +453,7 @@ Stopping, from the lightest:
 | file | what |
 |---|---|
 | `league/swarm/elane_births.py` | the switch, THE EQUITY QUOTA, the request's blocks, the equity pass and its admission |
-| `league/swarm/elane_train.py` | the Train years and the reserve, equity-v1 with its restart check (STATE), what a verdict is, the record, the identity, `may_validate`, the Train map and graveyard, the agenda, the equity researcher |
+| `league/swarm/elane_train.py` | the Train years and the reserve, equity-v1 with its restart check (STATE) and its start check (START, release E2.1), what a verdict is, the record, the identity, `may_validate`, the Train map and graveyard, the agenda, the equity researcher |
 | `league/swarm/elane_review.py` | the equity review: the level rule with run-start dependence, the memory rule, the paid review and audit's rubric and grounding, the record E1's look reads |
 | `league/swarm/elane_yield.py` | the route ledger, the operator's report, THE ROUTE CHOICE, one route a question, E2's hourly pace and day inside the Sail model line |
 | `league/swarm/elane_seal.py` | what of an equity family a generator may read; the graveyard filter |
@@ -339,6 +461,7 @@ Stopping, from the lightest:
 | `league/swarm/researcher.py` | equity rows out of the `graveyard` tool |
 | `league/tests/test_elane_e2_*.py`, `elane_e2_fakes.py` | births, Train (the seven years, the restart check), review, seal (D3 and the reserve), yield; E1's names faked as INTERFACES fixes them |
 | `league/tests/test_elane_e2_e1.py` | E2 on E1's own code with the patches (skipped on the skeleton): patch 5 in E1's `equity_round`, E1's `reviewed`, adoption, the lane-scoped graveyard, patches 9 and 10; A15 on E1's runner, ctx builder and decider (in process and a real child killed mid-check): the clocks of 5, 10 and 20 sessions, the decide that fails on an empty STATE, the in-place cache with and without dividends, and what of the reserve reaches Train (look-back) |
+| `league/tests/test_elane_e2_start.py` | release E2.1, the start check: the rule on invented streams (what is compared and what matches, the two shares, what stops it), the bar on the fakes (the record, the brief, START as the program's fault, the House's failures, a pass judged before the check, the cost in runs), and E1's runner, engine and decider over synthetic stores: what passes (a stateless overnight program, a trend holder bought again after its maximum hold, a stop on a lot's own return, a wait after an exit, the three seeds), the profit lock in seven spellings the static rule cannot see, the clocks, a size from the run's P&L, a real child killed mid-check |
 | `league/tests/test_elane_e2_switch.py` | the release as it ships on E1: the shipped switches and the settings' bounds, E1's real loop standing still while the lanes are off or the share is zero, one equity pass on the real router, the three identities unmoved, the generators' text naming the pinned screen and no threshold |
 
 ## Settings (`elane.e2`; every default in code, and policy.json carries the same block)
@@ -369,9 +492,14 @@ reading the options lanes with the equity lanes beside (14). E1 already scopes `
 so there is no patch 2. The isolated runner is shared by E1's tournament and E2's Train round; E1's decider serializes
 its calls under one lock.
 
+Release E2.1 (the start check) added no patch either and touches no file of E1's: it uses the same runner
+(`train(start, end)`), decider kinds and ctx builder, its instances live under keys of their own (`e2-start:`), and
+the three identities do not move. A version that reaches it makes eight Train runs instead of four.
+
 A15 added no patch: the Train spans and the restart check use what E1 already provides (the runner's
 `train(start, end)` and `decider`, the decider kinds, the ctx builder), and the restart check's instances live in the
 swarm's own decider child under keys of their own, dropped when it ends. Since A15 a version's Train run is four runs
-(two spans at two stresses), so E2's runs on the House are up to about 72 an hour. The A15 review's fixes added none
+(two spans at two stresses), so E2's runs on the House are up to about 72 an hour (since E2.1 a version that
+reaches the start check makes four more: 144 at most). The A15 review's fixes added none
 either: the restart check now also reads `stats.errors` from E1's decide answer, which E1's runner already gives
 beside `stats.calls` (an answer without it is the House's failure, never a pass).

@@ -46,6 +46,11 @@ provides: the isolated runner's `train(start, end)` and `decider`, the decider k
 hook that is missing fails safe: the restart check is then the House's failure (the version is not scored and cannot
 pass; the third such failure of a version raises the `elane_train_state` alert, once), never a pass.
 
+**Release E2.1 (the start check, START) needed no patch either.** It reads the same things and no more: the runner's
+`train(start, end)` for its later runs, the decider kinds and the decide answer's counts for its instances (keys
+`e2-start:`, dropped when it ends), and the ctx builder through the restart check's own stream. It edits no file of
+E1's, so the three identities do not move. A missing hook fails safe the same way (`elane_train_start`).
+
 ## Carried from E2's A15 review, for the captain (nothing here is a patch today)
 
 - **The reserve's bars reach Train as look-back.** E2 runs no session of 2020-2021 and keeps no row, figure or day of

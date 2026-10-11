@@ -73,7 +73,10 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    the sleeve's cash share (`ctx.cash / ctx.equity`) are allowed against a constant, and a weight is the asked share
    times the lot's own return times budget over equity: set against that return, or read in the lot's entry session,
    it is the run's profit, and nothing static tells it from an honest weight cap. A program built on it trades as
-   the lock does and passes this rule and the restart check. (b) What the pass cannot follow: a function reached
+   the lock does and passes this rule and the restart check. (Since release E2.1 the Train bar's START check,
+   league/swarm/elane_train.py `start_check`, runs every version that meets the rest of the bar again from later
+   starts and refuses one whose orders change with the run's standing, this one among them; what that check does
+   not catch is listed in ELANE_E2.md, and the paid review stands behind it.) (b) What the pass cannot follow: a function reached
    through an expression, a tuple or a dict stored whole, a container read in another function, a lot's tag read
    back as a number, a call the pass does not know on a value that is not the run's dollars; and the run's dollars
    plus, less, times or over such a value are unknown with it, never refused on a guess. (c) Memory in STATE:

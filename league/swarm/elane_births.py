@@ -239,6 +239,9 @@ price against its own moving average or recent high, the calendar fields), never
 sleeve's own dollars since the run began (ctx.equity, ctx.cash, ctx.budget, ctx.caps or a lot's value, pnl or qty against
 a constant, a PARAMS value, ctx.budget or what a lot cost: every judged run starts flat, live trading never restarts where
 a window does, and a rule whose trading depends on how far the run is ahead or behind is refused, whatever its spelling).
+The Train bar also RUNS every program again from later starts and fails one whose orders change with the day its run
+began (START, in the request): a program decides from ctx's bars, its calendar fields and each lot's own facts alone, and
+sizes a buy by a constant share of the sleeve.
 
 Reply with ONE JSON object: {"families": [{"slug": "short-kebab-name", "lane": "beta or equity", "agenda": "<one key of
 THE AGENDA>", "mechanism": "one or two sentences: why it should make money and who pays", "structure": "etf", "symbols":
@@ -286,7 +289,10 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
         "- THE CONTRACT IN BRIEF: decide(ctx) runs once a session after the close on daily bars (prices adjusted as of "
         "that day, never by a later event); an intent executes in the NEXT session, \"at\": \"open\" (default) or "
         "\"close\"; a lot is never sold in the session it was bought; the House exits a lot after its NEEDS "
-        "max_hold_sessions (at most 60); an ETF position is at most half the sleeve; fills pay the half-spread (1 bp "
+        "max_hold_sessions (at most 60), so a program that means to hold longer sells and buys again on ctx's calendar "
+        "(the month's last close, a weekday) and never by waiting for the House's exit, or its trading days are "
+        "counted from its run's first session and it fails START; an ETF position is at most half the sleeve; fills "
+        "pay the half-spread (1 bp "
         "the index ETFs, 3 bp the other ETFs, 5 bp TLT and GLD) and sells the SEC and FINRA fees. The whole contract is "
         "in your system prompt.",
         "- THE RATION: ONE Validation try and ONE sealed look a LINEAGE. A family continuing an idea (its parent, or a "
