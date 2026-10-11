@@ -1459,13 +1459,12 @@ diff --git a/league/ops/preopen.py b/league/ops/preopen.py
 - **The base (`24a52b11`) with this file's diffs and the gateway's static patch** (the R-E4a state): `test_ci`,
   `test_equity_money`, `test_constitution`, `test_live_long_single`, `test_gen_universe`, `test_ops_jobs`,
   `test_swarm_roster`, `test_e4_stubs`, `test_standing_grant`, `test_ld_release`, `test_equity_book`, `test_ops_stall`:
-  457 tests OK on 3.14 and on 3.11. `python3 -m league.ci --no-tests` passes. THE WHOLE LEAGUE SUITE on 3.14: 9048
-  tests OK, 29 skipped.
+  459 tests OK on 3.14 and on 3.11. `python3 -m league.ci --no-tests` passes. THE WHOLE LEAGUE SUITE on 3.14: 9048
+  tests OK, 29 skipped (two tests of `test_gen_universe` were added after that run and are in the 9050 below).
 - **The same tree with the UNIVERSE commit simulated** (the generator run on a stand-in list of 524 names, its
   gateway patch applied: exactly two files change, `league/constitution.py` and `gateway/lib/caps.mjs`): the same
-  modules, 457 tests OK on 3.14 and on 3.11; `--check` holds; `league.ci --no-tests` passes; THE WHOLE LEAGUE SUITE on
-  3.14: 9048 tests OK, 29 skipped (run before two last cosmetic changes, the place of one `setUp` and the comment's
-  wrap, whose bytes did not change; the modules above were run again after them).
+  modules, 459 tests OK on 3.14 and on 3.11; `--check` holds; `league.ci --no-tests` passes; THE WHOLE LEAGUE SUITE on
+  3.14: 9050 tests OK, 29 skipped.
 - **A grown universe WITHOUT this file's test changes:** the whole suite, 9040 tests, 8 failures:
   `test_ci.TheEquityLane.test_the_universe_changes_with_the_gateways_list`;
   `test_constitution...test_the_equity_lane_moved_the_money_digest_to_the_one_the_grant_re_ratifies`;
@@ -1475,7 +1474,8 @@ diff --git a/league/ops/preopen.py b/league/ops/preopen.py
 - **The gateway's suite** (`node --test test/*.test.mjs`, node 26): the base 455 of 455; with the static patch 457 of
   457; with the static patch and a generated list 457 of 457; a generated list without the static patch fails 5.
 - **At the integration head** (`feat/equity-e2-int` `a4514e83` + Step 0 + package I's branch + the diffs as given for
-  that head): the same modules, 461 tests OK on 3.14 and on 3.11, with E1's list and with a generated one;
-  `league.ci --no-tests` passes; the gateway's suite 457 of 457 with a generated list.
+  that head): the same modules, 463 tests OK on 3.14 and on 3.11, with E1's list and with a generated one;
+  `league.ci --no-tests` passes; the gateway's suite 457 of 457 with a generated list; THE WHOLE LEAGUE SUITE on 3.14
+  with the UNIVERSE commit simulated: 9189 tests OK, 29 skipped.
 - Every diff of this file was written to a plain file, applied with `git apply` to a clean copy of the base (and the
   head's to a clean copy of the head), and the result compared byte for byte with the tree the tests ran on.
