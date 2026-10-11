@@ -27,6 +27,7 @@ from league.ops import contam_probe, forward_db, registry
 from league.ops import schedule as S
 from league.swarm import elane_folds
 from league.swarm.evaluator import (EQUITY_EVIDENCE, EQUITY_GYM_FILES, equity_fingerprint, execution_fingerprint)
+from league.tests import REAL_POLICY_PATH
 from league.tests import test_equity_identity as A13
 
 REPO = Path(__file__).resolve().parents[2]
@@ -80,7 +81,8 @@ FGS_LITERAL_SHA = "c1eaf140a42c4a5968c60990c514c43fd92c182f6c315ddfb8841d366959e
 
 
 def policy_elane() -> dict:
-    return json.loads((REPO / "league" / "swarm" / "policy.json").read_text(encoding="utf-8"))["elane"]
+    """The committed policy.json's `elane` block (the House's; never the empty layer the tests load)."""
+    return json.loads(Path(REAL_POLICY_PATH).read_text(encoding="utf-8"))["elane"]
 
 
 def under(path: str, entries) -> bool:
@@ -284,10 +286,11 @@ class TheWiringIsWhole(unittest.TestCase):
         for name, block in E3_POLICY.items():
             self.assertEqual(elane[name], block, name)
             self.assertEqual(list(elane[name]), list(block), f"{name}: section 5's keys, in its order")
-        # As the House reads them: the forward record on, its values the policy's.
+        # As the House reads them (DEFAULTS under the committed policy; the test package itself reads an empty layer:
+        # league/tests/__init__.py): the forward record on, its values the policy's.
         from league.swarm import settings
 
-        loaded = settings.load(None, config={})
+        loaded = settings.load(config={}, policy=json.loads(Path(REAL_POLICY_PATH).read_text(encoding="utf-8")))
         self.assertEqual(loaded["_policy"]["state"], "ok")
         self.assertEqual(forward_db.cfg(loaded), E3_POLICY["forward"])
         self.assertEqual(forward_db.mode(loaded), "record")
