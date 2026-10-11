@@ -1002,16 +1002,16 @@ CONSTITUTION: dict[str, Any] = {
     #   `set_design 3 0.50` (A20's design: the money digest is 7e41909a again, exactly; the bounds may stay); the
     #   standing grant re-ratifies at the House's start; no fingerprint move, no evidence reset.
     # <equity-design>
-    #   THE DESIGN IN FORCE: 5 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
+    #   THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
     #   (`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.125 x E.
-    #   A lot in every seat asks for 0.625 x E of ETFs; the lane holds at most 0.625 x E of them, 0.125 x E of
+    #   A lot in every seat asks for 0.75 x E of ETFs; the lane holds at most 0.75 x E of them, 0.15 x E of
     #   open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 4 whole lots fit; the
-    #   next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 5 of
-    #   5 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-    #   5 of 5 in the $400 window alone; the window alone holds all 5 up to E = $3,200.
-    #   Whole sleeves (programs that hold several ETFs) ask for 1.25 x E; the lane holds at most 1.00 x E,
+    #   next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 6 of
+    #   6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
+    #   6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,666.
+    #   Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
     #   0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
-    #   the equity lots: $400 - 0.125 x E against the one-ETF lots above. The gateway's day line (4x
+    #   the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
     #   equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
     #   collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
     #   0.50 x E.
@@ -1077,7 +1077,7 @@ CONSTITUTION: dict[str, Any] = {
         "invested_share": "1.00",
         "cash_reserve_usd": "50",
         "open_risk_weight": {"etf": "0.20", "stock": "0.40"},
-        "probe": {"sleeve_share": "0.25", "max_programs": 5, "min_order_usd": "10"},
+        "probe": {"sleeve_share": "0.25", "max_programs": 6, "min_order_usd": "10"},
         "sized": {"min_trades": 1000, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
                   "beat_bh": True, "min_probe_sessions": 5},
         "demotion": {"rule": "edm1", "min_trades": 10, "z": "1.645", "program_loss_usd": "-300", "twin_gap_bp": "15",
@@ -1475,4 +1475,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '2195caac2c2447ee48c9ab1cfdcd11be4eef1ce078c044159018e7c440869cf3'
+PINNED_DIGEST = 'c3c061b0e320135486a53aedcd375eefb6b8773c9550eaf8f3244453305153b8'
