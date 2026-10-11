@@ -2003,8 +2003,8 @@ class ABrokenLaneHolds(Case):
         a = self.broken()
         # THIRTEEN HOURS ON the Sail guard holds E2 and the failures are older than the hours of events read.
         self.store.put(elane_yield.GUARD_KEY, {"braked": True, "reason": "an invented brake"})
-        later = NOW + 13 * HOUR
-        out, ctx = self.run_at(now=later)
+        later, told = NOW + 13 * HOUR, len(self.notify.calls)
+        out, _ = self.run_at(now=later)
         check = self.own(out)["elane_idle"]
         self.assertEqual({k: check["numbers"][k] for k in ("kind", "held_now", "idle_hours", "train_rounds", "house_failures",
                                                            "standing_since", "kept_standing")},
@@ -2021,7 +2021,8 @@ class ABrokenLaneHolds(Case):
         self.assertIn("elane_idle", out["stalled"])
         self.assertNotIn("elane_idle", out["cleared"])
         self.assertEqual(self.kept()["broken"], {"kind": "house", "at": NOW}, "since when it first stood")
-        self.assertEqual(self.notify.entry("elane_idle")["owner_step"], self.HOUSE, "the reminder goes on")
+        self.assertEqual((len(self.notify.calls), self.notify.causes()[0], self.notify.entry("elane_idle")["owner_step"]),
+                         (told + 1, "elane_idle", self.HOUSE), "the reminder goes on, twelve hours after the first mail")
         # The operator's report reads the same record, and writes nothing.
         before = (self.root / ST.STATE_FILE).read_text()
         self.beat(48, at=later, release=self.ONE)
