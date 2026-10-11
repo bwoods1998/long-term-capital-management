@@ -13,7 +13,8 @@ checkpoint (league/ops/E3_INTERFACES.md; the integrator's test, the one E3 test 
 `WithEveryModeOff`: the rollback switches (swarm.json `elane.forward.mode`, `elane.memory.mode`, `elane.contam.mode`
 "off"). Nothing of E3 runs or spends: every job is a skipped receipt that touches no gateway, no model route and no
 decider child and writes no store; a birth gets no hidden year and a scoring makes no hidden run and no memory row;
-the reports carry no forward alarm.
+the reports carry no forward alarm. What has no switch is said too: the release receipts (the stall job's read-back
+of what a deploy declared) still list, in their own store, and spend nothing; A14 is then unmeasured and does not hold.
 
 WHAT IS SYNTHETIC HERE (never a fake of an E3 module): the market (`league.equity.synth`, invented prices), the model
 routes (a scripted router: no test calls a model), the venue's minute bars (`Venue`, the gateway's bars route answered
@@ -888,6 +889,26 @@ class WithEveryModeOff(unittest.TestCase):
         self.assertEqual(swarm_rows(self.store), before)
         for name in (forward_db.DB, fill_minutes.DIR, "contamination.json", "forward-decider.log"):
             self.assertFalse((self.root / name).exists(), name)
+
+    def test_the_release_receipts_have_no_switch_and_only_list(self):
+        # The one part of E3 that runs whatever the modes say (the spec gives it no switch: it is the stall job's
+        # read-back of what a deploy declared). It reads the funnel and keeps its own small store; it spends nothing,
+        # contacts nobody and writes no row of the swarm store or the forward record. With the forward record off its
+        # two metrics stay at zero, and after their week the receipts read "flat": listed, never reverted.
+        repo = Path(forward_db.__file__).resolve().parents[2]
+        before = swarm_rows(self.store)
+        now = self.clock()
+        first = release_receipts.step(self.root, self.base, repo, now=now)
+        self.assertEqual((first["declared"], first["read"], first["unread"], first["errors"]),
+                         (["E3-forward", "E3-oof"], [], [], []))
+        week = max(d["window_hours"] for d in release_receipts.declarations(repo)) * 3600.0
+        later = release_receipts.step(self.root, self.base, repo, now=now + week + 3600.0)
+        self.assertEqual((later["declared"], later["errors"]), ([], []))
+        self.assertEqual(sorted((r["id"], r["verdict"]) for r in later["read"]),
+                         [("E3-forward", "flat"), ("E3-oof", "flat")])
+        self.assertEqual(swarm_rows(self.store), before)
+        self.assertTrue((self.root / release_receipts.DB).exists())
+        self.assertFalse((self.root / forward_db.DB).exists())
 
     def test_a_birth_gets_no_hidden_year_and_a_scoring_makes_no_hidden_run(self):
         settings = e3.settings("off")
