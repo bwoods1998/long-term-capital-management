@@ -748,7 +748,7 @@ class TheWiring(unittest.TestCase):
         self.assertEqual(len(fams), 4, self.store.get("elane_e2_last"))
         years = [f["spec"]["hidden_year"] for f in fams]
         self.assertLessEqual(set(years), {2019, 2022, 2023, 2024}, years)
-        self.assertEqual(len(set(years)), 4, "the cell's rotation goes on over the years it can run")
+        self.assertEqual(sorted(years), [2019, 2022, 2023, 2024], "the cell's four births spread over the four years it can run")
         self.assertEqual([p for p in self.events("swarm.status") if p.get("alert")], [])
         for fam in fams:
             held = elane_folds.bar_years(self.store.root, fam["spec"]["symbols"])

@@ -18,11 +18,13 @@ run "no_data" when one of the program's symbols has no bar in it, and E2 reads t
 version is never scored. A whole Train span always holds a bar of such a symbol (XLC's first is in 2018), but a
 stretch the cut leaves may hold none (2016-17 once 2018 is hidden), and the family could then never be scored. So a
 year is RUNNABLE for a family's symbols only when every seen span of it AND its own span hold a bar of every symbol,
-on the House's equity store (read one Train span at a time, never a reserve session), and `birth_fields` takes
-`WORK_YEARS[(k_c + h(cell) + j) % 7]` for the smallest j of 0..6 whose year is runnable: j is 0, the formula above
-exactly, for every symbol with a bar in each work year. A family with no runnable year gets no hidden year (seven
-Train years, no out-of-fold row). On a House with no equity store yet there is no listing to read and the formula
-stands alone; a store that is there and cannot be read raises, and the birth's guard stamps `FALLBACK` and says so.
+on the House's equity store (read one Train span at a time, never a reserve session), and `birth_fields` draws by
+the same formula over the runnable years alone: `R[(k_c + h(cell)) % len(R)]`, R the runnable work years in order.
+With all seven runnable (every symbol with a bar in each work year) that is the formula above exactly; with fewer,
+the cell's births still spread evenly over the years they can run. A family with no runnable year gets no hidden year
+(seven Train years, no out-of-fold row). On a House with no equity store yet there is no listing to read and the
+formula stands alone; a store that is there and cannot be read raises, and the birth's guard stamps `FALLBACK` and
+says so.
 
 THE SEEN SPANS (`seen_spans`). `seen_spans(None)` = `elane_train.TRAIN_SPANS`. `seen_spans(y)`: each Train span (first,
 last) that does not contain y as it is; the one that does, cut into the stretch before y, `(first, date(y - 1, 12,
@@ -93,28 +95,25 @@ def cell_hash(cell: Sequence[str]) -> int:
     return int(hashlib.sha256(("fold-1|" + "/".join(str(part) for part in cell)).encode()).hexdigest()[:8], 16)
 
 
-def rotation(store: Any, cell: Sequence[str]) -> tuple[int, ...]:
-    """The seven work years in the order the next family born in `cell` takes them: `WORK_YEARS[(k_c + cell_hash(cell)
-    + j) % 7]` for j = 0..6, k_c the equity families already born in that cell with a `hidden_year` in their spec
-    (alive or retired)."""
+def born(store: Any, cell: Sequence[str]) -> int:
+    """k_c: the equity families already born in `cell` with a `hidden_year` in their spec (alive or retired)."""
     from . import elane_seal, elane_train
 
     cell = tuple(str(part) for part in cell)
-    born = 0
+    count = 0
     for fam in elane_seal.equity_families(store):
         if hidden_year(fam) is None:
             continue
         facts = elane_seal.train_facts(fam, elane_train.STATE_KEY)
-        born += int(elane_train.cell_of(facts["lane"], facts["agenda"], facts["symbols"]) == cell)
-    start = born + cell_hash(cell)
-    return tuple(WORK_YEARS[(start + j) % len(WORK_YEARS)] for j in range(len(WORK_YEARS)))
+        count += int(elane_train.cell_of(facts["lane"], facts["agenda"], facts["symbols"]) == cell)
+    return count
 
 
 def assign(store: Any, cell: Sequence[str]) -> int:
     """The hidden year of the next family born in `cell`: `WORK_YEARS[(k_c + cell_hash(cell)) % 7]`, k_c the equity
-    families already born in that cell with a `hidden_year` in their spec (alive or retired). D14's formula alone:
-    `birth_fields` holds it to the years the family's symbols can run (THE LISTING RULE)."""
-    return rotation(store, cell)[0]
+    families already born in that cell with a `hidden_year` in their spec (`born`). D14's formula alone:
+    `birth_fields` draws by it over the years the family's symbols can run (THE LISTING RULE)."""
+    return WORK_YEARS[(born(store, cell) + cell_hash(cell)) % len(WORK_YEARS)]
 
 
 def bar_years(root: Any, symbols: Sequence[str]) -> dict[str, frozenset[int]] | None:
@@ -154,17 +153,19 @@ def runnable(hidden: int, held: Mapping[str, Collection[int]]) -> bool:
 def birth_fields(store: Any, settings: Mapping[str, Any] | None, *, lane: str, agenda: str, symbols: Sequence[str],
                  expected_oof: Any = None) -> dict[str, Any]:
     """What a birth's spec gains: {"hidden_year": int | None, "gid": "g0", "expected_oof": float | None}. The hidden
-    year is None when the mode is "off"; else the first year of `rotation(store, elane_train.cell_of(lane, agenda,
-    symbols))` the family's symbols can run (`runnable` on `bar_years(store.root, symbols)`: `assign`'s year whenever
-    every symbol has a bar in each work year, and on a House with no equity store yet), None when none can.
-    `expected_oof` is kept only when it is a finite number in [-1, 1] (no prompt asks for it in E3)."""
+    year is None when the mode is "off"; else `R[(k_c + cell_hash(cell)) % len(R)]`, cell = `elane_train.cell_of(lane,
+    agenda, symbols)` and R the work years the family's symbols can run (`runnable` on `bar_years(store.root,
+    symbols)`): `assign`'s year whenever every symbol has a bar in each work year, and on a House with no equity store
+    yet; None when no year can be run. `expected_oof` is kept only when it is a finite number in [-1, 1] (no prompt
+    asks for it in E3)."""
     from . import elane_train
 
     year = None
     if mode(settings) == "record":
+        cell = elane_train.cell_of(lane, agenda, symbols)
         held = bar_years(getattr(store, "root", None), symbols)
-        year = next((y for y in rotation(store, elane_train.cell_of(lane, agenda, symbols))
-                     if held is None or runnable(y, held)), None)
+        years = WORK_YEARS if held is None else tuple(y for y in WORK_YEARS if runnable(y, held))
+        year = years[(born(store, cell) + cell_hash(cell)) % len(years)] if years else None
     kept = None
     if isinstance(expected_oof, (int, float)) and not isinstance(expected_oof, bool) \
             and math.isfinite(expected_oof) and -1.0 <= float(expected_oof) <= 1.0:
@@ -217,5 +218,5 @@ def hidden_span(hidden: int) -> tuple[dt.date, dt.date]:
     return dt.date(hidden, 1, 1), dt.date(hidden, 12, 31)
 
 
-__all__ = ["WORK_YEARS", "RESERVE_YEARS", "GID0", "MODES", "FALLBACK", "BRIEF_NOTE", "mode", "cell_hash", "rotation",
+__all__ = ["WORK_YEARS", "RESERVE_YEARS", "GID0", "MODES", "FALLBACK", "BRIEF_NOTE", "mode", "cell_hash", "born",
            "assign", "bar_years", "runnable", "birth_fields", "hidden_year", "seen_spans", "hidden_span"]

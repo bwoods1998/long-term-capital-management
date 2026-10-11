@@ -317,32 +317,34 @@ class TheListingRule(unittest.TestCase):
                  for first, last in elane_train.TRAIN_SPANS]
         self.assertEqual(whole, ["ok", "ok"], "before E3 the family was scoreable: each whole span holds a bar")
 
-    def test_a_birth_takes_the_first_runnable_year_of_its_cells_rotation(self):
+    def test_a_birth_draws_by_the_formula_over_the_years_its_symbols_can_run(self):
         store = self.swarm()
         settings = e3.settings()
         cell = elane_train.cell_of("equity", "reversal", ("XLC",))
         self.assertEqual(cell, elane_train.cell_of("equity", "reversal", ("XLK",)), "one cell: the sector ETFs")
+        h = elane_folds.cell_hash(cell)
         taken = []
-        for i in range(14):
-            symbols = ("XLC",) if i % 2 == 0 else ("XLK",)
-            order = elane_folds.rotation(store, cell)
-            self.assertEqual(order[0], elane_folds.assign(store, cell))
-            self.assertEqual(sorted(order), sorted(elane_folds.WORK_YEARS))
+        for i in range(36):
+            symbols = ("XLC",) if i % 3 == 0 else ("XLK",)
+            self.assertEqual(elane_folds.born(store, cell), i, "k_c: every hidden-year family of the cell")
             fields = elane_folds.birth_fields(store, settings, lane="equity", agenda="reversal", symbols=symbols)
             if symbols == ("XLK",):
-                self.assertEqual(fields["hidden_year"], order[0], "a bar in every work year: D14's formula exactly")
+                self.assertEqual(fields["hidden_year"], elane_folds.assign(store, cell),
+                                 "a bar in every work year: D14's formula exactly")
+                self.assertEqual(fields["hidden_year"], elane_folds.WORK_YEARS[(i + h) % 7])
             else:
-                self.assertEqual(fields["hidden_year"], next(y for y in order if y in self.RUNNABLE))
-                self.assertIn(fields["hidden_year"], self.RUNNABLE)
+                self.assertEqual(fields["hidden_year"], self.RUNNABLE[(i + h) % len(self.RUNNABLE)])
             self.assertEqual((fields["gid"], fields["expected_oof"]), ("g0", None))
             e3.hidden_family(store, f"s-{i}", fields["hidden_year"], lane="equity", agenda="reversal", symbols=symbols,
                              mechanism=f"Invented sector idea {i}: holders are paid for an invented risk.")
             taken.append((symbols[0], fields["hidden_year"]))
-        self.assertEqual(sorted({y for s, y in taken if s == "XLK"}), sorted(elane_folds.WORK_YEARS), "the rotation goes on")
-        self.assertLessEqual({y for s, y in taken if s == "XLC"}, set(self.RUNNABLE))
+        self.assertEqual({y for s, y in taken if s == "XLK"}, set(elane_folds.WORK_YEARS))
+        late = [y for s, y in taken if s == "XLC"]
+        self.assertEqual(sorted(late.count(y) for y in self.RUNNABLE), [3, 3, 3, 3],
+                         "spread evenly over the years it can run: no year takes the births of the years it cannot")
         # Both symbols in one family: every symbol must have its bar in every stretch.
         both = elane_folds.birth_fields(store, settings, lane="equity", agenda="reversal", symbols=("XLK", "XLC"))
-        self.assertIn(both["hidden_year"], self.RUNNABLE)
+        self.assertEqual(both["hidden_year"], self.RUNNABLE[(36 + h) % len(self.RUNNABLE)])
 
     def test_no_runnable_year_is_no_hidden_year_and_an_unreadable_store_raises(self):
         from league.equity.store import MissingData
