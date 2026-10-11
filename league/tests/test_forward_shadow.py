@@ -992,6 +992,8 @@ class Finals(Case):
         other = register(self.db, "flip@1", FLIPPER, first_close=BEFORE)
         self.night(FWD[6])
         forward_db.tag(self.db, pid, "stopped", f"cap:{FWD[6].isoformat()}", at=self.t)
+        # The job again that same night: its last day is the store's last, whose morning audit has not run.
+        self.assertEqual(self.shadow(FWD[6], write=False).night()["finals"], 0)
         first = self.night(FWD[7])
         self.assertEqual((first["finals"], first["programs"]), (1, 1))        # a stopped program is not run
         self.assertEqual(self.night(FWD[8])["finals"], 0)
