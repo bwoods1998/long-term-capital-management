@@ -18,8 +18,9 @@ imported at a module's top). WITH `elane.panel.mode` "off" no patched statement 
 family exists, `elane_xs.is_panel` is False for every family, the quota's panel share is 0 and the PANEL block is "".
 
 WHAT PACKAGE G NEEDS OF THE OTHER PACKAGES' PATCHES: package E's patch 3 (`evaluator.adopt_xs`; `adopt_equity` skips
-structure "panel": WITHOUT IT `adopt_equity` would send a panel Candidate back to the Gym at every start, judging its
-proof against the equity identity) and package H's patch 12 (`kinds.kind_of`, the book's panel path).
+structure "panel": WITHOUT IT `adopt_equity`, at the first start after the EQUITY identity moves, would send a panel
+Candidate back to the Gym and clear its selection, judging its proof against the wrong identity) and package H's
+patch 12 (`kinds.kind_of`, the book's panel path).
 
 ## Patch 1: `league/swarm/store.py`
 
@@ -750,19 +751,23 @@ E2's researcher forwards a panel family; the record's readers read the panel's o
 
 ANCHORS: `record_of`; `pass_current` and `may_validate` (first statements); `_update` (its `set_state`); `train_map`
 and `refuted_rows` (their loops); `train_map_text` (its docstring, its `rows = train_map(store)` and its `return`);
-`EquityResearcher.step`, `brief`, `restart`, `score` and `review_step` (first statements).
+`EquityResearcher.queue` (its loop); `EquityResearcher.step`, `brief`, `restart`, `score` and `review_step` (first
+statements).
 WHAT: `record_key(fam)` (new): `elane_xs.STATE_KEY` for a panel family, else E2's own; `record_of` and `_update` read
 it, so the queue, the upkeep, the backoff and `close_retired` work on a panel family's record (it has E2's shape).
 `pass_current` and `may_validate` forward a panel family (`elane_xs.pass_current`: the xs identity and the costs'
 standing; `elane_xs.may_validate`: its pass, the review under the panel rubric, the mode "gate"). `step`, `score`,
 `brief`, `review_step` and `restart` forward a panel family to `elane_xs` (`step` asks `may_run` before any run; THE
-REVIEW of a panel program carries `elane_xs.REVIEW_XS`, the captain's A22 (3)). `train_map`, `closed_cells` (through
+REVIEW of a panel program carries `elane_xs.REVIEW_XS`, the captain's A22 (3)). `queue` asks `elane_xs.blocked(self)`
+ONCE a round, when it meets a panel family: while the panel lane is closed (the rollback) or no panel run may start
+(a wall is near, the day's panel CPU is spent) a panel family takes no place in the round, so it never slows the ETF
+families' research (E2's queue takes the least recently worked `train_per_round` families). `train_map`, `closed_cells` (through
 it) and `refuted_rows` skip a panel family; `train_map_text` is followed by `elane_xs.train_map_text` (the panel's
 cells, each with its ZERO-EDGE EXPECTED column).
-HELD BY: `test_elane_xs_bar.E2sResearcherForwardsAPanelFamily` (three tests).
+HELD BY: `test_elane_xs_bar.E2sResearcherForwardsAPanelFamily` (five tests).
 ```diff
 diff --git a/league/swarm/elane_train.py b/league/swarm/elane_train.py
-index bc76727b..390cb5a1 100644
+index bc76727b..86bc056e 100644
 --- a/league/swarm/elane_train.py
 +++ b/league/swarm/elane_train.py
 @@ -573,9 +573,17 @@ def bar_text() -> str:
@@ -871,7 +876,25 @@ index bc76727b..390cb5a1 100644
          facts = elane_seal.train_facts(fam, STATE_KEY)
          refuted = facts["record"].get("refuted")
          if facts["record"].get("status") != "refuted" or not isinstance(refuted, Mapping) or not judged(facts["record"]):
-@@ -1350,6 +1375,10 @@ class EquityResearcher:
+@@ -1273,10 +1298,17 @@ class EquityResearcher:
+     def queue(self) -> list[dict[str, Any]]:
+         """The living E2 families with a step to take (researching, or a pass to re-score under a new equity identity),
+         none waiting out a backoff, the least recently worked first, at most `train_per_round`."""
++        from . import elane_xs
++
+         rows = []
++        held: Any = False  # RELEASE E4: why no panel family may step now, asked once a round and only when one is met
+         for fam in elane_seal.equity_families(self.store, alive=True):
+             if not e2_family(fam):
+                 continue
++            if elane_xs.is_panel(fam):
++                held = elane_xs.blocked(self) if held is False else held
++                if held is not None:
++                    continue  # the panel lane is closed, or no panel run may start: it takes no place in the round
+             rec = record_of(fam)
+             status = rec.get("status", "researching")
+             if self.waiting(rec):
+@@ -1350,6 +1382,10 @@ class EquityResearcher:
      def step(self, fam: Mapping[str, Any]) -> dict[str, Any]:
          """One step of a family (the module docstring): re-score a stale pass; review a bar pass; score its newest
          unscored version; else, with budget left, ask for a program (its first, or a revision); else retire it."""
@@ -882,7 +905,7 @@ index bc76727b..390cb5a1 100644
          c = cfg(self.settings)
          fid = str(fam["id"])
          rec = record_of(fam)
-@@ -1375,8 +1404,10 @@ class EquityResearcher:
+@@ -1375,8 +1411,10 @@ class EquityResearcher:
      def brief(self, fam: Mapping[str, Any]) -> str:
          """The question's user turn: the family's card, its agenda prior, the bar and its own Train versions (Train
          facts and the review's reasons only: league/swarm/elane_seal.py)."""
@@ -894,7 +917,7 @@ index bc76727b..390cb5a1 100644
          c = cfg(self.settings)
          facts = elane_seal.train_facts(fam, STATE_KEY)
          rec = facts["record"]
-@@ -1478,6 +1509,12 @@ class EquityResearcher:
+@@ -1478,6 +1516,11 @@ class EquityResearcher:
      def restart(self, fid: str, code: str, params: Mapping[str, Any], runs: Sequence[Any]) -> dict[str, Any]:
          """THE RESTART CHECK of a version on its uninterrupted 1.0x Train runs (`restart_check` over `state_inputs`),
          through the isolated runner's decider (E1's `Isolated.decider`)."""
@@ -902,12 +925,11 @@ index bc76727b..390cb5a1 100644
 +
 +        if elane_xs.is_panel(self.store.family(fid)):
 +            # RELEASE E4: the panel's restart check, by CALL, through the panel kind and the panel's own decider.
-+            return elane_xs.state_check(elane_xs._decider_of(elane_xs._runner_of(self), self.root), code, params,
-+                                        name=fid, runs=runs)
++            return elane_xs.restart(self, code, params, name=fid, runs=runs)
          decider = getattr(self.runner(), "decider", None)
          if decider is None:
              raise StateCheckInterrupted("the isolated runner has no decider: the restart check cannot run")
-@@ -1534,6 +1571,10 @@ class EquityResearcher:
+@@ -1534,6 +1577,10 @@ class EquityResearcher:
          (the module docstring, WHAT A VERDICT IS); once Y1-R1 hold, THE RESTART CHECK on the 1.0x runs. A bar pass goes
          to the equity review (`review_step`); `rescore` (a pass judged under another equity identity): passed again it
          stands, else the pass is withdrawn."""
@@ -918,7 +940,7 @@ index bc76727b..390cb5a1 100644
          c = cfg(self.settings)
          fid, n = str(fam["id"]), int(version["n"])
          code, params = str(version.get("code") or ""), dict(version.get("params") or {})
-@@ -1641,8 +1682,13 @@ class EquityResearcher:
+@@ -1641,8 +1688,13 @@ class EquityResearcher:
          two different models. Both pass: the version is the family's pass (its lineage's one Validation try). A failure
          (or `review_max_unclear` unclear reads of one stage) is a Train failure of the version ("REVIEW"). A question no
          route answered counts nothing and is asked again next round."""
