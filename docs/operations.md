@@ -1104,13 +1104,17 @@ a session carry it to the next open. A buy is an open for the shared day counts 
 `MAX_DAY_ORDERS` 300, both books together). The gateway's caps (50% of equity an ETF, 20% a stock, the margin line,
 buying power, 4x equity of buys a day) are the backstop under the House's tighter rules, never the rule the House sizes
 to. `/v1/health` `stock_buys` shows the switch, the shares, the day's buys and the buys in flight.
-**Against the lot of 0.25 x E** (A20; the gateway reads the account's equity, and E is never above it): one order and
-one ETF's position are under the gateway's 50%; the lane at its invested cap (1.00 x E) is at the gateway's book line
-on a multiplier of 1 (1.00 x equity), which the House's $50 cash reserve keeps it under; and the gateway's day line
-counts every buy it admits, a cancelled one too, so it admits sixteen sends of such a lot a day (it admitted 32 of the
-lot of 0.125 x E). Three entries a day sent once each use under a fifth of it; three entries can each climb the
-collar's whole ladder of five sends, with one send to spare, and a sixth send of each would meet `stock_day` and end
-refused (`league/tests/test_ci.py` holds the figures to the release's own gateway files).
+**Against the one-ETF lot** (half a Probe sleeve; the gateway reads the account's equity, and E is never above it):
+one order and one ETF's position are under the gateway's 50% at any sleeve inside its bound; the lane at its invested
+cap (1.00 x E) is at the gateway's book line on a multiplier of 1 (1.00 x equity), which the House's $50 cash reserve
+keeps it under; and the gateway's day line counts every buy it admits, a cancelled one too, so it admits 4 over the
+lot's share of E sends of such a lot a day: sixteen of a lot of 0.25 x E (A20's), twenty-four of 0.165 x E,
+thirty-two of 0.125 x E. Every seat's entry sent once uses a quarter of the line at most, at any pair. An entry can
+climb the collar's whole ladder of five sends; how many entries can do that on the same day is that count over five
+(three, four, six), and a send past the line meets `stock_day` and ends its entry refused: missed, never chased, and
+nothing sold. **The seats and the sleeve** (in the equity lane's section) states both counts at the pair in force,
+and `league/tests/test_ci.py` holds the figures to the release's own gateway files (`DAY_LINE` by sleeve;
+`WHOLE_LADDERS` names the pairs whose every seat can climb the whole ladder on one day).
 
 ## Real stock and ETF buys at the gateway (Oct 10, 2026): deployed 21:18Z Oct 10 (gateway `3cc811b0`, #532)
 
