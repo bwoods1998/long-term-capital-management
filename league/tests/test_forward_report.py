@@ -463,6 +463,25 @@ class TheReplayMultiple(Fixture):
         self.assertTrue(2.2 * len(days) / 252.0 < got <= 3.0 * len(days) / 252.0, got)
         self.assertEqual(R.GATE_REASON, "forward-report")
 
+    def test_a_symbol_counts_only_in_the_years_it_has_a_bar_on_every_session(self):
+        from league.equity import store as ST
+        from league.equity import synth
+
+        symbols = ("SPY", "QQQ", "IWM")
+        span = dict(symbols=symbols, start=dt.date(2024, 1, 2), end=dt.date(2026, 10, 30), gate=True)
+        whole = synth.synthetic_store(self.base / "whole" / ST.STORE_DIR, **span)
+        synth.synthetic_store(self.root / ST.STORE_DIR, gaps={"IWM": [dt.date(2025, 3, 3)]}, **span)
+        files = {sym: np.load(whole / "bars" / f"{sym}.npz") for sym in symbols}
+        days = [ST.from_ordinal(int(o)) for o in files["SPY"]["days"] if ST.from_ordinal(int(o)) <= config.LOOK_CAP]
+        closes = np.vstack([files[sym]["all_c"][:len(days)] for sym in symbols])
+        by_year = {}
+        for year in (2024, 2025, 2026):
+            index = [i for i, d in enumerate(days) if d.year == year]
+            block = closes[:2 if year == 2025 else 3, max(index[0] - 1, 0):index[-1] + 1]   # IWM is out of 2025 alone
+            by_year[year] = block[:, 1:] / block[:, :-1] - 1.0
+        self.assertAlmostEqual(R.hist_independent_years(self.root, symbols), FS.independent_years(by_year), places=9)
+        self.assertLess(R.hist_independent_years(self.root, symbols), R.hist_independent_years(self.base / "whole", symbols))
+
     def test_a_store_that_cannot_be_read_gives_none_and_the_day_is_written_without_the_multiple(self):
         self.assertIsNone(R.hist_independent_years(self.root, ["SPY"]))
         self.series(self.register(), DAYS[:2], [0.0, 0.01])
@@ -609,8 +628,23 @@ class TheGroups(Fixture):
         self.assertEqual((control["n"], control["ugroups"]), (5, "index"))
         self.assertAlmostEqual(control["mean_x0"], 0.001 - 0.4 * 0.004, places=15)   # cost-free: r0 - w * b
         self.assertAlmostEqual(control["mean_x"], -0.001 - 0.4 * 0.004, places=15)
-        self.assertNotIn(f"control:{'sectors'}", rows)
-        self.assertIsNotNone(late_control)
+        self.assertNotIn("control:sectors", rows)
+        self.assertEqual(late_control, 19)
+
+    def test_the_cost_free_mean_is_the_controls_alone_and_whole_or_absent(self):
+        day = DAYS[0]
+        self.day(self.register(reason="train_pass"), day, 0.01, r0=0.02)        # a program's row carries no cost-free series
+        for n in range(3):
+            self.day(self.control("index", n), day, -0.001, w=0.5, b=0.002, r0=None if n == 2 else 0.001)
+        for n in range(2):
+            self.day(self.control("sectors", n), day, -0.001, w=0.5, b=0.002, r0=0.001)
+        self.night(day)
+        self.meters()
+        rows = {r["grp"]: r for r in self.table("fwd_groups")}
+        self.assertIsNone(rows["train_pass"]["mean_x0"])
+        self.assertEqual((rows["control:index"]["n"], rows["control:index"]["mean_x0"]), (3, None),
+                         "a control without its cost-free row: no mean is made of the rest")
+        self.assertEqual(rows["control:sectors"]["mean_x0"], 0.001 - 0.5 * 0.002)
 
     def test_a_group_with_no_counted_row_is_written_empty(self):
         self.register()
@@ -755,7 +789,20 @@ class TheSection(Fixture):
         with mock.patch.object(forward_db, "verify_chain", side_effect=RuntimeError("no chain")):
             out = self.section()
         self.assertEqual(out["registry"]["chain"], {"ok": None, "error": "RuntimeError"})
-        self.assertNotIn("FW4", [a["id"] for a in out["alarms"]], "unread is not broken")
+        # Unread is not broken: no warning says the chain does not hold; an info row says the alarm was not read.
+        self.assertEqual(out["alarms"], [{"id": "FW4", "level": "info", "new": True,
+                                          "text": "FW4 unread: this alarm could not be read (RuntimeError)"}])
+
+    def test_an_alarm_that_cannot_be_read_does_not_lose_the_others(self):
+        self.register(first_day=DAYS[0])
+        self.now = ny(DAYS[2], 12)
+        self.event("identity_moved", at=self.now - 60)
+        with mock.patch.object(R, "_nights", side_effect=sqlite3.OperationalError("database is locked")):
+            out = self.section()
+        self.assertEqual([(a["id"], a["level"]) for a in out["alarms"]],
+                         [("FW1", "warning"), ("FW2", "info"), ("FW3", "info"), ("FW8", "warning")])
+        self.assertTrue(all(R.text_ok(a["text"]) for a in out["alarms"]))
+        self.assertEqual(out["shadow"], {"error": "OperationalError"})
 
     def test_the_fills_and_twins_as_recorded(self):
         live = self.register("live-a@3", reason="live")
@@ -1019,9 +1066,11 @@ class EachForwardAlarm(Fixture):
         self.assertEqual(self.ids(), [])
 
     def test_fw2_programs_left_stale_two_nights_running(self):
+        self.night(DAYS[9], stale=0)
         self.night(DAYS[10], stale=4)
+        self.assertNotIn("FW2", self.ids(), "one night: the backlog is under a day old")
         self.night(DAYS[11], stale=0)
-        self.assertNotIn("FW2", self.ids())
+        self.assertNotIn("FW2", self.ids(), "the night after caught up")
         self.night(DAYS[11], stale=6)                              # the night's later run (a restart) is the night's
         (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW2"]
         self.assertIn(f"({DAYS[10]}: 4, {DAYS[11]}: 6)", alarm["text"])

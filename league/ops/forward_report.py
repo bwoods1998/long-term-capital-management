@@ -60,7 +60,8 @@ THE FUNNEL (`funnel_rows`, read by league/ops/funnel.py `window` as `forward_rec
 THE ALARMS (`alarms`; `ALARMS`: id -> level). Each row is {"id", "level": "info" | "warning", "text", "new"}; the
 dlane report carries them and each warning is also a `ctx.alert` of the job that finds it. EVERY TEXT HOLDS IDS, COUNTS
 AND DATES ONLY: no decimal figure, no "bp", no "%", no return, no dollar figure (`text_ok`). With
-`elane.forward.mode` off none of FW1-FW8 is raised.
+`elane.forward.mode` off none of FW1-FW8 is raised. Each alarm is read on its own: one that cannot be read (a store
+locked that minute) is an info row under its id that says so, never silence and never the loss of the others.
 - FW1 (warning): the mode is "record" AND (no `fwd_days` row by 09:00 ET the next session for the last closed forward
   day on which at least one active registry row had `first_day` <= that day, OR the report is stale): a stalled job.
   Silent on an empty registry, on the sessions before a first registration's `first_day`, and while the mode is off.
@@ -854,50 +855,76 @@ def _owed(db: sqlite3.Connection, now: float) -> tuple[str, str, int] | None:
     return None
 
 
-def _forward_alarms(db: sqlite3.Connection, root: Path, now: float, since: float) -> list[dict[str, Any]]:
-    """FW1-FW6 and FW8 from the forward store (FW1's stale-report half is `alarms`': the reader's)."""
-    out: list[dict[str, Any]] = []
+def _stalled(db: sqlite3.Connection, now: float) -> list[dict[str, Any]]:
+    """FW1's first half (the stale report is `alarms`': the reader's)."""
     owed = _owed(db, now)
-    if owed is not None and not _one(db, "SELECT count(*) FROM fwd_days WHERE day=?", (owed[0],)):
-        out.append(_row("FW1", f"no forward row for {owed[0]} by 09:00 New York on {owed[1]} though {owed[2]} registered "
-                               "rows were owed one: the forward shadow did not complete (its receipt and "
-                               "forward-decider.log say why)"))
+    if owed is None or _one(db, "SELECT count(*) FROM fwd_days WHERE day=?", (owed[0],)):
+        return []
+    return [_row("FW1", f"no forward row for {owed[0]} by 09:00 New York on {owed[1]} though {owed[2]} registered rows "
+                        "were owed one: the forward shadow did not complete (its receipt and forward-decider.log say "
+                        "why)")]
+
+
+def _backlog(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    """FW2: the last two nights."""
     nights = _nights(db)
-    if len(nights) == 2:
-        new, old = nights
-        if int(new["stale"] or 0) > 0 and int(old["stale"] or 0) > 0:
-            out.append(_row("FW2", f"programs were left stale two nights running ({old['through']}: {int(old['stale'])}, "
-                                   f"{new['through']}: {int(new['stale'])}): the night's budget does not cover the "
-                                   "registry", "stale"))
-        failed = {(kind, night["through"]): set(guard.ids(
-            db, "SELECT DISTINCT pid FROM fwd_events WHERE kind=? AND day=? AND pid IS NOT NULL", (kind, night["through"])))
-            for kind in ("data_failed", "run_failed") for night in nights}
-        earlier = failed[("data_failed", old["through"])] | failed[("run_failed", old["through"])]
-        data, alone = failed[("data_failed", new["through"])] & earlier, failed[("run_failed", new["through"])] & earlier
-        if data or alone:
-            out.append(_row("FW2", f"{len(data | alone)} programs failed on both {old['through']} and {new['through']} "
-                                   f"({len(data)} without data, {len(alone)} whose run failed alone)", "failed"))
-    if nights:
-        restated = _rows(db, "SELECT count(*) AS n, count(DISTINCT pid) AS pids FROM fwd_events WHERE kind='restated' AND "
-                             "at>=?", (float(nights[0]["started"]),))[0]
-        if int(restated["n"] or 0) > 0:
-            out.append(_row("FW3", f"{int(restated['n'])} stored days of {int(restated['pids'])} programs were restated on "
-                                   f"the night of {nights[0]['through']}: a recompute that is not deterministic, or a "
-                                   "vendor correction"))
-    try:
-        chain = forward_db.verify_chain(db)
-    except Exception:  # noqa: BLE001 - unread: the report's registry part names it; no alarm says "broken" unread
-        chain = None
-    if isinstance(chain, Mapping) and chain.get("ok") is not True:
-        out.append(_row("FW4", f"the registry's hash chain does not hold from pid {chain.get('first_bad')} "
-                               f"({chain.get('rows')} rows): stop the forward jobs and compare with the backup"))
+    if len(nights) < 2:
+        return []
+    out = []
+    new, old = nights
+    if int(new["stale"] or 0) > 0 and int(old["stale"] or 0) > 0:
+        out.append(_row("FW2", f"programs were left stale two nights running ({old['through']}: {int(old['stale'])}, "
+                               f"{new['through']}: {int(new['stale'])}): the night's budget does not cover the registry",
+                        "stale"))
+    failed = {(kind, night["through"]): set(guard.ids(
+        db, "SELECT DISTINCT pid FROM fwd_events WHERE kind=? AND day=? AND pid IS NOT NULL", (kind, night["through"])))
+        for kind in ("data_failed", "run_failed") for night in nights}
+    earlier = failed[("data_failed", old["through"])] | failed[("run_failed", old["through"])]
+    data, alone = failed[("data_failed", new["through"])] & earlier, failed[("run_failed", new["through"])] & earlier
+    if data or alone:
+        out.append(_row("FW2", f"{len(data | alone)} programs failed on both {old['through']} and {new['through']} "
+                               f"({len(data)} without data, {len(alone)} whose run failed alone)", "failed"))
+    return out
+
+
+def _restated(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    """FW3: `restated` events written since the last night began."""
+    nights = _nights(db)
+    if not nights:
+        return []
+    found = _rows(db, "SELECT count(*) AS n, count(DISTINCT pid) AS pids FROM fwd_events WHERE kind='restated' AND at>=?",
+                  (float(nights[0]["started"]),))[0]
+    if not int(found["n"] or 0):
+        return []
+    return [_row("FW3", f"{int(found['n'])} stored days of {int(found['pids'])} programs were restated on the night of "
+                        f"{nights[0]['through']}: a recompute that is not deterministic, or a vendor correction")]
+
+
+def _chain(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    """FW4."""
+    chain = forward_db.verify_chain(db)
+    if chain.get("ok") is True:
+        return []
+    return [_row("FW4", f"the registry's hash chain does not hold from pid {chain.get('first_bad')} ({chain.get('rows')} "
+                        "rows): stop the forward jobs and compare with the backup")]
+
+
+def _converging(db: sqlite3.Connection, root: Path, now: float) -> list[dict[str, Any]]:
+    """FW5."""
     run, first = _under_median(db)
-    if run >= FW5_DAYS and first is not None:
-        births = _equity_births(root, _close_at(first) or now - FW5_DAYS * 86400.0, now)
-        if births:
-            out.append(_row("FW5", f"the day's clean-evidence increment has been under its {MEDIAN_DAYS}-day median for "
-                                   f"{run} forward days running (since {first}) while {births} equity births went on: "
-                                   "the generators may be converging"))
+    if run < FW5_DAYS or first is None:
+        return []
+    births = _equity_births(root, _close_at(first) or now - FW5_DAYS * 86400.0, now)
+    if not births:
+        return []
+    return [_row("FW5", f"the day's clean-evidence increment has been under its {MEDIAN_DAYS}-day median for {run} "
+                        f"forward days running (since {first}) while {births} equity births went on: the generators may "
+                        "be converging")]
+
+
+def _twins_early(db: sqlite3.Connection, root: Path) -> list[dict[str, Any]]:
+    """FW6: a living instance's twins before any checkpoint reads them."""
+    out = []
     retired = _retired_instances(root)
     for row in _instances(_rows(db, "SELECT instance, pid, twin_gap_bp FROM fwd_lotgap"),
                           _rows(db, "SELECT instance, pid, agree FROM fwd_twins")):
@@ -910,10 +937,27 @@ def _forward_alarms(db: sqlite3.Connection, root: Path, now: float, since: float
         if row["sessions"] >= FW6_SESSIONS and row["agreed"] < forward_db.A14_AGREE * row["sessions"]:
             out.append(_row("FW6", f"{row['agreed']} of {row['sessions']} sessions agree with its twin, under the A14 "
                                    "bound", f"instance {row['instance']} intents"))
+    return out
+
+
+def _identity(db: sqlite3.Connection, since: float) -> list[dict[str, Any]]:
+    """FW8."""
     moved = int(_one(db, "SELECT count(*) FROM fwd_events WHERE kind='identity_moved' AND at>=?", (since,)) or 0)
-    if moved:
-        out.append(_row("FW8", f"the equity fingerprint moved while a lineage is live ({moved} identity_moved events "
-                               f"since {S.iso(since)[:10]}): its forward series restarts under a new engine label"))
+    if not moved:
+        return []
+    return [_row("FW8", f"the equity fingerprint moved while a lineage is live ({moved} identity_moved events since "
+                        f"{S.iso(since)[:10]}): the forward series go on under a new engine label")]
+
+
+def _each(checks: Sequence[tuple[str, Callable[[], list[dict[str, Any]]]]]) -> list[dict[str, Any]]:
+    """Every alarm read on its own: one that cannot be read is an info row that says so (never silence, and never
+    the loss of the others)."""
+    out: list[dict[str, Any]] = []
+    for alarm, read in checks:
+        try:
+            out += read()
+        except Exception as exc:  # noqa: BLE001
+            out.append({**_row(alarm, f"this alarm could not be read ({type(exc).__name__})", "unread"), "level": "info"})
     return out
 
 
@@ -1055,22 +1099,19 @@ def section(root: str | Path, *, now: float, settings: Mapping[str, Any] | None)
                 out[key] = _part(read)
             out["through"] = (out["shadow"] or {}).get("through")
             if mode != "off":
-                try:
-                    alarms += _forward_alarms(db, root, now, since)
-                except Exception:  # noqa: BLE001 - the report is written without the alarms it could not read
-                    pass
+                alarms += _each((("FW1", lambda: _stalled(db, now)), ("FW2", lambda: _backlog(db)),
+                                 ("FW3", lambda: _restated(db)), ("FW4", lambda: _chain(db)),
+                                 ("FW5", lambda: _converging(db, root, now)), ("FW6", lambda: _twins_early(db, root)),
+                                 ("FW8", lambda: _identity(db, since))))
         finally:
             db.close()
     out["memory"] = _part(lambda: _memory(root))
     out["contamination"] = _part(lambda: _contamination(root))
     out["receipts"] = _part(lambda: _receipts(root, now))
-    for read in ((lambda: _decide_alarm(root)) if mode != "off" else (lambda: []),
-                 lambda: _receipt_alarms(out["receipts"], now), lambda: _probe_alarms(root, out["contamination"], now),
-                 lambda: _memory_alarm(root, since)):
-        try:
-            alarms += read()
-        except Exception:  # noqa: BLE001
-            pass
+    alarms += _each(((("FW7", lambda: _decide_alarm(root)),) if mode != "off" else ())
+                    + (("RR1", lambda: _receipt_alarms(out["receipts"], now)),
+                       ("CP1", lambda: _probe_alarms(root, out["contamination"], now)),
+                       ("MM1", lambda: _memory_alarm(root, since))))
     known = {_head(a.get("text")) for a in (previous.get("alarms") or ()) if isinstance(a, Mapping)} \
         if isinstance(previous, Mapping) and isinstance(previous.get("alarms"), list) else set()
     out["alarms"] = [{**a, "new": _head(a["text"]) not in known} for a in alarms]
