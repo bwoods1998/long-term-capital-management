@@ -853,7 +853,10 @@ class BirthQuota:
         from .store import iso, loads
 
         for row in store._all("SELECT payload FROM events WHERE kind='swarm.born' AND at>=?", (iso(now - self.window_hours * 3600.0),)):
-            b = bucket_of((loads(row["payload"], {}) or {}).get("structure"))
+            payload = loads(row["payload"], {}) or {}
+            if isinstance(payload, Mapping) and payload.get("lane") in ("beta", "equity"):
+                continue  # THE EQUITY LANES (release E2): their own quota (league/swarm/elane_births.py `EquityQuota`)
+            b = bucket_of(payload.get("structure") if isinstance(payload, Mapping) else None)
             self.window[b] = self.window.get(b, 0) + 1
         self.passed: dict[str, int] = {}
         self.refused: dict[str, int] = {}
