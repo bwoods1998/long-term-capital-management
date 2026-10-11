@@ -256,7 +256,8 @@ def summarize(samples: Mapping[Any, Any]) -> dict[str, Any]:
         quoted = dropped + sum(r["kept"] for r in rows)
         return round(dropped / quoted, 4) if quoted else None
 
-    dropped = {exchange: {point: share([tally[point]]) for point in POINTS} for exchange, tally in sorted(counts.items())}
+    dropped = {exchange: {point: share([tally[point]]) for point in POINTS}
+               for exchange, tally in sorted(counts.items())}
     dropped_all = {point: share([tally[point] for tally in counts.values()]) for point in POINTS}
     warnings = []
     for point in POINTS:
@@ -370,8 +371,8 @@ def early_report(state: Mapping[str, Any]) -> dict[str, Any]:
             if a is not None and b is not None:
                 before.append(a)
                 at.append(b)
-    return {"names": len(state.get("early_names") or []), "pairs": len(at), "early_et": EARLY_ET, "open_et": TIMES_ET[0],
-            "median_early_bp": round(statistics.median(before), 4) if before else None,
+    return {"names": len(state.get("early_names") or []), "pairs": len(at), "early_et": EARLY_ET,
+            "open_et": TIMES_ET[0], "median_early_bp": round(statistics.median(before), 4) if before else None,
             "median_open_bp": round(statistics.median(at), 4) if at else None}
 
 
@@ -395,7 +396,9 @@ def _state(root: Path) -> dict[str, Any]:
     return {**_blank(), **held}
 
 
-def _save(root: Path, state: dict[str, Any], exchange: Mapping[str, str], *, now: float, remaining: int) -> dict[str, Any]:
+def _save(root: Path, state: dict[str, Any], exchange: Mapping[str, str], *, now: float,
+          remaining: int) -> dict[str, Any]:
+    """Rewrite the file from the state: its table summarized again, what is still owed, the instants' report."""
     from . import schedule as S
     from .context import write_json
 

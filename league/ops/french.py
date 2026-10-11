@@ -264,7 +264,8 @@ def run(ctx: Any) -> dict[str, Any]:
             if close is not None:
                 close()
         files[stem] = {"route": route, "days": len(parsed["days"]), "first": parsed["days"][0],
-                       "last": parsed["days"][-1], "dropped": parsed["dropped"], "sealed": len(parsed["sealed"]["days"])}
+                       "last": parsed["days"][-1], "dropped": parsed["dropped"],
+                       "sealed": len(parsed["sealed"]["days"])}
         del parsed  # the sealed lines are counted above and held no longer
         if route == "inbox":
             try:

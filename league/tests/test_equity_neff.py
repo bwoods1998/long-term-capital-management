@@ -47,7 +47,8 @@ def reference(x: np.ndarray) -> dict[str, float]:
     n = r.shape[0]
     rho = (r.sum() - np.trace(r)) / (n * (n - 1))
     eig = np.linalg.eigvalsh(r)
-    return {"rho": float(rho), "neff_rho": float(n / (1 + (n - 1) * rho)), "neff_pr": float(eig.sum() ** 2 / (eig ** 2).sum())}
+    return {"rho": float(rho), "neff_rho": float(n / (1 + (n - 1) * rho)),
+            "neff_pr": float(eig.sum() ** 2 / (eig ** 2).sum())}
 
 
 class TheFormula(unittest.TestCase):
@@ -227,7 +228,8 @@ class TheFormations(unittest.TestCase):
                 EN.formations(days, first)
 
 
-def synthetic_bars(*, names: int = 36, sectors: int = 4, seed: int = 61, load: float = 0.03, gaps=None) -> SimpleNamespace:
+def synthetic_bars(*, names: int = 36, sectors: int = 4, seed: int = 61, load: float = 0.03,
+                   gaps=None) -> SimpleNamespace:
     """A `league.xs.store.PanelBars` of invented prices on the true sessions of 2021-24 (the look-back year, then
     Train segment 2): `names` member columns after the REF columns, each moved by its sector's invented factor and
     its own noise. `gaps`: {column: session index} whose bar is a zero-volume bar (no valid bar that day)."""
@@ -517,7 +519,8 @@ class TheFunnelsRows(unittest.TestCase):
             db.commit()
             db.close()
 
-    def run_(self, fid: str, days, *, window: str = "train", status: str = "ok", trials: int = 1, at: float | None = None):
+    def run_(self, fid: str, days, *, window: str = "train", status: str = "ok", trials: int = 1,
+             at: float | None = None):
         self.runs += 1
         self.at = NOW - 3600.0 if at is None else at
         self.store.add_run(fid, 1, {"run_id": f"r{self.runs}", "status": status, "trials": trials,
@@ -616,7 +619,8 @@ class TheFunnelsRows(unittest.TestCase):
         # a figure under one name is one name; a report without the figure is the default
         (self.root / EN.FORWARD_REPORT).write_text(json.dumps({"cey": {"hist_iy": 0.2 * years}}))
         self.assertEqual(EN.etf_neff(self.root), (1.0, "forward-report"))
-        for report in ({"cey": {"hist_iy": None}}, {"cey": {"day": None}}, {"mode": "off"}, [], {"cey": {"hist_iy": True}}):
+        for report in ({"cey": {"hist_iy": None}}, {"cey": {"day": None}}, {"mode": "off"}, [],
+                       {"cey": {"hist_iy": True}}):
             (self.root / EN.FORWARD_REPORT).write_text(json.dumps(report))
             self.assertEqual(EN.etf_neff(self.root), (2.3, "default"))
 

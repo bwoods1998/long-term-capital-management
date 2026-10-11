@@ -182,7 +182,8 @@ class TheSample(unittest.TestCase):
         want = statistics.median([(100.02 - 99.98) / 200.0, (100.05 - 99.95) / 200.0, (100.10 - 99.90) / 200.0])
         self.assertEqual(got, want)
         # an even count: the mean of the middle two; the venue's nine-digit fractions are read
-        rows = [quote("2023-03-08T14:32:00.123456789Z", 99.98, 100.02), quote("2023-03-08T14:32:01.000000001Z", 99.94, 100.06)]
+        rows = [quote("2023-03-08T14:32:00.123456789Z", 99.98, 100.02),
+                quote("2023-03-08T14:32:01.000000001Z", 99.94, 100.06)]
         got = SP.sample(self.gateway({"quotes": {"ZZZ": rows}}), "ZZZ", self.DAY, "09:32:00", asof=None)
         self.assertAlmostEqual(got, (0.0002 + 0.0006) / 2, places=12)
 
@@ -260,7 +261,8 @@ class TheTable(unittest.TestCase):
 
     def test_with_no_name_of_eight_samples_the_universes_figure_is_the_fallback(self):
         out = SP.summarize({"100": {"exchange": "NYSE", "open": taken([4.0] * 7), "close": taken([4.0] * 7)}})
-        self.assertEqual(out["default"], {"open_bp": xs_config.HS_FALLBACK_BP[0], "close_bp": xs_config.HS_FALLBACK_BP[1]})
+        fallback = xs_config.HS_FALLBACK_BP
+        self.assertEqual(out["default"], {"open_bp": fallback[0], "close_bp": fallback[1]})
         self.assertEqual(SP.summarize({})["default"], {"open_bp": 10.0, "close_bp": 5.0})
 
     def test_what_a_fill_is_charged(self):
@@ -428,7 +430,8 @@ class TheJob(unittest.TestCase):
         self.assertEqual(held["names"]["105"], {"open_bp": None, "close_bp": None, "n_open": 0, "n_close": 0})
         self.assertEqual(held["default"], {"open_bp": SP.percentile([3.0, 6.0, 8.0, 10.0]), "close_bp": 8.5})
         self.assertEqual(held["dropped"], {"NASDAQ": {"open": round(48 / 144, 4), "close": round(48 / 144, 4)},
-                                           "NYSE": {"open": 0.0, "close": 0.0}, "unknown": {"open": None, "close": None}})
+                                           "NYSE": {"open": 0.0, "close": 0.0},
+                                           "unknown": {"open": None, "close": None}})
         self.assertEqual(held["samples"]["105"]["exchange"], "unknown")
         self.assertEqual(stat.S_IMODE((self.root / SP.FILE).stat().st_mode), 0o600)
         # the dropped share at both fill points is above the line: a House warning each, counts and shares only
@@ -498,8 +501,8 @@ class TheJob(unittest.TestCase):
         self.assertEqual((out["calls"], out["calls_total"], out["done"]), (TOTAL - 20, TOTAL, True))
 
     def test_a_run_asks_no_more_once_its_seconds_are_spent(self):
-        ctx = Context("equity_spreads", root=self.state, due_at=NOW, clock=lambda: NOW + 100.0 * len(self.gateway.calls),
-                      gateway=self.gateway, config={}, settings_value={})
+        ctx = Context("equity_spreads", root=self.state, due_at=NOW, gateway=self.gateway, config={},
+                      settings_value={}, clock=lambda: NOW + 100.0 * len(self.gateway.calls))
         out = self.go(ctx)
         self.assertEqual((out["ok"], out["calls"], out["done"]), (True, int(SP.BUDGET_S / 100), False))
         self.assertEqual(out["remaining"], TOTAL - 24)
@@ -538,7 +541,8 @@ class TheJob(unittest.TestCase):
 
     def test_a_request_the_venue_refuses_is_an_answer_of_no_sample(self):
         def refuses(n, params):
-            return GatewayError("GET quotes: HTTP 422 invalid symbol", status=422) if params["symbols"] == "QCZ" else None
+            refused = GatewayError("GET quotes: HTTP 422 invalid symbol", status=422)
+            return refused if params["symbols"] == "QCZ" else None
 
         self.gateway.raises = refuses
         out = self.go()
@@ -561,7 +565,8 @@ class TheJob(unittest.TestCase):
         answered = sum(len(row[p]) for row in held["samples"].values() for p in SP.POINTS) \
             + sum(len(row) for row in held["early"].values())
         self.assertEqual(answered, 25)
-        self.assertTrue(all(v is not None for row in held["samples"].values() for p in SP.POINTS for v in row[p].values()))
+        self.assertTrue(all(v is not None for row in held["samples"].values() for p in SP.POINTS
+                            for v in row[p].values()))
         self.gateway.raises = None
         self.assertEqual(self.go()["calls"], TOTAL - 25)
 
@@ -644,7 +649,8 @@ class ThePanelHalfSpread(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name) / SP.STORE_DIR
-        Universe.members_of, Universe.asked, Universe.fail = [(100, "QAZ"), (101, "QBZ"), (102, "QCZ"), (555, "QXZ")], [], None
+        Universe.members_of = [(100, "QAZ"), (101, "QBZ"), (102, "QCZ"), (555, "QXZ")]
+        Universe.asked, Universe.fail = [], None
         patch = mock.patch.object(xs_store, "Universe", Universe)
         patch.start()
         self.addCleanup(patch.stop)
