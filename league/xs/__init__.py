@@ -38,6 +38,8 @@ shapes, and where the pinned pre-registration overrides the spec). The pieces:
 - `synth`     synthetic panels for tests (never market data);
 - `book`      the parent-side adapter between a live panel program and E1's EquityBook (plumbing: no identity).
 
+`XS.md` beside them is the contract shown to a program's author.
+
 Standard library and numpy only (the House runs Python 3.11 with numpy, never pyarrow).
 """
 

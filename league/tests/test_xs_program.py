@@ -6,9 +6,13 @@ is the engine's (package D).
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
+import re
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
@@ -326,6 +330,73 @@ class TheTarget(unittest.TestCase):
 
         self.assertIn("RuntimeError", self.malformed({"target": Bomb(self.good())}))
         self.assertEqual(normalize_target({"target": Bomb(self.good())}, IDS, 10), {"hold": True})
+
+
+
+class TheContractShownToAuthors(unittest.TestCase):
+    """league/xs/XS.md: its example is a program the House loads, and its tables are the code's."""
+
+    @classmethod
+    def setUpClass(cls):
+        text = (Path(__file__).resolve().parents[1] / "xs" / "XS.md").read_text(encoding="utf-8")
+        cls.example = re.search(r"```python\n(.*?)```", text, re.S).group(1)
+        cls.text = " ".join(text.split())
+
+    def has(self, words: str) -> None:
+        self.assertTrue(words in self.text, f"XS.md does not say {words!r}")
+
+    def test_the_example_loads_and_answers_a_valid_target_on_a_real_ctx(self):
+        from league.xs import ctx, store, synth
+
+        program = load_program(self.example, name="xs-md-example")
+        self.assertEqual(program.needs, Needs("sp500", 60, 8, "weekly", 0, 30))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = synth.synthetic_panel(Path(tmp) / "equity-daily", n_assets=60, seed=3, start=dt.date(2023, 6, 1),
+                                         end=dt.date(2025, 6, 30))
+            bars = store.PanelStore(root).bars("validation", history=program.needs.history, run_key="example").bars
+            runner = program.start()
+            for t in (bars.first - 1, bars.first + 30, bars.first + 31):
+                built = ctx.build(ctx.inputs_from_panel(bars, t, needs=program.needs, cash=1000.0, equity=1000.0,
+                                                        budget=1000.0, params=program.params))
+                answer = runner.decide(built)
+                self.assertFalse(runner.last_failed)
+                self.assertEqual(answer["at"], "open")
+                self.assertEqual(len(answer["target"]), 8)
+                self.assertTrue(set(answer["target"]) <= set(built.ids.tolist()))
+                self.assertEqual(set(answer["target"].values()), {0.125})
+            self.assertEqual(runner.stats()["errors"], 0, runner.stats()["messages"])
+            few = ctx.build(ctx.inputs_from_panel(bars, 100, needs=program.needs, cash=0.0, equity=0.0, budget=0.0,
+                                                  params=program.params))
+            self.assertEqual((few.n, runner.decide(few)), (0, {"hold": True}))
+
+    def test_it_names_every_slot_of_the_ctx_and_every_key_of_needs(self):
+        from league.xs import ctx
+
+        for slot in ctx.XsCtx.__slots__:
+            self.has(f"`ctx.{slot}`")
+        for field in ctx.FIELDS:
+            self.has(f".{field}")
+        for key in NEEDS_KEYS:
+            self.has(f"| `{key}` |")
+        for banned in ("ctx.symbols", "ctx.bars", "ctx.prices", "ctx.events", "ctx.caps", "dv_decile", "`ctx.close`",
+                       "ctx.open", "ctx.high", "ctx.volume"):
+            self.assertFalse(banned in self.text, f"XS.md names {banned}")
+
+    def test_its_figures_are_the_codes(self):
+        for figure in (f"{config.MIN_HISTORY}-{config.MAX_HISTORY}", f"{config.MIN_NAMES}-{config.MAX_NAMES}",
+                       f"{config.MIN_HOLD_CAP}-{config.MAX_HOLD_CAP}", f"at most {config.MAX_WEIGHT:.2f}",
+                       f"{config.MAX_BUYS} buys and {config.MAX_SELLS} sells", f"{config.DERIVE_SESSIONS} sessions",
+                       f"{config.REL_VOLUME_SESSIONS} sessions", f"less {int(config.VANISH_HAIRCUT * 100)}%",
+                       f"under {int(config.HS_FLOOR_BP)} basis points", f"{config.CTX_PLACES} decimals",
+                       f"{config.BETA_PLACES} decimals", f"under ${config.MIN_NAME_USD}",
+                       f"{ctx_min_valid()} traded sessions"):
+            self.has(figure)
+
+
+def ctx_min_valid() -> int:
+    from league.xs import ctx
+
+    return ctx.REL_VOLUME_MIN_VALID
 
 
 if __name__ == "__main__":
