@@ -222,3 +222,41 @@ test('the causes of Oct 10, 2026: a Done checkpoint and K5 are owner lines; a pr
   assert.equal(both.subject, 'LTCM: stalled: a pre-open check failed, the nightly forward replay is late or stopped');
   for (const line of ['- failed_checks: 6_bands,9_compute', '- expected_day: 2026-10-09']) assert.ok(both.text.split('\n').includes(line), line);
 });
+
+test('the causes of Oct 11, 2026: each equity cause has its own words and keys its own notice, never the swarm alerts\' key', async () => {
+  // league/ops/elane_health.py (release E2.4): the equity lanes' own causes, each an entry of its own (invented figures).
+  const dq = { ...BIRTHS, cause: 'elane_dq', what: '7 of the 8 equity versions scored in the last 6 h could not be judged for a fault of their own program.',
+    numbers: { scored: 8, faulted: 7, top_error: 'typeerror', families: 2 },
+    owner_step: 'the equity generators misread the program contract, mostly TypeError: fix the text they read, in a release' };
+  const births = { ...BIRTHS, cause: 'elane_births', numbers: { barren_passes: 3, kind: 'symbols', born: 0 } };
+  const idle = { ...BIRTHS, cause: 'elane_idle', numbers: { kind: 'pace', steps_due: 9, steps_skipped: 6 } };
+  const refused = { ...BIRTHS, cause: 'elane_refused', numbers: { answers: 9, top_rule: 'reading', top_rule_n: 6 },
+    owner_step: 'the equity generators are not being taught the reading rule: teach it where they read it, in a release' };
+  assert.equal(composeNotice(notice(dq)).subject, 'LTCM: needs you: most equity versions could not be judged');
+  assert.equal(composeNotice(notice(births)).subject, 'LTCM: stalled: the equity passes bear no family');
+  assert.equal(composeNotice(notice(idle)).subject, 'LTCM: stalled: the equity lanes are idle or starved');
+  assert.equal(composeNotice(notice(refused)).subject, 'LTCM: needs you: most equity programs refused before a run by one rule');
+  const all = composeNotice(notice(births, dq, idle, refused));
+  assert.equal(all.subject, 'LTCM: needs you: most equity versions could not be judged, most equity programs refused before a run by one rule');
+  for (const line of ['Stalled: the equity passes bear no family.', 'Stalled: the equity lanes are idle or starved.', '- top_error: typeerror',
+    '- steps_skipped: 6', `Only you can do this: ${refused.owner_step}.`]) assert.ok(all.text.split('\n').includes(line), line);
+  assert.equal(stallKey(notice(dq, births)), 'stall:owner:elane_dq');
+  assert.equal(stallKey(notice(births, idle)), 'stall:info:elane_births+elane_idle');
+  // An equity owner step and a swarm alert's are two keys: neither waits out the other's 12 hours.
+  const alerts = { ...BIRTHS, cause: 'swarm_alerts', owner_step: 'a look failed three times: read its record' };
+  assert.equal(stallKey(notice(alerts)), 'stall:owner:swarm_alerts');
+  assert.equal(stallKey(notice(alerts, dq)), 'stall:owner:elane_dq+swarm_alerts');
+  const gate = createGate({ store: memoryStore(), env: env(), now: () => NOW });
+  const sent = [];
+  const post = (facts, at) => route(new Request(`${GATEWAY}/v1/notify`, {
+    method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(facts),
+  }), env(), { gate, now: () => at, mailer: async message => void sent.push(message) });
+  assert.equal((await (await post(notice(alerts), NOW)).json()).sent, true);
+  const second = await (await post(notice(alerts, dq), NOW + HOUR)).json();
+  assert.deepEqual([second.sent, second.duplicate, second.subject],
+    [true, undefined, 'LTCM: needs you: the swarm raised alerts, most equity versions could not be judged']);
+  assert.equal((await (await post(notice(dq), NOW + 2 * HOUR)).json()).sent, true, 'the equity cause alone: its own key');
+  assert.equal((await (await post(notice(dq), NOW + 3 * HOUR)).json()).duplicate, true, 'the same owner cause inside 12 hours');
+  assert.equal((await (await post(notice(alerts), NOW + 3 * HOUR)).json()).duplicate, true);
+  assert.equal(sent.length, 3);
+});

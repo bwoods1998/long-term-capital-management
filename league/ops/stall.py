@@ -94,6 +94,20 @@ was found by the captain reading the log, never by an alarm):
   under the release's own, the Claude lines at 0). DONE-RULE item 7 reads a day with no taper as at budget, so a
   swarm.json pin (Oct 9: gym.max_boxes 2 under the budget's 7) was invisible.
 
+THE EQUITY LANES' OWN CAUSES (release E2.4, Oct 11, 2026; league/ops/elane_health.py, which judges them): `elane_dq`
+(most equity versions scored could not be judged for a fault of their own program), `elane_births` (the last equity
+passes that asked a model bore no family), `elane_idle` (A BROKEN LANE: most of its program questions lost to a
+fault (answers that hold no program, questions no route answers), or work owed and no version scored for hours
+while its own record shows failures, or while it may ask a model; a lane held by its own pace, its day's dollars or
+the Sail guard never stands: what the setting costs is in the check's numbers and the funnel) and `elane_refused` (most
+programs written were refused before a run by one static rule). Each is judged only while the lanes are on and on
+enough evidence, and stands here like any cause (the last four of `CAUSES`: since when, warned, noticed at this job's
+pace, cleared, among the receipt's `checks`). The gateway words each (gateway/lib/email.mjs STALL_CAUSES; the gateway
+is deployed before this release), so each is an entry of its own in the notice and keys its own mail: none rides
+`swarm_alerts`, and none holds back another's mail or the swarm's own alerts. The job keeps, for them, since when the
+running release has run and what they keep under it (`stall.json` `elane`: {release, since} and
+`elane_health.KEPT`; `elane_health.release_since`), so a restart that fixes nothing resets no evidence.
+
 THE NOTICE: one `POST /v1/notify` kind `stall` a run at most, listing EVERY cause standing (`cause_facts` each: the
 cause, the numbers, how long, what the House is doing about it, the owner step when one is needed), owner steps first,
 through the same gateway client the budget's funding notice uses (`budget._notifier`). It is mailed:
@@ -138,6 +152,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from . import budget as B
+from . import elane_health as EH
 from . import funnel as F
 from . import guard
 from . import schedule as S
@@ -253,8 +268,12 @@ ARCHITECT_HOLD_USD = 2.0
 #: lifts each.
 PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its work is done (scripts/floor_box.py maintenance off)"),
                "swarm.stop": ("swarm_stop", "remove state/swarm.stop once the swarm should run again (the House starts it then)")}
+#: EVERY CAUSE THIS JOB RAISES, each worded by the gateway (gateway/lib/email.mjs STALL_CAUSES, which its own test holds
+#: equal to this tuple: a cause is worded there, and the gateway deployed, before it is named here). The last four are THE
+#: EQUITY LANES' OWN (release E2.4; league/ops/elane_health.py `CAUSES`, which judges them; a test holds the two equal).
 CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy",
-          "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend")
+          "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend",
+          "elane_dq", "elane_births", "elane_idle", "elane_refused")
 #: THE EQUITY LANES (release E2): their births (a `swarm.born` whose payload's lane is "beta" or "equity"), their families
 #: (structure "etf" or "stock": league/swarm/store.py `OPTIONS_ONLY_SQL`) and their Train runs on the House are their own:
 #: none masks a stalled options architect, population or Gym here.
@@ -1949,6 +1968,11 @@ def run(ctx: Any) -> dict[str, Any]:
                    preopen=preopen, forward=forward,
                    nightly_error_since=None if nightly_error is None else S.epoch(nightly_error["since"]),
                    done_told=done_told, binds=binds, alert_states=states)
+    # THE EQUITY LANES' OWN CAUSES (release E2.4): judged in league/ops/elane_health.py and raised from here on like any
+    # other. Their evidence counts from the first start of the RUNNING RELEASE (kept in stall.json: `EH.release_since`).
+    running = EH.release_since(state.get(EH.STATE_KEEP), root, now)
+    found.update(EH.checks(ctx, root, now, loaded, errors=errors, since=running.get("since"), kept=running,
+                           paused=found["paused"]["numbers"]["paused_since"] is not None))
 
     told = state.get("causes") if isinstance(state.get("causes"), dict) else {}
     mail = dict(state.get("mail")) if isinstance(state.get("mail"), dict) else {}
@@ -1982,7 +2006,7 @@ def run(ctx: Any) -> dict[str, Any]:
                          f"told at {mail.get('owner_at') or mail.get('info_at')}: the owner causes at most every 12 h, the "
                          "rest at most every 24 h")
     else:
-        facts = notice_facts(entries, now)
+        facts = notice_facts(EH.mailed(entries, found), now)  # the equity causes' entries as the gateway prints them
         notice["notice_id"] = facts["notice_id"]
         notify = _notifier(ctx)
         if notify is None:
@@ -2015,6 +2039,7 @@ def run(ctx: Any) -> dict[str, Any]:
         text = f"stall: {cause}: {check['what']} {check['doing']}"
         if check.get("owner_step"):
             text += f" Owner step: {check['owner_step']}."
+        text = EH.warning(cause, check, text)  # an equity cause's owner step whole inside the alert's cut
         if kind is not None and not notice["sent"] and notice.get("why"):
             text += f" (notice: {notice['why']})"
         _alert(ctx, text)
@@ -2024,7 +2049,7 @@ def run(ctx: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - the stall alarm goes on without it
         receipts = {"errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
     write_json(root / STATE_FILE, {"schema": 2, "at": S.iso(now), "causes": told, "mail": mail,
-                                   "nightly_error": nightly_error, "done_told": done_told})
+                                   "nightly_error": nightly_error, "done_told": done_told, EH.STATE_KEEP: running})
     return {"stalled": stalled, "cleared": cleared, "warned": warned, "notice": notice,
             "checks": {c: {k: found[c].get(k) for k in ("stalled", "what", "numbers", "doing", "owner_step")} for c in CAUSES},
             "ceiling": ceiling, "errors": errors, "warning": bool(stalled or errors), "receipts": receipts}
