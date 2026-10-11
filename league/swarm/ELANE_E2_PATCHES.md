@@ -33,7 +33,7 @@ integrator:
 
 - NO NEW PATCH. Everything the restart check needs, E1 already provides (read at E1's head 4baf7c10): the isolated
   runner's `decider` and its `Run` (the result with the `store.Bars` it ran on), the decider kinds `kind_load`,
-  `kind(..., "decide", ...)` and `kind_drop`, the child's decide answer (`intents`, `stats.calls`,
+  `kind(..., "decide", ...)` and `kind_drop`, the child's decide answer (`intents`, `stats.calls`, `stats.errors`,
   `stats.disqualified`, `missing`, `error`), `ctx.inputs_from_bars`, `ctx.lot_row` and `ctx.closed_row`. The list is
   under "What E2 reads of E1" below.
 - NO DIFF CHANGED. Patches 1 and 3-10 are as they were (A15 changes no signature a patch calls: patch 1's
@@ -45,8 +45,9 @@ integrator:
 - ONE DESCRIPTION CHANGED, patch 10's: a version's Train run is now four runs (two spans at two stresses), so E2's Train
   runs on the House are up to ~72 an hour, not ~36. The diff is the same (it counts the options lanes only).
 - IF A HOOK IS MISSING, E2 FAILS SAFE with no patch: a runner without `decider`, a decider without the kinds, or a
-  decide answer without `stats.calls` makes the restart check the House's failure (the version is not scored and
-  cannot pass; the third failure in a row raises the `elane_train_state` alert), never a pass.
+  decide answer without `stats.calls` or without `stats.errors` makes the restart check the House's failure (the
+  version is not scored and cannot pass; the third such failure of a version raises the `elane_train_state` alert,
+  once), never a pass.
 - NOT NEEDED, ONLY NOTED: E1's `Decider._ask` reloads a kind's instances into a child that died between two requests
   without counting it in `restarts` (it counts only a request that failed). E2 does not rely on `restarts` for that
   case: it reads each instance's `stats.calls` (league/tests/test_elane_e2_e1.py kills a real child mid-check).
@@ -58,6 +59,45 @@ integrator:
   `league/ci.py` and `league/tests/test_ci.py` no longer apply there (E1 edited the same lines) and must be
   regenerated; the other eight diffs apply, and on that tree test_elane_e2_* (with test_elane_e2_e1),
   test_researcher, test_equity_identity, test_equity_decider and test_swarm_loop pass. Nothing A15 reads changed.
+
+## The A15 review's fixes: no patch added, no diff changed
+
+The review of A15 found five things in E2's own files; all are fixed inside them (league/swarm/elane_train.py,
+elane_seal.py, ELANE_E2.md, the tests). For the integrator:
+
+- NO NEW PATCH, NO DIFF CHANGED. Patches 1 and 3-10 are as they were. `restart_check` gained a keyword (`first`) and
+  `elane_train` two names (`SIZE_TOL`, `same_intents`); no patch calls any of them. Patch 6's `elane.e2` block gains no
+  key: `state_first` (7) is a rule in `elane_train.BAR` beside `state_every` and `state_match`, not a setting.
+- ONE MORE FIELD READ OF E1, ALREADY THERE: the restart check now reads `stats.errors` beside `stats.calls` in each
+  decide answer (E1's `EquityRunner.stats`, league/equity/child.py `_decide`), to tell a decide that failed from one
+  that answered nothing. An answer without it is the House's failure, never a pass (as for `stats.calls`).
+- WHAT CHANGED IN THE BAR, for whoever reads a Train record: B's resets come 7 sessions into a span and every 20 after
+  (not on the span's first session), so a session counter of any period fails STATE; a session matches only when the
+  two decides also counted the same errors; two buys are the same size within one part in a million of the sleeve (a
+  cent for `usd`). A version's `state` record gains `first`, `failed`, `sized` and `size_gap`. The House's failures of
+  a version are counted by kind (`infra.streak`, `infra.kinds`, `infra.alerted`): RUN needs the child's failures in a
+  row, and the restart check's alert is sent once.
+- THE RESERVE'S BARS, FOR THE CAPTAIN (no patch today): E2 runs no reserve session, but E1's runner hands a 2022-2024
+  run its NEEDS `history` before 2022-01-03 (up to 504 sessions), so the 2022-2024 Train figures of a program with
+  look-back are functions of 2020-2021 bars (league/tests/test_elane_e2_e1.py `ReserveOnE1`). If the later
+  Thresholdout accessor needs those bars unseen as well, that is a NEW PATCH TO E1 (a blanked look-back in
+  `EquityStore.bars` or `Isolated.train`, e.g. a `history_floor` day), not something E2's files can do; it would cost a
+  long-look-back program most of its 2022.
+- NOT E2's, NOTED FOR E1's OWNER (the same review; nothing written there): E1's live book does not count a program's
+  own failed decide. The Gym engine reads the runner's `last_failed` and exits a program's lots after
+  `FAILED_DECIDES_EXIT` (2) failed decides in a row (EQUITY.md); live, the child's decide answer carries no such
+  flag and `EquityBook._decide` treats only a failed decider request, a missing result or `ok` False as failed, so a
+  program whose own decide raises twice keeps its lots until `max_hold_sessions`. E2's restart check does not lean on
+  either behaviour (it compares `stats.errors`), so a program whose decide fails only after a restart is refused on
+  Train whichever way E1 settles it.
+- Checked on a tree of E1's 8e11986b plus patches 1, 3-6 and 8-10 plus this branch's files (patch 7 still to
+  regenerate, as below): the modules named at the end of this section pass.
+
+MODULES RUN for the A15 review's fixes. On this branch (the skeleton): test_elane_e2_births, test_elane_e2_review,
+test_elane_e2_seal, test_elane_e2_train, test_elane_e2_yield, test_elane_e2_e1 (skipped there), test_researcher,
+test_dlane*. On the tree of E1's 8e11986b with the patches: the same, with test_elane_e2_e1 run (A15 on E1's runner,
+ctx builder and decider), and test_elane, test_elane_gate, test_equity_e2e, test_equity_decider, test_equity_identity,
+test_swarm_loop, test_loop_joints, test_ops_stall and test_swarm_settings_policy.
 
 ## Patch 5 in words
 
@@ -459,8 +499,9 @@ index d6b054e8..67e3b833 100644
   `elane_train.combine`).
 - A15, the restart check: `Isolated.decider` (the swarm's own child, never the live book's) with `kind_load("equity",
   key, {code, params, name, timeout, max_errors})`, `kind("equity", "decide", {jobs: [{key, inputs}]})`,
-  `kind_drop`, `restarts`; the decide answer's per-key `intents`, `stats.calls` and `stats.disqualified`
-  (`EquityRunner.stats`), `missing` and `error`; `Run.bars` (`n`, `first`, `days`, `raw`) and the result's `needs`,
-  `params`, `capital`, `lots`, `trades` and `daily`; `ctx.inputs_from_bars`, `ctx.lot_row`, `ctx.closed_row`,
-  `program.parse_needs`, `store.from_ordinal`, `config.POSITION_SHARE`, `class_of`, `SLEEVE_USD`. E2's instances are
-  keyed "e2-state:<family>:<span>:<a|bN>" and dropped when the check ends, whatever ends it.
+  `kind_drop`, `restarts`; the decide answer's per-key `intents`, `stats.calls`, `stats.errors` and
+  `stats.disqualified` (`EquityRunner.stats`), `missing` and `error`; `Run.bars` (`n`, `first`, `days`, `raw`) and the
+  result's `needs`, `params`, `capital`, `lots`, `trades` and `daily`; `ctx.inputs_from_bars`, `ctx.lot_row`,
+  `ctx.closed_row`, `program.parse_needs`, `store.from_ordinal`, `config.POSITION_SHARE`, `class_of`, `SLEEVE_USD`,
+  `QTY_PLACES`. E2's instances are keyed "e2-state:<family>:<span>:<a|bN>" and dropped when the check ends, whatever
+  ends it.

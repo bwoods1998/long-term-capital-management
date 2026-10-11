@@ -1,7 +1,8 @@
 """Release E2, THE EQUITY TRAIN (league/swarm/elane_train.py): the bar equity-v1 on the Train years only (2016-19 and
-2022-24, one run a span, summed; 2020-21 refused as 2025-26 is), its restart check (STATE), the record, the minimal equity
-researcher (write, score, review, revise, refute, stall) through E1's isolated runner, what a verdict is (the program's
-own doing, never the House's), the equity review at the first pass, the guard E1's tournament applies (`may_validate`),
+2022-24, one run a span, summed; 2020-21 refused as 2025-26 is), its restart check (STATE: the resets off the span's
+start, what a match is, the size two buys may differ by), the record, the minimal equity researcher (write, score, review,
+revise, refute, stall) through E1's isolated runner, what a verdict is (the program's own doing, never the House's, whose
+failures are counted by kind), the equity review at the first pass, the guard E1's tournament applies (`may_validate`),
 the identity a pass is judged under, and the equity Train map. E1's runner, decider kinds, switch and card admission are
 fakes as INTERFACES fixes them (league/tests/elane_e2_fakes.py). Every family, program and number here is invented."""
 
@@ -14,7 +15,7 @@ from unittest import mock
 from league.swarm import elane_review, elane_train, elane_yield
 from league.swarm.elane_train import (BAR, OBJECTIVE, RESERVE_YEARS, TRAIN_FIRST, TRAIN_LABEL, TRAIN_LAST, TRAIN_SPANS,
                                       TRAIN_YEARS, EquityResearcher, closed_cells, combine, may_validate, outside_years,
-                                      record_of, restart_check, train_map, train_map_text, train_score)
+                                      record_of, restart_check, same_intents, train_map, train_map_text, train_score)
 from league.swarm.gate import run_sha
 from league.tests import elane_e2_fakes as fx
 
@@ -142,6 +143,16 @@ class TheBar(unittest.TestCase):
         self.assertIn("3 of the 7 Train years", text)
         self.assertIn("(STATE) run again with its STATE emptied every 20 sessions", text)
         self.assertIn("at least 99% of the sessions", text)
+        # What a match is, and the two ways a sound-looking program fails it (told before the first version is written).
+        self.assertIn("each buy the same size to six places of its share", text)
+        self.assertIn("a decide must work on an empty STATE at any session, lots held or not", text)
+        self.assertIn("Never carry a value from session to session and update it in place", text)
+        self.assertIn("recompute it from ctx.bars at every call", text)
+        system = " ".join(elane_train.RESEARCHER_SYSTEM.split())
+        self.assertIn("a decide that raises after a restart is no match", system)
+        self.assertIn("recompute it from ctx.bars at every call", system)
+        self.assertEqual((BAR["state_every"], BAR["state_first"]), (20, 7))
+        self.assertEqual(elane_train.SIZE_TOL, {"share": 1e-06, "usd": 0.01})
         self.assertIn("ONE Validation try", text)
         self.assertNotRegex(text, r"\b20(20|21|25|26)\b")
         self.assertIn(TRAIN_LABEL, elane_train.MAP_LABEL)
@@ -468,6 +479,148 @@ class WhatAVerdictIs(ResearchCase):
         self.assertEqual(alerts[0]["payload"]["action"], "elane_train_window")
 
 
+class TheHousesFailuresByKind(ResearchCase):
+    """The A15 review's fifth finding: the House's failures of a version were one count for every kind, so a restart check
+    the House interrupted (never the program's) counted toward the RUN verdict, and the restart check's alert fired only
+    if the count landed on it. They are counted by kind (`EquityResearcher.house_failure`)."""
+
+    def attempt(self, fid: str) -> dict:
+        """One round, then the longest backoff: the family's step."""
+        out = self.researcher.run()
+        self.clock.advance(elane_train.BACKOFF_MAX)
+        return next(s for s in out["steps"] if s.get("family") == fid)
+
+    def judged_meanwhile(self, slug: str, symbol: str) -> None:
+        """Another program the child judges through in the next round (it fails P1, so it needs no restart check)."""
+        code = fx.program(symbol, share=0.2)
+        self.failing(code)
+        fx.e2_family(self.store, slug, code=code, symbols=(symbol,), mechanism=f"Invented idea {slug} on {symbol}.")
+
+    def interrupt(self) -> None:
+        """The child restarts ten decides into the next restart check (the House's "state")."""
+        self.runner.decider.restart_after = self.runner.decider.decides + 10
+
+    def fail_runs(self, code: str, exc: BaseException | None) -> None:
+        """The version's Train runs fail with `exc` (None: they run again)."""
+        if exc is None:
+            self.results.pop((code, 1.0), None)
+        else:
+            self.results[(code, 1.0)] = exc
+
+    def alerts(self) -> list:
+        return [e["payload"]["action"] for e in self.store.events_after(0)
+                if e["kind"] == "swarm.status" and e["payload"].get("alert")]
+
+    def test_restart_check_interruptions_never_count_toward_run(self):
+        """Two checks the House interrupted, another program judged meanwhile, then ONE failed run: three failures, one
+        of them a run's. The version is not judged RUN on the strength of the House's interruptions."""
+        code = fx.program(share=0.31)
+        fam = fx.e2_family(self.store, "sound", code=code)
+        fid = fam["id"]
+        self.interrupt()
+        self.assertEqual(self.attempt(fid)["house"], "state")
+        self.judged_meanwhile("meanwhile-1", "QQQ")
+        self.interrupt()
+        self.assertEqual(self.attempt(fid)["house"], "state")
+        self.fail_runs(code, fx.RunFailed("the decider child failed the run: timed out"))
+        step = self.attempt(fid)
+        self.assertEqual(step.get("house"), "run", f"one run failure is the House's: {step}")
+        rec = self.rec(fid)
+        infra = rec["infra"]
+        self.assertEqual((rec["versions"], infra["count"], infra["kind"], infra["streak"], infra["kinds"]),
+                         ({}, 3, "run", 1, {"state": 2, "run": 1}))
+        # RUN is the child failing this version's runs `train_max_errors` times in a row while others are judged.
+        self.judged_meanwhile("meanwhile-2", "IWM")
+        self.assertEqual(self.attempt(fid).get("house"), "run")
+        step = self.attempt(fid)
+        self.assertEqual((step.get("passed"), step.get("fails")), (False, ["RUN"]), step)
+        self.assertEqual(self.rec(fid)["versions"]["1"]["fails"], ["RUN"])
+
+    def test_a_standing_pass_is_not_withdrawn_by_the_houses_interruptions_and_one_failed_run(self):
+        ident = {"now": {"equity": "a" * 64, "engine": "equity-engine-1"}}
+        patcher = mock.patch("league.swarm.evaluator.equity_identity", lambda: dict(ident["now"]))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        code = fx.program(share=0.33)
+        fam = fx.e2_family(self.store, "standing", code=code)
+        fid = fam["id"]
+        self.researcher.run()
+        self.assertEqual(self.rec(fid)["passed_version"], 1)
+        ident["now"] = {"equity": "b" * 64, "engine": "equity-engine-1"}  # the pass is stale: Train-scored again
+        self.interrupt()
+        self.assertEqual(self.attempt(fid)["house"], "state")
+        self.judged_meanwhile("meanwhile", "QQQ")
+        self.interrupt()
+        self.assertEqual(self.attempt(fid)["house"], "state")
+        self.fail_runs(code, fx.RunFailed("the decider child failed the run: timed out"))
+        self.assertEqual(self.attempt(fid).get("house"), "run")
+        rec = self.rec(fid)
+        self.assertEqual((rec["status"], rec["passed_version"], rec["versions"]["1"]["passed"]), ("passed", 1, True),
+                         "the pass stands (stale until it can be judged), never withdrawn as RUN")
+        self.assertEqual(self.store.family(fid)["best_version"], 1)
+        self.fail_runs(code, None)
+        self.assertEqual(self.attempt(fid)["rescored"], "kept")
+        self.assertNotIn("infra", self.rec(fid), "a completed judgment clears every count")
+
+    def test_a_row_of_run_failures_broken_by_another_kind_starts_again(self):
+        """"In a row": a store being rewritten, or a check the House interrupted (whose attempt ran the version's Train
+        runs through), between the child's failures starts the row again, however many came before."""
+        code = fx.program(share=0.3)
+        fam = fx.e2_family(self.store, "broken-row", code=code)
+        fid = fam["id"]
+        failed = fx.RunFailed("the decider child failed the run: MemoryError")
+        self.fail_runs(code, failed)
+        self.assertEqual(self.attempt(fid)["house"], "run")
+        self.judged_meanwhile("meanwhile-1", "QQQ")
+        self.assertEqual(self.attempt(fid)["house"], "run")
+        self.fail_runs(code, fx.MissingData("the equity store is being rewritten"))
+        self.assertEqual(self.attempt(fid)["house"], "store")
+        self.fail_runs(code, failed)
+        step = self.attempt(fid)
+        self.assertEqual(step.get("house"), "run", f"the third run failure, not three in a row: {step}")
+        infra = self.rec(fid)["infra"]
+        self.assertEqual((infra["count"], infra["streak"], infra["kinds"]), (4, 1, {"run": 3, "store": 1}))
+        self.assertEqual(self.attempt(fid).get("house"), "run", "two in a row; no other program judged since the first")
+        self.judged_meanwhile("meanwhile-2", "IWM")
+        step = self.attempt(fid)
+        self.assertEqual(step.get("fails"), ["RUN"], "three in a row, another program judged after the first of them")
+
+    def test_the_backoff_doubles_with_every_failure_of_any_kind(self):
+        code = fx.program(share=0.29)
+        fam = fx.e2_family(self.store, "backoff", code=code)
+        delays = []
+        for exc in (fx.MissingData("no store"), fx.RunFailed("the child failed"), fx.MissingData("no store")):
+            self.fail_runs(code, exc)
+            delays.append(self.attempt(fam["id"])["retry_in"])
+        self.assertEqual(delays, [delays[0], 2 * delays[0], 4 * delays[0]])
+
+    def test_the_restart_checks_alert_counts_its_own_kind_and_is_sent_once(self):
+        """state, state, store, state: the third restart check that could not finish is the alert, though it is the
+        version's fourth failure; a fourth and a fifth send no second one; a judgment starts the count again."""
+        code = fx.program(share=0.28)
+        fam = fx.e2_family(self.store, "unfinished", code=code)
+        fid = fam["id"]
+        for _ in range(2):
+            self.interrupt()
+            self.assertEqual(self.attempt(fid)["house"], "state")
+        self.assertEqual(self.alerts(), [], "two interruptions are no news")
+        self.fail_runs(code, fx.MissingData("the equity store is being rewritten"))
+        self.assertEqual(self.attempt(fid)["house"], "store")
+        self.fail_runs(code, None)
+        self.interrupt()
+        self.assertEqual(self.attempt(fid)["house"], "state")
+        self.assertEqual(self.alerts(), ["elane_train_state"], "its third unfinished check, whatever failed between")
+        infra = self.rec(fid)["infra"]
+        self.assertEqual((infra["count"], infra["kinds"], infra["alerted"]), (4, {"state": 3, "store": 1}, ["state"]))
+        for _ in range(2):
+            self.interrupt()
+            self.assertEqual(self.attempt(fid)["house"], "state")
+        self.assertEqual(self.alerts(), ["elane_train_state"], "sent once")
+        self.attempt(fid)
+        self.assertEqual(self.rec(fid)["passed_version"], 1, "judged once the check could finish")
+        self.assertNotIn("infra", self.rec(fid))
+
+
 class TheRestartCheck(ResearchCase):
     """A15: the Train bar's STATE check. The House's decider child restarts on every deploy and a restart empties a
     program's STATE, so a version is run again with its STATE emptied every 20 sessions and must give the uninterrupted
@@ -480,11 +633,29 @@ class TheRestartCheck(ResearchCase):
         state = self.rec(fam["id"])["versions"]["1"]["state"]
         self.assertEqual((state["sessions"], state["matched"], state["share"], state["first_miss"], state["disqualified"]),
                          (2 * fx.STATE_SESSIONS, 2 * fx.STATE_SESSIONS, 1.0, None, 0))
+        self.assertEqual((state["every"], state["first"], state["failed"], state["sized"], state["size_gap"]),
+                         (20, 7, 0, 0, {}))
         decider = self.runner.decider
-        # Each span: A loaded once, B loaded fresh at sessions 0, 20 and 40; every instance dropped at the end.
+        # Each span: A loaded once; B loaded with it, then fresh at sessions 7 and 27; every instance dropped at the end.
         self.assertEqual(decider.loads, [f"e2-state:{fam['id']}:{span}:{x}" for span in (0, 1)
                                          for x in ("a", "b0", "b1", "b2")])
         self.assertEqual(decider.instances, {})
+
+    def test_the_resets_are_off_the_spans_start(self):
+        """B is emptied `state_first` (7) sessions into a span and every `state_every` (20) after: never on the session
+        A starts at, where a counter in either instance reads the same."""
+        decider = fx.FakeDecider()
+        seen: list[tuple[int, str]] = []
+        real = decider.kind
+
+        def kind(kind_, op, payload, **kw):
+            seen.append((len(seen), payload["jobs"][1]["key"]))
+            return real(kind_, op, payload, **kw)
+        decider.kind = kind
+        restart_check(decider, fx.program(), {}, name="p", streams=[fx.state_inputs(None, 70)])
+        resets = [i for i, key in seen if i == 0 or key != seen[i - 1][1]]
+        self.assertEqual(resets, [0, 7, 27, 47, 67])
+        self.assertEqual(decider.loads, ["e2-state:p:0:a", *(f"e2-state:p:0:b{n}" for n in range(5))])
 
     def test_a_program_that_counts_sessions_in_state_fails_state(self):
         settings = fx.settings(train_budget=1, train_per_round=5)
@@ -541,14 +712,150 @@ class TheRestartCheck(ResearchCase):
         for code, held in ((fx.program(), True), (fx.CACHE, True), (fx.COUNTER, False)):
             out = restart_check(decider, code, {}, name="p", streams=streams())
             self.assertEqual((out["sessions"], out["held"], out["every"]), (2 * fx.STATE_SESSIONS, held, 20), code[:40])
-        # The counter's clock is a multiple of 7 sessions: after a reset its buys come on other sessions.
+        # The counter's clock is a multiple of 7 sessions. Its first reset comes 7 sessions in, where the two clocks still
+        # agree; after the next (session 27) its buys come on other sessions: 27, 34 and 41 against 33 and 40.
         out = restart_check(decider, fx.COUNTER, {}, name="p", streams=streams())
-        self.assertEqual(out["first_miss"], {"span": 0, "session": 20, "after_reset": 0})
-        self.assertEqual(out["matched"], 2 * (fx.STATE_SESSIONS - 6))
+        self.assertEqual(out["first_miss"], {"span": 0, "session": 27, "after_reset": 0})
+        self.assertEqual(out["matched"], 2 * (fx.STATE_SESSIONS - 5))
         # Reset at every session, a program that only reads ctx still matches; a counter that never resets matches too.
         self.assertTrue(restart_check(decider, fx.CACHE, {}, name="p", streams=streams(), every=1)["held"])
-        self.assertTrue(restart_check(decider, fx.COUNTER, {}, name="p", streams=streams(), every=1000)["held"])
+        self.assertTrue(restart_check(decider, fx.COUNTER, {}, name="p", streams=streams(), every=1000, first=1000)["held"])
         self.assertEqual(decider.instances, {})
+
+    def test_a_clock_whose_period_divides_the_reset_period_fails_state(self):
+        """The A15 review's first finding: with B's resets counted from the span's first session, a session counter of
+        period 2, 4, 5, 10 or 20 (a weekly clock) kept in phase with its reset twin and matched on every session. Live, a
+        deploy restarts the clock at any session."""
+        decider = fx.FakeDecider()
+        sessions = 10 * BAR["state_every"]
+        for period in (2, 4, 5, 10, 20, 3, 7, 21):
+            out = restart_check(decider, fx.counter(period), {}, name="p", streams=[fx.state_inputs(None, sessions)])
+            self.assertFalse(out["held"], (period, out))
+            if BAR["state_every"] % period == 0:
+                self.assertLess(out["matched"], 0.92 * sessions, f"a clock of {period} misses far more than 1%")
+            # The schedule the review found: resets on the span's first session and every 20 after. Kept here as the
+            # reason for `state_first`: the periods that divide 20 are blind to it.
+            old = restart_check(decider, fx.counter(period), {}, name="p", streams=[fx.state_inputs(None, sessions)],
+                                first=0)
+            self.assertEqual(old["matched"] == sessions, BAR["state_every"] % period == 0, period)
+        self.assertNotEqual(BAR["state_first"] % 2, 0)
+        self.assertNotEqual(BAR["state_first"] % 5, 0, "7 shares no factor with 20")
+        self.assertLess(BAR["state_first"], BAR["state_every"])
+
+    def test_a_weekly_clock_in_state_fails_the_bar(self):
+        settings = fx.settings(train_budget=1, train_per_round=5)
+        researcher = EquityResearcher(self.store, self.router, settings, runner=self.runner, clock=self.clock)
+        for period in (5, 10, 20):
+            fam = fx.e2_family(self.store, f"clock-{period}", code=fx.counter(period),
+                               mechanism=f"Invented clock idea of {period} sessions on the index.")
+            out = researcher.score(fam, self.store.version(fam["id"], 1))
+            self.assertEqual((out["passed"], out["fails"]), (False, ["STATE"]), period)
+            rec = self.rec(fam["id"])
+            self.assertIsNone(rec.get("passed_version"))
+            self.assertFalse(may_validate(self.store, self.store.family(fam["id"]), 1), period)
+
+    def test_a_decide_that_fails_once_state_is_emptied_is_no_match(self):
+        """The A15 review's second finding: a decide that raises because STATE was emptied answers nothing, as the
+        uninterrupted one often does, so comparing the intents alone passed it at 100%. Live, two failed decides in a row
+        exit a program's lots (EQUITY.md)."""
+        decider = fx.FakeDecider()
+        out = restart_check(decider, fx.PEAK, {}, name="p", streams=[fx.state_inputs(None), fx.state_inputs(None)])
+        # B is emptied at sessions 7 and 27 of each span, a lot held at both: its decide raises there, A's does not.
+        self.assertEqual((out["sessions"], out["failed"], out["matched"], out["held"], out["disqualified"]),
+                         (2 * fx.STATE_SESSIONS, 4, 2 * fx.STATE_SESSIONS - 4, False, 0))
+        self.assertEqual(out["first_miss"], {"span": 0, "session": 7, "after_reset": 0})
+        # What the intents alone say of those sessions: nothing differs (both answered no order).
+        intents = restart_check(decider, fx.PEAK.replace('STATE["peak"] = max(STATE["peak"], px)',
+                                                         'STATE["peak"] = max(STATE.get("peak", px), px)'),
+                                {}, name="p", streams=[fx.state_inputs(None), fx.state_inputs(None)])
+        self.assertEqual((intents["failed"], intents["matched"]), (0, 2 * fx.STATE_SESSIONS), "the same orders, no error")
+        # Both decides failing alike is a match (the program fails the same with and without its memory).
+        both = restart_check(decider, fx.RAISES, {}, name="p", streams=[fx.state_inputs(None, 10)])
+        self.assertEqual((both["failed"], both["matched"], both["held"]), (0, 10, True))
+        # Through the bar: STATE, told in the brief.
+        fam = fx.e2_family(self.store, "peak", code=fx.PEAK)
+        step = self.researcher.run()["steps"][0]
+        self.assertEqual((step["passed"], step["fails"]), (False, ["STATE"]))
+        v1 = self.rec(fam["id"])["versions"]["1"]
+        self.assertEqual((v1["state"]["failed"], v1["state"]["matched"]), (4, 2 * fx.STATE_SESSIONS - 4))
+        text = elane_train.version_text(1, v1)
+        self.assertIn("on 4 sessions the decide failed (raised, timed out or returned a malformed intent) in one run and "
+                      "not in the other (no match)", text)
+        self.assertIn("a decide must work on an empty STATE at any session", text)
+        self.assertFalse(may_validate(self.store, self.store.family(fam["id"]), 1))
+
+    def test_an_answer_without_its_error_count_is_the_houses(self):
+        """Without `stats.errors` a decide that failed cannot be told from one that answered nothing: never a pass."""
+        fam = fx.e2_family(self.store, "uncounted", code=fx.program(share=0.17))
+        self.runner.decider.counts_errors = False
+        out = self.researcher.run()
+        self.assertEqual(out["steps"][0]["house"], "state")
+        self.assertIn("no error count (stats.errors)", out["steps"][0]["why"])
+        self.assertEqual(self.rec(fam["id"])["versions"], {})
+        self.runner.decider.counts_errors = True
+        self.clock.advance(elane_train.BACKOFF_MAX)
+        self.researcher.run()
+        self.assertEqual(self.rec(fam["id"])["passed_version"], 1)
+
+    def test_the_same_orders_within_a_size(self):
+        buy = {"buy": "SPY", "share": 0.25, "at": "close", "tag": ""}
+        sell = {"sell": 7, "at": "open", "tag": ""}
+        self.assertEqual(same_intents([sell, buy], [dict(sell), dict(buy)]), (True, None))
+        self.assertEqual(same_intents([], None), (True, None))
+        # The last digits of a size are no memory; the seventh place is.
+        self.assertEqual(same_intents([buy], [{**buy, "share": 0.25 + 2.5e-15}]), (True, None))
+        self.assertEqual(same_intents([buy], [{**buy, "share": 0.25 + 9e-07}]), (True, None))
+        same, gap = same_intents([sell, buy], [sell, {**buy, "share": 0.25004}])
+        self.assertEqual((same, list(gap), round(gap["share"], 6)), (False, ["share"], 4e-05))
+        usd = {"buy": "SPY", "usd": 100.0, "at": "open", "tag": ""}
+        self.assertEqual(same_intents([usd], [{**usd, "usd": 100.004}]), (True, None))
+        self.assertEqual(same_intents([usd], [{**usd, "usd": 100.5}])[0], False)
+        # Anything else that differs is another order: no size gap is named.
+        for other in ([buy], [buy, sell], [sell, {**buy, "buy": "QQQ"}], [sell, {**buy, "at": "open"}],
+                      [sell, {**buy, "tag": "n=3"}], [{**sell, "sell": 8}, buy], [sell, usd],
+                      [sell, {**buy, "share": 0.3, "at": "open"}], [{"cancel": 1}, buy]):
+            self.assertEqual(same_intents([sell, buy], other), (False, None), other)
+
+    def test_a_cache_updated_in_place_passes_on_rounding_alone(self):
+        """The A15 review's third finding: a cache holding the value ctx gives, updated in place (the newest term added,
+        the oldest dropped), differs from a fresh instance's in the last digits of a buy's size; compared exactly it
+        failed STATE on rounding alone. (`fx.CACHE` rebuilds its value at every call: nothing cached is reused there.)"""
+        decider = fx.FakeDecider()
+        sessions = 10 * BAR["state_every"]
+        out = restart_check(decider, fx.INPLACE, {}, name="p", streams=[fx.state_inputs(None, sessions)])
+        self.assertEqual((out["matched"], out["held"], out["sized"], out["size_gap"]), (sessions, True, 0, {}))
+        # The cache really is reused, and its sizes really differ: compared to the last digit it fails on many sessions.
+        with mock.patch.dict(elane_train.SIZE_TOL, {"share": 0.0}):
+            exact = restart_check(decider, fx.INPLACE, {}, name="p", streams=[fx.state_inputs(None, sessions)])
+        self.assertFalse(exact["held"])
+        self.assertGreater(exact["sized"], 0.25 * sessions)
+        self.assertEqual(exact["sized"], sessions - exact["matched"], "sizes were all that differed")
+        self.assertLess(exact["size_gap"]["share"], 1e-12, "in the last digits only")
+        # Through the bar it passes, as its recomputing twin does.
+        for slug, code in (("inplace", fx.INPLACE), ("recomputed", fx.RECOMPUTED)):
+            fam = fx.e2_family(self.store, slug, code=code, mechanism=f"Invented volatility idea, {slug}.")
+            self.researcher.run()
+            rec = self.rec(fam["id"])
+            self.assertEqual((rec.get("passed_version"), rec["versions"]["1"]["state"]["matched"]),
+                             (1, 2 * fx.STATE_SESSIONS), slug)
+
+    def test_a_value_carried_from_session_to_session_fails_state_and_is_told(self):
+        """What is NOT a cache: a value that depends on how long ago the instance was loaded (a decayed running sum). Its
+        orders are the same and only their sizes differ, far past the last digits: STATE, with the reason in the brief."""
+        fam = fx.e2_family(self.store, "carried", code=fx.CARRIED)
+        step = self.researcher.run()["steps"][0]
+        self.assertEqual((step["passed"], step["fails"]), (False, ["STATE"]))
+        state = self.rec(fam["id"])["versions"]["1"]["state"]
+        self.assertGreater(state["sized"], 0)
+        self.assertEqual(state["sized"], state["sessions"] - state["matched"], "the sizes are all that differed")
+        self.assertGreater(state["size_gap"]["share"], 100 * elane_train.SIZE_TOL["share"])
+        self.answers.append(self.program_answer(fx.RECOMPUTED, "the sum recomputed from ctx.bars at every call"))
+        out = self.researcher.run()
+        brief = self.writes()[0]["user"]
+        self.assertIn(f"on {state['sized']} sessions the two runs gave the same orders and differed only in a buy's size "
+                      f"(by at most {state['size_gap']['share']:.2g} of the sleeve)", brief)
+        self.assertIn("recompute it from ctx.bars at every call", brief)
+        self.assertEqual((out["steps"][0]["version"], out["steps"][0]["score"]["passed"]), (2, True))
 
     def test_the_check_runs_only_once_the_rest_of_the_bar_holds(self):
         code = fx.program(share=0.25)
@@ -583,7 +890,7 @@ class TheRestartCheck(ResearchCase):
         instance A then has fresh memory too, and a session counter would agree with its reset twin."""
         fam = fx.e2_family(self.store, "reloaded", code=fx.COUNTER)
         decider = self.runner.decider
-        decider.reload_after = 2 * 25  # before the span's 26th session, six sessions after B's reset
+        decider.reload_after = 2 * 25  # before the span's 26th session, eighteen sessions after B's reset
         out = self.researcher.run()
         self.assertEqual(out["steps"][0]["house"], "state")
         self.assertIn("reloaded an instance during the restart check", out["steps"][0]["why"])

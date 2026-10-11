@@ -2,9 +2,12 @@
 real `Tournament.equity_round`; E1's look reads E2's review (`elane.reviewed`); E1's equity adoption and E2's upkeep;
 E1's lane-scoped graveyard binding the equity births; the options population's floor (patch 9) and the operator's stall
 facts (patch 10) left unmasked by the equity lanes; and A15's restart check on E1's own isolated runner, decider kinds
-and ctx builder (a stateless program and a cache pass, a session counter fails STATE; the ctx stream holds the run's own
-lots). Skipped on a tree without E1's equity lanes (the E2 branch's own skeleton); it runs once E2 is merged into E1 with
-its patches. Every family, program and number here is invented (the market is E1's synthetic store)."""
+and ctx builder (a stateless program and a cache pass; a session counter fails STATE whatever its period, with the
+clocks of 5, 10 and 20 sessions the A15 review found passing; a decide that fails on an empty STATE; a cache updated in
+place, which passes on rounding alone and fails once dividends re-base ctx's history; the ctx stream holds the run's own
+lots); and what of the reserve reaches Train on E1's runner (its bars, as look-back). Skipped on a tree without E1's
+equity lanes (the E2 branch's own skeleton); it runs once E2 is merged into E1 with its patches. Every family, program
+and number here is invented (the market is E1's synthetic store)."""
 
 from __future__ import annotations
 
@@ -173,6 +176,11 @@ class StateOnE1(unittest.TestCase):
         # researcher's own score reaches the restart check.
         cls.paying_root = synth.synthetic_store(Path(cls.tmp.name) / "paying" / elane.STORE_DIR, symbols=("SPY",),
                                                 end=dt.date(2024, 12, 31), seed=5, drift=0.8, vol=0.04)
+        # The plain market with invented dividends inside both short spans: ctx's adjusted history is re-based at each.
+        cls.dividend_root = synth.synthetic_store(
+            Path(cls.tmp.name) / "dividends" / elane.STORE_DIR, symbols=("SPY",), end=dt.date(2024, 12, 31), seed=5,
+            drift=0.05, vol=0.15, dividends={"SPY": [(dt.date(2016, 2, 16), 1.2), (dt.date(2016, 4, 15), 1.2),
+                                                     (dt.date(2022, 2, 15), 1.2), (dt.date(2022, 3, 15), 1.2)]})
 
     @classmethod
     def tearDownClass(cls):
@@ -184,8 +192,8 @@ class StateOnE1(unittest.TestCase):
 
         return Isolated(decider if decider is not None else InlineDecider(), root or self.store_root)
 
-    def check(self, code: str) -> tuple[list, dict]:
-        runner = self.runner()
+    def check(self, code: str, root=None) -> tuple[list, dict]:
+        runner = self.runner(root)
         runs = [runner.train(code, {}, name="p", start=first, end=last, k=1.0) for first, last in self.SPANS]
         for run, span in zip(runs, self.SPANS):
             self.assertEqual(run.result["status"], "ok")
@@ -223,7 +231,57 @@ class StateOnE1(unittest.TestCase):
         _, out = self.check(fx.COUNTER)
         self.assertFalse(out["held"], out)
         self.assertLess(out["share"], elane_train.BAR["state_match"])
-        self.assertEqual(out["first_miss"]["after_reset"], 0, "the first session after the first reset")
+        self.assertEqual(out["first_miss"]["after_reset"], 0, "the first session after a reset")
+
+    def test_a_clock_whose_period_divides_the_reset_period_fails_on_e1s_runner(self):
+        """The A15 review's first finding, on E1's runner: clocks of 2, 4, 5, 10 and 20 sessions kept in STATE matched
+        on every session while B's resets were counted from the span's first session."""
+        for period in (2, 4, 5, 10, 20):
+            runs, out = self.check(fx.counter(period))
+            self.assertFalse(out["held"], (period, out))
+            self.assertLess(out["share"], 0.95, period)
+            # The resets counted from the span's start (the schedule the review found): blind to this clock.
+            runner = self.runner()
+            old = elane_train.restart_check(runner.decider, fx.counter(period), {}, name="p", first=0,
+                                            streams=[elane_train.state_inputs(run) for run in runs])
+            self.assertEqual(old["matched"], old["sessions"], period)
+
+    def test_a_decide_that_fails_on_an_empty_state_is_no_match_on_e1s_runner(self):
+        """The A15 review's second finding, on E1's runner and its `stats.errors`: the trailing-peak program runs clean
+        uninterrupted (no error in its Train runs) and raises once STATE is emptied under a held lot."""
+        runs, out = self.check(fx.PEAK)
+        self.assertEqual([run.result["runtime"]["errors"] for run in runs], [0, 0], "its Train runs never fail")
+        self.assertGreater(out["failed"], 0.01 * out["sessions"])
+        self.assertEqual((out["held"], out["disqualified"]), (False, 0), out)
+        self.assertLessEqual(out["matched"], out["sessions"] - out["failed"])
+        self.assertIn("the decide failed", elane_train.restart_text({"state": out}))
+
+    def test_a_cache_updated_in_place_on_e1s_runner(self):
+        """The A15 review's third finding. With no dividend ctx's history never moves: the in-place sum is the value ctx
+        gives, in another order of addition, and passes (compared to the last digit it failed). With dividends ctx's
+        adjusted history is re-based and rounded at each: the carried sum is no longer what ctx gives, the sizes differ
+        past the sixth place, and it fails STATE with the sessions and the gap told; its recomputing twin passes."""
+        # The fakes' programs, sized for this market's variance (a buy's share stays under one, so its size shows).
+        inplace, recomputed = (code.replace('"target": 0.0002', '"target": 0.00002') for code in (fx.INPLACE, fx.RECOMPUTED))
+        runs, out = self.check(inplace)
+        self.assertEqual((out["matched"], out["held"], out["sized"]), (out["sessions"], True, 0), out)
+        with mock.patch.dict(elane_train.SIZE_TOL, {"share": 0.0}):
+            runner = self.runner()
+            exact = elane_train.restart_check(runner.decider, inplace, {}, name="p",
+                                              streams=[elane_train.state_inputs(run) for run in runs])
+        self.assertFalse(exact["held"], "compared to the last digit, rounding alone failed it")
+        self.assertGreater(exact["sized"], 0.05 * exact["sessions"])
+        self.assertLess(exact["size_gap"]["share"], 1e-12)
+        _, out = self.check(inplace, self.dividend_root)
+        self.assertFalse(out["held"], out)
+        self.assertGreater(out["sized"], 0.05 * out["sessions"])
+        self.assertEqual(out["sized"], out["sessions"] - out["matched"], "the sizes are all that differed")
+        self.assertGreater(out["size_gap"]["share"], elane_train.SIZE_TOL["share"])
+        self.assertLess(out["size_gap"]["share"], 0.01, "a drift, not another order")
+        self.assertIn("differed only in a buy's size", elane_train.restart_text({"state": out}))
+        for root in (None, self.dividend_root):
+            _, out = self.check(recomputed, root)
+            self.assertEqual((out["matched"], out["held"]), (out["sessions"], True), out)
 
     def test_the_ctx_stream_holds_the_runs_own_lots(self):
         """The stateless program sells every lot it holds at the open: on the stream, the lots it names at each close
@@ -317,16 +375,137 @@ class StateOnE1(unittest.TestCase):
                                                              "first session: the store starts there)")
         self.assertEqual(runner.decider.kind_loaded, {})
         # A program that keeps its clock in STATE earns the same way on this market and meets Y1-R1: STATE alone fails it.
-        counter = fx.COUNTER.replace('"every": 7', '"every": 3')
-        fam = fx.e2_family(store, "e1-counter", code=counter, symbols=("SPY",))
-        EquityResearcher(store, router, SETTINGS, runner=runner, clock=clock).score(fam, store.version(fam["id"], 1))
-        rec = elane_train.record_of(store.family(fam["id"]))
-        v1 = rec["versions"]["1"]
-        self.assertEqual((v1["fails"], v1["passed"], rec.get("passed_version")), (["STATE"], False, None))
-        self.assertGreaterEqual(v1["active_years"], elane_train.BAR["min_active_years"])
-        self.assertGreater(v1["pnl_15"], 0, "it met the rest of the bar")
-        self.assertLess(v1["state"]["share"], elane_train.BAR["state_match"])
-        self.assertFalse(elane_train.may_validate(store, store.family(fam["id"]), 1))
+        # A weekly clock (5 sessions, a period that divides the check's 20) was the A15 review's first finding: it met
+        # the whole bar and became the lineage's Validation try. So was the program whose decide fails on an empty STATE.
+        for slug, code in (("e1-counter-3", fx.counter(3)), ("e1-counter-5", fx.counter(5)),
+                           ("e1-peak", fx.PEAK.replace('"max_hold_sessions": 3', '"max_hold_sessions": 2'))):
+            fam = fx.e2_family(store, slug, code=code, symbols=("SPY",), mechanism=f"Invented idea {slug} on the index.")
+            EquityResearcher(store, router, SETTINGS, runner=runner, clock=clock).score(fam, store.version(fam["id"], 1))
+            rec = elane_train.record_of(store.family(fam["id"]))
+            v1 = rec["versions"]["1"]
+            self.assertEqual((v1["fails"], v1["passed"], rec.get("passed_version")), (["STATE"], False, None), slug)
+            self.assertGreaterEqual(v1["active_years"], elane_train.BAR["min_active_years"])
+            self.assertGreater(v1["pnl_15"], 0, "it met the rest of the bar")
+            self.assertLess(v1["state"]["share"], elane_train.BAR["state_match"])
+            self.assertFalse(elane_train.may_validate(store, store.family(fam["id"]), 1))
+        self.assertGreater(v1["state"]["failed"], 0, "the peak program's decide failed in the reset run alone")
+
+
+class ReserveMoved:
+    """E1's decider with the reserve's bars moved in every run it is sent: each 2020-2021 row of the slice has its
+    prices scaled by a smooth bump over the two years (one at both ends, `1 + bump` in the middle), so the market is the
+    same on every Train session and differs only inside the reserve. `moved`: the reserve rows of each run's slice."""
+
+    def __init__(self, inner, bump: float):
+        self.inner, self.bump, self.moved = inner, float(bump), []
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def kind(self, kind, op, payload, **kw):
+        if op == "run":
+            payload = {**payload, "bars": self.market(payload["bars"])}
+        return self.inner.kind(kind, op, payload, **kw)
+
+    def market(self, bars):
+        import dataclasses
+        import math
+
+        import numpy as np
+
+        from league.equity.store import from_ordinal
+
+        first, last = dt.date(2020, 1, 1).toordinal(), dt.date(2022, 1, 1).toordinal()
+        days = [from_ordinal(int(d)) for d in bars.days]
+        rows = np.array([d.year in elane_train.RESERVE_YEARS for d in days])
+        assert not rows[bars.first:].any(), "no run session is a reserve session"
+        self.moved.append(int(rows.sum()))
+        factor = np.array([1.0 + self.bump * math.sin(math.pi * (d.toordinal() - first) / (last - first)) ** 2
+                           if d.year in elane_train.RESERVE_YEARS else 1.0 for d in days])
+        raw = {sym: a.copy() for sym, a in bars.raw.items()}
+        adj = {sym: a.copy() for sym, a in bars.adj.items()}
+        for sym in raw:
+            raw[sym][:, :4] *= factor[:, None]
+            adj[sym][:, :4] *= factor[:, None]
+        return dataclasses.replace(bars, raw=raw, adj=adj)
+
+
+#: An invented trend program with a 126-session look-back: in the first half of 2022 it compares a 2022 close with a
+#: reserve close.
+TREND = '''import math
+import numpy as np
+
+NEEDS = {"symbols": ["SPY"], "history": 252, "max_hold_sessions": 5}
+PARAMS = {"look": 126, "share": 0.5}
+
+
+def decide(ctx):
+    close = ctx.bars["SPY"].close
+    out = [{"sell": lot["id"], "at": "open"} for lot in ctx.positions if lot["held_sessions"] >= 3]
+    look = ctx.params["look"]
+    if len(close) > look and close[-1] > close[-1 - look] and not ctx.positions:
+        out.append({"buy": "SPY", "share": ctx.params["share"], "at": "close"})
+    return out
+'''
+
+
+@unittest.skipUnless(E1, "E1's equity lanes are not in this tree (the E2 branch's skeleton)")
+class ReserveOnE1(unittest.TestCase):
+    """THE RESERVE on E1's runner (the A15 review's fourth finding): what holds, and what does not. E2 runs no reserve
+    session and keeps no reserve row; the reserve's BARS still reach the 2022-2024 Train figures of a program with
+    look-back (E1's runner hands the run its NEEDS `history` before 2022-01-03). Two markets that differ only in
+    2020-2021: a program that asks for no history is the same byte for byte, and one with look-back is the same in
+    2016-2019 and differs from 2022 on."""
+
+    @classmethod
+    def setUpClass(cls):
+        from league.equity import synth
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.root = synth.synthetic_store(Path(cls.tmp.name) / "plain" / elane.STORE_DIR, symbols=("SPY",),
+                                         end=dt.date(2024, 12, 31), seed=5, drift=0.05, vol=0.15)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def verdict(self, code: str, bump: float | None) -> tuple[dict, list[int]]:
+        """The verdict E2 keeps of `code` (its Train figures: `train_score` of the summed spans) in the market as it is
+        (`bump` None) or with the reserve moved, and the reserve rows each run's slice held."""
+        from league.equity.runner import Isolated
+        from league.live.decider import InlineDecider
+
+        decider = ReserveMoved(InlineDecider(), bump or 0.0)
+        runner = Isolated(decider, self.root)
+        parts = {k: [runner.train(code, {}, name="p", start=first, end=last, k=k).result
+                     for first, last in elane_train.TRAIN_SPANS] for k in (1.0, 1.5)}
+        for results in parts.values():
+            for result, span in zip(results, elane_train.TRAIN_SPANS):
+                self.assertEqual(elane_train.outside_years(result, spans=[span]), [], "no reserve row, day or figure")
+                self.assertFalse({row[0][:4] for row in result["daily"]} & {"2020", "2021"}, "no reserve session")
+        return elane_train.train_score(elane_train.combine(parts[1.0]), elane_train.combine(parts[1.5])), decider.moved
+
+    def test_a_program_that_asks_for_no_history_reads_nothing_of_the_reserve(self):
+        code = fx.program().replace('"history": 2', '"history": 0')
+        as_is, held = self.verdict(code, None)
+        moved, held_moved = self.verdict(code, 2.0)
+        self.assertEqual((held, held_moved), ([0] * 4, [0] * 4), "its slices hold no reserve bar at all")
+        self.assertTrue(as_is["years"] and as_is["summary"]["trades"], "really run")
+        self.assertEqual(json.dumps(as_is, sort_keys=True), json.dumps(moved, sort_keys=True))
+
+    def test_a_program_with_look_back_reads_the_reserves_bars_in_2022(self):
+        as_is, held = self.verdict(TREND, None)
+        moved, held_moved = self.verdict(TREND, 2.0)
+        # Each 2022-2024 run's slice holds the 252 sessions before 2022-01-03 (reserve bars); the 2016-2019 runs' none.
+        self.assertEqual((held, held_moved), ([0, 252, 0, 252], [0, 252, 0, 252]))
+        early = ("2016", "2017", "2018", "2019")
+        self.assertEqual(sorted(as_is["years"]), [str(y) for y in elane_train.TRAIN_YEARS], "the seven Train years only")
+        self.assertEqual({y: as_is["years"][y] for y in early}, {y: moved["years"][y] for y in early},
+                         "2016-2019 is the same market: the same rows")
+        self.assertNotEqual(as_is["years"]["2022"], moved["years"]["2022"],
+                            "the 2022 row is a function of reserve bars, through the look-back")
+        self.assertNotEqual((as_is["pnl_10"], as_is["score"]), (moved["pnl_10"], moved["score"]),
+                            "and so are the sums and the pooled t it enters")
 
 
 if __name__ == "__main__":

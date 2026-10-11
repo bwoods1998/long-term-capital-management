@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import math
 import tempfile
 from types import SimpleNamespace
 from typing import Any, Callable, Mapping
@@ -265,7 +266,8 @@ class FakeDecider:
     What a test can make of the child: `restart_after` (a restart E1's decider counts in `restarts`, once that many
     decides were answered), `reload_after` (the child died between two requests: every instance is loaded again with
     fresh memory before the next decide, and `restarts` does not move, as in E1's `Decider._ask`), `counts` False (an
-    answer without `stats.calls`), `fails` (an exception every decide raises: a child that failed)."""
+    answer without `stats.calls`), `counts_errors` False (one without `stats.errors`), `fails` (an exception every
+    decide raises: a child that failed)."""
 
     def __init__(self) -> None:
         self.instances: dict[str, dict[str, Any]] = {}
@@ -275,6 +277,7 @@ class FakeDecider:
         self.restart_after: int | None = None
         self.reload_after: int | None = None
         self.counts = True
+        self.counts_errors = True
         self.fails: BaseException | None = None
 
     def _fresh(self, key: str, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -320,6 +323,8 @@ class FakeDecider:
                     if instance["errors"] >= int(instance["payload"].get("max_errors", 25)):
                         instance["disqualified"] = f"{instance['errors']} errors"
             stats = {"calls": instance["calls"], "errors": instance["errors"], "disqualified": instance["disqualified"]}
+            if not self.counts_errors:
+                del stats["errors"]
             results[key] = {"intents": json.loads(json.dumps(intents)), "stats": stats if self.counts else {}}
             self.decides += 1
         if self.restart_after is not None and self.decides >= self.restart_after:
@@ -328,17 +333,20 @@ class FakeDecider:
         return {"ok": True, "results": results}
 
 
-#: The decision sessions the invented ctx stream gives a Train span (two resets at the check's 20).
+#: The decision sessions the invented ctx stream gives a Train span: the check empties instance B's STATE 7 sessions
+#: in and every 20 after (league/swarm/elane_train.py `BAR`), so at sessions 7 and 27 here, both with a lot held.
 STATE_SESSIONS = 45
 
 
-def state_inputs(run: Any) -> Any:
+def state_inputs(run: Any, sessions: int = STATE_SESSIONS) -> Any:
     """The restart check's ctx stream, invented (E1's ctx builds the real one: league/swarm/elane_train.py
-    `state_inputs`): `STATE_SESSIONS` decision sessions of one Train span, each with its symbols' last closes, the
-    calendar fields and, every other session, an open lot."""
+    `state_inputs`): `sessions` (`STATE_SESSIONS`) decision sessions of one Train span, each with its symbols' last
+    closes, the calendar fields and, every other session, an open lot."""
     symbols = [str(s) for s in ((getattr(run, "result", None) or {}).get("symbols") or ["SPY"])]
-    for i in range(STATE_SESSIONS):
-        closes = [100.0 + ((j * 7) % 11) - 5.0 for j in range(i + 1)][-31:]
+    for i in range(sessions):
+        # Invented closes around 100 with no period and four decimals (a sum of their returns has rounding to show).
+        closes = [round(100.0 * math.exp(0.03 * math.sin(1.7 * j) + 0.02 * math.cos(0.37 * j * j)), 4)
+                  for j in range(i + 1)][-31:]
         yield {"symbols": symbols, "bars": {s: SimpleNamespace(close=list(closes)) for s in symbols},
                "prices": {s: closes[-1] for s in symbols}, "weekday": i % 5, "session_of_month": i % 21 + 1,
                "sessions_to_month_end": 20 - i % 21, "events": {}, "events_next": {},
@@ -362,6 +370,11 @@ def decide(ctx):
         out.append({"buy": "SPY", "share": ctx.params["share"], "at": "close"})
     return out
 '''
+
+def counter(every: int) -> str:
+    """`COUNTER` with a clock of `every` sessions (5 a week, 10, 20: the periods that divide the check's 20)."""
+    return COUNTER.replace('"every": 7', f'"every": {int(every)}')
+
 
 #: An invented program that raises at every call (a decide that fails is no intent: two silent instances agree).
 RAISES = '''import math
@@ -395,6 +408,66 @@ def decide(ctx):
         out.append({"buy": "SPY", "share": ctx.params["share"], "at": "close"})
     return out
 '''
+
+
+#: An invented program whose decide needs what STATE held before a restart: it writes a lot's peak at entry and reads it
+#: while the lot is held, so with STATE emptied under a held lot it raises, and a decide that raises answers nothing, as
+#: the uninterrupted one does while it holds (the stop is never reached on the invented stream).
+PEAK = '''import math
+
+NEEDS = {"symbols": ["SPY"], "history": 5, "max_hold_sessions": 3}
+PARAMS = {"share": 0.5, "stop": 0.5}
+STATE = {}
+
+
+def decide(ctx):
+    px = ctx.prices["SPY"]
+    if ctx.positions:
+        STATE["peak"] = max(STATE["peak"], px)
+        if px < STATE["peak"] * (1.0 - ctx.params["stop"]):
+            return [{"sell": lot["id"], "at": "open"} for lot in ctx.positions]
+        return []
+    STATE["peak"] = px
+    return [{"buy": "SPY", "share": ctx.params["share"], "at": "close"}]
+'''
+
+#: An invented program whose STATE holds the value ctx gives (a rolling sum of squared returns over the last n sessions)
+#: but UPDATED IN PLACE: the newest term added, the oldest dropped. The sum is the one ctx gives, added in another
+#: order, so the size of its buy differs from a fresh instance's in the last digits only (floating-point noise).
+INPLACE = '''import math
+
+NEEDS = {"symbols": ["SPY"], "history": 30, "max_hold_sessions": 3}
+PARAMS = {"n": 20, "target": 0.0002}
+STATE = {}
+
+
+def squared(close, back):
+    return (float(close[-1 - back]) / float(close[-2 - back]) - 1.0) ** 2
+
+
+def decide(ctx):
+    close = ctx.bars["SPY"].close
+    n = ctx.params["n"]
+    out = [{"sell": lot["id"], "at": "open"} for lot in ctx.positions]
+    if len(close) < n + 2:
+        return out
+    if "ss" not in STATE:
+        STATE["ss"] = sum(squared(close, back) for back in range(n))
+    else:
+        STATE["ss"] += squared(close, 0) - squared(close, n)
+    variance = max(STATE["ss"], 1e-12) / n
+    out.append({"buy": "SPY", "share": min(1.0, ctx.params["target"] / variance), "at": "close"})
+    return out
+'''
+
+#: `INPLACE` recomputing its sum from ctx at every call (what the bar asks for): nothing carried, nothing to drift.
+RECOMPUTED = INPLACE.replace("STATE[\"ss\"] += squared(close, 0) - squared(close, n)",
+                             "STATE[\"ss\"] = sum(squared(close, back) for back in range(n))")
+
+#: `INPLACE` with a value that is NOT the one ctx gives: a decayed running sum of every session since its load (it
+#: drops nothing, it fades), so the size of its buy depends on how long ago it was loaded.
+CARRIED = INPLACE.replace("STATE[\"ss\"] += squared(close, 0) - squared(close, n)",
+                          "STATE[\"ss\"] = 0.9 * STATE[\"ss\"] + squared(close, 0)")
 
 
 def e2_family(store: SwarmStore, slug: str, *, lane: str = "beta", agenda: str = "overnight",
@@ -447,6 +520,6 @@ def reviewed(store: SwarmStore, fid: str, n: int = 1) -> None:
 
 __all__ = ["UNIVERSE", "lane_block", "settings", "fake_cfg", "fake_validate", "switch_on", "new_store", "PROGRAM",
            "program", "card", "proposal", "answer", "FakeRouter", "TRAIN_YEARS", "year_rows", "daily_rows", "train_result",
-           "span_result", "FakeRunner", "FakeDecider", "STATE_SESSIONS", "state_inputs", "COUNTER", "RAISES", "CACHE",
-           "e2_family", "review_answer", "is_review", "RunFailed", "DeciderError", "ProgramRefused", "MissingData",
-           "reviewed"]
+           "span_result", "FakeRunner", "FakeDecider", "STATE_SESSIONS", "state_inputs", "COUNTER", "counter", "RAISES",
+           "CACHE", "PEAK", "INPLACE", "RECOMPUTED", "CARRIED", "e2_family", "review_answer", "is_review", "RunFailed",
+           "DeciderError", "ProgramRefused", "MissingData", "reviewed"]

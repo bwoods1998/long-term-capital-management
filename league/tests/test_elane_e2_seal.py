@@ -4,12 +4,14 @@ differ only in what happened to share programs after Train: in one the Train pas
 pre-check, passed the sealed look and went live; in the other both failed, retired, and left graveyard rows whose
 lessons tell the outcome. The equity request (system and user), the equity researcher's brief, the route choice, the
 equity Train map and graveyard, and the options generators' graveyard reads are the same in both, and carry no
-sentinel of either outcome. THE RESERVE (A15): two markets that differ only in 2020-2021 give every E2 record, stored
-run, map, ledger and generator read byte for byte the same, with no figure of those years in any; a runner that leaks a
-2020 row is refused whole; every text a generator reads says "Train years 2016-19 and 2022-24". (The invented runner
-answers the years it is asked for: what is tested is that E2 asks for no reserve session and keeps no reserve row. On
-E1's runner a 2022 run still looks back on 2021's bars as history, as the amendment's two `train(start, end)` calls
-do.) Every family, program and number here is invented."""
+sentinel of either outcome. THE RESERVE (A15), what these tests prove and no more: E2 asks the runner for the two Train
+spans only, so whatever the reserve years' P&L would have been, no record, stored run, map, ledger or generator read
+holds a figure, a row or a day of them; a runner that leaks a 2020 row is refused whole; every text a generator reads
+says "Train years 2016-19 and 2022-24". The invented runner answers the years it is asked for and has NO LOOK-BACK, so
+its two "markets" differ in the reserve's P&L only and hand E2 the same Train rows: these tests cannot show that two
+markets differing in 2020-2021 BARS give the same records, and on E1's runner they do not (a 2022-2024 run reads the
+bars before 2022-01-03 as history, so a program with look-back has other 2022-2024 rows: league/tests/test_elane_e2_e1.py
+`ReserveOnE1` pins what holds there). Every family, program and number here is invented."""
 
 from __future__ import annotations
 
@@ -146,7 +148,8 @@ RESERVE_WORDS = ("8642.97", "7531", "6421", "-3.217", "9753.31", "4.139")
 class MarketRunner:
     """E1's isolated runner over an invented market (a by-year row each year 2016-2024): `train(start, end)` answers
     only the requested sessions' years, its summary summed from them; `leak` puts the 2020 row into the 2016-2019 run.
-    The code "fails" in a program makes its 1.5x run lose."""
+    The code "fails" in a program makes its 1.5x run lose. It has no look-back: a span's rows never depend on the
+    reserve's (E1's runner's do, through NEEDS `history`: the module docstring)."""
 
     def __init__(self, reserve: dict, *, leak: bool = False):
         base = {"trades": 60, "days": 252, "days_traded": 30, "pnl": 20.0, "t_daily": 0.6, "exposure_mean": 0.3,
@@ -208,11 +211,14 @@ class TheReserve(unittest.TestCase):
                 "report": elane_yield.report(store, self.settings, train_key=STATE_KEY),
                 "calls": runner.calls}
 
-    def test_two_markets_that_differ_only_in_2020_21_read_the_same(self):
+    def test_e2_asks_for_the_train_spans_only_whatever_the_reserve_would_have_paid(self):
+        """Two invented markets whose reserve years would have paid very differently, and whose Train spans' rows are
+        the same (the invented runner has no look-back): E2 runs the two spans only, so everything it keeps and shows is
+        the same. NOT a claim about the reserve's bars (the module docstring)."""
         a, b = self.reads(RESERVE["a"]), self.reads(RESERVE["b"])
         for key in a:
             self.assertEqual(json.dumps(a[key], sort_keys=True, default=str), json.dumps(b[key], sort_keys=True, default=str),
-                             f"{key} differs with the reserve years")
+                             f"{key} differs with the reserve years' P&L")
         records = a["records"]
         self.assertEqual((records["earns"]["status"], records["earns"]["passed_version"]), ("passed", 1), "really judged")
         self.assertEqual((records["loses"]["status"], records["loses"]["versions"]["1"]["fails"]), ("refuted", ["P1", "R1"]))

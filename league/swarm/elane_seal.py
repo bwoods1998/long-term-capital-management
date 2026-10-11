@@ -20,13 +20,23 @@ and the diagnostician are generators too, of the options lanes. This module is t
   `visible_graveyard`, which the strategist and the diagnostician read) has its patch in ELANE_E2_PATCHES.md (4).
 - THE RESERVE (A15): 2020-2021 is not Train for E2. E2 runs programs over the Train spans 2016-2019 and 2022-2024
   only (league/swarm/elane_train.py `TRAIN_SPANS`), and a result carrying a row of 2020 or 2021 is refused whole as
-  one of 2025 or 2026 is (`elane_train.outside_years`), so no 2020-2021 figure or P&L reaches a family's record, the
-  Train map, the yield ledger or any generator.
+  one of 2025 or 2026 is (`elane_train.outside_years`), so no reserve session is run or scored and no 2020-2021
+  figure or P&L reaches a family's record, the Train map, the yield ledger or any generator. WHAT THIS IS NOT: a seal
+  of the reserve's BARS. On E1's runner the 2022-2024 run reads the bars before 2022-01-03 as look-back (NEEDS
+  `history`, up to `league.equity.config.MAX_HISTORY` sessions), so the 2022-2024 Train figures of a program with
+  look-back, the sums and the pooled t they enter, and the Train map's best t are functions of reserve bars (two
+  markets that differ only in 2020-2021 can give such a program other 2022-2024 rows; its 2016-2019 rows are the
+  same, and a program that reads no history is the same throughout). Blanking the look-back before 2022-01-03 would
+  need a hook in E1's runner or store and would cost a long-look-back program most of 2022: the captain's call when
+  the reserve's accessor is built.
 - INVARIANCE IS THE TEST. Two stores that differ only in what happened to share programs after Train (a Validation
   try passed or failed, a look passed or failed, a band, a retirement after the look, a look row, a graveyard row with
-  an outcome lesson) give the equity request, the researcher's brief and the route choice byte for byte the same; two
-  markets that differ only in 2020-2021 give every E2 record and every generator's read byte for byte the same
-  (league/tests/test_elane_e2_seal.py).
+  an outcome lesson) give the equity request, the researcher's brief and the route choice byte for byte the same
+  (league/tests/test_elane_e2_seal.py). For the reserve the tests say what holds and no more: E2 asks the runner for
+  the two Train spans only and keeps no reserve row, figure or day, whatever the reserve's P&L would have been
+  (test_elane_e2_seal.py, an invented runner with no look-back); on E1's runner no reserve session is run, a program
+  without look-back is byte for byte the same in two markets that differ only in 2020-2021, and one with look-back
+  differs in 2022-2024 only (test_elane_e2_e1.py).
 
 Why E2 cares beyond the rule: a generator that sees which programs passed the sealed look learns the holdout, and
 the screen's false-positive rate per program (S1-R's 12%) holds only for programs written blind to it.
