@@ -21,7 +21,6 @@ league/tests/test_equity_paper.py's, under the REAL `StockPaperProof`. No price 
 
 import datetime as dt
 import unittest
-from decimal import Decimal as D
 
 from league.equity import live as L
 from league.equity import schedule as S
