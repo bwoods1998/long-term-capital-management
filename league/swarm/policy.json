@@ -177,11 +177,53 @@
           "A6": []
         },
         "beside": "S2, c_R = 0 (no pooled-t bar), c_H,used = {c_H}; this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%); its holdout-only rate at c_H,used = {honly}% (the bound when 2025 is fully known); drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); a pass under S2 is weaker evidence of edge than under S1+F1; contamination: 2025 (all of Validation) and part of the 2026 holdout can be known to the authoring models, so the FP is a property of the procedure over 2010-19 and 2022-24 history, not a guarantee in this one world"
+      },
+      "equity_xs": {
+        "name": null,
+        "screen": null,
+        "receipt_sha256": null,
+        "c_XS": null,
+        "c_margin": null,
+        "alpha_plac": null,
+        "placebo_draws": null,
+        "rung": null,
+        "fp_cap": null,
+        "owner_wall": null,
+        "validation_tries": null,
+        "holdout_looks": null,
+        "retry": null,
+        "flags": null,
+        "screen_flags": null,
+        "beside": null
       }
     },
     "val_tries": 1,
     "looks_per_lineage": 1,
     "program_loss_usd": -300,
+    "panel": {
+      "mode": "off",
+      "panels": [
+        "sp500"
+      ],
+      "birth_share": 0.5,
+      "max_alive": 12,
+      "max_names": 12,
+      "rebalance": [
+        "weekly",
+        "monthly"
+      ],
+      "train_budget": 4,
+      "placebos_train": 200,
+      "cpu_seconds_day": 14400,
+      "run_budget_seconds": 600,
+      "zero_edge_programs": 100,
+      "coverage_min": 0.97,
+      "spreads_min_share": 0.9,
+      "membership_max_stale_days": 45,
+      "universe_max_age_days": 400,
+      "live_min_tradable_share": 0.95,
+      "census_notes": {}
+    },
     "e2": {
       "births_every_seconds": 7200,
       "births_refill_seconds": 1800,

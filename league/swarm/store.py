@@ -248,10 +248,15 @@ CLOSEABLE = ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly
 #: one of `EQUITY_STRUCTURES` (`add_family` holds the two together), so the options readers below tell the lanes apart
 #: by the structure column alone. `families(lanes=None)` (the default every options consumer calls) leaves equity
 #: families out; `lanes=EQUITY_LANES` returns them alone; `lanes="all"` everything (reports).
-EQUITY_STRUCTURES = ("etf", "stock")
+#: RELEASE E4: "panel" (a cross-sectional program on the point-in-time S&P 500; league/swarm/elane_xs.py), lane "equity"
+#: only, and the one structure whose family names no root (it sees salted slots, never a symbol).
+EQUITY_STRUCTURES = ("etf", "stock", "panel")
+PANEL_STRUCTURE = "panel"
 EQUITY_LANES = ("beta", "equity")
-#: The options readers' SQL guard: a families row that is no equity family.
-OPTIONS_ONLY_SQL = "structure NOT IN ('etf', 'stock')"
+#: The equity readers' SQL scope, and the options readers' guard (a families row that is no equity family): both built
+#: from `EQUITY_STRUCTURES`, so no reader spells the structures out (league/tests/test_elane_xs.py holds it).
+EQUITY_ONLY_SQL = "structure IN (" + ", ".join(f"'{name}'" for name in EQUITY_STRUCTURES) + ")"
+OPTIONS_ONLY_SQL = "structure NOT IN (" + ", ".join(f"'{name}'" for name in EQUITY_STRUCTURES) + ")"
 _SLUG = re.compile(r"^[a-z0-9-]{1,40}$")
 
 
@@ -502,6 +507,8 @@ class SwarmStore:
             if spec.get("structure") not in EQUITY_STRUCTURES:
                 raise ValueError(f"an equity-lane family's structure is one of {', '.join(EQUITY_STRUCTURES)}, "
                                  f"not {spec.get('structure')!r}")
+            if spec.get("structure") == PANEL_STRUCTURE and lane != "equity":
+                raise ValueError(f"a panel family's lane is \"equity\" (release E4), not {spec.get('lane')!r}")
             if parent and lane_of_spec((self.family(parent) or {}).get("spec")) != lane:
                 raise ValueError("an equity-lane family forks only from a family of its own lane (A8.12)")
         elif spec.get("structure") not in STRUCTURES:
@@ -509,7 +516,10 @@ class SwarmStore:
         elif parent and equity_family(self.family(parent)):
             raise ValueError("an options family never forks from an equity-lane family (A8.12)")
         roots = [str(r).upper() for r in (spec.get("roots") or []) if str(r).strip()]
-        if not roots:
+        panel = lane is not None and spec.get("structure") == PANEL_STRUCTURE
+        if panel and roots:
+            raise ValueError("a panel family names no root (it trades salted slots of its panel, never a symbol)")
+        if not roots and not panel:
             raise ValueError("a family names at least one root")
         mechanism = " ".join(str(spec.get("mechanism") or "").split())
         if len(mechanism) < 20:
@@ -561,7 +571,7 @@ class SwarmStore:
             unknown = sorted(wanted - set(EQUITY_LANES))
             if unknown:
                 raise ValueError(f"lanes: {', '.join(unknown)} is no equity lane (None is the options lanes, 'all' every family)")
-            scope = " AND structure IN ('etf', 'stock')"
+            scope = f" AND {EQUITY_ONLY_SQL}"
         if alive is None:
             rows = self._all(f"SELECT * FROM families WHERE 1=1{scope} ORDER BY born_at, id")
         elif alive:
@@ -1295,4 +1305,5 @@ class SwarmStore:
 
 __all__ = ["SwarmStore", "ALIVE", "BANDS", "STRUCTURES", "LONG_SINGLE", "SINGLE_SIDES", "same_slice", "slice_priors",
            "priors_of", "structure_text", "structure_query", "CLOSEABLE", "slugify", "code_sha", "dumps", "loads", "iso",
-           "EQUITY_STRUCTURES", "EQUITY_LANES", "OPTIONS_ONLY_SQL", "lane_of_spec", "equity_family"]
+           "EQUITY_STRUCTURES", "PANEL_STRUCTURE", "EQUITY_LANES", "EQUITY_ONLY_SQL", "OPTIONS_ONLY_SQL", "lane_of_spec",
+           "equity_family"]

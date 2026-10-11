@@ -59,6 +59,11 @@ SEALED_KEYS = frozenset({
     "elane_try", "elane_look", "elane_floor", "elane_train_r", "validation_r_sd_by_version", "validation_r_sd",
     "banded_evaluator", "validation_line", "validation_numbers", "validation_view", "validation", "gate_ready",
     "gate_hold", "look_inflight", "look", "holdout", "forward", "band_reason", "submitted_run",
+    # RELEASE E4, THE PANEL (league/swarm/elane_xs.py `SEALED`; a test holds the two equal): the program's floor, its
+    # two Train series (the lineage rule's), the pre-check's record, the Train placebo ranks, the halves' figures, the
+    # hidden run and the look. A panel family's Train record is read through `elane_xs.train_facts` only.
+    "elane_xs_floor", "elane_xs_train_x", "elane_xs_train_u", "elane_xs_precheck", "elane_xs_placebo",
+    "elane_xs_halves", "elane_xs_oof", "elane_xs_look",
 })
 #: The family columns no generator reads of an equity family.
 SEALED_COLUMNS = frozenset({"band", "band_since", "retired_at", "retire_reason", "validated_version", "best_validation",

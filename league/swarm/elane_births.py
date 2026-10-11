@@ -130,8 +130,12 @@ def universe(settings: Mapping[str, Any] | None) -> dict[str, list[str]]:
 def researching(store: Any) -> int:
     """E2 families in Train research (E2's record: neither passed nor refuted nor closed). Outcome-free (A9 D3): a
     family that passed Train leaves this count whatever happens to it after."""
+    from . import elane_xs
+
     n = 0
     for fam in elane_seal.equity_families(store):
+        if elane_xs.is_panel(fam):
+            continue  # RELEASE E4: a panel family is counted by the panel's own ceiling (`elane.panel.max_alive`)
         if elane_train.e2_family(fam) and elane_train.record_of(fam).get("status", "researching") == "researching":
             n += 1
     return n
@@ -185,33 +189,52 @@ class EquityQuota:
                      if self.on and self.room else 0)
         self.passed = {BETA: 0, EQUITY: 0}
         self.refused = 0
+        # RELEASE E4, THE QUOTA BY STRUCTURE (league/swarm/elane_xs.py `quota`): `panel` of the pass's births may be
+        # panel families (0 while the panel lane bears nothing: the pass is then E2's own), the rest share programs; a
+        # share one structure leaves unfilled is not handed to the other.
+        from . import elane_xs
 
-    def why_not(self, lane: str) -> str | None:
-        """Why one more equity birth may not be born in this pass, or None."""
+        self.by_structure = True
+        self.panel = elane_xs.quota(store, settings, self.want) if self.on else 0
+        self.born_panel = 0
+
+    def why_not(self, lane: str, structure: str | None = None) -> str | None:
+        """Why one more equity birth (of `structure`: "panel" for a panel family) may not be born in this pass, or
+        None."""
         if not self.on:
             return "the equity lanes' births are off (elane.mode, elane.birth_share)"
         if lane not in LANES:
             return f"{lane!r} is not an equity lane"
         if sum(self.passed.values()) >= self.want:
             return f"the pass's {self.want} equity births are born"
+        if structure == "panel":
+            if self.born_panel >= self.panel:
+                return f"the pass's {self.panel} panel births are born (elane.panel.birth_share)"
+        elif sum(self.passed.values()) - self.born_panel >= self.want - self.panel:
+            return (f"the pass's {self.want - self.panel} share-program births are born (its other {self.panel} are the "
+                    "panel's)")
         return None
 
-    def admits(self, lane: str) -> bool:
-        why = self.why_not(lane)
+    def admits(self, lane: str, structure: str | None = None) -> bool:
+        why = self.why_not(lane, structure)
         if why is not None:
             self.refused += 1
         return why is None
 
-    def born(self, lane: str) -> None:
+    def born(self, lane: str, structure: str | None = None) -> None:
         if lane in self.passed:
             self.passed[lane] += 1
+            self.born_panel += int(structure == "panel")
 
     def short(self) -> int:
         return max(0, self.want - sum(self.passed.values()))
 
     def event(self) -> dict[str, Any]:
-        return {"equity_births": dict(self.passed), "equity_refused_by_quota": self.refused, "equity_short": self.short(),
-                "equity_want": self.want, "window": dict(self.window), "researching": self.researching}
+        out = {"equity_births": dict(self.passed), "equity_refused_by_quota": self.refused, "equity_short": self.short(),
+               "equity_want": self.want, "window": dict(self.window), "researching": self.researching}
+        if self.panel or self.born_panel:
+            out["panel"] = {"want": self.panel, "born": self.born_panel}  # RELEASE E4
+        return out
 
     def text(self) -> str:
         """The request's quota lines ("" while off)."""
@@ -363,9 +386,11 @@ def families_text(store: Any, settings: Mapping[str, Any] | None) -> str:
     """The E2 families in Train research or refuted, the newest `families_shown`, Train facts only ("" for none)."""
     shown = cfg(settings)["families_shown"]
     rows = []
+    from . import elane_xs
+
     for fam in elane_seal.equity_families(store):
-        if not elane_train.e2_family(fam) or elane_train.passed_version(fam) is not None:
-            continue
+        if not elane_train.e2_family(fam) or elane_train.passed_version(fam) is not None or elane_xs.is_panel(fam):
+            continue  # (a panel family's Train facts are the PANEL block's: `elane_xs.request_text`)
         facts = elane_seal.train_facts(fam, STATE_KEY)
         rec = facts["record"]
         versions = elane_train.versions_of(rec)
@@ -457,9 +482,15 @@ class EquityPass:
         if isinstance(last, Mapping) and int(last.get("short") or 0):
             lead = (f"YOUR LAST EQUITY PASS LEFT {int(last['short'])} OF ITS BIRTHS UNFILLED: propose families that fit "
                     "the lanes' box, the agenda and the bar below.\n\n")
+        from . import elane_xs
+
         parts = [f"{lead}Propose {want} new EQUITY-LANE families (\"lane\": \"beta\" or \"equity\"), each with its card "
                  "and its first program; propose both lanes when you propose two or more.",
                  lanes_text(self.settings), agenda_text(), quota.text(),
+                 # RELEASE E4, THE PANEL BLOCK ("" while the panel lane bears nothing): what a panel program is, its
+                 # contract in brief, the panel agenda, the panel quota and the closed panel cells; the panel Train
+                 # map, with its ZERO-EDGE EXPECTED column, follows the equity one (`elane_train.train_map_text`).
+                 elane_xs.request_text(self.store, self.settings, want),
                  elane_train.train_map_text(self.store, self.settings), graveyard_text(self.store, self.settings),
                  tried_text(self.store), families_text(self.store, self.settings), vocabulary_text(self.settings),
                  last_text(self.store)]
@@ -541,7 +572,7 @@ class EquityPass:
 
     def admit(self, rows: Sequence[Any], quota: EquityQuota, route: elane_yield.Route) -> list[str]:
         """Birth the proposals the admission admits (the module docstring); every refusal named."""
-        from . import cards
+        from . import cards, elane_xs
         from .architect import family_slug, same_idea
 
         allowed = universe(self.settings)
@@ -565,6 +596,16 @@ class EquityPass:
                 self.refuse(slug, "lane: the proposal and its card declare different lanes")
                 continue
             structure = str(row.get("structure") or (raw_card or {}).get("structure") or "").strip().lower()
+            if structure == elane_xs.STRUCTURE:
+                # RELEASE E4: a panel proposal's admission is the panel lane's (its box, its cells, its hidden year
+                # stamped by `elane_xs.assign`, never `elane_folds.birth_fields`); refused there while the lane is closed.
+                fid = elane_xs.admit(self, row, slug=slug, lane=lane, mechanism=mechanism, quota=quota, route=route,
+                                     fams=fams)
+                if fid is not None:
+                    quota.born(lane, structure)
+                    born.append(fid)
+                    fams.append(self.store.family(fid) or {"id": fid})
+                continue
             if structure not in allowed:
                 self.refuse(slug, f"structure: {structure or 'none'!r} is not one of {', '.join(allowed) or 'none'} "
                                   "(elane.structures)")
