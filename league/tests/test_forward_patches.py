@@ -15,7 +15,11 @@ counted rows' twins, and item 4 of a reading with an equity close NOT READ, neve
 reader lands"). On a tree that carries it, the same edits are seated on that code (`EDITS_ON_E1_A14`): release E3 IS
 that reader, so a checkpoint's reading is handed its A14 by the meter (`reading(..., a14=)`), `a14_consistency` reads
 both halves when it is, and a reading handed none (the running figures, never a Done reading) is still not read. The
-tests of league/tests/test_dlane_report_a14.py hold on both.
+tests of league/tests/test_dlane_report_a14.py hold on both. ON THAT TREE TWO OF E1's OWN TESTS HOLD THE WORDS THAT
+SAID THE READER HAD NOT LANDED (league/tests/test_dlane_report_equity.py: the status' "partly computed ... has no
+reader yet"; league/tests/test_equity_fx_swarm.py: item 4 "still not read until the intents half has a reader"): they
+move with these edits, at the integrator's hand, and E1's other A14 tests (a gap past the bound fails item 4; a close
+with no priced twin is counted) pass unchanged.
 
 What the three glue edits must do, and nothing more (the spec: nothing C adds to `meter`, `report`, `funnel.window`
 or `stall.run` may raise): `funnel.window` carries `forward_record` (integers; unread is an `errors` entry, never a
