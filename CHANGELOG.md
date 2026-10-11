@@ -80,6 +80,29 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   thing for the captain to know before mode "live": at the Probe sleeve of 0.50 x E a five-name basket alone fills
   the $400 loss window (since the review's fixes it trades whole, five names of $200, the basket scaled to the room;
   while it is held the other programs' new buys wait for room).
+- **The review's fixes (Oct 11; nineteen findings, three lenses; nothing deployed; no id but the xs identity
+  moves, and no panel band exists under it).** LIVE SAFETY: a seated panel program is liquidated only by the
+  captain's switch: a store-side leg that fails with the switch at "live" (the nightly I6, the twin marker, a stale
+  store, the universe, the spreads) holds its opens and nothing else ("held": the spec's "its opens stop, exits go
+  on"; before, one restated bar among 515 columns sold the basket two opens later). The nightly I6 is False on a
+  price that differs and on nothing the live book itself tolerates (a bar served late, a member learnt after the
+  decision and a decision with no kept fetch are counts and a warning). A panel fetch that raises is a decide the
+  House could not make after the grace, never "still being read" for ever; a row the venue serves on no session is
+  dropped and counted as the nightly job does. A rebalance whose bars differ in the morning is void whole (its
+  program's sells with its buys). The lane's readiness reads the store's freshness by the clock, the panel job has
+  its own nightly trigger, and it fits the ops child's memory at the real panel's size (384 MB of 527 where it
+  failed at 25 names ex-dividend). The seating pass never fetches the panel inside a session; a failed decide it
+  counts exits the lots at the next open; a ticker change inside a held lot keeps its column. EVIDENCE: the panel's
+  sleeve is a constant-weight book in the Gym and live alike (the pre-registration's C3 and C8: a 5 x 0.20 target
+  opens five lots of 0.20 after a loss); the style loading is of what a program HELD (dollars times sessions), not
+  what it bought; `range` is the body plus the wicks under a relative dither, so no statistic of it ranks the slots
+  by price; the look's floor is computed from the segments each attempt runs; a live program is told the Gym's tag
+  of a lot. MONEY, PLAINLY: at about $2,229 and the rows in force a five-name basket was NOT tradable as five whole
+  names (four of $222.90 and a fifth cut to $108.40); the decision's budget is now the sleeve scaled so the whole
+  basket fits the account's room (five of $200.00), and a full basket then uses the whole $400 window. SWITCHES:
+  with `elane.panel.mode` "off" no data job runs either, and none starts with the House; `coverage_min` is the
+  lane's own key; the lane's effective mode and the leg that holds it are in the heartbeat and the report, with
+  the alarms that had no detector.
 - Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
   the universe deploy and its rollback, the alarms).
 

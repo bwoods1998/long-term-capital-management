@@ -2069,8 +2069,9 @@ class EquityBook:
         not ask (no bar, the decider) is asked again every `SEAT_RETRY_S` until the next session's pre-open (after it
         the book it holds is no longer the close's); its failed decide is counted once a session. The House's exit
         rules are the day's decision's own and are not run again here (a program seated now holds no lot), BUT FOR
-        ONE: an instance whose failed decide THIS pass counted, and whose count reached the exit rule, has its lots'
-        exits planned now, for the next open."""
+        ONE: an instance of another kind than the book's own (a panel program, which the day's decision leaves to
+        this pass while its bars are read) whose failed decide THIS pass counted, and whose count reached the exit
+        rule, has its lots' exits planned now, for the next open."""
         handled = done.get("instances")
         if done.get("status") != "done" or not isinstance(handled, list):
             return
@@ -2112,7 +2113,7 @@ class EquityBook:
         failed_exit = self._holds()[3]
         due = set()
         for i in fresh:
-            if counted_now.get(i.id) == day and counted.get(i.id) != day:
+            if i.kind != EQUITY_KIND and counted_now.get(i.id) == day and counted.get(i.id) != day:
                 again_inst = self._instance(i.id)
                 if again_inst is not None and again_inst.failed_decides >= failed_exit:
                     due.add(i.id)

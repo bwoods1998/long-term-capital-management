@@ -462,3 +462,32 @@ file say the same):
     line and falls by the index's turnover each year, and under `spreads_min_share` (0.90) the mode reads "train"
     (no Validation, no look). Two ways out, neither taken here: the setting (its bound is [0.5, 1.0]), or sampling a
     name's Train-era days whether or not it was a member then (a spec change for package B).
+
+## 11. The review's fixes (Oct 11, 2026; `feat/equity-e4`; nothing pushed, nothing deployed)
+
+Nineteen findings in three lenses (evidence, live, spec), each confirmed against the code and fixed at its root with a
+test that failed before; none rejected, none deferred. What CHANGED IN THIS CONTRACT's shapes and rules:
+
+| what | before | now | where |
+|---|---|---|---|
+| the seat of a SEATED panel program | any leg of the lane not live: "demoted" (retired, lots sold) | "demoted" only on the captain's switch; a failed store-side leg is "held": opens stop, exits go on, nothing retired (`families.HELD`); "unknown" as before | `elane_xs.seat_word`, `bands.equity_seat_withdrawn`, `families.standing`, `live._sync_instances` |
+| `live_ready`'s legs | all read from the last manifest | first: the store is FRESH by the clock (`fetched_through` the last closed session or the one before; the twin marker likewise); `elane_xs.CLOCK`, `now=` | `elane_xs._live_legs` |
+| the nightly I6 | False on a late bar, a member the decision's columns lacked, a row with no kept fetch | False only on a price that differs; `late`, `absent` counted; a row that read bars and has no kept fetch is `live[instance] = None`; rows without `bars_sha` are no rows of it | `equity_panel.i6_check` |
+| the Gym's sizing | a per-run cash book (a loss shrank the next lot) | CONSTANT-WEIGHT on entry notionals against E0 (C3, C8); ONE narrowing: the open lots' entry weights never pass 1.00; `ctx.cash` is the free room, `ctx.equity` that plus the lots at their marks | `engine._committed`, `_room` |
+| a live panel sleeve | E1's reading at the marks | the same constant-weight book (`book.committed`, `sleeve_room`); every wall of the account still at its marks | `live._size`, `_panel_job` |
+| a live decision's budget | the sleeve | the sleeve SCALED so the whole basket fits the loss budget's room and the invested cap (`equity.rebalance` says `scaled`) | `live._panel_budget` |
+| the style loading (A22 (1)) | sum of w x rank over lots | sum of w x h x rank, h the sessions held | `style.block` |
+| `ctx.range` | (h' - l') / c', each price dithered in cents | the body (as `iret` states it) + the true wicks over the close + `config.WICK_DITHER` x a draw: never under the body | `ctx._fields` |
+| a lot's `tag` in a live ctx | the House's "xs" | the Gym's word ("" or "ineligible") | `book._ctx_tag` |
+| `rows_to_arrays` | raised on a bar of a day that is no session | drops and counts it (`count`), as `Grid.place` | `ctx.rows_to_arrays`, `book.fetch` meta `dropped` |
+| `book.columns` | a held symbol the universe does not know: refused | `renamed={now: bought under}` finds a lot's column across a ticker change | `book.columns`, `live._panel_renamed` |
+| a morning mismatch on a rebalance row | its buys cancelled | void whole: its program's sells too | `live._panel_mismatch` |
+| the look's floor | reused from an earlier attempt when it fit the receipt | computed from the segments each attempt runs | `elane_xs.look` |
+| the data jobs | ran whatever the mode; `equity_universe` at start, `equity_panel` after it | skipped while `elane.panel.mode` is "off" (`equity_universe.lane_off`); daily 01:40Z and 01:55Z, each its own trigger; a wall detector around all six (`watched`) | `league/ops/registry.py`, the six jobs |
+| `coverage_min` | read from ops.json by the job; the lane's key read by nothing | the lane's own key (`equity_panel.coverage_floor`, `elane_xs.map_notes(root, settings)`) | |
+| the lane's state | the reason the mode read lower reached nothing | `elane_xs.status`, `health` (four alarms), `bands.roster(...)["seatless_why"]`, the heartbeat's `equity.panel`, the report's `equity.panel_lane` | |
+
+Open after the fixes, stated: a held lot's `ret` against its slot's path still scatters with one over the price (the
+reviewer's weaker channel); a name whose ADJUSTED price is under about $2 is coarse in every field (the store could
+mask such bars: not built); a full basket at this account's size uses the whole loss window (a panel sleeve of its
+own is a money row); the equity roster with `seatless_why` is in the dlane report only while the lane's switch is up.
