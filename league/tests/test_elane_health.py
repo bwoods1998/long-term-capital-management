@@ -983,6 +983,24 @@ class RaisedLikeAnyCause(Case):
         out, _ = self.run_at(now=NOW + 2.0 * HOUR)
         self.assertEqual(len(self.notify.calls), 4, "told: paced like any owner cause")
 
+    def test_a_notice_that_cannot_fold_them_still_goes_out_and_names_them(self):
+        self.broken()
+        with mock.patch.object(EH, "_carried", side_effect=RuntimeError("an invented failure")):
+            out, _ = self.run_at()
+        self.assertEqual((out["stalled"], out["notice"]["sent"]), (["elane_idle"], True))
+        entry = self.notify.calls[-1]["causes"][0]
+        self.assertEqual((entry["cause"], entry["what"]), (
+            "swarm_alerts", "The equity lanes: elane_idle stand; their sentences could not be composed (RuntimeError): the "
+                            "stall job's receipt has them."))
+        self.assertEqual(set(entry), {"cause", "what", "numbers", "since", "hours", "doing", "owner_step"})
+        # Beside a carrier that stands by itself it is said in the carrier's own entry: one cause, named once.
+        host = {"cause": "swarm_alerts", "what": "an invented alert", "numbers": {}, "since": None, "hours": None, "doing": "x",
+                "owner_step": None}
+        with mock.patch.object(EH, "_carried", side_effect=RuntimeError("an invented failure")):
+            folded = EH.carried([host, {"cause": "elane_dq", "what": "invented"}], EH.CAUSES)
+        self.assertEqual([e["cause"] for e in folded], ["swarm_alerts"])
+        self.assertTrue(folded[0]["what"].endswith("Also: an invented alert"))
+
     def test_once_the_gateway_words_them_each_is_its_own_entry(self):
         entries = [{"cause": "elane_dq", "what": "invented", "numbers": {"scored": 8}, "since": None, "hours": None,
                     "doing": "invented", "owner_step": "an invented step"},

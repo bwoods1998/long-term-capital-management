@@ -1275,6 +1275,25 @@ def research(db: Any, start: float, end: float) -> dict[str, Any]:
 # ---------------------------------------------------------------------------------------------- the notice
 def carried(entries: Sequence[Mapping[str, Any]], fold: Sequence[str] = CAUSES,
             found: Mapping[str, Mapping[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """THE STALL JOB'S CALL for the notice (`_carried`), which never raises: the notice of every other cause goes out
+    whatever these four hold. Entries that cannot be folded are NAMED in the carrier's sentence, with the error."""
+    try:
+        return _carried(entries, fold, found)
+    except Exception as exc:  # noqa: BLE001 - a notice without their sentences, never no notice
+        rest = [dict(e) for e in entries if isinstance(e, Mapping) and e.get("cause") not in fold]
+        names = [str(e.get("cause")) for e in entries if isinstance(e, Mapping) and e.get("cause") in fold]
+        said = (f"The equity lanes: {', '.join(names)} stand; their sentences could not be composed "
+                f"({type(exc).__name__}): the stall job's receipt has them.")
+        host = next((e for e in rest if e.get("cause") == CARRIER), None)
+        if host is not None:
+            host["what"] = f"{said} Also: {host.get('what') or ''}"[:WHAT_CHARS]
+            return rest
+        return [*rest, {"cause": CARRIER, "what": said, "numbers": {}, "since": None, "hours": None, "doing": "",
+                        "owner_step": None}]
+
+
+def _carried(entries: Sequence[Mapping[str, Any]], fold: Sequence[str] = CAUSES,
+             found: Mapping[str, Mapping[str, Any]] | None = None) -> list[dict[str, Any]]:
     """THE NOTICE (the module docstring): the stall notice's entries (`stall.cause_facts`, one a standing cause) with
     the equity causes the gateway has no words for (`fold`: `stall.EQUITY_CAUSES`) folded into ONE `CARRIER` entry: its
     `what` names each one ("elane_dq: ..."), its `numbers` open with each one's figures (`MAIL_FIGURES`, named
