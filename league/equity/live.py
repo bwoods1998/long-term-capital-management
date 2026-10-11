@@ -31,8 +31,9 @@ is its earliest moment, never its send time), the close window's the 15:55 minut
 minute, its age counted from the minute an order was sent in (`answer.tick`), never from `placed_at` (the wall clock at
 its POST). EVERY CUT-OFF IS JUDGED AGAIN ON THE WALL CLOCK at the send (`_send`): nothing is written or POSTed at or
 after its window's cut-off (09:45:00 an open entry, 15:59:30 every exit and every close entry), since a day order POSTed
-at or after the close would rest for the next session; and no order is cancelled for a re-price its replacement could
-not follow. THE GATEWAY'S UNREAD READINGS (`RETRY_CAPS`: 424 positions, 424 orders, 503 equity, 409 stock_close; nothing
+at or after the close would rest for the next session; no order is cancelled for a re-price its replacement could
+not follow; and one the venue still shows working on a later day than its own is cancelled wherever the minute finds
+it (`_end_stale`). THE GATEWAY'S UNREAD READINGS (`RETRY_CAPS`: 424 positions, 424 orders, 503 equity, 409 stock_close; nothing
 was sent and nothing judged) go again next minute like the House's own rate refusal: never an entry's end, never one of
 the `MAX_EXIT_REFUSALS` that carry an exit to the next session; an order refused before the venue widens no collar.
 ONE INTENT, ONE LOT: every fill of a buy intent's orders joins the lot its first fill opened (`_intent_lot`).
@@ -1027,6 +1028,23 @@ class EquityBook:
                     self.alert("warning", f"equity: order {order.client_id}, given up as lost, is at the venue after all")
                     self._absorb(order, row)
         self._look_up(now, shown)
+        self._end_stale(now)
+
+    def _end_stale(self, now: float) -> None:
+        """A DAY ORDER NEVER OUTLIVES ITS SESSION: one the venue still shows working on a later New York day than its
+        own (`day`) reached the venue after its session's close and rests for the next one (`_send` posts nothing at or
+        after a cut-off by the wall clock, so this takes a slow gateway and a House that was down at the cut-off's own
+        cancel). It is cancelled wherever the minute finds it, the quiet hours included, before the next open can fill
+        it as a lot of a session it never traded in; its intent then ends as any other (an entry missed, an exit sent
+        again in today's window)."""
+        today = S.ny_day(now).isoformat()
+        for order in self._orders(("working",)):
+            if order.day >= today or not order.venue_id:
+                continue
+            if "cancel_sent" not in order.answer:
+                self.alert("warning", f"equity: order {order.client_id} of {order.day} is still working at the venue: "
+                                      "cancelled (a day order ends with its session)")
+            self._cancel(order, "left working past its own session", now)
 
     def _look_up(self, now: float, shown: set[str]) -> None:
         candidates = [o for o in self._orders(WORKING) if o.status in ("unknown", "pending")]

@@ -8,8 +8,9 @@ interface).
 - EXITS, THEN ENTRIES (A2, in both windows): the close window's entries wait a minute for its exits, and an entry sized
   to nothing is not final while an exit may still fill (the venue here fills AFTER the POST answers, as a venue does).
 - ONE INTENT, ONE LOT: a fill the re-price cancel's own lookup finds never leaves the replacement to open a second lot.
-- THE HOUSE'S MINUTE CLOCK: the book's wall clock runs behind the minute's `now` by however long the options minute
-  took; a re-price is due on the minute clock, and nothing is POSTed at or after a cut-off by the wall clock.
+- THE HOUSE'S MINUTE CLOCK: the book's sends go later than the minute's `now` by however long the options minute
+  took; a re-price is due on the minute clock, nothing is POSTed at or after a cut-off by the wall clock, and an order
+  still resting on a later day than its own is cancelled before the next open.
 - THE GATEWAY'S UNREAD READINGS (424 positions, 424 orders, 503 equity, 409 stock_close): sent again next minute.
 
 No price here is a market's."""
@@ -338,6 +339,52 @@ class ExitsThenEntries(T.BookTest):
         self.assertEqual([(x.symbol, x.entry_at) for x in h.lots(open_only=True)], [("QQQ", "open")])
 
 
+class ExitsThenEntriesWithTheRealSizing(unittest.TestCase):
+    """The same rotation with nothing stubbed but the venue: money's `size_entry` and `available_cash`, core's fees and
+    the shared budget's room as they are (the book tests stub them at their interface)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.h = with_venue(T.Harness(Path(self.tmp.name)), LateVenue)
+        self.addCleanup(self.h.state.close)
+
+    def rotate(self) -> tuple[L.Lot, L.Intent]:
+        h = self.h
+        a = h.instance("rotator")
+        h.lot(a, "SPY", "0.416", "600")
+        iwm = h.lot(a, "IWM", "1.136", "220")
+        h.intent(a, "sell", symbol="IWM", lid=iwm.lid, at_="close")
+        return iwm, h.intent(a, "buy", symbol="QQQ", share="0.5", at_="close")
+
+    def test_the_rotation_ends_as_the_gyms_session(self):
+        h = self.h
+        iwm, buy = self.rotate()
+        for mm in (55, 56, 57):
+            h.tick(15, mm)
+        self.assertEqual(h.book._lot(iwm.lid).status, "closed")
+        self.assertEqual(h.get_intent(buy.iid).status, "done", h.get_intent(buy.iid).why)
+        held = {lot.symbol: lot for lot in h.lots(open_only=True)}
+        self.assertEqual(sorted(held), ["QQQ", "SPY"])
+        self.assertLessEqual(held["QQQ"].entry_notional, D("250"))          # half the $500 sleeve, as it asked
+        self.assertGreater(held["QQQ"].entry_notional, D("249"))
+
+    def test_a_resting_sale_leaves_the_entry_waiting_not_refused(self):
+        h = self.h
+        iwm, buy = self.rotate()
+        h.venue.fill = "none"
+        h.tick(15, 55)
+        h.tick(15, 56)
+        waiting = h.get_intent(buy.iid)
+        self.assertEqual(waiting.status, "planned")
+        self.assertIn("the sleeve has $0.48 of free cash", waiting.why)     # the review's own figure: the sleeve is full
+        self.assertIn("sized again when the exits still working fill", waiting.why)
+        h.venue.fill = "cross"
+        h.tick(15, 57)
+        h.tick(15, 58)
+        self.assertEqual(h.get_intent(buy.iid).status, "done")
+
+
 class OneIntentOneLot(T.BookTest):
     """ops-7: the re-price cancel's own lookup found a fill and the terminal state together; the lot's id was saved on
     a fresh row, and the entry went on from its stale one (no lot): the replacement's fill opened a second lot."""
@@ -487,6 +534,31 @@ class TheMinuteClock(T.BookTest):
         h.tick(9, 31, day=TUESDAY)
         self.assertEqual(h.book._lot(lot.lid).status, "closed")
 
+    def test_an_order_resting_past_its_session_is_cancelled_before_the_next_open(self):
+        """The rest of ops-12's scenario: an order that reached the venue after its close rests for the next session,
+        and the House was down at its cut-off's own cancel. It never fills as a lot of the session it missed."""
+        h = self.harness()
+        a, b = h.instance("fam-a"), h.instance("fam-b")
+        lot = h.lot(a, "SPY", "0.5", "590")
+        sale = h.intent(a, "sell", symbol="SPY", lid=lot.lid, at_="close")
+        buy = h.intent(b, "buy", symbol="QQQ", share="0.2", at_="close")
+        h.venue.fill = "none"
+        h.tick(15, 58)                                                      # both rest; the House then stops
+        self.assertEqual([o.status for o in h.orders()], ["working", "working"])
+        h.book = h.new_book()                                               # back on Tuesday, before the open
+        h.tick(8, 0, day=TUESDAY)                                           # (the venue fills nothing before its open)
+        self.assertEqual([o.status for o in h.orders()], ["canceled", "canceled"])
+        self.assertEqual(len(h.venue.cancels), 2)
+        self.assertEqual(len([text for _, text in h.alerts if "still working at the venue" in text]), 2)
+        h.venue.fill = "cross"
+        h.tick(9, 31, day=TUESDAY)
+        self.assertEqual(h.get_intent(buy.iid).status, "missed", "the buy is not chased in another session")
+        self.assertEqual([x.symbol for x in h.lots(open_only=True)], [], "and never became a lot of Monday's close")
+        sold = h.book._lot(lot.lid)
+        self.assertEqual((sold.status, sold.exit_day, sold.exit_at), ("closed", "2026-10-13", "open"),
+                         "the sale went again as Tuesday's own order")
+        self.assertEqual(h.get_intent(sale.iid).status, "done")
+
     def test_inside_the_window_by_the_wall_clock_the_send_goes(self):
         h = lagged(self.harness(), 20.0)                                    # 15:59:23: seven seconds to spare
         h.intent(h.instance(), "buy", symbol="SPY", share="0.5", at_="close")
@@ -582,6 +654,18 @@ class TheGatewaysUnreadReadings(T.BookTest):
             h.tick(hh, mm)
         self.assertEqual(h.get_intent(it.iid).status, "missed")
         self.assertEqual(len(h.venue.sent), 5)
+
+    def test_the_houses_own_rate_refusal_widens_no_collar_either(self):
+        h = self.harness()
+        it = h.intent(h.instance(), "buy", symbol="SPY", share="0.5")
+        h.venue.submit_mode = "ratelimited"
+        h.tick(9, 31)
+        h.tick(9, 32)
+        h.venue.submit_mode = "ok"
+        h.tick(9, 33)
+        self.assertEqual([(o.status, o.collar_bp) for o in h.orders()], [("refused", 10), ("refused", 10), ("filled", 10)])
+        h.tick(9, 34)
+        self.assertEqual(h.get_intent(it.iid).status, "done")
 
     def test_a_caps_verdict_is_still_final(self):
         """A 403 the gateway's caps gave is a verdict on the order: an entry ends refused, an exit is carried after
