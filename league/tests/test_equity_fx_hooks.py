@@ -657,6 +657,64 @@ class TheIdleProof(unittest.TestCase):
         self.assertEqual(self.paper.reads, reads, "failed for the day and flat of orders: idle until the next window")
 
 
+# ------------------------------------------------------------------------------------- the invested cap (money-10, A1)
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheInvestedCap(unittest.TestCase):
+    """A1's House rule on the options side: equity long value + open equity buys + options open maximum loss <= E."""
+
+    def setUp(self):
+        self.t = M.Table.from_constitution()
+        self.assertEqual((self.t.equity.invested_share, self.t.book_share), (D("1.00"), D("0.90")))
+        self.E = D("1500")
+
+    def plan(self, band="probe", unit="100", fwd_=None, **exposure):
+        return M.plan_open(self.t, band=band, tuition=False, equity=self.E, unit=D(unit), fwd=fwd_,
+                           exposure=M.Exposure(**{k: D(v) for k, v in exposure.items()}))
+
+    def test_the_findings_account(self):
+        """E $1,500 with $1,125 of equity lots: an option open went to the book's 90% of E alone ($2,175 invested)."""
+        self.assertEqual(self.plan().qty, 1)
+        self.assertEqual(self.plan(equity_invested="1125", book_loss="275").qty, 1, "1,125 + 275 + 100 = 1,500")
+        refused = self.plan(equity_invested="1125", book_loss="300")
+        self.assertEqual(refused.qty, 0)
+        self.assertIn("the House's invested cap: the equity lots and buys $1125.00 and the options book's open maximum "
+                      "loss $300.00 leave $75.00 under 100% of equity ($1500.00), and this risks $100.00", refused.reason)
+        self.assertEqual(self.plan(equity_invested="1500").qty, 0)
+        self.assertEqual(self.plan(equity_invested="1700").qty, 0, "already over: nothing more")
+
+    def test_without_equity_lots_nothing_changes_and_the_books_cap_binds_first(self):
+        full = self.plan(book_loss="1300")
+        self.assertEqual(full.qty, 0)
+        self.assertIn("the book's open maximum loss $1300.00 leaves no room under 90% of equity", full.reason)
+        self.assertEqual(M.invested_room(self.t, self.E, M.Exposure(book_loss=D("400"))), D("1100.00"))
+        import dataclasses
+
+        bare = dataclasses.replace(self.t, equity=None)                # a hand-built table: the lane does not exist
+        self.assertIsNone(M.invested_room(bare, self.E, M.Exposure(equity_invested=D("9999"))))
+        self.assertIsNone(M.invested_refusal(bare, self.E, M.Exposure(equity_invested=D("9999")), D("100")))
+        self.assertEqual(M.plan_open(bare, band="probe", tuition=False, equity=self.E, unit=D("100"), fwd=None,
+                                     exposure=M.Exposure(equity_invested=D("9999"))).qty, 1)
+
+    def test_a_sized_open_is_cut_to_the_room(self):
+        self.E = D("20000")
+        good = fwd([0.9, 0.8, 1.0, 0.7] * 5)
+        self.assertEqual(self.plan("sized", "300", good).qty, 3, "the gateway's per-order cap: three structures")
+        cut = self.plan("sized", "300", good, equity_invested="19300")
+        self.assertEqual(cut.qty, 2, "20,000 - 19,300 = 700 of room: two structures of 300")
+        self.assertEqual(self.plan("sized", "300", good, equity_invested="19800").qty, 0)
+
+    def test_every_other_route_asks_the_same_rule(self):
+        exposure = M.Exposure(equity_invested=D("1450"), book_loss=D("20"))
+        self.assertIsNone(M.invested_refusal(self.t, self.E, exposure, D("30")))
+        self.assertIn("the House's invested cap", M.invested_refusal(self.t, self.E, exposure, D("31")))
+        tally = M.IncubatorTally()
+        plan = M.plan_incubator(self.t, unit=D("40"), equity=self.E, tally=tally, exposure=exposure, room=D(0))
+        self.assertEqual(plan.qty, 0)
+        self.assertIn("the House's invested cap", plan.reason)
+        self.assertEqual(M.plan_incubator(self.t, unit=D("40"), equity=self.E, tally=tally, exposure=M.Exposure(),
+                                          room=D(0)).qty, self.t.incubator_contracts)
+
+
 # --------------------------------------------------------------------------------- the stock proof's start (amend-11)
 @unittest.skipUnless(HAVE, "numpy not installed")
 class TheFirstOpenWindow(LiveCase):
