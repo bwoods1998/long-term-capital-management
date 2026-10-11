@@ -674,8 +674,12 @@ class TheLiveLikeSeries(unittest.TestCase):
         self.assertEqual(forward_twins.on_run(self.db, golden_run(), now=1.0, settings=off), 0)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM fwd_ll").fetchone()[0], 0)
         self.assertEqual(events(self.db, "no_minute"), [], "no missing-minute event either")
-        self.assertEqual(forward_twins.on_run(self.db, golden_run(), now=1.0, settings=None), 0,
-                         "unreadable settings are the code defaults: the mode is off, the minutes are on")
+        for unread in (None, {}, {"elane": {"forward": {"mode": "off"}}}, {"elane": {"forward": {"fill_minutes": True}}}):
+            self.assertEqual(forward_twins.on_run(self.db, golden_run(), now=1.0, settings=unread), 0)
+        self.assertEqual(events(self.db, "no_minute"), [], "with the forward mode off nothing is written at all")
+        with mock.patch.object(forward_db, "cfg", side_effect=NotImplementedError("A: not landed")):
+            self.assertEqual(forward_twins.on_run(self.db, golden_run(), now=1.0, settings=SETTINGS), 0)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM fwd_ll").fetchone()[0], 0)
 
     def test_another_pid_and_another_engine_have_their_own_rows(self):
         self.gaps()
@@ -748,9 +752,10 @@ class TheTimingTable(WithAStore):
 
     def test_nothing_is_written_with_fill_minutes_false(self):
         self.minutes(D1)
-        off = {"elane": {"forward": {"mode": "record", "fill_minutes": False}}}
-        self.assertEqual(forward_twins.begin(self.root, self.db, self.shadow(D1, settings=off), now=5.0),
-                         {"days": 0, "rows": 0})
+        for off in ({"elane": {"forward": {"mode": "record", "fill_minutes": False}}},
+                    {"elane": {"forward": {"mode": "off"}}}, None):
+            self.assertEqual(forward_twins.begin(self.root, self.db, self.shadow(D1, settings=off), now=5.0),
+                             {"days": 0, "rows": 0})
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM fwd_fillgap").fetchone()[0], 0)
 
     def test_the_table_feeds_the_re_price_of_a_real_run(self):
@@ -1119,13 +1124,31 @@ class TheTwins(WithAStore):
         self.assertEqual(out["errors"], ["fake-broken@1:r: ValueError"])
         self.assertEqual({r["instance"] for r in self.twin_rows()}, {"fake-overnight@1:r"})
 
-    def test_twins_false_and_no_live_book_skip(self):
+    def test_twins_false_and_the_mode_off_skip(self):
         self.live_instance("fake-overnight@1", OVERNIGHT)
-        off = {"elane": {"forward": {"mode": "record", "twins": False}}}
-        out = self.night(D4, settings=off)
-        self.assertIn("twins", out["skipped"])
-        self.assertEqual(self.twin_rows(), [])
-        self.assertEqual({out[k] for k in forward_twins.FINISH_KEYS}, {0})
+        for off in ({"elane": {"forward": {"mode": "record", "twins": False}}}, {"elane": {"forward": {"mode": "off"}}},
+                    None):
+            out = self.night(D4, settings=off)
+            self.assertIn("twins", out["skipped"])
+            self.assertEqual(self.twin_rows(), [])
+            self.assertEqual({out[k] for k in forward_twins.FINISH_KEYS}, {0})
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM fwd_events").fetchone()[0], 0)
+
+    def test_a_child_that_fails_the_twins_run_is_an_interruption_and_a_data_error_is_not(self):
+        from league.equity.runner import RunFailed
+        from league.live.decider import DeciderError
+
+        book, iid, pid, run = self.live_instance("fake-overnight@1", OVERNIGHT)
+        for error, interrupted, failed in ((RunFailed("fake: the child timed out"), 1, 0),
+                                           (DeciderError("fake: the child was killed"), 1, 0),
+                                           (ValueError("fake: a held symbol has no price"), 0, 1)):
+            shadow = self.shadow(D4)
+            shadow.run_from = mock.Mock(side_effect=error)
+            out = forward_twins.finish(self.root, self.db, shadow, now=1.0)
+            self.assertEqual((out["interrupted"], out["failed"], out["twins"]), (interrupted, failed, 0), error)
+        found = events(self.db, "twin_interrupted")
+        self.assertEqual([(e["day"], e["payload"]["instance"]) for e in found], [(D4, iid)], "once a night")
+        self.assertEqual(self.night(D4)["twins"], 3, "the next try writes every session")
 
     def test_a_shadow_without_the_settings_attribute_reads_the_swarms(self):
         self.live_instance("fake-overnight@1", OVERNIGHT)

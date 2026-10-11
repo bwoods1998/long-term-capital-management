@@ -51,9 +51,11 @@ and are left out of every share:
   twin, which nobody retired, goes on trading. Such a session is not a disagreement of the program with its replay; it
   is shown, counted and left out. The rows run through the session before the instance's last lot closed (what
   D13's range needs); after that the instance has no twin run at all.
-A twin run whose decides were interrupted writes no row that night and is tried again the next. A registry `run_sha`
-that differs from the instance's is a `twin_sha_mismatch` event and no twin; no registry row is `twin_unregistered`
-(each once an instance).
+A twin run whose decides were interrupted (or whose run the child failed) writes no row that night, one
+`twin_interrupted` event (once an (instance, night)), and is tried again the next. A registry `run_sha` that differs
+from the instance's is a `twin_sha_mismatch` event and no twin; no registry row is `twin_unregistered` (each once an
+instance). With the forward mode "off" (or settings that cannot be read) `begin`, `on_run` and `finish` write
+nothing.
 
 A DISAGREEMENT IS DATA, NEVER AN ERROR (THE BARS HASH, league/ops/forward_db.py; found after the spec, binding). The
 vendor rounds adjustment=all prices to cents, so the as-of bars a live decision read and the store's are not always
@@ -111,6 +113,9 @@ KIND = "equity"
 DECIDE_TIMEOUT, DECIDE_MAX_ERRORS = 1.0, 25
 #: The real route's instance suffix (`league.equity.live.REAL_SUFFIX`): an instance's registry key is its id less it.
 REAL_SUFFIX = ":r"
+#: The child's failures of a twin's run (E1's `runner.RunFailed`, the decider's `DeciderError`), by class name as
+#: league/swarm/elane_train.py names them: the House's, as an interrupted decide is.
+RUN_FAILURES = ("RunFailed", "DeciderError", "BudgetSpent")
 #: The receipt keys of `finish` (counts).
 FINISH_KEYS = ("instances", "twins", "disagreed", "lots", "interrupted", "live_bars", "unreadable", "unregistered",
                "mismatched", "failed")
@@ -156,6 +161,11 @@ def _cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         return dict(forward_db.cfg(settings))
     except Exception:  # noqa: BLE001 - an unreadable block is "off"
         return dict(forward_db.DEFAULTS)
+
+
+def _on(cfg: Mapping[str, Any], key: str) -> bool:
+    """Whether the forward record is on (`mode` above "off") and its switch `key` is true."""
+    return cfg.get("mode") in forward_db.MODES[1:] and cfg.get(key) is True
 
 
 def _settings(root: str | Path, shadow: Any) -> Any:
@@ -588,7 +598,7 @@ def begin(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float) 
     forward day that has a minutes file and none yet, every store symbol, both fill points (D10; `shadow.official`).
     {"days", "rows"} (counts)."""
     out = {"days": 0, "rows": 0}
-    if not _cfg(_settings(root, shadow)).get("fill_minutes"):
+    if not _on(_cfg(_settings(root, shadow)), "fill_minutes"):
         return out
     first, through = _iso(forward_db.t0()), _iso(shadow.through)
     symbols = sorted(str(s) for s in shadow.store.symbols())
@@ -628,7 +638,7 @@ def begin(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float) 
 def on_run(db: sqlite3.Connection, run: ShadowRun, *, now: float, settings: Mapping[str, Any] | None) -> int:
     """After a program's write: 0 at once when `fill_minutes` is false; else the `fwd_ll` rows of the run's days that
     have none (D10; a `no_minute` event once a (pid, day)); how many were written."""
-    if not _cfg(settings).get("fill_minutes"):
+    if not _on(_cfg(settings), "fill_minutes"):
         return 0
     engine = forward_db.engine_now(db)
     if engine is None:
@@ -806,7 +816,12 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
         return      # nothing to write yet, or everything this instance will ever need is written
     start = schedule.next_session(first)
     try:
-        run = shadow.run_from(program, start)
+        try:
+            run = shadow.run_from(program, start)
+        except Exception as exc:  # noqa: BLE001 - the child's failure is an interruption; the data's is the caller's
+            if not any(base.__name__ in RUN_FAILURES for base in type(exc).__mro__):
+                raise
+            raise TwinInterrupted(f"the decider child failed the twin's run ({type(exc).__name__})") from None
         if run is None:
             return
         decisions = _twin(getattr(shadow, "decider", None), run)
@@ -856,8 +871,8 @@ def finish(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float)
     root = Path(root)
     out: dict[str, Any] = {key: 0 for key in FINISH_KEYS}
     cfg = _cfg(_settings(root, shadow))
-    if not cfg.get("twins"):
-        return {**out, "skipped": "elane.forward.twins is false"}
+    if not _on(cfg, "twins"):
+        return {**out, "skipped": "elane.forward.twins is false, or the forward mode is off"}
     if not (root / LIVE_DB).exists():
         return {**out, "skipped": "no live book"}
     book = read_book(root / LIVE_DB)
@@ -882,7 +897,7 @@ def finish(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float)
 
     try:
         out["lots"], unmade = _lot_gaps(root, db, book, _date(shadow.through), float(now),
-                                        fill=bool(cfg.get("fill_minutes")), pid_of=pid_of)
+                                        fill=_on(cfg, "fill_minutes"), pid_of=pid_of)
         out["failed"] += unmade
     except Exception as exc:  # noqa: BLE001 - the lots' rows are made again the next night; the twins' rows stand
         out["failed"] += 1
