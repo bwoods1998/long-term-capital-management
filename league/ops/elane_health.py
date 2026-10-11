@@ -16,8 +16,9 @@ THE CAUSES (`CAUSES`; `checks`). Each has `what`, `numbers`, `doing` (what the f
   of the contract: the check then reads clear and names the family). A fault of the generators against the contract or
   the sandbox, never a verdict on a mechanism. When fewer than `DQ_MIN_SCORED` versions fall in those hours it judges
   the last `DQ_MIN_SCORED` scored since the running release started (so it does not lapse by itself as the window
-  slides past a fault nothing fixed), and it stands early when at least `DQ_EARLY_SCORED` versions of two families
-  were scored and NONE was judged by the bar. It names the first error's class (a closed class: `dq_class`) only when
+  slides past a fault nothing fixed), and it stands EARLY, before the sixth version, once `DQ_EARLY_FAULTED` versions
+  of two families could not be judged (4 scored and none judged by the bar; 4 of 5): they are most of six whatever
+  the versions still to come are. It names the first error's class (a closed class: `dq_class`) only when
   one class is more than half of the disqualifications, else the classes that tie; and, for a class it names, the
   reading rule's commonest sentence for it in the same hours (`SENTENCES`) or, with none on record, what that class
   most often is (`DQ_SHORT`: one fixed short sentence a class, rules only). The owner's step: the text the generators
@@ -132,9 +133,10 @@ DQ_HOURS = 6.0
 DQ_MIN_SCORED = 6
 DQ_SHARE = 0.5
 DQ_MIN_FAMILIES = 2
-#: `elane_dq` stands before the sixth version when this many were scored, in `DQ_MIN_FAMILIES` families, and NONE was
-#: judged by the bar: at a slow pace six versions are hours away, and a lane that judges nothing at all is told sooner.
-DQ_EARLY_SCORED = 4
+#: `elane_dq` stands EARLY, before the sixth version, once this many could not be judged, in `DQ_MIN_FAMILIES` families:
+#: more than `DQ_SHARE` of `DQ_MIN_SCORED` (four of six), so whatever the versions still to come are, they are most of
+#: six. At a slow pace six versions are hours away, and a lane whose first four judge nothing is told at the fourth.
+DQ_EARLY_FAULTED = int(DQ_SHARE * DQ_MIN_SCORED) + 1
 #: `elane_births`: the equity passes read this far back (a pass comes every 30 minutes while the lanes refill and every
 #: 2 hours after: twelve hours hold several either way), and how many of the latest that asked a model must have borne
 #: nothing. Three, as the options lanes' dry window (`stall.DRY_PASSES`): one barren pass is a model's bad answer, three
@@ -869,10 +871,10 @@ def _dq_check(f: Mapping[str, Any], now: float, since: float | None) -> dict[str
         # THE WINDOW'S EDGE: fewer than the minimum fall in the six hours. The last `DQ_MIN_SCORED` scored since the
         # running release started are judged instead (inside `LOOKBACK_HOURS`), so a fault nothing fixed does not read
         # "not judged" once its families are retired and the window slides on; under that many, the lane is judged
-        # early only when NONE of at least `DQ_EARLY_SCORED` was judged by the bar.
+        # EARLY, and only once `DQ_EARLY_FAULTED` of them could not be judged.
         start, span = _since(now, LOOKBACK_HOURS, since)
         older = _scored(f, start, now)
-        rows, basis = (older[-DQ_MIN_SCORED:], "last_scored") if len(older) >= DQ_MIN_SCORED else (older, "none_judged")
+        rows, basis = (older[-DQ_MIN_SCORED:], "last_scored") if len(older) >= DQ_MIN_SCORED else (older, "early")
     scored, by_code, classes, examples, firsts = len(rows), {c: 0 for c in PROGRAM_FAULTS}, {}, [], []
     families: dict[str, int] = {}
     for at, fid, n, verdict in rows:
@@ -895,9 +897,9 @@ def _dq_check(f: Mapping[str, Any], now: float, since: float | None) -> dict[str
         "retired_stalled": sum(1 for at, what in f.get("retired") or [] if what == "stalled" and first <= at <= now),
         "hours": round((now - first) / 3600.0, 1), "min_scored": DQ_MIN_SCORED, "basis": basis}
     spread = len(families) >= DQ_MIN_FAMILIES
-    if basis == "none_judged" and not (scored >= DQ_EARLY_SCORED and faulted == scored and spread):
+    if basis == "early" and not (faulted >= DQ_EARLY_FAULTED and spread):
         return _not_judged(f"{scored} equity versions were scored in {span} (at least {DQ_MIN_SCORED} are needed, or "
-                           f"{DQ_EARLY_SCORED} of {DQ_MIN_FAMILIES} families with none judged by the bar)", numbers)
+                           f"{DQ_EARLY_FAULTED} of {DQ_MIN_FAMILIES} families that could not be judged)", numbers)
     # THE CLASS IS NAMED only when one is more than half of the disqualifications; else the classes that tie are.
     top = _top(classes, 4)
     most = bool(top) and 2 * top[0][1] > by_code["DQ"]
@@ -928,7 +930,9 @@ def _dq_check(f: Mapping[str, Any], now: float, since: float | None) -> dict[str
     head = {"window": f"{faulted} of the {scored} equity versions scored in {span}",
             "last_scored": (f"{faulted} of the last {scored} equity versions scored (over {_hours(now - first)} h: fewer "
                             f"than {DQ_MIN_SCORED} fall in the last {DQ_HOURS:g} h)"),
-            "none_judged": f"All {scored} equity versions scored in {span}"}[basis]
+            "early": f"{faulted} of the {scored} equity versions scored in {span}"}[basis]
+    early = (f"Fewer than {DQ_MIN_SCORED} are scored, and these {faulted} are already most of {DQ_MIN_SCORED}."
+             if basis == "early" else "")
     one = ""
     if faulted > DQ_SHARE * scored and not spread:
         # ONE FAMILY'S BAD PROGRAMS are no fault of the contract: clear, and the family is named (in the receipt and
@@ -944,7 +948,7 @@ def _dq_check(f: Mapping[str, Any], now: float, since: float | None) -> dict[str
                 f"static rule that should refuse it, in a release; {REPORT} lists the lines", STEP_CHARS)
     parts = [f"{head} could not be judged for a fault of their own program ({by_code['DQ']} disqualified, "
              f"{by_code['LOAD']} refused at load, {by_code['RUN']} failed by the decider child): no mechanism was judged in "
-             "them" + (f", and {retired} families were retired STALLED" if retired else "") + ".", said, read, one]
+             "them" + (f", and {retired} families were retired STALLED" if retired else "") + ".", early, said, read, one]
     return {
         "stalled": stalled, "judged": True, "what": " ".join(p for p in parts if p), "numbers": numbers,
         "doing": DOING["elane_dq"], "owner_step": step if stalled else None,
@@ -1628,7 +1632,7 @@ __all__ = ["CAUSES", "SWITCH", "switched_off", "checks", "judge", "facts", "lane
            "research",
            "research_counts", "report", "text", "main", "dq_class", "dq_line", "refusal_class", "foreign_symbols",
            "rule_of", "sentences", "skip_kind", "step_read", "pass_read", "refusals_tally", "e2_families",
-           "DQ_HOURS", "DQ_MIN_SCORED", "DQ_SHARE", "DQ_MIN_FAMILIES", "DQ_EARLY_SCORED", "DQ_SHORT", "BIRTHS_HOURS",
+           "DQ_HOURS", "DQ_MIN_SCORED", "DQ_SHARE", "DQ_MIN_FAMILIES", "DQ_EARLY_FAULTED", "DQ_SHORT", "BIRTHS_HOURS",
            "BIRTHS_PASSES", "BIRTHS_OWNER_HOURS", "IDLE_HOURS", "STARVED_MIN_STEPS", "STARVED_SHARE", "STARVED_KINDS",
            "BEAT_STALE_SECONDS", "SETTINGS", "STATE_FILE", "STATE_KEEP", "NOT_MAILED",
            "REFUSED_HOURS", "REFUSED_MIN_ANSWERS", "REFUSED_SHARE", "LOOKBACK_HOURS", "FUNNEL_HOURS", "REFUSALS",
