@@ -441,3 +441,11 @@ file say the same):
    it read the list now in force), or the lane stops there.
 9. `equity_panel` has one trigger, `after("equity_universe")`: a night the universe job fails or is skipped, the
    panel's bars and the nightly I6 do not run either (A's open issue 5); the I6's age is not yet a leg of `live_ready`.
+10. THE SPREADS' SHARE CANNOT HOLD 0.90 FOR LONG, BY CONSTRUCTION (seen when package B's job first ran against
+    package C's real store at integration; a rule-level reading, no market figure). A name is sampled on a Train-era
+    sample day only while it is an index member that day (8 days a Train year, the last of them in 2024), and
+    `hs_share` counts today's members with 8 samples at both fill points. So every name that joined the index after
+    the first weeks of 2024 has under 8 and is charged the universe's default figure: `hs_share` starts near the
+    line and falls by the index's turnover each year, and under `spreads_min_share` (0.90) the mode reads "train"
+    (no Validation, no look). Two ways out, neither taken here: the setting (its bound is [0.5, 1.0]), or sampling a
+    name's Train-era days whether or not it was a member then (a spec change for package B).

@@ -11,6 +11,8 @@ is the lane's one path from a birth to the Done meter; this module is what stand
 - `TheLaneStopsWhereItsRuleSays`: with no contamination reading of the panel strata (release E3's file and package B's
   patch 18: owed) no look runs and none is spent (the captain's A22 (3)); with no twin marker (package J: owed) the
   effective mode is "gate" whatever the setting.
+- `TheDataJobsOnTheRealStore`: package B's spreads and N_eff jobs on package C's real store (they were built against
+  fakes of it), and package A's and the twins' readers of what they leave.
 - `TheSeams`: the committed receipt, its pin and the House's sentence; one rounding bound for both lanes; the stall
   job's structures are the store's; every job row names a built module with its own wall."""
 
@@ -372,6 +374,70 @@ class TheLaneStopsWhereItsRuleSays(_Root):
         self.forget()
         self.assertIsNone(elane_xs.probed(self.root, self.store.family("rev-0")))
         self.assertEqual(elane_xs.MAX_CELL_LOOKS, 2, "A22 (2): two looks an agenda cell until a forward verdict")
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheDataJobsOnTheRealStore(unittest.TestCase):
+    """Package B's jobs were built against fakes of package C's store (C was a stub at their base). Here each runs on
+    C's REAL universe and panel (a synthetic one), and package A's and the twins' readers read the files they leave."""
+
+    def setUp(self):
+        from league.ops.context import Context
+        from league.tests.test_equity_spreads import Quotes
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state = Path(self.tmp.name) / "state"
+        self.root = synth.synthetic_panel(self.state / elane_xs.STORE_DIR, n_assets=40, gate=True)
+        self.now = at(SUNDAY, 2, 30)                               # a Sunday night: no wall is near
+        self.gateway = Quotes(bp=lambda symbol, start: 4.0 + len(symbol))
+        self.ctx = lambda name: Context(name, root=self.state, due_at=self.now, clock=lambda: self.now,
+                                        gateway=self.gateway, config={}, settings_value={})
+
+    def test_the_spreads_job_fills_the_table_the_panel_job_and_the_twins_read(self):
+        from league.equity.store import nyse_sessions
+        from league.ops import equity_panel, equity_spreads
+        from league.xs import store as xstore
+
+        out = equity_spreads.run(self.ctx("equity_spreads"), sleep=lambda seconds: None)
+        self.assertEqual((out["ok"], out["done"], out["remaining"], out["errors"], out["refused"]), (True, True, 0, 0, 0), out)
+        self.assertEqual({call["path"] for call in self.gateway.calls}, {equity_spreads.QUOTES})
+        years = {int(call["start"][:4]) for call in self.gateway.calls}
+        self.assertEqual(years, set(xconfig.TRAIN_YEARS), "a Train-era session only: never the reserve, never 2025-26")
+        panel = equity_panel.load_panel(self.root)
+        table = equity_panel.hs_table(self.root, panel.aids)
+        self.assertEqual(table.shape, (len(panel.aids), 2))
+        self.assertTrue(((table >= xconfig.HS_FLOOR_BP / 1e4) & (table <= xconfig.HS_MAX_BP / 1e4)).all())
+        universe = xstore.Universe(self.root)
+        today = [aid for aid, _ in universe.members(FRIDAY)]
+        share = equity_panel.hs_share(self.root, today)
+        # THE SHARE IS BELOW ONE BY CONSTRUCTION (E4_INTERFACES section 10, point 10): a name is sampled on a sample
+        # day only while it is a member, so the members with 8 samples at both points are exactly those that were
+        # members on 8 Train-era sample days, and every later joiner is charged the universe's default figure.
+        days = [d for year in equity_spreads.sample_days(nyse_sessions(dt.date(2016, 1, 4), FRIDAY)).values() for d in year]
+        sampled = [aid for aid in today if sum(1 for d in days if universe.member(aid, d)) >= equity_panel.MIN_SAMPLES]
+        self.assertEqual(share, len(sampled) / len(today))
+        self.assertTrue(0.5 < share < 1.0, share)
+        late = sorted(set(today) - set(sampled))
+        self.assertTrue(late and all(not universe.member(aid, days[-equity_panel.MIN_SAMPLES]) for aid in late))
+        # The twins' reader (package B's patch 11): a panel lot's half-spreads at the open and at the close.
+        reader = equity_spreads.panel_half_spread(self.root)
+        got = reader(universe.symbol(sampled[0], FRIDAY), FRIDAY.isoformat())
+        self.assertEqual(len(got), 2)
+        self.assertTrue(all(xconfig.HS_FLOOR_BP / 1e4 <= x <= xconfig.HS_MAX_BP / 1e4 for x in got), got)
+        self.assertIsNone(reader("NOSUCH", FRIDAY.isoformat()))
+
+    def test_the_neff_job_measures_the_real_panel_and_the_french_job_is_skipped_with_no_route(self):
+        from league.ops import equity_neff, french
+
+        out = equity_neff.run(self.ctx("equity_neff"))
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["panel"], "sp500")
+        self.assertTrue(1.0 < out["neff_pr"] <= out["names"] <= 40, out)
+        kept = json.loads((self.root / equity_neff.FILE).read_text(encoding="utf-8"))["sp500"]
+        self.assertEqual((kept["neff_pr"], kept["names"], kept["coverage"]), (out["neff_pr"], out["names"], "ok"))
+        self.assertEqual(self.gateway.calls, [], "it reads the store and asks the venue nothing")
+        self.assertEqual(french.run(self.ctx("french"))["status"], "skipped")
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")

@@ -385,7 +385,10 @@ recorded and not yet shadowed. A panel family born before release E3 has no hidd
 bar reads all six Train years, and the Train map says so. A panel program whose seat is withdrawn while the lane is
 not live keeps its roster seat (its band is not moved). A bar the data audit blanks in the store (a daily bar its
 minute bars contradict) is still in a live 16:20 fetch: the nightly I6 blanks the same cells before it compares, and
-the decision of that day read the bar. The screen does not match sub-industry, size or value: A22 (1) is the House's answer,
+the decision of that day read the bar. **The spreads' share falls with the index's turnover:** a name is sampled only
+on Train-era days it was a member (the last in 2024), so every later joiner is charged the universe's default figure
+and is not counted in `hs_share`; near or under `spreads_min_share` (0.90) the mode reads "train" and nothing is
+validated. Watch `hs_share` in the panel manifest from the backfill's first night; the setting's bound is [0.5, 1.0]. The screen does not match sub-industry, size or value: A22 (1) is the House's answer,
 and it withholds a seat from every momentum and low-volatility program. A member added to the index after the last
 universe deploy cannot be bought live until the next one (about 5% of names a year); the replay of such a day agrees,
 because the store records which symbols the constitution named that day. Membership is read two sessions ahead in the
