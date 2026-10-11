@@ -499,9 +499,12 @@ class NoSeenRunHasAHiddenSession(unittest.TestCase):
         self.assertEqual(whole - run_sessions, len(sessions_of([elane_folds.hidden_span(year)])))
 
     def test_the_hidden_runs_result_goes_to_the_out_of_fold_arithmetic_and_nowhere_else(self):
-        """The ingest on E1's runner: every run it makes is a hidden-span run, each result is handed to
-        `elane_effects.contribution` (the very object) and to nothing else: no `add_run`, no record key, no event, no
-        row of any table but the memory's own."""
+        """The ingest on E1's runner: every run it makes is a hidden-span run, made in a child of its own (never on
+        the runner the seen runs were made on), each result is handed to `elane_effects.contribution` (the very
+        object) and to nothing else: no `add_run`, no record key, no event, no row of any table but the memory's
+        own."""
+        from league.equity.runner import Isolated
+
         year = 2018
         clock = fx.Clock()
         store = fx.new_store(self, clock)
@@ -514,11 +517,11 @@ class NoSeenRunHasAHiddenSession(unittest.TestCase):
         fam = store.family(fam["id"])
         runner = self.runner()
         made, handed = [], []
-        real_train, real_contribution = runner.train, elane_effects.contribution
+        real_train, real_contribution = Isolated.train, elane_effects.contribution
 
-        def train(code, params, **kw):
-            run = real_train(code, params, **kw)
-            made.append((kw["start"], kw["end"], kw["k"], run))
+        def train(own, code, params, **kw):
+            run = real_train(own, code, params, **kw)
+            made.append((kw["start"], kw["end"], kw["k"], run, own))
             return run
 
         def contribution(run, *, k):
@@ -528,14 +531,18 @@ class NoSeenRunHasAHiddenSession(unittest.TestCase):
         elane_memory.ensure(store)
         before = e3.dump(store, less=elane_memory.TABLES)
         files = sorted(p.name for p in store.runs_dir.iterdir())
-        with mock.patch.object(runner, "train", train), mock.patch.object(elane_effects, "contribution", contribution), \
+        with mock.patch.object(Isolated, "train", train), mock.patch.object(elane_effects, "contribution", contribution), \
                 mock.patch.object(type(store), "add_run", side_effect=AssertionError("a hidden run was stored")) as add_run:
             out = elane_memory.ingest(store, fam, 1, runner=runner, code=self.code, params={}, seen=seen, verdict=verdict,
                                       settings=e3.settings())
         self.assertEqual(out, {"seen": 1, "contrib": 2, "hidden_year": year})
-        self.assertEqual([(a, b, k) for a, b, k, _ in made], [(*elane_folds.hidden_span(year), k) for k in (1.0, 1.5)],
+        self.assertEqual([(a, b, k) for a, b, k, *_ in made], [(*elane_folds.hidden_span(year), k) for k in (1.0, 1.5)],
                          "the only runs it makes: the hidden span at each k")
-        self.assertEqual([id(r) for r in handed], [id(run) for *_, run in made], "each result, to `contribution`")
+        owns = {id(own) for *_, own in made}
+        self.assertEqual(len(owns), 1, "one child for the version's hidden runs")
+        self.assertTrue(all(own is not runner and own.decider is not runner.decider and own.store_root == runner.store_root
+                            for *_, own in made), "never the runner, or the child, the seen runs were made on")
+        self.assertEqual([id(r) for r in handed], [id(made_[3]) for made_ in made], "each result, to `contribution`")
         add_run.assert_not_called()
         self.assertEqual(e3.dump(store, less=elane_memory.TABLES), before,
                          "no family state, no run, no event, no note, no kv: nothing but the memory tables moved")

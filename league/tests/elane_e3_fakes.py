@@ -117,7 +117,9 @@ class InventedMarket:
     read. `figures[year]` overrides a year's row and its lot's weight (what two markets differ in). A program whose
     text holds "fails" loses at the stress. It has NO LOOK-BACK: a span's rows never depend on another year's. Its
     `decider` is E2's fake (the restart check's kinds). What a test can make of THE HIDDEN RUN (a run over exactly the
-    year `hidden`, 1 January to 31 December): `hidden_status` (how it ended) and `fails` (an exception it raises)."""
+    year `hidden`, 1 January to 31 December): `hidden_status` (how it ended) and `fails` (an exception it raises). It
+    holds no process, so its hidden runs are its own (`hidden_runner`: what `elane_memory.hidden_runner` asks a runner
+    that is not E1's `Isolated`; `hidden_runners` counts the times it was asked)."""
 
     def __init__(self, figures: Mapping[int, Mapping[str, Any]] | None = None, *, hidden: int | None = None,
                  hidden_status: str = "ok", fails: BaseException | None = None):
@@ -130,6 +132,11 @@ class InventedMarket:
         self.calls: list[tuple[float, dt.date, dt.date]] = []
         self.runs: list[Any] = []
         self.decider = fx.FakeDecider()
+        self.hidden_runners = 0
+
+    def hidden_runner(self) -> "InventedMarket":
+        self.hidden_runners += 1
+        return self
 
     @staticmethod
     def sessions(year: int) -> list[dt.date]:

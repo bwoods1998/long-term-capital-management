@@ -206,6 +206,88 @@ class TheIngest(Base):
                          ("g0", None, None, None, None))
 
 
+class TheHiddenRunsOwnChild(Base):
+    """`hidden_runner`: the hidden run is never made on the runner the seen runs were made on (a program's memory
+    outlives a run wherever its interpreter does, and the swarm's one evidence child runs the next version's seen
+    runs)."""
+
+    def test_e1s_runner_gets_a_new_child_with_the_seen_childs_limits_and_seed_and_it_is_closed(self):
+        from league.equity.runner import Isolated
+        from league.live import decider as D
+
+        closed = []
+        seen = D.Decider(timeout=0.5, max_errors=7, memory_mb=1024, python="/invented/python", log="/invented/state/equity-decider.log",
+                         allow_unisolated=True)
+        seen.hash_seed = 0
+        runner = Isolated(seen, "/invented/state/equity-daily", budget_seconds=77.0)
+        with mock.patch.object(D.Decider, "close", lambda self: closed.append(self)):
+            with elane_memory.hidden_runner(runner) as own:
+                child = own.decider
+                self.assertIsInstance(own, Isolated)
+                self.assertIsInstance(child, D.Decider)
+                self.assertIsNot(own, runner)
+                self.assertIsNot(child, seen)
+                self.assertEqual((own.store_root, own.budget_seconds), (runner.store_root, 77.0))
+                self.assertEqual((child.timeout, child.max_errors, child.memory_mb, child.python, child.allow_unisolated,
+                                  child.hash_seed), (0.5, 7, 1024, "/invented/python", True, 0))
+                self.assertEqual(str(child.log), "/invented/state/" + elane_memory.HIDDEN_LOG)
+                self.assertNotEqual(str(child.log), str(seen.log), "a log of its own")
+                self.assertIsNone(child.proc, "started at its first request, not before")
+                self.assertEqual(closed, [])
+            self.assertEqual(closed, [child], "closed when the hidden runs are in: the seen child is not")
+            with self.assertRaises(ValueError):   # closed on a failure too
+                with elane_memory.hidden_runner(runner) as own:
+                    child = own.decider
+                    raise ValueError("the hidden run failed")
+            self.assertEqual(closed[-1], child)
+        unlogged = D.Decider(allow_unisolated=True)
+        with mock.patch.object(D.Decider, "close", lambda self: None), \
+                elane_memory.hidden_runner(Isolated(unlogged, "/invented")) as own:
+            self.assertIsNone(own.decider.log)
+            self.assertIsNone(own.decider.hash_seed, "the seen child's seed, pinned or not")
+
+    def test_an_inline_decider_gets_another_one(self):
+        from league.equity.runner import Isolated
+        from league.live.decider import InlineDecider
+
+        runner = Isolated(InlineDecider(timeout=0.25, max_errors=3), "/invented/equity-daily")
+        with elane_memory.hidden_runner(runner) as own:
+            self.assertIsInstance(own.decider, InlineDecider)
+            self.assertIsNot(own.decider, runner.decider)
+            self.assertEqual((own.decider.timeout, own.decider.max_errors, own.store_root), (0.25, 3, runner.store_root))
+
+    def test_a_runner_that_holds_no_process_is_asked_for_its_own(self):
+        market = e3.InventedMarket()
+        with elane_memory.hidden_runner(market) as own:
+            self.assertIs(own, market)
+        self.assertEqual(market.hidden_runners, 1)
+        fam, seen, verdict, market = self.scored("asked", 2018)
+        self.ingest(fam, seen, verdict, market)
+        self.assertEqual(market.hidden_runners, 1, "once a version: its two hidden runs share the child")
+        self.ingest(fam, seen, verdict, market)
+        self.assertEqual(market.hidden_runners, 1, "a second ingest owes no run and starts no child")
+
+    def test_a_runner_with_no_child_of_its_own_runs_no_hidden_year(self):
+        from league.equity.runner import Isolated
+
+        fam, seen, verdict, market = self.scored("shared", 2018)
+        for shared in (fx.FakeRunner(), Isolated(fx.FakeDecider(), "/invented/equity-daily"), object()):
+            with self.assertRaises(elane_memory.HiddenRunRefused) as caught:
+                elane_memory.ingest(self.store, fam, 1, runner=shared, code=self.code, params={}, seen=seen,
+                                    verdict=verdict, settings=self.settings)
+            self.assertIn("no child of its own for the hidden run", str(caught.exception))
+            self.assertEqual(getattr(shared, "calls", []), [], "nothing was run on the seen runs' runner")
+        self.assertEqual(len(self.rows("mem_seen")), 1, "the seen facts stand")
+        self.assertEqual(self.rows("mem_contrib") + self.rows("mem_series"), [])
+        self.assertEqual(self.ingest(fam, seen, verdict, market), {"seen": 0, "contrib": 2, "hidden_year": 2018},
+                         "the next ingest on a runner that has one records the year")
+        # A family with no hidden year needs no child: any runner will do.
+        plain, seen7, verdict7, _ = self.scored("seven", None)
+        self.assertEqual(elane_memory.ingest(self.store, plain, 1, runner=object(), code=self.code, params={}, seen=seen7,
+                                             verdict=verdict7, settings=self.settings),
+                         {"seen": 1, "contrib": 0, "hidden_year": None})
+
+
 class TheTables(Base):
     def test_ensure_is_idempotent_and_creates_the_schema_whole(self):
         elane_memory.ensure(self.store)

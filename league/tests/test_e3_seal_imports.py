@@ -10,8 +10,9 @@ by reading the source (an AST walk for the imports, a text scan for the names), 
   league/ops.
 - WHAT E3 MAY REACH. Its ops modules import only the modules the contract lists; the three memory modules import the
   equity lane's `config`, `results`, `screen` and `store` at their top and `elane_train` and `elane_seal` inside
-  functions only; only `elane_train`, `elane_births` and ops import the memory modules; and the ops jobs open the
-  swarm store read-only (the probe alone books its dollars).
+  functions only (`elane_memory` also E1's `runner` and the decider, inside a function: the hidden run's own child);
+  only `elane_train`, `elane_births` and ops import the memory modules; and the ops jobs open the swarm store
+  read-only (the probe alone books its dollars).
 
 `TheCheckCatchesWhatItShould` runs the same readers over invented sources that break each rule, so a green run here is
 never an empty scan."""
@@ -41,6 +42,10 @@ MEMORY = ("elane_folds", "elane_effects", "elane_memory")
 MEMORY_TOP = {"league.equity", "league.equity.config", "league.equity.results", "league.equity.screen",
               "league.equity.store", "league.swarm", *(f"league.swarm.{name}" for name in MEMORY)}
 MEMORY_INSIDE = MEMORY_TOP | {"league.swarm.elane_train", "league.swarm.elane_seal"}
+#: What one memory module may import beside, inside a function: `elane_memory.hidden_runner` starts THE HIDDEN RUN'S
+#: OWN CHILD (E1's `Isolated` on a decider of its own), as league/swarm/elane.py `isolated_runner` starts the
+#: evidence child.
+MEMORY_INSIDE_MORE = {"elane_memory": {"league.equity.runner", "league.live", "league.live.decider"}}
 #: What an E3 ops module may import of the league (section 1's second rule), E3's own ops modules beside.
 OPS_MAY = {
     "league.equity", *(f"league.equity.{name}" for name in ("config", "store", "program", "ctx", "engine", "results",
@@ -199,7 +204,17 @@ class TheForwardRecordIsOpsOnly(unittest.TestCase):
     def test_the_memory_modules_import_the_equity_lane_and_the_swarm_inside_functions_only(self):
         for name in MEMORY:
             path = REPO / "league" / "swarm" / f"{name}.py"
-            self.assertEqual(outside(REPO, path, MEMORY_TOP, inside=MEMORY_INSIDE), [], name)
+            inside = MEMORY_INSIDE | MEMORY_INSIDE_MORE.get(name, set())
+            self.assertEqual(outside(REPO, path, MEMORY_TOP, inside=inside), [], name)
+        # The child's two modules are named by the one function that starts it, and at no module's top.
+        self.assertEqual(set(MEMORY_INSIDE_MORE), {"elane_memory"})
+        reached = [(module, line) for module, inside, line in imports(REPO, REPO / "league/swarm/elane_memory.py")
+                   if module in MEMORY_INSIDE_MORE["elane_memory"] and module != "league.live"]
+        self.assertEqual(sorted({module for module, _ in reached}), ["league.equity.runner", "league.live.decider"])
+        source = (REPO / "league/swarm/elane_memory.py").read_text(encoding="utf-8").splitlines()
+        start = next(i for i, text in enumerate(source, 1) if text.startswith("def hidden_runner("))
+        end = next(i for i, text in enumerate(source, 1) if i > start and text.startswith(("def ", "class ")))
+        self.assertTrue(all(start < line < end for _, line in reached), reached)
 
     def test_only_the_train_the_births_and_ops_import_the_memory_modules(self):
         wanted = {f"league.swarm.{name}" for name in MEMORY}

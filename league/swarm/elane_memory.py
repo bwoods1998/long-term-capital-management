@@ -28,6 +28,20 @@ each. The hidden run's result is held in no other place and passed to no other f
 record. INSERT OR IGNORE throughout (a rescore changes nothing). A hidden run that raises leaves the `mem_seen` row
 and raises to the caller's guard; a disqualified hidden year is recorded as it traded.
 
+THE HIDDEN RUN'S OWN CHILD (`hidden_runner`). A program's memory outlives a run wherever the interpreter does: a
+module of the child (a class-level array of numpy that a call's result exposes, say) is one object for every program
+the child ever runs, and E2's static checks allow the call. The swarm has ONE evidence child
+(league/swarm/elane.py `isolated_runner`), and it runs the family's next version's SEEN runs: a hidden run made
+there could leave a mark the next version reads, and the hidden year would reach the family's own researcher through
+that version's record. So the hidden run is never made on the runner the seen runs were made on. `ingest` starts a
+decider child OF ITS OWN for one version's hidden runs (E1's `Isolated` over the same store on a new decider of the
+seen child's class, limits and hash seed; its log `HIDDEN_LOG` beside the evidence child's), and closes it when they
+are in: the process that held the hidden year's bars is dead before any other run starts, and no seen run, Validation
+run or look is ever made in it. What stays out of reach by other rules, not this one: a file (numpy's doors to files
+are shut by name, league/gym/safety.py `NUMPY_BANNED`). A runner that is not E1's `Isolated` on E1's decider must say
+itself how its hidden runs are kept apart (a `hidden_runner()` method: the tests' invented markets, which hold no
+process); with neither, `HiddenRunRefused`: the hidden year is run nowhere and no out-of-fold row is written.
+
 WHAT A ROW HOLDS BESIDE THE SPEC'S WORDS. `seen_sha` hashes the verdict's Train FIGURES as `elane_train.compact`
 shapes them (objective, passed, fails, score, the years, the summary, the figures beside and the restart check's
 counts), without the clock's `at` and the `identity`: the same figures give the same sha whenever they were judged.
@@ -35,15 +49,18 @@ counts), without the clock's `at` and the `identity`: the same figures give the 
 the swarm's `gate.run_sha`. `fails` is a JSON list. A hidden run already recorded at a k is not run again.
 
 `league.swarm.elane_train` and `elane_seal` are imported INSIDE FUNCTIONS only (`elane_train` imports this module at
-the top). Standard library and numpy only (numpy inside functions).
+the top), and so are E1's `league.equity.runner` and `league.live.decider` (`hidden_runner` alone: the child it
+starts). Standard library and numpy only (numpy inside functions).
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import sqlite3
-from typing import Any, Mapping
+from pathlib import Path
+from typing import Any, Iterator, Mapping
 
 TABLES = ("mem_seen", "mem_contrib", "mem_series")
 #: The tables that hold a hidden year's results: named only here, in `elane_seal` and in league/ops/.
@@ -51,6 +68,8 @@ SEALED_TABLES = ("mem_contrib", "mem_series")
 #: `mem_contrib.kind` and `symset` in E3 (a later release adds transfer runs).
 KIND_OWN = "own"
 APPEND_ONLY_ERROR = "the equity memory is append-only"
+#: The log of THE HIDDEN RUN'S OWN CHILD, beside the evidence child's (<state>/equity-decider.log).
+HIDDEN_LOG = "equity-hidden-decider.log"
 
 _TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS mem_seen (       -- one row a scored version: seen-year facts (no reader in E3)
@@ -137,13 +156,50 @@ def _results(runs: Any) -> list[dict[str, Any]]:
     return out
 
 
+class HiddenRunRefused(RuntimeError):
+    """The hidden run has no child of its own to be made in (`hidden_runner`): it is made nowhere."""
+
+
+@contextlib.contextmanager
+def hidden_runner(runner: Any) -> Iterator[Any]:
+    """THE HIDDEN RUN'S OWN CHILD (the module docstring): a runner for ONE version's hidden runs that shares no process
+    with `runner`, the one its seen runs were made on. For E1's `Isolated` on E1's `Decider`: a new `Isolated` over
+    the same store on a NEW `Decider` with the seen child's limits, interpreter and hash seed (the hidden run is the
+    seen runs' run in another process), started at its first request and CLOSED when the block ends. An
+    `InlineDecider` (tests only: one process, no child to keep apart) gets a new one. A runner with a
+    `hidden_runner()` method of its own is asked (the tests' invented markets). Anything else: `HiddenRunRefused`."""
+    from ..equity.runner import Isolated
+    from ..live.decider import Decider, InlineDecider
+
+    own = getattr(runner, "hidden_runner", None)
+    if callable(own):
+        yield own()
+        return
+    seen = getattr(runner, "decider", None)
+    if not isinstance(runner, Isolated) or not isinstance(seen, (Decider, InlineDecider)):
+        raise HiddenRunRefused(f"no child of its own for the hidden run: the seen runs' runner is a "
+                               f"{type(runner).__name__} on a {type(seen).__name__}")
+    if isinstance(seen, Decider):
+        child: Any = Decider(timeout=seen.timeout, max_errors=seen.max_errors, memory_mb=seen.memory_mb,
+                             python=seen.python, log=Path(seen.log).with_name(HIDDEN_LOG) if seen.log else None,
+                             allow_unisolated=seen.allow_unisolated)
+        child.hash_seed = seen.hash_seed
+    else:
+        child = InlineDecider(timeout=seen.timeout, max_errors=seen.max_errors)
+    try:
+        yield Isolated(child, runner.store_root, budget_seconds=runner.budget_seconds)
+    finally:
+        child.close()  # the process that held the hidden year's bars ends here, before any other run is made
+
+
 def ingest(store: Any, fam: Mapping[str, Any], version: int, *, runner: Any, code: str, params: Mapping[str, Any],
            seen: Mapping[float, Any], verdict: Mapping[str, Any], settings: Mapping[str, Any] | None,
            now: str | None = None) -> dict[str, Any]:
     """THE INGEST (the module docstring) of one scored version: {"seen" (rows written: 0 | 1), "contrib" (rows
     written), "hidden_year"}. `seen`: {k: [Run, ...]}, the version's Train runs as `EquityResearcher.score` made them
-    (one a seen span); `runner`: E1's `Isolated`; `verdict`: the bar's verdict (`train_score`, with its restart
-    check's); `now`: the rows' `at` (ISO text; the store's clock when None)."""
+    (one a seen span); `runner`: E1's `Isolated`, the one THE SEEN RUNS were made on: no hidden run is made on it
+    (`hidden_runner` gives the hidden runs a child of their own); `verdict`: the bar's verdict (`train_score`, with its
+    restart check's); `now`: the rows' `at` (ISO text; the store's clock when None)."""
     from ..equity import config
     from . import elane_effects, elane_folds, elane_seal, elane_train
 
@@ -179,21 +235,25 @@ def ingest(store: Any, fam: Mapping[str, Any], version: int, *, runner: Any, cod
         return out
     # THE HIDDEN RUN, after the verdict is recorded: its result goes to `contribution` and nowhere else.
     first, last = elane_folds.hidden_span(hidden)
-    for k in (float(config.K_BASE), float(config.K_STRESS)):
-        if store._one("SELECT 1 AS ok FROM mem_contrib WHERE family=? AND version=? AND symset=? AND k=?",
-                      (fid, n, KIND_OWN, k)) is not None:
-            continue  # recorded once: a second ingest runs nothing and changes nothing
-        c = elane_effects.contribution(runner.train(code, params, name=fid, start=first, end=last, k=k), k=k)
-        if c["year"] != hidden:
-            raise ValueError(f"the hidden run of {hidden} came back with sessions of {c['year']}")
-        with store.atomic():
-            store._exec("INSERT OR IGNORE INTO mem_series(sha, days, x, w) VALUES(?,?,?,?)",
-                        (c["series_sha"], c["days"], c["x"], c["w"]))
-            out["contrib"] += max(0, int(store._exec(
-                "INSERT OR IGNORE INTO mem_contrib(family, version, cell, kind, year, symset, k, status, n_days, n_lots, "
-                "exp_mean, e_ann, se_ann, t_x, series_sha, run_sha, at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (fid, n, cell, KIND_OWN, hidden, KIND_OWN, k, c["status"], c["n_days"], c["n_lots"], c["exp_mean"],
-                 c["e_ann"], c["se_ann"], c["t_x"], c["series_sha"], c["run_sha"], at)).rowcount))
+    owed = [k for k in (float(config.K_BASE), float(config.K_STRESS))
+            if store._one("SELECT 1 AS ok FROM mem_contrib WHERE family=? AND version=? AND symset=? AND k=?",
+                          (fid, n, KIND_OWN, k)) is None]  # recorded once: a second ingest runs nothing, changes nothing
+    if not owed:
+        return out
+    with hidden_runner(runner) as own:  # THE HIDDEN RUN'S OWN CHILD: never the one a seen run is made in
+        for k in owed:
+            c = elane_effects.contribution(own.train(code, params, name=fid, start=first, end=last, k=k), k=k)
+            if c["year"] != hidden:
+                raise ValueError(f"the hidden run of {hidden} came back with sessions of {c['year']}")
+            with store.atomic():
+                store._exec("INSERT OR IGNORE INTO mem_series(sha, days, x, w) VALUES(?,?,?,?)",
+                            (c["series_sha"], c["days"], c["x"], c["w"]))
+                out["contrib"] += max(0, int(store._exec(
+                    "INSERT OR IGNORE INTO mem_contrib(family, version, cell, kind, year, symset, k, status, n_days, "
+                    "n_lots, exp_mean, e_ann, se_ann, t_x, series_sha, run_sha, at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (fid, n, cell, KIND_OWN, hidden, KIND_OWN, k, c["status"], c["n_days"], c["n_lots"], c["exp_mean"],
+                     c["e_ann"], c["se_ann"], c["t_x"], c["series_sha"], c["run_sha"], at)).rowcount))
     return out
 
 
@@ -214,5 +274,5 @@ def counts(db: sqlite3.Connection) -> dict[str, Any]:
     return out
 
 
-__all__ = ["TABLES", "SEALED_TABLES", "KIND_OWN", "KEYS", "SCHEMA", "APPEND_ONLY_ERROR", "ensure", "seen_sha",
-           "ingest", "counts"]
+__all__ = ["TABLES", "SEALED_TABLES", "KIND_OWN", "KEYS", "SCHEMA", "APPEND_ONLY_ERROR", "HIDDEN_LOG",
+           "HiddenRunRefused", "ensure", "seen_sha", "hidden_runner", "ingest", "counts"]

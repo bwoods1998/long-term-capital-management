@@ -25,6 +25,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -386,6 +387,128 @@ class TheHiddenYearNeverReachesItsFamily(unittest.TestCase):
                                [e["payload"] for e in store.events_after(0)]], default=str)
             self.assertNotIn(f"{self.YEAR}-", text, "no day of the hidden year")
             self.assertNotIn(f'"{self.YEAR}"', text, "no by-year key of the hidden year")
+
+
+#: Two invented versions of one family that keep memory IN THE CHILD PROCESS across runs, by a door E2's own static
+#: checks leave open (a call's result exposing a class-level array of numpy: every `Polynomial` shares one `window`).
+#: v1 marks it the session it meets a bar with a huge overnight gap (only the moved market's hidden-year bars have
+#: one); v2 sizes its buy by the mark.
+MARKS = '''import numpy as np
+
+NEEDS = {"symbols": ["SPY"], "history": 3, "max_hold_sessions": 2}
+PARAMS = {"part": 0.5, "gap": 0.2}
+
+
+def decide(ctx):
+    bars = ctx.bars["SPY"]
+    if len(bars.close) > 1 and abs(float(bars.open[-1]) / float(bars.close[-2]) - 1.0) > ctx.params["gap"]:
+        np.polynomial.Polynomial([1.0]).window[1] = 2.0
+    out = [{"sell": lot["id"], "at": "open"} for lot in ctx.positions]
+    out.append({"buy": "SPY", "share": ctx.params["part"], "at": "close"})
+    return out
+'''
+READS = '''import numpy as np
+
+NEEDS = {"symbols": ["SPY"], "history": 3, "max_hold_sessions": 2}
+PARAMS = {"part": 0.5}
+
+
+def decide(ctx):
+    out = [{"sell": lot["id"], "at": "open"} for lot in ctx.positions]
+    share = ctx.params["part"] / float(np.polynomial.Polynomial([1.0]).window[1])
+    out.append({"buy": "SPY", "share": share, "at": "close"})
+    return out
+'''
+
+
+@unittest.skipUnless(e3.WIRED, e3.NOT_WIRED)
+@unittest.skipUnless(sys.platform.startswith("linux"), "the decider child's limits are Linux's")
+class TheHiddenYearNeverReachesALaterVersion(unittest.TestCase):
+    """T3 over TWO versions, each House with a REAL evidence child (E1's `Decider`, a subprocess; `allow_unisolated`,
+    as E1's own tests start one off a root House): the swarm has one such child and it runs every version's seen
+    runs. v1 (`MARKS`) is scored, then v2 (`READS`), on the two markets that differ only inside the hidden year. The
+    hidden run has a child of its own (`elane_memory.hidden_runner`), so v1's mark dies with it and v2's record is the
+    same in both markets. Made in the evidence child instead (what E3 does NOT do), the mark reaches v2's seen runs
+    and the hidden year reaches the family's own researcher."""
+
+    YEAR = 2018
+
+    @classmethod
+    def setUpClass(cls):
+        from league.equity import synth
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.plain = synth.synthetic_store(Path(cls.tmp.name) / "plain" / elane.STORE_DIR, symbols=("SPY",),
+                                          end=dt.date(2024, 12, 31), seed=5, drift=0.8, vol=0.04)
+        cls.moved = e3.moved_store(cls.plain, Path(cls.tmp.name) / "moved" / elane.STORE_DIR, year=cls.YEAR,
+                                   keep_last=e3.CARRIES_KEPT)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def house(self, root: Path) -> dict:
+        """One House on one market: ONE evidence child, v1 scored and then v2, by E2's own researcher."""
+        from league.equity.runner import Isolated
+        from league.live.decider import Decider
+        from league.swarm.store import SwarmStore
+
+        clock = fx.Clock()
+        store = SwarmStore(tempfile.mkdtemp(dir=self.tmp.name), clock=clock)
+        self.addCleanup(store.close)
+        child = Decider(python=sys.executable, log=Path(store.root) / "equity-decider.log", allow_unisolated=True)
+        child.hash_seed = elane.EVIDENCE_HASH_SEED
+        self.addCleanup(child.close)
+        fam = e3.hidden_family(store, "marks", self.YEAR, code=MARKS)
+        researcher = EquityResearcher(store, reviewing_router(), e3.settings(), runner=Isolated(child, root), clock=clock)
+        outs = [researcher.score(fam, store.version("marks", 1))]
+        second = store.add_version("marks", READS, {}, author="elane:test")
+        outs.append(researcher.score(store.family("marks"), second))
+        record = elane_train.record_of(store.family("marks"))
+        return {"outs": outs, "v1": record["versions"].get("1"), "v2": record["versions"].get("2"),
+                "brief": researcher.brief(store.family("marks")), "contrib": e3.table(store, "mem_contrib"),
+                "alerts": [e["payload"] for e in store.events_after(0) if e["kind"] == "swarm.status"],
+                "restarts": child.restarts, "pid": child.pid,
+                "hidden_log": (Path(store.root) / elane_memory.HIDDEN_LOG).exists()}
+
+    def same(self, a: dict, b: dict, key: str) -> bool:
+        return json.dumps(a[key], sort_keys=True, default=str) == json.dumps(b[key], sort_keys=True, default=str)
+
+    def test_e2s_own_checks_accept_both_versions(self):
+        # The door is open in E2's static checks (said to E2's owner; league/gym is not E3's to edit). Were it shut
+        # one day, another mark of process state belongs here: the seal below is by process, whatever the door.
+        for code in (MARKS, READS):
+            self.assertFalse(elane_train.check_code(code, ["SPY"]))
+
+    def test_a_second_version_reads_nothing_of_the_hidden_year_the_first_one_met(self):
+        a, b = self.house(self.plain), self.house(self.moved)
+        for w in (a, b):
+            self.assertEqual(w["alerts"], [], "both ingests ran")
+            self.assertEqual(len(w["contrib"]), 4, "two versions, each k: the hidden runs were made")
+            self.assertEqual(w["restarts"], 0, "the evidence child lived through both versions (one process a House)")
+            self.assertTrue(w["hidden_log"], "the hidden runs had a child, and a log, of their own")
+            self.assertEqual(sorted(w["v2"]["years"]), [str(y) for y in elane_folds.WORK_YEARS if y != self.YEAR])
+            self.assertGreater(w["v2"]["summary"]["trades"], 1000, "v2 trades every seen session")
+        self.assertNotEqual([r["series_sha"] for r in a["contrib"] if r["version"] == 1],
+                            [r["series_sha"] for r in b["contrib"] if r["version"] == 1],
+                            "the two markets do differ where v1's hidden run looks")
+        for key in ("v1", "v2", "brief", "outs"):
+            self.assertTrue(self.same(a, b, key), f"{key} differs with the hidden year's market")
+
+    def test_made_in_the_evidence_child_the_hidden_run_would_reach_the_next_version(self):
+        """What E3 does NOT do, and why: the hidden runs on the seen runs' own runner."""
+        import contextlib
+
+        @contextlib.contextmanager
+        def shared(runner):
+            yield runner
+
+        with mock.patch.object(elane_memory, "hidden_runner", shared):
+            a, b = self.house(self.plain), self.house(self.moved)
+        self.assertTrue(self.same(a, b, "v1"), "v1 marks, and trades the same")
+        self.assertFalse(self.same(a, b, "v2"), "the mark v1's hidden run left is in v2's seen runs")
+        self.assertFalse(self.same(a, b, "brief"), "and in what the family's researcher is shown")
+        self.assertNotEqual(a["v2"]["summary"]["exposure_mean"], b["v2"]["summary"]["exposure_mean"])
 
 
 @unittest.skipUnless(e3.WIRED, e3.NOT_WIRED)
