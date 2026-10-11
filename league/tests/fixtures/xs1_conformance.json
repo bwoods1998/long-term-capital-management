@@ -1,7 +1,7 @@
 {
  "what": "XS1 conformance vectors: synthetic inputs, every intermediate integer and the verdict (HOUSE-RULE-XS1.md section 9)",
  "numpy": "2.5.3",
- "k_XS": 130,
+ "k_XS": 138,
  "world": {
   "sessions": 456,
   "names": 24,
@@ -21,13 +21,13 @@
     "world_seed": 1,
     "fill": "open",
     "plant_per_day_V": 0.002,
-    "plant_per_day_H": 0.0013,
+    "plant_per_day_H": 0.00135,
     "train_pools": {
      "n_2016_19": 1004,
      "n_2022_24": 499,
      "lumpy": 0.0
     },
-    "k_XS": 130,
+    "k_XS": 138,
     "placebo_seed": "25539167690346316859240858469936157132",
     "receipt_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "program_code_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -3980,12 +3980,12 @@
     "exits_H": 153,
     "invested_H": 194,
     "sum_V_x": 0.2666482979045945,
-    "sum_H_x": 0.07312746295502365,
-    "sum_H_x15": 0.06269642533487042,
+    "sum_H_x": 0.07816390815732617,
+    "sum_H_x15": 0.06773268619610678,
     "sum_H_w": 156.22,
-    "sum_H_s": 0.014742075240306454,
+    "sum_H_s": 0.014742443922438779,
     "sum_H_f": 0.0030600000000000002,
-    "sum_H_B": 0.10993658303098355
+    "sum_H_B": 0.11271118313802891
    },
    "floor": {
     "eligible": true,
@@ -3996,7 +3996,7 @@
       "T": 1593180,
       "k_cell": 86,
       "kappa_H": 1.0190405382797996e-05,
-      "HO_at_k_used": 22260,
+      "HO_at_k_used": 16960,
       "HO_at_0": 823620
      },
      "D": {
@@ -4010,21 +4010,21 @@
    },
    "look": {
     "eligible": true,
-    "k_xs": 130,
+    "k_xs": 138,
     "k_p": 86,
-    "k_used": 130,
-    "own_fp": 0.013972055888223553,
+    "k_used": 138,
+    "own_fp": 0.010645375914836993,
     "RT_V": 198,
     "ID_V": 249,
     "sum_V": 0.2666482979045945,
     "precheck": true,
     "look_spent": true,
-    "sum_H": 0.07312746295502365,
-    "sum_H_x15": 0.06269642533487042,
-    "t_H": 1.3731936865871386,
-    "grid_index": 137,
-    "placebo_count": 89,
-    "p_plac_thousandths": 90,
+    "sum_H": 0.07816390815732617,
+    "sum_H_x15": 0.06773268619610678,
+    "t_H": 1.4676944145725097,
+    "grid_index": 146,
+    "placebo_count": 78,
+    "p_plac_thousandths": 79,
     "legs": {
      "sum_H_positive": true,
      "stress_sum_positive": true,
@@ -4057,7 +4057,7 @@
      "n_2022_24": 499,
      "lumpy": 0.0
     },
-    "k_XS": 130,
+    "k_XS": 138,
     "placebo_seed": "25539167690346316859240858469936157132",
     "receipt_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "program_code_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -7993,7 +7993,7 @@
       "T": 1593180,
       "k_cell": 86,
       "kappa_H": 1.0190405382797996e-05,
-      "HO_at_k_used": 22260,
+      "HO_at_k_used": 16960,
       "HO_at_0": 823620
      },
      "D": {
@@ -8007,10 +8007,10 @@
    },
    "look": {
     "eligible": true,
-    "k_xs": 130,
+    "k_xs": 138,
     "k_p": 86,
-    "k_used": 130,
-    "own_fp": 0.013972055888223553,
+    "k_used": 138,
+    "own_fp": 0.010645375914836993,
     "RT_V": 191,
     "ID_V": 249,
     "sum_V": 0.16181789904751612,
@@ -8054,7 +8054,7 @@
      "n_2022_24": 499,
      "lumpy": 0.0
     },
-    "k_XS": 130,
+    "k_XS": 138,
     "placebo_seed": "25539167690346316859240858469936157132",
     "receipt_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "program_code_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -12023,7 +12023,7 @@
       "T": 1593180,
       "k_cell": 86,
       "kappa_H": 1.0190405382797996e-05,
-      "HO_at_k_used": 22260,
+      "HO_at_k_used": 16960,
       "HO_at_0": 823620
      },
      "D": {
@@ -12037,10 +12037,10 @@
    },
    "look": {
     "eligible": true,
-    "k_xs": 130,
+    "k_xs": 138,
     "k_p": 86,
-    "k_used": 130,
-    "own_fp": 0.013972055888223553,
+    "k_used": 138,
+    "own_fp": 0.010645375914836993,
     "RT_V": 198,
     "ID_V": 249,
     "sum_V": -0.1281324893178174,
@@ -12070,7 +12070,7 @@
      "n_2022_24": 499,
      "lumpy": 0.0
     },
-    "k_XS": 130,
+    "k_XS": 138,
     "placebo_seed": "25539167690346316859240858469936157132",
     "receipt_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "program_code_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -15929,7 +15929,7 @@
       "T": 1593180,
       "k_cell": 86,
       "kappa_H": 1.0190405382797996e-05,
-      "HO_at_k_used": 22260,
+      "HO_at_k_used": 16960,
       "HO_at_0": 823620
      },
      "D": {
@@ -15943,10 +15943,10 @@
    },
    "look": {
     "eligible": true,
-    "k_xs": 130,
+    "k_xs": 138,
     "k_p": 86,
-    "k_used": 130,
-    "own_fp": 0.013972055888223553,
+    "k_used": 138,
+    "own_fp": 0.010645375914836993,
     "RT_V": 192,
     "ID_V": 249,
     "sum_V": 0.24251646931307422,
@@ -15984,13 +15984,13 @@
     "world_seed": 1,
     "fill": "open",
     "plant_per_day_V": 0.002,
-    "plant_per_day_H": 0.001265,
+    "plant_per_day_H": 0.001305,
     "train_pools": {
      "n_2016_19": 1004,
      "n_2022_24": 499,
      "lumpy": 0.001
     },
-    "k_XS": 130,
+    "k_XS": 138,
     "placebo_seed": "25539167690346316859240858469936157132",
     "receipt_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "program_code_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -19943,12 +19943,12 @@
     "exits_H": 153,
     "invested_H": 194,
     "sum_V_x": 0.2666482979045945,
-    "sum_H_x": 0.06960195131341398,
-    "sum_H_x15": 0.059171042732007066,
+    "sum_H_x": 0.07363110747525474,
+    "sum_H_x15": 0.06320005142099488,
     "sum_H_w": 156.22,
-    "sum_H_s": 0.014741817162813826,
+    "sum_H_s": 0.014742112108519686,
     "sum_H_f": 0.0030600000000000002,
-    "sum_H_B": 0.10799436295605314
+    "sum_H_B": 0.11021404304168865
    },
    "floor": {
     "eligible": true,
@@ -19973,7 +19973,7 @@
    },
    "look": {
     "eligible": true,
-    "k_xs": 130,
+    "k_xs": 138,
     "k_p": 165,
     "k_used": 170,
     "own_fp": 0.10557768924302789,
@@ -19982,12 +19982,12 @@
     "sum_V": 0.2666482979045945,
     "precheck": true,
     "look_spent": true,
-    "sum_H": 0.06960195131341398,
-    "sum_H_x15": 0.059171042732007066,
-    "t_H": 1.3070365014692675,
-    "grid_index": 130,
-    "placebo_count": 105,
-    "p_plac_thousandths": 106,
+    "sum_H": 0.07363110747525474,
+    "sum_H_x15": 0.06320005142099488,
+    "t_H": 1.3826442686101859,
+    "grid_index": 138,
+    "placebo_count": 88,
+    "p_plac_thousandths": 89,
     "legs": {
      "sum_H_positive": true,
      "stress_sum_positive": true,
@@ -20014,13 +20014,13 @@
     "world_seed": 1,
     "fill": "open",
     "plant_per_day_V": 0.002,
-    "plant_per_day_H": 0.0013,
+    "plant_per_day_H": 0.00135,
     "train_pools": {
      "n_2016_19": null,
      "n_2022_24": 549,
      "lumpy": 0.0
     },
-    "k_XS": 130,
+    "k_XS": 138,
     "placebo_seed": "25539167690346316859240858469936157132",
     "receipt_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "program_code_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -23973,12 +23973,12 @@
     "exits_H": 153,
     "invested_H": 194,
     "sum_V_x": 0.2666482979045945,
-    "sum_H_x": 0.07312746295502365,
-    "sum_H_x15": 0.06269642533487042,
+    "sum_H_x": 0.07816390815732617,
+    "sum_H_x15": 0.06773268619610678,
     "sum_H_w": 156.22,
-    "sum_H_s": 0.014742075240306454,
+    "sum_H_s": 0.014742443922438779,
     "sum_H_f": 0.0030600000000000002,
-    "sum_H_B": 0.10993658303098355
+    "sum_H_B": 0.11271118313802891
    },
    "floor": {
     "eligible": false,
@@ -23988,7 +23988,7 @@
    },
    "look": {
     "eligible": false,
-    "k_xs": 130,
+    "k_xs": 138,
     "k_p": null,
     "verdict": "INELIGIBLE",
     "look_spent": false,

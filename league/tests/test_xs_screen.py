@@ -1,12 +1,14 @@
 """XS1, THE PANEL SCREEN (league/xs/screen.py; release E4; the pinned pre-registration XSCREEN-1 revision 2, section 4).
 
-TheStudyVectors: all eight vectors of the study's file league/tests/fixtures/xs1_conformance.json, from the pools, the
-series and the placebo t's of xs1_conformance_inputs.npz, run under the vector file's OWN bar (`k_XS`): every integer
-and verdict exactly, every float to 1e-12; AND THE NINTH, by hand (the captain's A22 (4); xs1_conformance_c.json): a
-2022-24 pool alone as a floor cell, and a tenth of the House's own shape, each counted here again by a brute-force
-loop over every (Validation block, holdout block) pair. NoReceiptNoLook and TheCommittedPin (seal X10): nulls refuse,
-a placebo block under another stratum fails closed, and the pin of the committed policy.json is the receipt file's,
-value for value, through `screen.PIN_SOURCES`. Then the rule's parts at their edges: the receipt's loader, the series
+TheStudyVectors: all eight vectors of league/tests/fixtures/xs1_conformance.json (the file the study's own vector
+builder writes at the bar of the receipt the House runs), from the pools, the series and the placebo t's of
+xs1_conformance_inputs.npz, run under the vector file's OWN bar (`k_XS`): every integer and verdict exactly, every
+float to 1e-12; AND THE NINTH, by hand (the captain's A22 (4); xs1_conformance_c.json): a 2022-24 pool alone as a
+floor cell, and a tenth of the House's own shape, each counted here again by a brute-force loop over every
+(Validation block, holdout block) pair. NoReceiptNoLook and TheCommittedPin (seal X10): nulls refuse, a placebo block
+under another stratum fails closed, the pin of the committed policy.json is the receipt file's, value for value,
+through `screen.PIN_SOURCES`, and the committed vector files' bar is the pinned receipt's (the captain's A23: a
+receipt at another bar lands with its vectors). Then the rule's parts at their edges: the receipt's loader, the series
 and windows, the pre-check, the floor against brute force and every INELIGIBLE case, the look (119 placebos above
 pass and 120 fail; t exactly at c_used passes and just below fails; the stress leg), the verdict's failure order, the
 labels beside, the lineage in either series, and the sentence.
@@ -623,6 +625,37 @@ class TheCommittedPin(unittest.TestCase):
                                               fl["k_p"] + round(pinned.c_margin * 100)))
         self.assertEqual((moved["k_p"], moved["cells"]["C"]["k_cell"]), (fl["k_p"], fl["cells"]["C"]["k_cell"]))
 
+    def test_the_committed_vectors_run_at_the_pinned_bar(self):
+        """The captain's A23: the receipt was rebuilt at the House's bar and every conformance vector computed again
+        there. So the three committed vector files state ONE bar, the pinned receipt's c_XS on the grid: the study's
+        eight (written by its own vector builder at that `k_XS`), the inputs made from them, and the two by hand. A
+        receipt landed at another bar fails here until its vectors are built at it (docs/operations.md says how). The
+        vectors themselves read no pin: `TheStudyVectors` runs each file under the bar the file states."""
+        pinned = screen.pinned_receipt(self.block())
+        if pinned is None:
+            return  # nulls: no bar is pinned, and the vectors run under their own
+        k_xs = round(pinned.c_XS * 100)
+        for path in (VECTORS, NINTH):
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(doc["k_XS"], k_xs, path.name)
+            bars = {v["inputs"]["k_XS"] for v in doc["vectors"].values() if "k_XS" in v.get("inputs", {})}
+            self.assertEqual(bars, {k_xs}, path.name)
+        with np.load(INPUTS) as inputs:
+            manifest = json.loads(bytes(inputs["manifest"]).decode("utf-8"))
+        self.assertEqual(manifest["k_XS"], k_xs)
+        self.assertEqual(manifest["vectors_sha256"], hashlib.sha256(VECTORS.read_bytes()).hexdigest())
+        # and the receipt says what it is: its own bar beside the study's registered one, and that receipt's sha256
+        doc = json.loads((Path(ci.REPO) / screen.RECEIPT_PATH).read_text(encoding="utf-8"))
+        rebuilt = doc.get("house_bar")
+        if rebuilt is not None:
+            self.assertEqual(rebuilt["c_XS"], doc["c_XS"])
+            self.assertEqual([row["c_XS"] for row in doc["ladder"] if row["feasible"]][-1], rebuilt["registered_c_XS"])
+            self.assertLess(rebuilt["registered_c_XS"], doc["c_XS"], "a rebuilt receipt only tightens the bar")
+            self.assertEqual(doc["cost_of_rule"]["c_XS_with_finite_pool_bias"], doc["c_XS"],
+                             "the House's bar is the study's own bias-raised threshold")
+            self.assertRegex(rebuilt["registered_receipt_sha256"], r"^[0-9a-f]{64}$")
+            self.assertNotEqual(rebuilt["registered_receipt_sha256"], pinned.receipt_sha256)
+
     def test_the_pin_sources_name_every_pinned_value(self):
         self.assertEqual(set(screen.PIN_SOURCES), set(screen.PIN_KEYS) - {"receipt_sha256"})
         fake = json.loads(FAKE.read_text(encoding="utf-8"))
@@ -666,7 +699,7 @@ class Receipts(unittest.TestCase):
         fake = json.loads(FAKE.read_text(encoding="utf-8"))
         self.assertEqual(set(screen.RECEIPT_KEYS) - set(fake), set())
         self.assertEqual(set(fake) - set(screen.RECEIPT_KEYS), {"eligibility", "beside_calibrated_reading"},
-                         "a receipt may carry more than its keys (the adopted one adds these two)")
+                         "a receipt may carry more than its keys (the study's adds these two)")
         self.assertIn("FAKE", fake["study"])
         self.assertIn("FAKE", fake["note"])
         self.assertNotEqual(fake["name"], screen.RECEIPT_NAME)

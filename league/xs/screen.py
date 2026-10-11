@@ -5,17 +5,22 @@ Owner: package E. `ScreenRefused`, `Series`, `look_permitted` and `holdout_t` ar
 THE RULE IS THE PINNED PRE-REGISTRATION, EXACTLY: XSCREEN-1 revision 2 (sha256 c46aec17..., pinned 2026-10-11
 03:03:08Z), section 4. Where E4-SPEC section 9 differs (it was revised in parallel without seeing it), the
 pre-registration wins. THE THRESHOLDS ARE THE RECEIPT'S, READ AT RUNTIME, NEVER WRITTEN HERE: the study finished and
-adopted XS1 by its own mechanical rule (rung R0), and its receipt is docs/benchmarks/equity_screen_xs_1.json, which
-the integrator copies verbatim and pins in policy.json `elane.screens.equity_xs`. The captain may replace it with a
-rebuilt receipt at another c_XS: so no figure of a receipt is a constant of this module (the constants below are the
+adopted XS1 by its own mechanical rule (rung R0). THE RECEIPT THE HOUSE RUNS, docs/benchmarks/equity_screen_xs_1.json,
+pinned in policy.json `elane.screens.equity_xs`, IS THAT STUDY'S RECEIPT REBUILT AT THE CAPTAIN'S BAR (decision A23):
+the threshold of the study's own bias-raised rule (the registered rule with the measured finite-pool bias added to
+every real-signal cell), which is above the registered one. The study's own builder wrote it from the study's saved
+run; its key `house_bar` says so, and names the registered bar and the registered receipt's sha256. The captain may
+replace it again: so no figure of a receipt is a constant of this module (the constants below are the
 PRE-REGISTRATION's fixed figures, which every receipt must state, and the loader refuses one that states another).
 A SCREEN WITH NO PINNED RECEIPT REFUSES EVERY PROGRAM (`ScreenRefused`); tests use the fixture marked fake
 (league/tests/fixtures/equity_screen_xs_fake.json), shaped as the real receipt is (`RECEIPT_KEYS`).
 
 THE CONFORMANCE VECTORS (the study's HOUSE-RULE-XS1, section 9; synthetic inputs, no market data) are committed:
-league/tests/fixtures/xs1_conformance.json, the study's file byte for byte (eight vectors: V1 pass, V2 fail, V3
-refused at the pre-check, V4 the stress leg, V5 the own floor, V6 ineligible, CH the characteristics and cells, H the
-hand vector), and league/tests/fixtures/xs1_conformance_inputs.npz, the synthetic inputs V1-V6 were computed from
+league/tests/fixtures/xs1_conformance.json, the file the study's own vector builder writes at the bar of the receipt
+the House runs (the file's `k_XS`; at the registered bar the same builder gives the study's pinned file again), byte
+for byte (eight vectors: V1 pass, V2 fail, V3 refused at the pre-check, V4 the stress leg, V5 the own floor, V6
+ineligible, CH the characteristics and cells, H the hand vector), and
+league/tests/fixtures/xs1_conformance_inputs.npz, the synthetic inputs V1-V6 were computed from
 (prices, the eligible set, every lot with its cell, members and leaving sessions, the Train pools) with the study's
 plain reference's daily series beside (r, B, x, x15, s, f, w, exits, invested, the universe excess u, and the 999
 placebo t's on the holdout). `test_xs_screen.TheStudyVectors` reproduces EVERY integer and verdict exactly and every
@@ -26,7 +31,9 @@ third floor cell ("C": its second Train segment is 753 sessions). It is derived 
 every (Validation block, holdout block) pair of a small synthetic pool, never this module) and committed as
 league/tests/fixtures/xs1_conformance_c.json, with a tenth beside it of the House's own shape (pools of 752 and 751
 sessions: all three cells, the second segment's binding); `test_xs_screen` holds `floor` to both. Neither
-implementation is rewritten to fit the other after the receipt exists.
+implementation is rewritten to fit the other after the receipt exists. THE VECTORS RUN UNDER THE BAR THEIR OWN FILE
+STATES, never a pin's; and CI holds that bar equal to the pinned receipt's (`test_xs_screen.TheCommittedPin`), so a
+receipt at another bar lands with its vectors computed again at it.
 
 x is the residual, x15 the stress residual (`league.xs.placebo`), one observation a session.
 
@@ -123,7 +130,8 @@ RECEIPT_NAME = "equity_screen_xs_1"
 RECEIPT_PATH = "docs/benchmarks/equity_screen_xs_1.json"
 CONTRACT = "C-XS-1"
 #: The keys a receipt must carry (the pre-registration's 10.1); the loader refuses a receipt that lacks one, and
-#: lets a receipt carry more (the adopted one adds "eligibility" and "beside_calibrated_reading").
+#: lets a receipt carry more (the study's adds "eligibility" and "beside_calibrated_reading"; the one rebuilt at the
+#: captain's bar adds "house_bar" beside them: what it is, the registered bar and receipt, how it was built).
 RECEIPT_KEYS = ("name", "screen", "study", "rule", "contract", "fp_cap", "owner_wall", "c_XS", "c_margin",
                 "alpha_plac", "placebo_draws", "stratum", "residual", "precheck", "look", "floor", "windows", "lineage",
                 "R3_retry_permitted", "labels", "flags", "screen_flags", "ladder", "fp_zero_edge", "fp_zero_edge_B",

@@ -6,8 +6,9 @@ module imports and has the names it publishes, the DDL creates, and the shared s
 told. It is the INTEGRATOR'S file: a package that needs one of these shapes changed says so to the integrator and
 changes nothing here. It never asserts that a function is unbuilt, so it keeps passing as the packages land.
 
-It also holds the study's conformance fixtures (synthetic inputs; XSCREEN-1's vectors, byte for byte, and the inputs
-they were computed from) to each other, so packages D and E reproduce ONE set of vectors.
+It also holds the study's conformance fixtures (synthetic inputs; XSCREEN-1's vectors as its own vector builder
+writes them at the bar of the receipt the House runs, and the inputs they were computed from) to each other, so
+packages D and E reproduce ONE set of vectors.
 
 Nothing here reads market data: there is none in the repository.
 """
@@ -29,9 +30,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
-#: The study's conformance vectors (XSCREEN-1's work/conformance_xs1.json), committed byte for byte.
+#: The study's conformance vectors: the file XSCREEN-1's own vector builder (its code/conformance_xs1.py) writes at
+#: the bar of the receipt in the tree (the file's `k_XS`), committed byte for byte. The study pinned its file at the
+#: bar it registered (sha256 386995d8...: the same builder gives it again at that bar); the captain's A23 moved the
+#: House's bar, the receipt was rebuilt there, and every vector was computed again by that builder.
 VECTORS = FIXTURES / "xs1_conformance.json"
-VECTORS_SHA256 = "386995d8d8c86baec17f1c378b7c067be43ef39653c3879f71d059d0beae7e3c"
+VECTORS_SHA256 = "691f43404ae10bc409ea15450d26470667f192198a35f974c4c976f9a5e1edb8"
 #: The synthetic inputs of V1-V6 and the plain reference's series (written at Step 0 from the study's own generator).
 INPUTS = FIXTURES / "xs1_conformance_inputs.npz"
 
@@ -368,9 +372,12 @@ class TheStudysVectors(unittest.TestCase):
             if "look" in vector:
                 yield key.split()[0], vector
 
-    def test_the_vectors_are_the_studys_file_byte_for_byte(self):
+    def test_the_vectors_are_the_studys_builders_file_byte_for_byte(self):
         self.assertEqual(hashlib.sha256(VECTORS.read_bytes()).hexdigest(), VECTORS_SHA256)
         self.assertEqual(self.manifest["vectors_sha256"], VECTORS_SHA256, "the inputs were made for these vectors")
+        # one bar in the file, in every look vector and in the inputs made from them (read, never written here)
+        self.assertEqual({v["inputs"]["k_XS"] for _, v in self.looks()} | {self.manifest["k_XS"]},
+                         {self.vectors["k_XS"]})
         self.assertEqual(sorted(self.vectors["vectors"]),
                          ["CH", "H", "V1 pass", "V2 fail", "V3 pre-check", "V4 stress", "V5 own floor",
                           "V6 ineligible"])

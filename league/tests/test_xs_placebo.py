@@ -1,10 +1,11 @@
 """The panel's residual and its matched placebos (release E4, package D; league/xs/placebo.py): the pinned
 pre-registration XSCREEN-1, section 3, held to the study's own conformance vectors and to its tests T2, T5 and T15.
 
-SYNTHETIC DATA ONLY. The study's vectors (league/tests/fixtures/xs1_conformance.json, byte for byte) and their inputs
-(xs1_conformance_inputs.npz) are seeded pseudo-random prices: no market row. The vectors' names 0..23 are the columns,
-in that order, so "ascending asset id" is ascending column. `placebo.residual` and `placebo.run` read the bars and the
-holdings log alone, so nothing here needs package C."""
+SYNTHETIC DATA ONLY. The study's vectors (league/tests/fixtures/xs1_conformance.json: the file its own vector builder
+writes at the bar of the receipt the House runs, byte for byte) and their inputs (xs1_conformance_inputs.npz) are
+seeded pseudo-random prices: no market row. The vectors' names 0..23 are the columns, in that order, so "ascending
+asset id" is ascending column. `placebo.residual` and `placebo.run` read the bars and the holdings log alone, so
+nothing here needs package C."""
 
 from __future__ import annotations
 

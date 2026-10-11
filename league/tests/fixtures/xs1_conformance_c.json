@@ -2,7 +2,7 @@
  "what": "XS1 conformance vectors 9 and 10 (the captain's A22 (4)): the program's own floor where the 2022-24 pool is a floor cell alone. SYNTHETIC pools (integers from sha256 of a counter; no market data). Derived by a brute-force loop over every (Validation block, holdout block) pair, never by league/xs/screen.py",
  "derived_by": "a standalone script that imports nothing of league/xs; its brute force is repeated, pair by pair, in league/tests/test_xs_screen.py, which holds these figures and `screen.floor` to it",
  "numpy": "2.5.3",
- "k_XS": 130,
+ "k_XS": 138,
  "rule": {
   "L": 194,
   "LV": 250,
@@ -40,7 +40,7 @@
       "swing": 1500
      }
     },
-    "k_XS": 130
+    "k_XS": 138
    },
    "pools": {
     "pool_d": null,
@@ -96,7 +96,7 @@
       "swing": 1500
      }
     },
-    "k_XS": 130
+    "k_XS": 138
    },
    "pools": {
     "pool_d": {

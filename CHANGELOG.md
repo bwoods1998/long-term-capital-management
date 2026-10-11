@@ -34,8 +34,9 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
 - **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
   day's S&P 500 members by a symmetric cross-sectional rule, see salted slots with no ticker, no date and no price
   level, and are judged on their daily RESIDUAL against matched placebo portfolios by the screen XS1 (the study
-  XSCREEN-1's receipt, `docs/benchmarks/equity_screen_xs_1.json`, pinned in policy.json; every threshold read from it
-  at runtime). The data jobs (membership, the panel's bars with their coverage audit, spreads, N_eff), the panel
+  XSCREEN-1's receipt, rebuilt at the captain's bar: `docs/benchmarks/equity_screen_xs_1.json`, pinned in
+  policy.json; every threshold read from it at runtime). The data jobs (membership, the panel's bars with their
+  coverage audit, spreads, N_eff), the panel
   package `league/xs/` with its own evidence identity, the Train bar equity-xs-v1 with its weekly zero-edge column,
   the one Validation try and the one look, and the live adapter through E1's EquityBook (a rebalance the book can
   execute, a standing target that retries a missed buy, the bars a decision read kept and audited).
@@ -70,7 +71,8 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
 - **Integrated Oct 11 (R-E4a; nothing deployed):** eight packages (A data, B costs and counts, C the xs core, D the
   engine, E the screen and the identity, G the swarm's lane, H the book's panel path, I the universe generator, CI
   and docs) merged over E1 and E2 with their review fixes (`feat/equity-e2-int` 5ad1f01e), every patch to E1's and
-  E2's files applied, XS1's receipt landed verbatim with its pin. E4's own commits move NO id: the options execution
+  E2's files applied, XS1's receipt landed verbatim with its pin (the registered receipt; the captain's A23 has
+  since replaced it: below). E4's own commits move NO id: the options execution
   fingerprint, the equity identity and the money digest are the E1/E2 head's on every one of them (E1's own fixes
   moved all three before E4 was merged onto them: the vendor's cents, the Probe sleeve A20). **One fault found and
   fixed at integration:** a panel program ALREADY SEATED went on buying after the lane's mode was put down, the
@@ -78,8 +80,8 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   row only while the lane is live, its planned entries are held at the send, and the book retires it on the lane's
   own word; a switch file caught mid-write retires nobody. The xs rounding bound is E1's own, re-exported.
 - **Owed, each holding real money back by design (step two):** the hand-over of the probe's panel plan to the
-  House's job (patch 18 is built and not wired, below: until then every panel look waits); the receipt at the
-  captain's bar (A23); the universe commit R-E4b (needs
+  House's job (patch 18 is built and not wired, below: until then every panel look waits); the universe commit
+  R-E4b (needs
   the House's `tradable.json`; its gateway half is a patch for the owner) with the money row of a panel sleeve. And
   one thing for the captain to know before mode "live": at the Probe sleeve of 0.50 x E a five-name basket alone
   fills the $400 loss window (since the review's fixes it trades whole from flat, five names of $200, the basket
@@ -141,6 +143,27 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   works while the market is open (a run's wall is the whole session, 09:25 to 16:35 ET), and the spreads job's
   grace is three hours (with six it could hold the one ops child past a pre-open). STATED, NOT CHANGED: the send
   after a window loss (above); every budget of the lane on the box is an estimate until its first receipts.
+- **The receipt at the captain's bar (A23; Oct 11; nothing deployed; the three ids are main's on both Pythons, the
+  xs identity moves and no panel band exists under it).** THE HOUSE RUNS XS1 AT
+  c_XS 1.38, NOT THE REGISTERED 1.30. WHY: 1.38 is the registered rule's own answer once the finite-pool bias the
+  study measured is added to every real-signal cell (the registered receipt's
+  `cost_of_rule.c_XS_with_finite_pool_bias`), and a known bias left out of a bar is a loosened rule. WHAT MOVED:
+  `docs/benchmarks/equity_screen_xs_1.json` is the study's receipt rebuilt at 1.38 by the study's own report and
+  receipt builder from its saved run (sha256 `f7ce98b1...`; the registered receipt `98acbb83...` stays the study's
+  result, and the new file names it under `house_bar`); policy.json's pin of it (`receipt_sha256`, `c_XS`, the
+  sentence); the conformance vectors, computed again at the new bar by the study's vector builder, with their
+  inputs file and the two by-hand vectors; a CI test that holds the vectors' bar to the pin's; two docstrings of
+  `league/xs`. No line that judges, sizes or trades changed, and A22's four rules are as they were. THE COST, from
+  the two receipts' own `power` rows: at a planted net residual edge of +10% a year the full gate's power falls by
+  0.39 to 2.59 points over the eight archetypes' `XH|N0-S|e10` rows (X7 52.87% to 50.28%, X1 44.33% to 41.91%, X8
+  67.58% to 65.56%, X6 33.86% to 33.47%); over the 48 calibration rows the holdout-only power falls by 0.29 to
+  2.64 points (median 1.93). WHAT IT BUYS: the largest zero-edge rate of a calibration cell 10.02%
+  (11.15%), its largest 95% bound 13.11% (14.82%), and no bootstrap seed of twenty at the owner's 15% wall (2 at
+  1.30). STATED: every false-positive, bound, family-wise, bias and power row is read at 1.38 from the
+  simulations the study saved; the two report-only arms (takeovers and collapses; no-skill style tilts) had been
+  saved at the study's bar only and were run again at 1.38 by the study's own command, after the same command at
+  1.30 gave the saved results again; they decide nothing. A receipt at another bar lands the same way
+  (docs/operations.md, **The screen XS1**).
 - **The review's fixes (Oct 11; nineteen findings, three lenses; nothing deployed; no id but the xs identity
   moves, and no panel band exists under it).** LIVE SAFETY: a seated panel program is liquidated only by the
   captain's switch: a store-side leg that fails with the switch at "live" (the nightly I6, the twin marker, a stale

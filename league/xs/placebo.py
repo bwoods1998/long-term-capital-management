@@ -4,7 +4,9 @@ Owner: package D.
 
 THIS MODULE IS THE PINNED PRE-REGISTRATION'S SECTION 3, to the letter (XSCREEN-1 revision 2; where E4-SPEC D13 and D14
 differ, the pre-registration wins). THE STUDY'S CONFORMANCE VECTORS ARE COMMITTED (synthetic inputs, no market data):
-league/tests/fixtures/xs1_conformance.json (the study's file, byte for byte) and
+league/tests/fixtures/xs1_conformance.json (the file the study's own vector builder writes at the bar of the receipt
+the House runs, byte for byte: the captain's A23 moved that bar above the registered one, and every vector was
+computed again there) and
 league/tests/fixtures/xs1_conformance_inputs.npz (for V1-V6: the prices O and C, the eligible set U, entry validity,
 every lot of the holdings log with its cell, members and each member's leaving session, and the study's plain
 reference's series r, B, x, x15, s, f, w, exits, invested, u, the 999 placebo t's on the holdout and the counterpart
