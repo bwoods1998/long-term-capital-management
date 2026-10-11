@@ -333,6 +333,54 @@ SOUND: dict[str, str] = {
                 return out
             return [{"sell": lot["id"]} for lot in ctx.positions]
      ''',
+    "a closure over ctx, sets of symbols and intents made with dict()": '''
+        def decide(ctx):
+            n, h = int(ctx.params["n"]), 3
+
+            def z(sym):
+                r = ctx.bars[sym].ret
+                if len(r) < n + 2:
+                    return float("nan")
+                sd = float(np.nanstd(r[-n - 1:-1]))
+                return float(r[-1] / sd) if sd > 0 and np.isfinite(r[-1]) else float("nan")
+
+            exits = [{"sell": p["id"], "at": "open", "tag": "h"} for p in ctx.positions if int(p["held_sessions"]) + 1 >= h]
+            holding = {p["symbol"] for p in ctx.positions}
+            entries = []
+            for sym in ctx.symbols:
+                score = z(sym)
+                if sym not in holding and math.isfinite(score) and score < 0 and not ctx.events_next.get("fomc", False):
+                    entries.append(dict(buy=sym, share=float(ctx.params["share"]), at="open", tag="rev"))
+            last = ctx.closed[-1] if ctx.closed else None
+            if last is not None and last["reason"] == "house":
+                return exits
+            return exits + entries
+     ''',
+    "a walrus, several arrays at once and a lot read with get": '''
+        def sma(x, n):
+            return float(np.mean(x[-n:])) if len(x) >= n and np.all(np.isfinite(x[-n:])) else None
+
+        def decide(ctx):
+            intents = []
+            by_symbol = {}
+            for pos in ctx.positions:
+                by_symbol[pos["symbol"]] = by_symbol.get(pos["symbol"], []) + [pos]
+            for sym in ctx.symbols:
+                if (b := ctx.bars.get(sym)) is None:
+                    continue
+                c, h, l, v = b.close, b.high, b.low, b.volume
+                fast, slow = sma(c, 3), sma(c, 10)
+                if fast is None or slow is None or slow <= 0:
+                    continue
+                up = fast / slow > 1.0
+                lots = by_symbol.get(sym, [])
+                if up and not lots:
+                    intents.append({"buy": sym, "share": ctx.params["share"]})
+                if not up or any(lot["held_sessions"] >= 4 for lot in lots):
+                    for lot in lots:
+                        intents.append({"sell": lot.get("id"), "at": "open", "tag": lot.get("tag", "") or "exit"})
+            return intents[:20]
+     ''',
     "a list of candidates rebuilt into intents": '''
         def decide(ctx):
             out = []
@@ -601,6 +649,23 @@ class TheReadingRule(unittest.TestCase):
                     except TypeError:
                         c = b.close
                     return [{"buy": "SPY", "share": 0.25}] if len(c) > 1 and c[-1] > c[-2] else []
+             ''',
+            "a name another function rebinds": '''
+                def decide(ctx):
+                    x = ctx.bars["SPY"]
+
+                    def swap():
+                        nonlocal x
+                        x = {"close": [1.0, 2.0]}
+                    swap()
+                    return [{"buy": "SPY", "share": 0.25}] if x["close"][-1] > 0 else []
+             ''',
+            "a comprehension's own variable": '''
+                def decide(ctx):
+                    b = ctx.bars["SPY"]
+                    rows = [{"close": float(v)} for v in b.close[-3:]]
+                    last = [b["close"] for b in rows]
+                    return [{"buy": "SPY", "share": 0.25}] if last and last[-1] > 0 else []
              ''',
             "a kind the program asks the type of": '''
                 def decide(ctx):

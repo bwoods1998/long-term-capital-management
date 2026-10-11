@@ -1518,8 +1518,12 @@ class _Reading:
             for alias in node.names:
                 scope.bind((alias.asname or alias.name).split(".")[0], ("other",))
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            # A name another function may rebind is of no known kind there or here (every scope it can live in).
             for name in node.names:
-                scope.bind(name, ("other",))
+                home: _Scope | None = scope
+                while home is not None:
+                    home.bind(name, ("other",))
+                    home = home.up
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 if item.optional_vars is not None:
