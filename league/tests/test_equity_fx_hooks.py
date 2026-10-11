@@ -271,6 +271,9 @@ class TheCover(LiveCase):
         self.reading(live)
         self.assertEqual(live.equity.taken, [], "still short and nothing filled: nothing proves the lot gone")
         self.assertEqual(live.state.get("lots_swallowed")["SPY"]["lots"], "0.4")
+        shares = live.health()["shares"]
+        self.assertEqual((shares["ledger"], shares["refused"]["SPY"]["n"], shares["lots_swallowed"]["SPY"]["lots"]),
+                         ({"SPY": "-100"}, 2, "0.4"), "the health page shows what is standing")
         del self.venue.held["SPY"]                                     # closed outside the House
         self.venue.submit_mode = "ok"
         self.reading(live)
@@ -280,6 +283,7 @@ class TheCover(LiveCase):
                          "what the House did not cover stays on the ledger: the owner's --clear-assignment")
         self.assertEqual(len(self.stock()), 2, "both refused; nothing was sent once the short was gone")
         self.assertEqual(sum(1 for _, text in self.alerts if "closed outside the House" in text), 1)
+        self.assertEqual(live.health()["shares"], {"ledger": {"SPY": "-99.6"}})
 
     def test_a_short_seen_once_that_swallowed_nothing_closes_no_lot(self):
         live = self.start({"SPY": "0.4"})

@@ -3434,6 +3434,12 @@ class OptionsLive:
                                "cells": len(getattr(model, "hazard", {}) or {})},
                 "frozen": self.book.frozen if self.book is not None else None,
                 "equity": equity_hook.health(self.equity),
+                # THE ACCOUNT'S SHARES (`_close_shares`): what is standing of the share-event ledger, the House's own
+                # share orders, a refused one, shares nothing explains and lots a short swallowed (None: nothing is).
+                "shares": {name: self.state.get(key) for name, key in (
+                    ("ledger", "shares"), ("orders", "shares_orders"), ("refused", "shares_refused"),
+                    ("unexplained", "unexplained_shares"), ("lots_swallowed", "lots_swallowed"))
+                    if self.state.get(key)} or None,
                 "paper_proof": self.proof.status() if self.proof is not None else None,
                 "paper_proof_single": self.proof_single.status() if self.proof_single is not None else None,
                 "instances": {k: {"family": i.family, "kind": i.kind, "band": i.band, "mode": i.mode, "error": i.error or None,
