@@ -647,13 +647,15 @@ def standing(rows: Sequence[Mapping[str, Any]], cols: Columns, lots: Sequence[An
     """THE STANDING TARGET for a hold day: the instance's last CALLED `eq_rebalances` row whose status is "planned",
     as {target {id: w}, at, exited [id]} (`exited`: the ids the House has exited since that row: a lot of the id closed
     after it for any reason but the program's own sale); None when there is none or every id is held, has a buy
-    working (`pending`: symbols) or was exited. A decide recorded late never becomes it (its status is "late"), and a
-    hold, a None or a failed decide leaves the one before standing. `lots`: every lot of the instance, open and
-    closed."""
+    working (`pending`: symbols) or was exited. A decide recorded late never becomes it (its status is "late"), nor
+    one whose bars read again in the morning differed (its `audit` is "mismatch": its buys were cancelled, and a target
+    made on bars that did not hold is not planned again); a hold, a None or a failed decide leaves the one before
+    standing. `lots`: every lot of the instance, open and closed."""
     iso = _day(day).isoformat()
     row = None
     for r in sorted(rows, key=lambda r: str(r["decided_day"])):
-        if int(r.get("called") or 0) and r.get("status") == "planned" and str(r["decided_day"]) < iso:
+        if int(r.get("called") or 0) and r.get("status") == "planned" and str(r["decided_day"]) < iso \
+                and r.get("audit") != "mismatch":
             row = r
     if row is None:
         return None

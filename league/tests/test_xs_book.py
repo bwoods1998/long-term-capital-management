@@ -721,6 +721,12 @@ class TheStandingTarget(Case):
             self.assertEqual(set(self.standing()["target"]), {self.ids[s] for s in ("N005", "N011", "N012")}, status)
             self.rows.pop()
 
+    def test_a_target_made_on_bars_that_did_not_hold_never_stands(self):
+        self.rows.append({**self.row("2026-10-12", [["N029", 0.2]]), "audit": "mismatch"})
+        self.assertNotIn(self.ids["N029"], self.standing()["target"])
+        self.rows[-1]["audit"] = "ok"
+        self.assertEqual(set(self.standing()["target"]), {self.ids["N029"]})
+
     def test_a_later_target_replaces_it_and_an_empty_one_stands_for_cash(self):
         self.rows.append(self.row("2026-10-12", [["N029", 0.2]]))
         self.assertEqual(set(self.standing()["target"]), {self.ids["N029"]})
