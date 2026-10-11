@@ -103,6 +103,9 @@ LIVE_FROM_SHARE = 0.5
 I6_FLOOR = 1e-6
 LIVE_DB = "live.sqlite"
 SPREADS_FILE = "spreads.json"
+#: The UTC days of the job's failed runs since its last good one (`<state>/equity-daily/`, outside every manifest):
+#: two days running is an alarm, critical while a panel instance is live.
+FAILURES_FILE = "panel-failures.json"
 RAW_FIELDS = ("o", "h", "l", "c", "v")
 ADJ_FIELDS = ("o", "h", "l", "c")
 
@@ -1065,6 +1068,42 @@ def _fact(manifest: Mapping[str, Any] | None, key: str) -> Any:
     return (manifest or {}).get(key)
 
 
+def live_panels(path: str | Path) -> int:
+    """The live panel instances of live.sqlite (`eq_instances` of kind "panel" not retired), read-only; 0 with no
+    book, no such column (a book from before the panel's patch) or no row."""
+    if not Path(path).is_file():
+        return 0
+    db = sqlite3.connect(f"file:{Path(path)}?mode=ro", uri=True, timeout=5.0)
+    try:
+        return int(db.execute("SELECT COUNT(*) FROM eq_instances WHERE kind = 'panel' AND retired_at IS NULL")
+                   .fetchone()[0])
+    except sqlite3.Error:
+        return 0
+    finally:
+        db.close()
+
+
+def _fail(ctx: Any, root: Path, error: str, **more: Any) -> dict[str, Any]:
+    """A failed receipt, and its UTC day kept beside the store: the job failing two days running is an alarm
+    (critical while a panel instance is live: its decisions' bars are no longer being held to the store)."""
+    days: list[str] = []
+    try:
+        held = json.loads((root / FAILURES_FILE).read_text(encoding="utf-8"))
+        days = [str(d) for d in held.get("days") or ()]
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+    today = U._stamp(ctx.now())[:10]
+    days = sorted(set(days) | {today})
+    try:
+        U._write(root / FAILURES_FILE, U._json_bytes({"days": days}))
+    except OSError:
+        pass
+    if len(days) >= 2:
+        ctx.alert("critical" if live_panels(Path(ctx.root) / LIVE_DB) else "warning",
+                  f"equity_panel: failed on {len(days)} days running; the last good store stays")
+    return U._failed(error, **more)
+
+
 def _rows_of(days: Sequence[dt.date], raw: np.ndarray, fields: Sequence[str]) -> list[dict[str, Any]]:
     return [{"t": d.isoformat(), **dict(zip(fields, row))} for d, row in zip(days, raw.tolist())
             if not math.isnan(row[3])]
@@ -1141,7 +1180,7 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
     try:
         last = last_closed(now)
     except Exception as exc:  # noqa: BLE001 - no calendar, no run
-        return U._failed(f"the last closed session cannot be read: {type(exc).__name__}: {str(exc)[:160]}")
+        return _fail(ctx, root, f"the last closed session cannot be read: {type(exc).__name__}: {str(exc)[:160]}")
     try:
         before = load_panel(root)
     except ValueError as exc:  # a store that does not match its manifest is not grown: a whole refetch
@@ -1162,17 +1201,17 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
             except Exception as exc:  # noqa: BLE001 - a whole refetch that fails writes nothing new: the incremental
                 full_failed = f"{type(exc).__name__}: {str(exc)[:160]}"
                 if before is None:
-                    return U._failed(f"the first whole fetch failed ({full_failed}): nothing written")
+                    return _fail(ctx, root, f"the first whole fetch failed ({full_failed}): nothing written")
         if built is None:
             try:
                 built = incremental(root, ctx.gateway, last, assets=assets, blank=blank, sleep=sleep)
             except ValueError as exc:
                 if full_failed is not None:
-                    return U._failed(f"the whole refetch failed ({full_failed}) and the store cannot be grown ({exc}): "
+                    return _fail(ctx, root, f"the whole refetch failed ({full_failed}) and the store cannot be grown ({exc}): "
                                      "nothing written")
                 built = full(root, ctx.gateway, last, assets=assets, sleep=sleep)  # a store the calendar outgrew
     except Exception as exc:  # noqa: BLE001 - a gateway error writes nothing: a failed receipt, retried in its grace
-        return U._failed(f"the bars could not be fetched: {type(exc).__name__}: {str(exc)[:200]}: nothing written, "
+        return _fail(ctx, root, f"the bars could not be fetched: {type(exc).__name__}: {str(exc)[:200]}: nothing written, "
                          "the last good store stays")
     days, early, aids, raw, adj = built["days"], built["early"], built["aids"], built["raw"], built["adj"]
     n_ref = len(xs_config.REF)
@@ -1180,7 +1219,7 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
     count = {"calls": int(built["calls"]), "failed": 0}
     failed_ref = ref_audit(days, early, raw, adj)
     if failed_ref:
-        return U._failed(f"a REF column fails E1's audit ({', '.join(failed_ref)}): nothing written, the last good "
+        return _fail(ctx, root, f"a REF column fails E1's audit ({', '.join(failed_ref)}): nothing written, the last good "
                          "store stays", mode=built["mode"])
     member = U.membership(assets, days)
     # D19, in its order: what is no bar, what a second read contradicts, what a spell's series is, the coverage.
@@ -1241,7 +1280,7 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
     current = int(today.sum())
     masked_now = int((today & hidden).sum())
     if current and masked_now > MASKED_MEMBERS_MAX * current:
-        return U._failed(f"{masked_now} of {current} current members are masked (over "
+        return _fail(ctx, root, f"{masked_now} of {current} current members are masked (over "
                          f"{int(MASKED_MEMBERS_MAX * 100)}%): nothing written, the last good store stays",
                          mode=built["mode"], masked=dict(sorted(by_mask.items())))
     setting = ctx.job_settings().get("coverage_min") if hasattr(ctx, "job_settings") else None
@@ -1282,8 +1321,9 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
     except NotImplementedError:
         return {"status": "skipped", "why": "league.xs.store.write_panel is not built (package C's C0)"}
     except Exception as exc:  # noqa: BLE001 - the writer refuses before its first byte, and its manifest is last
-        return U._failed(f"the store could not be written: {type(exc).__name__}: {str(exc)[:200]}",
+        return _fail(ctx, root, f"the store could not be written: {type(exc).__name__}: {str(exc)[:200]}",
                          mode=built["mode"])
+    (root / FAILURES_FILE).unlink(missing_ok=True)
     remasked = True
     try:
         U.remask(root, masks, day=last)
@@ -1327,6 +1367,6 @@ __all__ = ["BARS", "WALL_S", "TRIES", "BACKOFF_S", "INCREMENTAL_SESSIONS", "FULL
            "ACCEPT_FIRST", "REUSED_USD", "INSANE_SHARE", "SECOND_READ_GAP", "MASKED_MEMBERS_MAX", "REVISIONS_ALARM",
            "I6_NEEDS", "fetch_asof", "plan", "incremental", "full", "acceptance", "second_read", "coverage",
            "hs_table", "i6_check", "run", "BATCH", "PAGE_LIMIT", "MAX_PAGES", "LOOKBACK_DAYS", "KEEP_ENDED_DAYS",
-           "MIN_SAMPLES", "JUMP_COLUMNS", "SECOND_READS_RUN", "LIVE_FROM_SHARE", "I6_FLOOR", "LIVE_DB", "SPREADS_FILE", "Request",
+           "MIN_SAMPLES", "JUMP_COLUMNS", "SECOND_READS_RUN", "LIVE_FROM_SHARE", "I6_FLOOR", "LIVE_DB", "SPREADS_FILE", "FAILURES_FILE", "live_panels", "Request",
            "requests", "Grid", "Panel", "load_panel", "ratios_equal", "valid_bars", "sane_bars", "jumps", "hs_share",
            "compare_bars", "ref_audit", "tradable_rows"]

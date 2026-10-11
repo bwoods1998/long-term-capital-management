@@ -1029,6 +1029,31 @@ class TheVintageRule(Fixture):
         receipt, _ = self.run_job()
         self.assertEqual(receipt["status"], "failed")
         self.assertFalse((self.root / xs_store.PANEL_DIR).exists())
+        self.assertNotIn("QAAC", json.dumps(receipt), "a failed call is said by its kind, never the venue's text")
+
+    def test_failing_two_days_running_is_an_alarm_and_critical_while_a_panel_instance_is_live(self):
+        self.market.fail_when = lambda p: True
+        first, ctx = self.run_job()
+        again, ctx_again = self.run_job(NOW + 600)   # the runner's retry inside the job's grace: the same day
+        self.assertEqual((first["status"], again["status"], ctx.alerts, ctx_again.alerts), ("failed", "failed", [], []))
+        second, ctx = self.run_job(NOW + DAY)
+        self.assertEqual([(a["level"], "2 days running" in a["text"]) for a in ctx.alerts], [("warning", True)])
+        db = sqlite3.connect(self.state / P.LIVE_DB)
+        db.execute("CREATE TABLE eq_instances (id TEXT PRIMARY KEY, retired_at REAL, kind TEXT NOT NULL DEFAULT 'equity')")
+        db.executemany("INSERT INTO eq_instances VALUES (?, ?, ?)", [("a@1:r", None, "equity"), ("b@1:r", 5.0, "panel")])
+        db.commit()
+        self.assertEqual(P.live_panels(self.state / P.LIVE_DB), 0, "an ETF program, and a retired panel one")
+        db.execute("INSERT INTO eq_instances VALUES ('c@1:r', NULL, 'panel')")
+        db.commit()
+        db.close()
+        third, ctx = self.run_job(NOW + 2 * DAY)
+        self.assertEqual([(a["level"], "3 days running" in a["text"]) for a in ctx.alerts], [("critical", True)])
+        self.market.fail_when = None
+        self.market.today = D(2022, 4, 1)
+        good, ctx = self.run_job(NOW + 2 * DAY + 600)
+        self.assertTrue(good.get("ok"), good)
+        self.assertFalse((self.root / P.FAILURES_FILE).exists(), "a good run ends the count")
+        self.assertEqual(P.live_panels(self.state / "absent.sqlite"), 0)
 
 
 # ================================================================================================ D20

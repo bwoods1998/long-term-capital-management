@@ -1308,7 +1308,6 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
 
     now = ctx.now()
     root = Path(ctx.root) / STORE_DIR
-    base = folder(root)
     try:
         universe = read_universe(root)
     except ValueError as exc:
