@@ -2121,8 +2121,9 @@ __all__ = ["OBJECTIVE", "STATE_KEY", "TRAIN_AT_KEY", "TRAIN_OK_KEY", "HOUSE_ALER
            "RESERVE_YEARS", "TRAIN_YEARS", "TRAIN_LABEL", "BAR", "FAILS", "JUDGED", "DEFAULTS", "AGENDA", "GROUPS",
            "MAP_LABEL", "cfg", "lane_on", "symbols_group", "cell_of", "cell_text", "outside_years", "combine", "year_rows",
            "train_score", "bar_text", "record_of", "e2_family", "passed_version", "identity", "judged", "tried",
-           "pass_current", "may_validate", "compact", "dq_said", "dq_source", "house_fault", "INTENT_FAULTS", "DQ_HINTS",
-           "CONTRACT_CHARS", "program_fault", "KIND", "StateCheckInterrupted", "state_inputs",
+           "pass_current", "may_validate", "compact", "dq_said", "program_fault", "KIND", "StateCheckInterrupted", "state_inputs",
            "SIZE_TOL", "same_intents", "restart_check", "with_state", "restart_text", "train_map",
            "closed_cells", "train_map_text", "refuted_rows", "needs_literal", "check_code", "program_of", "contract_text",
            "RESEARCHER_SYSTEM", "version_text", "EquityResearcher", "versions_of", "BETA", "EQUITY", "LANES"]
+# Release E2.2's names (the disqualification's brief, the contract's cut), listed apart from the list above.
+__all__ += ["dq_source", "house_fault", "INTENT_FAULTS", "DQ_HINTS", "CONTRACT_CHARS"]

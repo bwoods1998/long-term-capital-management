@@ -26,11 +26,15 @@ them). No evidence is reset, no grant re-ratifies. Train runs happen on the Hous
 **Switch it on** (after E1 is live: `elane.mode` "gate", the daily store written, the seeds born). On the owner's
 machine: `python3 set_swarm.py elane.birth_share=0.25 elane.e2.usd_day=8.0 --apply` (the captain's first values, A16).
 Read on the next loop pass; no deploy. **The pace, said plainly:** the equity lanes' research spend (births, Train
-research and the equity review together) is `elane.e2.pace_share` of the researchers' hourly pace, the Sail model line:
-about a quarter of it at the shipped 0.25, and never more than half (the bound is 0 to 0.5). `elane.e2.usd_day` is only
-a cap above it: it can end a day's spend earlier, it never raises it, so 8.0 buys no more than the share does. The split
-is the captain's to set, with the settings tool, at switch-on: `python3 set_swarm.py elane.e2.pace_share=<share>
---apply`, in the same command as the two values above or after it; left alone it is the shipped 0.25 (the details are
+research and the equity review together) is paced by TWO settings, and BOTH must be raised to give the lanes more:
+`elane.e2.pace_share`, E2's hourly pace in lines of the researchers' Sail model line (shipped 0.25; held to 0-4 since
+release E2.2, 0-0.5 before), and `elane.e2.usd_day`, its dollars a UTC day (shipped 8.0; held to 0-100). E2's day is
+the smaller of `usd_day` and a day at its pace: at the ceiling's line ($0.3333 an hour) a share of 0.25 is $2.00 a day
+whatever `usd_day` says, 1.0 is $8.00, 2.0 is $16.00, 4.0 is $32.00, each capped by `usd_day`. The captain sets them
+with the settings tool, at switch-on or after it: `python3 set_swarm.py elane.e2.pace_share=<lines>
+elane.e2.usd_day=<dollars> --apply` (for example `elane.e2.pace_share=2.0 elane.e2.usd_day=12.0`: up to $0.67 an hour
+and $12 a day); left alone they are the shipped 0.25 and 8.0. Beyond the two, E2 stops a dollar before the line where
+the Sail guard holds new research, so it never spends the options researchers' room or the day's cap (the details are
 under **The budget** below). The release itself ships `elane.mode` "off" and `elane.birth_share` 0 in
 policy.json, and with either one off NOTHING in E2 acts: neither round starts, no key is written, no event is made, no
 model is asked (the test runs E1's real loop on the committed policy). The bounds are in code: `elane.birth_share` 0
@@ -48,6 +52,20 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   Train with a graveyard row in E2's own words, or STALLED when no version could be judged). A round starts only
   when it has work it can do now: none while every family is past its research, in a backoff, or needs a model E2
   may not ask.
+- **How ctx is read (release E2.2).** The first programs the equity researcher wrote mostly read `ctx.bars[sym]` by
+  key (`ctx.bars[sym]["close"]`) or as rows: every decide raised a TypeError, the version was disqualified and cost
+  one of its family's four scored versions, and its author was told the error's class and line only. Now the contract
+  (`league/equity/EQUITY.md`, "Reading ctx") says what each field of ctx is, with a worked program and the common
+  faults, and one sentence and two lines of it are in the architect's lanes block and the researcher's system prompt.
+  THE READING RULE runs first of the static rules below: a symbol's bars read by key, by position or as rows, a field
+  ctx or the bars do not have, a lot read by attribute or by a key it lacks, `ctx.positions` read as a dict, and a
+  returned intent with none or two of buy, sell and cancel (an empty dict for "no order" among them), an "at" that
+  is no fill point, a buy with no size or a sell by a symbol are refused before the program is stored or run, each
+  with its line and what to write instead. A refusal costs the question's model dollars and one of the family's 7
+  write attempts, never one of its 4 scored versions. A version that is disqualified all the same (or was, before
+  the rule) has, in its author's next brief, the line of its own file the first error was raised at and what is
+  wrong there; the exception's own text stays on the House, as before (a program chooses it). Read a refusal in the
+  swarm log (`elane_train:` lines, `refused`) or in the family's state (`elane_e2`, `refused`).
 - **Three static rules refuse a program before it is stored or run**, each with its reason in the author's next
   brief: the Gym's code rules; the LEVEL rule (a price or volume level, or the ratio of two different symbols'
   prices, held against a constant or a PARAMS value) with RUN-START DEPENDENCE (the sleeve's own dollars of the run,
@@ -79,25 +97,44 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
 - **Nothing after Train reaches a generator** (A9 D3): no Validation or look outcome, no band, no retirement after the
   look. The equity generators read Train facts only, and no options generator reads an equity graveyard row.
 
-**The budget: a share of the Sail model line.** E2's MODEL dollars (births, Train research and the equity review
-together) are Sail research dollars inside the swarm's research budget and under THE GATE'S RESERVE like any new
-research, never beside it. The budget rule gives the swarm one hourly line for Sail models
+**The budget: E2's own pace, inside the House's Sail day.** E2's MODEL dollars (births, Train research and the equity
+review together) are Sail research dollars inside the swarm's research budget and under THE GATE'S RESERVE like any
+new research, never beside it. The budget rule gives the swarm one hourly line for Sail models
 (`researcher.sail_usd_per_hour` after the budget's overlay: $0.3333 an hour, $8.00 a day, at the owner's ceiling;
-$0.0667 an hour at the floor), and E2 is paid from it, counted apart from the options researchers:
-- **E2's hourly pace** is `elane.e2.pace_share` (0.25, held to 0-0.5) of that line: $0.0833 an hour at the ceiling,
-  $0.0167 at the floor. Before each model call E2 reads what the swarm booked for its own request keys
-  (`swarm:elane:...`) in the trailing hour, holds for unanswered calls included, and asks nothing at or over it.
+$0.0667 an hour at the floor) and one Sail research day (the Sail guard's cap on what the swarm books on Sail in a UTC
+day, models and Gym boxes together: $20 at the ceiling). E2 is counted apart from the options researchers and held by
+three lines, read before each of its model calls. **Why the pace is E2's own (release E2.2):** it was a share of the
+line, at most half, which at the ceiling is at most $0.17 an hour and $4 a day; the equity lanes stood still for most
+of each hour at that pace while most of the day's Sail research dollars went unspent, because the line is only the
+model share of a day planned around Gym boxes and an equity Train run needs no Gym box.
+- **E2's hourly pace** is `elane.e2.pace_share` (0.25, held to 0-4) x that line: $0.0833 an hour at the ceiling and
+  $0.0167 at the floor with the shipped share, $1.3333 and $0.2667 at four lines. Before each model call E2 reads
+  what the swarm booked for its own request keys (`swarm:elane:...`) in the trailing hour, holds for unanswered calls
+  included, and asks nothing at or over it.
 - **E2's day** is `elane.e2.usd_day` and never more than a day at that pace: $2.00 at the ceiling and $0.40 at the
   floor with the shipped share, so the captain's first value `usd_day` 8.0 is a cap above it and the budget's taper
   tightens E2 with the line. Once the day is spent no equity question is asked until the next UTC day. To give E2
-  more, raise `pace_share` (`python3 set_swarm.py elane.e2.pace_share=0.4 --apply`); a `usd_day` under the share's
-  day binds.
-- **The options researchers** keep the rest: their hourly pace no longer counts E2's rows as their own spend (as it
-  never counted the architect's), and what E2 spent in the hour, at most its pace, comes off their limit. With E2
-  idle they have the whole line; with E2 at its pace, three quarters. Before this, E2's first switch values made it
-  the whole pace and every options researcher slept while E2 spent. The heartbeat's `status.researcher_pace.equity`
-  shows E2's spend, limit and what it took; `allocation.plan_usd_per_hour`, when set, counts E2's dollars as research
-  spend.
+  more, raise BOTH (`python3 set_swarm.py elane.e2.pace_share=2.0 elane.e2.usd_day=12.0 --apply`); the smaller of
+  `usd_day` and the share's day binds.
+- **The House's Sail day** bounds the rest. E2 reads the Sail guard's own record and, fresh before each call, the
+  swarm's booked Sail spend of the UTC day (models and Gym boxes). It asks nothing while the guard is braked, holds
+  new research or has no good reading; nor once the day's spend is within a dollar of the line where the guard holds
+  new research (its research cap less THE GATE'S RESERVE, and the day's even pace while `guard.pace_day`). So E2
+  stops before the guard would hold anyone: its spending never brings the guard's hold on the options researchers,
+  and the day's Sail total never passes the guard's cap on E2's account. In the log a step skipped for it reads
+  "the House's Sail day ..." and the equity pass's line says `skipped` "sail_day" (beside "pace" and "usd_day").
+  What follows, stated: early in a UTC day E2 has room once the day's due dollars exceed the day's spend by that
+  dollar (at once at the ceiling; hours into the day at the floor), and over a day E2 takes what the options lanes
+  leave of the day's even pace, no more.
+- **The options researchers** keep at least half their line, whatever E2's pace: their hourly pace does not count
+  E2's rows as their own spend (as it never counted the architect's), and what E2 spent in the hour, at most
+  `min(pace_share, 0.5)` of the line, comes off their limit. With E2 idle they have the whole line; with E2 busy at
+  the shipped share, three quarters; at a share of a half or more, one half. The heartbeat's
+  `status.researcher_pace.equity` shows E2's spend and what it took; its `limit_usd_per_hour` is that half-line
+  reading, which above a share of a half is NOT E2's own pace: read E2's pace in the `dlane` report's `equity_yield`
+  (`usd_hour`, `line_share_usd_hour`, `day_line`). `allocation.plan_usd_per_hour`, when set, counts E2's dollars as
+  research spend: with a plan set, E2 at a high pace contracts the researchers' workers toward the plan's floor (no
+  plan is set by default).
 Per family: at most 4 Train-scored versions and 7 write attempts. A question no route answered backs the family off
 (20 minutes, doubling to six hours); a Sail call that timed out after it was sent is booked at its hold and no other
 route is asked the same question. Train runs spend no model

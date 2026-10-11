@@ -138,7 +138,8 @@ source before a program is run (league/swarm/elane_review.py, the reading rule):
   `ctx.positions["SPY"]` raises: find a symbol's lots with a loop.
 - **A lot is sold by its id.** `{"sell": lot["id"]}`; `{"sell": "SPY"}` is dropped and counted as an error.
 - **An intent has exactly one of `buy`, `sell`, `cancel`, and `"at"` is `"open"` or `"close"`.**
-  `{"symbol": "SPY", "side": "buy"}` and `"at": "market"` are dropped and counted as errors.
+  `{"symbol": "SPY", "side": "buy"}` and `"at": "market"` are dropped and counted as errors. No order is `[]` (or
+  `None`), never `{}`: a dict is read as one intent.
 - **ctx has the fields of the table above and no other, never a date.** `ctx.events` is a dict
   (`ctx.events["fomc"]`); `ctx.prices[sym]` and `ctx.caps[sym]` are floats.
 

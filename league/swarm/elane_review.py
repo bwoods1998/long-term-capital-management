@@ -106,10 +106,12 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    the lot's id. The pass follows a name only while EVERY binding of it in its function gives it the same kind of
    value (`bars = ctx.bars[sym]`, a loop over `ctx.positions`, `ctx.bars.items()`, a helper's parameter when every
    call hands it the same kind), and an intent only from `decide`'s own return (a list, a name appended to, a helper's
-   return); a name bound two ways, a value through a call it does not know, a dict changed after it was written are
-   left alone, never refused on a guess. It reads nothing but the source, so it says nothing of any market. It runs
-   first of the three rules in `elane_train.check_code`: a refusal is recorded with its reason for the next brief and
-   counts one of the family's write attempts (`train_max_attempts`), never one of its scored versions.
+   return); a name bound two ways, a value through a call it does not know, a dict changed after it was written, a
+   read inside a `try` that has a handler and a kind of value the program asks the type of (`isinstance(bars, dict)`:
+   it reads it both ways on purpose) are left alone, never refused on a guess. It reads nothing but the source, so it
+   says nothing of any market. It runs first of the three rules in `elane_train.check_code`: a refusal is recorded
+   with its reason for the next brief and counts one of the family's write attempts (`train_max_attempts`), never one
+   of its scored versions.
 2. THE PAID REVIEW AND AUDIT (`EquityReview`): at a version's first Train pass (equity-v1), BEFORE it is the lineage's
    Validation try, two different models read the exact program, its card and its own Train facts (never a Validation
    or look figure: A9 D3) under `REVIEW` (the gate's leakage rubric for daily share programs) and answer
@@ -1377,7 +1379,17 @@ class _Reading:
         self.touched: set[str] = set()
         self.changed: set[str] = set()
         self.rebuilt = False
+        #: WHAT THE PROGRAM ITSELF TAKES CARE OF: the nodes inside a `try` that has a handler (a read that raises there
+        #: is caught: whether the program then trades is Train's to judge), and the kinds of value it asks the type of
+        #: (`isinstance(bars, dict)`, `hasattr(lot, "id")`: it reads them both ways on purpose). Neither is refused.
+        self.guarded: set[int] = set()
+        self.probed: set[str] = set()
         self.build(tree, self.module)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Try) and node.handlers:
+                self.guarded |= {id(sub) for stmt in node.body for sub in ast.walk(stmt)}
+            elif type(node).__name__ == "TryStar":
+                self.guarded |= {id(sub) for stmt in node.body for sub in ast.walk(stmt)}
         #: Functions read as a value somewhere (handed on, stored, returned): their parameters may be anything.
         self.loose = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
                       and id(n) not in self.heads and n.id in self.defs}
@@ -1529,7 +1541,8 @@ class _Reading:
             self.build(sub, scope)
 
     def settle(self) -> None:
-        """Book every change in place, once every name is bound (`writes` asks how a changed name was bound)."""
+        """Book every change in place and every kind the program asks the type of, once every name is bound (`writes`
+        asks how a changed name was bound)."""
         for node in ast.walk(self.tree):
             scope = self.scope_of.get(id(node))
             if scope is None:
@@ -1538,6 +1551,9 @@ class _Reading:
                 self.writes(node, scope)
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _R_CHANGES:
                 self.writes(node, scope)
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.args \
+                    and node.func.id in ("isinstance", "hasattr", "callable") and scope.find(node.func.id) is None:
+                self.probed |= self.kinds(node.args[0], scope) or frozenset()
 
     def name(self, name: str, scope: _Scope) -> frozenset[str] | None:
         """The kinds a name holds where it is read: every binding of it in its scope gives a known kind, else None."""
@@ -1701,11 +1717,19 @@ class _Reading:
         return None
 
     # ------------------------------------------------------------------ the misreadings
-    def say(self, node: ast.AST, why: str) -> None:
+    def say(self, node: ast.AST, why: str, *, raises: bool = True) -> None:
+        """Book a misreading; one that RAISES is left alone inside a `try` with a handler (`guarded`)."""
+        if raises and id(node) in self.guarded:
+            return
         self.found.append((int(getattr(node, "lineno", 0) or 0), why))
 
-    def all_of(self, node: ast.AST | None, scope: _Scope, kinds: Iterable[str]) -> bool:
+    def known(self, node: ast.AST | None, scope: _Scope) -> frozenset[str] | None:
+        """`kinds`, less anything the program asks the type of (`probed`: None, it reads that both ways on purpose)."""
         whole = self.kinds(node, scope) if node is not None else None
+        return None if whole is None or whole & self.probed else whole
+
+    def all_of(self, node: ast.AST | None, scope: _Scope, kinds: Iterable[str]) -> bool:
+        whole = self.known(node, scope)
         return whole is not None and whole <= frozenset(kinds)
 
     def rows(self, node: ast.AST, what: str) -> None:
@@ -1747,7 +1771,7 @@ class _Reading:
                                        "compare a value of one array, ctx.bars[sym].close[-1]")
 
     def subscript(self, node: ast.Subscript, scope: _Scope) -> None:
-        whole = self.kinds(node.value, scope)
+        whole = self.known(node.value, scope)
         if whole is None:
             return
         key = _text(node.slice)
@@ -1792,7 +1816,7 @@ class _Reading:
         return f"a lot (open: {', '.join(READ_LOT)}; closed: {', '.join(READ_CLOSED)})"
 
     def attribute(self, node: ast.AST, value: ast.AST, attr: str, scope: _Scope) -> None:
-        whole = self.kinds(value, scope)
+        whole = self.known(value, scope)
         if whole is None:
             return
         told = f"`{_src(value)}.{attr}`"
@@ -1832,15 +1856,15 @@ class _Reading:
                     if self.all_of(arg, scope, (_R_BAR,)):
                         self.say(arg, f"`{owner.id}.{func.attr}({_src(arg)})` is handed a symbol's bars whole: "
                                       f"{_BARS_ARE}; hand it one array, ctx.bars[sym].close")
-            whole = self.kinds(owner, scope)
+            whole = self.known(owner, scope)
             key = _text(plain[0]) if plain else None
             if whole is not None and func.attr == "get" and key is not None:
                 if whole <= _R_ROWS and key not in self.keys(whole):
                     self.say(node, f"`{_src(node)}`: {self.keys_of(whole)} has no key {key!r}; the get is always its "
-                                   "default")
+                                   "default", raises=False)
                 elif whole == {_R_EVENTS} and key not in READ_EVENTS:
                     self.say(node, f"`{_src(node)}`: ctx.events and ctx.events_next hold {', '.join(READ_EVENTS)} only; "
-                                   "the get is always its default")
+                                   "the get is always its default", raises=False)
 
     # ------------------------------------------------------------------ the intents
     @staticmethod
@@ -1956,17 +1980,21 @@ class _Reading:
         shown = "{" + ", ".join(f'"{k}"' for k in keys) + "}"
         fixed = not (self.touched & INTENT_KEYS)  # no intent key is written into any dict after its display
         if not kinds:
-            if fixed:
+            if fixed and not keys:
+                self.say(node, "decide returns an empty dict: a dict is read as ONE intent, and one with none of \"buy\", "
+                               "\"sell\", \"cancel\" is dropped and counted as an error (25 errors disqualify the run); "
+                               "for no order return []", raises=False)
+            elif fixed:
                 self.say(node, f"decide returns the dict {shown}, which has none of \"buy\", \"sell\", \"cancel\": an "
                                "intent has EXACTLY one of them (it is dropped and counted as an error, and 25 errors "
                                "disqualify the run); write {\"buy\": \"SPY\", \"share\": 0.5, \"at\": \"open\"} or "
-                               "{\"sell\": lot[\"id\"], \"at\": \"open\"}")
+                               "{\"sell\": lot[\"id\"], \"at\": \"open\"}", raises=False)
             return
         if len(kinds) > 1:
             if not self.touched & set(INTENT_KINDS):
                 self.say(node, f"the intent {shown} has {' and '.join(repr(k) for k in kinds)}: an intent has EXACTLY one "
                                "of \"buy\", \"sell\", \"cancel\" (it is dropped and counted as an error); return one "
-                               "intent for the sell and another for the buy")
+                               "intent for the sell and another for the buy", raises=False)
             return
         kind = kinds[0]
         if kind == "cancel":
@@ -1974,27 +2002,28 @@ class _Reading:
         at = row.get("at")
         if isinstance(at, ast.Constant) and at.value not in INTENT_AT and "at" not in self.touched:
             self.say(at, f"the intent's \"at\" is {at.value!r}: it is \"open\" or \"close\" (the NEXT session's; left out, "
-                         "it is \"open\"); anything else drops the intent and counts as an error")
+                         "it is \"open\"); anything else drops the intent and counts as an error", raises=False)
         value = row[kind]
         if kind == "sell":
-            whole = self.kinds(value, scope)
+            whole = self.known(value, scope)
             if _text(value) is not None or (whole is not None and whole <= {_R_SYM, _R_LOT, _R_SHUT1, _R_BAR}):
                 self.say(value, f"the intent sells `{_src(value)}`: a lot is sold whole BY ITS ID, never by its symbol "
                                 "(the intent is dropped and counted as an error); write {\"sell\": lot[\"id\"]} for each "
-                                "lot in ctx.positions you want out of")
+                                "lot in ctx.positions you want out of", raises=False)
             return
         if isinstance(value, ast.Constant) and not (isinstance(value.value, str) and value.value.strip()):
-            self.say(value, f"the intent buys {value.value!r}: \"buy\" names a symbol of your NEEDS, e.g. \"SPY\"")
+            self.say(value, f"the intent buys {value.value!r}: \"buy\" names a symbol of your NEEDS, e.g. \"SPY\"",
+                     raises=False)
 
         def given(key: str) -> bool:
             return key in row and not (isinstance(row[key], ast.Constant) and row[key].value is None)
         if fixed and not given("share") and not given("usd"):
             self.say(node, f"the buy {shown} has neither \"share\" nor \"usd\": a buy has exactly one (\"share\": 0.5 is "
                            "half of the sleeve's equity; \"usd\": 250.0 is dollars); without one it is dropped and "
-                           "counted as an error")
+                           "counted as an error", raises=False)
         elif fixed and given("share") and given("usd") and all(isinstance(row[k], ast.Constant) for k in ("share", "usd")):
             self.say(node, "the buy has both \"share\" and \"usd\": a buy has exactly one of them (it is dropped and "
-                           "counted as an error)")
+                           "counted as an error)", raises=False)
         for key, high, what in (("share", 1.0, "a share of the sleeve's equity above 0 and at most 1 (0.5 is half)"),
                                 ("usd", math.inf, "dollars above 0")):
             size = row.get(key)
@@ -2005,7 +2034,7 @@ class _Reading:
             number = inner.value
             if isinstance(number, bool) or not isinstance(number, (int, float)) or not 0.0 < sign * float(number) <= high:
                 self.say(size, f"the buy's \"{key}\" is `{_src(size)}`: it is {what}; the intent is dropped and counted "
-                               "as an error")
+                               "as an error", raises=False)
 
     def run(self) -> list[tuple[int, str]]:
         self.settle()

@@ -235,6 +235,12 @@ MISREAD: dict[str, tuple[str, int, tuple[str, ...]]] = {
         def decide(ctx):
             return [{"buy": "SPY", "share": 25}]
      ''', 9, ("the buy's \"share\" is `25`", "at most 1")),
+    "an empty dict for no order": ('''
+        def decide(ctx):
+            if ctx.positions:
+                return {}
+            return {"buy": "SPY", "share": 0.25, "at": "close"} if ctx.weekday == 0 else {}
+     ''', 10, ("decide returns an empty dict", "for no order return []")),
 }
 #: The five shapes the first disqualified programs had (the release's reason).
 FIVE = ("bars by key", "bars by key through a name", "bars as rows, sliced and looped", "bars as rows in a comprehension",
@@ -334,6 +340,36 @@ SOUND: dict[str, str] = {
                 out.append({"sym": sym, "score": float(ctx.bars[sym].ret[-1])})
             out = [{"buy": c["sym"], "share": 0.25} for c in out if np.isfinite(c["score"]) and c["score"] < 0]
             return [] if ctx.positions else out
+     ''',
+}
+
+
+#: WHAT A PROGRAM GUARDS ITSELF: a misreading inside a `try` that catches it, and a value read both ways behind a check
+#: of its type. Both run on E1 as written, so the rule refuses neither.
+GUARDED: dict[str, str] = {
+    "a read the program catches itself": '''
+        def decide(ctx):
+            b = ctx.bars["SPY"]
+            try:
+                c = b["close"]
+            except TypeError:
+                c = b.close
+            if ctx.positions:
+                return [{"sell": lot["id"]} for lot in ctx.positions]
+            return [{"buy": "SPY", "share": 0.25}] if len(c) > 1 and c[-1] > c[-2] else []
+     ''',
+    "a kind the program asks the type of": '''
+        def decide(ctx):
+            out = []
+            for lot in ctx.positions:
+                lid = lot.id if hasattr(lot, "id") else lot["id"]
+                out.append({"sell": lid})
+            for sym in ctx.symbols:
+                b = ctx.bars[sym]
+                c = b["close"] if isinstance(b, dict) else b.close
+                if not ctx.positions and len(c) > 1 and c[-1] > c[-2]:
+                    out.append({"buy": sym, "share": 0.25})
+            return out
      ''',
 }
 
@@ -557,11 +593,42 @@ class TheReadingRule(unittest.TestCase):
                         o["at"] = "close"
                     return out
              ''',
+            "a read the program catches itself": '''
+                def decide(ctx):
+                    b = ctx.bars["SPY"]
+                    try:
+                        c = b["close"]
+                    except TypeError:
+                        c = b.close
+                    return [{"buy": "SPY", "share": 0.25}] if len(c) > 1 and c[-1] > c[-2] else []
+             ''',
+            "a kind the program asks the type of": '''
+                def decide(ctx):
+                    out = []
+                    for sym in ctx.symbols:
+                        b = ctx.bars[sym]
+                        c = b["close"] if isinstance(b, dict) else b.close
+                        if len(c) > 1 and c[-1] > c[-2]:
+                            out.append({"buy": sym, "share": 0.25})
+                    for lot in ctx.positions:
+                        lid = lot.id if hasattr(lot, "id") else lot["id"]
+                        out.append({"sell": lid})
+                    return out
+             ''',
         }
         for name, body in quiet.items():
             self.assertEqual(reading_refusals(prog(body)), [], name)
         self.assertEqual(reading_refusals("def decide(ctx:\n"), [], "a file that does not parse is the code rules' to refuse")
         self.assertEqual(reading_refusals(None), [])
+        # A `try` catches no malformed intent (the House drops it and counts the error after decide returned).
+        caught = prog('''
+            def decide(ctx):
+                try:
+                    return [{"buy": "SPY", "share": 0.25, "at": "market"}]
+                except Exception:
+                    return []
+         ''')
+        self.assertEqual(len(reading_refusals(caught)), 1)
 
     def test_the_same_name_holds_what_every_binding_of_it_gives(self):
         # A lot of either list by attribute is refused (both are dicts); a key only the open lot has is not.
@@ -767,6 +834,15 @@ class OnE1sRunner(unittest.TestCase):
             first = self.run_span(prog(MISREAD[name][0]))["runtime"]["messages"][0]
             self.assertIn("TypeError: ", first, name)
             self.assertIn("SymbolBars", first, name)
+
+    def test_what_a_program_guards_itself_runs_clean(self):
+        # Why the rule leaves a read inside a `try` and a kind the program asks the type of alone: both run.
+        for name, body in GUARDED.items():
+            code = prog(body)
+            self.assertEqual(reading_refusals(code), [], name)
+            result = self.run_span(code)
+            self.assertEqual((result["status"], result["runtime"]["errors"]), ("ok", 0), (name, result["runtime"]))
+            self.assertGreater(result["summary"]["trades"], 0, name)
 
     def test_every_shape_the_rule_leaves_alone_runs_clean(self):
         for name, body in SOUND.items():
