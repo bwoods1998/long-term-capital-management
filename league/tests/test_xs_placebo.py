@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Sequence
+from unittest import mock
 
 import numpy as np
 
@@ -288,6 +289,76 @@ class TheStudyVectors(unittest.TestCase):
         self.assertAlmostEqual(float(series["s"][0]), 0.2 * (1 - 1 / (1 + HS)), places=15)
         self.assertAlmostEqual(float(series["s"][2]), 0.2 * HS * 103.5 / 102.01, places=15)
         self.assertEqual(series["x"][3], 0.0, "no leg after the exit")
+
+
+class TheStudysProgram(unittest.TestCase):
+    """The ENGINE against the study's own program. The vectors' holdings logs were written by the study's no-skill
+    picker (every fifth close the five eligible names with the smallest seeded keys, weights by rank, the KEEP rule,
+    House exits, a maximum hold of 60, entry validity; `conformance_xs1.pick_lots`, written apart from this engine).
+    Given that program, the vectors' prices, eligible set and characteristics, `engine.run` writes THE SAME LOG, lot
+    for lot: name, decision, entry, exit, both fill points, cell and members. Only a lot's weight differs, by the
+    cash book's share rounding (under 2e-7), and x with it (under 1e-8)."""
+
+    WEIGHTS = (0.20, 0.18, 0.16, 0.14, 0.12)
+
+    def run_study(self, tag: str) -> tuple[dict[str, Any], engine.Log, engine.Log]:
+        data = Vectors.load()
+        inputs = data.vector(tag)["inputs"]
+        bars, theirs = data.case(tag)
+        eligible, sector = data.world(tag, "U"), data.world(tag, "sector").astype(np.int64)
+        beta, momb = data.world(tag, "beta"), data.world(tag, "momb")
+        index = {int(d): i for i, d in enumerate(bars.days)}
+        # the study's keys: one row a decision, by `Generator.random` (the one stream numpy keeps across versions)
+        keys = np.random.default_rng([20261011, 9200, int(inputs["world_seed"])]).random((456 // 5 + 1, 24))
+
+        class Study(fx.Core):
+            """Package C's doubles, with the vector's GIVEN eligible set and characteristics."""
+
+            @classmethod
+            def derive(cls, given: Any, *, rung: str | None = None) -> Any:
+                t = index[int(given.days[-1])]
+                elig = np.asarray(eligible[t], dtype=bool)
+                bg, mg, cell = fx.cells(elig, sector, beta, momb[t // 21])
+                return fx.ctx.Derived(elig=elig, beta=beta, mom=momb[t // 21], sector=sector, bg=bg, mg=mg, cell=cell,
+                                      rung="R0")
+
+        def decide(value: Any, state: dict) -> Any:
+            call = state.get("n", 0)
+            state["n"] = call + 1
+            want = sorted((int(j) for j in value.ids), key=lambda j: (keys[call][j], j))[:5]
+            return {"target": {j: self.WEIGHTS[rank] for rank, j in enumerate(want)}, "at": inputs["fill"]}
+
+        case = fx.EngineCase("run_log")
+        Study.install(case)
+        every_fifth = mock.patch.object(config, "decision_due", lambda t, rule, weekday=0: index[ordinal(t)] % 5 == 0)
+        every_fifth.start()
+        try:
+            result, mine = case.run_log(fx.Program(decide, max_hold_sessions=60), bars)
+        finally:
+            every_fifth.stop()
+            case.doCleanups()
+        return result, mine, theirs
+
+    def test_the_engine_writes_the_studys_holdings_log_lot_for_lot(self):
+        data = Vectors.load()
+        for tag in ("V1", "V2", "V4"):                      # open fills, close fills, another world
+            with self.subTest(vector=tag):
+                result, mine, theirs = self.run_study(tag)
+                self.assertEqual(len(mine.lots), data.vector(tag)["lots"]["count"])
+                for a, b in zip(mine.lots, theirs.lots):
+                    for key in ("col", "decided", "entry", "entry_at", "exit", "exit_at", "cell"):
+                        self.assertEqual(a[key], b[key], (a["lid"], key))
+                    self.assertEqual(a["members"].tolist(), b["members"].tolist(), a["lid"])
+                    self.assertAlmostEqual(a["weight"], b["weight"], delta=2e-7)
+                self.assertLessEqual({row["reason"] for row in mine.lots}, {"program", "house", "max_hold", "open"})
+                self.assertEqual(result["summary"]["refused"], {"no_bar": 0, "ahead": 0, "last": 0})
+                for name in ("x", "x15", "u"):
+                    got = np.array(results.column(result, name))
+                    self.assertLessEqual(float(np.max(np.abs(got - data.inputs[f"{tag}/{name}"]))), 1e-8, name)
+                self.assertEqual(results.column(result, "exits"), data.inputs[f"{tag}/exits"].tolist())
+                self.assertEqual(results.column(result, "invested"), data.inputs[f"{tag}/invested"].tolist())
+                self.assertEqual(result["summary"]["cells"], {"small": 0, "under5": sum(
+                    1 for row in theirs.lots if len(row["members"]) < config.MIN_CELL)})
 
 
 class TheAccounting(unittest.TestCase):
