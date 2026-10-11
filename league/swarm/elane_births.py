@@ -522,17 +522,19 @@ def refusal_said(item: Mapping[str, Any], settings: Mapping[str, Any] | None) ->
     kept beside it (its class; for symbols, the code's own symbols named and a count of the rest; for a card, its
     fields): never the refusal's own text."""
     cls = item.get("cls")
-    if cls not in REFUSAL_SAID:
+    if not isinstance(cls, str) or cls not in REFUSAL_SAID:
         return OTHER_SAID
     allowed = universe(settings)
     foreign = ""
-    known = [s for s in item.get("known") or [] if s in eqconfig.UNIVERSE] if isinstance(item.get("known"), list) else []
+    known = ([s for s in item["known"] if isinstance(s, str) and s in eqconfig.UNIVERSE]
+             if isinstance(item.get("known"), list) else [])
     unknown = item.get("unknown") if type(item.get("unknown")) is int and item.get("unknown") > 0 else 0
     if known:
         foreign = f": {', '.join(known)} {'is' if len(known) == 1 else 'are'} known to the code and not open"
     if unknown:
         foreign += (", and " if known else ": ") + f"{unknown} named {'is' if unknown == 1 else 'are'} no symbol the House knows"
-    fields = [f for f in item.get("fields") or [] if f in CARD_FIELDS] if isinstance(item.get("fields"), list) else []
+    fields = ([f for f in item["fields"] if isinstance(f, str) and f in CARD_FIELDS]
+              if isinstance(item.get("fields"), list) else [])
     more = item.get("other_fields") if type(item.get("other_fields")) is int and item.get("other_fields") > 0 else 0
     named = ((": " + ", ".join(fields)) if fields else "") + (f" (and {more} more)" if more and fields else "")
     return REFUSAL_SAID[cls].format(
@@ -558,8 +560,7 @@ def last_text(store: Any, settings: Mapping[str, Any] | None = None) -> str:
             continue
         n = item.get("n") if type(item.get("n")) is int and item.get("n") > 0 else None
         who = ("a proposal" if n is None else f"proposal {n}" + (f" of {proposed}" if proposed else ""))
-        labels = [x for x in (item.get("lane") if item.get("lane") in LANES else None,
-                              item.get("agenda") if item.get("agenda") in AGENDA else None) if x]
+        labels = [x for x in (item.get("lane"), item.get("agenda")) if isinstance(x, str) and (x in LANES or x in AGENDA)]
         lines.append(f"- {who}" + (f" ({', '.join(labels)})" if labels else "") + f": {refusal_said(item, settings)}")
     at = last.get("at") if isinstance(last.get("at"), str) and len(last.get("at")) <= 32 else "the last pass"
     return (f"YOUR LAST EQUITY PASS'S PROPOSALS NOT BORN ({at}; fix them or look elsewhere):\n" + "\n".join(lines))
