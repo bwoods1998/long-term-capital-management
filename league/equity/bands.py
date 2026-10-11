@@ -13,7 +13,8 @@ THE BANDS (the EquityBook moves them, writing through its families reader, leagu
   (`elane.roster`, league/swarm/bands.py `seating`): its sleeve is `probe.sleeve_share` x E (0.50: A5 as amended by
   the captain's A20, Oct 11, 2026);
 - probe -> sized: `sized_up` holds on its version's real closes: its sleeve is then `sized_sleeve_share` x E (since A20
-  the Probe's own 0.50 x E: the Sized cap, 0.50, is the Probe sleeve);
+  the Probe's own 0.50 x E: the Sized cap, 0.50, is the Probe sleeve). PARKED at the table in force
+  (`sized.min_trades` 1000): no equity program is Sized, so every equity close stays in the loss budget's tallies;
 - probe | sized -> candidate, exits only and sticky for the version: `edm1` names why (EDM1), or the program's realized
   Probe net reached `demotion.program_loss_usd` (-$300; the swarm's `elane.program_loss_usd` retires it too).
 """
@@ -98,7 +99,9 @@ def edm1_sigma(record: EquityRecord, returns: list[float] | None = None) -> tupl
 
 
 def sized_up(record: EquityRecord, table: Any) -> tuple[bool, str]:
-    """(money) THE SIZING-UP RULE: True when ALL hold on the version's real closes: n >= `sized.min_trades` (20); mean
+    """(money) THE SIZING-UP RULE: True when ALL hold on the version's real closes: n >= `sized.min_trades` (20 as
+    pre-registered; THE STEP IS PARKED at the table in force, whose row is 1000, until Sized closes count in the loss
+    budget: the constitution's `sized` comment, so no equity program is Sized); mean
     net return > 0 with its one-sided `sized.confidence` (80%) lower bound > 0; pnl beats `bh_pnl` when
     `sized.beat_bh` (an unpriced buy-and-hold fails it); `probe_sessions` >= `sized.min_probe_sessions` (5). The reason
     names the first that fails (or the figures that passed). A record with no spread at all (every return the same) is

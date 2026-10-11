@@ -610,8 +610,8 @@ moves and the standing grant re-ratifies at the House's start)
     "cash_reserve_usd": "50",               # A8.1: above the gateway's $25 floor
     "open_risk_weight": {"etf": "0.20", "stock": "0.40"},
     "probe": {"sleeve_share": "0.50", "max_programs": 3, "min_order_usd": "10"},             # A5; A20: the sleeve 0.50
-    "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
-              "beat_bh": True, "min_probe_sessions": 5},
+    "sized": {"min_trades": 1000, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
+              "beat_bh": True, "min_probe_sessions": 5},   # min_trades: 20 as pre-registered; PARKED at 1000 (section 16)
     "demotion": {"rule": "edm1", "min_trades": 10, "z": "1.645", "program_loss_usd": "-300", "twin_gap_bp": "15",
                  "twin_min_closes": 5},
     "holds": {"min_hold_sessions": 1, "default_max_hold_sessions": 20, "max_hold_sessions": 60,
@@ -967,8 +967,8 @@ receipts are judged only through the repository's pin (`test_the_committed_pin`,
   `MemoryEquityFamilies`-style double).
 - The money digest (`PINNED_DIGEST`) is re-pinned once, by money; any later constitution change goes through money.
 - A10.2 (applied at integration): `equity_money.enabled` ships True (one money-digest move with the block:
-  d8c96f66, full digest 7864da33, since A20's sleeve of 0.50, section 16; ad8c761b and 65b0e025 with the sleeve at
-  0.25); `elane.mode` deploys "off" and the captain sets "gate" after the deploy is verified;
+  7e41909a, full digest e909eb10, since A20's sleeve of 0.50 and the parked sizing-up step, section 16; ad8c761b
+  and 65b0e025 with the sleeve at 0.25 and sizing up at 20 closes); `elane.mode` deploys "off" and the captain sets "gate" after the deploy is verified;
   receipt 2 is pinned for both lanes (A11: the S2 screen; receipt 1, A9's, stays in the repository, unused); nothing
   trades until a program passes its look AND the stock proof's BUY stage passes.
 
@@ -1161,8 +1161,13 @@ Done's consistency clause, A14, reads that difference. docs/operations.md says i
 
 - **7.1** (CHANGES; money): `equity_money.probe.sleeve_share` "0.25" -> "0.50";
   `EQUITY_MONEY_BOUNDS["probe.sleeve_share"]` ("0", "0.25") -> ("0", "0.50"). `probe.max_programs` 3 and first-come
-  seating are unchanged, as is every other row. `PINNED_DIGEST` is re-pinned: money digest d8c96f66, full digest
-  7864da33 (the stop, `enabled` False: 76e6f818; the rollback, the sleeve back at "0.25": ad8c761b). No evidence
+  seating are unchanged. THE SIZING-UP STEP IS PARKED with it: `equity_money.sized.min_trades` 20 -> 1000 (inside
+  its bound ("20", "1000"), a tightening), so `sized_up` answers False for every record under 1000 real closes and
+  no equity program is Sized: every equity close keeps its Probe mark and stays in `probe_figures`' closes (a Sized
+  lot's would not). The rule is as pre-registered; the row is switched back only with a change that counts Sized
+  closes in the budget. `PINNED_DIGEST` is re-pinned: money digest 7e41909a, full digest
+  e909eb10 (the stop, `enabled` False: 23f17a14; the sleeve's rollback, "0.25" with the step still parked:
+  3a7c52d5; both rows back, the block as the branch carried it before A20: ad8c761b). No evidence
   module of league/equity changes: the equity identity does not move. `league/live/money.py`'s comment on
   `EquityTable.probe_sleeve_share` is corrected to the row in force (a comment only; the file is in the options
   execution fingerprint, which E1 moves once anyway).

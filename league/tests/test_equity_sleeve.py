@@ -11,6 +11,7 @@ budget's room over the ETF weight ("budget"). A Sized program would keep the Pro
 library only."""
 
 import unittest
+from dataclasses import replace
 from decimal import Decimal as D
 
 from league.constitution import CONSTITUTION, EQUITY_MONEY_BOUNDS
@@ -266,12 +267,16 @@ class TheBudget(unittest.TestCase):
 
 class ASizedProgram(unittest.TestCase):
     """(d) A Sized program's sleeve is never below the Probe's 0.50: with the Sized cap (0.50) equal to it, it IS the
-    Probe's, so a Sized program's lot would be a Probe's lot."""
+    Probe's, so a Sized program's lot would be a Probe's lot. THE STEP ITSELF IS PARKED (`sized.min_trades` 1000,
+    league/tests/test_equity_bands_money.py `TheSizingUpStepIsParked`): no equity program is Sized at this table."""
 
     GOOD = tuple(0.004 + (0.006 if i % 2 == 0 else -0.006) for i in range(24))
 
     def test_its_sleeve_is_the_probes_and_so_is_its_lot(self):
-        self.assertTrue(sized_up(record(self.GOOD), EQ)[0], "a record that meets every leg of the sizing-up rule")
+        self.assertEqual(EQ.sized_min_trades, 1000)
+        self.assertFalse(sized_up(record(self.GOOD), EQ)[0], "parked: no record of the first weeks sizes up")
+        self.assertTrue(sized_up(record(self.GOOD), replace(EQ, sized_min_trades=20))[0],
+                        "a record that meets every leg of the pre-registered rule")
         for returns in (self.GOOD, tuple(0.0025 + (0.03 if i % 2 == 0 else -0.03) for i in range(400)),
                         tuple(-0.01 + (0.02 if i % 2 == 0 else -0.02) for i in range(40)), (0.01,), ()):
             share = sized_sleeve_share(record(returns), EQ)

@@ -79,7 +79,7 @@ What they did find is fixed here, each with a test that failed before.
   (`league/tests/test_equity_rehearsal.py` `ThePublicWording`). Comments, docstrings and docs only: no code and no
   fingerprint moves.
 
-### Release E1, the Probe sleeve at 0.50 x E (the captain's A20), on `feat/equity-e1` (merged from `feat/equity-e1-sleeve`, then set to the row the study's review adopted; unreleased; an owner deploy with the rest of E1; the money digest E1 deploys is `d8c96f66`, one move with the block; no evidence reset)
+### Release E1, the Probe sleeve at 0.50 x E (the captain's A20), on `feat/equity-e1` (merged from `feat/equity-e1-sleeve`, then set to the row the study's review adopted; unreleased; an owner deploy with the rest of E1; the money digest E1 deploys is `7e41909a`, one move with the block; no evidence reset)
 
 - **The rule.** `equity_money.probe.sleeve_share` "0.25" -> "0.50" and its bound
   (`EQUITY_MONEY_BOUNDS["probe.sleeve_share"]`) ("0", "0.25") -> ("0", "0.50"), in `league/constitution.py`. Three
@@ -117,24 +117,32 @@ What they did find is fixed here, each with a test that failed before.
     for 1.50 x E, and the invested cap (1.00 x E, 0.20 x E of open risk) bounds the lane then;
   - **a Sized program would size nothing up.** `sized.sleeve_share` (0.50) was left as pre-registered and equals the
     Probe sleeve, and `sized_sleeve_share` is max(the Probe's share, min(quarter Kelly, the cap)): 0.50 x E whatever
-    the record;
+    the record. The step is parked (next bullet);
   - against the gateway (read, not changed): one order and one ETF's position of 0.25 x E are under its 50% of
     equity; the lane at 1.00 x E is at its book line on a multiplier of 1, under it by the House's cash reserve; its
     day line (4x equity of buys, a cancelled one too) admits sixteen sends of such a lot a day, where it admitted 32
     of the old lot, so three entries can each climb the collar's whole ladder of five sends, and a sixth send of
     each would meet `stock_day` and end refused.
+- **The sizing-up step is parked**: `equity_money.sized.min_trades` 20 -> 1000 (inside its bound, a tightening; the
+  captain's decision on the study's review). The owner's loss budget ($400 net in any rolling 20 sessions, $800 net
+  in total) covers all real money, and E1 as built leaves a Sized program's closes outside the Probe window, the
+  total and the -$300 line; with the Probe sleeve equal to the Sized cap (0.50) the step would size nothing up
+  anyway. With 1000 no equity program is Sized, so every equity close stays inside the loss budget's tallies. The
+  sizing-up RULE stays pre-registered as written; the row is switched back only together with a change that counts
+  Sized closes in the budget.
 - Fixed with it: the `dlane` report's `equity.options_probe_room` multiplied the seats by the sleeve (`league/ops/dlane_report.py`),
   which reads more than the invested cap allows once three sleeves pass 1.00 x E. It now takes the lower of the
   sleeves and the invested cap, never reads the lane's open risk above the window, and names what set the figure
   (`bound`: "sleeves", "invested_cap" or "budget"; `invested_share`, `invested_share_of_e` beside it). Its statement
   and the docs carry the arithmetic of the row in force, the three one-ETF lots' 0.15 x E beside the lane's most.
-- **Identities.** Money digest `d8c96f66` (it was `ad8c761b` on the branch with the sleeve at 0.25, never deployed),
-  full digest `7864da33` (`PINNED_DIGEST`); the stop, `enabled` False, is `76e6f818`. The standing grant re-ratifies
-  at the House's start on the owner's deploy, once, with the rest of E1. The equity identity does not move. The
-  options execution fingerprint moves with `league/live/money.py`'s corrected comment (`probe_sleeve_share` was
-  annotated "0.25"), as it already does once with E1. **Rollback**, one owner deploy: `sleeve_share` "0.25" (the
-  bound may stay), `PINNED_DIGEST` re-pinned; the digest is then `ad8c761b` and the grant re-ratifies; lots already
-  held are not resized.
+- **Identities.** Money digest `7e41909a` (it was `ad8c761b` on the branch with the sleeve at 0.25 and sizing up
+  at 20 closes, never deployed), full digest `e909eb10` (`PINNED_DIGEST`); the stop, `enabled` False, is
+  `23f17a14`. The standing grant re-ratifies at the House's start on the owner's deploy, once, with the rest of E1.
+  The equity identity does not move. The options execution fingerprint moves with `league/live/money.py`'s two
+  corrected comments (`probe_sleeve_share` was annotated "0.25", `sized_min_trades` 20), as it already does once with
+  E1. **Rollback of the sleeve**, one owner deploy: `sleeve_share` "0.25" (the bound may stay; the sizing-up step
+  stays parked), `PINNED_DIGEST` re-pinned; the digest is then `3a7c52d5` and the grant re-ratifies; lots
+  already held are not resized.
 - Proof: `league/tests/test_equity_sleeve.py` (three one-ETF lots of 0.25 x E with no cap binding, whether E is the
   grant's capital or the account's own cash; a fourth lot cut by the invested cap less the cash reserve, and the
   next refused by name; two programs in one ETF holding exactly the instrument's 0.50 x E, a third refused by it;
@@ -144,7 +152,10 @@ What they did find is fixed here, each with a test that failed before.
   the rollback's), `test_equity_bands_money` (the Sized sleeve's arithmetic kept on a table whose Probe sleeve is
   under the cap, and the table in force), `test_ci` (0.51 and the study rule's 0.66 refused by CI; the lot against
   the gateway's files), `test_dlane_report_equity`, `test_equity_e2e` (the real book's lot is a quarter of E),
-  `test_live_long_single` (the digest).
+  `test_live_long_single` (the digest). The park: `test_equity_bands_money` `TheSizingUpStepIsParked` (the rule as
+  pre-registered is held on its own 20 closes; at the table in force 999 winning closes are still Probe) and
+  `test_equity_fx_daily` `TheSizingUpStepIsParked` (the real book: 999 winning real closes, no band move, every
+  close in the Probe tallies and in the shared budget's net figure).
 
 ### Release E1, the rehearsal on real data: the data job, the vendor's cents, the seeds' order, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
 
@@ -428,9 +439,10 @@ evidence, ops and docs side (the order path's, the daily step's and the live hoo
   the S1+F1 screen: no lane pins it any more, A11 above; the file and its code stay); A10.1, the
   stock paper proof staged in the equity book's OPEN window (`paper_proof_stock_buy` gates real buys,
   `paper_proof_stock_sell` real sales, the practice sale first, a failed SELL stage alarms and stops new buys);
-  A10.2, `equity_money.enabled` ships True (money digest `fdf2ac7c` -> `d8c96f66`, full digest -> `7864da33`; the stop,
-  `enabled` False, is `76e6f818`: the figures since the Probe sleeve moved to 0.50, A20, at the top of this section;
-  with the sleeve at 0.25 they were `ad8c761b`, `65b0e025` and `ea97607c`); A8.1, the calibration's reservation reads the House-wide cash rule
+  A10.2, `equity_money.enabled` ships True (money digest `fdf2ac7c` -> `7e41909a`, full digest -> `e909eb10`; the stop,
+  `enabled` False, is `23f17a14`: the figures since the Probe sleeve moved to 0.50 and the sizing-up step was parked,
+  A20, at the top of this section; with the sleeve at 0.25 and sizing up at 20 closes they were `ad8c761b`,
+  `65b0e025` and `ea97607c`); A8.1, the calibration's reservation reads the House-wide cash rule
   (`RealBook.free_to_reserve`); A8.12, the options learning game never arms an equity family and its population
   ceiling counts the options lanes, and an equity look never counts in an options lane's leakage alarm.
 - Also applied: A12, `config.LOOK_CAP` 2026-10-09 (every look reads the 194 calibrated holdout sessions); A16,

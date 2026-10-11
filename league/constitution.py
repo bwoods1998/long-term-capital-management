@@ -999,8 +999,9 @@ CONSTITUTION: dict[str, Any] = {
     #   Every owner line stands and still binds through `size_entry` at any sleeve: an ETF at most 0.50 x E across all
     #   programs (`position_share`), at most 1.00 x E invested (`invested_share`), the cash reserve, and the shared
     #   loss budget ($400 net in any rolling 20 sessions, $800 net in total). Rollback, one owner deploy:
-    #   `sleeve_share` "0.25" here (its bound may stay) and `PINNED_DIGEST` re-pinned; the money digest moves back and
-    #   the standing grant re-ratifies at the House's start; no fingerprint move, no evidence reset.
+    #   `sleeve_share` "0.25" here (its bound may stay; the sizing-up step below stays parked) and `PINNED_DIGEST`
+    #   re-pinned; the money digest moves and the standing grant re-ratifies at the House's start; no fingerprint
+    #   move, no evidence reset.
     # - `sized`, PRE-REGISTERED here before the first live trade (goal item 4; `league/equity/bands.py` `sized_up`,
     #   `sized_sleeve_share`): a Probe program is Sized when its version's real closes number at least `min_trades`, their
     #   mean net return on notional is above zero with its one-sided `confidence` lower bound above zero, its P&L beats the
@@ -1012,6 +1013,13 @@ CONSTITUTION: dict[str, Any] = {
     #   raising the row is a later decision, with its bound). What Sized would still change: a lot bought while Sized
     #   carries no Probe mark, so its close joins neither the budget's realized figures nor the program's own loss line
     #   (`demotion.program_loss_usd`); its open value still counts as open risk, at the same weight.
+    #   THE SIZING-UP STEP IS PARKED (Oct 11, 2026; the captain's decision on the review of A20's study): `min_trades`
+    #   is 1000, inside its bound and a tightening. Why: the owner's loss budget ($400 net in any rolling 20 sessions,
+    #   $800 net in total) covers all real money, and E1 as built leaves a Sized program's closes outside the Probe
+    #   window, the total and the -$300 line; with the Probe sleeve equal to the Sized cap (0.50) the step would size
+    #   nothing up anyway. With 1000 no equity program is Sized, so every equity close stays inside the loss budget's
+    #   tallies. The sizing-up RULE stays pre-registered as written (its own count is 20 real closes); the row is
+    #   switched back only together with a change that counts Sized closes in the budget.
     # - `demotion`, EDM1, PRE-REGISTERED the same way (`league/equity/bands.py` `edm1`): exits only, sticky for the
     #   version, when its real closes are `min_trades` or more and their net returns sum below -`z` x sigma x sqrt(n)
     #   (sigma: the per-trade sd of its Validation run); when its realized net reaches `program_loss_usd`; or when its
@@ -1037,7 +1045,7 @@ CONSTITUTION: dict[str, Any] = {
         "cash_reserve_usd": "50",
         "open_risk_weight": {"etf": "0.20", "stock": "0.40"},
         "probe": {"sleeve_share": "0.50", "max_programs": 3, "min_order_usd": "10"},
-        "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
+        "sized": {"min_trades": 1000, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
                   "beat_bh": True, "min_probe_sessions": 5},
         "demotion": {"rule": "edm1", "min_trades": 10, "z": "1.645", "program_loss_usd": "-300", "twin_gap_bp": "15",
                      "twin_min_closes": 5},
@@ -1259,7 +1267,8 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "probe.min_order_usd": ("10", "100"),
     # The pre-registered sizing-up rule (the design's section 5): at least 20 closes, an 80% bound, quarter Kelly, half
     # of E at most (since A20 that is the Probe sleeve's own 0.50, and a Sized sleeve is never below the Probe's: the
-    # constitution's `sized` comment), five Probe sessions.
+    # constitution's `sized` comment), five Probe sessions. THE STEP IS PARKED at the count's tight end (the row in
+    # force is 1000: no equity program is Sized until Sized closes count in the loss budget; the `sized` comment).
     "sized.min_trades": ("20", "1000"),
     "sized.confidence": ("0.80", "0.99"),
     "sized.kelly_fraction": ("0.125", "0.25"),
@@ -1426,4 +1435,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '7864da3346cdb6e9717260b6fae3f46b74ae55834584c38e5ce14d76b70a767d'
+PINNED_DIGEST = 'e909eb1040231bc078e878df2d87fad7a1001d86ab3eac32be5f45f2b82c1895'

@@ -87,8 +87,8 @@ confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the Ho
 
 **The switches** (all three must be on for a real equity open; any one off stops new opens):
 - `equity_money.enabled` (league/constitution.py, a CON change: the money digest moves and the standing grant re-ratifies
-  at the House's start). E1 ships True (money digest `d8c96f66`, with the Probe sleeve at 0.50 x E: **The Probe
-  sleeve** below); False (`76e6f818`) is the stop: the book keeps its tables, runs its exits and reconciles; no equity
+  at the House's start). E1 ships True (money digest `7e41909a`, with the Probe sleeve at 0.50 x E: **The Probe
+  sleeve** below); False (`23f17a14`) is the stop: the book keeps its tables, runs its exits and reconciles; no equity
   open.
 - `elane.mode` (league/swarm/policy.json, swarm.json over it): "off" (the rollback: no seeded birth, no equity look) or
   "gate".
@@ -227,13 +227,18 @@ was 0.125 x E under the sleeve of 0.25 the branch carried before). Seats, seatin
   study's own table, if Monday's option (the options lane's open Probe position, which expires Monday) closes at or
   above zero, the smaller lot would have been the better row. One row was shipped, fixed before that result was
   known, and this is its stated price.
-- **A Sized program would size nothing up.** `sized.sleeve_share` (0.50) was left as pre-registered and equals the
-  Probe sleeve; the rule never sizes under the Probe's nor above the cap, so a Sized program's sleeve is 0.50 x E
-  whatever its record (**Sizing up and demotion** below).
-- **The money digest** is `d8c96f66` (full digest `7864da33`): one move with the E1 block, ratified at the House's
-  start on the owner's deploy. **Rollback**, one owner deploy: `sleeve_share` "0.25" (the bound may stay) and
-  `PINNED_DIGEST` re-pinned; the digest is then `ad8c761b`, the grant re-ratifies, no fingerprint moves and no
-  evidence is reset. Lots already held are not resized: a sleeve applies to the entries sized after it.
+- **The sizing-up step is parked** (`equity_money.sized.min_trades` 1000, inside its bound and a tightening; the
+  captain's decision on the study's review). The owner's loss budget ($400 net in any rolling 20 sessions, $800 net
+  in total) covers all real money, and E1 as built leaves a Sized program's closes outside the Probe window, the
+  total and the -$300 line; with the Probe sleeve equal to the Sized cap (0.50) the step would size nothing up
+  anyway. With 1000 no equity program is Sized, so every equity close stays inside the loss budget's tallies. The
+  sizing-up RULE stays pre-registered as written (**Sizing up and demotion** below); the row is switched back only
+  together with a change that counts Sized closes in the budget.
+- **The money digest** is `7e41909a` (full digest `e909eb10`): one move with the E1 block, ratified at the House's
+  start on the owner's deploy. **Rollback of the sleeve**, one owner deploy: `sleeve_share` "0.25" (the bound may
+  stay; the sizing-up step stays parked) and `PINNED_DIGEST` re-pinned; the digest is then `3a7c52d5`, the grant
+  re-ratifies, no fingerprint moves and no evidence is reset. Lots already held are not resized: a sleeve applies to
+  the entries sized after it.
 - Proof: `league/tests/test_equity_sleeve.py` (three lots of 0.25 x E with no cap binding, the fourth lot against
   the invested cap and the cash reserve, two programs in one ETF, the budget's cut, a Sized program's sleeve),
   `test_constitution` and `test_ci` (the row, its bound and one step past it), `test_equity_bands_money`,
@@ -449,8 +454,10 @@ bands move once a day, at the decision's band sync (never in the seating pass, n
   `probe.max_programs` 3 live programs, first come): a sleeve of `probe.sleeve_share` x E (0.50 since the captain's
   A20: **The Probe sleeve** above).
 - **Probe to Sized** (`sized_up`), when ALL hold, checked in this order (the reason recorded names the first that
-  fails):
-  1. at least 20 real closes (`sized.min_trades`);
+  fails). **PARKED at the table in force**: `sized.min_trades` is 1000, so no equity program is Sized and every
+  equity close stays inside the loss budget's tallies (**The Probe sleeve** above says why); the rule below is the
+  rule as pre-registered, switched back only with a change that counts Sized closes in the budget:
+  1. at least 20 real closes (`sized.min_trades` as pre-registered; 1000 in force);
   2. the closes have a spread (an sd above zero: closes with no spread at all never size up), their mean net return
      is above zero, and its one-sided 80% lower bound is above zero (`sized.confidence` 0.80: mean - t(0.80, n - 1) x
      sd / sqrt(n), sd the sample's);

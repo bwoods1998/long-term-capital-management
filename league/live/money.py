@@ -341,7 +341,7 @@ class EquityTable:
     probe_sleeve_share: Decimal                 # "0.50" (A5 as amended by A20: a one-ETF lot is 0.25 x E)
     probe_max_programs: int                     # 3 (A5) == elane.roster
     min_order_usd: Decimal                      # "10"
-    sized_min_trades: int                       # 20
+    sized_min_trades: int                       # 1000: the sizing-up step is parked (the rule's own count is 20)
     sized_confidence: float                     # 0.80
     sized_kelly_fraction: float                 # 0.25
     sized_sleeve_share: Decimal                 # "0.50"
