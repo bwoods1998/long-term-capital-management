@@ -880,6 +880,15 @@ def train_map_text(store: Any, settings: Mapping[str, Any] | None, *, limit: int
     return "\n".join(lines)
 
 
+def request_map_text(store: Any, settings: Mapping[str, Any] | None, *, limit: int = 40) -> str:
+    """The panel Train map as the architect's equity request carries it, after E2's own map
+    (`elane_train.train_map_text`): "" while the panel lane bears nothing (a closed lane shows no map of itself
+    beside a request that says nothing of the panel), else `train_map_text`."""
+    if MODES.index(mode(settings, getattr(store, "root", None))) < MODES.index("train"):
+        return ""
+    return train_map_text(store, settings, limit=limit)
+
+
 def cell_looks(store: Any, cell: Sequence[str]) -> int:
     """THE HOUSE'S COUNT (duty 3): the XS1 looks already taken by panel families of `cell`, in flight included."""
     cell = tuple(str(part) for part in cell)
@@ -1160,8 +1169,9 @@ PANEL_PROPOSAL = (
 
 def request_text(store: Any, settings: Mapping[str, Any] | None, births: int) -> str:
     """The PANEL block of the architect's equity request ("" while the panel lane bears nothing): what a panel
-    program is, XS.md in brief, the panel agenda, the panel Train map with its ZERO-EDGE EXPECTED column, the panel
-    quota and the closed panel cells. Train facts and rules only."""
+    program is, XS.md in brief, the panel agenda, the panel quota and the closed panel cells. Train facts and rules
+    only. The panel Train map, with its ZERO-EDGE EXPECTED column, is not in this block: it follows E2's own map in
+    the request (`elane_train.train_map_text`, by `request_map_text`), so the request shows it once."""
     root = getattr(store, "root", None)
     if MODES.index(mode(settings, root)) < MODES.index("train"):
         return ""
@@ -1181,7 +1191,6 @@ def request_text(store: Any, settings: Mapping[str, Any] | None, births: int) ->
         f"{researching(store)} of at most {c['max_alive']}). Rebalance schedules offered: {', '.join(c['rebalance'])}.",
         agenda_text(settings),
         bar_text(),
-        train_map_text(store, settings),
         ("CLOSED PANEL CELLS (no birth: refuted on Train too often with no pass): "
          + "; ".join(cell_text(cell) for cell in closed) + ".") if closed else "",
         "THE PANEL CONTRACT (league/xs/XS.md):\n" + contract_text(),
@@ -3370,9 +3379,8 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "assign", "run_spans", "seen_spans", "hidden_span", "agenda_text", "contract_text", "bar_text",
            "request_text", "researching", "quota", "check_code", "admit", "birth", "runner", "cpu_spent", "may_run",
            "book_cpu", "outside", "train_score_xs", "same_targets", "state_check", "restart", "with_state",
-           "program_fault",
-           "compact", "house_failure", "fault", "years_ok", "score", "rescored", "version_text", "restart_text",
-           "style_text",
-           "train_facts", "brief", "blocked", "step", "write", "review_question", "review_step", "review_failed", "rubric_sha",
-           "finish", "pass_current", "may_validate", "zero_edge_rate", "train_map", "map_notes", "train_map_text",
-           "same_lineage", "validate", "lineage_spent", "look", "beside_line", "view"]
+           "program_fault", "compact", "house_failure", "fault", "years_ok", "score", "rescored", "version_text",
+           "restart_text", "style_text", "train_facts", "brief", "blocked", "step", "write", "review_question",
+           "review_step", "review_failed", "rubric_sha", "finish", "pass_current", "may_validate", "zero_edge_rate",
+           "train_map", "map_notes", "train_map_text", "request_map_text", "same_lineage", "validate",
+           "lineage_spent", "look", "beside_line", "view"]

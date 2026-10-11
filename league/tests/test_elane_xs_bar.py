@@ -832,6 +832,9 @@ class E2sResearcherForwardsAPanelFamily(ScoreCase):
         self.assertEqual(elane_train.closed_cells(self.store, self.settings), [])
         self.assertEqual(elane_train.train_map_text(self.store, self.settings),
                          elane_xs.train_map_text(self.store, self.settings))
+        self.assertIn("PANEL TRAIN MAP", elane_train.train_map_text(self.store, self.settings))
+        self.assertEqual(elane_train.train_map_text(self.store, F.settings("off")), "",
+                         "with the panel lane closed E2's map says nothing of the panel")
         from league.swarm import elane_births, elane_yield
 
         self.assertEqual(elane_births.researching(self.store), 0)

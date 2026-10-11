@@ -407,6 +407,18 @@ class CardsAndCells(unittest.TestCase):
         self.assertIn("in-sample", text)
         self.assertEqual(elane_xs.train_map_text(F.new_store(self), self.settings), "")
 
+    def test_the_request_carries_the_map_after_e2s_and_never_in_the_panel_block(self):
+        text = elane_xs.train_map_text(self.store, self.settings)
+        self.assertEqual(elane_xs.request_map_text(self.store, self.settings), text)
+        self.assertEqual(elane_xs.request_map_text(self.store, self.settings, limit=1),
+                         elane_xs.train_map_text(self.store, self.settings, limit=1))
+        block = elane_xs.request_text(self.store, self.settings, 4)
+        self.assertIn("THE PANEL (structure \"panel\", lane equity)", block)
+        self.assertNotIn("PANEL TRAIN MAP", block, "the map is E2's request's, once (patch 7), not the block's too")
+        for closed in (F.settings("off"), F.settings("gate", lane="off"), None):
+            self.assertEqual(elane_xs.request_map_text(self.store, closed), "", "a closed lane shows no map of itself")
+            self.assertEqual(elane_xs.request_text(self.store, closed, 4), "")
+
     def test_the_maps_label_says_what_the_store_dropped(self):
         F.write_manifest(self.store.root, train_years_ok=[2017, 2018, 2019, 2022, 2024], verdict="low_coverage")
         (Path(self.store.root) / elane_xs.STORE_DIR / "universe").mkdir()
@@ -1282,7 +1294,7 @@ class ThePanelBirths(unittest.TestCase):
             self.assertIn(part, request)
         self.pass_([self.proposal("rev-a")])
         self.pass_([])
-        self.assertIn("PANEL TRAIN MAP", self.router.calls[-1]["user"])
+        self.assertEqual(self.router.calls[-1]["user"].count("PANEL TRAIN MAP"), 1, "once: after E2's own map")
         off = self.make(F.settings("off", e2={"max_per_pass": 4, "min_per_pass": 4}))
         out = self.pass_([self.proposal("rev-b")], off)
         self.assertNotIn("THE PANEL (structure", self.router.calls[-1]["user"])
