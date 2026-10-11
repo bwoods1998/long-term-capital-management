@@ -1355,6 +1355,11 @@ class FirstCome(SeatCase):
         with X.seat_rule("first-come"):
             got = json.loads(json.dumps(Q.run(self.fresh()), sort_keys=True))
         self.assertEqual(sorted(got), sorted(want))
+        # RELEASE E4's ONE COLUMN ON THESE ROWS (`eq_instances.kind`, league/equity/live.py `INSTANCE_KIND_DDL`): the
+        # record was written before it. It is held to what it must be for a share program, "equity" on every row,
+        # and left out of the comparison (as league/tests/equity_week.py `main_shape` does for the recorded weeks).
+        for row in got["tables"]["eq_instances"]:
+            self.assertEqual(row.pop("kind"), "equity", row["id"])
         for part in want:
             self.assertEqual(got[part], want[part], part)
         self.assertEqual(got["errors"], [])

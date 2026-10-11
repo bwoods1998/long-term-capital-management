@@ -26,10 +26,11 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261011T202519Z-50def634e716` (main `81963c87`, release E2.4, 20:25Z Oct 11), the
-gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
+The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, releases E5-A and E3.1, 22:51Z
+Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
+on branches.
 
-### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; main's releases through E5-S and E2.4 merged under it; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
+### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 
 - **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
   day's S&P 500 members by a symmetric cross-sectional rule, see salted slots with no ticker, no date and no price
@@ -100,6 +101,11 @@ gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is b
      lane's two protected paths (`gateway/lib/protected.mjs`; until then they wait in `PENDING_GATEWAY`).
   4. **The owner's deploy**: the gateway first, then the House, between two pre-opens; `digest()` and
      `money_digest()` move once and the standing grant re-ratifies at the House's start.
+  5. **A panel program under the seat rule, and its re-based twin** (new with main's releases E5-A and E3.1; "The
+     merge with main `8ab31e32`", below): which rank K a basket has (the panel's look writes none of K's counts, so
+     a panel Candidate would rank behind every program whose counts can be read), whether a panel program held on
+     a failed leg keeps one of the six seats while it has no row, and the re-base of the panel twin (not built).
+     None of it can be reached in step one.
   And before any LOOK, which moves no money and no digest: the hand-over of the probe's panel plan to the House's
   job (patch 18 is built and not wired, below; one allowance in E3's seal test, the captain's ruling). Until it is
   given every panel look waits.
@@ -240,10 +246,60 @@ gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is b
   (0.4 s before each; 30 s then 65 s after a 429). `forward_xs` skips where E3's own job skips (it failed on an
   evening the House's daily store held no forward day). The look's own reading of the lane's mode has its test,
   and E3's seal lets five modules import package J's, the five that dispatch to it.
+- **The merge with main `8ab31e32` (Oct 11; main's releases E5-A and E3.1, deployed 22:51Z; nothing of E4
+  deployed; the options execution fingerprint, the equity identity, the money digest and the constitution digest
+  are main's on both Pythons; the xs identity is unchanged, 2f0083bc...).** MERGED, every line of both kept: the
+  seat rule "activity-1-free", the exit wait's end and the re-based twin, under the panel lane. Ten files met. In
+  the live book (`league/equity/live.py`) the share path is main's code path: the seat rule's band sync, the
+  open note, the exit wait's end and the lost order's take-back are untouched, and what E4 changed stays behind
+  an instance's kind. The swarm's reader takes main's `queued` read and E4's panel rules together (a panel
+  Candidate is seatless while its lane is not live, so it has no row for the seat plan either); the roster and the
+  `dlane` report carry both sides' keys; `league/ops/E3_INTERFACES.md` keeps main's section 13 (release E3.1) and
+  E4's two sections are 14 and 15; `league/constitution.py` is main's to the byte. **A SHARE PROGRAM'S LIVE PATH
+  IS MAIN'S, ORDER FOR ORDER, PROVED AGAIN ON THAT MAIN:** the fixture was recorded again on a detached clone of
+  `8ab31e32` (two records equal to the byte), 75 scenarios. The 65 of before: on main itself the weeks in which
+  stage SELL cannot pass now sell at the 09:45 cut-off, and every scenario's keys hold the seat plan and the open
+  note. Ten that the new main makes possible: the seat rule over thirteen sessions (nobody waits and the idle
+  seats are kept; an idle seat yields to the waiting program; two wait and one seat yields a decision day; a
+  session in which the House refused every open is left out of the idle clock; a yielded program returns into a
+  freed seat; no idle clock while the House refuses every buy), and the forward record's nights beside the book
+  over eight sessions (nothing re-based; Monday's buys missed and the twins re-based; a rebuy missed mid-week; the
+  practice sale never witnessed). Every POST, cancel, fill, alert and line of the seat rule, whole, and every
+  intent, order, lot, instance row, key of the book, record, minute's answer, twin row, twin event, night's
+  receipt and A14 reading, by digest, equals main's, through the test double and through the real swarm reader
+  with the switch absent, "off" and at "train". The two differences allowed are the two of before (the column
+  `eq_instances.kind`, the empty table `eq_rebalances`); the forward store has none. A reader that hides the
+  waiting Candidates, an exit that never waits and a twin that is never re-based are each caught by the scenarios
+  recorded for them. **WHAT MAIN'S THREE RULES DO FOR A PANEL PROGRAM** (decided here; `league/swarm/E4.md`
+  section 7; `league/tests/test_equity_panel_on_main.py`): (1) in step one a panel family never enters the seat
+  plan, never counts against the six seats, never holds or yields a seat: the book builds its plan from the
+  reader's rows alone, and the reader gives a panel family none at any setting of the switch (held with a panel
+  family forced into the Candidate, Probe and Sized bands, where step one makes none; under the "first-come"
+  rollback the swarm's roster counts the Probe band as the store holds it, and step one puts no panel family in a
+  band); (2) the exit wait's end covers a basket's exits like any other, the program's sale and the House's exit
+  of a name that left the eligible set alike; the basket's buy of that open waits with its own sales (B8) and the
+  cut-off records it missed, the standing target planning it again; (3) the re-base is NOT BUILT for the panel
+  twin: a panel instance is twinned by the panel night, compared with the twin as registered every session, with
+  NULL in A29's two columns and no re-base event. **ONE FORWARD-STORE MIGRATION:** E4 adds no table and no column
+  to forward.sqlite (`forward_db.SCHEMA` is main's to the byte), so the migration is main's alone; a store built
+  by `8ab31e32` and one built by `8ed4e72e` (with a panel program's registry row and twin rows) both open under
+  the merged tree with no row rewritten, two writers at once included
+  (`league/tests/test_forward_store_two_builds.py`; the same run once on stores each sha's own code built).
 - Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
   the universe deploy and its rollback, the alarms).
 
-### Release E5-A: the seat rule of the share lane ("activity-1-free"; the captain's A24 with A30), on `feat/equity-e5a-seat-rule` (unreleased; one owner deploy with release E3.1 below, from `release/e31-e5a`, on top of releases E5-S and E2.4; THE MONEY DIGEST MOVES, the grant re-ratifies; no fingerprint moves)
+### 22:51Z Oct 11, 2026: releases E5-A and E3.1, the seat rule, the exit wait's end and the re-based twin (#542), House `20261011T225041Z-65fa6d3946ea`, main `8ab31e32`; gateway unchanged `9c0651a3`
+
+One owner deploy of both: CI green on the exact head; no order in flight at 22:50:28Z; promoted 22:51:33Z, the
+watchdog clean (rollback `20261011T202519Z-50def634e716`), nightly back and the updater repointed 23:02Z. Verified
+23:02Z: health clean, real money on; execution fingerprint `b60410ad` and gate contract `397b22b772b3` unchanged;
+money `6c0bc42b` -> `11a1dc0c` and constitution `c3c061b0` -> `00c2bf6f` on purpose (the seat rule's block), the
+grant re-ratified at House start.
+
+- Seen on the House after: the seat plan read "activity-1-free" with six seats held and nobody waiting; the three
+  buys planned for Monday's open stood.
+
+### Release E5-A: the seat rule of the share lane ("activity-1-free"; the captain's A24 with A30), on `feat/equity-e5a-seat-rule` (DEPLOYED 22:51Z Oct 11; one owner deploy with release E3.1 below, from `release/e31-e5a`, on top of releases E5-S and E2.4; THE MONEY DIGEST MOVES, the grant re-ratifies; no fingerprint moves)
 
 - **What it is.** Who takes a free seat was first come. It is now the seat rule the captain registered at 13:42Z
   Oct 11, before the first live share close and before any program waited, as amended by A30 at 20:47Z the same
@@ -328,7 +384,7 @@ gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is b
 - **Merged with main** (release E2.4, the equity lanes' alarms, and release E5-S as deployed): no line of either
   is changed here.
 
-### Release E3.1: an exit's wait for the practice proof has an end, and the twin is re-based after a difference, on `feat/equity-e31-exits-twin` (unreleased; one owner deploy with release E5-A above, from `release/e31-e5a`, on main `81963c87`; no identity moves of its own: the options execution fingerprint, the equity identity, the money digest and the constitution digest are main's; no evidence reset)
+### Release E3.1: an exit's wait for the practice proof has an end, and the twin is re-based after a difference, on `feat/equity-e31-exits-twin` (DEPLOYED 22:51Z Oct 11; one owner deploy with release E5-A above, from `release/e31-e5a`, on main `81963c87`; no identity moves of its own: the options execution fingerprint, the equity identity, the money digest and the constitution digest are main's; no evidence reset)
 
 Two rules the captain registered at 20:13Z Oct 11, 2026, from the rehearsal of the first real-money share session,
 **both before the first real share order** (and A29 before any twin row existed). Plumbing only: `league/equity/live.py`
