@@ -12,6 +12,10 @@ bands now, real orders and closes by route (the agents' against the House's), re
 Sail guard braked, and the stalls the `stall` job finds standing (`<state>/stall.json`, causes only). Every funnel figure
 is a count or a spend, never a Validation or holdout figure.
 
+THE EQUITY LANES (release E2.4): the page prints no equity row, as before. The job's RECEIPT (private) carries the
+funnel's `equity` block for the same two windows (`equity_funnel`): each lane's births, Validations, looks and band
+moves, and the lanes' research funnel (`league/ops/elane_health.py` `research_counts`).
+
 PUBLIC: the page is built from an allowlist of figures (`build`), never from free text the House holds, and then
 checked by `public_problems` (no account equity or balance, no quote, contract symbol, strike, box id, parameter or
 program text, no Validation or holdout figure). A page that fails the check is not posted (the job fails). It is
@@ -258,6 +262,18 @@ def funnel_lines(funnel: Mapping[str, Any] | None, stalls: Mapping[str, Any] | N
     return lines
 
 
+def equity_funnel(funnel: Mapping[str, Any] | None) -> dict[str, Any]:
+    """THE EQUITY LANES' FUNNEL for the job's receipt (release E2.4): the funnel's `equity` block of the last 24 hours
+    and of the time since the release (`funnel.read`: each lane's births, Validations, looks and band moves, and the
+    lanes' research funnel, `research`), None for a window that was not read. The receipt is private; the page prints
+    no equity row, as before."""
+    out = {}
+    for name, key in (("day", "day"), ("since_release", "release")):
+        window = funnel.get(key) if isinstance(funnel, Mapping) else None
+        out[name] = window.get("equity") if isinstance(window, Mapping) else None
+    return out
+
+
 def build(*, day: str, release: str, economics: Mapping[str, Any] | None, deploys: Mapping[str, Any],
           budget: Mapping[str, Any] | None, ladder: Mapping[str, Any], jobs: Mapping[str, int], written_at: str,
           engineer: Mapping[str, Any] | None = None, funnel: Mapping[str, Any] | None = None,
@@ -333,7 +349,8 @@ def run(ctx: Any) -> dict[str, Any]:
         answer = ctx.gateway.post(DOCS_ROUTE, {"path": path, "content": text, "message": f"desk: scoreboard {day}"})
     except GatewayError as exc:
         if exc.status in (404, 405):
-            return {"status": "skipped", "why": "the gateway's docs route is not deployed", "local": str(local), "bytes": len(text)}
+            return {"status": "skipped", "why": "the gateway's docs route is not deployed", "local": str(local), "bytes": len(text),
+                    "equity": equity_funnel(funnel)}
         raise
     return {"posted": path, "local": str(local), "bytes": len(text),
-            "commit": (answer or {}).get("commit") if isinstance(answer, dict) else None}
+            "commit": (answer or {}).get("commit") if isinstance(answer, dict) else None, "equity": equity_funnel(funnel)}

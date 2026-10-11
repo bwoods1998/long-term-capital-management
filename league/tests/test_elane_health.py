@@ -25,6 +25,7 @@ from league.ops import funnel as FN
 from league.ops import guard
 from league.ops import scoreboard as SB
 from league.ops import stall as ST
+from league.ops.context import Context
 from league.ops.store import OpsStore
 from league.swarm import elane_births, elane_train, elane_yield
 from league.swarm.architect import Architect
@@ -164,9 +165,14 @@ class Case(TS.Base):
         self.store.add_spend("sail_model", usd, detail={"key": f"swarm:elane:{purpose}:invented:1:{ROUTE}"})
 
     def equity(self, **kw) -> dict:
-        """One stall run's equity checks (the receipt's `elane.checks`)."""
+        """One stall run's equity checks (among the receipt's `checks`)."""
         out, _ = self.run_at(**kw)
-        return out["elane"]["checks"]
+        return self.own(out)
+
+    @staticmethod
+    def own(out: dict) -> dict:
+        """The equity causes' checks of a stall receipt, each with `judged` (its numbers') beside `stalled`."""
+        return {cause: {**out["checks"][cause], "judged": out["checks"][cause]["numbers"]["judged"]} for cause in EH.CAUSES}
 
     def told(self) -> str:
         """Everything the House sent to the gateway, as text."""
@@ -362,8 +368,8 @@ class AQuietLaneIsNotJudged(Case):
 
     def quiet(self, why: str, **kw) -> dict:
         out, ctx = self.run_at(**kw)
-        checks = out["elane"]["checks"]
-        self.assertEqual(set(checks), set(EH.CAUSES))
+        checks = self.own(out)
+        self.assertEqual(set(out["checks"]), {*ST.CAUSES, *EH.CAUSES})
         for cause, check in checks.items():
             self.assertEqual((check["stalled"], check["judged"]), (False, False), cause)
             self.assertIn("Not judged: ", check["what"])
@@ -388,7 +394,7 @@ class AQuietLaneIsNotJudged(Case):
         self.damning()
         self.beat(0.5)
         out, ctx = self.run_at()
-        checks = out["elane"]["checks"]
+        checks = self.own(out)
         self.assertEqual((out["stalled"], self.notify.calls, ctx.alerts), ([], [], []))
         for cause in EH.CAUSES:
             self.assertEqual((checks[cause]["stalled"], checks[cause]["judged"]), (False, False), cause)
@@ -406,7 +412,7 @@ class AQuietLaneIsNotJudged(Case):
         for name in ("PAUSE", "swarm.stop"):
             (self.root / name).write_text("")
             out, _ = self.run_at()
-            for cause, check in out["elane"]["checks"].items():
+            for cause, check in self.own(out).items():
                 self.assertEqual((check["stalled"], check["judged"]), (False, False), (name, cause))
                 self.assertIn("Not judged: the floor is paused", check["what"])
             self.assertEqual(self.notify.calls, [])
@@ -420,7 +426,7 @@ class AQuietLaneIsNotJudged(Case):
         ctx = self.ctx()
         ctx.settings = {"stall": {"elane": False}}
         out = ST.run(ctx)
-        for check in out["elane"]["checks"].values():
+        for check in self.own(out).values():
             self.assertEqual((check["stalled"], check["what"]), (False, "Not judged: switched off (ops.json stall.elane is false)."))
         self.assertEqual((out["stalled"], self.notify.calls), ([], []))
         self.assertTrue(all(cause in out["checks"] for cause in ST.CAUSES))
@@ -441,7 +447,7 @@ class AQuietLaneIsNotJudged(Case):
         with mock.patch.object(EH, "facts", side_effect=RuntimeError("an invented failure")):
             out, _ = self.run_at()
         self.assertIn("the equity lanes' health could not be read (RuntimeError)", out["errors"])
-        for check in out["elane"]["checks"].values():
+        for check in self.own(out).values():
             self.assertEqual((check["stalled"], check["judged"]), (False, False))
         self.assertEqual(out["stalled"], [])
         self.assertTrue(all(cause in out["checks"] for cause in ST.CAUSES), "the stall alarm goes on")
@@ -467,7 +473,7 @@ class MostVersionsDisqualified(Case):
         self.ago(1.0)
         self.store.event("swarm.elane", a, {"pass": "stalled", "codes": ["DQ"], "versions": 4})
         out, ctx = self.run_at()
-        check = out["elane"]["checks"]["elane_dq"]
+        check = self.own(out)["elane_dq"]
         self.assertTrue(check["stalled"] and check["judged"])
         self.assertEqual({k: check["numbers"][k] for k in ("scored", "faulted", "disqualified", "load_refused", "run_failed",
                                                            "share", "families", "retired_stalled", "top_error", "top_error_n")},
@@ -479,12 +485,17 @@ class MostVersionsDisqualified(Case):
             "families were retired STALLED. The commonest first error: TypeError (5 of 6; then KeyError 1). The reading "
             "rule's commonest sentence for it: a symbol's bars read by key (ctx.bars[sym] is ONE object: its arrays are "
             "read by attribute) (2x)."))
-        self.assertEqual(check["hint"], elane_train.DQ_HINTS["TypeError"], "the contract's own sentence for the class")
+        self.assertEqual(set(out["checks"]["elane_dq"]), {"stalled", "what", "numbers", "doing", "owner_step"},
+                         "the receipt keeps a check as it keeps every cause's")
         self.assertEqual(check["owner_step"], (
             "the equity generators misread the program contract (the commonest first error: TypeError): fix the text they "
             "read (league/equity/EQUITY.md \"Reading ctx\", elane_review.READING_CTX) or the static rule that should refuse "
             "it, in a release; python3 -m league.ops.elane_health --state /workspace/state lists the families and lines"))
-        self.assertEqual(check["examples"][0], {"family": a, "version": 1, "error": "TypeError", "line": 12})
+        self.assertEqual(check["numbers"]["examples"][0], {"family": a, "version": 1, "error": "TypeError", "line": 12})
+        # The contract's own sentence for the class is beside the check for the operator's report.
+        found = EH.checks(ctx, self.root, NOW, ST._load(ctx, self.root)[0])
+        self.assertEqual(found["elane_dq"]["hint"], elane_train.DQ_HINTS["TypeError"])
+        self.assertIn(f"  {elane_train.DQ_HINTS['TypeError']}.", EH.text(EH.report(self.root, now=NOW)))
         # Raised like any cause: standing in stall.json, a House warning, the notice.
         self.assertEqual(out["stalled"], ["elane_dq"])
         state = json.loads((self.root / ST.STATE_FILE).read_text())
@@ -541,7 +552,7 @@ class MostVersionsDisqualified(Case):
         self.runs(10, hours=-4.5)
         out, _ = self.run_at(now=later)
         self.assertIn("elane_dq", out["cleared"])
-        self.assertFalse(out["elane"]["checks"]["elane_dq"]["stalled"])
+        self.assertFalse(self.own(out)["elane_dq"]["stalled"])
         self.assertFalse(json.loads((self.root / ST.STATE_FILE).read_text())["causes"]["elane_dq"]["standing"])
 
 
@@ -556,7 +567,7 @@ class TheLastPassesBoreNothing(Case):
         self.births(1.5, skipped="pace")  # held back: asked nobody, so it neither counts nor breaks the row
         self.births(1.0, refused=[("wirefunds-again", self.SYMBOLS), ("wirefunds-card", self.CARD)])
         out, ctx = self.run_at()
-        check = out["elane"]["checks"]["elane_births"]
+        check = self.own(out)["elane_births"]
         self.assertTrue(check["stalled"])
         self.assertIsNone(check["owner_step"], "the lanes get six hours to correct themselves")
         self.assertEqual({k: check["numbers"][k] for k in ("barren_passes", "asked_passes", "born", "proposed", "refused",
@@ -638,7 +649,7 @@ class OwedWorkAndNothingScored(Case):
         self.researching()
         self.spend(0.5, 0.05)  # over the pace of the tests' settings (a quarter of the floor's line)
         out, _ = self.run_at()
-        check = out["elane"]["checks"]["elane_idle"]
+        check = self.own(out)["elane_idle"]
         self.assertTrue(check["stalled"])
         self.assertIsNone(check["owner_step"], "a starved lane runs as its settings say")
         self.assertEqual((check["numbers"]["kind"], check["numbers"]["held_now"], check["numbers"]["idle_hours"],
@@ -777,7 +788,7 @@ class MostProgramsRefusedByOneRule(Case):
         self.round(1.0, refused_step(b, refusal(AS_ROWS)), refused_step(a, refusal(LEVEL)), scored_step(b, 1, "DQ"),
                    {"family": a, "error": "no route answered", "errors": ["invented"], "retry_in": 600.0})
         out, ctx = self.run_at()
-        check = out["elane"]["checks"]["elane_refused"]
+        check = self.own(out)["elane_refused"]
         self.assertTrue(check["stalled"])
         self.assertEqual({k: check["numbers"][k] for k in ("answers", "stored", "refused", "refused_reading", "refused_level",
                                                            "top_rule", "top_rule_n", "share")},
@@ -791,8 +802,8 @@ class MostProgramsRefusedByOneRule(Case):
             "the equity generators are not being taught the reading rule: teach it where they read it "
             "(league/equity/EQUITY.md, the researcher's system prompt, elane_review.READING_CTX), in a release; python3 -m "
             "league.ops.elane_health --state /workspace/state lists the refusals"))
-        self.assertEqual(check["examples"][0], {"family": a, "rule": "reading", "line": 9,
-                                                "sentence": EH.SENTENCES["reading"][0][1]})
+        self.assertEqual(check["numbers"]["examples"][0], {"family": a, "rule": "reading", "line": 9,
+                                                           "sentence": EH.SENTENCES["reading"][0][1]})
         self.assertIn("elane_refused", out["stalled"])
         for text in (json.dumps(out), self.told(), json.dumps(ctx.alerts)):
             self.assertNotIn("zebra", text, "a refusal quotes the program's source; nothing here repeats it")
@@ -861,7 +872,7 @@ class RaisedLikeAnyCause(Case):
 
     def test_the_mail_names_only_causes_the_gateway_words(self):
         self.assertEqual(sorted(gateway_causes()), sorted(ST.CAUSES), "the gateway words stall.CAUSES and nothing else")
-        self.assertEqual(ST.EVERY_CAUSE, (*ST.CAUSES, *EH.CAUSES))
+        self.assertEqual((ST.EVERY_CAUSE, ST.EQUITY_CAUSES), ((*ST.CAUSES, *EH.CAUSES), EH.CAUSES))
         self.assertFalse(set(EH.CAUSES) & set(gateway_causes()), "until the gateway words them, they travel in the carrier")
         self.assertIn(EH.CARRIER, gateway_causes())
         self.broken()
@@ -899,7 +910,7 @@ class RaisedLikeAnyCause(Case):
                           "elane_births_barren_passes": 3, "elane_births_kind": "symbols",
                           "elane_refused_answers": 9, "elane_refused_top_rule": "reading"})
         self.assertIn("could not be judged for a fault of their own program (7 disqualified",
-                      out["elane"]["checks"]["elane_dq"]["what"])
+                      self.own(out)["elane_dq"]["what"])
         self.assertLessEqual(len(entry["numbers"]), EH.FIGURES)
         for name, value in entry["numbers"].items():
             self.assertRegex(name, r"^[a-z][a-z0-9_]{0,39}$")
@@ -952,9 +963,13 @@ class RaisedLikeAnyCause(Case):
                     "doing": "invented", "owner_step": "an invented step"},
                    {"cause": "births", "what": "invented", "numbers": {}, "since": None, "hours": None, "doing": "x",
                     "owner_step": None}]
-        self.assertEqual(EH.carried(entries, (*ST.CAUSES, *EH.CAUSES)), entries)
-        self.assertEqual([e["cause"] for e in EH.carried(entries, ST.CAUSES)], ["births", "swarm_alerts"])
-        self.assertEqual(EH.carried(entries[1:], ST.CAUSES), entries[1:], "no equity cause: the entries as they are")
+        self.assertEqual(ST.EQUITY_CAUSES, EH.CAUSES, "today the gateway words none of them: all four are folded")
+        self.assertEqual([e["cause"] for e in EH.carried(entries, ST.EQUITY_CAUSES)], ["births", "swarm_alerts"])
+        self.assertEqual(EH.carried(entries[1:], ST.EQUITY_CAUSES), entries[1:], "no equity cause: the entries as they are")
+        # With the four named in stall.CAUSES (the gateway words them), nothing is folded: each goes as it is, less
+        # what is no figure (the examples stay on the House).
+        entries[0]["numbers"]["examples"] = [{"family": "an-invented-family"}]
+        self.assertEqual(EH.carried(entries, ()), [{**entries[0], "numbers": {"scored": 8}}, entries[1]])
 
     def test_the_equity_causes_write_nothing(self):
         self.damning()
@@ -964,7 +979,6 @@ class RaisedLikeAnyCause(Case):
         loaded, _ = ST._load(ctx, self.root)
         found = EH.checks(ctx, self.root, NOW, loaded)
         self.assertEqual({c for c, check in found.items() if check["stalled"]}, {"elane_dq", "elane_births", "elane_refused"})
-        EH.receipt(self.root, NOW, found)
         EH.report(self.root, now=NOW)
         self.assertEqual(files(), before, "the checks, the receipt and the report read")
         # And the job as a whole writes what it writes with the four switched off, no file more.
@@ -1011,8 +1025,7 @@ class TheDoneMeterCountsThem(Case):
         b = self.bred("beta-two")
         self.record(b, versions={str(n): verdict(0.1 * n, "DQ") for n in range(1, 8)})
         out, _ = self.run_at()
-        self.assertTrue(out["elane"]["checks"]["elane_dq"]["owner_step"])
-        self.assertNotIn("elane_dq", out["checks"], "the receipt's `checks` are the causes the gateway words")
+        self.assertTrue(out["checks"]["elane_dq"]["owner_step"])
         day = self.day(out)
         self.assertEqual((day["holds"], day["owner"], day["why"]), (False, ["elane_dq"], "an owner step waiting (elane_dq)"))
 
@@ -1021,11 +1034,11 @@ class TheDoneMeterCountsThem(Case):
         self.record(a, versions={"1": verdict(5.0, "Y1")})
         self.spend(0.5, 0.05)
         out, _ = self.run_at()
-        self.assertEqual((out["stalled"], out["elane"]["checks"]["elane_idle"]["owner_step"]), (["elane_idle"], None))
+        self.assertEqual((out["stalled"], self.own(out)["elane_idle"]["owner_step"]), (["elane_idle"], None))
         day = self.day(out)
         self.assertEqual((day["holds"], day["owner"]), (True, []))
-        # A receipt from before the release (no `elane`) reads as it did.
-        self.assertEqual(self.day({"checks": {"births": {"stalled": True, "owner_step": "an invented step"}}})["owner"], [])
+        self.assertEqual(R.NEWS_CAUSES, ST.NEWS_CAUSES, "none of the four is news: an owner step of theirs is one waiting")
+        self.assertFalse(set(EH.CAUSES) & set(R.NEWS_CAUSES))
 
 
 # ---------------------------------------------------------------------------------------------- the funnel
@@ -1108,19 +1121,45 @@ class TheResearchFunnel(Case):
         self.assertEqual(window["errors"], {})
         self.assertEqual(window["equity"]["research"], self.EXPECTED)
         self.assertEqual((window["equity"]["beta"]["births"], window["equity"]["equity"]["births"]), (1, 2), "beside E1's")
+        # The daily funnel's job (the scoreboard) carries the equity block in its receipt; its page prints no equity row.
+        (self.base / "deploys.jsonl").write_text(json.dumps({"at": iso(NOW - 30 * HOUR), "stage": "verdict", "verdict": "promoted",
+                                                             "release": "an-invented-release"}) + "\n")
+        funnel = FN.read(self.root, self.base, "an-invented-release", NOW)
+        carried = SB.equity_funnel(funnel)
+        self.assertEqual((carried["day"]["research"], carried["day"]["beta"]["births"]), (self.EXPECTED, 1))
+        self.assertEqual(carried["since_release"]["research"]["birth_passes"]["passes"], 6, "the release began 30 h ago")
+        self.assertEqual(SB.equity_funnel({}), {"day": None, "since_release": None})
+        page = "\n".join(SB.funnel_lines(funnel))
+        self.assertNotIn("research", page)
+        self.assertEqual(SB.public_problems(page), [])
+
+        class Gateway:
+            posts: list = []
+
+            def post(self, path, body):
+                self.posts.append((path, body))
+                return {"commit": "c0ffee"}
+
+        gateway = Gateway()
+        ctx = Context("scoreboard", root=self.root, base=self.base, due_at=NOW, config={}, clock=lambda: NOW, gateway=gateway,
+                      settings_value={}, release=self.base / "an-invented-release")
+        receipt = SB.run(ctx)
+        self.assertEqual((receipt["posted"], receipt["equity"]["day"]["research"]), ("docs/runs/desk/2026-10-07.md", self.EXPECTED))
+        posted = gateway.posts[0][1]["content"]
+        self.assertEqual(SB.public_problems(posted), [])
+        for word in ("research funnel", "birth_passes", "proposals_refused", "elane"):
+            self.assertNotIn(word, posted, "the page prints no equity row")
         out, _ = self.run_at()
-        self.assertEqual(out["elane"]["funnel"], {"hours": 24.0, **self.EXPECTED})
-        self.assertEqual(out["elane"]["carrier"], "swarm_alerts")
-        json.dumps(out)  # the receipt is JSON
+        json.dumps(out)  # the stall receipt is JSON
+        self.assertEqual(set(out), {"stalled", "cleared", "warned", "notice", "checks", "ceiling", "errors", "warning"},
+                         "the stall receipt's keys are as they were")
 
     def test_a_funnel_that_cannot_be_read_is_an_error_there_and_never_a_zero(self):
         self.invented_day()
         with mock.patch.object(EH, "research_counts", side_effect=RuntimeError("an invented failure")):
             window = FN.window(self.root, NOW - 24 * HOUR, NOW)
-            out, _ = self.run_at()
         self.assertEqual(window["equity"]["research"], {"error": "RuntimeError: an invented failure"})
         self.assertEqual((window["errors"], window["births"] > 0), ({}, True), "the rest of the funnel stands")
-        self.assertEqual(out["elane"]["funnel"], {"hours": 24.0, "error": "RuntimeError: an invented failure"})
 
     def test_an_empty_store_counts_nothing(self):
         got = guard.read(self.root / EH.SWARM_DB, lambda db: EH.research_counts(db, NOW - 24 * HOUR, NOW))

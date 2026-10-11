@@ -191,8 +191,8 @@ request text, and nothing of E1's.
 5. **The notice.** The gateway composes a stall notice only from the causes it has words for, so the four reach the
    mail folded into the cause the swarm's alerts travel in (`elane_health.carried`), and everywhere on the House
    they stand under their own names. docs/operations.md says how to read them.
-6. **The research funnel** (`elane_health.research_counts`; the funnel's `equity.research`, the stall receipt's
-   `elane.funnel`): equity passes and families born, proposals refused by class, programs refused before a run by
+6. **The research funnel** (`elane_health.research_counts`; the funnel's `equity.research`, which the `scoreboard`
+   job's receipt carries for the last 24 hours and since the release): equity passes and families born, proposals refused by class, programs refused before a run by
    rule, versions scored, disqualified and failed by code, bar passes, review refusals and passes, families
    retired, E2's model dollars by purpose. Each count is the event itself; counts and E2's own dollars only.
 7. **The architect is not led outside the universe** (`elane_births.lanes_text`, `_costs_line`). The contract-in-brief

@@ -55,18 +55,18 @@ refusal rule. It reads, reports and notifies.
 
 THE NOTICE (`carried`). The gateway composes a stall notice only from causes it has words for (gateway/lib/email.mjs
 `STALL_CAUSES`; an unknown cause makes the whole notice a 400 and nothing is mailed), and its words are held equal to
-`stall.CAUSES` by its own test. So these four stand under their own names everywhere on the House (the receipt,
-`stall.json`, the House's warnings, the daily page's standing causes, the Done meter's item 7) and reach the mail INSIDE
-`CARRIER`, the cause the swarm's other alerts already travel in: one entry whose sentence names each equity cause
-standing, with its figures, what the floor is doing and its owner step, each cut to the gateway's own lengths. The
-stall job's pace is kept by the House's names (a new equity cause is a notice at once); the gateway's own window is
-keyed on the carrier, so a second equity cause inside it waits for the window (the House tries at every run). Once the
-gateway words the four (a gateway deploy first), naming them in `stall.CAUSES` sends each as its own entry: `carried`
-folds only the causes `known` leaves out.
+`stall.CAUSES` by its own test. So these four stand under their own names everywhere on the House (the receipt's
+`checks`, `stall.json`, the House's warnings, the daily page's standing causes, the Done meter's item 7, which reads
+the receipts' checks) and reach the mail INSIDE `CARRIER`, the cause the swarm's other alerts already travel in: one
+entry whose sentence names each equity cause standing, with its figures, what the floor is doing and its owner step,
+each cut to the gateway's own lengths. The stall job's pace is kept by the House's names (a new equity cause is a
+notice at once); the gateway's own window is keyed on the carrier, so a second equity cause inside it waits for the
+window (the House tries at every run). Once the gateway words the four (a gateway deploy first), naming them in
+`stall.CAUSES` sends each as its own entry: `stall.EQUITY_CAUSES`, what `carried` folds, is then empty.
 
-THE RESEARCH FUNNEL (`research_counts`; the funnel's `equity.research`, the stall receipt's `elane.funnel` for the
-last 24 hours, and `python3 -m league.ops.elane_health`): equity passes (asked, barren, cut short, skipped by reason)
-and families born, proposals refused by reason class, programs refused before a run by rule, versions scored,
+THE RESEARCH FUNNEL (`research_counts`; the funnel's `equity.research`, which the `scoreboard` job's receipt carries
+for the day and the release, and `python3 -m league.ops.elane_health`): equity passes (asked, barren, cut short,
+skipped by reason) and families born, proposals refused by reason class, programs refused before a run by rule, versions scored,
 disqualified and failed by code (Y1, Y2, P1, R1, STATE and any other the bar names), bar passes, review refusals and
 passes, families retired (stalled, refuted) and E2's model dollars by purpose. Counts and E2's own dollars only.
 
@@ -132,7 +132,7 @@ REFUSED_MIN_ANSWERS = 8
 REFUSED_SHARE = 0.5
 #: How far back `facts` reads the events (the longest window above).
 LOOKBACK_HOURS = max(DQ_HOURS, BIRTHS_HOURS, REFUSED_HOURS, IDLE_HOURS)
-#: The funnel in the stall receipt covers this many hours.
+#: The report's funnel covers this many hours unless it is asked another (`report`, the command's `--hours`).
 FUNNEL_HOURS = 24.0
 
 # ---------------------------------------------------------------------------------------------- E2's vocabulary
@@ -720,8 +720,15 @@ def lanes(loaded: Mapping[str, Any] | None, f: Mapping[str, Any] | None = None, 
 
 
 def _not_judged(why: str, numbers: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    return {"stalled": False, "judged": False, "what": f"Not judged: {why}.", "numbers": {"judged": False, **(numbers or {})},
+    return {"stalled": False, "judged": False, "what": f"Not judged: {why}.", "numbers": {**(numbers or {}), "judged": False},
             "doing": DOING["not_judged"], "owner_step": None, "onset": None}
+
+
+def _judged(check: dict[str, Any]) -> dict[str, Any]:
+    """A judged check as the stall receipt keeps it: the receipt holds a check's sentence, numbers, doing and owner
+    step, so `judged` and the `examples` (the families, versions and lines an operator reads) ride its numbers."""
+    extra = {"judged": True, **({"examples": check["examples"]} if check.get("examples") else {})}
+    return {**check, "judged": True, "numbers": {**check["numbers"], **extra}}
 
 
 def _since(now: float, hours: float, started: float | None) -> tuple[float, str]:
@@ -1099,9 +1106,10 @@ def judge(f: Mapping[str, Any], *, now: float, started: float | None = None, bea
     """The four checks over the store's facts (`facts`), each {stalled, judged, what, numbers, doing, owner_step, onset}.
     Pure. `started`: the running swarm's start (evidence counts from it); `beat_age`: its heartbeat's age in seconds;
     `settings`: `lanes`' third value."""
-    return {"elane_dq": _dq_check(f, now, started), "elane_births": _births_check(f, now, started),
-            "elane_idle": _idle_check(f, now, started, settings or {}, beat_age),
-            "elane_refused": _refused_check(f, now, started)}
+    found = {"elane_dq": _dq_check(f, now, started), "elane_births": _births_check(f, now, started),
+             "elane_idle": _idle_check(f, now, started, settings or {}, beat_age),
+             "elane_refused": _refused_check(f, now, started)}
+    return {cause: _judged(check) if check["judged"] else check for cause, check in found.items()}
 
 
 def heartbeat(root: str | Path, now: float) -> tuple[float | None, float | None]:
@@ -1236,19 +1244,23 @@ def research(db: Any, start: float, end: float) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------------------------- the notice
-def carried(entries: Sequence[Mapping[str, Any]], known: Sequence[str] = (),
+def carried(entries: Sequence[Mapping[str, Any]], fold: Sequence[str] = CAUSES,
             found: Mapping[str, Mapping[str, Any]] | None = None) -> list[dict[str, Any]]:
     """THE NOTICE (the module docstring): the stall notice's entries (`stall.cause_facts`, one a standing cause) with
-    the equity causes the gateway has no words for (those not in `known`, `stall.CAUSES`) folded into ONE `CARRIER`
-    entry: its `what` names each one ("elane_dq: ..."), its `numbers` open with each one's figures (`MAIL_FIGURES`,
-    named "<cause>_<figure>"), its `doing` and `owner_step` hold theirs, its `since` is the earliest, each inside the
+    the equity causes the gateway has no words for (`fold`: `stall.EQUITY_CAUSES`) folded into ONE `CARRIER` entry: its
+    `what` names each one ("elane_dq: ..."), its `numbers` open with each one's figures (`MAIL_FIGURES`, named
+    "<cause>_<figure>"), its `doing` and `owner_step` hold theirs, its `since` is the earliest, each inside the
     gateway's own cut. One equity cause alone is told in its own sentence and step; several, or one beside a carrier
     that stands by itself (its own words come after theirs), each in its short words (`found`: the checks, for their
-    `brief` and `step`), so the entry's 400 characters name them all. Pure."""
-    own = [dict(e) for e in entries if e.get("cause") in CAUSES and e.get("cause") not in known]
+    `brief` and `step`), so the entry's 400 characters name them all. An equity cause that is not folded goes as its
+    own entry with its figures only (the examples stay on the House). Pure."""
+    own = [dict(e) for e in entries if e.get("cause") in fold]
+    rest = [dict(e) for e in entries if e.get("cause") not in fold]
+    for e in rest:
+        if e.get("cause") in CAUSES and isinstance(e.get("numbers"), Mapping):
+            e["numbers"] = {k: v for k, v in e["numbers"].items() if not isinstance(v, (list, dict))}
     if not own:
-        return [dict(e) for e in entries]
-    rest = [dict(e) for e in entries if not (e.get("cause") in CAUSES and e.get("cause") not in known)]
+        return rest
     host = next((e for e in rest if e.get("cause") == CARRIER), None)
     alone = len(own) == 1 and host is None
     lead = "The equity lanes, " if alone else "The equity lanes: "
@@ -1261,7 +1273,7 @@ def carried(entries: Sequence[Mapping[str, Any]], known: Sequence[str] = (),
             steps.append(str(check.get("step") or e["owner_step"]))
         figures = e.get("numbers") if isinstance(e.get("numbers"), Mapping) else {}
         for name in MAIL_FIGURES.get(e["cause"], ()):
-            if name in figures:
+            if name in figures and not isinstance(figures[name], (list, dict)):
                 numbers[f"{e['cause']}_{name}"[:40]] = figures[name]
     doing = list(dict.fromkeys(str(e.get("doing") or "") for e in own))
     if host is not None:
@@ -1276,21 +1288,6 @@ def carried(entries: Sequence[Mapping[str, Any]], known: Sequence[str] = (),
               "since": None if first is None else first.get("since"), "hours": None if first is None else first.get("hours"),
               "doing": _fit(doing, DOING_CHARS), "owner_step": _fit(steps, STEP_CHARS, "; ") or None}
     return [folded if e is host else e for e in rest] if host is not None else [*rest, folded]
-
-
-def receipt(root: str | Path, now: float, found: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
-    """The stall receipt's `elane` (league/ops/stall.py `run`): each equity cause's check as the receipt keeps a check
-    (with whether it was judged, and its examples: the families, versions and lines an operator reads), the cause they
-    travel in, and the research funnel of the last `FUNNEL_HOURS`. Never raises."""
-    keys = ("stalled", "judged", "what", "numbers", "doing", "owner_step", "examples", "hint")
-    out: dict[str, Any] = {"carrier": CARRIER,
-                           "checks": {c: {k: found[c].get(k) for k in keys if k in found[c]} for c in CAUSES if c in found}}
-    try:
-        out["funnel"] = {"hours": FUNNEL_HOURS, **guard.read(Path(root) / SWARM_DB, lambda db: research(
-            db, now - FUNNEL_HOURS * 3600.0, now))}
-    except Exception as exc:  # noqa: BLE001 - the receipt goes on without the funnel
-        out["funnel"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
-    return out
 
 
 # ---------------------------------------------------------------------------------------------- the report
@@ -1333,7 +1330,8 @@ def report(root: str | Path, *, now: float, hours: float = FUNNEL_HOURS,
                          "status": fam["status"], "versions": versions, "refused": refused,
                          "waits": {k: S.iso(v) for k, v in fam["waits"].items() if v > now}})
     return {"at": S.iso(now), "judged": on, "why": why,
-            "checks": {c: {k: v for k, v in found[c].items() if k != "onset"} for c in CAUSES},
+            "checks": {c: {k: v for k, v in found[c].items() if k not in ("onset", "examples", "brief", "step")}
+                       for c in CAUSES},
             "funnel": {"hours": hours, **funnel}, "families": families}
 
 
@@ -1349,7 +1347,8 @@ def text(doc: Mapping[str, Any]) -> str:
             lines.append(f"  {check['hint']}.")
         if check.get("owner_step"):
             lines.append(f"  Owner step: {check['owner_step']}")
-        figures = ", ".join(f"{k} {v}" for k, v in (check.get("numbers") or {}).items() if v is not None and k != "judged")
+        figures = ", ".join(f"{k} {v}" for k, v in (check.get("numbers") or {}).items()
+                            if v is not None and k not in ("judged", "examples"))
         lines += [f"  {figures}"] if figures else []
     funnel = doc.get("funnel") or {}
     lines += ["", f"The research funnel, last {funnel.get('hours'):g} h:" if _num(funnel.get("hours")) is not None
@@ -1390,10 +1389,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = ["CAUSES", "CARRIER", "SWITCH", "switched_off", "checks", "judge", "facts", "lanes", "heartbeat", "carried",
-           "receipt", "research",
+           "research",
            "research_counts", "report", "text", "main", "dq_class", "dq_line", "refusal_class", "foreign_symbols",
            "rule_of", "sentences", "skip_kind", "step_read", "pass_read", "refusals_tally", "e2_families",
-           "DQ_HOURS", "DQ_MIN_SCORED", "DQ_SHARE", "BIRTHS_HOURS", "BIRTHS_PASSES", "BIRTHS_OWNER_HOURS", "IDLE_HOURS", "BEAT_STALE_SECONDS",
+           "DQ_HOURS", "DQ_MIN_SCORED", "DQ_SHARE", "BIRTHS_HOURS", "BIRTHS_PASSES", "BIRTHS_OWNER_HOURS", "IDLE_HOURS",
+           "BEAT_STALE_SECONDS",
            "REFUSED_HOURS", "REFUSED_MIN_ANSWERS", "REFUSED_SHARE", "LOOKBACK_HOURS", "FUNNEL_HOURS", "REFUSALS",
            "REFUSAL_WORDS", "RULES", "RULE_WORDS", "SENTENCES", "BIRTH_LEVERS", "IDLE_OWNER_KINDS", "PROGRAM_FAULTS",
            "BAR_CODES", "ERROR_CLASSES", "LANES", "STATE_KEY", "ROUTE_KEY", "MAIL_FIGURES"]

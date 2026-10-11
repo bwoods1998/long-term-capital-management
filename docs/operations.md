@@ -209,20 +209,23 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   causes it has words for, and has none for these yet): one entry whose sentence opens "The equity lanes" and names
   each cause standing, with its figures (`elane_dq_scored`, `elane_births_kind`, `elane_idle_kind`,
   `elane_refused_top_rule`...), what the floor is doing and your step. One cause alone is told in its whole
-  sentence; several share the entry's 400 characters in short words, and the receipt has each in full. A second
+  sentence; several share the entry's 400 characters in short words, and the receipt's `checks` have each in full. A second
   equity cause that arises inside the gateway's own 12 h or 24 h window for that entry is mailed when the window
   ends (the House tries at every run; its warning and `stall.json` have it at once).
 
-  **Read them** with no exec: the `stall` job's receipt (`python3 scripts/desk_receipts.py`), key `elane`: each
-  check (`stalled`, `judged`, `what`, `numbers`, `doing`, `owner_step`, and `examples`: the families, versions and
-  lines), the research funnel of the last 24 h (`funnel`: equity passes asked, barren and cut short, proposals
+  **Read them** with no exec (`python3 scripts/desk_receipts.py`): the `stall` job's receipt holds the four among
+  its `checks`, each as it holds every cause (`stalled`, `what`, `numbers`, `doing`, `owner_step`); a check's
+  `numbers` say whether it was judged (`judged`) and, for `elane_dq` and `elane_refused`, give `examples` (the
+  families, versions, lines and classes). The research funnel is in the `scoreboard` job's daily receipt, key
+  `equity` (`day` and `since_release`, each with `research`: equity passes asked, barren and cut short, proposals
   refused by reason class, programs refused before a run by rule, versions scored, disqualified and failed by
-  code, bar passes, review refusals and passes, families retired, E2's model dollars by purpose) and `carrier`. On
-  the box, read-only: `python3 -m league.ops.elane_health --state /workspace/state [--hours N] [--json]` prints
-  the same and each family's versions (fail codes, a disqualification's class and line) and refusals (the rule
-  and its sentence in closed words). No text a program or a model wrote is repeated in the mail, the House's
-  warning or the receipt's sentences: not an exception's text, not a program's source, not a refused proposal's
-  name, not a symbol a model made up. (The receipt's `examples` and the report name families by their ids.)
+  code, bar passes, review refusals and passes, families retired, E2's model dollars by purpose). On the box,
+  read-only: `python3 -m league.ops.elane_health --state /workspace/state [--hours N] [--json]` prints the checks,
+  the funnel of the last N hours and each family's versions (fail codes, a disqualification's class and line) and
+  refusals (the rule and its sentence in closed words). No text a program or a model wrote is repeated in the
+  mail, the House's warning or a check's sentences: not an exception's text, not a program's source, not a
+  refused proposal's name, not a symbol a model made up. (A check's `examples` and the report name families by
+  their ids.)
 
   **Settings.** The release adds none to `swarm.json` and changes none: the thresholds are constants in
   `league/ops/elane_health.py`, each with its reason. One switch is the owner's, in `ops.json`:
@@ -231,7 +234,8 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   captain's: `elane.mode`, `elane.birth_share`, `elane.universe`, `elane.structures`, `elane.e2.pace_share`,
   `elane.e2.usd_day`, `elane.e2.births_max_output_tokens`, `elane.e2.max_per_pass`, `elane.e2.refuted_cell_cap`.
   What does change at the deploy with no setting: the four causes are judged and told; Done's item 7 counts an
-  equity owner step waiting; the funnel carries `equity.research`; and the equity architect's request names the
+  equity owner step waiting; the funnel carries `equity.research` and the `scoreboard` job's receipt the funnel's
+  equity block; and the equity architect's request names the
   costs of the universe's own symbols only and says a proposal naming any other is refused whole (it named "the
   other ETFs", TLT and GLD whatever the universe held, and a pass then proposed sector ETFs the admission
   refused). It reads, reports and notifies: no screen, bar, budget, seat, money rule, graveyard or refusal rule
@@ -3249,8 +3253,8 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 stall job calls once): judged only while the lanes are on and not paused, on evidence since the running swarm started,
 else "Not judged" with the reason; **The equity lanes' births**, at the top, says how to read each and what to do.
 They are causes of the House under their own names (`stall.EVERY_CAUSE`: `stall.json`, the House's warnings, the
-daily page's standing causes, the receipt under `elane`), and Done's item 7 counts an owner step of theirs like any
-other's. The gateway composes a notice only from the causes it has words for (`STALL_CAUSES`, which its own test holds
+daily page's standing causes, the receipt's `checks`), and Done's item 7, which reads the receipts' checks, counts an
+owner step of theirs like any other's. The gateway composes a notice only from the causes it has words for (`STALL_CAUSES`, which its own test holds
 equal to `stall.CAUSES`; an unknown cause is a 400 for the whole notice), so in the mail they are folded into the
 `swarm_alerts` entry (`elane_health.carried`). When the gateway words them (a gateway deploy first) and
 `stall.CAUSES` names them, each is its own entry with no other change.
@@ -3290,8 +3294,8 @@ them), research spend by meter (Sail, Claude, OpenAI) and the hours the Sail gua
 (causes and since when). Counts and spend only, never a Validation or holdout figure, and the page passes the public
 filter as before. A section that cannot be read is n/a, never a zero. The equity lanes' counts are in the funnel
 apart (`equity`), and since release E2.4 their research funnel with them (`equity.research`,
-`elane_health.research_counts`): the daily page prints no equity row, as before; the `stall` job's receipt carries
-the last 24 hours of it (`elane.funnel`).
+`elane_health.research_counts`): the daily page prints no equity row, as before; the `scoreboard` job's receipt
+(private) carries the equity block for both windows (`equity`: `day`, `since_release`).
 
 ### Observing without exec
 

@@ -605,11 +605,11 @@ owner when the lanes next go wrong.
 - **No text a program or a model wrote reaches a notice, a warning or a receipt's sentence:** a disqualification
   is told by its class and line, a refusal by its rule and this module's words for its sentence, a refused proposal
   by its class and the symbols of the code's own universe. (The receipt's examples name families by their ids.)
-- **The research funnel** (`league/ops/funnel.py` `equity.research`; the `stall` receipt's `elane.funnel` for the
-  last 24 h; `python3 -m league.ops.elane_health --state DIR` on the box): equity passes and families born,
-  proposals refused by reason class, programs refused before a run by rule, versions scored, disqualified and
-  failed by code, bar passes, review refusals and passes, families retired, E2's model dollars. The daily page
-  prints no equity row, as before.
+- **The research funnel** (`league/ops/funnel.py` `equity.research`; the `scoreboard` job's private receipt carries
+  the funnel's equity block, `equity`; `python3 -m league.ops.elane_health --state DIR` on the box): equity passes
+  and families born, proposals refused by reason class, programs refused before a run by rule, versions scored,
+  disqualified and failed by code, bar passes, review refusals and passes, families retired, E2's model dollars.
+  The daily page prints no equity row, as before.
 - **The architect is not led outside the universe.** The equity request's contract-in-brief named the costs of "the
   other ETFs", TLT and GLD whatever `elane.universe` held; it now names the half-spread of each group the universe
   holds, in its own symbols, and says a proposal naming any other symbol is refused whole. The next request already
@@ -621,9 +621,10 @@ owner when the lanes next go wrong.
   program is read, parsed or run by the alarm, and nothing under `league/live/`, `league/gym/`, `league/equity/*.py`,
   `league/constitution.py` or `gateway/` is touched: the execution fingerprint, the equity identity and the money
   digest are main's.
-- In the files a parallel release also patches: `league/ops/stall.py` (an import, `EVERY_CAUSE`, one call, the loop's
-  tuple, the notice's carrier, the receipt's `elane`), `league/ops/funnel.py` (an import and one call),
-  `league/ops/registry.py` (the stall job's description) and `league/ops/dlane_report.py` (item 7's reader).
+- In the files a parallel release also patches: `league/ops/stall.py` (an import, `EQUITY_CAUSES` and `EVERY_CAUSE`,
+  and in `run` the one call, the job's list from there on and the notice's carrier; the receipt's keys are as they
+  were, its `checks` hold the four), `league/ops/funnel.py` (an import and one call) and `league/ops/registry.py`
+  (the stall job's description). `league/ops/dlane_report.py` is untouched: item 7 reads the receipts' checks.
 - Tests: `league/tests/test_elane_health.py` (the closed words held to the code that writes the records by running
   it: the equity pass's admission, the static rules, a disqualification's record, a real pass and Train rounds; the
   notice held to the gateway's cause list and its cuts). Operations:
