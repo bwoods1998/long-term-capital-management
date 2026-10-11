@@ -130,6 +130,11 @@ E3_ROUTE = "S2"
 E3_ALPHA_F = "0.03"
 CONTROL_ROUTE = "none"
 CONTROL_ALPHA_F = "0"
+#: RELEASE E4 (package J, league/ops/forward_xs.py): the route a PANEL program's row carries, at the same alpha (a row
+#: registered before its forward screen is pinned). A panel row is one whose `ugroup` begins `PANEL_UGROUP`; a row
+#: carries this route if and only if it is one.
+XS_ROUTE = "XS1"
+PANEL_UGROUP = "panel:"
 
 #: THE FORWARD SCREEN'S SHAPE (the module docstring). A receipt that differs from it in any field judges only days
 #: after its own pin; E3-era rows are judged at alpha_f 0.03 on the checkpoint of record (D4).
@@ -573,9 +578,11 @@ def append_registry(db: sqlite3.Connection, row: Mapping[str, Any]) -> int:
     if reason not in REASONS or lane not in LANES:
         raise ValueError(f"a registry row's reason is one of {', '.join(REASONS)} and its lane one of {', '.join(LANES)}")
     pair = (str(row["route"]), str(row["alpha_f"]))
-    if pair not in ((E3_ROUTE, E3_ALPHA_F), (CONTROL_ROUTE, CONTROL_ALPHA_F)):
+    if pair not in ((E3_ROUTE, E3_ALPHA_F), (XS_ROUTE, E3_ALPHA_F), (CONTROL_ROUTE, CONTROL_ALPHA_F)):
         raise ValueError(f"a registry row of release E3 carries route {E3_ROUTE} and alpha_f {E3_ALPHA_F} (a control "
                          f"{CONTROL_ROUTE} and {CONTROL_ALPHA_F}), not {pair[0]!r} and {pair[1]!r}")
+    if (pair[0] == XS_ROUTE) != str(row["ugroup"]).startswith(PANEL_UGROUP):
+        raise ValueError(f"a panel program's row, and only a panel program's, carries route {XS_ROUTE}")
     control = reason == "control"
     if control != (lane == "control") or control != (pair == (CONTROL_ROUTE, CONTROL_ALPHA_F)):
         raise ValueError("a control, and only a control, carries the control's lane, route and alpha_f")
@@ -875,7 +882,7 @@ def stored_days(db: sqlite3.Connection, pid: int, *, engine: int | None = None) 
 __all__ = ["DB", "SCHEMA", "GENESIS", "MODES", "REASONS", "LANES", "CHECKPOINTS", "CHECKPOINT_EVERY", "FWD_SERIES",
            "FILL_VERSION", "TOL", "NEFF_WINDOW", "NEFF_MIN_DAYS", "NEFF_PROVISIONAL", "Q", "RC_READS", "RC_MIN_GROUP",
            "SUSPECT_NIGHTS", "DQ_NIGHTS", "A14_GAP_BP", "A14_AGREE", "E3_ROUTE", "E3_ALPHA_F", "CONTROL_ROUTE",
-           "CONTROL_ALPHA_F", "FGS", "FGS_SHA", "HASHED", "DEFAULTS", "BOUNDS", "TAGS", "EVENT_KINDS", "ONCE_KINDS",
+           "CONTROL_ALPHA_F", "XS_ROUTE", "PANEL_UGROUP", "FGS", "FGS_SHA", "HASHED", "DEFAULTS", "BOUNDS", "TAGS", "EVENT_KINDS", "ONCE_KINDS",
            "KV_KEYS", "CAUSES", "BARS_HEX", "TABLES", "APPEND_ONLY", "WRITERS", "APPEND_ONLY_ERROR", "Program",
            "ShadowRun", "bars_hash", "cfg", "mode", "t0", "first_close", "first_day", "fwd_engine", "open_db",
            "row_hash", "append_registry", "verify_chain", "head", "event", "events", "kv_get", "kv_put", "kv_first",

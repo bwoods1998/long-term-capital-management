@@ -393,8 +393,9 @@ def _register(db: sqlite3.Connection, row: Mapping[str, Any], known: dict[str, i
             "reason": row["reason"], "ugroup": row["ugroup"], "lineage": row["lineage"], "code": row["code"],
             "params": row["params_text"], "needs": results.canonical(row["needs"]), "program_sha": row["sha"],
             "run_sha": row["run_sha"], "author": row["author"], "created_at": created, "evidence": row["evidence"],
-            "first_close": close, "first_day": day, "registered_at": now, "route": forward_db.E3_ROUTE,
-            "alpha_f": forward_db.E3_ALPHA_F})
+            "first_close": close, "first_day": day, "registered_at": now,
+            # (a panel program's row names its own route: league/ops/forward_xs.py)
+            "route": row.get("route", forward_db.E3_ROUTE), "alpha_f": row.get("alpha_f", forward_db.E3_ALPHA_F)})
     except sqlite3.IntegrityError:          # another writer registered the key meanwhile: it stands
         return None
     except ValueError:                      # fail closed: one row the chain refuses never stops the others
@@ -458,6 +459,7 @@ def _tags(db: sqlite3.Connection, families: Mapping[str, Mapping[str, Any]], ins
           out: dict[str, Any], *, now: float) -> None:
     """The facts learned later (the module docstring, TAGS), each written once: `at` is the run that first saw it."""
     from ..swarm import elane, elane_train
+    from . import forward_xs
 
     held = {(int(r["pid"]), str(r["tag"]), str(r["value"])) for r in db.execute(
         "SELECT pid, tag, value FROM fwd_tags WHERE tag NOT IN ('stopped', 'resumed', 'suspect')").fetchall()}
@@ -481,7 +483,7 @@ def _tags(db: sqlite3.Connection, families: Mapping[str, Mapping[str, Any]], ins
             wanted.append((pid, "try", ""))
         if (tried.get("version") == n and tried.get("entered") is True) or own.get("entered") is True:
             wanted.append((pid, "try_entered", ""))
-        looked = _mapping(state.get(elane.LOOK_KEY))
+        looked = _mapping(state.get(forward_xs.look_key(fam) or elane.LOOK_KEY))    # a panel family's look: its own key
         if looked and looked.get("version") == n:
             passed = _mapping(looked.get("verdict")).get("passed") is True
             wanted.append((pid, "look_pass" if passed else "look_fail", ""))
@@ -549,10 +551,15 @@ def _stops(db: sqlite3.Connection, out: dict[str, Any], *, now: float, settings:
         stored = {int(r["pid"]): (int(r["n"]), str(r["last"])) for r in db.execute(
             "SELECT pid, COUNT(*) AS n, MAX(day) AS last FROM fwd_days WHERE engine=? GROUP BY pid", (engine,)).fetchall()}
     # A NIGHT is a shadow run that got past its preflight, named by the store's last day: (through, the most programs
-    # a run of it completed, when its last run ended).
-    nights = [(str(r["through"]), int(r["programs"] or 0), float(r["finished"])) for r in db.execute(
-        "SELECT through, MAX(programs) AS programs, MAX(finished) AS finished FROM fwd_runs WHERE through IS NOT NULL "
-        "GROUP BY through ORDER BY through").fetchall()]
+    # a run of it completed, when its last run ended). EACH LANE READS ITS OWN JOB'S NIGHTS (release E4, package J:
+    # a panel program is run by the panel night, league/ops/forward_xs.py, which names its night by its own day).
+    from . import forward_xs
+
+    nights_of: dict[bool, list[tuple[str, int, float]]] = {False: [], True: []}
+    for r in db.execute("SELECT job=? AS panel, through, MAX(programs) AS programs, MAX(finished) AS finished FROM "
+                        "fwd_runs WHERE through IS NOT NULL GROUP BY job=?, through ORDER BY through",
+                        (forward_xs.JOB, forward_xs.JOB)).fetchall():
+        nights_of[bool(r["panel"])].append((str(r["through"]), int(r["programs"] or 0), float(r["finished"])))
     marks: dict[str, dict[int, dict[str, float]]] = {"run_disqualified": {}, "run_failed": {}}
     for row in db.execute("SELECT kind, pid, day, at, payload FROM fwd_events WHERE kind IN ('run_disqualified', "
                           "'run_failed') AND pid IS NOT NULL").fetchall():
@@ -560,8 +567,10 @@ def _stops(db: sqlite3.Connection, out: dict[str, Any], *, now: float, settings:
         if night is not None:
             marks[str(row["kind"])].setdefault(int(row["pid"]), {})[night] = float(row["at"])
     marked = set(marks["run_disqualified"]) | set(marks["run_failed"])
-    for row in db.execute("SELECT pid, key, reason FROM fwd_registry WHERE reason != 'control' ORDER BY pid").fetchall():
+    for row in db.execute("SELECT pid, key, reason, ugroup FROM fwd_registry WHERE reason != 'control' ORDER BY pid"
+                          ).fetchall():
         pid, since = int(row["pid"]), resumed.get(int(row["pid"]))
+        nights = nights_of[forward_xs.is_panel(dict(row))]
         if pid in stopped:
             continue
         cap = int(c["stop_fail_after_sessions"] if row["reason"] == "train_fail" else c["stop_after_sessions"])
@@ -624,6 +633,7 @@ def sync(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapp
     A swarm store or a live book that cannot be read is a `skipped` entry under its file's name (`SWARM_DB`,
     `LIVE_DB`) and the House's failure, never a version's: the rest goes on."""
     from ..swarm.store import SwarmStore
+    from . import forward_xs
 
     root, now = Path(root), float(now)
     out: dict[str, Any] = {"registered": 0, "controls": 0, "tagged": 0, "stopped": 0, "suspect": 0, "skipped": [],
@@ -641,6 +651,10 @@ def sync(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapp
             cursor = int(cursor) if isinstance(cursor, int) and not isinstance(cursor, bool) and cursor > 0 else 0
             fresh = _scored_events(store, after=cursor)
             rows, refused = _scored(store, families=families, events=_earliest(fresh), known=known, lookup=cursor > 0)
+            # RELEASE E4 (package J): the panel lane's versions, by their own reader (league/ops/forward_xs.py).
+            more, also = forward_xs.scored_rows(store, families=families, events=_earliest(fresh), known=known,
+                                                lookup=cursor > 0)
+            rows, refused = sorted([*rows, *more], key=forward_xs.oldest_first), [*refused, *also]
             seeds, seeds_refused = _seeds(store, families, known)
             for row in (*rows, *seeds):
                 _register(db, row, known, out, now=now)
@@ -674,7 +688,7 @@ def sync(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapp
             if key in known or not readable:    # its lineage is the swarm's to say: the next run that reads it registers
                 continue
             try:
-                row = _live_row(store, families, instance)
+                row = forward_xs.live_row(store, families, instance) or _live_row(store, families, instance)
             except _Refused as exc:
                 _refuse(db, out, key, exc.cause, now=now)
                 continue

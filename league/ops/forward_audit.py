@@ -146,6 +146,14 @@ def run(ctx: Any) -> dict[str, Any]:
                 ctx.alert("warning", f"forward_audit: the live book's bars audit could not be read "
                                      f"({type(exc).__name__}): no forward day was marked this morning")
             marked = mark(db, bars, now=now)
+            try:    # RELEASE E4 (package J): a live panel decision whose morning re-read was a mismatch
+                from . import forward_xs
+
+                marked += forward_xs.audit_marks(db, root / LIVE_DB, now=now)
+            except sqlite3.Error as exc:
+                marks = "unread"
+                ctx.alert("warning", f"forward_audit: the live book's panel decisions could not be read "
+                                     f"({type(exc).__name__}): no panel forward day was marked this morning")
         chain = forward_db.verify_chain(db)
         ok = bool(chain.get("ok"))
         rows, head, first_bad = chain.get("rows"), chain.get("head"), chain.get("first_bad")
