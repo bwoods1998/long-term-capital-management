@@ -61,6 +61,20 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   and ending its question, routes sampled on birth requests, the Validation alarm and Done's item 7 reading the
   options lanes with the equity lanes beside, an alert for a standing failure of the House's, no idle Train round,
   and the reserve's wording at E1's `history` + 1 slice.
+- **Fixed after the verification** (an independent verifier, Oct 11: no blocker and no major left). Its finding: a
+  bred program with no memory could still lock in a profit, by rebuilding the run's capital from its own lots (a
+  lot's `qty` times its `entry` or `exit`, its `value` less its `pnl`, `exit` times `qty` less `net`) and holding the
+  sleeve's cash or equity against it; a program that stops once ahead passes the share screen far more often than
+  the screen's false-positive line says. The level rule now reads a lot's `qty` and what a lot cost as the run's
+  anchor, in every spelling it can follow, and refuses the run's dollars written into a lot's `tag`; a lot's own
+  return, a hold count and a size from `ctx.budget` pass as before. **What the static rule still cannot see** is said
+  plainly in `league/swarm/ELANE_E2.md`: above all a lot's weight in the sleeve set against its own return, which
+  passes the static rule and the restart check, so the two paid readers are the only guard there; their rubric names
+  the pattern and ends on the rule (a rule whose trading depends on how far the run is ahead or behind is refused,
+  whatever its spelling). Also: the review reads its dollar hold again before the audit; and the documents say
+  plainly that the equity lanes' research spend is `elane.e2.pace_share` of the researchers' hourly pace (about a
+  quarter at the shipped 0.25), that `elane.e2.usd_day` is only a cap above it, and that the captain sets the share
+  with the settings tool at switch-on.
 - **No identity moves by E2:** it changes nothing under `league/live/`, `league/gym/`, `league/equity/` or
   `league/constitution.py`. The options execution fingerprint and the money digest are the ones E1 ships, and no
   evidence is reset by E2. (E1's own review fixes, merged here, move the equity evidence identity before its first

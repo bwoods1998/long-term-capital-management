@@ -25,7 +25,13 @@ them). No evidence is reset, no grant re-ratifies. Train runs happen on the Hous
 
 **Switch it on** (after E1 is live: `elane.mode` "gate", the daily store written, the seeds born). On the owner's
 machine: `python3 set_swarm.py elane.birth_share=0.25 elane.e2.usd_day=8.0 --apply` (the captain's first values, A16).
-Read on the next loop pass; no deploy. The release itself ships `elane.mode` "off" and `elane.birth_share` 0 in
+Read on the next loop pass; no deploy. **The pace, said plainly:** the equity lanes' research spend (births, Train
+research and the equity review together) is `elane.e2.pace_share` of the researchers' hourly pace, the Sail model line:
+about a quarter of it at the shipped 0.25, and never more than half (the bound is 0 to 0.5). `elane.e2.usd_day` is only
+a cap above it: it can end a day's spend earlier, it never raises it, so 8.0 buys no more than the share does. The split
+is the captain's to set, with the settings tool, at switch-on: `python3 set_swarm.py elane.e2.pace_share=<share>
+--apply`, in the same command as the two values above or after it; left alone it is the shipped 0.25 (the details are
+under **The budget** below). The release itself ships `elane.mode` "off" and `elane.birth_share` 0 in
 policy.json, and with either one off NOTHING in E2 acts: neither round starts, no key is written, no event is made, no
 model is asked (the test runs E1's real loop on the committed policy). The bounds are in code: `elane.birth_share` 0
 to 0.5 (above reads 0.5; a value that is no number reads 0, so births stay off); `elane.e2.usd_day` 0 to 100 (outside
@@ -45,10 +51,23 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
 - **Three static rules refuse a program before it is stored or run**, each with its reason in the author's next
   brief: the Gym's code rules; the LEVEL rule (a price or volume level, or the ratio of two different symbols'
   prices, held against a constant or a PARAMS value) with RUN-START DEPENDENCE (the sleeve's own dollars of the run,
-  `ctx.equity`, `ctx.cash`, `ctx.budget`, `ctx.caps`, a lot's `value` or `pnl`, held against a constant, a PARAMS
-  value or the run's anchor: a profit lock reads where a window starts, and the screen's false-positive line holds
-  only for programs blind to that); and the MEMORY rule (no object of `numpy` or `math` held as memory: it would
+  `ctx.equity`, `ctx.cash`, `ctx.budget`, `ctx.caps`, a lot's `value`, `pnl` or `qty`, held against a constant, a
+  PARAMS value or the run's anchor: a profit lock reads where a window starts, and the screen's false-positive line
+  holds only for programs blind to that. The anchor is `ctx.budget`, `ctx.caps` or THE CAPITAL A LOT WAS BOUGHT WITH:
+  a lot's `qty` times its `entry` or `exit`, its `value` less its `pnl`, `exit` times `qty` less `net`, and the
+  sleeve's dollars written into a lot's `tag`; a program with no memory rebuilt the run's capital that way and was
+  the profit lock again, and the restart check passed it. A lot's own return, however it is written, a count of
+  sessions held and a size from `ctx.budget` are untouched); and the MEMORY rule (no object of `numpy` or `math` held as memory: it would
   outlive a restart and be shared by every program in the decider child).
+- **What the static rule cannot see is the two paid readers' to refuse.** A lot's weight in the sleeve (its `value`
+  over `ctx.equity`) and the sleeve's cash share are allowed against a constant, because a weight cap is an honest
+  rule; set against the lot's own return, the same weight is the run's profit, and a program built on it locks its
+  profit, keeps no memory, and passes the static rule and the restart check. The same holds for a value the pass
+  cannot follow, and for the first equity a run saw kept in STATE (the restart check judges that one). The readers'
+  rubric names the pattern and ends on the rule: a rule whose trading depends on how far the run is ahead or behind is
+  refused, whatever its spelling (`league/swarm/ELANE_E2.md`, "What the static rule cannot see"). So a profit lock
+  the two readers both miss reaches the screen, whose false-positive line does not hold for it: read a bred program's
+  first live weeks with that in mind until E1's screen floor sees fresh starts.
 - **Train is 2016-19 and 2022-24** (A15): seven years, two runs a stress, summed. **2020-21 is the reserve**: no E2
   run has a session in it and a result carrying a row of it is refused whole (alert `elane_train_window`). The
   loosening, stated: the bar reads seven years, not nine.

@@ -117,6 +117,37 @@ Each has a test that failed before and passes after; the blockers and majors fir
 `policy.json`), `league/ops/` and the tests. E1's own review fixes, carried by the merge, move the equity identity
 before its first look (E1's changelog says so); that is E1's move, not E2's.
 
+## What the verification found (Oct 11)
+
+An independent verifier read the head above (b08a91dd) and found no blocker and no major left. What it did find, as
+done on E1's frozen head 05f83d9e:
+
+- **The profit lock with no memory** (the residual of seal-1). The House sizes an entry as the asked share of the
+  run's capital, so what a lot cost is that capital times a share the program chose. A bred program rebuilt the
+  capital from its own lots (a lot's `qty` times its `entry` or `exit`, its `value` less its `pnl`, `exit` times `qty`
+  less `net`) and held `ctx.cash` or `ctx.equity` against it: the reviewer's lock, lot for lot on synthetic stores,
+  with nothing in STATE for the restart check to catch. The level rule now reads a lot's `qty` and what a lot cost as
+  the run's anchor, follows the spellings (shares times a price, dollars over a price, a lot's dollars scaled by its
+  own return, a product of dollars, a reciprocal, an exponent, `pow`, text, a call the pass does not know), and
+  refuses the run's dollars written into a lot's `tag` (the House keeps a tag across a restart: the same lock, every
+  session of the restart check matched). A lot's own return however it is written, a stop on several lots' average
+  entry, a hold count and a size from `ctx.budget` pass as before. The rubric and its fact `run` name the capital
+  rebuilt from a lot and end on the rule: a rule whose trading depends on how far the run is ahead or behind is
+  refused, whatever its spelling. WHAT THE STATIC RULE STILL CANNOT SEE is in [ELANE_E2.md](ELANE_E2.md) under that
+  name: above all a lot's weight in the sleeve set against its own return, which is the run's profit and cannot be
+  told from an honest weight cap. A program built on it passes the static rule and the restart check, so there the
+  two paid readers are the only guard. FOR THE CAPTAIN: the root is still E1's screen floor (no fresh starts).
+- **The review's hold was read once for two calls** (nit). `EquityResearcher.review_step` reads `elane_yield.hold`
+  again before the audit stage, so the audit never starts on dollars the review's own call has just used up.
+- **A doubled clause in `version_text`** (nit): one clause now.
+- **The pace split** (a note; the captain's decision). `elane.e2.pace_share` ships 0.25 with its bound 0 to 0.5,
+  unchanged. The documents say plainly that the equity lanes' research spend is that share of the researchers'
+  hourly pace, that `elane.e2.usd_day` is only a cap above it, and that the captain sets the share with the settings
+  tool at switch-on. No code changed for it.
+
+The three identities did not move: these changes touch `league/swarm/elane_review.py`, `elane_train.py`,
+`elane_births.py`, their tests and the documents.
+
 ## What the integration added beside the patches
 
 - **The screen is S2** (amendment A11). The equity architect's system text said the share screen S1 judges the
