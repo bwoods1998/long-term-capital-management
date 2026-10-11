@@ -2332,6 +2332,23 @@ class TheReportShowsOnlyWhatItMay(Fixture):
         allowed = {"dlane_report.py", "funnel.py", "stall.py", "forward_xs.py", *(f"{name}.py" for name in E3_OPS)}
         names = ("forward_report", "forward_twins", "forward_db", "forward_shadow", "forward_register", "forward_audit",
                  "forward_controls", "fill_minutes", "release_receipts", "contam_probe", "forward_xs")
+        # PACKAGE J's OWN MODULE IS NARROWER THAN THAT LIST (the ship check's finding): of the modules above, only the
+        # five of E3 that dispatch to it and the dlane report import `forward_xs`; the funnel, the stall job and E3's
+        # other six do not (league/tests/test_e3_seal_imports.py holds E3's side of it, both ways).
+        j_importers = {"dlane_report.py", "forward_register.py", "forward_shadow.py", "forward_twins.py",
+                       "forward_audit.py", "forward_report.py"}
+        seen = set()
+        for path in sorted((REPO / "league" / "ops").glob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.ImportFrom):
+                    imported = {alias.name for alias in node.names} | {(node.module or "").split(".")[-1]}
+                elif isinstance(node, ast.Import):
+                    imported = {alias.name.split(".")[-1] for alias in node.names}
+                else:
+                    continue
+                if "forward_xs" in imported:
+                    seen.add(path.name)
+        self.assertEqual(seen, j_importers)
         for path in sorted((REPO / "league" / "ops").glob("*.py")):
             if path.name in allowed:
                 continue

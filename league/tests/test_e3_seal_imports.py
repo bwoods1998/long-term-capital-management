@@ -9,7 +9,9 @@ by reading the source (an AST walk for the imports, a text scan for the names), 
 - THE HIDDEN YEAR's two sealed tables are named only by their keepers: `elane_memory.py`, `elane_seal.py` and
   league/ops.
 - RELEASE E4's PACKAGE J (league/ops/forward_xs.py: the panel lane's half of the forward record) STANDS UNDER THE
-  SAME SEAL. E3's ops modules hand a panel program to it (so they may import it, and nothing else new), and it is
+  SAME SEAL. FIVE of E3's ops modules hand a panel program to it (`J_DISPATCH`: the registry, the night, the twins,
+  the audit and the report), so those five may import it, inside a function, and nothing else new; E3's other six
+  may not (the contamination probe among them: the allowance is its use, held both ways). It is
   held as they are: no sealed tree imports it or names it, it imports only what its own list names (E3's list and
   the panel's modules it runs: league/xs's store, runner, program, results, book, config and identity, and the
   panel lane's reader `elane_xs`), and it opens no swarm store writable. What it hands the swarm's process is one
@@ -63,8 +65,12 @@ OPS_MAY = {
                                                           "elane_train", "elane_seal", "elane_yield", "elane_memory",
                                                           "models")),
     "league.ops", *(f"league.ops.{name}" for name in ("guard", "context", "schedule", "twins", "funnel", "equity_data",
-                                                      *E3_OPS, *E4_OPS)),
+                                                      *E3_OPS)),
 }
+#: E3's ops modules that hand a PANEL program to package J (each dispatches to `forward_xs` inside a function): the
+#: only ones that may import it. The allowance is its use: a test holds that each of these does, and no other.
+J_DISPATCH = ("forward_register", "forward_shadow", "forward_twins", "forward_audit", "forward_report")
+J_MAY = {f"league.ops.{name}" for name in E4_OPS}
 #: What release E4's forward module may import beside: the panel's own modules it runs and reads.
 XS_MAY = {"league.xs", *(f"league.xs.{name}" for name in ("store", "runner", "program", "results", "book", "config",
                                                           "identity")), "league.swarm.elane_xs"}
@@ -210,9 +216,25 @@ class TheForwardRecordIsOpsOnly(unittest.TestCase):
 
     def test_e3s_ops_modules_import_only_what_the_contract_lists(self):
         for name in E3_OPS:
-            self.assertEqual(outside(REPO, REPO / "league" / "ops" / f"{name}.py", OPS_MAY), [], name)
+            may = OPS_MAY | J_MAY if name in J_DISPATCH else OPS_MAY
+            self.assertEqual(outside(REPO, REPO / "league" / "ops" / f"{name}.py", may), [], name)
         for name in E4_OPS:     # release E4's forward module: E3's list and the panel's own modules, nothing else
             self.assertEqual(outside(REPO, REPO / "league" / "ops" / f"{name}.py", OPS_MAY | XS_MAY), [], name)
+
+    def test_package_js_allowance_is_its_use_five_dispatchers_and_each_inside_a_function(self):
+        """The ship check's finding: the allowance was every E3 ops module's (the contamination probe's too) where
+        five use it. Held both ways: each dispatcher does import `forward_xs`, inside a function and never at its
+        top (E3's jobs load without the panel lane's module), and no other E3 ops module imports it."""
+        self.assertTrue(set(J_DISPATCH) < set(E3_OPS))
+        for name in E3_OPS:
+            found = [(inside, line) for module, inside, line in imports(REPO, REPO / "league" / "ops" / f"{name}.py")
+                     if module in J_MAY]
+            if name in J_DISPATCH:
+                self.assertTrue(found, f"{name} is listed as a dispatcher and imports no module of package J")
+                self.assertEqual([line for inside, line in found if not inside], [], f"{name}: at its top")
+            else:
+                self.assertEqual(found, [], f"{name} imports package J and is no dispatcher")
+        self.assertNotIn("contam_probe", J_DISPATCH)
 
     def test_the_memory_modules_import_the_equity_lane_and_the_swarm_inside_functions_only(self):
         for name in MEMORY:

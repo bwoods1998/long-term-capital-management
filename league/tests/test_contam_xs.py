@@ -1002,10 +1002,13 @@ class TheWiring(unittest.TestCase):
                           or m in ("league.ops.contam_xs", "league.swarm.elane_xs", *forward)})
         self.assertEqual(seal.outside(REPO, probe, seal.OPS_MAY), [])
         self.assertNotIn("contam_xs", (*seal.E3_OPS, *seal.E4_OPS))
-        # E3's list admits ONE module of the panel, package J's (the forward modules hand a panel program to it, and
-        # it is held under the same seal); the probe imports none of it (above), and nothing else of the panel is let in.
-        self.assertEqual({m for m in seal.OPS_MAY if m.rsplit(".", 1)[-1].endswith("xs") or ".xs" in m}, forward,
-                         "nothing of the panel was let into E3's list but the forward record's own panel half")
+        # E3's own list admits NOTHING of the panel. ONE module of it, package J's, is let to the five E3 modules
+        # that hand a panel program to it (`J_DISPATCH`, held under the same seal); the probe is none of them, and it
+        # imports none of it (above).
+        self.assertEqual({m for m in seal.OPS_MAY if m.rsplit(".", 1)[-1].endswith("xs") or ".xs" in m}, set(),
+                         "nothing of the panel is in E3's list")
+        self.assertEqual(seal.J_MAY, forward, "the dispatchers' allowance is the forward record's own panel half")
+        self.assertNotIn("contam_probe", seal.J_DISPATCH)
         imported = {module for module, _, _ in seal.imports(REPO, mine)}
         self.assertFalse(imported & {f"league.ops.{name}" for name in seal.E3_OPS}, "nothing of the forward record's")
         self.assertTrue({"league.xs.store", "league.xs.ctx", "league.xs.placebo", "league.swarm.elane_xs"} <= imported)

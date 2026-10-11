@@ -1257,6 +1257,30 @@ class TheCaptainsA22(TheLook):
 
 
 class TheLooksRefusalsAndWaits(TheLook):
+    def test_the_look_asks_the_lanes_mode_itself_and_is_refused_under_gate(self):
+        """THE LOOK'S OWN MODE CHECK (the ship check's finding: no test held it). A family validated under "gate" has
+        everything a look needs: its Validation entered, its review, the probe, the floor's segments, the holdout.
+        With the setting lowered to "train" (the captain's step one), or to "off", the look itself must refuse:
+        nothing run on the sealed window, no look spent, no band. It is the only guard if the setting is ever lowered
+        from "gate": Validation's own refusal (`may_validate`) is behind the family by then."""
+        fam = self.gated()
+        version = self.store.version(fam["id"], 1)
+        for lowered in ("train", "off"):
+            owner = F.owner(self.store, self.world, F.settings(lowered))
+            self.assertEqual(elane_xs.mode(owner.settings, self.store.root), lowered)
+            self.assertIsNone(elane_xs.look(owner, self.store.family(fam["id"]), version, run_sha(version)), lowered)
+            self.assertEqual(self.store.looks(), [], "no look spent")
+            self.assertNotIn("look", self.windows(), "the sealed run was not made")
+            got = self.store.family(fam["id"])
+            self.assertNotEqual(got["band"], "candidate")
+            self.assertNotIn(elane_xs.LOOK_KEY, got["state"])
+            self.assertNotIn("banded_evaluator", got["state"])
+            self.assertEqual(self.events("swarm.gate", "look"), [])
+        # With the setting back at "gate" the same family takes its one look: the check above refused nothing else.
+        self.assertIs(self.look(self.store.family(fam["id"])), True)
+        self.assertEqual(self.store.family(fam["id"])["band"], "candidate")
+        self.assertEqual(len(self.store.looks()), 1)
+
     def test_an_ineligible_floor_spends_no_look(self):
         fam = self.gated()
         self.world.screen.eligible = False
