@@ -71,12 +71,12 @@ and the owner has not switched the four off (`<state>/ops.json` `stall.elane` fa
 reads "Not judged" and says why. Lanes that cannot be read (the settings, E2's own readers, the store, the lane's
 own reading of whether it may ask a model) are "Not judged" AND an entry of the job's `errors` naming the class AND
 one House warning every `BLIND_WARN_SECONDS` while it lasts (`_blind`: the receipt's errors alone reach no one): an
-alarm that cannot see says so. And only on enough evidence,
-counted SINCE THE RUNNING RELEASE FIRST STARTED (`release_since`: the stall job keeps {release, since} in
-`stall.json`, the heartbeat's `release` and the `started_at` it first saw under it): a release that fixes a fault is
-a new release, so what the generators did under the earlier one is not held against this one; a restart of the same
-release (the watchdog's, a settings apply) fixes nothing and resets nothing. A cause with too little evidence says how
-much it has and how much it needs. WHAT THE JOB KEEPS UNDER A RELEASE (`KEPT`, beside {release, since}, dropped when
+alarm that cannot see says so. And only on enough evidence, counted SINCE THE RUNNING RELEASE FIRST STARTED
+(`release_since`: the stall job keeps {release, since} in `stall.json`, the heartbeat's `release` and the
+`started_at` it first saw under it): a release that fixes a fault is a new release, so what the generators did under
+the earlier one is not held against this one; a restart of the same release (the watchdog's, a settings apply) fixes
+nothing and resets nothing. A cause with too little evidence says how much it has and how much it needs.
+WHAT THE JOB KEEPS UNDER A RELEASE (`KEPT`, beside {release, since}, dropped when
 the release changes): the idle clock, the last hold of E2's a run read, when `elane_dq` first stood, when the
 unreadable lanes were last warned. `checks` reads them and leaves in the same record what the next run needs; it
 writes no file itself. A lane is not judged idle while the swarm itself is not running (its heartbeat
