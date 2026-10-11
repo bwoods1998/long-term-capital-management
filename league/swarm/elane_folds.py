@@ -13,6 +13,17 @@ already born in that cell with a `hidden_year`; `h(cell) = int(sha256(("fold-1|"
 spec, immutable, and is honoured whatever the mode is later (a family's bar must not move under it). `gid` is `GID0`
 and `expected_oof` is reserved (None) in E3.
 
+THE LISTING RULE (`bar_years`, `runnable`; AS BUILT: D14 is silent on a symbol listed after 2016). E1's engine ends a
+run "no_data" when one of the program's symbols has no bar in it, and E2 reads that as the House's failure: the
+version is never scored. A whole Train span always holds a bar of such a symbol (XLC's first is in 2018), but a
+stretch the cut leaves may hold none (2016-17 once 2018 is hidden), and the family could then never be scored. So a
+year is RUNNABLE for a family's symbols only when every seen span of it AND its own span hold a bar of every symbol,
+on the House's equity store (read one Train span at a time, never a reserve session), and `birth_fields` takes
+`WORK_YEARS[(k_c + h(cell) + j) % 7]` for the smallest j of 0..6 whose year is runnable: j is 0, the formula above
+exactly, for every symbol with a bar in each work year. A family with no runnable year gets no hidden year (seven
+Train years, no out-of-fold row). On a House with no equity store yet there is no listing to read and the formula
+stands alone; a store that is there and cannot be read raises, and the birth's guard stamps `FALLBACK` and says so.
+
 THE SEEN SPANS (`seen_spans`). `seen_spans(None)` = `elane_train.TRAIN_SPANS`. `seen_spans(y)`: each Train span (first,
 last) that does not contain y as it is; the one that does, cut into the stretch before y, `(first, date(y - 1, 12,
 31))` when y > first.year, and the stretch after it, `(date(y + 1, 1, 1), last)` when y < last.year (two or three
@@ -36,7 +47,7 @@ not seven; more zero-edge versions pass Train, and the screen's false-positive r
 is in-sample).
 
 `league.swarm.elane_train` and `elane_seal` are imported INSIDE FUNCTIONS only (`elane_train` and `elane_births`
-import this module at the top). Standard library only.
+import this module at the top), and so is `league.equity.store`. Standard library only.
 """
 
 from __future__ import annotations
@@ -44,7 +55,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import math
-from typing import Any, Mapping, Sequence
+from pathlib import Path
+from typing import Any, Collection, Mapping, Sequence
 
 #: The seven Train years a hidden year is drawn from (a test holds this equal to `elane_train.TRAIN_YEARS`).
 WORK_YEARS = (2016, 2017, 2018, 2019, 2022, 2023, 2024)
@@ -81,9 +93,10 @@ def cell_hash(cell: Sequence[str]) -> int:
     return int(hashlib.sha256(("fold-1|" + "/".join(str(part) for part in cell)).encode()).hexdigest()[:8], 16)
 
 
-def assign(store: Any, cell: Sequence[str]) -> int:
-    """The hidden year of the next family born in `cell`: `WORK_YEARS[(k_c + cell_hash(cell)) % 7]`, k_c the equity
-    families already born in that cell with a `hidden_year` in their spec (alive or retired)."""
+def rotation(store: Any, cell: Sequence[str]) -> tuple[int, ...]:
+    """The seven work years in the order the next family born in `cell` takes them: `WORK_YEARS[(k_c + cell_hash(cell)
+    + j) % 7]` for j = 0..6, k_c the equity families already born in that cell with a `hidden_year` in their spec
+    (alive or retired)."""
     from . import elane_seal, elane_train
 
     cell = tuple(str(part) for part in cell)
@@ -93,19 +106,65 @@ def assign(store: Any, cell: Sequence[str]) -> int:
             continue
         facts = elane_seal.train_facts(fam, elane_train.STATE_KEY)
         born += int(elane_train.cell_of(facts["lane"], facts["agenda"], facts["symbols"]) == cell)
-    return WORK_YEARS[(born + cell_hash(cell)) % len(WORK_YEARS)]
+    start = born + cell_hash(cell)
+    return tuple(WORK_YEARS[(start + j) % len(WORK_YEARS)] for j in range(len(WORK_YEARS)))
+
+
+def assign(store: Any, cell: Sequence[str]) -> int:
+    """The hidden year of the next family born in `cell`: `WORK_YEARS[(k_c + cell_hash(cell)) % 7]`, k_c the equity
+    families already born in that cell with a `hidden_year` in their spec (alive or retired). D14's formula alone:
+    `birth_fields` holds it to the years the family's symbols can run (THE LISTING RULE)."""
+    return rotation(store, cell)[0]
+
+
+def bar_years(root: Any, symbols: Sequence[str]) -> dict[str, frozenset[int]] | None:
+    """THE LISTING RULE's reading (the module docstring): each symbol's work years that hold at least one of its bars
+    in the House's equity store (`<root>/equity-daily`), read one Train span at a time, so never a reserve session.
+    None when there is nothing to read: no root, no symbol, or no equity store there yet. A store that is there and
+    cannot be read, or that holds no such symbol, raises (`league.equity.store.MissingData`)."""
+    from ..equity.store import STORE_DIR, EquityStore
+    from . import elane_train
+
+    names = tuple(dict.fromkeys(str(s).strip().upper() for s in symbols or () if str(s).strip()))
+    if root is None or not names:
+        return None
+    path = Path(root) / STORE_DIR
+    if not (path / "VERSION").is_file():
+        return None
+    equity = EquityStore(path)
+    held: dict[str, set[int]] = {name: set() for name in names}
+    for first, last in elane_train.TRAIN_SPANS:
+        bars = equity.bars(names, "train", history=0, start=first, end=last)
+        years = [bars.day(i).year for i in range(bars.n)]
+        for name in names:
+            close = bars.raw[name][:, 3]
+            held[name].update(year for year, there in zip(years, (close == close).tolist()) if there)  # NaN: no bar
+    return {name: frozenset(year for year in found if year in WORK_YEARS) for name, found in held.items()}
+
+
+def runnable(hidden: int, held: Mapping[str, Collection[int]]) -> bool:
+    """Whether E1's engine can run every stretch a family is run on with `hidden` as its hidden year: each seen span
+    and the hidden span hold a bar of every symbol (`held`: `bar_years`' answer; a run with no bar of a symbol ends
+    "no_data"). ValueError for a year outside `WORK_YEARS`."""
+    spans = (*seen_spans(hidden), hidden_span(hidden))
+    return all(any(year in found for year in range(first.year, last.year + 1))
+               for first, last in spans for found in held.values())
 
 
 def birth_fields(store: Any, settings: Mapping[str, Any] | None, *, lane: str, agenda: str, symbols: Sequence[str],
                  expected_oof: Any = None) -> dict[str, Any]:
     """What a birth's spec gains: {"hidden_year": int | None, "gid": "g0", "expected_oof": float | None}. The hidden
-    year is None when the mode is "off", else `assign(store, elane_train.cell_of(lane, agenda, symbols))`;
+    year is None when the mode is "off"; else the first year of `rotation(store, elane_train.cell_of(lane, agenda,
+    symbols))` the family's symbols can run (`runnable` on `bar_years(store.root, symbols)`: `assign`'s year whenever
+    every symbol has a bar in each work year, and on a House with no equity store yet), None when none can.
     `expected_oof` is kept only when it is a finite number in [-1, 1] (no prompt asks for it in E3)."""
     from . import elane_train
 
     year = None
     if mode(settings) == "record":
-        year = assign(store, elane_train.cell_of(lane, agenda, symbols))
+        held = bar_years(getattr(store, "root", None), symbols)
+        year = next((y for y in rotation(store, elane_train.cell_of(lane, agenda, symbols))
+                     if held is None or runnable(y, held)), None)
     kept = None
     if isinstance(expected_oof, (int, float)) and not isinstance(expected_oof, bool) \
             and math.isfinite(expected_oof) and -1.0 <= float(expected_oof) <= 1.0:
@@ -158,5 +217,5 @@ def hidden_span(hidden: int) -> tuple[dt.date, dt.date]:
     return dt.date(hidden, 1, 1), dt.date(hidden, 12, 31)
 
 
-__all__ = ["WORK_YEARS", "RESERVE_YEARS", "GID0", "MODES", "FALLBACK", "BRIEF_NOTE", "mode", "cell_hash", "assign",
-           "birth_fields", "hidden_year", "seen_spans", "hidden_span"]
+__all__ = ["WORK_YEARS", "RESERVE_YEARS", "GID0", "MODES", "FALLBACK", "BRIEF_NOTE", "mode", "cell_hash", "rotation",
+           "assign", "bar_years", "runnable", "birth_fields", "hidden_year", "seen_spans", "hidden_span"]

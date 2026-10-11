@@ -3,7 +3,8 @@
 sessions and no reserve session; on E1's own runner (its engine in this process, over its synthetic store) no seen
 run's result holds a day, a lot, a trade, an action or a by-year key of the hidden year; E2's `outside_years` refuses a
 seen result carrying one; E2's bar reads six years; and the hidden run's result is handed to the out-of-fold arithmetic
-and to nothing else. Every family, program, price and number here is invented."""
+and to nothing else. `TheListingRule`: a family whose symbol is listed inside the Train years is given only a hidden
+year whose every stretch E1's engine can run. Every family, program, price and number here is invented."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import datetime as dt
 import hashlib
 import json
 import re
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -203,6 +205,156 @@ class TheSeenSpans(unittest.TestCase):
         with mock.patch.object(elane_train, "TRAIN_SPANS", ((dt.date(2016, 1, 4), dt.date(2017, 12, 31)),)):
             with self.assertRaises(ValueError):
                 elane_folds.seen_spans(2023)
+
+
+class TheListingRule(unittest.TestCase):
+    """THE LISTING RULE (as built): an invented House whose store holds one symbol with a bar on every session and one
+    first listed in the middle of 2018 (as XLC is), and a third that left the store before the second Train span."""
+
+    LISTED = dt.date(2018, 6, 19)
+    #: The hidden years whose every stretch (each seen span and the year's own) holds a bar of the late symbol.
+    RUNNABLE = (2019, 2022, 2023, 2024)
+
+    @classmethod
+    def setUpClass(cls):
+        from league.equity import synth
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.house = Path(cls.tmp.name) / "house"
+        end = dt.date(2024, 12, 31)
+        before = [d for d, _ in nyse_sessions(dt.date(2016, 1, 4), cls.LISTED - dt.timedelta(days=1))]
+        after = [d for d, _ in nyse_sessions(dt.date(2020, 1, 2), end)]
+        cls.market = {"symbols": ("XLK", "XLC", "XLE"), "end": end, "seed": 9, "drift": 0.5, "vol": 0.05}
+        cls.root = synth.synthetic_store(cls.house / elane.STORE_DIR, gaps={"XLC": before, "XLE": after}, **cls.market)
+        cls.code = fx.program("XLC")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def swarm(self):
+        """A swarm store on a House of its own that holds the equity store (`store.root` is where `birth_fields`
+        looks)."""
+        store = fx.new_store(self)
+        shutil.copytree(self.root, Path(store.root) / elane.STORE_DIR)
+        return store
+
+    def test_the_years_a_symbol_has_a_bar_in(self):
+        held = elane_folds.bar_years(self.house, ["xlk", " XLC ", "XLE", "XLK"])
+        self.assertEqual(held, {"XLK": frozenset(elane_folds.WORK_YEARS), "XLC": frozenset({2018, 2019, 2022, 2023, 2024}),
+                                "XLE": frozenset({2016, 2017, 2018, 2019})})
+        self.assertEqual(list(held), ["XLK", "XLC", "XLE"])
+        self.assertIsNone(elane_folds.bar_years(self.house, []), "no symbol: nothing to read")
+        self.assertIsNone(elane_folds.bar_years(None, ["XLK"]))
+        self.assertIsNone(elane_folds.bar_years(Path(self.tmp.name) / "nowhere", ["XLK"]), "a House with no equity store yet")
+
+    def test_it_reads_one_train_span_at_a_time_and_never_a_reserve_session(self):
+        from league.equity.store import EquityStore
+
+        asked = []
+        real = EquityStore.bars
+
+        def bars(store, symbols, window, **kw):
+            asked.append((window, kw["history"], kw["start"], kw["end"]))
+            out = real(store, symbols, window, **kw)
+            self.assertFalse({out.day(i).year for i in range(out.n)} & set(elane_folds.RESERVE_YEARS))
+            return out
+        with mock.patch.object(EquityStore, "bars", bars):
+            elane_folds.bar_years(self.house, ["XLC"])
+        self.assertEqual(asked, [("train", 0, first, last) for first, last in elane_train.TRAIN_SPANS])
+        # Two markets that differ only in the reserve (here: whether the symbol has a bar there at all) read the same.
+        from league.equity import synth
+
+        other = Path(self.tmp.name) / "other"
+        reserve = [d for d, _ in nyse_sessions(dt.date(2020, 1, 2), dt.date(2021, 12, 31))]
+        before = [d for d, _ in nyse_sessions(dt.date(2016, 1, 4), self.LISTED - dt.timedelta(days=1))]
+        synth.synthetic_store(other / elane.STORE_DIR, gaps={"XLC": before + reserve}, **{**self.market, "seed": 10})
+        self.assertEqual(elane_folds.bar_years(other, ["XLK", "XLC"]), elane_folds.bar_years(self.house, ["XLK", "XLC"]))
+
+    def test_a_store_that_cannot_be_read_raises(self):
+        from league.equity.store import MissingData
+
+        with self.assertRaises(MissingData):
+            elane_folds.bar_years(self.house, ["XLK", "NOPE"])
+        torn = Path(self.tmp.name) / "torn"
+        (torn / elane.STORE_DIR).mkdir(parents=True)
+        (torn / elane.STORE_DIR / "VERSION").write_text((self.root / "VERSION").read_text())
+        with self.assertRaises(MissingData):
+            elane_folds.bar_years(torn, ["XLK"])
+
+    def test_a_year_is_runnable_when_every_stretch_holds_a_bar_of_every_symbol(self):
+        every = frozenset(elane_folds.WORK_YEARS)
+        late = frozenset({2018, 2019, 2022, 2023, 2024})
+        for year in elane_folds.WORK_YEARS:
+            self.assertTrue(elane_folds.runnable(year, {"XLK": every}), year)
+            self.assertTrue(elane_folds.runnable(year, {}), "no symbol read: nothing to hold it back")
+            self.assertEqual(elane_folds.runnable(year, {"XLK": every, "XLC": late}), year in self.RUNNABLE, year)
+            self.assertFalse(elane_folds.runnable(year, {"XLE": frozenset({2016, 2017, 2018, 2019})}),
+                             "gone before the second Train span: one stretch is always empty")
+            self.assertFalse(elane_folds.runnable(year, {"XLK": frozenset()}))
+        # 2016 hidden: its seen spans do hold the late symbol, its own span does not (no out-of-fold run to make).
+        self.assertTrue(all(any(y in late for y in range(a.year, b.year + 1)) for a, b in elane_folds.seen_spans(2016)))
+        self.assertFalse(elane_folds.runnable(2016, {"XLC": late}))
+        for bad in (2020, 2021, 2015, None, "2018"):
+            with self.assertRaises(ValueError):
+                elane_folds.runnable(bad, {"XLK": every})
+
+    def test_e1s_engine_agrees_year_by_year(self):
+        """Why the rule: on E1's own runner each stretch of a runnable year ends "ok", and each other year has a
+        stretch that ends "no_data" (which E2 reads as the House's failure: never scored)."""
+        from league.equity.runner import Isolated
+        from league.live.decider import InlineDecider
+
+        runner = Isolated(InlineDecider(), self.root)
+        held = elane_folds.bar_years(self.house, ["XLC"])
+        for year in elane_folds.WORK_YEARS:
+            spans = (*elane_folds.seen_spans(year), elane_folds.hidden_span(year))
+            statuses = [runner.train(self.code, {}, name="late", start=first, end=last, k=1.0).result["status"]
+                        for first, last in spans]
+            self.assertEqual(set(statuses) == {"ok"}, elane_folds.runnable(year, held), (year, statuses))
+            self.assertLessEqual(set(statuses), {"ok", "no_data"})
+        whole = [runner.train(self.code, {}, name="late", start=first, end=last, k=1.0).result["status"]
+                 for first, last in elane_train.TRAIN_SPANS]
+        self.assertEqual(whole, ["ok", "ok"], "before E3 the family was scoreable: each whole span holds a bar")
+
+    def test_a_birth_takes_the_first_runnable_year_of_its_cells_rotation(self):
+        store = self.swarm()
+        settings = e3.settings()
+        cell = elane_train.cell_of("equity", "reversal", ("XLC",))
+        self.assertEqual(cell, elane_train.cell_of("equity", "reversal", ("XLK",)), "one cell: the sector ETFs")
+        taken = []
+        for i in range(14):
+            symbols = ("XLC",) if i % 2 == 0 else ("XLK",)
+            order = elane_folds.rotation(store, cell)
+            self.assertEqual(order[0], elane_folds.assign(store, cell))
+            self.assertEqual(sorted(order), sorted(elane_folds.WORK_YEARS))
+            fields = elane_folds.birth_fields(store, settings, lane="equity", agenda="reversal", symbols=symbols)
+            if symbols == ("XLK",):
+                self.assertEqual(fields["hidden_year"], order[0], "a bar in every work year: D14's formula exactly")
+            else:
+                self.assertEqual(fields["hidden_year"], next(y for y in order if y in self.RUNNABLE))
+                self.assertIn(fields["hidden_year"], self.RUNNABLE)
+            self.assertEqual((fields["gid"], fields["expected_oof"]), ("g0", None))
+            e3.hidden_family(store, f"s-{i}", fields["hidden_year"], lane="equity", agenda="reversal", symbols=symbols,
+                             mechanism=f"Invented sector idea {i}: holders are paid for an invented risk.")
+            taken.append((symbols[0], fields["hidden_year"]))
+        self.assertEqual(sorted({y for s, y in taken if s == "XLK"}), sorted(elane_folds.WORK_YEARS), "the rotation goes on")
+        self.assertLessEqual({y for s, y in taken if s == "XLC"}, set(self.RUNNABLE))
+        # Both symbols in one family: every symbol must have its bar in every stretch.
+        both = elane_folds.birth_fields(store, settings, lane="equity", agenda="reversal", symbols=("XLK", "XLC"))
+        self.assertIn(both["hidden_year"], self.RUNNABLE)
+
+    def test_no_runnable_year_is_no_hidden_year_and_an_unreadable_store_raises(self):
+        from league.equity.store import MissingData
+
+        store = self.swarm()
+        settings = e3.settings()
+        gone = elane_folds.birth_fields(store, settings, lane="equity", agenda="reversal", symbols=("XLE",))
+        self.assertEqual(gone, elane_folds.FALLBACK, "seven Train years, no out-of-fold row")
+        with self.assertRaises(MissingData):   # the birth's guard (11.8) stamps FALLBACK and says so
+            elane_folds.birth_fields(store, settings, lane="equity", agenda="reversal", symbols=("NOPE",))
+        off = elane_folds.birth_fields(store, e3.settings("off"), lane="equity", agenda="reversal", symbols=("NOPE",))
+        self.assertEqual(off, elane_folds.FALLBACK, "with the mode off nothing is read")
 
 
 class NoSeenRunHasAHiddenSession(unittest.TestCase):

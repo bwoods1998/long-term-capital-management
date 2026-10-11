@@ -690,8 +690,8 @@ class TheWiring(unittest.TestCase):
         self.assertEqual(e3.table(self.store, "mem_contrib"), [])
         self.assertEqual(len(self.store.runs("h", window="train")), 2 * len(elane_folds.seen_spans(2018)))
 
-    def births(self, settings, n: int = 3, forecast: float | None = None) -> list[dict]:
-        rows = [fx.proposal(f"born-{i}", lane="beta", agenda="overnight", symbols=("SPY",), code=fx.program(),
+    def births(self, settings, n: int = 3, forecast: float | None = None, symbol: str = "SPY") -> list[dict]:
+        rows = [fx.proposal(f"born-{i}", lane="beta", agenda="overnight", symbols=(symbol,), code=fx.program(symbol),
                             mechanism=f"Invented overnight idea number {i}: index holders are paid for risk they cannot trade.",
                             **({"expected_oof": forecast} if i == 0 and forecast is not None else {})) for i in range(n)]
         answers = [fx.answer(rows)]
@@ -730,6 +730,40 @@ class TheWiring(unittest.TestCase):
         self.assertEqual([p["action"] for p in alerts], ["elane_memory"])
         self.assertIn("a birth got no hidden year (RuntimeError)", alerts[0]["text"])
         self.assertEqual(elane_folds.seen_spans(elane_folds.hidden_year(fam)), elane_train.TRAIN_SPANS)
+
+    def test_a_birth_on_a_symbol_listed_inside_the_train_years_takes_a_year_it_can_run(self):
+        """THE LISTING RULE through the equity pass: on a House whose store first holds the symbol in the middle of
+        2018, no birth is given a hidden year one of whose stretches has no bar of it (E1's engine would end that run
+        "no_data" and E2 would never score the family)."""
+        from league.equity import synth
+        from league.equity.store import nyse_sessions
+
+        before = [d for d, _ in nyse_sessions(dt.date(2016, 1, 4), dt.date(2018, 6, 18))]
+        synth.synthetic_store(Path(self.store.root) / elane.STORE_DIR, symbols=("XLC",), end=dt.date(2024, 12, 31),
+                              seed=3, gaps={"XLC": before})
+        settings = e3.settings()
+        settings["elane"]["universe"] = ["SPY", "XLC"]
+        with mock.patch("league.swarm.architect.same_idea", lambda a, b: False):
+            fams = self.births(settings, n=4, symbol="XLC")
+        self.assertEqual(len(fams), 4, self.store.get("elane_e2_last"))
+        years = [f["spec"]["hidden_year"] for f in fams]
+        self.assertLessEqual(set(years), {2019, 2022, 2023, 2024}, years)
+        self.assertEqual(len(set(years)), 4, "the cell's rotation goes on over the years it can run")
+        self.assertEqual([p for p in self.events("swarm.status") if p.get("alert")], [])
+        for fam in fams:
+            held = elane_folds.bar_years(self.store.root, fam["spec"]["symbols"])
+            self.assertTrue(elane_folds.runnable(fam["spec"]["hidden_year"], held))
+
+    def test_a_birth_whose_listing_cannot_be_read_goes_on_and_says_so(self):
+        from league.equity import synth
+
+        synth.synthetic_store(Path(self.store.root) / elane.STORE_DIR, symbols=("QQQ",), end=dt.date(2024, 12, 31), seed=3)
+        with mock.patch("league.swarm.architect.same_idea", lambda a, b: False):
+            (fam,) = self.births(self.settings, n=1)   # SPY: a symbol this House's store does not hold
+        self.assertEqual({k: fam["spec"][k] for k in elane_folds.FALLBACK}, elane_folds.FALLBACK)
+        alerts = [p for p in self.events("swarm.status") if p.get("alert")]
+        self.assertEqual([p["action"] for p in alerts], ["elane_memory"])
+        self.assertIn("a birth got no hidden year (MissingData)", alerts[0]["text"])
 
 
 class TheSwitchAndTheWiringLandTogether(unittest.TestCase):
