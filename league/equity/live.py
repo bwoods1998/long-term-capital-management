@@ -1669,11 +1669,15 @@ class EquityBook:
         are from before this rule). THE COST, as the captain stated it: a real sale can go through a path the practice
         account did not prove that day. So the owner is told: ONE error alert and one `equity.alert` record a session
         (kv `eq_sell_unproven` {day, why, at}), whatever the number of exits, naming the stage's own reason
-        (`_sell_stage_says`)."""
-        if (self.state.get("eq_sell_unproven") or {}).get("day") == today:
+        (`_sell_stage_says`). THE TELLING NEVER HOLDS AN EXIT: when the note cannot be read or kept this minute nothing
+        is said and nothing is raised; the exit goes, and the next minute that can keep the note says it."""
+        try:
+            if (self.state.get("eq_sell_unproven") or {}).get("day") == today:
+                return
+            said = self._sell_stage_says()[:300]
+            self.state.put("eq_sell_unproven", {"day": today, "why": said, "at": self.clock()})
+        except Exception:  # noqa: BLE001 - an exit is never held on its own notice
             return
-        said = self._sell_stage_says()[:300]
-        self.state.put("eq_sell_unproven", {"day": today, "why": said, "at": self.clock()})
         what = ("the sale path is unproven today: the stock paper proof's SELL stage had not passed by the entry "
                 f"cut-off ({said}); real equity exits no longer wait for it this session and go through the normal "
                 "path")

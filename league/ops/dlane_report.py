@@ -948,11 +948,11 @@ def a14_of(store: Any, counted: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """RELEASE E3, amendment A14 (league/ops/forward_twins.py `a14_reading`): over a checkpoint's counted closes, the size
     of the mean fill gap against the official-price model within 15 bp a side AND live and shadow intents agreeing on
     95% of the counted sessions. With no equity close it does not apply (holds); unreadable, unmeasured or misshapen, it
-    does not hold. Never raises, and always carries applies, holds, final and why. THE SHADOW INTENTS ARE A RE-BASED
-    TWIN'S (the captain's A29, registered before the first real share order): a session that differs is counted, as
-    registered, then the twin's book is set to the live book, so a miss counts once; the bounds are as registered.
-    The reading's `rebase` says, beside and in no rule, how many times each instance's twin was re-based and the
-    un-re-based twin's own agreement over the same sessions."""
+    does not hold. Never raises, and always carries applies, holds, final and why."""
+    # THE SHADOW INTENTS ARE A RE-BASED TWIN'S (the captain's A29, registered before the first real share order): a
+    # session that differs is counted, as registered, then the twin's book is set to the live book, so a miss counts
+    # once; the bounds are as registered. The reading's `rebase` says, beside and in no rule, how many times each
+    # instance's twin was re-based and the un-re-based twin's own agreement over the same sessions.
     if not any(c.get("equity") for c in counted):
         return {"applies": False, "holds": True, "final": True, "why": None}
     try:

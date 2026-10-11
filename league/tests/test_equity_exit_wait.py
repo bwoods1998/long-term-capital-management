@@ -331,6 +331,32 @@ class TheWaitHasAnEnd(BookTest):
         [text] = told(h)
         self.assertIn("could not be read (RuntimeError)", text)
 
+    def test_the_telling_never_holds_an_exit(self):
+        """The note of the session cannot be kept in the 09:45 minute: the exit goes all the same, nothing is said
+        twice, and the minute that can keep it says it."""
+        h = self.harness()
+        a, spy = self.held(h, "SPY", "fam-a")
+        b, qqq = self.held(h, "QQQ", "fam-b")
+        h.intent(a, "sell", symbol="SPY", lid=spy.lid)
+        h.intent(b, "sell", symbol="QQQ", lid=qqq.lid, at_="close")
+        h.proof.sell = False
+        put, broken = h.state.put, [True]
+
+        def failing(key, value):
+            if key == "eq_sell_unproven" and broken[0]:
+                raise RuntimeError("the state cannot be written")
+            return put(key, value)
+
+        h.state.put = failing
+        self.addCleanup(lambda: setattr(h.state, "put", put))
+        h.tick(9, 45)
+        self.assertEqual(sent(h), [("sell", "SPY")], "the exit went")
+        self.assertEqual(h.alerts, [], "and nothing was said that could not be kept")
+        broken[0] = False
+        h.tick(15, 55)
+        self.assertEqual(sent(h), [("sell", "SPY"), ("sell", "QQQ")])
+        self.assertEqual(len(told(h)), 1)
+
     def test_no_paper_account_at_all_says_nothing(self):
         h = self.harness()
         h.proof = None
