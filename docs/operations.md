@@ -156,7 +156,9 @@ planned again at each following close until the next called decision, in the Gym
   session=True)`, `league.xs.config.RUN_SESSION_ET`): on a session a run starts only when it would be done before
   09:25 ET, or after 16:35 (13:35 on a half day). The box has ONE core, a scored version is a dozen runs of every
   member column back to back, and nobody has timed one there; the day's panel CPU fits several times over in the
-  hours left. The one exception to both is the live path's own 16:20 fetch, 16:30 decide and 08:30 re-read of a
+  hours left. What it costs, stated: while no run may start a panel family takes no step at all, its researcher's
+  model question included (`elane_xs.blocked`), so the panel lane researches at night and on weekends; births in
+  the equity pass are not held. The one exception to both is the live path's own 16:20 fetch, 16:30 decide and 08:30 re-read of a
   LIVE panel program, which run in the live process as E1's do. **No daily job can still be working at a pre-open**
   either: due + grace + wall is 04:55Z, 05:50Z and 10:20Z for the three (the spreads job's grace is three hours;
   with six it could hold the one ops child from 12:30Z to 13:20Z, past the pre-open's 40 minutes).
