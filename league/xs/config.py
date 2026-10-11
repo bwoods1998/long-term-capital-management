@@ -156,6 +156,15 @@ ID_BITS = 31
 # ------------------------------------------------------------------------------------------------- quiet windows
 #: The walls (New York time, on a session) at which no E4 job and no panel Train run may be RUNNING.
 WALLS_ET = (("09:25", "09:45"), ("15:50", "16:35"))
+#: THE SESSION, FOR A PANEL RUN (the ship pass's ONE-CORE reading). The House box has one core, and a panel run is
+#: the heaviest thing the lane puts on it: every member column of every session of its span, tens of seconds of the
+#: whole core a run there by the builders' measure, a dozen runs back to back for one scored version. So on a
+#: session no panel RUN (Train, the restart check, Validation, the look, the zero-edge job's) may be running from
+#: the open wall's start to the close wall's end: the walls and everything between them. The data jobs keep the two
+#: walls alone (they wait on the venue, and their triggers keep them in the night). The day's panel CPU
+#: (`elane.panel.cpu_seconds_day`) fits several times over in the hours left. Read the first receipts off the box
+#: before anyone thinks of opening the session to runs: it is this one line.
+RUN_SESSION_ET = (WALLS_ET[0][0], WALLS_ET[-1][1])
 #: The regular close and a half day's (New York time): a wall that holds the regular close is the close wall, and on a
 #: half day it moves with the close (15:50-16:35 becomes 12:50-13:35).
 CLOSE_ET = "16:00"
@@ -169,8 +178,10 @@ def _clock(text: str) -> dt.time:
     return dt.time(int(hour), int(minute))
 
 
-def _walls(day: dt.date, early: bool) -> list[tuple[dt.datetime, dt.datetime, str]]:
-    """The walls of session `day` as New York datetimes with their label; a half day's close wall moved with its close."""
+def _walls(day: dt.date, early: bool, session: bool = False) -> list[tuple[dt.datetime, dt.datetime, str]]:
+    """The walls of session `day` as New York datetimes with their label; a half day's close wall moved with its close.
+    `session`: ONE wall, the whole of `RUN_SESSION_ET` (from the first wall's start to the last wall's end, which on a
+    half day has moved with the close)."""
     close, early_close = _clock(CLOSE_ET), _clock(EARLY_CLOSE_ET)
     shift = dt.datetime.combine(day, close) - dt.datetime.combine(day, early_close)
     out = []
@@ -180,14 +191,21 @@ def _walls(day: dt.date, early: bool) -> list[tuple[dt.datetime, dt.datetime, st
             lo, hi = lo - shift, hi - shift
         out.append((lo.replace(tzinfo=NEW_YORK), hi.replace(tzinfo=NEW_YORK),
                     f"{lo.time():%H:%M}-{hi.time():%H:%M} ET on {day.isoformat()}"))
+    if session:
+        lo, hi = out[0][0], out[-1][1]
+        return [(lo, hi, f"{lo.time():%H:%M}-{hi.time():%H:%M} ET on {day.isoformat()}")]
     return out
 
 
-def quiet(now: float, need_s: float) -> str | None:
+def quiet(now: float, need_s: float, *, session: bool = False) -> str | None:
     """Why nothing that needs `need_s` seconds may START at the epoch `now`, or None: on a session, when [now, now +
     need_s] meets a wall of `WALLS_ET` (a half day's close wall moves with its close). A job passes ITS OWN wall-clock
     limit and a Train run its run budget: a start is refused when the work could still be running at a wall, not only
     when it begins inside one. Sessions are `league.equity.store.nyse_sessions`.
+
+    `session` (A PANEL RUN'S QUESTION: `RUN_SESSION_ET`): the wall is the whole session, the two walls and everything
+    between them, so a run may start only when it would be done before 09:25 New York time, or after the close
+    wall's end (16:35; 13:35 on a half day). A weekend or a holiday has no wall of either kind.
 
     It never raises (a House job's first statement): a clock or a need it cannot read is itself a reason not to
     start."""
@@ -203,8 +221,12 @@ def quiet(now: float, need_s: float) -> str | None:
         day = start.date()
         while day <= end.date():
             for _, early in nyse_sessions(day, day):
-                for lo, hi, label in _walls(day, early):
+                for lo, hi, label in _walls(day, early, bool(session)):
                     if start <= hi and end >= lo:
+                        if session:
+                            return (f"a start now could still be running in the session {label} (it needs up to "
+                                    f"{need:.0f} s): no panel run works while the market is open (the box has one "
+                                    "core)")
                         return (f"a start now could still be running at the wall {label} (it needs up to "
                                 f"{need:.0f} s): no E4 job and no panel run works through a wall")
             day += dt.timedelta(days=1)
@@ -270,5 +292,5 @@ __all__ = ["SPANS", "TRAIN_SEGMENTS", "TRAIN_YEARS", "HISTORY_YEARS", "RESERVE_Y
            "MOM_SKIP", "MOM_BACK", "MEMBER_AHEAD", "REL_VOLUME_SESSIONS", "RUNGS", "RUNG", "MIN_CELL", "SMALL_CELL",
            "CELL_SECTOR", "CELL_BETA", "UNIVERSE_CELL", "HS_FLOOR_BP", "HS_FALLBACK_BP", "HS_MAX_BP", "STRESS_SPREAD",
            "STRESS_FEES", "VANISH_SESSIONS", "VANISH_HAIRCUT", "VANISH_DEAL", "DITHER_HALF", "WICK_DITHER", "CTX_PLACES",
-           "BETA_PLACES", "ID_BITS", "ADJUSTED_HALF_STEP", "ROUNDING_GUARD", "rounding_bound", "WALLS_ET", "CLOSE_ET",
+           "BETA_PLACES", "ID_BITS", "ADJUSTED_HALF_STEP", "ROUNDING_GUARD", "rounding_bound", "WALLS_ET", "RUN_SESSION_ET", "CLOSE_ET",
            "EARLY_CLOSE_ET", "NEW_YORK", "quiet", "next_session", "rebalance_session", "decision_due"]

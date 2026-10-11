@@ -204,6 +204,13 @@ JOBS: tuple[Job, ...] = (
     # live-4), fifteen minutes after the universe job's (one child at a time: it starts when that one has ended): its
     # only trigger was `after("equity_universe")`, so a night the universe job failed fetched no bars, ran no I6, and
     # raised none of the panel job's own alarms. It now runs every night on the last good universe.
+    # NO DAILY ROW CAN STILL BE WORKING AT A PRE-OPEN (the ship pass's one-core reading; the same fault as live-9, by
+    # the grace instead of the trigger). The box has one core and one ops child: a job started late in its grace
+    # holds every job due behind it. `equity_spreads` had six hours of grace: an occurrence due 06:30Z could start at
+    # 12:30Z (a House back up after a night down starts the oldest due occurrence first) and work until 13:20Z, past
+    # the pre-open's own 40 minutes (due 12:30Z in summer). Its grace is three hours: started by 09:30Z, done by
+    # 10:20Z. A night it misses costs one night of a backfill that goes on from its file. The other two daily rows
+    # end by 05:50Z at the latest (due + grace + wall); the weekly and monthly rows are a weekend's.
     Job("equity_universe", "league.ops.equity_universe", (S.daily(1, 40),), grace=3 * HOUR, cpu=120,
         wall=900, in_pause=True, owner="breadth",
         what="the point-in-time S&P 500 membership from a pinned public file and the changes table (the gateway's "
@@ -212,7 +219,7 @@ JOBS: tuple[Job, ...] = (
         in_pause=True, owner="breadth",
         what="the panel's daily bars through the venue's asof (never 2020), the store's vintage rule, the coverage "
              "audit and its verdict, the nightly I6, into <state>/equity-daily/panel/"),
-    Job("equity_spreads", "league.ops.equity_spreads", (S.daily(6, 30),), grace=6 * HOUR, cpu=300, wall=3000,
+    Job("equity_spreads", "league.ops.equity_spreads", (S.daily(6, 30),), grace=3 * HOUR, cpu=300, wall=3000,
         in_pause=True, owner="breadth",
         what="the panel's half-spreads: quote samples at the instants the book trades, on Train-segment sessions, "
              "resumable, into <state>/equity-daily/spreads.json"),

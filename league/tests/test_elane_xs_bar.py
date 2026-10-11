@@ -516,6 +516,8 @@ class TheJudgment(ScoreCase):
         self.assertEqual(out["skipped"], "inside 600 s of the 15:50 ET wall")
         self.assertEqual((self.world.runner.calls, self.record(fam)["versions"]), ([], {}))
         self.assertEqual(self.world.quiet_asked[-1][1], 600.0, "asked with the run budget, not with zero")
+        self.assertEqual(set(self.world.quiet_sessions), {True},
+                         "a panel run's wall is the whole session (one core): every question says so")
         self.world.quiet = None
         self.store.put(elane_xs.CPU_KEY, {elane_xs._utc_day(self.store.clock()): 14400.0})
         self.assertIn("CPU is spent", self.score(fam)["skipped"])
@@ -550,7 +552,7 @@ class TheJudgment(ScoreCase):
         fam = self.family(hidden=None)
         asked = []
 
-        def quiet(now, need):
+        def quiet(now, need, *, session=False):
             asked.append(need)
             return "a wall is near" if len(asked) == 6 else None
 
@@ -561,7 +563,7 @@ class TheJudgment(ScoreCase):
         self.assertEqual(self.record(fam)["versions"], {})
 
     def test_a_quiet_rule_that_is_not_built_starts_nothing(self):
-        def stub(now, need):
+        def stub(now, need, *, session=False):
             raise NotImplementedError("league.xs.config is a Step 0 stub")
 
         with mock.patch.object(F.xconfig, "quiet", stub):

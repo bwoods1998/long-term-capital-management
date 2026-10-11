@@ -155,9 +155,41 @@ class TheEffectiveMode(unittest.TestCase):
                                          dt.datetime(2026, 10, 11, 14, 0, tzinfo=dt.timezone.utc).timestamp()), [],
                          "a lane whose every leg holds says nothing")
 
+    def test_a_panel_run_may_not_start_where_it_could_work_inside_a_session(self):
+        """ONE CORE (the ship pass): a panel run's wall is the whole session, the two walls and everything between
+        them. `may_run` asks the real rule with the run budget; a weekend, a holiday and the night have no wall."""
+        patcher = mock.patch.object(xconfig, "quiet", REAL_QUIET)                                  # the rule itself
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        def at(day, hh, mm):                                                                     # New York time
+            return dt.datetime(*day, hh, mm, tzinfo=xconfig.NEW_YORK).timestamp()
+
+        monday, saturday, half, holiday = (2026, 10, 12), (2026, 10, 10), (2026, 11, 27), (2026, 11, 26)
+        settings = F.settings("train")
+        budget = float(elane_xs.cfg(settings)["run_budget_seconds"])
+        self.assertEqual((budget, xconfig.RUN_SESSION_ET), (600.0, ("09:25", "16:35")))
+        for hh, mm, may in ((9, 14, True), (9, 16, False), (9, 30, False), (11, 0, False), (13, 30, False),
+                            (15, 0, False), (16, 0, False), (16, 35, False), (16, 36, True), (20, 0, True), (3, 0, True)):
+            why = elane_xs.may_run(self.store, settings, at(monday, hh, mm))
+            self.assertEqual(why is None, may, (hh, mm, why))
+            if not may:
+                self.assertIn("no panel run works while the market is open", why)
+        # the data jobs' own question keeps the two walls alone: 11:00 is no wall of theirs
+        self.assertIsNone(xconfig.quiet(at(monday, 11, 0), budget))
+        self.assertIsNotNone(xconfig.quiet(at(monday, 11, 0), budget, session=True))
+        self.assertIsNotNone(xconfig.quiet(at(monday, 9, 30), budget))
+        # no session, no wall: a Saturday at noon and Thanksgiving at noon
+        for day in (saturday, holiday):
+            self.assertIsNone(elane_xs.may_run(self.store, settings, at(day, 12, 0)), day)
+        # a half day (the Friday after Thanksgiving closes at 13:00): the session's end moves with its close
+        self.assertIsNotNone(elane_xs.may_run(self.store, settings, at(half, 13, 30)))
+        self.assertIsNone(elane_xs.may_run(self.store, settings, at(half, 13, 36)))
+        self.assertIsNotNone(elane_xs.may_run(self.store, settings, at(half, 9, 20)))
+
     def test_a_run_found_running_at_a_wall_is_a_critical_alert_once_a_day(self):
         """E4-SPEC 17: "an E4 job or a Train run found RUNNING at a wall" (critical: a bug in `quiet`, which every
-        run asks before it starts). Nothing looked afterwards."""
+        run asks before it starts). For a panel run the wall is the whole session. Nothing looked afterwards."""
         monday_open = dt.datetime(2026, 10, 12, 13, 28, tzinfo=dt.timezone.utc).timestamp()      # 09:28 New York
         patcher = mock.patch.object(xconfig, "quiet", REAL_QUIET)                                  # the rule itself
         patcher.start()
@@ -172,7 +204,7 @@ class TheEffectiveMode(unittest.TestCase):
         elane_xs._wall_alert(self.store, monday_open, 60.0)
         [alarm] = walls()
         self.assertEqual((alarm["alert"], alarm["level"]), (True, "critical"))
-        self.assertIn("found RUNNING at a wall", alarm["text"])
+        self.assertIn("found RUNNING inside a session", alarm["text"])
         with mock.patch.object(elane_xs.time, "time", return_value=monday_open), \
                 mock.patch.object(elane_xs.time, "monotonic", side_effect=[0.0, 5.0]):
             self.assertEqual(elane_xs._timed(self.store, types.SimpleNamespace(clock=lambda: monday_open),

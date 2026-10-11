@@ -206,6 +206,8 @@ class TheJob(JobCase):
         self.assertEqual(self.world.quiet_asked[-1][1], 0.0,
                          "and AFTERWARDS the wall detector holds the job's own span to the rule (this clock stands still)")
         self.assertEqual(len(self.world.quiet_asked), 1 + 24 + 1)
+        self.assertEqual(self.world.quiet_sessions, [False] + [True] * 24 + [False],
+                         "the job asks by its own wall; each RUN by the whole session, as a Train run of the swarm does")
 
     def test_a_pass_is_counted_and_the_bars_restart_check_is_part_of_it(self):
         original = F.FakeRunner._result
@@ -250,7 +252,7 @@ class TheJob(JobCase):
     def test_a_wall_met_between_two_runs_stops_the_chunk_with_what_it_has(self):
         asked = []
 
-        def quiet(now, need):
+        def quiet(now, need, *, session=False):
             asked.append(need)
             return "a wall is near" if len(asked) == 1 + 8 + 4 else None  # the job's own, a program, half another
 

@@ -631,6 +631,8 @@ class World:
         self.screen = Screen()
         self.quiet: str | None = None
         self.quiet_asked: list[tuple[float, float]] = []
+        #: Whether each question was a panel RUN's (`session=True`: the whole session is its wall), in `quiet_asked`'s order.
+        self.quiet_sessions: list[bool] = []
         self.xs_sha: str | None = "c" * 64
         self.pin: Mapping[str, Any] = pin_block()
         self.tradable = 1.0
@@ -641,8 +643,9 @@ class World:
             raise FileNotFoundError("an xs evidence file is missing")
         return self.xs_sha
 
-    def ask_quiet(self, now: float, need_s: float) -> str | None:
+    def ask_quiet(self, now: float, need_s: float, *, session: bool = False) -> str | None:
         self.quiet_asked.append((float(now), float(need_s)))
+        self.quiet_sessions.append(bool(session))
         return self.quiet
 
 

@@ -1652,14 +1652,17 @@ def cpu_spent(store: Any, now: float) -> float:
 
 
 def may_run(store: Any, settings: Mapping[str, Any] | None, now: float) -> str | None:
-    """Why a panel run may not START now, or None: `league.xs.config.quiet(now, run_budget_seconds)` (asked before
-    EACH run of a version), then the day's CPU (`cpu_seconds_day` less `CPU_KEY`). A quiet rule that is not built or
-    cannot be read starts nothing (no panel run may be running at a wall on an unread clock)."""
+    """Why a panel run may not START now, or None: `league.xs.config.quiet(now, run_budget_seconds, session=True)`
+    (asked before EACH run of a version), then the day's CPU (`cpu_seconds_day` less `CPU_KEY`). THE WALL IS THE
+    WHOLE SESSION (`league.xs.config.RUN_SESSION_ET`: the box has one core, and no panel run works while the market
+    is open): on a session a run starts only when it would be done before 09:25 New York time, or after 16:35 (13:35
+    on a half day). A quiet rule that is not built or cannot be read starts nothing (no panel run may be running in
+    a session on an unread clock)."""
     c = cfg(settings)
     try:
         from ..xs import config as xconfig
 
-        why = xconfig.quiet(float(now), float(c["run_budget_seconds"]))
+        why = xconfig.quiet(float(now), float(c["run_budget_seconds"]), session=True)
     except Exception as exc:  # noqa: BLE001 - fail closed: nothing starts on a rule that cannot be read
         return f"the panel's quiet windows cannot be read ({type(exc).__name__}): no run starts"
     if why is not None:
@@ -2929,9 +2932,10 @@ def _status(run: Any) -> str:
 
 
 def _timed(store: Any, owner: Any, call: Callable[[], Any]) -> Any:
-    """`call()`, its seconds booked to the day's panel CPU whatever it does. A RUN FOUND RUNNING AT A WALL (E4-SPEC
-    17, critical: a bug in `quiet`, which every run asks before it starts): the wall clock from its start to its end
-    is held to `league.xs.config.quiet` again, and a run that met a wall is one `swarm.status` alert a UTC day."""
+    """`call()`, its seconds booked to the day's panel CPU whatever it does. A RUN FOUND RUNNING IN A SESSION (E4-SPEC
+    17's "at a wall", critical: a bug in `quiet`, which every run asks before it starts): the wall clock from its
+    start to its end is held to `league.xs.config.quiet(..., session=True)` again, and a run that met the session is
+    one `swarm.status` alert a UTC day."""
     began, started = time.monotonic(), time.time()
     try:
         return call()
@@ -2945,10 +2949,11 @@ def _timed(store: Any, owner: Any, call: Callable[[], Any]) -> Any:
 
 
 def _wall_alert(store: Any, started: float, seconds: float) -> None:
-    """One critical `swarm.status` alert a UTC day when [started, started + seconds] (wall clock) met a wall."""
+    """One critical `swarm.status` alert a UTC day when [started, started + seconds] (wall clock) met a session (a
+    panel run's wall is the whole of it: `league.xs.config.RUN_SESSION_ET`)."""
     from ..xs import config as xconfig
 
-    met = xconfig.quiet(float(started), max(0.0, float(seconds)))
+    met = xconfig.quiet(float(started), max(0.0, float(seconds)), session=True)
     if met is None:
         return
     day = _utc_day(started)
@@ -2960,7 +2965,7 @@ def _wall_alert(store: Any, started: float, seconds: float) -> None:
         store.put(ALERTS_KEY, {**held, "wall": day})
     store.event("swarm.status", None, {
         "action": "elane_xs_wall", "alert": True, "level": "critical",
-        "text": f"a panel run was found RUNNING at a wall of the session ({seconds:.0f} s from its start): {met}"[:400]})
+        "text": f"a panel run was found RUNNING inside a session ({seconds:.0f} s from its start): {met}"[:400]})
 
 
 def _by_session(series: Any, name: str) -> dict[int, float]:

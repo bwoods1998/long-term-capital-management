@@ -1785,6 +1785,11 @@ class TheRegistryRows(unittest.TestCase):
     #: universe job's (live-4: its only trigger was `after("equity_universe")`, so a night the universe job failed
     #: fetched no bars, ran no I6 and raised none of the panel job's own alarms).
     REVIEWED = {"equity_universe": (("daily", 1, 40),), "equity_panel": (("daily", 1, 55),)}
+    #: THE SHIP PASS'S ONE-CORE BOUND (the registry differs from the patch's record in this grace and no other
+    #: figure): six hours of grace let the spreads job start at 12:30Z and hold the one ops child past the pre-open.
+    BOUNDED = {"equity_spreads": 3 * 3600}
+    #: The earliest pre-open of either season, minutes of the UTC day (08:30 New York time in summer).
+    PREOPEN_UTC = 12 * 60 + 30
 
     @classmethod
     def setUpClass(cls):
@@ -1835,6 +1840,31 @@ class TheRegistryRows(unittest.TestCase):
                 elif t.kind == "after":
                     self.assertIn(t.job, self.SPEC)
 
+    def test_no_daily_row_can_still_be_working_at_a_pre_open(self):
+        """ONE CORE, ONE OPS CHILD: a job that starts at the end of its grace and works to its wall holds every job due
+        behind it. Every daily row of the lane is done (due + grace + wall) before the earliest pre-open of either
+        season; the patch's own six hours of grace for the spreads job were not (13:20Z, past the pre-open's 40
+        minutes). The weekly and monthly rows are a weekend's, where there is none."""
+        have = self.registry.by_name()
+        preopen = have["preopen"]
+        self.assertEqual([(t.kind, t.offset_minutes) for t in preopen.triggers], [("open", -60)])
+        late = {}
+        for name in self.SPEC:
+            job = have[name]
+            for t in job.triggers:
+                if t.kind == "daily":
+                    done = t.at.hour * 60 + t.at.minute + (job.grace + job.wall) / 60.0
+                    late[name] = done
+                    self.assertLessEqual(done, self.PREOPEN_UTC, f"{name} could still hold the ops child at a pre-open")
+                else:
+                    self.assertIn(t.kind, ("weekly", "monthly"), name)
+                    self.assertGreaterEqual(t.weekday, 5, name)
+        self.assertEqual(sorted(late), ["equity_panel", "equity_spreads", "equity_universe"])
+        self.assertEqual(late["equity_spreads"], 10 * 60 + 20)
+        patched = next(row for row in self.rows if row.name == "equity_spreads")
+        self.assertGreater(6 * 60 + 30 + (patched.grace + patched.wall) / 60.0, self.PREOPEN_UTC + preopen.grace / 60.0,
+                           "what the patch's six hours allowed: a pre-open missed behind it")
+
     def test_the_patch_fits_the_registry_and_the_registry_holds_it_once_applied(self):
         source = Path(self.registry.__file__).read_text(encoding="utf-8").splitlines()
         at = 0
@@ -1851,7 +1881,8 @@ class TheRegistryRows(unittest.TestCase):
                 mine = have[row.name]
                 self.assertEqual(tuple(self.trigger(t) for t in mine.triggers),
                                  self.REVIEWED.get(row.name, self.SPEC[row.name][0]), row.name)
-                self.assertEqual(dataclasses.replace(mine, triggers=row.triggers), row, row.name)
+                self.assertEqual(mine.grace, self.BOUNDED.get(row.name, row.grace), row.name)
+                self.assertEqual(dataclasses.replace(mine, triggers=row.triggers, grace=row.grace), row, row.name)
             self.assertEqual([job.name for job in self.registry.JOBS][-6:], list(self.SPEC))
             starts = [job.name for job in self.registry.JOBS if job.name in self.SPEC
                       and any(t.kind in ("start", "after") for t in job.triggers)]

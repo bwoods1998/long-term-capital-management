@@ -29,7 +29,8 @@ failed, a restart check that could not finish) is not counted, and the job stops
 
 THE WALLS. The job's first statement is `league.xs.config.quiet(now, WALL_S)` (its own wall: a start that could
 still be working at a wall is skipped, and the chunk resumes at its next trigger), and every run asks
-`quiet(now, run_budget_seconds)` before it starts, as a panel Train run of the swarm does. With `elane.panel.mode`
+`quiet(now, run_budget_seconds, session=True)` before it starts, as a panel Train run of the swarm does (no panel
+run works inside a session; the job's own triggers are a Sunday's, when there is none). With `elane.panel.mode`
 under "train" the job does nothing. THE CHUNK'S OWN WALL: a chunk starts no further program once the time it has
 worked plus its slowest program's would pass `CHUNK_S` (the registry row's working budget, under `WALL_S`): it
 stops with what it has, the week's row already written, and the next trigger resumes it; the runner never has to
@@ -236,7 +237,7 @@ def _run(ctx: Any) -> dict[str, Any]:
         folds = _folds_on(settings)
 
         def before() -> None:
-            why = xconfig.quiet(ctx.now(), float(c["run_budget_seconds"]))
+            why = xconfig.quiet(ctx.now(), float(c["run_budget_seconds"]), session=True)
             if why is not None:
                 raise Stopped(str(why))
 
