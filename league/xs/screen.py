@@ -34,7 +34,8 @@ x is the residual, x15 the stress residual (`league.xs.placebo`), one observatio
    (`league.equity.config.LOOK_FIRST`, `LOOK_CAP`). The look's run starts flat at V's first session and runs through
    H; `split` cuts its series in two. One sealed look a lineage; days after the cap are forward days only.
 2. THE PRE-CHECK on V (4.2): (lots fully exited >= 20 or sessions with a lot held at the close >= 120) AND sum_V x >
-   1e-12: E1's `precheck` on x. A failed pre-check spends no look, and spends the lineage's one Validation try.
+   1e-12: E1's pre-check on x, its sum taken with `math.fsum` as the study's is. A failed pre-check spends no look,
+   and spends the lineage's one Validation try.
 3. THE PROGRAM'S OWN FLOOR (4.4), before the look, no look spent when ineligible: S2's exact enumeration applied to
    the residual, at L = 194 ONLY. Pools: the program's own (x, w) on each Train-era span, from its first decision + 2
    sessions to the span's last session. Floor cells: (i) both pools together, when both exist and each has at least
@@ -69,7 +70,9 @@ x is the residual, x15 the stress residual (`league.xs.placebo`), one observatio
 8. STATED BESIDE EVERY LIVE PANEL TRADE: the receipt's sentence (`beside_line`), its per-program placeholders
    `BESIDE_FIELDS` filled on the House: {c_used}, {c_p}, {own_fp} (the largest, over the program's floor cells, of
    HO[k_used] / T: in-sample, at most 12% by construction, and said so), {n_cell} (the XS1 looks already taken in the
-   program's agenda cell, counted by the House), {basket}, {label}, {flags}.
+   program's agenda cell, counted by the House), {basket}, {label}, {flags}. A PASS is never stated with a hole in it
+   (ValueError); a verdict that did not pass has no trade to stand beside, and reads "unmeasured" where it lacks a
+   figure, so the look's record can always keep its sentence.
 
 Failure order of `verdict` (the first is `why`): no receipt (ScreenRefused); the floor ineligible, or run under other
 figures than the receipt's; a run that did not end "ok" at k 1.0 on the receipt's rung, or a placebo block of another
@@ -317,6 +320,11 @@ def _fsum(values: Any) -> float:
         return math.nan
 
 
+def _stated(total: float) -> float | None:
+    """A sum as a result states it: None where there is none (a record never holds a NaN)."""
+    return total if math.isfinite(total) else None
+
+
 # ------------------------------------------------------------------------------------------------------- the receipt
 def receipt_sha256(path: str | Path) -> str | None:
     """sha256 of the receipt file's bytes (64 hex), or None when there is no such file."""
@@ -347,6 +355,8 @@ def _pin(block: Any) -> ReceiptXS | str:
         if v is None or not 0.0 < v <= cap + ZERO:
             return f"{key} {block.get(key)!r} is not in (0, {cap}]"
         rates[key] = v
+    if rates["fp_cap"] > rates["owner_wall"] + ZERO:
+        return f"fp_cap {rates['fp_cap']} is above the owner's wall {rates['owner_wall']}"
     if _whole(block.get("placebo_draws")) != PLACEBO_DRAWS:
         return f"placebo_draws {block.get('placebo_draws')!r} is not {PLACEBO_DRAWS}"
     rung = block.get("rung")
@@ -385,9 +395,10 @@ def pinned_receipt(block: Mapping[str, Any] | None) -> ReceiptXS | None:
 
     A pin is read whole or not at all: `screen` and `name` "XS1"; a 64-hex `receipt_sha256`; `c_XS` on the 0.01 grid
     in 0.00..3.00; `c_margin` on the grid and at least `C_MARGIN` (the bar may be made narrower, never wider);
-    `alpha_plac`, `fp_cap` and `owner_wall` in (0, the pre-registration's figure]; `placebo_draws` `PLACEBO_DRAWS`;
-    `rung` one of `RUNGS`; one Validation try and one look a lineage; `retry` a literal false; well-formed `flags`;
-    `screen_flags` () or ("style-open",); the sentence with every placeholder of `BESIDE_FIELDS`."""
+    `alpha_plac`, `fp_cap` and `owner_wall` in (0, the pre-registration's figure], the cap never above the wall;
+    `placebo_draws` `PLACEBO_DRAWS`; `rung` one of `RUNGS`; one Validation try and one look a lineage; `retry` a
+    literal false; well-formed `flags`; `screen_flags` () or ("style-open",); the sentence with every placeholder of
+    `BESIDE_FIELDS`."""
     got = _pin(block)
     return got if isinstance(got, ReceiptXS) else None
 
@@ -591,7 +602,7 @@ def precheck(v: Series) -> dict[str, Any]:
     total = _fsum(v.r)
     checks = {"activity": rt >= ACTIVITY_ROUND_TRIPS or inv >= ACTIVITY_INVESTED_DAYS,
               "sum_positive": bool(total > ZERO)}
-    return {"passed": all(checks.values()), "round_trips": rt, "invested_days": inv, "sum": total,
+    return {"passed": all(checks.values()), "round_trips": rt, "invested_days": inv, "sum": _stated(total),
             "sessions": len(v.r), "checks": checks}
 
 
@@ -846,9 +857,9 @@ def look(v: Series, h: Series, *, h15: Series, c_used: float, placebo_t: Sequenc
     checks = {"precheck": bool(pre["passed"]), "sum_h": bool(sum_h > ZERO), "sum_h15": bool(sum_h15 > ZERO),
               "t_H": g >= _k(c),
               "placebo": ranked and (1 + count) * bar.denominator <= bar.numerator * (n + 1)}
-    return {"passed": all(checks.values()), "t_H": t_h, "sum_h": sum_h, "sum_h15": sum_h15, "count": count,
-            "n_placebo": n, "p_plac": (1 + count) / (n + 1) if ranked else None, "c_used": _k(c) / 100,
-            "grid_index": g, "precheck_result": pre, "checks": checks}
+    return {"passed": all(checks.values()), "t_H": t_h, "sum_h": _stated(sum_h), "sum_h15": _stated(sum_h15),
+            "count": count, "n_placebo": n, "p_plac": (1 + count) / (n + 1) if ranked else None,
+            "c_used": _k(c) / 100, "grid_index": g, "precheck_result": pre, "checks": checks}
 
 
 # ------------------------------------------------------------------------------------------- step 6: the labels beside
@@ -951,12 +962,14 @@ def labels(result: Mapping[str, Any], *, french: Mapping[str, Any] | None = None
     least the sum of x, else "selection-led" (`sum_bench`, `sum_x` beside). `french`: {"days": [day...], "factors":
     {name: [value a day]}} with every name of `FRENCH_FACTORS` (package B's reader's shape); the label is the OLS of x
     on them over the covered sessions of V and H (`french_days`), "unmeasured" under `FRENCH_MIN_DAYS` of them or
-    when the reading fails. ValueError only for a result whose daily series cannot be read."""
+    when the reading fails. ValueError only for a result whose daily series cannot be read or summed."""
     sx = series(result, "x")
     xv, xh = split(sx)
     bv, bh = split(_column(result, "bench"))
     sum_x = _fsum(np.concatenate([xv.r, xh.r]))
     sum_bench = _fsum(np.concatenate([bv.r, bh.r]))
+    if not (math.isfinite(sum_x) and math.isfinite(sum_bench)):
+        raise ValueError("the run's series do not sum to a number")
     label, got, days = _french_label(sx, french)
     return {"basket": BASKET_LABELS[0] if sum_bench >= sum_x else BASKET_LABELS[1], "label": label, "loadings": got,
             "sum_bench": sum_bench, "sum_x": sum_x, "french_days": days}

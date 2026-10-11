@@ -320,4 +320,5 @@ def seat_refusal(verdict: Mapping[str, Any] | None) -> str | None:
 
 
 __all__ = ["CHARACTERISTICS", "SIZE_SESSIONS", "SIZE_MIN_VALID", "VOL_SESSIONS", "VOL_MIN_VALID", "TILT", "MIN_LOTS",
-           "EDGE", "OPEN", "UNMEASURED", "BLOCK_KEYS", "POOLED_KEYS", "VERDICT_KEYS", "characteristics", "ranks", "block", "pooled", "style_open", "seat_refusal"]
+           "EDGE", "OPEN", "UNMEASURED", "BLOCK_KEYS", "POOLED_KEYS", "VERDICT_KEYS", "characteristics", "ranks",
+           "block", "pooled", "style_open", "seat_refusal"]

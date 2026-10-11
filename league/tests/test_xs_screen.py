@@ -695,6 +695,7 @@ class Receipts(unittest.TestCase):
             lambda d: d.update(alpha_plac=0.13), lambda d: d.update(alpha_plac=0.0), lambda d: d.update(alpha_plac="0.12"),
             lambda d: d.update(fp_cap=0.13), lambda d: d.update(fp_cap=0.0), lambda d: d.update(fp_cap=None),
             lambda d: d.update(owner_wall=0.16), lambda d: d.update(owner_wall=None), lambda d: d.update(owner_wall=-0.1),
+            lambda d: d.update(owner_wall=0.1),
             lambda d: d.update(placebo_draws=1000), lambda d: d.update(placebo_draws=998),
             lambda d: d.update(placebo_draws=999.5), lambda d: d.update(placebo_draws=True),
             lambda d: d["stratum"].update(rung="R2"), lambda d: d["stratum"].update(rung="R3"),
@@ -763,7 +764,7 @@ class Receipts(unittest.TestCase):
                  {"c_XS": None}, {"c_XS": float("nan")}, {"c_XS": True}, {"c_XS": 3.01}, {"c_XS": -0.1},
                  {"c_XS": 1.234}, {"c_margin": 0.04}, {"c_margin": None}, {"alpha_plac": 0.13}, {"alpha_plac": 0},
                  {"fp_cap": None}, {"fp_cap": 0.0}, {"fp_cap": 0.5}, {"owner_wall": 0.0}, {"owner_wall": "0.15"},
-                 {"owner_wall": 0.2}, {"placebo_draws": 200}, {"placebo_draws": None}, {"rung": "R2"}, {"rung": None},
+                 {"owner_wall": 0.2}, {"owner_wall": 0.11}, {"placebo_draws": 200}, {"placebo_draws": None}, {"rung": "R2"}, {"rung": None},
                  {"validation_tries": 2}, {"validation_tries": None}, {"holdout_looks": 2}, {"retry": True},
                  {"retry": None}, {"retry": "false"}, {"retry": 0}, {"flags": ["X1"]}, {"flags": {"X1": [1]}},
                  {"flags": None}, {"screen_flags": ["x"]}, {"screen_flags": None}, {"beside": None},
@@ -1332,8 +1333,9 @@ class TheLook(unittest.TestCase):
             wild = make_series(H_DAYS, x)
             with np.errstate(over="ignore", invalid="ignore"):
                 got = self.look(h=wild, h15=wild, c_used=0.0)
-            self.assertEqual((got["checks"]["sum_h"], got["passed"]), (False, False), values)
-            self.assertTrue(math.isnan(got["sum_h"]), values)
+            self.assertEqual((got["checks"]["sum_h"], got["passed"], got["sum_h"]), (False, False, None), values)
+            self.assertEqual(json.loads(json.dumps(got, allow_nan=False))["checks"], got["checks"],
+                             "a record never holds a NaN")
 
     def test_the_stress_leg(self):
         """sum_H x15 > 1e-12: the program must stay positive at 1.5 times the spread with its sell fees doubled."""
