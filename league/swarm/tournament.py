@@ -51,14 +51,17 @@
    after the ration (`dlane.always_in_failed`, an IDLE death that binds no card); an always-in family never forks
    (`lane_forks`: a fork adds a root, and each root's always-in idea has its own try).
    THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). The round above never sees an equity-lane family
-   (`SwarmStore.families` leaves them out). Its own step (`equity_round`, while `elane.mode` is "gate") DISPATCHES
-   VALIDATION BY LANE: each living Gym-band equity family's version due (`elane.next_try`: its candidate while its
-   lineage's one try is open and has no current verdict, else R3's pre-registered retry) is validated by
+   (`SwarmStore.families` leaves them out), and `run` never calls their step: the swarm's loop runs it on a thread of
+   its own, every `elane.ROUND_SECONDS`, under the brake and with the Gym down too (league/swarm/loop.py
+   `Swarm.equity_rounds`; A3: an equity Validation needs no Gym box). That step (`equity_round`, while `elane.mode` is
+   "gate") DISPATCHES VALIDATION BY LANE: each living Gym-band equity family's version due (`elane.next_try`: a tried
+   version whose verdict went stale, else its candidate while its lineage's one try is open and it has no current
+   verdict, else R3's pre-registered retry) is validated by
    `elane.validate`: on the House, in the decider-isolated child (A3: no Gym box), at k 1.0 and 1.5, the share screen's
    pre-check (S1's and S2's one rule) the entry to the gate. A family whose equity lineage has spent its try or its look retires (`elane.lineage_spent`:
    words only; no graveyard row, so no look outcome reaches a generator, A9 D3), and so does one at any band whose
    realized real net reached `elane.program_loss_usd` (-$300, `elane.loss_line`: its lots exit by the House's rules). An
-   equity family never forks (`lane_forks`). A failure of the equity step never stops the round.
+   equity family never forks (`lane_forks`). The step never raises, and nothing in the options round reaches it.
 3. THE ALLOCATION (Release B, league/swarm/allocation.py; `allocation.mode` "value"): each family's share of researcher
    turns and Gym priority by its expected information value (the variance of its next validation's pass or fail under
    an empirical-Bayes posterior, discounted by the idea's trials, its own and those inherited at birth, by exhaustion:
@@ -1313,10 +1316,11 @@ class Tournament:
     # ------------------------------------------------------------------ the equity lanes (release E1)
     def equity_round(self) -> dict[str, Any]:
         """THE EQUITY LANES' step (the module docstring): {validated: {family: verdict}, retired: [family], errors}.
-        Never raises (an error is one private `swarm.status` event and the round goes on)."""
+        Never raises (an error is one private `swarm.status` event and the round goes on). Called by the swarm's loop on
+        the equity rounds' own thread (`Swarm.equity_rounds`), never by `run`."""
         out: dict[str, Any] = {"validated": {}, "retired": [], "errors": {}}
         try:
-            fams = self.store.families(alive=True, lanes=elane.LANES)
+            fams = elane.round_order(self.store, self.store.families(alive=True, lanes=elane.LANES))
         except Exception as exc:  # noqa: BLE001
             self.store.event("swarm.status", None, {"action": "elane_round_error", "error": type(exc).__name__})
             return out
@@ -1362,7 +1366,6 @@ class Tournament:
         fams = self.store.families(alive=True)
         self.game_step("confirm_waiting", lambda: game.confirm_waiting(self.store, self.settings))
         validation = self.validate(fams)
-        equity = self.equity_round() if elane.on(self.settings) else None
         self.game_step("shadow_validated", lambda: game.shadow_validated(self.store, self.settings, self.pool, self.clock))
         self.game_step("requeue_stale", lambda: game.requeue_stale(self.store, self.settings, self.pool, self.clock))
         self.game_step("recheck", lambda: game.recheck(self.store, self.settings, self.pool, self.clock))
@@ -1398,8 +1401,6 @@ class Tournament:
         row = {"at": began, "seconds": round(self.clock() - began, 1), "validation": validation, "retired": retired, "born": born,
                "board": board, "totals": totals, "last_hour": last_hour, "practice_bonus": dict(self.practice_bonus),
                "allocation": dict(self.allocation), "incubator": facts}
-        if equity is not None:
-            row["equity"] = equity
         self.store.event("swarm.tournament", None, row)
         self.store.put("leaderboard", {"at": began, "board": board, "totals": totals})
         return row

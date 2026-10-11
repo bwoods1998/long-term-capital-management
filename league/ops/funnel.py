@@ -28,7 +28,9 @@ Each count comes from the record that is the event itself, never from a summary 
 
 THE EQUITY LANES (release E1, Oct 2026), apart, under `equity` (the daily page's table reads none of them):
 - per lane, "beta" and "equity" (a family's spec `lane`, `league.equity.LANES`): births (`swarm.born`, the payload's lane
-  else the family's), Validation verdicts judged and passed (the tournament's), looks taken and passed (the `looks`
+  else the family's), Validation verdicts judged and passed (the equity rounds' own `swarm.status` events, action
+  "elane_validation", one a verdict, `entered` its pass: the hourly `swarm.tournament` row is the options lanes' and
+  never carries an equity family), looks taken and passed (the `looks`
   rows), moves to Candidate, Probe and Sized (`equity_counts`); the equity families in each band now (`bands_now`'s
   `equity`: the Probe programs among them);
 - from the live book (`book_counts`'s `equity`): the EquityBook's orders placed and filled, lots opened and closed (a
@@ -184,13 +186,20 @@ def equity_counts(db: sqlite3.Connection, start: float, end: float) -> dict[str,
         if lane:
             out[lane]["births"] += 1
     if lanes:
-        for verdicts in json_rows(db, "swarm.tournament", "$.validation.judged", a, b):
-            for fid, verdict in (verdicts.items() if isinstance(verdicts, Mapping) else ()):
-                lane = lane_of(fid)
-                if lane:
-                    out[lane]["validations"]["judged"] += 1
-                    out[lane]["validations"]["passed"] += 1 if isinstance(verdict, Mapping) and verdict.get("passed") is True \
-                        else 0
+        # An equity Validation verdict is `elane.validate`'s own event (the swarm's equity rounds run apart from the
+        # hourly tournament, whose `validation.judged` holds options families only).
+        for row in guard.rows(db, "SELECT family, payload FROM events WHERE kind='swarm.status' AND at>=? AND at<? "
+                                  "AND instr(payload, 'elane_validation') > 0", (a, b)):
+            try:
+                payload = json.loads(row["payload"])
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(payload, Mapping) or payload.get("action") != "elane_validation":
+                continue
+            lane = lane_of(row["family"], payload)
+            if lane:
+                out[lane]["validations"]["judged"] += 1
+                out[lane]["validations"]["passed"] += 1 if payload.get("entered") is True else 0
         for row in guard.rows(db, "SELECT family, passed FROM looks WHERE at>=? AND at<?", (a, b)):
             lane = lane_of(row["family"])
             if lane:

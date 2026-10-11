@@ -96,7 +96,8 @@ class Parent(Case):
         run = Isolated(decider, self.root).validation(CODE, None, name="dip")
         self.assertIsInstance(run, Run)
         self.assertEqual(run.result["status"], "ok")
-        self.assertEqual((run.bars.window, run.bars.first, run.bars.symbols), ("validation", 15, ("SPY", "QQQ")))
+        self.assertEqual((run.bars.window, run.bars.first, run.bars.symbols), ("validation", 16, ("SPY", "QQQ")),
+                         "NEEDS history 15: 16 sessions before the first, the first decision's whole ctx")
         self.assertEqual((run.bars.day(run.bars.first), run.bars.day(run.bars.n - 1)), (D(2025, 1, 2), D(2025, 12, 31)))
         self.assertEqual([c[1] for c in decider.calls], ["needs", "run"], "NEEDS first: the parent never executes it")
         _, _, payload, budget = decider.calls[1]

@@ -81,8 +81,10 @@ no package writes it).
    money table by attribute); `kinds` imports nothing of either (the child reads it).
 4. **The equity fingerprint** (`league.swarm.evaluator.equity_fingerprint`, core; AS AMENDED BY A13): sha256 over the
    EVIDENCE modules only (`EQUITY_EVIDENCE`: `league/equity/<name>.py` for each, never this file or EQUITY.md: as
-   `execution_fingerprint`, documentation never resets evidence), the 4 `LEAGUE_FILES` and `EQUITY_GYM_FILES`, path and
-   bytes, in path order. `EQUITY_EVIDENCE` is the import closure, inside league/equity, of the runner, the child, the
+   `execution_fingerprint`, documentation never resets evidence), the 4 `LEAGUE_FILES`, `EQUITY_GYM_FILES` and, since
+   the review's fixes (section 14), `EQUITY_CALENDAR_FILES` (`ltcm/__init__.py`, `ltcm/broker.py`,
+   `ltcm/data/__init__.py`: the NYSE calendar the store and the ctx read, what the evidence imports outside league/),
+   path and bytes, in path order. `EQUITY_EVIDENCE` is the import closure, inside league/equity, of the runner, the child, the
    screen and the engine, plus `synth` (which the four never import; it imports nothing outside the closure):
    `test_equity_identity.py` holds the list equal to that closure, so a new evidence module cannot hide. THE PLUMBING
    IS OUT (`live`, `actions`, `schedule`, `families`, `bands`, `kinds`): a plumbing fix moves no identity and retires
@@ -122,7 +124,8 @@ no package writes it).
 - Lanes: `league.equity.LANES` = ("beta", "equity"). Classes: "etf", "stock". Fill points: `"at": "open" | "close"`.
 - Instances: `<family>@<version>:r` (the real evidence route, as the options book's), kept in `eq_instances`, never in
   the options `instances` table.
-- Client ids: `lq-<eid>-<family slug>` (`league.equity.CLIENT_PREFIX`).
+- Client ids: `lq-<nonce>-<eid>-<family slug>` (`league.equity.CLIENT_PREFIX`; the state's nonce first, as the book
+  builds them: section 5.2).
 - Every refusal names its cause; every unreadable input refuses opens and never blocks exits.
 
 ---
@@ -724,7 +727,8 @@ tournament's equity round validates now), `lineage_tries(store, fid)`, `card_lan
   screen that judged it ("S2"; "S1" under receipt 1), receipt, c_H (S2: c_H,used, with c_pF1; S1: with c_used) and the
   beside line.
 - **tournament.py**: Validation dispatches by lane (equity -> `elane.validate`, run through the isolated runner on the
-  House); `lane_forks` False for equity; one try a lineage (`elane.try_open`).
+  House); `lane_forks` False for equity; one try a lineage (`elane.try_open`). `Tournament.equity_round` is called by
+  the loop's equity rounds (section 14), never by `Tournament.run`.
 - **settings.py**: the `elane` overlay (DEFAULTS block).
 - **seeds.py**: `EQUITY_SEEDS` (three specs) and `equity_program_for(spec) -> (code, params)`, the programs written
   under the EQUITY.md contract (math and numpy only, no date):
@@ -737,7 +741,8 @@ tournament's equity round validates now), `lineage_tries(store, fid)`, `card_lan
     prior close, exit at the open h sessions later.
   Each card names its published prior (Cliff, Cooper and Gulen 2008; Lou, Polk and Skouras 2019; Connors and Alvarez
   2008) and no figure.
-- **loop.py**: `elane.birth_seeds` once a pass while the lane is on; `evaluator.adopt_equity` at start.
+- **loop.py**: `elane.birth_seeds` once a pass while the lane is on; `evaluator.adopt_equity` at start; THE EQUITY
+  ROUNDS on their own thread (`equity_due`, `equity_rounds`: section 14).
 - **dlane.py**: lane scoping only (A8.12): the always-in roots, `birth_spent` and the lineage links never join an
   equity family to an options lineage.
 - **league/live/money.py** `band_for`: its first statement forwards an equity row to `equity_hook.band_for`.
@@ -901,10 +906,12 @@ receipts are judged only through the repository's pin (`test_the_committed_pin`,
 
 1. **Data**: ops `equity_data.run` -> gateway bars (raw, all) -> `equity_data.audit` -> core `store.write_store`.
 2. **Birth**: swarm `loop` -> `elane.birth_seeds` -> `seeds.equity_program_for` -> store family (lane "beta").
-3. **Validation**: swarm `tournament` -> `elane.validate` -> core `runner.Isolated.validation` -> hooks
+3. **Validation**: swarm `loop.equity_rounds` -> `tournament.equity_round` -> `elane.validate` -> core
+   `runner.Isolated.validation` -> hooks
    `decider.kind("equity", "run")` -> hooks `child.handle` -> core `runner.run_bars` -> `engine.run`; then screen
    `series` + `precheck`; swarm records `elane_try`, `validation_r_sd_by_version`.
-4. **Look**: swarm `gate` -> `elane.look` -> screen `pinned_receipt` -> core `Isolated.segments` -> screen `series`,
+4. **Look**: swarm `loop.equity_rounds` -> `gate.equity_round` -> `elane.look` -> screen `pinned_receipt` -> core
+   `Isolated.segments` -> screen `series`,
    `floor` -> core `store.mint_equity_gate_capability` -> `Isolated.look` -> screen `series`, `verdict`,
    `beside_line` -> family to Candidate.
 5. **Seat and band**: book `EquityBook` (16:30) -> book `families.read` (swarm `bands.read(lanes=LANES)`, seating) ->
@@ -953,3 +960,53 @@ receipts are judged only through the repository's pin (`test_the_committed_pin`,
 | probe sleeve, invested share, cash reserve | DESIGN 5: 0.30, 0.90, $25 | A5: 0.25 and max 3 programs; A1: "1.00"; A8.1: "50" |
 | sizing caps Gym vs live | DESIGN: the same caps | `size_entry` applies the account cap AND the same share of the sleeve (`sleeve_cap`), so a live position is never a larger share of its sleeve than the Gym allows |
 | ltcm.data's NYSE calendar | the data job's audit "NYSE calendar has no gap" from 2016 | that calendar starts in 2022; `store.nyse_sessions` computes 2016-2021 by the same rules (core) |
+
+## 14. The review's fixes on the swarm, evidence and ops side (Oct 10, 2026; as built, additive unless it says so)
+
+What the adversarial review of the E1 branch changed in the contract above. Where a line above and this section
+differ, this section is the code.
+
+- **The equity rounds have their own home** (swarm; CHANGES section 8.3 and flows 3 and 4). `league/swarm/loop.py`
+  `Swarm.equity_due()` (the lane on and `elane.ROUND_SECONDS`, 300, since the store's kv `elane.ROUND_KEY`
+  "elane_round_at"; never the guard, never `gym_ready`) and `Swarm.equity_rounds()` (on the round thread "equity":
+  `Tournament.equity_round()`, then `Gate.equity_round(out)`; never raises) -> {validated {family: entered}, retired,
+  errors, looked, held}. `Tournament.run` and `Gate.run` no longer call the equity steps, and the hourly
+  `swarm.tournament` row carries no `equity` key. The heartbeat's status carries `equity` {mode, round_at}.
+- **The order of a round** (swarm): `elane.round_order(store, fams) -> [fam]`: by the second of birth, then the seeds in
+  `seeds.EQUITY_SEEDS` order, then by id. Both equity rounds walk it.
+- **Retirement causes** (swarm): `elane.SAME_LINEAGE`, `elane.FLOOR_INELIGIBLE`, `elane.REFUSED_BEFORE_LOOK`,
+  `elane.REFUSED_CAUSES` {refusal stage: cause}: what `lineage_spent` answers for a version the gate refused before
+  its look. `SPENT_TRY` and `SPENT_LOOK` are unchanged.
+- **The lineage** (swarm, core): `evaluator.EQUITY_SELECTION_KEYS` is ("validation_r_sd_by_version", "elane_floor"):
+  an adoption keeps `elane_train_r` and `elane_template` with `elane_look` (CHANGES section 4.11's list). `elane.same_lineage`
+  raises `elane.LineageUnread(family)` for a looked-at family (or a living one with a look in flight) that keeps no
+  Train series; `look` writes it again from that family's looked version (`Isolated.segments`) or waits.
+- **The look and its runs** (swarm, core): `runner.RunLost(RunFailed)`: the child took the "run" whole and no answer
+  came back (`Isolated._run`, by the decider's two failures of a taken request, `runner.SENT_NOT_ANSWERED`: it did not
+  answer in time, it exited; every other failure, an answer that is not a result included, stays `RunFailed`). `elane.look` reads each
+  run's status: a Train-era run not "ok" or "no_data" refuses the floor; "no_data" is passed to `screen.floor` as
+  None; a holdout run that ended "disqualified" is a look spent and failed (its `detail` and verdict carry `status`
+  and `why`); a `RunLost` at the sealed look is owed once, then spent and failed (`elane.LOOK_SENDS` 2, the family
+  state's `elane.LOST_KEY` "elane_look_lost" {sha, count, at}; a `swarm.status` alert "equity_look_lost" each time).
+- **The evidence child is deterministic** (swarm; hooks' file by a pure addition): `league.live.decider.Decider.hash_seed`
+  (class attribute, None: the child starts exactly as before; an int: started without -E with PYTHONHASHSEED set, the
+  same explicit environment otherwise). `elane.isolated_runner` sets `elane.EVIDENCE_HASH_SEED` (0) on its own child.
+  The House's live decider is not pinned.
+- **The ration** (swarm): `elane.next_try` first returns a tried version whose `elane_verdicts` entry is stale (the
+  lowest first, while `try_open` allows it), then the candidate, then R3's retry. `elane_try.retry_sha` is recorded at
+  the family's first recorded try and kept by every later Validation, None included.
+- **Family state keys** (ADDS to section 8.4): `elane_look` also carries `activity` ({validation, train [per span],
+  ratio}: the invested-day shares, House-only, never a condition); `elane_look_lost` (above).
+- **The identity** (core): `evaluator.EQUITY_CALENDAR_FILES` (section 2.4). `EQUITY_EVIDENCE` is unchanged.
+- **The store's slice** (core; CHANGES section 4.3's `bars`): `EquityStore.bars` and `span` put `history` + 1 sessions
+  before the run's first (what the store holds), so `Bars.first` is `history` + 1 and the engine's first decision
+  (the close of session `first` - 1) reads `history` + 1 rows, as a live decision does (I6 at the first decision).
+- **The seeds** (swarm): each `EQUITY_SEEDS` spec and family record carries `provenance`; `elane.view`'s notes carry
+  it for a seeded family.
+- **ops**: `dlane_report.a14_consistency(counted) -> dict | None` ({closes, priced, unpriced, mean_gap_bp, bound_bp,
+  fill_gap_ok, intents, consistent, why}; `A14_GAP_BP` 15.0, `A14_AGREEMENT` 0.95): a reading that holds an equity
+  close carries it as `a14`, its item 4 is never True while the intents half has no reader, and it does not hold.
+  `EquityScreens.of` returns `s1x` and `lane_label` (no `label`). `zero_edge(settings, *, equity_closes=0)` adds
+  `applies_to`, `equity_closes`, `equity_note` (`ZERO_EDGE_EQUITY_NOTE`) when any is counted; `equity_beside` carries
+  `zero_edge_note`. `funnel.equity_counts` reads Validation verdicts from the `swarm.status` events with action
+  "elane_validation".

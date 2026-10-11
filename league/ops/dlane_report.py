@@ -153,9 +153,18 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   model at most 15 bp a side AND the live and the shadow intents agreeing on at least 95% of the counted sessions, read
   at each Done checkpoint over its counted closes; else "not consistent" beside the P&L), what every Done reading is
   reported beside (`A14_BESIDE_DONE`: the number of distinct close dates and a date-clustered t), and the forward
-  seat rule, written and inactive (`A14_SEAT_RULE`). None of the three is computed here yet: until its reader lands the
-  meters read consistency by the pinned rule's own measure (CONSISTENT WITH REPLAY, above), no reading carries the
-  close-date figures, and no forward rule moves a seat (`PREREGISTERED["status"]` says so in the report).
+  seat rule, written and inactive (`A14_SEAT_RULE`). ITEM 4 OF A READING THAT HOLDS AN EQUITY CLOSE IS READ BY A14, NEVER
+  BY THE OPTIONS MEASURE (`a14_consistency`): the pinned replay gap divides by the maximum loss, which for a long lot is
+  its whole notional, so its 0.10 bound would let a thousand basis points of notional through where A14 says 15 a side.
+  The fill-gap half is computed (the mean of the counted equity closes' final priced twins' `gap_bp`, at most
+  `A14_GAP_BP` in size); a mean past the bound fails item 4 ("not consistent" beside the P&L). The intents-agreement
+  half has no reader yet, so until it lands item 4 of such a reading is NOT READ and never True: the reading does not
+  hold, and it says why. The close-date figures and the forward seat rule are not computed either
+  (`PREREGISTERED["status"]` says so in the report). A reading with no equity close is read by the pinned rule's own
+  measure, as before.
+- P(DONE | ZERO EDGE) IS THE OPTIONS RULES' FIGURE (`ZERO_EDGE_EQUITY_NOTE`): it was never measured for share closes,
+  and a delta-one lane's is far higher. A report that holds an equity close says so on the figure and in each
+  checkpoint's `equity` block; no figure for the equity lanes is stated.
 
 Standard library only, except the Probe envelope's figures (`fast_lane.probe_budget` and `real.probe_figures` read
 `league.live.real`, whose Gym legs need numpy, as the House box has): they are an `error` entry where that cannot load.
@@ -229,13 +238,25 @@ A14_BESIDE_DONE = (
 A14_SEAT_RULE = (
     "The forward seat rule is written and inactive: an incumbent with fewer than 5 real closes is never unseated, "
     "except by EDM1.")
+#: A14's two bounds as the sentence above states them: the mean fill gap a side (basis points) and the share of counted
+#: sessions on which the live and the shadow intents agree.
+A14_GAP_BP = 15.0
+A14_AGREEMENT = 0.95
 PREREGISTERED = {
     "id": "A14", "registered": "2026-10-10", "before": "the first equity close",
     "consistency": A14_CONSISTENCY, "beside_done": A14_BESIDE_DONE, "forward_seat_rule": A14_SEAT_RULE,
-    "status": "text only, not computed yet: until the reader lands the meters read consistency by the pinned Done "
-              "rule's own measure (the replay gap within its bound per program), no reading carries the close-date "
-              "figures, and no forward rule moves a seat",
+    "status": "partly computed: a reading that holds an equity close reads item 4 by A14 and never by the options "
+              "replay gap. The fill-gap half is computed from the equity twins (a mean past 15 bp a side fails item 4); "
+              "the intents-agreement half has no reader yet, so item 4 of such a reading is not read and the reading "
+              "does not hold. No reading carries the close-date figures, and no forward rule moves a seat",
 }
+#: P(DONE | ZERO EDGE) BESIDE EQUITY CLOSES: the figure the report carries is the options Probe rules' simulation. No
+#: figure for the share lanes is stated (none is committed); this sentence rides on the figure and in each checkpoint's
+#: `equity` block whenever a counted close is an equity close.
+ZERO_EDGE_EQUITY_NOTE = (
+    "This P(Done | zero edge) is the options Probe rules' simulation figure only. It was never measured for the MARKET "
+    "BETA and EQUITY lanes' share closes: a delta-one lane reaches Done whenever the market rises, so its zero-edge "
+    "P(Done) is far higher than this figure, and a Done read on share closes is weak evidence of skill.")
 #: A8.6: the shared loss budget's consequence for the options Probe lane, said in the report and the docs.
 EQUITY_PROBE_NOTE = (
     "THE LOSS BUDGET IS SHARED (A8.6): the equity lane's open Probe risk counts in the same $400 window and $800 total as "
@@ -1120,6 +1141,14 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
         whys.append(f"live fills inconsistent with replay: {', '.join(inconsistent[:8])}")
     item3 = len(counted) >= int(rule["min_closes"]) and per_program_ok and net_known and net > 0
     item4 = measured_ok and not inconsistent
+    # A14 (pre-registered before the first equity close): a reading that holds an equity close reads "consistent with
+    # replay" by A14's own measure, never by the gap above alone (a long lot's maximum loss is its notional, so the
+    # options bound of 0.10 is a thousand basis points of it). A fill gap past the bound fails item 4; while the
+    # intents-agreement half has no reader, item 4 is not read and never True.
+    a14 = a14_consistency(counted)
+    if a14 is not None:
+        whys.append(a14["why"])
+        item4 = False
     by_route: dict[str, dict[str, Any]] = {}
     for c in counted:
         key = c.get("code") or c["route"]
@@ -1141,7 +1170,47 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
             "by_route": {k: {"closes": v["closes"], "programs": len(v["programs"]),
                              "net_usd": None if v["unpriced"] else _usd(v["net"]), "unpriced": v["unpriced"]}
                          for k, v in sorted(by_route.items())},
-            "by_program": programs, "bh": _bh_sum(counted), "equity": equity_beside(counted)}
+            "by_program": programs, "bh": _bh_sum(counted), "equity": equity_beside(counted),
+            **({"a14": a14} if a14 is not None else {})}
+
+
+def a14_consistency(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """A14's READING OF "CONSISTENT WITH REPLAY" over a reading's EQUITY closes (`A14_CONSISTENCY`), or None when it
+    holds none. {closes, priced, unpriced, mean_gap_bp, bound_bp, fill_gap_ok, intents {agreement, bound, status},
+    consistent, why}:
+    - THE FILL GAP (computed): the mean of `gap_bp` over the counted equity closes whose twin is final and priced
+      (league/ops/twins.py `equity_twin`: the live net return less the official-price model's, basis points a side,
+      negative when the fills were worse); `fill_gap_ok` is |mean| <= `A14_GAP_BP`, None while no close is priced. Every
+      close with no final priced twin is counted in `unpriced`, never dropped silently.
+    - THE INTENTS (not read): the live and the shadow intents agreeing on at least `A14_AGREEMENT` of the counted
+      sessions has no reader yet.
+    - `consistent`: False when the fill gap is past its bound; else None (NOT READ: a half is missing). Never True
+      until both halves are read, so `reading` never holds item 4 on equity closes by the options measure."""
+    rows = [c for c in counted if c.get("equity")]
+    if not rows:
+        return None
+    gaps = []
+    for c in rows:
+        twin = c.get("twin") if isinstance(c.get("twin"), Mapping) else {}
+        gap = _num(twin.get("gap_bp"))
+        if twin.get("final") is True and twin.get("status") == "priced" and gap is not None:
+            gaps.append(gap)
+    mean = statistics.fmean(gaps) if gaps else None
+    fill_ok = None if mean is None else abs(mean) <= A14_GAP_BP
+    intents = {"agreement": None, "bound": A14_AGREEMENT,
+               "status": "not read: the live and shadow intents have no reader yet (A14's second half)"}
+    if fill_ok is False:
+        why = (f"not consistent (A14): the mean fill gap is {mean:.1f} bp a side over {len(gaps)} priced equity closes, "
+               f"past the {A14_GAP_BP:g} bp bound")
+    else:
+        measured = (f"the mean fill gap is {mean:.1f} bp a side over {len(gaps)} of {len(rows)} equity closes, inside "
+                    f"the {A14_GAP_BP:g} bp bound" if mean is not None else
+                    f"no equity close of {len(rows)} has a final priced twin yet")
+        why = (f"item 4 is not read for a reading with equity closes (A14 pending): {measured}; the intents-agreement "
+               "half has no reader yet")
+    return {"closes": len(rows), "priced": len(gaps), "unpriced": len(rows) - len(gaps),
+            "mean_gap_bp": None if mean is None else round(mean, 2), "bound_bp": A14_GAP_BP, "fill_gap_ok": fill_ok,
+            "intents": intents, "consistent": False if fill_ok is False else None, "why": why}
 
 
 def equity_beside(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
@@ -1184,7 +1253,7 @@ def equity_beside(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None
             "programs": [programs[f] for f in sorted(programs)],
             "seeded": sorted(f for f, v in programs.items() if v["seeded"]),
             "seeded_note": elane.SEEDED_NOTE if any(v["seeded"] for v in programs.values()) else None,
-            "direction": EQUITY_DIRECTION}
+            "direction": EQUITY_DIRECTION, "zero_edge_note": ZERO_EDGE_EQUITY_NOTE}
 
 
 #: THE GAP'S MEASURE, said beside every reading (the readiness audit's done-meter note: the rule says "mean ... gap", D5
@@ -1334,7 +1403,9 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
                             "consistent_ok": at["consistent_ok"], "measured_programs": at["measured_programs"],
                             "replay_coverage": at["replay_coverage"], "by_program": programs,
                             "research_247": r247, "by_route": at["by_route"], "bh": at["bh"],
-                            **({"equity": at["equity"]} if at.get("equity") else {})})
+                            **({"equity": at["equity"]} if at.get("equity") else {}),
+                            # A14's reading of item 4 for a checkpoint that holds an equity close (`a14_consistency`).
+                            **({"a14": at["a14"]} if at.get("a14") else {})})
         prev_k, k = k, k + int(rule["checkpoint_every"])
     nxt = int(rule["first_checkpoint"]) if not checkpoints else checkpoints[-1]["at_close"] + int(rule["checkpoint_every"])
     latest = checkpoints[-1] if checkpoints else None
@@ -1858,8 +1929,10 @@ class EquityScreens:
     "S2" or "S1" as recorded, never assumed), read once a program. Never computed here: the look's own figures."""
 
     #: The verdict's figures a row carries (S1's `c_p` and `c_used`, S2's `c_pF1` and `holdout_only`; None where the
-    #: screen that judged the look has none).
-    KEYS = ("passed", "c_R", "c_p", "c_pF1", "c_H", "c_used", "own_fp", "holdout_only", "drift_kept", "label", "fp_x")
+    #: screen that judged the look has none). THE TWO LABELS ARE APART, never one `label`: the look's detail names the
+    #: LANE's under `label` ("MARKET BETA" | "EQUITY") and S1-X's under `s1x`, while the verdict names S1-X's under
+    #: `label` ("alpha" | "beta"); a row carries `lane_label` and `s1x`.
+    KEYS = ("passed", "c_R", "c_p", "c_pF1", "c_H", "c_used", "own_fp", "holdout_only", "drift_kept", "fp_x")
 
     def __init__(self, store: Any):
         self.store = store
@@ -1881,6 +1954,9 @@ class EquityScreens:
             except Exception:  # noqa: BLE001 - an unreadable family has no recorded look
                 fam = None
             self.states[family] = ((fam or {}).get("state") or {}) if isinstance(fam, Mapping) else {}
+        from ..swarm import elane
+
+        lane_labels = set(elane.LABELS.values())
         n = _int(version)
         look = self.looks.get((family, n)) if n is not None else None
         detail = (look or {}).get("detail") or {}
@@ -1893,7 +1969,11 @@ class EquityScreens:
         out = {"screen": detail.get("screen") or verdict.get("screen"), "beside": beside,
                "look_at": (look or {}).get("at") or recorded.get("at"),
                "receipt": detail.get("receipt") or verdict.get("receipt"),
-               **{k: detail.get(k) if detail.get(k) is not None else verdict.get(k) for k in self.KEYS}}
+               **{k: detail.get(k) if detail.get(k) is not None else verdict.get(k) for k in self.KEYS},
+               # S1-X's label (alpha or beta) is the verdict's `label`, the look detail's `s1x`; the detail's own
+               # `label` is the lane's.
+               "s1x": detail.get("s1x") if detail.get("s1x") is not None else verdict.get("label"),
+               "lane_label": detail.get("label") if detail.get("label") in lane_labels else None}
         if not beside:
             out["fp_why"] = ("no screen line is recorded at this version's look (league/swarm/elane.py records it with the "
                              "look): none is stated")
@@ -2382,16 +2462,21 @@ def pt1_alarms(roster: Mapping[str, Any] | None, settings: Mapping[str, Any] | N
                      f"{PT1_ROSTER}, or measure the pair at this roster first"}]
 
 
-def zero_edge(settings: Mapping[str, Any] | None) -> dict[str, Any]:
+def zero_edge(settings: Mapping[str, Any] | None, *, equity_closes: int = 0) -> dict[str, Any]:
     """P(Done | zero edge) beside the meter (decision 8; DONE-RULE-A1 A1.2, the readiness audit's M10): the setting's
     figure, and when it is one this code names (`dlane.ZERO_EDGES`: 0.024, A1.2's pin under L-D's $400 total; 0.027,
     PREREG-T's under the $800 total, since Oct 10, 2026) what it is: its horizon, holds, the budget variant, its source
     and who named it. A named figure that is not the one for the rules this code ships (`dlane.ZERO_EDGE`) says so;
-    another figure is a setting's and says so: the claim states the figure for the rules in force."""
+    another figure is a setting's and says so: the claim states the figure for the rules in force. `equity_closes`: the
+    counted closes that are equity closes; with any, the figure says it is the options rules' only
+    (`ZERO_EDGE_EQUITY_NOTE`: `applies_to`, `equity_closes`, `equity_note`)."""
     from ..swarm import dlane
 
     value = dlane.cfg(settings)["done_zero_edge_p"]
     out: dict[str, Any] = {"value": value, "label": ZERO_EDGE_LABEL}
+    if int(equity_closes) > 0:
+        out.update(applies_to="the options Probe rules only", equity_closes=int(equity_closes),
+                   equity_note=ZERO_EDGE_EQUITY_NOTE)
     named = next((z for v, z in dlane.ZERO_EDGES.items() if abs(value - float(v)) < 1e-9), None)
     if named is not None:
         out.update({k: v for k, v in named.items() if k != "value"})
@@ -2523,7 +2608,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
                                  "note": "agent closes before the count began: reported beside, never counted (the goal "
                                          "of Oct 10, 2026)"},
                      "preregistered": dict(PREREGISTERED),
-                     "p_done_zero_edge": zero_edge(settings),
+                     "p_done_zero_edge": zero_edge(settings, equity_closes=sum(1 for c in counted if c.get("equity"))),
                      "net_after_costs": {**net_after_costs(root, counted, now=now), "counted_from": _iso(count_from),
                                          "counted_note": "the meters' closes count from counted_from; the costs are the "
                                                          "close economics' own, since its cost_start"},
@@ -2728,7 +2813,8 @@ def lane_off(ctx: Any, root: Path, settings: Mapping[str, Any] | None) -> dict[s
 
 
 __all__ = ["run", "report", "FILE", "CONTAMINATION", "PREREGISTERED", "A14_CONSISTENCY", "A14_BESIDE_DONE",
-           "A14_SEAT_RULE", "LOOSENED", "TIGHTENED", "closes", "meter", "reading", "replay_gap",
+           "A14_SEAT_RULE", "A14_GAP_BP", "A14_AGREEMENT", "a14_consistency", "ZERO_EDGE_EQUITY_NOTE", "LOOSENED",
+           "TIGHTENED", "closes", "meter", "reading", "replay_gap",
            "replay_twins", "twin_records",
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
            "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP", "finality",
