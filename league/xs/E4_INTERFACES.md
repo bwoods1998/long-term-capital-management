@@ -285,6 +285,13 @@ Each is a place the two texts had to be reconciled at Step 0; the stub says whic
 15. **The conformance inputs are a 1.1 MB binary fixture** (five synthetic price sets in float64, bit for bit): the
     study's vectors carry no input price (its review's defect 4), and regenerating them needs the study's private
     generator and numpy's stream.
+16. **A style-open program still takes its look** (A22 says "passer"), though the pass cannot seat it. That look
+    spends one of its cell's two (A22 (2)) and, by the pre-registration's section 11, lowers the program's own
+    forward bar from 0.12 to 0.03. The captain may prefer that a program read style-open on Train takes NO XS1 look
+    and declares the forward route fresh: it would be one condition in `elane_xs.look` (wait, nothing spent).
+17. **The Probe sleeve moved after the spec's feasibility table** (the captain's A20: 0.50 x E in all, three seats).
+    E4-SPEC 0 and 10.4 computed a basket in a 0.25 x E sleeve. No stub carries the figure: package H recomputes
+    10.4's table with E1's `size_entry` at the constitution's values in force and states it in its report.
 
 ## 9. Tests
 
