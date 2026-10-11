@@ -394,10 +394,11 @@ class StateOnE1(unittest.TestCase):
 class ReserveMoved:
     """E1's decider with the reserve's bars moved in every run it is sent: each 2020-2021 row of the slice has its
     prices scaled by a smooth bump over the two years (one at both ends, `1 + bump` in the middle), so the market is the
-    same on every Train session and differs only inside the reserve. `moved`: the reserve rows of each run's slice."""
+    same on every Train session and differs only inside the reserve. `moved`: the reserve rows of each run's slice; `last`: the latest reserve day of
+    each (None for none)."""
 
     def __init__(self, inner, bump: float):
-        self.inner, self.bump, self.moved = inner, float(bump), []
+        self.inner, self.bump, self.moved, self.last = inner, float(bump), [], []
 
     def __getattr__(self, name):
         return getattr(self.inner, name)
@@ -420,6 +421,7 @@ class ReserveMoved:
         rows = np.array([d.year in elane_train.RESERVE_YEARS for d in days])
         assert not rows[bars.first:].any(), "no run session is a reserve session"
         self.moved.append(int(rows.sum()))
+        self.last.append(max((d for d in days if d.year in elane_train.RESERVE_YEARS), default=None))
         factor = np.array([1.0 + self.bump * math.sin(math.pi * (d.toordinal() - first) / (last - first)) ** 2
                            if d.year in elane_train.RESERVE_YEARS else 1.0 for d in days])
         raw = {sym: a.copy() for sym, a in bars.raw.items()}
@@ -452,9 +454,12 @@ def decide(ctx):
 @unittest.skipUnless(E1, "E1's equity lanes are not in this tree (the E2 branch's skeleton)")
 class ReserveOnE1(unittest.TestCase):
     """THE RESERVE on E1's runner (the A15 review's fourth finding): what holds, and what does not. E2 runs no reserve
-    session and keeps no reserve row; the reserve's BARS still reach the 2022-2024 Train figures of a program with
-    look-back (E1's runner hands the run its NEEDS `history` before 2022-01-03). Two markets that differ only in
-    2020-2021: a program that asks for no history is the same byte for byte, and one with look-back is the same in
+    session and keeps no reserve row; the reserve's BARS still reach the 2022-2024 Train figures (E1's runner hands the
+    run its NEEDS `history` + 1 sessions before 2022-01-03: the engine's first decision is at the close of the session
+    before the run's first, E1's `store._slice`). So EVERY program's 2022-2024 run reads the last 2021 session, a
+    program with no look-back too, and one with look-back reads `history` more. Two markets that differ only in
+    2020-2021: a program that asks for no history and holds no price against another has the same figures of its own
+    (the buy-and-hold reported beside its 2022 moves with the last 2021 close), and one with look-back is the same in
     2016-2019 and differs from 2022 on."""
 
     @classmethod
@@ -471,7 +476,8 @@ class ReserveOnE1(unittest.TestCase):
 
     def verdict(self, code: str, bump: float | None) -> tuple[dict, list[int]]:
         """The verdict E2 keeps of `code` (its Train figures: `train_score` of the summed spans) in the market as it is
-        (`bump` None) or with the reserve moved, and the reserve rows each run's slice held."""
+        (`bump` None) or with the reserve moved, and the reserve rows each run's slice held (`self.last`: the latest
+        reserve day of each)."""
         from league.equity.runner import Isolated
         from league.live.decider import InlineDecider
 
@@ -483,21 +489,44 @@ class ReserveOnE1(unittest.TestCase):
             for result, span in zip(results, elane_train.TRAIN_SPANS):
                 self.assertEqual(elane_train.outside_years(result, spans=[span]), [], "no reserve row, day or figure")
                 self.assertFalse({row[0][:4] for row in result["daily"]} & {"2020", "2021"}, "no reserve session")
+        self.last = decider.last
         return elane_train.train_score(elane_train.combine(parts[1.0]), elane_train.combine(parts[1.5])), decider.moved
 
-    def test_a_program_that_asks_for_no_history_reads_nothing_of_the_reserve(self):
+    def test_a_program_that_asks_for_no_history_reads_the_last_reserve_session_alone(self):
+        # E1's slice is `history` + 1 sessions before the run's first (the first decision's own session): with no
+        # look-back at all, each 2022-2024 run still holds ONE reserve bar, the last 2021 session, and its first
+        # decision reads it. This program holds no price against another, so the two markets give it the same figures
+        # of its own; the same-exposure buy-and-hold reported BESIDE its 2022 is measured from that close and moves.
         code = fx.program().replace('"history": 2', '"history": 0')
         as_is, held = self.verdict(code, None)
         moved, held_moved = self.verdict(code, 2.0)
-        self.assertEqual((held, held_moved), ([0] * 4, [0] * 4), "its slices hold no reserve bar at all")
+        self.assertEqual((held, held_moved), ([0, 1, 0, 1], [0, 1, 0, 1]),
+                         "each 2022-2024 slice holds one reserve bar (history + 1), the 2016-2019 slices none")
+        days = [d for d in self.last if d is not None]
+        self.assertEqual(len(days), 2)
+        self.assertEqual({(d.year, d.month) for d in days}, {(2021, 12)}, "the last 2021 session")
+        self.assertTrue(all(d >= dt.date(2021, 12, 27) for d in days), days)
         self.assertTrue(as_is["years"] and as_is["summary"]["trades"], "really run")
-        self.assertEqual(json.dumps(as_is, sort_keys=True), json.dumps(moved, sort_keys=True))
+
+        def own(verdict: dict) -> str:
+            """The verdict less the buy-and-hold reported beside it (never a bar)."""
+            out = json.loads(json.dumps(verdict))
+            out["beside"].pop("bh_pnl")
+            out["beside"].pop("drift_share")
+            out["years"]["2022"].pop("bh_pnl")
+            return json.dumps(out, sort_keys=True)
+        self.assertEqual(own(as_is), own(moved), "its own lots, P&L, t and fails, and every other year's row")
+        self.assertNotEqual(as_is["years"]["2022"]["bh_pnl"], moved["years"]["2022"]["bh_pnl"],
+                            "the buy-and-hold beside its 2022 starts from the last 2021 close")
+        self.assertEqual({y: r["bh_pnl"] for y, r in as_is["years"].items() if y != "2022"},
+                         {y: r["bh_pnl"] for y, r in moved["years"].items() if y != "2022"})
 
     def test_a_program_with_look_back_reads_the_reserves_bars_in_2022(self):
         as_is, held = self.verdict(TREND, None)
         moved, held_moved = self.verdict(TREND, 2.0)
-        # Each 2022-2024 run's slice holds the 252 sessions before 2022-01-03 (reserve bars); the 2016-2019 runs' none.
-        self.assertEqual((held, held_moved), ([0, 252, 0, 252], [0, 252, 0, 252]))
+        # Each 2022-2024 run's slice holds the 252 + 1 sessions before 2022-01-03 (reserve bars: NEEDS `history` and the
+        # first decision's own session); the 2016-2019 runs' none.
+        self.assertEqual((held, held_moved), ([0, 253, 0, 253], [0, 253, 0, 253]))
         early = ("2016", "2017", "2018", "2019")
         self.assertEqual(sorted(as_is["years"]), [str(y) for y in elane_train.TRAIN_YEARS], "the seven Train years only")
         self.assertEqual({y: as_is["years"][y] for y in early}, {y: moved["years"][y] for y in early},

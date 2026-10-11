@@ -97,8 +97,9 @@ with a row for the route that answered.
 **Not handled, stated.** E2's rounds start only while the options Gym is configured and the Sail guard allows
 research, like every round that makes new research, though an equity Train run needs no Gym box. The restart check
 does not catch memory that changes fewer than 1% of sessions. **The reserve's bars reach Train as look-back**: no
-2020-21 session is run or scored, but a 2022-24 run reads up to 504 sessions before 2022-01-03 as its NEEDS `history`,
-so a program with look-back has 2022-24 Train figures that are functions of 2020-21 bars; sealing those bars too would
+2020-21 session is run or scored, but a 2022-24 run reads its NEEDS `history` + 1 sessions before 2022-01-03 (up to
+505), so a program with look-back has 2022-24 Train figures that are functions of 2020-21 bars, and even a program
+with no look-back reads the last 2021 session; sealing those bars too would
 be a change in E1's runner or store, the captain's call when the reserve's accessor is built. Post-earnings drift is
 named in the agenda and refused until earnings data exist.
 

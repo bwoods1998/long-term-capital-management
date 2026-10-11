@@ -42,8 +42,9 @@ pass; the third such failure of a version raises the `elane_train_state` alert, 
 ## Carried from E2's A15 review, for the captain (nothing here is a patch today)
 
 - **The reserve's bars reach Train as look-back.** E2 runs no session of 2020-2021 and keeps no row, figure or day of
-  it. But E1's runner hands a 2022-2024 run its NEEDS `history` before 2022-01-03 (up to 504 sessions), so the
-  2022-2024 Train figures of a program with look-back are functions of 2020-2021 bars
+  it. But E1's runner hands a 2022-2024 run its NEEDS `history` + 1 sessions before 2022-01-03 (up to 505: E1's fix
+  a00ab9f9 gives the first decision its whole window), so the 2022-2024 Train figures of a program with look-back
+  are functions of 2020-2021 bars, and even a program with no look-back reads the last 2021 session
   (league/tests/test_elane_e2_e1.py `ReserveOnE1` says exactly what holds). If the later Thresholdout accessor needs
   those bars unseen too, that is a new change in E1's runner or store (a blanked look-back, e.g. a `history_floor`
   day), which E2's files cannot make; it would cost a long-look-back program most of its 2022.

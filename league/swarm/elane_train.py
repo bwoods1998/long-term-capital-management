@@ -11,12 +11,15 @@ exactly as a 2025 or 2026 one: a by-year row, a daily row, a trade's, a lot's or
 end) is refused whole and judged on nothing (WINDOW). No 2020-2021 session is ever a run session, so no 2020-2021
 figure or P&L exists to reach a family's record, the Train map, the yield ledger or a generator. WHAT OF THE RESERVE
 DOES REACH TRAIN, stated: its BARS, as look-back. The 2022-2024 run's decisions read the bars before 2022-01-03 as
-history (NEEDS `history`, up to `league.equity.config.MAX_HISTORY` sessions, so back into 2020), as a Validation run
-looks back on 2024's. So a program with look-back has 2022-2024 Train figures that are functions of reserve bars
-(directly while its look-back still reaches before 2022-01-03, at most two years; after that only through the lots,
-cash and equity the run carries), and so are the sums and the pooled t they enter. Its 2016-2019 figures are not, and a
-program that reads no history has none. E2 blanks nothing: a blanked look-back would need a hook in E1's runner or
-store and would cost a long-look-back program most of 2022 (the captain's call, with the later accessor).
+history (NEEDS `history` + 1 sessions, the first decision's own session among them: E1's `store._slice`; up to
+`league.equity.config.MAX_HISTORY` + 1, so back into 2020), as a Validation run looks back on 2024's. So a program
+with look-back has 2022-2024 Train figures that are functions of reserve bars (directly while its look-back still
+reaches before 2022-01-03, at most two years; after that only through the lots, cash and equity the run carries), and
+so are the sums and the pooled t they enter. Its 2016-2019 figures are not. EVEN A PROGRAM WITH NO LOOK-BACK READS THE
+LAST 2021 SESSION: the 2022-2024 run's first decision is at that session's close, so its bar is in every program's
+slice (one reserve bar at least, never none), and the buy-and-hold reported beside 2022 is measured from that close. E2
+blanks nothing: a blanked look-back would need a hook in E1's runner
+or store and would cost a long-look-back program most of 2022 (the captain's call, with the later accessor).
 THE LOOSENING, stated: the bar reads seven Train years, not the nine of 2016-2024, so "active in three years" is three
 of seven, "no year's t below the floor" has two years fewer to fail in, and the two P&L rules sum seven years.
 

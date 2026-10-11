@@ -66,9 +66,11 @@ Stopping, from the lightest:
    session of it, and a result that carries a row of 2020 or 2021 is refused whole exactly as one of 2025 or 2026 is, so
    no 2020-2021 P&L reaches a family's record, the Train map, the yield ledger or a generator. The Train map, the
    briefs and the architect's text say "Train years 2016-19 and 2022-24". What of the reserve does reach Train: its
-   bars, as look-back. The 2022-2024 run reads the bars before 2022-01-03 as history (NEEDS `history`, up to 504
-   sessions), as a Validation run looks back on 2024's, so a program with look-back has 2022-2024 Train figures that
-   are functions of reserve bars; no session of the reserve is ever traded or scored (section 4 says what is tested).
+   bars, as look-back. The 2022-2024 run reads the bars before 2022-01-03 as history (NEEDS `history` + 1 sessions,
+   up to 505: the first decision is at the close of the session before the run's first, and E1's store hands it that
+   session and `history` before it), as a Validation run looks back on 2024's, so a program with look-back has
+   2022-2024 Train figures that are functions of reserve bars, and even a program with no look-back reads the last
+   2021 session; no session of the reserve is ever traded or scored (section 4 says what is tested).
 
    THE BAR equity-v1 (the design's 6b, on the Train years), on the summed runs at 1.0x and 1.5x the half-spread: at
    least 40 closed lots and 20 entry days in each of three or more of the seven Train years; no Train year's daily t
@@ -172,9 +174,12 @@ Stopping, from the lightest:
    generator read holds a figure, a row or a day of 2020-2021, whatever the reserve's P&L would have been; a runner
    that leaks a 2020 row is refused whole. It is NOT true that two markets that differ only in 2020-2021 give every
    E2 record byte for byte the same: on E1's runner the 2022-2024 run reads the bars before 2022-01-03 as look-back
-   (up to 504 sessions), so a program with look-back has 2022-2024 Train rows, P1/R1 sums, a pooled t and a Train-map
-   best t that are functions of reserve bars. Its 2016-2019 rows are the same in both markets, and a program that
-   reads no history is the same throughout (league/tests/test_elane_e2_e1.py, on E1's runner). FOR THE CAPTAIN: if
+   (`history` + 1 sessions, up to 505), so a program with look-back has 2022-2024 Train rows, P1/R1 sums, a pooled t
+   and a Train-map best t that are functions of reserve bars. Its 2016-2019 rows are the same in both markets. Even a
+   program with no look-back reads the last 2021 session (one reserve bar is in every 2022-2024 slice); the tested
+   one, which holds no price against another, has the same figures of its own throughout, and the buy-and-hold
+   reported beside its 2022 moves with that close (league/tests/test_elane_e2_e1.py, on E1's runner). FOR THE
+   CAPTAIN: if
    the later Thresholdout accessor needs the reserve's bars unseen too, the look-back before 2022-01-03 must be
    blanked by a hook in E1's runner or store (E2 cannot do it from its own files), at the cost of most of 2022 for a
    long-look-back program.
