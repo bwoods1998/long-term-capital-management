@@ -213,7 +213,10 @@ ANSWERS_SHARE = 0.5
 ANSWERS_EARLY = int(ANSWERS_SHARE * ANSWERS_MIN) + 1
 #: HOW A PROGRAM QUESTION'S ANSWER IS LOST TO A FAULT, never to a setting and never to a rule: the answer the lane paid
 #: for held no program (the Train round's own words, `RULES`' "no_program": a programless, an unreadable and a
-#: cut-short answer are all that refusal), or no route answered the question.
+#: cut-short answer are all that refusal), or no route answered the question. WHERE THE LINE IS: a stop before the bar
+#: judged a version, the same program sent again and a program a rule refuses are answers the lane could read, and
+#: the generator's own: each is in its author's next brief, and none is lost to a fault (the rules' refusals are
+#: `elane_refused`'s to judge).
 LOST_KINDS = ("no_program", "unanswered")
 LOST_WORDS = {"no_program": "answers held no program", "unanswered": "questions got no answer from a model route"}
 #: A QUESTION NO ROUTE ANSWERED counts only once no route has answered a program question for `IDLE_HOURS` WHILE THE

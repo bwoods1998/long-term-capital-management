@@ -184,7 +184,9 @@ of E1's.
      route answered), 8 at least, more than half were LOST TO A FAULT: the answer E2 paid for held no program
      (`write`'s own refusal, "the answer held no program": a programless, an unreadable and a cut-short answer all
      end there), or no route answered (`unanswered`). Work lost to a fault, never to a setting (`hold` did not
-     refuse the question: it was asked, and paid for) and never to a rule (`check_code` read no program). With
+     refuse the question: it was asked, and paid for) and never to a rule (`check_code` read no program). `write`'s
+     other refusals are answers it could read and the generator's own, each in its author's next brief: a stop
+     before any version was judged, the same program again, a program a rule refuses. None is lost to a fault. With
      fewer than 8 in the 6 h the last 8 asked since the running release started are judged, and before the eighth
      it stands once 5 are lost: the window and its reasons are `elane_refused`'s. The lane need not be idle: a
      family's revisions are asked on its birth route, so one route of `elane.e2.routes` that writes no program can

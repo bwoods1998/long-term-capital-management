@@ -1765,6 +1765,24 @@ class TheLanesAnswers(Case):
         check = self.equity()["elane_idle"]
         self.assertFalse(check["stalled"])
         self.assertNotIn("questions_lost", check["numbers"])
+        # WHERE THE LINE IS: a stop before any version was judged and the same program sent again are answers the lane
+        # could read, the generator's own (each is in its author's next brief): program questions, and none lost.
+        stop = ("a stop is accepted only once a version was judged by the bar (Y1, Y2, P1 or R1); none was: an invented "
+                "reason a model gave")
+        again = "the same program as v1, already scored"
+        self.assertEqual([EH.rule_of(why) for why in (NO_PROGRAM, stop, again)], ["no_program", "early_stop", "same_program"])
+        for why in (stop, again):
+            self.setUp()
+            self.lane([lambda f, why=why: refused_step(f, why)] * 8)
+            checks = self.equity()
+            self.assertEqual((checks["elane_idle"]["stalled"], checks["elane_idle"]["numbers"]["kind"],
+                              checks["elane_idle"]["numbers"]["refused_answers"]), (False, "pace", 8), why)
+            self.assertNotIn("questions_lost", checks["elane_idle"]["numbers"])
+            self.assertIn("STARVED BY A SETTING, not broken: ", checks["elane_idle"]["what"])
+            self.assertNotIn("an invented reason a model gave", json.dumps(checks))
+        rows = EH._questions({"rounds": [(NOW - 60.0, {"steps": [refused_step("x", stop), refused_step("x", again),
+                                                                  lost_step("x")]})]}, NOW - HOUR, NOW, [ROUTE])
+        self.assertEqual([(how, named) for _, how, named in rows], [(None, (ROUTE,)), (None, (ROUTE,)), ("no_program", (ROUTE,))])
 
     def test_most_lost_beside_a_failure_of_another_kind_is_said_after_it(self):
         house = lambda f: {"family": f, "version": 2, "house": "store", "why": "MissingData: invented",  # noqa: E731

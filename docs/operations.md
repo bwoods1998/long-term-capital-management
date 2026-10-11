@@ -488,6 +488,8 @@ the look on the House; real money only at Probe, inside the shared loss budget).
     eighth, once 5 are lost: they are most of eight whatever is still to be asked), more than half were LOST TO A
     FAULT: the answer E2 paid for held no program (the round's own words, "the answer held no program": a
     programless, an unreadable and a cut-short answer are all that refusal), or no route answered the question.
+    (A stop before any version was judged, the same program sent again and a program a rule refuses are answers
+    the lane could read and the generator's own, each in its author's next brief: none is lost to a fault.)
     That is work lost to a fault, never to a setting and never to a rule, and the lane need not be idle for it: a
     lane that still scores a version now and then while most of what it pays for holds no program stands too. A
     question no route answered counts only once no route has answered a program question for 3 h WHILE THE LANES

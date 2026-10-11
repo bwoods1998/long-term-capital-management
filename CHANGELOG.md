@@ -169,7 +169,9 @@ owner when the lanes next go wrong.
   reminder stopped): once a BROKEN kind stood under a release it HOLDS (`stall.json` `elane.broken`) until a
   version is scored after it stood, the release changes or no work is owed. Not changed by this round: programs
   refused before a run by several static rules with none most stay `elane_refused`'s to read (it stands on one
-  rule only), and stand on nothing in a held lane. The third check's break and its Sail-guard day are tests on the
+  rule only), and stand on nothing in a held lane; nor are a stop before any version was judged and the same
+  program sent again lost to a fault (answers the lane could read, the generator's own, each in its author's next
+  brief). The third check's break and its Sail-guard day are tests on the
   invented House, with a healthy lane that loses one answer in ten. `gateway/` is not touched by this round, nor
   `league/ops/registry.py` or `funnel.py`; of `league/ops/stall.py`, one sentence of its docstring (what a broken
   lane is).
