@@ -231,6 +231,12 @@ class TheExitWaitsEndCoversAPanelBasket(P.PanelCase if P is not None else unitte
         self.assertEqual((buy.symbol, buy.status), ("N010", "missed"))
         self.assertIn("exit(s) of its own program", buy.why)
         self.assertEqual(h.held(), ["N000", "N002", "N004"], "the two exits are out; nothing was bought")
+        # ... and the standing target plans the name again at Monday's close, for Tuesday's open (a hold day: no
+        # program code runs).
+        h.proof.sell = True
+        h.decide(P.MONDAY)
+        again = [(i.kind, i.symbol, i.status, i.exec_day) for i in h.panel_intents(decided_day=P.MONDAY.isoformat())]
+        self.assertEqual(again, [("buy", "N010", "planned", P.TUESDAY.isoformat())])
 
     def test_a_stage_that_passes_in_the_window_releases_the_basket_at_once(self):
         h = self.h
