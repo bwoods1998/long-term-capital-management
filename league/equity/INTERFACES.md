@@ -1234,7 +1234,9 @@ Money digest `11a1dc0c`, full digest `00c2bf6f` (`PINNED_DIGEST`); the rollback,
   bound of a `swarm.json` setting, which may only lower it); `PINNED_DIGEST`; and the four design blocks (this one,
   the constitution's `probe` comment between `# <equity-design>` and `# </equity-design>`, docs/operations.md and
   CHANGELOG.md between `<!-- equity-design:begin -->` and `<!-- equity-design:end -->`). Run again with the same
-  pair it changes nothing; `set_design 3 0.50` restores A20's design and E1's money digest (7e41909a) exactly. It
+  pair it changes nothing; `set_design 3 0.50` restores A20's seats and sleeve (on release E5-S alone that was E1's
+  money digest, 7e41909a, exactly; since release E5-A's seat block, section 18, it is the pair's pin with that
+  block, and 7e41909a with the block left out). It
   refuses, changing nothing, a pair outside THE GRID below (the tests pin each of its pairs' digests and hold the
   tree to one of them) and a design block whose words are not the tree's own; a block whose figures alone are stale
   it rewrites. `sized.sleeve_share` is NOT moved: the Sized sleeve's floor is the Probe's in `sized_sleeve_share`
@@ -1284,3 +1286,71 @@ Money digest `11a1dc0c`, full digest `00c2bf6f` (`PINNED_DIGEST`); the rollback,
   (A20's scenarios at A20's design as a table of its own; every pair against the hand rule), and the tests that
   named the pair, which now read it: `test_constitution`, `test_ci`, `test_elane`, `test_equity_money`,
   `test_equity_bands_money`, `test_dlane_report_equity`, `test_equity_e2e`, `test_live_long_single`.
+
+## 18. The seat rule (release E5-A, Oct 11, 2026; the captain's A24; money, swarm and book; CHANGES 5.5, 7.1, 8.3, 8.4, 10, as built)
+
+Who takes a free equity seat, and when an idle seat yields. Where a line above and this section differ, this section
+is the code. "First come" above describes the rollback value.
+
+- **7.1** (CHANGES; money): `equity_money.probe.seat` = {`rule`, `k_floor`, `idle_sessions`}, in force
+  {"activity-1-free", "0.25", 10}. `EQUITY_MONEY_CHOICES["probe.seat.rule"]` = ("activity-1-free", "first-come");
+  `EQUITY_MONEY_BOUNDS`: `probe.seat.k_floor` ("0.25", "0.25"), `probe.seat.idle_sessions` ("10", "60"), a whole
+  count. A table without the block is refused (`equity_money_problems`). The block is attached to the `probe` dict
+  under the table's literal, because `set_design` rewrites the `probe` row by its exact line. It is a money rule:
+  the money digest and `PINNED_DIGEST` moved once with it, and every pair of section 17's grid with them
+  (league/tests/equity_design.py `DIGESTS`; `DIGESTS_E5S` keeps the pins before the block). `EquityTable`
+  (league/live/money.py, inside the options execution fingerprint) is NOT edited and carries nothing of the block.
+- **The reader and the pure rule** (league/equity/bands.py; owner: swarm; no clock, no I/O):
+  - `seat_settings(constitution=None) -> SeatSettings(rule, k_floor, idle_sessions)`; `.first_come`. A block that
+    is absent or cannot be read is `SEAT_FALLBACK` ("first-come").
+  - `close_days(lots, *, floor) -> int`: the days on which the lots that closed (`exit_day`) have `weight`s summing
+    to at least `floor` - `K_TOLERANCE` (0.0005). Decimal sums. It reads those two fields and nothing else.
+  - `seat_counts(validation_result, train_results, *, floor) -> {"floor", "validation": {"close_days", "sessions"},
+    "train": {"close_days", "sessions"}}`; a "no_data" Train-era run adds nothing; any other run not "ok" raises.
+  - `seat_k(activity) -> Fraction | None`: min(Validation close days, Train-era close days x 250 / Train-era
+    sessions); None when the counts cannot be read.
+  - `SeatFacts(family, k, passed_at, flagged, seeded, seat_day, seated_sessions, quiet_sessions, flat)`;
+    `seat_key`, `seat_order` (not flagged, a readable K, the higher K, the earlier pass, the id); `seat_idle(facts,
+    settings)`; `seat_yielder(idle)` (the lowest K, the latest seated, the latest pass, the higher id).
+  - `seat_plan(holders, waiting, *, seats, settings, late=False, yielded_today=False) -> {"idle", "yields", "for",
+    "queue", "seat"}`: the plan of one band sync. Free seats first; then one idle seat yields for the best-ranked
+    unflagged program that would still wait. league/tests/fixtures/equity_seat_vectors.json holds 31 vectors of it.
+- **8.4** (CHANGES; swarm, league/swarm/elane.py): the family state's `elane_seat` (`SEAT_KEY`) = {version, run_sha,
+  floor, validation {close_days, sessions}, train {close_days, sessions}, at, source "look" | "backfill",
+  validation_run "look" | "stored" | "rerun"}, written ONCE. `look` writes it with the look, from the recorded
+  Validation run and the Train-era runs it already made (it keeps the `Run`s of `Isolated.segments` for this).
+  `seat_backfill(gate) -> [family]` (called at the end of `Gate.equity_round`, league/swarm/gate.py) writes it
+  for a Candidate, Probe or Sized family that has none: the Validation count from the stored run whose
+  `result_sha` is `elane_validation.result_sha` (`SwarmStore.run_result`), else `Isolated.validation` again; the
+  Train-era count from `Isolated.segments` again. No gate capability, no `Isolated.look`, no sealed window; a
+  failure is one House warning and is tried again after `SEAT_RETRY_SECONDS`. `seat_recorded`, `seat_activity`
+  read it. An equity identity adoption keeps the key (it is not in `EQUITY_SELECTION_KEYS`).
+- **8.3** (CHANGES; swarm, league/swarm/bands.py): `read(root, lanes=LANES, waiting=True)` (and `_read_equity`):
+  every passed Candidate that could hold a seat has a row; a Candidate's `seat` is "queue"; every row carries
+  `passed_at` (`banded_at`) and `seat_activity` (`elane.seat_activity`: the two counts, or None). The default read
+  is unchanged, key for key. `seat_plan(root)` reads the book's kv `eq_seat` from live.sqlite, read only;
+  `roster(root, lanes=LANES)` adds `rule`, `plan` and `order` (its own lists stay by pass time and say so).
+- **5.5** (CHANGES; book, league/equity/families.py): `EquityFamilies._rows` asks `waiting=True` unless the rule is
+  "first-come" (then the call is release E5-S's, argument for argument); `seats() -> int` is `elane.roster_seats`,
+  0 when closed or unreadable. `MemoryEquityFamilies(rows, seats=None)`: `seats()` None means the table's count.
+- **5.5** (CHANGES; book, league/equity/live.py): `_sync_instances` under "first-come" is release E5-S's band sync.
+  Otherwise `_seat_bands`: the holders judged as before (EDM1, sizing up); EDM1 over waiting programs with a
+  record (kv `eq_sticky`); `bands.seat_plan` on `_seat_facts` (`_flat`, `_last_ask`, the seat's day from
+  `eq_band_since`); `_yield` (one state transaction: flat again, `confirm_band` to "candidate", the instance
+  retired with why "yielded: ...", the flag and the plan written); the queue walked with fall-through. The seating
+  pass (`late`) fills free seats only, and revives a yielded instance that returns. The plan is kv `eq_seat`
+  (`SEAT_KEY`): {rule, seats, idle_sessions, day, holders, waiting, idle, sticky, passed, yield_day, last, order};
+  `seats()` and `health()["seats"]` return it. Ledger kind `equity.seat` (private): {action "seated" | "yielded" |
+  "returned" | "passed_over" | "waiting_demoted", family, version, day, rank, for, seeded, rule, why}.
+  `_house_exits`, `_open_block`, `_record_intents`, `_size` and the order path are not edited.
+- **10** (CHANGES; ops, league/ops/dlane_report.py): `read_book` adds `seat_plan`; `equity_seats(root, book, seeded)`
+  is the report's `equity.seats` ({rule, seats, as_of, holders, seeded_seats, seeded_statement, waiting,
+  idle_flagged, last_change, order, why, preregistered}); `A24_SEAT_RULE`, `A24_SEAT_COSTS`, `SEAT_RULE`;
+  `PREREGISTERED["seat_rule"]` says A24 replaced A14's forward seat sentence (which stays as registered).
+- **Costs and limits** (A24's, and the build's): closes concentrate in frequent traders; a daily slice of a quarter
+  sleeve can buy rank; a slow, non-idle incumbent keeps its seat; a sale is not an ask, so a program that held one
+  lot longer than the idle clock is idle at the first decision after it is flat. Outranking is NOT adopted.
+- **Rollback**: `probe.seat.rule` "first-come", one owner deploy, one money-digest move.
+- **Tests**: league/tests/test_equity_seats.py; league/tests/equity_seat_sequence.py and
+  fixtures/equity_seat_first_come.json (the week recorded on release E5-S); the changed pins in test_constitution,
+  test_equity_money, test_live_long_single, test_equity_design, test_equity_families and test_equity_book.

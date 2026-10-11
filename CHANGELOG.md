@@ -29,6 +29,55 @@ any other deploy.
 The running House release is `20261011T114321Z-af12ca87b92f` (main `87f9fd0c`, release E2.2, 11:44Z Oct 11), the
 gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
 
+### Release E5-A: the seat rule of the share lane ("activity-1-free"; the captain's A24), on `feat/equity-e5a-seat-rule` (unreleased; an owner deploy on top of release E5-S; THE MONEY DIGEST MOVES, the grant re-ratifies; no fingerprint moves)
+
+- **What it is.** Who takes a free seat was first come. It is now the seat rule the captain registered at 13:42Z
+  Oct 11, before the first live share close and before any program waited: `equity_money.probe.seat` = {`rule`
+  "activity-1-free", `k_floor` "0.25", `idle_sessions` 10}, a row of the money table with its bounds and choices.
+  A FREE seat goes to the best-ranked waiting passed program. The rank K is the smaller of the program's Validation
+  close days and its Train-era close days per 250 sessions, a day counted only when the lots closed on it sum to a
+  quarter of the sleeve (less 0.0005, the engine's rounding); ties go to the earlier look pass, then the family
+  id. K reads no P&L and no sealed window, and no public text prints it (a rank position only).
+- **The idle seat.** A seated program that is flat and has had no buy reach the venue, and none cut or refused by
+  the loss budget, for ten sessions of its seat is idle. It keeps its seat while no unflagged program is left
+  waiting, and yields at once when one is (one yield a decision day). A buy refused by the instrument cap, the
+  invested cap or cash does not count as asked. The yielded program waits flagged, behind every unflagged one,
+  and returns only into a free seat, by the same rank, with no new look.
+- **What it never does.** No trading program is stopped: OUTRANKING IS NOT ADOPTED, and the table does not allow
+  it as a value. No lot is sold, no exit is planned and no order is cancelled by the seat rule; a yield retires an
+  instance only inside the one state transaction that found it flat. `size_entry` and every owner line are
+  untouched (the base's cap tests run unchanged).
+- **Also in it.** EDM1 covers a waiting program that has a real record (sticky: it does not return). A seating
+  that does not take falls through to the next waiting program in the same sync. Seeded and bred programs follow
+  the same rule, and the `dlane` report says which seats the seeds hold (`equity.seats`).
+- **Where it lives.** The row and its bounds: league/constitution.py. Its reader and the pure rule (`seat_settings`,
+  `seat_counts`, `seat_k`, `seat_order`, `seat_idle`, `seat_plan`): league/equity/bands.py. The book applies it and
+  is the one source of the plan (league/equity/live.py `_seat_bands`, kv `eq_seat`, `health.json` `equity.seats`);
+  the swarm's reader shows the book every waiting Candidate (`bands.read(..., waiting=True)`) and its roster reports
+  the book's plan. K's two counts are written beside the look, once (league/swarm/elane.py `elane_seat`), and for
+  a program that passed before the release by `elane.seat_backfill` in the gate's equity round, from unsealed runs
+  only. league/live/money.py is not edited: `EquityTable` does not read the block.
+- **Its costs, as A24 states them.** Closes concentrate in frequent traders, so Done reached this way is weaker
+  evidence of skill; a daily slice of a quarter sleeve can buy rank; a slow, non-idle incumbent keeps its seat.
+- **Against the study's simulator** (EQDONE-3, whose seat logic was the reference): the rule built is the rule
+  simulated, with these differences, each resolved toward A24. (1) Free seats are filled before any idle yield: the
+  simulator yielded and re-seated an idle program in one sync when a seat was free, restarting its clock. (2) A
+  buy counts as asked when its order reached the venue, filled or not; the simulator's orders always fill. (3) K
+  is compared as an exact fraction and a close day's weights are summed in decimal; the simulator used floats.
+  (4) The seating pass fills a free seat between two decisions; the simulator seats once a day. (5) A seating
+  that does not take falls through; the simulator's always takes. (6) A program without its two counts ranks
+  last until the backfill writes them; the simulator knows every K. (7) The swarm's roster can lower the seats.
+- **Identities.** The money digest moves once, with the block: the pair in force is in the design block of release
+  E5-S below, and every pair of the grid moved with it (`DIGESTS` in league/tests/equity_design.py, regenerated
+  by the tree's own digest functions; each pair with the block left out is still release E5-S's pin,
+  `DIGESTS_E5S`). The options execution fingerprint (`b60410ad`) and the equity identity (`78022ca6`) are release
+  E5-S's: no file of league/live, league/gym or the equity evidence modules is edited.
+- **At the deploy.** Nobody is unseated; each seat keeps its own day and the idle clock counts from it. The grant
+  re-ratifies at the House's start. The swarm's next equity round writes K's counts for every passed program.
+- **Rollback**, one owner deploy: `equity_money.probe.seat.rule` "first-come" (one money-digest move; the grant
+  re-ratifies; nobody is unseated). Under it the band sync and the swarm's read are release E5-S's line for line:
+  league/tests/test_equity_seats.py holds a week recorded on release E5-S to it, entry for entry.
+
 ### Release E5-S: the seats and the sleeve of the share lane are two numbers, on `feat/equity-e5s-seats` (unreleased; an owner deploy on main `7d2d3c84`; THE MONEY DIGEST MOVES with the pair, the grant re-ratifies; no fingerprint moves, no evidence reset)
 
 - **What it is.** `equity_money.probe.max_programs` (the seats) and `probe.sleeve_share` are set together by one
@@ -82,7 +131,9 @@ Money digest `11a1dc0c`, full digest `00c2bf6f` (`PINNED_DIGEST`); the rollback,
   file of league/live, league/gym or the equity evidence modules is edited (league/live/money.py's two comments on
   the table's rows stay as A20 wrote them for that reason). The money digest and `PINNED_DIGEST` are the pair's, in
   the block above; every pair of the grid is pinned in `league/tests/equity_design.py`, and `set_design 3 0.50` is
-  E1's `7e41909a` / `e909eb10` again, to the last hex (the rollback, one owner deploy).
+  the rollback of the pair, one owner deploy. On this release alone it was E1's `7e41909a` / `e909eb10` again, to
+  the last hex; with release E5-A's seat block in the table the pair's digests are the ones the block above
+  states (and still E1's with that block left out).
 - **Also changed.** `league/ops/dlane_report.py`: A8.6's statement is built from the rows (`equity_probe_note`), no
   longer a sentence with A20's figures in it. The gateway is not edited.
 
