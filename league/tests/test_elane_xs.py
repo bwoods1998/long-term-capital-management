@@ -1265,8 +1265,21 @@ class ThePanelBirths(unittest.TestCase):
         self.assertEqual(sorted(out["born"]), ["etf-0", "etf-1", "rev-0", "rev-1"])
         whys = {item["slug"]: item["why"] for item in out["refused"]["items"]}
         self.assertIn("2 panel births are born", whys["rev-2"])
-        self.assertIn("2 share-program births are born", whys["etf-2"])
+        self.assertIn("4 equity births are born", whys["etf-2"])
         self.assertEqual(out["panel"], {"want": 2, "born": 2})
+        from league.swarm.elane_births import EquityQuota
+
+        quota = EquityQuota(F.new_store(self), self.settings, now=self.store.clock())
+        self.assertEqual((quota.want, quota.panel), (4, 0), "a store with no panel manifest: the pass is E2's own")
+        store = F.new_store(self)
+        F.ready(store.root)
+        quota = EquityQuota(store, self.settings, now=store.clock())
+        self.assertEqual((quota.want, quota.panel, quota.by_structure), (4, 2, True))
+        for _ in range(2):
+            self.assertTrue(quota.admits("equity"))
+            quota.born("equity")
+        self.assertIn("2 share-program births are born", quota.why_not("beta"))
+        self.assertIsNone(quota.why_not("equity", "panel"), "the panel's share is not the share programs' to fill")
 
     def test_a_proposal_outside_the_panels_box_is_refused_with_its_reason(self):
         closed = {"status": "refuted", "versions": {"1": {"fails": ["XT1"]}}}
