@@ -44,11 +44,12 @@ class TheTable(unittest.TestCase):
         self.assertEqual(e, M.EquityTable.from_constitution())
         self.assertIs(e.enabled, True, "A10.2: the switch ships on (elane.mode off and the stock proof hold the lane)")
         self.assertEqual((e.invested_share, e.cash_reserve, e.min_order_usd), (D("1.00"), D("50"), D("10")))
-        self.assertEqual((e.probe_sleeve_share, e.probe_max_programs), (D("0.66"), 3), "A20: 0.66 x E, three seats")
+        self.assertEqual((e.probe_sleeve_share, e.probe_max_programs), (D("0.50"), 3), "A20: 0.50 x E, three seats")
         self.assertEqual(dict(e.position_share), {"etf": D("0.50"), "stock": D("0.20")})
         self.assertEqual(dict(e.open_risk_weight), {"etf": D("0.20"), "stock": D("0.40")})
         self.assertEqual((e.sized_min_trades, e.sized_confidence, e.sized_kelly_fraction, e.sized_sleeve_share,
-                          e.sized_beat_bh, e.sized_min_probe_sessions), (20, 0.80, 0.25, D("0.50"), True, 5))
+                          e.sized_beat_bh, e.sized_min_probe_sessions), (1000, 0.80, 0.25, D("0.50"), True, 5),
+                         "the sizing-up step is parked (min_trades 1000); the rule's other rows are as pre-registered")
         self.assertEqual((e.demotion_rule, e.demotion_min_trades, e.demotion_z, e.program_loss_usd, e.twin_gap_bp,
                           e.twin_min_closes), ("edm1", 10, 1.645, D("-300"), D("15"), 5))
         self.assertEqual((e.min_hold_sessions, e.default_max_hold_sessions, e.max_hold_sessions, e.failed_decides_exit),
@@ -210,17 +211,18 @@ class TheCashRule(unittest.TestCase):
 
 
 class TheGrantReRatifies(StandingCase):
-    """Release E1's `equity_money` moves the money digest (THE PROBE TOTAL AT $800's fdf2ac7c -> d6510685, the block with
-    `enabled` True: the switch ships on, A10.2; and with the Probe sleeve at 0.66 x E, A20: one move with the block): a
+    """Release E1's `equity_money` moves the money digest (THE PROBE TOTAL AT $800's fdf2ac7c -> 7e41909a, the block with
+    `enabled` True: the switch ships on, A10.2; and with the Probe sleeve at 0.50 x E and the sizing-up step parked,
+    A20 and its study's review: one move with the block): a
     grant pinned on fdf2ac7c holds nothing after the deploy until the standing grant re-ratifies it at the House's
     start, on the owner's release change only. The stop (`enabled` False, a constitution-only change) is a digest of
-    its own, ratified the same way, and so is A20's rollback (the sleeve back at 0.25: ad8c761b); the rollback to a
+    its own, ratified the same way, and so is A20's rollback (the sleeve back at 0.25: 3a7c52d5); the rollback to a
     release before E1 brings fdf2ac7c back on the owner's deploy of it."""
 
     BEFORE = "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7"
-    E1 = "d65106857de570a351764b64054de1bf0c1e90f7f584a12e50e4924bb32372e1"
-    OFF = "a782f11f3e1cc0ffcc53b25c9822d4b24e5fa30a11f03451d6f7bef9d6cc1a8f"
-    QUARTER = "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367"
+    E1 = "7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a"
+    OFF = "23f17a1467610f8d252b55c6d6748f8fb1311a0142e3f92c43d4bff710886579"
+    QUARTER = "3a7c52d58911d0c1a39f58cbe79547e343683a18004355b52a9390c8aec04fd2"
 
     def pre_e1(self):
         patcher = patch.dict(CONSTITUTION)

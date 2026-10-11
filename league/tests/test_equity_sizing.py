@@ -10,7 +10,7 @@ from league.equity import config
 from league.equity.sizing import CAPS, Sized, SizingInputs, size_entry
 
 #: A House at E = $2,000 with a sleeve of $500 (both invented: `size_entry` takes the sleeve's dollars as a fact it is
-#: given), nothing held, plenty of cash and budget. The table's own Probe sleeve (0.66 x E since the captain's A20, Oct
+#: given), nothing held, plenty of cash and budget. The table's own Probe sleeve (0.50 x E since the captain's A20, Oct
 #: 11, 2026) is sized through this same function in league/tests/test_equity_sleeve.py.
 LIVE = SizingInputs(symbol="SPY", klass="etf", share=D("0.5"), usd=None, limit_price=D("100.00"), E=D("2000"),
                     sleeve_equity=D("500"), sleeve_free_cash=D("500"), sleeve_symbol_value=D("0"),

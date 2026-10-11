@@ -288,15 +288,16 @@ class TheFunnelAndTheBudget(EquityFixture):
 
     def test_the_shared_budget_leaves_the_options_probe_lane_little_room_a8_6(self):
         """The lane holds the LOWER of its Probe sleeves and the invested cap. Since the captain's A20 (the sleeves at
-        0.66 x E) three sleeves ask for 1.98 x E, so the invested cap's 1.00 x E is the bound: 0.20 x E of open risk."""
+        0.50 x E) three whole sleeves ask for 1.50 x E, so the invested cap's 1.00 x E is the bound: 0.20 x E of open
+        risk at most (three one-ETF programs, a lot of 0.25 x E each, hold 0.15 x E of it; the note says both)."""
         from league.constitution import CONSTITUTION
 
         constitution = {"options_money": {"probe": {"loss_budget_usd": "400"}},
-                        "equity_money": {"probe": {"sleeve_share": "0.66", "max_programs": 3}, "invested_share": "1.00",
+                        "equity_money": {"probe": {"sleeve_share": "0.50", "max_programs": 3}, "invested_share": "1.00",
                                          "open_risk_weight": {"etf": "0.20", "stock": "0.40"}}}
         em, probe = CONSTITUTION["equity_money"], CONSTITUTION["options_money"]["probe"]
         self.assertEqual((em["probe"]["sleeve_share"], em["probe"]["max_programs"], em["invested_share"],
-                          em["open_risk_weight"]["etf"], probe["loss_budget_usd"]), ("0.66", 3, "1.00", "0.20", "400"),
+                          em["open_risk_weight"]["etf"], probe["loss_budget_usd"]), ("0.50", 3, "1.00", "0.20", "400"),
                          "the fixture is the table in force")
         room = R.options_probe_room(2000, constitution)
         self.assertEqual(room, R.options_probe_room(2000), "and the table in force is read when none is passed")
@@ -323,11 +324,13 @@ class TheFunnelAndTheBudget(EquityFixture):
         room = R.options_probe_room(1000, bare)
         self.assertEqual((round(room["open_risk_share_of_e"], 6), room["equity_open_risk_usd"],
                           room["options_window_room_usd"], room["bound"], room["invested_share"]),
-                         (0.396, 396.0, 4.0, "sleeves", None))
+                         (0.3, 300.0, 100.0, "sleeves", None))
         self.assertEqual(room["statement"], R.EQUITY_PROBE_NOTE)
         self.assertIn("effectively off", R.EQUITY_PROBE_NOTE)
-        self.assertIn("3 x 0.66 E", R.EQUITY_PROBE_NOTE)
+        self.assertIn("3 x 0.50 E", R.EQUITY_PROBE_NOTE)
         self.assertIn("at most 0.20 x E", R.EQUITY_PROBE_NOTE)
+        self.assertIn("three one-ETF programs hold a lot of 0.25 x E each, 0.15 x E of open risk", R.EQUITY_PROBE_NOTE)
+        self.assertIn("$400 less its realized loss less 0.20 x the equity lots", R.EQUITY_PROBE_NOTE)
         self.assertIn("why", R.options_probe_room(2000, {"options_money": {"probe": {"loss_budget_usd": "400"}}}))
         self.assertIn("why", R.options_probe_room(None, constitution))
         self.assertEqual(self.report()["equity"]["options_probe_room"]["statement"], R.EQUITY_PROBE_NOTE)

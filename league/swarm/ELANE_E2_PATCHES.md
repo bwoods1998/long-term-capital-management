@@ -4,7 +4,8 @@ This file was E2's list of changes for the integrator. It is now the record of w
 to do. E2 (`feat/equity-e2`, carried at 04ca26c9: its A15 review fixes included) was merged into E1's final head
 8e11986b on branch `feat/equity-e2-int`, and E1's later commits were merged in after it (bb0f2671, then its review's
 fixes, 5472aa99 and 70948154, then its rehearsal on real data, 5084263e, then its verification's fixes and the lot
-scale (A20): 1159d421 and e643bca3, the head carried now); E2's own files
+scale (A20): 1159d421 and e643bca3, then the Probe sleeve at 0.50 x E and the parked sizing-up step: 05f83d9e, E1's
+frozen head and the one carried now); E2's own files
 (`league/swarm/elane_births.py`, `elane_train.py`, `elane_yield.py`, `elane_seal.py`, `elane_review.py`, their tests,
 and its branches in `league/swarm/architect.py` and `league/swarm/researcher.py`) merged with no conflict, and each
 patch below went in as one commit, in this order (11 was found by the full suite and added at the integration; 12 to
