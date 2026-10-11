@@ -23,8 +23,8 @@ or store and would cost a long-look-back program most of 2022 (the captain's cal
 THE LOOSENING, stated: the bar reads seven Train years, not the nine of 2016-2024, so "active in three years" is three
 of seven, "no year's t below the floor" has two years fewer to fail in, and the two P&L rules sum seven years.
 
-THE BAR, equity-v1 (the design's section 6b on the Train years; `train_score`, then `restart_check`). The summed runs at
-1.0x and at 1.5x the half-spread (`league.equity.config.K_BASE`, `K_STRESS`). A version PASSES when all hold:
+THE BAR, equity-v1 (the design's section 6b on the Train years; `train_score`, then `restart_check`, then
+`start_check`). The summed runs at 1.0x and at 1.5x the half-spread (`league.equity.config.K_BASE`, `K_STRESS`). A version PASSES when all hold:
   Y1  ACTIVE in at least `min_active_years` (3) of the seven Train years: a year with at least `year_min_trades` (40)
       closed lots and `year_min_days` (20) entry days, on the 1.0x runs;
   Y2  no Train year's t (the year's daily P&L t, `by_year.t_daily`; a flat year reads 0) below `year_t_floor` (-1.0),
@@ -36,6 +36,13 @@ THE BAR, equity-v1 (the design's section 6b on the Train years; `train_score`, t
       below). The House's decider child restarts on every deploy and a restart empties a program's memory: a program
       whose decisions hang on STATE beyond a cache of what ctx gives again would trade live other than its replay
       (and so would one whose decide fails once its STATE is gone).
+  START  (release E2.1; checked once STATE holds) each Train span run again from `start_shifts` (61 and 127) decision
+      sessions in, every run starting flat, gives the orders of the run from the span's first session on at least
+      `start_match` (99%) of each later run's compared sessions, and on at least `start_active` (95%) of those on
+      which either run asked an order (THE START CHECK below). The House starts every
+      program live on a fresh date, and every judged window starts flat: a program whose decisions depend on when its
+      run started (a profit lock, a size from the run's own standing, a clock counted from its first trade) trades
+      live other than its replay, and the share screen's false-positive line does not hold for it.
 REPORTED BESIDE, NEVER A BAR: the same-exposure buy-and-hold over the same sessions (`bh.pnl`), the mean
 time-matched excess (MTE: `mte.mean`, `mte.t`) and the DRIFT SHARE (the buy-and-hold P&L over the program's, while
 the program's is above zero: near one, the program earned what holding its average exposure earned). Every number
@@ -75,20 +82,67 @@ reloaded or missing instance, a ctx that cannot be built, a span with no session
 scored, and its `train_max_errors`-th such failure with no judgment of the version in between is an alert, once. A
 child that fails a decide is judged as a run's failure is.
 
+THE START CHECK (`start_check`, `later_runs`, `start_run`; release E2.1). A program's decisions must not depend on WHEN
+its run started. THE HOLE IT CLOSES: a program can stop or shrink its trading once its own run is ahead (a profit
+lock). E1's screen builds a program's floor from slices of long Train runs, which start flat once, while Validation
+and the sealed look each start flat; so a lock passes a positive-sum, t-above-a-floor screen far more often than the
+screen's stated rate. The static rule refuses the spellings it can follow and the paid readers' rubric names the
+pattern; this check runs the program and looks.
+  THE RUNS. For each Train span: run A, the bar's own 1.0x run from the span's first session, and one later run a
+  shift of `start_shifts` (61 and 127: two different primes, so a clock of any period above one is out of phase with
+  run A in at least one of them), each one more run of E1's isolated runner (`Isolated.train(start, end)`), starting
+  FLAT on the session after run A's decision number `shift` and ending with the span. Four more runs a version at the
+  spans' real lengths; they are the check's, kept in no record and stored as no run. Then one instance a run is
+  loaded through E1's decider kinds, never reset, and at every decision session each decides on ITS OWN run's ctx
+  (`state_inputs` over that run: its bars, its own lots, cash, equity and caps).
+  WHAT IS COMPARED. A later run's session is compared with run A's same session (a) once the later run has WARMED UP:
+  its own first max(NEEDS `history`, NEEDS `max_hold_sessions`) + `start_warm` (20) decision sessions are behind it
+  (run A may hold lots a fresh run does not; they are gone inside the maximum hold); and (b) BEFORE that, only where
+  the two runs show their program THE SAME BOOK (`same_book`: the same open lots, each by symbol, fill point, sessions
+  held, entry price and mark, and the same lots closed since the last call; never a lot's id, quantity, value, pnl or
+  tag). With the same bars, calendar and book, nothing but the run's own standing (its equity, cash and caps, its
+  lots' ids, sizes and tags, its memory) can make the two decides differ, so such a session is held to run A from the
+  later run's first decision. Without (b) a lock that closes inside the warm-up was invisible, and a program chose its
+  own warm-up by declaring a long `history`.
+  WHAT MATCHES (`start_orders`, then the restart check's `same_intents`). The same list of orders in the same order:
+  each order's kind, symbol and fill point; a buy's `share` or `usd` within `SIZE_TOL`; a sell names its lot's
+  symbol (two runs number their lots apart); tags are ignored (a program's own words). A decide that failed in one run
+  and not the other, and a session an instance was disqualified at, match nothing, as in the restart check.
+  THE RULE. A version passes START when EVERY later run matches run A on at least `start_match` (99%) of its compared
+  sessions AND on at least `start_active` (95%) of those on which either run asked an order (a program that trades
+  once a month asks nothing on nineteen sessions in twenty: read on all sessions alone, a fifth of its trades could
+  differ inside the 1%); else it fails the bar with the code START: the program's fault, like STATE (it judges a program, not the
+  mechanism, so it refutes nothing and spends no Validation try). Its record keeps the counts by later run and the
+  sessions that differed, counted from the later run's own first decision (never a day), and what the two runs asked
+  where they first differed; the next brief says so and says what a program may decide from (`start_text`).
+  WHAT FITS (`start_plan`). A shift is used in a span that leaves its later run at least `start_min` (120) warmed-up
+  sessions; a span too short for a shift goes without it and the record says so (`skipped`). On the Train spans
+  (1,006 and 753 sessions) the 61-session start fits every program the contract allows; the 127-session start does
+  not fit 2022-24 for a program with `history` above 486.
+  NEVER A SILENT PASS, as the restart check (`_decided`, the two checks' one reader). A check that cannot run or finish
+  (no decider, a reloaded or missing instance, a decider that restarted, a later run that ended in no result or does
+  not share its span's sessions, spans that fit no later start) is the House's (`StartCheckInterrupted`): the version
+  is not scored, and its `train_max_errors`-th such failure since it was last judged is an alert, once
+  (`elane_train_start`). A child that fails a later run or a decide is judged as a run's failure is.
+  A PASS JUDGED BEFORE THIS CHECK EXISTED (a verdict with no `start` record) is not current until its version has had
+  its Validation try: it is Train-scored again before E1 may validate it (`pass_current`).
+  WHAT IT COSTS, AND WHAT IT DOES NOT CATCH: league/swarm/ELANE_E2.md, section 3.
+
 WHAT A VERDICT IS (`score`). Only the PROGRAM's own doing is judged: its runs finished ("ok": the bar), it was
 disqualified by its own errors or timeouts ("DQ"), the child refused to load it ("LOAD": a `ProgramRefused`, a
 `CodeRefused` or a `NeedsRefused`), the child failed its run (or its restart check's decides) `train_max_errors` times
-in a row while other programs' Train judgments completed after the first of those failures ("RUN"), or its intents
-changed when its STATE was emptied ("STATE"). Anything else is the House's (no equity store yet, the store being
-rewritten, a decider child that could not start, a restart check that could not run or finish, a result outside the
-Train years, "no_data"): the version is NOT scored, spends no budget and asks no model; it is tried again after a
+in a row while other programs' Train judgments completed after the first of those failures ("RUN"), its intents
+changed when its STATE was emptied ("STATE"), or its orders changed with the day its run started ("START"). Anything
+else is the House's (no equity store yet, the store being rewritten, a decider child that could not start, a restart
+check or a start check that could not run or finish, a result outside the Train years, "no_data"): the version is NOT scored, spends no budget and asks no model; it is tried again after a
 backoff (`train_every_seconds` doubling with every failure of any kind, at most `BACKOFF_MAX`); a result outside the
-Train years is also an alert, and so is a restart check that could not finish `train_max_errors` times. THE HOUSE'S
+Train years is also an alert, and so is a restart check or a start check that could not finish `train_max_errors`
+times. THE HOUSE'S
 FAILURES ARE COUNTED BY KIND (`house_failure`; the record's `infra`): "in a row" for RUN means the child's failures of
 this version one after another, so a failure of another kind in between (a restart check the House interrupted, whose
 attempt ran the version's Train runs through; a store being rewritten) starts the row again and never counts toward
-RUN; the restart check's alert counts that kind's failures since the version was last judged, whatever came between,
-and is sent once. Of the verdicts, only Y1, Y2, P1 and R1 judge the MECHANISM (`JUDGED`); the others judge a program
+RUN; the restart check's alert and the start check's each count that kind's failures since the version was last judged,
+whatever came between, and each is sent once. Of the verdicts, only Y1, Y2, P1 and R1 judge the MECHANISM (`JUDGED`); the others judge a program
 that could not be judged.
 
 THE REVIEW (league/swarm/elane_review.py). A program holding a raw price or volume level against a constant or a PARAMS
@@ -99,7 +153,8 @@ writes the record E1's look reads (`state["review"]`) and makes it the family's 
 that version ("REVIEW") and spends no try.
 
 THE RECORD (family state `STATE_KEY`, E2's own; `record_of`). Per version: its verdict, its fails, its Train figures,
-its restart check's counts (`state`) and the equity identity it was judged under (`identity`); the family's `status`
+its restart check's counts (`state`), its start check's (`start`) and the equity identity it was judged under
+(`identity`); the family's `status`
 ("researching", "passed", "refuted", "stalled", "closed"), `passed_version`, a pending `review`, the `passed_review`
 (E2's copy of the record E1 reads), its write `attempts`, its `refused` programs and an `infra` backoff. The FIRST
 version that passes the bar AND the review ends the family's Train research: it is the lineage's one Validation try
@@ -182,13 +237,15 @@ TRAIN_LABEL = "Train years 2016-19 and 2022-24"
 #: The bar's rules (the design's 6b; rules, never market figures). `state_every`, `state_first`, `state_match`: THE
 #: RESTART CHECK (STATE emptied `state_first` sessions into a span, then every `state_every`; the share that must match).
 #: `state_first` shares no factor with `state_every`, so no counter's period keeps in phase with the resets.
-#: `start_shifts`, `start_warm`, `start_min`, `start_match`: THE START CHECK (the later starts, in decision sessions into
-#: a Train span: two different primes, so no clock's period divides both; the sessions added to a later run's warm-up;
-#: the warmed-up sessions a later run must have for its shift to be used; the share of its compared sessions that must
-#: match).
+#: `start_shifts`, `start_warm`, `start_min`, `start_match`, `start_active`: THE START CHECK (the later starts, in
+#: decision sessions into a Train span: two different primes, so no clock's period divides both; the sessions added to
+#: a later run's warm-up; the warmed-up sessions a later run must have for its shift to be used; the share of its
+#: compared sessions that must match; and the share that must match of those on which either run asked an order, so a
+#: program that trades on few sessions cannot hide what differs among the sessions that ask nothing).
 BAR: dict[str, Any] = {"min_active_years": 3, "year_min_trades": 40, "year_min_days": 20, "year_t_floor": -1.0,
                        "cost_ratio": 0.5, "state_every": 20, "state_first": 7, "state_match": 0.99,
-                       "start_shifts": (61, 127), "start_warm": 20, "start_min": 120, "start_match": 0.99}
+                       "start_shifts": (61, 127), "start_warm": 20, "start_min": 120, "start_match": 0.99,
+                       "start_active": 0.95}
 #: The decide limits the restart check loads its instances with (league/equity/EQUITY.md: 1 second a call, 25 errors).
 DECIDE_TIMEOUT, DECIDE_MAX_ERRORS = 1.0, 25
 #: THE SAME SIZE (the restart check): two buys' sizes within these are one size. A `share` within one part in a million
@@ -206,8 +263,9 @@ FAILS: dict[str, str] = {
              "match)",
     "START": f"run again from later starts ({' and '.join(str(x) for x in BAR['start_shifts'])} sessions into a Train "
              f"span, each run starting flat as a live program does on its first day), the program's orders matched the "
-             f"run from the span's start on fewer than {BAR['start_match']:.0%} of a later run's compared sessions: its "
-             "decisions depend on when its run started",
+             f"run from the span's start on fewer than {BAR['start_match']:.0%} of a later run's compared sessions (or "
+             f"on fewer than {BAR['start_active']:.0%} of those on which either run asked an order): its decisions "
+             "depend on when its run started",
     "WINDOW": f"the Train result carried a day outside the {TRAIN_LABEL} and was refused whole",
     "Y1": f"active (at least {BAR['year_min_trades']} closed lots on {BAR['year_min_days']} entry days) in fewer than "
           f"{BAR['min_active_years']} of the {len(TRAIN_YEARS)} Train years",
@@ -226,7 +284,8 @@ BOUNDS: dict[str, tuple[float, float]] = {"train_budget": (1, 12), "train_max_at
 EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 STATUSES = ("researching", "passed", "refuted", "stalled", "closed")
 #: The fails that judge the MECHANISM on Train (the bar's). A family is REFUTED only with a version judged by one of these;
-#: RUN, DQ, LOAD, REVIEW and STATE judge a program, so a family with no other is STALLED (no graveyard row, no cell count).
+#: RUN, DQ, LOAD, REVIEW, STATE and START judge a program, so a family with no other is STALLED (no graveyard row, no
+#: cell count).
 JUDGED = ("Y1", "Y2", "P1", "R1")
 #: The exception classes (by name, anywhere in the class's MRO) that are a program the child would not load: "LOAD".
 LOAD_REFUSALS = ("ProgramRefused", "CodeRefused", "NeedsRefused")
@@ -525,8 +584,8 @@ def train_score(base: Mapping[str, Any] | None, stress: Mapping[str, Any] | None
     """equity-v1's Y1, Y2, P1 and R1 on a version's 1.0x (`base`) and 1.5x (`stress`) Train results, each the Train
     spans' runs summed (`combine`; the module docstring): {objective, passed, fails, why, score (the pooled daily t at
     1.0x), years, active_years, pnl_10, pnl_15, ratio, summary, beside}. A result outside the Train years (WINDOW) or
-    not "ok" (RUN) is judged on nothing else and shows no figure. STATE is the restart check's (`restart_check`), run
-    on the House once these hold."""
+    not "ok" (RUN) is judged on nothing else and shows no figure. STATE is the restart check's (`restart_check`) and
+    START the start check's (`start_check`), run on the House once these hold."""
     out: dict[str, Any] = {"objective": OBJECTIVE, "passed": False, "fails": [], "why": None, "score": None,
                            "years": {}, "active_years": 0, "pnl_10": None, "pnl_15": None, "ratio": None,
                            "summary": {}, "beside": {}}
@@ -584,7 +643,14 @@ def bar_text() -> str:
             "carry a value from session to session and update it in place (a running sum, a moving average, a peak "
             "since entry): ctx's history is adjusted as of each session and rounded, so the carried value drifts from "
             "what ctx gives now and the sizes differ; recompute it from ctx.bars at every call (a lot's own facts are "
-            "in ctx.positions). Reported beside, never a bar: the same-exposure "
+            f"in ctx.positions). (START) each Train span run again from "
+            f"{' and '.join(str(x) for x in BAR['start_shifts'])} sessions in, every run starting flat, the program's "
+            f"orders (each order's kind, symbol and fill point, each buy's size; tags apart) match the run from the "
+            f"span's start on at least {BAR['start_match']:.0%} of each later run's sessions (and on at least "
+            f"{BAR['start_active']:.0%} of those on which either run asked an order), compared once the later "
+            "run has warmed up (the longer of the program's history and maximum hold, and "
+            f"{BAR['start_warm']} sessions more) and before that wherever the two runs hold the same lots. "
+            f"{START_ADVICE} Reported beside, never a bar: the same-exposure "
             "buy-and-hold over the same sessions, the mean time-matched excess (MTE) and the drift share. The first "
             "version that passes is the lineage's ONE Validation try, then ONE sealed look; their outcomes are sealed and "
             "never shown to anyone who writes programs.")
@@ -639,15 +705,18 @@ def tried(store: Any, fid: str, n: int) -> bool:
 
 def pass_current(store: Any, fam: Mapping[str, Any] | None) -> bool:
     """THE IDENTITY (the module docstring): the family's pass was judged under the equity identity in force, or its
-    version has had its Validation try (E1 owns it from there), or no identity can be read."""
+    version has had its Validation try (E1 owns it from there), or no identity can be read. AND THE WHOLE BAR (release
+    E2.1): a pass whose verdict carries no start check (`start`: it was judged before START was part of the bar) is
+    not current either, until its version has had its try."""
     n = passed_version(fam)
     if n is None:
         return False
-    now = identity()
-    if now is None:
-        return True
     verdict = versions_of(record_of(fam)).get(str(n)) or {}
-    return verdict.get("identity") == now or tried(store, str((fam or {}).get("id")), n)
+    whole = isinstance(verdict.get("start"), Mapping)
+    now = identity()
+    if now is None and whole:
+        return True
+    return (whole and verdict.get("identity") == now) or tried(store, str((fam or {}).get("id")), n)
 
 
 def may_validate(store: Any, fam: Mapping[str, Any] | None, n: Any) -> bool:
@@ -1210,9 +1279,11 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
     reset, each deciding on ITS OWN run's ctx at every session of its run; a later run's answer is held against the
     base run's at the same session.
 
-    {sessions (compared, all later runs), matched, share (the LOWEST later run's: the one the rule reads), need, warm,
-    shifts, held (every later run matched on at least `BAR["start_match"]` of its compared sessions), runs ([{span,
-    shift, sessions, early (those compared before its warm-up ended: the same book), matched, share, held,
+    {sessions (compared, all later runs), matched, share (the LOWEST later run's: the one the rule reads), need,
+    active (the compared sessions on which either run asked an order), active_matched, active_share (the lowest later
+    run's), active_need, warm, shifts, held (every later run matched on at least `BAR["start_match"]` of its compared
+    sessions AND on at least `BAR["start_active"]` of its active ones), runs ([{span, shift, sessions, early (those
+    compared before its warm-up ended: the same book), matched, share, active, active_matched, active_share, held,
     disqualified, failed, sized, misses (its first `START_MISSES` differing sessions, counted from its own first
     decision), first_miss ({session, what ("orders" | "size" | "failed" | "disqualified"), base, later: the two runs'
     orders in words})}]), skipped ([{span, shift, why}]), disqualified, failed, sized, size_gap, first_miss ({span,
@@ -1224,7 +1295,7 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
     later run that does not start `shift` decision sessions into its span or does not share the span's sessions, a
     later run with fewer than `BAR["start_min"]` warmed-up sessions, and spans that fit no later start at all. The
     decider's own errors pass through. Every instance is dropped at the end."""
-    need = float(BAR["start_match"])
+    need, busy = float(BAR["start_match"]), float(BAR["start_active"])
     payload = {"code": str(code), "params": dict(params or {}), "name": str(name), "timeout": DECIDE_TIMEOUT,
                "max_errors": DECIDE_MAX_ERRORS}
     restarts = getattr(decider, "restarts", None)
@@ -1264,7 +1335,8 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
                 tally[key] = load(key)
                 others.append({"key": key, "inputs": iter(run.inputs),
                                "out": {"span": span, "shift": shift, "sessions": 0, "early": 0, "matched": 0,
-                                       "disqualified": 0, "failed": 0, "sized": 0, "misses": [], "first_miss": None}})
+                                       "active": 0, "active_matched": 0, "disqualified": 0, "failed": 0, "sized": 0,
+                                       "misses": [], "first_miss": None}})
             seen = 0
             for i, inputs in enumerate(base.inputs):
                 if i >= len(days):
@@ -1295,6 +1367,8 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
                     rb, erred_b = answers[other["key"]]
                     out["sessions"] += 1
                     mine, yours = start_orders(ra.get("intents"), inputs), start_orders(rb.get("intents"), theirs)
+                    asked = bool(mine or yours)  # a session on which either run asked an order
+                    out["active"] += int(asked)
                     what = None
                     if erred_a is None or erred_b is None:
                         out["disqualified"] += 1  # a disqualified instance answers nothing: no match
@@ -1312,6 +1386,7 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
                             what = "size" if gaps else "orders"
                     if what is None:
                         out["matched"] += 1
+                        out["active_matched"] += int(asked)
                         continue
                     if len(out["misses"]) < START_MISSES:
                         out["misses"].append(k)
@@ -1340,13 +1415,17 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
                                     "compare")
     for out in runs:
         out["share"] = round(out["matched"] / out["sessions"], 4) if out["sessions"] else 0.0
-        out["held"] = bool(out["sessions"]) and out["matched"] >= need * out["sessions"] - 1e-9
+        out["active_share"] = round(out["active_matched"] / out["active"], 4) if out["active"] else 1.0
+        out["held"] = (bool(out["sessions"]) and out["matched"] >= need * out["sessions"] - 1e-9
+                       and out["active_matched"] >= busy * out["active"] - 1e-9)
     sessions = sum(out["sessions"] for out in runs)
     matched = sum(out["matched"] for out in runs)
     worst = next((out for out in runs if not out["held"]), None) or next((out for out in runs if out["first_miss"]), None)
     first_miss = {"span": worst["span"], "shift": worst["shift"], **worst["first_miss"]} \
         if worst is not None and worst["first_miss"] else None
     return {"sessions": sessions, "matched": matched, "share": min(out["share"] for out in runs), "need": need,
+            "active": sum(out["active"] for out in runs), "active_matched": sum(out["active_matched"] for out in runs),
+            "active_share": min(out["active_share"] for out in runs), "active_need": busy,
             "warm": warm, "shifts": [int(x) for x in BAR["start_shifts"]], "runs": runs, "skipped": skipped,
             "disqualified": sum(out["disqualified"] for out in runs), "failed": sum(out["failed"] for out in runs),
             "sized": sum(out["sized"] for out in runs),
@@ -1356,8 +1435,8 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
 
 #: What of a start check the record keeps (`with_start`): counts, sessions counted from a later run's own start and the
 #: program's own orders in words; no day and no market figure.
-START_KEYS = ("sessions", "matched", "share", "need", "warm", "shifts", "runs", "skipped", "disqualified", "failed",
-              "sized", "size_gap", "first_miss")
+START_KEYS = ("sessions", "matched", "share", "need", "active", "active_matched", "active_share", "active_need", "warm",
+              "shifts", "runs", "skipped", "disqualified", "failed", "sized", "size_gap", "first_miss")
 
 
 def with_start(verdict: Mapping[str, Any], check: Mapping[str, Any]) -> dict[str, Any]:
@@ -1367,7 +1446,8 @@ def with_start(verdict: Mapping[str, Any], check: Mapping[str, Any]) -> dict[str
     out["start"] = {k: check.get(k) for k in START_KEYS}
     if not check.get("held") or not check.get("sessions"):
         out.update(passed=False, fails=["START"],
-                   why=f"{FAILS['START']}: the lowest later run matched {_pct(check.get('share'))} of its sessions")
+                   why=f"{FAILS['START']}: the lowest later run matched {_pct(check.get('share'))} of its sessions and "
+                       f"{_pct(check.get('active_share'))} of those with an order")
     return out
 
 
@@ -1569,7 +1649,15 @@ ctx.positions and the clock from ctx's calendar fields, never from a count you k
 STATE at any session, lots held or not: a decide that raises after a restart is no match. Never carry a value from
 session to session and update it in place (a running sum, a moving average, a peak since entry): ctx's history is
 adjusted as of each session and rounded, so the carried value drifts from what ctx gives now and your buys' sizes differ
-(they must agree to six places of a share); recompute it from ctx.bars at every call.
+(they must agree to six places of a share); recompute it from ctx.bars at every call. THE START RULE (part of the bar):
+the House starts every program live on a fresh date and every judged run starts flat, so the bar runs your program again
+from later starts inside each Train span and fails it (START) unless its orders match the run from the span's start on
+99% of each later run's sessions and on 95% of those where either run asked an order. Decide from ctx.bars, ctx's calendar fields and each lot's own facts (its symbol, entry,
+mark, held_sessions, its own return) alone, never from how your run stands: not ctx.equity, ctx.cash or ctx.caps, not a
+lot's qty, value, pnl or weight in the sleeve as a measure of the run, not a lot's id, not a value carried from earlier
+lots in a tag or in STATE, not a count of sessions, lots or wins since the run began. Size a buy by a constant share of
+the sleeve. A hold that simply ends at the House's max-hold exit and is bought again at once is counted from the run's
+start too: exit and re-enter on ctx's calendar (ctx.weekday, ctx.session_of_month) or on a market condition.
 
 Reply with ONE JSON object: {"program": "<the whole Python file>", "note": "what this version changes and why, one or two
 sentences"}; or, once a version of yours was judged by the bar (Y1, Y2, P1 or R1) and no honest revision is left,
@@ -1660,8 +1748,10 @@ def start_text(v: Mapping[str, Any]) -> str:
              f"{'were' if len(left) != 1 else 'was'} not run)" if left else "")
     head = (f"Start check: run again from {shifts} sessions into each Train span (every run starts flat){short}, its "
             f"orders matched the run from the span's start on {start.get('matched')} of {start.get('sessions')} compared "
-            f"sessions; the lowest of the {len(runs)} later runs matched {_pct(start.get('share'))} "
-            f"({_pct(start.get('need'))} needed of each)")
+            f"sessions, and on {start.get('active_matched')} of the {start.get('active')} on which either run asked an "
+            f"order; the lowest of the {len(runs)} later runs matched {_pct(start.get('share'))} of its sessions "
+            f"({_pct(start.get('need'))} needed of each) and {_pct(start.get('active_share'))} of those with an order "
+            f"({_pct(start.get('active_need'))} needed)")
     failed = [r for r in runs if not r.get("held")]
     if not failed:
         return head + "."
@@ -1671,8 +1761,8 @@ def start_text(v: Mapping[str, Any]) -> str:
         lost = int(_num(r.get("sessions")) or 0) - int(_num(r.get("matched")) or 0)
         more = f" and {lost - len(misses)} more" if lost > len(misses) else ""
         said.append(f"the run started {r.get('shift')} sessions into span {int(_num(r.get('span')) or 0) + 1} matched "
-                    f"{r.get('matched')} of {r.get('sessions')} and differed on its sessions "
-                    f"{', '.join(str(k) for k in misses)}{more}")
+                    f"{r.get('matched')} of {r.get('sessions')} ({r.get('active_matched')} of {r.get('active')} with an "
+                    f"order) and differed on its sessions {', '.join(str(k) for k in misses)}{more}")
     miss = start.get("first_miss") if isinstance(start.get("first_miss"), Mapping) else None
     kinds = {"size": "the two runs asked the same orders in different sizes",
              "failed": "the decide failed (raised, timed out or returned a malformed intent) in one run and not in the "
@@ -1703,8 +1793,9 @@ START_ADVICE = ("The House starts every program live on a fresh date, so a progr
                 "mark, held_sessions and own return) alone, NEVER from how the run stands: not ctx.equity, ctx.cash or "
                 "ctx.caps, not a lot's qty, value, pnl or weight in the sleeve as a measure of the run, not a lot's id, "
                 "not a value carried from earlier lots in a tag or in STATE, not a count of sessions, lots or wins since "
-                "the run began. A hold that ends at the House's max-hold exit and is bought again at once is counted "
-                "from the run's start too: exit and re-enter on ctx's calendar or on a market condition.")
+                "the run began. Size a buy by a constant share of the sleeve. A hold that ends at the House's max-hold "
+                "exit and is bought again at once is counted from the run's start too: exit and re-enter on ctx's "
+                "calendar or on a market condition.")
 
 
 def _pct(x: Any) -> str:
