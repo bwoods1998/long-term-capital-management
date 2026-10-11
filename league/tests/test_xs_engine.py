@@ -1275,11 +1275,24 @@ class ThePooledReading(EngineCase):
             self.assertEqual(summary[key], one["summary"][key] + two["summary"][key], key)
         dates = [*results.close_dates(one["lots"], 1000).values(), *results.close_dates(two["lots"], 1000).values()]
         self.assertEqual(summary["close_dates"], len(dates))
+        # what the Train bar reads beside: the turnover, the cost share and the dilution over all the sessions, the
+        # vanish, cell and refusal counts and the haircut sensitivities added
+        a, b = one["summary"], two["summary"]
+        for key in ("costs", "gross", "delta", "sum_w", "sum_x_h0", "sum_x_h1"):
+            self.assertEqual(summary[key], math.fsum([a[key], b[key]]), key)
+        self.assertAlmostEqual(summary["cost_share"], summary["costs"] / summary["gross"], places=6)
+        self.assertAlmostEqual(summary["dilution"], summary["delta"] / summary["sum_w"], places=6)
+        self.assertAlmostEqual(summary["exposure_mean"], summary["sum_w"] / summary["days"], places=6)
+        weights = [lot["weight"] for result in (one, two) for lot in result["lots"]]
+        self.assertAlmostEqual(summary["turnover"], math.fsum(weights) / (summary["days"] / 252), places=4)
+        for key in ("vanished", "cells", "refused"):
+            self.assertEqual(summary[key], {name: a[key][name] + b[key][name] for name in a[key]}, key)
         self.assertEqual(sorted(pooled["by_year"]), ["2031", "2032"])
         self.assertEqual(pooled["by_year"]["2031"]["days"], one["by_year"]["2031"]["days"])
         self.assertEqual(math.fsum(row["sum_x"] for row in pooled["by_year"].values()), summary["sum_x"])
         bad = results.pooled([one, results.failed("p", "boom")])
         self.assertEqual(bad["status"], "error")
+        self.assertIsNone(bad["summary"]["sum_x"], "a sum one of the runs does not carry is no sum")
 
     def test_t_is_e1s_expression_and_the_newey_west_t_beside(self):
         from league.equity.screen import holdout_t

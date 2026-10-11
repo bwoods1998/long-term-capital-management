@@ -11,11 +11,13 @@ THE RESULT RECORD (a plain dict; in-House only: `view` decides what a researcher
                 `failed`), needs
     summary     {days, invested_days, rebalances (called decisions with a non-empty target), calls, lots, closed,
                 round_trips, pnl, realized, fees, dividends (cash-book dollars), sum_r, sum_x, sum_x15, sum_u,
-                sum_bench, t_x, t_x_nw5 (Newey-West, lag 5), t_r, basket ("basket-led" when sum bench >= sum x, else
-                "selection-led"), exposure_mean, names_mean, turnover, costs, cost_share, dilution, cells {small,
-                under5}, vanished {deal, other}, refused {no_bar, ahead, last}, sum_x_h0, sum_x_h1 (sum x at haircut 0
-                and 1), close_dates, sd_date_return (over the run's close dates, the sd, ddof 1, of that date's summed
-                lot net over their summed entry notional; None under 2 dates)}
+                sum_bench, sum_w, t_x, t_x_nw5 (Newey-West, lag 5), t_r, basket ("basket-led" when sum bench >= sum
+                x, else "selection-led"), exposure_mean, names_mean, turnover (entry notional over E0, a year), costs,
+                gross, delta (the sums of the residual's cost series, gross residual and diluted exposure),
+                cost_share (costs over the gross residual, when that is above zero), dilution (delta over sum_w),
+                cells {small, under5}, vanished {deal, other}, refused {no_bar, ahead, last}, sum_x_h0, sum_x_h1
+                (sum x at haircut 0 and 1), close_dates, sd_date_return (over the run's close dates, the sd, ddof 1,
+                of that date's summed lot net over their summed entry notional; None under 2 dates)}
     by_year     {year: {days, sum_x, sumsq_x, sum_x15, sum_r, rebalances, closed}}
     daily       rows in `DAILY`'s order, one a run session: the day (ISO), then THE PRE-REGISTERED SERIES of
                 `placebo.residual` (constant-weight on E0, never the cash book): r, x, x15, u, w, bench (B), exits (lots
@@ -72,9 +74,12 @@ TRAIN_VIEW = ("status", "summary", "by_year", "pick_counts", "runtime")
 #: Sessions a year (the turnover's unit), and the lag of the Newey-West t reported beside the plain one.
 YEAR_SESSIONS = 252.0
 NW_LAG = 5
-#: The sums `pooled` adds across runs, and the summary's counts it adds with them.
-POOLED_SUMS = ("sum_r", "sum_x", "sum_x15", "sum_u", "sum_bench", "pnl", "realized", "fees", "dividends", "costs")
+#: The sums `pooled` adds across runs (None when a run lacks one), the summary's counts it adds with them, and the
+#: counts it adds key by key.
+POOLED_SUMS = ("sum_r", "sum_x", "sum_x15", "sum_u", "sum_bench", "sum_w", "pnl", "realized", "fees", "dividends",
+               "costs", "gross", "delta", "sum_x_h0", "sum_x_h1")
 POOLED_COUNTS = ("days", "invested_days", "rebalances", "calls", "lots", "closed", "round_trips")
+POOLED_TALLIES = ("cells", "vanished", "refused")
 _ZERO = 1e-12
 
 
@@ -183,6 +188,20 @@ def _held(daily: Sequence[Sequence[Any]], lots: Sequence[Mapping[str, Any]]) -> 
     return out
 
 
+def _shares(costs: Any, gross: Any, delta: Any, sum_w: Any) -> dict[str, float | None]:
+    """{cost_share, dilution}: the costs over the gross residual (None unless that is above zero), and the diluted
+    exposure over the exposure (None with no exposure)."""
+    known = all(v is not None for v in (costs, gross))
+    return {"cost_share": _r(float(costs) / float(gross), 6) if known and float(gross) > _ZERO else None,
+            "dilution": _r(float(delta) / float(sum_w), 6) if delta is not None and sum_w is not None
+            and float(sum_w) > _ZERO else None}
+
+
+def _turnover(weights: Sequence[float], days: int) -> float | None:
+    """The entry notional over E0, a year of `YEAR_SESSIONS` sessions."""
+    return _r(math.fsum(weights) / (max(int(days), 1) / YEAR_SESSIONS), 4)
+
+
 def summarize(daily: Sequence[Sequence[Any]], lots: Sequence[Mapping[str, Any]],
               picks: Sequence[Mapping[str, Any]], capital: Any, *,
               beside: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -203,7 +222,6 @@ def summarize(daily: Sequence[Sequence[Any]], lots: Sequence[Mapping[str, Any]],
     held = _held(daily, lots)
     called = [p for p in picks if p.get("called")]
     costs, gross, delta = beside.get("costs"), beside.get("gross"), beside.get("delta")
-    years = max(days, 1) / YEAR_SESSIONS
     sd_dates = _sd(list(by_date.values()))
     return {
         "days": days, "invested_days": sum(invested), "rebalances": sum(1 for p in called if p.get("targets")),
@@ -213,16 +231,14 @@ def summarize(daily: Sequence[Sequence[Any]], lots: Sequence[Mapping[str, Any]],
         "fees": round(math.fsum(float(lot.get("fees") or 0.0) for lot in lots), 2),
         "dividends": round(math.fsum(float(lot.get("div") or 0.0) for lot in lots), 2),
         "sum_r": math.fsum(r), "sum_x": sum_x, "sum_x15": math.fsum(x15), "sum_u": math.fsum(u),
-        "sum_bench": sum_bench, "t_x": t_stat(x) if days >= 2 else None, "t_x_nw5": nw_t(x),
+        "sum_bench": sum_bench, "sum_w": sum_w, "t_x": t_stat(x) if days >= 2 else None, "t_x_nw5": nw_t(x),
         "t_r": t_stat(r) if days >= 2 else None,
         "basket": "basket-led" if sum_bench >= sum_x else "selection-led",
         "exposure_mean": _r(sum_w / days, 6) if days else None,
         "names_mean": _r(math.fsum(held) / days, 4) if days else None,
-        "turnover": _r(math.fsum(float(lot.get("weight") or 0.0) for lot in lots) / years, 4),
-        "costs": None if costs is None else float(costs),
-        "cost_share": _r(float(costs) / float(gross), 6) if costs is not None and gross is not None
-        and float(gross) > _ZERO else None,
-        "dilution": _r(float(delta) / sum_w, 6) if delta is not None and sum_w > _ZERO else None,
+        "turnover": _turnover([float(lot.get("weight") or 0.0) for lot in lots], days),
+        "costs": None if costs is None else float(costs), "gross": None if gross is None else float(gross),
+        "delta": None if delta is None else float(delta), **_shares(costs, gross, delta, sum_w),
         "cells": dict(beside.get("cells") or {}), "vanished": dict(beside.get("vanished") or {}),
         "refused": dict(beside.get("refused") or {}),
         "sum_x_h0": beside.get("sum_x_h0"), "sum_x_h1": beside.get("sum_x_h1"),
@@ -283,10 +299,12 @@ def view(result: Mapping[str, Any], window: str) -> dict[str, Any]:
 
 
 def pooled(results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Several runs of one version at one k read as one (the seen spans of the Train bar): the summary's sums added,
-    T (D15) and the year rows from the concatenated daily x, `sd_date_return` over all their close dates. -> {"runs",
-    "status" ("ok" only when every run is), "summary", "by_year"}. The runs are read in the order given (span order);
-    a year two runs share has its rows added."""
+    """Several runs of one version at one k read as one (the seen spans of the Train bar): the summary's sums and
+    counts added (the vanish, cell and refusal counts key by key; the haircut sensitivities too), T (D15) and the
+    year rows from the concatenated daily x, the turnover, cost share, dilution and mean exposure over all their
+    sessions, `sd_date_return` over all their close dates. -> {"runs", "status" ("ok" only when every run is),
+    "summary", "by_year"}. The runs are read in the order given (span order); a year two runs share has its rows
+    added. A sum one of the runs does not carry is None."""
     results = list(results)
     daily = [row for result in results for row in result.get("daily") or ()]
     x, r = _column(daily, "x"), _column(daily, "r")
@@ -295,23 +313,31 @@ def pooled(results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     summary: dict[str, Any] = {key: sum(int(s.get(key) or 0) for s in summaries) for key in POOLED_COUNTS}
     for key in POOLED_SUMS:
         values = [s.get(key) for s in summaries]
-        summary[key] = math.fsum(float(v) for v in values if v is not None) if any(v is not None for v in values) \
-            else None
+        summary[key] = math.fsum(float(v) for v in values) if values and all(v is not None for v in values) else None
+    for key in POOLED_TALLIES:
+        tally: dict[str, int] = {}
+        for s in summaries:
+            for name, count in (s.get(key) or {}).items():
+                tally[str(name)] = tally.get(str(name), 0) + int(count)
+        summary[key] = tally
     days = len(daily)
     dates: list[float] = []
     for result in results:
         dates.extend(close_dates(result.get("lots") or (), result.get("capital") or 0).values())
-    weights = [(int(s.get("days") or 0), s) for s in summaries]
+    by_days = [(int(s.get("days") or 0), s) for s in summaries]
 
     def mean_of(key: str) -> float | None:
-        parts = [(n, float(s[key])) for n, s in weights if s.get(key) is not None and n > 0]
+        parts = [(n, float(s[key])) for n, s in by_days if s.get(key) is not None and n > 0]
         total = sum(n for n, _ in parts)
         return math.fsum(n * v for n, v in parts) / total if total else None
 
+    weights = [float(lot.get("weight") or 0.0) for result in results for lot in result.get("lots") or ()]
     summary.update({
         "t_x": t_stat(x) if days >= 2 else None, "t_x_nw5": nw_t(x), "t_r": t_stat(r) if days >= 2 else None,
         "basket": "basket-led" if (summary["sum_bench"] or 0.0) >= (summary["sum_x"] or 0.0) else "selection-led",
-        "exposure_mean": _r(mean_of("exposure_mean"), 6), "names_mean": _r(mean_of("names_mean"), 4),
+        "exposure_mean": _r(summary["sum_w"] / days, 6) if days and summary["sum_w"] is not None else None,
+        "names_mean": _r(mean_of("names_mean"), 4), "turnover": _turnover(weights, days) if days else None,
+        **_shares(summary["costs"], summary["gross"], summary["delta"], summary["sum_w"]),
         "close_dates": len(dates), "sd_date_return": _sd(dates),
     })
     years: dict[str, dict[str, Any]] = {}
