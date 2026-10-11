@@ -3,7 +3,7 @@
 
 The live side is a synthetic book: E1's own tables and the panel's (`league.equity.live.SCHEMA`,
 `league.xs.book.SCHEMA`), filled with the orders of the Gym's own run under the instance's key, each buy in the
-dollars of a LIVE sleeve ($557.25, not the Gym's $1,000). What is held: the twin under the instance's run key
+dollars of a LIVE sleeve (an invented $613.37, not the Gym's $1,000). What is held: the twin under the instance's run key
 reproduces those orders (every session agrees, the two ctx hashes are equal, every lot is matched) and the marker
 then lets the lane read "live"; weights agree where dollars could not; a live buy the budget skipped disagrees from
 the day the standing target plans it again and agrees again once it is filled; a twin built under another run key
@@ -39,8 +39,8 @@ from league.xs import config as xconfig
 from league.xs import runner as xrunner
 from league.xs import store as xstore
 
-#: A live sleeve's dollars (the Gym's is `league.xs.config.XS_SLEEVE_USD`).
-SLEEVE = Decimal("557.25")
+#: An invented live sleeve's dollars (the Gym's is `league.xs.config.XS_SLEEVE_USD`).
+SLEEVE = Decimal("613.37")
 CENT = Decimal("0.01")
 
 
@@ -193,10 +193,10 @@ class TheTwinReproducesTheLiveBook(unittest.TestCase):
         twin = X.keys(pick, symbols)
         self.assertEqual(twin, {"sells": ["S|ZQAB|open|2026-10-14"], "buys": {"B|ZQAA|open": 0.2}})
         intents = [{"kind": "sell", "at": "open", "lid": 3, "lot_symbol": "ZQAB", "lot_day": "2026-10-14"},
-                   {"kind": "buy", "at": "open", "symbol": "zqaa", "usd": "111.45"},
+                   {"kind": "buy", "at": "open", "symbol": "zqaa", "usd": "122.67"},
                    {"kind": "sell", "at": "open", "lid": None, "lot_symbol": None},     # a sell that names no lot
                    {"kind": "buy", "at": "noon", "symbol": "ZQAC", "usd": "10"}]        # no fill point of the book
-        live = X.live_keys(intents, {"budget": "557.25"})
+        live = X.live_keys(intents, {"budget": "613.37"})
         self.assertEqual(live["sells"], twin["sells"])
         self.assertAlmostEqual(live["buys"]["B|ZQAA|open"], 0.2, places=4)
         self.assertTrue(X.agree(live, twin))
