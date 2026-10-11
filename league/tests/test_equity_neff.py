@@ -261,8 +261,8 @@ class Derive:
     """Package C's `ctx.inputs_from_panel` and `ctx.derive` at their interface: the inputs are the decision's index,
     the answer a `Derived` whose sectors and eligible set the test fixed."""
 
-    def __init__(self, world: SimpleNamespace, *, out=(), mover=None):
-        self.world, self.out, self.mover = world, dict(out), mover
+    def __init__(self, world: SimpleNamespace, *, out=(), mover=None, empty=()):
+        self.world, self.out, self.mover, self.empty = world, dict(out), mover, set(empty)
         self.asked: list[int] = []
         self.needs: list = []
 
@@ -278,7 +278,7 @@ class Derive:
         sector = np.full(m, -1, dtype=np.int8)
         sector[REF:] = self.world.sector_of
         elig = np.zeros(m, dtype=bool)
-        elig[REF:] = True
+        elig[REF:] = len(self.asked) - 1 not in self.empty
         for column, months in self.out.items():
             if len(self.asked) - 1 in months:
                 elig[column] = False
@@ -364,6 +364,37 @@ class TheMeasure(unittest.TestCase):
             out = EN.measure(world.bars)
         self.assertEqual(out["names"], 34)
         self.assertEqual(out["dropped"], {"no_return": 1, "not_eligible": 1, "flat": 0})
+
+    def test_a_month_formed_with_no_eligible_name_is_not_read(self):
+        """The segment's first formation (2021-12-31) is one session short of a momentum on the House, so nothing is
+        eligible there (E4-SPEC D1): January 2022 has no basket and the window read begins in February."""
+        world = synthetic_bars(names=12)
+        whole = Derive(world)
+        with whole.patched():
+            every = EN.measure(world.bars)
+        with Derive(world, empty={0}).patched():
+            out = EN.measure(world.bars)
+        january = sum(1 for d in world.days if (d.year, d.month) == (2022, 1))
+        self.assertEqual((every["window"], every["months"], every["months_skipped"]),
+                         (["2022-01-03", "2024-12-31"], 36, 0))
+        self.assertEqual((out["window"], out["months"], out["months_skipped"]), (["2022-02-01", "2024-12-31"], 35, 1))
+        self.assertEqual((out["sessions"], out["names"]), (every["sessions"] - january, 12))
+        self.assertEqual(out["dropped"], {"no_return": 0, "not_eligible": 0, "flat": 0})
+        # the figures are D21 on the sessions read: the plain reference on February 2022 on
+        close = world.bars.adj[:, REF:, 3]
+        r = (close[world.first:] / close[world.first - 1:-1] - 1.0)[january:]
+        x = r.copy()
+        for code in sorted(set(world.sector_of.tolist())):
+            members = world.sector_of == code
+            x[:, members] = r[:, members] - r[:, members].mean(axis=1, keepdims=True)
+        self.assertAlmostEqual(out["neff_pr"], reference(x)["neff_pr"], places=8)
+        # a month in the middle with no eligible name is left out the same way
+        with Derive(world, empty={0, 17}).patched():
+            both = EN.measure(world.bars)
+        self.assertEqual((both["months"], both["months_skipped"], both["names"]), (34, 2, 12))
+        with Derive(world, empty=set(range(36))).patched():
+            with self.assertRaisesRegex(ValueError, "no month's formation close has an eligible name"):
+                EN.measure(world.bars)
 
     def test_too_few_names_is_no_matrix(self):
         world = synthetic_bars(names=4, sectors=4)        # every basket is one name: every residual is flat
@@ -462,11 +493,12 @@ class TheJob(unittest.TestCase):
         self.assertEqual(row, {"window": ["2022-01-03", "2024-12-31"], "names": 20, "rho": round(want["rho"], 6),
                                "neff_rho": round(want["neff_rho"], 2), "neff_pr": round(want["neff_pr"], 2),
                                "computed_at": "2027-01-15T08:00:00Z", "sessions": want["sessions"], "columns": 20,
-                               "dropped": {"no_return": 0, "not_eligible": 0, "flat": 0}, "coverage": "ok"})
+                               "dropped": {"no_return": 0, "not_eligible": 0, "flat": 0}, "months": 36,
+                               "months_skipped": 0, "coverage": "ok"})
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(out, {"ok": True, "panel": "sp500", "names": 20, "sessions": want["sessions"], "columns": 20,
-                               "neff_rho": row["neff_rho"], "neff_pr": row["neff_pr"],
-                               "window": row["window"], "dropped": row["dropped"]})
+                               "neff_rho": row["neff_rho"], "neff_pr": row["neff_pr"], "window": row["window"],
+                               "dropped": row["dropped"], "months": 36, "months_skipped": 0})
         self.assertNotIn("rho", out)
         self.assertEqual(EN.panel_neff(self.state), row["neff_pr"])
 

@@ -17,6 +17,9 @@ THE DEFINITION, to the last step (`residuals`, `neff`; each a formula `test_equi
 - The month of a session forms its baskets at the close BEFORE the month's first session (the first month's in the
   look-back): `derive` says which columns are eligible there and each one's sector. The basket of a sector that
   month is its eligible columns; a session's sector mean is the mean of the basket's returns that exist that session.
+  A MONTH WHOSE FORMATION HAS NO ELIGIBLE NAME IS NOT READ: the segment's first month is one (at the close before
+  the first run session the store holds 252 sessions, one short of a 12-1 momentum, so nothing is eligible there:
+  E4-SPEC D1), so the window read is 2022-02 through 2024-12 and the file's `window` says so.
 - A NAME HAS A FULL SERIES when it has a return on every session of the window and is eligible, with a sector, at
   every month's formation. Its residual is its return less its own sector's mean (the basket holds the name itself).
   A name whose residual never moves (a basket of one) is dropped and counted.
@@ -194,8 +197,9 @@ def panel_returns(bars: Any) -> Any:
 
 def measure(bars: Any) -> dict[str, Any]:
     """D21 on one Train slice (`league.xs.store.PanelBars` with its look-back): `neff`'s answer with "window" (the
-    run's first and last session), "columns" (the member columns read) and "dropped". The formations are
-    `league.xs.ctx.derive`'s, asked once a month at the close before the month's first session."""
+    first and last session read), "columns" (the member columns), "dropped", "months" and "months_skipped". The
+    formations are `league.xs.ctx.derive`'s, asked once a month at the close before the month's first session; a
+    month whose formation has no eligible name is not read."""
     import numpy as np
 
     from ..equity import store as eq_store
@@ -217,18 +221,29 @@ def measure(bars: Any) -> dict[str, Any]:
         sector[m] = np.asarray(derived.sector, dtype=np.int64)
         eligible[m] = np.asarray(derived.elig, dtype=bool)
     # The REF columns (SPY and the sector funds) lead every slice and are never names: the members alone are read.
-    parts = residuals(panel_returns(bars)[:, ref:], month, sector[:, ref:], eligible[:, ref:])
+    sector, eligible = sector[:, ref:], eligible[:, ref:]
+    # A month whose formation close has no eligible name has no basket and is left out (the segment's FIRST month:
+    # at the close before the first run session the store is one session short of a 12-1 momentum, so nothing is
+    # eligible there, on the House and in the screen's study alike: E4-SPEC D1).
+    formed_months = [m for m in range(len(formed)) if eligible[m].any()]
+    place = {m: j for j, m in enumerate(formed_months)}
+    rows = [t for t, m in enumerate(month) if m in place]
+    if not rows:
+        raise ValueError("no month's formation close has an eligible name: no basket, no matrix")
+    parts = residuals(panel_returns(bars)[rows][:, ref:], [place[month[t]] for t in rows], sector[formed_months],
+                      eligible[formed_months])
     if len(parts["columns"]) < MIN_NAMES:
-        raise ValueError(f"{len(parts['columns'])} names have a full series of {len(month)} sessions: no matrix")
+        raise ValueError(f"{len(parts['columns'])} names have a full series of {len(rows)} sessions: no matrix")
     out = neff(parts["x"])
-    out.update(window=[days[first].isoformat(), days[-1].isoformat()], columns=columns - ref,
-               dropped=parts["dropped"])
+    out.update(window=[days[first + rows[0]].isoformat(), days[first + rows[-1]].isoformat()], columns=columns - ref,
+               dropped=parts["dropped"], months=len(formed_months), months_skipped=len(formed) - len(formed_months))
     return out
 
 
 def run(ctx: Any) -> dict[str, Any]:
     """The job. Its first statement is `league.xs.config.quiet(ctx.now(), WALL_S)`. {"ok": True, "panel", "names",
-    "sessions", "columns", "neff_rho", "neff_pr", "window", "dropped"} and neff.json written; {"status": "skipped",
+    "sessions", "columns", "neff_rho", "neff_pr", "window", "dropped", "months", "months_skipped"} and neff.json
+    written; {"status": "skipped",
     "why"} inside a quiet window, before the panel store exists, and while its coverage verdict is "insufficient";
     {"status": "failed", "ok": False, "error"} when the store or the matrix cannot be read (the last neff.json
     stays)."""
@@ -262,13 +277,14 @@ def run(ctx: Any) -> dict[str, Any]:
     row = {"window": found["window"], "names": found["names"], "rho": round(found["rho"], 6),
            "neff_rho": round(found["neff_rho"], 2), "neff_pr": round(found["neff_pr"], 2),
            "computed_at": S.iso(ctx.now()), "sessions": found["sessions"], "columns": found["columns"],
-           "dropped": found["dropped"], "coverage": verdict}
+           "dropped": found["dropped"], "months": found["months"], "months_skipped": found["months_skipped"],
+           "coverage": verdict}
     held = read_json(root / FILE, {})
     held = dict(held) if isinstance(held, Mapping) else {}
     held[panel] = row
     write_json(root / FILE, held)
     return {"ok": True, "panel": panel, **{k: row[k] for k in ("names", "sessions", "columns", "neff_rho", "neff_pr",
-                                                               "window", "dropped")}}
+                                                               "window", "dropped", "months", "months_skipped")}}
 
 
 # ------------------------------------------------------------------------------------------------- the funnel's rows
