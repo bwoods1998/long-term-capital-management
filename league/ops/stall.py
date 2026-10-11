@@ -96,15 +96,16 @@ was found by the captain reading the log, never by an alarm):
 
 THE EQUITY LANES' OWN CAUSES (release E2.4, Oct 11, 2026; league/ops/elane_health.py, which judges them): `elane_dq`
 (most equity versions scored could not be judged for a fault of their own program), `elane_births` (the last equity
-passes that asked a model bore no family), `elane_idle` (work owed and not done: no version scored for hours, or most
-Train steps skipped for want of model dollars; starved or broken) and `elane_refused` (most programs written were
-refused before a run by one static rule). Each is judged only while the lanes are on and on enough evidence, and
-stands here like any cause (the last four of `CAUSES`: since when, warned, noticed at this job's pace, cleared, among
-the receipt's `checks`). The gateway words each (gateway/lib/email.mjs STALL_CAUSES; the gateway is deployed before
-this release), so each is an entry of its own in the notice and keys its own mail: none rides `swarm_alerts`, and none
-holds back another's mail or the swarm's own alerts. The job keeps, for them, since when the running release has run
-(`stall.json` `elane`: {release, since}; `elane_health.release_since`), so a restart that fixes nothing resets no
-evidence.
+passes that asked a model bore no family), `elane_idle` (A BROKEN LANE: work owed and no version scored for hours
+while its own record shows failures, or while it may ask a model; a lane held by its own pace, its day's dollars or
+the Sail guard never stands: what the setting costs is in the check's numbers and the funnel) and `elane_refused` (most
+programs written were refused before a run by one static rule). Each is judged only while the lanes are on and on
+enough evidence, and stands here like any cause (the last four of `CAUSES`: since when, warned, noticed at this job's
+pace, cleared, among the receipt's `checks`). The gateway words each (gateway/lib/email.mjs STALL_CAUSES; the gateway
+is deployed before this release), so each is an entry of its own in the notice and keys its own mail: none rides
+`swarm_alerts`, and none holds back another's mail or the swarm's own alerts. The job keeps, for them, since when the
+running release has run and what they keep under it (`stall.json` `elane`: {release, since} and
+`elane_health.KEPT`; `elane_health.release_since`), so a restart that fixes nothing resets no evidence.
 
 THE NOTICE: one `POST /v1/notify` kind `stall` a run at most, listing EVERY cause standing (`cause_facts` each: the
 cause, the numbers, how long, what the House is doing about it, the owner step when one is needed), owner steps first,
@@ -1969,7 +1970,7 @@ def run(ctx: Any) -> dict[str, Any]:
     # THE EQUITY LANES' OWN CAUSES (release E2.4): judged in league/ops/elane_health.py and raised from here on like any
     # other. Their evidence counts from the first start of the RUNNING RELEASE (kept in stall.json: `EH.release_since`).
     running = EH.release_since(state.get(EH.STATE_KEEP), root, now)
-    found.update(EH.checks(ctx, root, now, loaded, errors=errors, since=running.get("since"),
+    found.update(EH.checks(ctx, root, now, loaded, errors=errors, since=running.get("since"), kept=running,
                            paused=found["paused"]["numbers"]["paused_since"] is not None))
 
     told = state.get("causes") if isinstance(state.get("causes"), dict) else {}
@@ -2037,6 +2038,7 @@ def run(ctx: Any) -> dict[str, Any]:
         text = f"stall: {cause}: {check['what']} {check['doing']}"
         if check.get("owner_step"):
             text += f" Owner step: {check['owner_step']}."
+        text = EH.warning(cause, check, text)  # an equity cause's owner step whole inside the alert's cut
         if kind is not None and not notice["sent"] and notice.get("why"):
             text += f" (notice: {notice['why']})"
         _alert(ctx, text)

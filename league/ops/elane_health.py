@@ -15,14 +15,16 @@ THE CAUSES (`CAUSES`; `checks`). Each has `what`, `numbers`, `doing` (what the f
   failed by it again and again (RUN), in at least `DQ_MIN_FAMILIES` families (one family's bad programs are no fault
   of the contract: the check then reads clear and names the family). A fault of the generators against the contract or
   the sandbox, never a verdict on a mechanism. When fewer than `DQ_MIN_SCORED` versions fall in those hours it judges
-  the last `DQ_MIN_SCORED` scored since the running release started (so it does not lapse by itself as the window
-  slides past a fault nothing fixed), and it stands EARLY, before the sixth version, once `DQ_EARLY_FAULTED` versions
-  of two families could not be judged (4 scored and none judged by the bar; 4 of 5): they are most of six whatever
-  the versions still to come are. It names the first error's class (a closed class: `dq_class`) only when
-  one class is more than half of the disqualifications, else the classes that tie; and, for a class it names, the
-  reading rule's commonest sentence for it in the same hours (`SENTENCES`) or, with none on record, what that class
-  most often is (`DQ_SHORT`: one fixed short sentence a class, rules only). The owner's step: the text the generators
-  read needs a fix, in a release.
+  the last `DQ_MIN_SCORED` scored since the running release started, and it stands EARLY, before the sixth version,
+  once `DQ_EARLY_FAULTED` versions of two families could not be judged (4 scored and none judged by the bar; 4 of 5):
+  they are most of six whatever the versions still to come are. ONCE IT STOOD UNDER A RELEASE IT HOLDS (the stall
+  job keeps when, `stall.json` `elane.dq`) until versions scored after it stood are judged by the bar in
+  `DQ_MIN_FAMILIES` families, or the release changes: a window that slides past a fault nothing fixed, or one
+  family's bar fails beside the retired families' versions, clears nothing. It names the first error's class (a
+  closed class: `dq_class`) only when one class is more than half of the disqualifications, else the classes that
+  tie; and, for a class it names, the reading rule's commonest sentence for it in the same hours (`SENTENCES`) or,
+  with none on record, what that class most often is (`DQ_SHORT`: one fixed short sentence a class, rules only). The
+  owner's step: the text the generators read needs a fix, in a release.
 - `elane_births`: the last `BIRTHS_PASSES` equity passes that asked a model bore no family (every proposal refused, none
   proposed, the answer cut short, no route answered, the pass raised). It names the commonest refusals in the House's
   own closed words (`REFUSALS`; the refusal's text carries what the model wrote and never reaches a notice) and the
@@ -30,39 +32,55 @@ THE CAUSES (`CAUSES`; `checks`). Each has `what`, `numbers`, `doing` (what the f
   born for `BIRTHS_OWNER_HOURS` and a setting clears the main way they bore nothing (`BIRTH_LEVERS`); at once when
   every route refused the request before it was sent for a setting (the pass's event names it, `SETTINGS`): asking
   again changes nothing until the setting does.
-- `elane_idle`: work is owed (families in Train research, or births wanted) and it is not being done. Two ways:
-  STARVED BY WORK LOST: over the last `IDLE_HOURS` at least `STARVED_MIN_STEPS` Train steps were due and more than
-  `STARVED_SHARE` of them were skipped because E2 might ask no model (its hourly pace, its day's line, the House's
-  Sail day: `elane_yield.hold`), whether or not a version was scored: a lane that scores one version an hour while two
-  families in three wait is starved, and a count of idle hours never shows it. Or NOTHING SCORED for `IDLE_HOURS`,
-  counted from the later of the last version scored, when the work became owed (a family born after a quiet spell is
-  not idle on a score of days ago) and the running swarm's start: STARVED when E2 may ask no model now, BROKEN when
-  it may and still scores nothing (the Train round's own steps: failures of the House's, questions no route answered,
-  steps and rounds that raised, families waiting out a backoff, no round at all). A starved lane says which of E2's
-  lines binds, the hourly pace or the day's (`_lever`), and needs nobody; a broken one is the owner's step (but for
-  routes that do not answer, which heal by themselves). THE DAY'S DOLLARS SPENT IS NO STALL: while E2's day's line is
-  spent and a version was scored since 00:00 UTC the cause reads clear and says so (a busy lane spends its day before
-  the day ends, every day, by design).
+- `elane_idle`: A BROKEN LANE, AND ONLY THAT. Work is owed (families in Train research, or births wanted) and no
+  version was scored for `IDLE_HOURS` (the idle clock, below). BROKEN IS JUDGED FIRST: the lane's own record since
+  it went idle shows `BROKEN_MIN_FAILS` rounds that raised, Train steps that failed on the House's side (or a family
+  waiting out a House backoff after that many failures) or steps that failed with an error of their own. It stands
+  with that kind's owner step WHATEVER E2's lines hold, and a second sentence says the line when E2 is also held (a
+  lane whose every Train run fails scores nothing at any pace). Else it stands only when THE LANE MAY ASK A MODEL
+  AND STILL SCORES NOTHING: no hold of E2's was seen in the last `IDLE_HOURS` (not now, not at an earlier run of
+  the job, which keeps its last reading in `stall.json` `elane.held`, and no Train step or equity pass skipped for
+  want of model dollars): questions no route answered and programs refused before a run (nobody's step: they heal
+  or are `elane_refused`'s), barren passes with no family left (`elane_births`'), rounds that run and judge
+  nothing or no round at all (the owner's step).
+  STARVATION BY SETTINGS IS NO STANDING CAUSE. A lane held by its own hourly pace, its day's dollars or the House's
+  Sail day (`elane_yield.hold`) is the budget the captain chose, at work: the cause reads JUDGED CLEAR, never
+  stands and never mails, and its sentence and numbers say what the setting cost (the Train steps due in the last
+  `IDLE_HOURS`, taken and skipped by reason, whether E2 is held now and by which line, `_lever`). The same counts
+  are in the research funnel (`train_steps`, the passes' `skipped`). THE COST: a lane starved by a setting is read
+  in the funnel and the receipt, not in the mail.
+  THE IDLE CLOCK is kept per release (`stall.json` `elane.idle`: {from, down, started, beat_at}): from the later of
+  the last version scored and when the work became owed (a family born after a quiet spell is not idle on a score
+  of days ago), LESS THE TIME THE SWARM WAS DOWN (at a restart, from the heartbeat the last run read to the new
+  start; before anything was kept, everything before the running swarm's own start). A restart resets nothing: a
+  broken lane restarted every two hours is still judged idle.
 - `elane_refused`: of the programs the generators wrote in the last `REFUSED_HOURS`, more than `REFUSED_SHARE` were
   refused before a run by ONE static rule (the reading, level or memory rule, the code rules, NEEDS; any
   "equity <name> rule" a later release adds is read the same way): the generators are not being taught that rule. It
-  names the rule and its commonest sentence in closed words. The owner's step: teach it where they read it, in a
-  release.
+  names the rule and its commonest sentence in closed words. As `elane_dq`: when fewer than `REFUSED_MIN_ANSWERS`
+  fall in those hours it judges the last `REFUSED_MIN_ANSWERS` written since the running release started (a slow
+  lane's fault does not read "not judged" as the window slides), and it stands EARLY once `REFUSED_EARLY` were
+  refused by one rule (most of eight whatever is still to be written). The owner's step: teach it where they read
+  it, in a release.
 
 WHEN A CAUSE IS JUDGED (`lanes`). Only while the lanes are on (`elane.mode` "gate" and `elane.birth_share` above zero,
 as the swarm loads its settings), release E2's rounds are in the running tree, the floor is not paused (a maintenance
 pause or a stopped swarm stops the lanes by design), E2's own dollars are not set to zero (`elane.e2.usd_day` or
 `elane.e2.pace_share` at 0: the lanes paused by setting), the store holds an equity family or an equity pass at all,
 and the owner has not switched the four off (`<state>/ops.json` `stall.elane` false: `switched_off`). Else every cause
-reads "Not judged" and says why. Lanes that cannot be read (the settings, or E2's own readers) are "Not judged" AND
-an entry of the job's `errors` naming the class: an alarm that cannot see says so. And only on enough evidence,
+reads "Not judged" and says why. Lanes that cannot be read (the settings, E2's own readers, the store, the lane's
+own reading of whether it may ask a model) are "Not judged" AND an entry of the job's `errors` naming the class AND
+one House warning every `BLIND_WARN_SECONDS` while it lasts (`_blind`: the receipt's errors alone reach no one): an
+alarm that cannot see says so. And only on enough evidence,
 counted SINCE THE RUNNING RELEASE FIRST STARTED (`release_since`: the stall job keeps {release, since} in
 `stall.json`, the heartbeat's `release` and the `started_at` it first saw under it): a release that fixes a fault is
 a new release, so what the generators did under the earlier one is not held against this one; a restart of the same
 release (the watchdog's, a settings apply) fixes nothing and resets nothing. A cause with too little evidence says how
-much it has and how much it needs. The idle clock alone also starts at the running swarm's own start (a swarm that
-was down is not idle on the hours it was down), and a lane is not judged idle while the swarm itself is not running
-(its heartbeat `BEAT_STALE_SECONDS` old): that is the options lanes' causes to tell.
+much it has and how much it needs. WHAT THE JOB KEEPS UNDER A RELEASE (`KEPT`, beside {release, since}, dropped when
+the release changes): the idle clock, the last hold of E2's a run read, when `elane_dq` first stood, when the
+unreadable lanes were last warned. `checks` reads them and leaves in the same record what the next run needs; it
+writes no file itself. A lane is not judged idle while the swarm itself is not running (its heartbeat
+`BEAT_STALE_SECONDS` old): that is the options lanes' causes to tell.
 
 WHAT IT READS. The swarm's store, read-only, in one read transaction (`facts`): the equity families the equity pass
 bore and E2's own Train record of each (state `elane_e2`: versions with their fails and what a disqualification said,
@@ -81,7 +99,9 @@ stands under its own name everywhere (the receipt's `checks`, `stall.json`, the 
 standing causes, the Done meter's item 7) and is AN ENTRY OF ITS OWN in the mail, keyed by its own name: an equity
 owner step is mailed at once whatever the swarm's own alerts told, and theirs whatever these told. `mailed` only fits
 an entry to what the gateway prints: its sentence whole inside the gateway's cut (the leading sentences that fit),
-the mail's figures first, and nothing that is no figure (the examples and the hint stay on the House).
+the mail's figures first, and nothing that is no figure (the examples and the hint stay on the House). `warning`
+fits a House warning the same way: an owner step is whole inside the alert's cut (`WARN_CHARS`), and what is
+shortened is the sentences before it.
 
 THE RESEARCH FUNNEL (`research_counts`; the funnel's `equity.research`, which the `scoreboard` job's receipt carries
 for the day and the release, and `python3 -m league.ops.elane_health`): equity passes (asked, barren, cut short,
@@ -119,9 +139,12 @@ SWITCH = "elane"
 SWARM_DB = "swarm.sqlite"
 HEARTBEAT = "swarm.heartbeat"
 #: The stall job's own state file (`stall.STATE_FILE`; a test holds the two equal) and its key that keeps since when the
-#: running release has run (`release_since`).
+#: running release has run (`release_since`), and under it WHAT IS KEPT WHILE THAT RELEASE RUNS (`KEPT`): `idle` (the
+#: idle clock: `_idle_clock`), `held` (the last run that read E2 held: {at, kind}), `dq` (when `elane_dq` first stood:
+#: {stood_at}) and `unread` (when the lanes that cannot be read were last warned: {warned_at}).
 STATE_FILE = "stall.json"
 STATE_KEEP = "elane"
+KEPT = ("idle", "held", "dq", "unread")
 
 # ---------------------------------------------------------------------------------------------- the thresholds
 #: `elane_dq`: the window, the scored versions under which nothing is judged, and the share above which it stands. Six
@@ -148,14 +171,17 @@ BIRTHS_PASSES = 3
 #: themselves before anyone is asked.
 BIRTHS_OWNER_HOURS = 6.0
 #: `elane_idle`: no version scored on Train this long while work is owed. The Train round comes every ten minutes and
-#: scores a version in the step that wrote it, so three hours is eighteen rounds with nothing judged.
+#: scores a version in the step that wrote it, so three hours is eighteen rounds with nothing judged. The same hours
+#: are how long no hold of E2's must have been seen for a lane to be one that MAY ASK A MODEL and still scores nothing.
 IDLE_HOURS = 3.0
-#: `elane_idle`, STARVED BY WORK LOST: the Train steps due in the last `IDLE_HOURS` under which nothing is judged (two
-#: rounds of three families) and the share of them skipped for want of model dollars above which it stands ("most").
-STARVED_MIN_STEPS = 6
-STARVED_SHARE = 0.5
-#: Why a Train step is skipped for want of model dollars (`skip_kind`): E2's hourly pace, its day's line, the House's
-#: Sail day. Any other skip (a passing version that cannot be read) is no starvation.
+#: `elane_idle`, BROKEN BY ITS OWN RECORD: this many rounds that raised, steps that failed on the House's side or steps
+#: that failed with an error of their own since the lanes went idle stand whatever E2's lines hold. Two: one failure
+#: before a hold (a store being rewritten for a minute, then the day's dollars spent) is no broken lane, and a failure
+#: of the House's is tried again without a model, so a standing one is two within the half hour.
+BROKEN_MIN_FAILS = 2
+#: Why a Train step or an equity pass is skipped for want of model dollars (`skip_kind`): E2's hourly pace, its day's
+#: line, the House's Sail day: THE SETTINGS' HOLDS, which never stand. Any other skip (a passing version that cannot
+#: be read) is none of them.
 STARVED_KINDS = ("pace", "usd_day", "sail_day")
 STARVED_WORDS = {"pace": "its hourly pace", "usd_day": "its day's line", "sail_day": "the House's Sail day"}
 #: A swarm whose heartbeat is this old is not running, and its lanes are not judged idle: the House's hook restarts a
@@ -167,6 +193,12 @@ BEAT_STALE_SECONDS = 600.0
 REFUSED_HOURS = 6.0
 REFUSED_MIN_ANSWERS = 8
 REFUSED_SHARE = 0.5
+#: `elane_refused` stands EARLY, before the eighth program, once this many were refused by one rule: more than
+#: `REFUSED_SHARE` of `REFUSED_MIN_ANSWERS` (five of eight), so they are most of eight whatever is still to be written.
+REFUSED_EARLY = int(REFUSED_SHARE * REFUSED_MIN_ANSWERS) + 1
+#: LANES THAT CANNOT BE READ are one House warning this often while it lasts (`_blind`; the stall job's own pace of a
+#: standing cause's warning, `stall.WARN_EVERY_SECONDS`).
+BLIND_WARN_SECONDS = 12 * 3600.0
 #: How far back `facts` reads the events (the longest window above).
 LOOKBACK_HOURS = max(DQ_HOURS, BIRTHS_HOURS, REFUSED_HOURS, IDLE_HOURS)
 #: The report's funnel covers this many hours unless it is asked another (`report`, the command's `--hours`).
@@ -367,25 +399,32 @@ _ITEM = re.compile(r"(?:^|[:;] )line (\d{1,6}): ")
 _RAISES = ("TypeError", "AttributeError", "KeyError")
 
 #: What the floor does about each cause by itself.
-#: Kept short: a cause's sentence, this and its owner step are one House warning of 900 characters.
+#: Kept short: a cause's sentence, this and its owner step are one House warning of `WARN_CHARS` (`warning`).
 DOING = {
-    "elane_dq": ("Each disqualified version's author is shown the line of its own file the first error was raised at and "
-                 "what is wrong there; a family whose versions all end so is retired STALLED. Nothing loosens the bar or "
-                 "the sandbox."),
+    "elane_dq": ("Each disqualified version's author is shown the line of its first error; a family whose versions all "
+                 "end so is retired STALLED. Nothing loosens the bar or the sandbox."),
     "elane_births": ("The equity pass asks again at its own cadence and tells its next request the last pass's refusals "
                      "by class, in closed words. Nothing loosens the admission."),
     "elane_refused": ("Each refusal is in its author's next brief with what to write instead; it costs one write attempt, "
                       "never a scored version. Nothing loosens a rule."),
     "starved": ("E2 asks again by itself once it may (its hour's spend under its pace, 00:00 UTC for its day, room under "
-                "the Sail guard's line). Versions already written are still scored. Nothing raises a pace or a line."),
+                "the Sail guard's line). Versions already written are still scored. Nothing raises a pace or a line, and "
+                "nothing is mailed for a setting at work."),
     "broken": ("The Train round comes every ten minutes while it has work; a failure of the House's backs its family off "
                "and is alerted once (elane_train_house); a question no route answered is asked again after its backoff. "
                "Nothing here repairs anything."),
     "not_judged": "Nothing: the cause is not judged.",
 }
 REPORT = "python3 -m league.ops.elane_health --state /workspace/state"
-#: The ways an idle lane is BROKEN that nothing on the floor heals: the owner's step.
+#: The ways an idle lane is BROKEN that nothing on the floor heals: the owner's step. The first three are BROKEN BY
+#: THE LANE'S OWN RECORD (`BROKEN_KINDS`): they stand whatever E2's lines hold.
 IDLE_OWNER_KINDS = ("raised", "house", "errors", "silent", "no_round")
+BROKEN_KINDS = ("raised", "house", "errors")
+#: What a lane held by a setting says of this cause (`_idle_check`).
+NO_STALL = ("A lane held by its own settings is no stall: this cause stands for a broken lane only, and what a setting "
+            "costs is read here and in the equity research funnel (train_steps).")
+#: The cut of a House warning (league/ops/stall.py `_alert`, league/ops/context.py `Context.alert`).
+WARN_CHARS = 900
 #: The gateway's cuts of a stall entry (gateway/lib/email.mjs: `sentence(entry.what, 400)`, `sentence(entry.doing, 700)`,
 #: STALL_STEP_CHARS, STALL_NUMBERS), the figures of each cause its mail shows first (`mailed`), and what a check's
 #: numbers hold that the mail does not list (kept on the House: the receipt and the report): what is no figure, and
@@ -394,8 +433,8 @@ IDLE_OWNER_KINDS = ("raised", "house", "errors", "silent", "no_round")
 WHAT_CHARS, DOING_CHARS, STEP_CHARS, FIGURES = 400, 700, 400, 16
 MAIL_FIGURES = {"elane_dq": ("scored", "faulted", "families", "top_error", "basis"),
                 "elane_births": ("barren_passes", "kind", "born", "setting"),
-                "elane_idle": ("kind", "steps_due", "steps_skipped", "idle_hours", "researching", "held_now"),
-                "elane_refused": ("answers", "top_rule", "top_rule_n")}
+                "elane_idle": ("kind", "idle_hours", "researching", "held_now", "steps_due", "steps_skipped"),
+                "elane_refused": ("answers", "top_rule", "top_rule_n", "basis")}
 NOT_MAILED = ("judged", "examples", "hint", "pace_usd_hour", "spent_last_hour_usd", "day_line_usd", "spent_today_usd")
 
 
@@ -638,8 +677,9 @@ class _Reader:
 def e2_families(db: Any) -> list[dict[str, Any]]:
     """Every family the equity pass bore, alive or retired (its spec names an equity lane and its birth route), with
     E2's own Train record of it: {id, lane, born_at, alive, status, versions {n: verdict}, refused [{at, why}],
-    waits (the backoffs it has on record, {"infra:<kind>" | "unanswered": until when})}. Nothing of a later stage is
-    read (no band, no Validation, no look)."""
+    waits (the backoffs it has on record, {"infra:<kind>" | "unanswered": until when}), house_fails (the failures of
+    the House's its newest version has had one after another, `infra.count`: 0 with none on record)}. Nothing of a
+    later stage is read (no band, no Validation, no look)."""
     out = []
     for row in guard.rows(db, "SELECT id, spec, state, born_at, retired_at FROM families WHERE structure IN ('etf', 'stock') "
                               "ORDER BY born_at, id"):
@@ -658,7 +698,8 @@ def e2_families(db: Any) -> list[dict[str, Any]]:
                     "versions": {str(k): dict(v) for k, v in versions.items() if isinstance(v, Mapping) and str(k).isdigit()},
                     "refused": [dict(r) for r in record.get("refused") or [] if isinstance(r, Mapping)]
                     if isinstance(record.get("refused"), list) else [],
-                    "waits": waits})
+                    "waits": waits,
+                    "house_fails": _count(record["infra"].get("count")) if isinstance(record.get("infra"), Mapping) else 0})
     return out
 
 
@@ -809,16 +850,44 @@ def _output_limit() -> int | None:
 
 
 # ---------------------------------------------------------------------------------------------- the checks
-def refusals_tally(f: Mapping[str, Any], start: float, now: float) -> dict[str, Any]:
-    """The programs the equity generators wrote in `[start, now]` and the static rules' refusals of them: {answers,
-    stored, refused, by_rule, sentences {rule: {words: n}}, raises {error class: {words: n}} (the reading rule's
-    sentences by the error each says its misreading raises), examples [{family, rule, line, sentence}]}. The
-    researchers' programs come from the Train rounds' events (each step that read an answer); the architect's programs
-    at birth from the births (`program` "v1": stored) and the families' records (a refusal named `ARCHITECT_PROGRAM`)."""
+def _answers(f: Mapping[str, Any], start: float, now: float) -> list[tuple[float, str, Any]]:
+    """THE PROGRAMS THE EQUITY GENERATORS WROTE in `[start, now]`, oldest first: (when, its family, the static rule's
+    refusal of it, None for one that was stored). The researchers' programs come from the Train rounds' events (each
+    step that read an answer); the architect's programs at birth from the births (`program` "v1": stored) and the
+    families' records (a refusal named `ARCHITECT_PROGRAM`)."""
+    rows: list[tuple[float, str, Any]] = []
+    for at, payload in f.get("rounds") or []:
+        if not start <= at <= now:
+            continue
+        for step in payload.get("steps") or []:
+            read = step_read(step)
+            if read["answered"]:
+                rows.append((at, str(step.get("family") if isinstance(step, Mapping) else None),
+                             None if read["refused"] is None else str(read["why"] or "")))
+    for at, program in f.get("born") or []:
+        if start <= at <= now and program == "v1":
+            rows.append((at, "", None))
+    for fam in f.get("families") or []:
+        for row in fam["refused"]:
+            at = S.epoch(row.get("at"))
+            if at is not None and start <= at <= now and str(row.get("why") or "").startswith(ARCHITECT_PROGRAM):
+                rows.append((at, fam["id"], str(row.get("why"))))
+    return sorted(rows, key=lambda row: row[0])
+
+
+def refusals_tally(f: Mapping[str, Any], start: float, now: float,
+                   rows: Sequence[tuple[float, str, Any]] | None = None) -> dict[str, Any]:
+    """The programs the equity generators wrote in `[start, now]` (`_answers`; `rows`: these of them instead) and the
+    static rules' refusals of them: {answers, stored, refused, by_rule, sentences {rule: {words: n}}, raises {error
+    class: {words: n}} (the reading rule's sentences by the error each says its misreading raises), examples [{family,
+    rule, line, sentence}]}."""
     out: dict[str, Any] = {"answers": 0, "stored": 0, "refused": 0, "by_rule": {}, "sentences": {}, "raises": {},
                            "examples": []}
-
-    def refusal(family: Any, why: Any) -> None:
+    for _, family, why in (_answers(f, start, now) if rows is None else rows):
+        out["answers"] += 1
+        if why is None:
+            out["stored"] += 1
+            continue
         rule = rule_of(why)
         out["refused"] += 1
         _bump(out["by_rule"], rule)
@@ -828,29 +897,6 @@ def refusals_tally(f: Mapping[str, Any], start: float, now: float) -> dict[str, 
                 _bump(out["raises"].setdefault(raises, {}), words)
             if len(out["examples"]) < 6:
                 out["examples"].append({"family": str(family), "rule": rule, "line": line, "sentence": words})
-
-    for at, payload in f.get("rounds") or []:
-        if not start <= at <= now:
-            continue
-        for step in payload.get("steps") or []:
-            read = step_read(step)
-            if not read["answered"]:
-                continue
-            out["answers"] += 1
-            if read["refused"] is None:
-                out["stored"] += 1
-            else:
-                refusal(step.get("family") if isinstance(step, Mapping) else None, read["why"])
-    for at, program in f.get("born") or []:
-        if start <= at <= now and program == "v1":
-            out["answers"] += 1
-            out["stored"] += 1
-    for fam in f.get("families") or []:
-        for row in fam["refused"]:
-            at = S.epoch(row.get("at"))
-            if at is not None and start <= at <= now and str(row.get("why") or "").startswith(ARCHITECT_PROGRAM):
-                out["answers"] += 1
-                refusal(fam["id"], row.get("why"))
     return out
 
 
@@ -865,14 +911,21 @@ def _scored(f: Mapping[str, Any], start: float, now: float) -> list[tuple[float,
     return sorted(rows, key=lambda row: row[:3])
 
 
-def _dq_check(f: Mapping[str, Any], now: float, since: float | None) -> dict[str, Any]:
-    """`elane_dq` (the module docstring). Pure. `since`: the running release's first start (evidence counts from it)."""
+def _faulted(verdict: Mapping[str, Any]) -> str | None:
+    """The program fault a version's verdict ended in (`PROGRAM_FAULTS`), None for one the bar judged."""
+    fails = [str(x) for x in verdict.get("fails") or []] if isinstance(verdict.get("fails"), list) else []
+    return fails[0] if len(fails) == 1 and fails[0] in PROGRAM_FAULTS else None
+
+
+def _dq_check(f: Mapping[str, Any], now: float, since: float | None, kept: Any = None) -> dict[str, Any]:
+    """`elane_dq` (the module docstring). Pure. `since`: the running release's first start (evidence counts from it);
+    `kept`: when it first stood under the running release (`stall.json` `elane.dq`: {stood_at}), which HOLDS it; the
+    answer's `keep` is what the next run keeps."""
     start, span = _since(now, DQ_HOURS, since)
     rows, basis = _scored(f, start, now), "window"
     if len(rows) < DQ_MIN_SCORED:
         # THE WINDOW'S EDGE: fewer than the minimum fall in the six hours. The last `DQ_MIN_SCORED` scored since the
-        # running release started are judged instead (inside `LOOKBACK_HOURS`), so a fault nothing fixed does not read
-        # "not judged" once its families are retired and the window slides on; under that many, the lane is judged
+        # running release started are judged instead (inside `LOOKBACK_HOURS`); under that many, the lane is judged
         # EARLY, and only once `DQ_EARLY_FAULTED` of them could not be judged.
         start, span = _since(now, LOOKBACK_HOURS, since)
         older = _scored(f, start, now)
@@ -880,13 +933,13 @@ def _dq_check(f: Mapping[str, Any], now: float, since: float | None) -> dict[str
     scored, by_code, classes, examples, firsts = len(rows), {c: 0 for c in PROGRAM_FAULTS}, {}, [], []
     families: dict[str, int] = {}
     for at, fid, n, verdict in rows:
-        fails = [str(x) for x in verdict.get("fails") or []] if isinstance(verdict.get("fails"), list) else []
-        if len(fails) != 1 or fails[0] not in PROGRAM_FAULTS:
+        fault = _faulted(verdict)
+        if fault is None:
             continue
-        by_code[fails[0]] += 1
+        by_code[fault] += 1
         _bump(families, fid)
         firsts.append(at)
-        if fails[0] == "DQ":
+        if fault == "DQ":
             name = dq_class(verdict.get("why"))
             _bump(classes, name)
             if len(examples) < 6:
@@ -899,19 +952,35 @@ def _dq_check(f: Mapping[str, Any], now: float, since: float | None) -> dict[str
         "retired_stalled": sum(1 for at, what in f.get("retired") or [] if what == "stalled" and first <= at <= now),
         "hours": round((now - first) / 3600.0, 1), "min_scored": DQ_MIN_SCORED, "basis": basis}
     spread = len(families) >= DQ_MIN_FAMILIES
-    if basis == "early" and not (faulted >= DQ_EARLY_FAULTED and spread):
-        return _not_judged(f"{scored} equity versions were scored in {span} (at least {DQ_MIN_SCORED} are needed, or "
-                           f"{DQ_EARLY_FAULTED} of {DQ_MIN_FAMILIES} families that could not be judged)", numbers)
+    enough = basis != "early" or (faulted >= DQ_EARLY_FAULTED and spread)
+    most = enough and faulted > DQ_SHARE * scored and spread
+    # ONCE IT STOOD UNDER A RELEASE IT HOLDS until versions scored AFTER it stood are judged by the bar in
+    # `DQ_MIN_FAMILIES` families (the generators write programs that run), or the release changes (the record is then
+    # dropped: `release_since`). Else the window slid past a fault nothing fixed, or one family's bar fails beside the
+    # retired families' versions read "half", and the cause cleared and stood again by itself.
+    stood = _num(kept.get("stood_at")) if isinstance(kept, Mapping) else None
+    stood = stood if stood is not None and 0 < stood <= now else None
+    proven = ({fid for at, fid, _, verdict in _scored(f, stood, now) if at > stood and _faulted(verdict) is None}
+              if stood is not None else set())
+    held = stood is not None and len(proven) < DQ_MIN_FAMILIES
+    stalled = most or held
+    keep = {"dq": {"stood_at": stood if held else now} if stalled else None}
+    if held:
+        numbers.update(standing_since=S.iso(stood), bar_families_since=len(proven))
+    if not enough and not held:
+        return {**_not_judged(f"{scored} equity versions were scored in {span} (at least {DQ_MIN_SCORED} are needed, or "
+                              f"{DQ_EARLY_FAULTED} of {DQ_MIN_FAMILIES} families that could not be judged)", numbers),
+                "keep": keep}
     # THE CLASS IS NAMED only when one is more than half of the disqualifications; else the classes that tie are.
     top = _top(classes, 4)
-    most = bool(top) and 2 * top[0][1] > by_code["DQ"]
-    name = top[0][0] if most and top[0][0] != UNNAMED else None
+    one_class = bool(top) and 2 * top[0][1] > by_code["DQ"]
+    name = top[0][0] if one_class and top[0][0] != UNNAMED else None
     tied = sorted(k for k, v in classes.items() if top and v == top[0][1] and k != UNNAMED)
     said, read, hint, told = "", "", None, []
     if top:
-        numbers.update(top_error=_token(top[0][0]) if most else ",".join(_token(k) for k in tied[:3]) or "none",
+        numbers.update(top_error=_token(top[0][0]) if one_class else ",".join(_token(k) for k in tied[:3]) or "none",
                        top_error_n=top[0][1])
-    if most:
+    if one_class:
         said = (f"The commonest first error: {name or 'none its record names'} ({top[0][1]} of {by_code['DQ']}"
                 + ("; then " + ", ".join(f"{k} {v}" for k, v in top[1:3]) if top[1:] else "") + ").")
     elif top:
@@ -927,35 +996,40 @@ def _dq_check(f: Mapping[str, Any], now: float, since: float | None) -> dict[str
             hint = DQ_HINTS.get(name)
         except Exception:  # noqa: BLE001 - the class is named without it
             hint = None
-    stalled = faulted > DQ_SHARE * scored and spread
     retired = numbers["retired_stalled"]
     head = {"window": f"{faulted} of the {scored} equity versions scored in {span}",
             "last_scored": (f"{faulted} of the last {scored} equity versions scored (over {_hours(now - first)} h: fewer "
                             f"than {DQ_MIN_SCORED} fall in the last {DQ_HOURS:g} h)"),
             "early": f"{faulted} of the {scored} equity versions scored in {span}"}[basis]
     early = (f"Fewer than {DQ_MIN_SCORED} are scored, and these {faulted} are already most of {DQ_MIN_SCORED}."
-             if basis == "early" else "")
+             if basis == "early" and most else "")
+    hold = ""
+    if held and not most:
+        hold = (f"It stood at {S.iso(stood)} under the running release and HOLDS until versions scored after that are "
+                f"judged by the bar in {DQ_MIN_FAMILIES} families ({len(proven)} so far), or the release changes.")
     one = ""
-    if faulted > DQ_SHARE * scored and not spread:
+    if faulted > DQ_SHARE * scored and not spread and not stalled:
         # ONE FAMILY'S BAD PROGRAMS are no fault of the contract: clear, and the family is named (in the receipt and
         # the report only: a check that does not stand reaches no warning and no mail).
         one = (f"They are all of ONE family ({next(iter(families))}): one family's bad programs are no fault of the "
                f"contract (at least {DQ_MIN_FAMILIES} families are needed).")
     # THE OWNER'S STEP names the class when one is most, and what it most often is: the reading rule's own sentence
     # where the records hold one (it is in the sentence above), else the class's fixed short hint.
-    named = f", mostly {name}" if name else f" (first errors: {', '.join(tied[:3])})" if tied and not most else ""
+    named = f", mostly {name}" if name else f" (first errors: {', '.join(tied[:3])})" if tied and not one_class else ""
     short = DQ_SHORT.get(name) if name and not told else None
     step = _cut(f"the equity generators misread the program contract{named}" + (f" ({short})" if short else "")
                 + ": fix the text they read (league/equity/EQUITY.md \"Reading ctx\", elane_review.READING_CTX) or the "
                 f"static rule that should refuse it, in a release; {REPORT} lists the lines", STEP_CHARS)
-    parts = [f"{head} could not be judged for a fault of their own program ({by_code['DQ']} disqualified, "
-             f"{by_code['LOAD']} refused at load, {by_code['RUN']} failed by the decider child): no mechanism was judged in "
-             "them" + (f", and {retired} families were retired STALLED" if retired else "") + ".", early, said, read, one]
+    parts = [(f"{head} could not be judged for a fault of their own program ({by_code['DQ']} disqualified, "
+              f"{by_code['LOAD']} refused at load, {by_code['RUN']} failed by the decider child): no mechanism was judged "
+              "in them" + (f", and {retired} families were retired STALLED" if retired else "") + "."
+              if scored else f"No equity version was scored in {span}."), early, hold, said, read, one]
+    parts = [part for part in parts if part]
     return {
-        "stalled": stalled, "judged": True, "what": " ".join(p for p in parts if p), "numbers": numbers,
+        "stalled": stalled, "judged": True, "what": " ".join(parts), "numbers": numbers,
         "doing": DOING["elane_dq"], "owner_step": step if stalled else None,
-        "onset": min(firsts) if firsts and stalled else None, "examples": examples, "hint": hint,
-        "mail": _lead(parts, WHAT_CHARS)}
+        "onset": (min(firsts) if firsts else stood) if stalled else None, "examples": examples, "hint": hint,
+        "mail": _lead(parts, WHAT_CHARS), "parts": parts, "keep": keep}
 
 
 def _births_check(f: Mapping[str, Any], now: float, since: float | None) -> dict[str, Any]:
@@ -1024,8 +1098,9 @@ def _births_check(f: Mapping[str, Any], now: float, since: float | None) -> dict
               f"Symbols the code knows and elane.universe does not hold, named most: {symbols}." if symbols else ""]
              if streak else
              [f"The equity lanes' latest pass that asked a model bore a family ({len(asked)} asked in {span})."])
+    parts = [part for part in parts if part]
     return {
-        "stalled": stalled, "judged": True, "what": " ".join(p for p in parts if p), "numbers": numbers,
+        "stalled": stalled, "judged": True, "what": " ".join(parts), "numbers": numbers,
         "doing": DOING["elane_births"] + ("" if lever or not stalled else
                                           (f" After {BIRTHS_OWNER_HOURS:g} h with no equity birth this is your step when a "
                                            "setting clears it.")),
@@ -1036,7 +1111,7 @@ def _births_check(f: Mapping[str, Any], now: float, since: float | None) -> dict
                                           limit="" if limit is None else f" (at most {limit}: the model provider's own "
                                                                          "output limit)"), STEP_CHARS) if lever else None,
         "onset": (last_born if last_born is not None else streak[-1][0]) if stalled else None,
-        "mail": _lead(parts, WHAT_CHARS)}
+        "mail": _lead(parts, WHAT_CHARS), "parts": parts}
 
 
 def _work(f: Mapping[str, Any], start: float, now: float) -> dict[str, Any]:
@@ -1063,17 +1138,18 @@ def _lever(kind: str, held: Mapping[str, Any] | None, c: Mapping[str, Any], *,
            now_held: bool = True) -> tuple[str, list[str]]:
     """WHICH OF E2'S LINES BINDS, and the owner's lever for it, from the figures the check holds (`_held`: the hourly
     pace, the day's line, what was booked against each; `lanes`' settings): (what binds, the lever's sentences: the
-    lever, the command that sets it, and the budget's where it binds first; [] for no lever). The hourly pace is
-    `elane.e2.pace_share` of the Sail model line; the day's line is the smaller of `elane.e2.usd_day` and 24 hours at
-    that pace, so `usd_day` is the lever only when it is the smaller: at the release's settings the day is 24 hourly
+    lever, the budget's line where it binds first, the command that sets the lever; [] for no lever). The hourly pace
+    is `elane.e2.pace_share` of the Sail model line; the day's line is the smaller of `elane.e2.usd_day` and 24 hours
+    at that pace, so `usd_day` is the lever only when it is the smaller: at the release's settings the day is 24 hourly
     paces and `usd_day` does not bind. Where the settings' budget block is the floor (no usable budget.json) the model
-    line itself is the floor's, and the last sentence says the budget's line binds before the share. The House's Sail
-    day is no lever of E2's. `now_held`: the kind holds E2 at this moment (what was booked is then said against it)."""
+    line itself is the floor's, and the sentence after the lever says the budget's line binds before the share (before
+    the command, so a cut never keeps the command and loses it). The House's Sail day is no lever of E2's. `now_held`:
+    the kind holds E2 at this moment (what was booked is then said against it)."""
     share, usd_day = _num(c.get("pace_share")), _num(c.get("usd_day"))
     floor = ["The budget holds the Sail model line at its floor (no usable budget.json): the budget's line binds before "
              "the share does."] if c.get("budget_floor") else []
-    pace = ["The lever is elane.e2.pace_share.", "Set it with python3 set_swarm.py elane.e2.pace_share=<lines> --apply.",
-            *floor]
+    pace = ["The lever is elane.e2.pace_share.", *floor,
+            "Set it with python3 set_swarm.py elane.e2.pace_share=<lines> --apply."]
     if kind == "pace":
         what = "E2's hourly pace binds"
         if held is not None and share is not None:
@@ -1100,12 +1176,64 @@ def _lever(kind: str, held: Mapping[str, Any] | None, c: Mapping[str, Any], *,
     return "E2 may ask no model now", []
 
 
+def _idle_clock(fresh: float, last_scored: float | None, now: float, started: float | None, beat_age: float | None,
+                since: float | None, kept: Any) -> tuple[float, float, dict[str, Any]]:
+    """THE IDLE CLOCK, KEPT PER RELEASE (`stall.json` `elane.idle`: {from, down, started, beat_at}): (since when the
+    lanes are idle, the seconds of it the swarm was down, what the next run keeps). `fresh`: since when the store says
+    the lanes are idle now (the later of the last version scored and when the work became owed).
+
+    WHAT WAS KEPT STANDS while no version was scored after it (work was owed at every run between: a run that finds
+    none owed drops the record), so the clock neither starts again at a restart nor moves with the lookback's edge or
+    with which family is the oldest still in research. THE TIME THE SWARM WAS DOWN is taken off: at a restart seen
+    since the last run (the heartbeat's `started_at` moved), from the heartbeat as that run read it to the new start
+    (the old swarm may have run on for up to one run's interval: counted as down, never as idle); with nothing kept,
+    everything before the running swarm's own start (`since`, the release's first start, with no heartbeat to read)."""
+    k = kept if isinstance(kept, Mapping) else {}
+    was = _num(k.get("from"))
+    seen, read = None, None
+    if was is not None and 0 < was <= now and (last_scored is None or last_scored <= was + 1.0):
+        idle_from, down = was, max(0.0, _num(k.get("down")) or 0.0)
+        seen, read = _num(k.get("started")), _num(k.get("beat_at"))
+        if started is not None and seen is not None and started > seen + 1.0:  # a restart since the last run
+            down += max(0.0, started - max(idle_from, seen if read is None else read))
+    else:
+        idle_from = fresh
+        edge = started if started is not None else since
+        down = max(0.0, edge - idle_from) if edge is not None else 0.0
+    down = min(down, max(0.0, now - idle_from))
+    return idle_from, down, {"from": idle_from, "down": round(down, 1), "started": started if started is not None else seen,
+                             "beat_at": read if beat_age is None else now - beat_age}
+
+
+def _holds(f: Mapping[str, Any], passes: Sequence[tuple[float, Mapping[str, Any]]], now: float, kept: Any,
+           held_now: str | None) -> tuple[float, str] | None:
+    """THE LAST HOLD OF E2'S SEEN in the last `IDLE_HOURS`: (when, its kind), None for none. E2 held now; the last run
+    of the job that read it held (`stall.json` `elane.held`: a hold between two rounds leaves no event, since no
+    round starts while every family needs a model E2 may not ask); a Train step or an equity pass skipped for want of
+    model dollars (`STARVED_KINDS`). A lane with none of them was FREE TO ASK for the whole of those hours."""
+    edge = now - IDLE_HOURS * 3600.0
+    seen: list[tuple[float, str]] = [(now, held_now)] if held_now else []
+    k = kept if isinstance(kept, Mapping) else {}
+    at = _num(k.get("at"))
+    if at is not None and edge < at <= now and isinstance(k.get("kind"), str):
+        seen.append((at, k["kind"]))
+    for at, payload in f.get("rounds") or []:
+        if edge < at <= now:
+            seen += [(at, kind) for kind in (step_read(step)["skipped"] for step in payload.get("steps") or [])
+                     if kind in STARVED_KINDS]
+    seen += [(at, row["skipped"]) for at, row in passes if edge < at <= now and row["skipped"] in STARVED_KINDS]
+    return max(seen, key=lambda row: row[0]) if seen else None
+
+
 def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapping[str, Any],
-                beat_age: float | None = None, since: float | None = None) -> dict[str, Any]:
-    """`elane_idle` (the module docstring). Pure. `started`: the running swarm's own start (the idle clock starts no
-    earlier); `since`: the running release's first start (the Train steps' window starts no earlier; `started` when
-    none is kept); `beat_age`: the age of the swarm's heartbeat in seconds, when known."""
+                beat_age: float | None = None, since: float | None = None, kept: Any = None) -> dict[str, Any]:
+    """`elane_idle` (the module docstring): A BROKEN LANE, and only that. Pure. `started`: the running swarm's own
+    start; `since`: the running release's first start (the Train steps' window starts no earlier; `started` when none
+    is kept); `beat_age`: the age of the swarm's heartbeat in seconds, when known; `kept`: what the job keeps under
+    the release (`idle`, the clock; `held`, the last run that read E2 held). The answer's `keep` is what the next run
+    keeps."""
     since = started if since is None else since
+    kept = kept if isinstance(kept, Mapping) else {}
     fams = f.get("families") or []
     researching = [fam for fam in fams if fam["alive"] and fam["status"] == "researching"]
     passes = [(at, pass_read(p)) for at, p in f.get("passes") or []]
@@ -1135,9 +1263,11 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
     if overdue:
         owed_at.append(births_at)
     first_owed = min([t for t in owed_at if t is not None], default=None)
-    idle_from = first_owed if last_scored is None or first_owed is None else max(last_scored, first_owed)
+    fresh = first_owed if last_scored is None or first_owed is None else max(last_scored, first_owed)
     held = f.get("held") if isinstance(f.get("held"), Mapping) else None
-    # THE TRAIN STEPS DUE in the last `IDLE_HOURS` (since the running release started), taken and skipped.
+    held_now = held["kind"] if held is not None else None
+    # THE TRAIN STEPS DUE in the last `IDLE_HOURS` (since the running release started), taken and skipped: what E2's
+    # lines cost, said whether or not the cause stands (it never stands for them).
     edge, span = _since(now, IDLE_HOURS, since)
     work = _work(f, edge, now)
     numbers: dict[str, Any] = {"researching": len(researching), "births_wanted": wanted, "pass_overdue": overdue,
@@ -1146,58 +1276,66 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                                "steps_skipped": work["lost"],
                                **{f"skipped_{kind}": work["skipped"][kind] for kind in STARVED_KINDS}}
     if held is not None:
-        numbers.update(held_now=held["kind"] or "none", pace_usd_hour=round(held["limit_usd_hour"], 4),
+        numbers.update(held_now=held_now or "none", pace_usd_hour=round(held["limit_usd_hour"], 4),
                        spent_last_hour_usd=round(held["spent_last_hour_usd"], 4), day_line_usd=round(held["day_line_usd"], 2),
                        spent_today_usd=round(held["spent_today_usd"], 2))
     if not researching and not wanted and not overdue:
-        return _not_judged("no equity family is in Train research and no equity birth is wanted", numbers)
-    if idle_from is None:
+        return {**_not_judged("no equity family is in Train research and no equity birth is wanted", numbers),
+                "keep": {"idle": None}}  # nothing owed: the idle clock is dropped
+    if fresh is None:
         return _not_judged("nothing says since when the equity lanes owe work", numbers)
     if beat_age is not None and beat_age > BEAT_STALE_SECONDS:
         return _not_judged(f"the swarm is not running (its heartbeat is {beat_age / 60.0:.0f} min old): the House restarts "
                            "a swarm that stops, and the options lanes' causes say so", numbers)
+    idle_from, down, clock = _idle_clock(fresh, last_scored, now, started, beat_age, since, kept.get("idle"))
+    idle = (now - idle_from) - down
+    seen = _holds(f, passes, now, kept.get("held"), held_now)
+    keep: dict[str, Any] = {"idle": clock, **({"held": {"at": now, "kind": held_now}} if held_now else {})}
+    numbers.update(idle_hours=round(idle / 3600.0, 1), down_hours=round(down / 3600.0, 1), basis="idle_hours",
+                   held_lately=seen is not None)
     owed = ((f"{len(researching)} families are in Train research" if researching else "no family is in Train research")
             + (" and births are wanted" if wanted else " and the equity pass is overdue" if overdue else ""))
-    # THE DAY'S DOLLARS SPENT IS NO STALL: E2's day's line is spent and a version was scored since 00:00 UTC. A busy
-    # lane spends its day before the day ends, every day, by design: judged clear, and said.
-    if held is not None and held["kind"] == "usd_day" and scored_today:
-        _, lever = _lever("usd_day", held, c)
-        return {"stalled": False, "judged": True,
-                "what": " ".join([f"E2's model dollars for the UTC day are spent ({_usd(held['spent_today_usd'])} of a "
-                                  f"day's line of {_usd(held['day_line_usd'])}) and {scored_today} equity versions were "
-                                  "scored since 00:00 UTC: no stall. E2 asks again at 00:00 UTC.", *lever]),
-                "numbers": {**numbers, "kind": "usd_day"}, "doing": DOING["starved"], "owner_step": None, "onset": None}
-    # STARVED BY WORK LOST: most of the Train steps due were skipped because E2 might ask no model, whether or not a
-    # version was scored (a version an hour while two families in three wait is no idle lane, and is starved).
-    if work["due"] >= STARVED_MIN_STEPS and work["lost"] > STARVED_SHARE * work["due"]:
-        now_kind = held["kind"] if held is not None else None
-        kind = max(STARVED_KINDS, key=lambda k: (work["skipped"][k], k == now_kind, -STARVED_KINDS.index(k)))
-        binds, lever = _lever(kind, held, c, now_held=kind == now_kind)
-        by = ", ".join(f"{STARVED_WORDS[k]} {work['skipped'][k]}" for k in STARVED_KINDS if work["skipped"][k])
-        parts = [f"{work['lost']} of the {work['due']} equity Train steps due in {span} were skipped because E2 might ask "
-                 f"no model ({by}); {work['scored']} versions were scored.", f"STARVED, not broken: {binds}.", *lever]
-        return {"stalled": True, "judged": True, "what": " ".join(p for p in parts if p),
-                "numbers": {**numbers, "kind": kind, "basis": "work_lost"}, "owner_step": None, "onset": None,
-                "doing": DOING["starved"], "mail": _lead(parts, WHAT_CHARS)}
-    # NOTHING SCORED: the idle clock, from the later of when the lanes went idle and the running swarm's own start (a
-    # swarm that was down is not idle on the hours it was down: under `IDLE_HOURS` up, it is not judged idle).
-    edge = max(idle_from, started) if started is not None else idle_from
-    idle = now - edge
-    numbers.update(idle_hours=round(idle / 3600.0, 1), basis="idle_hours")
+    # WHAT E2'S LINES COST, in sentences: the steps due, taken and skipped by reason; whether E2 is held now, or where
+    # it was held; that this is no stall; the lever. Said by every reading that does not stand, when there is any.
+    by = ", ".join(f"{STARVED_WORDS[k]} {work['skipped'][k]}" for k in STARVED_KINDS if work["skipped"][k])
+    lost = ([f"Of the {work['due']} equity Train steps due in {span}, {work['taken']} were taken and {work['lost']} were "
+             f"skipped because E2 might ask no model ({by}); {work['scored']} versions were scored."] if work["lost"] else
+            [f"All {work['due']} equity Train steps due in {span} were taken; {work['scored']} versions were scored."]
+            if work["due"] else [])
+    most = max(STARVED_KINDS, key=lambda k: (work["skipped"][k], -STARVED_KINDS.index(k))) if work["lost"] else None
+    line = held_now or most or (seen[1] if seen is not None else None)
+    binds, lever = _lever(line, held, c, now_held=bool(held_now)) if line else ("", [])
+    # Whether E2 is held now, by which line; else which line held it, and how long ago a hold was last seen.
+    hold = (f"{binds}, so no model is asked." if held_now else
+            f"{binds}; E2 may ask a model now and was last held {_hours(now - seen[0])} h ago." if seen is not None else "")
+    exact = last_scored is not None and abs(idle_from - last_scored) < 1.0  # the clock starts at a version scored
+    spent = (f"E2's model dollars for the UTC day are spent ({_usd(held['spent_today_usd'])} of a day's line of "
+             f"{_usd(held['day_line_usd'])})" if held is not None and held_now == "usd_day" else "")
     if idle < IDLE_HOURS * 3600.0:
-        if started is not None and idle_from < started:
-            return _not_judged(f"the swarm started {_hours(now - started)} h ago (the lanes are judged idle after "
-                               f"{IDLE_HOURS:g} h with nothing scored)", numbers)
-        return {"stalled": False, "judged": True,
-                "what": (f"The last equity version was scored {_hours(idle)} h ago." if idle_from == last_scored else
-                         f"The equity lanes have owed work for {_hours(idle)} h and scored no version since.")
-                        + f" The lanes are idle after {IDLE_HOURS:g} h with nothing scored.",
-                "numbers": numbers, "doing": DOING["broken"], "owner_step": None, "onset": None}
+        if down > 0:
+            # A swarm that was down is not idle on the hours it was down: under `IDLE_HOURS` of running time, not judged.
+            ran = started is not None and abs((now - started) - idle) < 1.0
+            return {**_not_judged((f"the swarm started {_hours(now - started)} h ago" if ran else
+                                   f"nothing was scored for {_hours(now - idle_from)} h, {_hours(down)} h of them with the "
+                                   "swarm down") + f" (the lanes are judged idle after {IDLE_HOURS:g} h with nothing "
+                                   "scored)", numbers), "keep": keep}
+        told = bool(work["lost"] or held_now)
+        if spent and scored_today:
+            parts = [f"{spent} and {scored_today} equity versions were scored since 00:00 UTC: no stall. E2 asks again at "
+                     "00:00 UTC.", *lost, *lever]
+        else:
+            parts = [(f"The last equity version was scored {_hours(idle)} h ago." if exact else
+                      f"The equity lanes have owed work for {_hours(idle)} h and scored no version since.")
+                     + f" The lanes are idle after {IDLE_HOURS:g} h with nothing scored.",
+                     *([*lost, hold[:1].upper() + hold[1:], NO_STALL, *lever] if told else [])]
+        return {"stalled": False, "judged": True, "what": " ".join(parts),
+                "numbers": {**numbers, **({"kind": line} if told and line else {})},
+                "doing": DOING["starved" if told else "broken"], "owner_step": None, "onset": None, "keep": keep}
     # WHY, since the lanes went idle: the Train rounds' own steps, the rounds that raised, the families waiting.
     tally = {"rounds": 0, "house": 0, "unanswered": 0, "refused": 0, "errors": 0, "raised": 0, "passes": 0}
     houses: dict[str, int] = {}
     for at, payload in f.get("rounds") or []:
-        if at < edge:
+        if at < idle_from:
             continue
         tally["rounds"] += 1
         for step in payload.get("steps") or []:
@@ -1208,56 +1346,77 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
             tally["unanswered"] += int(read["unanswered"])
             tally["refused"] += int(read["refused"] is not None)
             tally["errors"] += int(read["error"])
-    tally["raised"] = sum(1 for at, _ in f.get("raised") or [] if at >= edge)
-    tally["passes"] = sum(1 for at, row in passes if at >= edge and row["barren"])
+    tally["raised"] = sum(1 for at, _ in f.get("raised") or [] if at >= idle_from)
+    tally["passes"] = sum(1 for at, row in passes if at >= idle_from and row["barren"])
     waiting = [fam for fam in researching if any(t > now for t in fam["waits"].values())]
+    backed = 0  # the most failures of the House's one after another a family now waiting out its backoff has had
     for fam in waiting:
         for name, until in fam["waits"].items():
             if until > now and name.startswith("infra:"):
                 _bump(houses, name.split(":", 1)[1])
+                backed = max(backed, int(fam.get("house_fails") or 0))
     train_at = (f.get("kv") or {}).get(TRAIN_AT_KEY)
     numbers.update(train_rounds=tally["rounds"], house_failures=tally["house"], unanswered=tally["unanswered"],
                    refused_answers=tally["refused"], step_errors=tally["errors"], rounds_raised=tally["raised"],
                    barren_passes=tally["passes"],
                    families_waiting=len(waiting),
                    train_round_age_min=None if train_at is None else round(max(0.0, now - train_at) / 60.0, 1))
-    starved = held is not None and held["kind"] is not None
-    lever: list[str] = []
-    if starved:
-        kind = held["kind"]
-        binds, lever = _lever(kind, held, c)
-        why = f"STARVED, not broken: {binds}, so no model is asked."
-    else:
-        # With no family in research the work owed is the equity pass's: barren passes are `elane_births`' to explain,
-        # before anything the Train rounds of families now gone left behind (programs refused, steps that failed).
-        kind = ("raised" if tally["raised"] else "house" if tally["house"] or houses else
-                "unanswered" if tally["unanswered"] or any("unanswered" in fam["waits"] for fam in waiting) else
-                "barren" if not researching and tally["passes"] else
-                "refused" if tally["refused"] else "errors" if tally["errors"] else
-                "silent" if tally["rounds"] else "no_round")
-        said = [f"{tally['rounds']} Train rounds ran"]
-        if tally["raised"]:
-            said.append(f"{tally['raised']} rounds raised")
-        if tally["house"] or houses:
-            said.append(f"{tally['house']} steps failed on the House's side ("
-                        + (", ".join(f"{k} {n}" for k, n in _top(houses, 4)) or "kind not named") + ")")
-        if tally["unanswered"]:
-            said.append(f"{tally['unanswered']} questions got no answer from a model route")
-        if tally["refused"]:
-            said.append(f"{tally['refused']} programs were refused before a run (see elane_refused)")
-        if tally["errors"]:
-            said.append(f"{tally['errors']} steps failed with an error of their own")
-        if waiting:
-            said.append(f"{len(waiting)} of {len(researching)} families wait out a backoff")
-        if train_at is not None:
-            said.append(f"the Train round last started {max(0.0, now - train_at) / 60.0:.0f} min ago")
-        may = "E2 may ask a model now" if held is not None else "whether E2 may ask a model now could not be read"
+    # BROKEN IS JUDGED FIRST, by the lane's own record: rounds that raised, steps that failed on the House's side (or a
+    # family waiting out a House backoff after as many failures), steps that failed with an error of their own. It
+    # stands whatever E2's lines hold: a lane whose every Train run fails scores nothing at any pace.
+    fails = {"raised": tally["raised"], "house": max(tally["house"], backed), "errors": tally["errors"]}
+    broken = next((kind for kind in BROKEN_KINDS if fails[kind] >= BROKEN_MIN_FAILS), None)
+    # "At least" unless the clock starts at a version scored: since when work is owed is read inside the lookback.
+    lead = (f"No equity version was scored on Train for {'' if exact else 'at least '}{_hours(idle)} h"
+            + (f" of the swarm's running time (it was down {_hours(down)} h more)" if down > 0 else "") + f" while {owed}.")
+    if broken is None and seen is not None:
+        # STARVED BY A SETTING, not broken: E2 is held, or was inside these hours, and the record shows no failing
+        # lane. The captain's chosen budget at work: judged CLEAR, never standing, never mailed; the cost is said.
+        if spent and scored_today:
+            head = [f"{spent} and {scored_today} equity versions were scored since 00:00 UTC: no stall. E2 asks again at "
+                    "00:00 UTC."]
+        else:
+            head = [lead, f"STARVED BY A SETTING, not broken: {hold}"]
+        parts = [*head, *lost, *([] if spent and scored_today else [NO_STALL]), *lever]
+        return {"stalled": False, "judged": True, "what": " ".join(parts),
+                "numbers": {**numbers, "kind": line, "starved": True}, "doing": DOING["starved"], "owner_step": None,
+                "onset": None, "keep": keep}
+    # With no family in research the work owed is the equity pass's: barren passes are `elane_births`' to explain,
+    # before anything the Train rounds of families now gone left behind (programs refused, steps that failed).
+    kind = broken or ("raised" if tally["raised"] else "house" if tally["house"] or houses else
+                      "unanswered" if tally["unanswered"] or any("unanswered" in fam["waits"] for fam in waiting) else
+                      "barren" if not researching and tally["passes"] else
+                      "refused" if tally["refused"] else "errors" if tally["errors"] else
+                      "silent" if tally["rounds"] else "no_round")
+    said = [f"{tally['rounds']} Train rounds ran"]
+    if tally["raised"]:
+        said.append(f"{tally['raised']} rounds raised")
+    if tally["house"] or houses:
+        said.append(f"{tally['house']} steps failed on the House's side ("
+                    + (", ".join(f"{k} {n}" for k, n in _top(houses, 4)) or "kind not named") + ")")
+    if tally["unanswered"]:
+        said.append(f"{tally['unanswered']} questions got no answer from a model route")
+    if tally["refused"]:
+        said.append(f"{tally['refused']} programs were refused before a run (see elane_refused)")
+    if tally["errors"]:
+        said.append(f"{tally['errors']} steps failed with an error of their own")
+    if waiting:
+        said.append(f"{len(waiting)} of {len(researching)} families wait out a backoff")
+    if train_at is not None:
+        said.append(f"the Train round last started {max(0.0, now - train_at) / 60.0:.0f} min ago")
+    may = "E2 may ask a model now" if held is not None else "whether E2 may ask a model now could not be read"
+    pace = ""
+    if held_now:  # BROKEN by its record while E2 is also held: the line is said second, and is not the fault
+        why = "BROKEN, whatever E2's own lines hold: " + "; ".join(said) + "."
+        pace = f"E2 is also held now ({binds}): that is its setting at work, and a broken lane scores nothing at any pace."
+    elif kind == "barren":
         why = (f"Not starved ({may}): {tally['passes']} equity passes asked a model and bore no family, so there is none "
-               "to score (see elane_births)." if kind == "barren" else
-               f"BROKEN, not starved: {may} and " + "; ".join(said) + ".")
+               "to score (see elane_births).")
+    else:
+        why = f"BROKEN, not starved: {may} and " + "; ".join(said) + "."
     numbers["kind"] = kind
     owner = None
-    if not starved and kind in IDLE_OWNER_KINDS:
+    if kind in IDLE_OWNER_KINDS:
         owner = {"raised": "the equity lanes' rounds raise (the swarm log's \"elane failed\" and \"elane_train failed\" lines)",
                  "house": ("the equity lanes' Train runs fail on the House's side: check the equity_data job's receipt and the "
                            "swarm's equity-decider.log"),
@@ -1266,12 +1425,12 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                  "no_round": ("the equity lanes owe work, may ask a model and start no round (the swarm log's elane_train "
                               "lines)"),
                  }[kind] + f"; it needs a fix, in a release or on the box ({REPORT} prints each family's state)"
-    parts = [f"No equity version was scored on Train for {_hours(idle)} h while {owed}.", why, *lever]
+    parts = [part for part in (lead, why, pace) if part]
     return {
-        "stalled": True, "judged": True, "what": " ".join(p for p in parts if p),
-        "numbers": numbers, "owner_step": owner, "onset": edge,
-        "doing": DOING["starved" if starved else "elane_births" if kind == "barren" else "broken"],
-        "mail": _lead(parts, WHAT_CHARS)}
+        "stalled": True, "judged": True, "what": " ".join(parts),
+        "numbers": numbers, "owner_step": owner, "onset": idle_from,
+        "doing": DOING["elane_births" if kind == "barren" else "broken"],
+        "mail": _lead(parts, WHAT_CHARS), "parts": parts, "keep": keep}
 
 
 def _sail_words(text: Any) -> str:
@@ -1291,45 +1450,64 @@ def _sail_words(text: Any) -> str:
 def _refused_check(f: Mapping[str, Any], now: float, since: float | None) -> dict[str, Any]:
     """`elane_refused` (the module docstring). Pure. `since`: the running release's first start."""
     start, span = _since(now, REFUSED_HOURS, since)
-    tally = refusals_tally(f, start, now)
+    rows, basis = _answers(f, start, now), "window"
+    if len(rows) < REFUSED_MIN_ANSWERS:
+        # THE WINDOW'S EDGE, as `elane_dq`: fewer than the minimum fall in the six hours (a slow lane writes one program
+        # an hour). The last `REFUSED_MIN_ANSWERS` written since the running release started are judged instead (inside
+        # `LOOKBACK_HOURS`); under that many, the lane is judged EARLY, once `REFUSED_EARLY` were refused by one rule.
+        start, span = _since(now, LOOKBACK_HOURS, since)
+        older = _answers(f, start, now)
+        rows, basis = ((older[-REFUSED_MIN_ANSWERS:], "last_written") if len(older) >= REFUSED_MIN_ANSWERS else
+                       (older, "early"))
+    tally = refusals_tally(f, start, now, rows)
     answers, refused = tally["answers"], tally["refused"]
+    first = rows[0][0] if rows and basis == "last_written" else start
     rules = {k: v for k, v in tally["by_rule"].items() if k not in NOT_RULES}
-    numbers: dict[str, Any] = {"answers": answers, "stored": tally["stored"], "refused": refused,
-                               **{f"refused_{_token(k)}": v for k, v in sorted(tally["by_rule"].items())},
-                               "hours": round((now - start) / 3600.0, 1), "min_answers": REFUSED_MIN_ANSWERS}
-    if answers < REFUSED_MIN_ANSWERS:
-        return _not_judged(f"the equity generators wrote {answers} programs in {span} (at least {REFUSED_MIN_ANSWERS} are "
-                           "needed)", numbers)
     top = _top(rules, 1)
     rule, n = top[0] if top else ("none", 0)
+    numbers: dict[str, Any] = {"answers": answers, "stored": tally["stored"], "refused": refused,
+                               **{f"refused_{_token(k)}": v for k, v in sorted(tally["by_rule"].items())},
+                               "hours": round((now - first) / 3600.0, 1), "min_answers": REFUSED_MIN_ANSWERS, "basis": basis}
+    if basis == "early" and n < REFUSED_EARLY:
+        return _not_judged(f"the equity generators wrote {answers} programs in {span} (at least {REFUSED_MIN_ANSWERS} are "
+                           f"needed, or {REFUSED_EARLY} refused by one rule)", numbers)
     numbers.update(top_rule=_token(rule), top_rule_n=n, share=round(n / answers, 2))
     stalled = n > REFUSED_SHARE * answers
     said = _top(tally["sentences"].get(rule, {}), 2)
     words = RULE_WORDS.get(rule, f"the {rule} rule")
     by_rule = ", ".join(f"{RULE_WORDS.get(k, 'the ' + k + ' rule')} {v}" for k, v in _top(tally["by_rule"], 5))
-    parts = ([f"{n} of the {answers} programs the equity generators wrote in {span} were refused before a run by ONE "
-              f"static rule, {words} ({refused} refused in all: {by_rule}).",
+    head = {"window": f"{n} of the {answers} programs the equity generators wrote in {span}",
+            "last_written": (f"{n} of the last {answers} programs the equity generators wrote (over {_hours(now - first)} h: "
+                             f"fewer than {REFUSED_MIN_ANSWERS} fall in the last {REFUSED_HOURS:g} h)"),
+            "early": f"{n} of the {answers} programs the equity generators wrote in {span}"}[basis]
+    parts = ([f"{head} were refused before a run by ONE static rule, {words} ({refused} refused in all: {by_rule}).",
+              (f"Fewer than {REFUSED_MIN_ANSWERS} are written, and these {n} are already most of {REFUSED_MIN_ANSWERS}."
+               if basis == "early" else ""),
               "Its commonest sentence: " + "; then ".join(f"{s} ({k}x)" for s, k in said) + "." if said else ""]
              if top else
              [f"None of the {answers} programs the equity generators wrote in {span} was refused by a static rule."])
+    parts = [part for part in parts if part]
     return {
-        "stalled": stalled, "judged": True, "what": " ".join(p for p in parts if p),
+        "stalled": stalled, "judged": True, "what": " ".join(parts),
         "numbers": numbers, "doing": DOING["elane_refused"],
         "owner_step": (f"the equity generators are not being taught {words}: teach it where they read it "
                        "(league/equity/EQUITY.md, the researcher's system prompt, elane_review.READING_CTX), in a "
                        f"release; {REPORT} lists the refusals") if stalled else None,
-        "onset": None, "examples": tally["examples"], "mail": _lead(parts, WHAT_CHARS)}
+        "onset": None, "examples": tally["examples"], "mail": _lead(parts, WHAT_CHARS), "parts": parts}
 
 
 def judge(f: Mapping[str, Any], *, now: float, started: float | None = None, beat_age: float | None = None,
-          settings: Mapping[str, Any] | None = None, since: float | None = None) -> dict[str, dict[str, Any]]:
-    """The four checks over the store's facts (`facts`), each {stalled, judged, what, numbers, doing, owner_step, onset}.
-    Pure. `since`: the running release's first start (evidence counts from it; `started` when none is kept);
-    `started`: the running swarm's own start (the idle clock); `beat_age`: its heartbeat's age in seconds; `settings`:
-    `lanes`' third value."""
+          settings: Mapping[str, Any] | None = None, since: float | None = None,
+          kept: Mapping[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """The four checks over the store's facts (`facts`), each {stalled, judged, what, numbers, doing, owner_step, onset}
+    and, where the next run needs something kept, `keep` ({a key of `KEPT`: its value, None to drop it}). Pure.
+    `since`: the running release's first start (evidence counts from it; `started` when none is kept); `started`: the
+    running swarm's own start; `beat_age`: its heartbeat's age in seconds; `settings`: `lanes`' third value; `kept`:
+    what the stall job keeps under the running release (`KEPT`)."""
     since = started if since is None else since
-    found = {"elane_dq": _dq_check(f, now, since), "elane_births": _births_check(f, now, since),
-             "elane_idle": _idle_check(f, now, started, settings or {}, beat_age, since),
+    kept = kept if isinstance(kept, Mapping) else {}
+    found = {"elane_dq": _dq_check(f, now, since, kept.get("dq")), "elane_births": _births_check(f, now, since),
+             "elane_idle": _idle_check(f, now, started, settings or {}, beat_age, since, kept),
              "elane_refused": _refused_check(f, now, since)}
     return {cause: _judged(check) if check["judged"] else check for cause, check in found.items()}
 
@@ -1346,25 +1524,33 @@ def heartbeat(root: str | Path, now: float) -> tuple[float | None, float | None]
 
 def release_since(kept: Any, root: str | Path, now: float) -> dict[str, Any]:
     """SINCE WHEN THE RUNNING RELEASE HAS RUN, as the stall job keeps it in its state file (`STATE_FILE`'s
-    `STATE_KEEP`): {release, since}. `release` is the heartbeat's (the release directory the running swarm was started
-    from, league/swarm/loop.py) and `since` the `started_at` first seen under it: KEPT while the heartbeat names the
-    same release, so a restart that fixes nothing (the watchdog's, a settings apply) resets no evidence; replaced when
-    it names another, so what the generators did under an earlier release is not held against this one. `kept`: what
-    the last run kept. A heartbeat that names no release counts from the running swarm's own start, as before the
-    record was kept; with no heartbeat to read, what was kept stands. Never raises."""
+    `STATE_KEEP`): {release, since} and, with them, what was kept under that release (`KEPT`). `release` is the
+    heartbeat's (the release directory the running swarm was started from, league/swarm/loop.py) and `since` the
+    `started_at` first seen under it: KEPT while the heartbeat names the same release, so a restart that fixes nothing
+    (the watchdog's, a settings apply) resets no evidence and none of the clocks kept under it; replaced when it names
+    another, so what the generators did under an earlier release is not held against this one (and `KEPT` is dropped:
+    a release that fixes a fault clears what stood for it). `kept`: what the last run kept. A heartbeat that names no
+    release counts from the running swarm's own start, as before the record was kept (what was kept stands for that
+    one run of the swarm); with no heartbeat to read, what was kept stands. Never raises."""
     try:
         kept = kept if isinstance(kept, Mapping) else {}
         old = _num(kept.get("since"))
         old = old if old is not None and 0 < old <= now else None
+        named = kept.get("release") if isinstance(kept.get("release"), str) else None
         beat = read_json(Path(root) / HEARTBEAT, None)
         beat = beat if isinstance(beat, Mapping) else {}
         release = beat.get("release") if isinstance(beat.get("release"), str) and beat.get("release") else None
         started = heartbeat(root, now)[0]
-        if release is not None and kept.get("release") == release and old is not None:
-            return {"release": release, "since": old if started is None else min(old, started)}
-        if release is None and started is None:
-            return {"release": kept.get("release") if isinstance(kept.get("release"), str) else None, "since": old}
-        return {"release": release, "since": started}
+        if release is not None and named == release and old is not None:
+            out, same = {"release": release, "since": old if started is None else min(old, started)}, True
+        elif release is None and started is None:
+            out, same = {"release": named, "since": old}, True
+        else:
+            out = {"release": release, "since": started}
+            same = release is None and named is None and old is not None and started is not None and abs(started - old) < 1.0
+        if same:
+            out.update({key: dict(kept[key]) for key in KEPT if isinstance(kept.get(key), Mapping)})
+        return out
     except Exception:  # noqa: BLE001 - nothing kept: the evidence counts from the running swarm's start
         return {"release": None, "since": None}
 
@@ -1378,14 +1564,42 @@ def switched_off(ctx: Any) -> bool:
     return isinstance(block, Mapping) and block.get(SWITCH) is False
 
 
+def _blind(ctx: Any, kept: Any, now: float, errors: list[str] | None, text: str) -> None:
+    """AN ALARM THAT CANNOT SEE SAYS SO (the review of Oct 11: an entry of the receipt's `errors` reached no one).
+    `text` (it names the CLASS of what could not be read, never its message) is an entry of the job's `errors` at
+    every run, and ONE House warning every `BLIND_WARN_SECONDS` while it lasts: through the job's context
+    (`ctx.alert`), its time kept in the job's record (`kept`: `unread`). A call with no record to keep it in (the
+    operator's report) warns nobody."""
+    if errors is not None:
+        errors.append(text)
+    try:
+        if not isinstance(kept, dict):
+            return
+        last = _num(kept["unread"].get("warned_at")) if isinstance(kept.get("unread"), Mapping) else None
+        if last is not None and 0.0 <= now - last < BLIND_WARN_SECONDS:
+            return
+        alert = ctx.get("alert") if isinstance(ctx, Mapping) else getattr(ctx, "alert", None)
+        if callable(alert):
+            alert("warning", _cut(f"stall: the equity lanes' alarm cannot see: {text}. It is said here every "
+                                  f"{BLIND_WARN_SECONDS / 3600.0:g} h while it lasts and in the stall receipt's errors at "
+                                  f"every run; it needs a fix, in a release or on the box ({REPORT} shows what reads).",
+                                  WARN_CHARS))
+            kept["unread"] = {"warned_at": now}
+    except Exception:  # noqa: BLE001 - the errors entry stands without the warning
+        pass
+
+
 def checks(ctx: Any, root: str | Path, now: float, loaded: Mapping[str, Any] | None, *, paused: bool = False,
-           errors: list[str] | None = None, since: float | None = None) -> dict[str, dict[str, Any]]:
+           errors: list[str] | None = None, since: float | None = None,
+           kept: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
     """THE STALL JOB'S CALL (league/ops/stall.py `run`): the four causes' checks, from the swarm's store (read-only),
     its heartbeat and its settings as it loads them (`loaded`). `ctx`: the job's context (for the owner's switch,
-    `switched_off`). `paused`: a maintenance pause or a stopped swarm stands. `since`: the running release's first
-    start (`release_since`; None: the running swarm's own). Never raises. LANES THAT CANNOT BE READ are "Not judged"
-    AND an entry of `errors` naming the class (the settings, one of E2's own readers, the store, the lane's own
-    reading of whether it may ask a model): the receipt's warning then says the alarm could not see."""
+    `switched_off`, and its House warnings). `paused`: a maintenance pause or a stopped swarm stands. `since`: the
+    running release's first start (`release_since`; None: the running swarm's own). `kept`: the job's record under the
+    running release (`release_since`'s answer): read for what earlier runs kept (`KEPT`) and LEFT HOLDING what the
+    next run needs, for the job to write with its state; nothing is written here. Never raises. LANES THAT CANNOT BE
+    READ are "Not judged", an entry of `errors` naming the class (the settings, one of E2's own readers, the store,
+    the lane's own reading of whether it may ask a model) and a House warning every `BLIND_WARN_SECONDS` (`_blind`)."""
     try:
         if switched_off(ctx):
             return {cause: _not_judged(f"switched off (ops.json stall.{SWITCH} is false)") for cause in CAUSES}
@@ -1394,18 +1608,26 @@ def checks(ctx: Any, root: str | Path, now: float, loaded: Mapping[str, Any] | N
             f = guard.read(Path(root) / SWARM_DB, lambda db: facts(db, now, loaded))
             on, why, c = lanes(loaded, f, paused=paused)
         if not on:
-            if c.get("unread") and errors is not None:
-                errors.append(f"the equity lanes' readers could not be read ({c['unread']}): the four equity causes are "
-                              "not judged")
+            if c.get("unread"):
+                _blind(ctx, kept, now, errors, f"the equity lanes' readers could not be read ({c['unread']}): the four "
+                                               "equity causes are not judged")
             return {cause: _not_judged(str(why)) for cause in CAUSES}
-        if f.get("held_error") and errors is not None:
-            errors.append("the equity lanes' own reading of whether E2 may ask a model could not be read "
-                          f"({f['held_error']}): elane_idle cannot tell a starved lane from a broken one")
+        if f.get("held_error"):
+            _blind(ctx, kept, now, errors, "the equity lanes' own reading of whether E2 may ask a model could not be read "
+                                           f"({f['held_error']}): elane_idle cannot tell a starved lane from a broken one")
         started, beat_age = heartbeat(root, now)
-        return judge(f, now=now, started=started, beat_age=beat_age, settings=c, since=since)
+        found = judge(f, now=now, started=started, beat_age=beat_age, settings=c, since=since, kept=kept)
+        for check in found.values():  # what the next run needs, into the job's record (None: dropped)
+            for key, value in (check.pop("keep", None) or {}).items():
+                if not isinstance(kept, dict) or key not in KEPT:
+                    continue
+                if value is None:
+                    kept.pop(key, None)
+                else:
+                    kept[key] = value
+        return found
     except Exception as exc:  # noqa: BLE001 - the stall alarm goes on without the equity lanes' causes
-        if errors is not None:
-            errors.append(f"the equity lanes' health could not be read ({type(exc).__name__})")
+        _blind(ctx, kept, now, errors, f"the equity lanes' health could not be read ({type(exc).__name__})")
         return {cause: _not_judged(f"the equity lanes' records could not be read ({type(exc).__name__})") for cause in CAUSES}
 
 
@@ -1532,6 +1754,23 @@ def mailed(entries: Sequence[Mapping[str, Any]],
         return [dict(e) for e in entries]
 
 
+def warning(cause: str, check: Mapping[str, Any], text: str) -> str:
+    """THE STALL JOB'S CALL for a House warning: `text`, the warning as the job words every cause's ("stall: <cause>:
+    <what> <doing> Owner step: <step>."), returned as it is unless it is an equity cause's with an owner step and
+    passes the alert's cut (`WARN_CHARS`). Then THE STEP IS KEPT WHOLE and what comes before it is the check's leading
+    sentences that fit (`_lead`: its own, most telling first, then what the floor does): before, a long sentence cut
+    the warning inside the owner step. Never raises."""
+    try:
+        step = check.get("owner_step")
+        if cause not in CAUSES or not step or len(text) <= WARN_CHARS:
+            return text
+        head, tail = f"stall: {cause}: ", f" Owner step: {step}."
+        parts = check.get("parts") if isinstance(check.get("parts"), list) else [check.get("what")]
+        return head + _lead([*parts, check.get("doing")], WARN_CHARS - len(head) - len(tail)) + tail
+    except Exception:  # noqa: BLE001 - the warning as the job worded it
+        return text
+
+
 # ---------------------------------------------------------------------------------------------- the report
 def report(root: str | Path, *, now: float, hours: float = FUNNEL_HOURS,
            settings: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -1547,9 +1786,9 @@ def report(root: str | Path, *, now: float, hours: float = FUNNEL_HOURS,
             loaded = settings_mod.load(root)
     paused = any((root / name).exists() for name in ("PAUSE", "swarm.stop"))
     ctx = {"settings": ops_settings(root)}
-    kept = read_json(root / STATE_FILE, None)  # the stall job's own record of since when the running release has run
-    since = release_since(kept.get(STATE_KEEP) if isinstance(kept, Mapping) else None, root, now)["since"]
-    found = checks(ctx, root, now, loaded, paused=paused, since=since)
+    kept = read_json(root / STATE_FILE, None)  # the stall job's own record of the running release, read and not written
+    running = release_since(kept.get(STATE_KEEP) if isinstance(kept, Mapping) else None, root, now)
+    found = checks(ctx, root, now, loaded, paused=paused, since=running.get("since"), kept=running)
     on, why, _ = lanes(loaded, paused=paused)
     if switched_off(ctx):
         on, why = False, f"switched off (ops.json stall.{SWITCH} is false)"
@@ -1574,7 +1813,7 @@ def report(root: str | Path, *, now: float, hours: float = FUNNEL_HOURS,
                          "status": fam["status"], "versions": versions, "refused": refused,
                          "waits": {k: S.iso(v) for k, v in fam["waits"].items() if v > now}})
     return {"at": S.iso(now), "judged": on, "why": why,
-            "checks": {c: {k: v for k, v in found[c].items() if k not in ("onset", "examples", "mail")}
+            "checks": {c: {k: v for k, v in found[c].items() if k not in ("onset", "examples", "mail", "parts", "keep")}
                        for c in CAUSES},
             "funnel": {"hours": hours, **funnel}, "families": families}
 
@@ -1633,13 +1872,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = ["CAUSES", "SWITCH", "switched_off", "checks", "judge", "facts", "lanes", "heartbeat", "release_since", "mailed",
-           "research",
+           "warning", "research",
            "research_counts", "report", "text", "main", "dq_class", "dq_line", "refusal_class", "foreign_symbols",
            "rule_of", "sentences", "skip_kind", "step_read", "pass_read", "refusals_tally", "e2_families",
            "DQ_HOURS", "DQ_MIN_SCORED", "DQ_SHARE", "DQ_MIN_FAMILIES", "DQ_EARLY_FAULTED", "DQ_SHORT", "BIRTHS_HOURS",
-           "BIRTHS_PASSES", "BIRTHS_OWNER_HOURS", "IDLE_HOURS", "STARVED_MIN_STEPS", "STARVED_SHARE", "STARVED_KINDS",
-           "BEAT_STALE_SECONDS", "SETTINGS", "STATE_FILE", "STATE_KEEP", "NOT_MAILED",
-           "REFUSED_HOURS", "REFUSED_MIN_ANSWERS", "REFUSED_SHARE", "LOOKBACK_HOURS", "FUNNEL_HOURS", "REFUSALS",
+           "BIRTHS_PASSES", "BIRTHS_OWNER_HOURS", "IDLE_HOURS", "BROKEN_MIN_FAILS", "BROKEN_KINDS", "STARVED_KINDS",
+           "BEAT_STALE_SECONDS", "SETTINGS", "STATE_FILE", "STATE_KEEP", "KEPT", "NOT_MAILED", "NO_STALL", "WARN_CHARS",
+           "REFUSED_HOURS", "REFUSED_MIN_ANSWERS", "REFUSED_SHARE", "REFUSED_EARLY", "BLIND_WARN_SECONDS",
+           "LOOKBACK_HOURS", "FUNNEL_HOURS", "REFUSALS",
            "REFUSAL_WORDS", "RULES", "RULE_WORDS", "SENTENCES", "BIRTH_LEVERS", "IDLE_OWNER_KINDS", "PROGRAM_FAULTS",
            "BAR_CODES", "ERROR_CLASSES", "LANES", "STATE_KEY", "ROUTE_KEY", "MAIL_FIGURES"]
 
