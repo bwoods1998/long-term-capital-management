@@ -289,7 +289,10 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
         "- THE CONTRACT IN BRIEF: decide(ctx) runs once a session after the close on daily bars (prices adjusted as of "
         "that day, never by a later event); an intent executes in the NEXT session, \"at\": \"open\" (default) or "
         "\"close\"; a lot is never sold in the session it was bought; the House exits a lot after its NEEDS "
-        "max_hold_sessions (at most 60); an ETF position is at most half the sleeve; fills pay the half-spread (1 bp "
+        "max_hold_sessions (at most 60), so a program that means to hold longer sells and buys again on ctx's calendar "
+        "(the month's last close, a weekday) and never by waiting for the House's exit, or its trading days are "
+        "counted from its run's first session and it fails START; an ETF position is at most half the sleeve; fills "
+        "pay the half-spread (1 bp "
         "the index ETFs, 3 bp the other ETFs, 5 bp TLT and GLD) and sells the SEC and FINRA fees. The whole contract is "
         "in your system prompt.",
         "- THE RATION: ONE Validation try and ONE sealed look a LINEAGE. A family continuing an idea (its parent, or a "

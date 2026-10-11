@@ -245,13 +245,17 @@ Stopping, from the lightest:
      WHAT IT REFUSES THAT IS HONEST, stated: (1) a hold that simply ends at the House's maximum-hold exit and is
      bought again at once (always in the market in lots of N sessions): its trading days are counted from the run's
      first session, a later run never falls in step, and live it would trade on other days than any replay; the cure
-     is to exit and re-enter on ctx's calendar or a market condition, and the brief says so. A trend or signal
-     program that the House's exit interrupts falls in step again at its next flat stretch and passes (in the tests:
-     `TREND`). (2) A buy sized in dollars worked out from `ctx.equity`, `ctx.cash` or `ctx.caps` (compounding the
-     sleeve, "what is left", the House's room), or from the cash share or a lot's weight: the static rule allows it
-     and this check refuses it at the first session two runs hold the same lots, since such a size differs between
-     two runs; size by a constant `share` (the House sizes a share on the sleeve itself and cuts it to the cash and
-     the room). (3) A weight cap or a rule on the cash share that binds often: allowed by the static rule, and
+     is to exit and re-enter on ctx's calendar or a market condition, and the brief says so (the architect's
+     request says it too, before a first program is written). A trend or signal program that the House's exit
+     interrupts falls in step again at its next flat stretch and passes (in the tests: `TREND`); A SLOW TREND THAT
+     NEVER BREAKS while a later run warms up is the first case all the same: on a steadily rising invented market,
+     holders with a look-back of 63 to 200 sessions that wait for the House's exit failed 18 of the build's 36
+     trials (on two other invented markets 2 of 96), and their twins that sell and buy again on the month's last
+     close failed none of 144. (2) A buy sized in dollars worked out from `ctx.equity`, `ctx.cash` or `ctx.caps`
+     (compounding the sleeve, "what is left", the House's room), or from the cash share or a lot's weight: the
+     static rule allows it and this check refuses it at the first session two runs hold the same lots, since such a
+     size differs between two runs; size by a constant `share` (the House sizes a share on the sleeve itself and
+     cuts it to the cash and the room). (3) A weight cap or a rule on the cash share that binds often: allowed by the static rule, and
      run-dependent where it binds (a lot's weight is its asked share times its own return times capital over
      equity); it passes while it flips fewer than 1% of a later run's sessions. (4) A count kept in STATE across
      lots (a wait of N sessions after an exit): the restart check refuses it before this check sees it (a restart
