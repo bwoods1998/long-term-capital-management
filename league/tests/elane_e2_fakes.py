@@ -1,11 +1,14 @@
 """Fakes for release E2's tests (the equity lanes' births, Train, seal and yield): E1's switch and card admission as the
 interfaces fix them (league/equity/INTERFACES.md sections 8.1-8.3; E1's own implementations land with E1), a store that
 accepts the equity structures, a scripted router, an isolated runner that answers each Train span with that span's rows,
-and the decider kinds the restart check drives (a program loaded in this process, its STATE fresh at every load) over an
-invented ctx stream. Every family, program and number here is invented; no market data is read."""
+and the decider kinds the restart check and the start check drive (a program loaded in this process, its STATE fresh at
+every load) over invented ctx streams (`state_inputs`; `start_run`, where a run's own standing grows with its age and
+its lots are numbered from its own start). Every family, program and number here is invented; no market data is
+read."""
 
 from __future__ import annotations
 
+import datetime as dt
 import itertools
 import json
 import math
@@ -81,8 +84,22 @@ def switch_on(case: Any) -> None:
                mock.patch.object(cards, "validate", fake_validate),
                mock.patch.object(store_mod, "STRUCTURES", tuple(dict.fromkeys((*store_mod.STRUCTURES, "etf", "stock")))),
                mock.patch.object(SwarmStore, "families", lanes_families),
-               mock.patch.object(elane_train, "state_inputs", state_inputs)]
+               *stream_patches()]
     for p in patches:
+        p.start()
+        case.addCleanup(p.stop)
+
+
+def stream_patches() -> list[Any]:
+    """The Train checks' ctx streams, invented (a `FakeRunner`'s runs carry no bars): the restart check's
+    (`state_inputs`) and the start check's (`start_run`)."""
+    return [mock.patch.object(elane_train, "state_inputs", state_inputs),
+            mock.patch.object(elane_train, "start_run", start_run)]
+
+
+def invented_streams(case: Any) -> None:
+    """`stream_patches` for the life of `case` (a test that builds its own `FakeRunner` without `switch_on`)."""
+    for p in stream_patches():
         p.start()
         case.addCleanup(p.stop)
 
@@ -241,19 +258,31 @@ def is_review(call: Mapping[str, Any]) -> bool:
 class FakeRunner:
     """E1's `runner.Isolated` (INTERFACES 4.8): `train(start, end)` answers the span's part (`span_result`) of
     `answer(code, k)` (an invented whole-Train result; an Exception raises); calls kept. Its `decider` is a
-    `FakeDecider` (the restart check's kinds)."""
+    `FakeDecider` (the restart and start checks' kinds). A run carries its program and its start, which the invented
+    start-check stream reads (`start_run`). `later` (`answer(code, k)` for a run that starts after its span's first
+    session: the start check's; None: `answer`) lets a test fail the later runs alone."""
 
     def __init__(self, answer_: Callable[[str, float], Any] | None = None):
         self.calls: list[dict[str, Any]] = []
         self.answer = answer_ or (lambda code, k: train_result(k=k, pnl=180.0 if k == 1.0 else 120.0))
+        self.later: Callable[[str, float], Any] | None = None
         self.decider = FakeDecider()
 
     def train(self, code: str, params: Any, *, name: str, start: Any = None, end: Any = None, k: float = 1.0) -> Any:
         self.calls.append({"code": code, "params": params, "name": name, "start": start, "end": end, "k": k})
-        out = self.answer(code, k)
+        late = start is not None and all(start != first for first, _ in elane_train.TRAIN_SPANS)
+        out = (self.later if late and self.later is not None else self.answer)(code, k)
         if isinstance(out, BaseException):
             raise out
-        return SimpleNamespace(result=span_result(out, start, end), bars=None)
+        return SimpleNamespace(result=span_result(out, start, end), bars=None, code=code, start=start, end=end)
+
+    def base_calls(self) -> list[dict[str, Any]]:
+        """The Train runs from a span's first session (the bar's own, at 1.0x and 1.5x)."""
+        return [c for c in self.calls if any(c["start"] == first for first, _ in elane_train.TRAIN_SPANS)]
+
+    def later_calls(self) -> list[dict[str, Any]]:
+        """The start check's runs: the ones that start after their span's first session."""
+        return [c for c in self.calls if all(c["start"] != first for first, _ in elane_train.TRAIN_SPANS)]
 
 
 class FakeDecider:
@@ -353,6 +382,50 @@ def state_inputs(run: Any, sessions: int = STATE_SESSIONS) -> Any:
                "positions": [{"id": 1000 + i, "symbol": symbols[0], "qty": 1.0, "held_sessions": 1}] if i % 2 else [],
                "orders": [], "closed": [], "rejects": [], "cash": 500.0, "equity": 1000.0, "budget": 1000.0,
                "caps": {s: 500.0 for s in symbols}}
+
+
+#: The decision sessions the invented start-check stream gives a Train span: the later starts of 61 and 127 sessions
+#: (league/swarm/elane_train.py `BAR`) and a warm-up of 50 at most (the invented programs' NEEDS) leave every later
+#: run its 120 warmed-up sessions.
+START_SESSIONS = 300
+#: How much the invented run's equity grows a session of its own age (so a run is 3% ahead 60 sessions after ITS start).
+START_GAIN = 0.0005
+
+
+def start_run(run: Any, sessions: int = START_SESSIONS) -> Any:
+    """The start check's view of one `FakeRunner` run, invented (E1's bars and ctx build the real one:
+    league/swarm/elane_train.py `start_run`): `sessions` (`START_SESSIONS`) decision sessions a Train span, invented
+    as consecutive days from the span's first; a run that starts later has the span's sessions from its own start on
+    (its first decision the session before its start). The MARKET of a session is the same for every run (the
+    closes, the calendar fields, and whether a lot is held); what is A RUN'S OWN is counted from its start: its
+    equity and cash (they grow `START_GAIN` of the budget a session of the run's age) and its lots' ids."""
+    code = str(getattr(run, "code", "") or "")
+    needs = elane_train.needs_literal(code) or {}
+    start = getattr(run, "start", None)
+    first = next(a for a, b in elane_train.TRAIN_SPANS if a <= start <= b)
+    offset = 0 if start == first else (start - first).days - 1
+    symbols = [str(s) for s in (needs.get("symbols") or ["SPY"])]
+
+    def close(j: int) -> float:
+        return round(100.0 * math.exp(0.03 * math.sin(1.7 * j) + 0.02 * math.cos(0.37 * j * j)), 4)
+
+    def stream() -> Any:
+        for i in range(offset, sessions):
+            closes = [close(j) for j in range(max(0, i - 30), i + 1)]
+            age = i - offset
+            equity = round(1000.0 * (1.0 + START_GAIN * age), 2)
+            lot = {"id": 1 + age, "symbol": symbols[0], "class": "etf", "qty": 1.0, "entry": close(i - 1), "mark": closes[-1],
+                   "value": closes[-1], "pnl": round(closes[-1] - close(i - 1), 4), "held_sessions": 1, "at": "close",
+                   "tag": ""}
+            yield {"symbols": symbols, "bars": {s: SimpleNamespace(close=list(closes)) for s in symbols},
+                   "prices": {s: closes[-1] for s in symbols}, "weekday": i % 5, "session_of_month": i % 21 + 1,
+                   "sessions_to_month_end": 20 - i % 21, "events": {}, "events_next": {},
+                   "positions": [lot] if i % 2 else [], "orders": [], "closed": [], "rejects": [],
+                   "cash": round(equity - (closes[-1] if i % 2 else 0.0), 2), "equity": equity, "budget": 1000.0,
+                   "caps": {s: 500.0 for s in symbols}}
+
+    return elane_train.StartRun([first + dt.timedelta(days=i) for i in range(offset, sessions)], stream(),
+                                int(needs.get("history", 252)), int(needs.get("max_hold_sessions", 20)))
 
 
 #: An invented program that counts sessions in STATE (a clock of its own): its intents change when STATE is emptied.
@@ -520,6 +593,7 @@ def reviewed(store: SwarmStore, fid: str, n: int = 1) -> None:
 
 __all__ = ["UNIVERSE", "lane_block", "settings", "fake_cfg", "fake_validate", "switch_on", "new_store", "PROGRAM",
            "program", "card", "proposal", "answer", "FakeRouter", "TRAIN_YEARS", "year_rows", "daily_rows", "train_result",
-           "span_result", "FakeRunner", "FakeDecider", "STATE_SESSIONS", "state_inputs", "COUNTER", "counter", "RAISES",
+           "span_result", "FakeRunner", "FakeDecider", "STATE_SESSIONS", "state_inputs", "stream_patches",
+           "invented_streams", "START_SESSIONS", "START_GAIN", "start_run", "COUNTER", "counter", "RAISES",
            "CACHE", "PEAK", "INPLACE", "RECOMPUTED", "CARRIED", "e2_family", "review_answer", "is_review", "RunFailed",
            "DeciderError", "ProgramRefused", "MissingData", "reviewed"]

@@ -38,10 +38,9 @@ class OnE1(unittest.TestCase):
         self.reviews: list = []
         self.router = fx.FakeRouter(self.script)
         self.runner = fx.FakeRunner()
-        # The fake runner's runs carry no bars: the restart check reads the invented ctx stream (StateOnE1: E1's own).
-        patcher = mock.patch.object(elane_train, "state_inputs", fx.state_inputs)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # The fake runner's runs carry no bars: the restart and start checks read the invented ctx streams (StateOnE1
+        # and test_elane_e2_start.py: E1's own).
+        fx.invented_streams(self)
         self.researcher = EquityResearcher(self.store, self.router, SETTINGS, runner=self.runner, clock=self.clock)
         self.validated: list = []
 
