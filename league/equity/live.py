@@ -24,14 +24,32 @@ replacement can go in the same minute. ONE DAY ORDER COUNT (A8.3): at most `orde
 orders a day (cancels counted, as the options book counts its own), entries leaving room for every open lot's exit and
 one cancel of it, and none while the House-wide count would leave less than the options book's `exit_reserve()`.
 
+THE HOUSE'S MINUTE (the clock every window runs on): `tick(now)` is handed the minute's start, three seconds past the
+wall minute, and runs AFTER the whole options minute, so its sends go later by however long that took (up to most of a
+minute). A moment is due at the first minute at or after it: the open window's first send is the 09:31 minute's (09:30:30
+is its earliest moment, never its send time), the close window's the 15:55 minute's, and a re-price goes at most once a
+minute, its age counted from the minute an order was sent in (`answer.tick`), never from `placed_at` (the wall clock at
+its POST). EVERY CUT-OFF IS JUDGED AGAIN ON THE WALL CLOCK at the send (`_send`): nothing is written or POSTed at or
+after its window's cut-off (09:45:00 an open entry, 15:59:30 every exit and every close entry), since a day order POSTed
+at or after the close would rest for the next session; no order is cancelled for a re-price its replacement could
+not follow; and one the venue still shows working on a later day than its own is cancelled wherever the minute finds
+it (`_end_stale`). THE GATEWAY'S UNREAD READINGS (`RETRY_CAPS`: 424 positions, 424 orders, 503 equity, 409 stock_close; nothing
+was sent and nothing judged) go again next minute like the House's own rate refusal: never an entry's end, never one of
+the `MAX_EXIT_REFUSALS` that carry an exit to the next session; an order refused before the venue widens no collar.
+ONE INTENT, ONE LOT: every fill of a buy intent's orders joins the lot its first fill opened (`_intent_lot`).
+THE OWNER'S COMMANDS (`OWNER_FLATTEN`, `OWNER_CLEAR_FREEZE`: `python3 -m league.live --flatten-equity "<why>"`,
+`--clear-equity-freeze "<why>"`) are key-values read first every minute and done once, in the House's own thread.
+
 THE WINDOWS (`schedule`): OPEN: exits first at open+30 s (09:30:30 ET), entries after the exits filled or 2 minutes,
 sized on cash after the exit fills (no entry is funded by an exit that has not filled: the account is read again before
 the entries are sized, and an unfilled sale adds nothing to its cash); collar `entry_collar_bp` (10 ETF / 25 stock) on
 the first send, widening by the same step each re-price to `max_collar_bp` (50 / 100), and at the widest collar
 re-priced only when the quote has moved through the limit (`_reprice_due`: the day's order count is shared); entries stop at open+15 min
 (09:45); exits continue to close-5 min (15:55), then go at the bid at the widest collar in the close window. CLOSE (A2):
-at close-5 min (15:55:00) exits first then entries, marketable limits re-priced every 30 s to close-30 s (15:59:30),
-then recorded missed. PRE-OPEN (09:25): the day's first reconciliation reading and an activities read (a split or a
+at close-5 min (15:55:00) exits first, then entries once those exits filled or a minute passed (`CLOSE_EXIT_WAIT_S`: as
+at the open, sized on the cash after the exits), marketable limits re-priced every 30 s to close-30 s (15:59:30), then
+recorded missed. In either window an entry sized to nothing is not final while an exit may still fill (`_exits_due`): it
+is sized again each minute, and its cut-off records it missed with the reason. PRE-OPEN (09:25): the day's first reconciliation reading and an activities read (a split or a
 dividend posted overnight); the windows' orders are the decide's intents (`eq_intents`), each written `pending` at its
 own send with that minute's quote, never at 09:25 with a pre-open price. A missed entry is recorded, never chased; an exit the windows could not fill is recorded missed
 and carried to the next session's open (a "house_exit" intent of the same reason). MIN HOLD: a lot never sells in the
@@ -173,14 +191,34 @@ PENDING_GRACE_S = 30.0
 LOOKUP_LIMIT = 6
 #: A cancel is not sent again for the same order within this many seconds.
 CANCEL_AGAIN_S = 50.0
+#: THE OWNER'S COMMANDS (`python3 -m league.live --root <state> --flatten-equity "<why>"` and `--clear-equity-freeze
+#: "<why>"`, league/live/__main__.py): key-values only the owner's command writes ({why, at, by}). The tick reads them
+#: every minute, acts once in the House's own thread and deletes them (`EquityBook._owner`), as the options path reads
+#: `owner_clear_assignment`.
+OWNER_FLATTEN = "owner_equity_flatten"
+OWNER_CLEAR_FREEZE = "owner_equity_clear_freeze"
 #: A symbol whose equity order is working, or ended this recently, is not reconciled that minute.
 FLUX_S = 120.0
 #: An exit the gateway or the venue refused this many times in a session is carried to the next one (and alarmed).
 MAX_EXIT_REFUSALS = 3
+#: THE GATEWAY'S "NOTHING WAS SENT, SEND IT AGAIN" ANSWERS, by their `cap` (gateway/lib/router.mjs and gate.mjs: 424
+#: `positions` and `orders`, the account's book could not be read; 503 `equity`, the account could not be read; 409
+#: `stock_close`, an earlier close of the same shares is still held in flight, a minute at most): a reading that could
+#: not be made, never a verdict on the order. Like the House's own rate refusal the order goes again next minute until
+#: its window's cut-off: never an entry's end, never one of the `MAX_EXIT_REFUSALS` that carry an exit to the next
+#: session (the owner is told once a day a lot when an exit met `MAX_EXIT_REFUSALS` of them).
+RETRY_CAPS = ("positions", "orders", "equity", "stock_close")
+#: THE CLOSE WINDOW's wait (A2: close exits, then close entries, sized on the cash after the exits): its entries wait
+#: this long after `close_send` for the window's exits to fill, then go on the cash there is (the open window's
+#: `exit_wait_s` is 120 s of fifteen minutes; this is one House minute of the close's four and a half).
+CLOSE_EXIT_WAIT_S = 60.0
 #: The widest quoted spread an entry is sized on (a wider quote waits a minute): a fraction of the mid.
 MAX_ENTRY_SPREAD = Decimal("0.02")
 #: Seconds after `decide_at` the decide waits for a missing bar before deciding without it (those instances fail).
 BARS_GRACE_S = 1800.0
+#: THE SEATING PASS (`EquityBook._seat_step`): seconds before an instance the House could not ask is asked again for
+#: the same close (a program seated since the day's decision is asked at once).
+SEAT_RETRY_S = 600.0
 #: A program's decide: its per-call limit and error budget (the Gym runner's).
 DECIDE_TIMEOUT = 1.0
 DECIDE_MAX_ERRORS = 25
@@ -479,6 +517,12 @@ class Order:
     @property
     def filled_value(self) -> Decimal:
         return self.filled_qty * (self.avg_px or ZERO)
+
+    @property
+    def again(self) -> bool:
+        """A refusal that says nothing of the order itself (the House's own rate, or a reading the gateway could not
+        make: `RETRY_CAPS`): nothing was sent, and it is sent again next minute."""
+        return self.status == "refused" and bool(self.answer.get("house") or self.answer.get("retry"))
 
     def row(self) -> dict:
         return {"eid": self.eid, "client_id": self.client_id, "venue_id": self.venue_id, "instance": self.instance,
@@ -826,6 +870,41 @@ class EquityBook:
         self.record("equity.flatten", {"why": why[:300], "lots": n})
         return n
 
+    def _owner(self, now: float, out: dict) -> None:
+        """THE OWNER'S COMMANDS (`OWNER_FLATTEN`, `OWNER_CLEAR_FREEZE`), read first every minute, whatever the phase:
+        `flatten` run in the House's own thread (a second process on live.sqlite would race the book's row ids), and
+        the corporate-action freeze `eq_freeze` lifted (the reconciliation's own freeze is never the owner's to lift:
+        two clean readings lift it). Each is done once and its key deleted; one that fails keeps its key and is tried
+        again the next minute (a flatten queues each lot once), and never stops the other."""
+        for key, act in ((OWNER_FLATTEN, self._owner_flatten), (OWNER_CLEAR_FREEZE, self._owner_clear_freeze)):
+            ask = self.state.get(key)
+            if not ask:
+                continue
+            ask = ask if isinstance(ask, Mapping) else {}
+            try:
+                act(f"{ask.get('by') or 'the owner'}: {ask.get('why') or 'no reason given'}", out)
+            except Exception as exc:  # noqa: BLE001 - again next minute
+                self._error(key, exc, out)
+
+    def _owner_flatten(self, why: str, out: dict) -> None:
+        n = self.flatten(why)
+        self.state.execute("DELETE FROM kv WHERE key=?", (OWNER_FLATTEN,))
+        out["flatten"] = n
+        self.alert("warning", f"equity: flatten, {n} lots queued to exit through the normal path ({why[:200]})")
+
+    def _owner_clear_freeze(self, why: str, out: dict) -> None:
+        was = self.state.get("eq_freeze")
+        with self.state.transaction():
+            self.state.execute("DELETE FROM kv WHERE key IN ('eq_freeze', ?)", (OWNER_CLEAR_FREEZE,))
+        out["freeze_cleared"] = bool(was)
+        if not was:
+            return
+        old = str(was.get("why") if isinstance(was, Mapping) else was)[:300]
+        self.record("equity.freeze", {"frozen": bool(self.frozen), "cleared": "eq_freeze", "by": why[:300],
+                                      "why": f"cleared (was: {old})",
+                                      "activity": was.get("activity") if isinstance(was, Mapping) else None})
+        self.alert("warning", f"equity: the corporate-action freeze is cleared ({why[:200]}); it was: {old[:200]}")
+
     # ------------------------------------------------------------------ the minute
     def tick(self, now: float, *, account_row: Mapping[str, Any] | None, positions: Sequence[Mapping[str, Any]] | None,
              open_orders: Sequence[Mapping[str, Any]] | None, real_block: Callable[..., str | None],
@@ -851,6 +930,7 @@ class EquityBook:
             today = S.ny_day(now)
             m = S.moments(today, self._offsets())
             steps: list[tuple[str, Callable[[], Any]]] = [
+                ("owner", lambda: self._owner(now, out)),
                 ("orders", lambda: self._sync_orders(now, out)),
                 ("activities", lambda: self._activities(now, m, out)),
                 ("reconcile", lambda: self._reconcile_step(now, m, out)),
@@ -951,6 +1031,23 @@ class EquityBook:
                     self.alert("warning", f"equity: order {order.client_id}, given up as lost, is at the venue after all")
                     self._absorb(order, row)
         self._look_up(now, shown)
+        self._end_stale(now)
+
+    def _end_stale(self, now: float) -> None:
+        """A DAY ORDER NEVER OUTLIVES ITS SESSION: one the venue still shows working on a later New York day than its
+        own (`day`) reached the venue after its session's close and rests for the next one (`_send` posts nothing at or
+        after a cut-off by the wall clock, so this takes a slow gateway and a House that was down at the cut-off's own
+        cancel). It is cancelled wherever the minute finds it, the quiet hours included, before the next open can fill
+        it as a lot of a session it never traded in; its intent then ends as any other (an entry missed, an exit sent
+        again in today's window)."""
+        today = S.ny_day(now).isoformat()
+        for order in self._orders(("working",)):
+            if order.day >= today or not order.venue_id:
+                continue
+            if "cancel_sent" not in order.answer:
+                self.alert("warning", f"equity: order {order.client_id} of {order.day} is still working at the venue: "
+                                      "cancelled (a day order ends with its session)")
+            self._cancel(order, "left working past its own session", now)
 
     def _look_up(self, now: float, shown: set[str]) -> None:
         candidates = [o for o in self._orders(WORKING) if o.status in ("unknown", "pending")]
@@ -1020,6 +1117,8 @@ class EquityBook:
         intent = self._intent(order.iid)
         if order.side == "buy":
             lid = order.lid if order.lid is not None else (intent.lid if intent is not None else None)
+            if lid is None:
+                lid = self._intent_lot(order)
             lot = self._lot(lid)
             if lot is None:
                 inst = self._instance(order.instance)
@@ -1037,6 +1136,9 @@ class EquityBook:
                 lot.entry_notional += dq * px
                 lot.entry_px = (lot.entry_notional / lot.opened_qty).quantize(PRICE_PLACES)
                 lot.cash -= dq * px
+                if intent is not None and intent.lid != lot.lid:
+                    intent.lid = lot.lid
+                    self._save_intent(intent)
             order.lid = lot.lid
             self._save_lot(lot)
             fees = ZERO
@@ -1079,19 +1181,41 @@ class EquityBook:
                                          "symbol": lot.symbol, "cash": text(lot.cash), "reason": lot.reason},
                         agent=lot.family)
 
+    def _intent_lot(self, order: Order) -> int | None:
+        """The open lot an earlier order of this buy's intent already opened (`eq_lots.iid`), when neither the order nor
+        the intent's row names it: ONE INTENT, ONE LOT, as the Gym has one lot a buy, whatever a row lost."""
+        if order.iid is None:
+            return None
+        rows = self.state.rows("SELECT lid FROM eq_lots WHERE iid=? AND instance=? AND symbol=? AND status IN "
+                               "('open', 'closing') ORDER BY lid LIMIT 1", (int(order.iid), order.instance, order.symbol))
+        return int(rows[0]["lid"]) if rows else None
+
     # ------------------------------------------------------------------ sending
     def _send(self, intent: Intent, *, side: str, symbol: str, klass: str, qty: Decimal, limit: Decimal, collar: int,
-              day: str, lid: int | None, replaces: int | None, probe: bool, why: str, at: str | None = None) -> Order:
+              day: str, lid: int | None, replaces: int | None, probe: bool, why: str, at: str | None = None,
+              tick: float | None = None, until: float | None = None) -> Order | None:
         """Write the order `pending` (the intent `sent`, a sold lot `closing`) BEFORE the POST; then POST it once. `at`
         is the window it goes in (the fill point a lot's `entry_at` / `exit_at` and its twin read), the intent's by
-        default."""
+        default. `tick` is the minute's `now` the send belongs to, kept as the order's `answer.tick` (a re-price is due
+        on the House's minute clock, `_reprice_due`; `placed_at` stays the wall clock at the POST). `until` is the
+        window's cut-off, judged here on the WALL clock: the minute's `now` passed it at the minute's start, but the
+        equity minute runs after the whole options minute, and a day order POSTed at or after the close would rest for
+        the next session. At or after `until` nothing is written or sent (None); the next minute ends the intent (an
+        entry missed, an exit carried)."""
         now = self.clock()
+        if until is not None and now >= until:
+            late = "not sent: the window's cut-off passed on the wall clock before the order could go"
+            if intent.why != late:
+                intent.why = late
+                self._save_intent(intent)
+            return None
         exit_ = side == "sell"
+        stamp = {} if tick is None else {"tick": float(tick)}
         with self.state.transaction():
             eid = self._next("eq_orders", "eid")
             order = Order(eid, client_id(eid, intent.family, nonce=getattr(self.state, "nonce", "")), intent.instance,
                           intent.family, side, symbol, klass, at or intent.at, qty, limit, int(collar), "pending", now, day,
-                          lid=lid, iid=intent.iid, replaces=replaces, probe=probe, why=why[:300])
+                          lid=lid, iid=intent.iid, replaces=replaces, probe=probe, why=why[:300], answer=dict(stamp))
             if exit_:
                 try:
                     order.fees_est = config.sell_fees(qty * limit, qty)
@@ -1128,6 +1252,9 @@ class EquityBook:
                 order.status = "refused" if gateway else "rejected"
                 order.answer = {"error": result.error, "status": result.status, "gateway": gateway,
                                 "cap": payload.get("cap")}
+                if gateway and payload.get("cap") in RETRY_CAPS:
+                    order.answer["retry"] = True     # nothing was sent, and nothing judged: again next minute
+        order.answer = {**stamp, **order.answer}
         self._save_order(order)
         if result is not None and result.ok:
             self._absorb(order, result.order)
@@ -1300,7 +1427,9 @@ class EquityBook:
                                      real_block=real_block, killed=killed, out=out)
                 except Exception as exc:  # noqa: BLE001
                     self._error(f"entry {intent.iid}", exc, out)
-        if now >= m.close_send:
+        # THE CLOSE WINDOW keeps the session's order too (A2: close exits, then close entries): its entries wait for the
+        # window's exits (today's close exits, and an open exit still going late) to fill, or `CLOSE_EXIT_WAIT_S`.
+        if now >= m.close_send and (now >= m.close_send + CLOSE_EXIT_WAIT_S or not self._exits_due(today, now, m)):
             for intent in entries:
                 if intent.at != "close":
                     continue
@@ -1309,6 +1438,17 @@ class EquityBook:
                                      real_block=real_block, killed=killed, out=out)
                 except Exception as exc:  # noqa: BLE001
                     self._error(f"entry {intent.iid}", exc, out)
+
+    def _exits_due(self, today: str, now: float, m: S.Moments) -> list[dict]:
+        """The exits that may still fill in the window open now ([{iid, instance}]): planned or sent, of a lot that may
+        sell today (the min hold), today's close exits only from `close_send` (before it they wait for the close). An
+        entry is sized on the cash AFTER them (A2, as the Gym's session: exits, then entries): each one that fills frees
+        its program's sleeve, the House-wide cash, the invested cap and the loss budget's room."""
+        rows = self.state.rows("SELECT iid, instance, at, exec_day FROM eq_intents WHERE status IN ('planned', 'sent') "
+                               "AND exec_day<=? AND kind IN ('sell', 'house_exit') AND lid IN "
+                               "(SELECT lid FROM eq_lots WHERE opened_day<? AND status IN ('open', 'closing'))",
+                               (today, today))
+        return [r for r in rows if not (r["at"] == "close" and r["exec_day"] == today and now < m.close_send)]
 
     def _finish(self, intent: Intent, status: str, why: str) -> None:
         intent.status, intent.why = status, why[:400]
@@ -1331,7 +1471,8 @@ class EquityBook:
         if current is not None and current.working:
             if now >= m.close_until:
                 self._cancel(current, "the close window ended", now)
-            elif self._reprice_due(current, now, reprice, m):
+            elif self.clock() < m.close_until and self._reprice_due(current, now, reprice, m):
+                # (Never cancelled for a re-price its replacement could not follow: `_send`'s wall-clock cut-off.)
                 self._cancel(current, "re-priced: cancel, then resend once it is terminal", now)
             current = Order.of(self.state.rows("SELECT * FROM eq_orders WHERE eid=?", (current.eid,))[0])
             if current.working:
@@ -1362,13 +1503,20 @@ class EquityBook:
             intent.why = "the gateway's kill switch is engaged (it blocks sells too)"
             self._save_intent(intent)
             return
-        refused = [o for o in orders if o.day == today and o.status in ("rejected", "refused")
-                   and not o.answer.get("house")]
+        refused = [o for o in orders if o.day == today and o.status in ("rejected", "refused") and not o.again]
         if len(refused) >= MAX_EXIT_REFUSALS:
             self.alert("error", f"equity: the exit of lot {lot.lid} ({lot.symbol}) was refused {len(refused)} times today; "
                                 "carried to the next session")
             self._carry(intent, lot, today, f"refused {len(refused)} times: {refused[-1].answer.get('error')}")
             return
+        unread = [o for o in orders if o.day == today and o.again and o.answer.get("retry")]
+        if len(unread) >= MAX_EXIT_REFUSALS and lot.info.get("exit_unread_told") != today:
+            # `RETRY_CAPS`: nothing was sent and nothing judged, so the exit is never carried for them; said once a day.
+            lot.info["exit_unread_told"] = today
+            self._save_lot(lot)
+            self.alert("error", f"equity: the gateway could not check the exit of lot {lot.lid} ({lot.symbol}) "
+                                f"{len(unread)} times today ({unread[-1].answer.get('cap')}: nothing was sent); it is "
+                                "sent again each minute until the session's windows end")
         why = self._symbol_busy(lot.symbol) or self._count_refusal(today, exit_=True)
         if why is None and any(o.status == "lost" for o in orders):
             why = self._lost_sale_check(lot)
@@ -1388,14 +1536,17 @@ class EquityBook:
                 self._save_intent(intent)
                 return
         entry_bp, max_bp = self._collars(lot.klass)
-        attempt = sum(1 for o in orders if o.day == today)
+        # The collar widens with each order that reached the venue; one refused before it (the House's rate, a gateway
+        # cap or an unread reading) priced nothing.
+        attempt = sum(1 for o in orders if o.day == today and o.status != "refused")
         late = intent.at == "open" and now >= m.exit_until
         collar = max_bp if late else collar_for(attempt, entry_bp, max_bp)
         limit = limit_for("sell", bid, collar)
         reason = "program" if intent.kind == "sell" else (intent.tag or "house")
         self._send(intent, side="sell", symbol=lot.symbol, klass=lot.klass, qty=lot.qty, limit=limit, collar=collar,
                    day=today, lid=lot.lid, replaces=current.eid if current is not None else None, probe=lot.probe,
-                   why=f"exit ({reason}){' at the bid, late' if late else ''}", at="close" if in_close else "open")
+                   why=f"exit ({reason}){' at the bid, late' if late else ''}", at="close" if in_close else "open",
+                   tick=now, until=m.close_until)
 
     def _sell_proof(self) -> str | None:
         """Why no real equity SALE may go yet (A10.1: the stock paper proof's SELL stage gates every one; the practice
@@ -1433,8 +1584,15 @@ class EquityBook:
     def _reprice_due(self, order: Order, now: float, reprice: float, m: S.Moments) -> bool:
         """Whether a working order is re-priced now: once it is `reprice` seconds old, while its collar can still widen;
         at the widest collar only when the quote has moved through its limit (a marketable order that does not fill is
-        not helped by another, and each re-price costs two of the day's orders, A8.3)."""
-        if order.status != "working" or now - order.placed_at < reprice:
+        not helped by another, and each re-price costs two of the day's orders, A8.3). Its age is counted on the
+        House's minute clock, from the `now` of the minute it was sent in (`answer.tick`) to this minute's `now`:
+        `placed_at` is the wall clock at the POST, later than its minute's `now` by however long the options minute
+        ran, and an age counted from it is always under a minute at the next minute (a 60-second re-price then went
+        every second minute). An order without the stamp (written by a process that stopped before its answer) is
+        aged from `placed_at`."""
+        sent = order.answer.get("tick")
+        since = float(sent) if isinstance(sent, (int, float)) and not isinstance(sent, bool) else order.placed_at
+        if order.status != "working" or now - since < reprice:
             return False
         if order.collar_bp < self._collars(order.klass)[1]:
             return True
@@ -1465,19 +1623,23 @@ class EquityBook:
         if current is not None and current.working:
             if now >= deadline:
                 self._cancel(current, "the entry cut-off", now)
-            elif self._reprice_due(current, now, reprice, m):
+            elif self.clock() < deadline and self._reprice_due(current, now, reprice, m):
+                # (Never cancelled for a re-price its replacement could not follow: `_send`'s wall-clock cut-off.)
                 self._cancel(current, "re-priced: cancel, then resend once it is terminal", now)
             orders = self._intent_orders(intent.iid)
             current = orders[-1]
             if current.working:
                 return
+            # The cancel's own lookup may have booked a fill, and with it the intent's lot (`_book_fill` saves the lot's
+            # id on the row): read the row again, so nothing below saves or sends from the row as it was before.
+            intent = self._intent(intent.iid) or intent
         et = self._et()
         min_order = Decimal(str(getattr(et, "min_order_usd", "10"))) if et is not None else Decimal("10")
         filled_qty = sum((o.filled_qty for o in orders), ZERO)
         filled_usd = sum((o.filled_value for o in orders), ZERO)
         target = orders[0].qty * orders[0].limit_px if orders else None
         if current is not None:
-            final = current.status in ("rejected", "lost") or (current.status == "refused" and not current.answer.get("house"))
+            final = current.status in ("rejected", "lost") or (current.status == "refused" and not current.again)
             if final:
                 cause = current.answer.get("reject_reason") or current.answer.get("error") or current.answer.get("lookup")
                 self._finish(intent, "done" if filled_qty > 0 else ("refused" if current.status == "refused" else "missed"),
@@ -1517,18 +1679,31 @@ class EquityBook:
             self._save_intent(intent)
             return
         entry_bp, max_bp = self._collars(klass)
-        collar = collar_for(len(orders), entry_bp, max_bp)
+        # The collar widens with each order that reached the venue; one refused before it priced nothing.
+        collar = collar_for(sum(1 for o in orders if o.status != "refused"), entry_bp, max_bp)
         limit = limit_for("buy", ask, collar)
         usd = None if target is None else target - filled_usd
         sized = self._size(intent, inst, symbol, klass, limit, usd, today)
         if sized is None:
             return
         if sized.qty <= 0:
+            due = self._exits_due(today, now, m)
+            if due:
+                # Not final while an exit may still fill (A2: entries are sized on the cash after the exits; the Gym
+                # fills a session's exits before it sizes its entries): sized again next minute, and the cut-off
+                # records it missed with this reason when no exit filled in time.
+                own = sum(1 for r in due if r["instance"] == intent.instance)
+                why = (f"sizing ({sized.binding}): {sized.reason}; sized again when the exits still working fill "
+                       f"({own} of its own program, {len(due)} in all)")
+                if intent.why != why:
+                    intent.why = why
+                    self._save_intent(intent)
+                return
             self._finish(intent, "done" if filled_qty > 0 else "refused", f"sizing ({sized.binding}): {sized.reason}")
             return
         self._send(intent, side="buy", symbol=symbol, klass=klass, qty=sized.qty, limit=limit, collar=collar, day=today,
                    lid=intent.lid, replaces=current.eid if current is not None else None, probe=inst.band == "probe",
-                   why=f"entry ({sized.binding}: {sized.reason})"[:300])
+                   why=f"entry ({sized.binding}: {sized.reason})"[:300], tick=now, until=deadline)
 
     # ------------------------------------------------------------------ sizing
     def _size(self, intent: Intent, inst: Instance, symbol: str, klass: str, limit: Decimal, usd: Decimal | None,
@@ -1635,6 +1810,11 @@ class EquityBook:
         return intent
 
     # ------------------------------------------------------------------ the decide
+    #: The daily step's own memory in this process (kept on the class: the constructor is the whole book's): when the
+    #: seating pass last asked an instance again, and the decision day whose unconfirmed instances were alerted.
+    _seat_tried: float = float("-inf")
+    _unconfirmed_day: str = ""
+
     def _last_closed(self, now: float) -> dt.date | None:
         """The latest session whose 16:20 bars moment has passed (the decision day that is due or done)."""
         d = S.ny_day(now)
@@ -1649,18 +1829,31 @@ class EquityBook:
     def _decide_step(self, now: float, out: dict) -> None:
         """The decision of the last session: the instances synced (bands, retirements), its bars read (16:20), its
         programs decided (16:30) and the House's exit rules applied; a catch-up after a restart, until the next
-        session's close window."""
+        session's close window. Once the day's decision is recorded, THE SEATING PASS (`_seat_step`) runs every minute
+        until that same cut-off: a program that passes its look after the decision (A10.4: the looks of a Sunday
+        deploy) is seated and decided for the same close, so its first order goes in the next session and not the one
+        after.
+
+        `eq_decide` {day, status, at, instances, why}: `instances` names every instance asked for the day (decided, or
+        its own decide failed): the seating pass asks the live ones it does not name. A record without the list (an idle
+        or failed day, or one written by hand) is closed."""
         t = self._last_closed(now)
         if t is None:
             return
         day = t.isoformat()
         done = self.state.get("eq_decide", {}) or {}
-        if str(done.get("day") or "") >= day:
+        last = str(done.get("day") or "")
+        if last > day:
             return
         off = self._offsets()
         mt, nxt = S.moments(t, off), S.next_session(t)
         mn = S.moments(nxt, off)
-        if mn is not None and now >= mn.close_send - 60:
+        cut = mn is not None and now >= mn.close_send - 60
+        if last == day:
+            if not cut:
+                self._seat_step(now, t, mt, mn, done, out)
+            return
+        if cut:
             self._decide_failed(t, now, "no decide ran before the next session's close window")
             return
         et = self._et()
@@ -1672,36 +1865,113 @@ class EquityBook:
         if (self.state.get("eq_synced") or "") != day and self._sync_instances(now, t, out):
             self.state.put("eq_synced", day)
         live = [i for i in self._instances(alive=True) if i.live]
-        if not live:
-            self._house_exits(t, now)
-            self.state.put("eq_decide", {"day": day, "status": "done", "at": now, "why": "no live program"})
+        bars = self._day_bars(now, t, mt, live, live, out)
+        if bars is None:
             return
+        if (self.state.get("eq_synced") or "") != day and self._unconfirmed_day != day:
+            # The day's band sync never completed (the store could not be read): said once, never silent.
+            self._unconfirmed_day = day
+            self.alert("warning", f"equity: the families could not be read for the band sync of {day} "
+                                  f"({out.get('families') or 'no reading'}): no band moved and nobody was retired; the "
+                                  "programs the book holds decide as they are")
+        if live:
+            self._decide(t, live, bars, now, out)
+        self._house_exits(t, now)
+        record = {"day": day, "status": "done", "at": now,
+                  "instances": sorted(i.id for i in live if i.last_decided_day == day)}
+        if not live:
+            record["why"] = "no live program"
+        self.state.put("eq_decide", record)
+
+    def _seat_step(self, now: float, t: dt.date, mt: S.Moments, mn: S.Moments | None, done: Mapping[str, Any],
+                   out: dict) -> None:
+        """THE SEATING PASS, between a recorded decision and the next session's close window (`_decide_step`): the
+        families read again (`_sync_instances(late=True)`: a Candidate holding a seat goes to Probe and gets its
+        instance; nothing else moves, nobody is retired), then every live instance the day's record does not name is
+        asked for the same close on the same bars (`_decide` skips one already asked). An instance the House could
+        not ask (no bar, the decider) is asked again every `SEAT_RETRY_S` until the next session's pre-open (after it
+        the book it holds is no longer the close's); its failed decide is counted once a session. The House's exit
+        rules are the day's decision's own and are not run again here: a program seated now holds no lot."""
+        handled = done.get("instances")
+        if done.get("status") != "done" or not isinstance(handled, list):
+            return
+        et = self._et()
+        if et is None or not et.enabled:
+            return
+        self._sync_instances(now, t, out, late=True)
+        live = [i for i in self._instances(alive=True) if i.live]
+        day = t.isoformat()
+        counted = self.state.get("eq_failed", {}) or {}
+        again = mn is None or now < mn.preopen
+        fresh = [i for i in live if i.id not in handled and (again or counted.get(i.id) != day)]
+        if not fresh:
+            return
+        if all(counted.get(i.id) == day for i in fresh) and now - self._seat_tried < SEAT_RETRY_S:
+            return
+        bars = self._day_bars(now, t, mt, live, fresh, out, held=False)
+        if bars is None:
+            return
+        self._seat_tried = now
+        self._decide(t, fresh, bars, now, out)
+        asked = sorted(set(handled) | {i.id for i in fresh if i.last_decided_day == day})
+        if asked != sorted(handled):
+            record = {k: v for k, v in done.items() if k != "why"}
+            self.state.put("eq_decide", {**record, "instances": asked, "seated_at": now})
+
+    def _lot_symbols(self, day: str) -> set[str]:
+        """The symbols of the lots open now, or opened or closed in session `day`: their bars are read whether or not a
+        live program still needs them (a retired or demoted program's last lot is priced on its exit day's bar: its
+        twin, league/ops/twins.py, and the buy-and-hold beside it)."""
+        return {str(r["symbol"]) for r in self.state.rows(
+            "SELECT DISTINCT symbol FROM eq_lots WHERE status IN ('open', 'closing') OR opened_day=? OR exit_day=?",
+            (day, day))}
+
+    def _day_bars(self, now: float, t: dt.date, mt: S.Moments, live: Sequence[Instance], asked: Sequence[Instance],
+                  out: dict, *, held: bool = True) -> Mapping[str, Any] | None:
+        """Session t's bars for a decide of `asked`, read (`_fetch_bars`) when the ones held lack a symbol: the NEEDS of
+        every live program and the lots' own symbols (`_lot_symbols`), one fetch for them all. None while the decide
+        must wait: before 16:30 (`decide_at`) with a program to ask, or within `BARS_GRACE_S` of it while a bar is
+        still missing (after it the decide goes without: a program that needs the bar fails, a lot without it has no
+        priced twin). `held` False (the seating pass): only the asked programs' bars are waited for or cause a read."""
+        day = t.isoformat()
         for inst in live:
             self._ensure_loaded(inst)
-        symbols = sorted({s for i in live for s in (self._needs.get(i.id) or {}).get("symbols", [])})
+        lots = self._lot_symbols(day)
+        need = {s for i in asked for s in (self._needs.get(i.id) or {}).get("symbols", [])} | (lots if held else set())
+        symbols = sorted({s for i in live for s in (self._needs.get(i.id) or {}).get("symbols", [])} | lots)
         history = max([int((self._needs.get(i.id) or {}).get("history", 0)) for i in live] + [1])
         bars = self._bars if self._bars is not None and self._bars.get("day") == day else None
-        if symbols and (bars is None or set(symbols) - set(bars.get("present") or ())):
+        if need - set((bars or {}).get("present") or ()):
             try:
                 self._fetch_bars(t, symbols, history, now)
             except Exception as exc:  # noqa: BLE001 - read again next minute (the decide waits for its grace)
                 self._error("bars", exc, out)
             bars = self._bars if self._bars is not None and self._bars.get("day") == day else None
-        if now < mt.decide_at:
-            return
-        missing = set(symbols) - set((bars or {}).get("present") or ())
+        if asked and now < mt.decide_at:
+            return None
+        missing = need - set((bars or {}).get("present") or ())
         if missing and now < mt.decide_at + BARS_GRACE_S:
             out["decide"] = f"waiting for the bars of {', '.join(sorted(missing))}"
-            return
-        self._decide(t, live, bars or {"day": day, "symbols": [], "present": [], "raw": {}, "all": {}}, now, out)
-        self._house_exits(t, now)
-        self.state.put("eq_decide", {"day": day, "status": "done", "at": now})
+            return None
+        return bars or {"day": day, "symbols": [], "present": [], "raw": {}, "all": {}}
 
-    def _sync_instances(self, now: float, t: dt.date, out: dict) -> bool:
+    def _sync_instances(self, now: float, t: dt.date, out: dict, *, late: bool = False) -> bool:
         """The equity families' rows against the book's instances: band moves (`bands.next_band`, the book alone moves
         candidate <-> probe <-> sized, while the lane is enabled), a Probe or Sized row's instance created or updated, and
         every instance whose family no longer runs it retired (its lots exit at the next open, planned in
-        `_house_exits`). An unreadable store changes nothing."""
+        `_house_exits`). An unreadable store changes nothing.
+
+        RETIRED ONLY ON POSITIVE EVIDENCE (A8.5; INTERFACES 5.5): a row of the read that names another version or a
+        band that does not run, or, for a family with no row at all, the store's own word on it (`families.standing`:
+        retired, another version, a band that does not run, a proof that is not the current equity identity). A family
+        that is merely absent from one read, or whose standing cannot be read, keeps its instance: nothing changes, the
+        owner is told once a decision day, and the sync is not recorded done (False: it runs again next minute). A
+        retirement is an alert. A retired instance whose row is back in a running band on the same version and program
+        runs again, unless its version's demotion is sticky (EDM1).
+
+        `late` (THE SEATING PASS, `_seat_step`): only a Candidate moves (to Probe, when it holds a free seat) and only a
+        new instance is made, of a family none of whose versions runs. No demotion, no sizing up, no update of a
+        running instance, no retirement, no revival: those are the decision's own, once a day."""
         et = self._et()
         rows = [dict(r) for r in self.families.read() if str(r.get("lane") or "") in _pkg.LANES]
         if getattr(self.families, "last_error", ""):
@@ -1709,15 +1979,18 @@ class EquityBook:
             return False
         sticky = dict(self.state.get("eq_sticky", {}) or {})
         since = dict(self.state.get("eq_band_since", {}) or {})
+        before = (dumps(sticky), dumps(since))
         day = t.isoformat()
         if et is not None and et.enabled:
             live_n = sum(1 for r in rows if r.get("band") in LIVE_BANDS)
             for row in rows:
                 if row.get("band") not in ("candidate",) + LIVE_BANDS:
                     continue
+                if late and row.get("band") != "candidate":
+                    continue
                 key = instance_key(row["family"], int(row["version"]))
                 try:
-                    record = self._record_of(row["family"], int(row["version"]), row)
+                    record = self._record_of(row["family"], int(row["version"]), row, refetch=not late)
                     band, why = B.next_band(row, record, et, seat_free=live_n < int(et.probe_max_programs)
                                             or row.get("band") in LIVE_BANDS, sticky=sticky.get(key))
                 except Exception as exc:  # noqa: BLE001 - no move on a rule that cannot be read
@@ -1737,35 +2010,61 @@ class EquityBook:
                     live_n += 1
                 row["band"] = band
                 since[key] = {"band": band, "day": day}
-        self.state.put("eq_sticky", sticky)
+        if not late or dumps(sticky) != before[0]:
+            self.state.put("eq_sticky", sticky)
         holds = self._holds()
         wanted: dict[str, dict] = {}
         for row in rows:
             if row.get("band") in LIVE_BANDS:
                 wanted[instance_key(row["family"], int(row["version"]))] = row
+        running = {i.family for i in self._instances(alive=True)} if late else set()
         for key, row in wanted.items():
             inst = self._instance(key)
             params = dict(row.get("params") or {})
+            if inst is None and str(row["family"]) in running:
+                continue   # another version of it still runs: the decision retires that one and starts this one
             if inst is None:
                 inst = Instance(key, str(row["family"]), int(row["version"]), str(row.get("lane") or ""),
                                 str(row.get("run_sha") or ""), str(row.get("code") or ""), params, str(row["band"]),
                                 bool(row.get("seeded")), holds[1], created_at=now)
                 since.setdefault(key, {"band": inst.band, "day": day})
                 self.record("equity.instance", {"instance": key, "band": inst.band, "lane": inst.lane}, agent=inst.family)
+            elif late:
+                continue   # a running instance is the decision's own to update; a retired one its own to bring back
             elif inst.retired_at is not None:
-                continue   # a retired version never runs again (its family runs a new version under a new key)
+                # The family runs this version again (the swarm banded it again; an instance retired on a read that
+                # proved wrong): the same key runs again. Never a sticky demotion (EDM1 holds for the version), and
+                # never another program under the same version.
+                if key in sticky or inst.run_sha != str(row.get("run_sha") or ""):
+                    continue
+                inst.retired_at, inst.why, inst.band = None, "", str(row["band"])
+                inst.code, inst.params, inst.seeded = str(row.get("code") or ""), params, bool(row.get("seeded"))
+                since[key] = {"band": inst.band, "day": day}
+                self.record("equity.instance", {"instance": key, "band": inst.band, "lane": inst.lane, "revived": True},
+                            agent=inst.family)
+                self.alert("warning", f"equity: {key} runs again (its family's row is back in the {inst.band} band)")
             else:
                 inst.band, inst.code, inst.params, inst.run_sha = str(row["band"]), str(row.get("code") or ""), params, \
                     str(row.get("run_sha") or "")
                 inst.seeded = bool(row.get("seeded"))
             self._save_instance(inst)
+        if not late or dumps(since) != before[1]:
+            self.state.put("eq_band_since", since)
+        if late:
+            return True
+        from .families import GONE
+
         by_family = {str(r["family"]): r for r in rows}
+        unconfirmed = []
         for inst in self._instances(alive=True):
             if inst.id in wanted:
                 continue
             row = by_family.get(inst.family)
             if row is None:
-                code, why = "retired", "its family is no longer an equity-lane family the House may run"
+                code, why = self._standing(inst)
+                if code not in GONE:
+                    unconfirmed.append(f"{inst.id} ({why})")
+                    continue
             elif int(row.get("version") or 0) != inst.version:
                 code, why = "retired", f"superseded by version {row.get('version')}"
             else:
@@ -1774,8 +2073,30 @@ class EquityBook:
             self._save_instance(inst)
             self._drop(inst)
             self.record("equity.instance", {"instance": inst.id, "retired": True, "why": inst.why}, agent=inst.family)
-        self.state.put("eq_band_since", since)
+            self.alert("warning", f"equity: {inst.id} is {inst.why}: it decides no more and its lots exit at the next "
+                                  "open")
+        if unconfirmed:
+            out["families"] = f"no row and no word of the store on {'; '.join(unconfirmed)}: nothing retired"
+            if self._unconfirmed_day != day:
+                self._unconfirmed_day = day
+                self.alert("warning", f"equity: the families read has no row for {'; '.join(unconfirmed)} and the "
+                                      "swarm store does not say it stopped: it keeps running. Look at its family in "
+                                      "swarm.sqlite (its band, banded_version and code file)")
+            return False
         return True
+
+    def _standing(self, inst: Instance) -> tuple[str, str]:
+        """The swarm store's own word on an instance whose family has no row in a good read (`families.standing`):
+        ("retired" | "demoted", why) is positive evidence it no longer runs; anything else ("live", "unknown", a reader
+        that cannot say, an error) is none."""
+        read = getattr(self.families, "standing", None)
+        if read is None:
+            return "unknown", "its families reader cannot say why"
+        try:
+            code, why = read(inst.family, inst.version)
+        except Exception as exc:  # noqa: BLE001 - no evidence
+            return "unknown", f"{type(exc).__name__}: {str(exc)[:160]}"
+        return str(code), str(why)
 
     def _drop(self, inst: Instance) -> None:
         self._loaded.pop(inst.id, None)
@@ -1818,7 +2139,12 @@ class EquityBook:
 
     def _fetch_bars(self, t: dt.date, symbols: Sequence[str], history: int, now: float) -> None:
         """The 1Day bars of `symbols` through session t, adjustment=raw and adjustment=all, kept for the decide and
-        written to `eq_bars` (the rows and each series' sha: A8.11's provenance)."""
+        written to `eq_bars` (the rows and each series' sha: A8.11's provenance).
+
+        A READ AFTER A DECISION OF THE SAME DAY (the seating pass reads again when a program seated since needs a bar
+        the day's fetch did not hold) writes the day's rows again, so the rows an earlier decision used are first
+        compared with it, as the morning audit would have compared them (`_bars_verdict`): a price that differs costs
+        the programs that already decided on it what a morning mismatch costs (`_mismatch`)."""
         start = (t - dt.timedelta(days=int(history * 1.5) + 14)).isoformat()
         end = (t + dt.timedelta(days=1)).isoformat()
         raw = self.market.bars(list(symbols), timeframe="1Day", start=start, end=end, adjustment="raw")
@@ -1832,6 +2158,18 @@ class EquityBook:
                 keep[name][symbol] = rows
         present = [s for s in symbols if keep["raw"][s] and _bar_day(keep["raw"][s][-1]) == day
                    and keep["all"][s] and _bar_day(keep["all"][s][-1]) == day]
+        earlier = self.state.get("eq_decision") or {}
+        changed = []
+        if earlier.get("day") == day and any(i.last_decided_day == day for i in self._instances(alive=True)):
+            since = max(str(earlier.get("start") or ""), start)
+            again = sorted(set(earlier.get("symbols") or ()) & set(present))
+            stored = self._stored_bars(again, since, day)
+            for symbol in again:
+                fresh = [{_bar_day(r): r for r in keep[name][symbol] if since <= (_bar_day(r) or "")}
+                         for name in ("raw", "all")]
+                if _bars_verdict(stored.get((symbol, "raw"), {}), stored.get((symbol, "all"), {}), fresh[0], fresh[1],
+                                 day) == "mismatch":
+                    changed.append(symbol)
         shas = {}
         with self.state.transaction():
             for name in ("raw", "all"):
@@ -1856,12 +2194,27 @@ class EquityBook:
         self._bars = {"day": day, "symbols": list(symbols), "present": present, "raw": keep["raw"], "all": keep["all"],
                       "shas": shas, "start": start, "end": end, "fetched_at": now}
         self.record("equity.bars", {"day": day, "symbols": list(symbols), "present": present})
+        if changed:
+            self._mismatch(day, changed, now, where="read again for a later decide")
 
     def _decide(self, t: dt.date, live: Sequence[Instance], bars: Mapping[str, Any], now: float, out: dict) -> None:
-        """One "decide" request for every live instance whose bars and program are ready; its intents recorded."""
+        """One "decide" request for every live instance whose bars and program are ready; its intents recorded.
+
+        ONCE A SESSION: an instance already asked for the day (`last_decided_day`, written in its intents' own
+        transaction) is skipped, so a decide that runs again (an error or a restart after one instance's commit and
+        before `eq_decide`'s, the seating pass) never records a program's intents twice.
+
+        A FAILED DECIDE (A8.5: `failed_decides_exit` in a row exit the program's lots at the next open, `_house_exits`)
+        is counted once a session (kv `eq_failed` {instance: the last day counted}), in two kinds. THE HOUSE COULD NOT
+        ASK: no program loaded, no bar, no ctx, the decider or its answer failed, the child holds no runner for it
+        (`missing`) or could not build the ctx (`error`): the instance may be asked again for the same close
+        (`_seat_step`). THE PROGRAM FAILED: its answer says `failed` (league/equity/child.py: the runner's
+        `last_failed`: it raised, ran past its limit or is disqualified), which is exactly what the Gym engine counts
+        (league/equity/engine.py `decide`); the session is spent as in the Gym (`last_decided_day` moves, no intent)."""
         day = t.isoformat()
         jobs, failed, meta = [], {}, {}
-        for inst in live:
+        asked = [inst for inst in live if inst.last_decided_day != day]
+        for inst in asked:
             if not self._ensure_loaded(inst):
                 failed[inst.id] = inst.why or "the program did not load"
                 continue
@@ -1890,15 +2243,35 @@ class EquityBook:
             except Exception as exc:  # noqa: BLE001
                 for job in jobs:
                     failed[job["key"]] = f"the decider: {type(exc).__name__}: {str(exc)[:200]}"
-        decided = []
-        for inst in live:
+        counted = dict(self.state.get("eq_failed", {}) or {})
+        decided, spent, fresh = [], {}, []
+        for inst in asked:
             result = results.get(inst.id)
-            if inst.id not in failed and (not isinstance(result, Mapping) or result.get("ok") is False):
-                failed[inst.id] = f"no answer: {str((result or {}).get('error') if isinstance(result, Mapping) else '')[:200]}"
-            if inst.id in failed:
-                inst.failed_decides += 1
-                inst.why = f"decide {day}: {failed[inst.id]}"[:400]
-                self._save_instance(inst)
+            if inst.id not in failed:
+                if not isinstance(result, Mapping) or result.get("ok") is False:
+                    error = result.get("error") if isinstance(result, Mapping) else ""
+                    failed[inst.id] = f"no answer: {str(error or '')[:200]}"
+                elif result.get("missing"):
+                    self._loaded.pop(inst.id, None)    # the child lost its runner: loaded again before the next decide
+                    failed[inst.id] = "the decider holds no loaded program for it"
+                elif result.get("error"):
+                    failed[inst.id] = f"the decider: {str(result.get('error'))[:200]}"
+                elif result.get("failed"):
+                    said = result.get("why") or "it raised, ran past its limit or is disqualified"
+                    spent[inst.id] = f"its own decide failed: {str(said)[:200]}"
+            why = failed.get(inst.id) or spent.get(inst.id)
+            if why is not None:
+                with self.state.transaction():
+                    if counted.get(inst.id) != day:
+                        inst.failed_decides += 1
+                        counted[inst.id] = day
+                        fresh.append(inst.id)
+                        self.state.put("eq_failed", counted)
+                    if inst.id in spent:
+                        inst.last_decided_day = day
+                    inst.why = f"decide {day}: {why}"[:400]
+                    self._save_instance(inst)
+                failed[inst.id] = why
                 continue
             with self.state.transaction():
                 n = self._record_intents(inst, t, list(result.get("intents") or []), result.get("ctx_sha"),
@@ -1909,8 +2282,10 @@ class EquityBook:
         out["decided"] = decided
         if failed:
             out["decide_failed"] = dict(failed)
-            self.alert("warning", f"equity: the decide of {day} failed for {', '.join(sorted(failed))}")
-        self.record("equity.decide", {"day": day, "decided": decided, "failed": failed})
+        if fresh:
+            self.alert("warning", f"equity: the decide of {day} failed for {', '.join(sorted(fresh))}")
+        if decided or fresh:
+            self.record("equity.decide", {"day": day, "decided": decided, "failed": failed})
 
     def _inputs(self, inst: Instance, t: dt.date, needs: Mapping[str, Any], bars: Mapping[str, Any]) -> tuple[Any, str]:
         """The instance's ctx inputs (`ctx.inputs_from_fetch`, the Gym's own constructor's live twin, I6) and the sha of
@@ -1925,7 +2300,9 @@ class EquityBook:
             for lot in self._lots():
                 close = closes.get(lot.symbol) or (A.dec(bars["raw"].get(lot.symbol, [{}])[-1].get("c"))
                                                    if bars["raw"].get(lot.symbol) else None)
-                if close is not None and close > 0:
+                # Session t's close marks a lot held at it (a decide that runs late, after the next open, never
+                # marks a lot bought since with a price from before it was bought).
+                if close is not None and close > 0 and lot.opened_day <= day:
                     lot.mark, lot.marked_at = close, now
                     self._save_lot(lot)
         lots = self._lots(instance=inst.id)
@@ -2036,13 +2413,23 @@ class EquityBook:
     def _house_exits(self, t: dt.date, now: float) -> int:
         """THE HOUSE'S EXIT RULES (A8.5, identical in the Gym engine), planned at the decision of session t for the
         next open: a retired or demoted program's lots; a program with `failed_decides_exit` failed decides in a row;
-        a lot held its program's `max_hold_sessions` by the next open."""
+        a lot held its program's `max_hold_sessions` by the next open.
+
+        A rule that is due goes AT THE OPEN whatever its program planned for the close: the Gym sells a lot the House
+        exits at the next open and then rejects the program's own close sell of it (league/equity/engine.py `_exits`),
+        so a program's planned `at: close` sell of that lot is refused here (the program reads why in its next ctx's
+        rejects) and the House's exit takes its place. A program's own sell at the open goes first in the Gym too, and
+        an exit of the House's already planned (carried, flatten) stands."""
         day, nxt = t.isoformat(), S.next_session(t).isoformat()
         _, default_hold, cap, failed_exit = self._holds()
         n = 0
         with self.state.transaction():
             for lot in self._lots():
-                if self._exit_pending(lot.lid):
+                pending = [Intent.of(r) for r in self.state.rows(
+                    "SELECT * FROM eq_intents WHERE lid=? AND kind IN ('sell', 'house_exit') AND status IN "
+                    "('planned', 'sent') ORDER BY iid", (int(lot.lid),))]
+                yields = [i for i in pending if i.kind == "sell" and i.status == "planned" and i.at == "close"]
+                if len(yields) != len(pending):
                     continue
                 inst = self._instance(lot.instance)
                 reason, why = None, ""
@@ -2057,6 +2444,9 @@ class EquityBook:
                     if config.max_hold_due(held, hold):
                         reason, why = "max_hold", f"held {held + 1} sessions by the next open (its maximum {hold})"
                 if reason:
+                    for intent in yields:
+                        self._finish(intent, "refused", f"lot {lot.lid} leaves at the open by the House's rule "
+                                                        f"({reason}: {why})"[:300])
                     self._plan_exit(lot, exec_day=nxt, at="open", reason=reason, why=why, decided_day=day)
                     n += 1
         if n:
@@ -2065,21 +2455,30 @@ class EquityBook:
 
     def _decide_failed(self, t: dt.date, now: float, why: str) -> None:
         day = t.isoformat()
+        counted = dict(self.state.get("eq_failed", {}) or {})
         for inst in self._instances(alive=True):
-            if inst.live and inst.last_decided_day != day:
+            if inst.live and inst.last_decided_day != day and counted.get(inst.id) != day:
                 inst.failed_decides += 1
+                counted[inst.id] = day
                 inst.why = f"decide {day}: {why}"[:400]
                 self._save_instance(inst)
+        self.state.put("eq_failed", counted)
         self._house_exits(t, now)
         self.state.put("eq_decide", {"day": day, "status": "failed", "at": now, "why": why})
         self.alert("warning", f"equity: the decide of {day} failed: {why}")
 
     # ------------------------------------------------------------------ the morning audit (A8.11)
     def _audit(self, now: float, m: S.Moments | None, out: dict) -> None:
-        """The last decision's bars fetched again before the next open and compared: raw rows exactly, adjustment=all
-        rows as the as-of prices a program saw (all_s x raw_t / all_t, within a millionth: an event after t rescales the
-        series without changing them). A mismatch is an alarm and a twin note; that decision's planned buys of the
-        affected programs are canceled and it counts as a failed decide (A8.5)."""
+        """The last decision's bars fetched again before the next open and compared (`_bars_verdict`): the raw open,
+        high, low and close of every day exactly, and the adjustment=all rows as the as-of prices a program saw (all_s x
+        raw_t / all_t, within the vendor's rounding: an event after t rescales the series without changing them). A
+        PRICE mismatch is an alarm and a twin note; that decision's planned buys of the affected programs are canceled
+        and it counts as a failed decide (A8.5): `_mismatch`. A VOLUME-only difference is a note and nothing else (the
+        decision's `volume`, the `equity.bars_audit` record): a session's consolidated volume is not final at 16:20
+        (the vendor's 1Day bar goes on counting late and after-hours prints), so judging it would cancel every
+        morning's buys; a program that reads `volume[-1]` live reads the 16:20 figure. Each audited symbol's rows of the
+        day are marked on its own verdict ("ok" on its prices, "mismatch"); a symbol the decision did not read is not
+        marked."""
         if m is None or not (m.audit_at <= now < m.open_send):
             return
         decision = dict(self.state.get("eq_decision") or {})
@@ -2102,39 +2501,63 @@ class EquityBook:
                 self.state.put("eq_decision", decision)
                 self.alert("warning", f"equity: the bars of {day} could not be read again ({type(exc).__name__})")
             return
-        stored: dict[tuple[str, str], dict[str, tuple]] = {}
-        for r in self.state.rows("SELECT * FROM eq_bars WHERE symbol IN (%s) AND day>=? AND day<=?"
-                                 % ",".join("?" * len(symbols)), (*symbols, decision["start"], day)):
-            stored.setdefault((r["symbol"], r["adjustment"]), {})[r["day"]] = (r["o"], r["h"], r["l"], r["c"], r["v"])
-        bad = []
+        stored = self._stored_bars(symbols, decision["start"], day)
+        bad, drift = [], []
         for symbol in symbols:
             start = decision["start"]
             fresh_raw = {_bar_day(r): r for r in (raw or {}).get(symbol) or [] if start <= (_bar_day(r) or "9999") <= day}
             fresh_all = {_bar_day(r): r for r in (adj or {}).get(symbol) or [] if start <= (_bar_day(r) or "9999") <= day}
-            old_raw, old_all = stored.get((symbol, "raw"), {}), stored.get((symbol, "all"), {})
-            if set(fresh_raw) != set(old_raw) or set(fresh_all) != set(old_all) or day not in old_raw:
+            verdict = _bars_verdict(stored.get((symbol, "raw"), {}), stored.get((symbol, "all"), {}), fresh_raw,
+                                    fresh_all, day)
+            if verdict == "mismatch":
                 bad.append(symbol)
-                continue
-            if any(A.dec(fresh_raw[d].get(k)) != A.dec(old_raw[d][i]) for d in old_raw
-                   for i, k in enumerate(("o", "h", "l", "c", "v"))):
-                bad.append(symbol)
-                continue
-            if not _as_of_equal(old_raw, old_all, fresh_raw, fresh_all, day):
-                bad.append(symbol)
+            elif verdict == "volume":
+                drift.append(symbol)
         verdict = "mismatch" if bad else "ok"
         with self.state.transaction():
-            self.state.execute("UPDATE eq_bars SET audit=? WHERE day=?", (verdict, day))
+            self.state.execute(f"UPDATE eq_bars SET audit='ok' WHERE day=? AND symbol IN "
+                               f"({','.join('?' * len(symbols))})", (day, *symbols))
             if bad:
                 self.state.execute(f"UPDATE eq_bars SET audit='mismatch' WHERE day=? AND symbol IN "
                                    f"({','.join('?' * len(bad))})", (day, *bad))
-            decision["audit"], decision["mismatch"] = verdict, bad
+            decision["audit"], decision["mismatch"], decision["volume"] = verdict, bad, drift
             self.state.put("eq_decision", decision)
-        if not bad:
-            return
+        if drift:
+            out["bars_volume"] = f"the volume of {', '.join(drift)} read again differs (a note: its prices agree)"
+        if bad:
+            self._mismatch(day, bad, now, volume=drift)
+        elif drift:
+            self._audit_note(day, [], drift, now)
+            self.record("equity.bars_audit", {"day": day, "mismatch": [], "volume": drift, "programs": []})
+
+    def _stored_bars(self, symbols: Sequence[str], start: str, day: str) -> dict[tuple[str, str], dict[str, tuple]]:
+        """{(symbol, adjustment): {day: (o, h, l, c, v)}}: the rows `eq_bars` keeps of `symbols` from `start` through
+        `day` (the bars a decision of `day` used)."""
+        stored: dict[tuple[str, str], dict[str, tuple]] = {}
+        if not symbols:
+            return stored
+        for r in self.state.rows("SELECT * FROM eq_bars WHERE symbol IN (%s) AND day>=? AND day<=?"
+                                 % ",".join("?" * len(symbols)), (*symbols, start, day)):
+            stored.setdefault((r["symbol"], r["adjustment"]), {})[r["day"]] = (r["o"], r["h"], r["l"], r["c"], r["v"])
+        return stored
+
+    def _audit_note(self, day: str, bad: Sequence[str], volume: Sequence[str], now: float) -> None:
+        """The twin note of a decision day (kv `eq_bars_audit` {day: {symbols, volume, at}}, the last 30): `symbols` the
+        ones whose prices read again differ, `volume` the ones whose volume alone does."""
         notes = dict(self.state.get("eq_bars_audit", {}) or {})
-        notes[day] = {"symbols": bad, "at": now}
+        notes[day] = {"symbols": list(bad), "volume": list(volume), "at": now}
         self.state.put("eq_bars_audit", dict(sorted(notes.items())[-30:]))
-        self.alert("error", f"equity: the bars of {day} read again differ for {', '.join(bad)}: that decision's buys "
+
+    def _mismatch(self, day: str, bad: Sequence[str], now: float, *, volume: Sequence[str] = (),
+                  where: str = "read again") -> list[str]:
+        """What it costs when the bars a decision of `day` used differ, in a price, from a later reading (A8.11, A8.5):
+        the twin note (kv `eq_bars_audit`), the alarm, and for each program that decided on one of `bad`: its planned
+        buys of that decision canceled and one failed decide (one a session, `eq_failed`: a program whose own decide
+        of that day already failed is not counted again). Returns the programs hit."""
+        bad = list(bad)
+        counted = dict(self.state.get("eq_failed", {}) or {})
+        self._audit_note(day, bad, volume, now)
+        self.alert("error", f"equity: the bars of {day} {where} differ for {', '.join(bad)}: that decision's buys "
                             "are canceled")
         hit = []
         for inst in self._instances(alive=True):
@@ -2148,12 +2571,17 @@ class EquityBook:
             if not (symbols_of & set(bad) if symbols_of else planned):
                 continue
             for intent in planned:
-                self._finish(intent, "canceled", f"the bars of {day} read again differ ({', '.join(bad)})")
-            inst.failed_decides += 1
+                self._finish(intent, "canceled", f"the bars of {day} {where} differ ({', '.join(bad)})")
+            if counted.get(inst.id) != day:
+                inst.failed_decides += 1
+                counted[inst.id] = day
             inst.why = f"bars audit {day}: {', '.join(bad)}"
             self._save_instance(inst)
             hit.append(inst.id)
-        self.record("equity.bars_audit", {"day": day, "mismatch": bad, "programs": hit})
+        if hit:
+            self.state.put("eq_failed", counted)
+        self.record("equity.bars_audit", {"day": day, "mismatch": bad, "volume": list(volume), "programs": hit})
+        return hit
 
     # ------------------------------------------------------------------ reconciliation
     def _reconcile_step(self, now: float, m: S.Moments | None, out: dict) -> None:
@@ -2484,14 +2912,20 @@ class EquityBook:
             out["paper_proof_stock"] = answer.get("status")
 
     # ------------------------------------------------------------------ the band rules' record
-    def _record_of(self, family: str, version: int, row: Mapping[str, Any] | None) -> Any:
+    def _record_of(self, family: str, version: int, row: Mapping[str, Any] | None, *, refetch: bool = False) -> Any:
         """The version's real record for the band rules (money's `bands.EquityRecord`): its closed ":r" lots in close
         order (net return on notional each), their net cash, the same-risk buy-and-hold over the same sessions
-        (`_bh_pnl`), its whole sessions at Probe, its realized Probe net, its priced twins' gaps and EDM1's sigma."""
+        (`_bh_pnl`), its whole sessions at Probe, its realized Probe net, its priced twins' gaps and EDM1's sigma.
+        `refetch`: the buy-and-hold may read the vendor (the daily band sync asks so; a sizing at send time never
+        does), and only once the record holds the closes the sizing-up rule needs before it reads the figure at all
+        (`sized.min_trades`): the sync runs before the day's own bars are read, so the last exit day's close is not
+        stored yet for a program that closed a lot that day."""
         key = instance_key(family, version)
         lots = [Lot.of(r) for r in self.state.rows(
             "SELECT * FROM eq_lots WHERE instance=? AND status='closed' ORDER BY closed_at, lid", (key,))]
         returns = tuple(float(lot.cash / lot.entry_notional) for lot in lots if lot.entry_notional > 0)
+        et = self._et()
+        refetch = bool(refetch and et is not None and len(returns) >= int(et.sized_min_trades))
         pnl = sum((lot.cash for lot in lots), ZERO)
         since = (self.state.get("eq_band_since", {}) or {}).get(key) or {}
         probe_sessions = 0
@@ -2508,17 +2942,22 @@ class EquityBook:
             if twin.get("status") == "priced" and isinstance(twin.get("gap_bp"), (int, float)) \
                     and math.isfinite(float(twin["gap_bp"])):
                 gaps.append(float(twin["gap_bp"]))
-        return B.EquityRecord(n=len(returns), returns=returns, pnl=pnl, bh_pnl=self._bh_pnl(lots),
+        return B.EquityRecord(n=len(returns), returns=returns, pnl=pnl, bh_pnl=self._bh_pnl(lots, refetch=refetch),
                               probe_sessions=probe_sessions,
                               realized_net=sum((lot.cash for lot in lots if lot.probe), ZERO),
                               twin_gaps_bp=tuple(gaps),
                               validation_r_sd=(row or {}).get("validation_r_sd"))
 
-    def _bh_pnl(self, lots: Sequence[Lot]) -> Decimal | None:
+    def _bh_pnl(self, lots: Sequence[Lot], *, refetch: bool = False) -> Decimal | None:
         """THE SAME-RISK BUY-AND-HOLD OVER THE SAME SESSIONS (goal item 4's scaling rule): per symbol, its lots' average
         exposure over their span (entry notional x sessions held, over the span's sessions) held from the close before
-        the first entry to the close of the last exit, at the adjustment=all closes the book stored (`eq_bars`; total
-        return). None when a close is missing (the rule then fails `beat_bh`)."""
+        the first entry to the close of the last exit, at adjustment=all closes (total return). None when a close is
+        missing (the rule then fails `beat_bh`).
+
+        ONE BASIS: an adjustment=all close is adjusted for every event up to the day it was fetched, so two closes of
+        two fetches straddling an ex-date or a split are not one series (their ratio would lose the dividend, or be off
+        by the split). The two closes are read from `eq_bars` only when one fetch wrote both (the same series `sha`);
+        otherwise both are read again in ONE fetch (`refetch`: the daily band sync), else the figure is None."""
         if not lots:
             return ZERO
         total = ZERO
@@ -2535,13 +2974,30 @@ class EquityBook:
             span = max(1, S.sessions_between(before, last))
             exposure = sum((lot.entry_notional * max(1, S.sessions_between(lot.opened_day, str(lot.exit_day)))
                             for lot in mine), ZERO) / span
-            closes = {r["day"]: A.dec(r["c"]) for r in self.state.rows(
-                "SELECT day, c FROM eq_bars WHERE symbol=? AND adjustment='all' AND day IN (?, ?)", (symbol, before, last))}
+            rows = {r["day"]: r for r in self.state.rows(
+                "SELECT day, c, sha FROM eq_bars WHERE symbol=? AND adjustment='all' AND day IN (?, ?)",
+                (symbol, before, last))}
+            closes = {}
+            if before in rows and last in rows and rows[before]["sha"] == rows[last]["sha"]:
+                closes = {d: A.dec(r["c"]) for d, r in rows.items()}
+            elif refetch:
+                closes = self._closes_again(symbol, before, last)
             start, end = closes.get(before), closes.get(last)
             if not start or not end or start <= 0:
                 return None
             total += exposure * (end / start - 1)
         return total
+
+    def _closes_again(self, symbol: str, first: str, last: str) -> dict[str, Decimal | None]:
+        """{day: adjustment=all close} of `symbol` on the days `first` and `last`, read in ONE fetch (one basis); {}
+        when it cannot be read."""
+        try:
+            end = (dt.date.fromisoformat(last) + dt.timedelta(days=1)).isoformat()
+            fetched = self.market.bars([symbol], timeframe="1Day", start=first, end=end, adjustment="all")
+        except Exception:  # noqa: BLE001 - unpriced: the rule fails `beat_bh` and reads again at the next sync
+            return {}
+        return {d: A.dec(r.get("c")) for r in (fetched or {}).get(symbol) or []
+                for d in (_bar_day(r),) if d in (first, last)}
 
 
 def export_row(lot: Lot) -> dict[str, Any]:
@@ -2569,12 +3025,37 @@ def _version_of(instance: str) -> int:
         return 0
 
 
+def _bars_verdict(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fresh_raw: Mapping[str, Mapping],
+                  fresh_all: Mapping[str, Mapping], day: str) -> str:
+    """One symbol's stored rows ({day: (o, h, l, c, v)}, raw and all) against a later reading of the same span ({day:
+    row}): "mismatch" when their sessions, a raw open, high, low or close, or the as-of prices at `day` differ;
+    "volume" when only a raw volume does; else "ok"."""
+    if set(fresh_raw) != set(old_raw) or set(fresh_all) != set(old_all) or day not in old_raw:
+        return "mismatch"
+    if any(A.dec(fresh_raw[d].get(k)) != A.dec(old_raw[d][i]) for d in old_raw
+           for i, k in enumerate(("o", "h", "l", "c"))):
+        return "mismatch"
+    if not _as_of_equal(old_raw, old_all, fresh_raw, fresh_all, day):
+        return "mismatch"
+    if any(A.dec(fresh_raw[d].get("v")) != A.dec(old_raw[d][4]) for d in old_raw):
+        return "volume"
+    return "ok"
+
+
+#: Half a step of the vendor's price grid (four decimals): the most one of its rounded prices is off.
+VENDOR_HALF_STEP = 5e-5
+
+
 def _as_of_equal(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fresh_raw: Mapping[str, Mapping],
                  fresh_all: Mapping[str, Mapping], day: str) -> bool:
-    """Whether two readings of the adjustment=all series give the same as-of prices at `day` (within a millionth)."""
+    """Whether two readings of the adjustment=all series give the same as-of prices at `day`: within a millionth, or
+    within what the vendor's four-decimal rounding allows when that is more. An as-of price is all_s x raw_t / all_t of
+    prices each rounded to 0.0001, so two readings of one series that a later event rescaled differ by up to half a
+    step x (raw_t / all_t) x (1 + all_s / all_t) each: under a millionth of a $600 price, over it below about $100."""
     try:
-        old_t = float(old_raw[day][3]) / float(old_all[day][3])
-        new_t = float(fresh_raw[day]["c"]) / float(fresh_all[day]["c"])
+        old_c, new_c = float(old_all[day][3]), float(fresh_all[day]["c"])
+        old_t = float(old_raw[day][3]) / old_c
+        new_t = float(fresh_raw[day]["c"]) / new_c
     except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return False
     for d, values in old_all.items():
@@ -2583,10 +3064,14 @@ def _as_of_equal(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fre
             return False
         for i, k in enumerate(("o", "h", "l", "c")):
             try:
-                a, b = float(values[i]) * old_t, float(row[k]) * new_t
+                x, y = float(values[i]), float(row[k])
             except (TypeError, ValueError):
                 return False
-            if not math.isfinite(a) or not math.isfinite(b) or abs(a - b) > 1e-6 * max(abs(a), abs(b), 1.0):
+            a, b = x * old_t, y * new_t
+            if not math.isfinite(a) or not math.isfinite(b):
+                return False
+            rounding = VENDOR_HALF_STEP * (abs(old_t) * (1 + abs(x / old_c)) + abs(new_t) * (1 + abs(y / new_c)))
+            if abs(a - b) > max(rounding, 1e-6 * max(abs(a), abs(b), 1.0)):
                 return False
     return True
 
