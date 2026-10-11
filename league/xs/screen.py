@@ -388,16 +388,17 @@ def pinned_receipt(block: Mapping[str, Any] | None) -> ReceiptXS | None:
     return got if isinstance(got, ReceiptXS) else None
 
 
-def _read(path: str | Path, pinned_sha256: Any = None) -> tuple[Mapping[str, Any], str]:
-    """A receipt file's JSON object and sha256; with `pinned_sha256`, refused unless its bytes are the pinned ones."""
-    if pinned_sha256 is not None and (not isinstance(pinned_sha256, str) or not _HEX64.fullmatch(pinned_sha256)):
+def _read(path: str | Path, *, pinned: bool, pinned_sha256: Any = None) -> tuple[Mapping[str, Any], str]:
+    """A receipt file's JSON object and sha256; `pinned`: refused unless its bytes are the ones `pinned_sha256` names
+    (64 hex: a pin that is none refuses, it never reads as "any file")."""
+    if pinned and (not isinstance(pinned_sha256, str) or not _HEX64.fullmatch(pinned_sha256)):
         raise ScreenRefused(f"{_WHO} refuses: no receipt sha256 is pinned")
     try:
         raw = Path(path).read_bytes()
     except OSError as exc:
         raise ScreenRefused(f"{_WHO} refuses: the receipt {path} cannot be read ({exc})") from exc
     sha = hashlib.sha256(raw).hexdigest()
-    if pinned_sha256 is not None and sha != pinned_sha256:
+    if pinned and sha != pinned_sha256:
         raise ScreenRefused(f"{_WHO} refuses: the receipt's sha256 {sha[:12]} is not the pinned {pinned_sha256[:12]}")
     try:
         doc = json.loads(raw)
@@ -431,7 +432,7 @@ def pin(path: str | Path) -> dict[str, Any]:
     INTEGRATOR's one call when the receipt lands (and CI's: `test_xs_screen.TheCommittedPin` holds the committed block
     equal to it). ScreenRefused for a file that cannot be read, is no JSON object or lacks a pinned value; whether
     the pin is one this screen runs is `pinned_receipt`'s to say."""
-    doc, sha = _read(path)
+    doc, sha = _read(path, pinned=False)
     return _pin_of(doc, sha)
 
 
@@ -448,7 +449,7 @@ def load_receipt(path: str | Path, *, pinned_sha256: str) -> ReceiptXS:
     other than `H_LENGTH` sessions from `league.equity.config.LOOK_FIRST` through `LOOK_CAP`; lineage series other
     than `LINEAGE_SERIES`; a stratum whose window, valid-return minimum, smallest cell, funds or market are not
     `league.xs.config`'s (the residual and every placebo are drawn under that stratum)."""
-    doc, sha = _read(path, pinned_sha256)
+    doc, sha = _read(path, pinned=True, pinned_sha256=pinned_sha256)
     missing = [k for k in RECEIPT_KEYS if k not in doc]
     if missing:
         raise ScreenRefused(f"{_WHO} refuses: the receipt lacks {', '.join(missing)}")
