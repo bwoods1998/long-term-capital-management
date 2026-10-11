@@ -62,7 +62,9 @@ when it has been without one for fewer than `METER_WAIT_NIGHTS` owed sessions ru
 (`forward_db.suspect`) nor behind in the shadow's queue (`_behind`: its last attempt failed twice in the child). A
 STANDING absentee is so awaited at the start of its absence (its first day, or its first `METER_WAIT_NIGHTS` - 1)
 and never again: the days after are written the night itself, are no partial days, and FW5 reads them. FW2 goes on
-telling a program that fails night after night. A CONTROL is made in the job's own process and no budget leaves one
+telling a program that fails night after night. The price, stated: when such an absentee RETURNS, the days it missed
+keep meters written without its row and carry no mark (a mark would need an event kind of its own); its rows are in
+`fwd_days` for whoever reads the record itself. A CONTROL is made in the job's own process and no budget leaves one
 stale: one without its row is awaited, by the same rule, only when its data failed (a `data_failed` event of its
 own for that night or a later one). A night whose deadline deferred the controls left every due program stale too,
 and the day waits for those.
@@ -126,7 +128,9 @@ still raises RR, CP and MM, and `alarms` still hands them to the dlane report.
   and the counts, no figure. A session whose intents differ counts against the bound whatever its cause (A14's rule is
   not changed by it); the text says how many of them read other bars (the bars hash: a disagreement is data).
 - FW7 (warning): while `eq_instances` holds a live row: the live book's kv `eq_decide` for the last session is status
-  "failed", or status "done" with no `why` and `at` later than that session's `close_at` + 2,400 s.
+  "failed", or status "done" with no `why` and `at` later than that session's `close_at` + 2,400 s while an instance
+  the record names (every living one when it names none) was in the book by then: a catch-up decide with nobody
+  seated, whose record the seating pass wrote again without its `why`, kept nobody waiting.
 - FW8 (warning): the equity fingerprint moved while a lineage is live (`identity_moved`).
 - RR1 (warning): a declared release receipt unread 24 h after its window closed; RR2 (info): a receipt read "flat"
   or "wrong_way" (listed for `RR2_DAYS` days, never reverted).
@@ -1237,14 +1241,15 @@ def _decide_alarm(root: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
 
-    def read(db: sqlite3.Connection) -> tuple[int, Any]:
+    def read(db: sqlite3.Connection) -> tuple[int, Any, list[dict[str, Any]]]:
         tables = set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'"))
         if not {"eq_instances", "kv"} <= tables:
-            return 0, None
+            return 0, None, []
         return (int(_one(db, "SELECT count(*) FROM eq_instances WHERE retired_at IS NULL") or 0),
-                _one(db, "SELECT value FROM kv WHERE key='eq_decide'"))
+                _one(db, "SELECT value FROM kv WHERE key='eq_decide'"),
+                _rows(db, "SELECT id, created_at, retired_at FROM eq_instances"))
 
-    live, raw = guard.read(path, read)
+    live, raw, instances = guard.read(path, read)
     try:
         decide = json.loads(raw) if raw else None
     except (TypeError, ValueError):
@@ -1256,7 +1261,20 @@ def _decide_alarm(root: Path) -> list[dict[str, Any]]:
         return [_row("FW7", f"the equity decide of {day} failed: the live programs took no decision that session")]
     close, at = _close_at(day), S.epoch(decide.get("at"))
     if status == "done" and not decide.get("why") and close is not None and at is not None and at > close + FW7_LATE_S:
-        return [_row("FW7", f"the equity decide of {day} ran late (past 40 minutes after its close)")]
+        # NOBODY WAITED FOR A DECIDE THAT SEATED ITS PROGRAMS LATER. A catch-up decide with no live program is
+        # written with a `why` and is ignored above; the book's seating pass (league/equity/live.py `_seat_step`) then
+        # seats a program that passed its look afterwards and writes the record again without the `why`, keeping
+        # the catch-up's `at`. Late is a decide that an instance was waiting for at the deadline: one the record
+        # names (every living one when it names none) that the book held by then. One it cannot place counts as
+        # waiting: unread is never on time.
+        named = decide.get("instances") if isinstance(decide.get("instances"), list) else []
+        asked = {str(name) for name in named}
+        waited = [row for row in instances if (str(row["id"]) in asked if asked else row["retired_at"] is None)]
+        placed = {str(row["id"]) for row in waited}
+        on_time = [row for row in waited if not isinstance(row["created_at"], (int, float))
+                   or float(row["created_at"]) <= close + FW7_LATE_S]
+        if on_time or not waited or asked - placed:
+            return [_row("FW7", f"the equity decide of {day} ran late (past 40 minutes after its close)")]
     return []
 
 

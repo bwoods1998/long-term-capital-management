@@ -1691,6 +1691,28 @@ class EachForwardAlarm(Fixture):
         live.put("eq_decide", {"day": DAYS[11], "status": "done", "at": close(DAYS[11]) + 9000, "why": "no live program"})
         self.assertNotIn("FW7", self.ids())
 
+    def test_fw7_a_catch_up_decide_that_seated_its_programs_later_kept_nobody_waiting(self):
+        # The book's first decide was a catch-up with nobody seated (`why` "no live program"); the seating pass then
+        # seated a program that passed its look afterwards and wrote the record again without the `why`.
+        late = close(DAYS[11]) + 140000
+        live = self.book({"day": DAYS[11], "status": "done", "at": late, "instances": ["a@1:r"], "seated_at": late + 600})
+        (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW7"]
+        self.assertIn("ran late", alarm["text"], "the instance was in the book at the deadline: it waited")
+        live.db.execute("UPDATE eq_instances SET created_at=? WHERE id='a@1:r'", (late + 500,))
+        live.db.commit()
+        self.assertNotIn("FW7", self.ids(), "seated after the catch-up: nobody waited at 16:40")
+        live.db.execute("UPDATE eq_instances SET created_at=? WHERE id='a@1:r'", (close(DAYS[11]) + R.FW7_LATE_S,))
+        live.db.commit()
+        self.assertIn("FW7", self.ids(), "in the book at 16:40 itself")
+        # A record that names an instance the book does not hold cannot be placed: told, never silent.
+        live.put("eq_decide", {"day": DAYS[11], "status": "done", "at": late, "instances": ["gone@1:r"]})
+        self.assertIn("FW7", self.ids())
+        # A record with no list is read on every living instance.
+        live.db.execute("UPDATE eq_instances SET created_at=? WHERE id='a@1:r'", (late + 500,))
+        live.db.commit()
+        live.put("eq_decide", {"day": DAYS[11], "status": "done", "at": late})
+        self.assertNotIn("FW7", self.ids())
+
     def test_fw7_only_while_an_instance_lives(self):
         self.book({"day": DAYS[11], "status": "failed", "at": 1.0}, retired=True)
         self.assertNotIn("FW7", self.ids())

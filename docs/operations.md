@@ -204,8 +204,9 @@ awaited:** one that began that day (the program had its row the session before),
 fewer than 3 sessions running of a program that is neither suspect nor behind in the queue. A standing absentee (a
 holder of a halted symbol, which has no row until the bar comes; a program that hangs every night) is awaited at the
 start of its absence, one or two days, and never again: the days after are written the night itself, are no partial
-days, and FW5 reads them; FW2 goes on naming a program that fails night after night. (Awaited without end, one such
-program made every later day three sessions late and partial for good, and FW5 read nothing.) A control without its
+days, and FW5 reads them; FW2 goes on naming a program that fails night after night. When such a program returns,
+the days it missed keep the meters written without it and carry no mark; its own rows are in the record. (Awaited
+without end, one such program made every later day three sessions late and partial for good, and FW5 read nothing.) A control without its
 row is awaited by the same rule when the night said its data failed.
 
 **What nobody may read yet** (recorded in release E3, shown to no one: no generator, no report, and not the captain
