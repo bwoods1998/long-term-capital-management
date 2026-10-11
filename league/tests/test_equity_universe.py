@@ -403,6 +403,15 @@ class TheVenue(unittest.TestCase):
             U.assets(gateway, ["QAAC"], sleep=waits.append)
         self.assertEqual(waits, [5, 20], "three tries, backing off 5 then 20 seconds")
         self.assertEqual(len(gateway.gets(U.ASSETS + "QAAC")), 3)
+        # A 429 waits past the minute (the rehearsal's finding), and the job's paced client pauses before every call.
+        waits.clear()
+        gateway.venue["QAAD"] = GatewayError("GET: HTTP 429", status=429)
+        with self.assertRaises(GatewayError):
+            U.assets(gateway, ["QAAD"], sleep=waits.append)
+        self.assertEqual(waits, list(U.RATE_WAIT_S))
+        waits.clear()
+        U.assets(U.Paced(gateway, waits.append), ["QAAA", "QAAB"], sleep=waits.append)
+        self.assertEqual(waits, [U.PAUSE_S, U.PAUSE_S])
 
     def test_a_ticker_the_path_cannot_name_is_refused_unsent(self):
         gateway = FakeGateway()

@@ -1207,6 +1207,48 @@ class TheJob(unittest.TestCase):
         self.assertEqual(json.loads((h.store_root / xbook.TWINS_FILE).read_text())["through"], h.days[7].isoformat(),
                          "the marker stays where the last whole night left it: the lane reads it as behind")
 
+    def test_it_skips_where_e3s_own_job_skips_and_before_any_panel_row_is_final(self):
+        """THE FIRST EVENING AT "TRAIN" (the rehearsal on the House's box): the panel night's preflight runs E3's
+        canary on the House's daily store first; with no forward day in it the night FAILED ("the store holds no
+        forward day": up to three failed receipts, three warnings, a `night_failed` event) where E3's own job skips.
+        And a panel row is final a session after its day: with the panel store's last session the first forward day
+        itself, no row could be written."""
+        h = House(self)
+        (h.root / "swarm.json").write_text(json.dumps(h.settings))
+        made = []
+
+        def child(root):
+            made.append(D.InlineDecider())
+            return made[-1]
+
+        def job(day, through):
+            h.store(through)
+            when = at(day, 22, 5)
+            ctx = Context("forward_xs", root=h.root, due_at=when, clock=lambda: when, config={})
+            with mock.patch.object(forward_shadow, "_decider", child):
+                return X.run(ctx), ctx
+
+        before = schedule.previous_session(F.t0())
+        out, ctx = job(h.days[0], before)
+        self.assertEqual(out["status"], "skipped", out)
+        self.assertIn("no forward day in the House's daily store yet", out["why"])
+        self.assertIn(before.isoformat(), out["why"])
+        # E3's own job says the same of the same store, and neither started a child or left an event.
+        e3 = forward_shadow.run(Context("forward_shadow", root=h.root, due_at=at(h.days[0], 22, 5),
+                                        clock=lambda: at(h.days[0], 22, 5), config={}))
+        self.assertEqual(e3["status"], "skipped", e3)
+        self.assertIn("no forward day in the store yet", e3["why"])
+        self.assertEqual((made, ctx.alerts, h.events("night_failed")), ([], [], []))
+        self.assertFalse((h.store_root / xbook.TWINS_FILE).exists(), "and no marker was written")
+        out, ctx = job(h.days[0], h.days[0])
+        self.assertEqual(out["status"], "skipped", out)
+        self.assertIn("no final forward day in the panel store yet", out["why"])
+        self.assertEqual((ctx.alerts, h.events("night_failed")), ([], []))
+        out, ctx = job(h.days[1], h.days[1])
+        self.assertEqual((out.get("through"), out.get("programs")), (h.days[0].isoformat(), 0),
+                         "from the next session on the night runs (nobody is registered here: no program)")
+        self.assertEqual(ctx.alerts, [])
+
     def test_the_registry_row_of_the_job(self):
         from league.ops import registry
         from league.ops import schedule as S

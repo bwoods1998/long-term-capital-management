@@ -415,7 +415,7 @@ class FetchAsof(Fixture):
 
     def test_a_call_is_tried_three_times_backing_off_five_then_twenty_seconds(self):
         waits, count = [], {"calls": 0, "failed": 0}
-        self.market.fail = [GatewayError("HTTP 429", status=429), GatewayError("HTTP 500", status=500)]
+        self.market.fail = [GatewayError("HTTP 502", status=502), GatewayError("HTTP 500", status=500)]
         rows = P.fetch_asof(self.market, ["SPY"], "2019-12-30", "2019-12-31", adjustment="raw", asof=None,
                             sleep=waits.append, count=count)
         self.assertEqual((len(rows["SPY"]), waits, count), (2, [5, 20], {"calls": 3, "failed": 0}))
@@ -426,6 +426,46 @@ class FetchAsof(Fixture):
                          sleep=waits.append, count=count)
         self.assertEqual((waits, count), ([5, 20], {"calls": 6, "failed": 1}))
         self.assertIn("failed 3 times", str(caught.exception))
+
+    def test_a_call_the_venue_answers_429_waits_past_the_minute_before_its_last_try(self):
+        """The rehearsal's finding: three tries 5 s and 20 s apart are over before a minute's line resets, so a first
+        fetch that met the venue's rate line failed whole. After a 429 the waits are 30 s, then 65 s."""
+        self.assertEqual((U.RATE_LIMITED, U.RATE_WAIT_S, U.BACKOFF_S), (429, (30, 65), (5, 20)))
+        self.assertGreater(U.RATE_WAIT_S[-1], 60, "the last wait is past a whole minute")
+        waits, count = [], {"calls": 0, "failed": 0}
+        self.market.fail = [GatewayError("HTTP 429", status=429), GatewayError("HTTP 429", status=429)]
+        rows = P.fetch_asof(self.market, ["SPY"], "2019-12-30", "2019-12-31", adjustment="raw", asof=None,
+                            sleep=waits.append, count=count)
+        self.assertEqual((len(rows["SPY"]), waits, count), (2, [30, 65], {"calls": 3, "failed": 0}))
+        waits.clear()
+        self.market.fail = [GatewayError("HTTP 429", status=429), GatewayError("HTTP 503", status=503)]
+        P.fetch_asof(self.market, ["SPY"], "2019-12-30", "2019-12-31", adjustment="raw", asof=None,
+                     sleep=waits.append, count=count)
+        self.assertEqual(waits, [30, 20], "each wait is by the answer before it")
+        self.assertEqual([U.backoff(GatewayError("x", status=s), k) for s in (429, 500, None) for k in (0, 1, 5)],
+                         [30, 65, 65, 5, 20, 20, 5, 20, 20])
+
+    def test_the_job_pauses_before_every_venue_call_and_a_plain_call_pauses_nowhere(self):
+        """The rehearsal's finding: the job's requests went back to back, about 285 a minute for single-symbol ones,
+        on a token the House shares. The job hands its fetches the paced client (`equity_universe.Paced`): `PAUSE_S`
+        before every call, so at most 150 a minute by the pause alone."""
+        self.assertEqual(U.PAUSE_S, 0.4)
+        self.assertLessEqual(60 / U.PAUSE_S, 150)
+        waits = []
+        paced = U.Paced(self.market, waits.append)
+        before = len(self.market.requests)
+        P.fetch_asof(paced, ["SPY", "QAAA"], "2019-12-02", "2019-12-31", adjustment="raw", asof=None, sleep=waits.append)
+        asked = len(self.market.requests) - before
+        self.assertGreaterEqual(asked, 1)
+        self.assertEqual(waits, [U.PAUSE_S] * asked, "one pause a call, before it")
+        self.assertIs(paced.requests, self.market.requests, "every other name is the client's own")
+        waits.clear()
+        P.fetch_asof(self.market, ["SPY"], "2019-12-30", "2019-12-31", adjustment="raw", asof=None, sleep=waits.append)
+        self.assertEqual(waits, [], "the plain client (a test's, a function called by hand) pauses nowhere")
+        # A failed call's next try is paced too: the pause, then the call, then the back-off.
+        self.market.fail = [GatewayError("HTTP 429", status=429)]
+        P.fetch_asof(paced, ["SPY"], "2019-12-30", "2019-12-31", adjustment="raw", asof=None, sleep=waits.append)
+        self.assertEqual(waits, [U.PAUSE_S, 30, U.PAUSE_S])
 
     def test_a_malformed_answer_is_a_value_error(self):
         for answer in ({}, {"bars": []}, {"bars": {"SPY": "rows"}}, {"bars": {"SPY": [{"o": 1}]}},
@@ -1788,6 +1828,12 @@ class TheRegistryRows(unittest.TestCase):
     #: THE SHIP PASS'S ONE-CORE BOUND (the registry differs from the patch's record in this grace and no other
     #: figure): six hours of grace let the spreads job start at 12:30Z and hold the one ops child past the pre-open.
     BOUNDED = {"equity_spreads": 3 * 3600}
+    #: THE REHEARSAL'S MEASURE (the registry differs from the patch's record in this CPU figure and no other): the
+    #: ops client opens a TLS connection a request, about 70 ms of CPU a call on the House's box, and a night of the
+    #: spreads' backfill asks up to `equity_spreads.CALLS_RUN`. The patch's 300 s was under that night's cost.
+    MEASURED = {"equity_spreads": 900}
+    #: CPU seconds a gateway call cost the ops child on the box, at the top of what the rehearsal read (64 to 71 ms).
+    CPU_S_CALL = 0.071
     #: The earliest pre-open of either season, minutes of the UTC day (08:30 New York time in summer).
     PREOPEN_UTC = 12 * 60 + 30
 
@@ -1865,6 +1911,20 @@ class TheRegistryRows(unittest.TestCase):
         self.assertGreater(6 * 60 + 30 + (patched.grace + patched.wall) / 60.0, self.PREOPEN_UTC + preopen.grace / 60.0,
                            "what the patch's six hours allowed: a pre-open missed behind it")
 
+    def test_the_spreads_jobs_cpu_row_covers_a_whole_night_of_its_backfill_twice(self):
+        """A job that asks the gateway `CALLS_RUN` times a night pays a TLS connection a call (the ops client keeps
+        none): the row's CPU is at least twice that night's measured cost, and the patch's own figure was under it
+        (the child would have been killed on every night of the backfill)."""
+        from league.ops import equity_spreads as SP
+
+        night = SP.CALLS_RUN * self.CPU_S_CALL
+        row = self.registry.by_name()["equity_spreads"]
+        self.assertEqual((row.cpu, SP.CALLS_RUN), (self.MEASURED["equity_spreads"], 6000))
+        self.assertGreaterEqual(row.cpu, 2 * night, f"a night's {night:.0f} s of CPU, twice")
+        self.assertLess(self.SPEC["equity_spreads"][2], night, "what the patch's 300 s allowed: killed every night")
+        self.assertLess(row.cpu, row.wall, "and still far inside its own wall")
+        self.assertLessEqual(SP.BUDGET_S, row.wall, "the job stops itself before the runner would")
+
     def test_the_patch_fits_the_registry_and_the_registry_holds_it_once_applied(self):
         source = Path(self.registry.__file__).read_text(encoding="utf-8").splitlines()
         at = 0
@@ -1882,7 +1942,9 @@ class TheRegistryRows(unittest.TestCase):
                 self.assertEqual(tuple(self.trigger(t) for t in mine.triggers),
                                  self.REVIEWED.get(row.name, self.SPEC[row.name][0]), row.name)
                 self.assertEqual(mine.grace, self.BOUNDED.get(row.name, row.grace), row.name)
-                self.assertEqual(dataclasses.replace(mine, triggers=row.triggers, grace=row.grace), row, row.name)
+                self.assertEqual(mine.cpu, self.MEASURED.get(row.name, row.cpu), row.name)
+                self.assertEqual(dataclasses.replace(mine, triggers=row.triggers, grace=row.grace, cpu=row.cpu), row,
+                                 row.name)
             self.assertEqual([job.name for job in self.registry.JOBS][-6:], list(self.SPEC))
             starts = [job.name for job in self.registry.JOBS if job.name in self.SPEC
                       and any(t.kind in ("start", "after") for t in job.triggers)]
@@ -1977,6 +2039,23 @@ class TheJobFitsItsMemory(unittest.TestCase):
         with mock.patch.object(P, "requests", wraps=P.requests) as planned:
             P.full(fixture.root, fixture.market, LAST, sleep=lambda s: None)
         self.assertEqual(planned.call_args.kwargs.get("batch"), P.WHOLE_BATCH)
+
+
+class TheJobsPace(unittest.TestCase):
+    def test_the_job_pauses_before_every_request_it_sends(self):
+        """The whole job, a first night and a run on the store it left: as many pauses of `PAUSE_S` as requests the
+        venue saw (the bars of the store, the second reads, the nightly I6), each before its call."""
+        fixture = Fixture("ctx")
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        for now in (NOW, NOW + 3600):
+            waits = []
+            fixture.market.requests.clear()
+            receipt = P.run(fixture.ctx(now), sleep=waits.append)
+            self.assertTrue(receipt.get("ok"), receipt)
+            self.assertGreater(len(fixture.market.requests), 0)
+            self.assertEqual(waits.count(U.PAUSE_S), len(fixture.market.requests), receipt.get("mode"))
+            self.assertEqual([w for w in waits if w != U.PAUSE_S], [], "no call failed: no back-off")
 
 
 class TheWalls(unittest.TestCase):

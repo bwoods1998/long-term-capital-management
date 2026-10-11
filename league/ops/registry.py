@@ -226,6 +226,12 @@ JOBS: tuple[Job, ...] = (
     # the pre-open's own 40 minutes (due 12:30Z in summer). Its grace is three hours: started by 09:30Z, done by
     # 10:20Z. A night it misses costs one night of a backfill that goes on from its file. The other two daily rows
     # end by 05:50Z at the latest (due + grace + wall); the weekly and monthly rows are a weekend's.
+    # `equity_spreads`' CPU IS 900 s, NOT THE PATCH'S 300 (the ship check's reading of the rehearsal on the House's
+    # box): the ops client opens a TLS connection a request (league/ops/context.py: urllib, no kept connection), which
+    # cost about 70 ms of CPU a call there, and a night of the backfill asks up to `equity_spreads.CALLS_RUN` (6,000):
+    # about 420 s. At 300 s the child was killed every night of the nine: a failed receipt, a House warning and two
+    # retries a night (the file is saved every 500 answers, so the backfill still crept on). 900 is twice the
+    # measured need; it works at nice 19 from 06:30Z, far from any session, and its wall is unchanged.
     Job("equity_universe", "league.ops.equity_universe", (S.daily(1, 40),), grace=3 * HOUR, cpu=120,
         wall=900, in_pause=True, owner="breadth",
         what="the point-in-time S&P 500 membership from a pinned public file and the changes table (the gateway's "
@@ -234,7 +240,7 @@ JOBS: tuple[Job, ...] = (
         in_pause=True, owner="breadth",
         what="the panel's daily bars through the venue's asof (never 2020), the store's vintage rule, the coverage "
              "audit and its verdict, the nightly I6, into <state>/equity-daily/panel/"),
-    Job("equity_spreads", "league.ops.equity_spreads", (S.daily(6, 30),), grace=3 * HOUR, cpu=300, wall=3000,
+    Job("equity_spreads", "league.ops.equity_spreads", (S.daily(6, 30),), grace=3 * HOUR, cpu=900, wall=3000,
         in_pause=True, owner="breadth",
         what="the panel's half-spreads: quote samples at the instants the book trades, on Train-segment sessions, "
              "resumable, into <state>/equity-daily/spreads.json"),

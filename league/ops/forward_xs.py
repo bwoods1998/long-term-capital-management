@@ -1126,13 +1126,18 @@ def beside(root: str | Path) -> dict[str, dict[str, Any]]:
 # --------------------------------------------------------------------------------------------------------------- the job
 def run(ctx: Any) -> dict[str, Any]:
     """THE JOB (league/ops/registry.py, after `equity_panel`): skipped when `forward_db.mode` is "off", when
-    `elane.panel.mode` is "off", inside 09:00-17:30 New York on a session, or with no panel store; else the panel
-    night (`panel_shadow(...).night()`) in the forward job's own decider child, closed in `finally`. A preflight
-    that fails is {"status": "failed"} (nobody run or marked; the runner starts it again inside its grace); a store
-    that cannot be opened is a failed receipt too. A night with failures of the House's own is one warning."""
+    `elane.panel.mode` is "off", inside 09:00-17:30 New York on a session, with no panel store, and WHERE E3'S OWN JOB
+    SKIPS: while the House's daily store holds no forward day (the panel night's preflight runs E3's canary on that
+    store first, and with no forward day in it the night FAILED where E3's skipped: three failed receipts, three
+    warnings and a `night_failed` event on the first evening the lane was at "train", measured in the rehearsal on
+    the House's box), and while the panel store holds no session whose rows are final (its last session, less the
+    row lag, is before the first forward day). Else the panel night (`panel_shadow(...).night()`) in the forward
+    job's own decider child, closed in `finally`. A preflight that fails is {"status": "failed"} (nobody run or
+    marked; the runner starts it again inside its grace); a store that cannot be opened is a failed receipt too. A
+    night with failures of the House's own is one warning."""
     import contextlib
 
-    from ..equity.store import MissingData, StoreRefused
+    from ..equity.store import EquityStore, MissingData, StoreRefused
     from ..swarm import settings as swarm_settings
     from . import forward_shadow
 
@@ -1147,6 +1152,13 @@ def run(ctx: Any) -> dict[str, Any]:
     store_root = root / STORE_DIR
     if not (store_root / PANEL_VERSION).is_file() or not (store_root / "VERSION").is_file():
         return {"status": "skipped", "why": "no panel store yet: no panel forward day"}
+    try:
+        through = EquityStore(store_root).fetched_through
+    except (MissingData, StoreRefused) as exc:
+        return {"status": "failed", "error": f"the equity store could not be opened ({forward_shadow._why(exc)})"}
+    if through < forward_db.t0():
+        return {"status": "skipped", "why": f"no forward day in the House's daily store yet (its last day is "
+                                           f"{through.isoformat()}): the night's canary has no day to run on"}
     db = forward_db.open_db(root)
     children: list[Any] = []
 
@@ -1160,6 +1172,10 @@ def run(ctx: Any) -> dict[str, Any]:
 
     try:
         shadow = panel_shadow(root, db, decider=fresh(), settings=settings, clock=ctx.now, fresh=fresh)
+        if shadow.through < forward_db.t0():
+            return {"status": "skipped", "why": f"no final forward day in the panel store yet (its last session is "
+                                               f"{shadow.panel_through.isoformat()}, and a panel row is final a "
+                                               "session later)"}
         receipt = shadow.night()
         failures = forward_shadow.house_failures(receipt)
         if isinstance(receipt.get("marker"), Mapping) and "error" in receipt["marker"]:

@@ -114,6 +114,15 @@ FIRST_AID = 100
 TICKER = re.compile(r"^[A-Z]{1,5}(\.[A-Z]{1,2})?$")
 TRIES = 3
 BACKOFF_S = (5, 20)
+#: THE PACE OF THE TWO DATA JOBS' VENUE CALLS (the rehearsal on the House's box): the panel job's bars calls, the
+#: rename tests' and this job's asset rows went back to back, about 285 a minute for single-symbol requests, on a
+#: token the House shares, and three tries 5 s and 20 s apart are over before a minute's line resets. So a job
+#: pauses `PAUSE_S` before every venue call (`Paced`: at most 150 a minute by the pause alone), and a call the venue
+#: answers 429 (too many requests) waits `RATE_WAIT_S` before its next try, in place of `BACKOFF_S`: the second wait
+#: is past a whole minute.
+PAUSE_S = 0.4
+RATE_LIMITED = 429
+RATE_WAIT_S = (30, 65)
 STORE_DIR = "equity-daily"
 SOURCE_FILE = "SOURCE.json"
 SPELLS_FILE = "spells.csv"
@@ -738,10 +747,34 @@ def _asset_row(row: Any) -> dict[str, Any] | None:
             "exchange": str(row.get("exchange") or "")}
 
 
+def backoff(exc: BaseException, attempt: int) -> float:
+    """Seconds to wait after try `attempt` (from 0) of a venue call failed with `exc`: `RATE_WAIT_S` when the venue
+    answered 429, else `BACKOFF_S`."""
+    waits = RATE_WAIT_S if getattr(exc, "status", None) == RATE_LIMITED else BACKOFF_S
+    return float(waits[min(int(attempt), len(waits) - 1)])
+
+
+class Paced:
+    """A job's gateway client, PACED: `get` pauses `pause` seconds (the job's own `sleep`) before every call and is
+    the client's own otherwise (every other name is the client's). The two data jobs hand it to their venue calls;
+    a function called with the plain client (a test's) pauses nowhere."""
+
+    def __init__(self, gateway: Any, sleep: Callable[[float], None], pause: float = PAUSE_S):
+        self.gateway, self.sleep, self.pause = gateway, sleep, float(pause)
+
+    def get(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
+        self.sleep(self.pause)
+        return self.gateway.get(path) if params is None else self.gateway.get(path, params)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.gateway, name)
+
+
 def assets(gateway: Any, tickers: Sequence[str], *, tries: int = TRIES,
            sleep: Callable[[float], None] = time.sleep) -> dict[str, dict[str, Any] | None]:
     """{ticker: the venue's asset row {id, status, tradable, fractionable, exchange} | None (it knows no such
-    symbol)}. Each call is tried up to `tries` times; one that still fails raises (never read as "no asset")."""
+    symbol)}. Each call is tried up to `tries` times (`backoff`: longer after a 429); one that still fails raises
+    (never read as "no asset")."""
     out: dict[str, dict[str, Any] | None] = {}
     for ticker in tickers:
         symbol = _ticker(ticker)
@@ -757,7 +790,7 @@ def assets(gateway: Any, tickers: Sequence[str], *, tries: int = TRIES,
                     break
                 if attempt + 1 >= max(1, int(tries)):
                     raise
-                sleep(BACKOFF_S[min(attempt, len(BACKOFF_S) - 1)])
+                sleep(backoff(exc, attempt))
     return out
 
 
@@ -1425,12 +1458,13 @@ def _run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, 
         horizon = _months_before(last, UNION_MONTHS + 1)
         tickers = sorted({t for t, s, e in spells if in_store(s, e) and (e is None or e > horizon)})
         ask = [t for t in tickers if t not in venue_cache]
-        rows, asked, failed = _venue_rows(ctx.gateway, root, ask, now=now, sleep=sleep, check=check)
+        rows, asked, failed = _venue_rows(Paced(ctx.gateway, sleep), root, ask, now=now, sleep=sleep, check=check)
         venue_cache.update(rows)
         counts["venue_asked"] += asked
         counts["venue_failed"] += failed
         venue = {t: venue_cache[t] for t in tickers}
-        joined = _joins(ctx.gateway, root, spells, previous, wiki["rows"], last=last, sleep=sleep, check=check)
+        joined = _joins(Paced(ctx.gateway, sleep), root, spells, previous, wiki["rows"], last=last, sleep=sleep,
+                        check=check)
         waiting = set(joined["waiting"])
         table = assign([s for s in spells if s not in waiting], previous, joined["joins"], exits=ended, venue=venue)
         recorded = before.get("sha256") if before.get("commit") == commit else None

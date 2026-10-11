@@ -154,7 +154,7 @@ def _call(gateway: Any, params: Mapping[str, Any], tries: int, sleep: Callable[[
         except Exception as exc:  # noqa: BLE001 - the gateway's own error: tried again, then the caller's
             last = exc
             if attempt + 1 < max(1, int(tries)):
-                sleep(BACKOFF_S[min(attempt, len(BACKOFF_S) - 1)])
+                sleep(U.backoff(exc, attempt))      # (`BACKOFF_S`; after a 429 the longer `U.RATE_WAIT_S`)
     if count is not None:
         count["failed"] = count.get("failed", 0) + 1
     status = getattr(last, "status", None)
@@ -167,8 +167,10 @@ def fetch_asof(gateway: Any, symbols: Sequence[str], start: str, end: str, *, ad
                sleep: Callable[[float], None] = time.sleep,
                count: dict[str, int] | None = None) -> dict[str, list[dict[str, Any]]]:
     """{symbol: [bar rows {t, o, h, l, c, v} in time order]} (E1's `equity_data.fetch` paging with the venue's `asof`;
-    None: the venue's own default, today). Each call is tried up to `tries` times, backing off `BACKOFF_S`
-    (RuntimeError when it still fails). ValueError for a span touching 2020 ("2020 is never fetched": the request is
+    None: the venue's own default, today). Each call is tried up to `tries` times, backing off `BACKOFF_S` (after an
+    HTTP 429 the longer `equity_universe.RATE_WAIT_S`; RuntimeError when it still fails). THE JOB PACES ITS CALLS: it
+    hands this the paced client (`equity_universe.Paced`: a pause before every call). ValueError for a span touching
+    2020 ("2020 is never fetched": the request is
     not sent) and for a malformed answer. `count`: {"calls", "failed"}, added to."""
     _sealed(start, end, asof)
     names = [str(s) for s in symbols]
@@ -1315,19 +1317,21 @@ def _run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, 
     try:
         if want_full:
             try:
-                built = full(root, ctx.gateway, last, assets=assets, sleep=sleep)
+                built = full(root, U.Paced(ctx.gateway, sleep), last, assets=assets, sleep=sleep)
             except Exception as exc:  # noqa: BLE001 - a whole refetch that fails writes nothing new: the incremental
                 full_failed = f"{type(exc).__name__}: {str(exc)[:160]}"
                 if before is None:
                     return _fail(ctx, root, f"the first whole fetch failed ({full_failed}): nothing written")
         if built is None:
             try:
-                built = incremental(root, ctx.gateway, last, assets=assets, blank=blank, sleep=sleep)
+                built = incremental(root, U.Paced(ctx.gateway, sleep), last, assets=assets, blank=blank,
+                                    sleep=sleep)
             except ValueError as exc:
                 if full_failed is not None:
                     return _fail(ctx, root, f"the whole refetch failed ({full_failed}) and the store cannot be grown ({exc}): "
                                      "nothing written")
-                built = full(root, ctx.gateway, last, assets=assets, sleep=sleep)  # a store the calendar outgrew
+                # (a store the calendar outgrew)
+                built = full(root, U.Paced(ctx.gateway, sleep), last, assets=assets, sleep=sleep)
     except Exception as exc:  # noqa: BLE001 - a gateway error writes nothing: a failed receipt, retried in its grace
         return _fail(ctx, root, f"the bars could not be fetched: {type(exc).__name__}: {str(exc)[:200]}: nothing written, "
                          "the last good store stays")
@@ -1365,7 +1369,7 @@ def _run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, 
                     pending += 1
                     continue
                 read_now += 1
-                reads[key] = second_read(ctx.gateway, str(row["symbol"]), days[at], asof=asof,
+                reads[key] = second_read(U.Paced(ctx.gateway, sleep), str(row["symbol"]), days[at], asof=asof,
                                          daily=float(raw[at, n_ref + k, 3]), early=bool(early[at]), sleep=sleep,
                                          count=count)
             if reads[key] is False:
@@ -1426,7 +1430,7 @@ def _run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, 
              "full_failures": (int(audit_before.get("full_failures") or 0) + 1) if full_failed else 0}
     panel = Panel(days=days, early=np.array(early, dtype=bool), aids=aids, raw=raw, adj=adj, member=member,
                   tradable=tradable, hs=hs, manifest={})
-    i6 = i6_check(root, ctx.gateway, last, live=Path(ctx.root) / LIVE_DB, panel=panel, assets=assets,
+    i6 = i6_check(root, U.Paced(ctx.gateway, sleep), last, live=Path(ctx.root) / LIVE_DB, panel=panel, assets=assets,
                   blank=sorted(blanks), sleep=sleep, count=count)
     day_of_full = last if built["mode"] == "full" else U._day(_fact(old, "full_at"))
     try:
