@@ -979,6 +979,22 @@ class TheWiring(unittest.TestCase):
         top = {module for module, inside, _ in seal.imports(REPO, REPO / "league" / "ops" / "contam_xs.py") if not inside}
         self.assertEqual(top, set(), "numpy and the panel are imported where they are used")
 
+    def test_the_permit_the_lanes_own_tests_fake_is_the_shape_the_job_writes(self):
+        """league/tests/elane_xs_fakes.py `write_probe` (the panel lane's tests and the end-to-end test write a permit
+        by hand): the same keys at every depth as `permit` gives of a probe file."""
+        from league.tests import elane_xs_fakes
+
+        def shape(value):
+            return {key: shape(inner) for key, inner in value.items()} if isinstance(value, dict) else type(value).__name__
+        cell = {name: None for name in P.CELL_KEYS} | {"readable": True, "recalled": False}
+        doc = {"routes": {elane_xs_fakes.ROUTE: {"at": "2026-10-10T00:20:00Z", "model": "fake-model", "cells": {
+            s: {"2016-24": dict(cell), "2025": dict(cell)} for s in (*P.STRATA, *P.PANEL_STRATA)}}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            elane_xs_fakes.write_probe(tmp)
+            faked = json.loads((Path(tmp) / elane_xs.PROBE_FILE).read_text())
+            self.assertEqual(shape(X.write_permit(tmp, doc)), shape(faked))
+            self.assertEqual(json.loads((Path(tmp) / elane_xs.PROBE_FILE).read_text()), faked)
+
     def test_no_sealed_tree_imports_this_module(self):
         for tree in seal.SEALED_TREES:
             for path in seal.sources(REPO, tree):
