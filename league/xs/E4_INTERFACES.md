@@ -852,7 +852,7 @@ the job failed on the second run of its first program. In `league/swarm/elane_xs
 - `league/tests/test_xs_zero_edge.py` `TheJobFitsItsMemory` (its world: `league/tests/xs_zero_edge_budget.py`):
   three judgments at 2,455 sessions by 767 columns under `league.ops.__main__.limit(None, 500)`, with the real
   store, runner and decider (the House's side and its child's loop; the engine canned), peak about 80 MB under the
-  cap on the desk and are held to 50; the judgment as it was meets the cap inside its first program, and the test
+  cap on the desk and are held to 30; the judgment as it was meets the cap inside its first program, and the test
   holds that too. The real job, run whole on the desk under the same limits (the real engine in a real child:
   eleven programs, 99 runs), peaked at 465 MB of 522: 57 MB to spare. Not measured on the box.
 

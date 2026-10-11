@@ -109,7 +109,7 @@ copy of the House's state found one blocker, three majors and the minors; each i
   run whole: at the real panel's size its second run met the 500 MB cap, so every Sunday chunk would have failed.
   A judgment now reads one store, keeps each run's result and lets its slice go, and the restart check cuts a
   slice again when it reads it. Three judgments at 2,455 sessions by 767 columns under the child's own limit peak
-  about 80 MB under the cap on the desk with the engine canned (the test holds 50), and the real job run whole
+  about 80 MB under the cap on the desk with the engine canned (the test holds 30), and the real job run whole
   there under the same limits (eleven programs, 99 runs) peaked 57 MB under it: it fits, and the room is thin. NOT
   MEASURED ON THE BOX. If the first Sunday's receipt fails on memory the lever is a memory room of the row's own
   (the runner gives every job the same 500 MB). The swarm's own judgments use the same code (they were 762 MB a

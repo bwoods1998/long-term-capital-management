@@ -467,10 +467,13 @@ class TheJobFitsItsMemory(unittest.TestCase):
 
     EXTRA_MB = 500          # the registry row's default: `league.ops.runner` starts the child with it
     PROGRAMS = 3
-    #: Of the cap, three judgments leave at least this much address space unused (measured on the desk's Python
-    #: 3.14 and 3.11: about 80 and 90 MB; the House's box reads about 20 MB higher at the same shape). What is left
-    #: is the store's two maps, one slice, its pickle and its frame: a judgment's runs no longer add to it.
-    HEADROOM_MB = 50
+    #: Of the cap, three judgments leave at least this much address space unused. Measured on the desk: 78 MB on
+    #: Python 3.14 and 92 on 3.11 with the engine canned, and 57 in the real job run whole (eleven programs); not
+    #: measured on the House's box. The bound is set under those with room for another machine's libraries (the
+    #: figure is an address space's, and a check that gates a deploy must not fail on a runner's own build): what it
+    #: holds is that a judgment's runs no longer add to the peak, which is the store's two maps, one slice, its
+    #: pickle and its frame. The judgment as it was needed 135 MB more for every run.
+    HEADROOM_MB = 30
 
     def measure(self, mode):
         import os
@@ -499,10 +502,14 @@ class TheJobFitsItsMemory(unittest.TestCase):
         return json.loads(done.stdout.strip().splitlines()[-1])
 
     def test_three_judgments_fit_with_room_to_spare_and_the_job_as_it_was_does_not_fit_one(self):
+        import os
+
         try:
             import numpy  # noqa: F401 - the real store and runner
         except ImportError:  # pragma: no cover
             self.skipTest("numpy not installed")
+        if os.geteuid() == 0:  # pragma: no cover
+            self.skipTest("as root the decider starts its child from its own runtime copy: the canned child is not in it")
         out = self.measure("judge")
         self.assertIsNone(out["error"], out)
         self.assertEqual(out["verdicts"], [{"passed": False, "fails": [Z.FAULT]}] * self.PROGRAMS,
