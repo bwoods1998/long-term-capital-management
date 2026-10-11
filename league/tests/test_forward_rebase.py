@@ -606,6 +606,16 @@ class AStoreFromBeforeTheRelease(unittest.TestCase):
         self.addCleanup(again.close)
         self.assertEqual([tuple(r) for r in again.execute("SELECT * FROM fwd_twins ORDER BY day")], after)
 
+    def test_two_writers_adding_the_same_column_is_no_error(self):
+        """Four jobs open the store for writing on the first night after a deploy: the one that looks, finds a column
+        missing and loses the race to add it must read the column as there, not fail its open."""
+        db = sqlite3.connect(":memory:")
+        self.addCleanup(db.close)
+        db.executescript(forward_db.SCHEMA)
+        with mock.patch.object(forward_db, "has_column", return_value=False):  # the look came before the other's ALTER
+            self.assertEqual(forward_db._migrate(db), 0)
+        self.assertTrue(all(forward_db.has_column(db, t, c) for t, c, _ in forward_db.ADDED_COLUMNS))
+
     def test_the_tables_pages_are_untouched_by_the_migration(self):
         """The rows' own bytes: every page of the store's file that holds a `fwd_twins` row is identical before and
         after (SQLite adds a nullable column by changing the declaration in its schema page; the rows keep their

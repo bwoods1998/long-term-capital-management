@@ -500,7 +500,14 @@ def _migrate(db: sqlite3.Connection) -> int:
     added = 0
     for table, column, declaration in ADDED_COLUMNS:
         if not has_column(db, table, column):
-            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+            try:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+            except sqlite3.OperationalError as exc:
+                # Another writer added it between the look and the ALTER (four jobs open the store for writing on the
+                # first night after a deploy): the column is there, which is all this asks.
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+                continue
             added += 1
     if added:
         db.commit()
