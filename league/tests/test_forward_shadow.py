@@ -1616,6 +1616,11 @@ class TheJob(Case):
         self.assertEqual((skipped["status"], BEFORE.isoformat() in skipped["why"]), ("skipped", True))
         shutil.rmtree(self.root / STORE_DIR)
         self.assertEqual(forward_shadow.run(self.ctx())["status"], "skipped")
+        # A release without the forward store's package (its functions still step 0's stubs): skipped, never a crash.
+        write_night(self.root, FWD[3])
+        with mock.patch.object(forward_db, "mode", side_effect=NotImplementedError("A: league/ops/forward_db.py mode")):
+            skipped = forward_shadow.run(self.ctx())
+        self.assertEqual((skipped["status"], "not in this release" in skipped["why"]), ("skipped", True))
         self.assertEqual((self.made, (self.root / forward_db.DB).exists()), ([], False))
 
     def test_a_night(self):

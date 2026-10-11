@@ -18,6 +18,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from league.equity import live as eq_live
 from league.equity import schedule
@@ -180,6 +181,10 @@ class TheJob(Audit):
         ctx = Context("forward_audit", root=other, due_at=self.t, clock=lambda: self.t, config={}, settings_value={})
         self.assertEqual(forward_audit.run(ctx)["status"], "skipped")
         self.assertFalse((other / forward_db.DB).exists())                     # a morning job never makes the store
+        # A release without the forward store's package (its functions still step 0's stubs): skipped, never a crash.
+        with mock.patch.object(forward_db, "mode", side_effect=NotImplementedError("A: league/ops/forward_db.py mode")):
+            skipped = forward_audit.run(self.ctx())
+        self.assertEqual((skipped["status"], "not in this release" in skipped["why"]), ("skipped", True))
 
     def test_a_book_that_cannot_be_read_marks_nobody_and_the_chain_is_still_checked(self):
         pid = fx.register(self.db, "always@1", fx.ALWAYS, first_close=BEFORE)

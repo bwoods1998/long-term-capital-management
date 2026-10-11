@@ -232,7 +232,11 @@ def run(ctx: Any) -> dict[str, Any]:
 
     root = Path(ctx.root)
     settings = swarm_settings.load(root, config=getattr(ctx, "config", None))
-    if forward_db.mode(settings) == "off":
+    try:
+        mode = forward_db.mode(settings)
+    except NotImplementedError:  # a release without the forward store's package: nothing to record into, never a crash
+        return {"status": "skipped", "why": "the forward store is not in this release (league/ops/forward_db.py)"}
+    if mode == "off":
         return {"status": "skipped", "why": "elane.forward.mode is off"}
     if quiet(ctx.now()):
         return {"status": "skipped", "why": "inside 09:00-17:30 New York time on a session: the evening run does the "
