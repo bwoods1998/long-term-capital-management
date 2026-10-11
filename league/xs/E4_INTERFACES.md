@@ -960,8 +960,9 @@ main's failed without a conflict:
   holds or yields a seat. The book's plan is built from the reader's rows alone; the reader gives a panel family
   none at any setting of the switch. Held with a panel family forced into the Candidate, Probe and Sized bands
   (what step one cannot make): the reader's answer at five settings, thirteen sessions of the seat rule equal to
-  main's record, an ETF Candidate's seat not taken. Under the rollback "first-come" the swarm's roster counts the
-  Probe band as the store holds it; step one puts no panel family in a band.
+  main's record, an ETF Candidate's seat not taken, and the swarm's backfill of K's counts passing a panel family
+  in Train research by. Under the rollback "first-come" the swarm's roster counts the Probe band as the store holds
+  it; step one puts no panel family in a band.
 - THE EXIT WAIT'S END covers a basket's exits like any other (`_work_exit` reads no kind). The basket's buy of that
   open waits with its own sales (B8) and is missed at the cut-off; the standing target plans it again.
 - THE TWIN'S RE-BASE IS NOT BUILT FOR THE PANEL TWIN. `forward_twins._one_instance` hands a panel instance to
@@ -984,5 +985,6 @@ moved the two digests on main, and E4 moves none. The xs identity is 2f0083bc...
 changed no file it reads.
 
 **6. Open, for the captain** (none reachable in step one). The seat rule for a panel program in step two: K for a
-basket (the panel's look writes none of K's counts), and whether a panel program held on a failed leg counts its seat
-in the book's plan. The re-base of the panel twin. Section 17's open points stand.
+basket (the panel's look writes none of K's counts, and the backfill's share runner cannot make them), and whether a
+panel program held on a failed leg counts its seat in the book's plan. The re-base of the panel twin. Section 17's
+open points stand.

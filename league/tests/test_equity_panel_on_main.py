@@ -13,7 +13,9 @@ league/swarm/E4.md ("The merge with main's releases E5-A and E3.1") and held her
    step two's. `APanelFamilyNeverReachesTheSeatPlan` puts into the store what step one cannot make (a panel family in
    each of the Candidate, Probe and Sized bands, passed, its proof current) and holds that the reader shows none of
    them, queued or not, at every setting, and that the book's plan, its six seats, its yield and its orders are main's
-   own record to the row.
+   own record to the row. The swarm's side of the rule, the backfill of K's two counts (league/swarm/elane.py
+   `seat_backfill`), reads the Candidate, Probe and Sized bands: it passes a panel family in Train research by and
+   writes a share program's counts as on main.
 2. AN EXIT'S WAIT FOR THE PRACTICE PROOF HAS AN END (A28; `_work_exit`). It covers a panel basket's exits like any
    other: `_work_exit` asks nothing of an instance's kind. A rotation's sale and the House's exit of a name that left
    the eligible set wait for the SELL stage inside the open window and go at the entry cut-off, with the one alert a
@@ -160,6 +162,55 @@ class APanelFamilyNeverReachesTheSeatPlan(unittest.TestCase):
         made = [f for f in store.families(lanes="all") if f["structure"] == "panel" and not f["id"].startswith("xs-forced")]
         self.assertEqual([(f["id"], f["band"]) for f in made], [("xs-in-train", "gym")])
 
+    def test_the_backfill_of_the_seat_rules_counts_passes_a_panel_family_by(self):
+        """THE SWARM'S SIDE OF THE SEAT RULE (league/swarm/elane.py `seat_backfill`: K's two counts for the programs
+        that passed before they were kept). It reads the Candidate, Probe and Sized bands. At "train" a panel family
+        is in Train research (band "gym"): the backfill makes the count an ETF program is owed, exactly as on main,
+        and neither runs nor names the panel family."""
+        from types import SimpleNamespace
+
+        from league.swarm import elane
+        from league.swarm import settings as settings_mod
+        from league.swarm.store import SwarmStore
+
+        tmp = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR"))
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        clock = W.Clock(W.at(W.FRIDAY, 16, 0))
+        families = W.store_families(root, W.ranked_programs(1), clock, "train")
+        self.addCleanup(lambda: families._store is not None and families._store.close())
+        store = SwarmStore(root, clock=clock)
+        self.addCleanup(store.close)
+        self.assertEqual([(f["id"], f["band"]) for f in store.families(lanes="all") if f["structure"] == "panel"],
+                         [("xs-in-train", "gym")])
+        store.set_state("bred-e-wait", **{elane.SEAT_KEY: None})            # one ETF program is owed its counts
+        asked: list[str] = []
+
+        class Runner:
+            """The House's isolated runner at the interface the backfill reads: invented whole runs."""
+
+            def validation(self, code, params, *, name, k):
+                asked.append(name)
+                return SimpleNamespace(result={"status": "ok", "daily": [{}] * 250,
+                                               "lots": [{"exit_day": f"2025-03-{d:02d}", "weight": 0.3} for d in (3, 4, 5)]})
+
+            def segments(self, code, params, *, name):
+                asked.append(name)
+                return [SimpleNamespace(result={"status": "ok", "daily": [{}] * 500,
+                                                "lots": [{"exit_day": "2023-05-02", "weight": 0.3}]})]
+
+        gate = SimpleNamespace(store=store, settings=settings_mod.load(root), clock=clock, equity_runner=Runner())
+        self.assertEqual(elane.seat_backfill(gate), ["bred-e-wait"])
+        self.assertEqual(asked, ["bred-e-wait", "bred-e-wait"], "the one program owed, and no panel program")
+        held = store.family("bred-e-wait")["state"][elane.SEAT_KEY]
+        self.assertEqual((held["validation"], held["train"]), ({"close_days": 3, "sessions": 250},
+                                                               {"close_days": 1, "sessions": 500}))
+        self.assertNotIn(elane.SEAT_KEY, store.family("xs-in-train")["state"])
+        counted = [e["family"] for e in store.events_after(0, limit=5000)
+                   if str((e["payload"] or {}).get("action") or "").startswith(("seat_counts", "equity_seat_counts"))]
+        self.assertEqual(counted, ["bred-e-wait"], "one event, the ETF program's; none names the panel family")
+        self.assertEqual(elane.seat_backfill(gate), [], "once")
+
     def test_the_plan_is_built_from_the_readers_rows_alone(self):
         """Why the reader's answer is the whole proof: `_seat_bands` counts its holders and its waiting from the rows
         it is handed (the seats there are less the rows in a running band), and `_sync_instances` hands it
@@ -290,6 +341,12 @@ class ThePanelTwinIsTheRegisteredOne(unittest.TestCase):
         self.assertEqual(beside["rebases"], 0)
         self.assertEqual((beside["sessions"], beside["agreed"]), (mine["sessions"], mine["agreed"]))
         self.assertEqual(reading["intents"]["disagreed"], 1)
+        # ... and so does the forward report's line beside its twins (`fills.rebase`).
+        from league.ops import forward_report
+
+        seen = forward_report._rebase([dict(r) for r in rows], {s.pid})
+        self.assertEqual((seen["rebases"], seen["sessions"], seen["agreed"]),
+                         (0, sum(1 for r in rows if r["agree"] is not None), sum(1 for r in rows if r["agree"] == 1)))
 
     def test_the_hand_over_comes_before_the_re_base(self):
         """Where it is decided: `_one_instance` hands a panel instance to the panel night before the first line of
