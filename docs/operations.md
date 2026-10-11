@@ -234,8 +234,8 @@ files: a byte changed in any of them moves the equity identity.** A change to on
 back to the Gym for fresh qualification (no new try, no new look: with its one look spent, a live program does not
 come back). An adoption keeps each look's LINEAGE RECORD (the looked version's Train series and template): D3 goes on
 binding later programs against every program already looked at, and where a looked-at program keeps no series the next
-look writes it again from that program's Train-era runs or waits, never passing D3 unjudged. The PLUMBING is out (`live`, `actions`, `schedule`, `families`, `bands`,
-`kinds`): a fix to the EquityBook, its clock, its corporate actions or its band plumbing retires no lineage. The cost
+look writes it again from that program's Train-era runs or waits, never passing D3 unjudged. The PLUMBING is out
+(`live`, `actions`, `schedule`, `families`, `bands`, `kinds`): a fix to the EquityBook, its clock, its corporate actions or its band plumbing retires no lineage. The cost
 stated: nothing in the identity then proves the live path matches the Gym after such a fix; the I6 ctx test
 (`test_equity_i6`) and the equity twins police it. `league/xs/` is the panel kind's slot (`kinds.KINDS["panel"]`): its
 `handle` refuses every op today, and a later cross-sectional lane is built there without touching `league/live` (the
@@ -270,8 +270,8 @@ readings and needs no command.
 its own). The book sends `limit` `day` orders in shares (fractional, six decimals sent; the venue takes nine), never a
 notional, market or stop order, with client ids `lq-<nonce>-<eid>-<family slug>` (the state's nonce first, as the
 options book's `lv-<nonce>-...`: a rolled-back state never repeats an id the venue has seen; `league/live/real.py`
-`ingest` skips every `lq-` id: never a foreign order). A buy is a marketable limit at the ask x (1 + collar), a sale at the bid x (1 - collar). Each row is
-written `pending` before the POST; a lost answer is `unknown` and is looked up by its client id, never re-sent blind.
+`ingest` skips every `lq-` id: never a foreign order). A buy is a marketable limit at the ask x (1 + collar), a sale at
+the bid x (1 - collar). Each row is written `pending` before the POST; a lost answer is `unknown` and is looked up by its client id, never re-sent blind.
 The gateway's answers the book reads: `403 {cap}` (`stock_order`, `stock_position`, `stock_day`, `stock_total`,
 `buying_power`): a refusal recorded on the order; `503 equity` (Retry-After 30), `424 orders`, `424 positions`: the
 account or its book could not be read, nothing sent; `409 stock_close`: a second close of the same shares in flight;

@@ -126,7 +126,8 @@ evidence, ops and docs side (the order path's, the daily step's and the live hoo
   `kinds.KINDS["panel"]` = `league.xs.child`, the child's runtime carries `league/xs/`, and `league/xs/child.py`
   refuses every op until the cross-sectional lane is built there.
 - **Pre-registered before the first equity close** (A14; text first, its fill-gap half read since the review's fixes
-  above; `docs/operations.md` and every `dlane` report's `done.preregistered`): Done's "live fills consistent with their replay" is the mean fill gap against the
+  above; `docs/operations.md` and every `dlane` report's `done.preregistered`): Done's "live fills consistent with
+  their replay" is the mean fill gap against the
   official-price model at most 15 bp a side AND live and shadow intents agreeing on at least 95% of the counted
   sessions, read at each Done checkpoint; Done is reported beside the number of distinct close dates and a
   date-clustered t; the forward seat rule is written and inactive (an incumbent with fewer than 5 real closes is never
