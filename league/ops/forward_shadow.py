@@ -52,7 +52,9 @@ and that night every active program's whole history is written again under the n
 are never read as the current series); `marks`; `forward_twins.begin`; `controls`; `finals`; `due()` in order until
 the child seconds spent reach `cpu_seconds_night` or the clock is within 300 s of the next session's 09:00 ET (the
 rest are `stale`: a `budget_hit` event, once a night; THE RETRY'S ROOM is kept back: the loop stops that much sooner
-for each program on the retry list); `forward_twins.on_run` after each `write`; THE RETRY;
+for each program on the retry list; THE NIGHT'S DEADLINE, `late`, is read by every other step too: the timing table,
+each control and each instance's twin run are `deferred` once it has passed, and the next night writes them);
+`forward_twins.on_run` after each `write`; THE RETRY;
 `forward_twins.finish`; one `fwd_runs` row (`programs` = the programs whose run completed THAT NIGHT, whichever start
 of the job ran them: what the registry's suspect rule reads beside `run_failed`, which is attributed the same way;
 `sessions`, `errors`, `stale` and `seconds` are this start's own: the run sessions it recomputed, what it left, the
@@ -405,6 +407,8 @@ class Shadow:
         self.through: dt.date = self.store.fetched_through
         self.night_day = self.through.isoformat()
         self.spent = 0.0
+        #: THE NIGHT'S DEADLINE (`night` sets it; `late`): no step of the night is started from then on.
+        self.deadline = float("inf")
         self._t0: dt.date = forward_db.t0()
         self._engine: int | None = None
         self._held: set[str] | None = None
@@ -765,17 +769,21 @@ class Shadow:
         `fwd_days` rows with `r0` (and `bars` NULL: a control reads no bar); its checkpoints with `t_x0` and `p_x0`
         beside D4's.
 
-        Also {"checks", "restated", "errors", "data_failed"}: a control whose series cannot be made tonight is
-        counted in `errors` (the data's, counted in `data_failed` too, is one `data_failed` event, once a (pid,
-        night)) and the others go on; one written through `through` is skipped."""
+        Also {"checks", "restated", "errors", "data_failed", "deferred"}: a control whose series cannot be made
+        tonight is counted in `errors` (the data's, counted in `data_failed` too, is one `data_failed` event, once a
+        (pid, night)) and the others go on; one written through `through` is skipped; one not started because the
+        night's deadline had passed (`late`) is `deferred`."""
         last = self._last_stored()
         groups: set[str] = set()
-        out = {"groups": 0, "rows": 0, "checks": 0, "restated": 0, "errors": 0, "data_failed": 0}
+        out = {"groups": 0, "rows": 0, "checks": 0, "restated": 0, "errors": 0, "data_failed": 0, "deferred": 0}
         for program in forward_db.programs(self.db, reasons=("control",), active=True):
             if program.first_day > self.through:
                 continue
             groups.add(program.ugroup)
             if (last.get(program.pid) or "") >= self.night_day:
+                continue
+            if self.late():      # THE NIGHT'S DEADLINE: the next night's whole recompute writes its rows
+                out["deferred"] += 1
                 continue
             try:
                 wrote = self._control(program)
@@ -878,6 +886,13 @@ class Shadow:
                 return float("inf")
         return _nine(day) - OPEN_MARGIN_SECONDS
 
+    def late(self) -> bool:
+        """Whether the clock has reached THE NIGHT'S DEADLINE (`OPEN_MARGIN_SECONDS` before the next session's 09:00
+        New York time): no program, no control, no timing table and no twin run is started from then on (the review's
+        fix: only the due loop read it, and a morning catch-up's twins kept the forward child, and the single ops
+        slot, past 09:00). What a late night leaves, the next night writes: each of them is a whole recompute."""
+        return self.clock() >= self.deadline
+
     def _guarded(self, call: Callable[[], Any]) -> Any:
         """`call()`, or {"error": its class} when it raised (what it had not committed is rolled back): a step of the
         night that is not a program's run never costs the night."""
@@ -933,13 +948,13 @@ class Shadow:
         synced = self._guarded(lambda: forward_register.sync(self.root, self.db, now=self.clock(),
                                                              settings=self.settings))
         engine = self.engine
+        deadline = self.deadline = self._deadline(started)    # THE NIGHT'S DEADLINE: every step below reads it (`late`)
         marks = self._guarded(self.marks)
-        twins: dict[str, Any] = {"begin": self._guarded(
+        twins: dict[str, Any] = {"begin": {"days": 0, "rows": 0, "deferred": 1} if self.late() else self._guarded(
             lambda: forward_twins.begin(self.root, self.db, self, now=self.clock()))}
         controls = self._guarded(self.controls)
         finals = self._guarded(self.finals)
         budget = float(self.cfg["cpu_seconds_night"])
-        deadline = self._deadline(started)
         room = RETRY_RUNS * float(self.cfg["run_budget_seconds"])    # THE RETRY'S ROOM, a listed program
 
         def over(listed: int = 0) -> bool:

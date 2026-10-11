@@ -119,7 +119,7 @@ REAL_SUFFIX = ":r"
 RUN_FAILURES = ("RunFailed", "DeciderError", "BudgetSpent")
 #: The receipt keys of `finish` (counts).
 FINISH_KEYS = ("instances", "twins", "disagreed", "lots", "interrupted", "live_bars", "unreadable", "unregistered",
-               "mismatched", "failed")
+               "mismatched", "failed", "deferred")
 _MISSING = object()
 
 
@@ -792,7 +792,7 @@ def _last_needed(lots: Sequence[Mapping[str, Any]], retired: dt.date) -> dt.date
 
 
 def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping[str, Any], book: Mapping[str, Any],
-                  hashes: dict[tuple[str, str], str], out: dict[str, Any], *, now: float) -> None:
+                  hashes: dict[tuple[str, str], str], out: dict[str, Any], *, now: float, late: bool = False) -> None:
     from ..equity import schedule
 
     iid = str(inst["id"])
@@ -831,6 +831,12 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
     parted = db.execute("SELECT 1 FROM fwd_part WHERE instance=? AND through=?", (iid, night)).fetchone() is not None
     if not wanted or (all(day in have for day in wanted) and (parted or retired is not None)):
         return      # nothing to write yet, or everything this instance will ever need is written
+    if late:
+        # THE NIGHT'S DEADLINE has passed (league/ops/forward_shadow.py `late`): no twin run is started. The live
+        # decision's bars hash above is taken all the same (the book holds it tonight only); the rows lag a session
+        # already, and the next night writes them.
+        out["deferred"] += 1
+        return
     start = schedule.next_session(first)
     try:
         try:
@@ -886,9 +892,11 @@ def finish(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float)
     sides disagree, its cause), one `fwd_part` row for `through`. For every closed live lot with a final priced E1
     twin and no `fwd_lotgap` row: its row (D11; timing and execution None when `fill_minutes` is false).
     {"instances", "twins", "disagreed", "lots", "interrupted", "live_bars"} (counts), with `FINISH_KEYS`' others
-    beside ("unreadable", "unregistered", "mismatched", "failed") and, when an instance's twin could not be made,
-    "errors" (ids and class names). It reads `shadow.through`, `shadow.run_from`, and the night's `decider` and
-    `settings` as the shadow holds them; one instance's failure never costs another its rows."""
+    beside ("unreadable", "unregistered", "mismatched", "failed", "deferred") and, when an instance's twin could not
+    be made, "errors" (ids and class names). It reads `shadow.through`, `shadow.run_from`, and the night's `decider`
+    and `settings` as the shadow holds them; one instance's failure never costs another its rows. Before each
+    instance's twin run it reads `shadow.late()` (the night's deadline, 300 s before the next session's 09:00 New
+    York): past it no twin run is started and the instance is `deferred` to the next night."""
     root = Path(root)
     out: dict[str, Any] = {key: 0 for key in FINISH_KEYS}
     cfg = _cfg(_settings(root, shadow))
@@ -901,10 +909,11 @@ def finish(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float)
               for e in forward_db.events(db, "live_bars") if isinstance(e.get("payload"), Mapping)
               and e["payload"].get("bars")}
     errors: list[str] = []
+    late = getattr(shadow, "late", None)
     for inst in book["instances"]:
         out["instances"] += 1
         try:
-            _one_instance(root, db, shadow, inst, book, hashes, out, now=now)
+            _one_instance(root, db, shadow, inst, book, hashes, out, now=now, late=callable(late) and bool(late()))
         except Exception as exc:  # noqa: BLE001 - one instance's twin never costs the others theirs, or the lots
             out["failed"] += 1
             errors.append(f"{str(inst.get('id'))[:60]}: {type(exc).__name__}")

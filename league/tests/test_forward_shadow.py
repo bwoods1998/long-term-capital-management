@@ -1653,6 +1653,41 @@ class TheNight(Case):
                 self.assertNotRegex(json.dumps(event["payload"]), r"\d+\.\d+", kind)
                 self.assertIn("why", event["payload"])
 
+    def test_past_the_nights_deadline_no_step_is_started(self):
+        """The review's finding: the deadline (300 s before the next session's 09:00 New York) was read by the due
+        loop alone. A morning catch-up (the House back at 08:40 on a session) went on into the timing table, the
+        controls and every live instance's twin run. Each step reads it now (`late`); what it leaves is the next
+        night's, each a whole recompute."""
+        pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
+        control = register_control(self.db, "index", 40, SYMBOLS, first_close=BEFORE)
+        evening_shadow = self.shadow(FWD[2])
+        self.assertEqual(evening_shadow.night()["controls"]["deferred"], 0)
+        self.assertFalse(evening_shadow.late())
+        self.assertEqual(evening_shadow.deadline, forward_shadow._nine(FWD[3]) - forward_shadow.OPEN_MARGIN_SECONDS)
+        stored = (len(self.rows(pid)), len(self.rows(control)))
+        self.assertEqual(stored, (3, 3))
+        begun = len(self.twins["begin"])
+        # The morning after the next session's store: 08:56 New York, four minutes before the window.
+        write_night(self.root, FWD[3])
+        self.t = forward_shadow._nine(FWD[4]) - 240.0
+        self.assertFalse(forward_shadow.quiet(self.t), "the job itself still starts")
+        shadow = self.shadow(FWD[3], write=False)
+        self.assertFalse(shadow.late(), "no deadline before a night began")
+        receipt = shadow.night()
+        self.assertTrue(shadow.late())
+        self.assertEqual((receipt["programs"], receipt["stale"], receipt["budget_hit"]), (0, 1, 1))
+        self.assertEqual(receipt["controls"]["deferred"], 1)
+        self.assertEqual((receipt["controls"]["rows"], receipt["controls"]["errors"]), (0, 0))
+        self.assertEqual(receipt["twins"]["begin"], {"days": 0, "rows": 0, "deferred": 1})
+        self.assertEqual(len(self.twins["begin"]), begun, "the timing table was not begun")
+        self.assertIs(self.twins["finish"][-1], shadow, "the twins' finish is handed the shadow, and reads its `late`")
+        self.assertEqual((len(self.rows(pid)), len(self.rows(control))), stored, "nothing was started")
+        self.assertEqual(forward_shadow.house_failures(receipt), [], "a deferred step is no failure of the House")
+        # That evening the night is whole: the program's day and the control's are written.
+        receipt = self.night(FWD[4])
+        self.assertEqual((receipt["programs"], receipt["controls"]["deferred"], receipt["controls"]["rows"]), (1, 0, 2))
+        self.assertEqual((len(self.rows(pid)), len(self.rows(control))), (5, 5))
+
     def test_a_night_killed_after_one_program_resumes_with_no_duplicate(self):
         first = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
         second = register(self.db, "flip@1", FLIPPER, first_close=BEFORE)

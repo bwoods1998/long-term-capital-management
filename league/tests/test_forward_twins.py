@@ -1159,6 +1159,38 @@ class TheTwins(WithAStore):
         self.assertEqual(out["errors"], ["fake-broken@1:r: ValueError"])
         self.assertEqual({r["instance"] for r in self.twin_rows()}, {"fake-overnight@1:r"})
 
+    def test_no_twin_run_is_started_once_the_nights_deadline_has_passed(self):
+        """The review's finding: `finish` read neither the night's deadline nor the clock, so a morning catch-up ran
+        every live instance's twin (a child run of up to the whole run budget each) into the window the job never
+        runs in. Past the deadline (`shadow.late()`) an instance is deferred: the next night writes its rows."""
+        self.live_instance("fake-overnight@1", OVERNIGHT)
+        register(self.db, "fake-second@1", OVERNIGHT)
+        book = Book(self.root / forward_twins.LIVE_DB)
+        self.addCleanup(book.close)
+        book.instance("fake-second@1", OVERNIGHT, created=at(D1, 16, 25))
+        shadow = self.shadow(D4)
+        shadow.late = lambda: len(shadow.runs) >= 1          # the deadline passes during the first instance's twin
+        out = forward_twins.finish(self.root, self.db, shadow, now=1.0)
+        self.assertEqual((out["instances"], out["deferred"], out["failed"], out["interrupted"]), (2, 1, 0, 0))
+        self.assertEqual([key for key, _ in shadow.runs], ["fake-overnight@1"], "one twin run, no second")
+        self.assertEqual({r["instance"] for r in self.twin_rows()}, {"fake-overnight@1:r"})
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM fwd_part WHERE instance='fake-second@1:r'").fetchone()[0], 0)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM fwd_events WHERE kind='twin_interrupted'").fetchone()[0], 0,
+                         "deferred is no interruption: nothing failed")
+        late = self.shadow(D4)
+        late.late = lambda: True
+        again = forward_twins.finish(self.root, self.db, late, now=2.0)
+        self.assertEqual((again["deferred"], late.runs), (1, []), "the first is whole already; the second waits still")
+        # The next night, in its own time: the rows the deferred instance was owed, every session of them.
+        after = schedule.next_session(dt.date.fromisoformat(D4)).isoformat()
+        out = self.night(after)
+        self.assertEqual((out["deferred"], out["failed"]), (0, 0))
+        mine = [r["day"] for r in self.twin_rows("fake-second@1:r")]
+        self.assertEqual(mine, [r["day"] for r in self.twin_rows("fake-overnight@1:r")])
+        self.assertGreaterEqual(len(mine), 3)
+        # A shadow with no `late` (a fake to the stub's words) is never late.
+        self.assertEqual(self.night(after)["deferred"], 0)
+
     def test_twins_false_and_the_mode_off_skip(self):
         self.live_instance("fake-overnight@1", OVERNIGHT)
         for off in ({"elane": {"forward": {"mode": "record", "twins": False}}}, {"elane": {"forward": {"mode": "off"}}},
