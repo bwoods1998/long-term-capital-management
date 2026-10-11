@@ -309,8 +309,12 @@ def _iso(value: int) -> str:
 
 
 def _fsum(values: Any) -> float:
-    """The exact sum of a float array (`math.fsum`): one sum on every Python."""
-    return math.fsum(np.asarray(values, dtype=np.float64).ravel().tolist())
+    """The exact sum of a float array (`math.fsum`): one sum on every Python. NaN where there is none (a value that is
+    not finite, or a sum past the largest float): a sum that is no number is never "above zero"."""
+    try:
+        return math.fsum(np.asarray(values, dtype=np.float64).ravel().tolist())
+    except (OverflowError, ValueError):
+        return math.nan
 
 
 # ------------------------------------------------------------------------------------------------------- the receipt
@@ -675,10 +679,13 @@ def _enumerate(pools: Sequence[tuple[np.ndarray, np.ndarray]], *, L: int = H_LEN
     weights, total = _tuple_weights(lens, L, lv)
     if total <= 0:
         raise _Ineligible("no valid (V, H) tuple")
-    exposure = math.fsum(weights[k] * _fsum(w) for k, (_, w) in enumerate(pools))
+    exposure = _fsum([weights[k] * _fsum(w) for k, (_, w) in enumerate(pools)])
+    total_x = _fsum([weights[k] * _fsum(x) for k, (x, _) in enumerate(pools)])
+    if not (math.isfinite(exposure) and math.isfinite(total_x)):
+        raise _Ineligible("the pool series are not finite")
     if not exposure > 0:
         raise _Ineligible("no exposure in the pool (kappa is undefined)")
-    kappa = math.fsum(weights[k] * _fsum(x) for k, (x, _) in enumerate(pools)) / exposure
+    kappa = total_x / exposure
     if not math.isfinite(kappa):
         raise _Ineligible("the pool series are not finite")
     hits = np.zeros(K_MAX + 1, dtype=np.int64)
@@ -691,7 +698,7 @@ def _enumerate(pools: Sequence[tuple[np.ndarray, np.ndarray]], *, L: int = H_LEN
         for start in range(n):
             block = twice[start:start + L]
             t = holdout_t(block)
-            g = _grid_index(t if t is not None and math.fsum(block.tolist()) > ZERO else None)
+            g = _grid_index(t if t is not None and _fsum(block) > ZERO else None)
             if g >= 0:
                 hits[g] += weights[k]
     # HO[k] = the weight of the blocks whose grid index is at least k
@@ -799,17 +806,17 @@ def _floor_reading(program_floor: Any, receipt: ReceiptXS) -> tuple[str | None, 
 # -------------------------------------------------------------------------------------------------- step 5: the look
 def _placebo_count(t: float | None, placebo_t: Sequence[float | None]) -> int | None:
     """#{m : placebo_t[m] >= t}: an undefined placebo t (None, or not finite) counts as not above; None when `t`
-    itself is undefined."""
-    if t is None:
-        return None
+    itself is undefined. ValueError for a placebo t that is neither a number nor None."""
     count = 0
     for value in placebo_t:
         if value is None:
             continue
+        if isinstance(value, bool) or not isinstance(value, (int, float, np.integer, np.floating)):
+            raise ValueError(f"a placebo t that is no number: {value!r}")
         m = float(value)
-        if math.isfinite(m) and m >= t:
+        if t is not None and math.isfinite(m) and m >= t:
             count += 1
-    return count
+    return None if t is None else count
 
 
 def look(v: Series, h: Series, *, h15: Series, c_used: float, placebo_t: Sequence[float | None],
@@ -820,7 +827,8 @@ def look(v: Series, h: Series, *, h15: Series, c_used: float, placebo_t: Sequenc
 
     Also `grid_index` (the largest k with k / 100 <= t_H, -1 when there is none) and `precheck_result` (step 2's own
     answer on V). The t bar is held on the grid: t_H >= k_used / 100 with k_used = 100 c_used. ValueError for a
-    `c_used` off the 0.01 grid, an `alpha` outside (0, 1), or a stress series on other sessions than H's."""
+    `c_used` off the 0.01 grid, an `alpha` outside (0, 1), a stress series on other sessions than H's, or a placebo t
+    that is neither a number nor None."""
     c = _on_grid(c_used)
     if c is None:
         raise ValueError(f"c_used must lie on the 0.01 grid in 0.00..{K_MAX / 100:.2f}: {c_used!r}")
@@ -947,8 +955,8 @@ def labels(result: Mapping[str, Any], *, french: Mapping[str, Any] | None = None
     sx = series(result, "x")
     xv, xh = split(sx)
     bv, bh = split(_column(result, "bench"))
-    sum_x = math.fsum(np.concatenate([xv.r, xh.r]).tolist())
-    sum_bench = math.fsum(np.concatenate([bv.r, bh.r]).tolist())
+    sum_x = _fsum(np.concatenate([xv.r, xh.r]))
+    sum_bench = _fsum(np.concatenate([bv.r, bh.r]))
     label, got, days = _french_label(sx, french)
     return {"basket": BASKET_LABELS[0] if sum_bench >= sum_x else BASKET_LABELS[1], "label": label, "loadings": got,
             "sum_bench": sum_bench, "sum_x": sum_x, "french_days": days}

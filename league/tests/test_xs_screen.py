@@ -18,7 +18,6 @@ that needs one reads the fake, the vector file, or the committed pin.
 
 from __future__ import annotations
 
-import ast
 import copy
 import dataclasses
 import datetime as dt
@@ -613,10 +612,16 @@ class TheCommittedPin(unittest.TestCase):
         self.assertEqual((loaded.c_XS, loaded.rung), (pinned.c_XS, pinned.rung))
         doc = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(doc["name"], screen.RECEIPT_NAME)
-        # no figure of the receipt is a constant of the judge: its bar is read, never written
-        numbers = {node.value for node in ast.walk(ast.parse(Path(screen.__file__).read_text()))
-                   if isinstance(node, ast.Constant) and isinstance(node.value, float)}
-        self.assertNotIn(loaded.c_XS, numbers, "c_XS is written in league/xs/screen.py")
+        # its bar is READ, never written: the floor of one program under the pinned receipt and under the same
+        # receipt at a higher bar differ by the bar and by nothing else
+        segments = [None, pool_series(1, *seeded_pool(1, 600))]
+        fl = screen.floor(segments, receipt=pinned)
+        self.assertEqual(fl["k_used"], max(round(pinned.c_XS * 100), fl["k_p"] + round(pinned.c_margin * 100)))
+        step = 0.5 if pinned.c_XS <= 2.5 else -0.5
+        moved = screen.floor(segments, receipt=dataclasses.replace(pinned, c_XS=pinned.c_XS + step))
+        self.assertEqual(moved["k_used"], max(round((pinned.c_XS + step) * 100),
+                                              fl["k_p"] + round(pinned.c_margin * 100)))
+        self.assertEqual((moved["k_p"], moved["cells"]["C"]["k_cell"]), (fl["k_p"], fl["cells"]["C"]["k_cell"]))
 
     def test_the_pin_sources_name_every_pinned_value(self):
         self.assertEqual(set(screen.PIN_SOURCES), set(screen.PIN_KEYS) - {"receipt_sha256"})
@@ -1151,6 +1156,12 @@ class TheFloor(unittest.TestCase):
         d[0][17] = float("nan")
         got = screen.floor([pool_series(0, *d), pool_series(1, x, w)], receipt=self.rc)
         self.assertEqual((got["eligible"], got["why"]), (False, "cell both: the pool series are not finite"))
+        # values past what a sum can hold are no series either (never an exception out of the floor)
+        huge = x.copy()
+        huge[:4] = 1.7e308
+        with np.errstate(over="ignore", invalid="ignore"):
+            got = screen.floor([None, pool_series(1, huge, w)], receipt=self.rc)
+        self.assertEqual((got["eligible"], got["why"]), (False, "cell C: the pool series are not finite"))
 
     def test_no_k_on_the_grid_holds_the_cap(self):
         """One loss day and a steady small gain otherwise: at zero edge almost every holdout that misses the loss day
@@ -1265,6 +1276,9 @@ class TheLook(unittest.TestCase):
         for bad in (0.0, 1.0, -0.1, float("nan"), None, "0.12", True):
             with self.assertRaises(ValueError, msg=bad):
                 self.look(alpha=bad)
+        for bad in ("1.0", True, [1.0], b"1"):
+            with self.assertRaises(ValueError, msg=bad):
+                self.look(placebo_t=[bad] + [0.0] * (self.draws - 1))
 
     def test_t_exactly_at_c_used_passes_and_just_below_fails(self):
         """The bar is held on the grid: the smallest shift of the holdout's mean that reaches grid step k passes, and
@@ -1311,6 +1325,15 @@ class TheLook(unittest.TestCase):
         x[:3] = (1e16, 2e-12, -1e16)
         tiny = make_series(H_DAYS, x)
         self.assertEqual(self.look(h=tiny, h15=tiny, c_used=0.0)["sum_h"], 2e-12)
+        # and a sum that is no number is never above zero: no exception, a fail
+        for values in ((1.7e308, 1.7e308), (float("inf"), -float("inf")), (float("nan"), 1.0)):
+            x = np.full(n, 0.001)
+            x[:2] = values
+            wild = make_series(H_DAYS, x)
+            with np.errstate(over="ignore", invalid="ignore"):
+                got = self.look(h=wild, h15=wild, c_used=0.0)
+            self.assertEqual((got["checks"]["sum_h"], got["passed"]), (False, False), values)
+            self.assertTrue(math.isnan(got["sum_h"]), values)
 
     def test_the_stress_leg(self):
         """sum_H x15 > 1e-12: the program must stay positive at 1.5 times the spread with its sell fees doubled."""
