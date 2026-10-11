@@ -32,7 +32,7 @@ refuses it; a family whose structure is not "etf" or "stock".
 
 TAGS, each run, from the swarm store and the live book: review_pass (the record's `passed_version` is the version),
 review_fail (its fails are ["REVIEW"]), try and try_entered (`elane_try`), look_pass / look_fail (`elane_look`'s
-verdict), live (value: the instance id).
+verdict; a panel family's look under the panel lane's own key), live (value: the instance id).
 
 THE STOP RULES, each run, from the forward store's own rows and events, counting only nights after the pid's latest
 "resumed" tag. A FAILURE NEVER STOPS A PROGRAM. A program's nights are those of THE JOB THAT RUNS IT (`fwd_runs.job`: the forward
@@ -657,9 +657,17 @@ def sync(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapp
             cursor = int(cursor) if isinstance(cursor, int) and not isinstance(cursor, bool) and cursor > 0 else 0
             fresh = _scored_events(store, after=cursor)
             rows, refused = _scored(store, families=families, events=_earliest(fresh), known=known, lookup=cursor > 0)
-            # RELEASE E4 (package J): the panel lane's versions, by their own reader (league/ops/forward_xs.py).
-            more, also = forward_xs.scored_rows(store, families=families, events=_earliest(fresh), known=known,
-                                                lookup=cursor > 0)
+            # RELEASE E4 (package J): the panel lane's versions, by their own reader (league/ops/forward_xs.py). What
+            # stops that reader is the House's and never costs this release its own rows: said, and read again next run.
+            try:
+                more, also = forward_xs.scored_rows(store, families=families, events=_earliest(fresh), known=known,
+                                                    lookup=cursor > 0)
+            except sqlite3.Error:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                more, also = [], []
+                out["skipped"].append({"key": "panel", "why": f"the panel lane's versions could not be read "
+                                                              f"({type(exc).__name__}): none registered this run"})
             rows, refused = sorted([*rows, *more], key=forward_xs.oldest_first), [*refused, *also]
             seeds, seeds_refused = _seeds(store, families, known)
             for row in (*rows, *seeds):

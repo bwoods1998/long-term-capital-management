@@ -271,6 +271,20 @@ class TheRegistry(unittest.TestCase):
                 F.append_registry(h.db, {**base, "ugroup": ugroup, "route": route, "alpha_f": alpha})
         self.assertEqual(h.db.execute("SELECT COUNT(*) FROM fwd_registry").fetchone()[0], 0)
 
+    def test_a_panel_reader_that_cannot_read_costs_e3_none_of_its_own_rows(self):
+        h = House(self)
+        etf = e2.e2_family(h.swarm, "ex", lane="equity", agenda="trend", symbols=("XLK",), code=e2.program("XLK"),
+                           record={"status": "researching", "versions": {"1": {"passed": True, "fails": [],
+                                                                               "pnl_10": 1.0, "pnl_15": 1.0}}})
+        h.family("px")
+        with mock.patch.object(X, "scored_rows", side_effect=ImportError("no league.xs in this release")):
+            out = h.sync()
+        self.assertEqual((out["registered"], [s["key"] for s in out["skipped"]]), (1, ["panel"]))
+        self.assertIn("could not be read (ImportError)", out["skipped"][0]["why"])
+        self.assertIsNotNone(h.row(f"{etf['id']}@1"))
+        self.assertEqual(F.events(h.db, "register_skipped"), [], "the House's failure refuses no version")
+        self.assertEqual(h.sync()["registered"], 1, "read again the next run")
+
     def test_a_live_panel_instance_the_registry_does_not_hold_and_its_tags(self):
         h = House(self)
         fid = h.family("px", {})                # no version judged: nothing registered from the record
@@ -764,6 +778,42 @@ class TheReportReadsAPanelProgramInItsOwnGroups(unittest.TestCase):
         h.swarm.add_run(fid, 1, {"status": "ok", "summary": {"days": 252}, "trials": 1, "run_id": "r1"}, window="train",
                         stress=1.0, purpose="elane_xs_train")
         self.assertAlmostEqual(forward_report.sim_program_years(h.root, h.db, day) - before, 1.0, places=6)
+
+
+    def test_a_days_meters_wait_for_the_panels_rows_and_are_never_partial_for_it(self):
+        h = House(self)
+        h.store(h.days[0])
+        etf = e2.e2_family(h.swarm, "ex", lane="equity", agenda="trend", symbols=("XLK",), code=e2.program("XLK"),
+                           record={"status": "researching", "versions": {"1": {"passed": True, "fails": [],
+                                                                               "pnl_10": 1.0, "pnl_15": 1.0}}})
+        fid = h.family("px")
+        h.scored(fid, when=at(h.days[0], 12))
+        h.swarm.event("swarm.elane", etf["id"], {"pass": "scored", "version": 1, "sha": h.swarm.version("ex", 1)["sha"],
+                                                 "bar_passed": True})
+        h.sync()
+        days = [d.isoformat() for d in h.days]
+
+        def meters() -> dict:
+            return forward_report.meters(h.root, h.db, now=h.clock(), settings=h.settings)
+
+        for i in (4, 5):
+            h.store(h.days[i])
+            h.e3_shadow(i).night()
+            h.night(i, write=False)
+        h.store(h.days[6])
+        h.e3_shadow(6).night()
+        # The evening of day 6, after E3's night: the ETF program has its row of day 6, the panel program its rows
+        # through day 4. Day 5's meters wait for the panel night that is about to run.
+        first = meters()
+        self.assertEqual(first["waiting"], {"day": days[5], "programs": 1})
+        written = [r[0] for r in h.db.execute("SELECT day FROM fwd_cey ORDER BY day")]
+        self.assertEqual(written[-1], days[4])
+        h.night(6, write=False)
+        second = meters()
+        self.assertEqual((second["days"], second["waiting"]), (1, {"day": days[6], "programs": 1}))
+        groups = {r["grp"]: r["n"] for r in map(dict, h.db.execute("SELECT grp, n FROM fwd_groups WHERE day=?", (days[5],)))}
+        self.assertEqual((groups["xs:train_pass"], groups["train_pass"]), (1, 1), "written with the panel's row in it")
+        self.assertEqual(h.events("meter_partial"), [])
 
 
 class TheMarkerCarriesNoOutcome(unittest.TestCase):

@@ -49,7 +49,9 @@ engine label, its queue, its groups).
    - THE BUDGET, ON ONE CORE: the panel night spends what E3's night left of `elane.forward.cpu_seconds_night`
      (`night_budget`: one budget a night, not raised). With many panel programs registered the stale ones go first
      the next night (E3's queue); FX3 says when two nights running left some. A live instance's twin run is outside
-     it, bounded by the night's deadline, as E3's.
+     it, bounded by the night's deadline, as E3's. ONE OPEN OF THE PANEL STORE A NIGHT: every run reads the night's
+     own store (the ops child's address space is capped 500 MB above its start, and each open maps the two bar
+     arrays again).
    - `fwd_days.bars` of a panel row (`bars_hash`): 16 hex over the panel store's bars as the decision behind the
      day's orders could read them (the 253 sessions through the session before it, every column), one hash a session
      for every panel program. It moves when the vendor restates any name's history (E3's "moved"), which is what
@@ -90,11 +92,11 @@ engine label, its queue, its groups).
 THE MORNING MARKS (`audit_marks`): a live panel decision whose 08:30 re-read was a mismatch marks that day of its
 program's registry row (`audit_mismatch`, once a (pid, day)): the day leaves its counted days.
 
-STATED LIMITS. A panel row lags a session behind an ETF row, so a day's meters (league/ops/forward_report.py) are
-written a night later once a panel program is registered. The panel's Train runs enter the replay multiple's
-numerator and its independent history is not in the denominator (the multiple overstates). No panel control exists
-(no control pair reads a panel group). The forward route's own verdict (c_FX, the placebo rank over the first n
-sessions) is a later release's: E3 records and judges nothing.
+STATED LIMITS. A panel row lags a session behind an ETF row, so once a panel program is registered a day's meters
+(league/ops/forward_report.py) wait for its rows and are written the second morning after the day. The panel's
+Train runs enter the replay multiple's numerator and its independent history is not in the denominator (the
+multiple overstates). No panel control exists (no control pair reads a panel group). The forward route's own
+verdict (c_FX, the placebo rank over the first n sessions) is a later release's: E3 records and judges nothing.
 
 Standard library at import; numpy and league.xs inside the functions that read arrays.
 """

@@ -41,9 +41,9 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   execute, a standing target that retries a missed buy, the bars a decision read kept and audited).
 - **Ships off.** policy.json `elane.panel.mode` "off": no birth, no run, no fetch of the live path, no model question.
   The ladder is "train", "gate", "live", each the captain's settings change and each falling back to the one before.
-  **Mode "live" reads as "gate" until the forward twin exists** (package J, owed: it is built on release E3's forward
-  modules), and **no panel look runs until E3's contamination probe has published the panel strata and written the
-  look permit** (the captain's A22; package B's patch to the probe, owed).
+  **Mode "live" reads as "gate" until the forward twin's marker is written and while it is behind** (package J,
+  built: below), and **no panel look runs until E3's contamination probe has published the panel strata and written
+  the look permit** (the captain's A22; package B's patch to the probe, owed).
 - **Before any real money on an XS1 pass** (A22): a style-open program takes no live seat on a pass alone (recorded
   and shadowed, never seated); at most 2 XS1 looks an agenda cell; the equity code review and the contamination probe
   before a look; a ninth conformance vector beside the study's eight.
@@ -76,21 +76,45 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   nightly I6 failed or its shadow twin stopped (the seat rule read Candidates only). Now a seated panel family has a
   row only while the lane is live, its planned entries are held at the send, and the book retires it on the lane's
   own word; a switch file caught mid-write retires nobody. The xs rounding bound is E1's own, re-exported.
-- **Owed, each holding real money back by design (step two):** package J (the forward twin and the forward row of
-  a scored panel version, on release E3's modules: until then mode "live" reads as "gate" and no panel version is in
-  the forward record); package B's probe strata P4-P6 with the look permit the probe's job writes (patch 18, E3's
-  file: until then every panel look waits); the receipt at the captain's bar (A23); the universe commit R-E4b (needs
+- **Owed, each holding real money back by design (step two):** package B's probe strata P4-P6 with the look
+  permit the probe's job writes (patch 18, E3's file: until then every panel look waits); the receipt at the
+  captain's bar (A23); the universe commit R-E4b (needs
   the House's `tradable.json`; its gateway half is a patch for the owner) with the money row of a panel sleeve. And
   one thing for the captain to know before mode "live": at the Probe sleeve of 0.50 x E a five-name basket alone
   fills the $400 loss window (since the review's fixes it trades whole from flat, five names of $200, the basket
   scaled to the room; while it is held the other programs' new buys wait for room, and after any net loss in the
   window a partial rotation's new name is cut or refused at the send, so the program holds a name fewer than its
   Gym twin: pinned as built, a money decision for step two).
+- **Package J, the forward twin (Oct 11; nothing deployed; the three ids are main's on both Pythons; no identity
+  moves: `league/ops/forward_xs.py` is plumbing).** A scored panel version is registered in E3's forward record
+  (hash-chained with its NEEDS, route "XS1" and alpha 0.03) and recomputed whole on its own forward days each
+  PANEL NIGHT: the new job `forward_xs`, E3's own night on the panel store, after each `equity_panel` (not a ride on
+  `forward_shadow`: the panel store is a session behind at 22:35Z and the lane's twin marker must be through the
+  store's last session by the next close). One run a program a night at 1.0x: the row's stress column holds the
+  pre-registered stress residual of that run, and E3's excess of the row is the residual against the matched
+  cells. Rows lag one session and twins two (the engine opens no lot on a slice's last session and reads
+  membership two sessions ahead: shown on the real engine). The panel night spends what E3's night left of the
+  one budget, and all its runs read one open of the panel store (opened once a run, the ops child's address-space
+  cap was met at the third run: measured at the real panel's size). The twin of a live panel instance runs under
+  the instance's own id as run key and is compared by weights; A14 then reads a basket's sessions as any
+  program's. The marker (`xs-twins.json`: instance ids and days only) is what the lane reads before mode "live".
+  Alarms FX1 (the marker behind), FX2 (a rebalance session that disagrees), FX3 (panel programs stale two nights
+  running); the twin's residual and the rebalance sessions agreed stand beside a live panel program in the
+  direction report. PATCHES TO E3's FILES, each a few lines: `forward_db` (the panel's route in the chain),
+  `forward_register` (the panel's reader beside its own; nights by job), `forward_shadow` (its queue leaves panel
+  programs out; the label; the job's name), `forward_twins`, `forward_audit`, `forward_report` (the panel's own
+  groups; nights by job; the FX rows). E3's import seal admits the new module and holds it as it holds E3's own.
+  COSTS, stated: once a panel program is registered the engine label gains the xs fingerprint (one `engine_moved`,
+  every program's forward history written again under the new label; again at every later change to an xs
+  evidence module) and a day's meters wait for its panel rows (the second morning after the day, where they were
+  written the same evening). NOT BUILT: `fill_minutes` fetches no panel
+  symbol; the forward route's own verdict; panel controls. With `elane.panel.mode` "off" none of it runs or writes.
 - **The ship pass (Oct 11; nothing deployed; the three ids are main's on both Pythons, the xs identity moves).**
   MERGED: main's E2.2 and E3 (`7d2d3c84`); E3's six jobs then E4's six in the registry, the forward record's counts
   beside the asset-years in the funnel. WHAT THE MERGE MADE TRUE: a panel family is born with a hidden year (E3's
   folds record in the committed policy), and E3's count of a cell's births holds no panel family; a scored panel
-  version is neither registered nor refused by E3's registry (package J's, owed); three of E3's seal tests failed
+  version was neither registered nor refused by E3's registry (package J registers it: below); three of E3's seal
+  tests failed
   on the lane and the LANE changed, no seal: it imports no memory module (the fold's switch, hash and genome id
   are spelled in `elane_xs`, held equal by a test), and the swarm reads a LOOK PERMIT
   (`<state>/xs-look-permit.json`: two words a stratum and era, written by the probe's job) where it read the

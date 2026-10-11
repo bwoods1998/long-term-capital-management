@@ -140,6 +140,12 @@ raised (the registry's sync, the audit marks, the controls, the final checkpoint
 and a program that failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms
 read those.
 
+RELEASE E4 (package J). A PANEL program (a registry row whose `ugroup` begins "panel:") is never run here: its
+store, its engine and its day are the panel's. `due` leaves it out (`_mine`); THE PANEL NIGHT runs it
+(league/ops/forward_xs.py: this class's own `night` on a subclass that reads the panel store, after that store is
+written, under its own `JOB` in `fwd_runs`). Both nights write under one engine label, which names the xs evidence
+too once the registry holds a panel row (`_label`); with none it is this release's label, unmoved.
+
 Standard library and numpy only.
 """
 

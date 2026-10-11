@@ -537,3 +537,78 @@ there); the receipt at the captain's bar; the gateway's follow-up for the two pr
 the index after 2024 is charged the universe's half-spread (sampling its own Train-era days is a spec change for
 package B); Validation and the look ask the quiet rule once for two or three runs (Train asks before each); every
 budget of the lane on the box's one core is an estimate until its first receipts are read.
+
+## 13. Package J as built (Oct 11, 2026; `feat/equity-e4-j`; nothing pushed, nothing deployed)
+
+`league/ops/forward_xs.py` is no longer a stub (the module's own docstring is the reference). Sections 1 to 12 are
+records of their own day; where they call package J owed, this section says what is true now. Plumbing: no evidence
+identity and no money digest moves (the options execution fingerprint, the equity identity and the money digest are
+main's on both Pythons; the xs identity does not move either: nothing under league/xs changed).
+
+**What is built**, on release E3's real interfaces:
+
+| the spec's 10.6 | as built | where |
+|---|---|---|
+| (1) the registry | every panel version judged on the Train bar (its record's verdict carries Train facts), passed or failed, with the scored event's time; a live panel instance not yet registered; `ugroup` "panel:<panel>", route "XS1", alpha "0.03" in the hashed row; the chain takes that route on a panel row only | `forward_xs.scored_rows`, `scored`, `live_row`; `forward_db.XS_ROUTE`, `PANEL_UGROUP`; `forward_register.sync` asks the panel's reader beside its own |
+| (2) the nightly run | THE PANEL NIGHT: E3's `Shadow.night` on a subclass that reads the panel store and runs the "panel" kind in the forward job's own kind of child; its own job in `fwd_runs` | `forward_xs.panel_shadow`, `run`; the job `forward_xs`, after `equity_panel` |
+| (3) the twin | from the twin run's own `picks` under the instance's id as run key; agree = same sells, same buys, every weight within `WEIGHT_TOL`; "audit" and "retired" unreadable | `forward_xs.twin`, `keys`, `live_keys`, `agree`; `forward_twins._one_instance` hands a panel instance over |
+| (4) the marker | per ALIVE panel instance `due` and `last`, `through` the panel store's last session; ids and days only | `forward_xs.write_marker`, the night's `mark` |
+| beside | REBALANCE sessions agreed k of n, the twin's residual over the instance's sessions; the xs: groups | `forward_xs.rebalance_agreement`, `beside`; `dlane_report.panel_forward`; `forward_report._group_rows` |
+| the alarms (E4-SPEC 17) | FX1 the marker behind (and an instance's twin behind its due day), FX2 a rebalance session that disagrees, FX3 panel programs stale two panel nights running | `forward_xs.alarms`, in the forward report |
+| X14 | `test_forward_xs.TheMarkerCarriesNoOutcome` | beside G's `test_elane_xs_seal.TheSwarmReadsOnlyTheMarker` |
+
+**Where the build departs from the spec's words, each for a stated reason:**
+
+1. **The panel night is its own job, not a ride on `forward_shadow`.** The spec's 10.6 put the panel's runs inside
+   E3's night (22:35Z). The panel store is written at 01:55Z, so at 22:35Z it is a session behind; and the lane's
+   rule since the review (section 11: the twin marker no older than the session before the last closed one) needs
+   the marker through the store's last session by the next close. A ride on E3's night would have read "twin marker
+   behind" from every close to 22:35Z, the 16:30 decide included (a critical alert every decision day). So the
+   registry gains ONE row, `forward_xs`, after `equity_panel`; it goes between E3's six rows and E4's six.
+2. **Rows lag one session, twins two** (`forward_xs.ROW_LAG`, `TWIN_LAG`). The engine opens no lot at a slice's last
+   session (open point 6 of section 8: entry validity reads the session after the fill) and reads membership
+   `config.MEMBER_AHEAD` sessions ahead, as at the last past a slice's end (open point 5). E3's rows are first-write:
+   a row written a session early stands wrong for good. With the store through P the night writes rows through
+   P - 1 and twin rows for decisions through P - 2, and names itself by P - 1. Measured on the real engine over a
+   synthetic panel with index changes: the last day's row differs from a later run's in a third of the nights, a
+   one-session-old decision in a few, nothing older (`test_forward_xs.TheRowsThatAreFinal`). The spec's "E3's D12
+   lag" (one session) would have written the twin's row a session before its decision is final.
+3. **One run a program a night, at k 1.0** (the spec: k 1.0 and 1.5). Section 4's last row binds: the forward series
+   is x and the stress residual x15 of ONE run. `fwd_days.r15` of a panel row is r - (x - x15), so E3's stress
+   excess of the row is x15. Gain: half the child seconds on one core. Not recorded: the 1.5x-cost book's own run.
+4. **E3's "split" rule is not applied to a panel twin.** It guards a decide rebuilt from a run's lots; the panel
+   twin's keys are the run's own picks.
+5. **A buy's weight is its dollars over the decision's BUDGET** (`eq_rebalances.budget`; the spec said `equity`):
+   since the review a live decision's budget is the sleeve scaled to the room, and the engine's lot is w x budget.
+6. **The twin's two hashes are of the whole ctx each side read** (`eq_rebalances.ctx_sha`, the pick's `ctx_sha`; 16
+   hex), where E3's are of the bars alone: the live book keeps that one. "bars" on a panel row says the two
+   decisions did not read the same ctx. A hold day has no ctx: its cause, when it differs, is "unknown".
+7. **`fwd_days.bars` of a panel row is one hash a session for every panel program**: the panel store's bars over the
+   253 sessions through the decision's session, every column (E3's is the program's own symbols'). It moves when
+   the vendor restates any name's history, which is what the restated event's cause reads.
+8. **The engine label gains the xs fingerprint only once the registry holds a panel row** (the spec: always). With
+   the lane off the forward record of the share programs is byte for byte what it was.
+9. **E3 reads each job's own nights** (the stop rules, FW2, the funnel's `stale`): a panel night ends hours after
+   E3's night of the same name, and read as one they would have counted an ETF program's next-evening row as a run
+   it completed the night before.
+10. **`fill_minutes` is NOT patched** (the spec: it also fetches the day's traded panel symbols). A panel lot's
+    `fwd_lotgap` row has its model, slip and twin gap (package B's half-spread is in its twin record) and no timing
+    part. Owed, small: a second read of the book in a job that reaches the gateway.
+11. **The morning mark of a mismatched panel decision falls on the decision's day of the INSTANCE's program only**,
+    not on every registered panel program (every one of them reads every member's bars: one restated bar among 515
+    columns would take a day from them all).
+
+**The budget on one core, estimated** (the build machine's core, the real panel's width, a synthetic panel; the box
+reads about three times slower): a program-night of 60 forward sessions about 1 s, of 250 about 4 s; forty programs
+of 250 sessions 165 s and 200 MB of address space above the start with the engine in the same process. The panel
+night spends what E3's night left of `elane.forward.cpu_seconds_night` (1,800): about 150 programs of 250 sessions
+a night on the box, more while they are young. Past that the stale ones go first the next night and FX3 says so.
+
+**What follows for the other packages.** G: nothing (the lane imports none of this; `live_ready` reads the marker
+as it did). H: `dlane_report.PANEL_OWED` now says "not recorded yet" and `PANEL_SHADOWED` stands beside a style-open
+passer. A: the registry has thirteen rows after `dlane` (E3's six, `forward_xs`, E4's six). E3's contract gains its
+own section 13 (league/ops/E3_INTERFACES.md): the import rule admits `league/ops/forward_xs.py` and holds it.
+
+**Still owed after package J:** patch 18 with the look permit; the universe commit and the money row; the receipt
+at the captain's bar; `fill_minutes`' panel symbols; the forward route's verdict (c_FX and the placebo rank over the
+first n sessions: `runner.Isolated.forward(placebos=, seed=)` exists and nothing asks it); panel controls.

@@ -12,7 +12,9 @@ THE STORE (`SCHEMA`; each table's columns are commented there):
   the skill-free controls: its code frozen, the row hash-chained (`HASHED`, `row_hash`, `append_registry`,
   `verify_chain`; `GENESIS` before the first row). The forward route and its alpha are IN the hashed row (`route`,
   `alpha_f`: `E3_ROUTE`, `E3_ALPHA_F` on every program row of E3; "none", "0" on a control), so no forward outcome that
-  exists before a forward screen is pinned can be given a larger alpha (D2).
+  exists before a forward screen is pinned can be given a larger alpha (D2). (Release E4, package J: a PANEL
+  program's row, one whose `ugroup` begins `PANEL_UGROUP`, carries `XS_ROUTE` at the same alpha, and no other row
+  does: league/ops/forward_xs.py.)
 - `fwd_tags`: facts learned later (`TAGS`); ops only, never to a generator.
 - `fwd_days`, `fwd_checks`, `fwd_runs`: the nightly recompute's daily rows, its checkpoints at `CHECKPOINTS` counted
   days (then every `CHECKPOINT_EVERY`), and one row a night (league/ops/forward_shadow.py).

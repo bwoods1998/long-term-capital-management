@@ -559,3 +559,42 @@ rows' `first_attempted_at` and `attempts`. **Names added:** `elane_memory.HIDDEN
   good. What a standing absentee still costs: the first one or two days of its absence wait their three nights and
   are partial; FW2 goes on naming it. **Names added:** `forward_report._behind`. No table, column, event kind,
   setting or receipt key changed.
+
+## 13. Release E4's package J on this record (Oct 11, 2026; additive: no signature, column or event kind changed)
+
+Release E4's panel lane (programs that pick names out of the S&P 500 panel) has its half of the forward record in
+ONE new ops module, `league/ops/forward_xs.py`, which writes this release's own tables through this release's
+modules. What changed HERE, each a few lines (the record: league/swarm/e4_patches/J.md):
+
+- **The import rule (section 1).** E3's ops modules may also import `league.ops.forward_xs`, inside functions (it
+  imports them at its top). That module stands under the same seal: no module of the sealed trees imports or names
+  it, it imports only this section's list and the panel's own modules (league/xs's `store`, `runner`, `program`,
+  `results`, `book`, `config`, `identity`; `league.swarm.elane_xs`), and it opens no swarm store writable.
+  `test_e3_seal_imports` holds all three, and `test_forward_report` that no other ops module but the dlane report
+  names it.
+- **`forward_db`.** `XS_ROUTE` ("XS1") and `PANEL_UGROUP` ("panel:"): `append_registry` admits (`XS_ROUTE`,
+  `E3_ALPHA_F`) on a row whose `ugroup` begins `PANEL_UGROUP`, and on no other; such a row carries no other route.
+- **`forward_register`.** `sync` asks `forward_xs.scored_rows` beside `_scored` (pids still follow the order the
+  programs came to exist) and `forward_xs.live_row` before `_live_row`; `_register` writes the row's own route;
+  `_tags` reads a panel family's look under the panel lane's key; `_stops` reads, for each program, THE NIGHTS OF
+  THE JOB THAT RUNS IT (`fwd_runs.job`). `STRUCTURES` is unchanged: this reader still takes "etf" and "stock".
+- **`forward_shadow`.** `Shadow.JOB` (the night's `fwd_runs.job`: a class attribute), `Shadow._mine(program)` (its
+  queue leaves a panel program out) and one line of `_label` (the label gains "+xs." and 12 hex of the xs
+  fingerprint once the registry holds a panel row; never before). The panel night is `Shadow.night` itself on a
+  subclass (`forward_xs.panel_shadow`): what it overrides is the store it reads, the run, the write, the canary
+  and which programs are its own.
+- **`forward_twins`.** `on_run` writes no live-like row of a panel run; `_one_instance` hands an instance whose
+  registry row is a panel row to `forward_xs.twin` (each night twins its own lane). `fwd_lotgap`, `fwd_part`'s
+  shape and `a14_reading` are unchanged and read a panel instance as any other.
+- **`forward_audit`.** The morning job also writes `forward_xs.audit_marks`.
+- **`forward_report`.** D9's groups gain "xs:train_pass", "xs:train_fail", "xs:look_pass", "xs:look_fail" from the
+  first day a panel row is registered (a panel pid is in no other group); D7's numerator counts structure "panel"
+  runs; `_nights` and the funnel's `stale` read this release's own job; `raised` knows the FX alarms and `section`
+  appends them (`forward_xs.alarms`). `ALARMS`, `SECTION_KEYS` and `FUNNEL_KEYS` are unchanged.
+- **What a registered panel program costs this record, stated.** The engine label moves once when the first panel
+  row is registered and at every later change to an xs evidence module (a new series for every program, as an
+  equity evidence change opens one). A panel row is written a night after an ETF row of the same day, so a day's
+  meters wait for it (section 11's live-3 rule, unchanged, does the waiting: they are written the second morning
+  after the day, never partial for that cause). FW1 would read a registry that
+  held ONLY panel programs as stalled each morning (no row of the last closed day by 09:00): the House's registry
+  holds the seeds and the controls.

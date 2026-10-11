@@ -145,6 +145,21 @@ still raises RR, CP and MM, and `alarms` still hands them to the dlane report.
 - MM1 (warning): a `swarm.status` "elane_memory" alert in the last 24 h.
 FW8 and MM1 read back to the report before this one when that is longer than 24 h (never past `LOOKBACK_DAYS`): the
 job does not run between a Friday night and a Monday morning, and what happened then is still told once.
+- FX1, FX2, FX3 (warning; RELEASE E4, package J: league/ops/forward_xs.py `alarms`, `ALARMS`): the panel lane's twin
+  marker behind its store, a REBALANCE session of a live panel program whose live and twin orders disagree, and
+  panel programs left stale two panel nights running. They follow two switches (`elane.forward.mode` and
+  `elane.panel.mode`); `ALARMS` here is release E3's own list.
+
+RELEASE E4 (package J), WHAT ELSE READS A PANEL PROGRAM HERE. Its rows are E3's rows (x = r - w * b is its residual
+against its matched cells), so D6 to D8 read it as any lineage. D9 keeps it APART: a panel pid stands in the groups
+"xs:train_pass", "xs:train_fail", "xs:look_pass" and "xs:look_fail" (written from the first day a panel row is
+registered), never in an ETF group, and no RC pair reads them (no panel control exists). The replay multiple's
+numerator counts a panel family's Train runs; its denominator does not hold the panel's independent history (the
+multiple overstates: stated). A NIGHT here (`_nights`: FW2, FW3's start, the funnel's `stale`) is one of this
+release's own job; the panel lane's nights (their own job and their own day: a panel row is final a session after
+an ETF row) are FX3's. So once a panel program is registered a day's meters wait for its panel rows (A DAY'S
+METERS WAIT FOR ITS ROWS, above): they are written at the morning run after the panel night that holds them, the
+second morning after the day, and are not partial for that cause.
 
 Standard library and numpy only (numpy inside the functions that read arrays).
 """

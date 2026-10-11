@@ -22,6 +22,9 @@ of `<state>/forward.sqlite` (league/ops/forward_db.py).
   that held only a symbol whose bar was right would have lost the day by its rows; E1's review made the mark each
   audited symbol's own verdict, "ok" or "mismatch", and a test here holds the book to that. A note the book writes
   for a volume-only difference names no symbol: its day is read from the rows, which then say "ok".)
+- (RELEASE E4, package J) A LIVE PANEL DECISION whose morning re-read was a mismatch (the book's `eq_rebalances
+  .audit`) marks that day of its program's registry row, once a (pid, day): league/ops/forward_xs.py `audit_marks`.
+  A panel program names no symbol in its NEEDS, so the marks above never reach one.
 - THE CHAIN: `forward_db.verify_chain` -> one `chain_ok` or `chain_broken` event, and for a broken chain a
   `ctx.alert("warning", ...)` (owner step: stop the forward jobs and compare with the backup). The alert's text
   holds ids, counts and dates only.

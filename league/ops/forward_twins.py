@@ -92,6 +92,12 @@ intents ok is True. It is final iff every close of C_eq has a final twin and `mi
 `d_first(I)` is read as the day of the instance's first `fwd_twins` row (the rows are written in day order from it);
 an instance with no row yet has every session from the one before its first counted lot's entry missing.
 
+RELEASE E4 (package J). An instance whose registry row is a PANEL row is twinned by the panel night, on the panel
+store, from its run's own picks and with weights (league/ops/forward_xs.py `twin`): `_one_instance` hands it over
+once its registry row and run sha are checked, and each night twins its own lane. `on_run` writes no live-like row of
+a panel run (no minute bars exist for 500 names). `fwd_lotgap` and A14's reading are this module's for every lot and
+every instance, a panel one's too: a panel lot's row has its model, slip and twin gap and no timing part.
+
 Standard library and numpy only.
 """
 
