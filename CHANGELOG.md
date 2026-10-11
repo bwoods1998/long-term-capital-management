@@ -77,8 +77,9 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
 - **Owed, each holding real money back by design:** package J (the forward twin; after release E3: until then mode
   "live" reads as "gate"); package B's probe strata P4-P6 (patch 18, E3's file: until then every panel look waits);
   the universe commit R-E4b (needs the House's `tradable.json`; its gateway half is a patch for the owner). And one
-  decision for the captain before mode "live": at the Probe sleeve of 0.50 x E a five-name basket alone fills the
-  $400 loss window (four whole names, the fifth cut), so a panel program wants its own sleeve share.
+  thing for the captain to know before mode "live": at the Probe sleeve of 0.50 x E a five-name basket alone fills
+  the $400 loss window (since the review's fixes it trades whole, five names of $200, the basket scaled to the room;
+  while it is held the other programs' new buys wait for room).
 - Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
   the universe deploy and its rollback, the alarms).
 

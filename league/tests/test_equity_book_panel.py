@@ -187,10 +187,10 @@ class Child(T.Decider):
 
 
 class Harness(T.Harness):
-    def __init__(self, root: Path, *, rows=None, E: str = "2229"):
+    def __init__(self, root: Path, *, rows=None, E: str = "2229", **table_over):
         self.dir = root
         self.child = Child(root / STORE_DIR)
-        table = T.equity_table(universe={**config.UNIVERSE, **{s: "stock" for s in NAMES}})
+        table = T.equity_table(universe={**config.UNIVERSE, **{s: "stock" for s in NAMES}}, **table_over)
         super().__init__(root, cash=E, E=E, table=table, rows=[panel_row()] if rows is None else rows)
         self.market = Market(self.clock)
         self.venue = T.Venue(self.market, self.clock, cash=E)
@@ -1108,6 +1108,93 @@ class AMismatchedRebalanceIsVoidWhole(PanelCase):
         h.run(TUESDAY, (8, 31), (9, 26), (9, 31), (9, 32), (9, 33))
         self.assertEqual((h.venue.sent, h.held()), ([], ["N000", "N001", "N002", "N003", "N004"]),
                          "no name is sold at one open and bought back at the next")
+
+
+class TheWholeBasketIsScaledToTheRoom(PanelCase):
+    """The review's spec-2, AT THE ROWS IN FORCE (the captain's A20: a Probe sleeve of 0.50 x E; a stock weighs 0.40
+    of the $400 window): a full sleeve of stocks is 0.20 x E of open risk, above the window from E = $2,000. E1's
+    sizing holds the window a name at a time, so at $2,229 a five-name basket bought four names of $222.90 and the
+    fifth cut to $108.40, and the Gym twin bought five. The decision's BUDGET is the sleeve scaled so the whole basket
+    fits: five lots of one size."""
+
+    def setUp(self):
+        super().setUp()
+        self.h.state.close()
+        self.h = Harness(self.root, probe_sleeve_share=D("0.50"))
+        self.addCleanup(self.h.state.close)
+        self.assertEqual(self.h.table.probe_loss_budget, D("400"), "the constitution's window")
+        self.h.plan(["N010", "N011", "N012", "N013", "N014"])
+
+    def buys(self):
+        return sorted(self.usd(b) for b in self.h.sent("buy"))
+
+    def test_alone_with_the_window_untouched_five_names_of_two_hundred_dollars(self):
+        h = self.h
+        h.decide(FRIDAY)
+        row = h.rebalance(FRIDAY)
+        self.assertEqual((row["budget"], row["n_buys"], row["n_skipped"]), ("1000.00", 5, 0),
+                         "the sleeve is $1,114.50; a full basket fits the $400 window at $1,000")
+        self.assertEqual({i.usd for i in h.panel_intents()}, {D("200.00")})
+        self.assertEqual([p for k, p in h.events if k == "equity.rebalance"][-1].get("scaled"), True)
+        h.run(MONDAY, (8, 31), (9, 26), (9, 31), (9, 33))
+        sent = self.buys()
+        self.assertEqual(len(sent), 5)
+        self.assertGreater(sent[0], D("199.80"), "FIVE WHOLE NAMES, none cut and none refused")
+        self.assertLessEqual(sent[-1], D("200.00"))
+        self.assertEqual({i.status for i in h.panel_intents()}, {"done"})
+        self.assertEqual(len(h.held()), 5)
+        risk = L.probe_figures(h.state.rows, weights=h.table.equity.open_risk_weight).open_risk
+        self.assertLessEqual(risk, D("400"), "inside the owner's window")
+        self.assertGreater(risk, D("398"))
+
+    def test_the_room_a_lost_window_or_another_program_leaves_scales_every_name_alike(self):
+        h = self.h
+        other = L.Lot(h.book._next("eq_lots", "lid"), "seed-a@1:r", "seed-a", 1, "beta", "SPY", "etf", D("1"), D("1"),
+                      D("557.25"), D("557.25"), "close", opened_at=T.at(THURSDAY, 15, 56), opened_day=THURSDAY.isoformat(),
+                      cash=-D("557.25"), probe=True)
+        h.book._save_lot(other)                                       # a seeded ETF program invested: $111.45 at risk
+        gone = L.Lot(h.book._next("eq_lots", "lid"), "seed-b@1:r", "seed-b", 1, "beta", "QQQ", "etf", D("0"), D("1"),
+                     D("500"), D("500"), "close", opened_at=T.at(THURSDAY, 15, 56), opened_day=THURSDAY.isoformat(),
+                     status=L.LOT_CLOSED, exit_px=D("411.45"), exit_at="open", exit_day=FRIDAY.isoformat(),
+                     closed_at=T.at(FRIDAY, 9, 31), cash=-D("88.55"), probe=True)
+        h.book._save_lot(gone)                                        # and $88.55 lost in the window
+        room = h.book._budget_room(FRIDAY.isoformat())
+        self.assertEqual(room, D("400") - D("88.55") - D("111.45"))
+        h.decide(FRIDAY)
+        self.assertEqual(h.rebalance(FRIDAY)["budget"], "500.00", "$200 of room over the stock weight 0.40")
+        self.assertEqual({i.usd for i in h.panel_intents()}, {D("100.00")}, "five names of $100, not two whole and three refused")
+
+    def test_a_held_basket_is_never_resized_and_a_budget_that_fell_sells_nothing(self):
+        h = self.h
+        for symbol in ("N010", "N011", "N012", "N013", "N014"):
+            h.seed(symbol, "200.00")
+        gone = L.Lot(h.book._next("eq_lots", "lid"), "seed-b@1:r", "seed-b", 1, "beta", "QQQ", "etf", D("0"), D("1"),
+                     D("500"), D("500"), "close", opened_at=T.at(THURSDAY, 15, 56), opened_day=THURSDAY.isoformat(),
+                     status=L.LOT_CLOSED, exit_px=D("300"), exit_at="open", exit_day=FRIDAY.isoformat(),
+                     closed_at=T.at(FRIDAY, 9, 31), cash=-D("200"), probe=True)
+        h.book._save_lot(gone)                                        # the window lost $200 beside the held basket
+        h.plan(["N010", "N011", "N012", "N013", "N020"])              # one name rotated
+        h.decide(FRIDAY)
+        row = h.rebalance(FRIDAY)
+        self.assertEqual((row["n_sells"], row["n_buys"]), (1, 1), "only what the program asked: nothing sold for the budget")
+        [buy] = [i for i in h.panel_intents() if i.kind == "buy"]
+        self.assertLess(buy.usd, D("101.00"), "the new lot is a fifth of the SMALLER budget: what a full rotation fits")
+        self.assertGreater(buy.usd, D("99.00"))
+        self.assertEqual(buy.usd, (D(row["budget"]) / 5).quantize(D("0.01"), rounding=ROUND_DOWN))
+        self.assertEqual(sorted(h.held()), ["N010", "N011", "N012", "N013", "N014"])
+
+    def test_a_figure_that_cannot_be_read_leaves_the_sleeve_and_the_send_holds_the_walls(self):
+        h = self.h
+        with mock.patch.object(L.EquityBook, "_budget_room", side_effect=RuntimeError("unread")):
+            h.decide(FRIDAY)
+        self.assertEqual(h.rebalance(FRIDAY)["budget"], "1114.50")
+        self.assertNotIn("scaled", [p for k, p in h.events if k == "equity.rebalance"][-1])
+        h.run(MONDAY, (8, 31), (9, 26), (9, 31), (9, 33))
+        risk = L.probe_figures(h.state.rows, weights=h.table.equity.open_risk_weight).open_risk
+        self.assertLessEqual(risk, D("400"), "E1's own sizing, a name at a time: the wall holds whatever the budget said")
+        self.assertEqual(len(self.buys()), 5)
+        self.assertLess(self.buys()[0], D("120"), "(and the last name is the one it cuts: about half a lot)")
+        self.assertGreater(self.buys()[1], D("222"))
 
 
 class TheSleeveIsReadOnEntryNotionals(PanelCase):

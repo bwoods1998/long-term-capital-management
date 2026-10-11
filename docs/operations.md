@@ -269,15 +269,37 @@ Read with the amendments in force when this was integrated, which the text above
   0.50 (the text's "$557 sleeve" is 0.25 x E). The rules do not change; the dollar examples scale with the sleeve, and
   -$300 is then a smaller share of it. One consequence is new and is stated here: a FULL sleeve of stocks at 0.50 x E
   counts 0.40 x 0.50 x E = 0.20 x E of open risk, which is above the $400 window once E is above $2,000. So the loss
-  budget, not the sleeve, bounds a panel program's invested dollars at that size: sizing cuts the last entries to the
-  window's room, and the standing target buys them the day the room exists. The live package (H) recomputes the
-  spec's feasibility table with E1's own sizing function at the values in force.
-  **What that looks like, on money's real rules** (`league/tests/test_e4_e2e.py` trades it against a fake venue): a
-  five-name basket of a program alone at Probe buys FOUR whole lots of 20% of the sleeve and the fifth cut to what is
-  left of the window (about half a lot), every time it rebalances; beside two invested ETF seeds only one name goes
-  whole. Nothing breaks a wall, and the Gym's twin (no budget cut) buys all five: that is a standing
-  live-versus-twin difference in the bought weights. **Open for the captain before mode "live":** a panel program's
-  own sleeve share (0.25 x E fits five whole names in the window), which is a money row and so an owner deploy.
+  budget, not the sleeve, bounds a panel program's invested dollars at that size.
+  **THE PLAIN ANSWER at about $2,229, and the rule that makes it tradable.** The build spec's "a five-name basket IS
+  tradable and needs no larger sleeve" was computed on a 0.25 x E sleeve. At the rows in force (sleeve $1,114.50; a
+  name at most 20% of it, $222.90; a stock weighing 0.40 of the $400 window) E1's sizing, which holds the window a
+  name at a time at the send, would buy FOUR names of $222.90 and cut the fifth to $108.40 (three whole after $100
+  of window loss; one whole and one cut beside the two seeded programs invested), every rebalance, while the Gym
+  twin buys five: a cut name is never resized (the KEEP rule), so the basket would stay lopsided until that name is
+  sold. **So the whole basket is SCALED TO THE ROOM** (`league/equity/live.py` `_panel_budget`; plumbing, no money
+  row and no digest move, and no wall loosened): the budget a panel decision is handed is the smaller of the sleeve
+  and what a FULL basket fits now (the program's own lots at their marks plus the loss budget's room over the stock
+  weight; the invested cap likewise), and every name is its weight of THAT:
+
+  | at E = $2,229, sleeve $1,114.50 | the decision's budget | a five-name basket | its open risk |
+  |---|---|---|---|
+  | alone, the window untouched | $1,000.00 | 5 x $200.00 | $400 (the whole window) |
+  | after $100 of window loss | $750.00 | 5 x $150.00 | $300 |
+  | beside the two seeded ETF programs invested ($222.90 at risk) | $442.75 | 5 x $88.55 | $177.10 |
+  | beside one seed invested and $88.55 of window loss | $500.00 | 5 x $100.00 | $200 |
+  | a 12-name basket alone | $1,000.00 | 12 x $83.33 | $400 |
+
+  (`league/tests/test_e4_e2e.py` trades the first row against a fake venue on money's real rules, and
+  `test_equity_book_panel.TheWholeBasketIsScaledToTheRoom` the first and fourth.) The lot's WEIGHT is the same as
+  its twin's (dollars over the decision's own budget), so the two agree. Held lots are never resized: a budget that
+  fell buys smaller lots at the next rotation and sells nothing. The send's own sizing still holds every wall a
+  name at a time, so a budget that moved between the decision and the open cuts the last name, as before (and a
+  name the send CUT stays cut until it is sold; only a name it SKIPPED is bought later by the standing target).
+  **THE COST, stated:** a full basket at this size USES THE WHOLE WINDOW. While it is held, another program's new
+  buys and the options Probe lane's opens are refused for budget (first come, as three invested ETF programs
+  already leave the options lane about $66 of room), and the panel's own basket is rebuilt smaller after any loss
+  in the window. A panel sleeve of its own (0.25 x E) would leave room beside it; that is a money row and an owner
+  deploy, and is no longer needed for the basket to trade whole.
 - **Sizing up is parked** (the captain's A21: `equity_money.sized.min_trades` 1000, for every equity program): the
   text's "sizing up from 20 dates" reads "from `sized.min_trades` close dates", which no program reaches while the
   step is parked. EDM1's legs, the -$300 program line, the window and the total are as the text says.

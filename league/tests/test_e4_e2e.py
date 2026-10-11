@@ -572,14 +572,20 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertEqual((first["exec_day"], first["at"], first["called"], first["n_names"], first["n_sells"],
                           first["n_buys"], first["n_skipped"], first["status"]),
                          (WEEK[0].isoformat(), "open", 1, 5, 0, 5, 0, "planned"))
+        # THE WHOLE BASKET IS SCALED TO THE ROOM (the review's spec-2): at the Probe sleeve of 0.50 x E a full sleeve of
+        # stocks is 0.40 x $1,114.50 = $445.80 of open risk, above the $400 window, so the decision's budget is what a
+        # full basket fits: $400 / 0.40 = $1,000, and every name is a fifth of THAT.
         sleeve = table.equity.probe_sleeve_share * E
-        self.assertEqual(D(first["budget"]), sleeve)
+        window = table.probe_loss_budget
+        budget = window / table.equity.open_risk_weight["stock"]
+        self.assertLess(budget, sleeve)
+        self.assertEqual(D(first["budget"]), budget)
         basket = sorted(symbol for symbol, _ in json.loads(first["targets"]))
         self.assertTrue(set(basket) <= self.tickers and len(basket) == 5, basket)
         planned = state.rows("SELECT * FROM eq_intents ORDER BY iid")
         self.assertEqual(sorted(i["symbol"] for i in planned), basket)
         self.assertEqual({(i["kind"], i["at"], i["usd"], i["exec_day"], i["tag"]) for i in planned},
-                         {("buy", "open", str((D("0.2") * sleeve).quantize(D("0.01"))), WEEK[0].isoformat(), xbook.TAG)})
+                         {("buy", "open", str((D("0.2") * budget).quantize(D("0.01"))), WEEK[0].isoformat(), xbook.TAG)})
         # THE BARS THAT DECISION READ ARE KEPT, and the nightly I6 now reads them against the store by the book's own
         # rule: the live decision's ctx is the Gym's.
         self.assertTrue((self.store_root / xbook.LIVE_BARS_DIR / f"{FRIDAY.isoformat()}.npz").exists())
@@ -587,10 +593,9 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertEqual((again["equal"], again["source"], again["live"]), (True, "kept", {inst: True}), again)
 
         # ---------------------------------------------------------------------------- 7. a live week
-        # Monday's open: five limit buys through E1's order path, sized by money's own rules. Four are whole lots of
-        # 20% of the Probe sleeve; THE FIFTH IS CUT BY THE SHARED LOSS BUDGET, where a stock's open risk weighs 0.40:
-        # at the Probe sleeve of 0.50 x E a five-name basket alone fills the $400 window (open point 17: a panel
-        # program needs its own sleeve share before the lane trades at this account's size).
+        # Monday's open: five limit buys through E1's order path, sized by money's own rules. FIVE WHOLE LOTS, each a
+        # fifth of the scaled budget ($200): together they fill the $400 window, where a stock's open risk weighs
+        # 0.40, and none is cut (before the fix: four lots of $222.90 and the fifth cut to $108.40 by the budget).
         market.extend(WEEK[0], lambda symbol: 0.001)
         tick(WEEK[0], 8, 31)
         self.assertEqual((rebalance(FRIDAY)["audit"], venue.sent), ("ok", []))
@@ -616,22 +621,22 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertEqual({(b["side"], b["type"], b["time_in_force"]) for b in venue.sent}, {("buy", "limit", "day")})
         self.assertEqual({(lot.status, lot.entry_at, lot.opened_day, lot.probe, lot.klass, lot.tag) for lot in bought},
                          {("open", "open", WEEK[0].isoformat(), True, "stock", xbook.TAG)})
-        name_cap = D("0.2") * sleeve
+        name = D("0.2") * budget
         for lot in bought:
-            self.assertLessEqual(lot.entry_notional, name_cap)
+            self.assertLessEqual(lot.entry_notional, name)
+            self.assertLessEqual(lot.entry_notional, D("0.2") * sleeve, "the sleeve's own name cap")
             self.assertLessEqual(lot.entry_notional, table.equity.position_share["stock"] * E, "a stock: 20% of equity")
             self.assertEqual(lot.entry_px, market.quote(lot.symbol)[1], "a marketable limit filled at the ask")
-        whole = [lot for lot in bought if lot.entry_notional > name_cap - 1]
-        self.assertEqual(len(whole), 4, [str(lot.entry_notional) for lot in bought])
+        whole = [lot for lot in bought if lot.entry_notional > name - 1]
+        self.assertEqual(len(whole), 5, [str(lot.entry_notional) for lot in bought])
         _, _, _, at_risk, _ = R.probe_figures(state.rows, day=WEEK[0].isoformat(), table=table)
         invested = sum((lot.qty * lot.entry_px for lot in bought), D(0))
         self.assertEqual(at_risk, table.equity.open_risk_weight["stock"] * invested, "one budget, stocks at 0.40")
-        window = table.probe_loss_budget
         self.assertLessEqual(at_risk, window)
-        self.assertGreater(at_risk, window - 1, "the fifth lot took what room the window had left")
+        self.assertGreater(at_risk, window - 2, "the whole basket took the window, a fifth a name")
         self.assertLessEqual(invested, table.equity.invested_share * E)
-        [cut] = [o for o in state.rows("SELECT why FROM eq_orders") if "budget" in o["why"]]
-        self.assertIn("loss budget", cut["why"])
+        self.assertEqual([o for o in state.rows("SELECT why FROM eq_orders") if "budget" in (o["why"] or "")], [],
+                         "no order was cut by the budget")
 
         # Four hold days: the bars are read, kept and audited, the lots marked, NO program code runs, nothing trades.
         held = set(basket)
@@ -671,8 +676,8 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
                           second["exec_day"]), (1, "planned", 5, 5, 0, NEXT_MONDAY.isoformat()))
         self.assertEqual(sorted(symbol for symbol, _ in json.loads(second["targets"])), losers)
 
-        # The next Monday's open: five sales (never in the session a lot was bought), then five buys, the fifth cut
-        # again; the closed lots are exported to the forward record.
+        # The next Monday's open: five sales (never in the session a lot was bought), then five buys, each a fifth of
+        # that decision's budget; the closed lots are exported to the forward record.
         market.extend(NEXT_MONDAY, lambda symbol: 0.001)
         tick(NEXT_MONDAY, 8, 31)
         tick(NEXT_MONDAY, 9, 30, 33)

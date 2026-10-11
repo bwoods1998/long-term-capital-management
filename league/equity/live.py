@@ -2901,6 +2901,40 @@ class EquityBook:
                                       f"{int(PANEL_LATE_S // 60)} minutes after the decide's moment")
         return state
 
+    def _panel_budget(self, inst: Instance, day: str, lots: Sequence[Lot]) -> tuple[Decimal, Decimal]:
+        """A PANEL PROGRAM'S BUDGET FOR ONE DECISION, and its whole sleeve beside it: (budget, sleeve). THE WHOLE BASKET
+        IS SCALED TO THE ROOM (the review's spec-2). A basket's lots are `weight x budget` a name, and E1's sizing
+        holds the account's walls a name at a time, at the send: on a sleeve of 0.50 x E a full basket of stocks is
+        0.40 x 0.50 x E = 0.20 x E of open risk, above the $400 window from E = $2,000, so at $2,229 a five-name
+        target bought four names of $222.90 and the fifth cut to $108.40 (three whole after $100 of window loss, two
+        beside the two seeded programs), while its Gym twin bought five every time. So the budget the decision is
+        handed is the smaller of
+        - the sleeve (`sleeve_share` x E), and
+        - what the account's walls leave a FULL basket now: the program's own lots at their marks plus the shared
+          loss budget's room over the class's open-risk weight, and plus the invested cap's room.
+        Every name of the target then scales alike: five lots of $200.00 at $2,229 with the window untouched ($150.00
+        after $100 of window loss, $88.55 beside the two seeds invested), each a fifth of the budget its twin's
+        weights are read against. NOTHING IS LOOSENED: the send's own sizing still holds every wall a name at a time
+        (a budget that has moved since cuts the last name, as before), held lots are never resized (KEEP: a budget
+        that fell buys smaller lots at the next rotation and sells nothing), and a figure that cannot be read leaves
+        the sleeve as the budget. THE COST, stated in docs/operations.md: a full basket at this size uses the whole
+        window, so another program's new buys and the options Probe lane's opens wait for room (first come)."""
+        et = self._et()
+        E = self.sizing_equity() or ZERO
+        sleeve = self._sleeve_share(inst) * E if et is not None else ZERO
+        if et is None or sleeve <= 0:
+            return sleeve, sleeve
+        own = sum((lot.value for lot in lots), ZERO)
+        try:
+            weight = _weight(et.open_risk_weight, "stock")     # (a panel lot's class; an unread weight is a whole dollar)
+            # (a room below zero shrinks it too: what a FULL rotation of the basket could buy back)
+            by_budget = own + self._budget_room(day) / weight
+            by_invested = own + (Decimal(str(et.invested_share)) * E - invested(self.state.rows)
+                                 - self._options_open_loss(day))
+        except Exception:  # noqa: BLE001 - unread: the sleeve, and the send's sizing holds the walls as ever
+            return sleeve, sleeve
+        return max(ZERO, min(sleeve, by_budget, by_invested)).quantize(CENT, rounding=ROUND_DOWN), sleeve
+
     def _panel_job(self, inst: Instance, t: dt.date, needs: Mapping[str, Any], panel: Mapping[str, Any] | None,
                    now: float) -> tuple[dict[str, Any], dict[str, Any]]:
         """A panel instance's decide job (B4) and what its record needs: {"key", "inputs", "called", "standing"}. EVERY
@@ -2935,8 +2969,7 @@ class EquityBook:
             rejects.extend(r["why"] for r in self.state.rows(
                 "SELECT why FROM eq_intents WHERE instance=? AND status IN ('refused', 'missed') AND decided_day>=? "
                 "AND decided_day<? ORDER BY iid", (inst.id, last, day)) if r["why"])
-        E = self.sizing_equity() or ZERO
-        budget = self._sleeve_share(inst) * E if self._et() is not None else ZERO
+        budget, sleeve = self._panel_budget(inst, day, lots)
         own_value = sum((lot.value for lot in lots), ZERO)
         # THE CONSTANT-WEIGHT BOOK (the pre-registration's C3, C8; the Gym engine's own): the sleeve's free room is its
         # budget less the open lots' ENTRY notionals, and its equity that room plus the lots at their marks.
@@ -2956,8 +2989,8 @@ class EquityBook:
         if standing is not None:
             job["standing"] = standing
         info = {"cols": cols, "called": is_called, "standing": standing, "equity": cash + own_value, "budget": budget,
-                "bars_sha": adapter.bars_sha(fetched, cols), "fetch": {**dict(fetched.meta), "sha": panel.get("sha")},
-                "lots": {lot.lid: lot for lot in lots}}
+                "sleeve": sleeve, "bars_sha": adapter.bars_sha(fetched, cols),
+                "fetch": {**dict(fetched.meta), "sha": panel.get("sha")}, "lots": {lot.lid: lot for lot in lots}}
         return job, info
 
     def _panel_ineligible(self, inst: Instance, t: dt.date, answer: Mapping[str, Any] | None, adapter: Any) -> int:
@@ -3037,7 +3070,10 @@ class EquityBook:
             ctx_sha=answer.get("ctx_sha"), bars_sha=info.get("bars_sha"), fetch=info.get("fetch") or {}, status=status,
             why=why, now=now)
         self.state.upsert("eq_rebalances", row, "instance, decided_day")
-        self.record("equity.rebalance", adapter.event(row), agent=inst.family)
+        # (`scaled`: the decision's budget was under the sleeve, the whole basket scaled to the account's room:
+        # `_panel_budget`. A verdict, never a dollar figure; absent when the budget is the sleeve.)
+        scaled = (A.dec(info.get("budget")) or ZERO) < (A.dec(info.get("sleeve")) or ZERO)
+        self.record("equity.rebalance", {**adapter.event(row), **({"scaled": True} if scaled else {})}, agent=inst.family)
         notes = dict(self.state.get("eq_hold_failed", {}) or {})
         if notes.pop(inst.id, None) is not None:
             self.state.put("eq_hold_failed", notes)

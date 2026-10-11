@@ -434,8 +434,11 @@ panel family's hidden year is `elane_xs.assign`'s, over six years); `equity_neff
 
 **Decisions the builders made that the captain should confirm** (each is in its package's report; the code and this
 file say the same):
-1. The Probe sleeve: at 0.50 x E (A20) a five-name basket alone fills the loss window (four whole names and the
-   fifth cut, held by `test_e4_e2e`); a panel program wants its own sleeve share before mode "live" (open point 17).
+1. The Probe sleeve: at 0.50 x E (A20) a five-name basket alone fills the loss window. FIXED AT THE REVIEW (spec-2):
+   E1's sizing cut the fifth name; the decision's budget is now the sleeve scaled so the whole basket fits
+   (`live._panel_budget`: five lots of $200 at $2,229, held by `test_e4_e2e` and
+   `test_equity_book_panel.TheWholeBasketIsScaledToTheRoom`). What is left for the captain: a full basket uses the
+   whole window (first come), and a panel sleeve of its own would leave room beside it (a money row).
 2. The vanish leg (D): at a name's third session with no valid close its leg is -0.30, no cost, for the lot, its
    counterparts and its cell's members, when the House could not have sold it since it left the eligible set.
 3. The dither (C; open point 18): on the ADJUSTED price's own cent grid, not the raw price's as the spec worded it.
