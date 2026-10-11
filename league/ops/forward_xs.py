@@ -503,7 +503,12 @@ def _shadow_class() -> Any:
                      run_key: str | None = None) -> Any:
             """One forward run of the panel kind in the night's decider child (`league.xs.runner.Isolated.forward`),
             its seconds added to `spent`. A program the child would not load is the child's failure (`RunFailed`),
-            as E3 reads a refusal."""
+            as E3 reads a refusal. THE CLOCK RULE (`elane_xs.steady`): a run whose runtime shows a decide timeout is
+            made again, `elane_xs.CLOCK_RUNS` times at most, and never read: a decide's limit is a second of WALL
+            time and this box has stood still for longer, so such a run is not the program's. With a timeout in
+            every run of the bound it is the child's failure too (`RunFailed`, with the measured seconds): no row of
+            that night, E3's retry, and E3's `run_failed` only when other programs' runs completed."""
+            from ..swarm import elane_xs
             from ..xs import runner as XR
 
             panel = self.panel
@@ -522,9 +527,12 @@ def _shadow_class() -> Any:
                            budget_seconds=float(self.cfg["run_budget_seconds"]), nice=None)
             began = self.clock()
             try:
-                return iso.forward(code, dict(params or {}), name=name, gate=self._gate, start=start, run_key=run_key)
+                return elane_xs.steady(lambda: iso.forward(code, dict(params or {}), name=name, gate=self._gate,
+                                                           start=start, run_key=run_key), what="forward run")
             except XR.ProgramRefused as exc:
                 raise XR.RunFailed(f"the program does not load: {str(exc)[:200]}") from None
+            except (elane_xs.TooSlow, elane_xs.ClockUnsteady) as exc:
+                raise XR.RunFailed(str(exc)[:400]) from None
             finally:
                 self.spent += max(0.0, self.clock() - began)
 

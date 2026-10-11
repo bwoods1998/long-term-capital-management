@@ -188,13 +188,16 @@ class FakeRunner:
     """`league.xs.runner.Isolated` at its interface (the module docstring): `train`, `validation`, `look`, `segments`,
     each answering a `runner.Run`-shaped object (`result`, `slice`); every call kept in `calls`. `market` {year: a
     daily term} is added to the residual of a program whose PARAMS carry `mkt`; `fail` {window: an Exception} raises;
-    `decider` is the panel kind's fake."""
+    `decider` is the panel kind's fake. THE HOUSE'S CLOCK: a program whose PARAMS carry `clock` (a list) shows that
+    many decide timeouts in its runtime, the list read in the order its runs are made (`clock_at`: runs past its end
+    show none), of `clock_calls` calls (default 250) that took `clock_seconds` in all (default 25.0)."""
 
     def __init__(self, *, market: Mapping[int, float] | None = None):
         self.calls: list[dict[str, Any]] = []
         self.market = dict(market or {})
         self.fail: dict[str, BaseException] = {}
         self.decider = FakeDecider()
+        self.clock_at: dict[str, int] = {}
 
     def needs(self, code: str, params: Any, *, name: str) -> dict[str, Any]:
         return dict(_model(code, params)["needs"])
@@ -244,6 +247,12 @@ class FakeRunner:
             "summary": _summary(daily, model, rebalances), "by_year": _by_year(daily, every), "daily": daily,
             "lots": [], "picks": [], "picks_sha": sha[:12], "factors": [], "runtime": {"seconds": 0.01},
             "start": days[0].isoformat() if days else None, "end": days[-1].isoformat() if days else None}
+        if isinstance(model.get("clock"), (list, tuple)):
+            at = self.clock_at.get(sha, 0)
+            self.clock_at[sha] = at + 1
+            timeouts = int(model["clock"][at]) if at < len(model["clock"]) else 0
+            result["runtime"] = {"calls": int(model.get("clock_calls", 250)), "errors": timeouts, "timeouts": timeouts,
+                                 "disqualified": None, "decide_seconds": float(model.get("clock_seconds", 25.0))}
         leak = model.get("leak_day")
         if leak and window == "train":
             result["daily"] = [*daily, [str(leak), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, False, 1000.0]]
@@ -314,8 +323,9 @@ class FakeDecider:
     """The decider's panel kind in this process (`kind_load`, `kind` "decide", `kind_drop`): a load executes the
     invented program in a namespace of its own (so its STATE starts empty, as a fresh instance's does in the child); a
     decide calls its `decide` on the job's invented inputs and answers the child's shape ({hold, target (string keys,
-    as JSON gives them), at, stats {calls, errors, disqualified}, failed}). `restart_after`, `reload_after`, `counts`,
-    `fails`: what a test can make of the child (E2's fake's own knobs)."""
+    as JSON gives them), at, stats {calls, errors, timeouts, disqualified}, failed}). `restart_after`, `reload_after`,
+    `counts`, `fails`: what a test can make of the child (E2's fake's own knobs); `timeout_at`: the decide (counted
+    over every job) the child's wall-clock limit cuts (a hold, one error and one timeout of that instance)."""
 
     def __init__(self) -> None:
         self.instances: dict[str, dict[str, Any]] = {}
@@ -326,13 +336,14 @@ class FakeDecider:
         self.reload_after: int | None = None
         self.counts = True
         self.fails: BaseException | None = None
+        self.timeout_at: int | None = None
 
     def _fresh(self, key: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         space: dict[str, Any] = {}
         exec(compile(str(payload["code"]), f"<{key}>", "exec"), space)  # noqa: S102 - an invented test program
         params = {**dict(space.get("PARAMS") or {}), **dict(payload.get("params") or {})}
         self.instances[key] = {"space": space, "params": params, "payload": dict(payload), "calls": 0, "errors": 0,
-                               "disqualified": None}
+                               "timeouts": 0, "disqualified": None}
         return self.instances[key]
 
     def kind_load(self, kind: str, key: str, payload: Mapping[str, Any], *, budget_seconds: Any = None) -> dict:
@@ -366,6 +377,9 @@ class FakeDecider:
             if not instance["disqualified"]:
                 instance["calls"] += 1
                 try:
+                    if self.timeout_at is not None and self.decides == self.timeout_at:
+                        instance["timeouts"] += 1
+                        raise TimeoutError("decide ran past its limit")
                     answer = instance["space"]["decide"](SimpleNamespace(**dict(job["inputs"]),
                                                                          params=instance["params"]))
                 except Exception:  # noqa: BLE001 - a failed decide is a hold and one error, as the runner counts it
@@ -373,7 +387,8 @@ class FakeDecider:
                     instance["errors"] += 1
                     if instance["errors"] >= int(instance["payload"].get("max_errors", 25)):
                         instance["disqualified"] = f"{instance['errors']} errors"
-            stats = {"calls": instance["calls"], "errors": instance["errors"], "disqualified": instance["disqualified"]}
+            stats = {"calls": instance["calls"], "errors": instance["errors"], "timeouts": instance["timeouts"],
+                     "disqualified": instance["disqualified"]}
             target = answer.get("target") if isinstance(answer, Mapping) else None
             results[key] = {"hold": target is None, "at": answer.get("at") if isinstance(answer, Mapping) else None,
                             "target": json.loads(json.dumps({str(k): v for k, v in target.items()})) if target else

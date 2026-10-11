@@ -627,6 +627,76 @@ class ThePanelNight(unittest.TestCase):
         self.assertEqual(h.rows(int(h.row(f"{bad}@1")["pid"])), [])
 
 
+class TheHousesClockAtNight(unittest.TestCase):
+    """THE CLOCK RULE on the forward night (`elane_xs.steady`, asked by `PanelShadow._forward`): a decide's limit is a
+    second of WALL time and the House's box stands still for longer, so a forward run whose runtime shows a decide
+    timeout is made again and no row is written from it."""
+
+    @staticmethod
+    def clocked(name: str, script: list[int]):
+        """A decider whose runs of program `name` show `script`'s decide timeouts, in the order they are made (none
+        past its end); every other run is as it is."""
+        class Clocked(D.InlineDecider):
+            made: list[int] = []
+
+            def kind(self, kind, op, payload, **kw):
+                answer = super().kind(kind, op, payload, **kw)
+                if kind == "panel" and op == "run" and payload.get("name") == name:
+                    timeouts = script[len(Clocked.made)] if len(Clocked.made) < len(script) else 0
+                    Clocked.made.append(timeouts)
+                    answer["result"]["runtime"]["timeouts"] = timeouts
+                return answer
+
+        Clocked.made = []
+        return Clocked
+
+    def test_a_run_that_lost_a_decide_is_made_again_and_the_rows_are_the_clean_runs(self):
+        plain, _, plain_pid = registered(self)
+        plain.night(8)
+        h, key, pid = registered(self)
+        clocked = self.clocked(key, [2, 0])
+        receipt = h.night(8, decider=clocked())
+        self.assertEqual(clocked.made, [2, 0], "made twice: the first lost two decides to the clock")
+        self.assertEqual((receipt["programs"], receipt["errors"], receipt["retried"], receipt["house"]), (1, 0, 0, 0))
+        wanted = [(r["day"], r["r"], r["w"], r["b"], r["r15"], r["entries"], r["exits"]) for r in plain.rows(plain_pid)]
+        self.assertEqual([(r["day"], r["r"], r["w"], r["b"], r["r15"], r["entries"], r["exits"]) for r in h.rows(pid)],
+                         wanted)
+        self.assertEqual(h.events("run_failed") + h.events("run_disqualified"), [])
+
+    def test_timeouts_in_every_run_of_the_bound_write_no_row_and_are_the_childs_failure(self):
+        said = "ran past 1.00 s of wall time in each of 3 runs of one forward run"
+        for script in ([1, 2, 1] * 4, [3, 3, 3] * 4):       # (whether or not they repeat: a night judges no program)
+            h = House(self)
+            h.store(h.days[0])
+            good, slow = h.family("px"), h.family("py")
+            for fid in (good, slow):
+                h.scored(fid, when=at(h.days[0], 12))
+            h.sync()
+            clocked = self.clocked(f"{slow}@1", script)
+            shadow = h.shadow(6, decider=clocked())
+            shadow.fresh = clocked
+            seen = []
+            forward = type(shadow)._forward
+
+            def watched(self_, **kw):
+                try:
+                    return forward(self_, **kw)
+                except Exception as exc:  # noqa: BLE001 - what the night's attempt is handed
+                    seen.append(exc)
+                    raise
+
+            with mock.patch.object(type(shadow), "_forward", watched):
+                receipt = shadow.night()
+            self.assertEqual((receipt["programs"], receipt["retried"], receipt["errors"]), (1, 1, 1), script)
+            self.assertEqual(len(clocked.made), 2 * elane_xs.CLOCK_RUNS, "the bound, and the night's own retry of it")
+            self.assertEqual({type(exc).__name__ for exc in seen}, {"RunFailed"}, "the child's failure, as E3 reads it")
+            self.assertIn(said, str(seen[0]))
+            self.assertEqual(h.rows(int(h.row(f"{slow}@1")["pid"])), [], "no row of a run that lost decides")
+            self.assertEqual(len(h.rows(int(h.row(f"{good}@1")["pid"]))), 5, "the other program's night is whole")
+            (event,) = h.events("run_failed")
+            self.assertEqual(event["pid"], int(h.row(f"{slow}@1")["pid"]))
+
+
 class TheStopRulesReadEachLanesOwnNights(unittest.TestCase):
     """E3's rules, unchanged, on the nights of the job that runs the program (rows and events invented, as E3's own
     tests write them)."""

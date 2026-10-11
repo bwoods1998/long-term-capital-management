@@ -127,7 +127,8 @@ def plan(week: str, index: int, *, hidden: bool = True) -> dict[str, Any]:
 
 def build_runner(root: Path, settings: Mapping[str, Any]) -> tuple[Any, Any]:
     """(the job's `league.xs.runner.Isolated`, its decider): its OWN `league.live.decider.Decider`, nice 19, its hash
-    seed pinned as the swarm's evidence child's is; never the swarm's runner and never the live decider."""
+    seed pinned as the swarm's evidence child's is; never the swarm's runner and never the live decider. The chunk
+    reads ONE panel store through it (`elane_xs.one_store`, held by `_run` around its programs)."""
     from ..live.decider import Decider
     from ..swarm import elane, elane_xs
     from ..xs.runner import NICE, Isolated
@@ -146,25 +147,24 @@ def judge(run_through: Any, decider: Any, code: str, *, name: str, hidden: int |
           placebos: int, before: Any = None) -> dict[str, Any]:
     """THE WHOLE BAR for one program (the module docstring), nothing recorded: {passed, fails}. `before()` is called
     before each run (it raises `Stopped` to stop the chunk). The runner's and the decider's own errors pass through
-    (the House's: the program is not counted)."""
+    (the House's: the program is not counted), and so does the clock rule's (`elane_xs.steady`: a run whose runtime
+    shows a decide timeout is made again and never read; a random-score program has no slow decide of its own, so
+    timeouts in every run of the bound are the House's too). THE RUNS ARE THE SWARM'S OWN (`elane_xs.bar_runs`): each
+    run's slice is dropped once its result is read, and the restart check cuts a k 1.5 run's slice again when it
+    reads it (`elane_xs.slicer`), one span's at a time."""
     from ..swarm import elane_xs
 
     spans = elane_xs.run_spans(hidden, years_ok)
     if not spans:
         raise RuntimeError("the panel store names no Train year the bar can run on")
-    runs: dict[Any, list[Any]] = {"base": [], "stress": [], 0: [], 1: []}
 
     def one(**kw: Any) -> Any:
         if before is not None:
             before()
         return run_through.train(code, {}, name=name, **kw)
 
-    for first, last in spans:
-        runs["base"].append(one(start=first, end=last, k=elane_xs.K_BASE, style=True))
-        runs["stress"].append(one(start=first, end=last, k=elane_xs.K_STRESS, placebos=int(placebos), calls=True))
-        for half in elane_xs.HALVES:
-            runs[half].append(one(start=first, end=last, k=elane_xs.K_STRESS, half=half))
-    parts = {key: [dict(getattr(run, "result", None) or {}) for run in rs] for key, rs in runs.items()}
+    parts, stress = elane_xs.bar_runs(one, spans, placebos=int(placebos),
+                                      again=elane_xs.slicer(run_through, code, {}, name=name))
     statuses = {str(result.get("status")) for rs in parts.values() for result in rs}
     if "disqualified" in statuses:
         return {"passed": False, "fails": [FAULT]}  # a random-score program has no error of its own to make
@@ -173,7 +173,8 @@ def judge(run_through: Any, decider: Any, code: str, *, name: str, hidden: int |
     verdict = elane_xs.train_score_xs({"spans": spans, "base": parts["base"], "stress": parts["stress"],
                                        "halves": {0: parts[0], 1: parts[1]}}, years_ok=years_ok)
     if verdict["passed"]:
-        verdict = elane_xs.with_state(verdict, elane_xs.state_check(decider, code, {}, name=name, runs=runs["stress"]))
+        verdict = elane_xs.with_state(verdict, elane_xs.state_check(decider, code, {}, name=name, runs=stress))
+    stress.clear()
     return {"passed": bool(verdict["passed"]), "fails": list(verdict["fails"])}
 
 
@@ -242,36 +243,38 @@ def _run(ctx: Any) -> dict[str, Any]:
                 raise Stopped(str(why))
 
         started, slowest = time.monotonic(), 0.0
-        for index in range(row["programs"], row["programs"] + todo):
-            if done and time.monotonic() - started + slowest > CHUNK_S:
-                stopped = "the chunk's own wall is near: the next trigger resumes the week"
-                break
-            spec = plan(week, index, hidden=folds)
-            code = program_code(spec["seed"], spec["k"], spec["rebalance"])
-            began = time.monotonic()
-            try:
-                verdict = judge(run_through, decider, code, name=f"xs-zero-{week}-{index}", hidden=spec["hidden_year"],
-                                years_ok=years_ok, placebos=int(c["placebos_train"]), before=before)
-            except Stopped as exc:
-                stopped = str(exc)
-                break
-            except Exception as exc:  # noqa: BLE001 - the House's: this program is not counted, the chunk ends here
-                stopped = f"{type(exc).__name__}: {str(exc)[:200]}"
-                if not done:
-                    return {"status": "failed", "error": stopped, "week": week, "programs": row["programs"],
-                            "passes": row["passes"]}
-                break
-            finally:
-                took = time.monotonic() - began
-                slowest = max(slowest, took)
-                elane_xs.book_cpu(store, took, ctx.now())
-            row["programs"] += 1
-            row["passes"] += int(verdict["passed"])
-            for code_ in ([PASS] if verdict["passed"] else verdict["fails"] or [FAULT]):
-                row["by_rule"][code_] = row["by_rule"].get(code_, 0) + 1
-            weeks[week] = row
-            store.put(KV, {k: weeks[k] for k in sorted(weeks)[-WEEKS_KEPT:]})  # after EACH program: a chunk resumes
-            done += 1
+        with elane_xs.one_store(run_through):  # (one store a chunk: each open maps the bar arrays again)
+            for index in range(row["programs"], row["programs"] + todo):
+                if done and time.monotonic() - started + slowest > CHUNK_S:
+                    stopped = "the chunk's own wall is near: the next trigger resumes the week"
+                    break
+                spec = plan(week, index, hidden=folds)
+                code = program_code(spec["seed"], spec["k"], spec["rebalance"])
+                began = time.monotonic()
+                try:
+                    verdict = judge(run_through, decider, code, name=f"xs-zero-{week}-{index}",
+                                    hidden=spec["hidden_year"], years_ok=years_ok, placebos=int(c["placebos_train"]),
+                                    before=before)
+                except Stopped as exc:
+                    stopped = str(exc)
+                    break
+                except Exception as exc:  # noqa: BLE001 - the House's: this program is not counted, the chunk ends here
+                    stopped = f"{type(exc).__name__}: {str(exc)[:200]}"
+                    if not done:
+                        return {"status": "failed", "error": stopped, "week": week, "programs": row["programs"],
+                                "passes": row["passes"]}
+                    break
+                finally:
+                    took = time.monotonic() - began
+                    slowest = max(slowest, took)
+                    elane_xs.book_cpu(store, took, ctx.now())
+                row["programs"] += 1
+                row["passes"] += int(verdict["passed"])
+                for code_ in ([PASS] if verdict["passed"] else verdict["fails"] or [FAULT]):
+                    row["by_rule"][code_] = row["by_rule"].get(code_, 0) + 1
+                weeks[week] = row
+                store.put(KV, {k: weeks[k] for k in sorted(weeks)[-WEEKS_KEPT:]})  # after EACH program: a chunk resumes
+                done += 1
     finally:
         try:
             if decider is not None and callable(getattr(decider, "close", None)):

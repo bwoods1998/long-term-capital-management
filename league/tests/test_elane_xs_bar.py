@@ -9,10 +9,13 @@ review under the panel rubric, the retirement REFUTED or STALLED). league.xs is 
 from __future__ import annotations
 
 import datetime as dt
+import gzip
 import json
 import unittest
 from types import SimpleNamespace
 from unittest import mock
+
+import numpy as np
 
 from league.equity import config as econfig
 from league.swarm import elane_review, elane_train, elane_xs
@@ -615,6 +618,258 @@ class TheJudgment(ScoreCase):
             self.assertIn("closed", elane_xs.step(owner, fam)["skipped"])
         self.assertEqual((self.world.runner.calls, self.router.calls), ([], []))
         self.assertEqual(self.world.quiet_asked, [])
+
+
+class TheHousesClock(ScoreCase):
+    """THE CLOCK RULE (`elane_xs.steady`; the ship check's major): a decide's limit is a second of WALL time and the
+    House's box stands still for longer, so a run whose runtime shows a decide timeout is made again and never read.
+    A program that times out the same way in every run of the bound is too slow, and reads so with the measured
+    seconds; timeouts that do not repeat are the House's, and nothing is judged."""
+
+    @staticmethod
+    def a_run(timeouts, calls=250, seconds=25.0):
+        return SimpleNamespace(result={"status": "ok", "runtime": {"calls": calls, "errors": timeouts,
+                                                                   "timeouts": timeouts, "decide_seconds": seconds}})
+
+    def test_the_first_run_with_no_timeout_is_the_one_read(self):
+        made = []
+
+        def make(script):
+            runs = iter(script)
+
+            def one():
+                made.append(next(runs))
+                return made[-1]
+            return one
+
+        clean = self.a_run(0)
+        self.assertIs(elane_xs.steady(make([clean])), clean)
+        self.assertEqual(len(made), 1, "a clean run is made once")
+        del made[:]
+        self.assertIs(elane_xs.steady(make([self.a_run(1), self.a_run(2), clean])), clean)
+        self.assertEqual(len(made), elane_xs.CLOCK_RUNS, "at most the bound")
+        self.assertEqual(elane_xs.clock_of({"runtime": {"calls": 10, "timeouts": 2, "decide_seconds": 4.0}}),
+                         {"calls": 10, "timeouts": 2, "seconds": 4.0, "mean": 0.4})
+        self.assertEqual(elane_xs.clock_of({})["timeouts"], 0, "a result that carries no runtime shows none")
+        self.assertEqual(elane_xs.clock_of(None)["timeouts"], 0)
+
+    def test_timeouts_that_repeat_are_the_programs_and_the_refusal_says_the_measured_seconds(self):
+        for script in ([7, 7, 7], [130, 121, 127], [1, 1, 1]):
+            with self.assertRaises(elane_xs.TooSlow, msg=script) as raised:
+                runs = iter([self.a_run(n, seconds=212.5) for n in script])
+                elane_xs.steady(lambda: next(runs), what="span (2019-01-02..2019-12-31, base)")
+            said = str(raised.exception)
+            self.assertIn("decide ran past 1.00 s of wall time in each of 3 runs", said)
+            self.assertIn(f"{script[0]} of 250, {script[1]} of 250, {script[2]} of 250 calls", said)
+            self.assertIn("the last run's decides took 212.5 s in all, 0.85 s a call on average", said)
+
+    def test_timeouts_that_do_not_repeat_are_the_houses_clock(self):
+        for script in ([1, 2, 1], [3, 1, 2], [12, 1, 1]):      # (12 of 250 is under 5%: one run's bad minute)
+            with self.assertRaises(elane_xs.ClockUnsteady, msg=script):
+                runs = iter([self.a_run(n) for n in script])
+                elane_xs.steady(lambda: next(runs))
+        with self.assertRaises(KeyError):
+            elane_xs.steady(lambda: {}["a run the child failed passes through"])
+
+    def test_a_judgment_is_made_on_the_run_that_showed_no_timeout(self):
+        plain = self.family("rev-plain", code=F.good())
+        lost = self.family("rev-lost", code=F.good(clock=[2, 0, 0, 1]))      # its 1st and 4th runs lost decides
+        self.score(plain)
+        calls = len(self.world.runner.calls)
+        out = self.score(lost)
+        self.assertEqual((out["passed"], out["fails"]), (True, []))
+        self.assertEqual(len(self.world.runner.calls) - calls, calls + 2, "the two runs were made again, once each")
+        a, b = self.record(plain)["versions"]["1"], self.record(lost)["versions"]["1"]
+        self.assertEqual((b["facts"], b["score"], b["state"]), (a["facts"], a["score"], a["state"]),
+                         "the verdict is the clean runs': what a lost decide did to a run was read by nobody")
+        stored = self.store.runs(lost["id"])
+        self.assertEqual(len(stored), len(self.store.runs(plain["id"])))
+        kept = [json.loads(gzip.decompress((self.store.root / r["path"]).read_bytes())) for r in stored]
+        self.assertEqual({k["runtime"]["timeouts"] for k in kept}, {0}, "no stored run lost a decide")
+        self.assertNotIn("infra", self.record(lost))
+
+    def test_a_program_truly_too_slow_reads_a_refusal_with_the_measured_seconds(self):
+        fam = self.family(code=F.good(clock=[9] * 40, clock_calls=250, clock_seconds=231.0))
+        out = self.score(fam)
+        self.assertEqual((out["passed"], out["fails"]), (False, ["SLOW"]))
+        self.assertEqual(len(self.world.runner.calls), elane_xs.CLOCK_RUNS, "the first leg, three times, and no further")
+        entry = self.record(fam)["versions"]["1"]
+        self.assertEqual((entry["fails"], entry["facts"], entry["passed"]), (["SLOW"], {}, False))
+        self.assertEqual(elane_xs.judged(self.record(fam)), 0, "it judges the program, never the mechanism")
+        text = elane_xs.version_text(1, entry)
+        self.assertIn(elane_xs.PROGRAM_FAILS["SLOW"], text)
+        self.assertIn("decide ran past 1.00 s of wall time in each of 3 runs", text)
+        self.assertIn("9 of 250, 9 of 250, 9 of 250 calls", text)
+        self.assertIn("231.0 s in all, 0.92 s a call on average", text)
+        self.assertEqual(self.store._all("SELECT 1 FROM runs WHERE family=?", (fam["id"],)), [], "no run of it is kept")
+        scored = [e["payload"] for e in self.events("swarm.elane") if e["payload"].get("pass") == "scored"]
+        self.assertEqual([(e["bar_passed"], e["fails"], e["judged"]) for e in scored], [(False, ["SLOW"], False)])
+        brief = elane_xs.brief(self.owner, self.store.family(fam["id"]))
+        self.assertIn("v1: the program's decide is too slow for the House", brief, "its author reads it")
+        self.assertIn("231.0 s in all, 0.92 s a call on average", brief)
+
+    def test_timeouts_that_do_not_repeat_judge_nothing_and_are_told_once(self):
+        fam = self.family(code=F.good(clock=[1, 2, 1] * 20))
+        tell = elane_train.cfg(self.settings)["train_max_errors"]
+        for attempt in range(1, tell + 2):
+            out = self.score(fam)
+            self.assertEqual(out["house"], "clock")
+            self.assertIn("the House's clock, not the program", out["why"])
+            self.assertEqual(self.record(fam)["versions"], {}, "nothing scored, no budget spent, no verdict")
+            self.assertEqual(self.record(fam)["infra"]["kinds"], {"clock": attempt})
+            self.store.clock.advance(10)
+        self.assertEqual(self.store._all("SELECT 1 FROM runs WHERE family=?", (fam["id"],)), [])
+        alerts = [e["payload"] for e in self.events("swarm.status") if e["payload"].get("action") == "elane_xs_clock"]
+        self.assertEqual(len(alerts), 1, "once, at the bound, and not again")
+        self.assertTrue(alerts[0]["alert"])
+        self.assertEqual([e for e in self.events("swarm.elane") if e["payload"].get("pass") == "scored"], [])
+
+    def test_a_timeout_inside_the_restart_check_is_the_houses_and_never_a_mismatch(self):
+        fam = self.family()
+        self.world.runner.decider.timeout_at = 8
+        out = self.score(fam)
+        self.assertEqual(out["house"], "state")
+        self.assertIn("ran past 1.00 s of wall time during the restart check", out["why"])
+        self.assertEqual(self.record(fam)["versions"], {})
+        self.world.runner.decider.timeout_at = None
+        self.store.clock.advance(elane_xs.BACKOFF_MAX)
+        self.assertTrue(self.score(fam)["passed"], "asked again on a steady clock it is judged")
+
+    def test_the_hidden_run_keeps_no_row_of_a_run_that_lost_decides(self):
+        """The bar's runs of a version with a hidden year: 3 spans x 4 legs. Then its two hidden runs."""
+        steady = self.family("rev-steady", code=F.good(clock=[0] * 12 + [1, 0, 0]), hidden=2018)
+        self.score(steady)
+        oof = self.store.family(steady["id"])["state"][elane_xs.OOF_KEY]["1"]
+        self.assertEqual(sorted(oof), ["1", "1.5"], "the first hidden run was made again and both are kept")
+        slow = self.family("rev-slowhid", code=F.good(clock=[0] * 12 + [4] * 9), hidden=2018)
+        self.assertTrue(self.score(slow)["passed"], "the verdict was recorded before the hidden run")
+        self.assertNotIn(elane_xs.OOF_KEY, self.store.family(slow["id"])["state"], "and no out-of-fold row of such a run")
+
+
+class TheJudgmentsMemory(unittest.TestCase):
+    """ONE STORE A JUDGMENT, and the restart check's slice cut again (`one_store`, `slicer`, `bar_runs`; the ship
+    check's major and the rehearsal's measurement): on the REAL panel store, runner and decider kind (a small
+    synthetic panel, invented prices), no double of league.xs."""
+
+    @classmethod
+    def setUpClass(cls):
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        from league.live import decider as D
+        from league.tests.test_xs_runner import REAL
+        from league.xs import runner as xrunner
+        from league.xs import synth
+
+        cls.tmp = tempfile.mkdtemp()
+        cls.addClassCleanup(shutil.rmtree, cls.tmp, ignore_errors=True)
+        cls.root = synth.synthetic_panel(Path(cls.tmp) / "equity-daily", n_assets=40, seed=11, churn=0.10, gate=True)
+        cls.code = REAL
+        cls.decider = D.InlineDecider()
+        cls.iso = xrunner.Isolated(cls.decider, cls.root, nice=None)
+        cls.span = (dt.date(2022, 1, 3), dt.date(2022, 12, 30))
+
+    def opened(self):
+        """The runner with its store opens counted: (the context to hold it in, the list of stores opened)."""
+        from league.xs import store as xstore
+
+        stores = []
+        plain = xstore.PanelStore
+
+        def counting(root, gate=None):
+            stores.append(plain(root, gate=gate))
+            return stores[-1]
+
+        return mock.patch.object(xstore, "PanelStore", counting), stores
+
+    def test_the_runner_opens_the_store_for_every_run_and_a_judgment_opens_it_once(self):
+        first, last = self.span
+        counted, stores = self.opened()
+        with counted:
+            for k in (1.0, 1.5):
+                self.iso.train(self.code, None, name="p", start=first, end=last, k=k)
+            self.assertEqual(len(stores), 2, "as the runner is: a store a run")
+            del stores[:]
+            with elane_xs.one_store(self.iso) as held:
+                self.assertIs(held, self.iso)
+                a = self.iso.train(self.code, None, name="p", start=first, end=last, k=1.0)
+                b = self.iso.train(self.code, None, name="p", start=first, end=last, k=1.5, half=0)
+                self.iso.validation(self.code, None, name="p")
+                self.assertEqual(len(stores), 1, "one store for the judgment's ungated runs")
+                with elane_xs.one_store(self.iso):       # (a judgment inside a chunk's store adds none)
+                    self.iso.train(self.code, None, name="p", start=first, end=last, k=1.0)
+                self.assertEqual(len(stores), 1)
+            self.assertNotIn("_store", vars(self.iso), "the runner is as it was afterwards")
+            self.iso.train(self.code, None, name="p", start=first, end=last, k=1.0)
+            self.assertEqual(len(stores), 2)
+        again = self.iso.train(self.code, None, name="p", start=first, end=last, k=1.0)
+        self.assertEqual((a.result["result_sha"], b.result["half"]), (again.result["result_sha"], 0),
+                         "a run on the kept store is the run on a store of its own")
+
+    def test_a_gated_run_never_reads_the_kept_store(self):
+        from league.equity.store import mint_equity_gate_capability
+
+        gate = mint_equity_gate_capability(self.root, "the one look")
+        counted, stores = self.opened()
+        with counted, elane_xs.one_store(self.iso):
+            self.iso.train(self.code, None, name="p", start=self.span[0], end=self.span[1])
+            self.iso.look(self.code, None, name="p", gate=gate, placebos=5, seed=3)
+            self.iso.look(self.code, None, name="p", gate=gate, placebos=5, seed=3)
+        self.assertEqual(len(stores), 3, "the sealed window's store is opened for its run and never kept")
+
+    def test_a_double_of_the_runner_is_left_as_it_is(self):
+        double = F.FakeRunner()
+        with elane_xs.one_store(double) as held:
+            self.assertIs(held, double)
+        self.assertIsNone(elane_xs.slicer(double, self.code, {}, name="p"), "and its k 1.5 runs are kept whole")
+
+    def test_the_slice_cut_again_is_the_runs_own_and_the_restart_check_reads_it(self):
+        from league.xs import runner as xrunner
+
+        first, last = self.span
+        run = self.iso.train(self.code, None, name="p", start=first, end=last, k=1.5, placebos=5, calls=True)
+        cut = elane_xs.slicer(self.iso, self.code, None, name="p")
+        again = cut(first, last)
+        self.assertEqual(again.run_key, run.slice.run_key)
+        self.assertEqual(again.bars.dither_key, run.slice.bars.dither_key)
+        for name in ("days", "early", "raw", "adj", "elig0", "ids", "exit", "hs", "sector_perm"):
+            self.assertTrue(np.array_equal(getattr(again.bars, name), getattr(run.slice.bars, name), equal_nan=True), name)
+        self.assertTrue(np.array_equal(again.aids, run.slice.aids))
+        # A k 1.5 run kept WITHOUT its slice gives the restart check the same stream, call for call...
+        kept = elane_xs._Kept(run.result, lambda: cut(first, last))
+        whole, lazy = list(xrunner.state_stream(run)), list(xrunner.state_stream(kept))
+        self.assertGreater(len(whole), 30)
+        self.assertEqual(len(lazy), len(whole), "every call's ctx was rebuilt and held to the sha the run recorded")
+        # ...and A SLICE THAT IS NOT THE RUN'S IS REFUSED, never read: the stream holds every rebuilt ctx to the sha
+        # the run recorded for that call.
+        other = elane_xs._Kept(run.result, lambda: cut(dt.date(2023, 1, 3), dt.date(2023, 12, 29)))
+        with self.assertRaises(xrunner.RunFailed):
+            list(xrunner.state_stream(other))
+
+    def test_the_bars_runs_keep_results_and_the_stress_runs_come_without_their_slices(self):
+        made = []
+
+        def run_one(**kw):
+            made.append(self.iso.train(self.code, None, name="p", **kw))
+            return made[-1]
+
+        spans = (self.span, (dt.date(2023, 1, 3), dt.date(2023, 12, 29)))
+        with elane_xs.one_store(self.iso):
+            parts, stress = elane_xs.bar_runs(run_one, spans, placebos=5,
+                                              again=elane_xs.slicer(self.iso, self.code, None, name="p"))
+            self.assertEqual({leg: len(rs) for leg, rs in parts.items()}, {"base": 2, "stress": 2, 0: 2, 1: 2})
+            self.assertEqual([type(run).__name__ for run in stress], ["_Kept", "_Kept"])
+            self.assertEqual([run.result["result_sha"] for run in stress], [r["result_sha"] for r in parts["stress"]])
+            self.assertNotIn("slice", vars(stress[0]), "no slice is held: it is cut when it is read")
+            check = elane_xs.state_check(self.decider, self.code, None, name="p", runs=stress)
+        self.assertGreater(check["calls"], 60)
+        self.assertEqual(check["resets"], list(elane_xs.BAR_XS["state_resets"]))
+        whole = elane_xs.state_check(self.decider, self.code, None, name="p",
+                                     runs=[made[1], made[5]])       # (the same two k 1.5 runs, kept whole)
+        self.assertEqual({k: check[k] for k in ("calls", "matched", "disqualified", "failed", "first_miss")},
+                         {k: whole[k] for k in ("calls", "matched", "disqualified", "failed", "first_miss")},
+                         "the restart check on the slices cut again is the check on the runs kept whole")
 
 
 class TheReviewAndTheStep(ScoreCase):

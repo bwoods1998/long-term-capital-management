@@ -221,6 +221,79 @@ class TheJob(JobCase):
         self.assertTrue(any(":b" in key for key in self.world.runner.decider.loads), "instance B was loaded fresh")
         self.assertEqual(elane_xs.zero_edge_rate(self.store), {"programs": 2, "passes": 2, "rate": 1.0})
 
+    def clocked(self, script):
+        """The fake runner with THE HOUSE'S CLOCK in it: run i of the job shows `script[i]` decide timeouts (none past
+        the script's end)."""
+        original = F.FakeRunner._result
+        made = iter(range(10 ** 6))
+
+        def result(runner, code, params, **kw):
+            i = next(made)
+            return original(runner, code, {"clock": [script[i]] if i < len(script) else [0], "run": i}, **kw)
+
+        return mock.patch.object(F.FakeRunner, "_result", result)
+
+    def test_a_run_that_lost_a_decide_to_the_clock_is_made_again_and_its_program_counts_once(self):
+        with mock.patch.object(Z, "PROGRAMS_RUN", 1), self.clocked([1, 0, 0, 2, 3]):
+            out = self.run_job()
+        self.assertEqual((out["status"], out["ran"], out["programs"]), ("ok", 1, 1))
+        self.assertNotIn("stopped", out)
+        self.assertEqual(len(self.world.runner.calls), 8 + 3, "the first run once more, the third twice more")
+        self.assertEqual(self.row()["programs"], 1)
+
+    def test_timeouts_in_every_run_of_the_bound_are_the_houses_and_count_no_program(self):
+        """A random-score program has no slow decide of its own: whether the timeouts repeat or not, the job judges
+        nothing on such runs and the chunk ends with what it has."""
+        for script, named in (([1, 2, 1], "ClockUnsteady"), ([4, 4, 4], "TooSlow")):
+            with mock.patch.object(Z, "PROGRAMS_RUN", 2), self.clocked(script):
+                out = self.run_job()
+            self.assertEqual((out["status"], out["programs"]), ("failed", 0), script)
+            self.assertIn(named, out["error"])
+            self.assertIsNone(self.row())
+        with mock.patch.object(Z, "PROGRAMS_RUN", 2), self.clocked([0] * 8 + [1, 2, 1]):
+            out = self.run_job()
+        self.assertEqual((out["status"], out["ran"], out["programs"]), ("ok", 1, 1), "the first program stands")
+        self.assertIn("ClockUnsteady", out["stopped"])
+
+    def test_a_judgment_keeps_no_run_whole_but_the_stress_runs_until_the_restart_check(self):
+        """THE MEMORY OF A JUDGMENT (the ship check's major): the bar's runs are the swarm's own (`elane_xs.bar_runs`),
+        which keeps each run's RESULT and lets its slice go, the k 1.5 runs alone kept whole for the restart check;
+        the judgment lets those go too. Held here by counting what is still alive of every run made."""
+        import gc
+        import weakref
+
+        alive: list[weakref.ref] = []
+        original = F.FakeRunner._result
+
+        class Slice:
+            def __init__(self, window, run_key):
+                self.window, self.run_key = window, run_key
+
+        def result(runner, code, params, **kw):
+            run = original(runner, code, {"edge": 0.0015, "sd": 0.004}, **kw)   # (a pass: the restart check runs)
+            run.slice = Slice(run.slice.window, run.slice.run_key)
+            alive.append(weakref.ref(run.slice))
+            return run
+
+        seen = {}
+        check = elane_xs.state_check
+
+        def checked(decider, code, params, *, name, runs):
+            gc.collect()
+            seen["at_check"] = sum(1 for ref in alive if ref() is not None)
+            seen["kept"] = len(runs)
+            return check(decider, code, params, name=name, runs=runs)
+
+        code = Z.program_code(7, 8, "weekly")
+        with mock.patch.object(F.FakeRunner, "_result", result), mock.patch.object(elane_xs, "state_check", checked):
+            out = Z.judge(self.world.runner, self.world.runner.decider, code, name="xs-zero-mem", hidden=2018,
+                          years_ok=list(xconfig.TRAIN_YEARS), placebos=200)
+        self.assertTrue(out["passed"], out)
+        self.assertEqual(len(alive), 12, "three seen spans, four runs each")
+        self.assertEqual((seen["kept"], seen["at_check"]), (3, 3), "at the restart check only the k 1.5 runs are whole")
+        gc.collect()
+        self.assertEqual(sum(1 for ref in alive if ref() is not None), 0, "and after the judgment none is")
+
     def test_a_chunk_resumes_where_the_weeks_earlier_chunks_stopped_and_stops_at_the_weeks_programs(self):
         seen = []
 
@@ -381,6 +454,70 @@ class TheJob(JobCase):
                          ("xs-zero-decider.log", self.root / "equity-daily", 300.0, 19))
         self.assertNotEqual(made["log"].name, elane_xs.DECIDER_LOG, "never the swarm's own child")
         self.assertEqual(decider.hash_seed, elane.EVIDENCE_HASH_SEED)
+
+
+class TheJobFitsItsMemory(unittest.TestCase):
+    """The ship check's major, AT THE REAL PANEL'S SIZE (2,455 sessions by 767 columns) UNDER THE OPS CHILD'S OWN
+    LIMIT (`league.ops.__main__.limit`: the address space is capped 500 MB above the child's start, before the job's
+    first import). As it was, the job opened the store again for every run and kept every run whole: its SECOND run
+    found no room, every Sunday chunk would have failed and the zero-edge column stayed empty. A judgment now reads
+    one store a chunk, keeps each run's result and lets its slice go, and cuts a k 1.5 run's slice again for the
+    restart check. The world is `league/tests/xs_zero_edge_budget.py`'s: the real store, runner and decider (the
+    House's side and its child's loop), the engine canned; the judgments run in a child of this test."""
+
+    EXTRA_MB = 500          # the registry row's default: `league.ops.runner` starts the child with it
+    PROGRAMS = 3
+    #: Of the cap, three judgments leave at least this much address space unused (measured on the desk's Python
+    #: 3.14 and 3.11: about 80 and 90 MB; the House's box reads about 20 MB higher at the same shape). What is left
+    #: is the store's two maps, one slice, its pickle and its frame: a judgment's runs no longer add to it.
+    HEADROOM_MB = 50
+
+    def measure(self, mode):
+        import os
+        import subprocess
+        import sys
+        import tempfile
+
+        from league.ops import registry, runner
+        from league.tests import xs_zero_edge_budget as B
+
+        self.assertEqual(runner.EXTRA_MB, self.EXTRA_MB, "the address space the runner gives every job's child")
+        if not hasattr(self, "state"):
+            tmp = tempfile.TemporaryDirectory()
+            self.addCleanup(tmp.cleanup)
+            self.state = Path(tmp.name) / "state"
+            built = B.build(self.state)
+            self.assertGreaterEqual(built["sessions"], 2455, "the production panel's sessions")
+            self.assertGreaterEqual(built["columns"], 700, "and its columns")
+        repo = Path(Z.__file__).resolve().parents[2]
+        env = {**os.environ, "PYTHONPATH": str(repo), "PYTHONDONTWRITEBYTECODE": "1", "OPENBLAS_NUM_THREADS": "1",
+               "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}    # (as `league.ops.runner` starts its child)
+        done = subprocess.run([sys.executable, "-c", B.BOOT, str(self.state), str(self.EXTRA_MB), mode,
+                               str(self.PROGRAMS)], cwd=repo, env=env, capture_output=True, text=True,
+                              timeout=registry.by_name()["xs_zero_edge"].wall)
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+        return json.loads(done.stdout.strip().splitlines()[-1])
+
+    def test_three_judgments_fit_with_room_to_spare_and_the_job_as_it_was_does_not_fit_one(self):
+        try:
+            import numpy  # noqa: F401 - the real store and runner
+        except ImportError:  # pragma: no cover
+            self.skipTest("numpy not installed")
+        out = self.measure("judge")
+        self.assertIsNone(out["error"], out)
+        self.assertEqual(out["verdicts"], [{"passed": False, "fails": [Z.FAULT]}] * self.PROGRAMS,
+                         "every run was sent whole and answered (a canned child's programs are FAULT by construction)")
+        self.assertEqual((out["spans"], out["runs"]), (2, self.PROGRAMS * 8), "both Train segments whole, four runs each")
+        self.assertGreater(out["slice_sessions"], 700, "a slice of three Train years with its history")
+        self.assertGreater(out["cap_mb"], 0, "the limit was set before the job's imports")
+        self.assertLessEqual(out["vm_peak_mb"], out["cap_mb"] - self.HEADROOM_MB,
+                             f"three judgments peaked at {out['vm_peak_mb']} MB of a cap of {out['cap_mb']} MB")
+        # THE MEASUREMENT SEES WHAT IT IS FOR: the judgment as it was (a store a run, every run kept whole) meets the
+        # cap inside its first program, as the House's box did on its second run.
+        was = self.measure("kept")
+        self.assertIn("MemoryError", str(was["error"]), was)
+        self.assertEqual(was["verdicts"], [])
+        self.assertLess(was["runs"], 8, "not one program's eight runs")
 
 
 if __name__ == "__main__":

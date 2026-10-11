@@ -228,6 +228,8 @@ PROGRAM_FAILS: dict[str, str] = {
     "RUN": "the panel's decider child failed this program's Train run again and again while other programs' runs "
            "completed",
     "DQ": "the program was disqualified on Train by its own errors or timeouts",
+    "SLOW": "the program's decide is too slow for the House: it ran past the limit of one second a call in every one "
+            "of the runs it was given of one span",
     "LOAD": "the panel's decider child refused to load the program",
     "REVIEW": "the equity review refused the program under the panel rubric (an embedded table, calendar recognition, "
               "a use of the slot ids beyond naming targets, a level search or lookahead)",
@@ -1911,6 +1913,13 @@ def _asked(row: Mapping[str, Any]) -> tuple[int | None, int | None, bool]:
     return calls, errors, bool(stats.get("disqualified"))
 
 
+def _timed_out(row: Mapping[str, Any]) -> int:
+    """The decides the answering instance has counted past their wall-clock limit since it was loaded (`stats`)."""
+    stats = row.get("stats")
+    value = stats.get("timeouts") if isinstance(stats, Mapping) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
 #: What of a restart check the record keeps (`with_state`): counts only, no market figure.
 STATE_KEYS = ("calls", "matched", "share", "resets", "need", "disqualified", "failed", "first_miss")
 
@@ -1921,7 +1930,8 @@ def state_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
     loaded fresh after calls 3, 10, 13, 20, 23, 30 and on, both deciding on THE SAME `Inputs` at every called
     decision. A call matches when `at` is equal, the two targets name the same ids, every weight is within 1e-6 and
     the errors moved by the same count. Never a silent pass: `elane_train.StateCheckInterrupted` when an answer's
-    `stats.calls` is not what its instance was asked, or the decider restarted. -> {calls, matched, share, resets,
+    `stats.calls` is not what its instance was asked, the decider restarted, or a decide of either instance ran past
+    its wall-clock limit (the House's clock: `steady`). -> {calls, matched, share, resets,
     need, held, disqualified (the calls an instance was disqualified at: they match nothing), failed (the calls the
     two decides did not count the same errors), first_miss {span, call, after_reset}}. The decider's own errors pass
     through (a child that failed; a program it would not load). Every instance is dropped at the end."""
@@ -1975,6 +1985,11 @@ def state_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
                 if ra.get("error") or rb.get("error"):
                     raise StateCheckInterrupted("the child could not build a ctx: "
                                                 f"{str(ra.get('error') or rb.get('error'))[:200]}")
+                if _timed_out(ra) or _timed_out(rb):
+                    # THE CLOCK RULE (`steady`): the runs this check reads showed no decide timeout, so one here is
+                    # the House's clock, and a call one instance lost to it would read as a mismatch.
+                    raise StateCheckInterrupted(f"a decide ran past {DECIDE_TIMEOUT:.2f} s of wall time during the "
+                                                "restart check (the runs it reads had none): the House's clock")
                 out = False
                 erred: list[int] = []
                 for key, row in ((a, ra), (b, rb)):
@@ -2080,12 +2095,182 @@ class _Waits(RuntimeError):
     """A run that may not start now (`may_run`): the version's judgment waits, nothing scored."""
 
 
+# ------------------------------------------------------------------------------- the House's clock, and its memory
+#: THE HOUSE'S CLOCK (the ship check's major, Oct 11, 2026). A decide's limit is one second of WALL time
+#: (league/gym/runtime.py arms ITIMER_REAL and league/xs/program.py reads a wall clock beside it), and a research
+#: child runs at nice 19 on a box of one core that was seen standing still for seconds: a decide that needs a tenth
+#: of a second can read as "ran past its limit", its target is lost, and the same program on the same span gave
+#: different lots run to run. The fix at the root (the child's own CPU time) is inside the equity identity and is not
+#: this release's. So no caller of release E4 judges or records a run whose runtime shows a decide timeout: the run
+#: is made again, at most `CLOCK_RUNS` times in all (`steady`), and the first run with none is the one read.
+CLOCK_RUNS = 3
+#: When every one of those runs shows a timeout the fault is THE PROGRAM'S only if it repeats as a program's does: the
+#: same count of timeouts in every run (a slow call is slow every time it is made), or more than this share of its
+#: calls in every run (a decide near the limit). Else it is the House's clock again, and nothing is judged.
+SLOW_SHARE = 0.05
+
+
+class TooSlow(RuntimeError):
+    """A program whose decide ran past the limit in every run it was given, the same way each time: THE PROGRAM'S
+    (`PROGRAM_FAILS["SLOW"]`), with the measured seconds in its words."""
+
+
+class ClockUnsteady(RuntimeError):
+    """A decide timeout in every run of the bound that does not repeat as a program's does: THE HOUSE'S (its clock),
+    never a verdict."""
+
+
+def clock_of(result: Mapping[str, Any] | None) -> dict[str, Any]:
+    """{calls, timeouts, seconds (the decides' own, summed), mean (seconds a call)} of a run's runtime (zeros and None
+    for what it does not carry)."""
+    runtime = (result or {}).get("runtime")
+    runtime = runtime if isinstance(runtime, Mapping) else {}
+    calls, timeouts = (int(_num(runtime.get(key)) or 0) for key in ("calls", "timeouts"))
+    seconds = _num(runtime.get("decide_seconds"))
+    return {"calls": calls, "timeouts": timeouts, "seconds": seconds,
+            "mean": seconds / calls if seconds is not None and calls else None}
+
+
+def steady(make: Callable[[], Any], *, runs: int = CLOCK_RUNS, what: str = "run") -> Any:
+    """THE CLOCK RULE: `make()` (one run; a `league.xs.runner.Run`) until its runtime shows no decide timeout, `runs`
+    times at most, and that run. Every run of the bound with a timeout: `TooSlow` when they repeat as a program's do
+    (`SLOW_SHARE`), with the measured seconds; else `ClockUnsteady`. `make`'s own exceptions pass through (a run that
+    may not start now, a run the child failed)."""
+    seen: list[dict[str, Any]] = []
+    for _ in range(max(1, int(runs))):
+        run = make()
+        clock = clock_of(getattr(run, "result", None))
+        if not clock["timeouts"]:
+            return run
+        seen.append(clock)
+        del run
+    counts = [c["timeouts"] for c in seen]
+    told = ", ".join(f"{c['timeouts']} of {c['calls']}" for c in seen)
+    last = seen[-1]
+    took = ("" if last["seconds"] is None or last["mean"] is None else
+            f"; the last run's decides took {last['seconds']:.1f} s in all, {last['mean']:.2f} s a call on average")
+    limit = f"{DECIDE_TIMEOUT:.2f} s"
+    if len(set(counts)) == 1 or all(c["timeouts"] > SLOW_SHARE * max(1, c["calls"]) for c in seen):
+        raise TooSlow(f"decide ran past {limit} of wall time in each of {len(seen)} runs of one {what} ({told} calls"
+                      f"{took}); a call must answer well inside the limit on a busy one-core box")
+    raise ClockUnsteady(f"the House's clock, not the program: a decide ran past {limit} of wall time in each of "
+                        f"{len(seen)} runs of one {what} ({told} calls{took}), and not the same way twice")
+
+
+def one_store(run_through: Any) -> Any:
+    """ONE PANEL STORE A JUDGMENT (a context manager; the rehearsal's measurement on the House's box). The panel
+    runner opens the store again for every run (`league.xs.runner.Isolated._store`), and each open maps the two bar
+    arrays again, about 120 MB of address space at the real panel's size, held until a full collection (the store and
+    its universe name each other). Inside this block the runner's ungated runs (Train, Validation) read ONE store,
+    opened at the first of them; a gated run (the look, a forward run) opens its own, as before, and nothing of a
+    sealed window is kept. At the end the store is let go and collected. A runner that is not the panel's own (a
+    test's double) is left as it is."""
+    import contextlib
+    import gc
+
+    from ..xs import runner as xrunner
+
+    @contextlib.contextmanager
+    def held() -> Any:
+        if not isinstance(run_through, xrunner.Isolated) or "_store" in vars(run_through):
+            yield run_through
+            return
+        plain = run_through._store
+        kept: list[Any] = []
+
+        def store(gate: Any = None) -> Any:
+            if gate is not None:
+                return plain(gate)
+            if not kept:
+                kept.append(plain())
+            return kept[0]
+
+        run_through._store = store  # type: ignore[method-assign]
+        try:
+            yield run_through
+        finally:
+            del run_through._store
+            kept.clear()
+            gc.collect()
+
+    return held()
+
+
+class _Kept:
+    """A k 1.5 run kept for the restart check WITHOUT its slice: its `result`, and its span's `slice` cut again each
+    time it is read (never held here: the check reads one span's at a time)."""
+
+    def __init__(self, result: Mapping[str, Any], cut: Callable[[], Any]):
+        self.result = result
+        self._cut = cut
+
+    @property
+    def slice(self) -> Any:
+        return self._cut()
+
+
+def slicer(run_through: Any, code: str, params: Mapping[str, Any] | None, *,
+           name: str) -> Callable[[dt.date, dt.date], Any] | None:
+    """HOW A SEEN SPAN'S SLICE IS CUT AGAIN for the restart check (`bar_runs`'s `again`): the panel runner's own cut
+    of a Train run over [start, end] (`league.xs.runner.Isolated.train`: the program's NEEDS and run sha through the
+    child, the store's `train` under the run key `run_sha|train|first run day`, the full universe), so the ids, the
+    sector codes and the dither are the run's own. None for a runner that is not the panel's own (a test's double:
+    its runs are then kept whole). IT CANNOT PASS A WRONG SLICE OFF AS THE RUN'S: `runner.state_stream` rebuilds every
+    called ctx from the slice and refuses one whose sha is not the sha the run recorded for that call."""
+    from ..xs import runner as xrunner
+
+    if not isinstance(run_through, xrunner.Isolated):
+        return None
+
+    def cut(start: dt.date, end: dt.date) -> Any:
+        needs, run_sha = run_through._program(code, params, name)
+        store = run_through._store()
+        first = run_through._first([d for d in store.sessions("train") if start <= d <= end],
+                                   f"Train in {start}..{end}")
+        return store.train(start, end, history=needs.history, run_key=xrunner.gym_key(run_sha, "train", first),
+                           half=None)
+
+    return cut
+
+
+def bar_runs(run_one: Callable[..., Any], spans: Sequence[tuple[dt.date, dt.date]], *, placebos: int,
+             again: Callable[[dt.date, dt.date], Any] | None = None
+             ) -> tuple[dict[Any, list[dict[str, Any]]], list[Any]]:
+    """THE TRAIN BAR'S RUNS of one judgment: one run a seen span and a leg, each starting flat (the full universe at
+    1.0x with its style block and at 1.5x with `placebos` placebos and its calls, each asset half at 1.5x), every one
+    through the clock rule (`steady`). -> (each leg's RESULTS in span order {"base", "stress", 0, 1}, the k 1.5 runs
+    for the restart check). A RUN'S SLICE IS DROPPED ONCE ITS RESULT IS READ: a slice of three Train years is about
+    45 MB at the real panel's size, the parent holds it three times over while it is sent (the slice, its pickle, the
+    frame), and the runs of a judgment kept whole were what filled the ops child's 500 MB (measured again with the
+    k 1.5 runs alone kept: the eighth run still found no room). So with `again` (`slicer`) a k 1.5 run is kept as its
+    result alone and its slice is cut again when the restart check reads it; without it (a test's double) the k 1.5
+    runs are kept whole. The check is the caller's to make, and the list the caller's to empty."""
+    parts: dict[Any, list[dict[str, Any]]] = {"base": [], "stress": [], 0: [], 1: []}
+    stress: list[Any] = []
+
+    def read(leg: Any, span: str, **kw: Any) -> Any:
+        run = steady(lambda: run_one(**kw), what=f"span ({span}, {leg if isinstance(leg, str) else f'half {leg}'})")
+        parts[leg].append(dict(getattr(run, "result", None) or {}))
+        return run
+
+    for first, last in spans:
+        span = f"{first.isoformat()}..{last.isoformat()}"
+        read("base", span, start=first, end=last, k=K_BASE, style=True)
+        run = read("stress", span, start=first, end=last, k=K_STRESS, placebos=int(placebos), calls=True)
+        stress.append(run if again is None else _Kept(parts["stress"][-1], lambda a=first, b=last: again(a, b)))
+        del run
+        for half in HALVES:
+            read(half, span, start=first, end=last, k=K_STRESS, half=half)
+    return parts, stress
+
+
 def house_failure(researcher: Any, fam: Mapping[str, Any], n: int, why: str, *, kind: str) -> dict[str, Any] | None:
     """A failure of the House's (E2's rule, on the panel's record): nothing scored, no budget, no model call; a backoff
     that doubles with every failure of the version, of any kind. COUNTED BY KIND: for a child's run failure ("run")
     whose streak reaches `train_max_errors` while other programs' panel judgments completed since the streak's first,
     None: the caller judges the program RUN. A result outside its span ("window") is an alert at once; a restart check
-    that could not run or finish ("state") once, at its `train_max_errors`-th."""
+    that could not run or finish ("state") once, at its `train_max_errors`-th, and so are decide timeouts that do not
+    repeat ("clock": `steady`)."""
     from . import elane_train
 
     c = elane_train.cfg(researcher.settings)
@@ -2106,7 +2291,7 @@ def house_failure(researcher: Any, fam: Mapping[str, Any], n: int, why: str, *, 
     if kind == "run" and streak >= c["train_max_errors"] and (_num(store.get(TRAIN_OK_KEY)) or 0.0) > since:
         return None
     delay = min(float(c["train_every_seconds"]) * (2 ** min(count - 1, 12)), BACKOFF_MAX)
-    tell = kind == "state" and kinds[kind] >= c["train_max_errors"] and kind not in alerted
+    tell = kind in ("state", "clock") and kinds[kind] >= c["train_max_errors"] and kind not in alerted
     if tell:
         alerted.append(kind)
     record = {"version": n, "count": count, "first_at": first, "next_at": now + delay, "kind": kind, "why": why[:240],
@@ -2117,7 +2302,13 @@ def house_failure(researcher: Any, fam: Mapping[str, Any], n: int, why: str, *, 
                                           "text": "a panel Train result carried a day outside its seen span, or of "
                                                   "2016, 2020 or 2021: refused whole; nothing is judged on it (check "
                                                   "the panel runner)"})
-    if tell:
+    if tell and kind == "clock":
+        store.event("swarm.status", fid, {"action": "elane_xs_clock", "alert": True, "version": n,
+                                          "text": f"a panel Train judgment met decide timeouts that did not repeat "
+                                                  f"{kinds[kind]} times since this version was last judged: "
+                                                  f"{why[:160]}; the version is not scored on such a run (the box's "
+                                                  "clock: check what holds the core while the panel's child runs)"})
+    elif tell:
         store.event("swarm.status", fid, {"action": "elane_xs_state", "alert": True, "version": n,
                                           "text": f"the panel Train bar's restart check (STATE) could not finish "
                                                   f"{kinds[kind]} times since this version was last judged: "
@@ -2169,7 +2360,8 @@ def _hidden_run(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, A
                 years_ok: Sequence[int]) -> None:
     """THE HIDDEN RUN, after the verdict is recorded: one run at each k over `hidden_span(hidden)`, starting flat, its
     sum, t, days and status into the sealed `OOF_KEY` and nowhere else (never `add_run`, never the record, no event).
-    A hidden run the House failed, or that may not start now, writes nothing and is not tried again."""
+    A hidden run the House failed, or that may not start now, writes nothing and is not tried again; nor does one
+    whose every run of the clock rule's bound shows a decide timeout (`steady`: no row is kept of such a run)."""
     if hidden not in years_ok:
         return
     store, settings = researcher.store, researcher.settings
@@ -2179,14 +2371,18 @@ def _hidden_run(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, A
     row: dict[str, Any] = {}
     try:
         run_through = _runner_of(researcher)
-        for k in (K_BASE, K_STRESS):
+
+        def one(k: float) -> Any:
             if may_run(store, settings, researcher.clock()) is not None:
-                return
+                raise _Waits("a wall or the day's budget")
             began = time.monotonic()
             try:
-                run = run_through.train(code, params, name=fid, start=first, end=last, k=float(k))
+                return run_through.train(code, params, name=fid, start=first, end=last, k=float(k))
             finally:
                 book_cpu(store, time.monotonic() - began, researcher.clock())
+
+        for k in (K_BASE, K_STRESS):
+            run = steady(lambda: one(k), what="hidden span")
             result = dict(getattr(run, "result", None) or {})
             summary = result.get("summary") if isinstance(result.get("summary"), Mapping) else {}
             row[f"{k:g}"] = {"status": str(result.get("status") or "unknown"), "sum_x": _round(summary.get("sum_x"), 6),
@@ -2207,7 +2403,6 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
     provisional costs): passed again it stands, else the pass is withdrawn."""
     store, settings = researcher.store, researcher.settings
     root = _root_of(researcher)
-    c = cfg(settings)
     fid, n = str(fam["id"]), int(version["n"])
     code, params = str(version.get("code") or ""), dict(version.get("params") or {})
     if MODES.index(mode(settings, root)) < MODES.index("train"):
@@ -2230,17 +2425,32 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
         finally:
             book_cpu(store, time.monotonic() - began, researcher.clock())
 
-    runs: dict[Any, list[Any]] = {"base": [], "stress": [], 0: [], 1: []}
+    with one_store(run_through):
+        return _judged(researcher, fam, version, run_one, spans, covered, hidden, rescore=rescore)
+
+
+def _judged(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], run_one: Callable[..., Any],
+            spans: Sequence[tuple[dt.date, dt.date]], covered: Sequence[int] | None, hidden: int | None, *,
+            rescore: bool) -> dict[str, Any]:
+    """`score`'s judgment once its runs may be made (inside the judgment's one store): the bar's runs (`bar_runs`: no
+    run with a decide timeout is read), the bar, the restart check, the record, then the hidden run."""
+    store, settings = researcher.store, researcher.settings
+    root = _root_of(researcher)
+    c = cfg(settings)
+    fid, n = str(fam["id"]), int(version["n"])
+    code, params = str(version.get("code") or ""), dict(version.get("params") or {})
+    parts: dict[Any, list[dict[str, Any]]] = {}
+    stress: list[Any] = []
     verdict: dict[str, Any] | None = None
     try:
-        for first, last in spans:
-            runs["base"].append(run_one(start=first, end=last, k=K_BASE, style=True))
-            runs["stress"].append(run_one(start=first, end=last, k=K_STRESS, placebos=int(c["placebos_train"]),
-                                          calls=True))
-            for half in HALVES:
-                runs[half].append(run_one(start=first, end=last, k=K_STRESS, half=half))
+        parts, stress = bar_runs(run_one, spans, placebos=int(c["placebos_train"]),
+                                 again=slicer(_runner_of(researcher), code, params, name=fid))
     except _Waits as wait:
         return {"family": fid, "version": n, "skipped": str(wait)}
+    except TooSlow as slow:  # THE PROGRAM'S, after the bounded runs: a refusal with the measured seconds
+        verdict = program_fault("SLOW", str(slow))
+    except ClockUnsteady as exc:  # THE HOUSE'S clock: nothing judged, nothing recorded as a verdict
+        return house_failure(researcher, fam, n, str(exc), kind="clock") or {}
     except Exception as exc:  # noqa: BLE001 - a refusal is the program's; a run failure is judged below
         verdict, out = fault(researcher, fam, n, exc)
         if out is not None:
@@ -2248,7 +2458,6 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
     sealed: dict[str, Any] = {}
     style: dict[str, Any] | None = None
     if verdict is None:
-        parts = {key: [dict(getattr(run, "result", None) or {}) for run in rs] for key, rs in runs.items()}
         if any(outside(result, span) for rs in parts.values() for result, span in zip(rs, spans)):
             return house_failure(researcher, fam, n, "a panel Train result carried a day outside its seen span",
                                  kind="window") or {}
@@ -2273,7 +2482,7 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
                 # THE RESTART CHECK: no pass without it (E2's rule: what stops it is the House's, or, for a child that
                 # keeps failing it while other programs are judged, the program's).
                 try:
-                    check = restart(researcher, code, params, name=fid, runs=runs["stress"])
+                    check = restart(researcher, code, params, name=fid, runs=stress)
                 except Exception as exc:  # noqa: BLE001 - judged as a run's failure is
                     verdict, out = fault(researcher, fam, n, exc, check=True)
                     if out is not None:
@@ -2281,6 +2490,7 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
                     through = False
                 else:
                     verdict = with_state(verdict, check)
+            stress.clear()  # (the k 1.5 runs' slices: kept for the restart check, and no longer)
             if through:
                 store.put(TRAIN_OK_KEY, researcher.clock())
             style = _style(parts["base"])  # A22 (1): kept whatever the bar said
@@ -3641,6 +3851,7 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "SETTINGS_KEY", "SCREEN_KEY", "SCREEN_NAME", "DECIDER_LOG", "STORE_DIR", "PANEL_MANIFEST",
            "UNIVERSE_MANIFEST", "DEFAULTS", "BOUNDS", "CENSUS_NOTE_MAX", "CENSUS_LABEL", "SCREEN_NULLS", "PANEL_AGENDA",
            "INPUTS", "BAR_XS", "FAILS_XS", "PROGRAM_FAILS", "JUDGED_XS", "MAP_LABEL", "K_BASE", "K_STRESS",
+           "CLOCK_RUNS", "SLOW_SHARE", "TooSlow", "ClockUnsteady", "clock_of", "steady", "one_store", "slicer", "bar_runs",
            "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "cfg", "pin", "receipt", "mode",
            "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
            "judged", "identity", "hidden_year_of", "card_errors", "cell_of", "family_cell", "cell_text",
