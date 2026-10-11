@@ -302,7 +302,11 @@ class World:
     def _book(self) -> None:
         """One live instance a registered program, created inside the decide step of `fwd[1]`, that decided and filled
         exactly as E1's engine does on the same bars: its lots (at the engine's own prices, quantities and fees) and
-        the intents of every decision, from the program's run on the whole market through the REAL shadow."""
+        the intents of every decision, from the program's own decisions on the whole market's bars as the REAL shadow
+        slices them. THE BOOK IS ITS OWN DECISIONS' DOING (`book_fx.live_path`): the SPY instance's decide of
+        `self.odd` recorded nothing, so the lot it would have bought was never bought and the lot it would have sold
+        is still held the next session, as in a real book (the fixture before A29 kept the twin run's lots there: a
+        lot no decision bought, which a twin set to the live book cannot follow)."""
         self.book = book_fx.Book(self.root / "live.sqlite")
         self.instances: dict[str, str] = {}
         db = forward_db.open_db(self.root)
@@ -312,20 +316,12 @@ class World:
             for key, base in LID_BASE.items():
                 program = forward_db.program(db, key)
                 iid = self.book.instance(key, program.code, created=at(self.fwd[1], 16, 25), run_sha=program.run_sha)
-                run = probe.run_from(program, self.fwd[2])
-                lots = {int(lot["lid"]): lot for lot in run.result["lots"]}
-                for lid, lot in lots.items():
-                    self.book.lot(base + lid, iid, lot["symbol"], lot["entry_day"], lot["entry_at"],
-                                  exit_day=lot["exit_day"], exit_at=lot["exit_at"], **self._money(lot))
-                for day, intents, held in book_fx.decide_loop(InlineDecider(), run):
-                    book_fx.record(self.book, iid, day, intents, held, set(program.needs["symbols"]), lots, base=base)
+                book_fx.live_path(self.book, iid, program, probe.slice(program, first_day=self.fwd[2]), base=base,
+                                  drop={self.odd} if key == "carries@1" else frozenset(), money=self._money)
                 self.instances[key] = iid
             self.wide = probe.store.bars(["QQQ", "SPY"], "forward", history=40, end=self.fwd[NIGHTS])
         finally:
             db.close()
-        self.book.db.execute("DELETE FROM eq_intents WHERE instance=? AND decided_day=?",
-                             (self.instances["carries@1"], self.odd))
-        self.book.db.commit()
 
     @staticmethod
     def _money(lot: dict) -> dict:
@@ -694,17 +690,30 @@ class TheWholeNight(unittest.TestCase):
                 self.assertNotEqual(odd[0]["live_bars"], odd[0]["shadow_bars"])
                 self.assertEqual(json.loads(odd[0]["live_keys"]), [])
                 self.assertNotEqual(json.loads(odd[0]["shadow_keys"]), [])
+                # A29: THAT ONE SESSION, and no other. The lot the live book did not sell is still held the next
+                # session, where the twin run holds another: as registered that session differed too (the
+                # un-re-based answer, kept beside). The twin, set to the live book after the odd session, holds the
+                # lot the live book holds, and every session after it agrees.
+                after = schedule.next_session(dt.date.fromisoformat(w.odd)).isoformat()
+                self.assertEqual([r["day"] for r in rows if r["base_agree"] == 0], [w.odd, after])
+                self.assertEqual([r["rebased"] for r in rows], [0 if r["day"] <= w.odd else 1 for r in rows])
             else:
                 self.assertEqual(odd, [])
+                self.assertEqual({(r["rebased"], r["base_agree"]) for r in rows}, {(0, 1)})
             same = [r for r in rows if r["agree"] == 1]
             self.assertTrue(all(r["live_bars"] == r["shadow_bars"] and r["cause"] is None for r in same))
             self.assertTrue(all(json.loads(r["live_keys"]) for r in same[1:]), "it sells and buys every session")
+            # Participation is read against the un-re-based twin run, as before: the one lot the odd decision never
+            # bought is the twin's alone.
             part = self.rows("SELECT * FROM fwd_part WHERE instance=? ORDER BY through", iid)[-1]
-            self.assertEqual((part["missed"], part["extra"]), (0, 0))
+            self.assertEqual((part["missed"], part["extra"]), (1 if key == "carries@1" else 0, 0))
             self.assertGreaterEqual(part["matched"], 18)
         finishes = [jobs["forward_shadow"]["twins"]["finish"] for jobs in w.receipts.values()]
         self.assertEqual(sum(f["disagreed"] for f in finishes), 1)
         self.assertEqual(sum(f["failed"] + f["interrupted"] + f["unregistered"] + f["mismatched"] for f in finishes), 0)
+        self.assertEqual(sum(f["rebased"] for f in finishes), 1)
+        [event] = self.rows("SELECT day, pid, payload FROM fwd_events WHERE kind='twin_rebased'")
+        self.assertEqual((event["day"], json.loads(event["payload"])["instance"]), (w.odd, w.instances["carries@1"]))
         self.assertEqual(self.rows("SELECT * FROM fwd_events WHERE kind IN ('twin_interrupted', 'twin_unregistered', "
                                    "'twin_sha_mismatch')"), [])
 
