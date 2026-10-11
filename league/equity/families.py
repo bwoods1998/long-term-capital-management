@@ -24,6 +24,13 @@ absence alone (one family's code file or version row that cannot be read leaves 
 swarm store's `equity_twins` record (league/ops/twins.py writes it: {"eq:<lid>": {status, gap_bp, final, ...}}), EDM1's
 twin leg.
 
+THE SEAT RULE (release E5-A; league/equity/bands.py, `equity_money.probe.seat`). Under "first-come" the read is the
+one above, unchanged: a Candidate waiting for a seat has no row, and the swarm's queue by pass time is the rule.
+Under "activity-1-free" the book itself decides who takes a free seat, so `_rows` asks the swarm's reader for
+`waiting=True`: every passed Candidate that could hold a seat has a row, each row carries `passed_at` and
+`seat_activity` (K's two counts, written beside the look by league/swarm/elane.py), and `seats()` says how many seats
+the swarm's roster allows (`elane.roster_seats`, failing closed: an unreadable roster seats nobody new).
+
 `MemoryEquityFamilies` is the same API in memory, for tests.
 """
 
@@ -36,6 +43,7 @@ from typing import Any, Iterable, Mapping
 
 from ..live.money import positive_sd
 from . import LANES
+from . import bands as B
 
 #: The swarm store key league/ops/twins.py records the equity twins under.
 TWINS_KEY = "equity_twins"
@@ -82,8 +90,22 @@ class EquityFamilies:
     def _rows(self, family: str | None = None) -> list[dict]:
         from ..swarm import bands
 
-        return [dict(row) for row in bands.read(self.root, family=family, lanes=LANES, strict=True)
+        # THE SEAT RULE: under "first-come" the swarm's own queue is the rule and the read is release E5-S's, to the
+        # byte; under any other rule the book ranks the waiting Candidates itself, so it reads them too.
+        waiting = {} if B.seat_settings().first_come else {"waiting": True}
+        return [dict(row) for row in bands.read(self.root, family=family, lanes=LANES, strict=True, **waiting)
                 if str(row.get("lane") or "") in LANES]
+
+    def seats(self) -> int:
+        """THE EQUITY ROSTER's seats as the swarm sets them (`elane.roster_seats`: swarm.json over policy.json, failing
+        closed): a positive count, or 0 when the roster seats nobody new (0, or a setting that cannot be read). The
+        book never seats past the lower of this and `equity_money.probe.max_programs`."""
+        try:
+            from ..swarm import elane
+
+            return max(0, int(elane.roster_seats(self.root)))
+        except Exception:  # noqa: BLE001 - fail closed: no new seat
+            return 0
 
     def read(self, family: str | None = None) -> list[dict]:
         """The equity-lane rows (the module docstring); [] with `last_error` set when the store cannot be read (no
@@ -204,8 +226,10 @@ class MemoryEquityFamilies:
     `standing` of a family with no row at all is "unknown" (the store never deletes a family: it retires it, band
     "retired")."""
 
-    def __init__(self, rows: Iterable[Mapping[str, Any]] = ()):
+    def __init__(self, rows: Iterable[Mapping[str, Any]] = (), *, seats: int | None = None):
         self.rows = {str(r["family"]): dict(r) for r in rows}
+        #: The swarm's roster as `EquityFamilies.seats` answers it; None: no word of it (the table's count alone).
+        self.roster = seats
         self.forward: dict[str, dict[str, dict]] = {}
         self.moves: list[tuple[str, str, str]] = []
         self.twin_rows: dict[str, dict] = {}
@@ -272,6 +296,9 @@ class MemoryEquityFamilies:
     def twins(self) -> dict[str, dict]:
         with self.lock:
             return copy.deepcopy(self.twin_rows)
+
+    def seats(self) -> int | None:
+        return self.roster
 
 
 __all__ = ["TWINS_KEY", "BOOK_BANDS", "RUNNING_BANDS", "GONE", "CONFIRM_FIELDS", "validation_r_sd", "EquityFamilies",

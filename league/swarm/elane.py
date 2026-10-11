@@ -109,6 +109,20 @@ refused at the gate before its look retires for what happened (`REFUSED_CAUSES`:
 not as a spent Validation try. Every report says plainly that these three were seeded by the captain's build agents
 (`SEEDED_NOTE`), and the Done meter reads Done with and without them (`seeded`).
 
+THE SEAT RULE'S TWO COUNTS (release E5-A; the captain's A24; league/equity/bands.py `seat_counts`, `seat_k`). A free
+equity seat goes to the best-ranked waiting passed program, and its rank K is the smaller of its Validation close
+days and its Train-era close days per 250 sessions. `look` writes the two counts beside the look (`SEAT_KEY`), ONCE,
+from the runs it already makes before the sealed run (the recorded Validation run it reproduced, and the Train-era
+runs of the floor): K is fixed when the look is recorded. A PROGRAM THAT PASSED BEFORE THE RELEASE has no record;
+`seat_backfill` (called at the end of the gate's equity round) writes it once: the Validation count from the STORED
+run whose `result_sha` is the one its look reproduced (the swarm store's own run file; when that file is gone, the
+Validation run made again), the Train-era count from the Train-era runs made again (`Isolated.segments`: the look
+keeps their series, not their lots). NO SEALED FIGURE IS READ OR PRINTED BY EITHER PATH: neither mints a gate
+capability, neither calls `Isolated.look`, both read the unsealed Validation and Train-era windows only, and what
+they keep is four whole numbers (close days and sessions), which count lots by size and exit day and read no price,
+return or P&L. The counts are House-only (family state; a private `_counts` in the gate's event): the EquityBook reads
+them in its rows (`bands.read(..., waiting=True)`: `seat_activity`) and every report shows a rank position, never K.
+
 Standard library only at import (league/equity/__init__.py and config.py); the screen, the runner and the store (numpy)
 are imported where they are used, on the House.
 """
@@ -172,6 +186,12 @@ TEMPLATE_KEY = "elane_template"
 VALIDATION_KEY = "elane_validation"
 VERDICTS_KEY = "elane_verdicts"
 SIGMA_KEY = "validation_r_sd_by_version"
+#: K's TWO COUNTS (THE SEAT RULE'S TWO COUNTS, the module docstring), written ONCE beside the look and never again for
+#: the same program: {version, run_sha, floor, validation {close_days, sessions}, train {close_days, sessions}, at,
+#: source "look" | "backfill", validation_run "look" | "stored" | "rerun"}. House-only: never in a view.
+SEAT_KEY = "elane_seat"
+#: Seconds before a backfill that failed is tried again for the same program (`seat_backfill`; kept in this process).
+SEAT_RETRY_SECONDS = 3600.0
 #: The share screens a lane's block may pin (league/equity/screen.py `SCREENS`; a test holds the two lists equal): "S2"
 #: is the House's gate (amendment A11, receipt 2); "S1" (A7 as amended by A9, receipt 1) stays in code, unused while no
 #: lane pins it. `SCREEN` is the screen of a block that names none (receipt 1's blocks may be written so).
@@ -1352,7 +1372,8 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     code, params = version["code"], dict(version.get("params") or {})
     floors = state.get(FLOOR_KEY) if isinstance(state.get(FLOOR_KEY), Mapping) else {}
     try:
-        segments, ended = _segment_series(S, runner.segments(code, params, name=fid))
+        runs = runner.segments(code, params, name=fid)
+        segments, ended = _segment_series(S, runs)
         cached = floors.get(str(n))
         if ended is not None:
             floor = {"eligible": False, "why": f"a Train-era run ended {ended}: its series is partial"}
@@ -1435,6 +1456,9 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         return None
     s1x = _s1x_floor(S, segments, receipt)  # S1-X's rate beside an S2 verdict: Train-era series only, before the look
     activity = _invested_shares(v, segments)  # beside the look, never its condition
+    # THE SEAT RULE'S TWO COUNTS (A24), from the runs made above, BEFORE the sealed run: K is fixed with the look.
+    seat = None if seat_recorded(state, n, sha) else _seat_record(store, n, sha, recorded.result, runs, source="look",
+                                                                   validation_run="look")
     marker = {"sha": sha, "n": n, "at": gate.clock(), "lane": lane}
     with store.atomic():
         current = store.family(fid) or {}
@@ -1500,15 +1524,146 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
                         **{LOOK_KEY: {"version": n, "at": store.now(), "verdict": verdict, "beside": beside,
                                       "activity": activity},
                            FLOOR_KEY: {**dict(floors), str(n): floor},
-                           TRAIN_R_KEY: train, TEMPLATE_KEY: template})
+                           TRAIN_R_KEY: train, TEMPLATE_KEY: template, **({SEAT_KEY: seat} if seat is not None else {})})
         current = store.family(fid) or {}
         if passed and current.get("band") == "gym" and not current.get("retired_at"):
             store.set_state(fid, banded_version=n, banded_sha=version.get("sha"), banded_at=gate.clock(),
                             banded_evaluator=proof)
             store.set_band(fid, "candidate", reason=f"passed its sealed look ({screen}, {label(lane)})")
     store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": passed, "lane": lane, "screen": screen,
-                                    "receipt": receipt.receipt_sha256, "_verdict": verdict, "_activity": activity})
+                                    "receipt": receipt.receipt_sha256, "_verdict": verdict, "_activity": activity,
+                                    "_seat": seat})
     return passed
+
+
+# ----------------------------------------------------------------------------------------------------------- the seat rule
+_seat_failed: dict[tuple[str, str, str], float] = {}
+
+
+def seat_recorded(state: Any, version: Any, sha: Any) -> bool:
+    """Whether K's two counts are already written for this exact program (`SEAT_KEY`: its version and run sha)."""
+    held = state.get(SEAT_KEY) if isinstance(state, Mapping) and isinstance(state.get(SEAT_KEY), Mapping) else None
+    return bool(held and sha and held.get("run_sha") == sha and held.get("version") == version)
+
+
+def seat_activity(state: Any, version: Any, sha: Any) -> dict[str, Any] | None:
+    """K's two counts of the program a row stands for, as the EquityBook reads them (`bands.read(..., waiting=True)`:
+    `seat_activity`): the `SEAT_KEY` record while it is this version's and this run sha's, else None (the program then
+    ranks after every program whose counts can be read, until `seat_backfill` writes them)."""
+    if not seat_recorded(state, version, sha):
+        return None
+    held = state[SEAT_KEY]
+    return {key: dict(held[key]) for key in ("validation", "train") if isinstance(held.get(key), Mapping)}
+
+
+def _seat_floor() -> Any:
+    from ..equity import bands as equity_bands
+
+    return equity_bands.seat_settings().k_floor
+
+
+def _seat_record(store: Any, n: int, sha: str, validation: Any, runs: Sequence[Any], *, source: str,
+                 validation_run: str) -> dict[str, Any] | None:
+    """K's two counts as the family's state keeps them (`SEAT_KEY`), from a Validation run's result and the Train-era
+    runs (`runner.Run`s or their results). None when they cannot be counted (a figure beside the look: never its
+    condition; the backfill tries again)."""
+    from ..equity import bands as equity_bands
+
+    try:
+        train = [dict(getattr(run, "result", run) or {}) for run in runs]
+        counts = equity_bands.seat_counts(dict(validation or {}), train, floor=_seat_floor())
+    except Exception:  # noqa: BLE001 - beside the look, never its condition
+        return None
+    return {"version": int(n), "run_sha": str(sha), **counts, "at": store.now(), "source": source,
+            "validation_run": validation_run}
+
+
+def _stored_validation(store: Any, fid: str, n: int, result_sha: Any) -> dict[str, Any] | None:
+    """THE RECORDED VALIDATION RUN as the swarm store kept it in full (`validate` -> `add_run`): the base-spread run of
+    version `n` whose `result_sha` is `result_sha` (the one its look reproduced, `VALIDATION_KEY`), status "ok", with
+    its lots. None when no such file can be read."""
+    if not result_sha:
+        return None
+    for row in store.version_runs(fid, int(n), window="validation", stress=econfig.K_BASE, limit=20):
+        result = store.run_result(row["run_id"])
+        if isinstance(result, Mapping) and result.get("result_sha") == result_sha and result.get("status") == "ok" \
+                and isinstance(result.get("lots"), list):
+            return dict(result)
+    return None
+
+
+def seat_backfill(gate: Any) -> list[str]:
+    """K'S TWO COUNTS FOR THE PROGRAMS THAT PASSED BEFORE THEY WERE KEPT (release E5-A; the module docstring). For
+    every living equity family in the Candidate, Probe or Sized band whose state holds no `SEAT_KEY` record of its
+    banded program: the Validation count from the stored run its look reproduced (`_stored_validation`; made again
+    through the House's own runner, `Isolated.validation`, when that file is gone), the Train-era count from the
+    Train-era runs made again (`Isolated.segments`). Written once (never over a record that landed meanwhile), with
+    one private `swarm.gate` event; a program whose counts cannot be made is tried again after `SEAT_RETRY_SECONDS`
+    and said once as a House warning (it ranks last until then: league/equity/bands.py `seat_key`).
+
+    NO SEALED FIGURE IS READ OR PRINTED: no gate capability is minted, `Isolated.look` is never called, both runs read
+    unsealed windows (Validation, the Train-era spans), and what is kept is four whole numbers. No try, no look, no
+    trial is counted and no band moves. Returns the families written. Never raises."""
+    store, settings = gate.store, gate.settings
+    written: list[str] = []
+    try:
+        if not on(settings) or getattr(store, "readonly", False):
+            return written
+        fams = store.families(alive=True, lanes=LANES)
+    except Exception:  # noqa: BLE001 - nothing read, nothing written
+        return written
+    for fam in fams:
+        fid = str(fam.get("id"))
+        try:
+            if fam.get("band") not in ("candidate", "probe", "sized"):
+                continue
+            state = fam.get("state") or {}
+            n = state.get("banded_version")
+            if isinstance(n, bool) or not isinstance(n, int):
+                continue
+            version = store.version(fid, n)
+            sha = _run_sha(version)
+            if sha is None or not (version or {}).get("code") or seat_recorded(state, n, sha):
+                continue
+            mark = (str(store.root), fid, sha)
+            now = float(gate.clock())
+            if now - _seat_failed.get(mark, float("-inf")) < SEAT_RETRY_SECONDS:
+                continue
+            noted = state.get(VALIDATION_KEY) if isinstance(state.get(VALIDATION_KEY), Mapping) else {}
+            code, params = version["code"], dict(version.get("params") or {})
+            runner = _runner(gate)
+            try:
+                validation = _stored_validation(store, fid, n, noted.get("result_sha") if noted.get("version") == n else None)
+                made = "stored"
+                if validation is None:
+                    validation, made = runner.validation(code, params, name=fid, k=econfig.K_BASE).result, "rerun"
+                record = _seat_record(store, n, sha, validation, runner.segments(code, params, name=fid),
+                                      source="backfill", validation_run=made)
+                if record is None:
+                    raise ValueError("the runs could not be counted")
+            except Exception as exc:  # noqa: BLE001 - it ranks last until the counts can be made
+                first = mark not in _seat_failed
+                _seat_failed[mark] = now
+                store.event("swarm.gate", fid, {"action": "seat_counts_failed", "version": n, "error": type(exc).__name__})
+                if first:
+                    store.event("swarm.status", fid, {  # a House warning (the swarm's alerts are its status rows)
+                        "action": "equity_seat_counts_failed", "alert": True, "version": n,
+                        "text": f"the seat rule's two counts of {fid} v{n} could not be made ({type(exc).__name__}): it "
+                                "ranks after every program whose counts can be read; tried again hourly"})
+                continue
+            with store.atomic():
+                current = store.family(fid) or {}
+                if current.get("retired_at") or seat_recorded(current.get("state") or {}, n, sha) \
+                        or (current.get("state") or {}).get("banded_version") != n:
+                    continue
+                store.set_state(fid, **{SEAT_KEY: record})
+            _seat_failed.pop(mark, None)
+            store.event("swarm.gate", fid, {"action": "seat_counts", "version": n, "source": "backfill",
+                                            "validation_run": made, "_counts": record})
+            written.append(fid)
+        except Exception as exc:  # noqa: BLE001 - one family's trouble never stops the others
+            store.event("swarm.gate", fid, {"action": "seat_counts_failed", "error": type(exc).__name__})
+    return written
 
 
 # ----------------------------------------------------------------------------------------------------------- the seeds
@@ -1587,4 +1742,4 @@ __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_K
            "FLOOR_INELIGIBLE", "REFUSED_BEFORE_LOOK", "REFUSED_CAUSES",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",
            "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LineageUnread", "LOSS_LINE",
-           "loss_line"]
+           "loss_line", "SEAT_KEY", "SEAT_RETRY_SECONDS", "seat_recorded", "seat_activity", "seat_backfill"]

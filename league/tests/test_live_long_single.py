@@ -80,9 +80,9 @@ class TheDeclaredType(unittest.TestCase):
             self.assertTrue(set(types) <= set(OPTIONS_REAL_TYPES))
 
     def test_the_money_table_and_its_digest_are_unchanged(self):
-        from league.tests.equity_design import DIGESTS, in_force, reference
+        from league.tests.equity_design import DIGESTS, e1, in_force
 
-        with reference():
+        with e1():      # A20's design as E1 deployed it: before the seat rule's block (release E5-A)
             self.assertEqual(money_digest(), MONEY_DIGEST)
         self.assertEqual(money_digest(), DIGESTS[in_force()][0])
         self.assertEqual(CONSTITUTION["options_money"]["real_types"], ["debit_vertical", "long_butterfly", "long_call", "long_put"])

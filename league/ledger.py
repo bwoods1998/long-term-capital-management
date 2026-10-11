@@ -177,6 +177,7 @@ KINDS: dict[str, bool] = {
     "equity.bars": False,       # the bars a decision read (their provenance sha in eq_bars)
     "equity.bars_audit": False,  # the morning re-fetch of a decision's bars agreed or did not
     "equity.band": False,       # the book moved an equity family between candidate, probe and sized
+    "equity.seat": False,       # THE SEAT RULE (A24): a seat taken, yielded or returned into, and why (a rank, never K)
     "equity.instance": False,   # an equity program instance started, updated or retired
     "equity.house_exits": False,  # the House's exit rules planned lots out (max hold, demotion, failed decides)
     "equity.activity": False,   # a dividend, split or corporate action booked (or frozen on)

@@ -976,8 +976,9 @@ CONSTITUTION: dict[str, Any] = {
     # - `open_risk_weight`: what an equity position counts in the shared budget, as a share of its marked value (the
     #   goal's convention: 0.20 an ETF, 0.40 a stock; only stricter).
     # - `probe` (A5): a program that passed its lane's look takes an equity roster seat (`max_programs`, equal to the
-    #   swarm's `elane.roster`; first come) with a sleeve of `sleeve_share` x E; an entry is cut to fit the budget's room
-    #   over its weight, and nothing under `min_order_usd` is sent.
+    #   swarm's `elane.roster`; who takes a free one is THE SEAT RULE, `probe.seat`, written under the table) with a
+    #   sleeve of `sleeve_share` x E; an entry is cut to fit the budget's room over its weight, and nothing under
+    #   `min_order_usd` is sent.
     #   THE SEATS AND THE SLEEVE ARE TWO NUMBERS (release E5-S, Oct 11, 2026; Claude's build under goal item 4):
     #   `max_programs` and `sleeve_share` are set TOGETHER, inside their bounds (`EQUITY_MONEY_BOUNDS`: 0 to 6 seats,
     #   a sleeve of 0 to 0.50 x E), by one mechanical step, `set_design SEATS SLEEVE`, which rewrites these two rows,
@@ -999,8 +1000,10 @@ CONSTITUTION: dict[str, Any] = {
     #   and its program's next entries are held to the sleeve in force (no more of that ETF while the lot is over
     #   half the sleeve, nothing at all while it is over the whole of it); a buy planned under the old sleeve is
     #   sized at its send under the one in force; seats moved down unseat nobody. Rollback, one owner deploy:
-    #   `set_design 3 0.50` (A20's design: the money digest is 7e41909a again, exactly; the bounds may stay); the
-    #   standing grant re-ratifies at the House's start; no fingerprint move, no evidence reset.
+    #   `set_design 3 0.50` (A20's seats and sleeve; the bounds may stay; its money digest is the pair's pin in
+    #   league/tests/equity_design.py `DIGESTS`, which since release E5-A carries the seat rule's block: E1's own
+    #   7e41909a was the table before that block); the standing grant re-ratifies at the House's start; no
+    #   fingerprint move, no evidence reset.
     # <equity-design>
     #   THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
     #   (`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.125 x E.
@@ -1093,6 +1096,35 @@ CONSTITUTION: dict[str, Any] = {
                        "decide_after_close_s": 1800, "audit_before_open_s": 3600},
     },
 }
+
+# ---- THE SEAT RULE (`equity_money.probe.seat`; the captain's A24, registered 13:42Z Oct 11, 2026, before the first live
+# share close and before any program waited for a seat; release E5-A). IT DECIDES WHO MAY OPEN NEXT, AND NOTHING ELSE.
+# - `rule`: "activity-1-free" (in force) or "first-come" (the rollback: release E5-S's behaviour exactly, seats by the
+#   time of the look pass).
+# - A FREE SEAT goes to the best-ranked WAITING passed program. Its rank is K: the smaller of its Validation close days
+#   and its Train-era close days per 250 sessions, a day counted only when the lots it closed that day sum to at
+#   least `k_floor` of its sleeve (read as `k_floor` minus 0.0005: the engine rounds a lot's weight). Ties: the
+#   earlier look pass, then the family id. K reads no P&L and no sealed window. It is fixed when the look is recorded
+#   and is never printed in public text (a report shows a rank position only).
+# - THE IDLE SEAT: a seated program that is flat and has had no buy reach the venue, and none cut or refused by the
+#   loss budget, for `idle_sessions` seated sessions is flagged idle. It keeps its seat while nobody waits and yields
+#   it at once when an unflagged program waits. A buy refused by the instrument cap, the invested cap or cash does not
+#   count as asked. A yielded program returns only into a free seat, by the same rank, with no new look.
+# - NOBODY TRADING IS EVER STOPPED BY THE SEAT RULE. OUTRANKING (a better-ranked arrival making a seated program
+#   exit-only) is NOT ADOPTED: it may be switched on only by A24's own pre-registered line, as a new value of `rule`.
+#   Never a forced or hand-placed trade; no lot is ever sold by the seat rule.
+# - Seeded and bred programs follow the same rule. EDM1 (`demotion`) covers waiting programs too.
+# - ITS COSTS, PLAINLY (A24): closes concentrate in frequent traders, so Done reached this way is weaker evidence of
+#   skill; a daily slice of a quarter sleeve can buy rank; a slow, non-idle incumbent keeps its seat.
+# - Rollback, one owner deploy: `rule` "first-come" (one money-digest move; the standing grant re-ratifies at the
+#   House's start; no fingerprint move, no evidence reset; nobody is unseated by it). `k_floor` is ONE value (K is
+#   fixed per program, so a moved floor would rank old and new programs on two measures: a new floor is a new rule
+#   name). `idle_sessions` sits at its loose end (10): inside its bound a change can only make a yield rarer.
+# The `probe` row in the table stays one line of two numbers, because release E5-S's mechanical step (`set_design`)
+# rewrites that exact line; the block is added to the same dict here, so it is a row of the table and of the money
+# digest like every other (`EQUITY_MONEY_BOUNDS`, `EQUITY_MONEY_CHOICES`). Its reader is league/equity/bands.py
+# `seat_settings` (league/live/money.py's `EquityTable` reads its rows by name and does not read this one).
+CONSTITUTION["equity_money"]["probe"]["seat"] = {"rule": "activity-1-free", "k_floor": "0.25", "idle_sessions": 10}
 
 
 def digest(constitution: dict[str, Any] | None = None) -> str:
@@ -1305,6 +1337,12 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # equals the row in force (league/tests/test_elane.py) and a setting may only lower it.
     "probe.max_programs": ("0", "6"),
     "probe.min_order_usd": ("10", "100"),
+    # THE SEAT RULE's constants (A24, Oct 11, 2026; release E5-A; the comment under the table). The floor of a close
+    # day is ONE value, a quarter of the sleeve: K is fixed per program when its look is recorded, so a moved floor
+    # would rank old and new programs on two measures (a new floor is a new rule name). The idle clock's loose end is
+    # 10 seated sessions (A24 set 10 where the design said 20): a longer clock only makes a yield rarer.
+    "probe.seat.k_floor": ("0.25", "0.25"),
+    "probe.seat.idle_sessions": ("10", "60"),
     # The pre-registered sizing-up rule (the design's section 5): at least 20 closes, an 80% bound, quarter Kelly, half
     # of E at most (the loose end of the Probe sleeve's own bound, and a Sized sleeve is never below the Probe's: the
     # constitution's `sized` comment), five Probe sessions. THE STEP IS PARKED at the count's tight end (the row in
@@ -1358,6 +1396,9 @@ EQUITY_MONEY_CHOICES: dict[str, tuple[Any, ...]] = {
     "enabled": (False, True),
     "sized.beat_bh": (True,),
     "demotion.rule": ("edm1",),
+    # THE SEAT RULE (A24): the value in force, and the rollback ("first-come": release E5-S's behaviour exactly).
+    # Outranking ("activity-1") is NOT a value here: it is not adopted, and adding it is the owner's line to write.
+    "probe.seat.rule": ("activity-1-free", "first-come"),
 }
 #: The schedule's offsets (`league/equity/schedule.py` DEFAULTS' keys), read by `league/live/money.py` `EquityTable`.
 EQUITY_ORDER_OFFSETS = ("preopen_before_open_s", "open_send_after_open_s", "exit_wait_s", "entry_until_after_open_s",
@@ -1365,7 +1406,8 @@ EQUITY_ORDER_OFFSETS = ("preopen_before_open_s", "open_send_after_open_s", "exit
                         "open_reprice_s", "close_reprice_s", "bars_after_close_s", "decide_after_close_s",
                         "audit_before_open_s")
 #: Rows read as whole counts: the counts, the collars and the offsets.
-_EQUITY_COUNTS = ("probe.max_programs", "sized.min_trades", "sized.min_probe_sessions", "demotion.min_trades",
+_EQUITY_COUNTS = ("probe.max_programs", "probe.seat.idle_sessions", "sized.min_trades", "sized.min_probe_sessions",
+                  "demotion.min_trades",
                   "demotion.twin_min_closes", "holds.min_hold_sessions", "holds.default_max_hold_sessions",
                   "holds.max_hold_sessions", "holds.failed_decides_exit", "order_path.entry_collar_bp.etf",
                   "order_path.entry_collar_bp.stock", "order_path.max_collar_bp.etf", "order_path.max_collar_bp.stock",
@@ -1475,4 +1517,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'c3c061b0e320135486a53aedcd375eefb6b8773c9550eaf8f3244453305153b8'
+PINNED_DIGEST = '00c2bf6f2c57125e2b66e84730ab3a25c97e163438dc8e1085486d03ae69f4c9'

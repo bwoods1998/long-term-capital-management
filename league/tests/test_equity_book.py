@@ -1347,9 +1347,25 @@ class BandRecord(BookTest):
             seats[row["family"]] = seat_free
             return row["band"], "unchanged"
 
-        with mock.patch.object(B, "next_band", next_band):
+        from league.tests.equity_design import seat_rule
+
+        # "first-come" (the rollback: the band sync before the seat rule): the waiting row is judged with no seat.
+        with seat_rule("first-come"), mock.patch.object(B, "next_band", next_band):
             h.tick(16, 31)
         self.assertEqual(seats, {"live-0": True, "live-1": True, "live-2": True, "waiting": False})
+        # THE SEAT RULE in force: the book ranks the waiting itself, and with no seat free it offers none (the band
+        # rule is not even asked of the waiting program); its plan says who waits, first in line.
+        seats.clear()
+        h.state.execute("DELETE FROM kv WHERE key IN ('eq_decide', 'eq_synced')")
+        h.state.put("eq_decide", {"day": FRIDAY.isoformat(), "status": "done"})
+        with mock.patch.object(B, "next_band", next_band):
+            h.tick(16, 32)
+        self.assertEqual(seats, {"live-0": True, "live-1": True, "live-2": True})
+        plan = h.book.seats()
+        self.assertEqual((plan["rule"], plan["seats"], [x["family"] for x in plan["holders"]]),
+                         ("activity-1-free", 3, ["live-0", "live-1", "live-2"]))
+        self.assertEqual([(w["family"], w["rank"]) for w in plan["waiting"]], [("waiting", 1)])
+        self.assertEqual(h.families.rows["waiting"]["band"], "candidate")
 
     def test_a_sized_program_sizes_on_its_own_sleeve_and_is_never_a_probe_open(self):
         h = self.harness()

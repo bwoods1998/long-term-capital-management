@@ -18,14 +18,31 @@ THE BANDS (the EquityBook moves them, writing through its families reader, leagu
   (`sized.min_trades` 1000): no equity program is Sized, so every equity close stays in the loss budget's tallies;
 - probe | sized -> candidate, exits only and sticky for the version: `edm1` names why (EDM1), or the program's realized
   Probe net reached `demotion.program_loss_usd` (-$300; the swarm's `elane.program_loss_usd` retires it too).
+
+THE SEAT RULE (release E5-A; the captain's A24; the constitution's `equity_money.probe.seat`, read here by
+`seat_settings`, never by league/live/money.py). Owner: swarm. Pure functions; the EquityBook applies them
+(league/equity/live.py `_seat_bands`) and is THE ONE SOURCE of who holds a seat and who waits.
+- "first-come" (the rollback): release E5-S's behaviour exactly; nothing below is called.
+- "activity-1-free" (in force): a FREE seat goes to the best-ranked waiting passed program (`seat_order`): not
+  idle-flagged before idle-flagged, then the higher K, then the earlier look pass, then the family id. K (`seat_k`) is
+  the smaller of the program's Validation close days and its Train-era close days per `K_PER_SESSIONS` sessions
+  (`close_days`, `seat_counts`: a day counts when the lots closed on it sum to at least `k_floor` of the sleeve, less
+  `K_TOLERANCE`, the engine's rounding of a lot's weight). K reads no P&L and no sealed window; the swarm writes its
+  two counts beside the look, once (league/swarm/elane.py `SEAT_KEY`). A program whose counts cannot be read ranks
+  after every program whose counts can.
+- THE IDLE SEAT (`seat_idle`): a seated program that is flat and has had no asked buy for `idle_sessions` seated
+  sessions. It keeps its seat while nobody waits; when an unflagged program waits, ONE idle program a decision day
+  yields (`seat_yielder`: the lowest K, then the latest seated, the latest pass, the higher id) and is flagged.
+- No function here stops a program that trades, sells a lot or names an exit: the rule only orders who may OPEN next.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from decimal import ROUND_DOWN, Decimal
-from typing import Any, Mapping
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from fractions import Fraction
+from typing import Any, Iterable, Mapping, Sequence
 
 from .. import stats
 
@@ -220,6 +237,193 @@ def next_band(row: Mapping[str, Any], record: EquityRecord | None, table: Any, *
     return "candidate", f"not a live band ({band or 'none'}): no real entries"
 
 
+# ----------------------------------------------------------------------------------------------------- the seat rule
+#: `equity_money.probe.seat.rule`'s values (`league.constitution.EQUITY_MONEY_CHOICES`; a test holds the two equal).
+FIRST_COME = "first-come"
+ACTIVITY_FREE = "activity-1-free"
+SEAT_RULES = (ACTIVITY_FREE, FIRST_COME)
+#: A close day's floor is read as `k_floor` minus this (A24): the engine writes a lot's weight rounded to eight places
+#: of a notional floored to whole millionths of a share, so a lot bought with a share of exactly the floor weighs a
+#: hair under it (league/equity/engine.py `_lot`).
+K_TOLERANCE = Decimal("0.0005")
+#: K is a count of close days per this many sessions (the Validation year's length, as the rule states it).
+K_PER_SESSIONS = 250
+#: The engine's places of a lot's weight (league/equity/engine.py `_lot`: round(notional / capital, 8)).
+WEIGHT_PLACES = Decimal("0.00000001")
+
+
+@dataclass(frozen=True)
+class SeatSettings:
+    """`equity_money.probe.seat` as the book reads it: `rule` (one of `SEAT_RULES`), `k_floor` (a share of the sleeve)
+    and `idle_sessions` (seated sessions)."""
+
+    rule: str
+    k_floor: Decimal
+    idle_sessions: int
+
+    @property
+    def first_come(self) -> bool:
+        return self.rule == FIRST_COME
+
+
+#: What a table with no readable seat block is read as: first come (the rollback value, release E5-S's behaviour). A
+#: block that cannot be read never moves a seat by a rule nobody can state. (The constitution's own check,
+#: `equity_money_problems`, refuses such a table before any of this runs.)
+SEAT_FALLBACK = SeatSettings(FIRST_COME, Decimal("0.25"), 10)
+
+
+def seat_settings(constitution: Mapping[str, Any] | None = None) -> SeatSettings:
+    """(swarm) THE SEAT RULE's row, `equity_money.probe.seat` of `constitution` (None: the one in force), read here so
+    that league/live/money.py (inside the options execution fingerprint) never has to learn it. `SEAT_FALLBACK` when
+    the block is absent or any of its three values cannot be read."""
+    if constitution is None:
+        from ..constitution import CONSTITUTION as constitution  # noqa: N811
+    try:
+        block = constitution["equity_money"]["probe"]["seat"]
+        rule, sessions = block["rule"], block["idle_sessions"]
+        floor = Decimal(str(block["k_floor"]))
+        if rule not in SEAT_RULES or isinstance(sessions, bool) or not isinstance(sessions, int) or sessions < 1 \
+                or not floor.is_finite() or not Decimal(0) < floor <= 1:
+            return SEAT_FALLBACK
+        return SeatSettings(str(rule), floor, int(sessions))
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        return SEAT_FALLBACK
+
+
+def close_days(lots: Iterable[Mapping[str, Any]], *, floor: Decimal) -> int:
+    """(swarm) K's count over ONE run's lots (league/equity/engine.py's `lots` rows): the number of days on which the
+    lots that closed (`exit_day`; a lot still open at the run's end has none and counts nowhere) have entry weights
+    (`weight`: entry notional over the run's capital, eight places) summing to at least `floor` - `K_TOLERANCE`. It
+    reads a lot's size and its exit day and nothing else: no price, no return, no P&L. Decimal sums, so the count is
+    the same on every Python. ValueError for a row whose weight is no finite number."""
+    need = Decimal(floor) - K_TOLERANCE
+    by_day: dict[str, Decimal] = {}
+    for lot in lots:
+        day = lot.get("exit_day")
+        if day is None:
+            continue
+        weight = lot.get("weight")
+        if isinstance(weight, bool) or not isinstance(weight, (int, float, Decimal)):
+            raise ValueError(f"a lot's weight is not a number: {weight!r}")
+        value = Decimal(repr(weight)) if isinstance(weight, float) else Decimal(weight)
+        if not value.is_finite():
+            raise ValueError(f"a lot's weight is not finite: {weight!r}")
+        by_day[str(day)] = by_day.get(str(day), Decimal(0)) + value.quantize(WEIGHT_PLACES)
+    return sum(1 for total in by_day.values() if total >= need)
+
+
+def run_sessions(result: Mapping[str, Any]) -> int:
+    """The sessions one run covered: its `daily` rows (one a run session), else its summary's `days`."""
+    daily = result.get("daily")
+    if isinstance(daily, (list, tuple)):
+        return len(daily)
+    days = (result.get("summary") or {}).get("days") if isinstance(result.get("summary"), Mapping) else None
+    if isinstance(days, bool) or not isinstance(days, int) or days < 0:
+        raise ValueError("a run names no sessions")
+    return int(days)
+
+
+def seat_counts(validation: Mapping[str, Any], train: Sequence[Mapping[str, Any]], *, floor: Decimal) -> dict[str, Any]:
+    """(swarm) K's TWO COUNTS from the runs a look already makes: the recorded Validation run's result and the
+    Train-era runs' results (league/equity/runner.py `Isolated.validation`, `segments`: unsealed windows, both). ->
+    {"floor", "validation": {"close_days", "sessions"}, "train": {"close_days", "sessions"}}, whole numbers only. A
+    Train-era run with no data ("no_data": the program has no history there, the screen's own reading) adds neither
+    days nor sessions; any other run that did not end "ok" is a ValueError (a partial series is never counted)."""
+    def one(result: Mapping[str, Any]) -> tuple[int, int]:
+        return close_days(result.get("lots") or [], floor=floor), run_sessions(result)
+
+    if str(validation.get("status") or "") != "ok":
+        raise ValueError(f"the Validation run ended {validation.get('status')!r}")
+    v_days, v_sessions = one(validation)
+    t_days = t_sessions = 0
+    for result in train:
+        status = str(result.get("status") or "")
+        if status == "no_data":
+            continue
+        if status != "ok":
+            raise ValueError(f"a Train-era run ended {status!r}")
+        days, sessions = one(result)
+        t_days, t_sessions = t_days + days, t_sessions + sessions
+    return {"floor": str(floor), "validation": {"close_days": v_days, "sessions": v_sessions},
+            "train": {"close_days": t_days, "sessions": t_sessions}}
+
+
+def seat_k(activity: Any) -> Fraction | None:
+    """(swarm) K, exactly: the smaller of the Validation close days and the Train-era close days per `K_PER_SESSIONS`
+    sessions, from `seat_counts`' record (as a family's row carries it, `seat_activity`); None when it cannot be read
+    (no record, a count that is no whole number, no Train-era session). A Fraction, so two programs compare the same
+    on every Python and a tie is a tie."""
+    if not isinstance(activity, Mapping):
+        return None
+    try:
+        v, t = activity["validation"], activity["train"]
+        counts = (v["close_days"], t["close_days"], t["sessions"])
+    except (KeyError, TypeError):
+        return None
+    if any(isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in counts) or counts[2] < 1:
+        return None
+    return min(Fraction(counts[0]), Fraction(counts[1] * K_PER_SESSIONS, counts[2]))
+
+
+@dataclass(frozen=True)
+class SeatFacts:
+    """One passed program as the seat rule reads it. `k`: `seat_k` (None: unreadable). `passed_at`: when its look
+    passed (epoch seconds; None: unknown, after every known time). `flagged`: it yielded an idle seat and has not been
+    seated since. For a seated program: `seat_day` (the decision day it took its seat), `seated_sessions` (sessions
+    since), `quiet_sessions` (sessions since its last asked buy; None: it never asked) and `flat` (no lot, no working
+    order, no planned or sent intent)."""
+
+    family: str
+    k: Fraction | None = None
+    passed_at: float | None = None
+    flagged: bool = False
+    seeded: bool = False
+    seat_day: str = ""
+    seated_sessions: int = 0
+    quiet_sessions: int | None = None
+    flat: bool = False
+
+
+def _pass_key(p: SeatFacts) -> tuple:
+    return (p.passed_at is None, p.passed_at if p.passed_at is not None else 0.0, p.family)
+
+
+def seat_key(p: SeatFacts) -> tuple:
+    """(swarm) THE RANK of a waiting program, smallest first: not idle-flagged before idle-flagged; a readable K before
+    an unreadable one; the higher K; the earlier look pass; the family id. Total: no two programs compare equal."""
+    return (p.flagged, p.k is None, -(p.k if p.k is not None else Fraction(0)), *_pass_key(p))
+
+
+def seat_order(waiting: Iterable[SeatFacts]) -> list[SeatFacts]:
+    """(swarm) The waiting programs, best-ranked first (`seat_key`)."""
+    return sorted(waiting, key=seat_key)
+
+
+def seat_idle(p: SeatFacts, settings: SeatSettings) -> bool:
+    """(swarm) THE IDLE SEAT's test of a seated program at a decision: it has held its seat for at least
+    `idle_sessions` sessions, it is flat, and it has had no asked buy in the last `idle_sessions` sessions (asked: a
+    buy reached the venue, or the loss budget cut or refused it; the book says which, `EquityBook._last_ask`)."""
+    n = int(settings.idle_sessions)
+    return bool(p.flat and p.seated_sessions >= n and (p.quiet_sessions is None or p.quiet_sessions >= n))
+
+
+def seat_yielder(idle: Iterable[SeatFacts]) -> SeatFacts | None:
+    """(swarm) Which of the idle seated programs yields when an unflagged program waits (one a decision day): the
+    lowest K (an unreadable K lowest of all), then the latest seated, then the latest look pass, then the higher id.
+    None when none is idle."""
+    def key(p: SeatFacts) -> tuple:
+        return (p.k is not None, p.k if p.k is not None else Fraction(0), _neg(p.seat_day), p.passed_at is not None,
+                -(p.passed_at or 0.0), _neg(p.family))
+
+    rows = list(idle)
+    return min(rows, key=key) if rows else None
+
+
+def _neg(text: str) -> tuple:
+    """A string's sort key reversed (the later day, the higher id, first)."""
+    return tuple(-ord(c) for c in str(text)) + (1,)
+
+
 def band_for_row(row: Mapping[str, Any]) -> tuple[str, str]:
     """(swarm) What `league.live.money.band_for` answers for an equity-lane row (through
     `league.live.equity_hook.band_for`): the row's band unchanged, with the reason "an equity-lane family: its band is
@@ -227,4 +431,7 @@ def band_for_row(row: Mapping[str, Any]) -> tuple[str, str]:
     return str((row or {}).get("band") or ""), "an equity-lane family: its band is the EquityBook's (league/equity/bands.py)"
 
 
-__all__ = ["EquityRecord", "sized_up", "sized_sleeve_share", "edm1", "next_band", "band_for_row"]
+__all__ = ["EquityRecord", "sized_up", "sized_sleeve_share", "edm1", "next_band", "band_for_row", "FIRST_COME",
+           "ACTIVITY_FREE", "SEAT_RULES", "K_TOLERANCE", "K_PER_SESSIONS", "SeatSettings", "SEAT_FALLBACK",
+           "seat_settings", "close_days", "run_sessions", "seat_counts", "seat_k", "SeatFacts", "seat_key", "seat_order",
+           "seat_idle", "seat_yielder"]
