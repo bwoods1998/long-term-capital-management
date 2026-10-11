@@ -1,13 +1,16 @@
 """The forward record and the shadow twin of a panel program. PACKAGE J OF RELEASE E4: OWED, NOT BUILT IN THIS BUILD.
 
-Owner: package J, which waits for release E3 (the forward shadow swarm: `forward_db`, `forward_register`,
-`forward_shadow`, `forward_audit`, `forward_twins`, `forward_report`, `fill_minutes`, built in parallel on
-feat/equity-e3). The captain's ruling for this build: J is left out, its stubs are kept, and the rule that depends on
-it stands exactly as E4-SPEC has it: WHILE J IS NOT MERGED, OR ITS NIGHTLY RUN HAS NOT WRITTEN THE MARKER,
-`elane.panel.mode` "live" READS AS "gate" (`league.swarm.elane_xs.live_ready`): no panel program opens a position the
-forward record is not shadowing. Every function here raises NotImplementedError; nothing imports E3 at import time.
+Owner: package J, which is built on release E3 (the forward shadow swarm: `forward_db`, `forward_register`,
+`forward_shadow`, `forward_audit`, `forward_twins`, `forward_report`, `fill_minutes`). E3 is merged under this
+release since the ship pass (Oct 11, 2026); J is still not built. The captain's ruling for this build: J is left
+out, its stubs are kept, and the rule that depends on it stands exactly as E4-SPEC has it: WHILE J IS NOT MERGED, OR
+ITS NIGHTLY RUN HAS NOT WRITTEN THE MARKER, `elane.panel.mode` "live" READS AS "gate"
+(`league.swarm.elane_xs.live_ready`): no panel program opens a position the forward record is not shadowing. Every
+function here raises NotImplementedError; nothing imports E3 at import time.
 
-WHY IT IS OWED AND NOT OPTIONAL. E3's registry skips any structure but "etf" and "stock", and a counted session with
+WHY IT IS OWED AND NOT OPTIONAL. E3's registry takes no panel version (it reads E2's Train record, and registers the
+structures "etf" and "stock" alone: league/tests/test_e4_e2e.py holds that it neither registers nor refuses one),
+so until J a scored panel version is recorded by its own lane and not shadowed forward; and a counted session with
 no `fwd_twins` row is NOT agreed: the first live panel close would enter the next Done checkpoint with every session
 missing and A14 would read "not consistent" for the whole checkpoint, the seeds' closes included.
 
@@ -41,8 +44,8 @@ ALPHA_F = "0.03"
 WEIGHT_TOL = 1e-3
 GROUPS = ("xs:train_pass", "xs:train_fail", "xs:look_pass", "xs:look_fail")
 
-_STUB = ("league.ops.forward_xs is package J of release E4: owed, not built (it waits for release E3; until its "
-         "marker exists elane.panel.mode 'live' reads as 'gate')")
+_STUB = ("league.ops.forward_xs is package J of release E4: owed, not built (it is built on release E3's forward "
+         "modules; until its marker exists elane.panel.mode 'live' reads as 'gate')")
 
 
 def scored(store: Any) -> list[dict[str, Any]]:
