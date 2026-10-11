@@ -146,12 +146,14 @@ sentence and the contract's faults say so), NaN compared. Those are still disqua
 ## Release E2.4 (Oct 11, 2026): the lanes alarm on their own stalls
 
 In the lanes' first three hours most scored versions were disqualified by the misreading above, families were retired
-for it, the lanes stood still at their pace, one equity pass was cut short and another bore nothing because every
+for it, the lanes were starved at their pace, one equity pass was cut short and another bore nothing because every
 proposal named symbols outside the universe. No alarm fired: the stall job (`league/ops/stall.py`) watched the options
 lanes, and of the equity lanes it knew only Validation runs and families awaiting a try. The captain found each fault
 by hand. Release E2.2 fixed the misreading and the pace. This release makes the House tell the owner when the lanes
-next go wrong, and takes away one cause of the barren pass. It touches no module of E2's but the equity pass's
-request text, and nothing of E1's.
+next go wrong, and takes away two causes of the barren pass. Of E2's modules it touches the equity pass's request
+text and its record of a refusal (`elane_births.py`), the two output settings' bound (`elane_births.py`,
+`elane_train.py`) and the reading of the provider's limit and of a setting-shaped failure (`elane_yield.py`); nothing
+of E1's.
 
 1. **Four stall causes of the lanes' own** (`league/ops/elane_health.py`; the stall job calls it once at every run).
    What each reads is what E2 already writes: a family's record (`elane_e2`: each version's fails and what a
@@ -159,26 +161,44 @@ request text, and nothing of E1's.
    rounds' steps), the rounds that raised, E2's clocks and spend, and the lane's own reading of whether it may ask a
    model now (`elane_yield.hold`, over a read-only reader).
    - `elane_dq`: more than half of the versions scored in the last 6 h, 6 at least, ended DQ, LOAD or RUN (a fault of
-     the program against the contract or the sandbox: nothing is said of a mechanism). It names the commonest first
-     error by its class (`dq_said`'s own closed classes read back) and, where the records hold a reading-rule refusal
-     that says it raises that class, the rule's commonest sentence. The owner's step: the text the generators read.
+     the program against the contract or the sandbox: nothing is said of a mechanism), in at least two families (one
+     family's bad programs are no fault of the contract). With fewer than 6 in the 6 h, the last 6 scored since the
+     running release started are judged, so the cause does not lapse by itself once the faulty families are retired;
+     before the sixth version it stands once 4 of two families could not be judged (most of six, whatever comes). It
+     names the first error by its class (`dq_said`'s own closed classes read back) only when one class is more than
+     half of the disqualifications, else the classes that tie; and, for a class it names, the reading rule's commonest
+     sentence that says it raises that class, or, with none on record, one fixed short sentence of what the class
+     most often is (in the owner's step). The owner's step: the text the generators read.
    - `elane_births`: the last 3 passes that asked a model bore no family (every proposal refused, none proposed, cut
      short, no route answered, the pass raised). The commonest refusals by class (how each refusal of
      `EquityPass.admit` begins) and the symbols of the code's universe that `elane.universe` does not hold. The
-     owner's step only after 6 h with no birth and only for a way a setting clears.
-   - `elane_idle`: families in Train research or births wanted, and no version scored for 3 h. STARVED when the
-     lane's own `hold` says it may ask no model (its pace, its day, the House's Sail day): the lever is named, nobody
-     is asked. BROKEN when it may ask and scores nothing: the owner's step when the rounds raise, the Train runs fail
-     on the House's side, the steps fail, or no round starts or judges anything.
+     owner's step only after 6 h with no birth and only for a way a setting clears; at once when every route refused
+     the request for a setting (the pass's event names the `elane.e2` key: item 8).
+   - `elane_idle`: families in Train research or births wanted, and the work is not done. STARVED BY WORK LOST: of
+     the Train steps due in the last 3 h, 6 at least, more than half were skipped because E2 might ask no model (a
+     step's `skipped` is the lane's own `hold`: its pace, its day, the House's Sail day), whether or not a version
+     was scored. On Oct 11 a version was scored about hourly while two families in three waited at the pace, and a
+     count of idle hours never showed it. Or NOTHING SCORED for 3 h: STARVED when `hold` says E2 may ask no model
+     now, BROKEN when it may ask and scores nothing (the owner's step when the rounds raise, the Train runs fail on
+     the House's side, the steps fail, or no round starts or judges anything). A starved lane says which line binds
+     and names that lever, and nobody is asked: the hourly pace; or the day's line, which is `usd_day` only when it
+     is under 24 hours at the pace (`elane_yield.day_line` is the smaller of the two; at the shipped settings the
+     day is 24 paces). THE DAY'S DOLLARS SPENT IS NO STALL: while the day's line is spent and a version was scored
+     since 00:00 UTC the cause reads clear and says so. A busy lane spends its day before the day ends, every day
+     (a call may overshoot the hourly pace, the day's line is 24 paces), and the first build stood on it every
+     evening.
    - `elane_refused`: more than half of the programs written in the last 6 h, 8 at least, were refused before a run
      by one static rule. The rule and its commonest sentence. The owner's step: teach the rule.
 2. **When a cause is judged.** Only while `elane.mode` is "gate", `elane.birth_share` is above zero, E2's rounds are
    in the tree, the floor is not paused, `elane.e2.usd_day` and `elane.e2.pace_share` are above zero and the store
-   holds an equity family or pass. Evidence counts from the running swarm's start (its heartbeat's `started_at`): a
-   release that fixes a fault restarts the swarm, and what the generators did before it is not held against it. A
-   lane is not judged idle while the swarm itself is not running (a heartbeat ten minutes old: the options lanes'
-   causes say that). STATED LIMIT: a swarm that restarts more often than a cause's window gathers little evidence and is rarely judged;
-   its restarts are the watchdog's and the deploys' to explain.
+   holds an equity family or pass. Evidence counts from the first start of the RUNNING RELEASE: the stall job keeps
+   {release, since} in `stall.json` (the release directory the heartbeat names, and the `started_at` first seen under
+   it), so a release that fixes a fault is not judged on what the generators did before it, and a restart of the same
+   release (the watchdog's, a settings apply, a deploy of nothing the lanes read) resets nothing. The idle clock
+   alone also starts at the running swarm's own start (a swarm that was down is not idle on the hours it was down),
+   and a lane is not judged idle while the swarm itself is not running (a heartbeat ten minutes old: the options
+   lanes' causes say that). LANES THAT CANNOT BE READ (the settings, one of E2's readers, the lane's own `hold`) are
+   "Not judged" AND an entry of the job's `errors` naming the class: an alarm that cannot see must say so.
 3. **Closed words only.** A record's sentences quote what a program wrote (a rule's sentence quotes its source, a
    refusal names the model's lane, symbols and slug), and a disqualification's exception text is the program's own
    choice (the design's WHAT ITS AUTHOR READS OF IT). So nothing of them is repeated: a disqualification is its class
@@ -187,22 +207,44 @@ request text, and nothing of E1's.
    runs the equity pass, the static rules and a disqualification's record and reads each back, so a sentence E2
    rewords fails a test there, never silently reads as "another".
 4. **No recursion into judges.** The alarm reads records. It never reads, parses or runs a program and applies no
-   rule again; it changes no bar, screen, budget, seat, graveyard or refusal rule; it writes nothing.
-5. **The notice.** The gateway composes a stall notice only from the causes it has words for, so the four reach the
-   mail folded into the cause the swarm's alerts travel in (`elane_health.carried`), and everywhere on the House
-   they stand under their own names. docs/operations.md says how to read them.
+   rule again; it changes no bar, screen, budget, seat, graveyard or refusal rule; it writes nothing (the stall job
+   writes its own state file, as before).
+5. **The notice.** The gateway words the four (`gateway/lib/email.mjs` `STALL_CAUSES`; the gateway deploys first), so
+   each is named in `stall.CAUSES` and is an entry of its own in the mail, keyed by its own name. The first build
+   folded them into the cause the swarm's alerts travel in: one gateway key for five things, so each could hold
+   back another's mail for 12 hours and a cause that lapsed first was never mailed. `elane_health.mailed` only fits
+   an entry to what the gateway prints (the sentence's leading sentences whole inside 400 characters, the telling
+   figures first). docs/operations.md says how to read them.
 6. **The research funnel** (`elane_health.research_counts`; the funnel's `equity.research`, which the `scoreboard`
-   job's receipt carries for the last 24 hours and since the release): equity passes and families born, proposals refused by class, programs refused before a run by
-   rule, versions scored, disqualified and failed by code, bar passes, review refusals and passes, families
-   retired, E2's model dollars by purpose. Each count is the event itself; counts and E2's own dollars only.
-7. **The architect is not led outside the universe** (`elane_births.lanes_text`, `_costs_line`). The contract-in-brief
-   quoted half-spreads for "the other ETFs", TLT and GLD whatever `elane.universe` held, and the agenda speaks of
-   sector ETFs: a pass on the four index ETFs proposed sector rotations and every proposal was refused. The line
-   now gives the half-spread of each group the universe holds, in its own symbols (the code's
-   `HALF_SPREAD_BP`), and THE UNIVERSE line says a proposal naming any other symbol is refused whole. The agenda's
-   priors are unchanged (rules, and the Train map's mechanisms). The next request already showed the last pass's
-   refusals with their reasons (`last_text`), as the options architect's does; unlike it, a pass that proposed
-   nothing replaces them with none.
+   job's receipt carries for the last 24 hours and since the release): equity passes and families born, proposals
+   refused by class, programs refused before a run by rule, the Train rounds' steps taken and skipped by reason
+   (`train_steps`), versions scored, disqualified and failed by code, bar passes, review refusals and passes,
+   families retired, E2's model dollars by purpose. Each count is the event itself; counts and E2's own dollars only.
+7. **The architect is not led outside the universe, and is told in closed words** (`elane_births.lanes_text`,
+   `_costs_line`, `agenda_text`, `last_text`). The contract-in-brief quoted half-spreads for "the other ETFs", TLT and
+   GLD whatever `elane.universe` held, and the agenda speaks of sector ETFs: a pass on the four index ETFs proposed
+   sector rotations and every proposal was refused. The line now gives the half-spread of each group the universe
+   holds, in its own symbols (the code's `HALF_SPREAD_BP`), and THE UNIVERSE line says a proposal naming any other
+   symbol is refused whole. The agenda's priors are unchanged (rules, and the Train map's mechanisms); while the
+   universe holds no sector ETF one sentence after THE AGENDA says to read "sector ETFs" as THE UNIVERSE's own
+   symbols (`NO_SECTORS`). THE LAST PASS'S REFUSALS are said by class, in the House's one sentence a class with the
+   House's own values (`REFUSAL_SAID`: the structures and universe the settings open, the agenda's keys, a card's
+   field names, the symbols of the code's universe that are not open and a count of any others). The admission keeps
+   those closed facts beside each refusal (its class, the proposal's place in the answer, its lane and agenda key
+   when valid). The request used to show each refusal's own text and the proposal's slug, both of which repeat what
+   the model wrote (a lane, structure, agenda or symbol as it spelled it), and the next request may be read on
+   another route. A PROPOSAL IS NAMED BY ITS PLACE, never its slug: the House's slug rule (`architect.family_slug`:
+   lower case, every other run of characters a hyphen, cut at 36) keeps a model's words, so a slug that passed it
+   can still carry a sentence. The House's record of the pass keeps slugs and reasons, as before. Unlike the options
+   architect's, a pass that proposed nothing replaces the last refusals with none.
+8. **The output settings are the provider's to bound** (`elane_yield.OUTPUT_LIMIT`, read from `ltcm/provider.py`
+   `MAX_OUTPUT_TOKENS`). `births_max_output_tokens` and `train_max_output_tokens` were bounded at 64,000 while the
+   provider refuses a request above its own limit before it is sent, so on Oct 11 a setting inside the lanes' bound
+   failed every route of one births pass, and the pass's event said only that no route answered. Both bounds are
+   the provider's limit now (a value above it is its default, as any value outside a bound). And a births pass that
+   every route refuses for a setting (`elane_yield.setting_fault`: the provider's own codes for a request it never
+   sends: the output limit, the effort, an unknown profile) says so in its event in one closed word, the `elane.e2`
+   key (`setting`), which `elane_births` reads.
 
 No setting is added and none changes; `ops.json` `{"stall": {"elane": false}}` is the owner's switch for the four
 causes. No identity moves.
@@ -483,10 +525,10 @@ causes. No identity moves.
 | `league/swarm/elane_review.py` | the equity review: the level rule with run-start dependence, the memory rule, the paid review and audit's rubric and grounding, the record E1's look reads |
 | `league/swarm/elane_yield.py` | the route ledger, the operator's report, THE ROUTE CHOICE, one route a question, E2's hourly pace and day inside the Sail model line |
 | `league/swarm/elane_seal.py` | what of an equity family a generator may read; the graveyard filter |
-| `league/ops/elane_health.py` | release E2.4: the lanes' own stall causes (`elane_dq`, `elane_births`, `elane_idle`, `elane_refused`), their research funnel, the notice's carrier, the operator's report; read-only |
+| `league/ops/elane_health.py` | release E2.4: the lanes' own stall causes (`elane_dq`, `elane_births`, `elane_idle`, `elane_refused`), their research funnel, the notice's entries fitted to the gateway's cuts, the operator's report; read-only |
 | `league/swarm/architect.py` | `equity_due`, `equity_pass`; equity rows out of the digest, `graves`, `unseen`, `graveyard_ids` |
 | `league/swarm/researcher.py` | equity rows out of the `graveyard` tool |
-| `league/tests/test_elane_health.py` | release E2.4: each cause standing and each quiet lane not judged, the stall job's machinery, the notice held to the gateway's causes and cuts, Done's item 7, the funnel on an invented day, the closed words held to the code that writes the records, the lanes block on two universes |
+| `league/tests/test_elane_health.py` | release E2.4: each cause standing and each quiet lane not judged, the stall job's machinery, the notice held to the gateway's causes and cuts, Done's item 7, the funnel on an invented day, the closed words held to the code that writes the records, the lanes block on two universes, hostile text in every field of a barren pass, the output settings' bound, and the two replays of Oct 11 on an invented House (`league/tests/elane_e24_house.py`) |
 | `league/tests/test_elane_e2_*.py`, `elane_e2_fakes.py` | births, Train (the seven years, the restart check), review, seal (D3 and the reserve), yield; E1's names faked as INTERFACES fixes them |
 | `league/tests/test_elane_e2_e1.py` | E2 on E1's own code with the patches (skipped on the skeleton): patch 5 in E1's `equity_round`, E1's `reviewed`, adoption, the lane-scoped graveyard, patches 9 and 10; A15 on E1's runner, ctx builder and decider (in process and a real child killed mid-check): the clocks of 5, 10 and 20 sessions, the decide that fails on an empty STATE, the in-place cache with and without dividends, and what of the reserve reaches Train (look-back) |
 | `league/tests/test_elane_e2_switch.py` | the release as it ships on E1: the shipped switches and the settings' bounds, E1's real loop standing still while the lanes are off or the share is zero, one equity pass on the real router, the three identities unmoved, the generators' text naming the pinned screen and no threshold |
@@ -501,7 +543,9 @@ Births: `births_every_seconds`, `births_refill_seconds` (while fewer than `start
 `explore_every`, `usd_day`, `pace_share`. Each is held to its bound in code; a malformed value is its default. The box's swarm.json
 overrides one key at a time (the settings layers merge deep): `usd_day` is held to 0 to 100 dollars a UTC day,
 `pace_share` to 0 to 4 lines of the Sail model line (0 to 0.5 before release E2.2; a value outside reads the shipped
-0.25), and E1's `elane.birth_share` to 0 to 0.5 (a value above reads 0.5; one that is no number reads 0).
+0.25), `births_max_output_tokens` and `train_max_output_tokens` to the model provider's own output limit (release
+E2.4: `ltcm/provider.py` `MAX_OUTPUT_TOKENS`; 64,000 before, above what the provider takes; a value above the limit
+reads the default), and E1's `elane.birth_share` to 0 to 0.5 (a value above reads 0.5; one that is no number reads 0).
 
 ## The patches (league/swarm/ELANE_E2_PATCHES.md)
 
