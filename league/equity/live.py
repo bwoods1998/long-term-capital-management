@@ -2849,6 +2849,23 @@ def _version_of(instance: str) -> int:
         return 0
 
 
+def _bars_verdict(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fresh_raw: Mapping[str, Mapping],
+                  fresh_all: Mapping[str, Mapping], day: str) -> str:
+    """One symbol's stored rows ({day: (o, h, l, c, v)}, raw and all) against a later reading of the same span ({day:
+    row}): "mismatch" when their sessions, a raw open, high, low or close, or the as-of prices at `day` differ;
+    "volume" when only a raw volume does; else "ok"."""
+    if set(fresh_raw) != set(old_raw) or set(fresh_all) != set(old_all) or day not in old_raw:
+        return "mismatch"
+    if any(A.dec(fresh_raw[d].get(k)) != A.dec(old_raw[d][i]) for d in old_raw
+           for i, k in enumerate(("o", "h", "l", "c"))):
+        return "mismatch"
+    if not _as_of_equal(old_raw, old_all, fresh_raw, fresh_all, day):
+        return "mismatch"
+    if any(A.dec(fresh_raw[d].get("v")) != A.dec(old_raw[d][4]) for d in old_raw):
+        return "volume"
+    return "ok"
+
+
 #: Half a step of the vendor's price grid (four decimals): the most one of its rounded prices is off.
 VENDOR_HALF_STEP = 5e-5
 
@@ -2881,23 +2898,6 @@ def _as_of_equal(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fre
             if abs(a - b) > max(rounding, 1e-6 * max(abs(a), abs(b), 1.0)):
                 return False
     return True
-
-
-def _bars_verdict(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fresh_raw: Mapping[str, Mapping],
-                  fresh_all: Mapping[str, Mapping], day: str) -> str:
-    """One symbol's stored rows ({day: (o, h, l, c, v)}, raw and all) against a later reading of the same span ({day:
-    row}): "mismatch" when their sessions, a raw open, high, low or close, or the as-of prices at `day` differ;
-    "volume" when only a raw volume does; else "ok"."""
-    if set(fresh_raw) != set(old_raw) or set(fresh_all) != set(old_all) or day not in old_raw:
-        return "mismatch"
-    if any(A.dec(fresh_raw[d].get(k)) != A.dec(old_raw[d][i]) for d in old_raw
-           for i, k in enumerate(("o", "h", "l", "c"))):
-        return "mismatch"
-    if not _as_of_equal(old_raw, old_all, fresh_raw, fresh_all, day):
-        return "mismatch"
-    if any(A.dec(fresh_raw[d].get("v")) != A.dec(old_raw[d][4]) for d in old_raw):
-        return "volume"
-    return "ok"
 
 
 __all__ = ["SCHEMA", "WORKING", "TERMINAL", "LOT_OPEN", "LOT_CLOSING", "LOT_CLOSED", "REAL_SUFFIX", "SHARE_TOLERANCE",
