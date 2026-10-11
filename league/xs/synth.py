@@ -19,7 +19,8 @@ asset moves no other). So a name's statistical sector (`ctx.derive`) is the fund
 `cent_panel`: 2, the tape's grid); adjustment=all is the raw path times every later event's factor ((1 - dividend /
 the previous raw close) / split factor), ROUNDED TO THE CENT as the vendor's is, as of the fetch day `as_of`: two
 panels that differ only in `as_of` hold one raw history under two vintages. Every asset has bars on every session,
-before it joins the index and after it leaves it, except the names of `vanish`, whose bars end.
+before it joins the index and after it leaves it, except the names of `vanish`, whose bars end. From a split's ex-day
+on the share volume is multiplied by its factor, as a real one's is.
 
 MEMBERSHIP. `n_assets` names are members at the start; each year `churn` of them leave and as many new assets join on
 random sessions (never in 2020, which no panel holds). An ended spell's `exit` cycles through `store.EXITS`. The two
@@ -180,6 +181,7 @@ def _paths(assets: Sequence[Mapping[str, Any]], sessions: Sequence[dt.date], ref
     dividend, split = np.zeros((n, count)), np.ones((n, count))
     for i, (div, ratio) in events.items():
         dividend[:, i], split[:, i] = div, ratio
+        volume[:, i] = np.floor(volume[:, i] * np.cumprod(ratio))    # after a split the same dollars are more shares
     plain = [i for i in range(count) if i not in events]
     if plain:
         close = start[plain] * np.exp(np.cumsum(overnight[:, plain] + intraday[:, plain], axis=0))

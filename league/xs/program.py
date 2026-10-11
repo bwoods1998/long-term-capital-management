@@ -73,7 +73,7 @@ def _whole(value: Any, name: str) -> int:
 def parse_needs(raw: Any) -> Needs:
     """NEEDS as a `Needs`; `NeedsRefused` (E1's) says how it is malformed: a key outside `NEEDS_KEYS`, a panel outside
     `league.xs.PANELS`, a figure outside its bound, a schedule outside `config.REBALANCE` (a daily one included), a
-    `weekday` on a monthly program."""
+    `weekday` on a monthly program (but its default, 0: `parse_needs(needs.as_dict())` is `needs`)."""
     if not isinstance(raw, Mapping):
         raise NeedsRefused("NEEDS is a dict")
     unknown = set(map(str, raw)) - set(NEEDS_KEYS)
@@ -92,12 +92,13 @@ def parse_needs(raw: Any) -> Needs:
     max_names = _whole(raw.get("max_names", DEFAULT_MAX_NAMES), "max_names")
     if not config.MIN_NAMES <= max_names <= config.MAX_NAMES:
         raise NeedsRefused(f"NEEDS['max_names'] is {config.MIN_NAMES} to {config.MAX_NAMES} names")
-    if rebalance == "monthly" and "weekday" in raw:
-        raise NeedsRefused("NEEDS['weekday'] is a weekly program's: a monthly one is asked before the month's first "
-                           "session")
     weekday = _whole(raw.get("weekday", DEFAULT_WEEKDAY), "weekday")
     if not 0 <= weekday <= 4:
         raise NeedsRefused("NEEDS['weekday'] is 0 (Monday) to 4 (Friday)")
+    if rebalance == "monthly" and weekday != DEFAULT_WEEKDAY:
+        # the default is read back (`Needs.as_dict` always carries the key: the parent re-parses the child's answer)
+        raise NeedsRefused("NEEDS['weekday'] is a weekly program's: a monthly one is asked before the month's first "
+                           "session")
     max_hold = _whole(raw.get("max_hold_sessions", DEFAULT_MAX_HOLD), "max_hold_sessions")
     if not config.MIN_HOLD_CAP <= max_hold <= config.MAX_HOLD_CAP:
         raise NeedsRefused(f"NEEDS['max_hold_sessions'] is {config.MIN_HOLD_CAP} to {config.MAX_HOLD_CAP} sessions")
