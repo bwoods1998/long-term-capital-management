@@ -85,69 +85,6 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
 - Operations: [docs/operations.md](docs/operations.md), "The equity lanes' births" (switch on, read, stop, the budget,
   the yield record).
 
-### Release E2.4: the equity lanes alarm on their own stalls, their research funnel, and an architect kept inside the universe, on `feat/equity-e24-health` (unreleased; an owner deploy; no identity moves; no setting changes)
-
-In the equity lanes' first hours (Oct 11) most scored versions were disqualified by one misreading of the contract,
-families were retired for it, the lanes stood still at their pace, one births pass was cut short and another bore
-nothing because every proposal named symbols outside the universe. No alarm fired: the stall job watched the options
-lanes. The captain found each fault by hand. Release E2.2 fixed the misreading and the pace; this release tells the
-owner when the lanes next go wrong.
-
-- **Four stall causes of the equity lanes' own** (`league/ops/elane_health.py`, a new module the `stall` job calls
-  once; read-only), each with its sentence, numbers, what the floor does by itself and the owner's step:
-  - `elane_dq`: more than half of the versions scored in the last 6 h (6 at least) could not be judged for a fault of
-    their own program (disqualified, refused at load, failed by the decider child). It names the commonest first
-    error and, where the records hold one, the reading rule's sentence for it. The owner's step: fix the text the
-    generators read, in a release.
-  - `elane_births`: the last 3 equity passes that asked a model bore no family. It names how, the commonest refusals
-    in the House's own closed words and the symbols `elane.universe` does not hold. The owner's step after 6 h with
-    no birth, when a setting clears it (the universe, the structures, the output limit).
-  - `elane_idle`: work is owed and no version was scored for 3 h. STARVED (E2 may ask no model: its pace, its day,
-    the House's Sail day) names its lever and needs nobody; BROKEN (it may ask and scores nothing: rounds that raise,
-    Train runs failing on the House's side, no round) is the owner's step.
-  - `elane_refused`: more than half of the programs written in the last 6 h (8 at least) were refused before a run by
-    one static rule. It names the rule and its commonest sentence. The owner's step: teach the rule, in a release.
-- **Judged only when there is something to judge:** the lanes on (`elane.mode`, `elane.birth_share`), the floor not
-  paused, E2's dollars not set to zero, an equity family or pass on record, and enough evidence SINCE THE RUNNING
-  SWARM STARTED (a release that fixes a fault restarts it). Else "Not judged", with the reason. A test each: an empty
-  population, a lane switched off, a House that just started, a weekend with the lanes paused.
-- **Raised by the stall job's own machinery**, under their own names: standing in `stall.json`, one House warning
-  every 12 h, the notice at the job's pace (an owner step at once and every 12 h, the rest every 24 h), cleared when
-  it no longer holds, on the daily page's standing causes, and counted by Done's item 7 like any owner step waiting.
-- **The mail carries them inside "the swarm raised alerts".** The gateway composes a stall notice only from causes it
-  has words for and this release does not touch the gateway, so the four are folded into the `swarm_alerts` entry
-  (its sentence names each one; each in short words when several stand). The cost, stated: a second equity cause
-  that arises inside the gateway's own window for that entry (12 h with an owner step, 24 h without) is mailed when
-  the window ends; the House's warning, `stall.json` and the receipt have it at once. **A gateway follow-up** would
-  word the four in `STALL_CAUSES` (deploy the gateway first), after which naming them in `stall.CAUSES` sends each
-  as its own entry.
-- **Nothing a program or a model wrote reaches a notice or a receipt:** a disqualification is told by its class and
-  line, a refusal by its rule and this module's words for its sentence, a refused proposal by its class and the
-  symbols of the code's own universe.
-- **The research funnel** (`league/ops/funnel.py` `equity.research`; the `stall` receipt's `elane.funnel` for the
-  last 24 h; `python3 -m league.ops.elane_health --state DIR` on the box): equity passes and families born,
-  proposals refused by reason class, programs refused before a run by rule, versions scored, disqualified and
-  failed by code, bar passes, review refusals and passes, families retired, E2's model dollars. The daily page
-  prints no equity row, as before.
-- **The architect is not led outside the universe.** The equity request's contract-in-brief named the costs of "the
-  other ETFs", TLT and GLD whatever `elane.universe` held; it now names the half-spread of each group the universe
-  holds, in its own symbols, and says a proposal naming any other symbol is refused whole. The next request already
-  showed the last pass's refusals with their reasons (a test holds it).
-- **Settings:** none added to `swarm.json`, none changed. One owner's switch in `ops.json`:
-  `{"stall": {"elane": false}}` stops the four from being judged. What changes at the deploy without a setting: the
-  four causes are judged and told, Done's item 7 counts their owner steps, and the equity request's wording above.
-- **An alarm never loosens a judge:** no screen, bar, budget, seat, money rule, graveyard or refusal rule changes, no
-  program is read, parsed or run by the alarm, and nothing under `league/live/`, `league/gym/`, `league/equity/*.py`,
-  `league/constitution.py` or `gateway/` is touched: the execution fingerprint, the equity identity and the money
-  digest are main's.
-- In the files a parallel release also patches: `league/ops/stall.py` (an import, `EVERY_CAUSE`, one call, the loop's
-  tuple, the notice's carrier, the receipt's `elane`), `league/ops/funnel.py` (an import and one call),
-  `league/ops/registry.py` (the stall job's description) and `league/ops/dlane_report.py` (item 7's reader).
-- Tests: `league/tests/test_elane_health.py` (the closed words held to the code that writes the records by running
-  it: the equity pass's admission, the static rules, a disqualification's record, a real pass and Train rounds; the
-  notice held to the gateway's cause list and its cuts). Operations:
-  [docs/operations.md](docs/operations.md), "The equity lanes' births" and "The stall alarm and the funnel".
-
 ### Release E2.2: the equity lanes read ctx as it is given, and their pace is their own, on `feat/equity-e22-yield` (unreleased; an owner deploy; no identity moves; the shipped settings are unchanged)
 
 Two things seen in the equity births' first hour on the House, each fixed in E2's own modules and documents.
@@ -628,6 +565,69 @@ evidence, ops and docs side (the order path's, the daily step's and the live hoo
 - Landed since (the section above): the S2 screen with its receipt's copy and pin (A11), the equity identity over the
   evidence modules only with the panel kind's slot (A13), and the Done consistency text (A14). Still open: the
   gateway's `MERGE_FORBIDDEN` follow-up (above).
+
+### Release E2.4: the equity lanes alarm on their own stalls, their research funnel, and an architect kept inside the universe, on `feat/equity-e24-health` (unreleased; an owner deploy; no identity moves; no setting changes)
+
+In the equity lanes' first hours (Oct 11) most scored versions were disqualified by one misreading of the contract,
+families were retired for it, the lanes stood still at their pace, one births pass was cut short and another bore
+nothing because every proposal named symbols outside the universe. No alarm fired: the stall job watched the options
+lanes. The captain found each fault by hand. Release E2.2 fixed the misreading and the pace; this release tells the
+owner when the lanes next go wrong.
+
+- **Four stall causes of the equity lanes' own** (`league/ops/elane_health.py`, a new module the `stall` job calls
+  once; read-only), each with its sentence, numbers, what the floor does by itself and the owner's step:
+  - `elane_dq`: more than half of the versions scored in the last 6 h (6 at least) could not be judged for a fault of
+    their own program (disqualified, refused at load, failed by the decider child). It names the commonest first
+    error and, where the records hold one, the reading rule's sentence for it. The owner's step: fix the text the
+    generators read, in a release.
+  - `elane_births`: the last 3 equity passes that asked a model bore no family. It names how, the commonest refusals
+    in the House's own closed words and the symbols `elane.universe` does not hold. The owner's step after 6 h with
+    no birth, when a setting clears it (the universe, the structures, the output limit).
+  - `elane_idle`: work is owed and no version was scored for 3 h. STARVED (E2 may ask no model: its pace, its day,
+    the House's Sail day) names its lever and needs nobody; BROKEN (it may ask and scores nothing: rounds that raise,
+    Train runs failing on the House's side, no round) is the owner's step.
+  - `elane_refused`: more than half of the programs written in the last 6 h (8 at least) were refused before a run by
+    one static rule. It names the rule and its commonest sentence. The owner's step: teach the rule, in a release.
+- **Judged only when there is something to judge:** the lanes on (`elane.mode`, `elane.birth_share`), the floor not
+  paused, E2's dollars not set to zero, an equity family or pass on record, and enough evidence SINCE THE RUNNING
+  SWARM STARTED (a release that fixes a fault restarts it). Else "Not judged", with the reason. A test each: an empty
+  population, a lane switched off, a House that just started, a weekend with the lanes paused.
+- **Raised by the stall job's own machinery**, under their own names: standing in `stall.json`, one House warning
+  every 12 h, the notice at the job's pace (an owner step at once and every 12 h, the rest every 24 h), cleared when
+  it no longer holds, on the daily page's standing causes, and counted by Done's item 7 like any owner step waiting.
+- **The mail carries them inside "the swarm raised alerts".** The gateway composes a stall notice only from causes it
+  has words for and this release does not touch the gateway, so the four are folded into the `swarm_alerts` entry
+  (its sentence names each one; each in short words when several stand). The cost, stated: a second equity cause
+  that arises inside the gateway's own window for that entry (12 h with an owner step, 24 h without) is mailed when
+  the window ends; the House's warning, `stall.json` and the receipt have it at once. **A gateway follow-up** would
+  word the four in `STALL_CAUSES` (deploy the gateway first), after which naming them in `stall.CAUSES` sends each
+  as its own entry.
+- **Nothing a program or a model wrote reaches a notice or a receipt:** a disqualification is told by its class and
+  line, a refusal by its rule and this module's words for its sentence, a refused proposal by its class and the
+  symbols of the code's own universe.
+- **The research funnel** (`league/ops/funnel.py` `equity.research`; the `stall` receipt's `elane.funnel` for the
+  last 24 h; `python3 -m league.ops.elane_health --state DIR` on the box): equity passes and families born,
+  proposals refused by reason class, programs refused before a run by rule, versions scored, disqualified and
+  failed by code, bar passes, review refusals and passes, families retired, E2's model dollars. The daily page
+  prints no equity row, as before.
+- **The architect is not led outside the universe.** The equity request's contract-in-brief named the costs of "the
+  other ETFs", TLT and GLD whatever `elane.universe` held; it now names the half-spread of each group the universe
+  holds, in its own symbols, and says a proposal naming any other symbol is refused whole. The next request already
+  showed the last pass's refusals with their reasons (a test holds it).
+- **Settings:** none added to `swarm.json`, none changed. One owner's switch in `ops.json`:
+  `{"stall": {"elane": false}}` stops the four from being judged. What changes at the deploy without a setting: the
+  four causes are judged and told, Done's item 7 counts their owner steps, and the equity request's wording above.
+- **An alarm never loosens a judge:** no screen, bar, budget, seat, money rule, graveyard or refusal rule changes, no
+  program is read, parsed or run by the alarm, and nothing under `league/live/`, `league/gym/`, `league/equity/*.py`,
+  `league/constitution.py` or `gateway/` is touched: the execution fingerprint, the equity identity and the money
+  digest are main's.
+- In the files a parallel release also patches: `league/ops/stall.py` (an import, `EVERY_CAUSE`, one call, the loop's
+  tuple, the notice's carrier, the receipt's `elane`), `league/ops/funnel.py` (an import and one call),
+  `league/ops/registry.py` (the stall job's description) and `league/ops/dlane_report.py` (item 7's reader).
+- Tests: `league/tests/test_elane_health.py` (the closed words held to the code that writes the records by running
+  it: the equity pass's admission, the static rules, a disqualification's record, a real pass and Train rounds; the
+  notice held to the gateway's cause list and its cuts). Operations:
+  [docs/operations.md](docs/operations.md), "The equity lanes' births" and "The stall alarm and the funnel".
 
 ### 22:20Z Oct 10, 2026: the stock path's races (#534), gateway `95e7a8d0`, main `3177bb14`
 
