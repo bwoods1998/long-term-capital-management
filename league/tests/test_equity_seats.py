@@ -1214,7 +1214,8 @@ class TheBook(SeatCase):
         f.h.tick(16, 40, day=f.days[2])
         self.assertEqual(sorted(f.holders()), ["busy-3", "fourth", "next"])
         self.assertEqual(f.seats()["sticky"], ["lost", "third"])
-        self.assertEqual([(e["action"], e["family"]) for e in f.events()[-2:]], [("waiting_demoted", "third"), ("seated", "fourth")],
+        self.assertEqual([(e["action"], e["family"]) for e in f.events()[-2:]],
+                         [("waiting_demoted", "third"), ("seated", "fourth")],
                          "the same record as the day's own pass (league/tests/test_equity_seats_a30.py)")
         f.h.families.rows["busy-3"]["band"] = "retired"
         f.run(3, 5)

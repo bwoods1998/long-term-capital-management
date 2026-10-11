@@ -425,11 +425,12 @@ class TheIdleClock(TS.SeatCase):
 
         reasons = {
             "paused": (lambda h: setattr(h, "blocked", PAUSED), lambda h: setattr(h, "blocked", None), PAUSED),
-            "the grant": (lambda h: setattr(h, "blocked", "the grant options-swarm-20260928 is not active on the money rules in force"),
+            "the grant": (lambda h: setattr(h, "blocked", "the grant is not active on the money rules in force"),
                           lambda h: setattr(h, "blocked", None), "the grant"),
             "a stop": (lambda h: setattr(h, "blocked", "the daily stop: no new real entry today"),
                        lambda h: setattr(h, "blocked", None), "the daily stop"),
-            "the kill switch": (lambda h: setattr(h, "kill", True), lambda h: setattr(h, "kill", False), "kill switch is engaged"),
+            "the kill switch": (lambda h: setattr(h, "kill", True), lambda h: setattr(h, "kill", False),
+                                "kill switch is engaged"),
             "a corporate action's freeze": (freeze, unfreeze, "equity reconciliation: an unexplained corporate action"),
             "the BUY stage": (lambda h: setattr(h.proof, "ok", False), lambda h: setattr(h.proof, "ok", True),
                               "BUY stage (paper_proof_stock_buy) has not passed"),
@@ -720,7 +721,8 @@ class TheMinors(TS.SeatCase):
         out = f.session(10)
         f.plan("rare")
         self.assertEqual(fired, [f.key("rare")])
-        self.assertTrue(any(e.startswith("seats: RuntimeError") for e in f.h.book._last.get("errors", []) + out.get("errors", [])))
+        errors = f.h.book._last.get("errors", []) + out.get("errors", [])
+        self.assertTrue(any(e.startswith("seats: RuntimeError") for e in errors), errors)
         self.assertEqual(len(f.h.families.moves), moves, "the swarm's store was never written")
         self.assertEqual((f.band("rare"), f.band("late")), ("probe", "candidate"))
         inst = f.inst("rare")
@@ -772,7 +774,8 @@ class TheMinors(TS.SeatCase):
         with mock.patch.object(h.families, "confirm_band", confirm):
             out = f.session(10)
         self.assertEqual(proxy.failed, 1)
-        self.assertTrue(any(e.startswith("seats: OperationalError") for e in h.book._last.get("errors", []) + out.get("errors", [])))
+        errors = h.book._last.get("errors", []) + out.get("errors", [])
+        self.assertTrue(any(e.startswith("seats: OperationalError") for e in errors), errors)
         self.assertEqual([(m[0], m[1]) for m in h.families.moves[-2:]], [("rare", "candidate"), ("rare", "probe")])
         self.assertIn("its yield could not be written", h.families.moves[-1][2])
         self.assertEqual((f.band("rare"), f.band("late")), ("probe", "candidate"))

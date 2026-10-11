@@ -278,9 +278,10 @@ FEE_PROCEEDS = re.compile(r"of \$(\d+(?:\.\d+)?)")
 #: Sessions after a lot's exit day without a fee row for that day before the owner is told (once a lot).
 FEES_LATE_SESSIONS = 5
 #: THE SEAT RULE (the module docstring): the kv of the book's seat plan and memory ({rule, seats, day, holders, waiting,
-#: idle {family: {day, why}}, yield_day, passed {family: day}, left_out [{day, why}], last}: rank positions, never K); how a yielded
-#: instance's `why` starts; and the words `league.equity.sizing.size_entry` names the loss budget's cap by (its
-#: `why["budget"]`), which is how a buy cut under the minimum order says that the budget cut it (a test holds them).
+#: idle {family: {day, why}}, yield_day, passed {family: day}, left_out [{day, why}], last}: rank positions, never K);
+#: how a yielded instance's `why` starts; and the words `league.equity.sizing.size_entry` names the loss budget's cap
+#: by (its `why["budget"]`), which is how a buy cut under the minimum order says that the budget cut it (a test holds
+#: them).
 SEAT_KEY = "eq_seat"
 YIELDED = "yielded"
 BUDGET_WORDS = "the shared loss budget has"
