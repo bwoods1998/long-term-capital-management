@@ -30,11 +30,14 @@ slices the store for NEEDS symbols and history, and sends ("kind", "equity", "ru
 child refuses (it does not load) raises `ProgramRefused` (a `CodeRefused`). The parent re-checks the child's NEEDS
 (`program.parse_needs`) before it slices anything, so a child's answer never widens what is read.
 
-SENT, AND NOT ANSWERED (`RunLost`, a `RunFailed`). A failure before the bars leave the parent (the NEEDS call, the
-store's slice) is the House's and raises `RunFailed`. Once the "run" was sent, the program held its bars: a child that
-then fails, is killed, runs past its budget or answers an error raises `RunLost`. The difference matters for the sealed
-look alone (league/swarm/elane.py `look`): a program that could choose not to answer, and be owed its look again, would
-draw its holdout more than once.
+SENT, AND NOT ANSWERED (`RunLost`, a `RunFailed`). The child took the whole "run" request, so the program held its
+bars, and then no answer came: it ran past its budget or it exited (`SENT_NOT_ANSWERED`: the decider's two failures
+that can only follow a request it took whole). The difference matters for the sealed look alone (league/swarm/elane.py
+`look`): a program that could choose not to answer, and be owed its look again, would draw its holdout more than once.
+EVERY OTHER FAILURE stays a plain `RunFailed` and counts against no program: the NEEDS call, the store's slice, a
+child that could not be started or did not take the request (its pipe, its namespace, a frame too large), and an
+answer that came back and is not a result (the child's own error, the engine's): those are the House's to fix, and a
+look they cost is owed.
 """
 
 from __future__ import annotations
@@ -59,8 +62,15 @@ class RunFailed(RuntimeError):
 
 
 class RunLost(RunFailed):
-    """The run was sent (the program held its bars) and no result came back: the child failed, was killed, ran past its
-    budget or answered an error AFTER the send (the module docstring)."""
+    """The run was sent whole (the program held its bars) and no answer came back: the child ran past its budget or
+    exited (`SENT_NOT_ANSWERED`; the module docstring)."""
+
+
+#: The decider's failures that can only follow a request the child took whole (league/live/decider.py `Decider._read`:
+#: the frame was written and no answer came): it did not answer inside its budget, or it exited. Matched in the
+#: failure's words, which is all an evidence module sees of league/live; a test holds the decider to these words
+#: (league/tests/test_equity_fx_swarm.py), so a rewording there cannot quietly lift the sealed look's limit.
+SENT_NOT_ANSWERED = ("the decider did not answer in time", "the decider exited")
 
 
 class ProgramRefused(CodeRefused):
@@ -132,13 +142,15 @@ class Isolated:
                    "capital": None}
         try:
             answer = self._ask("run", payload, self.budget_seconds)
-        except RunFailed as exc:  # after the send: the program held its bars (`RunLost`); a refused load is not a run
-            raise RunLost(str(exc)) from None
+        except RunFailed as exc:
+            if any(mark in str(exc) for mark in SENT_NOT_ANSWERED):
+                raise RunLost(str(exc)) from None  # sent whole, never answered: the program held its bars
+            raise
         result = answer.get("result")
         if not isinstance(result, Mapping):
-            raise RunLost("the decider child returned no result")
+            raise RunFailed("the decider child returned no result")
         if result.get("status") == "error":
-            raise RunLost(str(result.get("reason") or "the run ended in an error"))
+            raise RunFailed(str(result.get("reason") or "the run ended in an error"))
         return Run(dict(result), bars)
 
     def train(self, code: str, params: Mapping[str, Any] | None, *, name: str, start: dt.date | None = None,
@@ -173,5 +185,5 @@ class Isolated:
                 for first, last in config.TRAIN_ERA_SEGMENTS]
 
 
-__all__ = ["RunFailed", "RunLost", "ProgramRefused", "Run", "RUN_BUDGET_SECONDS", "NEEDS_BUDGET_SECONDS", "KIND",
-           "run_bars", "Isolated"]
+__all__ = ["RunFailed", "RunLost", "SENT_NOT_ANSWERED", "ProgramRefused", "Run", "RUN_BUDGET_SECONDS",
+           "NEEDS_BUDGET_SECONDS", "KIND", "run_bars", "Isolated"]

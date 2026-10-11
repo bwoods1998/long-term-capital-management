@@ -441,18 +441,46 @@ class TheSealedRunSentOnce(FixCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = synth.constant_store(Path(tmp) / "store", start=dt.date(2025, 1, 2), sessions=30)
-            for run in (TimeoutError("the decider did not answer in time"), {"ok": False, "error": "the child broke"},
-                        {"ok": True, "result": None}, {"ok": True, "result": {"status": "error", "reason": "engine"}}):
-                with self.assertRaises(R.RunLost, msg=repr(run)):
-                    R.Isolated(Child(run), root).validation(CODE, {}, name="p")
+            # SENT WHOLE AND NEVER ANSWERED: the decider's own two failures of a request the child took.
+            for said in ("the decider did not answer in time; the child was killed; programs reload within the next "
+                         "request's budget", "the decider exited; the child was killed"):
+                with self.assertRaises(R.RunLost, msg=said):
+                    R.Isolated(Child(RuntimeError(said)), root).validation(CODE, {}, name="p")
             self.assertTrue(issubclass(R.RunLost, R.RunFailed), "every earlier reader of RunFailed still catches it")
+            # EVERY OTHER FAILURE is the House's: a child that could not start or did not take the request, an answer
+            # that is not a result. A plain RunFailed, which the sealed look owes again and counts against no program.
+            for run in (RuntimeError("the production decider requires a network namespace under its separate uid"),
+                        RuntimeError("the decider's pipe broke: [Errno 32] Broken pipe"),
+                        RuntimeError("the decider did not consume its input in time"),
+                        RuntimeError("the decider input exceeds 67108864 bytes"), OSError("fork failed"),
+                        {"ok": False, "error": "the child broke"}, {"ok": True, "result": None},
+                        {"ok": True, "result": {"status": "error", "reason": "the engine raised"}}):
+                with self.assertRaises(R.RunFailed, msg=repr(run)) as raised:
+                    R.Isolated(Child(run), root).validation(CODE, {}, name="p")
+                self.assertNotIsInstance(raised.exception, R.RunLost, repr(run))
             with self.assertRaises(CodeRefused):
                 R.Isolated(Child({"ok": False, "refused": True, "error": "no decide"}), root).validation(CODE, {}, name="p")
             child = Child({"ok": True, "result": {"status": "ok"}})
-            child.kind = mock.Mock(side_effect=TimeoutError("the decider did not answer in time"))
+            child.kind = mock.Mock(side_effect=RuntimeError("the decider did not answer in time"))
             with self.assertRaises(R.RunFailed) as raised:
                 R.Isolated(child, root).validation(CODE, {}, name="p")
-            self.assertNotIsInstance(raised.exception, R.RunLost, "the NEEDS call failed: nothing was sent")
+            self.assertNotIsInstance(raised.exception, R.RunLost, "the NEEDS call failed: the run was never sent")
+
+    def test_the_deciders_words_for_a_request_taken_and_not_answered_are_the_runners(self):
+        """The runner reads the decider's failure by its words (an evidence module imports nothing of league/live):
+        the two that `Decider._read` raises once the frame is written. A rewording there must fail here."""
+        import inspect
+
+        from league.equity import runner as R
+        from league.live import decider as D
+
+        read, raw = inspect.getsource(D.Decider._read), inspect.getsource(D.Decider._raw)
+        for words in R.SENT_NOT_ANSWERED:
+            self.assertIn(f'"{words}"', read)
+            self.assertNotIn(words, raw.replace("self._read", ""), "never raised before the frame is written")
+        self.assertEqual(len(R.SENT_NOT_ANSWERED), 2)
+        self.assertEqual(sorted(set(__import__("re").findall(r'DeciderError\("([^"]+)"\)', read))),
+                         sorted(R.SENT_NOT_ANSWERED), "every failure of the read is one the runner knows")
 
     def test_the_evidence_child_pins_its_hash_seed(self):
         import tempfile
@@ -519,6 +547,37 @@ class TheEvidenceChildIsDeterministic(unittest.TestCase):
                 child._kill()  # the next run starts a new child (a deploy, a failure)
             self.assertEqual(len(seen), 1, seen)
             self.assertEqual(child.pid is not None and len(next(iter(seen))[1]), 1, "one symbol, bought once")
+
+    SLOW = ("NEEDS = {'symbols': ['SPY'], 'history': 2}\nPARAMS = {}\n\n\n"
+            "def decide(ctx):\n"
+            "    x = 0\n"
+            "    for i in range(400000):\n        x += i * i\n"
+            "    return []\n")
+
+    def test_a_run_the_real_child_took_and_did_not_answer_in_its_budget_is_lost(self):
+        """The real decider's words reach the runner: a run that outlasts its budget is `RunLost` (sent, not
+        answered), the child is killed, and the next request starts a new one."""
+        import datetime as dt
+        import tempfile
+        from pathlib import Path
+
+        from league.equity import synth
+        from league.equity.runner import Isolated, RunLost
+        from league.live import decider as D
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = synth.synthetic_store(Path(tmp) / "store", symbols=("SPY",), start=dt.date(2024, 6, 3),
+                                         end=dt.date(2025, 12, 31))
+            child = D.Decider(python=sys.executable, allow_unisolated=True)
+            child.hash_seed = elane.EVIDENCE_HASH_SEED
+            self.addCleanup(child.close)
+            with self.assertRaises(RunLost) as raised:
+                Isolated(child, root, budget_seconds=1.0).validation(self.SLOW, {}, name="slow")
+            self.assertIn("did not answer in time", str(raised.exception))
+            self.assertEqual(child.restarts, 1, "the child was killed")
+            again = Isolated(child, root, budget_seconds=120.0).validation(self.PROGRAM.replace(
+                "['SPY', 'QQQ', 'IWM', 'DIA']", "['SPY']"), {}, name="after")
+            self.assertEqual(again.result["status"], "ok", "a new child answers the next request")
 
 
 class ATryOwedAgain(FixCase):

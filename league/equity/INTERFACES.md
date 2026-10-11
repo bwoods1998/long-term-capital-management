@@ -981,8 +981,9 @@ differ, this section is the code.
   an adoption keeps `elane_train_r` and `elane_template` with `elane_look` (CHANGES section 4.11's list). `elane.same_lineage`
   raises `elane.LineageUnread(family)` for a looked-at family (or a living one with a look in flight) that keeps no
   Train series; `look` writes it again from that family's looked version (`Isolated.segments`) or waits.
-- **The look and its runs** (swarm, core): `runner.RunLost(RunFailed)`: the "run" was sent and no result came back
-  (`Isolated._run`; a failure of the NEEDS call or of the store's slice stays `RunFailed`). `elane.look` reads each
+- **The look and its runs** (swarm, core): `runner.RunLost(RunFailed)`: the child took the "run" whole and no answer
+  came back (`Isolated._run`, by the decider's two failures of a taken request, `runner.SENT_NOT_ANSWERED`: it did not
+  answer in time, it exited; every other failure, an answer that is not a result included, stays `RunFailed`). `elane.look` reads each
   run's status: a Train-era run not "ok" or "no_data" refuses the floor; "no_data" is passed to `screen.floor` as
   None; a holdout run that ended "disqualified" is a look spent and failed (its `detail` and verdict carry `status`
   and `why`); a `RunLost` at the sealed look is owed once, then spent and failed (`elane.LOOK_SENDS` 2, the family

@@ -54,8 +54,10 @@ evidence, ops and docs side (the order path's, the daily step's and the live hoo
   series and could pass. It is now a look spent and failed; a Train-era run that ended so refuses the floor; a span
   with no data is no history, the screen's own rule.
 - **A sealed run is sent at most twice** (`elane.LOOK_SENDS`; `league/equity/runner.py` `RunLost`): a look whose run
-  did not return was owed again without limit. One sent and not answered is owed once, then the look is spent and
-  failed, with a House warning each time; a failure before the send is the House's and counts against nobody. **The
+  did not return was owed again without limit. One the child took whole and did not answer (it ran past its budget
+  or exited) is owed once, then the look is spent and failed, with a House warning each time; every other failure (the
+  store, a child that could not start or did not take the request, an answer that is not a result) is the House's and
+  counts against nobody. **The
   evidence child's hash seed is pinned** (`Decider.hash_seed`, 0 for the swarm's equity child, as the options Gym's
   PYTHONHASHSEED=0): a program that iterates a set of strings no longer differs from one start of the child to the next.
 - **A tried version whose verdict went stale is validated again** (`elane.next_try`), whichever version the family's

@@ -61,10 +61,11 @@ THE RUN'S STATUS, AND A RUN THAT DOES NOT RETURN. Every run the look reads is re
 is. A Train-era run its own errors ended ("disqualified") gives no floor (refused at the floor, no look spent); one with
 no data is no history there (the screen's rule). A holdout run that ended "disqualified" is a look SPENT AND FAILED: a
 partial series is never judged. A holdout run the House could not make at all (the capability, the store's slice, the
-NEEDS call, "no_data") is no look and is owed again. But once the sealed run was sent and no result came back
-(league/equity/runner.py `RunLost`: the child failed, was killed or ran past its budget while the program held its
-holdout), it is owed again only once: the second time (`LOOK_SENDS`) the look is spent and failed, with a House warning
-each time, so a program cannot stop answering until its holdout suits it. The evidence child's hash seed is pinned
+NEEDS call, a child that could not be started or did not take the request, an answer that is not a result, "no_data")
+is no look and is owed again, counted against no program. But once the child took the sealed run whole and no answer
+came back (league/equity/runner.py `RunLost`: it ran past its budget or exited while the program held its holdout), it
+is owed again only once: the second time (`LOOK_SENDS`) the look is spent and failed, with a House warning each time,
+so a program cannot stop answering until its holdout suits it. The evidence child's hash seed is pinned
 (`EVIDENCE_HASH_SEED`), so the run owed again is the same run.
 
 THE REVIEW (E1). The gate's paid program review and audit read options programs. In E1 an equity look is taken only for

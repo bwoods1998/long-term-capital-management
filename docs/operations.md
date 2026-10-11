@@ -44,11 +44,13 @@ on the House).
 **What a look does with a run that went wrong** (`league/swarm/elane.py` `look`):
 - a holdout run its own errors ended ("disqualified") is a look SPENT AND FAILED, never judged on its partial series;
 - a Train-era run that ended "disqualified" refuses the program at the floor (no look spent);
-- a look the House could not make (the capability, the store, the NEEDS call, no data) is no look and is owed again;
-- a sealed run that was SENT and did not return (the child failed, was killed or ran past its 20-minute budget while
-  the program held its holdout) is owed once more, then the look is spent and failed. Each time is a House warning
-  ("the sealed equity look of ... was sent and did not return"): read `<state>/equity-decider.log`. The evidence
-  child's hash seed is pinned, so the run owed again is the same run.
+- a look the House could not make (the capability, the store, the NEEDS call, a child that could not be started or
+  did not take the request, an answer that is not a result, no data) is no look and is owed again, however often: it
+  counts against no program (each try is a `look_failed` gate event naming the stage);
+- a sealed run the child TOOK and did not answer (it ran past its 20-minute budget, or it exited, while the program
+  held its holdout) is owed once more, then the look is spent and failed. Each time is a House warning ("the sealed
+  equity look of ... was sent and did not return"): read `<state>/equity-decider.log`. The evidence child's hash seed
+  is pinned, so the run owed again is the same run.
 - a validated version whose recorded run no longer reproduces (the data job wrote the next day, or the equity identity
   moved) is validated again in the next round, the same try, whichever version the family's candidate is by then.
 
