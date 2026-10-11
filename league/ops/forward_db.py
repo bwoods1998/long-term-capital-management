@@ -424,6 +424,14 @@ def _tx(db: sqlite3.Connection) -> Iterator[None]:
     db.commit()
 
 
+def transaction(db: sqlite3.Connection) -> Any:
+    """`with transaction(db):` makes the writes inside it ONE transaction: begun here and committed at its end (rolled
+    back whole on any error) when the caller holds none, else a part of the caller's. Every write of this module
+    (`event`, `tag`, `append_registry`, `kv_put`, `kv_first`, `engine_id`) joins it; a plain `with db:` begins nothing
+    by itself, so the first of them would commit alone."""
+    return _tx(db)
+
+
 def _json(value: Any, default: Any = None) -> Any:
     try:
         return json.loads(value)
@@ -829,4 +837,4 @@ __all__ = ["DB", "SCHEMA", "GENESIS", "MODES", "REASONS", "LANES", "CHECKPOINTS"
            "ShadowRun", "bars_hash", "cfg", "mode", "t0", "first_close", "first_day", "fwd_engine", "open_db",
            "row_hash", "append_registry", "verify_chain", "head", "event", "events", "kv_get", "kv_put", "kv_first",
            "engine_id", "engine_now", "engine_label", "programs", "active", "suspect", "program", "tags", "tag",
-           "counted_days", "stored_days", "last_stored_day"]
+           "counted_days", "stored_days", "last_stored_day", "transaction"]
