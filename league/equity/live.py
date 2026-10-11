@@ -56,7 +56,9 @@ dividend posted overnight); the windows' orders are the decide's intents (`eq_in
 own send with that minute's quote, never at 09:25 with a pre-open price. A missed entry is recorded, never chased; an exit the windows could not fill is recorded missed
 and carried to the next session's open (a "house_exit" intent of the same reason). MIN HOLD: a lot never sells in the
 session it was bought (kill switch and stops included; the gateway's kill blocks sells too). REAL SALES WAIT for the
-stock paper proof's SELL stage (A10.1; the practice sale goes first in its window). NO STUCK LOTS (A8.5): a
+stock paper proof's SELL stage (A10.1; the practice sale goes first in its window) UNTIL THE ENTRY CUT-OFF AT THE
+LATEST (09:45): from then on an exit goes whatever the stage says, and the owner is told once a session
+(`_sell_unproven`: an exit is never held on the practice account past it). NO STUCK LOTS (A8.5): a
 lot held its program's `max_hold_sessions` exits at the next open; a demoted, retired or band-dropped program's lots
 exit at the next open; 2 sessions of failed decides exit the program's lots at the next open; on a restart a catch-up
 decide runs for the last close if it was missed (until the next session's close window). Limits: a buy rounds UP and a
@@ -1555,11 +1557,15 @@ class EquityBook:
                 self._save_intent(intent)
             return
         why = self._sell_proof()
-        if why:
+        if why and now < m.entry_until:
+            # The practice sale goes first in its window (A10.1): it is sent in the open window's first minute and is
+            # normally witnessed in its second. THE WAIT ENDS AT THE ENTRY CUT-OFF (`_sell_unproven`).
             if intent.why != why:
                 intent.why = why
                 self._save_intent(intent)
             return
+        if why:
+            self._sell_unproven(today, why)
         try:
             stopped = bool(killed())
         except Exception:  # noqa: BLE001 - unreadable counts as engaged
@@ -1616,15 +1622,38 @@ class EquityBook:
     def _sell_proof(self) -> str | None:
         """Why no real equity SALE may go yet (A10.1: the stock paper proof's SELL stage gates every one; the practice
         sale goes first in its window), or None. A House with no paper account at all (no proof object) opens nothing,
-        and its exits go: no stage can ever pass there, and a lot is never held on a proof that cannot run."""
+        and its exits go: no stage can ever pass there, and a lot is never held on a proof that cannot run. The caller
+        (`_work_exit`) waits on this only until the session's entry cut-off (`_sell_unproven`)."""
         if self.stock_proof is None:
             return None
         try:
             if self.stock_proof.sell_passed():
                 return None
-        except Exception as exc:  # noqa: BLE001 - unreadable: the sale waits (the lot stays held)
+        except Exception as exc:  # noqa: BLE001 - unreadable: the sale waits (until the entry cut-off)
             return f"the stock paper proof could not be read ({type(exc).__name__}): real exits wait"
         return "real exits wait for the stock paper proof's SELL stage (paper_proof_stock_sell, A10)"
+
+    def _sell_unproven(self, today: str, why: str) -> None:
+        """AN EXIT IS NEVER HELD ON THE PRACTICE ACCOUNT PAST THE ENTRY CUT-OFF. The SELL stage's practice sale goes
+        first in its window (A10.1): sent in the open window's first minute, normally witnessed in its second, and real
+        exits wait for it. That wait ends at the session's `entry_until` (09:45, the open window's fifteen minutes):
+        from then on every exit goes whatever the stage says (a program's sale, the House's max hold, a demoted or
+        retired program's lots, a carried exit, the owner's flatten), each through the normal path (its collar, the one
+        working order a symbol, the day's count, the kill switch, the min hold). Until this rule a stage that could not
+        pass (a practice sale that rests, FILL activities the practice account does not list, a practice position off
+        its baseline) held every real lot for as long as it could not, the owner's flatten among them, and the only way
+        out was by hand at the broker. What the stage still decides is unchanged: a FAILED stage stops new real buys
+        until it passes (`_open_block`), and its own alarm goes on (league/live/paper.py `_fail_sell`, whose words
+        "real equity lots stay held" are from before this rule). The owner is told once a session (kv
+        `eq_sell_unproven`: one error alert and one `equity.alert` record), whatever the number of exits."""
+        if (self.state.get("eq_sell_unproven") or {}).get("day") == today:
+            return
+        self.state.put("eq_sell_unproven", {"day": today, "why": why[:300], "at": self.clock()})
+        what = ("real equity exits go from the entry cut-off on although the stock paper proof's SELL stage has not "
+                f"passed ({why[:200]}): an exit is never held on the practice account past it")
+        self.record("equity.alert", {"what": what, "day": today})
+        self.alert("error", f"equity: {what}. Owner step: look at the practice account (alpaca-paper), its SPY "
+                            "position and orders; new real equity buys stay stopped while the stage is failed")
 
     def _lost_sale_check(self, lot: Lot) -> str | None:
         """After a sale of this lot was given up as lost, it goes again only while the account still holds what the

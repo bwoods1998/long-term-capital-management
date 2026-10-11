@@ -527,8 +527,9 @@ Decimal` (`Unreadable.shares_taken` raises).
   On `alpaca-paper`: stage BUY buys a fractional SPY marketable limit from the open window's first send to the entry
   cut-off and passes on its fill, its lot row and the reconciled position (gates every real equity BUY); stage SELL
   sells it in the next session's open window, first, and passes on the whole sale, the FILL activities and the
-  position back at its baseline (gates every real equity SALE); a SELL stage that ends its window unpassed is
-  "failed" (an alarm with the owner's step; new real buys stop until it passes). Checked only by the equity book
+  position back at its baseline (gates every real equity SALE, until the book's entry cut-off at the latest: from
+  09:45 on the book's exits go whatever the stage says, league/equity/live.py `_sell_unproven`); a SELL stage that ends
+  its window unpassed is "failed" (an alarm with the owner's step; new real buys stop until it passes). Checked only by the equity book
   (options entries never wait on it). Client ids `lq-pp-...` (never `lv-`). `StockPaperProof` never waits for the
   options route's proofs (no `after`); `_idle` minutes read nothing of the practice account. An order the venue does
   not show by its client id after `STOCK_LOST_AFTER_TRIES` (4) lookups or `STOCK_LOST_AFTER_S` (600) seconds is lost

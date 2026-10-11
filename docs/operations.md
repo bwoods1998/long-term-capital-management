@@ -586,10 +586,14 @@ confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the Ho
   `alpaca-paper` from 09:30:30 ET to the 09:45 entry cut-off and passes on its fill, its lot row and the reconciled
   position: it gates every REAL equity BUY. Stage SELL (kv `paper_proof_stock_sell`) sells that lot in the next
   session's open window, first (real exits wait for it), and passes on the whole sale, the FILL activities and the
-  position back at its baseline: it gates every REAL equity SALE. A SELL stage that ends its window unpassed is "failed":
-  an error alert with the owner's step (look at the practice account's SPY position and orders), real lots stay held
-  (the max-hold rule applies once it passes) and new real buys stop until it passes; the next open window buys again
-  and the one after sells. The attempt row is kv `paper_proof_stock`. Only the equity book waits on it (options entries
+  position back at its baseline: it gates every REAL equity SALE **until the entry cut-off (09:45) at the latest**. The
+  practice sale is sent in the window's first minute and normally witnessed in its second; a real exit waits for that
+  pass and no longer than the open window's fifteen minutes: from 09:45 on every exit goes whatever the stage says
+  (a program's sale, the max-hold rule, a demoted program's lots, the owner's flatten), with one error alert a
+  session (kv `eq_sell_unproven`; `league/equity/live.py` `_sell_unproven`). An exit is never held on the practice
+  account past it. A SELL stage that ends its window unpassed is "failed": an error alert with the owner's step (look
+  at the practice account's SPY position and orders; its words "real equity lots stay held" are from before the
+  cut-off rule) and new real buys stop until it passes; the next open window buys again and the one after sells. The attempt row is kv `paper_proof_stock`. Only the equity book waits on it (options entries
   never do); its client ids are `lq-pp-...`. **Stage BUY never waits on the options route's own paper proofs**
   (`paper_proof`, `paper_proof_single`): it goes in the first open window after the deploy. While it has nothing to do
   (waiting outside its BUY window, or holding its lot outside the SELL stage's window) the proof makes no call to the
