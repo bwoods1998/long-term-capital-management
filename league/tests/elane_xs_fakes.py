@@ -388,10 +388,14 @@ class FakeDecider:
 
 def state_stream(run: Any, calls: int = STATE_CALLS) -> Any:
     """`league.xs.runner.state_stream`, invented: `calls` called decisions of one seen span's k 1.5 run, each the same
-    twelve slot ids and the call's index (no ctx is built: package C's `build` is not under test here)."""
+    twelve slot ids, the call's index and an invented market path (no ctx is built: package C's `build` is not under
+    test here)."""
     assert (getattr(run, "result", None) or {}).get("calls") is not None, "the restart check reads a run made with calls=True"
     for i in range(calls):
-        yield {"i": i, "ids": [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112], "positions": [], "n": 12}
+        # (the market's last returns differ from call to call and are the same for both instances of a call)
+        market = SimpleNamespace(ret=[round(0.01 * math.sin(1.3 * (i + j)), 6) for j in range(21)])
+        yield {"i": i, "ids": [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112], "positions": [], "n": 12,
+               "mkt": market}
 
 
 # --------------------------------------------------------------------------------- league.xs's functions, to the contract
