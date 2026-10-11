@@ -188,7 +188,7 @@ _SLEEVE, _CTX, _VALUE, _PNL, _SHARES, _INV = "$S", "$A", "$v", "$p", "$q", "$i"
 _RIDERS = frozenset({_SLEEVE, _CTX, _VALUE, _PNL, _SHARES, _INV})
 #: A lot's dollar fields as the pass reads them (`_Levels._field`).
 _LOT_DOLLARS: dict[str, frozenset[str]] = {
-    "value": frozenset({_M, _VALUE}), "pnl": frozenset({_M, _PNL}), "net": frozenset({_M, _PNL}),
+    **{key: frozenset({_M, _VALUE if key == "value" else _PNL}) for key in MONEY_KEYS},
     QTY_KEY: frozenset({_B, _SHARES})}
 _NOW = frozenset({_M, _SLEEVE})
 _ANCHOR = frozenset({_B, _CTX})

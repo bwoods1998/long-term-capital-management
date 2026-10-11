@@ -1318,6 +1318,10 @@ class TheRunsCapitalFromALot(unittest.TestCase):
         for expr in allowed:
             with self.subTest(expr):
                 self.assertEqual(level_refusals(body(expr)), [], expr)
+        # A dict of the program's own with a key named as a lot's is no lot, and a count is no dollar.
+        own = ('def decide(ctx):\n    plan = {"qty": 3, "value": 0.5}\n    late = ctx.weekday >= 3 or ctx.session_of_month > 15\n'
+               '    return [{"buy": "SPY", "share": 0.5}] if plan["qty"] > 2 and plan["value"] > 0.25 and late else []\n')
+        self.assertEqual(level_refusals(own), [])
 
     def test_what_the_static_rule_cannot_see_is_named_for_the_two_paid_readers(self):
         from pathlib import Path
