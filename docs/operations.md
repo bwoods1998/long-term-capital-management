@@ -39,7 +39,16 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   the options birth quota, floor and stall alarms count the options lanes only.
 - The equity researcher (`elane_train` round; every 10 min, 3 families a round) gives each family one step: score its
   newest version on Train, review a pass, ask its birth route for a program or a revision, or retire it (REFUTED on
-  Train with a graveyard row in E2's own words, or STALLED when no version could be judged).
+  Train with a graveyard row in E2's own words, or STALLED when no version could be judged). A round starts only
+  when it has work it can do now: none while every family is past its research, in a backoff, or needs a model E2
+  may not ask.
+- **Three static rules refuse a program before it is stored or run**, each with its reason in the author's next
+  brief: the Gym's code rules; the LEVEL rule (a price or volume level, or the ratio of two different symbols'
+  prices, held against a constant or a PARAMS value) with RUN-START DEPENDENCE (the sleeve's own dollars of the run,
+  `ctx.equity`, `ctx.cash`, `ctx.budget`, `ctx.caps`, a lot's `value` or `pnl`, held against a constant, a PARAMS
+  value or the run's anchor: a profit lock reads where a window starts, and the screen's false-positive line holds
+  only for programs blind to that); and the MEMORY rule (no object of `numpy` or `math` held as memory: it would
+  outlive a restart and be shared by every program in the decider child).
 - **Train is 2016-19 and 2022-24** (A15): seven years, two runs a stress, summed. **2020-21 is the reserve**: no E2
   run has a session in it and a result carrying a row of it is refused whole (alert `elane_train_window`). The
   loosening, stated: the bar reads seven years, not nine.
@@ -51,10 +60,28 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
 - **Nothing after Train reaches a generator** (A9 D3): no Validation or look outcome, no band, no retirement after the
   look. The equity generators read Train facts only, and no options generator reads an equity graveyard row.
 
-**The budget.** `elane.e2.usd_day` (8 dollars a UTC day at the first switch-on) caps E2's MODEL dollars: births, Train
-research and the equity review together. They are Sail research dollars inside the swarm's research budget and under
-THE GATE'S RESERVE like any new research, never beside it; once the day's line is spent no equity question is asked
-until the next UTC day. Per family: at most 4 Train-scored versions and 7 write attempts. Train runs spend no model
+**The budget: a share of the Sail model line.** E2's MODEL dollars (births, Train research and the equity review
+together) are Sail research dollars inside the swarm's research budget and under THE GATE'S RESERVE like any new
+research, never beside it. The budget rule gives the swarm one hourly line for Sail models
+(`researcher.sail_usd_per_hour` after the budget's overlay: $0.3333 an hour, $8.00 a day, at the owner's ceiling;
+$0.0667 an hour at the floor), and E2 is paid from it, counted apart from the options researchers:
+- **E2's hourly pace** is `elane.e2.pace_share` (0.25, held to 0-0.5) of that line: $0.0833 an hour at the ceiling,
+  $0.0167 at the floor. Before each model call E2 reads what the swarm booked for its own request keys
+  (`swarm:elane:...`) in the trailing hour, holds for unanswered calls included, and asks nothing at or over it.
+- **E2's day** is `elane.e2.usd_day` and never more than a day at that pace: $2.00 at the ceiling and $0.40 at the
+  floor with the shipped share, so the captain's first value `usd_day` 8.0 is a cap above it and the budget's taper
+  tightens E2 with the line. Once the day is spent no equity question is asked until the next UTC day. To give E2
+  more, raise `pace_share` (`python3 set_swarm.py elane.e2.pace_share=0.4 --apply`); a `usd_day` under the share's
+  day binds.
+- **The options researchers** keep the rest: their hourly pace no longer counts E2's rows as their own spend (as it
+  never counted the architect's), and what E2 spent in the hour, at most its pace, comes off their limit. With E2
+  idle they have the whole line; with E2 at its pace, three quarters. Before this, E2's first switch values made it
+  the whole pace and every options researcher slept while E2 spent. The heartbeat's `status.researcher_pace.equity`
+  shows E2's spend, limit and what it took; `allocation.plan_usd_per_hour`, when set, counts E2's dollars as research
+  spend.
+Per family: at most 4 Train-scored versions and 7 write attempts. A question no route answered backs the family off
+(20 minutes, doubling to six hours); a Sail call that timed out after it was sent is booked at its hold and no other
+route is asked the same question. Train runs spend no model
 dollar (House CPU: up to about 72 short daily-bar runs an hour). After a Train pass the costs are E1's (Validation and
 the look on the House; real money only at Probe, inside the shared loss budget).
 
@@ -71,7 +98,16 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   review's dollars are on rows of their own ("review:<route>"); `days` is the spend by UTC day against `usd_day`. The
   route for the next question is chosen from births, dollars and Train passes ONLY, never from a later stage (a choice
   made on look outcomes would feed the holdout back into which model writes programs).
-- Alerts (House warnings through the swarm's status events): `elane_train_window`, `elane_train_state`.
+- Alerts (House warnings through the swarm's status events, in the owner's `swarm_alerts` cause):
+  `elane_train_window`, `elane_train_state`, and `elane_train_house` (the equity Train is not running: a version's
+  third failure of the House's since it was last judged, the decider child failing every run or no equity store; at
+  most once every six hours).
+- **The owner's alarms and Done.** The stall causes (births, population, Gym runs, Validations) and pre-open check 6
+  read the options lanes only; an equity family in a live band is check 10's, and an equity Validation never reads a
+  stalled options pipeline as moving (`equity_validation_runs` and `equity_awaiting_ids` are beside). Done's item 7
+  ("births, Gym runs and Validations every UTC day") counts the options lanes; each day's `equity` row (births, Train
+  runs, Validations) is reported beside it, never a bar. Counting the equity lanes in item 7 would be the owner's
+  change of the pinned rule.
 
 **Stop it**, from the lightest (each read on the next loop pass, no deploy):
 1. `elane.birth_share=0`: no more births. The families already born finish their Train research, and one that passed
@@ -91,12 +127,15 @@ in `league/ci.py` `PENDING_GATEWAY`.
 **Verify after the deploy** (read-only): `policy.json` on the box has the `elane.e2` block and `elane.birth_share` 0;
 before the switch the swarm log has no `elane:` or `elane_train:` line and `swarm.sqlite` no `swarm.elane` event; the
 three identities are E1's. After the switch: an `elane:` line within the first loop passes, `swarm.born` events with an
-equity lane, `elane_train:` lines every 10 minutes while a family researches, and the `dlane` report's `equity_yield`
-with a row for the route that answered.
+equity lane, `elane_train:` lines while a family has a step to take, the heartbeat's `researcher_pace.equity`, and the
+`dlane` report's `equity_yield` with a row for the route that answered and its `day_line` and `usd_hour`.
 
-**Not handled, stated.** E2's rounds start only while the options Gym is configured and the Sail guard allows
-research, like every round that makes new research, though an equity Train run needs no Gym box. The restart check
-does not catch memory that changes fewer than 1% of sessions. **The reserve's bars reach Train as look-back**: no
+**Not handled, stated.** E2's rounds start only while the Sail guard allows new research (THE GATE'S RESERVE and
+the brake hold them, as they hold every round that makes new research); the options Gym being down holds neither, since
+an equity Train run needs no Gym box. The restart check
+does not catch memory that changes fewer than 1% of sessions. The static rules do not follow a value through STATE or a
+level's digits (the two paid readers do), and the memory rule covers the programs the swarm breeds, not the seeds or
+the options Gym's programs (the root is E1's, for its next identity move). **The reserve's bars reach Train as look-back**: no
 2020-21 session is run or scored, but a 2022-24 run reads its NEEDS `history` + 1 sessions before 2022-01-03 (up to
 505), so a program with look-back has 2022-24 Train figures that are functions of 2020-21 bars, and even a program
 with no look-back reads the last 2021 session; sealing those bars too would

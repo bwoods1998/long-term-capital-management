@@ -48,9 +48,23 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   FORBIDDEN (`league/ci.py` `PENDING_GATEWAY` until the gateway's merge list names them: a gateway follow-up).
 - **Fixed at the integration:** the equity architect was told the share screen S1 judges (it is S2); with the lanes on
   and the share at zero the equity Train round ran empty every ten minutes (it now waits for a family of its own).
-- **No identity moves:** nothing under `league/live/`, `league/gym/`, `league/equity/` or `league/constitution.py`
-  changes. The options execution fingerprint, the equity evidence identity and the money digest read the same before
-  the merge and after it; no evidence is reset and no grant re-ratifies.
+- **Fixed after the integration's review** (three reviewers, Oct 10-11; `league/swarm/ELANE_E2_PATCHES.md` lists each
+  with what was done). The blockers and majors: E2's Sail dollars landed on the options researchers' hourly pace and
+  nothing paced E2 (at the first switch values E2's day was the whole pace): E2's dollars are now a share of the Sail
+  model line, `elane.e2.pace_share` 0.25, counted apart, with its own hourly pace and a day the budget tightens;
+  pre-open check 6 failed once any equity family held a live band (E1's line: it reads the options lanes now); a bred
+  program could size on its own profit since the run began, which lifts a zero-edge program's pass rate at the share
+  screen (the level rule refuses run-start dependence, and the rubric names it); an equity identity adoption let a
+  re-bred near-copy take a second look (E1 fixed it, carried). The rest: every continued lineage checked at birth, the
+  level rule's missed shapes, no memory in an object of numpy's, a LOAD refusal's reason shown and a
+  disqualification's own words never, the audit's second model under a stalled Sail window, a timed-out call booked
+  and ending its question, routes sampled on birth requests, the Validation alarm and Done's item 7 reading the
+  options lanes with the equity lanes beside, an alert for a standing failure of the House's, no idle Train round,
+  and the reserve's wording at E1's `history` + 1 slice.
+- **No identity moves by E2:** it changes nothing under `league/live/`, `league/gym/`, `league/equity/` or
+  `league/constitution.py`. The options execution fingerprint and the money digest are the ones E1 ships, and no
+  evidence is reset by E2. (E1's own review fixes, merged here, move the equity evidence identity before its first
+  look: the section below.)
 - Operations: [docs/operations.md](docs/operations.md), "The equity lanes' births" (switch on, read, stop, the budget,
   the yield record).
 

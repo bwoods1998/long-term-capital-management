@@ -46,6 +46,13 @@ takes its look in the same round. They run on the House in the decider child (A3
 the main loop starts them whatever the guard says and whether or not the Gym is up (`equity_due`), outside the branch
 that holds the options rounds, and no options round carries or delays them.
 
+THE EQUITY LANES' BIRTHS AND TRAIN (release E2; league/swarm/ELANE_E2.md): two rounds of their own, `elane` (the
+architect's equity pass) and `elane_train` (the equity researcher), off unless `elane.mode` is "gate" (births also
+need `elane.birth_share` above zero). They ask models, so they start only while the guard allows new research; they
+need no Gym box, so a Gym that is down holds neither. THEIR DOLLARS ARE COUNTED APART (`pace_status`): a share of the
+Sail model line (`elane.e2.pace_share`), paced by E2 itself before each call, never the researchers' own spend, and
+what E2 took of the line in the hour comes off the researchers' limit.
+
 The heartbeat (`<root>/swarm.heartbeat`, JSON) carries the pid, the release directory, the time, and a live
 status (families, cycles and spend in the last hour by kind, the guard, the pool): the House's `SwarmStep`
 reads it to supervise the process and the operator reads it to see the swarm.
@@ -1044,19 +1051,24 @@ class Swarm:
                 born = self.reseed()
                 if born:
                     log(f"reseeded {len(born)}: {', '.join(born)}")
-            # THE EQUITY LANES' BIRTHS AND TRAIN (release E2; league/swarm/elane_births.py, elane_train.py): their own
-            # rounds, never inside the options architect's pass (its ceiling and its closed cells stop neither). Each is
-            # off unless `elane.mode` is "gate" (births also need `elane.birth_share` above zero).
-            if research and self.architect.equity_due():
-                self._round("elane", self.architect.equity_pass)
-            if research and self.elane_train.due():
-                self._round("elane_train", self.elane_train.run)
             if research and self.diagnostician.due():  # Claude's own funded line and daily budget, not the researchers' pace
                 self._round("diagnostician", self.diagnostician.run)
             if not self.over_pace():
                 # PARKED DORMANCY (F1): a park counts toward the dormancy clause only while a cycle could have run, as
                 # the timer's holds did (never under the brake, with the Gym down or over the pace).
                 self.scheduler.count_parked()
+        # THE EQUITY LANES' BIRTHS AND TRAIN (release E2; league/swarm/elane_births.py, elane_train.py): their own
+        # rounds, never inside the options architect's pass (its ceiling and its closed cells stop neither). Each is
+        # off unless `elane.mode` is "gate" (births also need `elane.birth_share` above zero). They make new research
+        # with model dollars, so THE GATE'S RESERVE and the brake hold them (`guard.allows("research")`) and E2's own
+        # pace and day hold each model call (`elane_yield.hold`); they run on the House's decider child, no Gym box
+        # (A3), so they start outside the branch that holds the options rounds: a Gym that is down holds neither, as
+        # it holds none of E1's equity rounds above (s2-7).
+        if self.guard.allows("research"):
+            if self.architect.equity_due():
+                self._round("elane", self.architect.equity_pass)
+            if self.elane_train.due():
+                self._round("elane_train", self.elane_train.run)
         self._grow_workers()
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()

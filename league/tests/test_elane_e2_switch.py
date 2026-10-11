@@ -337,6 +337,36 @@ class TheLoop(LoopCase):
         self.assertIn("elane", names)
         self.assertIn("elane_train", names)
 
+    def test_e2s_rounds_need_no_gym_and_stop_at_the_research_guard(self):
+        # Patch 1's placement, re-read on E1's s2-7 (its equity rounds left the Gym's branch): an equity Train run needs
+        # no Gym box (A3), so a Gym that is down holds neither of E2's rounds; they make new research with model
+        # dollars, so THE GATE'S RESERVE and the brake hold both.
+        fx.e2_family(self.store, "e2-first")
+        block = {"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}}
+        names, sw = self.started(block)
+        self.assertIn("elane", names)
+        self.assertIn("elane_train", names)
+
+        def again() -> list[str]:
+            names.clear()
+            sw.step()
+            return list(names)
+        sw.gym_ready = lambda: False
+        after = again()
+        self.assertNotIn("tournament", after, "the options rounds wait for the Gym")
+        self.assertIn("elane", after)
+        self.assertIn("elane_train", after)
+        self.guard.research_held = True
+        after = again()
+        self.assertNotIn("elane", after, "THE GATE'S RESERVE holds new research, E2's too")
+        self.assertNotIn("elane_train", after)
+        self.guard.research_held, self.guard.braked = False, True
+        after = again()
+        self.assertNotIn("elane", after, "and so does the brake")
+        self.assertNotIn("elane_train", after)
+        self.guard.braked = False
+        self.assertIn("elane_train", again())
+
     def test_one_equity_pass_on_the_real_router_is_born_and_booked(self):
         # The wiring production runs: the loop's own Architect and EquityResearcher, the real ModelRouter and Provider (a
         # scripted Sail), E1's real card admission and store. The pass asks ONE question on the first route, bears the

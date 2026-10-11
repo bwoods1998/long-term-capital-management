@@ -2,16 +2,18 @@
 
 This file was E2's list of changes for the integrator. It is now the record of what was applied: nothing here is left
 to do. E2 (`feat/equity-e2`, carried at 04ca26c9: its A15 review fixes included) was merged into E1's final head
-8e11986b on branch `feat/equity-e2-int`, and E1's later commit bb0f2671 was merged in after it; E2's own files
+8e11986b on branch `feat/equity-e2-int`, and E1's later commits were merged in after it (bb0f2671, then its review's
+fixes: 5472aa99 and 70948154, the head carried now); E2's own files
 (`league/swarm/elane_births.py`, `elane_train.py`, `elane_yield.py`, `elane_seal.py`, `elane_review.py`, their tests,
 and its branches in `league/swarm/architect.py` and `league/swarm/researcher.py`) merged with no conflict, and each
-patch below went in as one commit, in this order (11 was found by the full suite and added at the integration). The
+patch below went in as one commit, in this order (11 was found by the full suite and added at the integration; 12 to
+14 answer the integration's own review, below). The
 numbers are the ones the code's comments and docstrings name ("patch 5", "patch 9"). The design is in
 [ELANE_E2.md](ELANE_E2.md).
 
 | # | file | what | without it | applied |
 |---|---|---|---|---|
-| 1 | `league/swarm/loop.py` | the two rounds: `elane` (`Architect.equity_pass`) and `elane_train` (`EquityResearcher.run`) | E2 never runs | as written |
+| 1 | `league/swarm/loop.py` | the two rounds: `elane` (`Architect.equity_pass`) and `elane_train` (`EquityResearcher.run`) | E2 never runs | as written; re-placed after E1's s2-7 (its equity rounds left the Gym's branch): E2's two start under the research guard alone, outside the branch a Gym that is down closes |
 | 2 | (none) | E1's `dlane._born` already skips equity births (A8.12) | | not needed: E1 has it |
 | 3 | `league/swarm/allocation.py` | `BirthQuota` skips equity births | equity births (E1's seeds too) dilute the options structure families' window shares | as written |
 | 4 | `league/swarm/game.py` | `visible_graveyard` drops equity rows | the diagnostician can read an equity row whose lesson tells a Validation or look outcome (A9 D3) | as written |
@@ -22,6 +24,9 @@ numbers are the ones the code's comments and docstrings name ("patch 5", "patch 
 | 9 | `league/swarm/store.py` | `retire_gym`'s population floor counts the options families only | E2's families hold the options floor up, so the diagnostician can retire the options population toward zero | as written |
 | 10 | `league/ops/stall.py`, `league/ops/preopen.py` | the owner's alarms count the options lanes only: births, the living population, the Gym runs, the dry-births tally, the pre-open population check | E2's births hide a dead options architect, its families a population under its floor, its Train runs on the House (up to ~72 an hour) a stalled Gym | as written |
 | 11 | `league/swarm/hook.py` | `SKIPPED_KINDS` gains `swarm.elane` (E2's pass and Train-round events stay in the swarm's own table) | the House's mirror drops each row as an unknown kind and warns the owner; `test_swarm_hook` fails | added at the integration (E2's list did not have it) |
+| 12 | `league/swarm/loop.py`, `league/swarm/policy.json` | `Swarm.pace_status` leaves E2's rows (`swarm:elane:` keys) out of the researchers' own spend and takes what E2 spent in the hour, at most E2's pace, off their limit; `elane.e2.pace_share` 0.25 | E2's dollars pause every options researcher (at the first switch values E2's day was the whole pace) while nothing paces E2 | added after the integration's review (loop-1, merge-1) |
+| 13 | `league/ops/preopen.py` | check 6 lists the options lanes' live-band families only | every equity family in a live band reads as "missing a band row": check 6 fails each trading day and hides a real options family without one | added after the integration's review (merge-2) |
+| 14 | `league/ops/stall.py`, `league/ops/dlane_report.py` | the Validation alarm (runs, inherited verdicts, the families owed one) and Done's item 7 read (births, Gym runs, Validations) count the options lanes; the equity lanes' own are reported beside | one equity Validation reads a stalled options Validation pipeline as moving; a day when only the equity lanes worked reads as research running | added after the integration's review (loop-4, merge-3) |
 
 **Patch 7, re-made.** The diff was written when E1's `PENDING_GATEWAY` still held E1's own four entries. E1's last
 commit moved those into `FORBIDDEN`'s own list and into the gateway's merge list, and left `PENDING_GATEWAY` empty, so
@@ -58,6 +63,53 @@ pass; the third such failure of a version raises the `elane_train_state` alert, 
   updates in place (a running sum, a peak since entry) fails STATE, because ctx's history is re-adjusted each session;
   the cure for an author is to recompute from `ctx.bars` at every call.
 
+## What the integration's review found, and what was done (three reviewers, Oct 10-11)
+
+Each has a test that failed before and passes after; the blockers and majors first.
+
+- **E2's dollars paused the options researchers and nothing paced E2** (blocker; patch 12). E2's dollars are now a
+  share of the Sail model line, counted apart: `elane.e2.pace_share` (0.25) of `researcher.sail_usd_per_hour` is E2's
+  hourly pace, read from the swarm's own meter for E2's keys before each model call; E2's day is `usd_day` and never
+  more than a day at that pace, so the budget's floor tightens it; the researchers keep the line less what E2 took,
+  at most its pace. FOR THE CAPTAIN: the split is `pace_share`; at the ceiling E2 has $2.00 a day and the first
+  switch value `usd_day` 8.0 is a cap above it.
+- **Pre-open check 6 failed once any equity family held a live band** (major; patch 13). E1's line.
+- **A bred program could read its own profit since the run began** (major). The level rule now refuses RUN-START
+  DEPENDENCE (the sleeve's dollars of the run against a constant, a PARAMS value or the run's anchor), and the rubric
+  and its facts name it. FOR THE CAPTAIN: the root is E1's screen (its floor's worlds never start flat while every
+  judged window does), so the false-positive line beside a live trade is true only for programs blind to their run's
+  start; the captain's seeds are (they read no dollar of the sleeve).
+- **After an equity identity adoption a re-bred near-copy took a second look** (major; E1's code). Fixed at the root
+  by E1 (8ffdc6bb, carried): the look's Train series stays with the look and `same_lineage` fails closed. A test here
+  holds it for an E2-born family.
+- **The admission checked one lineage for a spent try.** It checks the declared parent, every family of the slice
+  with the same idea and the rebirth row.
+- **The level rule missed natural shapes** (`ctx.bars.items()`, a helper handed a level, a lot's `.get`, numpy's
+  `greater`/`subtract`/`mod`/`digitize`/`searchsorted`, `float('400')`, `400 + 0`, the ratio of two different
+  symbols' prices). Each is refused now.
+- **Memory in an object of numpy's** (`np.typecodes`) survived the restart check and was shared by every run in the
+  decider child. E2's own static MEMORY rule refuses it for every bred program. NOT changed: league/gym/safety.py
+  and E1's child (both in an identity); FOR E1's OWNER, with the next identity move: the same rule in safety.py or a
+  child forked a run, so the seeds' and the options Gym's programs are covered too.
+- **A LOAD refusal's reason never reached its author; a disqualification's own words must not.** The record keeps
+  the House's refusal text for LOAD, and counts, a line and a known exception class for DQ.
+- **The audit could not complete while Sail's balanced window was stalled**, and each retry re-read one key (booked
+  again; empty after the router's compaction; three empties failed the version). The audit skips a candidate whose
+  fallback reaches the reviewer's model, asks the next candidate when the answer came from it all the same, and every
+  question has a key of its own.
+- **A timed-out call booked a hold E2's line never saw**, every other route was asked the same question, and the
+  family asked again next round. The failed call is booked at its hold, ends its question, and the family backs off.
+- **A route was "sampled" on its families' revisions.** The sample and the cheapest-route price read birth requests.
+- **The Validation alarm and Done's item 7 pooled the lanes** (patch 14).
+- **A standing failure of the House's never alerted** (no store, a child that cannot start): `elane_train_house`.
+- **An idle Train round every ten minutes** while any family of E2's lived: a round starts only with work it can do.
+- **E1's history + 1 slice** (a00ab9f9) made two reserve tests and the "504 sessions" wording stale: every 2022-2024
+  run holds the last 2021 bar; the tests and the A15 sentences say so.
+
+**The three identities still did not move**: these fixes touch `league/swarm/` (E2's modules, `loop.py`,
+`policy.json`), `league/ops/` and the tests. E1's own review fixes, carried by the merge, move the equity identity
+before its first look (E1's changelog says so); that is E1's move, not E2's.
+
 ## What the integration added beside the patches
 
 - **The screen is S2** (amendment A11). The equity architect's system text said the share screen S1 judges the
@@ -65,7 +117,7 @@ pass; the third such failure of a version raises the `elane_train_state` alert, 
   text a generator or a reviewer reads (`league/tests/test_elane_e2_switch.py` holds both).
 - **No idle Train round.** `EquityResearcher.due` is false while no family of E2's has a round to be given. Before,
   with `elane.mode` "gate" and `elane.birth_share` 0 (E1 on, E2's births not yet), an empty round wrote its clock and
-  one event every ten minutes.
+  one event every ten minutes. (The review above took it further: no round without work it can do now.)
 - **The shipped switches, tested on E1's real loop** (`league/tests/test_elane_e2_switch.py`): policy.json ships
   `elane.mode` "off" and `elane.birth_share` 0 with the code's defaults in `elane.e2`; the settings layers take
   `elane.birth_share`, `elane.e2.usd_day` and every other `elane.e2` key from swarm.json one key at a time, each held
