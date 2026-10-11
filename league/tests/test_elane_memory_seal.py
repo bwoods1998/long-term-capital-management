@@ -145,6 +145,12 @@ class GeneratorsReadNothingNew(unittest.TestCase):
             store.set_state(fid, elane_try={"version": 1, "entered": not flip, "precheck": {"passed": not flip, "t": figure}},
                             elane_look={"version": 1, "verdict": {"passed": not flip, "t": figure}, "beside": word})
             store.add_look(fid, 1, f"sha-{fid}", passed=not flip, p_value=abs(figure), detail={"why": word})
+        # The probe's own ledger rows (league/ops/contam_probe.py books its dollars on "probe:<route>" rows of E2's
+        # ledger: the one thing E3 writes where the route chooser reads).
+        for route, usd in (("sail:pro_asap", 2.75 if flip else 0.35), ("sail:k3", 0.05 if flip else 1.95)):
+            for _ in range(40 if flip else 2):
+                elane_yield.book(store, f"probe:{route}", usd=usd / 40, known=True, purpose="probe", answered=not flip,
+                                 now=clock())
         # Every memory row.
         elane_memory.ensure(store)
         for fid, hidden in (("won", 2018), ("busy", 2023), ("old", None)):
@@ -193,6 +199,9 @@ class GeneratorsReadNothingNew(unittest.TestCase):
                      "contamination.json", "equity-fill-minutes/2026/2026-10-12.json"):
             self.assertNotEqual(Path(a.root, name).read_bytes(), Path(b.root, name).read_bytes(), name)
         self.assertNotEqual(a.looks(), b.looks())
+        rows = [elane_yield.ledger(x)["routes"] for x in (a, b)]
+        self.assertNotEqual(rows[0]["probe:sail:pro_asap"], rows[1]["probe:sail:pro_asap"])
+        self.assertEqual(rows[0]["sail:pro_asap"], rows[1]["sail:pro_asap"], "the birth routes' own rows are one")
 
     def test_the_brief_says_a_year_is_held_out_and_names_none(self):
         briefs = self.reads("a")["briefs"]
