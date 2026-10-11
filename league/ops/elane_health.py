@@ -24,8 +24,9 @@ THE CAUSES (`CAUSES`; `checks`). Each has `what`, `numbers`, `doing` (what the f
 - `elane_idle`: work is owed (families in Train research, or births wanted) and no version was scored on Train for
   `IDLE_HOURS`. It says why in the lane's own words: STARVED when E2 may ask no model now (`elane_yield.hold`: its
   hourly pace, its day's line, or the House's Sail day and the guard), BROKEN when it may and still scores nothing (the
-  Train round's own steps: failures of the House's, questions no route answered, rounds that raised, families waiting
-  out a backoff, no round at all). A starved lane names its lever and needs nobody; a broken one is the owner's step.
+  Train round's own steps: failures of the House's, questions no route answered, steps and rounds that raised,
+  families waiting out a backoff, no round at all). A starved lane names its lever and needs nobody; a broken one is
+  the owner's step (but for routes that do not answer, which heal by themselves).
 - `elane_refused`: of the programs the generators wrote in the last `REFUSED_HOURS`, more than `REFUSED_SHARE` were
   refused before a run by ONE static rule (the reading, level or memory rule, the code rules, NEEDS; any
   "equity <name> rule" a later release adds is read the same way): the generators are not being taught that rule. It
@@ -346,15 +347,18 @@ IDLE_BRIEFS = {"pace": "starved at its own pace (elane.e2.pace_share)", "usd_day
                "(elane.e2.usd_day)", "sail_day": "starved: the House's Sail day holds it", OTHER: "starved",
                "raised": "broken: its rounds raise", "house": "broken: Train runs fail on the House's side",
                "unanswered": "broken: no model route answers", "refused": "broken: every program is refused before a run",
+               "errors": "broken: its Train steps fail", "silent": "broken: its rounds judge nothing",
                "barren": "no family yet: the equity passes bear none", "no_round": "broken: no round starts"}
 IDLE_STEPS = {"raised": "the equity rounds raise (the swarm log): a fix, in a release",
               "house": "check the equity_data job's receipt and the swarm's equity-decider.log",
+              "errors": "the equity lanes' Train steps fail (the swarm log): a fix, in a release",
+              "silent": "the equity lanes' rounds judge nothing (the swarm log): a fix, in a release",
               "no_round": "the equity lanes start no round (the swarm log): a fix, in a release"}
 #: The lever of a starved lane, said beside it (never an owner step: the lanes run as their settings say).
 PACE_LEVER = ("The lever is yours: BOTH elane.e2.pace_share and elane.e2.usd_day bind (python3 set_swarm.py "
               "elane.e2.pace_share=<lines> elane.e2.usd_day=<dollars> --apply).")
 #: The ways an idle lane is BROKEN that nothing on the floor heals: the owner's step.
-IDLE_OWNER_KINDS = ("raised", "house", "no_round")
+IDLE_OWNER_KINDS = ("raised", "house", "errors", "silent", "no_round")
 #: The gateway's cuts of a stall entry (gateway/lib/email.mjs: `sentence(entry.what, 400)`, `sentence(entry.doing, 700)`,
 #: STALL_STEP_CHARS, STALL_NUMBERS) and the figures of each cause the carried entry shows first.
 WHAT_CHARS, DOING_CHARS, STEP_CHARS, FIGURES = 400, 700, 400, 16
@@ -975,7 +979,7 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                         + f" The lanes are idle after {IDLE_HOURS:g} h with nothing scored.",
                 "numbers": numbers, "doing": DOING["broken"], "owner_step": None, "onset": None}
     # WHY, since the lanes went idle: the Train rounds' own steps, the rounds that raised, the families waiting.
-    tally = {"rounds": 0, "house": 0, "unanswered": 0, "refused": 0, "raised": 0, "passes": 0}
+    tally = {"rounds": 0, "house": 0, "unanswered": 0, "refused": 0, "errors": 0, "raised": 0, "passes": 0}
     houses: dict[str, int] = {}
     for at, payload in f.get("rounds") or []:
         if at < edge:
@@ -988,6 +992,7 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                 _bump(houses, read["house"])
             tally["unanswered"] += int(read["unanswered"])
             tally["refused"] += int(read["refused"] is not None)
+            tally["errors"] += int(read["error"])
     tally["raised"] = sum(1 for at, _ in f.get("raised") or [] if at >= edge)
     tally["passes"] = sum(1 for at, row in passes if at >= edge and row["barren"])
     waiting = [fam for fam in researching if any(t > now for t in fam["waits"].values())]
@@ -997,7 +1002,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                 _bump(houses, name.split(":", 1)[1])
     train_at = (f.get("kv") or {}).get(TRAIN_AT_KEY)
     numbers.update(train_rounds=tally["rounds"], house_failures=tally["house"], unanswered=tally["unanswered"],
-                   refused_answers=tally["refused"], rounds_raised=tally["raised"], barren_passes=tally["passes"],
+                   refused_answers=tally["refused"], step_errors=tally["errors"], rounds_raised=tally["raised"],
+                   barren_passes=tally["passes"],
                    families_waiting=len(waiting),
                    train_round_age_min=None if train_at is None else round(max(0.0, now - train_at) / 60.0, 1))
     starved = held is not None and held["kind"] is not None
@@ -1016,7 +1022,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
         # With no family in research the work owed is the equity pass's: barren passes are `elane_births`' to explain.
         kind = ("raised" if tally["raised"] else "house" if tally["house"] or houses else
                 "unanswered" if tally["unanswered"] or any("unanswered" in fam["waits"] for fam in waiting) else
-                "refused" if tally["refused"] else "barren" if not researching and tally["passes"] else "no_round")
+                "refused" if tally["refused"] else "errors" if tally["errors"] else
+                "barren" if not researching and tally["passes"] else "silent" if tally["rounds"] else "no_round")
         parts = [f"{tally['rounds']} Train rounds ran"]
         if tally["raised"]:
             parts.append(f"{tally['raised']} rounds raised")
@@ -1027,6 +1034,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
             parts.append(f"{tally['unanswered']} questions got no answer from a model route")
         if tally["refused"]:
             parts.append(f"{tally['refused']} programs were refused before a run (see elane_refused)")
+        if tally["errors"]:
+            parts.append(f"{tally['errors']} steps failed with an error of their own")
         if waiting:
             parts.append(f"{len(waiting)} of {len(researching)} families wait out a backoff")
         if train_at is not None:
@@ -1043,6 +1052,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
         owner = {"raised": "the equity lanes' rounds raise (the swarm log's \"elane failed\" and \"elane_train failed\" lines)",
                  "house": ("the equity lanes' Train runs fail on the House's side: check the equity_data job's receipt and the "
                            "swarm's equity-decider.log"),
+                 "errors": "the equity lanes' Train steps fail with errors (the swarm log's elane_train lines)",
+                 "silent": "the equity lanes' Train rounds run and judge nothing (the swarm log's elane_train lines)",
                  "no_round": ("the equity lanes owe work, may ask a model and start no round (the swarm log's elane_train "
                               "lines)"),
                  }[kind] + f"; it needs a fix, in a release or on the box ({REPORT} prints each family's state)"

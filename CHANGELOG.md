@@ -585,7 +585,7 @@ owner when the lanes next go wrong.
     no birth, when a setting clears it (the universe, the structures, the output limit).
   - `elane_idle`: work is owed and no version was scored for 3 h. STARVED (E2 may ask no model: its pace, its day,
     the House's Sail day) names its lever and needs nobody; BROKEN (it may ask and scores nothing: rounds that raise,
-    Train runs failing on the House's side, no round) is the owner's step.
+    Train runs failing on the House's side, steps that fail, no round) is the owner's step.
   - `elane_refused`: more than half of the programs written in the last 6 h (8 at least) were refused before a run by
     one static rule. It names the rule and its commonest sentence. The owner's step: teach the rule, in a release.
 - **Judged only when there is something to judge:** the lanes on (`elane.mode`, `elane.birth_share`), the floor not

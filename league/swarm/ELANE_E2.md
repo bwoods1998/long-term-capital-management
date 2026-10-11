@@ -169,7 +169,7 @@ request text, and nothing of E1's.
    - `elane_idle`: families in Train research or births wanted, and no version scored for 3 h. STARVED when the
      lane's own `hold` says it may ask no model (its pace, its day, the House's Sail day): the lever is named, nobody
      is asked. BROKEN when it may ask and scores nothing: the owner's step when the rounds raise, the Train runs fail
-     on the House's side, or no round starts.
+     on the House's side, the steps fail, or no round starts or judges anything.
    - `elane_refused`: more than half of the programs written in the last 6 h, 8 at least, were refused before a run
      by one static rule. The rule and its commonest sentence. The owner's step: teach the rule.
 2. **When a cause is judged.** Only while `elane.mode` is "gate", `elane.birth_share` is above zero, E2's rounds are

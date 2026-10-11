@@ -710,6 +710,22 @@ class OwedWorkAndNothingScored(Case):
         check = self.equity()["elane_idle"]
         self.assertEqual((check["numbers"]["kind"], check["numbers"]["rounds_raised"]), ("raised", 1))
         self.assertIn("the equity lanes' rounds raise", check["owner_step"])
+        # Steps that fail with an error of their own, and rounds that run and judge nothing.
+        for steps, kind, words in (([{"family": "alpha-one", "error": "TypeError: invented"}], "errors",
+                                    "1 Train rounds ran; 1 steps failed with an error of their own"),
+                                   ([{"family": "alpha-one", "skipped": "its passing version cannot be read"}], "silent",
+                                    "1 Train rounds ran")):
+            self.setUp()
+            self.researching()
+            self.round(1.0, *steps)
+            check = self.equity()["elane_idle"]
+            self.assertEqual((check["numbers"]["kind"], check["stalled"], bool(check["owner_step"])), (kind, True, True))
+            self.assertIn(f"BROKEN, not starved: E2 may ask a model now and {words}", check["what"])
+            self.assertNotIn("TypeError", json.dumps(check))
+        self.assertEqual(set(EH.IDLE_STEPS), set(EH.IDLE_OWNER_KINDS))
+        self.assertLessEqual({*EH.IDLE_OWNER_KINDS, "unanswered", "refused", "barren", "pace", "usd_day", "sail_day"},
+                             set(EH.IDLE_BRIEFS))
+        self.assertEqual(set(EH.BIRTH_STEPS), set(EH.BIRTH_LEVERS))
         # Routes that do not answer heal by themselves: told, nobody's step.
         self.setUp()
         a = self.researching()

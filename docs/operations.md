@@ -193,13 +193,15 @@ the look on the House; real money only at Probe, inside the shared loss budget).
     `elane.e2.max_per_pass`; a pass that raises needs a release. Cards refused, an empty answer or a route that did
     not answer stay information.
   - `elane_idle`: work is owed (families in Train research, or births wanted) and no version was scored for 3 h
-    (not judged while the swarm itself is not running: its heartbeat ten minutes old). It reads STARVED when E2 may ask no model now, in the lane's own words: at its own hourly pace, its day's dollars
-    spent, or held by the House's Sail day and the guard. That is no step of yours: the lanes run as their settings
-    say, and it names the lever (`python3 set_swarm.py elane.e2.pace_share=<lines> elane.e2.usd_day=<dollars>
-    --apply`; both bind). It reads BROKEN when E2 may ask and still scores nothing. **Your step** when its rounds
-    raise (the swarm log's "elane failed" and "elane_train failed" lines), when its Train runs fail on the House's
-    side (the `equity_data` job's receipt, the swarm's `equity-decider.log`) or when no round starts; model routes
-    that do not answer heal by themselves, and with no family yet and barren passes it points at `elane_births`.
+    (not judged while the swarm itself is not running: its heartbeat ten minutes old). It reads STARVED when E2
+    may ask no model now, in the lane's own words: at its own hourly pace, its day's dollars spent, or held by the
+    House's Sail day and the guard. That is no step of yours: the lanes run as their settings say, and it names
+    the lever (`python3 set_swarm.py elane.e2.pace_share=<lines> elane.e2.usd_day=<dollars> --apply`; both bind).
+    It reads BROKEN when E2 may ask and still scores nothing. **Your step** when its rounds raise (the swarm log's
+    "elane failed" and "elane_train failed" lines), when its Train runs fail on the House's side (the
+    `equity_data` job's receipt, the swarm's `equity-decider.log`), when its steps fail with errors, or when no
+    round starts or judges anything (the swarm log's `elane_train` lines); model routes that do not answer heal by
+    themselves, and with no family yet and barren passes it points at `elane_births`.
   - `elane_refused`: more than half of the programs the generators wrote in the last 6 h (8 at least) were refused
     before a run by ONE static rule (the reading, level or memory rule, the code rules, NEEDS). It names the rule
     and its commonest sentence. **Your step:** the generators are not being taught that rule: teach it where they
@@ -3245,7 +3247,7 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `underspend` (no-captain) | Sail's booked research today under 70% of what its day's figure buys by now at an even pace (from 6 h into the day, the guard braked under 2 h of it; Claude's reading is said, never a cause), or two settings that cannot both hold while they bind (`settings_binds` conflicts: the class cap once a direction card met it in the last 6 h); the settings that bind research are named either way | none (INFO): the settings named are the owner's to change |
 | `elane_dq` (release E2.4) | the equity lanes on and judged: more than half of the equity versions scored in the last 6 h (6 at least, since the swarm started) could not be judged for a fault of their own program (disqualified, refused at load, failed by the decider child) | "the equity generators misread the program contract ...: fix the text they read (league/equity/EQUITY.md "Reading ctx", elane_review.READING_CTX) or the static rule that should refuse it, in a release" |
 | `elane_births` (release E2.4) | the last 3 equity passes that asked a model (in the last 12 h, since the swarm started) bore no family | none for 6 h (each pass shows the next its refusals); then, when a setting clears the main way they bore nothing: widening `elane.universe` or `elane.structures` (your decision), `elane.e2.births_max_output_tokens` or `elane.e2.max_per_pass` for answers cut short, a release for a pass that raises; none for the rest |
-| `elane_idle` (release E2.4) | families in Train research or births wanted, and no equity version scored for 3 h (since the swarm started) | none while STARVED (E2 at its own pace, its day's dollars spent, the House's Sail day): the lever is named, never a step; BROKEN: "the equity lanes' rounds raise ...", "... Train runs fail on the House's side: check the equity_data job's receipt and the swarm's equity-decider.log", or "... start no round"; none for routes that do not answer |
+| `elane_idle` (release E2.4) | families in Train research or births wanted, and no equity version scored for 3 h (since the swarm started) | none while STARVED (E2 at its own pace, its day's dollars spent, the House's Sail day): the lever is named, never a step; BROKEN: "the equity lanes' rounds raise ...", "... Train runs fail on the House's side: check the equity_data job's receipt and the swarm's equity-decider.log", "... Train steps fail with errors", "... rounds run and judge nothing" or "... start no round"; none for routes that do not answer |
 | `elane_refused` (release E2.4) | more than half of the programs the equity generators wrote in the last 6 h (8 at least, since the swarm started) were refused before a run by one static rule | "the equity generators are not being taught <the rule>: teach it where they read it (league/equity/EQUITY.md, the researcher's system prompt, elane_review.READING_CTX), in a release" |
 | `forward` (weekend fixes) | the nightly's ready file (`gym-forward.json`) does not carry the last session before today once the UTC day is 10 h in; `data/nightly.json` has carried an error 6 h or more (from the first run that saw it, kept in `stall.json`); or `data/nightly.stop` has stood 2 h or more | for a stop: "remove /workspace/state/data/nightly.stop ... the nightly forward replay, and with it the Done meter's replay twins, waits while it stands"; none for the rest |
 
