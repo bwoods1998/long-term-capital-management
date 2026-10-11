@@ -605,13 +605,15 @@ class Probe:
         write_json(self.root / FILE, doc)
 
     def run(self) -> dict[str, Any]:
-        from ..equity.store import MissingData
+        from ..equity.store import MissingData, StoreRefused
         from ..swarm import elane_yield
         from . import schedule
 
         c = cfg(self.settings)
         if c["mode"] == "off":
             return {"status": "skipped", "why": "elane.contam.mode is off"}
+        if c["usd_run"] <= 0:
+            return {"status": "skipped", "why": "elane.contam.usd_run is zero: a probe may spend nothing"}
         now = float(self.ctx.now())
         served = {r.key: r for r in elane_yield.routes(self.settings, self.router)}
         doc = read(self.root)
@@ -697,8 +699,8 @@ class Probe:
                 answers.extend(got)
             try:
                 truths = [truth(self.equity, q) for q in batch_of]
-            except MissingData as exc:  # the store is being rewritten: what is scored so far stays
-                state["stopped"], state["error"] = "data", f"MissingData: {str(exc)[:160]}"
+            except (MissingData, StoreRefused) as exc:  # the store is being rewritten: what is scored so far stays
+                state["stopped"], state["error"] = "data", f"{type(exc).__name__}: {str(exc)[:160]}"
                 return None
             return score(batch_of, answers, truths)
 
@@ -753,8 +755,9 @@ class Probe:
 
 
 def run(ctx: Any) -> dict[str, Any]:
-    """THE JOB (the module docstring; league/ops/registry.py). The receipt: {"route", "usd", "finished", "cells"
-    (scored this run), "asked", "stopped" ("usd" | "time" | None)}."""
+    """THE JOB (the module docstring; league/ops/registry.py). The receipt: {"route", "probe" (its number), "usd",
+    "finished", "cells" (scored this run), "asked", "stopped" ("usd" | "time" | "error" | "data" | None)} and, when a
+    call or the store failed, "error"."""
     from ..equity.store import STORE_DIR, EquityStore, MissingData, StoreRefused, mint_equity_gate_capability
     from ..swarm import settings as settings_mod
     from . import equity_data

@@ -541,6 +541,7 @@ class TheJob(Jobs):
 
     def test_nothing_to_do(self):
         self.assertEqual(self.probe(settings_=settings(mode="off"))[0], {"status": "skipped", "why": "elane.contam.mode is off"})
+        self.assertEqual(self.probe(settings_=settings(usd_run=0))[0]["status"], "skipped", "no dollar, no probe, no idle mark")
         self.assertFalse((self.root / P.FILE).exists())
         elane_yield.book(self.store, "sail:pro_asap", usd=6.0, known=True, purpose="research", answered=True, now=self.clock())
         out, _ = self.probe()

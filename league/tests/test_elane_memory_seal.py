@@ -732,5 +732,20 @@ class TheWiring(unittest.TestCase):
         self.assertEqual(elane_folds.seen_spans(elane_folds.hidden_year(fam)), elane_train.TRAIN_SPANS)
 
 
+class TheSwitchAndTheWiringLandTogether(unittest.TestCase):
+    def test_a_policy_that_records_the_memory_ships_with_the_wired_flow(self):
+        """policy.json's `elane.memory.mode` "record" (release E3's patch 11.2) on a tree without the patches to E2's
+        files would record nothing and skip this file's wired tests in silence: the two land together or this fails."""
+        from league.swarm import settings as settings_mod
+
+        layer, status = settings_mod.read_policy()
+        self.assertEqual(status["state"], "ok", status)
+        if elane_folds.mode(layer) == "record":
+            self.assertTrue(e3.WIRED, e3.NOT_WIRED)
+            self.assertEqual(elane_seal.SEALED_TABLES, frozenset(elane_memory.SEALED_TABLES))
+        else:
+            self.assertEqual(elane_folds.mode(layer), "off")
+
+
 if __name__ == "__main__":
     unittest.main()
