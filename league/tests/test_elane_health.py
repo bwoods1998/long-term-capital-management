@@ -404,6 +404,22 @@ class AQuietLaneIsNotJudged(Case):
             self.lanes(mode="gate", birth_share=0.25, e2={key: 0})
             self.quiet("the equity lanes' model dollars are set to zero (elane.e2.usd_day or elane.e2.pace_share)")
 
+    def test_the_owners_switch_in_ops_json_stops_the_four_and_nothing_else(self):
+        self.damning()
+        ctx = self.ctx()
+        ctx.settings = {"stall": {"elane": False}}
+        out = ST.run(ctx)
+        for check in out["elane"]["checks"].values():
+            self.assertEqual((check["stalled"], check["what"]), (False, "Not judged: switched off (ops.json stall.elane is false)."))
+        self.assertEqual((out["stalled"], self.notify.calls), ([], []))
+        self.assertTrue(all(cause in out["checks"] for cause in ST.CAUSES))
+        ctx = self.ctx()
+        ctx.settings = {"stall": {"elane": True}, "jobs": {}}
+        self.assertTrue(ST.run(ctx)["stalled"], "anything but false: judged")
+        (self.root / "ops.json").write_text(json.dumps({"stall": {"elane": False}}))
+        doc = EH.report(self.root, now=NOW)
+        self.assertEqual((doc["judged"], doc["why"]), (False, "switched off (ops.json stall.elane is false)"))
+
     def test_lanes_that_cannot_be_read_are_an_error_and_never_a_failed_run(self):
         self.damning()
         with mock.patch.object(EH, "facts", side_effect=RuntimeError("an invented failure")):

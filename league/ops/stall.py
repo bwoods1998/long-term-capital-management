@@ -1957,7 +1957,7 @@ def run(ctx: Any) -> dict[str, Any]:
                    nightly_error_since=None if nightly_error is None else S.epoch(nightly_error["since"]),
                    done_told=done_told, binds=binds, alert_states=states)
     # THE EQUITY LANES' OWN CAUSES (release E2.4): judged in league/ops/elane_health.py, raised from here on like any other.
-    found.update(EH.checks(root, now, loaded, paused=found["paused"]["numbers"]["paused_since"] is not None, errors=errors))
+    found.update(EH.checks(ctx, root, now, loaded, paused=found["paused"]["numbers"]["paused_since"] is not None, errors=errors))
 
     told = state.get("causes") if isinstance(state.get("causes"), dict) else {}
     mail = dict(state.get("mail")) if isinstance(state.get("mail"), dict) else {}

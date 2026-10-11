@@ -87,11 +87,14 @@ from typing import Any, Mapping, Sequence
 from . import guard
 from . import schedule as S
 from .context import read_json
+from .context import settings as ops_settings
 
 CAUSES = ("elane_dq", "elane_births", "elane_idle", "elane_refused")
 #: The stall notice's cause these travel in until the gateway words them (the module docstring, THE NOTICE): the cause
 #: the swarm's own alerts reach the owner in, the equity Train's among them (`elane_train_house`, `elane_train_state`).
 CARRIER = "swarm_alerts"
+#: The stall job's key in `<state>/ops.json` that switches these four off (`switched_off`): `{"stall": {"elane": false}}`.
+SWITCH = "elane"
 SWARM_DB = "swarm.sqlite"
 HEARTBEAT = "swarm.heartbeat"
 
@@ -1097,12 +1100,24 @@ def started_at(root: str | Path, now: float) -> float | None:
     return value if value is not None and 0 < value <= now else None
 
 
-def checks(root: str | Path, now: float, loaded: Mapping[str, Any] | None, *, paused: bool = False,
+def switched_off(ctx: Any) -> bool:
+    """THE OWNER'S SWITCH (`<state>/ops.json` `stall.elane` false; `ctx`: the job's context, or a mapping with its
+    `settings`): the four causes are not judged, and the rest of the stall alarm goes on. Absent, they are judged (the
+    release ships it so)."""
+    settings = ctx.get("settings") if isinstance(ctx, Mapping) else getattr(ctx, "settings", None)
+    block = settings.get("stall") if isinstance(settings, Mapping) else None
+    return isinstance(block, Mapping) and block.get(SWITCH) is False
+
+
+def checks(ctx: Any, root: str | Path, now: float, loaded: Mapping[str, Any] | None, *, paused: bool = False,
            errors: list[str] | None = None) -> dict[str, dict[str, Any]]:
     """THE STALL JOB'S CALL (league/ops/stall.py `run`): the four causes' checks, from the swarm's store (read-only),
-    its heartbeat and its settings as it loads them (`loaded`). `paused`: a maintenance pause or a stopped swarm stands.
-    Never raises: lanes that cannot be read are "Not judged" and an entry of `errors`."""
+    its heartbeat and its settings as it loads them (`loaded`). `ctx`: the job's context (for the owner's switch,
+    `switched_off`). `paused`: a maintenance pause or a stopped swarm stands. Never raises: lanes that cannot be read
+    are "Not judged" and an entry of `errors`."""
     try:
+        if switched_off(ctx):
+            return {cause: _not_judged(f"switched off (ops.json stall.{SWITCH} is false)") for cause in CAUSES}
         on, why, _ = lanes(loaded, paused=paused)  # the switch first: lanes that are off cost no read of the store
         if on:
             f = guard.read(Path(root) / SWARM_DB, lambda db: facts(db, now, loaded))
@@ -1277,8 +1292,11 @@ def report(root: str | Path, *, now: float, hours: float = FUNNEL_HOURS,
         with guard.readonly():
             loaded = settings_mod.load(root)
     paused = any((root / name).exists() for name in ("PAUSE", "swarm.stop"))
-    found = checks(root, now, loaded, paused=paused)
+    ctx = {"settings": ops_settings(root)}
+    found = checks(ctx, root, now, loaded, paused=paused)
     on, why, _ = lanes(loaded, paused=paused)
+    if switched_off(ctx):
+        on, why = False, f"switched off (ops.json stall.{SWITCH} is false)"
 
     def read(db: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         return research(db, now - hours * 3600.0, now), e2_families(db)
@@ -1356,7 +1374,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["CAUSES", "CARRIER", "checks", "judge", "facts", "lanes", "started_at", "carried", "receipt", "research",
+__all__ = ["CAUSES", "CARRIER", "SWITCH", "switched_off", "checks", "judge", "facts", "lanes", "started_at", "carried",
+           "receipt", "research",
            "research_counts", "report", "text", "main", "dq_class", "dq_line", "refusal_class", "foreign_symbols",
            "rule_of", "sentences", "skip_kind", "step_read", "pass_read", "refusals_tally", "e2_families",
            "DQ_HOURS", "DQ_MIN_SCORED", "DQ_SHARE", "BIRTHS_HOURS", "BIRTHS_PASSES", "BIRTHS_OWNER_HOURS", "IDLE_HOURS",
