@@ -188,14 +188,15 @@ class TheRefusals(unittest.TestCase):
         self.assertEqual(self.why(invented()), [])
         self.assertEqual(self.why(invented(G.MIN_NAMES)), [])
         self.assertEqual(self.why(invented(G.MAX_NAMES)), [])
-        self.assertEqual(self.why(list(reversed(invented()))), [], "the order of the input is not a rule: the list is sorted")
+        self.assertEqual(self.why(list(reversed(invented()))), [],
+                         "the order of the input is not a rule: the list is sorted")
         self.assertEqual((G.MIN_NAMES, G.MAX_NAMES), (450, 650))
 
     def test_the_size_of_a_three_year_union(self):
-        self.assertEqual(self.why(invented(G.MIN_NAMES - 1)), ["the list has 449 names: a 36-month union of the index has "
-                                                               "450 to 650"])
-        self.assertEqual(self.why(invented(G.MAX_NAMES + 1)), ["the list has 651 names: a 36-month union of the index has "
-                                                               "450 to 650"])
+        self.assertEqual(self.why(invented(G.MIN_NAMES - 1)),
+                         ["the list has 449 names: a 36-month union of the index has 450 to 650"])
+        self.assertEqual(self.why(invented(G.MAX_NAMES + 1)),
+                         ["the list has 651 names: a 36-month union of the index has 450 to 650"])
         self.assertIn("the list has 18 names", " ".join(self.why(E1_STOCKS)))
         self.assertIn("the list has 0 names", " ".join(self.why([])))
 
@@ -220,8 +221,8 @@ class TheRefusals(unittest.TestCase):
         for fund in ("SPY", "XLK", "TLT"):
             refused = self.why(invented()[:-1] + [fund])
             self.assertEqual(len(refused), 1)
-            self.assertIn(f"1 symbol(s) are ETFs (the stock list names stocks; `universe.etf` is not generated): {fund}",
-                          refused[0])
+            self.assertIn("1 symbol(s) are ETFs (the stock list names stocks; `universe.etf` is not generated): "
+                          f"{fund}", refused[0])
 
     def test_a_symbol_twice(self):
         refused = self.why(invented() + ["ZZAA", "AAPL"])
@@ -302,7 +303,8 @@ class TheConstitution(unittest.TestCase):
         self.assertFalse(any(path[0] == "equity_money" for path in self.after["RISK_FREE"]))
         # With the tree's own list put back, both digests are the tree's again: the list is all that moved.
         back = copy.deepcopy(self.after["CONSTITUTION"])
-        back["equity_money"]["universe"]["stock"] = list(self.before["CONSTITUTION"]["equity_money"]["universe"]["stock"])
+        was = self.before["CONSTITUTION"]["equity_money"]["universe"]["stock"]
+        back["equity_money"]["universe"]["stock"] = list(was)
         self.assertEqual(digest(back), self.before["PINNED_DIGEST"])
         self.assertEqual(money(back), self.before["money_digest"](self.before["CONSTITUTION"]))
 
@@ -326,7 +328,8 @@ class TheConstitution(unittest.TestCase):
         self.assertEqual(rules_of(again)["CONSTITUTION"]["equity_money"]["universe"]["stock"], other)
         self.assertEqual(again.split(G.BEGIN)[0], self.out.split(G.BEGIN)[0])
         self.assertEqual(G._PINNED.sub("", again.split(G.END)[1]), G._PINNED.sub("", self.out.split(G.END)[1]))
-        self.assertEqual(G.constitution_text(again, self.names), self.out, "and back: the text is a function of the list")
+        self.assertEqual(G.constitution_text(again, self.names), self.out,
+                         "and back: the text is a function of the list")
 
     def test_a_refused_list_writes_no_text(self):
         for names, why in ((invented(100), "the list has 100 names"), (invented()[:-1] + ["SPY"], "are ETFs"),
@@ -489,7 +492,8 @@ class TheGateway(unittest.TestCase):
 
     def test_the_patch_is_the_whole_change_as_git_takes_it(self):
         patch = G.patch_text(self.text, self.out, G.GATEWAY)
-        self.assertTrue(patch.startswith(f"diff --git a/{G.GATEWAY} b/{G.GATEWAY}\n--- a/{G.GATEWAY}\n+++ b/{G.GATEWAY}\n@@ "))
+        self.assertTrue(patch.startswith(f"diff --git a/{G.GATEWAY} b/{G.GATEWAY}\n--- a/{G.GATEWAY}\n"
+                                         f"+++ b/{G.GATEWAY}\n@@ "))
         self.assertEqual(apply_patch(self.text, patch), self.out)
         self.assertEqual(G.patch_text(self.out, self.out, G.GATEWAY), "")
         self.assertEqual(G.patch_text("a\nb", "a\nc", "x").splitlines()[-4:],
@@ -580,14 +584,16 @@ class TheCommand(unittest.TestCase):
         rules = rules_of(now[G.CONSTITUTION].decode())
         self.assertEqual(rules["CONSTITUTION"]["equity_money"]["universe"]["stock"], self.names)
         was = rules_of(self.was[G.CONSTITUTION].decode())
-        self.assertIn(f"universe.stock: {len(was['CONSTITUTION']['equity_money']['universe']['stock'])} -> 520 names", out)
+        self.assertIn(f"universe.stock: {len(was['CONSTITUTION']['equity_money']['universe']['stock'])} -> 520 "
+                      "names", out)
         self.assertIn(f"digest {was['PINNED_DIGEST'][:12]} -> {rules['PINNED_DIGEST'][:12]}", out)
         self.assertIn(f"money digest {was['money_digest'](was['CONSTITUTION'])[:12]} -> "
                       f"{rules['money_digest'](rules['CONSTITUTION'])[:12]}", out)
         self.assertIn("THIS MOVES THE MONEY DIGEST", out)
         self.assertFalse(list((self.root / "league").glob("*.tmp")), "the write is whole or not at all")
         # One half alone is a tree `league.ci` refuses; with the owner's step both lists are one list.
-        self.assertIn("the gateway's STOCK_UNIVERSE and equity_money.universe differ", " ".join(ci.check_equity(self.root)))
+        self.assertIn("the gateway's STOCK_UNIVERSE and equity_money.universe differ",
+                      " ".join(ci.check_equity(self.root)))
         self.assertEqual(self.run_main("--check")[0], 1)
         self.apply()
         self.assertEqual(ci.check_equity(self.root), [])
@@ -655,7 +661,8 @@ class TheCommand(unittest.TestCase):
     def test_the_day_of_the_list_is_written_nowhere(self):
         code, out = self.run_main("--gateway-patch", str(self.patch))
         self.assertEqual(code, 0)
-        for text in (out, self.patch.read_text(encoding="utf-8"), (self.root / G.CONSTITUTION).read_text(encoding="utf-8")):
+        for text in (out, self.patch.read_text(encoding="utf-8"),
+                     (self.root / G.CONSTITUTION).read_text(encoding="utf-8")):
             self.assertNotIn(AS_OF, text)
             self.assertNotIn(AS_OF[:4], text.split(G.BEGIN)[1].split(G.END)[0] if G.BEGIN in text else "")
 
@@ -670,7 +677,8 @@ class TheTreeAsItStands(unittest.TestCase):
             self.assertEqual(stocks, E1_STOCKS, "no generated block: the list is release E1's, in its order")
             return
         start, stop, indent = G._marked(text, G.BEGIN, G.END, G.CONSTITUTION)
-        self.assertEqual(text[start:stop].split("\n"), G._block(stocks, indent), "the block is the generator's, byte for byte")
+        self.assertEqual(text[start:stop].split("\n"), G._block(stocks, indent),
+                         "the block is the generator's, byte for byte")
         self.assertEqual(G.problems(stocks, keep=E1_STOCKS, etfs=E1_ETFS), [])
         self.assertEqual(stocks, sorted(stocks))
         self.assertEqual(G.constitution_text(text, stocks), text)
@@ -736,8 +744,8 @@ class ThePatchFile(unittest.TestCase):
         self.assertNotIn(G.CONSTITUTION, self.FILES)
         self.assertFalse([path for path in self.FILES if path.startswith("gateway/")])
         self.assertEqual(text.count("```diff\n"), len(named), "one diff a block")
-        for heading in ("## Patch 16 (release R-E4a)", "## Patch 15 (release R-E4b): THE UNIVERSE (moves the money digest; "
-                        "deployed separately)"):
+        for heading in ("## Patch 16 (release R-E4a)",
+                        "## Patch 15 (release R-E4b): THE UNIVERSE (moves the money digest; deployed separately)"):
             self.assertEqual(text.count(heading), 1, heading)
         self.assertIn("python3 scripts/gen_universe.py --from tradable.json --gateway-patch", text)
 

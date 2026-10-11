@@ -86,8 +86,8 @@ NAMED = 10
 #: What the generated blocks say of themselves (the count follows). No date: the block is a union, never a day's list.
 #: The tree's two blocks are held to the generator's output byte for byte (league/tests/test_gen_universe.py): a word
 #: changed here is a regeneration of both files (no digest moves by it, but the gateway's is an owner deploy).
-ABOUT = ("THE PANEL'S TRADABLE UNION (release E4; scripts/gen_universe.py): every symbol that was an S&P 500 member on any "
-         "session of the 36 months before the generation day and was tradable, fractionable and unmasked that day, "
+ABOUT = ("THE PANEL'S TRADABLE UNION (release E4; scripts/gen_universe.py): every symbol that was an S&P 500 member on "
+         "any session of the 36 months before the generation day and was tradable, fractionable and unmasked that day, "
          "release E1's stocks among them. Sorted; no date, no weight, no history. The constitution's "
          "`equity_money.universe.stock` and the gateway's STOCK_UNIVERSE hold the same symbols (`league.ci` holds the "
          "two equal); `league.equity.config.UNIVERSE` stays release E1's and inside them. Regenerated about once a "
@@ -131,7 +131,8 @@ def problems(symbols: Sequence[str], *, keep: Sequence[str], etfs: Sequence[str]
     out: list[str] = []
     bad = sorted({s for s in names if not STOCK_SYMBOL.fullmatch(s)})
     if bad:
-        out.append(f"{len(bad)} symbol(s) fail the gateway's STOCK_SYMBOL pattern: {_named([repr(s[:12]) for s in bad])}")
+        out.append(f"{len(bad)} symbol(s) fail the gateway's STOCK_SYMBOL pattern: "
+                   f"{_named([repr(s[:12]) for s in bad])}")
     narrow = sorted({s for s in names if STOCK_SYMBOL.fullmatch(s) and not TICKER.fullmatch(s)})
     if narrow:
         out.append(f"{len(narrow)} symbol(s) pass the gateway's pattern and fail the constitution's ticker pattern "
@@ -164,7 +165,7 @@ def read_input(path: str | Path) -> list[str]:
                       "them could carry a date beside a symbol)")
     as_of = raw["as_of"]
     try:
-        dated = isinstance(as_of, str) and _DAY.fullmatch(as_of) is not None and dt.date.fromisoformat(as_of) is not None
+        dated = isinstance(as_of, str) and _DAY.fullmatch(as_of) is not None and bool(dt.date.fromisoformat(as_of))
     except ValueError:
         dated = False
     if not dated:
@@ -442,8 +443,8 @@ def main(argv: Sequence[str] | None = None, *, out: Any = None) -> int:
         say(f"{GATEWAY}: already what this input generates (no patch written)")
     if new_rules != rules:
         _write(repo / CONSTITUTION, new_rules)
-        say(f"{CONSTITUTION}: written; digest {was['digest'](was['CONSTITUTION'])[:12]} -> {now['PINNED_DIGEST'][:12]}; "
-            f"money digest {was['money_digest'](was['CONSTITUTION'])[:12]} -> "
+        say(f"{CONSTITUTION}: written; digest {was['digest'](was['CONSTITUTION'])[:12]} -> "
+            f"{now['PINNED_DIGEST'][:12]}; money digest {was['money_digest'](was['CONSTITUTION'])[:12]} -> "
             f"{now['money_digest'](now['CONSTITUTION'])[:12]}")
         say("THIS MOVES THE MONEY DIGEST: commit it alone, marked \"UNIVERSE (moves the money digest; deployed "
             "separately)\"; deploy the gateway first, then the House, both between two pre-opens; the standing grant "
