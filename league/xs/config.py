@@ -1,14 +1,16 @@
 """The panel lane's constants, each a rule, and its quiet windows. Owner: package C (C0 delivers this module whole).
 
-STEP 0 STUB: the constants are the contract (every package imports them from here from day one) and `rounding_bound`
-is built; `quiet`, `rebalance_session` and `decision_due` raise NotImplementedError until C0 lands. Changing a constant here is a new xs identity or a new receipt, never a
+Every package imports its figures from here. Changing a constant here is a new xs identity or a new receipt, never a
 setting (E4-SPEC 12).
 
 WHERE A FIGURE COMES FROM. "PREREG" is the pinned pre-registration XSCREEN-1 (revision 2, sha256 c46aec17...): where
 it and E4-SPEC disagree on the program contract, the residual and its cells, the stress leg, the House exit law or the
 gate, the pre-registration wins, and the line says so. Everything else is E4-SPEC section 5 and 6.1.
 
-Evidence module (in the xs identity). Standard library only.
+THE CALENDAR every function here reads is `league.equity.store.nyse_sessions` (E1's: the store's, the ctx's and the
+data jobs' one calendar), so a panel schedule and an E1 schedule cannot disagree about a session.
+
+Evidence module (in the xs identity). Standard library only, beside that one calendar.
 """
 
 from __future__ import annotations
@@ -17,6 +19,9 @@ import datetime as dt
 import math
 import re
 from decimal import Decimal
+from functools import lru_cache
+
+from ..equity.store import nyse_sessions
 
 # ------------------------------------------------------------------------------------------------ sessions and spans
 #: D1. What the panel store holds: span A and span B. NO 2020 ROW EXISTS (the reserve): `store.write_panel` refuses one.
@@ -162,28 +167,113 @@ def rounding_bound(*adjusted: float) -> float:
 # ------------------------------------------------------------------------------------------------- quiet windows
 #: The walls (New York time, on a session) at which no E4 job and no panel Train run may be RUNNING.
 WALLS_ET = (("09:25", "09:45"), ("15:50", "16:35"))
+#: The regular close and a half day's (New York time): a wall that holds the regular close is the close wall, and on a
+#: half day it moves with the close (15:50-16:35 becomes 12:50-13:35).
+CLOSE_ET = "16:00"
+EARLY_CLOSE_ET = "13:00"
 
-_STUB = "league.xs.config is a Step 0 stub: package C (C0) builds it (league/xs/E4_INTERFACES.md)"
+
+def _clock(text: str) -> dt.time:
+    hour, minute = text.split(":")
+    return dt.time(int(hour), int(minute))
+
+
+def _walls(day: dt.date, early: bool) -> list[tuple[dt.datetime, dt.datetime, str]]:
+    """The walls of session `day` as New York datetimes with their label; a half day's close wall moved with its close."""
+    from ltcm.data import NEW_YORK
+
+    close, early_close = _clock(CLOSE_ET), _clock(EARLY_CLOSE_ET)
+    shift = dt.datetime.combine(day, close) - dt.datetime.combine(day, early_close)
+    out = []
+    for low, high in WALLS_ET:
+        lo, hi = dt.datetime.combine(day, _clock(low)), dt.datetime.combine(day, _clock(high))
+        if early and lo.time() <= close <= hi.time():
+            lo, hi = lo - shift, hi - shift
+        out.append((lo.replace(tzinfo=NEW_YORK), hi.replace(tzinfo=NEW_YORK),
+                    f"{lo.time():%H:%M}-{hi.time():%H:%M} ET on {day.isoformat()}"))
+    return out
 
 
 def quiet(now: float, need_s: float) -> str | None:
     """Why nothing that needs `need_s` seconds may START at the epoch `now`, or None: on a session, when [now, now +
     need_s] meets a wall of `WALLS_ET` (a half day's close wall moves with its close). A job passes ITS OWN wall-clock
     limit and a Train run its run budget: a start is refused when the work could still be running at a wall, not only
-    when it begins inside one. Sessions are `league.equity.store.nyse_sessions`."""
-    raise NotImplementedError(_STUB)
+    when it begins inside one. Sessions are `league.equity.store.nyse_sessions`.
+
+    It never raises (a House job's first statement): a clock or a need it cannot read is itself a reason not to
+    start."""
+    from ltcm.data import NEW_YORK
+
+    try:
+        begin, need = float(now), float(need_s)
+    except (TypeError, ValueError):
+        return "the quiet windows cannot be read: the clock and the need are numbers"
+    if not (math.isfinite(begin) and math.isfinite(need)) or need < 0:
+        return "the quiet windows cannot be read: the clock and the need are finite, the need not negative"
+    try:
+        start = dt.datetime.fromtimestamp(begin, NEW_YORK)
+        end = dt.datetime.fromtimestamp(begin + need, NEW_YORK)
+        day = start.date()
+        while day <= end.date():
+            for _, early in nyse_sessions(day, day):
+                for lo, hi, label in _walls(day, early):
+                    if start <= hi and end >= lo:
+                        return (f"a start now could still be running at the wall {label} (it needs up to "
+                                f"{need:.0f} s): no E4 job and no panel run works through a wall")
+            day += dt.timedelta(days=1)
+    except Exception as exc:  # noqa: BLE001 - an unreadable calendar or clock never starts work, and never raises
+        return f"the quiet windows cannot be read ({type(exc).__name__}: {str(exc)[:120]})"
+    return None
+
+
+# ------------------------------------------------------------------------------------------------- the schedule
+@lru_cache(maxsize=4096)
+def _session(day: dt.date) -> bool:
+    return bool(nyse_sessions(day, day))
+
+
+@lru_cache(maxsize=4096)
+def next_session(day: dt.date) -> dt.date:
+    """The first session after `day` (the calendar's; `day` itself need not be one)."""
+    later = nyse_sessions(day + dt.timedelta(days=1), day + dt.timedelta(days=14))
+    if not later:
+        raise ValueError(f"the calendar holds no session in the two weeks after {day}")
+    return later[0][0]
+
+
+@lru_cache(maxsize=8192)
+def _rebalance(day: dt.date, rule: str, weekday: int) -> bool:
+    if rule == "monthly":
+        return nyse_sessions(day.replace(day=1), day)[0][0] == day
+    monday = day - dt.timedelta(days=day.weekday())
+    week = [d for d, _ in nyse_sessions(monday, monday + dt.timedelta(days=4)) if d.weekday() >= weekday]
+    return bool(week) and week[0] == day
+
+
+def _schedule(day: object, rule: object, weekday: object) -> tuple[dt.date, str, int]:
+    if rule not in REBALANCE:
+        raise ValueError(f"a rebalance rule is one of {', '.join(REBALANCE)}, not {rule!r}")
+    if isinstance(weekday, bool) or not isinstance(weekday, int) or not 0 <= weekday <= 4:
+        raise ValueError(f"a rebalance weekday is 0 (Monday) to 4 (Friday), not {weekday!r}")
+    if isinstance(day, dt.datetime) or not isinstance(day, dt.date):
+        raise ValueError(f"not a session day: {day!r}")
+    if not _session(day):
+        raise ValueError(f"{day} is not a session")
+    return day, str(rule), int(weekday)
 
 
 def rebalance_session(day: dt.date, rule: str, weekday: int = 0) -> bool:
     """D9. Whether the session `day` is a rebalance session: "weekly": the first session of its ISO week with weekday >=
     `weekday` (a week with none has no rebalance); "monthly": the first session of its month. ValueError for a rule
     outside `REBALANCE` or a day that is no session."""
-    raise NotImplementedError(_STUB)
+    return _rebalance(*_schedule(day, rule, weekday))
 
 
 def decision_due(t: dt.date, rule: str, weekday: int = 0) -> bool:
-    """D9. Whether the program is CALLED at the close of session `t`: the next session is a rebalance session."""
-    raise NotImplementedError(_STUB)
+    """D9. Whether the program is CALLED at the close of session `t`: the next session is a rebalance session.
+    ValueError as `rebalance_session`'s."""
+    day, rule, weekday = _schedule(t, rule, weekday)
+    return _rebalance(next_session(day), rule, weekday)
 
 
 __all__ = ["SPANS", "TRAIN_SEGMENTS", "TRAIN_YEARS", "HISTORY_YEARS", "RESERVE_YEARS", "REF", "FUNDS", "FUND_COLUMNS",
@@ -193,5 +283,5 @@ __all__ = ["SPANS", "TRAIN_SEGMENTS", "TRAIN_YEARS", "HISTORY_YEARS", "RESERVE_Y
            "MOM_SKIP", "MOM_BACK", "MEMBER_AHEAD", "REL_VOLUME_SESSIONS", "RUNGS", "RUNG", "MIN_CELL", "SMALL_CELL",
            "CELL_SECTOR", "CELL_BETA", "UNIVERSE_CELL", "HS_FLOOR_BP", "HS_FALLBACK_BP", "HS_MAX_BP", "STRESS_SPREAD",
            "STRESS_FEES", "VANISH_SESSIONS", "VANISH_HAIRCUT", "VANISH_DEAL", "DITHER_HALF", "CTX_PLACES",
-           "BETA_PLACES", "ID_BITS", "ADJUSTED_HALF_STEP", "ROUNDING_GUARD", "rounding_bound", "WALLS_ET", "quiet",
-           "rebalance_session", "decision_due"]
+           "BETA_PLACES", "ID_BITS", "ADJUSTED_HALF_STEP", "ROUNDING_GUARD", "rounding_bound", "WALLS_ET", "CLOSE_ET",
+           "EARLY_CLOSE_ET", "quiet", "next_session", "rebalance_session", "decision_due"]
