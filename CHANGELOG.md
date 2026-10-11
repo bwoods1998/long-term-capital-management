@@ -76,6 +76,19 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
 - Operations: [docs/operations.md](docs/operations.md), "The forward record" (what is recorded, the switches and what
   each does not reach, A14 as coded, the hidden year, the stop rules and their undo, the alarms, the facts to verify
   on the House).
+- **After its review (Oct 11; twelve findings, all fixed on the branch, each with a test):** the hidden run has a
+  decider child of its own, started for one version and closed after it (a program's memory outlives a run wherever
+  its interpreter does, and the swarm's one evidence child runs the family's next version: the blocker); a hidden
+  year the family's record already holds (a code rollback judged it on all seven years) is void and leaves no
+  out-of-fold row; a probe's request key is asked once (the router answers a repeated key from the provider's stored
+  row at its original cost, blanked after an hour); the stop rules count a program's own attempted nights, a hung
+  run keeps its retry and loses the queue's head; every step of the night reads its deadline; a day's meters wait
+  for the rows a budget-cut night left out; the any-edge meter shows no count over fewer than five lineages; each
+  alarm follows its own switch (RR, CP and MM are raised with the forward record off); CP1 counts from a route's
+  last completed probe; a capped program's grid checkpoint is a grid row; a revived live instance keeps its
+  retirement and gets a twin of its own; the meters and the night's queue fit the ops child's address space at the
+  settings' bounds. Four event kinds are new (`run_behind`, `twin_retired`, `twin_revived`, `meter_partial`); no
+  table or column is. `league/ops/E3_INTERFACES.md` section 11 lists each fix against the spec.
 
 ### Release E2, integrated on E1: the swarm breeds share programs for the BETA and EQUITY lanes, on `feat/equity-e2-int` (unreleased; an owner deploy with or after E1; no identity moves; ships switched off)
 

@@ -64,7 +64,9 @@ fake and says so in its docstring (T11 is the one test with none).
   `models.build_router`) and `league.ops` (`guard`, `context`, `schedule`, `twins`, `funnel`, `equity_data`).
 - `elane_folds`, `elane_effects`, `elane_memory` import `league.equity` (config, results, screen, store) and, INSIDE
   FUNCTIONS only, `league.swarm.elane_train` and `elane_seal` (`elane_train` and `elane_births` import the three at the
-  top; nothing else does).
+  top; nothing else does). `elane_memory` alone also imports, inside its one function `hidden_runner`,
+  `league.equity.runner` and `league.live.decider`: the hidden run's own decider child (section 11, seals-1), started
+  as `league/swarm/elane.py` `isolated_runner` starts the evidence child. T1 holds the two imports to that function.
 - The swarm process never opens the forward store. The ops jobs open the swarm store read-only (`SwarmStore(root,
   readonly=True)` or `guard.read`), except `contam_probe`, which books its dollars.
 
@@ -274,6 +276,14 @@ to `meter`, `report`, `funnel.window` or `stall.run` may raise (the spec's 11.4-
   keeps both key lists, so `Counter(live_keys) == Counter(shadow_keys)` can still be read from it. Once a retired
   instance's rows are written through the session before its last lot closed it has no twin run again, and its
   participation counts entries through its retirement only.
+- **A revived instance (section 11, spec-2).** E1's book brings a retired instance back under the same key with
+  `retired_at` cleared. `finish` keeps each retirement the night the book shows it (a `twin_retired` event, `day` the
+  retirement session, once an (instance, session)) and starts a new run for an instance found running after one (a
+  `twin_revived` event, `day` the session it ran again: the book's kv `eq_band_since[<instance>].day` when that is
+  after the retirement, else the decision session of the night that first sees it). Each run is read as D12 reads an
+  instance: its twin is D3's run started flat at the session after its first decision, the sessions from its
+  retirement to the one before it ran again are "retired", and `fwd_part` is the current run's. `read_book` also
+  returns `since`.
 - **`a14_reading` reads `d_first(I)` as the day of the instance's first `fwd_twins` row** (the rows are written in day
   order from `d_first`); an instance with no row yet has every session from the one before its first counted lot's
   entry `missing`. It opens the forward store through `forward_db.open_db(root, readonly=True)` and the swarm store's
@@ -332,7 +342,9 @@ column of `COLUMNS` its place. What the other packages should know of `forward_d
    event toward a night by the event's `day` (the night's `through`, ISO), else by its `once` key when that is an
    ISO day. The nights themselves are the distinct `fwd_runs.through`; a night counts toward "suspect" only when a
    row of it has `programs >= 1`; "after a resume" is `fwd_runs.finished` later than the resumed tag. B writes
-   `through`, `programs` and `finished` on every `fwd_runs` row.
+   `through`, `programs` and `finished` on every `fwd_runs` row. **The nights counted are the program's own
+   attempted nights** (section 11, live-1): those it has one of the two events for, and those a run of it completed
+   (its `fwd_days` row for the night's day written no later than that night's `finished`).
 6. **PARAMS are stored exact.** `fwd_registry.params` is the swarm's own encoding (`league.swarm.store.dumps`), not
    `results.canonical`, which rounds floats to six places: the shadow would have run other parameters than the row's
    `run_sha` names. `gate.run_sha({"sha": program_sha, "params": Program.params})` is the row's `run_sha`. `needs`
@@ -485,3 +497,31 @@ Every signature of `test_e3_skeleton.SIGNATURES` stands. What other packages and
   the equity lanes' whole Saturday of research dollars: section 9); the listing rule of the hidden year (section 9);
   a retired instance's sessions read "retired", unreadable (section 7); `suspect` is tagged each night after the
   third (section 8's stop rules); the House facts of the spec's section 15, none of which blocks the deploy.
+
+## 11. The review's fixes (twelve findings, after the integration; what each changed against the spec)
+
+Every fix has a test that fails on the integration's head (57eba7c1) and passes here; where a test needs a name the
+fix introduces, it errors there, and the old behaviour itself is shown by the reviewers' scripts or by a script run on
+the old tree (kept privately with the build's notes, never committed).
+
+| finding | what changed | against the spec |
+|---|---|---|
+| seals-1 (blocker) | `elane_memory.hidden_runner`: the hidden runs of one version are made on E1's `Isolated` over the same store on a NEW decider child (the seen child's class, limits, interpreter and hash seed; log `HIDDEN_LOG`), closed when they are in. A runner that is not E1's `Isolated` on E1's decider must offer `hidden_runner()` itself (the tests' invented markets), else `HiddenRunRefused` and no out-of-fold row. `test_elane_memory_seal.TheHiddenYearNeverReachesALaterVersion` scores two versions on a real child a House | 7.9 handed `ingest` "E1's `Isolated`" and ran the hidden span on it; D14's "what still reaches a seen run" did not name the child's own memory. Section 1's import rule gains the two imports above. NOT FIXED HERE, AND SAID TO E1'S AND E2'S OWNERS: the same child runs Train, Validation and the sealed look, and E2's memory rule lets a call's result expose a class-level array (`league/gym` is not E3's to edit) |
+| seals-2 | a probe's request key carries the route's run (`attempts`): no run repeats a key. A cut cell is asked again whole and paid; a cell is begun only when the run can pay for it; a key already booked is not asked; an answer with no text is booked, ends the run and is not scored (section 9) | 7.10, 8.2 and 12.1's "a resumed probe re-reads its answered batches at $0" was false on the real router |
+| seals-3 | `forward_report.METER_MIN` (5): the report shows `m` always and `bh`, `by_`, `reading`, `unreliable` only at the floor (None and "too few lineages to read" under it); `funnel_rows`' `bh` and `by` are 0 under it. `fwd_meter` keeps the whole row | D8 and 12.2 gave the meter no floor; section 9's "shown to no one" did |
+| live-1 | the stop rules count the pid's own attempted nights (item 5); `Shadow.night` keeps back `RETRY_RUNS` x `run_budget_seconds` a listed program; `Shadow.due` puts a program whose last attempt failed twice behind its class; `run_behind` (B, once a (pid, night)) is that order's mark on a night nobody else completed | 7.2's "on each of the last N nights" was read by the calendar; 7.3's retry ran "while the budget allows", which on a binding night was never |
+| live-2 | `elane_memory.seen_hidden`: a family whose record (or verdict in hand) holds a `years` row of its hidden year gets no hidden run and no `mem_contrib` row from then on; its `mem_seen.hidden_year` is NULL from that version; one `swarm.status` "elane_memory" alert a family | the spec's rollback text covered the switches, not a code rollback |
+| live-3 | `forward_report.meters` writes a day once no active registered program owed it lacks its row, or after `METER_WAIT_NIGHTS` (3) later nights, then with one `meter_partial` event (C). The receipt's `waiting` names the day. FW5 reads no partial day | 7.5 wrote every day up to the last `fwd_runs.through` at once |
+| live-4 | `Shadow.late()` (the night's deadline) is read by the timing table, each control and each instance's twin run (`finish` reads `shadow.late` when the shadow has one); what is not started is `deferred` in the receipt (`controls.deferred`, `twins.begin.deferred`, `FINISH_KEYS` gains "deferred") | 7.3 named the deadline for the due loop only |
+| live-5 | `forward_stats._participation` sums the pairs `BLOCK_ROWS` rows at a time (the same exact sums); `forward_db.programs(..., code=False)` is a listing read from the cursor a row at a time, used by `Shadow.due` and the audit marks; `Shadow._whole` loads the program a run is made of and refuses a text that is not its sha's | 5's bound of 3,000 members did not fit the job's address space; 7.1's `programs` signature gains `code` |
+| spec-1 | `Shadow.finals` writes `final` 0 when the stopped program's counted days are a grid count, 1 off the grid | D4: a final checkpoint is for a program stopped OFF the grid |
+| spec-2 | the bullet "A revived instance" of section 7; `twin_retired`, `twin_revived` (D) | D12 knew one run an instance |
+| spec-3 | CP1 reads the configured routes (`elane_yield.cfg(settings)["routes"]`) and the file's, from a route's last completed probe, else the earlier of the file's `first_attempted_at` (the probe writes it once) and the report's `contamination.first_seen` | 12.3's "a route unprobed for 45 days" was read off the file's rows by their last attempt |
+| spec-4 | `forward_report.raised`: FW1-FW8 follow `elane.forward.mode`, CP1 and CP2 `elane.contam.mode`, RR and MM none. With the forward mode off `run` writes `OFF_KEYS` ({"at", "mode": "off", "memory", "contamination", "receipts", "alarms"}) and `alarms` returns the file's rows by their switches | 3.3 and 7.5 wrote {"at", "mode": "off", "alarms": []} and returned [], which silenced RR, CP and MM against 12.3 and section 10 |
+
+**Event kinds added:** `run_behind` (B), `twin_retired`, `twin_revived` (D), `meter_partial` (C; `EVENT_KINDS`' owners
+are now A, B, C, D), all in `ONCE_KINDS`. **No table or column was added**; the probe's file gained `attempts`,
+`first_attempted_at` and `partial.batch_usd`, the report `meter.floor`, `contamination.first_seen` and the route
+rows' `first_attempted_at` and `attempts`. **Names added:** `elane_memory.HIDDEN_LOG`, `HiddenRunRefused`,
+`hidden_runner`, `seen_hidden`; `forward_shadow.RETRY_RUNS`, `Shadow.late`, `Shadow.deadline`;
+`forward_stats.BLOCK_ROWS`; `forward_report.METER_MIN`, `METER_WAIT_NIGHTS`, `METER_UNREAD`, `OFF_KEYS`, `raised`.

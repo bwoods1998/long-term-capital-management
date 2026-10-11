@@ -56,7 +56,14 @@ E3 module is behind the updater's wall (`league/ops/`, and the three swarm modul
   shadow opens a new series, `<label>~<the id it follows>`, so the newest engine id is always the series being
   written. **A night that ran with failures of the House's own** (programs left without rows by the forward store or
   by a child that could not be restarted, controls that could not be drawn, a step that raised) raises one House
-  warning of counts and class names; nobody is marked and the next night fills what was left out.
+  warning of counts and class names; nobody is marked and the next night fills what was left out. **The night's
+  deadline** (300 s before the next session's 09:00 ET) is read by every step, not the program loop alone: past it
+  the timing table, each control and each live instance's twin run are `deferred` in the receipt (no failure) and
+  the next night writes them, so a morning catch-up never holds the one ops slot into the pre-open jobs. **The
+  queue** is a listing (no program text is held for the thousands a night may never reach); the one program a run is
+  made of is loaded then, and a text that is not its registered sha's is never run. A program whose last attempt
+  failed twice (in the night's child, then alone in a fresh one) stands behind its class until a run of it
+  completes, and the loop keeps back a retry's seconds for each program on the retry list.
 - **The morning marks** (`forward_audit.py`, 25 minutes before each open): a forward day is marked for the programs
   whose NEEDS hold a symbol the book's morning re-fetch found different, read from the book's own note (kv
   `eq_bars_audit`) and, for a day the note does not name, from its `eq_bars` audit rows; a marked day leaves the
@@ -114,7 +121,12 @@ close):
   counted exit, the live and the twin intents agree on at least 95%. A session a split makes unreadable, or one from
   the instance's retirement on (the book asks a retired program nothing), is left out; a session with no twin row is
   not agreed. A disagreement is counted with its cause (the bars differed, they were the same and the program
-  differed, or the live decision's bars are not known), and it counts against the 95% whatever its cause;
+  differed, or the live decision's bars are not known), and it counts against the 95% whatever its cause. **A
+  revived instance** (the book brings a retired instance back under the same key and clears its retirement): the
+  retirement is kept in the forward store the night the book shows it, the sessions from it to the one before the
+  instance ran again are left out as retired, and from there the instance is read against a twin started flat at
+  that session (`twin_retired`, `twin_revived` events). A retirement and a revival that both fall between two
+  nights the forward job did not run are seen by nobody;
 - unmeasured, A14 does not hold and the checkpoint is not final. A checkpoint that held without A14 can only stop
   holding; none can start. The pinned Done rule is not edited.
 
@@ -126,7 +138,12 @@ run a SEEN span (each stretch of the other six
 years its own run starting flat, exactly as A15 runs its two spans), and the bar, the record, the brief, the Train map
 and the stored runs read those runs and nothing else. The hidden year's own run is made after the verdict is recorded
 and goes to two sealed tables (`mem_contrib`, `mem_series`) that no generator reads, the family's own researcher
-included. It is run as its own span because a filtered view of a whole-span run cannot hide a year: the sleeve's cash
+included. **It is made in a decider child of its own** (`elane_memory.hidden_runner`; log
+`<state>/equity-hidden-decider.log`), started for one version's hidden runs and closed when they are in: a program's
+memory outlives a run wherever its interpreter does, and the swarm's one evidence child runs the family's next
+version's seen runs, so a hidden run made there could leave that version a mark of the year. (The same door stands
+open between the Validation, look and Train runs that share the evidence child; that is release E1's and E2's to
+close, and is said to their owners.) It is run as its own span because a filtered view of a whole-span run cannot hide a year: the sleeve's cash
 carries the year's P&L into every later decision. What still reaches a seen run is the hidden year's BARS as
 look-back in the stretch after it, as the reserve's do. **The cost:** a family born with a hidden year is judged on
 six years, not seven, so more zero-edge versions pass Train and take a Validation try; the share screen's
@@ -134,10 +151,13 @@ false-positive rate per program is unchanged (Train is in-sample). A family born
 
 **The stop rules** (`forward_register.py`). A failure never stops a program. A program stops at its session cap
 (`elane.forward.stop_after_sessions` 500 stored sessions for a passer, a seed or a live program;
-`stop_fail_after_sessions` 250 for a non-passer), or after three nights running disqualified by its own errors; a
-stopped program gets a final checkpoint, so what it earned stays in the meters. A program whose run fails alone on
-three nights running while other programs' runs complete is tagged suspect: it runs last and is counted, never
-stopped. A decider that cannot start fails the job at its preflight and marks nobody; a missing bar is the data's and
+`stop_fail_after_sessions` 250 for a non-passer), or once its last three completed runs were each disqualified by
+its own errors; a stopped program gets its checkpoint (the grid's own when it stopped on a grid count, as the
+shipped caps are; a final one off the grid), so what it earned stays in the meters. A program whose run fails alone
+on its last three attempted nights while other programs' runs complete is tagged suspect: it runs last and is
+counted, never stopped. **The nights are the program's own:** a night the budget left it stale, a night the data
+failed it and a night it was not due neither count nor break the run of nights (counted by the calendar, neither
+rule could fire once the registry outgrew the night). A decider that cannot start fails the job at its preflight and marks nobody; a missing bar is the data's and
 marks nobody; the next night's whole recompute fills the days. **To undo a stop** (the operator, on the box, with no
 forward job running): `forward_register.resume(db, "<family>@<version>", why="...", at=time.time())` on
 `forward_db.open_db("<state>")`. It writes a `resumed` tag and event; the nights and the stored days before it no
@@ -145,20 +165,21 @@ longer count, and the next night fills every day the stop left out.
 
 **The switches** (policy.json ships all three at "record": an unrecorded forward day is lost for good and none of
 the three touches money; `<state>/swarm.json` overrides them with no deploy, each read at its job's next run):
-- `elane.forward.mode` "off": the forward jobs write `skipped` receipts, the report file says `mode` "off" and no
-  FW alarm is raised. `forward.sqlite` stays (append-only evidence), and a recompute after the mode returns fills
-  every missed day. **Stated cost:** while it is off no twin row is written, so A14 is unmeasured and no Done
+- `elane.forward.mode` "off": the forward jobs write `skipped` receipts, the report file says `mode` "off" and holds
+  no forward part, and no FW alarm is raised (the report job still writes the memory counts, the probe's file, the
+  release receipts and their alarms: RR, CP and MM have other switches or none). `forward.sqlite` stays (append-only
+  evidence), and a recompute after the mode returns fills every missed day. **Stated cost:** while it is off no twin row is written, so A14 is unmeasured and no Done
   checkpoint holding an equity close can hold until the mode is back and one night has run.
 - `elane.memory.mode` "off": no new hidden year, no ingest, no hidden run. **It does not reach a family already born
   with a hidden year:** that family keeps its seen spans whatever the mode, because its bar must not move under it. A
   defect in the seen spans for such a family is fixed by a DEPLOY, not a switch; until then its versions are a
   failure of the House's (nothing scored, no budget spent, E2's backoff moves the family out of the queue's head)
   and alarm MM1 says so.
-- `elane.contam.mode` "off": no probe.
+- `elane.contam.mode` "off": no probe, and neither CP1 nor CP2 is raised.
 - The other keys, each held inside its bound where it is read (`forward_db.BOUNDS`, `contam_probe.BOUNDS`):
   `elane.forward.controls_per_group` (50), `cpu_seconds_night` (1,800 s of child time a night; the rest are stale and
-  go first the next night), `run_budget_seconds` (120), `neff_max_members` (1,500), `fill_minutes` and `twins`
-  (true); `elane.contam.usd_run` (3.0), `every_days` (28), `batch` (20), `questions_per_cell` (120).
+  go first the next night), `run_budget_seconds` (120), `neff_max_members` (1,500; its upper bound of 3,000 fits the
+  report job's address space, measured under the job's own limit), `fill_minutes` and `twins` (true); `elane.contam.usd_run` (3.0), `every_days` (28), `batch` (20), `questions_per_cell` (120).
 
 **Read it.** `<state>/forward-report.json` (operator-only, written after each night and 35 minutes before each open)
 and the `forward_record` section of the `dlane` report; the funnel counts it apart (`forward_record`: integers only).
@@ -169,6 +190,12 @@ program-years over independent evidence-years: a rising multiple means compute i
 anywhere (BH and BY at q 0.10 over the lineages, beside the controls' cost-free rate); and the fill gap (timing,
 execution, the mean twin gap, participation, intent agreement). No per-program forward figure is shown for a program
 without a live instance; no group difference is shown before its pair's own 60th, 120th and 250th usable session.
+**The meter's floor:** BH, BY and the reading are shown once the family holds 5 lineages (the controls' side once it
+holds 5 controls); under it the report shows the family's size and "too few lineages to read", and the funnel's `bh`
+and `by` are 0 (over one or two lineages the count is a verdict on a program). **A day's meters wait for its rows:**
+a day is written once no registered program owed it is still without its row (a night the budget cut, a late vendor
+bar), or after 3 later nights, then as it stands with a `meter_partial` event; the receipt says which day waits and
+for how many programs, and FW5 reads no partial day.
 
 **What nobody may read yet** (recorded in release E3, shown to no one: no generator, no report, and not the captain
 either, who writes seeds and agendas and is therefore an author too):
@@ -186,8 +213,11 @@ ops and the Done meter, the one later reader of a per-program forward row is the
 release, at the alpha pinned in the row.
 
 **The alarms** ride the `dlane` report's `alarms` (so the stall notice mails a warning) and each is a House alert of
-the job that finds it; a text holds ids, counts and dates only. With `elane.forward.mode` off none of FW1-FW8 is
-raised.
+the job that finds it; a text holds ids, counts and dates only. **Each alarm follows its own switch:** with
+`elane.forward.mode` off none of FW1-FW8 is raised and no forward part of the report is written; with
+`elane.contam.mode` off neither CP1 nor CP2 is; RR1, RR2 and MM1 have no switch. So with the forward record rolled
+back the report job still writes the memory counts, the probe's file and the release receipts, and still raises RR,
+CP and MM.
 
 | Alarm | Level | Fires when |
 |---|---|---|
@@ -201,7 +231,7 @@ raised.
 | FW8 | warning | the equity evidence identity moved while a lineage is live (the forward record opens a new engine series) |
 | RR1 | warning | a declared release receipt unread 24 h after its window closed |
 | RR2 | info | a release receipt read "flat" or "wrong_way" |
-| CP1 | info | a model route unprobed for 45 days, or a readable 2025 or 2026 cell newly "recalled" |
+| CP1 | info | a configured model route with no COMPLETED probe for 45 days (for a route no probe ever finished on: since its first attempt, or since the first report that saw it configured), or a readable 2025 or 2026 cell newly "recalled" |
 | CP2 | warning | a route whose last three probe attempts added no cell |
 | MM1 | warning | the swarm reported a memory failure (a birth without its hidden year, an ingest that failed, a hidden year found void after a code rollback) in the last 24 h |
 
