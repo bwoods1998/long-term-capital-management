@@ -45,6 +45,8 @@ def load():
 
 
 floor_box = load()
+#: What a release before E1 lacks of the equity book (floor_box `EQUITY_BOOK_MARKERS`, as its guard names it).
+EQUITY_LACKS = [f"{rel}: {marker}" for rel, marker in floor_box.EQUITY_BOOK_MARKERS]
 floor_box_client = floor_box.client
 
 
@@ -120,6 +122,12 @@ class FakeBox:
         self.previous_real = {"real_money": True, "missing": []}
         self.real_book = {"positions": 0, "orders": 0}
         self.real_guard_error: str | None = None
+        # The equity book guard (release E1, A8.9): what the release it is asked about lacks of the EquityBook, and what
+        # the box's live.sqlite shows of the equity book (lots held, orders working), or the error the check answers.
+        # This box's releases and live state predate E1: no EquityBook in them, no equity tables.
+        self.previous_equity_missing: list[str] = list(EQUITY_LACKS)
+        self.equity_book = {"lots": 0, "orders": 0, "book": "before E1"}
+        self.equity_guard_error: str | None = None
 
     # ------------------------------------------------------------- what was done, for the asserts
     def execs(self) -> list[str]:
@@ -166,6 +174,12 @@ class FakeBox:
                 return Result(json.dumps({"error": self.real_guard_error}))
             ask = json.loads(command[-1])
             return Result(json.dumps({"release": {"dir": ask["release"], **self.previous_real}, **self.real_book}))
+        if not isinstance(command, str) and floor_box.EQUITY_GUARD_SNIPPET in command:
+            if self.equity_guard_error:
+                return Result(json.dumps({"error": self.equity_guard_error}))
+            ask = json.loads(command[-1])
+            release = {"dir": ask["release"], "missing": list(self.previous_equity_missing)} if ask.get("release") else None
+            return Result(json.dumps({"release": release, **self.equity_book}))
         if not isinstance(command, str) and floor_box.STRUCTURE_GUARD_SNIPPET in command:
             if self.guard_error:
                 return Result(json.dumps({"error": self.guard_error}))
@@ -1363,6 +1377,12 @@ HELD = {"structures": [{"agent": "structure-7", "code": CODE, "quantity": "1"}],
 LACKS = ["league/house.py: def _structure_practice_account(", "league/book.py: def _fold_structure_legs("]
 
 
+def equity_asks(box: FakeBox) -> list[dict]:
+    """The JSON argument of each equity book check the script ran on the box (its last argv element)."""
+    return [json.loads(command[-1]) for command in box.raw if not isinstance(command, str)
+            and floor_box.EQUITY_GUARD_SNIPPET in command]
+
+
 def guard_asks(box: FakeBox) -> list[dict]:
     """The JSON argument of each structures check the script ran on the box (its last argv element)."""
     return [json.loads(command[-1]) for command in box.raw if not isinstance(command, str)
@@ -1481,6 +1501,57 @@ class RollbackTests(BoxCase):
         self.assertIn("WARNING: --force-real-risk", errors.getvalue())
         self.assertEqual(len(self.rollbacks()), 1)
 
+    def equity_asks(self) -> list[dict]:
+        return equity_asks(self.box)
+
+    def test_past_e1_while_the_equity_book_holds_a_lot_or_works_an_order_is_refused(self):
+        """A8.9 (release E1): never back to a release without the EquityBook while the live state shows an equity lot
+        held or an equity order working. The older code would market-sell the shares at its first minute."""
+        for book, why in (({"lots": 1, "orders": 0, "book": "live"}, "holds 1 lot(s) and works 0 order(s)"),
+                          ({"lots": 0, "orders": 2, "book": "live"}, "holds 0 lot(s) and works 2 order(s)")):
+            with self.subTest(why=why):
+                self.box.calls.clear()
+                self.box.raw.clear()
+                self.box.equity_book = book
+                with self.assertRaises(SystemExit) as caught:
+                    self.run_cmd("rollback")
+                refusal = str(caught.exception)
+                self.assertTrue(refusal.startswith("REFUSED: the previous release 20260917T070000Z-ba9876543210 lacks the "
+                                                   "equity book"), refusal)
+                self.assertIn(why, refusal)
+                self.assertIn("--force-equity-risk", refusal)
+                self.assertEqual(self.rollbacks(), [])
+                [ask] = self.equity_asks()
+                self.assertEqual((ask["release"], ask["state"]), ("/workspace/previous", "/workspace/state"))
+                self.assertEqual(ask["markers"], [["league/equity/live.py", "class EquityBook"]])
+
+    def test_a_flat_equity_book_or_a_release_with_the_book_goes_and_the_guard_is_asked_first(self):
+        code, printed = self.run_cmd("rollback")                      # this box predates E1: no lot, no order
+        self.assertEqual(code, 0)
+        self.assertIn("predates the equity book", printed)
+        self.assertIn("no equity lot held and no equity order working, so it may go", printed)
+        self.assertLess(self.box.index("floor_box equity book guard"), self.box.index("-m league.watchdog rollback"))
+        self.box.calls.clear()
+        self.box.previous_equity_missing, self.box.equity_book = [], {"lots": 3, "orders": 1, "book": "live"}
+        code, printed = self.run_cmd("rollback")                      # the previous release has the book: it keeps the lots
+        self.assertEqual(code, 0)
+        self.assertNotIn("equity book", printed)
+        self.assertEqual(len(self.rollbacks()), 1)
+
+    def test_an_unreadable_equity_book_refuses_and_the_owner_can_force_it(self):
+        self.box.equity_guard_error = "OperationalError: unable to open database file"
+        with self.assertRaises(SystemExit) as caught:
+            self.run_cmd("rollback")
+        self.assertIn("could not be read (OperationalError", str(caught.exception))
+        self.assertIn("nothing shows that the equity book is flat", str(caught.exception))
+        self.assertEqual(self.rollbacks(), [])
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            code, printed = self.run_cmd("rollback", "--force-equity-risk")
+        self.assertEqual(code, 0)
+        self.assertIn("WARNING: --force-equity-risk", errors.getvalue())
+        self.assertEqual(len(self.rollbacks()), 1)
+
     def test_no_rollback_during_a_deploy_or_without_a_previous_release(self):
         self.box.probe["deploy.pid"] = "5001"
         with self.assertRaises(SystemExit) as caught:
@@ -1490,7 +1561,7 @@ class RollbackTests(BoxCase):
         with self.assertRaises(SystemExit) as caught:
             self.run_cmd("rollback")
         self.assertIn("no previous release", str(caught.exception))
-        self.assertEqual((self.rollbacks(), self.guard_asks()), ([], []))
+        self.assertEqual((self.rollbacks(), self.guard_asks(), self.equity_asks()), ([], [], []))
 
     def test_a_rollback_the_watchdog_could_not_make_is_exit_one(self):
         self.box.rollback_answer = {"ok": False, "error": "no previous release to roll back to", "current": "x"}
@@ -1529,6 +1600,40 @@ class DeployStructureGuardTests(BoxCase):
         self.assertEqual(code, 0)
         self.assertIn("WARNING: --force-structures-risk: this working tree lacks", printed)
         self.assertEqual(len([u for u in self.box.uploads() if u.endswith(".tgz")]), 1)
+
+    def test_a_tree_before_e1_is_refused_while_the_equity_book_holds_a_lot(self):
+        """A8.9 (release E1): `deploy` sends no tree without the EquityBook while the live state shows an equity lot
+        held or an equity order working (this test tree is one: it carries no league/equity/live.py)."""
+        self.box.equity_book = {"lots": 2, "orders": 1, "book": "live"}
+        with self.assertRaises(SystemExit) as caught:
+            self.run_cmd("deploy")
+        refusal = str(caught.exception)
+        self.assertTrue(refusal.startswith("REFUSED: this working tree lacks the equity book"), refusal)
+        self.assertIn("holds 2 lot(s) and works 1 order(s)", refusal)
+        self.assertIn("--force-equity-risk", refusal)
+        self.assertEqual(self.box.uploads(), [])
+        self.assertFalse([t for t in self.box.execs() if "-m league.watchdog deploy" in t])
+        [ask] = equity_asks(self.box)
+        self.assertEqual((ask["release"], ask["state"]), (None, "/workspace/state"))
+        with contextlib.redirect_stderr(io.StringIO()):
+            code, printed = self.run_cmd("deploy", "--force-equity-risk")
+        self.assertEqual(code, 0)
+        self.assertIn("WARNING: --force-equity-risk: this working tree lacks the equity book", printed)
+        self.assertEqual(len([u for u in self.box.uploads() if u.endswith(".tgz")]), 1)
+
+    def test_a_tree_before_e1_goes_to_a_box_whose_equity_book_is_flat(self):
+        code, printed = self.run_cmd("deploy")                        # this box predates E1: no lot, no order
+        self.assertEqual(code, 0)
+        self.assertIn("this working tree predates the equity book", printed)
+        self.assertEqual(len(equity_asks(self.box)), 1)
+        self.assertLess(self.box.index("floor_box equity book guard"), self.box.index("-m league.watchdog deploy"))
+
+    def test_a_tree_with_the_equity_book_never_reads_it(self):
+        self.box.equity_book = {"lots": 2, "orders": 0, "book": "live"}
+        with mock.patch.object(floor_box, "equity_gaps", lambda files: []):   # a tree that carries the EquityBook
+            code, _ = self.run_cmd("deploy")
+        self.assertEqual(code, 0)
+        self.assertEqual(equity_asks(self.box), [], "the lots are the new release's own book's to keep")
 
     def test_a_tree_with_the_structure_code_never_reads_the_ledger(self):
         tree = [Path("league/__main__.py"), Path("league/config.json"), Path("league/house.py"), Path("league/book.py")]
