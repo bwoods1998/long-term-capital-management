@@ -306,15 +306,26 @@ Read with the amendments in force when this was integrated, which the text above
 
   (`league/tests/test_e4_e2e.py` trades the first row against a fake venue on money's real rules, and
   `test_equity_book_panel.TheWholeBasketIsScaledToTheRoom` the first and fourth.) The lot's WEIGHT is the same as
-  its twin's (dollars over the decision's own budget), so the two agree. Held lots are never resized: a budget that
-  fell buys smaller lots at the next rotation and sells nothing. The send's own sizing still holds every wall a
-  name at a time, so a budget that moved between the decision and the open cuts the last name, as before (and a
-  name the send CUT stays cut until it is sold; only a name it SKIPPED is bought later by the standing target).
+  its twin's (dollars over the decision's own budget), so the two agree. Held lots are never resized, and a budget
+  that fell sells nothing. The send's own sizing still holds every wall a name at a time, so a budget that moved
+  between the decision and the open cuts the last name, as before (and a name the send CUT stays cut until it is
+  sold; only a name it SKIPPED is bought later by the standing target).
+  **WHAT THE SCALING DOES NOT DO (the verification's residual; as built, held by the same class's send tests).**
+  It sizes a basket bought from flat, or rotated whole. A held five-name basket IS the whole window (5 x $200 x
+  0.40), so after ANY net loss in the window the room is below zero, and on a PARTIAL rotation the sale of one name
+  frees $80 of it, less than the loss took: the name rotated in is refused for budget at the send, and the program
+  holds four names where its Gym twin holds five. Measured on the fake venue at the rows in force: $100 of window
+  loss and one name rotated, the sale goes and the buy is refused; two rotated, one is bought ($150) and the second
+  refused; $200 of loss and one rotated, refused. With no loss, or on a full rotation ($40 of loss: five names of
+  $180), every name is bought whole. The basket stays a name short until a rotation frees more room than the window
+  lost, or the loss leaves the 20-session window; the standing target asks for the name again each close.
   **THE COST, stated:** a full basket at this size USES THE WHOLE WINDOW. While it is held, another program's new
   buys and the options Probe lane's opens are refused for budget (first come, as three invested ETF programs
-  already leave the options lane about $66 of room), and the panel's own basket is rebuilt smaller after any loss
-  in the window. A panel sleeve of its own (0.25 x E) would leave room beside it; that is a money row and an owner
-  deploy, and is no longer needed for the basket to trade whole.
+  already leave the options lane about $66 of room); after a loss in the window the panel's own basket is rebuilt
+  smaller on a full rotation and loses a name on a partial one. **This is a money question and it is open:** a
+  panel sleeve of its own (a constitution row; 0.25 x E is the captain's leaning) is the owner's deploy with a
+  money-digest move, decided with the universe before any panel program is seated. Nothing is changed here: in the
+  release that takes the lane to "train" no panel program can hold a seat, so no order meets this rule.
 - **Sizing up is parked** (the captain's A21: `equity_money.sized.min_trades` 1000, for every equity program): the
   text's "sizing up from 20 dates" reads "from `sized.min_trades` close dates", which no program reaches while the
   step is parked. EDM1's legs, the -$300 program line, the window and the total are as the text says.

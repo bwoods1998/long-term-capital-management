@@ -1260,6 +1260,75 @@ class TheWholeBasketIsScaledToTheRoom(PanelCase):
         self.assertEqual(buy.usd, (D(row["budget"]) / 5).quantize(D("0.01"), rounding=ROUND_DOWN))
         self.assertEqual(sorted(h.held()), ["N010", "N011", "N012", "N013", "N014"])
 
+    # ---- THE SEND AFTER A LOSS (the verification's spec-2 residual, PINNED AS BUILT: no money rule changes in the
+    # release that ships the lane to "train", where no panel program can be seated). The test above reads the
+    # PLANNED intent; these run Monday's send. A held five-name basket is the whole $400 window (5 x $200 x 0.40),
+    # so after any net loss in the window the room is below zero: the sale of one name frees $80 of it, less than the
+    # loss took, and the name rotated in is REFUSED for budget at the send. The program then holds FOUR names where
+    # its Gym twin holds five, until a rotation frees more room than the window lost or the loss leaves the window.
+    # From flat, with no loss, or on a full rotation every name is bought whole. What a panel sleeve of its own would
+    # change is the captain's step-two decision (a money row); these tests are what that decision starts from.
+    def after_a_loss(self, loss: str, rotate: int):
+        """A held basket of 5 x $200.00, `loss` dollars lost in the window by another program on Friday's open, and
+        `rotate` names rotated out at Friday's decision: (the rebalance row, Monday's buys sent as {symbol: dollars},
+        the panel intents after Monday's send)."""
+        h = self.h
+        held = ["N010", "N011", "N012", "N013", "N014"]
+        for symbol in held:
+            h.seed(symbol, "200.00")
+        if D(loss):
+            gone = L.Lot(h.book._next("eq_lots", "lid"), "seed-b@1:r", "seed-b", 1, "beta", "QQQ", "etf", D("0"), D("1"),
+                         D("500"), D("500"), "close", opened_at=T.at(THURSDAY, 15, 56), opened_day=THURSDAY.isoformat(),
+                         status=L.LOT_CLOSED, exit_px=D("300"), exit_at="open", exit_day=FRIDAY.isoformat(),
+                         closed_at=T.at(FRIDAY, 9, 31), cash=-D(loss), probe=True)
+            h.book._save_lot(gone)
+        h.plan(held[:5 - rotate] + [f"N02{k}" for k in range(rotate)])
+        h.decide(FRIDAY)
+        row = h.rebalance(FRIDAY)
+        h.run(MONDAY, (8, 31), (9, 26), (9, 31), (9, 32), (9, 33), (9, 34), (9, 36), (9, 40), (9, 44), (9, 46))
+        sent = {b["symbol"]: self.usd(b) for b in h.sent("buy")}
+        return row, sent, {(i.kind, i.symbol): i for i in h.panel_intents()}
+
+    def test_after_a_window_loss_one_name_rotated_is_sold_and_its_successor_refused_at_the_send(self):
+        for loss, budget, lot in (("100", "750.00", "150.00"), ("200", "500.00", "100.00")):
+            with self.subTest(loss=loss):
+                self.setUp()
+                row, sent, intents = self.after_a_loss(loss, 1)
+                self.assertEqual((row["budget"], row["n_sells"], row["n_buys"]), (budget, 1, 1))
+                self.assertEqual(intents[("buy", "N020")].usd, D(lot), "planned: a fifth of the budget a full basket fits")
+                self.assertEqual(intents[("sell", "N014")].status, "done", "the sale goes whatever the buy's fate")
+                self.assertEqual(sent, {}, "NO BUY IS SENT")
+                self.assertEqual(intents[("buy", "N020")].status, "refused")
+                self.assertTrue(str(intents[("buy", "N020")].why).startswith("sizing (budget)"), intents[("buy", "N020")].why)
+                self.assertEqual(self.h.held(), ["N010", "N011", "N012", "N013"], "four names held; its twin holds five")
+                risk = L.probe_figures(self.h.state.rows, weights=self.h.table.equity.open_risk_weight).open_risk
+                self.assertLess(abs(risk - D("320")), D("1"), "four held names of $200 at the stock weight 0.40")
+                self.assertGreater(risk + D(loss), D("400"), "the four held names and the loss are more than the window: "
+                                                             "no room for a fifth, whatever its size")
+
+    def test_after_a_window_loss_two_names_rotated_buy_one_and_refuse_the_other(self):
+        row, sent, intents = self.after_a_loss("100", 2)
+        self.assertEqual((row["budget"], row["n_sells"], row["n_buys"]), ("750.00", 2, 2))
+        self.assertEqual(sorted(sent), ["N020"], "the first name fits the room two sales freed, the second does not")
+        self.assertGreater(sent["N020"], D("149.80"))
+        self.assertLessEqual(sent["N020"], D("150.00"))
+        self.assertEqual((intents[("buy", "N020")].status, intents[("buy", "N021")].status), ("done", "refused"))
+        self.assertTrue(str(intents[("buy", "N021")].why).startswith("sizing (min_order)"), intents[("buy", "N021")].why)
+        self.assertEqual(self.h.held(), ["N010", "N011", "N012", "N020"])
+
+    def test_with_no_loss_or_on_a_full_rotation_every_name_is_bought_whole(self):
+        for loss, rotate, lot in (("0", 2, D("200.00")), ("40", 5, D("180.00"))):
+            with self.subTest(loss=loss, rotate=rotate):
+                self.setUp()
+                row, sent, intents = self.after_a_loss(loss, rotate)
+                self.assertEqual((row["n_sells"], row["n_buys"], row["n_skipped"]), (rotate, rotate, 0))
+                self.assertEqual(len(sent), rotate)
+                for usd in sent.values():
+                    self.assertGreater(usd, lot - D("0.20"))
+                    self.assertLessEqual(usd, lot)
+                self.assertEqual({i.status for i in intents.values()}, {"done"})
+                self.assertEqual(len(self.h.held()), 5)
+
     def test_a_figure_that_cannot_be_read_leaves_the_sleeve_and_the_send_holds_the_walls(self):
         h = self.h
         with mock.patch.object(L.EquityBook, "_budget_room", side_effect=RuntimeError("unread")):

@@ -439,7 +439,10 @@ file say the same):
    E1's sizing cut the fifth name; the decision's budget is now the sleeve scaled so the whole basket fits
    (`live._panel_budget`: five lots of $200 at $2,229, held by `test_e4_e2e` and
    `test_equity_book_panel.TheWholeBasketIsScaledToTheRoom`). What is left for the captain: a full basket uses the
-   whole window (first come), and a panel sleeve of its own would leave room beside it (a money row).
+   whole window (first come), so after any net loss in the window a PARTIAL rotation's new name is refused for
+   budget at the send and the program holds four names where its twin holds five (the verification's residual;
+   pinned as built by the same class's send tests). A panel sleeve of its own would leave room beside the basket
+   and inside it: a money row, decided with the universe deploy before any panel program is seated.
 2. The vanish leg (D): at a name's third session with no valid close its leg is -0.30, no cost, for the lot, its
    counterparts and its cell's members, when the House could not have sold it since it left the eligible set.
 3. The dither (C; open point 18): on the ADJUSTED price's own cent grid, not the raw price's as the spec worded it.

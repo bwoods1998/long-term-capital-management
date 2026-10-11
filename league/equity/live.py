@@ -2958,10 +2958,15 @@ class EquityBook:
         Every name of the target then scales alike: five lots of $200.00 at $2,229 with the window untouched ($150.00
         after $100 of window loss, $88.55 beside the two seeds invested), each a fifth of the budget its twin's
         weights are read against. NOTHING IS LOOSENED: the send's own sizing still holds every wall a name at a time
-        (a budget that has moved since cuts the last name, as before), held lots are never resized (KEEP: a budget
-        that fell buys smaller lots at the next rotation and sells nothing), and a figure that cannot be read leaves
-        the sleeve as the budget. THE COST, stated in docs/operations.md: a full basket at this size uses the whole
-        window, so another program's new buys and the options Probe lane's opens wait for room (first come)."""
+        (a budget that has moved since cuts the last name, as before), held lots are never resized and a budget that
+        fell sells nothing (KEEP), and a figure that cannot be read leaves the sleeve as the budget. WHAT IT DOES NOT
+        DO: it sizes a basket bought from flat or rotated whole. A held five-name basket is the whole window, so
+        after any net loss in the window a PARTIAL rotation's new name is planned at a fifth of the smaller budget
+        and then refused for budget at the send (one sale frees less room than the loss took): the program holds
+        four names where its twin holds five (`TheWholeBasketIsScaledToTheRoom`'s send tests pin it as built). THE
+        COST, stated in docs/operations.md: a full basket at this size uses the whole window, so another program's
+        new buys and the options Probe lane's opens wait for room (first come). A panel sleeve of its own is a
+        money row and the owner's decision, open."""
         et = self._et()
         E = self.sizing_equity() or ZERO
         sleeve = self._sleeve_share(inst) * E if et is not None else ZERO

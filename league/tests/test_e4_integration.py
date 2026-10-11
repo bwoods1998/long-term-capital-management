@@ -726,6 +726,30 @@ class TheSeams(unittest.TestCase):
             self.assertEqual(elane_folds.born(store, elane_train.cell_of(facts["lane"], facts["agenda"], facts["symbols"])), 1)
             self.assertEqual(elane_xs.assign(store, panel_cell, recording), second)
 
+    def test_what_the_lane_reads_of_release_e3_is_what_e3_writes(self):
+        """The panel lane reads two of E3's files by name (it was built before E3 was merged): the contamination
+        probe's (the look's gate, the captain's A22 (3)) and the forward report's (an ETF program's N_eff for the
+        funnel's asset-years). The names and the fields are E3's own; and the probe's strata do NOT yet hold the
+        panel's (package B's patch to E3's probe, owed), so every panel look waits, as the lane's rule says."""
+        from league.ops import contam_probe, equity_neff, forward_db, forward_report
+
+        self.assertEqual(elane_xs.PROBE_FILE, contam_probe.FILE)
+        self.assertEqual(equity_neff.FORWARD_REPORT, forward_report.FILE)
+        self.assertIn("cey", forward_report.SECTION_KEYS)
+        self.assertIn("hist_iy REAL", " ".join(forward_db.SCHEMA.split()), "the report's `cey` is a row of fwd_cey")
+        self.assertEqual(set(elane_xs.PROBE_STRATA) & set(contam_probe.STRATA), set(),
+                         "the day E3's probe carries the panel strata this reads all three, and a look may be taken")
+        with tempfile.TemporaryDirectory() as tmp:
+            asked = {s: {"2016-24": {"readable": True, "recalled": False}} for s in contam_probe.STRATA}
+            (Path(tmp) / contam_probe.FILE).write_text(json.dumps(
+                {"version": contam_probe.VERSION, "history": [],
+                 "routes": {ROUTE: {"at": "2026-10-10T00:20:00Z", "model": "fake-model", "cells": asked}}}),
+                encoding="utf-8")
+            why = elane_xs.probed(tmp, {"spec": {"e2_route": ROUTE}})
+            self.assertIsNotNone(why, "E3's probe as it runs today (S1-S4) opens no panel look")
+            for stratum in elane_xs.PROBE_STRATA:
+                self.assertIn(stratum, why)
+
     def test_no_stub_is_left_on_a_built_path(self):
         left = []
         for path in [*sorted((REPO / "league" / "xs").glob("*.py")), REPO / "league" / "swarm" / "elane_xs.py",
