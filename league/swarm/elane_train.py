@@ -1317,9 +1317,43 @@ class EquityResearcher:
         return True
 
     def waiting(self, rec: Mapping[str, Any]) -> bool:
-        """Whether a family waits out a backoff after a failure of the House's (`infra.next_at`)."""
-        infra = rec.get("infra") if isinstance(rec.get("infra"), Mapping) else {}
-        return (_num(infra.get("next_at")) or 0.0) > self.clock()
+        """Whether a family waits out a backoff: after a failure of the House's (`infra.next_at`), or after a question
+        of its own no route answered (`unanswered.next_at`)."""
+        for name in ("infra", "unanswered"):
+            held = rec.get(name) if isinstance(rec.get(name), Mapping) else {}
+            if (_num(held.get("next_at")) or 0.0) > self.clock():
+                return True
+        return False
+
+    def unanswered(self, fid: str, what: str, errors: Sequence[str]) -> dict[str, Any]:
+        """A QUESTION NO ROUTE ANSWERED (a Train write, a review or an audit read): nothing is counted against the
+        program, and the family waits out a backoff before it asks again (`train_every_seconds` doubling with every
+        question in a row left unanswered, at most `BACKOFF_MAX`), as it does after a failure of the House's. Without it
+        a family whose routes were down asked every route again each round under a fresh key, each timed-out call a
+        hold on the swarm's meter (the integration review's loop-2). An answered question clears it (`answered`)."""
+        c = cfg(self.settings)
+        now = self.clock()
+        held = record_of(self.store.family(fid) or {}).get("unanswered")
+        count = int(held.get("count") or 0) + 1 if isinstance(held, Mapping) else 1
+        delay = min(float(c["train_every_seconds"]) * (2 ** min(count, 12)), BACKOFF_MAX)
+        record = {"count": count, "at": now, "next_at": now + delay, "what": what,
+                  "sent": not elane_yield.unsent(errors)}
+        _update(self.store, fid, lambda r: r.update(unanswered=record))
+        return {"family": fid, "error": f"no {what} route answered" if what != "train" else "no route answered",
+                "errors": list(errors)[:3], "retry_in": delay}
+
+    def reader_now(self, route: Any) -> str:
+        """The model that would answer `route` NOW: its own, or, for a Sail profile whose window is flagged stalled, the
+        model of the asap profile the router's window fallback sends E2's role to (league/swarm/models.py
+        `sail_fallback`: k3_balanced and pro_balanced both fall to pro_asap for a role that is not the gate's audit)."""
+        if getattr(route, "kind", None) == "sail":
+            try:
+                fallback = self.router.sail_fallback(route.name, role=elane_yield.ROLE)
+                if fallback is not None and self.router.window_stalled(fallback[0]) is not None:
+                    return elane_review.model_of(f"sail:{fallback[1]}")
+            except Exception:  # noqa: BLE001 - a router that cannot say: the route's own model
+                pass
+        return elane_review.model_of(route.key)
 
     def queue(self) -> list[dict[str, Any]]:
         """The living E2 families with a step to take (researching, or a pass to re-score under a new equity identity),
@@ -1474,9 +1508,13 @@ class EquityResearcher:
             system=RESEARCHER_SYSTEM + contract_text(), user=self.brief(fam), key=f"swarm:elane:train:{fid}:{int(self.clock())}",
             max_output=c["train_max_output_tokens"], effort=c["train_effort"], purpose="research", now=self.clock(), family=fid)
         if answer is None:
-            return {"family": fid, "error": "no route answered", "errors": errors[:3]}
+            return self.unanswered(fid, "train", errors)
         # An answered question is one attempt (`train_max_attempts`); a route that could not answer spends none.
-        _update(self.store, fid, lambda r: r.update(attempts=int(r.get("attempts") or 0) + 1))
+
+        def answered(r: dict[str, Any]) -> None:
+            r.pop("unanswered", None)
+            r["attempts"] = int(r.get("attempts") or 0) + 1
+        _update(self.store, fid, answered)
         code, note, stop = program_of(answer)
         if stop is not None:
             if not judged(record_of(self.store.family(fid) or fam)):
@@ -1693,7 +1731,16 @@ class EquityResearcher:
         """THE EQUITY REVIEW of a bar pass (league/swarm/elane_review.py): the level rule, then the review and the audit on
         two different models. Both pass: the version is the family's pass (its lineage's one Validation try). A failure
         (or `review_max_unclear` unclear reads of one stage) is a Train failure of the version ("REVIEW"). A question no
-        route answered counts nothing and is asked again next round."""
+        route answered counts nothing and is asked again after a backoff (`unanswered`).
+
+        THE AUDIT'S READER IS NEVER THE REVIEWER'S MODEL, wherever the router takes the call: a candidate whose window
+        is flagged stalled is read as the model its fallback reaches (`reader_now`) and left out when that is the
+        reviewer's, and an answer that came back from the reviewer's model all the same (the window stalled on this very
+        call) is booked, discarded, and the next candidate is asked in the same step. EVERY QUESTION HAS ITS OWN KEY
+        (`asked`, counted once its outcome is handled): the Provider answers a repeated key from its store, so a key
+        asked again would be booked a second time for one call, and once the router's hourly compaction has blanked the
+        stored answer the re-read is empty. An answer with no text at all counts as no answer (at most
+        `review_max_unclear` times a stage; after that it is an unclear read)."""
         from .gate import run_sha
 
         fid = str(fam["id"])
@@ -1727,24 +1774,39 @@ class EquityResearcher:
             if isinstance(done, Mapping) and done.get("verdict") == "pass":
                 continue
             reader = (pending.get("review") or {}).get("route") if stage == "audit" else None
+            taken = elane_review.model_of(str(reader or "")) if stage == "audit" else None
             if stage == "audit":
-                taken = elane_review.model_of(str(reader or ""))
-                candidates = [r for r in served if elane_review.model_of(r.key) != taken]
+                candidates = [r for r in served if self.reader_now(r) != taken]
             else:
                 candidates = list(served)
             if not candidates:
                 return {"family": fid, "version": n, "error": f"no {stage} route on a second model (elane.e2.review_routes)"}
             tries = int(unclear.get(stage) or 0)
+            asked = dict(pending.get("asked") or {})
+            turn = int(asked.get(stage) or 0)
             answer, route, errors = elane_yield.ask(
                 self.router, self.store, self.settings, first=None, role=elane_yield.ROLE,
                 system=elane_review.REVIEW + contract_text(),
                 user=elane_review.question(fam, version, card=card, train=train, lane_label=lane_label, stage=stage),
-                key=f"swarm:elane:{stage}:{fid}:{n}:{tries}", max_output=rc["review_max_output_tokens"],
+                key=f"swarm:elane:{stage}:{fid}:{n}:{turn}", max_output=rc["review_max_output_tokens"],
                 effort=rc["review_effort"], purpose="review", now=self.clock(), family=fid, candidates=candidates,
-                book_as=lambda r: f"review:{r.key}")
+                book_as=lambda r: f"review:{r.key}",
+                accept=(lambda r, taken=taken: elane_review.model_of(r.key) != taken) if stage == "audit" else None)
+            # This question's outcome is handled from here on: the next one of this stage has a key of its own.
+            asked[stage] = turn + 1
+            pending["asked"] = asked
             if answer is None or route is None:
                 _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))
-                return {"family": fid, "version": n, "error": f"no {stage} route answered", "errors": errors[:3]}
+                return {"version": n, **self.unanswered(fid, stage, errors)}
+            if not str(answer.get("text") or "").strip() and not answer.get("json"):
+                blank = dict(pending.get("blank") or {})
+                blank[stage] = int(blank.get(stage) or 0) + 1
+                pending["blank"] = blank
+                if blank[stage] <= rc["review_max_unclear"]:
+                    # An answer with no text is no read (a key re-read after the router blanked its stored answer).
+                    _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))
+                    return {"family": fid, "version": n, "error": f"the {stage} answered nothing", "blank": blank[stage]}
+            _update(self.store, fid, lambda r: r.pop("unanswered", None))
             read = {**elane_review.grounded(answer, code), "route": route.key}
             if read["verdict"] == "fail":
                 return self.review_failed(fam, n, stage, read["reasons"] or [f"the {stage} failed it"], read=read)
@@ -1755,8 +1817,9 @@ class EquityResearcher:
                                               + read["reasons"][:2], read=read)
                 _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))
                 return {"family": fid, "version": n, stage: "unclear", "reads": unclear[stage]}
-            if stage == "audit" and elane_review.model_of(route.key) == elane_review.model_of(str(reader or "")):
-                # A fallback inside the router reached the reviewer's own model: no second reader; asked again next round.
+            if stage == "audit" and elane_review.model_of(route.key) == taken:
+                # Never reached (`accept` refuses such an answer): the two-reader rule is held here too.
+                _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))
                 return {"family": fid, "version": n, "error": "the audit was answered by the reviewer's model"}
             pending[stage] = {k: read.get(k) for k in ("verdict", "route", "model", "reasons")}
             _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))

@@ -293,6 +293,95 @@ class TheResearcher(ResearchCase):
         self.assertEqual(readers, ["pro_balanced", "k3_balanced"], "pro_asap is the reviewer's model: never its audit")
         self.assertEqual(self.rec(fam["id"])["passed_version"], 1)
 
+    def test_an_audit_answered_by_the_reviewers_model_is_discarded_and_the_next_candidate_is_asked(self):
+        # The integration review's seal-7: the router's window fallback sent the audit's first candidate to the
+        # reviewer's own model; the step returned, the next candidate was never asked, and the same key was asked again
+        # every round. Now the answer is booked and discarded and glm_balanced is asked in the same step.
+        fam = fx.e2_family(self.store, "stalled-window", code=fx.program(share=0.41))
+
+        def script(call):
+            if not fx.is_review(call):
+                return fx.answer([])
+            if call["sail_profile"] == "pro_balanced":
+                return fx.review_answer("pass", model="pro_balanced")
+            if call["sail_profile"] == "k3_balanced":  # the stall flagged on this very call: answered on pro_asap
+                return {**fx.review_answer("pass", model="pro_asap"),
+                        "sail_fallback": {"from": "k3_balanced", "to": "pro_asap", "why": "stall"}}
+            return fx.review_answer("pass", model=call["sail_profile"])
+        self.router.script = script
+        self.researcher.run()
+        readers = [c["sail_profile"] for c in self.router.calls if fx.is_review(c)]
+        self.assertEqual(readers, ["pro_balanced", "k3_balanced", "glm_balanced"])
+        rec = self.rec(fam["id"])
+        self.assertEqual(rec["passed_version"], 1)
+        self.assertEqual((rec["passed_review"]["route"], rec["passed_review"]["audit"]["route"]),
+                         ("sail:pro_balanced", "sail:glm_balanced"))
+        rows = elane_yield.ledger(self.store)["routes"]
+        self.assertEqual(rows["review:sail:pro_asap"]["requests"], 1, "the discarded answer's dollars are booked, once")
+
+    def test_every_review_question_has_a_key_of_its_own_and_a_blank_answer_is_no_read(self):
+        from league.swarm.models import ModelError
+
+        fam = fx.e2_family(self.store, "keys", code=fx.program(share=0.39))
+        blank = {"text": "", "json": None, "route": "sail", "model": "pro_balanced", "cost_usd": 0.0}
+        answers = [ModelError("busy"), blank, fx.review_answer("maybe"), fx.review_answer("pass", model="pro_balanced")]
+        self.router.script = lambda call: (answers.pop(0) if call["sail_profile"] == "pro_balanced" and
+                                           call["key"].startswith("swarm:elane:review:") else
+                                           ModelError("busy") if call["key"].startswith("swarm:elane:review:") else
+                                           fx.review_answer("pass", model=call["sail_profile"]) if fx.is_review(call) else
+                                           fx.answer([]))
+        for _ in range(4):
+            self.researcher.run()
+            self.clock.advance(elane_train.BACKOFF_MAX)
+        keys = [c["key"] for c in self.router.calls if c["key"].startswith("swarm:elane:review:") and
+                c["sail_profile"] == "pro_balanced"]
+        self.assertEqual(len(keys), 4)
+        self.assertEqual(len(set(keys)), 4, "no key is asked twice: a repeated key is a re-read, booked again")
+        rec = self.rec(fam["id"])
+        self.assertEqual(rec["passed_version"], 1, "a failed call, a blank answer and one unclear read, then the pass")
+        review = [c for c in self.router.calls if c["key"].startswith("swarm:elane:audit:")]
+        self.assertEqual(len(review), 1)
+
+    def test_a_blank_answer_never_counts_as_an_unclear_read(self):
+        fam = fx.e2_family(self.store, "blank", code=fx.program(share=0.38))
+        blank = {"text": "", "json": None, "route": "sail", "model": "pro_balanced", "cost_usd": 0.0}
+        self.router.script = lambda call: blank if fx.is_review(call) else fx.answer([])
+        for n in (1, 2, 3):
+            out = self.researcher.run()
+            rec = self.rec(fam["id"])
+            self.assertEqual((rec["review"].get("unclear"), rec["review"]["blank"]["review"]), ({}, n), out)
+        self.assertEqual(rec["versions"]["1"]["fails"], [], "three blank answers failed the version at REVIEW before")
+        self.researcher.run()  # past `review_max_unclear` blanks a route that only answers nothing reads unclear
+        self.assertEqual(self.rec(fam["id"])["review"]["unclear"], {"review": 1})
+
+    def test_a_question_no_route_answered_backs_the_family_off(self):
+        from league.swarm.models import ModelError
+
+        fam = fx.e2_family(self.store, "silent")  # no program yet: its step is a write
+        self.router.script = lambda call: ModelError("busy")
+        out = self.researcher.run()
+        self.assertEqual(out["steps"][0]["error"], "no route answered")
+        first = len(self.router.calls)
+        self.assertEqual(first, len(elane_yield.DEFAULTS["routes"]), "nothing was sent: every route is tried once")
+        every = elane_train.DEFAULTS["train_every_seconds"]
+        waits = []
+        for _ in range(3):
+            rec = self.rec(fam["id"])
+            waits.append(rec["unanswered"]["next_at"] - rec["unanswered"]["at"])
+            self.clock.advance(waits[-1] - 1)
+            self.assertEqual(self.researcher.run()["steps"], [], "inside its backoff the family asks nothing")
+            self.clock.advance(2)
+            self.researcher.run()
+        self.assertEqual(waits, [2 * every, 4 * every, 8 * every], "doubling with every question in a row left unanswered")
+        self.assertIsNone(self.rec(fam["id"]).get("attempts"), "an unanswered question is no attempt")
+        self.router.script = self.script
+        self.answers.append(self.program_answer(fx.program(share=0.37)))
+        self.clock.advance(elane_train.BACKOFF_MAX)
+        self.researcher.run()
+        rec = self.rec(fam["id"])
+        self.assertNotIn("unanswered", rec)
+        self.assertEqual(rec["attempts"], 1)
+
     def test_no_reviewer_answering_counts_nothing(self):
         from league.swarm.models import ModelError
 
@@ -303,8 +392,15 @@ class TheResearcher(ResearchCase):
         rec = self.rec(fam["id"])
         self.assertEqual((rec["review"]["version"], rec["review"].get("unclear")), (1, {}))
         self.router.script = self.script
+        # The family waits out a backoff before it asks again (the review's loop-2), then its review is read.
+        self.assertEqual(rec["unanswered"]["count"], 1)
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"])
+        self.assertEqual(self.researcher.run()["steps"], [], "still waiting: no question, no model")
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"])
         self.researcher.run()
-        self.assertEqual(self.rec(fam["id"])["passed_version"], 1)
+        rec = self.rec(fam["id"])
+        self.assertEqual(rec["passed_version"], 1)
+        self.assertNotIn("unanswered", rec)
 
     def test_a_failed_version_is_revised_on_its_birth_route_and_the_revision_passes(self):
         first = fx.program(share=0.4)

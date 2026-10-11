@@ -459,6 +459,76 @@ class TheLoop(LoopCase):
         self.assertLess(elane_yield.day_line(sw.settings), 8.0)
         self.assertEqual(elane_yield.cfg(sw.settings)["usd_day"], 8.0)
 
+    # ------------------------------------------------------------------ the routes when Sail is slow or silent
+    def bar_passed(self, fid: str) -> None:
+        """A family whose v1 passed the bar and awaits its review (what `EquityResearcher.score` writes)."""
+        fx.e2_family(self.store, fid, code=fx.program())
+        verdict = {"passed": True, "fails": [], "score": 1.0, "years": {}, "summary": {}, "beside": {}}
+        elane_train._update(self.store, fid, lambda r: r.update(
+            versions={"1": elane_train.compact(verdict, at=self.store.now(), ident=None)},
+            review={"version": 1, "unclear": {}, "at": self.store.now()}))
+
+    def test_the_audit_finds_a_second_model_while_the_balanced_window_is_stalled(self):
+        # The integration review's seal-7 and loop-3, on the real router: with Sail's balanced window flagged stalled
+        # (one poll timeout flags it for an hour) the router answers pro_balanced AND k3_balanced on pro_asap for E2's
+        # role, so the audit's first candidate came back from the reviewer's own model, was discarded, glm_balanced was
+        # never asked, and the same key was re-read every round (booked again each time; empty once the router had
+        # blanked it; three empty reads failed the version at REVIEW).
+        from league.swarm import models
+
+        self.sail.script = lambda body: {"text": json.dumps({"verdict": "pass", "reasons": ["invented"], "findings": []})}
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        self.assertEqual(sw.router.sail_fallback("k3_balanced", role=elane_yield.ROLE), ("balanced", "pro_asap"))
+        self.bar_passed("e2-a")
+        now = sw.clock()
+        self.store.put(models.STALL_KEY, {"balanced": {"until": now + 3600, "since": now, "at": now, "profile": "pro_balanced",
+                                                       "fallback": "pro_asap", "role": "elane",
+                                                       "code": "provider_poll_timeout"}})
+        asked = len(self.sail.bodies)
+        out = sw.elane_train.review_step(self.store.family("e2-a"), 1)
+        self.assertEqual((out.get("passed"), out.get("review")), (True, "pass"), json.dumps(out)[:400])
+        rec = elane_train.record_of(self.store.family("e2-a"))
+        held = rec["passed_review"]
+        self.assertEqual((held["route"], held["audit"]["route"]), ("sail:pro_asap", "sail:glm_balanced"))
+        self.assertNotEqual(elane_review.model_of(held["route"]), elane_review.model_of(held["audit"]["route"]))
+        self.assertEqual(len(self.sail.bodies) - asked, 2, "one review, one audit: k3_balanced was never sent to pro_asap")
+        rows = elane_yield.ledger(self.store)["routes"]
+        self.assertEqual({k: v["requests"] for k, v in rows.items()}, {"review:sail:pro_asap": 1, "review:sail:glm_balanced": 1})
+        self.assertAlmostEqual(elane_yield.ledger(self.store)["days"][elane_yield._today(now)],
+                               self.store.spent(["sail_model"]), places=6, msg="E2's ledger books each call once")
+        self.assertEqual(rec["passed_version"], 1)
+
+    def test_a_call_that_timed_out_after_it_was_sent_is_booked_and_ends_the_question(self):
+        # The review's loop-2, on the real router and Provider with a transport that times out: one family's write sent
+        # three calls (every route in turn), the swarm's meter booked three holds, E2's own day booked nothing, and the
+        # family asked all three again next round under a new key.
+        def boom(body):
+            raise TimeoutError("the socket timed out after the request went")
+
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        fx.e2_family(self.store, "e2-a")
+        self.sail.script = boom
+        sent = len(self.sail.bodies)
+        out = sw.elane_train.write(self.store.family("e2-a"))
+        self.assertEqual(out.get("error"), "no route answered", json.dumps(out)[:400])
+        self.assertTrue(out["errors"][0].startswith(elane_yield.SENT_UNANSWERED), out["errors"])
+        self.assertGreater(out["retry_in"], 0)
+        booked = self.store.spent(["sail_model"])
+        self.assertGreater(booked, 0.0, "the Provider's hold for the call that may still be billed")
+        self.assertEqual(len(self.store._all("SELECT 1 FROM spend WHERE kind='sail_model'")), 1, "one call, one hold")
+        rows = elane_yield.ledger(self.store)["routes"]
+        self.assertEqual(list(rows), ["sail:pro_asap"], "no other route was asked the same question on top of it")
+        self.assertEqual((rows["sail:pro_asap"]["failed"], rows["sail:pro_asap"]["unknown_cost"]), (1, 1))
+        self.assertAlmostEqual(rows["sail:pro_asap"]["usd"], booked, places=6)
+        self.assertAlmostEqual(elane_yield.spent_today(self.store, sw.clock()), booked, places=6)
+        # The family waits out its backoff: the next round asks nothing for it.
+        rec = elane_train.record_of(self.store.family("e2-a"))
+        self.assertEqual((rec["unanswered"]["count"], rec["unanswered"]["sent"], rec.get("attempts")), (1, True, None))
+        tried = len(self.sail.bodies)
+        self.assertEqual(sw.elane_train.run()["steps"], [])
+        self.assertEqual(len(self.sail.bodies), tried)
+        self.assertGreaterEqual(tried - sent, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

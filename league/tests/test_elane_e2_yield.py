@@ -99,6 +99,41 @@ class TheChoice(YieldCase):
                      record={"status": "passed", "passed_version": 1, "versions": {"1": {}}})
         self.assertEqual(self.pick(0), "sail:pro_asap", "one pass on 2 dollars beats one on 200")
 
+    def test_revisions_alone_never_make_a_route_sampled(self):
+        # The integration review's seal-8: a family's Train revisions are booked on its birth route's row, and the
+        # sample read every request, so a route with 4 births and 26 revisions was "sampled": exploration ended and the
+        # ranking began on a fraction of the births the rule names.
+        settings = fx.settings(min_births=10, sample_requests=30, routes=["sail:pro_asap", "sail:glm_asap"])
+        candidates = routes(settings, fx.FakeRouter())
+        for key in ("sail:pro_asap", "sail:glm_asap"):
+            for _ in range(4):
+                book(self.store, key, usd=0.10, known=True, purpose="births", answered=True, now=self.clock())
+            book_births(self.store, key, 4)
+            for _ in range(40):
+                book(self.store, key, usd=0.01, known=True, purpose="research", answered=True, now=self.clock())
+        rows = ledger(self.store)["routes"]
+        self.assertEqual((rows["sail:pro_asap"]["requests"], rows["sail:pro_asap"]["requests_births"],
+                          rows["sail:pro_asap"]["answered_births"]), (44, 4, 4))
+        _, why = choose(self.store, settings, candidates, turn=0, train_key=STATE_KEY)
+        self.assertEqual(why, "the cheapest route that has produced births", "44 requests, 4 of them births: not sampled")
+        _, why = choose(self.store, settings, candidates, turn=2, train_key=STATE_KEY)
+        self.assertIn("furthest from its sample of 10 births", why)
+        # 30 BIRTH requests, answered or failed, do sample a route that never bears.
+        for key in ("sail:pro_asap", "sail:glm_asap"):
+            for _ in range(26):
+                book(self.store, key, usd=0.10, known=True, purpose="births", answered=False, now=self.clock())
+        _, why = choose(self.store, settings, candidates, turn=0, train_key=STATE_KEY)
+        self.assertIn("every route has its sample", why)
+
+    def test_the_cheapest_route_is_priced_on_its_birth_requests(self):
+        # A 24k-token birth request and a 12k-token revision are not one price: the default is the lowest mean dollars
+        # a BIRTH request, whatever the route's revisions cost.
+        self.spend("sail:pro_asap", 0.60, 1, requests=2)   # 0.30 a birth request
+        self.spend("sail:glm_asap", 0.40, 1, requests=1)   # 0.40 a birth request
+        for _ in range(20):                                # glm's many cheap revisions would have averaged it down
+            book(self.store, "sail:glm_asap", usd=0.01, known=True, purpose="research", answered=True, now=self.clock())
+        self.assertEqual(self.pick(0), "sail:pro_asap")
+
     def test_a_claude_route_only_while_the_router_serves_its_role(self):
         settings = fx.settings(routes=["claude:architect", "sail:pro_asap"])
         self.assertEqual([r.key for r in routes(settings, fx.FakeRouter())], ["sail:pro_asap"])
@@ -138,6 +173,55 @@ class TheLedger(YieldCase):
                                       now=self.clock())
         self.assertEqual(route.key, "sail:pro_asap")
         self.assertEqual(ledger(self.store)["routes"]["sail:pro_asap"]["usd_research"], 0.03)
+
+    def test_a_call_that_failed_after_it_was_sent_ends_the_question_and_books_its_hold(self):
+        # The swarm's meter holds what the router booked for the call (its request key); the ledger books the same, the
+        # next route is NOT asked the same question, and the errors say the call may still answer.
+        def script(call):
+            self.store.add_spend("sail_model", 0.085, family="f", detail={"profile": call["sail_profile"], "key": call["key"],
+                                                                         "desk": "f", "unsettled": "provider_poll_timeout"})
+            return ModelError("sail: ProviderError: provider_poll_timeout")
+        router = fx.FakeRouter(script)
+        answer, route, errors = elane_yield.ask(router, self.store, self.settings, first=Route.of("sail:pro_asap"),
+                                                role="elane", system="s", user="u", key="swarm:elane:train:f:1",
+                                                max_output=4000, effort="medium", purpose="research", now=self.clock())
+        self.assertEqual((answer, route), (None, None))
+        self.assertEqual([c["sail_profile"] for c in router.calls], ["pro_asap"])
+        self.assertTrue(errors[0].startswith(elane_yield.SENT_UNANSWERED))
+        self.assertFalse(elane_yield.unsent(errors))
+        row = ledger(self.store)["routes"]["sail:pro_asap"]
+        self.assertEqual((row["failed"], row["usd"], row["unknown_cost"]), (1, 0.085, 1))
+        self.assertAlmostEqual(elane_yield.booked_for(self.store, "swarm:elane:train:f:1:sail:pro_asap"), 0.085)
+        self.assertEqual(elane_yield.booked_for(self.store, "swarm:elane:train:f:2:sail:pro_asap"), 0.0)
+        # The timeout named with no hold on the meter (a fake Provider) ends the question the same way.
+        other = fx.FakeRouter(lambda call: ModelError("sail: ProviderError: provider_transport_timeout"))
+        _, _, errors = elane_yield.ask(other, self.store, self.settings, first=None, role="elane", system="s", user="u",
+                                       key="swarm:elane:train:f:3", max_output=4000, effort="medium", purpose="research",
+                                       now=self.clock())
+        self.assertEqual(len(other.calls), 1)
+        self.assertFalse(elane_yield.unsent(errors))
+        # A refusal before anything was sent (no hold, no timeout) still falls to the next route, as before.
+        self.assertTrue(elane_yield.unsent(["sail:pro_asap: ModelError: busy"]))
+
+    def test_an_answer_the_asker_may_not_read_is_booked_and_the_next_route_is_asked(self):
+        # The audit's rule (league/swarm/elane_train.py `review_step`): the router's window fallback answered on the
+        # reviewer's model; the dollars are booked to the route that answered and the next candidate is asked.
+        def script(call):
+            if call["sail_profile"] == "k3_balanced":
+                return {"text": "{}", "route": "sail", "model": "pro_asap", "cost_usd": 0.03,
+                        "sail_fallback": {"from": "k3_balanced", "to": "pro_asap", "why": "stall"}}
+            return {"text": "{}", "route": "sail", "model": call["sail_profile"], "cost_usd": 0.04}
+        router = fx.FakeRouter(script)
+        answer, route, errors = elane_yield.ask(
+            router, self.store, self.settings, first=None, role="elane", system="s", user="u",
+            key="swarm:elane:audit:f:1:0", max_output=4000, effort="medium", purpose="review", now=self.clock(),
+            candidates=[Route.of("sail:k3_balanced"), Route.of("sail:glm_balanced")], book_as=lambda r: f"review:{r.key}",
+            accept=lambda r: r.key != "sail:pro_asap")
+        self.assertEqual(route.key, "sail:glm_balanced")
+        self.assertEqual([c["sail_profile"] for c in router.calls], ["k3_balanced", "glm_balanced"])
+        rows = ledger(self.store)["routes"]
+        self.assertEqual((rows["review:sail:pro_asap"]["usd"], rows["review:sail:glm_balanced"]["usd"]), (0.03, 0.04))
+        self.assertIn("may not read this question", errors[0])
 
     def test_an_unknown_bill_books_its_hold(self):
         router = fx.FakeRouter(lambda call: {"text": "{}", "route": "claude", "model": "m", "cost_usd": None,
