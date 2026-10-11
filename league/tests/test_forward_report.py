@@ -1157,6 +1157,7 @@ class EachForwardAlarm(Fixture):
         self.assertIn(f"2 stored days of 1 programs were restated on the night of {DAYS[11]}", alarm["text"])
         self.assertIn("0 of the 2 restatements read bars that have moved since", alarm["text"])
         self.assertIn("2 carry no bars hash", alarm["text"])
+        self.assertEqual(alarm["level"], "warning", "a program's restatement that cannot say which bars it read")
 
     def test_fw3_counts_the_restatements_by_their_bars(self):
         # The shadow's event as it writes it: one a program and cause, with the stored days that differ and whether the
@@ -1174,6 +1175,7 @@ class EachForwardAlarm(Fixture):
                       "the same bars (a recompute that is not deterministic)", alarm["text"])
         self.assertNotIn("carry no bars hash", alarm["text"])
         self.assertTrue(R.text_ok(alarm["text"]))
+        self.assertEqual(alarm["level"], "warning", "one read the same bars: the recompute itself moved")
         # A payload that cannot be read is one day of one program with no cause, never an error.
         with self.db:
             self.db.execute("INSERT INTO fwd_events(at, kind, pid, day, payload) VALUES(?, 'restated', ?, ?, 'torn')",
@@ -1181,6 +1183,25 @@ class EachForwardAlarm(Fixture):
         (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW3"]
         self.assertIn("8 stored days of 3 programs", alarm["text"])
         self.assertIn("1 carry no bars hash", alarm["text"])
+
+    def test_fw3_is_data_not_a_warning_when_every_restatement_read_moved_bars(self):
+        # The routine case (an ex-day of a held symbol: the vendor restates its whole adjusted history, rounded to
+        # cents): every program's restatement read bars that have moved since and every control's reads no bar. It is
+        # listed with its counts and mails nobody; one that read the same bars makes it a warning again.
+        b = self.register("b@1")
+        self.night(DAYS[11])
+        at = ny(DAYS[11], 18, 36)
+        self.event("restated", pid=self.pid_a, day=DAYS[3], at=at, payload={"days": 9, "bars": "moved", "night": DAYS[11]})
+        self.event("restated", pid=b, day=DAYS[3], at=at, payload={"days": 9, "bars": "none", "moved": 0, "same": 0})
+        (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW3"]
+        self.assertEqual(alarm["level"], "info")
+        self.assertIn("18 stored days of 2 programs", alarm["text"])
+        self.assertIn("1 of the 2 restatements read bars that have moved since", alarm["text"])
+        self.assertIn("1 carry no bars hash", alarm["text"])
+        self.assertTrue(R.text_ok(alarm["text"]))
+        self.event("restated", pid=b, day=DAYS[4], at=at, payload={"days": 1, "bars": "same", "night": DAYS[11]})
+        (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW3"]
+        self.assertEqual(alarm["level"], "warning")
 
     def test_fw4_the_chain_does_not_hold(self):
         FakeA.chain = {"ok": False, "rows": 9, "first_bad": 4}

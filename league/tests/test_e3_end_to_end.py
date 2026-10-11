@@ -191,6 +191,13 @@ def swarm_rows(store: SwarmStore) -> dict[str, list[dict]]:
     return out
 
 
+def dlane(root: Path, settings: dict, now: float, **kw) -> dict:
+    """The dlane report as its job writes it at `now`. The forward report's section is read against the wall clock
+    (`forward_report.read_section` takes no `now`), so the wall clock is `now` here: on the House the two are one."""
+    with mock.patch.object(forward_report.time, "time", lambda: now):
+        return dlane_report.report(root, settings=settings, now=now, **kw)
+
+
 def forward_counts(db: sqlite3.Connection) -> dict[str, int]:
     return {table: int(db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for table in FORWARD_TABLES}
 
@@ -235,7 +242,7 @@ class World:
             self._morning(self.fwd[i])
         self.now = at(schedule.next_session(self.fwd[NIGHTS]), 9, 10)
         self.clock.t = self.now
-        self.report = dlane_report.report(self.root, settings=self.settings, now=self.now)
+        self.report = dlane(self.root, self.settings, self.now)
         self.after = self.generator_views()
         self.rows_after = swarm_rows(self.store)
 
@@ -255,8 +262,8 @@ class World:
         self.runner = Isolated(InlineDecider(), self.root / STORE_DIR)
         researcher = EquityResearcher(self.store, reviewing_router(), self.settings, runner=self.runner,
                                       clock=self.clock)
-        self.scores = {fid: researcher.score(self.store.family(fid), self.store.version(fid, 1)) for fid in PROGRAMS}
         for fid in PROGRAMS:
+            researcher.score(self.store.family(fid), self.store.version(fid, 1))
             self.store.set_band(fid, "probe", reason="fixture")
 
     def generator_views(self) -> dict:
@@ -290,7 +297,6 @@ class World:
         the intents of every decision, from the program's run on the whole market through the REAL shadow."""
         self.book = book_fx.Book(self.root / "live.sqlite")
         self.instances: dict[str, str] = {}
-        self.twin_lots: dict[str, dict[int, dict]] = {}
         db = forward_db.open_db(self.root)
         try:
             probe = forward_shadow.Shadow(self.base / "whole", db, decider=InlineDecider(), settings=self.settings,
@@ -305,7 +311,7 @@ class World:
                                   exit_day=lot["exit_day"], exit_at=lot["exit_at"], **self._money(lot))
                 for day, intents, held in book_fx.decide_loop(InlineDecider(), run):
                     book_fx.record(self.book, iid, day, intents, held, set(program.needs["symbols"]), lots, base=base)
-                self.instances[key], self.twin_lots[key] = iid, lots
+                self.instances[key] = iid
             self.wide = probe.store.bars(["QQQ", "SPY"], "forward", history=40, end=self.fwd[NIGHTS])
         finally:
             db.close()
@@ -744,8 +750,8 @@ class TheWholeNight(unittest.TestCase):
         try:
             for name in names:
                 shutil.move(str(w.root / name), str(moved / name))
-            out = dlane_report.report(w.root, settings=w.settings, now=w.now)
-            carried = dlane_report.report(w.root, settings=w.settings, now=w.now, previous=w.report)
+            out = dlane(w.root, w.settings, w.now)
+            carried = dlane(w.root, w.settings, w.now, previous=w.report)
         finally:
             for name in names:
                 shutil.move(str(moved / name), str(w.root / name))
@@ -806,8 +812,9 @@ class TheWholeNight(unittest.TestCase):
         stale = forward_report.alarms(w.root, now=later, settings=w.settings)
         self.assertEqual([a["id"] for a in stale], ["FW1"])
         self.assertTrue(all(forward_report.text_ok(a["text"]) and a["level"] == "warning" for a in stale))
-        out = dlane_report.report(w.root, settings=w.settings, now=later)
+        out = dlane(w.root, w.settings, later)
         self.assertIn("FW1", [a["id"] for a in out["alarms"]], "it rides the dlane report, which the stall job mails")
+        self.assertIsNone(out["forward_record"], "a stale section is not shown as today's")
 
 
 class WithEveryModeOff(unittest.TestCase):
@@ -912,9 +919,9 @@ class WithEveryModeOff(unittest.TestCase):
     def test_the_reports_carry_no_forward_alarm_and_the_funnel_reads_zeros(self):
         now = self.clock()
         self.assertEqual(forward_report.alarms(self.root, now=now, settings=self.settings), [])
-        out = dlane_report.report(self.root, settings=self.settings, now=now)
+        out = dlane(self.root, self.settings, now)
         self.assertEqual([a["id"] for a in out["alarms"] if a["id"][:2] in ("FW", "RR", "CP", "MM")], [])
-        self.assertIn("forward_record", out)
+        self.assertIsNone(out["forward_record"], "no report was written: nothing to show")
         counts = funnel.window(self.root, now - 86400.0, now)["forward_record"]
         self.assertEqual(set(counts.values()), {0})
         self.assertFalse((self.root / forward_db.DB).exists(), "reading the record creates no store")

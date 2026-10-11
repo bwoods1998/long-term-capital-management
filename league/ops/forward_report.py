@@ -72,10 +72,16 @@ locked that minute) is an info row under its id that says so, never silence and 
   (one registered later was owed no row that night; the next night's whole recompute fills its days).
 - FW2 (warning): programs left stale two nights running, or a pid with a `data_failed` or a `run_failed` event on two
   nights running (counts in the text).
-- FW3 (warning): a `restated` event written last night (written once a value, so this is its first night). The text
-  counts the restatements by cause, as the event's bars hash tells it (league/ops/E3_INTERFACES.md, fact 1): those
-  whose decisions read bars that have moved since (the vendor's: a correction, or adjusted prices rounded to cents)
-  and those that read the same bars (the recompute itself is not deterministic).
+- FW3 (warning, or info): a `restated` event written last night (written once a value, so this is its first night).
+  The text counts the restatements by cause, as the event's bars hash tells it (league/ops/E3_INTERFACES.md, fact 1):
+  those whose decisions read bars that have moved since (the vendor's: a correction, or adjusted prices rounded to
+  cents) and those that read the same bars (the recompute itself is not deterministic). ITS LEVEL IS ITS CAUSE
+  (`_restated`; decided at the integration, on the shadow's measurement): the vendor restates a symbol's whole
+  adjusted history at every dividend and split, so an ex-day of a held symbol restates nearly every stored day of
+  every holder, most weeks; that is data, counted with its cause, and reads "info" (listed, never mailed). It is a
+  "warning" when any restatement read THE SAME bars, or is a program's that cannot say which it read (no bars hash):
+  the recompute itself moved, which nothing but a defect explains. A control's restatement carries no bars hash by
+  construction (it reads no bar: `bars` "none") and is the vendor's too.
 - FW4 (warning): `verify_chain` not ok (owner step: stop the forward jobs and compare with the backup).
 - FW5 (warning): cey_day under its 20-day median for 10 forward days running while equity births continue.
 - FW6 (warning): a live instance with 5 or more priced closes whose mean twin gap is beyond the A14 bound either
@@ -861,10 +867,11 @@ def _previously_recalled(root: Path, route: str, at: Any) -> set[str] | None:
 
 
 # ------------------------------------------------------------------------------------------------------- the alarms
-def _row(alarm: str, text: str, subject: str = "") -> dict[str, Any]:
-    """One alarm row; its text opens with its id and its subject, then a colon: what `new` is told by."""
+def _row(alarm: str, text: str, subject: str = "", level: str | None = None) -> dict[str, Any]:
+    """One alarm row; its text opens with its id and its subject, then a colon: what `new` is told by. `level`: the
+    row's own when its alarm's depends on its cause (FW3), else `ALARMS`'."""
     head = f"{alarm} {subject}".strip()
-    return {"id": alarm, "level": ALARMS[alarm], "text": f"{head}: {text}", "new": True}
+    return {"id": alarm, "level": level or ALARMS[alarm], "text": f"{head}: {text}", "new": True}
 
 
 def _head(text: Any) -> str:
@@ -933,14 +940,16 @@ def _backlog(db: sqlite3.Connection) -> list[dict[str, Any]]:
 def _restated(db: sqlite3.Connection) -> list[dict[str, Any]]:
     """FW3: `restated` events written since the last night began, counted by cause. One event is one program's
     restatement that night: its payload holds how many stored days differ (`days`; 1 when it does not say) and whether
-    the decisions behind them read bars that have moved since (`bars`: "moved" | "same")."""
+    the decisions behind them read bars that have moved since (`bars`: "moved" | "same"; a control's says "none": it
+    reads no bar). THE LEVEL (the module docstring): "info" when every restatement read bars that moved or is a
+    control's; "warning" when one read the same bars or cannot say."""
     nights = _nights(db)
     if not nights:
         return []
     found = _rows(db, "SELECT pid, payload FROM fwd_events WHERE kind='restated' AND at>=?", (float(nights[0]["started"]),))
     if not found:
         return []
-    days, causes = 0, {"moved": 0, "same": 0}
+    days, causes, controls = 0, {"moved": 0, "same": 0}, 0
     for row in found:
         try:
             payload = json.loads(row["payload"])
@@ -951,12 +960,15 @@ def _restated(db: sqlite3.Connection) -> list[dict[str, Any]]:
         days += count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 1
         if payload.get("bars") in causes:
             causes[payload["bars"]] += 1
+        elif payload.get("bars") == "none":
+            controls += 1
     untold = len(found) - causes["moved"] - causes["same"]
+    level = "warning" if causes["same"] or untold > controls else "info"
     return [_row("FW3", f"{days} stored days of {len({row['pid'] for row in found})} programs were restated on the night of "
                         f"{nights[0]['through']}: {causes['moved']} of the {len(found)} restatements read bars that have "
                         f"moved since (a vendor correction, or adjusted prices rounded to cents), {causes['same']} read "
                         f"the same bars (a recompute that is not deterministic)"
-                        + (f", {untold} carry no bars hash" if untold else ""))]
+                        + (f", {untold} carry no bars hash" if untold else ""), level=level)]
 
 
 def _chain(db: sqlite3.Connection) -> list[dict[str, Any]]:

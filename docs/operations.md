@@ -20,7 +20,13 @@ contract is `league/ops/E3_INTERFACES.md`.
 **No identity moves.** Nothing under `league/live/`, `league/gym/`, `league/equity/` or `league/constitution.py`
 changes, no decider kind is added and no evidence module imports a file of E3, so the options execution fingerprint,
 the equity evidence identity (A13) and the money digest are the ones E2 ships; no evidence is reset and no grant
-re-ratifies (`league/tests/test_e3_identities.py`). **The forward record is ops only, by process:** `league/swarm`,
+re-ratifies (`league/tests/test_e3_identities.py`). Read at the integration with the repository's own functions
+(`evaluator.execution_fingerprint`, `evaluator.equity_identity`, `constitution.money_digest`): the three are equal
+on the E1/E2 tree this release is built on (`feat/equity-e2-int` at `5ad1f01e`) and on this tree, and equal on the
+tree the packages were cut from (`5a6906ff`) and on that tree with the five packages merged. Between those two bases
+all three DID move, by E1's and E2's own review fixes (the first-decision look-back in the store, the engine's
+rounding tolerance, the live book, the money table): that is E1's and E2's deploy to state, not this release's.
+**The forward record is ops only, by process:** `league/swarm`,
 `league/equity`, `league/live` and `league/gym` import no E3 ops module and never name the forward store or one of its
 tables (`league/tests/test_e3_seal_imports.py`), so no architect, researcher or reviewer can read a forward row. Every
 E3 module is behind the updater's wall (`league/ops/`, and the three swarm modules in `league/ci.py`
@@ -44,7 +50,18 @@ E3 module is behind the updater's wall (`league/ops/`, and the three swarm modul
   verdict. Stored days whose recompute differs are a `restated` event, one a program and cause (the first rows stand),
   and every row carries the bars hash of the decision it came from: the vendor rounds adjusted prices to cents (and
   rescales the whole adjusted history on each ex-day), so a later store does not always give a decision the bytes the
-  live one read, and a difference for that cause is data, never an error.
+  live one read, and a difference for that cause is data, never an error. A program's slice carries its NEEDS
+  history + 1 sessions before its first forward day (E1's store hands them), so its first decision reads the bars
+  the live book reads at that close. **A label that returns:** after a rollback of an equity evidence module the
+  shadow opens a new series, `<label>~<the id it follows>`, so the newest engine id is always the series being
+  written. **A night that ran with failures of the House's own** (programs left without rows by the forward store or
+  by a child that could not be restarted, controls that could not be drawn, a step that raised) raises one House
+  warning of counts and class names; nobody is marked and the next night fills what was left out.
+- **The morning marks** (`forward_audit.py`, 25 minutes before each open): a forward day is marked for the programs
+  whose NEEDS hold a symbol the book's morning re-fetch found different, read from the book's own note (kv
+  `eq_bars_audit`) and, for a day the note does not name, from its `eq_bars` audit rows; a marked day leaves the
+  program's counted days and its row stays. The shadow's night makes up a mark the morning job missed before it reads
+  any checkpoint. Then the registry's hash chain is verified whole.
 - **The fills** (`fill_minutes.py`, `forward_twins.py`): the send-minute 1Min bars of the universe; the live-like
   price beside each official open and close; the live-like re-price of every shadow day; for each closed live lot, its
   fill gap against E1's twin split into timing and execution; and, session by session, whether the live program's
@@ -54,7 +71,15 @@ E3 module is behind the updater's wall (`league/ops/`, and the three swarm modul
 - **The contamination probe** (`contam_probe.py`, Saturday 00:10Z, at most `elane.contam.usd_run` dollars a run, one
   model route a week, inside E2's daily line): each route is asked what it recalls of the eras programs are judged on;
   the House scores the answers against a permutation by whole period and keeps aggregates only
-  (`<state>/contamination.json`). A prompt carries no truth and no score.
+  (`<state>/contamination.json`). A prompt carries no truth and no score. **Its dollars, as built:** a run's bound is
+  the smaller of `usd_run` and what is left of the equity lanes' day when it starts (`elane_yield.room`, which E2
+  holds to `elane.e2.pace_share` of the Sail model line: well under $3 a day at the shipped share), the room is read
+  again before every call, and a run is skipped only when the room is zero; so a probe finishes over several
+  Saturdays, its answered batches read again at $0. Its request keys carry the equity lanes' mark
+  (`swarm:elane:probe:...`), so the swarm's meters count it as the equity lanes' spend and the options researchers'
+  hourly pace does not read it as theirs. An answer the router's window fallback gave on another profile is scored
+  by nothing (one route, one model). **The captain's call:** at `usd_run` 3.0 a probe may take the whole of that
+  Saturday's equity research dollars; a smaller value (0.25 to 0.50) leaves the researchers their day.
 - **Release receipts** (`release_receipts.py`, read by the stall job): a release declares the funnel metric it expects
   to move (`league/ops/release_receipts.json`); the House reads it back after its window and lists the verdict.
   Listed, never reverted. E3 declares two, each read after a week: program-sessions accrue, and out-of-fold rows.
@@ -140,6 +165,21 @@ anywhere (BH and BY at q 0.10 over the lineages, beside the controls' cost-free 
 execution, the mean twin gap, participation, intent agreement). No per-program forward figure is shown for a program
 without a live instance; no group difference is shown before its pair's own 60th, 120th and 250th usable session.
 
+**What nobody may read yet** (recorded in release E3, shown to no one: no generator, no report, and not the captain
+either, who writes seeds and agendas and is therefore an author too):
+- the group differences (passers against non-passers, looks passed against failed, each against the pooled
+  controls) before a pair's own 60th, 120th and 250th usable session: `fwd_groups` holds the daily means, the report
+  prints counts, and a read is one formula fixed before the means exist;
+- every figure of the hidden year's out-of-fold tables (`mem_contrib`, `mem_series`): the report prints row counts;
+- the forward P&L and the checkpoint t and p of every program without a live instance: the report prints aggregates
+  and counts (a seated program's twins are shown, because Done's reading needs them);
+- the probe's per-question outcomes, which it never stores (the provider's own store keeps each request and answer,
+  on the House only).
+Do not query `forward.sqlite` or the `mem_` tables by hand for any of these: a look taken before a read's own
+session is a forking path, and the pre-registration above is what makes the later verdicts worth reading. Besides
+ops and the Done meter, the one later reader of a per-program forward row is the forward seat rule of a later
+release, at the alpha pinned in the row.
+
 **The alarms** ride the `dlane` report's `alarms` (so the stall notice mails a warning) and each is a House alert of
 the job that finds it; a text holds ids, counts and dates only. With `elane.forward.mode` off none of FW1-FW8 is
 raised.
@@ -148,7 +188,7 @@ raised.
 |---|---|---|
 | FW1 | warning | the mode is "record" and a forward day on which a registered program was owed a row has none by 09:00 ET the next session, or the report is over 36 h old (a stalled job). Silent on an empty registry |
 | FW2 | warning | programs left stale two nights running, or a program with a data failure or a run failure on two nights running |
-| FW3 | warning | a `restated` event written last night (recompute nondeterminism, or a vendor correction) |
+| FW3 | info, or warning | a `restated` event written last night, counted by cause. INFO when every restatement read bars that have moved since (the vendor restates a symbol's adjusted history at each ex-day, rounded to cents: routine, most weeks) or is a control's; WARNING when one read the same bars or cannot say which it read (the recompute itself moved) |
 | FW4 | warning | the registry's hash chain does not verify. Owner step: stop the forward jobs and compare with the backup |
 | FW5 | warning | the daily clean-evidence increment under its 20-day median for 10 forward days running while equity births continue (generators converging) |
 | FW6 | warning | a live instance with 5 or more priced closes whose mean twin gap is beyond the A14 bound either way, or with 20 or more sessions under the A14 agreement bound |
@@ -166,8 +206,15 @@ canary (else `forward_shadow` fails at its preflight every night, FW1 says so an
 deploy); (2) the gateway serves 1Min bars with `vw` for the universe 45 minutes after the close (else the fallback
 price is used and `fwd_fillgap.field` says which); (3) the probe's router reaches the model routes from an ops child
 (else CP2 fires at the third idle attempt); (4) the House's seconds a program-night, from the first three nights'
-`fwd_runs`, to set `cpu_seconds_night`; (5) E2's scored versions a day, which set the registry's size. **Roll back**
-by the switches above, with what each does not reach.
+`fwd_runs`, to set `cpu_seconds_night`; (5) E2's scored versions a day, which set the registry's size; (6) the
+probe's spend rows land in the swarm store under the equity lanes' key mark. **Roll back** by the switches above,
+with what each does not reach. A CODE rollback (the previous release) leaves `forward.sqlite`, the fill minutes and
+the memory tables where they are: nothing of the older release reads them, a family born with a hidden year is then
+scored on E2's two whole spans again (its bar moves: prefer the switches), and when the release returns the shadow
+fills every missed day; were an equity evidence module rolled back too, the engine label that returns opens a new
+series (above). **Verified at the integration** (`league/tests/test_e3_end_to_end.py`, the real modules together on a
+synthetic market and a synthetic live book): a Train scoring to a Done checkpoint through every job, the generators'
+views byte for byte unchanged, and every job a skipped receipt that touches nothing with the three modes off.
 
 ## The equity lanes' births (release E2, Oct 2026): `feat/equity-e2-int`, not deployed
 
@@ -733,9 +780,10 @@ to the owner once a lot. The funnel (`league/ops/funnel.py`) counts the equity l
 
 **Pre-registered before the first equity close** (the captain's A14, Oct 10, 2026; the same three sentences ride in
 every `dlane` report as `done.preregistered`). Consistency is computed since release E3 (each checkpoint's `a14`: the
-size of the mean fill gap either way, and the intents; **The forward record**, at the top): a reading that holds an
-equity close reads item 4 ("consistent with replay") by A14, never by the options replay gap (that gap divides by the
-maximum loss, a long lot's whole notional, so its 0.10 bound is a thousand basis points). The fill-gap half is the
+size of the mean fill gap either way, and the intents; **The forward record**, at the top): a checkpoint that holds
+an equity close reads item 4 ("consistent with replay") by A14 beside the pinned rule's own measure, never by the
+options replay gap alone (that gap divides by the maximum loss, a long lot's whole notional, so its 0.10 bound is a
+thousand basis points). The fill-gap half is the
 mean `gap_bp` of the counted equity closes with a final priced twin; the intents-agreement half is read from the
 forward record's twins (the live and the shadow intents, session by session); unmeasured, A14 does not hold and the
 reading says why. The close-date figures are not computed yet and no forward rule moves a seat. A reading with no

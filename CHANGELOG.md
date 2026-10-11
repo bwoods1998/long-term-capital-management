@@ -48,14 +48,31 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   it does not hold (a tightening). A family born with a hidden year is judged on six Train years, not seven, each
   stretch its own run (a loosening of the Train bar; the share screen's false-positive rate per program is unchanged).
 - **Six House jobs** (`league/ops/registry.py`): `forward_register` (hourly), `fill_minutes`, `forward_shadow`,
-  `forward_report`, `forward_audit` (all five run in a pause) and `contam_probe` (Saturdays, paid, at most $3 a run).
+  `forward_report`, `forward_audit` (all five run in a pause) and `contam_probe` (Saturdays, paid, at most $3 a run
+  and never more than what is left of the equity lanes' research day).
 - **Switches:** policy.json ships `elane.forward.mode`, `elane.memory.mode` and `elane.contam.mode` at "record"
   (an unrecorded forward day is lost for good); swarm.json "off" is the rollback of each. With the forward mode off
   A14 is unmeasured, so no Done checkpoint holding an equity close can hold; a family already born with a hidden year
   keeps it whatever the memory mode.
 - **No identity moves:** nothing under `league/live/`, `league/gym/`, `league/equity/` or `league/constitution.py`
   changes, no decider kind is added and nothing of E3 enters the equity evidence's import closure. The three new swarm
-  modules join `league/ci.py` `PENDING_GATEWAY` (a gateway follow-up).
+  modules join `league/ci.py` `PENDING_GATEWAY` (a gateway follow-up). Read with the repository's own functions at the
+  integration: the execution fingerprint, the equity identity and the money digest are equal on the E1/E2 tree it is
+  built on (`feat/equity-e2-int` at `5ad1f01e`) and on its head. (All three moved between `5a6906ff`, where the
+  packages were cut, and `5ad1f01e`: E1's and E2's own review fixes, theirs to state at their deploy.)
+- **Integrated** (five packages, then `feat/equity-e2-int` at `5ad1f01e`, which holds `feat/equity-e1` at `05f83d9e`
+  and `feat/equity-e2` at `04ca26c9`): the six jobs, the three policy blocks at "record", the three walled paths, the
+  funnel's counts, the report's section and alarms, the Done meter's A14 on E1's own reader (a checkpoint's reading is
+  handed the forward record's A14 and holds only when both say yes), the stall job's receipt read and E2's three
+  hooks. **Fixed at the integration:** E1's store now hands a slice its history + 1 sessions itself, so the shadow
+  asked for one session too many and its official prices read None (the timing table and every live-like re-price
+  would have been empty); the declared receipts lay under `docs/`, which never reaches the House (no receipt would
+  ever have been declared or read, in silence): they are `league/ops/release_receipts.json`, with a guard test; alarm
+  FW3 mailed a warning on every routine ex-day: its level is now its cause (info when every restatement read bars the
+  vendor has since moved; a warning when the recompute itself moved).
+- **One test of the whole:** `league/tests/test_e3_end_to_end.py`, the real modules together from a Train scoring to a
+  Done checkpoint that carries A14, the generators' views byte for byte unchanged; and with the three modes off every
+  job a skipped receipt that touches no gateway, model or decider child.
 - Operations: [docs/operations.md](docs/operations.md), "The forward record" (what is recorded, the switches and what
   each does not reach, A14 as coded, the hidden year, the stop rules and their undo, the alarms, the facts to verify
   on the House).

@@ -340,7 +340,10 @@ class TheForwardRecordInTheReport(A14Fixture):
 
         self.eq_family("p-a")
         write_json(self.root / forward_report.FILE, {"at": S.iso(self.now), "mode": "record", "alarms": [self.ROW]})
-        with mock.patch.multiple(forward_db, cfg=FakeA.cfg, mode=FakeA.mode):
+        # `read_section` reads the file's age against the WALL clock (it takes no `now`): held to the fixture's own
+        # instant here, or this test would start failing 36 hours after the fixture's date.
+        with mock.patch.multiple(forward_db, cfg=FakeA.cfg, mode=FakeA.mode), \
+                mock.patch.object(forward_report.time, "time", lambda: self.now):
             base = [a["id"] for a in self.report(settings=GATE)["alarms"]]
             off = self.report(settings={**GATE, "elane": {"forward": {"mode": "off"}}})
             on = self.report(settings=RECORD)

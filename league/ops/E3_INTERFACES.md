@@ -1,7 +1,9 @@
 # E3 build interfaces: release E3 "record and measure", the contract between its five packages
 
 Branch `feat/equity-e3` (worktree `~/Work/ltcm-v3/eqe3`), cut from `feat/equity-e2-int` at 5a6906ff: release E1 (the
-share lane) and release E2 (the swarm breeds share programs) merged, E2's patches applied. This file is step 0's: every
+share lane) and release E2 (the swarm breeds share programs) merged, E2's patches applied. INTEGRATED since (section
+10): the five packages, `feat/equity-e2-int` at 5ad1f01e and every patch of section 5; where a section below speaks of
+the base as it stood at step 0, section 10 says what moved. This file is step 0's: every
 package builds against it and changes it only through the integrator. The stubs it names exist on the branch now
 (bodies raise `NotImplementedError("<package>: <file> <name>")`; their docstrings say what each must do), so every
 package imports every other package's names from day one. `league/tests/test_e3_skeleton.py` holds the imports, the
@@ -138,6 +140,9 @@ Every existing name the spec calls was checked against 5a6906ff. Signatures matc
    history + 1. With one more session the first decision's ctx is byte for byte the live one's, so a program that
    waits for its full history does not decide a session late in the shadow only, and a twin's bars hash at
    `d_first` can equal the live decision's; every later decision is unchanged). B holds this with a test.
+   AT THE INTEGRATION (section 10): E1's review took this into the store itself (`EquityStore.bars(history=h)` now
+   hands h + 1 sessions before a run's first), so `Shadow.slice` asks for `history=needs.history` and adds nothing;
+   the slice still carries NEEDS history + 1 sessions, and the same test holds it.
 3. **The engine's result statuses (B).** A result is "ok", "disqualified", "no_data" or "error". `fwd_days.status`
    holds the first two only. "error" (`results.failed`) is the child's failure, read as `runner.Isolated` reads it
    (`RunFailed`); "no_data" (a NEEDS symbol with no bar in the run) is the data's (`data_failed`, no row).
@@ -175,9 +180,10 @@ Every existing name the spec calls was checked against 5a6906ff. Signatures matc
 13. **Two run shas.** `fwd_registry.run_sha` and `eq_instances.run_sha` are both the swarm's `gate.run_sha(version)`
     (the code sha with the version's params), which is what D compares. E1's `EquityProgram.run_sha` (the code sha
     with the MERGED params) is another value: never compare the two.
-14. **Which bars the morning audit found different (B; measured on E1's own book).** E1's `_audit` writes "mismatch"
-    on EVERY `eq_bars` row of the decision's day when any one symbol differs, and that evening's fetch sets a row
-    whose values changed (the symbol that did differ) back to unaudited. The book's kv `eq_bars_audit` ({day:
+14. **Which bars the morning audit found different (B; measured on E1's own book).** AT STEP 0'S BASE E1's `_audit`
+    wrote "mismatch" on EVERY `eq_bars` row of the decision's day when any one symbol differed (since E1's review
+    each audited symbol's rows carry its own verdict, "ok" or "mismatch": section 10), and that evening's fetch sets
+    a row whose values changed (the symbol that did differ) back to unaudited, then and now. The book's kv `eq_bars_audit` ({day:
     {"symbols", "at"}}, its last 30 failed audits) names the symbols that differed. `forward_audit` marks a day
     the note names for THOSE symbols and reads the rows only for a day the note does not name, so a program whose
     bars were right keeps its day and a morning that was missed is made up later. The shadow's night reads the book
@@ -287,8 +293,182 @@ to `meter`, `report`, `funnel.window` or `stall.run` may raise (the spec's 11.4-
   the run's last day (what B's `write` just wrote), and under `forward_db.engine_now` only when there is none. FOR
   THE INTEGRATOR, not D's to fix: B writes a night under `engine_id(fwd_engine())`, while `engine_now` (A's
   `counted_days` default, C's meters) is the LARGEST id. They are the same id until an engine label COMES BACK (a
-  rollback restores an equity fingerprint that already has its id while a newer id exists); from that night the
-  shadow writes under the old id and every reader of "the newest engine" reads the abandoned series.
+  rollback restores an equity fingerprint that already has its id while a newer id exists). SETTLED by package B
+  (section 4, item 15): a label that returns is written as a NEW series, `<label>~<the id it follows>`, so tonight's
+  engine id is always `forward_db.engine_now` and no reader reads an abandoned series.
 - **Names added**: in `fill_minutes` `FILL_POINTS`, `STAMP`, `LOOKBACK_DAYS`, `livelike_of`, `inside`, `path_of`,
   `days_on_disk`, `due_days`; in `forward_twins` `LIVE_DB`, `SWARM_DB`, `KIND`, `DECIDE_TIMEOUT`, `DECIDE_MAX_ERRORS`,
   `REAL_SUFFIX`, `RUN_FAILURES`, `FINISH_KEYS`, `d_retired`, `registry_key`, `read_book`, `twin_records`.
+
+## 8. Package A as built (the forward store, the registry's job, the control draw; additive)
+
+Nothing of step 0's contract changed shape: every name of `test_e3_skeleton.SIGNATURES` keeps its signature and every
+column of `COLUMNS` its place. What the other packages should know of `forward_db`, `forward_register` and
+`forward_controls` as they landed:
+
+1. **`forward_db.SCHEMA` now starts with `PRAGMA recursive_triggers=ON;`.** SQLite's REPLACE (`INSERT OR REPLACE`,
+   `REPLACE INTO`) deletes the row it conflicts with WITHOUT firing a delete trigger unless recursive triggers are on,
+   so with the spec's triggers alone a replace overwrote a row of an append-only table in silence. Every connection
+   that runs the schema (a writable `open_db`, a package's in-memory test database) now refuses a replace with
+   `APPEND_ONLY_ERROR`. "First write stands" is `INSERT` (IntegrityError on a known key) or `INSERT OR IGNORE`,
+   never OR REPLACE.
+2. **Transactions.** `open_db` returns a connection in sqlite3's default transaction mode, exactly what
+   `sqlite3.connect(":memory:")` gives a test. Each write of `forward_db` (`event`, `tag`, `append_registry`,
+   `kv_put`, `kv_first`, `engine_id`) is its own transaction and commits before it returns, UNLESS the caller already
+   holds one, which it joins. `with forward_db.transaction(db):` (NEW) makes several writes one transaction; a plain
+   `with db:` begins nothing by itself. A row a job writes with `db.execute(...)` is the job's to commit: on an
+   in-memory test database a missing commit does not show.
+3. **`event` is strict.** A kind outside `EVENT_KINDS` is a ValueError, and so is a kind of `ONCE_KINDS` written
+   without `once`. The payload is stored as `results.canonical` (floats to six places, NaN as null); `day` may be a
+   date. `once` is matched on (kind, pid, day), `pid` and `day` None included.
+4. **`append_registry` refuses, before anything is written** (ValueError): a row outside (`E3_ROUTE`, `E3_ALPHA_F`) /
+   (`CONTROL_ROUTE`, `CONTROL_ALPHA_F`); a control or a program carrying the other's lane, route, alpha, family or
+   version; a `program_sha` that is not sha256 of `code`; an evidence that is neither "event:<seq>" nor "registry";
+   evidence "registry" with `created_at` before `registered_at`; a `first_close` before
+   `forward_db.first_close(created_at)` or a `first_day` that is not `first_day(first_close)`. A test that needs a
+   registry row either builds a D2-consistent one (see `league/tests/test_forward_db.py` `registry_row`) or writes it
+   with SQL.
+5. **The stop rules read the night from the event.** `forward_register` counts a `run_disqualified` or `run_failed`
+   event toward a night by the event's `day` (the night's `through`, ISO), else by its `once` key when that is an
+   ISO day. The nights themselves are the distinct `fwd_runs.through`; a night counts toward "suspect" only when a
+   row of it has `programs >= 1`; "after a resume" is `fwd_runs.finished` later than the resumed tag. B writes
+   `through`, `programs` and `finished` on every `fwd_runs` row.
+6. **PARAMS are stored exact.** `fwd_registry.params` is the swarm's own encoding (`league.swarm.store.dumps`), not
+   `results.canonical`, which rounds floats to six places: the shadow would have run other parameters than the row's
+   `run_sha` names. `gate.run_sha({"sha": program_sha, "params": Program.params})` is the row's `run_sha`. `needs`
+   and a control's `code` are `results.canonical`.
+7. **Tags carry the registry's sighting.** A tag's `at` is the run of `sync` that first saw the fact (within the
+   hour), not the fact's own time; values are "" but for "live" (the instance id), "stopped" ("cap:<night>" |
+   "disqualified:<night>"), "suspect" (the night) and "resumed" ("<at>|<why>"). A live instance whose `run_sha`
+   differs from its key's registry row is NOT tagged live (a `register_skipped` event, cause "live_sha").
+8. **Added public names:** `forward_db.transaction`, `forward_db.last_stored_day(db, pid)`;
+   `forward_register.identity_watch`, `instance_key`, `CAUSES`, `SWARM_DB`, `LIVE_DB`, `SCORED_KIND`, `SCORED_PASS`.
+   `forward_register.resume` returns False, with nothing written, for a program that is not stopped.
+   `scored_versions` rows carry `key`, `needs`, `ugroup` and `params_text`, and `created_at` None with evidence
+   "registry" (the time is `sync`'s `now`).
+9. **`control_lots`** counts a slot's lots from 1 (`lid` 1, 1001, 2001, 3001 are the slots' first); the last session
+   of `sessions` decides nothing (its entry day does not exist yet). `cost_free` refuses lots not drawn at `k=0.0`.
+10. **T1 (`test_e3_seal_imports`) reads the real sources at integration.** An E3 ops module importing a league module
+    outside section 1's list, a memory module importing the swarm at its top, or an ops job opening `SwarmStore`
+    without `readonly=True` (the probe excepted) fails there by name.
+11. **T10 (`test_e3_identities` `TheWiringIsWhole`)** holds the spec's 11.1-11.3 together: all three applied, or none.
+12. **The declared receipts** are `league/ops/release_receipts.json` (`release_receipts.DECLARATIONS`), not the
+    spec's `docs/benchmarks/release_receipts.json`: the House's release carries `league`, `ltcm`, `playbooks`,
+    `scripts` and `deploy` only (`scripts/floor_box.py` `UPLOAD_TREES`, `league/updater.py` `TREES`), so a file under
+    `docs/` is never at hand there and no receipt would ever have been declared or read, in silence. Still behind the
+    wall (`league/ops/`). `test_e3_identities.TheDeclaredReceipts` holds the file to the spec's 7.6 text (each metric
+    is `forward_record.<a key of forward_report.FUNNEL_KEYS>`, read after 168 h) and its path to a tree the deploy
+    carries (`test_the_declarations_reach_the_house`).
+13. **The stop rules' events are the shadow's own shape**: `day` = the night (`through`), `once` = "night". A night
+    whose `run_disqualified` or `run_failed` event is older than the pid's latest "resumed" tag is an old night,
+    whenever its `fwd_runs` row landed. Pids follow the order the programs came to exist (the scored event's time;
+    a version with no event after those of the same run).
+14. **A run that could not read the swarm store writes no tag** (a "live" tag neither) and registers no live
+    instance; the next run that reads both the swarm store and the book does. The stop rules and the chain check
+    still run (they read the forward store alone), and the job's receipt is `failed` so the runner starts it again
+    inside its grace.
+
+## 9. What package E's build added (the memory tables and the probe; additive: no signature or column above changed)
+
+Every signature of `test_e3_skeleton.SIGNATURES` stands. What other packages and the integrator read beside it:
+
+- **The patches 11.7-11.9 land together with `elane.memory.mode` "record" in policy.json (11.2).**
+  `league/tests/test_elane_memory_seal.py` runs the wired flow only when `elane_train` imports `elane_memory` and
+  `elane_births` imports `elane_folds` (`league/tests/elane_e3_fakes.py` `WIRED`); a tree whose policy says "record"
+  without them fails `TheSwitchAndTheWiringLandTogether`. No test of that file may read "skipped" after integration.
+- **THE LISTING RULE (D14 as built; the spec is silent on a symbol listed after 2016).** E1's engine ends a run
+  "no_data" when a NEEDS symbol has no bar in it, and E2 reads that as the House's failure (nothing scored, backoff for
+  ever). A whole Train span always holds a bar of such a symbol (XLC's first is in 2018); a stretch the cut leaves may
+  hold none (2016-17 once 2018 is hidden). So `elane_folds.birth_fields` draws the hidden year by D14's formula over
+  the RUNNABLE years alone, `R[(k_c + h(cell)) % len(R)]`: a year is runnable when each of its seen spans and its own
+  span hold a bar of every symbol, by the House store's MANIFEST (`bar_years`: each symbol's first and last bar day;
+  no bar is sliced, no reserve session read). With all seven runnable (every symbol of today's `elane.universe`) that
+  is D14's formula exactly; no runnable year is no hidden year; no equity store under the swarm's root is the formula
+  alone; a store that is there and cannot be read raises into 11.8's guard (`FALLBACK` and the MM1 alert).
+- **The memory tables (C, the integrator).** `elane_memory.SCHEMA` carries a THIRD trigger a table
+  (`<table>_first_write`, keys in `elane_memory.KEYS`): an insert of a key already written is dropped, whatever its
+  conflict clause (SQLite fires no DELETE trigger for the row an `INSERT OR REPLACE` displaces unless
+  `recursive_triggers` is on; A closes the forward store's own with that pragma). `mem_seen.at` and `mem_contrib.at`
+  are the swarm store's ISO text; `mem_seen.fails` is a JSON list; `seen_sha` is `elane_memory.seen_sha(verdict)` (the
+  Train figures as `elane_train.compact` shapes them, without `at` and `identity`); `mem_contrib.run_sha` is the
+  hidden run's own (E1's `EquityProgram.run_sha`), never `gate.run_sha`; `elane_memory.counts(db)["by_year"]` has
+  string keys. A series is stored once under its sha (two contributions may share one). A hidden run already recorded
+  at a k is not run again.
+- **The probe's dollars (the integrator; E2's owner).** AS BUILT, and needed on E2's branch as it stands after the
+  base: (1) a run's BOUND is min(`elane.contam.usd_run`, `elane_yield.room` when it starts), and a run is skipped only
+  when that room is zero (the spec's "skipped while room < usd_run" skips every run once E2's day line is under
+  `usd_run`, which it is where E2 holds its day to a share of the swarm's Sail model line); (2) every request key
+  begins `contam_probe.KEY_PREFIX` ("swarm:elane:probe", then the route, `probe_n` and the batch's hash as specified),
+  the equity lanes' mark in the swarm's spend rows, so the swarm's meters count the probe as E2's and the options
+  researchers' hourly pace does not read it as theirs. The ledger rows are "probe:<route>" (a window fallback's
+  answer on the row of the profile that gave it).
+- **The probe's file (C: `contamination`, CP1, CP2).** `at` and `attempted_at` are ISO text (`schedule.iso`; read them
+  with `schedule.epoch`). A published route also carries `newly_recalled` (the "stratum/era" cells recalled now and not
+  in its result before) and a partial `model`; `contam_probe.read(root)` gives the file as the job keeps it;
+  `IDLE_ALARM` (3) is CP2's bound and `JUDGED_ERAS` the eras CP1 reads. The job itself raises CP2 (warning, when
+  `idle` reaches the bound) and CP1 (info, a 2025 or 2026H1 cell newly recalled) through `ctx.alert`, their texts ids,
+  counts and names only. Its receipt: {route, probe, usd, bound, finished, cells, asked, stopped ("usd" | "time" |
+  "error" | "data" | "fallback" | None)}, and `error` beside the last three.
+- **One route, one model.** An answer the router's own Sail window fallback gave on another profile is scored by
+  nothing: the run ends ("stopped": "fallback"), the route adds no cell and CP2 names it at the third such attempt.
+- **What the spec left open, as built.** The probe's universe is `equity_data.universe()` (the store's symbols, so S3
+  has its stocks); S2 is every ETF but SPY; a period belongs to the era its last session falls in and runs from the
+  last session before it, so January 2016 and 2016's first week are in no grid; a cell's "answered" share is over all
+  its questions; `parse` reads the array with the most usable answers of those a reply holds, and of a reply cut at
+  its output bound the whole entries before the cut.
+- **Names added**: in `elane_folds` `born`, `bar_years`, `runnable`; in `elane_effects` `t_stat`, `YEAR_SESSIONS`,
+  `MIN_EXPOSURE`, `MIN_SD`; in `elane_memory` `KEYS`, `seen_sha`; in `contam_probe` `KEY_PREFIX`, `ARRAY_STARTS`,
+  `AGAINST`, `WORDS`, `RECALL_ERA`, `IDLE_ALARM`, `JUDGED_ERAS`, `CELL_KEYS`, `RECALL_KEYS`, `MAX_OUTPUT`, `EFFORT`,
+  `periods`, `stratum_symbols`, `read`, `Probe`; and the test helper `league/tests/elane_e3_fakes.py`.
+
+## 10. The integration (what landed with the five packages, and what moved under them)
+
+- **What this tree carries.** Step 0 (550144d8) with packages A (7f3f29eb), B (5e1fb0e0), C (48c216d3), D (c181bcb8)
+  and E (cce2b5d7) merged, then `feat/equity-e2-int` at 5ad1f01e (which holds `feat/equity-e1` at 05f83d9e and
+  `feat/equity-e2` at 04ca26c9: 83 commits of E1's and E2's review fixes past step 0's base). Every patch of section
+  5 is applied: 11.1-11.3 and 11.10 (A's, its diffs for the moved base), 11.4-11.6 (C's, its edit set for a tree that
+  carries E1's own A14 reader; `league/tests/test_forward_patches.py` now holds the real files to every added line),
+  11.7-11.9 (E's one commit). No stub is left: `test_e3_skeleton` still holds every signature and column.
+- **THE BASE MOVED, and three things followed.**
+  1. *The slice* (section 4, item 2): E1's store hands `history` + 1 sessions before a run's first by itself.
+     `Shadow.slice` asks for NEEDS' own history; `Shadow.official` reads its one-session slice at `bars.first` (it
+     read index 0, the look-back session's place, and answered None for every symbol: the timing table and every
+     live-like re-price would have been empty). Package D's fake of the shadow follows. A store that went back to
+     `history` sessions fails `test_forward_shadow.NoDayBeforeItsCodeExisted` by name.
+  2. *The audit rows* (item 14): E1 now marks each audited symbol's rows on its own verdict. `forward_audit` still
+     reads the book's note first, because the evening fetch still resets the guilty raw row; its test on E1's real
+     book holds both facts.
+  3. *A14 in the Done meter* (11.5): E1 landed `a14_consistency` in `dlane_report.reading` (the fill-gap half, item
+     4 forced False "until the intents half's reader lands"). As integrated: `meter` hands each checkpoint's reading
+     the forward record's A14 (`reading(..., a14=a14_of(...))`); `a14_consistency(counted, forward)` then returns
+     that reading with E1's own fill-gap keys beside it and holds only when BOTH say yes; the running figures (never
+     a Done reading) are handed none and stay "not read". Item 4 of a checkpoint is the pinned rule's own measure AND
+     A14. Two of E1's tests that pinned "no reader yet" follow (`test_dlane_report_equity`, `test_equity_fx_swarm`).
+- **The three ids, read with the repository's own functions** (`evaluator.execution_fingerprint`,
+  `evaluator.equity_identity`, `constitution.money_digest`). Equal at 5a6906ff and on that tree with the five
+  packages merged; equal at `feat/equity-e2-int` 5ad1f01e and at this branch's head. Between 5a6906ff and 5ad1f01e
+  all three moved, by E1's and E2's own commits (`league/live`, `league/equity`, the constitution's money table):
+  release E3 moved none, and T10 (`test_e3_identities`) holds that no E3 path lies in any of the hashed sets.
+- **FW3's level is its cause** (`forward_report._restated`; the spec's 12.3 says "warning"). The vendor restates a
+  symbol's adjusted history at every ex-day, rounded to cents (section 3, fact 1), so a routine ex-day of a held
+  symbol restated nearly every stored day of every holder and FW3 would have mailed a warning most weeks. It is
+  "info" when every restatement read bars that have moved since or is a control's (`bars` "none"), and "warning"
+  when one read the same bars or is a program's with no bars hash.
+- **T11** is `league/tests/test_e3_end_to_end.py` (`TheWholeNight`): E2's researcher on E1's runner -> the scored
+  event -> the registry's job -> 22 nights of the shadow job in its own decider instance -> the minutes job against
+  a synthetic venue -> the report job, the funnel -> E1's own twin round, the fill-gap parts and the intents' twin
+  rows (one disagreement on bars a cent away: counted with its cause) -> the Done meter's 30-close checkpoint
+  carrying A14 as `a14_reading` reads it -> the generators' views byte for byte unchanged and no row of the swarm
+  store written by an E3 job. `WithEveryModeOff`: the three switches off, every job a skipped receipt that touches
+  no gateway, model route or decider child. These tests read an EMPTY policy (league/tests/__init__.py): a fixture
+  that wants the record on says so in its swarm.json.
+- **What a test fixture must know** (found building T11): `forward_report.read_section` reads staleness from the
+  wall clock, not from a `now` (its signature has none), so a fixture dated in the future is never stale;
+  `fill_minutes.run` asks for `equity_data.universe()` (35 symbols) and is ready when the calendar symbol's
+  send-minute bar is in both windows; the shadow job's child is `forward_shadow._decider(root)` (the one seam a test
+  swaps for an `InlineDecider`); a live book's `eq_bars` rows need their morning audit ("ok") before E1's twin of a
+  lot is final, else it waits two sessions.
+- **Left open, for the captain** (each stated in docs/operations.md): `elane.contam.usd_run` (at 3.0 a probe may take
+  the equity lanes' whole Saturday of research dollars: section 9); the listing rule of the hidden year (section 9);
+  a retired instance's sessions read "retired", unreadable (section 7); `suspect` is tagged each night after the
+  third (section 8's stop rules); the House facts of the spec's section 15, none of which blocks the deploy.
