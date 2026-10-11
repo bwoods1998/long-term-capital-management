@@ -689,6 +689,41 @@ class TheLiveLikeSeries(unittest.TestCase):
         self.assertEqual(forward_twins.on_run(self.db, golden_run(7), now=2.0, settings=SETTINGS), 3)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM fwd_ll").fetchone()[0], 9)
 
+    def stored(self, engine: int, days, *, pid: int = 7, at_: float) -> None:
+        """The `fwd_days` rows the shadow's write leaves for a run's days (package B's writer; SQL here)."""
+        self.db.executemany("INSERT INTO fwd_days(pid, day, engine, r, w, b, entries, exits, status, at) "
+                            "VALUES(?,?,?,0.0,0.0,0.0,0,0,'ok',?)", [(pid, day, engine, at_) for day in days])
+        self.db.commit()
+
+    def test_the_re_price_stays_with_the_series_the_shadow_wrote(self):
+        # An engine label that CAME BACK (a rollback restores a label that has its id): the night writes the run under
+        # the old id 1 while the newer id 2 exists. The re-price goes under 1, never under an id the run was not
+        # written under.
+        self.gaps()
+        self.db.execute("INSERT INTO fwd_engines(label, at) VALUES('fake-engine+1+fwd-1', 2.0)")
+        self.assertEqual(fake_engine_now(self.db), 2)
+        self.stored(2, (D1, D2), at_=2.0)               # the abandoned label's rows: it never saw D3
+        self.stored(1, (D1, D2, D3), at_=3.0)           # tonight's
+        self.stored(2, (D1, D2, D3), pid=8, at_=3.0)    # another program's rows name nothing for this one
+        self.assertEqual(forward_twins.on_run(self.db, golden_run(), now=3.0, settings=SETTINGS), 3)
+        self.assertEqual([tuple(r) for r in self.db.execute("SELECT DISTINCT pid, engine FROM fwd_ll")], [(7, 1)])
+        self.assertEqual(forward_twins.on_run(self.db, golden_run(), now=3.5, settings=SETTINGS), 0, "written once")
+        # The same night run again under the newer label (a deploy between two runs of it): the newest row of the
+        # run's last day names the engine.
+        self.stored(2, (D3,), at_=4.0)
+        self.assertEqual(forward_twins.on_run(self.db, golden_run(), now=4.0, settings=SETTINGS), 3)
+        self.assertEqual([tuple(r) for r in self.db.execute("SELECT engine, COUNT(*) FROM fwd_ll WHERE pid=7 "
+                                                            "GROUP BY engine ORDER BY engine")], [(1, 3), (2, 3)])
+
+    def test_a_missing_minute_is_still_one_event_whatever_engine_the_run_is_under(self):
+        self.gaps({k: v for k, v in GOLDEN_DRIFT.items() if k[0] != D2})
+        self.db.execute("INSERT INTO fwd_engines(label, at) VALUES('fake-engine+1+fwd-1', 2.0)")
+        self.stored(1, (D1, D2, D3), at_=1.0)
+        self.assertEqual(forward_twins.on_run(self.db, golden_run(), now=1.0, settings=SETTINGS), 2)
+        self.stored(2, (D1, D2, D3), at_=2.0)           # the label moved: the whole history is written again
+        self.assertEqual(forward_twins.on_run(self.db, golden_run(), now=2.0, settings=SETTINGS), 2)
+        self.assertEqual(len(events(self.db, "no_minute")), 1, "once a (pid, day), not once an engine")
+
 
 class TheTimingTable(WithAStore):
     """`begin`: one `fwd_fillgap` row a (day, symbol, at) for every store symbol, from the day's minutes file."""

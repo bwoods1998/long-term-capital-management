@@ -636,16 +636,31 @@ def begin(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float) 
     return out
 
 
+def _engine_of(db: sqlite3.Connection, pid: int, days: Sequence[str]) -> int | None:
+    """The engine id a run's re-price belongs to: the one the shadow wrote the run's last day under (the newest
+    `fwd_days` row of that pid and day: the night writes a program's days, then calls `on_run`); with no such row,
+    the newest engine id (`forward_db.engine_now`). The two differ only when an engine label has COME BACK (a
+    rollback restores a label that already has its id while a newer id exists): the re-price then stays with the
+    series it re-prices, never under an id that run was not written under."""
+    if days:
+        row = db.execute("SELECT engine FROM fwd_days WHERE pid=? AND day=? ORDER BY at DESC, engine DESC LIMIT 1",
+                         (int(pid), str(days[-1]))).fetchone()
+        if row is not None and row[0] is not None:
+            return int(row[0])
+    return forward_db.engine_now(db)
+
+
 def on_run(db: sqlite3.Connection, run: ShadowRun, *, now: float, settings: Mapping[str, Any] | None) -> int:
     """After a program's write: 0 at once when `fill_minutes` is false; else the `fwd_ll` rows of the run's days that
-    have none (D10; a `no_minute` event once a (pid, day)); how many were written."""
+    have none under the run's engine id (D10; `_engine_of`; a `no_minute` event once a (pid, day)); how many were
+    written."""
     if not _on(_cfg(settings), "fill_minutes"):
-        return 0
-    engine = forward_db.engine_now(db)
-    if engine is None:
         return 0
     pid = int(run.program.pid)
     days = _days(run.series.days)
+    engine = _engine_of(db, pid, days)
+    if engine is None:
+        return 0
     have = {str(r[0]) for r in db.execute("SELECT day FROM fwd_ll WHERE pid=? AND engine=?", (pid, int(engine)))}
     todo = {d for d in days if d not in have}
     if not todo:
