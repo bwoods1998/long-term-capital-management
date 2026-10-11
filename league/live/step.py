@@ -96,7 +96,10 @@ sold after two consecutive readings with an alarm (`_close_shares`), both at mar
 holds only the part an assignment or an exercise explains is ever sold; an account below what the equity
 book owns is reconciliation's mismatch, never an order. The SHARE-EVENT LEDGER (live state kv `shares`, {symbol:
 signed Decimal string}) books 100 shares a contract for each assignment and exercise (`_activities`), moves toward zero
-as the House's own share orders (`lv-shares-`) fill, and is what reconciliation expects beside the equity lots.
+as the House's own share orders (`lv-shares-`) fill, and is what reconciliation expects beside the equity lots. The
+options book's reconciliation does not judge a symbol the equity book has in flux (a working equity order, or one that
+changed in the last two minutes: the equity book books a minute's fills after the options path read the account); the
+equity book's own reconciliation does, once it settles.
 
 Real opens need every one of: `config.json` `real_money`; the grant `options-swarm-20260928` active on the money digest
 in force (`House.grant`); the gateway's kill switch off; no stop tripped (`money.Stops`); reconciliation clean (the
@@ -1946,7 +1949,7 @@ class OptionsLive:
             self._shares_filled_safe()
             before = book.frozen
             book.reconcile(positions, foreign, day=day.day, after_close=False, shares=self.state.get("shares", {}) or {},
-                           equity_shares=self._owned_shares())
+                           equity_shares=self._owned_shares(), equity_flux=self._equity_flux(now))
             if book.frozen and not before:
                 self.alert("error", f"live: real entries frozen: {book.frozen}")
                 self._tell_owner("reconciliation", book.frozen)
@@ -2176,6 +2179,15 @@ class OptionsLive:
             return equity_hook.expected_shares(self.equity)
         except Exception:  # noqa: BLE001
             return None
+
+    def _equity_flux(self, now: float) -> set[str]:
+        """The symbols this reading's reconciliation leaves to the equity book's own (`equity_hook.flux`: a working
+        equity order, or one that changed in the last two minutes: the equity book's minute, which books its fills,
+        runs after this one's reads); none when the equity book cannot be read (every symbol is judged: fail closed)."""
+        try:
+            return equity_hook.flux(self.equity, self.state.rows, now)
+        except Exception:  # noqa: BLE001
+            return set()
 
     def _book_shares(self, kind: str, symbol: str, contracts: int) -> None:
         """THE SHARE-EVENT LEDGER (A8.2): an assignment (OPASN) or an exercise (OPEXC) of `contracts` contracts books
@@ -3178,7 +3190,7 @@ class OptionsLive:
                 self._shares_filled_safe()
                 self.book.reconcile(positions, foreign, day=today, after_close=True,
                                     shares=self.state.get("shares", {}) or {}, include_expired=True,
-                                    equity_shares=self._owned_shares())
+                                    equity_shares=self._owned_shares(), equity_flux=self._equity_flux(now))
                 self._export_real()
 
     def _reconcile_expiry(self, orders: list[dict], positions: list[dict], today: dt.date, out: dict) -> None:

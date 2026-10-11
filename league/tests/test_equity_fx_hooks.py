@@ -49,6 +49,45 @@ if HAVE:
     TUESDAY = MONDAY + dt.timedelta(days=1)
     WORKING = ("new", "accepted", "partially_filled")
 
+    class LateVenue(Venue):
+        """The real account as the venue answers it: a POST's answer carries NO fill (the fill lands after it). A stock
+        limit order (the equity book's) rests until the test fills it (`fill_stock`); a market order fills at the next
+        read of the account."""
+
+        posting = False
+
+        def submit(self, body, *, exit):
+            self.posting = True
+            try:
+                return super().submit(body, exit=exit)
+            finally:
+                self.posting = False
+
+        def _try_fill(self, order):
+            if self.posting:
+                return
+            if order["legs"] or occ_parts(order["symbol"]) or order["type"] != "limit":
+                return super()._try_fill(order)
+
+        def fill_stock(self, symbol, share=D(1)):
+            """`share` of what is left of the working stock orders on `symbol` fills at the quote."""
+            quote = self.market.stocks([symbol])[symbol]["latestQuote"]
+            for o in self.book:
+                if o["symbol"] != symbol or o["legs"] or o["status"] not in WORKING:
+                    continue
+                buying = o["side"] == "buy"
+                price, done = D(str(quote["ap"] if buying else quote["bp"])), D(o["filled_qty"])
+                add = ((D(o["qty"]) - done) * D(share)).quantize(D("0.000000001"))
+                if add <= 0:
+                    continue
+                old = D(str(o.get("filled_avg_price") or 0))
+                o["filled_avg_price"] = str((old * done + price * add) / (done + add))
+                o["filled_qty"] = str(done + add)
+                o["status"] = "filled" if done + add >= D(o["qty"]) else "partially_filled"
+                if o["status"] == "filled":
+                    o["filled_at"] = iso(self.clock())
+                self.held[symbol] = self.held.get(symbol, D(0)) + (add if buying else -add)
+
 
 def stock_proof_passed(state) -> None:
     """Both stages of the stock paper proof taken as passed (league/tests/test_equity_paper.py proves them)."""
@@ -336,6 +375,168 @@ class TheLongExcess(LiveCase):
         self.assertEqual([(b["side"], b["qty"]) for b in self.stock("QQQ")], [("sell", "3")])
         self.assertEqual(self.stock(), [])
         self.assertIsNone(live.state.get("unexplained_shares") or None)
+
+
+# --------------------------------------------------------------------------------- the race (ops-2, amend-3, money-2)
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheRace(LiveCase):
+    """The options path reads the account, reconciles, and only then the equity book's minute books its fills."""
+
+    def setUp(self):
+        super().setUp()
+        rows = self.venue.activity_rows
+        self.venue = LateVenue(self.market, equity="5481.65", last_equity="481.65")
+        self.venue.activity_rows = rows
+
+    def house(self):
+        live = self.make([])
+        stock_proof_passed(live.state)
+        live.state.put("eq_decide", {"day": FRIDAY.isoformat(), "status": "done"})
+        self.assertIsInstance(live.equity, L.EquityBook)
+        return live
+
+    def frozen_alerts(self):
+        return [text for _, text in self.alerts if "real entries frozen" in text or "frozen by reconciliation" in text]
+
+    def minute(self, hh, mm):
+        """ONE pass at hh:mm, as the loop makes it: the options path, then the equity book's minute (`run_to` passes
+        the minute it starts in a second time, and that second pass would book the fill before the next reading)."""
+        self.clock.set(at(MONDAY, hh, mm))
+        return self.live.minute()
+
+    def test_a_sale_filled_over_two_minutes_never_freezes_the_options_book(self):
+        live = self.house()
+        book = live.equity
+        inst = seat(book)
+        lot = hold(book, self.venue, inst, "SPY", "0.5", "590")
+        plan_sale(book, inst, lot)
+        self.minute(9, 31)
+        [sale] = [b for b in self.venue.sent if b.get("symbol") == "SPY"]
+        self.assertEqual((sale["side"], sale["type"], sale["qty"]), ("sell", "limit", "0.5"))
+        self.assertTrue(sale["client_order_id"].startswith("lq-"))
+        self.assertEqual(self.venue.held["SPY"], D("0.5"), "the POST's answer carried no fill")
+        self.venue.fill_stock("SPY", D("0.6"))                         # 0.3 fills between the minutes
+        self.minute(9, 32)
+        self.assertEqual(live.book.mismatch, [], "the equity order is working: the equity book judges the symbol")
+        self.assertEqual(book._lot(lot.lid).qty, D("0.2"), "booked by the equity book's minute, after the options reads")
+        self.venue.fill_stock("SPY")                                   # the rest, a minute later
+        out = self.minute(9, 33)
+        self.assertEqual(live.book.mismatch, [])
+        self.assertEqual(live.book.frozen, "", "two fills in consecutive minutes froze real entries in both lanes")
+        self.assertIsNone(out["blocked"])
+        self.assertEqual(book._lot(lot.lid).status, "closed")
+        for mm in (34, 35, 36):
+            self.minute(9, mm)
+        self.assertEqual((live.book.frozen, book.frozen), ("", ""))
+        self.assertEqual(self.frozen_alerts(), [])
+        self.assertEqual(self.notices, [], "the owner was paged for a reconciliation stop that was a race")
+
+    def test_an_exit_and_then_an_entry_at_the_open_never_freeze_it_either(self):
+        """The review's own morning: an overnight seed sells at the open while another program buys (entries wait for
+        the exits), each filled after its POST and booked a minute later."""
+        live = self.house()
+        book = live.equity
+        seller, buyer = seat(book), seat(book, "seed-reversal-index", symbols=("IWM",))
+        lot = hold(book, self.venue, seller, "SPY", "0.5", "590")
+        plan_sale(book, seller, lot)
+        now = book.clock()
+        book._save_intent(L.Intent(book._next("eq_intents", "iid"), buyer.id, buyer.family, buyer.version,
+                                   FRIDAY.isoformat(), MONDAY.isoformat(), "open", "buy", "planned", symbol="IWM",
+                                   share=D("0.5"), created_at=now, updated_at=now))
+        self.minute(9, 31)
+        self.venue.fill_stock("SPY")
+        self.minute(9, 32)                                             # the sale is booked, the entry sent
+        [entry] = [b for b in self.venue.sent if b.get("symbol") == "IWM"]
+        self.assertEqual((entry["side"], entry["type"]), ("buy", "limit"))
+        self.venue.fill_stock("IWM")
+        out = self.minute(9, 33)
+        self.assertGreater(self.venue.held["IWM"], 0)
+        self.assertEqual((live.book.mismatch, live.book.frozen), ([], ""))
+        self.assertIsNone(out["blocked"])
+        self.assertEqual(H.expected_shares(book), {"IWM": self.venue.held["IWM"]}, "booked by the equity book's minute")
+        self.assertEqual(self.frozen_alerts() + self.notices, [])
+
+    def test_a_settled_symbol_is_judged_again_and_a_real_mismatch_still_freezes(self):
+        live = self.house()
+        book = live.equity
+        inst = seat(book)
+        lot = hold(book, self.venue, inst, "SPY", "0.5", "590")
+        plan_sale(book, inst, lot)
+        self.minute(9, 31)
+        self.venue.fill_stock("SPY")
+        self.minute(9, 32)
+        self.assertEqual(book._lot(lot.lid).status, "closed")
+        self.assertEqual(H.flux(book, live.state.rows, self.clock()), {"SPY"}, "it ended this minute")
+        self.venue.held["SPY"] = D("0.1")                              # shares nothing explains, while in flux
+        self.minute(9, 33)
+        self.assertEqual(live.book.mismatch, [], "not judged within two minutes of the order's end")
+        for mm in (34, 35, 36):
+            self.minute(9, mm)
+        self.assertEqual(H.flux(book, live.state.rows, self.clock()), set())
+        self.assertIn("SPY: 0.1 shares held, 0 expected", live.book.frozen, "settled: judged, and frozen on two readings")
+        self.assertIn("equity lots 0, assignment shares 0", live.book.frozen)
+
+    def test_reconcile_skips_only_the_symbols_in_flux(self):
+        dir_ = tempfile.TemporaryDirectory()
+        self.addCleanup(dir_.cleanup)
+        clock = Clock(at(MONDAY, 10, 0))
+        state = LiveState(Path(dir_.name) / "live.sqlite", clock=clock)
+        self.addCleanup(state.close)
+        venue = Venue(Market(clock))
+        book = RealBook(state, venue, M.Table.from_constitution(), clock=clock)
+
+        def recon(**kw):
+            return book.reconcile(venue.positions(), [], day=MONDAY, after_close=False, **kw)
+
+        venue.held["SPY"], venue.held["QQQ"] = D("0.2"), D("1")
+        owned = {"SPY": D("0.5"), "IWM": D("2")}
+        self.assertEqual(len(recon(equity_shares=owned)), 3, "SPY short of its lots, QQQ unexplained, IWM not held")
+        problems = recon(equity_shares=owned, equity_flux={"spy", "IWM"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("QQQ: 1 shares held, 0 expected", problems[0])
+        self.assertEqual(recon(equity_shares=owned, equity_flux={"SPY", "IWM", "QQQ"}), [])
+
+    def test_flux_is_a_working_order_or_one_that_changed_in_the_last_two_minutes(self):
+        live = self.house()
+        book = live.equity
+        inst = seat(book)
+        now = self.clock()
+
+        def order(eid, symbol, status, updated):
+            row = L.Order(eid, f"lq-{eid}", inst.id, inst.family, "buy", symbol, "etf", "open", D("1"), D("100"), 10,
+                          status, now - 600, MONDAY.isoformat()).row()
+            live.state.upsert("eq_orders", {**row, "updated_at": updated}, "eid")
+
+        order(1, "SPY", "working", now - 900)                         # resting since long ago: still in flux
+        order(2, "QQQ", "filled", now - 60)                           # ended a minute ago
+        order(3, "IWM", "canceled", now - L.FLUX_S - 1)               # settled
+        self.assertEqual(H.flux(book, live.state.rows, now), {"SPY", "QQQ"})
+        self.assertEqual(live._equity_flux(now), {"SPY", "QQQ"})
+        self.assertEqual(H.flux(None, live.state.rows, now), set(), "no book: nothing in flux")
+        live.equity = H.Unreadable("the equity book cannot be read")
+        with self.assertRaises(RuntimeError):
+            H.flux(live.equity, live.state.rows, now)
+        self.assertEqual(live._equity_flux(now), set(), "unreadable: every symbol is judged (fail closed)")
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheOptionsExitsStand(LiveCase):
+    """Nothing here delays an options exit: a Probe family's vertical still opens and closes with the equity book
+    ticking, in flux, beside it."""
+
+    def test_a_vertical_round_trip_beside_a_working_equity_order(self):
+        live = self.make([family("vert", VERTICAL, band="probe")])
+        stock_proof_passed(live.state)
+        live.state.put("eq_decide", {"day": FRIDAY.isoformat(), "status": "done"})
+        book = live.equity
+        inst = seat(book)
+        lot = hold(book, self.venue, inst, "SPY", "0.5", "590")
+        plan_sale(book, inst, lot)
+        self.run_to(9, 31)
+        self.assertEqual(len(live.book.positions), 1, "the options open went")
+        self.run_to(9, 40)
+        self.assertEqual([p.status for p in live.book.positions.values()], [], "and its close, three minutes on")
+        self.assertEqual(live.book.frozen, "")
 
 
 if __name__ == "__main__":

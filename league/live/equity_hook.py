@@ -14,8 +14,9 @@ import is made inside a function: league/equity/live.py imports `league.live.rea
 Callers:
 - league/live/step.py: `build_book` (OptionsLive.__init__: `self.equity`), `expected_shares` (`_close_shares`, the
   assignment latch, both reconciliations), `frozen` (`real_block`), `busy` (one working order a symbol across both
-  books), `shares_taken` (`_lots_taken`: lots an assignment swallowed, closed once the House's cover has filled),
-  `health` (`OptionsLive.health`);
+  books), `flux` (the symbols the options book's reconciliation leaves to the equity book's own that minute),
+  `shares_taken` (`_lots_taken`: lots an assignment swallowed, closed once the House's cover has filled), `health`
+  (`OptionsLive.health`);
 - league/live/real.py: `is_equity_client_id` (`ingest`), `probe_figures` (`probe_tally`, `probe_realized`,
   `probe_figures`), `working_buys_worst` (the options reservation's available cash, A8.1), `orders_today`
   (`count_refusal`, `path_refusal`: the one day order count, A8.3), `invested` and `open_risk` (`RealBook.exposure`);
@@ -46,8 +47,9 @@ class Unreadable:
     """The House's equity book when it could not be built while the live state shows it holds or works shares (a bad
     release, a table that cannot be parsed): every reading fails closed. `frozen` names why (real_block refuses every
     real open, both lanes), `expected_shares` raises (reconciliation then sees every share as a mismatch, and
-    `_close_shares` sells no long share, since what is owned cannot be told), `busy` and `shares_taken` raise, `tick`
-    does nothing. A restart with a working book is the way out; nothing here ever sends an order."""
+    `_close_shares` sells no long share, since what is owned cannot be told), `busy` and `shares_taken` raise (`flux`
+    with them: no symbol is left unjudged), `tick` does nothing. A restart with a working book is the way out; nothing
+    here ever sends an order."""
 
     def __init__(self, why: str):
         self.why = str(why)[:300]
@@ -172,6 +174,26 @@ def busy(book: Any | None) -> set[str]:
     return {str(symbol).upper() for symbol in book.busy()}
 
 
+def flux(book: Any | None, rows: Callable[..., list], now: float) -> set[str]:
+    """Symbols whose shares are IN FLUX in the equity book (set() with no book): one with a working equity order
+    (`busy`), or one whose equity order changed in the last `league.equity.live.FLUX_S` seconds (it ended, or a fill
+    of it was booked). The account's reading of such a symbol and the book's rows race each other (the options path
+    reads the positions before the equity book's minute books that minute's fills, and the venue's positions can
+    trail an order's last fill), so the options book's reconciliation does not judge it that minute: the equity
+    book's own reconciliation, which skips the same set (`EquityBook.reconcile`), judges it once it settles. `rows`
+    are the live state's (`rows(sql, params)` returns dicts). Raises when the book cannot be read (the caller then
+    judges every symbol)."""
+    if book is None:
+        return set()
+    out = busy(book)
+    if _has(rows, "eq_orders"):
+        from ..equity import live as B
+
+        out |= {str(r["symbol"]).upper() for r in rows("SELECT DISTINCT symbol FROM eq_orders WHERE updated_at>=?",
+                                                       (float(now) - B.FLUX_S,))}
+    return out
+
+
 def shares_taken(book: Any | None, symbol: str, qty: Decimal, px: Decimal | None, *, why: str) -> Decimal:
     """`EquityBook.shares_taken`: `qty` shares of `symbol` the book's lots held left the account in an option
     assignment or exercise and the House's cover of the short has filled at `px` (None: unreadable); the lots are
@@ -260,5 +282,5 @@ def band_for(row: Mapping[str, Any]) -> tuple[str, str]:
 
 
 __all__ = ["CLIENT_PREFIX", "LANES", "SHARE_TOLERANCE", "UNREADABLE", "Unreadable", "build_book", "is_equity_client_id",
-           "is_equity_row", "expected_shares", "frozen", "busy", "shares_taken", "health", "probe_figures",
+           "is_equity_row", "expected_shares", "frozen", "busy", "flux", "shares_taken", "health", "probe_figures",
            "working_buys_worst", "orders_today", "invested", "open_risk", "band_for"]
