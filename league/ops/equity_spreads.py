@@ -481,6 +481,10 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
     except Exception as exc:  # noqa: BLE001 - nothing asked, nothing written
         return {"status": "failed", "ok": False, "error": f"the universe cannot be read: {type(exc).__name__}: "
                                                           f"{str(exc)[:200]}"}
+    try:
+        gateway = ctx.gateway if owed["items"] else None
+    except Exception as exc:  # noqa: BLE001 - no client (no token, no gateway url): nothing asked, nothing written
+        return {"status": "failed", "ok": False, "error": f"no gateway: {type(exc).__name__}: {str(exc)[:200]}"}
     state["sampled"] = {str(year): [day.isoformat() for day in picked] for year, picked in sorted(days.items())}
     state["early_names"] = owed["early_names"]
     state["checked_at"] = S.iso(began)
@@ -495,7 +499,7 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
             break
         sleep(PAUSE_S)
         key = day.isoformat()
-        value, tries, failed = _ask(ctx.gateway, symbol, day,
+        value, tries, failed = _ask(gateway, symbol, day,
                                     EARLY_ET if kind == "early" else TIMES_ET[POINTS.index(kind)], sleep=sleep)
         counts["calls"] += tries
         if failed is not None and getattr(failed, "status", None) not in REFUSED_STATUS:

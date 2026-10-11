@@ -398,6 +398,18 @@ class TheJob(unittest.TestCase):
         self.assertEqual(self.gateway.calls, [])
         self.assertFalse((self.root / SP.FILE).exists())
 
+    def test_with_no_gateway_client_it_is_a_failed_receipt_and_nothing_is_written(self):
+        class NoClient(Context):
+            @property
+            def gateway(self):
+                raise GatewayError("GATEWAY_TOKEN is not set")
+
+        ctx = NoClient("equity_spreads", root=self.state, due_at=NOW, clock=lambda: NOW, config={}, settings_value={})
+        out = self.go(ctx)
+        self.assertEqual((out["status"], out["ok"]), ("failed", False))
+        self.assertIn("no gateway", out["error"])
+        self.assertFalse((self.root / SP.FILE).exists())
+
     def test_the_budgets_sit_inside_the_wall(self):
         from league.ops import equity_data
 
