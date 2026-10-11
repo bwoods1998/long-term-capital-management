@@ -3654,6 +3654,41 @@ class TheDocumentsSayTheRuling(unittest.TestCase):
         self.assertIn("the equity lanes are idle or starved", (REPO / "gateway" / "lib" / "email.mjs").read_text())
         self.assertIn('still say "idle or starved"', ops)
 
+    def test_the_documents_say_the_third_checks_ruling_and_the_stand_that_holds(self):
+        """What `elane_idle` is now, in the three documents and the module: broken by its answers (work lost to a
+        fault, the constants named), which cause it is and why, and the BROKEN stand that holds."""
+        flat = lambda path: " ".join((REPO / path).read_text().split())  # noqa: E731
+        ops, notes, log = flat("docs/operations.md"), flat("league/swarm/ELANE_E2.md"), flat("CHANGELOG.md")
+        module = " ".join(EH.__doc__.split())
+        for name, text in (("operations", ops), ("notes", notes), ("changelog", log), ("module", module)):
+            self.assertIn("LOST TO A FAULT", text, name)
+            self.assertIn("HOLDS", text, name)
+            self.assertIn("elane.broken", text, name)
+            self.assertIn("by one rule", text, name)  # why it is `elane_idle`'s BROKEN and not `elane_refused`'s
+            self.assertIn("elane.e2.routes", text, name)
+            self.assertIn("train_steps", text, name)  # where what a setting costs is read
+        for name, text in (("operations", ops), ("notes", notes), ("changelog", log)):
+            self.assertIn(f'"{NO_PROGRAM}"', text, name)  # the round's own words, as `EquityResearcher.write` writes them
+        # The constants the changelog and the operations page name are the module's.
+        self.assertIn(f"`ANSWERS_HOURS` {EH.ANSWERS_HOURS:g}, `ANSWERS_MIN` {EH.ANSWERS_MIN}, `ANSWERS_SHARE` a half, "
+                      f"`ANSWERS_EARLY` {EH.ANSWERS_EARLY}", log)
+        self.assertEqual(EH.ANSWERS_SHARE, 0.5)
+        self.assertIn(f"in the last {EH.ANSWERS_HOURS:g} h ({EH.ANSWERS_MIN} at least;", ops)
+        self.assertIn(f"once {EH.ANSWERS_EARLY} are lost", ops)
+        self.assertIn(f"for {EH.IDLE_HOURS:g} h WHILE THE LANES KEPT ASKING", ops)
+        self.assertEqual(EH.QUIET_SPAN_HOURS, 1.5)
+        self.assertIn("they span an hour and a half", ops)
+        # The step's two settings exist, and the operations page lists them among those its steps name.
+        self.assertIn("train_max_output_tokens", elane_train.DEFAULTS)
+        self.assertIn("routes", elane_yield.DEFAULTS)
+        self.assertIn("`elane.e2.train_max_output_tokens`, `elane.e2.routes`.", ops)
+        # Nothing says any more that routes that do not answer simply heal, or that lost answers are `elane_refused`'s.
+        for name, text in (("operations", ops), ("notes", notes), ("module", module)):
+            self.assertNotIn("model routes that do not answer heal by themselves", text, name)
+        self.assertEqual(EH.KEPT[-1], "broken")
+        self.assertEqual(EH.BROKEN_KINDS[-1], "answers")
+        self.assertEqual(set(EH.BROKEN_WORDS), set(EH.BROKEN_KINDS))
+
 
 # ---------------------------------------------------------------------------------------------- the architect's universe
 class TheArchitectIsNotLedOutsideTheUniverse(unittest.TestCase):
