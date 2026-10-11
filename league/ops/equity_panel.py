@@ -92,7 +92,8 @@ LOOKBACK_DAYS = 400
 KEEP_ENDED_DAYS = 120
 #: D20: a name's own half-spread needs this many samples at a fill point.
 MIN_SAMPLES = 8
-#: The jumps are read this many columns at a time (a whole panel's arrays are never doubled in memory).
+#: The jumps are read, and an old store copied, this many columns at a time (a whole panel's arrays are never
+#: doubled in memory).
 JUMP_COLUMNS = 64
 #: Second reads a run (two calls each); the rest wait for the next run, their bars standing meanwhile.
 SECOND_READS_RUN = 60
@@ -440,11 +441,11 @@ def full(root: str | Path, gateway: Any, last: dt.date, *, assets: Mapping[str, 
     except ValueError:
         before = None
     if before is not None:
-        rows = [i for i, d in enumerate(before.days) if d in grid.row]
-        cols = [k for k, a in enumerate(before.aids) if a in grid.col]
-        if rows and cols:
-            mine = grid.raw[np.ix_([grid.row[before.days[i]] for i in rows], [grid.col[before.aids[k]] for k in cols])]
-            revisions = _revised(before.raw[np.ix_(rows, cols)], mine)
+        rows = [i for i, d in enumerate(before.days) if d.isoformat() in grid.row]
+        mine = [grid.row[before.days[i].isoformat()] for i in rows]
+        for k, aid in enumerate(before.aids):   # a column at a time: the two stores are never both copied
+            if rows and aid in grid.col:
+                revisions += _revised(np.asarray(before.raw[rows, k]), grid.raw[mine, grid.col[aid]])
     return {"days": days, "early": [bool(e) for _, e in calendar], "aids": aids, "raw": grid.raw, "adj": grid.adj,
             "vintage": {aid: last for aid in aids}, "revisions": revisions, "calls": count["calls"],
             "mode": "full", "refetched": len(aids), "appended": 0, "misaligned": odd, "dropped": grid.dropped}
@@ -492,8 +493,10 @@ def incremental(root: str | Path, gateway: Any, last: dt.date, *, assets: Mappin
     grid = Grid(days, aids)
     old_col = {aid: k for k, aid in enumerate(before.aids)}
     kept = [aid for aid in aids if aid in old_col]
-    grid.raw[:n_old, [grid.col[a] for a in kept]] = before.raw[:, [old_col[a] for a in kept]]
-    grid.adj[:n_old, [grid.col[a] for a in kept]] = before.adj[:, [old_col[a] for a in kept]]
+    for at in range(0, len(kept), JUMP_COLUMNS):   # a block of columns at a time: the old store is never copied whole
+        block = kept[at:at + JUMP_COLUMNS]
+        grid.raw[:n_old, [grid.col[a] for a in block]] = before.raw[:, [old_col[a] for a in block]]
+        grid.adj[:n_old, [grid.col[a] for a in block]] = before.adj[:, [old_col[a] for a in block]]
     start = max(0, min(len(days) - INCREMENTAL_SESSIONS, n_old - (INCREMENTAL_SESSIONS - 1)))
     spans_of = [next((k for k, (first, end) in enumerate(U.spans()) if first <= d and (end is None or d <= end)), None)
                 for d in (days[start], days[-1])]
