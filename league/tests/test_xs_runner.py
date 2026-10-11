@@ -464,6 +464,10 @@ class TheIsolatedRuns(RunnerCase):
                                 aids=[101, 102])
         self.assertEqual((twin.slice.run_key, FakeStore.asked[-1]["aids"]), ("fam@3:r", [101, 102]))
         self.assertNotEqual(twin.slice.bars.dither_key, run.slice.bars.dither_key)
+        self.assertNotIn("placebo", run.result)
+        ranked = self.iso.forward(CODE, None, name="p", gate=self.gate, start=days[10], placebos=12, seed=4)
+        self.assertEqual((ranked.result["placebo"]["n"], ranked.result["placebo"]["seed"],
+                          list(ranked.result["placebo"]["spans"])), (12, 4, ["run"]))
 
     def test_a_run_goes_through_the_decider_as_one_run_of_the_panel_kind(self):
         seen = []

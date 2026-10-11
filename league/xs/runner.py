@@ -22,7 +22,7 @@ IN THE PARENT (league/swarm/elane_xs.py's `runner`, over its own niced decider):
     iso.validation(code, params, name=..., k=1.0)
     iso.look(code, params, name=..., gate=<EquityGateCapability>, k=1.0, placebos=<the receipt's>, seed=<look_seed>)
     iso.segments(code, params, name=...) -> [Run, Run]        # config.TRAIN_SEGMENTS whole: the floor's pools
-    iso.forward(code, params, name=..., gate=..., start=..., run_key=None, aids=None, k=1.0)    # package J's
+    iso.forward(code, params, name=..., gate=..., start=..., run_key=None, aids=None, k=1.0, placebos=0, seed=None)
     state_stream(run) -> each called decision's Inputs        # the restart check's, for a run made with calls=True
 
 A run the child took whole and never answered is `RunLost` (every other failure a plain `RunFailed`), exactly as E1's
@@ -221,10 +221,12 @@ class Isolated:
         return out
 
     def forward(self, code: str, params: Mapping[str, Any] | None, *, name: str, gate: Any, start: dt.date,
-                run_key: str | None = None, aids: Sequence[int] | None = None, k: float = 1.0) -> Run:
+                run_key: str | None = None, aids: Sequence[int] | None = None, k: float = 1.0,
+                placebos: int = 0, seed: int | None = None) -> Run:
         """Package J's: the forward days from `start`, starting flat. `run_key`: the instance id for a live
         instance's twin (so the twin reads the ids, the sector codes and the dither the live ctx read), with `aids`
-        its columns."""
+        its columns. `placebos`, `seed`: the forward route's matched-placebo leg on those sessions (the
+        pre-registration's section 11), drawn only when asked."""
         if not isinstance(gate, EquityGateCapability):
             raise StoreRefused("the forward days need the forward record's EquityGateCapability")
         start = as_date(start)
@@ -233,7 +235,7 @@ class Isolated:
         first = self._first([d for d in store.sessions("forward") if d >= start], f"the forward days from {start}")
         key = gym_key(run_sha, "forward", first) if run_key is None else str(run_key)
         piece = store.bars("forward", history=needs.history, run_key=key, start=first, aids=aids)
-        return self._run(code, params, name, piece, k)
+        return self._run(code, params, name, piece, k, placebos=int(placebos), seed=seed)
 
 
 def state_stream(run: Run) -> Iterator[Any]:
