@@ -1281,16 +1281,10 @@ def _lost_check(f: Mapping[str, Any], now: float, since: float | None, routes: S
             "quiet": quiet if counted else 0.0}
 
 
-def _routes_said(named: Any, routes: Sequence[str] | None = None) -> str:
-    """The routes of lost program questions in words ("sail:pro_asap 9 of 12": lost, of those it was asked), from
-    `_lost_check`'s `routes` or what the job kept of them (`routes`: then each name is held to the settings' own
-    again, `_route`); "" for none."""
-    rows = []
-    for row in named if isinstance(named, (list, tuple)) else []:
-        if isinstance(row, (list, tuple)) and len(row) == 3 and _count(row[1]) and _count(row[2]) >= _count(row[1]):
-            name = row[0] if routes is None else _route(row[0], routes)
-            rows.append(f"{name} {_count(row[1])} of {_count(row[2])}")
-    return ", ".join(rows[:3])
+def _routes_said(named: Sequence[tuple[str, int, int]]) -> str:
+    """The routes of lost program questions in words ("sail:pro_asap 9 of 12": lost, of those it was asked), the most
+    lost first (`_lost_check`'s `routes`: each name already one of the settings' own, `_route`); "" for none."""
+    return ", ".join(f"{name} {lost} of {asked}" for name, lost, asked in named)
 
 
 def _lever(kind: str, held: Mapping[str, Any] | None, c: Mapping[str, Any], *,

@@ -154,7 +154,7 @@ owner when the lanes next go wrong.
   to a setting. In the check's break every Train answer was paid for and held no program: under any hold of E2's
   the four causes stood at none of 61 runs in thirty hours, `elane_idle` said "STARVED BY A SETTING, not broken ...
   programs were refused before a run (see elane_refused)" and `elane_refused` said none was; with no hold it stood
-  as told to nobody, with no step. Now `elane_idle` stands BROKEN BY ITS ANSWERS when more than half of the lane's
+  as information, with no owner step. Now `elane_idle` stands BROKEN BY ITS ANSWERS when more than half of the lane's
   program questions over the window are lost and there are enough of them (`ANSWERS_HOURS` 6, `ANSWERS_MIN` 8,
   `ANSWERS_SHARE` a half, `ANSWERS_EARLY` 5: the window and its reasons are `elane_refused`'s), whatever E2's lines
   hold and whether or not the lane still scores a version now and then, with an owner step that names the routes

@@ -3348,7 +3348,7 @@ class TheReplays(unittest.TestCase):
         the answer holds no program. With E2 at its pace (the budget's floor, the shipped share, a two-cent write) all
         four equity causes stood at 0 of 61 runs in thirty hours, nothing was mailed, `elane_idle` said "STARVED BY A
         SETTING, not broken ... programs were refused before a run (see elane_refused)" and `elane_refused` said none
-        was. With no hold it stood as told to nobody, with no step. THE RULING: work lost to a fault. It stands BROKEN
+        was. With no hold it stood as information, with no owner step. THE RULING: work lost to a fault. It stands BROKEN
         with the owner's step naming the route, whatever E2's lines hold."""
         # WITH A HOLD IN FORCE: one write an hour, two steps in three skipped at E2's pace.
         house = self.paid_for_nothing({"min_per_pass": 3}, 0.02)
