@@ -38,23 +38,24 @@ THE FILE: {"version": "contam-1", "routes": {route: {"at", "model", "usd", "prob
 24 route results]}.
 
 THE JOB (`run`): skipped when the mode is "off", no route is due (`due`), or E2's day leaves it no dollar
-(`elane_yield.room(store, settings, now)`: THE BOUND below). One route a run: `router = models.build_router(ctx.root, store, settings, config=ctx.config)`; routes =
-`elane_yield.routes(settings, router)`. FIRST it writes the route's `attempted_at` and `idle` + 1 (`idle`: its
-attempts in a row that added no cell; a cell written sets it to 0), so a route that cannot move goes to the back of
-the line and never blocks the others. `probe_n` = 1 + the route's `probes` (its completed probes, a counter never
-truncated). Cell by cell in a fixed order, then the recall: each batch `elane_yield.ask_on(router, route, role=ROLE,
-system=SYSTEM, user=..., key=KEY, max_output=2000, effort="low")` with `KEY =
-f"{KEY_PREFIX}:{route.key}:{probe_n}:{h}"`, h = the first 12 hex of sha256(the batch's user text); booked `elane_yield.book(store, f"probe:{route.key}", usd=...,
-known=..., purpose="probe", answered=..., now=now)` (rows of their own, inside E2's day line; that function counts a
-purpose it does not name under `usd_research`). THE KEY: the Provider answers a request key it has seen from its
-store, at $0. So a resumed probe (the same `probe_n`) re-reads its own batches for nothing; a new probe (`probe_n` +
-1) asks afresh and is billed; a batch whose questions changed has another hash and never meets an old answer. A cell
-whose batches are all in is scored and written at once to `routes[route].partial` (aggregates only, with `probe_n`,
-`qset` and the dollars so far); a partial with another `qset` is dropped. The run stops asking once its booked
-dollars reach its bound or `ASK_SECONDS` have passed; the next run of that route goes on from the partial. When every
-cell and the recall are in, the result is published (`at`, `model`, `usd`, `cells`, `recall`), `probes` + 1, `idle` 0,
-`partial` removed, `history` appended. Truths and answers are dropped before every write. A `MissingData` (the store
-being rewritten) ends the run with the cells already scored kept and the billed dollars booked.
+(`elane_yield.room(store, settings, now)`: THE BOUND below). One route a run: `router =
+models.build_router(ctx.root, store, settings, config=ctx.config)`; routes = `elane_yield.routes(settings, router)`.
+FIRST it writes the route's `attempted_at` and `idle` + 1 (`idle`: its attempts in a row that added no cell; a cell
+written sets it to 0), so a route that cannot move goes to the back of the line and never blocks the others.
+`probe_n` = 1 + the route's `probes` (its completed probes, a counter never truncated). Cell by cell in a fixed
+order, then the recall: each batch `elane_yield.ask_on(router, route, role=ROLE, system=SYSTEM, user=..., key=KEY,
+max_output=2000, effort="low")` with `KEY = f"{KEY_PREFIX}:{route.key}:{probe_n}:{h}"`, h = the first 12 hex of
+sha256(the batch's user text); booked `elane_yield.book(store, f"probe:{route.key}", usd=..., known=...,
+purpose="probe", answered=..., now=now)` (rows of their own, inside E2's day line; that function counts a purpose it
+does not name under `usd_research`). THE KEY: the Provider answers a request key it has seen from its store, at $0.
+So a resumed probe (the same `probe_n`) re-reads its own batches for nothing; a new probe (`probe_n` + 1) asks afresh
+and is billed; a batch whose questions changed has another hash and never meets an old answer. A cell whose batches
+are all in is scored and written at once to `routes[route].partial` (aggregates only, with `probe_n`, `qset` and the
+dollars so far); a partial with another `qset` is dropped. The run stops asking once its booked dollars reach its
+bound or `ASK_SECONDS` have passed; the next run of that route goes on from the partial. When every cell and the
+recall are in, the result is published (`at`, `model`, `usd`, `cells`, `recall`), `probes` + 1, `idle` 0, `partial`
+removed, `history` appended. Truths and answers are dropped before every write. A `MissingData` (the store being
+rewritten) ends the run with the cells already scored kept and the billed dollars booked.
 
 AS BUILT, beside the words above.
 - THE BOUND of a run's dollars is min(`usd_run`, E2's room for the UTC day when the run starts), and a run is skipped
