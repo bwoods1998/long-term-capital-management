@@ -1885,7 +1885,7 @@ class RaisedLikeAnyCause(Case):
         self.assertTrue(text.startswith(f"stall: elane_dq: {check['what']} Each disqualified version's author is shown"), text)
         self.assertLessEqual(len(text), EH.WARN_CHARS)
         # A longer sentence (families retired, a class named second, the reading rule's own sentence): the cause's
-        # sentences whole, the step whole, and what the floor does is what is cut.
+        # sentences whole, the step whole, and of what the floor does the sentence that still fits.
         self.setUp()
         a, b = self.bred("alpha-one"), self.bred("beta-two", lane="beta")
         self.record(a, versions={"1": verdict(5.0, "DQ"), "2": verdict(4.0, "DQ"), "3": verdict(3.0, "DQ"),
@@ -1899,8 +1899,9 @@ class RaisedLikeAnyCause(Case):
         check = self.own(out)["elane_dq"]
         text = next(a["text"] for a in ctx.alerts if a["text"].startswith("stall: elane_dq: "))
         self.assertGreater(len(f"stall: elane_dq: {check['what']} {check['doing']} Owner step: {check['owner_step']}."), 900)
-        self.assertTrue(text.startswith(f"stall: elane_dq: {check['what']} Each disqualified version's author is shown"), text)
-        self.assertTrue(text.endswith(f"... Owner step: {check['owner_step']}."), text)
+        self.assertEqual(text, f"stall: elane_dq: {check['what']} Each disqualified version's author is shown the line of "
+                               "its first error; a family whose versions all end so is retired STALLED. Owner step: "
+                               f"{check['owner_step']}.")
         self.assertLessEqual(len(text), EH.WARN_CHARS)
         # The fit by itself: any other cause's warning is returned as it is, and so is one with no owner step or one
         # that fits; of one that does not, the leading sentences that fit, the next one cut, and the step whole.
@@ -1919,6 +1920,11 @@ class RaisedLikeAnyCause(Case):
         self.assertTrue(fitted.endswith(f"B... Owner step: {step}."))
         self.assertNotIn("C", fitted)
         self.assertNotIn("D", fitted)
+        # What the floor does is fitted a sentence at a time: one that fits is whole, one with no room is left out
+        # (never three letters of it).
+        check = {"owner_step": step, "parts": ["A" * 299 + "."], "doing": "D" * 99 + ". " + "E" * 70 + ". " + "F" * 30 + "."}
+        fitted = EH.warning("elane_idle", check, "stall: elane_idle: " + "y" * 1500)
+        self.assertEqual(fitted, "stall: elane_idle: " + "A" * 299 + ". " + "D" * 99 + f". Owner step: {step}.")
         # Every standing equity cause of the first replay's morning: the step whole in its warning (`TheReplays`).
 
     def test_a_notice_whose_fitting_fails_still_goes_out_under_the_causes_own_names(self):

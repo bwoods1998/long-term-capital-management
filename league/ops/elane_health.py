@@ -1763,15 +1763,16 @@ def warning(cause: str, check: Mapping[str, Any], text: str) -> str:
     """THE STALL JOB'S CALL for a House warning: `text`, the warning as the job words every cause's ("stall: <cause>:
     <what> <doing> Owner step: <step>."), returned as it is unless it is an equity cause's with an owner step and
     passes the alert's cut (`WARN_CHARS`). Then THE STEP IS KEPT WHOLE and what comes before it is the check's leading
-    sentences that fit (`_lead`: its own, most telling first, then what the floor does): before, a long sentence cut
-    the warning inside the owner step. Never raises."""
+    sentences that fit (`_lead`: its own, most telling first, then those of what the floor does): before, a long
+    sentence cut the warning inside the owner step. Never raises."""
     try:
         step = check.get("owner_step")
         if cause not in CAUSES or not step or len(text) <= WARN_CHARS:
             return text
         head, tail = f"stall: {cause}: ", f" Owner step: {step}."
         parts = check.get("parts") if isinstance(check.get("parts"), list) else [check.get("what")]
-        return head + _lead([*parts, check.get("doing")], WARN_CHARS - len(head) - len(tail)) + tail
+        doing = re.split(r"(?<=\.)\s+", str(check.get("doing") or ""))
+        return head + _lead([*parts, *doing], WARN_CHARS - len(head) - len(tail)) + tail
     except Exception:  # noqa: BLE001 - the warning as the job worded it
         return text
 
