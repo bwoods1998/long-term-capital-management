@@ -237,6 +237,7 @@ class _Levels:
         self._accum: set[str] = set()
         self._stack: list[str] = []
         self._memo: dict[tuple, frozenset[str]] = {}
+        self._early = 0  # above zero inside a function body's first reading (`_twice`)
 
     # ------------------------------------------------------------------ the module
     def run(self) -> list[tuple[int, str]]:
@@ -264,19 +265,31 @@ class _Levels:
         for stmt in body:
             self._stmt(stmt, env)
 
-    def _twice(self, body: Sequence[ast.stmt], env: dict[str, set[str]], test: ast.AST | None = None) -> None:
-        """A body that may run again (a function's, a loop's) is read TWICE: the first reading only gathers what each
-        name can hold, so a name assigned late reaches the reads above it; refusals are kept on the second reading
-        alone. Kept on the first, a placeholder was read as the number it starts as (`prev = None` ... `px / prev - 1`
-        ... `prev = px`; `lo = 1e9` ... `if x < lo: lo = x`) and a scale-free program was refused for a level it
-        never holds against a constant."""
-        held, self.record = self.record, False
+    def _twice(self, body: Sequence[ast.stmt], env: dict[str, set[str]], test: ast.AST | None = None, *,
+               loop: bool = True) -> None:
+        """A body that may run again is read TWICE, so a name assigned late reaches the reads above it.
+        A LOOP's first reading only gathers what each name can hold; refusals are kept on its second reading alone.
+        Kept on the first, a placeholder was read as the number it starts as (`prev = None` ... `px / prev - 1` ...
+        `prev = px`; `lo = 1e9` ... `if x < lo: lo = x`) and a scale-free program was refused for a level it never
+        holds against a constant.
+        A FUNCTION's body (`loop` False) keeps its refusals on both readings: the first is the order the statements
+        run in, so a constant held against a level is refused though its name is given a level further down
+        (`x = 400.0` ... `px > x` ... `x = px`). What carries from one call to the next is the program's own
+        containers (STATE), so on that first reading a key of one that holds nothing with a unit yet is read as
+        unknown (`_early`, `_keyed`): the price a program will put there is not the None it starts as."""
+        held = self.record
+        if loop:
+            self.record = False
+        else:
+            self._early += 1
         try:
             if test is not None:
                 self._tag(test, env)
             self._block(body, env)
         finally:
             self.record = held
+            if not loop:
+                self._early -= 1
         if test is not None:
             self._tag(test, env)
         self._block(body, env)
@@ -295,7 +308,7 @@ class _Levels:
         for default in [*args.defaults, *[d for d in args.kw_defaults if d is not None]]:
             self._tag(default, env)
         self._ret.append(set())
-        self._twice(node.body, inner)
+        self._twice(node.body, inner, loop=False)
         self.returns[node.name] = _norm(self._ret.pop())
         self.functions[node.name] = (node, env)
         env.setdefault(node.name, set()).add(_U)
@@ -306,7 +319,9 @@ class _Levels:
         a level; a level and a constant handed to `above(x, k)` meet inside it). A helper that calls itself, or a chain
         deeper than `CALL_DEPTH`, reads as the helper did with unknown arguments."""
         fn, home = self.functions[name]
-        memo = (name, tuple(args), tuple(sorted(keywords.items())), self.record)  # a silent reading records nothing
+        # A silent reading records nothing and an early one reads the program's own empty keys as unknown: each kind
+        # of reading remembers its own.
+        memo = (name, tuple(args), tuple(sorted(keywords.items())), self.record, self._early > 0)
         if memo in self._memo:
             return self._memo[memo]
         if name in self._stack or len(self._stack) >= CALL_DEPTH:
@@ -328,7 +343,7 @@ class _Levels:
         self._ret.append(set())
         self._stack.append(name)
         try:
-            self._twice(fn.body, inner)
+            self._twice(fn.body, inner, loop=False)
         finally:
             self._stack.pop()
             out = _norm(self._ret.pop())
@@ -523,6 +538,11 @@ class _Levels:
         key = _key(slice_) if slice_ is not None else None
         own = None if base & (_CONTAINERS | _VIEWS) else self._own(holder, key, env)
         out = self._subscript(base, key, slice_)
+        if self._early and isinstance(holder, ast.Name) and not base and not (own if own is not None else out):
+            # A function's first reading (`_twice`): a container of the program's own that holds nothing with a unit
+            # yet, under this key or at all. What a later statement puts there (a price kept from the last call) is
+            # read on the second reading; here it is unknown, never the None or zero it starts as.
+            return frozenset({_U})
         if own is not None:
             # The program's own key. Under a name the House uses for a lot's field ("entry", "pnl"), or in a value the
             # pass cannot place (a helper's argument), it may be the House's row all the same: both readings hold, so

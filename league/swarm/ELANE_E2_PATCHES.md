@@ -90,7 +90,8 @@ Each has a test that failed before and passes after; the blockers and majors fir
   symbols' prices). Each is refused now, and so are the same level put into a container of the program's own and
   read back (`closes[s] = c[-1]`, `xs.append(px)`, `STATE["px"] = px`), taken out of a `zip`, or read by a named
   lambda. The pass also stopped refusing scale-free programs for a placeholder a loop fills (`prev = None` ...
-  `px / prev - 1`; a running low kept from a sentinel): refusals are kept on the second reading of a body.
+  `px / prev - 1`; a running low kept from a sentinel; the last call's price kept in STATE): a loop's refusals are
+  kept on its second reading, and a key of the program's own that holds nothing yet is unknown, not zero.
 - **Memory in an object of numpy's** (`np.typecodes`) survived the restart check and was shared by every run in the
   decider child. E2's own static MEMORY rule refuses it for every bred program. NOT changed: league/gym/safety.py
   and E1's child (both in an identity); FOR E1's OWNER, with the next identity move: the same rule in safety.py or a

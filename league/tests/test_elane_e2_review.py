@@ -610,6 +610,26 @@ def decide(ctx):
             lo = x
     return [{"buy": "SPY", "share": 0.2}] if c[-1] / lo - 1 < 0.01 else []
 ''',
+            "the last call's price kept in STATE": '''
+STATE = {}
+def decide(ctx):
+    px, out = ctx.prices["SPY"], []
+    if "px" in STATE and px / STATE["px"] - 1 > 0.01:
+        out.append({"buy": "SPY", "share": 0.1})
+    STATE["px"] = px
+    return out
+''',
+            "each symbol's last price kept in a dict of the program's own": '''
+LAST = {}
+def decide(ctx):
+    out = []
+    for s in ctx.symbols:
+        px = ctx.prices[s]
+        if s in LAST and px / LAST[s] - 1 > 0.01:
+            out.append({"buy": s, "share": 0.1})
+        LAST[s] = px
+    return out
+''',
             "a while loop over the same": '''
 def decide(ctx):
     c = ctx.bars["SPY"].close
@@ -624,8 +644,23 @@ def decide(ctx):
         }.items():
             with self.subTest(name):
                 self.assertEqual(level_refusals(HEAD + body), [])
-        # A level held against a constant inside such a loop, or in a helper called from one, is refused as before.
+        # A level held against a constant inside such a loop, or in a helper called from one, is refused as before; so
+        # is a constant whose name is given a level further down the function (the first reading of a function's body
+        # is the order its statements run in), and a constant kept in STATE.
         for name, body in {
+            "a constant threshold whose name is reused for a level": '''
+def decide(ctx):
+    x = 400.0
+    out = [{"buy": "SPY", "share": 0.5}] if ctx.prices["SPY"] > x else []
+    x = ctx.prices["SPY"]
+    return out if x > 0 else []
+''',
+            "a constant kept in STATE and read back against a price": '''
+STATE = {}
+def decide(ctx):
+    STATE["thr"] = 400.0
+    return [{"buy": "SPY", "share": 0.5}] if ctx.prices["SPY"] > STATE["thr"] else []
+''',
             "inside the loop": '''
 def decide(ctx):
     prev, out = None, []

@@ -187,11 +187,13 @@ Stopping, from the lightest:
      lambda with each call's own arguments, numpy's comparison, arithmetic and table functions, `getattr` with a
      literal name, a constant written as arithmetic or text, `zip` taken apart in a loop, and what the program puts
      into a container of its own and reads back in the same function (`closes[s] = c[-1]`, `xs.append(px)`,
-     `STATE["px"] = px`; each string key kept apart, so a counter beside a price stays a counter). A body that may run
-     again (a function's, a loop's) is read twice and refusals are kept on the second reading, so a placeholder a
-     loop fills (`prev = None` ... `px / prev - 1` ... `prev = px`) is not read as the number it starts as. What it
-     cannot follow (a tuple or a dict stored whole, a container read in another function, a level's digits, an
-     unknown call) is the paid review's.
+     `STATE["px"] = px`; each string key kept apart, so a counter beside a price stays a counter; what ctx gives, a
+     lot's row or PARAMS, is never the program's own whatever it writes there). A loop's body is read twice and its
+     refusals are kept on the second reading, so a placeholder a loop fills (`prev = None` ... `px / prev - 1` ...
+     `prev = px`) is not read as the number it starts as; a function's body keeps the refusals of both readings (the
+     first is the order its statements run in), and on that first reading a key of the program's own that holds
+     nothing yet (the price kept from the last call) is unknown. What it cannot follow (a tuple or a dict stored
+     whole, a container read in another function, a level's digits, an unknown call) is the paid review's.
    - RUN-START DEPENDENCE, in the same pass (the integration review's seal-1): every judged run starts flat with the
      same capital (`ctx.budget`, a constant in a replay), so a program that reads its own profit since the run began
      and sizes on it (a profit lock) trades one way from a fresh start and another mid-run, and the share screen's
