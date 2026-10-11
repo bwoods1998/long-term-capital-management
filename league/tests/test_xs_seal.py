@@ -552,6 +552,123 @@ class TheLevelCannotBeSearched(unittest.TestCase):
         self.assertTrue((shrunk < 0.999).any(), "some adjusted prices are below their raw ones: dividends since")
 
 
+def ranks(values) -> np.ndarray:
+    """Ranks with ties averaged (a statistic most slots share, as a count of rare events, must not rank by position)."""
+    values = np.asarray(values, dtype=np.float64)
+    order = np.argsort(values, kind="stable")
+    out = np.empty(len(values))
+    out[order] = np.arange(len(values), dtype=np.float64)
+    for value in np.unique(values):
+        same = values == value
+        out[same] = out[same].mean()
+    return out
+
+
+def spearman(a, b) -> float:
+    """The rank correlation of two per-slot statistics (0.0 when one of them is the same for every slot)."""
+    ra, rb = ranks(a), ranks(b)
+    if float(ra.std()) == 0.0 or float(rb.std()) == 0.0:
+        return 0.0
+    return float(np.corrcoef(ra, rb)[0, 1])
+
+
+class TheLevelCannotBeRanked(unittest.TestCase):
+    """SEAL X1's STATISTICAL adversary (the review's evidence-2). The exact searches above find no level; this one
+    does not look for a level, it RANKS the slots by one. A true bar's range is never under its body, which `iret`
+    states; `range` was once formed from a high and a low each moved by half a cent of their own, so a bar with
+    little wick showed a range UNDER its body by about a cent over the price: the slots where that happened were the
+    cheapest names (and in Train years a low adjusted price marks the names with the largest later splits). On two
+    cent panels, one ctx with a year of history: every per-slot statistic a program can form of `range` against the
+    body is held to the adjusted price by rank; and the same adversary, on `range` as it was formed, finds the cheap
+    names (so this test would see the leak)."""
+
+    PANELS = ((150, 11), (300, 5))
+    #: |rank correlation| a statistic of the fields may show with 1 / price (about 3.5 standard errors at 150 names).
+    BOUND = 0.30
+    TOLERANCE = 2e-6          # the fields are rounded to 6 decimals: a difference under two of them is no difference
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.worlds = []
+        for n_assets, seed in cls.PANELS:
+            root = synth.cent_panel(Path(cls.tmp.name) / f"p{seed}" / "equity-daily", n_assets=n_assets, seed=seed,
+                                    end=D(2019, 12, 31))
+            piece = store.PanelStore(root).train(D(2018, 1, 2), D(2019, 12, 31), history=252,
+                                                 run_key="rank|train|2018-01-02")
+            bars = piece.bars
+            t = bars.n - 2
+            inputs = ctx.inputs_from_panel(bars, t, needs=Needs("sp500", 252, 10, "weekly", 0, 60), cash=0.0,
+                                           equity=0.0, budget=1000.0, params={})
+            derived = ctx.derive(inputs)
+            seen = ctx.build(inputs, derived)
+            slots = np.flatnonzero(derived.elig)
+            adj = np.asarray(inputs.adj)[-253:][:, slots]
+            u = ctx._dithers(inputs.dither_key, np.asarray(seen.ids, dtype=np.int64), np.asarray(inputs.days)[-253:])
+            # `range` AS IT WAS FORMED: the dithered high less the dithered low over the dithered close
+            was = np.round(((adj[:, :, 1] + u[:, :, 1]) - (adj[:, :, 2] + u[:, :, 2])).T
+                           / (adj[:, :, 3] + u[:, :, 3]).T, config.CTX_PLACES)
+            iret = np.asarray(seen.iret)
+            cls.worlds.append({"price": np.asarray(bars.adj)[t, slots, 3], "body": np.abs(1.0 - 1.0 / (1.0 + iret)),
+                               "range": np.asarray(seen.range), "was": was, "ctx": seen})
+        ctx._DITHERS.clear()
+        ctx._REL.clear()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def statistics(self, spread: np.ndarray, body: np.ndarray) -> dict[str, np.ndarray]:
+        """What a program can form, slot by slot, of `range` against the body its `iret` states."""
+        excess = spread - body
+        return {"under the body": np.nansum(excess < -self.TOLERANCE, axis=1).astype(float),
+                "at the body": np.nansum(np.abs(excess) <= self.TOLERANCE, axis=1).astype(float),
+                "within 2 bp of it": np.nansum(excess < 2e-4, axis=1).astype(float),
+                "least": np.nanmin(excess, axis=1), "5th percentile": np.nanquantile(excess, 0.05, axis=1),
+                "median": np.nanmedian(excess, axis=1), "mean": np.nanmean(excess, axis=1),
+                "spread": np.nanstd(excess, axis=1), "most": np.nanmax(excess, axis=1)}
+
+    def cheapest(self, world: dict) -> tuple[set[int], int]:
+        k = max(5, len(world["price"]) // 10)
+        return set(np.argsort(world["price"], kind="stable")[:k].tolist()), k
+
+    def test_range_is_never_under_the_body_and_no_statistic_of_it_ranks_the_price(self):
+        for world in self.worlds:
+            found = self.statistics(world["range"], world["body"])
+            self.assertEqual(int(found["under the body"].sum()), 0, "a true bar's range is never under its body")
+            for name, values in found.items():
+                with self.subTest(names=len(world["price"]), statistic=name):
+                    self.assertLessEqual(abs(spearman(values, 1.0 / world["price"])), self.BOUND)
+            cheap, k = self.cheapest(world)
+            nearest = set(np.argsort(found["least"], kind="stable")[:k].tolist())
+            self.assertLessEqual(len(nearest & cheap), 4 + k * k // len(world["price"]),
+                                 "the slots whose range came nearest their body are not the cheap names")
+
+    def test_the_same_adversary_finds_the_cheap_names_in_range_as_it_was_formed(self):
+        """So the test above would see the leak: with a high and a low each moved by half a cent of their own, the
+        slots whose range fell under their body are the cheapest decile, most of them."""
+        for world in self.worlds:
+            found = self.statistics(world["was"], world["body"])
+            flagged = set(np.flatnonzero(found["under the body"] > 0).tolist())
+            cheap, k = self.cheapest(world)
+            with self.subTest(names=len(world["price"])):
+                self.assertGreaterEqual(len(flagged), 10)
+                self.assertGreater(len(flagged & cheap), len(flagged) // 2,
+                                   f"{len(flagged & cheap)} of {len(flagged)} flagged slots are among the {k} cheapest")
+                self.assertGreater(len(flagged & cheap), 5 * (len(flagged) * k / len(world["price"])), "far above chance")
+
+    def test_the_wicks_dither_is_a_share_of_the_close_never_cents(self):
+        """The excess of `range` over the body is the true wicks over the close plus at most `WICK_DITHER`: its
+        ceiling over the true wicks is the same share of the close for the cheapest name and the dearest."""
+        self.assertEqual(config.WICK_DITHER, 0.005)
+        for world in self.worlds:
+            excess = world["range"] - world["body"]
+            self.assertGreaterEqual(float(np.nanmin(excess)), -self.TOLERANCE)
+            seen = world["ctx"]
+            self.assertEqual(seen.range.shape, seen.iret.shape)
+            self.assertTrue(np.isfinite(seen.range[:, -1]).all())
+
+
 class IdsAreSaltedPerRun(unittest.TestCase):
     """SEAL X2."""
 

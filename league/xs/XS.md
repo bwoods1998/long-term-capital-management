@@ -82,7 +82,7 @@ sessions, oldest first, the last one session t.
 | `ctx.ret` | (n, h + 1): close-to-close total return (the first column is NaN) |
 | `ctx.oret` | (n, h + 1): the open over the previous close, minus 1 (the first column is NaN) |
 | `ctx.iret` | (n, h + 1): the close over the open, minus 1 |
-| `ctx.range` | (n, h + 1): (high - low) / close |
+| `ctx.range` | (n, h + 1): (high - low) / close: the candle's body (what `iret` states) plus its wicks, the wicks moved UP by a small random share of the close (at most half a percent, about a quarter on average: the same for every name, and one number a bar). Never under the body |
 | `ctx.rel_volume` | (n, h + 1): the session's volume over the median of the name's own 63 sessions through it (split-adjusted; NaN with fewer than 32 traded sessions among them, and for sessions more than 190 back) |
 | `ctx.sector` | int8 (n,): the sector code, 0-10. The fund the name's market-residual returns followed most closely over the last 252 sessions; the codes are relabelled in every run |
 | `ctx.beta` | (n,): beta to the market over the last 252 returns, 2 decimals |
@@ -109,8 +109,10 @@ last week may be missing today, and a new one may appear.
 **The numbers carry a little noise, on purpose.** Each price is moved by up to half a cent before any ratio is
 formed, and each volume by up to half a percent, so that no arithmetic on the fields gives a price or a share count
 back. A return of a $10 name carries about 4 basis points of noise (10 at the very most), of a $100 name a tenth of
-that; a session's `range` whose high and low were a cent apart can read slightly negative. One bar reads the same in every ctx of a run. Fills,
-your P&L and every statistic you are judged on use the true prices.
+that. A session's `range` is its body plus its wicks, and the wicks carry their own noise: up to half a percent
+of the close, always upward, the same share for every name (so `range` is never under the body `iret` states, and
+runs about a quarter of a percent above the true range on average). One bar reads the same in every ctx of a run.
+Fills, your P&L and every statistic you are judged on use the true prices.
 
 ## What decide returns
 

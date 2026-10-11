@@ -526,8 +526,9 @@ class Build(Panel):
         self.assertEqual((c.sector.shape, c.beta.shape), ((c.n,), (c.n,)))
 
     def test_the_fields_are_ratios_of_dithered_adjusted_prices(self):
-        """ret = c' / c'(-1) - 1, oret = o' / c'(-1) - 1, iret = c' / o' - 1, range = (h' - l') / c', each price p' =
-        the bar's adjusted price + its own u; 6 decimals."""
+        """ret = c' / c'(-1) - 1, oret = o' / c'(-1) - 1, iret = c' / o' - 1, each price p' = the bar's adjusted price +
+        its own u; range = |c' - o'| / c' + the true wicks over the true close + `WICK_DITHER` x the mean of |u_h| and
+        |u_l| over `DITHER_HALF` (the body as `iret` states it; the wicks' dither a share of the close); 6 decimals."""
         inputs = self.inputs()
         derived = ctx.derive(inputs)
         c = ctx.build(inputs)
@@ -543,8 +544,15 @@ class Build(Panel):
 
             for back in (0, 1, 5, 100, 251):
                 row = len(days) - 1 - back
-                o, h, low, close, prev = price(row, 0), price(row, 1), price(row, 2), price(row, 3), price(row - 1, 3)
-                want = {"ret": close / prev - 1, "oret": o / prev - 1, "iret": close / o - 1, "range": (h - low) / close}
+                o, close, prev = price(row, 0), price(row, 3), price(row - 1, 3)
+                t_o, t_h, t_l, t_c = (float(inputs.adj[row, col, f]) for f in range(4))
+                wick = max(t_h - max(t_o, t_c), 0.0) + max(min(t_o, t_c) - t_l, 0.0)
+                draw = (abs(ctx.dither(key, ident, days[row], b"h")) + abs(ctx.dither(key, ident, days[row], b"l"))) \
+                    / (2.0 * config.DITHER_HALF)
+                self.assertTrue(0.0 <= draw < 1.0)
+                spread = abs(close - o) / close + wick / t_c + config.WICK_DITHER * draw
+                self.assertGreaterEqual(spread, abs(1.0 - 1.0 / (close / o)) - 1e-12, "never under the body")
+                want = {"ret": close / prev - 1, "oret": o / prev - 1, "iret": close / o - 1, "range": spread}
                 for name, value in want.items():
                     field = getattr(got, name) if at is None else getattr(c, name)[at]
                     self.assertEqual(float(field[-1 - back]), round(value, config.CTX_PLACES), (at, back, name))

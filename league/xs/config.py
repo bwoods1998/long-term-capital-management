@@ -134,6 +134,10 @@ VANISH_DEAL = re.compile(r"acqui|merg|private|buyout|takeover|tender", re.I)
 #: D7. Every bar's RAW price is moved by at most half a cent before any ratio is formed (the level is removed, not
 #: hidden), and what a program reads is rounded to `CTX_PLACES` decimals (beta to `BETA_PLACES`: PREREG C1).
 DITHER_HALF = 0.005
+#: THE WICKS' DITHER (the review's evidence-2): `range` is the candle's body plus its two wicks, and the wicks are
+#: moved UP by at most this share of the close, a FIXED RELATIVE scale (never cents: `league.xs.ctx._fields`). It
+#: covers the adjusted cent grid of every name whose adjusted price is at least 0.01 / WICK_DITHER dollars ($2).
+WICK_DITHER = 0.005
 CTX_PLACES = 6
 BETA_PLACES = 2
 #: D8. A slot id is the first `ID_BITS` bits of a salted hash of the aid.
@@ -265,6 +269,6 @@ __all__ = ["SPANS", "TRAIN_SEGMENTS", "TRAIN_YEARS", "HISTORY_YEARS", "RESERVE_Y
            "XS_SLEEVE_USD", "MIN_NAME_USD", "POSITION_SHARE", "RISK_WEIGHT", "DERIVE_SESSIONS", "WINDOW", "MIN_VALID",
            "MOM_SKIP", "MOM_BACK", "MEMBER_AHEAD", "REL_VOLUME_SESSIONS", "RUNGS", "RUNG", "MIN_CELL", "SMALL_CELL",
            "CELL_SECTOR", "CELL_BETA", "UNIVERSE_CELL", "HS_FLOOR_BP", "HS_FALLBACK_BP", "HS_MAX_BP", "STRESS_SPREAD",
-           "STRESS_FEES", "VANISH_SESSIONS", "VANISH_HAIRCUT", "VANISH_DEAL", "DITHER_HALF", "CTX_PLACES",
+           "STRESS_FEES", "VANISH_SESSIONS", "VANISH_HAIRCUT", "VANISH_DEAL", "DITHER_HALF", "WICK_DITHER", "CTX_PLACES",
            "BETA_PLACES", "ID_BITS", "ADJUSTED_HALF_STEP", "ROUNDING_GUARD", "rounding_bound", "WALLS_ET", "CLOSE_ET",
            "EARLY_CLOSE_ET", "NEW_YORK", "quiet", "next_session", "rebalance_session", "decision_due"]

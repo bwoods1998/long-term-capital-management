@@ -84,7 +84,10 @@ with its history and its three characteristics), each slot a salted number that 
 across runs; per slot only SCALE-FREE fields (`ret`, `oret`, `iret`, `range`, `rel_volume`, a salted `sector` code, a
 `beta` to two decimals) and the same fields of the market; four calendar counts. **No ticker, no date, no price
 level, no share count, no dollar volume, no size or liquidity rank, no event flag.** Under them every price is
-dithered by half a cent before any ratio is taken, so the cent grid cannot give a level back. It answers a target
+dithered by half a cent before any ratio is taken, so the cent grid cannot give a level back; and `range` is the
+candle's body plus its wicks under a dither that is a fixed SHARE of the close (never cents), so no statistic of it
+ranks the slots by price either (dithered in cents like the other prices, a bar with little wick read a range under
+its body by a cent over the price, and the slots where that happened were the cheapest names). It answers a target
 `{slot: weight}` at the open or the close, long only, each weight at most 0.20, the sum at most 1.00, 5 names or more
 when invested. **The KEEP rule** turns a target into lots: a held name that is still in the target is kept untouched; a
 name that left it is sold whole; a new name is bought as one lot; at most 12 buys and 12 sells, and a target that

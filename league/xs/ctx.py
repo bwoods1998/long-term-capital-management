@@ -66,6 +66,23 @@ vintage, each moved by the vendor's own cent rounding; a program that kept the e
 read the scale of those moves. It exists only where nothing is hindsight (a live decision), never in a run on the
 store (one vintage), and it is what the code review's "no search for a price level" is for.
 
+`range` IS THE BODY PLUS THE WICKS, AND THE WICKS' DITHER IS RELATIVE (the review's evidence-2). Dithered as the
+other three prices are (high and low each moved by up to half a cent of their own), `range` gave the price level
+back in one line: a true bar's range is never under its body, |close - open| / close, which `iret` states; with
+four independent half-cent moves a bar with little or no wick showed a `range` UNDER its body by about a cent over
+the price, so the slots where that happened, and how often, ranked the names by adjusted price (on synthetic cent
+panels the slots with a violation were the cheapest decile, and in Train years a low adjusted price marks the names
+with the largest later splits). So `range` is formed as
+    |c' - o'| / c'  +  wick / c  +  `config.WICK_DITHER` x v
+where c' and o' are the dithered close and open (the body is exactly what `iret` says: `range` is never under it),
+wick = (h - max(o, c)) + (min(o, c) - l) on the undithered adjusted prices (never below zero), and v in [0, 1) is the
+mean of the bar's two wick draws (|u_h| and |u_l| over `config.DITHER_HALF`: the same hashes, one number a bar for
+the whole run). The noise of the wicks is the same share of the close for a $5 name and a $500 one, so nothing in
+`range` beside the body scales with one over the price. It costs `range` about a quarter of a percent of bias and a
+tenth of a percent of noise a bar. What is left, stated: a name whose ADJUSTED price is under about two dollars (a
+later split of forty for one and more) is coarse in every field, `ret` first (its adjusted cent is half a percent
+and more of its price); the dither covers the grid and cannot hide that the grid is coarse.
+
 THREE MORE GRIDS ARE CLOSED THE SAME WAY (each narrower than the registered contract, none wider):
 - THE SHARE COUNT. A session's volume is a whole number of shares, and a ratio of two of them over one median is the
   same lattice: for a thinly traded name it gives the exact counts back, and an exact count dates a session and names
@@ -540,20 +557,28 @@ def _rel_volume(basis: np.ndarray, first: int) -> np.ndarray:
 def _fields(adj: np.ndarray, valid: np.ndarray, u: np.ndarray, rel: np.ndarray, history: int) -> dict[str, np.ndarray]:
     """The five scale-free fields of columns (L, k): `adj` (L, k, 4) adjusted o h l c, `valid` (L, k), `u` (L, k, 5)
     their dithers, `rel` (L, k) their `rel_volume`; each (k, history + 1), oldest first, the last session t,
-    NaN-padded on the left when the inputs hold fewer sessions. Formed from the DITHERED prices only (each adjusted
-    price moved by its own u; a price that is not above zero after it reads as no price), rounded to
-    `config.CTX_PLACES` decimals."""
+    NaN-padded on the left when the inputs hold fewer sessions. `ret`, `oret` and `iret` are formed from the DITHERED
+    open and close only (each moved by its own u; a price that is not above zero after it reads as no price);
+    `range` is the dithered body plus the wicks under their RELATIVE dither (the module docstring: never under the
+    body, and nothing in it beside the body scales with one over the price). Rounded to `config.CTX_PLACES`."""
     length, k = valid.shape
     with np.errstate(invalid="ignore", divide="ignore"):
         moved = adj + u[:, :, :4]
         prices = np.where(valid[:, :, None] & (adj > 0) & (moved > 0), moved, np.nan)
-        o, h, low, c = prices[:, :, 0], prices[:, :, 1], prices[:, :, 2], prices[:, :, 3]
+        o, c = prices[:, :, 0], prices[:, :, 3]
         ret, oret = np.full((length, k), np.nan), np.full((length, k), np.nan)
         if length > 1:
             ret[1:] = c[1:] / c[:-1] - 1.0
             oret[1:] = o[1:] / c[:-1] - 1.0
         iret = c / o - 1.0
-        spread = (h - low) / c
+        # RANGE: the body as `iret` states it, the wicks on the undithered prices, their dither a share of the close
+        true = np.where(valid[:, :, None] & (adj > 0), adj, np.nan)
+        t_o, t_h, t_l, t_c = true[:, :, 0], true[:, :, 1], true[:, :, 2], true[:, :, 3]
+        wick = np.maximum(t_h - np.maximum(t_o, t_c), 0.0) + np.maximum(np.minimum(t_o, t_c) - t_l, 0.0)
+        half = float(config.DITHER_HALF)
+        draw = (np.abs(u[:, :, 1]) + np.abs(u[:, :, 2])) / (2.0 * half) if half > 0 else np.zeros((length, k))
+        spread = np.abs(c - o) / c + wick / t_c + config.WICK_DITHER * draw
+        spread = np.where(np.isfinite(prices[:, :, 1]) & np.isfinite(prices[:, :, 2]), spread, np.nan)
     out = {}
     for name, values in zip(FIELDS, (ret, oret, iret, spread, rel)):
         values = np.where(np.isfinite(values), values, np.nan)
