@@ -190,6 +190,8 @@ def step(root: str | Path, base: str | Path, release_dir: str | Path, *, now: fl
         grace = UNREAD_GRACE_HOURS * 3600.0
         kept, dropped = _read(release_dir)
         out["errors"].extend(dropped)
+        if not kept and not (Path(root) / DB).exists():
+            return out   # nothing declared and no receipt waiting: the store is not made for nothing
         windows: dict[tuple[float, float], Mapping[str, Any] | None] = {}
 
         def value(path: str, start: float, end: float) -> tuple[float | None, bool]:

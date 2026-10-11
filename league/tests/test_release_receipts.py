@@ -120,6 +120,8 @@ class TheDeclarations(Fixture):
     def test_an_absent_or_unreadable_file_declares_nothing(self):
         self.assertEqual(RR.declarations(self.release), [])
         self.assertEqual(self.step(1), {"declared": [], "read": [], "unread": [], "errors": []})
+        self.assertFalse((self.root / RR.DB).exists(), "no declaration and no receipt: no store is made")
+        self.assertEqual(self.asked, [], "and the funnel is not read")
         (self.release / RR.DECLARATIONS).parent.mkdir(parents=True)
         (self.release / RR.DECLARATIONS).write_text("{not json", encoding="utf-8")
         self.assertEqual(RR.declarations(self.release), [])
