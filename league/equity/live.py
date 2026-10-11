@@ -806,6 +806,63 @@ class EquityBook:
             return out
         return [i for i in out if (i.retired_at is None) == alive]
 
+    # ------------------------------------------------------------------ shares an assignment took (A8.2)
+    def shares_taken(self, symbol: str, qty: Decimal, px: Decimal | None, *, why: str) -> Decimal:
+        """SHARES AN ASSIGNMENT TOOK (league/live/step.py `_lots_taken`, through league/live/equity_hook.py): `qty`
+        shares of `symbol` that this book's lots held are no longer on the account. An option's assignment or exercise
+        delivered them (the account went short while the book owned them); the gateway admits no buy that both covers
+        and opens, so they are never bought back. The symbol's open lots are closed for that many shares, oldest
+        first, as "forced" at `px`, the price the House's cover of that short filled at (a lot's last mark, else its
+        entry price, when `px` is None: the cover's price is unreadable, or the short was closed outside the House):
+        no fee (the book sold nothing), the exit at "open" on this New York day, each take kept in the lot's
+        `info["taken"]`. An exit intent still planned for a lot closed here ends at the next window (`_work_exit`: "the
+        lot is sold"), and the lot is exported like any closed one. Returns the shares closed (less than `qty` when the
+        book holds less). Never an order."""
+        symbol = str(symbol).upper()
+        left = D(qty, ZERO)
+        price = D(px, ZERO)
+        now = self.clock()
+        today = S.ny_day(now).isoformat()
+        taken = ZERO
+        closed: list[Lot] = []
+        with self.state.transaction():
+            for lot in self._lots(symbol=symbol):
+                if left <= SHARE_TOLERANCE:
+                    break
+                dq = min(lot.qty, left)
+                if dq <= 0:
+                    continue
+                at_px = price if price > 0 else (lot.mark if lot.mark is not None and lot.mark > 0 else lot.entry_px)
+                proceeds = dq * at_px
+                lot.qty -= dq
+                lot.cash += proceeds
+                lot.info["exit_qty"] = text(D(lot.info.get("exit_qty"), ZERO) + dq)
+                lot.info["exit_notional"] = text(D(lot.info.get("exit_notional"), ZERO) + proceeds)
+                lot.info.setdefault("taken", []).append({"qty": text(dq), "px": text(at_px), "at": now,
+                                                         "priced": "cover" if price > 0 else "mark", "why": why[:200]})
+                if lot.qty <= SHARE_TOLERANCE:
+                    lot.qty = ZERO
+                    exit_qty = D(lot.info["exit_qty"])
+                    lot.status, lot.closed_at, lot.reason = LOT_CLOSED, now, "forced"
+                    lot.exit_px = ((D(lot.info["exit_notional"]) / exit_qty).quantize(PRICE_PLACES) if exit_qty > 0
+                                   else at_px)
+                    lot.exit_at, lot.exit_day = "open", today
+                    closed.append(lot)
+                else:
+                    lot.status = LOT_CLOSING
+                self._save_lot(lot)
+                taken += dq
+                left -= dq
+        for lot in closed:
+            self.record("equity.close", {"lid": lot.lid, "family": lot.family, "instance": lot.instance,
+                                         "symbol": lot.symbol, "cash": text(lot.cash), "reason": lot.reason},
+                        agent=lot.family)
+        if taken > 0:
+            self.record("equity.alert", {"what": f"{text(taken)} {symbol} of the book's lots left the account in an "
+                                                 f"option assignment or exercise: closed as forced ({why[:200]})",
+                                         "lots": [lot.lid for lot in closed]})
+        return taken
+
     # ------------------------------------------------------------------ what the hooks read
     @property
     def frozen(self) -> str:

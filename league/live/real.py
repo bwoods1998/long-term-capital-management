@@ -42,7 +42,9 @@ entries (exits pass) and says why; two clean readings in a row lift it.
 
 THE EQUITY LANE (release E1; league/live/equity_hook.py is its one door here). The equity book's orders (`lq-`) are
 never foreign (`ingest`); the account's shares are reconciled against the equity book's lots plus the share-event
-ledger's assignment and exercise shares, as Decimal within `equity_hook.SHARE_TOLERANCE` (`reconcile`); THE PROBE LOSS
+ledger's assignment and exercise shares, as Decimal within `equity_hook.SHARE_TOLERANCE` (`reconcile`), a symbol the
+equity book has in flux (a working order of its own, or one that changed in the last two minutes) left to the equity
+book's own reconciliation that minute; THE PROBE LOSS
 BUDGET is one budget for both lanes (`probe_tally`, `probe_realized`, `probe_figures` union the equity rows: one slot a
 program, its open lots' weighted mark value at risk, its Probe lots' net cash realized); the day's order count is the
 account's, shared by both books (`house_count`, A8.3); and an option open reserves against the lower of
@@ -1239,19 +1241,27 @@ class RealBook:
     # ------------------------------------------------------------------ reconciliation
     def reconcile(self, positions: Sequence[Mapping[str, Any]], foreign_orders: Sequence[Mapping[str, Any]], *,
                   day: dt.date, after_close: bool, shares: Mapping[str, Any] | None = None,
-                  include_expired: bool = False, equity_shares: Mapping[str, Decimal] | None = None) -> list[str]:
+                  include_expired: bool = False, equity_shares: Mapping[str, Decimal] | None = None,
+                  equity_flux: Iterable[str] = ()) -> list[str]:
         """The account against this book (the module docstring). Returns the mismatches of THIS reading; the freeze
         follows two readings in a row.
 
         Shares (release E1, A8.2): each us_equity symbol's signed quantity against what is expected of it, the equity
         book's (`equity_shares`: its open lots and the filled part of its working orders, read in the same pass) plus
         the share-event ledger's assignment and exercise shares (`shares`: {symbol: signed Decimal string}), as
-        Decimal within `equity_hook.SHARE_TOLERANCE`; a symbol expected but not held is a mismatch too."""
+        Decimal within `equity_hook.SHARE_TOLERANCE`; a symbol expected but not held is a mismatch too.
+
+        IN FLUX (`equity_flux`, `equity_hook.flux`): a symbol with a working equity order, or one whose equity order
+        changed in the last two minutes, is not judged in this reading. The options path reads the account before the
+        equity book's minute books that minute's fills (`OptionsLive.minute`), so every equity fill would otherwise be
+        one mismatched reading here, and fills in two consecutive minutes a freeze of both lanes; the equity book's
+        own reconciliation judges the symbol once it settles (its freeze blocks every real open too, `real_block`)."""
         expected = self.expected_positions()
         held: dict[str, int] = {}
         problems = []
         ledger = {str(k).upper(): M.D(v) for k, v in (shares or {}).items()}
         owned = {str(k).upper(): Decimal(str(v)) for k, v in (equity_shares or {}).items()}
+        flux = {str(symbol).upper() for symbol in equity_flux}
         seen_shares: set[str] = set()
         for row in positions:
             symbol = str(row.get("symbol") or "").upper()
@@ -1266,6 +1276,8 @@ class RealBook:
                 continue
             if klass == "us_equity":
                 seen_shares.add(symbol)
+                if symbol in flux:
+                    continue  # its fills and this reading race each other: the equity book judges it once it settles
                 lots, assigned = owned.get(symbol, M.ZERO), ledger.get(symbol, M.ZERO)
                 if abs(signed - lots - assigned) > equity_hook.SHARE_TOLERANCE:
                     problems.append(f"{symbol}: {_plain(signed)} shares held, {_plain(lots + assigned)} expected (equity "
@@ -1278,7 +1290,7 @@ class RealBook:
                 problems.append(f"{symbol}: {signed} contracts, not a whole number")
                 continue
             held[symbol] = int(signed)
-        for symbol in sorted((set(ledger) | set(owned)) - seen_shares):
+        for symbol in sorted((set(ledger) | set(owned)) - seen_shares - flux):
             lots, assigned = owned.get(symbol, M.ZERO), ledger.get(symbol, M.ZERO)
             if abs(lots + assigned) > equity_hook.SHARE_TOLERANCE:
                 problems.append(f"{symbol}: no shares held, {_plain(lots + assigned)} expected (equity lots {_plain(lots)}, "
