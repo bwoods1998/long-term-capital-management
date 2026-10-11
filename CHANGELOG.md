@@ -602,9 +602,9 @@ owner when the lanes next go wrong.
   the window ends; the House's warning, `stall.json` and the receipt have it at once. **A gateway follow-up** would
   word the four in `STALL_CAUSES` (deploy the gateway first), after which naming them in `stall.CAUSES` sends each
   as its own entry.
-- **Nothing a program or a model wrote reaches a notice or a receipt:** a disqualification is told by its class and
-  line, a refusal by its rule and this module's words for its sentence, a refused proposal by its class and the
-  symbols of the code's own universe.
+- **No text a program or a model wrote reaches a notice, a warning or a receipt's sentence:** a disqualification
+  is told by its class and line, a refusal by its rule and this module's words for its sentence, a refused proposal
+  by its class and the symbols of the code's own universe. (The receipt's examples name families by their ids.)
 - **The research funnel** (`league/ops/funnel.py` `equity.research`; the `stall` receipt's `elane.funnel` for the
   last 24 h; `python3 -m league.ops.elane_health --state DIR` on the box): equity passes and families born,
   proposals refused by reason class, programs refused before a run by rule, versions scored, disqualified and

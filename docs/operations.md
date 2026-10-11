@@ -220,8 +220,9 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   code, bar passes, review refusals and passes, families retired, E2's model dollars by purpose) and `carrier`. On
   the box, read-only: `python3 -m league.ops.elane_health --state /workspace/state [--hours N] [--json]` prints
   the same and each family's versions (fail codes, a disqualification's class and line) and refusals (the rule
-  and its sentence in closed words). Nothing a program wrote is repeated anywhere: not its exception's text, not
-  its source, not a slug or a symbol a model made up.
+  and its sentence in closed words). No text a program or a model wrote is repeated in the mail, the House's
+  warning or the receipt's sentences: not an exception's text, not a program's source, not a refused proposal's
+  name, not a symbol a model made up. (The receipt's `examples` and the report name families by their ids.)
 
   **Settings.** The release adds none to `swarm.json` and changes none: the thresholds are constants in
   `league/ops/elane_health.py`, each with its reason. One switch is the owner's, in `ops.json`:

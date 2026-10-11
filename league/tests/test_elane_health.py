@@ -110,9 +110,20 @@ class Case(TS.Base):
     def lanes(self, **block):
         (self.root / "swarm.json").write_text(json.dumps({"elane": block}))
 
-    def beat(self, hours: float):
-        """The swarm's heartbeat: it started `hours` before NOW."""
-        (self.root / EH.HEARTBEAT).write_text(json.dumps({"at": NOW, "started_at": NOW - hours * HOUR}))
+    def beat(self, hours: float, at: float = NOW):
+        """The swarm's heartbeat, written at `at`: it started `hours` before NOW."""
+        (self.root / EH.HEARTBEAT).write_text(json.dumps({"at": at, "started_at": NOW - hours * HOUR}))
+
+    def run_at(self, now=NOW, **kw):
+        """One stall run at `now`, the swarm alive then (its heartbeat fresh) unless a test wrote a stale one."""
+        path = self.root / EH.HEARTBEAT
+        beat = json.loads(path.read_text()) if path.exists() else {}
+        if beat.get("at") == NOW:
+            self.beat((NOW - beat["started_at"]) / HOUR, at=now)
+        out = super().run_at(now=now, **kw)
+        if beat.get("at") == NOW:
+            self.beat((NOW - beat["started_at"]) / HOUR)
+        return out
 
     def bred(self, slug: str, *, hours: float = 10.0, lane: str = "equity", symbols=("SPY",), record=None) -> str:
         """An equity family as the equity pass bears it, born `hours` before NOW, with E2's record of it."""
@@ -420,6 +431,11 @@ class AQuietLaneIsNotJudged(Case):
         doc = EH.report(self.root, now=NOW)
         self.assertEqual((doc["judged"], doc["why"]), (False, "switched off (ops.json stall.elane is false)"))
 
+    def test_a_tree_without_e2s_rounds_is_not_judged(self):
+        self.damning()
+        with mock.patch.object(Architect, "equity_pass", None):
+            self.quiet("release E2's rounds are not in the running tree")
+
     def test_lanes_that_cannot_be_read_are_an_error_and_never_a_failed_run(self):
         self.damning()
         with mock.patch.object(EH, "facts", side_effect=RuntimeError("an invented failure")):
@@ -690,6 +706,15 @@ class OwedWorkAndNothingScored(Case):
         check = self.equity()["elane_idle"]
         self.assertEqual((check["numbers"]["kind"], check["stalled"], check["owner_step"]), ("unanswered", True, None))
 
+    def test_a_swarm_that_is_not_running_is_not_judged_idle(self):
+        self.researching()
+        self.beat(48, at=NOW - 0.5 * HOUR)  # its last heartbeat is half an hour old
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["judged"]), (False, False))
+        self.assertIn("Not judged: the swarm is not running (its heartbeat is 30 min old)", check["what"])
+        (self.root / EH.HEARTBEAT).unlink()  # no heartbeat to read: judged on the records alone
+        self.assertTrue(self.equity()["elane_idle"]["stalled"])
+
     def test_a_lane_that_scored_lately_or_owes_nothing_is_not_idle(self):
         a = self.researching(last_scored=1.0)
         check = self.equity()["elane_idle"]
@@ -931,14 +956,28 @@ class RaisedLikeAnyCause(Case):
         self.assertEqual([e["cause"] for e in EH.carried(entries, ST.CAUSES)], ["births", "swarm_alerts"])
         self.assertEqual(EH.carried(entries[1:], ST.CAUSES), entries[1:], "no equity cause: the entries as they are")
 
-    def test_the_job_still_writes_only_its_own_state_file(self):
+    def test_the_equity_causes_write_nothing(self):
         self.damning()
-        before = {p: p.stat().st_mtime_ns for p in self.root.rglob("*") if p.is_file()}
+        files = lambda: {p: p.stat().st_mtime_ns for p in self.root.rglob("*") if p.is_file()}  # noqa: E731
+        before = files()
+        ctx = self.ctx()
+        loaded, _ = ST._load(ctx, self.root)
+        found = EH.checks(ctx, self.root, NOW, loaded)
+        self.assertEqual({c for c, check in found.items() if check["stalled"]}, {"elane_dq", "elane_births", "elane_refused"})
+        EH.receipt(self.root, NOW, found)
+        EH.report(self.root, now=NOW)
+        self.assertEqual(files(), before, "the checks, the receipt and the report read")
+        # And the job as a whole writes what it writes with the four switched off, no file more.
+        off = self.ctx()
+        off.settings = {"stall": {"elane": False}}
+        ST.run(off)
+        without = set(files())
+        for path in without - set(before):
+            path.unlink()
         out, _ = self.run_at()
         self.assertTrue(out["stalled"])
-        after = {p: p.stat().st_mtime_ns for p in self.root.rglob("*") if p.is_file()}
-        self.assertEqual(sorted(set(after) - set(before)), [self.root / ST.STATE_FILE])
-        self.assertEqual({p for p in before if after[p] != before[p]}, set())
+        self.assertEqual(set(files()), without)
+        self.assertIn(self.root / ST.STATE_FILE, without)
 
     def test_the_daily_page_lists_them_among_the_stalls_standing(self):
         self.broken()

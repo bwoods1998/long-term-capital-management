@@ -120,6 +120,10 @@ BIRTHS_OWNER_HOURS = 6.0
 #: `elane_idle`: no version scored on Train this long while work is owed. The Train round comes every ten minutes and
 #: scores a version in the step that wrote it, so three hours is eighteen rounds with nothing judged.
 IDLE_HOURS = 3.0
+#: A swarm whose heartbeat is this old is not running, and its lanes are not judged idle: the House's hook restarts a
+#: swarm whose heartbeat is 240 seconds old (league/swarm/hook.py `stale_heartbeat_seconds`), and a swarm that stays
+#: down is the options lanes' causes to tell (`gym_runs` says the heartbeat's age).
+BEAT_STALE_SECONDS = 600.0
 #: `elane_refused`: the window (as `DQ_HOURS`), the programs written under which nothing is judged (two families' worth
 #: of write attempts answered, as `DQ_MIN_SCORED` reasons), and the share one rule must pass ("most": more than half).
 REFUSED_HOURS = 6.0
@@ -586,8 +590,8 @@ class _Reader:
 def e2_families(db: Any) -> list[dict[str, Any]]:
     """Every family the equity pass bore, alive or retired (its spec names an equity lane and its birth route), with
     E2's own Train record of it: {id, lane, born_at, alive, status, versions {n: verdict}, refused [{at, why}],
-    waiting (the kind of backoff it waits out: "infra:<kind>" | "unanswered" | None, with `next_at`)}. Nothing of a
-    later stage is read (no band, no Validation, no look)."""
+    waits (the backoffs it has on record, {"infra:<kind>" | "unanswered": until when})}. Nothing of a later stage is
+    read (no band, no Validation, no look)."""
     out = []
     for row in guard.rows(db, "SELECT id, spec, state, born_at, retired_at FROM families WHERE structure IN ('etf', 'stock') "
                               "ORDER BY born_at, id"):
@@ -913,8 +917,9 @@ def _births_check(f: Mapping[str, Any], now: float, started: float | None) -> di
         "step": BIRTH_STEPS.get(str(kind)) if lever else None}
 
 
-def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapping[str, Any]) -> dict[str, Any]:
-    """`elane_idle` (the module docstring). Pure."""
+def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapping[str, Any],
+                beat_age: float | None = None) -> dict[str, Any]:
+    """`elane_idle` (the module docstring). Pure. `beat_age`: the age of the swarm's heartbeat in seconds, when known."""
     fams = f.get("families") or []
     researching = [fam for fam in fams if fam["alive"] and fam["status"] == "researching"]
     passes = [(at, pass_read(p)) for at, p in f.get("passes") or []]
@@ -941,6 +946,9 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
         return _not_judged("no equity family is in Train research and no equity birth is wanted", numbers)
     if since is None:
         return _not_judged("nothing says since when the equity lanes owe work", numbers)
+    if beat_age is not None and beat_age > BEAT_STALE_SECONDS:
+        return _not_judged(f"the swarm is not running (its heartbeat is {beat_age / 60.0:.0f} min old): the House restarts "
+                           "a swarm that stops, and the options lanes' causes say so", numbers)
     # Evidence counts from the running swarm's start: a swarm up for less than `IDLE_HOURS` is not judged idle.
     edge = max(since, started) if started is not None else since
     idle = now - edge
@@ -1085,19 +1093,24 @@ def _refused_check(f: Mapping[str, Any], now: float, started: float | None) -> d
         "step": f"teach {words} where the generators read it (league/equity/EQUITY.md), in a release" if stalled else None}
 
 
-def judge(f: Mapping[str, Any], *, now: float, started: float | None = None,
+def judge(f: Mapping[str, Any], *, now: float, started: float | None = None, beat_age: float | None = None,
           settings: Mapping[str, Any] | None = None) -> dict[str, dict[str, Any]]:
     """The four checks over the store's facts (`facts`), each {stalled, judged, what, numbers, doing, owner_step, onset}.
-    Pure. `started`: the running swarm's start (evidence counts from it); `settings`: `lanes`' third value."""
+    Pure. `started`: the running swarm's start (evidence counts from it); `beat_age`: its heartbeat's age in seconds;
+    `settings`: `lanes`' third value."""
     return {"elane_dq": _dq_check(f, now, started), "elane_births": _births_check(f, now, started),
-            "elane_idle": _idle_check(f, now, started, settings or {}), "elane_refused": _refused_check(f, now, started)}
+            "elane_idle": _idle_check(f, now, started, settings or {}, beat_age),
+            "elane_refused": _refused_check(f, now, started)}
 
 
-def started_at(root: str | Path, now: float) -> float | None:
-    """When the running swarm started (its heartbeat's `started_at`), None when the heartbeat does not say."""
+def heartbeat(root: str | Path, now: float) -> tuple[float | None, float | None]:
+    """(when the running swarm started, the age of its heartbeat in seconds) from `<state>/swarm.heartbeat`
+    (`started_at`, `at`); a None for what the file does not say."""
     beat = read_json(Path(root) / HEARTBEAT, None)
-    value = _num(beat.get("started_at")) if isinstance(beat, Mapping) else None
-    return value if value is not None and 0 < value <= now else None
+    beat = beat if isinstance(beat, Mapping) else {}
+    started, at = _num(beat.get("started_at")), _num(beat.get("at"))
+    return (started if started is not None and 0 < started <= now else None,
+            None if at is None else max(0.0, now - at))
 
 
 def switched_off(ctx: Any) -> bool:
@@ -1124,7 +1137,8 @@ def checks(ctx: Any, root: str | Path, now: float, loaded: Mapping[str, Any] | N
             on, why, c = lanes(loaded, f, paused=paused)
         if not on:
             return {cause: _not_judged(str(why)) for cause in CAUSES}
-        return judge(f, now=now, started=started_at(root, now), settings=c)
+        started, beat_age = heartbeat(root, now)
+        return judge(f, now=now, started=started, beat_age=beat_age, settings=c)
     except Exception as exc:  # noqa: BLE001 - the stall alarm goes on without the equity lanes' causes
         if errors is not None:
             errors.append(f"the equity lanes' health could not be read ({type(exc).__name__})")
@@ -1374,11 +1388,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["CAUSES", "CARRIER", "SWITCH", "switched_off", "checks", "judge", "facts", "lanes", "started_at", "carried",
+__all__ = ["CAUSES", "CARRIER", "SWITCH", "switched_off", "checks", "judge", "facts", "lanes", "heartbeat", "carried",
            "receipt", "research",
            "research_counts", "report", "text", "main", "dq_class", "dq_line", "refusal_class", "foreign_symbols",
            "rule_of", "sentences", "skip_kind", "step_read", "pass_read", "refusals_tally", "e2_families",
-           "DQ_HOURS", "DQ_MIN_SCORED", "DQ_SHARE", "BIRTHS_HOURS", "BIRTHS_PASSES", "BIRTHS_OWNER_HOURS", "IDLE_HOURS",
+           "DQ_HOURS", "DQ_MIN_SCORED", "DQ_SHARE", "BIRTHS_HOURS", "BIRTHS_PASSES", "BIRTHS_OWNER_HOURS", "IDLE_HOURS", "BEAT_STALE_SECONDS",
            "REFUSED_HOURS", "REFUSED_MIN_ANSWERS", "REFUSED_SHARE", "LOOKBACK_HOURS", "FUNNEL_HOURS", "REFUSALS",
            "REFUSAL_WORDS", "RULES", "RULE_WORDS", "SENTENCES", "BIRTH_LEVERS", "IDLE_OWNER_KINDS", "PROGRAM_FAULTS",
            "BAR_CODES", "ERROR_CLASSES", "LANES", "STATE_KEY", "ROUTE_KEY", "MAIL_FIGURES"]
