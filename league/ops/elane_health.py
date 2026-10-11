@@ -141,10 +141,11 @@ HEARTBEAT = "swarm.heartbeat"
 #: The stall job's own state file (`stall.STATE_FILE`; a test holds the two equal) and its key that keeps since when the
 #: running release has run (`release_since`), and under it WHAT IS KEPT WHILE THAT RELEASE RUNS (`KEPT`): `idle` (the
 #: idle clock: `_idle_clock`), `held` (the last run that read E2 held: {at, kind}), `dq` (when `elane_dq` first stood:
-#: {stood_at}) and `unread` (when the lanes that cannot be read were last warned: {warned_at}).
+#: {stood_at}), `unread` (when the lanes that cannot be read were last warned: {warned_at}) and `broken` (the BROKEN
+#: kind `elane_idle` stands on and since when: {kind, at}, with the routes it named for the kind "answers").
 STATE_FILE = "stall.json"
 STATE_KEEP = "elane"
-KEPT = ("idle", "held", "dq", "unread")
+KEPT = ("idle", "held", "dq", "unread", "broken")
 
 # ---------------------------------------------------------------------------------------------- the thresholds
 #: `elane_dq`: the window, the scored versions under which nothing is judged, and the share above which it stands. Six
@@ -179,6 +180,22 @@ IDLE_HOURS = 3.0
 #: before a hold (a store being rewritten for a minute, then the day's dollars spent) is no broken lane, and a failure
 #: of the House's is tried again without a model, so a standing one is two within the half hour.
 BROKEN_MIN_FAILS = 2
+#: `elane_idle`, BROKEN BY ITS ANSWERS (the captain's ruling on the third check of Oct 11): THE LANE'S PROGRAM QUESTIONS
+#: (`_questions`: each question a Train round asked a model for a program) are judged over a window as `elane_refused`
+#: judges the programs written, and for its reasons: six hours hold several rounds of several families; under eight
+#: questions nothing is judged (`REFUSED_MIN_ANSWERS`; a fault of the routes is no family's own, so no spread of
+#: families is asked); "most" is more than half, so a lane that loses one answer in ten, or four in ten, is a lane at
+#: work; and it stands EARLY once five are lost, which are most of eight whatever the next three are (a lane at the
+#: floor's pace asks one question an hour: eight are a working day away).
+ANSWERS_HOURS = 6.0
+ANSWERS_MIN = 8
+ANSWERS_SHARE = 0.5
+ANSWERS_EARLY = int(ANSWERS_SHARE * ANSWERS_MIN) + 1
+#: HOW A PROGRAM QUESTION'S ANSWER IS LOST TO A FAULT, never to a setting and never to a rule: the answer the lane paid
+#: for held no program (the Train round's own words, `RULES`' "no_program": a programless, an unreadable and a
+#: cut-short answer are all that refusal), or no route answered the question.
+LOST_KINDS = ("no_program", "unanswered")
+LOST_WORDS = {"no_program": "answers held no program", "unanswered": "questions got no answer from a model route"}
 #: Why a Train step or an equity pass is skipped for want of model dollars (`skip_kind`): E2's hourly pace, its day's
 #: line, the House's Sail day: THE SETTINGS' HOLDS, which never stand. Any other skip (a passing version that cannot
 #: be read) is none of them.
@@ -413,13 +430,25 @@ DOING = {
     "broken": ("The Train round comes every ten minutes while it has work; a failure of the House's backs its family off "
                "and is alerted once (elane_train_house); a question no route answered is asked again after its backoff. "
                "Nothing here repairs anything."),
+    "answers": ("An answer with no program costs its family a write attempt and E2 its dollars (a family whose attempts are "
+                "spent with nothing judged is retired STALLED); a question no route answered is asked again after its "
+                "backoff. Nothing here changes a route or a setting."),
     "not_judged": "Nothing: the cause is not judged.",
 }
 REPORT = "python3 -m league.ops.elane_health --state /workspace/state"
-#: The ways an idle lane is BROKEN that nothing on the floor heals: the owner's step. The first three are BROKEN BY
-#: THE LANE'S OWN RECORD (`BROKEN_KINDS`): they stand whatever E2's lines hold.
-IDLE_OWNER_KINDS = ("raised", "house", "errors", "silent", "no_round")
-BROKEN_KINDS = ("raised", "house", "errors")
+#: The ways a lane is BROKEN that nothing on the floor heals: the owner's step. The first four are BROKEN BY THE LANE'S
+#: OWN RECORD (`BROKEN_KINDS`): they stand whatever E2's lines hold, and ONCE ONE STOOD IT HOLDS (`_idle_check`).
+IDLE_OWNER_KINDS = ("raised", "house", "errors", "answers", "silent", "no_round")
+BROKEN_KINDS = ("raised", "house", "errors", "answers")
+#: What each of them is, for a stand that HOLDS after its evidence left the hours the check reads.
+BROKEN_WORDS = {"raised": "its rounds raised", "house": "its Train runs failed on the House's side",
+                "errors": "its Train steps failed with errors of their own",
+                "answers": "most of its program questions were lost to a fault"}
+#: How a model route's name is spelled (`elane_yield.Route`: its kind and the profile, model or role). A route is NAMED
+#: in a sentence or a step only when it is one of the settings' own (`elane.e2.routes`, as the swarm loads them) and is
+#: spelled so; any other is "another route".
+_ROUTE = re.compile(r"^(?:sail|openai|claude):[A-Za-z0-9][A-Za-z0-9_.\-]{0,39}$")
+ANOTHER_ROUTE = "another route"
 #: What a lane held by a setting says of this cause (`_idle_check`).
 NO_STALL = ("A lane held by its own settings is no stall: this cause stands for a broken lane only, and what a setting "
             "costs is read here and in the equity research funnel (train_steps).")
@@ -433,8 +462,9 @@ WARN_CHARS = 900
 WHAT_CHARS, DOING_CHARS, STEP_CHARS, FIGURES = 400, 700, 400, 16
 MAIL_FIGURES = {"elane_dq": ("scored", "faulted", "families", "top_error", "basis"),
                 "elane_births": ("barren_passes", "kind", "born", "setting"),
-                "elane_idle": ("kind", "idle_hours", "researching", "held_now", "house_failures", "step_errors",
-                               "rounds_raised", "train_rounds", "steps_due", "steps_skipped"),
+                "elane_idle": ("kind", "idle_hours", "researching", "held_now", "questions_lost", "questions_asked",
+                               "house_failures", "step_errors", "rounds_raised", "train_rounds", "steps_due",
+                               "steps_skipped"),
                 "elane_refused": ("answers", "top_rule", "top_rule_n", "basis")}
 NOT_MAILED = ("judged", "examples", "hint", "pace_usd_hour", "spent_last_hour_usd", "day_line_usd", "spent_today_usd")
 
@@ -779,7 +809,8 @@ def facts(db: Any, now: float, loaded: Mapping[str, Any] | None = None) -> dict[
 def lanes(loaded: Mapping[str, Any] | None, f: Mapping[str, Any] | None = None, *,
           paused: bool = False) -> tuple[bool, str | None, dict[str, Any]]:
     """WHEN A CAUSE IS JUDGED (the module docstring): (judged, why not, the lanes' settings the checks read:
-    {births_every_seconds, pace_share, usd_day, budget_floor}). `f`: the store's facts, for the empty lanes. LANES THAT
+    {births_every_seconds, pace_share, usd_day, budget_floor, routes (`elane.e2.routes`: the only routes a sentence
+    names)}). `f`: the store's facts, for the empty lanes. LANES THAT
     COULD NOT BE READ (the settings, or E2's own readers) answer `unread` in the third value, the class that failed:
     `checks` makes it an entry of the job's `errors`, so an alarm that cannot see is never a silent "Not judged"."""
     c: dict[str, Any] = {}
@@ -794,7 +825,7 @@ def lanes(loaded: Mapping[str, Any] | None, f: Mapping[str, Any] | None = None, 
         budget = loaded.get("budget") if isinstance(loaded.get("budget"), Mapping) else {}
         c = {"births_every_seconds": float(elane_births.cfg(loaded)["births_every_seconds"]),
              "pace_share": float(money["pace_share"]), "usd_day": float(money["usd_day"]),
-             "budget_floor": budget.get("source") == "floor"}
+             "budget_floor": budget.get("source") == "floor", "routes": tuple(str(r) for r in money["routes"])}
     except Exception as exc:  # noqa: BLE001 - the lanes' own readers are not in this tree, or do not read
         return False, f"release E2's readers could not be read ({type(exc).__name__})", {"unread": type(exc).__name__}
     if not wired:
@@ -1135,6 +1166,104 @@ def _work(f: Mapping[str, Any], start: float, now: float) -> dict[str, Any]:
     return out
 
 
+def _route(key: Any, routes: Sequence[str]) -> str:
+    """A model route's name as a sentence may say it: one of the settings' own (`routes`), spelled as a route is
+    (`_ROUTE`); else `ANOTHER_ROUTE`."""
+    return key if isinstance(key, str) and key in routes and _ROUTE.match(key) else ANOTHER_ROUTE
+
+
+def _questions(f: Mapping[str, Any], start: float, now: float,
+               routes: Sequence[str] = ()) -> list[tuple[float, str | None, tuple[str, ...]]]:
+    """THE LANE'S PROGRAM QUESTIONS in `[start, now]`, oldest first, from the Train rounds' events: (when, how its
+    answer was lost (one of `LOST_KINDS`; None for an answer that held a program), the routes it names). A program
+    question is one a Train round asked a model for a program: a step that read an answer (a program stored as a
+    version, or refused before a run by a rule, or the refusal "no_program") or a question for one that no route
+    answered (a review's or an audit's unanswered question holds its version, and is none). THE ROUTES are named in
+    closed words (`_route`): the route that answered, or, for a question none answered, the routes that failed it (how
+    each of the step's `errors` begins: a route's own error text is never read further)."""
+    rows = []
+    for at, payload in f.get("rounds") or []:
+        if not start <= at <= now:
+            continue
+        for step in payload.get("steps") or []:
+            step = step if isinstance(step, Mapping) else {}
+            read = step_read(step)
+            if read["answered"]:
+                rows.append((at, "no_program" if read["refused"] == "no_program" else None, (_route(step.get("route"), routes),)))
+            elif read["unanswered"] and step.get("version") is None:
+                errors = step.get("errors") if isinstance(step.get("errors"), list) else []
+                named = dict.fromkeys(_route(str(e).split(": ", 1)[0], routes) for e in errors)
+                failed = [name for name in named if name != ANOTHER_ROUTE]
+                rows.append((at, "unanswered", tuple(failed) or (ANOTHER_ROUTE,)))
+    return rows
+
+
+def _lost_check(f: Mapping[str, Any], now: float, since: float | None, routes: Sequence[str],
+                down: float = 0.0) -> dict[str, Any]:
+    """BROKEN BY ITS ANSWERS (`elane_idle`; the module docstring): the lane's program questions (`_questions`) over the
+    window, and whether most were LOST TO A FAULT. Pure. {stands, asked, lost, by_kind, routes [(name, lost, asked)],
+    basis ("window" | "last_asked" | "early"), said (the sentence's clause, with no capital and no full stop), early
+    (the sentence a stand before `ANSWERS_MIN` adds, else ""), quiet (the seconds no route has answered a program
+    question, for the questions none answered that count; else 0)}.
+
+    THE WINDOW is `elane_refused`'s: the last `ANSWERS_HOURS` (since the running release started); with fewer than
+    `ANSWERS_MIN` questions in it, the last `ANSWERS_MIN` asked since the release started (inside `LOOKBACK_HOURS`);
+    with fewer than that, the lane is judged EARLY, and only once `ANSWERS_EARLY` are lost.
+
+    A QUESTION NO ROUTE ANSWERED COUNTS ONLY ONCE NO ROUTE HAS ANSWERED FOR `IDLE_HOURS`: the questions none answered
+    after the last program question a route did answer, once the first of them is `IDLE_HOURS` old (less `down`, the
+    time the swarm was down while idle). A route's bad hour heals by itself (the question is asked again after its
+    backoff), and a question none answered costs nothing, so E2's pace does not ration it as it rations the answers:
+    counted at once, twenty minutes without a route would be most of a slow lane's window for hours after."""
+    start, _ = _since(now, LOOKBACK_HOURS, since)
+    rows = _questions(f, start, now, routes)
+    last = max((i for i, row in enumerate(rows) if row[1] != "unanswered"), default=-1)
+    quiet = max(0.0, (now - rows[last + 1][0]) - down) if last + 1 < len(rows) else 0.0
+    counted = quiet >= IDLE_HOURS * 3600.0
+    rows = [row for i, row in enumerate(rows) if row[1] != "unanswered" or (counted and i > last)]
+    edge, span = _since(now, ANSWERS_HOURS, since)
+    window, basis = [row for row in rows if row[0] >= edge], "window"
+    if len(window) < ANSWERS_MIN:
+        _, span = _since(now, LOOKBACK_HOURS, since)
+        window, basis = (rows[-ANSWERS_MIN:], "last_asked") if len(rows) >= ANSWERS_MIN else (rows, "early")
+    asked, by_kind = len(window), {kind: sum(1 for row in window if row[1] == kind) for kind in LOST_KINDS}
+    lost = sum(by_kind.values())
+    asked_of: dict[str, int] = {}
+    lost_of: dict[str, int] = {}
+    for _, how, named in window:
+        for name in named:
+            _bump(asked_of, name)
+            _bump(lost_of, name, int(how is not None))
+    enough = basis != "early" or lost >= ANSWERS_EARLY
+    stands = enough and lost > ANSWERS_SHARE * asked
+    head = {"window": f"{lost} of the {asked} program questions the equity lanes asked in {span}",
+            "last_asked": (f"{lost} of the last {asked} program questions the equity lanes asked (over "
+                           f"{_hours(now - window[0][0]) if window else '0.0'} h: fewer than {ANSWERS_MIN} fall in the "
+                           f"last {ANSWERS_HOURS:g} h)"),
+            "early": f"{lost} of the {asked} program questions the equity lanes asked in {span}"}[basis]
+    kinds = ", ".join(f"{by_kind[kind]} {LOST_WORDS[kind]}"
+                      + (f", none answered for {_hours(quiet)} h" if kind == "unanswered" else "")
+                      for kind in LOST_KINDS if by_kind[kind])
+    named = [(name, n, asked_of[name]) for name, n in _top(lost_of, 3)]
+    return {"stands": stands, "asked": asked, "lost": lost, "by_kind": by_kind, "routes": named, "basis": basis,
+            "said": f"{head} were lost to a fault, not to a setting ({kinds}; by route: {_routes_said(named)})",
+            "early": (f"Fewer than {ANSWERS_MIN} were asked, and these {lost} are already most of {ANSWERS_MIN}."
+                      if basis == "early" and stands else ""),
+            "quiet": quiet if counted else 0.0}
+
+
+def _routes_said(named: Any, routes: Sequence[str] | None = None) -> str:
+    """The routes of lost program questions in words ("sail:pro_asap 9 of 12": lost, of those it was asked), from
+    `_lost_check`'s `routes` or what the job kept of them (`routes`: then each name is held to the settings' own
+    again, `_route`); "" for none."""
+    rows = []
+    for row in named if isinstance(named, (list, tuple)) else []:
+        if isinstance(row, (list, tuple)) and len(row) == 3 and _count(row[1]) and _count(row[2]) >= _count(row[1]):
+            name = row[0] if routes is None else _route(row[0], routes)
+            rows.append(f"{name} {_count(row[1])} of {_count(row[2])}")
+    return ", ".join(rows[:3])
+
+
 def _lever(kind: str, held: Mapping[str, Any] | None, c: Mapping[str, Any], *,
            now_held: bool = True) -> tuple[str, list[str]]:
     """WHICH OF E2'S LINES BINDS, and the owner's lever for it, from the figures the check holds (`_held`: the hourly
@@ -1281,8 +1410,9 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                        spent_last_hour_usd=round(held["spent_last_hour_usd"], 4), day_line_usd=round(held["day_line_usd"], 2),
                        spent_today_usd=round(held["spent_today_usd"], 2))
     if not researching and not wanted and not overdue:
+        # Nothing owed: the idle clock is dropped, and so is a BROKEN stand it kept (a lane with no work is not broken).
         return {**_not_judged("no equity family is in Train research and no equity birth is wanted", numbers),
-                "keep": {"idle": None}}  # nothing owed: the idle clock is dropped
+                "keep": {"idle": None, "broken": None}}
     if fresh is None:
         return _not_judged("nothing says since when the equity lanes owe work", numbers)
     if beat_age is not None and beat_age > BEAT_STALE_SECONDS:
@@ -1290,12 +1420,22 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                            "a swarm that stops, and the options lanes' causes say so", numbers)
     idle_from, down, clock = _idle_clock(fresh, last_scored, now, started, beat_age, since, kept.get("idle"))
     idle = (now - idle_from) - down
+    late = idle >= IDLE_HOURS * 3600.0
     seen = _holds(f, passes, now, kept.get("held"), held_now)
     keep: dict[str, Any] = {"idle": clock, **({"held": {"at": now, "kind": held_now}} if held_now else {})}
     numbers.update(idle_hours=round(idle / 3600.0, 1), down_hours=round(down / 3600.0, 1), basis="idle_hours",
                    held_lately=seen is not None)
     owed = ((f"{len(researching)} families are in Train research" if researching else "no family is in Train research")
             + (" and births are wanted" if wanted else " and the equity pass is overdue" if overdue else ""))
+    # THE LANE'S PROGRAM QUESTIONS over their own window, and whether most were LOST TO A FAULT (`_lost_check`): judged
+    # whatever the idle clock and E2's lines say. Their figures are in the numbers whenever one was lost.
+    routes = [name for name in c.get("routes") or () if isinstance(name, str)]
+    asked = _lost_check(f, now, since, routes, down)
+    if asked["lost"]:
+        numbers.update(questions_lost=asked["lost"], questions_asked=asked["asked"], questions_basis=asked["basis"],
+                       **{f"lost_{kind}": asked["by_kind"][kind] for kind in LOST_KINDS})
+    judged = (f"{asked['said'][:1].upper()}{asked['said'][1:]}: it stands BROKEN once they are {ANSWERS_EARLY} and more "
+              "than half of those asked.") if asked["lost"] and not asked["stands"] else ""
     # WHAT E2'S LINES COST, in sentences: the steps due, taken and skipped by reason; whether E2 is held now, or where
     # it was held; that this is no stall; the lever. Said by every reading that does not stand, when there is any.
     by = ", ".join(f"{STARVED_WORDS[k]} {work['skipped'][k]}" for k in STARVED_KINDS if work["skipped"][k])
@@ -1312,7 +1452,56 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
     exact = last_scored is not None and abs(idle_from - last_scored) < 1.0  # the clock starts at a version scored
     spent = (f"E2's model dollars for the UTC day are spent ({_usd(held['spent_today_usd'])} of a day's line of "
              f"{_usd(held['day_line_usd'])})" if held is not None and held_now == "usd_day" else "")
-    if idle < IDLE_HOURS * 3600.0:
+    # WHY, since the lanes went idle: the Train rounds' own steps, the rounds that raised, the families waiting.
+    tally = {"rounds": 0, "house": 0, "unanswered": 0, "refused": 0, "no_program": 0, "errors": 0, "raised": 0, "passes": 0}
+    houses: dict[str, int] = {}
+    for at, payload in f.get("rounds") or []:
+        if at < idle_from:
+            continue
+        tally["rounds"] += 1
+        for step in payload.get("steps") or []:
+            read = step_read(step)
+            if read["house"]:
+                tally["house"] += 1
+                _bump(houses, read["house"])
+            tally["unanswered"] += int(read["unanswered"])
+            tally["refused"] += int(read["refused"] is not None)
+            tally["no_program"] += int(read["refused"] == "no_program")
+            tally["errors"] += int(read["error"])
+    tally["raised"] = sum(1 for at, _ in f.get("raised") or [] if at >= idle_from)
+    tally["passes"] = sum(1 for at, row in passes if at >= idle_from and row["barren"])
+    waiting = [fam for fam in researching if any(t > now for t in fam["waits"].values())]
+    backed = 0  # the most failures of the House's one after another a family now waiting out its backoff has had
+    for fam in waiting:
+        for name, until in fam["waits"].items():
+            if until > now and name.startswith("infra:"):
+                _bump(houses, name.split(":", 1)[1])
+                backed = max(backed, int(fam.get("house_fails") or 0))
+    # BROKEN IS JUDGED FIRST, by the lane's own record. Once the lanes are idle: rounds that raised, steps that failed on
+    # the House's side (or a family waiting out a House backoff after as many failures), steps that failed with an
+    # error of their own. At any time: most of its program questions lost to a fault. It stands whatever E2's lines
+    # hold: a lane whose every Train run fails, or whose every answer holds no program, scores nothing at any pace.
+    fails = {"raised": tally["raised"], "house": max(tally["house"], backed), "errors": tally["errors"]}
+    found = ((next((kind for kind in fails if fails[kind] >= BROKEN_MIN_FAILS), None) if late else None)
+             or ("answers" if asked["stands"] else None))
+    # ONCE A BROKEN KIND STOOD UNDER A RELEASE IT HOLDS (`stall.json` `elane.broken`: {kind, at}) until a version is
+    # scored after it stood, the release changes (the record is then dropped: `release_since`) or no work is owed.
+    # Else a hold of E2's that outlasts the hours of events this check reads (a day under the Sail guard) turned a
+    # lane nothing had fixed into "starved by a setting", and its owner step lapsed.
+    was = kept.get("broken") if isinstance(kept.get("broken"), Mapping) else {}
+    stood = _num(was.get("at")) if was.get("kind") in BROKEN_KINDS else None
+    stood = stood if stood is not None and 0 < stood <= now and (last_scored is None or last_scored <= stood) else None
+    broken = found or (was["kind"] if stood is not None else None)
+    kept_only = found is None and broken is not None
+    # The routes of a lane broken by its answers, and which way most were lost: this run's, or what was kept of them.
+    named = asked["routes"] if found == "answers" else was.get("routes") if broken == "answers" else None
+    way = (max(LOST_KINDS, key=lambda k: (asked["by_kind"][k], -LOST_KINDS.index(k))) if found == "answers" else
+           was.get("lost") if was.get("lost") in LOST_KINDS else LOST_KINDS[0])
+    keep["broken"] = None if broken is None else {
+        "kind": broken, "at": now if stood is None else stood,
+        **({"routes": [list(row) for row in named or [] if isinstance(row, (list, tuple))], "lost": way}
+           if broken == "answers" else {})}
+    if not late and broken is None:
         if down > 0:
             # A swarm that was down is not idle on the hours it was down: under `IDLE_HOURS` of running time, not judged.
             ran = started is not None and abs((now - started) - idle) < 1.0
@@ -1329,47 +1518,23 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                       f"The equity lanes have owed work for {_hours(idle)} h and scored no version since.")
                      + f" The lanes are idle after {IDLE_HOURS:g} h with nothing scored.",
                      *([*lost, hold[:1].upper() + hold[1:], NO_STALL, *lever] if told else [])]
+        parts += [judged] if judged else []
         return {"stalled": False, "judged": True, "what": " ".join(parts),
                 "numbers": {**numbers, **({"kind": line} if told and line else {})},
                 "doing": DOING["starved" if told else "broken"], "owner_step": None, "onset": None, "keep": keep}
-    # WHY, since the lanes went idle: the Train rounds' own steps, the rounds that raised, the families waiting.
-    tally = {"rounds": 0, "house": 0, "unanswered": 0, "refused": 0, "errors": 0, "raised": 0, "passes": 0}
-    houses: dict[str, int] = {}
-    for at, payload in f.get("rounds") or []:
-        if at < idle_from:
-            continue
-        tally["rounds"] += 1
-        for step in payload.get("steps") or []:
-            read = step_read(step)
-            if read["house"]:
-                tally["house"] += 1
-                _bump(houses, read["house"])
-            tally["unanswered"] += int(read["unanswered"])
-            tally["refused"] += int(read["refused"] is not None)
-            tally["errors"] += int(read["error"])
-    tally["raised"] = sum(1 for at, _ in f.get("raised") or [] if at >= idle_from)
-    tally["passes"] = sum(1 for at, row in passes if at >= idle_from and row["barren"])
-    waiting = [fam for fam in researching if any(t > now for t in fam["waits"].values())]
-    backed = 0  # the most failures of the House's one after another a family now waiting out its backoff has had
-    for fam in waiting:
-        for name, until in fam["waits"].items():
-            if until > now and name.startswith("infra:"):
-                _bump(houses, name.split(":", 1)[1])
-                backed = max(backed, int(fam.get("house_fails") or 0))
     train_at = (f.get("kv") or {}).get(TRAIN_AT_KEY)
     numbers.update(train_rounds=tally["rounds"], house_failures=tally["house"], unanswered=tally["unanswered"],
                    refused_answers=tally["refused"], step_errors=tally["errors"], rounds_raised=tally["raised"],
                    barren_passes=tally["passes"],
                    families_waiting=len(waiting),
                    train_round_age_min=None if train_at is None else round(max(0.0, now - train_at) / 60.0, 1))
-    # BROKEN IS JUDGED FIRST, by the lane's own record: rounds that raised, steps that failed on the House's side (or a
-    # family waiting out a House backoff after as many failures), steps that failed with an error of their own. It
-    # stands whatever E2's lines hold: a lane whose every Train run fails scores nothing at any pace.
-    fails = {"raised": tally["raised"], "house": max(tally["house"], backed), "errors": tally["errors"]}
-    broken = next((kind for kind in BROKEN_KINDS if fails[kind] >= BROKEN_MIN_FAILS), None)
-    # "At least" unless the clock starts at a version scored: since when work is owed is read inside the lookback.
+    # "At least" unless the clock starts at a version scored: since when work is owed is read inside the lookback. A
+    # lane BROKEN BY ITS ANSWERS before it is idle says how long ago it scored, or how long it has owed work.
     lead = (f"No equity version was scored on Train for {'' if exact else 'at least '}{_hours(idle)} h"
-            + (f" of the swarm's running time (it was down {_hours(down)} h more)" if down > 0 else "") + f" while {owed}.")
+            + (f" of the swarm's running time (it was down {_hours(down)} h more)" if down > 0 else "") + f" while {owed}."
+            if late else
+            (f"The last equity version was scored {_hours(idle)} h ago" if exact else
+             f"The equity lanes have owed work for {_hours(idle)} h and scored no version since") + f", while {owed}.")
     # What the lane's own record shows since it went idle, in words.
     said = [f"{tally['rounds']} Train rounds ran"]
     if tally["raised"]:
@@ -1379,8 +1544,10 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                     + (", ".join(f"{k} {n}" for k, n in _top(houses, 4)) or "kind not named") + ")")
     if tally["unanswered"]:
         said.append(f"{tally['unanswered']} questions got no answer from a model route")
-    if tally["refused"]:
-        said.append(f"{tally['refused']} programs were refused before a run (see elane_refused)")
+    if tally["no_program"]:  # no rule's refusal: the answer held no program at all (never `elane_refused`'s to tell)
+        said.append(f"{tally['no_program']} {LOST_WORDS['no_program']}")
+    if tally["refused"] - tally["no_program"]:
+        said.append(f"{tally['refused'] - tally['no_program']} programs were refused before a run (see elane_refused)")
     if tally["errors"]:
         said.append(f"{tally['errors']} steps failed with an error of their own")
     if waiting:
@@ -1392,14 +1559,15 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
         # STARVED BY A SETTING, not broken: E2 is held, or was inside these hours, and the record shows no failing
         # lane. The captain's chosen budget at work: judged CLEAR, never standing, never mailed; the cost is said,
         # and so is what the steps taken show that is under `BROKEN_MIN_FAILS` or no failure of the lane's (questions
-        # no route answered, programs a static rule refused).
+        # no route answered, programs a static rule refused). With program questions lost to a fault, too few to
+        # stand, it does not say "not broken": it says how many, and how many it takes.
         if spent and scored_today:
             head = [f"{spent} and {scored_today} equity versions were scored since 00:00 UTC: no stall. E2 asks again at "
                     "00:00 UTC."]
         else:
-            head = [lead, f"STARVED BY A SETTING, not broken: {hold}"]
-        parts = [*head, *(["Since the lanes went idle " + "; ".join(said) + "."] if shown else []), *lost,
-                 *([] if spent and scored_today else [NO_STALL]), *lever]
+            head = [lead, ("STARVED BY A SETTING: " if judged else "STARVED BY A SETTING, not broken: ") + hold]
+        parts = [*head, *(["Since the lanes went idle " + "; ".join(said) + "."] if shown else []),
+                 *([judged] if judged else []), *lost, *([] if spent and scored_today else [NO_STALL]), *lever]
         return {"stalled": False, "judged": True, "what": " ".join(parts),
                 "numbers": {**numbers, "kind": line, "starved": True}, "doing": DOING["starved"], "owner_step": None,
                 "onset": None, "keep": keep}
@@ -1411,18 +1579,31 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                       "refused" if tally["refused"] else "errors" if tally["errors"] else
                       "silent" if tally["rounds"] else "no_round")
     may = "E2 may ask a model now" if held is not None else "whether E2 may ask a model now could not be read"
+    record = asked["said"] if found == "answers" else "; ".join(said)
     pace: list[str] = []
-    if held_now:  # BROKEN by its record while E2 is also held: the line is said second, and is not the fault
-        why = "BROKEN, whatever E2's own lines hold: " + "; ".join(said) + "."
-        pace = [f"E2 is also held now: {binds}.", "That is its setting at work: a broken lane scores nothing at any pace."]
+    if kept_only:
+        # It stands on what the job kept: what it stood on has left the hours this check reads (or is under what
+        # stands by itself), and nothing since says the lane works: no version was scored.
+        numbers.update(standing_since=S.iso(stood), kept_standing=True)
+        why = (f"BROKEN, whatever E2's own lines hold: it stood at {S.iso(stood)} under the running release "
+               f"({BROKEN_WORDS[kind]}) and HOLDS until a version is scored or the release changes. Since then no version "
+               "was scored; in the hours this check reads " + "; ".join(said) + ".")
+    elif held_now:  # BROKEN by its record while E2 is also held: the line is said second, and is not the fault
+        why = f"BROKEN, whatever E2's own lines hold: {record}."
     elif kind == "barren":
         why = (f"Not starved ({may}): {tally['passes']} equity passes asked a model and bore no family, so there is none "
                "to score (see elane_births).")
     else:
-        why = f"BROKEN, not starved: {may} and " + "; ".join(said) + "."
+        why = f"BROKEN, not starved: {may} and {record}."
+    if held_now and broken is not None:
+        pace = [f"E2 is also held now: {binds}.",
+                "That is its setting at work: " + ("an answer with no program scores nothing at any pace."
+                                                   if kind == "answers" else "a broken lane scores nothing at any pace.")]
     numbers["kind"] = kind
     owner = None
-    if kind in IDLE_OWNER_KINDS:
+    if kind == "answers":
+        owner = _answers_step([row[0] for row in named or [] if isinstance(row, (list, tuple)) and row], way, routes)
+    elif kind in IDLE_OWNER_KINDS:
         owner = {"raised": "the equity lanes' rounds raise (the swarm log's \"elane failed\" and \"elane_train failed\" lines)",
                  "house": ("the equity lanes' Train runs fail on the House's side: check the equity_data job's receipt and the "
                            "swarm's equity-decider.log"),
@@ -1431,12 +1612,33 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                  "no_round": ("the equity lanes owe work, may ask a model and start no round (the swarm log's elane_train "
                               "lines)"),
                  }[kind] + f"; it needs a fix, in a release or on the box ({REPORT} prints each family's state)"
-    parts = [lead, why, *pace]
+    parts = [lead, why, *([asked["early"]] if found == "answers" and asked["early"] else []), *pace]
     return {
         "stalled": True, "judged": True, "what": " ".join(parts),
-        "numbers": numbers, "owner_step": owner, "onset": idle_from,
-        "doing": DOING["elane_births" if kind == "barren" else "broken"],
+        "numbers": numbers, "owner_step": owner, "onset": idle_from if late else now if stood is None else stood,
+        "doing": DOING["elane_births" if kind == "barren" else "answers" if kind == "answers" else "broken"],
         "mail": _lead(parts, WHAT_CHARS), "parts": parts, "keep": keep}
+
+
+def _answers_step(named: Sequence[Any], way: str, routes: Sequence[str]) -> str:
+    """THE OWNER'S STEP of a lane BROKEN BY ITS ANSWERS, whole inside the gateway's cut (`STEP_CHARS`): what is wrong
+    (`way`: most answers held no program, or most questions got no answer), the routes in closed words (`named`, the
+    most lost first, each held to the settings' own, `_route`: as many as fit, the step is never cut inside its
+    command), and the settings that are the owner's to change."""
+    head, tail = (
+        ("no model route answers the equity lanes' program questions",
+         ": check the routes at the model provider, or name routes that answer in elane.e2.routes (swarm.json; python3 "
+         "set_swarm.py elane.e2.<key>=<value> --apply); else it needs a fix, in a release") if way == "unanswered" else
+        ("the equity lanes pay for answers that hold no program",
+         ": raise elane.e2.train_max_output_tokens if they are cut short, or take a route out of elane.e2.routes "
+         "(swarm.json; python3 set_swarm.py elane.e2.<key>=<value> --apply); else it needs a fix, in a release"))
+    tail += f" ({REPORT} prints each family's state)"
+    said: list[str] = []
+    for name in dict.fromkeys(_route(name, routes) for name in named):
+        if len(head) + len(tail) + len(" ()") + len(", ".join([*said, name])) > STEP_CHARS:
+            break
+        said.append(name)
+    return _cut(head + (f" ({', '.join(said)})" if said else "") + tail, STEP_CHARS)
 
 
 def _sail_words(text: Any) -> str:
