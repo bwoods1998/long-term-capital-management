@@ -279,8 +279,8 @@ class TheEquityLane(unittest.TestCase):
         return ci.check_equity(self.root)
 
     def test_the_tree_and_the_swarm_lane_are_protected(self):
-        self.assertEqual(ci.PENDING_GATEWAY, ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py"))
-        for entry in ci.PENDING_GATEWAY:
+        self.assertEqual(ci.PENDING_GATEWAY, (), "the gateway's merge list holds them since its follow-up")
+        for entry in ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py"):
             self.assertIn(entry, ci.FORBIDDEN)
         for path in ("league/equity/sizing.py", "league/equity/live.py", "league/equity/INTERFACES.md",
                      "League/Equity/bands.py", "league/swarm/elane.py", "league/xs/child.py", "league/xs/__init__.py",

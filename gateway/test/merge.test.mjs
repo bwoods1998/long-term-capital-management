@@ -64,7 +64,9 @@ test('what the Gym bundle, the evaluator fingerprint and the decider\'s sealed r
     'league/swarm/harness_lanes.py LEAGUE_FILES': pyTuple(repoText('league/swarm/harness_lanes.py'), /\nLEAGUE_FILES = \(([\s\S]*?)\)/),
     'league/practice_runner.py RUNTIME_FILES': pyTuple(repoText('league/practice_runner.py'), /\nRUNTIME_FILES = \(([\s\S]*?)\n\)/),
     'league/practice_runner.py EXTRA_EVALUATOR_FILES': pyTuple(repoText('league/practice_runner.py'), /\nEXTRA_EVALUATOR_FILES = \(([\s\S]*?)\)/),
-    'league/live/decider.py runtime files': pyTuple(repoText('league/live/decider.py'), /\n\s+files = \(("league\/__init__\.py"[\s\S]*?)\)/),
+    'league/live/decider.py RUNTIME_FILES': pyTuple(repoText('league/live/decider.py'), /\nRUNTIME_FILES = \(([\s\S]*?)\)/),
+    // Release E1: every decider kind's runtime (league/equity/kinds.py RUNTIME: entries ending in "/" are trees).
+    'league/equity/kinds.py RUNTIME': pyTuple(repoText('league/equity/kinds.py'), /\nRUNTIME: tuple\[str, \.\.\.\] = \(([\s\S]*?)\)/),
   };
   for (const [source, files] of Object.entries(sources)) {
     assert.ok(files.length >= 4, `${source}: read ${files.length}`);

@@ -154,6 +154,12 @@ FORBIDDEN: tuple[str, ...] = (
     "league/swarm/dlane.py", "league/swarm/dlane_map.json",
     # How the House is deployed and the House itself (its tick calls the updater).
     "scripts/floor_box.py", "league/house.py", "CHANGELOG.md",
+    # THE EQUITY LANE (release E1, Oct 2026): its tree (the engine, the sizing, the bands, the screen and the book that
+    # trade real money, its evidence modules their own identity) and its swarm lane (births, the look, the roster):
+    # judges and money movers like the options lane's; and what the decider child's sealed runtime carries beside
+    # league/equity/ since E1 (league/equity/kinds.py `RUNTIME`): league/xs/ (the panel kind's slot, A13) and
+    # ltcm/broker.py (`ltcm.data`, the engine's NYSE calendar, imports it).
+    "league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py",
 )
 #: THE EQUITY LANE (release E1, Oct 2026): its tree (the engine, the sizing, the bands, the screen and the book that
 #: trade real money, its evidence modules their own identity) and its swarm lane (births, the look, the roster) are
@@ -165,7 +171,7 @@ FORBIDDEN: tuple[str, ...] = (
 #: MERGE_FORBIDDEN, which gateway/test/merge.test.mjs holds to that list as written) cannot change in E1: gateway/ ships
 #: separately. A gateway follow-up adds them to MERGE_FORBIDDEN and moves them into the list above, leaving this
 #: empty; until then league/tests/test_ci.py allows exactly these in `FORBIDDEN` beyond the gateway's list.
-PENDING_GATEWAY: tuple[str, ...] = ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py")
+PENDING_GATEWAY: tuple[str, ...] = ()
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

@@ -38,6 +38,11 @@ export const MERGE_FORBIDDEN = Object.freeze([
   // the store of the swarm; the data layer and its builders.
   'league/gym/', 'league/swarm/gate.py', 'league/swarm/bands.py', 'league/swarm/evaluator.py',
   'league/swarm/settings.py', 'league/swarm/store.py', 'ltcm/data/', 'scripts/data/',
+  // The equity lane (release E1, Oct 2026): its tree (its evidence identity, the EquityBook and the decider's "equity"
+  // kind, which league/live reaches through league/live/equity_hook.py and league/live/decider.py), the swarm's lane
+  // module, the panel kind's slot (league/xs/, in the decider child's sealed runtime beside league/equity/), and
+  // ltcm/broker.py (ltcm.data imports it; the same runtime carries both).
+  'league/equity/', 'league/swarm/elane.py', 'league/xs/', 'ltcm/broker.py',
   // What league/live/ and league/gym/ import from outside their trees, and what is sealed into the Gym bundle and the
   // decider's runtime with them: the packages' own __init__ files run first in every House process and in the sandbox;
   // structure_core classifies, limits and prices every real order; ltcm.performance names the owner's flows the stops
