@@ -54,6 +54,10 @@ integrator:
   test_elane_e2_e1: A15 on E1's real runner, ctx builder and decider), test_researcher, test_dlane*, test_ci,
   test_elane, test_elane_gate, test_equity_e2e, test_swarm_loop, test_loop_joints, test_ops_stall and
   test_swarm_settings_policy pass.
+- E1 MOVED WHILE A15 WAS FINISHED (3430b3b8, its A13: the evidence identity and the panel slot): patch 7's hunks in
+  `league/ci.py` and `league/tests/test_ci.py` no longer apply there (E1 edited the same lines) and must be
+  regenerated; the other eight diffs apply, and on that tree test_elane_e2_* (with test_elane_e2_e1),
+  test_researcher, test_equity_identity, test_equity_decider and test_swarm_loop pass. Nothing A15 reads changed.
 
 ## Patch 5 in words
 
