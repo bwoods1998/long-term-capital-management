@@ -1,0 +1,302 @@
+"""Release E2 as it ships on E1 (league/swarm/ELANE_E2.md, "The switch"): THE SHIPPED SWITCHES and what they keep still.
+
+- policy.json ships `elane.mode` "off" and `elane.birth_share` 0, and its `elane.e2` block is the code's defaults, key
+  for key; the settings layers (league/swarm/settings.py: DEFAULTS < policy.json < swarm.json) take the captain's keys
+  (`elane.birth_share`, `elane.e2.usd_day`, any other `elane.e2` key) from swarm.json, one key at a time, and the code
+  holds each inside its bound.
+- THE LOOP (league/swarm/loop.py `Swarm.step`, E1's real store and settings, no fake of the switch): with `elane.mode`
+  "off", or with `elane.birth_share` 0, neither of E2's rounds starts and E2 writes no key, makes no event and asks no
+  model. The one thing a zero `birth_share` leaves running is stated and tested: families the equity pass ALREADY bore
+  finish their Train research (inside `elane.e2.usd_day`; zero there asks no model).
+- THE THREE IDENTITIES: nothing E2 ships is hashed into the equity evidence identity (A13) or the options execution
+  fingerprint, and the money rules do not read it.
+- THE SCREEN'S NAME (A11): the text every equity generator and reviewer reads names the screen policy.json pins.
+
+Every family and number here is invented."""
+
+from __future__ import annotations
+
+import json
+import math
+import re
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from league.swarm import elane, elane_births, elane_review, elane_seal, elane_train, elane_yield
+from league.swarm import settings as S
+from league.tests import REAL_POLICY_PATH
+from league.tests import elane_e2_fakes as fx
+from league.tests.test_swarm_loop import LoopCase
+
+REPO = Path(__file__).resolve().parents[2]
+E2_MODULES = (elane_births, elane_train, elane_review, elane_yield)
+E2_FILES = tuple(f"league/swarm/elane_{name}.py" for name in ("births", "train", "yield", "seal", "review"))
+#: E2's own footprints in the store's kv: its two rounds' clocks, the last pass, the Train liveness mark, the ledger.
+E2_KEYS = (elane_births.BIRTHS_AT_KEY, elane_births.LAST_KEY, elane_train.TRAIN_AT_KEY, elane_train.TRAIN_OK_KEY,
+           elane_yield.LEDGER_KEY)
+
+
+def policy() -> dict:
+    """The committed policy.json (the league's other tests read an empty layer in its place: league/tests/__init__.py)."""
+    return json.loads(Path(REAL_POLICY_PATH).read_text(encoding="utf-8"))
+
+
+def shipped() -> dict:
+    """The settings as the layers give them with no swarm.json: DEFAULTS under the committed policy.json."""
+    return S.load(config={}, policy=policy())
+
+
+def with_elane(**block) -> dict:
+    """`shipped` with `elane` keys laid over as the box's swarm.json lays them (the deep merge `settings.load` does)."""
+    return S._merge(shipped(), {"elane": block})
+
+
+class Shipped(unittest.TestCase):
+    def test_policy_ships_the_lanes_off_no_births_and_the_codes_defaults(self):
+        block = policy()["elane"]
+        self.assertEqual(block["mode"], "off")
+        self.assertEqual(block["birth_share"], 0)
+        code: dict = {}
+        for module in E2_MODULES:
+            for key, value in module.DEFAULTS.items():
+                self.assertNotIn(key, code, f"{key}: two E2 modules hold a default for it")
+                code[key] = value
+        self.assertEqual(block["e2"], code, "policy.json's elane.e2 block is the code's defaults, key for key")
+        loaded = shipped()
+        self.assertEqual(loaded["_policy"]["state"], "ok", loaded["_policy"])
+        self.assertFalse(elane.on(loaded))
+        self.assertFalse(elane_train.lane_on(loaded))
+        self.assertFalse(elane_births.births_on(loaded))
+        self.assertEqual(elane_births.birth_share(loaded), 0.0)
+
+    def test_the_settings_take_the_captains_keys_one_at_a_time(self):
+        # What the captain sets at the first switch-on (amendment A16): the lanes' share of births and E2's day line.
+        s = with_elane(mode="gate", birth_share=0.25, e2={"usd_day": 8.0})
+        self.assertEqual(S.policy_shape(policy()), [], "the nested e2 object breaks no shape of the defaults")
+        self.assertTrue(elane_births.births_on(s))
+        self.assertEqual(elane.cfg(s)["birth_share"], 0.25)
+        self.assertEqual(elane_yield.cfg(s)["usd_day"], 8.0)
+        # One key of the block moved; every other key is still policy.json's (the layers merge deep).
+        block = policy()["elane"]["e2"]
+        self.assertEqual({k: v for k, v in s["elane"]["e2"].items() if k != "usd_day"},
+                         {k: v for k, v in block.items() if k != "usd_day"})
+        self.assertEqual(s["elane"]["screens"], policy()["elane"]["screens"], "the pinned screens are not the switch's")
+        half = with_elane(mode="gate", birth_share=0.25, e2={"usd_day": 3.5, "max_alive": 12})
+        self.assertEqual(elane_yield.cfg(half)["usd_day"], 3.5)
+        self.assertEqual(elane_births.cfg(half)["max_alive"], 12)
+        self.assertEqual(elane_births.cfg(half)["max_per_pass"], block["max_per_pass"])
+
+    def test_every_key_is_held_inside_its_bound(self):
+        # `elane.birth_share` is E1's (`elane.cfg`): held to [0, 0.5], and anything that is no number is zero.
+        for raw, want in ((0.25, 0.25), (0.5, 0.5), (0.9, 0.5), (5, 0.5), (-0.1, 0.0), ("0.25", 0.0), (True, 0.0),
+                          (None, 0.0), (math.nan, 0.0), (math.inf, 0.0), ([0.25], 0.0)):
+            s = with_elane(mode="gate", birth_share=raw)
+            self.assertEqual(elane_births.birth_share(s), want, raw)
+            self.assertEqual(elane_births.births_on(s), want > 0, raw)
+        # `elane.e2.usd_day`: 0 (no model is asked) to 100 dollars a UTC day; anything else is the default.
+        default = elane_yield.DEFAULTS["usd_day"]
+        for raw, want in ((8.0, 8.0), (0, 0.0), (0.0, 0.0), (100, 100.0), (100.01, default), (-1, default),
+                          ("8", default), (True, default), (None, default), (math.nan, default), (math.inf, default)):
+            self.assertEqual(elane_yield.cfg(with_elane(e2={"usd_day": raw}))["usd_day"], want, raw)
+        # Every numeric key of the block: a value outside its bound, or no number, is the code's default.
+        for module in E2_MODULES:
+            self.assertTrue(module.BOUNDS)
+            for key, (low, high) in module.BOUNDS.items():
+                self.assertIn(key, module.DEFAULTS)
+                self.assertTrue(low <= module.DEFAULTS[key] <= high, key)
+                for raw in (low - 1, high + 1, "x", True, None, math.nan):
+                    got = module.cfg(with_elane(e2={key: raw}))[key]
+                    self.assertEqual(got, module.DEFAULTS[key], (module.__name__, key, raw))
+                for raw in (low, high):
+                    self.assertEqual(module.cfg(with_elane(e2={key: raw}))[key], raw, (module.__name__, key, raw))
+        # A block that is no object at all is the defaults, and the lanes' own switch still reads.
+        for raw in ("x", 5, None, [1]):
+            s = with_elane(mode="gate", birth_share=0.25, e2=raw)
+            for module in E2_MODULES:
+                self.assertEqual(module.cfg(s), module.cfg({}), (module.__name__, raw))
+            self.assertTrue(elane_births.births_on(s))
+
+
+class TheIdentities(unittest.TestCase):
+    """E2 moves none of the three ids (the equity evidence identity, the options execution fingerprint, the money
+    digest): it adds no file to what any of them hashes and none of those files reads it."""
+
+    def hashed(self) -> dict[str, list[Path]]:
+        from league.gym.driver import LEAGUE_FILES
+        from league.swarm import evaluator
+
+        equity = [REPO / name for name in (*LEAGUE_FILES, *evaluator.EQUITY_GYM_FILES)]
+        equity += [REPO / "league" / "equity" / f"{name}.py" for name in evaluator.EQUITY_EVIDENCE]
+        options = [REPO / name for name in LEAGUE_FILES]
+        for tree in ("gym", "live"):
+            options += sorted((REPO / "league" / tree).rglob("*.py"))
+        return {"equity": equity, "options": options, "money": [REPO / "league" / "constitution.py"]}
+
+    def test_no_e2_file_is_in_an_identity_and_no_identity_file_reads_e2(self):
+        from league.swarm import evaluator
+
+        self.assertEqual(evaluator.EQUITY_EVIDENCE, ("__init__", "config", "store", "program", "ctx", "engine", "results",
+                                                     "runner", "synth", "sizing", "screen", "child"),
+                         "A13's list: release E2 adds nothing to the equity evidence")
+        self.assertFalse([name for name in evaluator.EQUITY_EVIDENCE if "elane" in name])
+        names = re.compile(r"\belane_(births|train|yield|seal|review)\b")
+        for identity, files in self.hashed().items():
+            self.assertTrue(files, identity)
+            for path in files:
+                rel = path.relative_to(REPO).as_posix()
+                self.assertNotIn(rel, E2_FILES, identity)
+                self.assertFalse(rel.startswith("league/swarm/"), (identity, rel))
+                self.assertIsNone(names.search(path.read_text(encoding="utf-8")), (identity, rel))
+        # Nor does any other file of the equity tree or of the live path's hook into it (plumbing outside A13's list).
+        for path in sorted((REPO / "league" / "equity").rglob("*.py")) + sorted((REPO / "league" / "xs").rglob("*.py")):
+            self.assertIsNone(names.search(path.read_text(encoding="utf-8")), path.relative_to(REPO).as_posix())
+
+    def test_the_money_rules_hold_no_e2_setting(self):
+        from league import constitution
+
+        text = json.dumps(constitution.CONSTITUTION, sort_keys=True)
+        for word in ("birth_share", "usd_day", "e2", "elane"):
+            self.assertNotIn(f'"{word}"', text, "the constitution (so the money digest) knows nothing of E2's switches")
+
+    def test_the_five_modules_are_protected(self):
+        from league import ci
+
+        for rel in E2_FILES:
+            self.assertTrue((REPO / rel).is_file(), rel)
+            self.assertIn(rel, ci.FORBIDDEN)
+            self.assertTrue(ci.guard([rel], None), rel)
+            for role in ci.ROLE_PATHS:
+                self.assertTrue(ci.guard([rel], role), (rel, role))
+
+
+class TheScreensName(unittest.TestCase):
+    """Amendment A11: the share screen is S2. Whatever a generator or a reviewer is told of the screen names the one
+    policy.json pins, and tells no outcome and no threshold."""
+
+    def texts(self) -> dict[str, str]:
+        on = with_elane(mode="gate", birth_share=0.25)
+        return {"the architect's system text": elane_births.SYSTEM, "the lanes block": elane_births.lanes_text(on),
+                "the agenda": elane_births.agenda_text(), "the bar": elane_train.bar_text(),
+                "the researcher's system text": elane_train.RESEARCHER_SYSTEM, "the review's rubric": elane_review.REVIEW,
+                "the Train map's label": elane_train.MAP_LABEL}
+
+    def test_the_architect_is_told_the_pinned_screen(self):
+        pinned = {elane.screen_name(lane, policy=policy()) for lane in elane.LANES}
+        self.assertEqual(pinned, {"S2"}, "policy.json pins S2 for both lanes (A11)")
+        self.assertIn("by the share screen S2,", " ".join(elane_births.SYSTEM.split()))
+        for where, text in self.texts().items():
+            self.assertTrue(text, where)
+            self.assertIsNone(re.search(r"\bS1\b", text), f"{where} still names S1")
+            for name in re.findall(r"\bshare screen (S\d)\b", " ".join(text.split())):
+                self.assertIn(name, pinned, where)
+
+    def test_the_text_tells_no_threshold_of_the_screen(self):
+        # The receipt's figures are the operator's: no generator text carries one (the seal is about outcomes; a
+        # threshold in a prompt would be a target to fit).
+        block = policy()["elane"]["screens"]
+        figures = {str(block[lane][key]) for lane in block for key in ("c_H_floor", "c_H_margin", "c_X", "fp_cap", "owner_wall")}
+        figures.discard("0.0")
+        for where, text in self.texts().items():
+            for figure in figures:
+                self.assertIsNone(re.search(rf"(?<![\d.]){re.escape(figure)}(?![\d])", text), (where, figure))
+            for word in ("c_H", "c_R", "c_X", "fp_cap", "t_H"):
+                self.assertNotIn(word, text, where)
+
+
+class TheLoop(LoopCase):
+    """E1's real loop, store, settings layers and switch, on the committed policy.json under a swarm.json; the rounds
+    a pass would start are recorded, not run."""
+
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.object(S, "POLICY_PATH", REAL_POLICY_PATH)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def asked(self) -> list[dict]:
+        """The model requests that carry a text of E2's (its two system prompts and its review's rubric)."""
+        marks = ("EQUITY LANES", "long-only ETF programs")
+        return [b for b in self.sail.bodies if any(m in json.dumps(b, default=str) for m in marks)]
+
+    def started(self, block: dict | None, *, passes: int = 2) -> tuple[list[str], object]:
+        doc = {"enabled": True, "gym": self.settings["gym"], "researcher": {"idle_seconds": 0}}
+        if block is not None:
+            doc["elane"] = block
+        (self.root / "swarm.json").write_text(json.dumps(doc))
+        sw = self.swarm()
+        names: list[str] = []
+        sw._round = lambda name, fn: names.append(name)
+        for _ in range(passes):
+            sw.step()
+        self.assertTrue(sw.gym_ready(), "the rounds' own precondition holds, so a round not started was held by the switch")
+        self.assertTrue(self.guard.allows("research"))
+        return names, sw
+
+    def footprints(self) -> dict:
+        events = self.store._all("SELECT COUNT(*) AS n FROM events WHERE kind='swarm.elane'")[0]["n"]
+        return {"keys": {k: self.store.get(k) for k in E2_KEYS if self.store.get(k) is not None}, "events": events}
+
+    def e2_families(self) -> list[str]:
+        return [str(f["id"]) for f in elane_seal.equity_families(self.store) if elane_train.e2_family(f)]
+
+    def assert_still(self, names: list[str], sw) -> None:
+        self.assertNotIn("elane", names)
+        self.assertNotIn("elane_train", names)
+        self.assertFalse(sw.architect.equity_due())
+        self.assertFalse(sw.elane_train.due())
+        self.assertEqual(self.footprints(), {"keys": {}, "events": 0})
+        self.assertEqual(self.asked(), [], "no model was asked")
+
+    def test_as_shipped_nothing_of_e2_acts(self):
+        names, sw = self.started(None)
+        self.assertEqual(elane.cfg(sw.settings)["mode"], "off")
+        self.assert_still(names, sw)
+        self.assertEqual(elane_seal.equity_families(self.store), [], "nor are E1's seeds born while the lanes are off")
+
+    def test_the_lanes_off_nothing_of_e2_acts_whatever_the_share(self):
+        # Even with a share set and families the equity pass bore earlier still on record: `elane.mode` "off" stops all.
+        fx.e2_family(self.store, "e2-earlier", code=fx.program())
+        names, sw = self.started({"mode": "off", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        self.assert_still(names, sw)
+        self.assertEqual(elane_train.record_of(self.store.family("e2-earlier"))["versions"], {}, "nothing was scored")
+
+    def test_no_share_nothing_of_e2_acts_while_e1_runs(self):
+        # E1 switched on (the captain's first step), E2's births not yet: the seeds are born, E2 does nothing.
+        names, sw = self.started({"mode": "gate", "birth_share": 0.0})
+        self.assertTrue(elane.on(sw.settings))
+        self.assertEqual(len(elane_seal.equity_families(self.store)), 3, "E1's three seeds, born by the same pass")
+        self.assertEqual(self.e2_families(), [])
+        self.assert_still(names, sw)
+        # The same with the key absent (policy.json's zero), a share that is no number, and one below zero.
+        for block in ({"mode": "gate"}, {"mode": "gate", "birth_share": "0.25"}, {"mode": "gate", "birth_share": -1}):
+            names, sw = self.started(block)
+            self.assert_still(names, sw)
+
+    def test_the_share_set_back_to_zero_stops_the_births_and_lets_the_born_finish(self):
+        # Stated in ELANE_E2.md and docs/operations.md: a zero share stops BIRTHS at once; the families already born
+        # finish their Train research, and `elane.e2.usd_day` 0 keeps that from asking a model.
+        fx.e2_family(self.store, "e2-born")
+        names, sw = self.started({"mode": "gate", "birth_share": 0.0, "e2": {"usd_day": 0.0}})
+        self.assertNotIn("elane", names, "no equity pass: no birth")
+        self.assertFalse(sw.architect.equity_due())
+        self.assertIn("elane_train", names, "the family already born still has its Train round")
+        out = sw.elane_train.run()
+        self.assertEqual([s.get("skipped") for s in out["steps"]],
+                         ["E2's model dollars for the day are spent (elane.e2.usd_day)"])
+        self.assertEqual(self.asked(), [], "with the day line at zero no model is asked")
+        self.assertEqual(self.e2_families(), ["e2-born"])
+
+    def test_the_switch_on_starts_both_rounds(self):
+        # The positive control: the recorder sees E2's rounds once the captain's two keys are set.
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        self.assertIn("elane", names)
+        self.assertNotIn("elane_train", names, "no family of E2's yet: no Train round")
+        fx.e2_family(self.store, "e2-first")
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        self.assertIn("elane", names)
+        self.assertIn("elane_train", names)
+
+
+if __name__ == "__main__":
+    unittest.main()

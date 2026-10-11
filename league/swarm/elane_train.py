@@ -96,7 +96,10 @@ before it is stored (`league.gym.safety.check_program`; NEEDS a literal dict who
 level rule), and its PARAMS are its declaration's (a version's params are {}). A `stop` answer before any version was
 judged on the bar is not accepted (it counts as an attempt).
 
-With `elane.mode` "off" nothing here acts. Standard library only.
+With `elane.mode` "off" nothing here acts; nor does anything while no family of E2's exists (`EquityResearcher.due`:
+the births were never on), so `elane.birth_share` zero from the start keeps this module silent too. Once families were
+born, `elane.birth_share` zero stops the births only: the families already born finish their Train research inside
+`elane.e2.usd_day` (zero there asks no model). Standard library only.
 """
 
 from __future__ import annotations
@@ -1114,11 +1117,26 @@ class EquityResearcher:
         return self._runner
 
     def due(self) -> bool:
-        """The lane is on and `train_every_seconds` passed since the last round."""
+        """The lane is on, `train_every_seconds` passed since the last round, and a family of E2's has a round to be
+        given (`idle`). So while `elane.birth_share` has been zero since the start (no equity pass ever bore a family)
+        no round runs, no key is written and no event is made: with the births off E2 does nothing at all."""
         if not lane_on(self.settings):
             return False
         last = _num(self.store.get(TRAIN_AT_KEY)) or 0.0
-        return self.clock() - last >= cfg(self.settings)["train_every_seconds"]
+        if self.clock() - last < cfg(self.settings)["train_every_seconds"]:
+            return False
+        try:
+            return not self.idle()
+        except Exception:  # noqa: BLE001 - a store that cannot be read gives no round
+            return False
+
+    def idle(self) -> bool:
+        """No family of E2's needs a round: none is alive, and none was retired elsewhere with its record still saying
+        it researches (`close_retired`'s work). The captain's seeds are never E2's."""
+        for fam in elane_seal.equity_families(self.store):
+            if e2_family(fam) and (not fam.get("retired_at") or record_of(fam).get("status", "researching") == "researching"):
+                return False
+        return True
 
     def waiting(self, rec: Mapping[str, Any]) -> bool:
         """Whether a family waits out a backoff after a failure of the House's (`infra.next_at`)."""
