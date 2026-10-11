@@ -1186,9 +1186,10 @@ average or range of prices, a lot's entry or mark, a share volume, or the log of
 PARAMS value (compared with, offset by, bucketed by or clipped at one); a ratio of two levels of the SAME symbol is fine
 (a ratio of two different symbols' prices against a constant is not). It also refuses RUN-START DEPENDENCE: every judged
 run starts flat with the same capital (ctx.budget), so never hold ctx.equity, ctx.cash, ctx.budget, ctx.caps or a lot's
-value or pnl against a constant or a PARAMS value, and never the sleeve's dollars against ctx.budget or ctx.caps (no
-profit lock, no sleeve-wide stop, no size that changes once the run is ahead or behind): size by a share of the sleeve,
-check a sign (a lot's pnl below zero) and exit on a lot's own return (mark over entry). THE REVIEW (two
+value, pnl or qty against a constant or a PARAMS value, never the sleeve's dollars against ctx.budget, ctx.caps or what
+a lot cost (its qty times a price, its value less its pnl), and never write them into a lot's tag (no profit lock, no
+sleeve-wide stop, no size that changes once the run is ahead or behind, whatever its spelling): size by a share of the
+sleeve, check a sign (a lot's pnl below zero) and exit on a lot's own return (mark over entry). THE REVIEW (two
 other models) refuses absolute levels, a calendar reconstructed by counting sessions in STATE, tables of dates or levels,
 run-start dependence and lookahead. THE STATE RULE (part of the bar): the House's decider restarts on every deploy and a restart empties STATE,
 so the bar runs your program again with STATE emptied every 20 sessions and fails it (STATE) unless its intents match the

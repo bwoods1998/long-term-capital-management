@@ -21,8 +21,8 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    constant written as arithmetic or as text, comprehensions, `zip` taken apart in a loop, and what the program puts
    into a container of its own and reads back in the same function: `closes[s] = c[-1]`, `xs.append(px)`,
    `STATE["px"] = px`, each string key of a dict kept apart so a counter beside a price stays a counter); what it
-   cannot follow (a tuple or a dict stored whole, a container read in another function, a level's digits, an unknown
-   call) is left to the paid review, never refused on a guess.
+   cannot follow (a tuple or a dict stored whole, a container read in another function, a level's digits, a level
+   through a call it does not know) is left to the paid review, never refused on a guess.
    It runs in `elane_train.check_code`, so such a program is never stored or run: the researcher hears why.
 1b. RUN-START DEPENDENCE, in the same pass (the integration review's seal-1). Every judged run starts flat: each
    Train span, Validation and the look, with `ctx.budget` the run's constant capital while `ctx.equity` moves. A
@@ -38,6 +38,38 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    Allowed: sizing proportional to them (`"usd": 0.5 * ctx.equity`, `min(ctx.cash, ctx.caps[s])`), a sign or zero
    check (`lot["pnl"] < 0`, `ctx.caps[s] <= 0`), and the position's own state among the sleeve's dollars now
    (`ctx.cash / ctx.equity`, a lot's `value` over `ctx.equity`, `pnl` over `value`).
+1d. THE RUN'S CAPITAL FROM A LOT, in the same pass (the verification's seal-1 residual). The anchor need not come from
+   ctx. The House sizes an entry as the asked share of the run's capital, so WHAT A LOT COST is that capital times a
+   share the program chose itself. A program with no memory at all rebuilt it from its own lots (a lot's `qty` times
+   its `entry` or `exit`, its `value` less its `pnl`, `exit` times `qty` less `net`), held `ctx.cash` or `ctx.equity`
+   against it and was the profit lock again: lot for lot the same trades on synthetic stores, and the restart check
+   passed it, for it keeps nothing in STATE. So a lot's `qty` and what a lot cost ARE the run's anchor. Refused: the
+   sleeve's dollars now (`ctx.equity`, `ctx.cash`) held against them in any way, as against `ctx.budget`; and they
+   against a constant or a PARAMS value, as every dollar of the run is. The pass follows the spellings: a number of
+   shares times a price is dollars and dollars over a price a number of shares (`ctx.cash / px` against a lot's
+   `qty`); a lot's own dollars now times or over anything but a constant read as what the lot cost from there on (its
+   `value` over its `mark` is its qty, its `value` over its own return what it cost); the run's dollars stay the run's
+   dollars through a product of two of them, a reciprocal, an exponent, their text (`float(str(ctx.equity))`, an
+   f-string) and a call the pass does not know (`math.copysign(ctx.equity, 1)`). And THE RUN'S DOLLARS WRITTEN INTO
+   AN INTENT'S "tag" are refused: the House keeps a lot's tag across a restart, so the first equity a run saw,
+   carried from lot to lot, is the lock's memory where the restart check cannot see it (same trades as the lock on
+   synthetic stores; the check matched every session).
+   Allowed: A LOT'S OWN RETURN however it is written (`mark / entry`, `pnl / value`, `pnl / (qty * entry)`,
+   `pnl / (value - pnl)`: a lot's own dollars against what a lot cost hold nothing of the sleeve's), a lot's average
+   entry (`sum(qty * entry) / sum(qty)`: a price), a sign check, a count of sessions held, a size from the sleeve
+   or from `ctx.budget`.
+   THE COST, stated: an honest program that writes a lot's weight through its qty (`qty * price / ctx.equity`) or
+   scales a lot's value by a ratio before setting it against the sleeve (`value * (1 - stop / mark) / ctx.equity`)
+   is refused with this reason, and must write the weight as `lot["value"] / ctx.equity` (allowed, below).
+   WHAT THIS RULE CANNOT SEE, AND THE PAID REVIEW MUST (`REVIEW`, "RUN-START DEPENDENCE"; ELANE_E2.md says it too).
+   (a) The position's own state used as the anchor. A lot's weight in the sleeve (`lot["value"] / ctx.equity`) and
+   the sleeve's cash share (`ctx.cash / ctx.equity`) are allowed against a constant, and a weight is the asked share
+   times the lot's own return times budget over equity: set against that return, or read in the lot's entry session,
+   it is the run's profit, and nothing static tells it from an honest weight cap. A program built on it trades as
+   the lock does and passes this rule and the restart check. (b) What the pass cannot follow: a function reached
+   through an expression, a tuple or a dict stored whole, a container read in another function, a lot's tag read
+   back as a number, a call the pass does not know on a value that is not the run's dollars. (c) Memory in STATE:
+   the first equity a run saw, kept there, passes this rule; the Train bar's restart check judges it.
 1c. THE MEMORY RULE (`memory_refusals`; static, free; the integration review's seal-5). The swarm's one decider child
    runs every equity program and run in ONE interpreter (Train runs, the restart check, Validation, the sealed look),
    and the Gym's code rules (league/gym/safety.py) refuse attribute assignment but not a change to an object that
@@ -138,9 +170,10 @@ _M, _B, _X, _K = "M", "B", "X", "K"
 #: `_VALUE` and `_PNL`, a lot's value, and its pnl or a closed lot's net, went in. With B: `_CTX`, ctx.budget or
 #: ctx.caps went in (without it the anchor is THE CAPITAL A LOT WAS BOUGHT WITH: its qty, its qty times a price, its
 #: value less its pnl). With either: `_SHARES`, the dollars were divided by a price (a number of shares: a lot's qty,
-#: cash over a price), so dollars over them are a price again.
-_SLEEVE, _CTX, _VALUE, _PNL, _SHARES = "$S", "$A", "$v", "$p", "$q"
-_RIDERS = frozenset({_SLEEVE, _CTX, _VALUE, _PNL, _SHARES})
+#: cash over a price), so dollars over them are a price again; `_INV`, the dollars are written as a reciprocal
+#: (`1 / ctx.equity`), so a product with them is a ratio.
+_SLEEVE, _CTX, _VALUE, _PNL, _SHARES, _INV = "$S", "$A", "$v", "$p", "$q", "$i"
+_RIDERS = frozenset({_SLEEVE, _CTX, _VALUE, _PNL, _SHARES, _INV})
 #: A lot's dollar fields as the pass reads them (`_Levels._field`).
 _LOT_DOLLARS: dict[str, frozenset[str]] = {
     "value": frozenset({_M, _VALUE}), "pnl": frozenset({_M, _PNL}), "net": frozenset({_M, _PNL}),
@@ -187,11 +220,11 @@ def _norm(tags: Iterable[str]) -> frozenset[str]:
     if _M in t and _B in t:
         if t & {_SLEEVE, _CTX}:
             return frozenset({_X})
-        return frozenset({_B}) | (t & {_SHARES})  # a lot's dollars now with what it cost: the lot's own dollars still
+        return frozenset({_B}) | (t & {_SHARES, _INV})  # a lot's dollars now with what it cost: the lot's own still
     if _M in t:
-        return frozenset({_M}) | (t & {_SLEEVE, _VALUE, _PNL, _SHARES})
+        return frozenset({_M}) | (t & {_SLEEVE, _VALUE, _PNL, _SHARES, _INV})
     if _B in t:
-        return frozenset({_B}) | (t & {_CTX, _SHARES})
+        return frozenset({_B}) | (t & {_CTX, _SHARES, _INV})
     for mark in (_U, _C):
         if mark in t:
             return frozenset({mark})
@@ -218,8 +251,8 @@ def _const(t: frozenset[str]) -> bool:
 def _meets(a: frozenset[str], b: frozenset[str]) -> bool:
     """The sleeve's dollars now on one side and the run's anchor on the other (or a value that already holds both). The
     anchor is ctx's (`ctx.budget`, `ctx.caps`) or the capital a lot was bought with (its qty, its qty times a price, its
-    value less its pnl). ONE PAIR IS NO MEETING: a lot's own dollars now (its value, pnl or net, nothing of the sleeve's)
-    against what a lot cost, which is the lot's own return written in dollars (`lot["pnl"] / (lot["qty"] *
+    value less its pnl). ONE PAIR IS NO MEETING: a lot's own dollars now (its value, pnl or net, nothing of the
+    sleeve's) against what a lot cost, which is the lot's own return written in dollars (`lot["pnl"] / (lot["qty"] *
     lot["entry"])`)."""
     both = a | b
     if not (_money(a) and _money(b)):
@@ -246,7 +279,7 @@ def _scaled(m: frozenset[str], by: frozenset[str]) -> frozenset[str]:
     lot was bought with from there on."""
     if _const(by) or not _lots_own(m):
         return m
-    return frozenset({_B}) | (m & {_SHARES})
+    return frozenset({_B}) | (m & {_SHARES, _INV})
 
 
 def _cross(a: frozenset[str], b: frozenset[str]) -> bool:
@@ -651,7 +684,7 @@ class _Levels:
             return frozenset({_LOTS if isinstance(slice_, ast.Slice) else _LOT})
         if key in LOT_FIELDS:
             return frozenset({_L})
-        if key in _LOT_DOLLARS and _U in base:  # a lot handed around (a helper's argument): never the program's own dict
+        if key in _LOT_DOLLARS and _U in base:  # a lot handed around (a helper's argument): never the program's own
             return _LOT_DOLLARS[key]
         return _norm(base) if base else _NONE
 
@@ -961,6 +994,20 @@ class _Levels:
             return _norm(t for u in units if _money(u) for t in _dollars(u))
         return frozenset({_U})
 
+    def _ratio(self, node: ast.AST, a: frozenset[str], b: frozenset[str], verb: str,
+               met: frozenset[str]) -> frozenset[str]:
+        """The run's dollars `a` TIMES the run's dollars `b` (a division hands `b` in inverted). The sleeve's dollars
+        now with the run's anchor are refused whichever way they are written (`met` is what the caller reads on).
+        One of the two inverted, they are a ratio: of no unit (cash over equity, a lot's pnl over what it cost: the
+        position's own state), or a price when one side is a number of shares (a lot's cost over its qty). Neither or
+        both inverted, dollars times dollars: the run's dollars still, never a value of no unit."""
+        if _meets(a, b):
+            self._refuse(node, f"{verb} {ANCHORED}")
+            return met
+        if (_INV in a) != (_INV in b):
+            return frozenset({_L}) if (_SHARES in a) != (_SHARES in b) else _NONE
+        return _norm([*_dollars(a), *_dollars(b)]) - {_SHARES}
+
     def _binop(self, node: ast.AST, a: frozenset[str], op: ast.operator, b: frozenset[str]) -> frozenset[str]:
         a, b = _norm(a), _norm(b)
         if isinstance(op, (ast.Add, ast.Sub)):
@@ -997,16 +1044,13 @@ class _Levels:
             if _L in a and _L in b:
                 return frozenset({_K}) if _cross(a, b) else _NONE  # a ratio of two levels: scale-free on ONE symbol
             if _money(a) and _money(b):
-                if _meets(a, b):
-                    self._refuse(node, f"divides {ANCHORED}")
-                    return frozenset({_U})
-                if (_SHARES in a) != (_SHARES in b):
-                    return frozenset({_L})  # dollars over a number of shares: a price (a lot's cost over its qty)
-                return _NONE  # cash over equity, a lot's value over the sleeve's: the position's state, scale-free
-            if (_money(a) and _L in b) or (_L in a and _money(b)):
+                return self._ratio(node, a, b ^ {_INV}, "divides", frozenset({_U}))
+            if _money(a) and _L in b:
                 # The run's dollars over a price: a number of shares, and the run's dollars still (cash over a price
                 # against a lot's qty is cash against what the lot cost).
-                return _scaled(a if _money(a) else b, b if _money(a) else a) | {_SHARES}
+                return _scaled(a, b) | {_SHARES}
+            if _L in a and _money(b):
+                return (_scaled(b, a) | {_SHARES}) ^ {_INV}
             if _U in a or _U in b or (_G in a and _L in b) or (_L in a and _G in b) or (_G in a and _G in b):
                 return frozenset({_U})
             if _L in a or _L in b:
@@ -1018,18 +1062,15 @@ class _Levels:
             if _money(a):
                 return _scaled(a, b)
             if _money(b):
-                return _scaled(b, a)  # 1000.0 / ctx.equity, 1 / ctx.budget: the run's dollars still, as a reciprocal
+                return _scaled(b, a) ^ {_INV}  # 1000.0 / ctx.equity, 1 / ctx.budget: the run's dollars still, inverted
             if _G in a:
                 return a
             return frozenset({_C}) if _const(a) and _const(b) else _NONE
         if isinstance(op, ast.Mult):
             if _U in a or _U in b or (_G in a and (_G in b or _L in b)) or (_L in a and _G in b):
                 return frozenset({_U})
-            if _meets(a, b):  # ctx.equity * (1 / ctx.budget): the ratio, written as a product
-                self._refuse(node, f"sets {ANCHORED}")
-                return frozenset({_X})
-            if _money(a) and _money(b):  # dollars times dollars: the run's dollars still, never a value of no unit
-                return _norm([*_dollars(a), *_dollars(b)]) - {_SHARES}
+            if _money(a) and _money(b):  # ctx.equity * (1 / ctx.budget): the ratio, written as a product
+                return self._ratio(node, a, b, "sets", frozenset({_X}))
             if _money(a) or _money(b):
                 m, other = (a, b) if _money(a) else (b, a)
                 if _L in other:  # a number of shares times a price: dollars (a lot's qty times its entry: what it cost)
@@ -1077,8 +1118,9 @@ def level_text(code: Any) -> str | None:
             "of the same symbol, e.g. a ratio to their own average or recent high, never against a constant or a PARAMS "
             "value; and every judged run starts flat, so the sleeve's dollars since the run began are no signal: size by "
             "a share of the sleeve, exit on a lot's own return (mark over entry), and never hold ctx.equity, ctx.cash, "
-            "ctx.budget, ctx.caps or a lot's value or pnl against a constant or a PARAMS value, nor the sleeve's dollars "
-            "against ctx.budget or ctx.caps): "
+            "ctx.budget, ctx.caps or a lot's value, pnl or qty against a constant or a PARAMS value, nor the sleeve's "
+            "dollars against ctx.budget, ctx.caps or what a lot cost (its qty times a price, its value less its pnl; "
+            "write a lot's weight as its value over ctx.equity), nor keep them in a lot's tag): "
             + "; ".join(found[:4]) + (f"; and {len(found) - 4} more" if len(found) > 4 else ""))
 
 
@@ -1202,7 +1244,13 @@ FACTS: dict[str, str] = {
            "ctx.equity, ctx.cash and a lot's value and pnl move with the run. A rule keyed to the sleeve's dollars since "
            "the run began (equity against budget, a constant or a PARAMS value; a profit lock, a loss stop on the "
            "sleeve, a size that changes once the run is ahead or behind) depends on where the run starts, which live "
-           "trading never repeats. Sizing by a share of the sleeve and exits on a lot's own return are fine.",
+           "trading never repeats. The capital is also what a lot cost over the share it asked, so the same rule is "
+           "ctx.equity or ctx.cash against a lot's qty times its entry or exit, its value less its pnl, or exit times "
+           "qty less net; a lot's weight in the sleeve (its value over ctx.equity) or the sleeve's cash share set "
+           "against the lot's own return or the share it asked; and the sleeve's dollars of an earlier call kept in "
+           "STATE or in a lot's tag. A rule whose trading depends on how far the run is ahead or behind is refused, "
+           "whatever its spelling. Sizing by a share of the sleeve, a lot's own return (mark over entry, its pnl over "
+           "what it cost), a count of sessions held and a weight cap that does not work out the run's profit are fine.",
 }
 REVIEW = """You review long-only ETF programs before their ONE Validation try and ONE sealed holdout look. A program is one Python
 file (NEEDS, PARAMS, decide(ctx)) that the House runs once a session after the close on daily bars: on the Train years
@@ -1226,8 +1274,16 @@ Refuse it (verdict "fail") for any of:
   the sleeve is 3% ahead, trade a token size"), a loss stop on the whole sleeve, a size or a rule that changes once the
   run is ahead or behind, however it is computed (a ratio, a difference, a running peak of equity kept in STATE). Such a
   program trades one way from a fresh start and another way mid-run, and no live program restarts where a window does.
-  Sizing by a share of the sleeve, a sign check (a lot's pnl below zero) and an exit on a lot's own return (mark over
-  entry) are fine.
+  THE CAPITAL NEED NOT BE READ FROM ctx.budget: the House sizes an entry as the asked share of the run's capital, so a
+  program can rebuild that capital from its own lots with no memory at all (a lot's qty times its entry or exit, its
+  value less its pnl, exit times qty less net, each over the share it asked) and hold ctx.cash or ctx.equity against
+  it; or read it off the position's state (a lot's weight in the sleeve, value over ctx.equity, or the sleeve's cash
+  share, set against the lot's own return or the share it asked: the weight is that share times the lot's return times
+  budget over equity); or carry the sleeve's dollars of an earlier call in STATE or in a lot's tag. A rule whose
+  trading depends on how far the run is ahead or behind is refused, whatever its spelling.
+  Sizing by a share of the sleeve, a sign check (a lot's pnl below zero), an exit on a lot's own return (mark over
+  entry, or its pnl over what it cost), a count of sessions held and a cap on a lot's weight that does not work out the
+  run's profit are fine.
 - LOOKAHEAD: anything that could know the future inside the replay (it only sees ctx at session t's close; its intents
   fill at the NEXT session's open or close).
 Use the contract in this prompt as the execution contract. Do not invent unavailable fields. Distinguish a verified defect

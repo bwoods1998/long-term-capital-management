@@ -1,8 +1,10 @@
 """Release E2, THE EQUITY REVIEW (league/swarm/elane_review.py): the level rule refuses a program that holds a raw price
 or volume level against a constant or a PARAMS value and leaves scale-free programs alone (the captain's three seeds
 among them); it refuses RUN-START DEPENDENCE (the sleeve's dollars of the run held against a constant, a PARAMS value
-or the run's anchor) and leaves sizing by the sleeve alone; a paid failure binds only when grounded; the audit's reader is another model; the record is the one E1's
-look reads (league/swarm/elane.py `reviewed`). Every program here is invented."""
+or the run's anchor) and leaves sizing by the sleeve alone; it refuses THE RUN'S CAPITAL REBUILT FROM A LOT (the
+verification's seal-1 residual: the profit lock with no memory) and leaves a lot's own return, a hold count and a size
+from the budget alone; a paid failure binds only when grounded; the audit's reader is another model; the record is the
+one E1's look reads (league/swarm/elane.py `reviewed`). Every program here is invented."""
 
 from __future__ import annotations
 
@@ -425,6 +427,337 @@ def decide(ctx):
     return [] if steps > 102 else [{"buy": "SPY", "share": 0.5}]
 ''',
 }
+
+#: THE VERIFICATION'S SEAL-1 RESIDUAL: the profit lock with NO MEMORY. The House sizes an entry as the asked share of the
+#: run's capital, so what a lot cost over that share IS the capital, and the sleeve's dollars over it the run's profit.
+LOT_HEAD = '''import math
+import numpy as np
+
+NEEDS = {"symbols": ["SPY"], "history": 30, "max_hold_sessions": 4}
+PARAMS = {"share": 0.5, "lock": 0.01, "small": 0.02, "stop": 0.05, "h": 3}
+STATE = {}
+'''
+LOT_TAIL = '''    small = ahead >= ctx.params["lock"]
+    return [{"buy": "SPY", "share": ctx.params["small"] if small else ctx.params["share"], "at": "open",
+             "tag": "s" if small else "f"}]
+'''
+
+
+def lot_lock(body: str, *, pre: str = "", flat: bool = True) -> str:
+    # A profit lock: `body` works out `ahead`, the run's profit since it began, and the entry is a token size once
+    # it reaches PARAMS["lock"].
+    lines = "".join(f"    {line}\n" for line in body.strip("\n").split("\n"))
+    return (LOT_HEAD + pre + "\n\ndef decide(ctx):\n" + ("    if ctx.positions:\n        return []\n" if flat else "")
+            + lines + LOT_TAIL)
+
+
+#: The verifier's two programs (scratch v_lock_equiv.py `LAUNDERED`, v_lock_probe.py N28), their rules word for word.
+#: The first traded the reviewer's lock lot for lot on six synthetic stores, and the restart check matched every session.
+VERIFIERS_FIRST = '''NEEDS = {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 4}
+PARAMS = {"share": 0.5, "lock": 0.01, "small": 0.02}
+
+
+def decide(ctx):
+    if ctx.positions:
+        return []
+    ahead = 0.0
+    for lot in ctx.closed:
+        asked = ctx.params["small"] if lot["tag"] == "s" else ctx.params["share"]
+        ahead = ctx.cash * asked / (lot["entry"] * lot["qty"]) - 1.0
+    small = ahead >= ctx.params["lock"]
+    return [{"buy": "SPY", "share": ctx.params["small"] if small else ctx.params["share"], "at": "open", "tag": "s" if small else "f"}]
+'''
+VERIFIERS_SECOND = '''NEEDS = {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 4}
+PARAMS = {"share": 0.5, "lock": 0.03, "small": 0.02}
+
+
+def decide(ctx):
+    out = []
+    ahead = 0.0
+    for lot in ctx.positions:
+        cost = lot["value"] - lot["pnl"]
+        ahead = ctx.equity * ctx.params["share"] / cost - 1.0
+    if ctx.positions:
+        return out
+    share = ctx.params["small"] if ahead >= ctx.params["lock"] else ctx.params["share"]
+    return [{"buy": "SPY", "share": share, "at": "open"}]
+'''
+#: The same lock with the first equity the run saw carried from lot to lot in a lot's TAG, which the House keeps across
+#: a restart: no STATE, so the restart check matches every session (`TheLockWithNoMemoryOnE1sEngine`).
+TAG_CARRIED = '''NEEDS = {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 4}
+PARAMS = {"share": 0.5, "lock": 0.01, "small": 0.02}
+
+
+def decide(ctx):
+    if ctx.positions:
+        return []
+    first = ctx.equity
+    for lot in ctx.closed:
+        first = float(lot["tag"])
+    ahead = ctx.equity / first - 1.0
+    small = ahead >= ctx.params["lock"]
+    return [{"buy": "SPY", "share": ctx.params["small"] if small else ctx.params["share"], "at": "open", "tag": str(first)}]
+'''
+LOT_ANCHORED = {
+    "the verifier's first: cash over the last closed lot's qty times entry": VERIFIERS_FIRST,
+    "the verifier's second: equity over an open lot's value less its pnl": VERIFIERS_SECOND,
+    "cash over exit times qty less net": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    cost = lot["exit"] * lot["qty"] - lot["net"]
+    ahead = ctx.cash * ctx.params["share"] / cost - 1.0'''),
+    "cash over a closed lot's proceeds (qty times exit)": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    ahead = ctx.cash * ctx.params["share"] / (lot["exit"] * lot["qty"]) - 1.0'''),
+    "the shares cash buys at the lot's entry over the lot's qty": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    ahead = (ctx.cash / lot["entry"]) / lot["qty"] * ctx.params["share"] - 1.0'''),
+    "a comparison with no division": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    if ctx.cash * ctx.params["share"] > 1.03 * lot["qty"] * lot["entry"]:
+        ahead = 1.0'''),
+    "the qty rebuilt from a lot's value over its mark": lot_lock('''
+ahead = 0.0
+for lot in ctx.positions:
+    shares = lot["value"] / lot["mark"]
+    ahead = ctx.equity * ctx.params["share"] / (shares * lot["entry"]) - 1.0''', flat=False),
+    "the cost rebuilt from a lot's pnl over its own return": lot_lock('''
+ahead = 0.0
+for lot in ctx.positions:
+    own = lot["mark"] / lot["entry"] - 1.0
+    if own != 0:
+        ahead = ctx.equity * ctx.params["share"] / (lot["pnl"] / own) - 1.0''', flat=False),
+    "the cost rebuilt from a lot's value over its own return": lot_lock('''
+ahead = 0.0
+for lot in ctx.positions:
+    cost = lot["value"] / (lot["mark"] / lot["entry"])
+    ahead = ctx.equity * ctx.params["share"] / cost - 1.0''', flat=False),
+    "the cost through a helper": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    ahead = ctx.cash * ctx.params["share"] / cost_of(lot) - 1.0''', pre='\ndef cost_of(row):\n    return row["qty"] * row["entry"]\n'),
+    "the costs of the day's closed lots summed": lot_lock('''
+ahead = 0.0
+cost = sum(row["qty"] * row["entry"] for row in ctx.closed)
+if cost > 0:
+    ahead = ctx.cash * ctx.params["share"] / cost - 1.0'''),
+    "open lots' values less their pnls, each summed": lot_lock('''
+ahead = 0.0
+held = 0.0
+won = 0.0
+for lot in ctx.positions:
+    held += lot["value"]
+    won += lot["pnl"]
+if held > 0:
+    ahead = ctx.equity * ctx.params["share"] / (held - won) - 1.0''', flat=False),
+    "numpy's divide and multiply": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    ahead = np.divide(ctx.cash * ctx.params["share"], np.multiply(lot["entry"], lot["qty"])) - 1.0'''),
+    "the cost's reciprocal": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    inv = 1.0 / (lot["qty"] * lot["entry"])
+    ahead = ctx.cash * ctx.params["share"] * inv - 1.0'''),
+    "the cost's reciprocal through pow": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    ahead = ctx.cash * ctx.params["share"] * pow(lot["qty"] * lot["entry"], -1) - 1.0'''),
+    "the log profit": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    ahead = math.log(ctx.cash * ctx.params["share"]) - math.log(lot["qty"] * lot["entry"])'''),
+    "the shares cash buys now against the lot's qty": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    if ctx.cash / ctx.prices["SPY"] * ctx.params["share"] > 1.03 * lot["qty"]:
+        ahead = 1.0'''),
+    "the cost kept in STATE": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    STATE["cost"] = lot["entry"] * lot["qty"]
+if STATE.get("cost"):
+    ahead = ctx.cash * ctx.params["share"] / STATE["cost"] - 1.0'''),
+    "the lot's fields by .get and the last closed lot by index": lot_lock('''
+ahead = 0.0
+if ctx.closed:
+    last = ctx.closed[-1]
+    ahead = ctx.cash * ctx.params["share"] / (last.get("qty") * last.get("entry")) - 1.0'''),
+    "a copy of the lot": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    row = dict(lot)
+    ahead = ctx.cash * ctx.params["share"] / (row["qty"] * row["entry"]) - 1.0'''),
+    "a product numpy makes": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    ahead = ctx.cash * ctx.params["share"] / np.dot([lot["qty"]], [lot["entry"]]) - 1.0'''),
+    "a product math makes": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    ahead = ctx.cash * ctx.params["share"] / math.prod([lot["qty"], lot["entry"]]) - 1.0'''),
+    "the dollars read back from their text": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    ahead = float(str(ctx.cash)) * ctx.params["share"] / float(f"{lot['qty'] * lot['entry']}") - 1.0'''),
+    "dollars times dollars over the cost squared": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    cost = lot["qty"] * lot["entry"]
+    ahead = (ctx.equity * ctx.cash) * ctx.params["share"] ** 2 / (cost * cost) - 1.0'''),
+    "a lot's qty against a constant (the entry price's level, the capital known)": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    if lot["qty"] < 1.5:
+        ahead = 1.0'''),
+    "what a lot cost against a constant": lot_lock('''
+ahead = 0.0
+for lot in ctx.closed:
+    if lot["qty"] * lot["entry"] > 515.0:
+        ahead = 1.0'''),
+    "the first equity the run saw, carried in a lot's tag": TAG_CARRIED,
+    "the sleeve's dollars in a tag written as an f-string": lot_lock('''
+ahead = 0.0
+return [{"buy": "SPY", "share": 0.5, "tag": f"e{ctx.equity:.2f}"}]'''),
+    "the sleeve's dollars in a tag set by a key": lot_lock('''
+ahead = 0.0
+intent = {"buy": "SPY", "share": 0.5}
+intent["tag"] = "%.2f" % ctx.cash
+return [intent]'''),
+    # The run's own profit written so the rule's second version let it through: a function the pass does not know,
+    # an exponent, and pow for the reciprocal.
+    "equity and budget through a function the pass does not know": lot_lock(
+        'ahead = math.copysign(ctx.equity, 1.0) / math.copysign(ctx.budget, 1.0) - 1.0'),
+    "equity and budget as exponents": lot_lock(
+        'ahead = math.log(1.001 ** ctx.equity) / math.log(1.001 ** ctx.budget) - 1.0'),
+    "equity times pow(budget, -1)": lot_lock('ahead = ctx.equity * pow(ctx.budget, -1) - 1.0'),
+    "equity and budget read back from their text": lot_lock(
+        'ahead = float(str(ctx.equity)) / float(str(ctx.budget)) - 1.0'),
+}
+
+#: Honest programs that read their lots for ordinary reasons: never refused. The first three are the captain's list (a
+#: stop on a lot's own return from its entry, a max-hold count, a size from ctx.budget).
+LOT_HONEST = {
+    "a stop on a lot's own return from its entry": LOT_HEAD + '''
+
+def decide(ctx):
+    out = []
+    for lot in ctx.positions:
+        if lot["mark"] / lot["entry"] - 1.0 <= -ctx.params["stop"]:
+            out.append({"sell": lot["id"], "at": "open"})
+    if not ctx.positions:
+        out.append({"buy": "SPY", "share": ctx.params["share"]})
+    return out
+''',
+    "a max-hold count": LOT_HEAD + '''
+
+def decide(ctx):
+    out = [{"sell": lot["id"], "at": "open"} for lot in ctx.positions if lot["held_sessions"] >= ctx.params["h"]]
+    if not ctx.positions and not any(row["reason"] == "max_hold" for row in ctx.closed):
+        out.append({"buy": "SPY", "share": ctx.params["share"], "at": "close"})
+    return out
+''',
+    "a size from ctx.budget": LOT_HEAD + '''
+
+def decide(ctx):
+    if ctx.positions or ctx.cash <= 0:
+        return []
+    usd = min(ctx.cash, ctx.caps["SPY"], ctx.params["share"] * ctx.budget)
+    return [{"buy": "SPY", "usd": round(usd, 2)}] if usd > 0 else []
+''',
+    "a lot's own return in dollars: its pnl over what it cost": LOT_HEAD + '''
+
+def decide(ctx):
+    out = []
+    for lot in ctx.positions:
+        cost = lot["qty"] * lot["entry"]
+        basis = lot["value"] - lot["pnl"]
+        if cost > 0 and lot["pnl"] / cost <= -ctx.params["stop"] or basis > 0 and lot["pnl"] / basis > 0.08:
+            out.append({"sell": lot["id"]})
+        elif lot["value"] > cost and lot["held_sessions"] >= 2 or lot["pnl"] * (1.0 / lot["value"]) > 0.05:
+            out.append({"sell": lot["id"]})
+    return out or ([] if ctx.positions else [{"buy": "SPY", "share": 0.5}])
+''',
+    "a stop on the average entry of several lots": LOT_HEAD + '''
+
+def decide(ctx):
+    lots = [row for row in ctx.positions if row["symbol"] == "SPY"]
+    shares = sum(row["qty"] for row in lots)
+    if shares > 0:
+        average = sum(row["qty"] * row["entry"] for row in lots) / shares
+        if ctx.prices["SPY"] / average - 1.0 < -ctx.params["stop"]:
+            return [{"sell": row["id"]} for row in lots]
+        if len(lots) < 2 and ctx.prices["SPY"] < average:
+            return [{"buy": "SPY", "share": 0.25}]
+        return []
+    return [{"buy": "SPY", "share": 0.25}]
+''',
+    "a lot's own price from its value and qty, and its pnl's sign": LOT_HEAD + '''
+
+def decide(ctx):
+    out = []
+    for lot in ctx.positions:
+        if lot["qty"] <= 0 or lot["mark"] is None:
+            continue
+        px = lot["value"] / lot["qty"]
+        if px / lot["entry"] - 1.0 > 0.04 or lot["qty"] * (lot["mark"] - lot["entry"]) < 0 and lot["held_sessions"] > 2:
+            out.append({"sell": lot["id"]})
+    return out or ([] if ctx.positions else [{"buy": "SPY", "usd": 0.5 * ctx.equity}])
+''',
+    "the last lot's result, a rebuy of the same dollars, and tags that are labels": LOT_HEAD + '''
+
+def decide(ctx):
+    if ctx.positions:
+        return []
+    out = []
+    lost = any(row["net"] < 0 for row in ctx.closed)
+    wins = sum(1 for row in ctx.closed if row["exit"] / row["entry"] - 1.0 > 0)
+    for row in ctx.closed:
+        if row["net"] > 0 and row["reason"] == "max_hold" and row["tag"] != "again":
+            out.append({"buy": row["symbol"], "usd": row["qty"] * row["exit"], "tag": "again"})
+    mom = ctx.bars["SPY"].close[-1] / ctx.bars["SPY"].close[-21] - 1.0
+    return out or [{"buy": "SPY", "share": 0.25 if lost else 0.5, "tag": f"m{mom:.2f}w{wins}"}]
+''',
+    "the position's own state: a weight cap, the cash share, exposure": LOT_HEAD + '''
+
+def decide(ctx):
+    out = []
+    held = sum(lot["value"] for lot in ctx.positions)
+    for lot in ctx.positions:
+        if lot["value"] / ctx.equity > 0.6 or lot["pnl"] / ctx.equity < -0.02:
+            out.append({"sell": lot["id"]})
+    if not out and held / ctx.equity < 0.8 and ctx.cash * (1 / ctx.equity) > 0.2:
+        out.append({"buy": "SPY", "usd": 0.2 * ctx.equity})
+    return out
+''',
+}
+
+#: WHAT THE STATIC RULE CANNOT SEE (elane_review's docstring, 1d; ELANE_E2.md): the position's own state used as the
+#: anchor. A lot's weight in the sleeve is the asked share times the lot's own return times budget over equity, so the
+#: weight set against that return is the run's profit, and nothing static tells it from an honest weight cap. This
+#: program is a profit lock with no memory; the level rule and the restart check both pass it; the paid readers' rubric
+#: names the pattern.
+WEIGHT_LOCK = '''NEEDS = {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 4}
+PARAMS = {"share": 0.5, "lock": 0.01, "small": 0.02}
+
+
+def decide(ctx):
+    out = []
+    for lot in ctx.positions:
+        asked = ctx.params["small"] if lot["tag"] == "s" else ctx.params["share"]
+        own = lot["mark"] / lot["entry"]
+        small = asked * own / (lot["value"] / ctx.equity) >= 1.0 + ctx.params["lock"]
+        if lot["held_sessions"] >= 2:
+            out.append({"sell": lot["id"], "at": "open"})
+            out.append({"buy": "SPY", "share": ctx.params["small"] if small else ctx.params["share"], "at": "close",
+                        "tag": "s" if small else "f"})
+    if not ctx.positions:
+        out.append({"buy": "SPY", "share": ctx.params["share"], "at": "open", "tag": "f"})
+    return out
+'''
 
 #: What stays allowed of the run's dollars: sizing proportional to them, a sign or zero check, and the position's own
 #: state among the sleeve's dollars now.
@@ -873,6 +1206,207 @@ def decide(ctx):
                                      "would not"}
         answer = {"json": {"verdict": "fail", "reasons": ["a profit lock"], "findings": [finding]}, "text": ""}
         self.assertEqual(grounded(answer, code)["verdict"], "fail", "a reader's failure on it binds")
+
+
+class TheRunsCapitalFromALot(unittest.TestCase):
+    """The verification's seal-1 residual: with no memory at all a bred program rebuilt the run's capital from its own
+    lots (what a lot cost over the share it asked) and held the sleeve's cash or equity against it: the profit lock
+    again, which a positive-sum, t-above-a-floor screen passes far more often than its false-positive cap says."""
+
+    RULE = "A rule whose trading depends on how far the run is ahead or behind is refused, whatever its spelling."
+
+    def test_the_capital_rebuilt_from_a_lot_is_refused_in_every_spelling(self):
+        self.assertGreaterEqual(len(LOT_ANCHORED), 2 + 4, "the verifier's two and at least four more")
+        for name, code in LOT_ANCHORED.items():
+            with self.subTest(name):
+                found = level_refusals(code)
+                self.assertTrue(found, name)
+                self.assertTrue(all(f.startswith("line ") for f in found))
+
+    def test_the_verifiers_two_programs_are_refused_before_they_are_stored_or_run(self):
+        from league.gym.safety import check_program
+        from league.swarm import elane_train
+
+        for name, code, line in (("the first", VERIFIERS_FIRST, 11), ("the second", VERIFIERS_SECOND, 10)):
+            with self.subTest(name):
+                check_program(code)  # the Gym's own code rules have nothing against either
+                self.assertEqual(elane_review.memory_refusals(code), [])
+                why = elane_train.check_code(code, ["SPY"])
+                self.assertIsNotNone(why, "it passed every static check before")
+                self.assertIn("equity level rule", why)
+                self.assertIn(f"line {line}: divides the sleeve's dollars now against the run's anchor", why)
+                self.assertIn("the capital a lot was bought with", why)
+                self.assertIn("the run's own profit since it began", why)
+        # The same two programs without the lock are admitted: nothing else in them is refused.
+        plain = VERIFIERS_FIRST.replace("        ahead = ctx.cash * asked / (lot[\"entry\"] * lot[\"qty\"]) - 1.0\n",
+                                        "        ahead = 0.0 * asked\n")
+        self.assertNotIn("ctx.cash", plain)
+        self.assertIsNone(elane_train.check_code(plain, ["SPY"]))
+
+    def test_the_runs_dollars_in_a_lots_tag_are_refused(self):
+        from league.swarm import elane_train
+
+        found = level_refusals(TAG_CARRIED)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("line 13: keeps the run's dollars in a lot's tag", found[0])
+        self.assertIn("equity level rule", elane_train.check_code(TAG_CARRIED, ["SPY"]))
+        for tag in ('"tag": str(ctx.equity)', '"tag": "e" + str(round(ctx.cash))', '"tag": "{:.0f}".format(ctx.budget)',
+                    '"tag": str(lot["qty"] * lot["entry"])', '"tag": str(int(ctx.equity))[:3]'):
+            with self.subTest(tag):
+                code = ('def decide(ctx):\n    out = []\n    for lot in ctx.closed:\n'
+                        f'        out.append({{"buy": "SPY", "share": 0.5, {tag}}})\n    return out\n')
+                self.assertTrue(level_refusals(code), tag)
+        as_call = 'def decide(ctx):\n    return [dict(buy="SPY", share=0.5, tag=str(ctx.equity))]\n'
+        self.assertTrue(level_refusals(as_call))
+        # A label, a count, a return and a price in a tag are what a tag is for.
+        labels = ('def decide(ctx):\n    c = ctx.bars["SPY"].close\n    mom = c[-1] / c[-21] - 1.0\n'
+                  '    return [{"buy": "SPY", "share": 0.5, "tag": f"m{mom:.2f}n{len(ctx.closed)}"},\n'
+                  '            {"buy": "SPY", "share": 0.1, "tag": "stop" + str(round(0.95 * c[-1], 2))}]\n')
+        self.assertEqual(level_refusals(labels), [])
+
+    def test_honest_readers_of_lots_still_pass(self):
+        from league.swarm import elane_train
+
+        self.assertGreaterEqual(len(LOT_HONEST), 3)
+        for name, code in LOT_HONEST.items():
+            with self.subTest(name):
+                self.assertEqual(level_refusals(code), [])
+                self.assertIsNone(elane_train.check_code(code, ["SPY"]))
+        for code in (SLEEVE_SIZED, SCALE_FREE, *SEED_SHAPES):
+            self.assertEqual(level_refusals(code), [])
+
+    def test_what_a_lot_cost_is_the_anchor_and_a_lots_own_return_is_not(self):
+        def body(expr: str) -> str:
+            return ('def decide(ctx):\n    out = []\n    for lot in ctx.positions:\n'
+                    f'        if {expr}:\n            out.append({{"sell": lot["id"]}})\n    return out\n')
+
+        refused = ('ctx.equity / (lot["qty"] * lot["entry"]) > 2.02', 'ctx.cash > lot["qty"] * lot["entry"]',
+                   'ctx.equity - (lot["value"] - lot["pnl"]) > 0', 'ctx.cash / lot["qty"] > lot["entry"]',
+                   'lot["qty"] * lot["mark"] / ctx.equity > 0.6', 'lot["qty"] > 2.5', 'lot["value"] - lot["pnl"] > 500',
+                   'ctx.equity * (1 / (lot["qty"] * lot["entry"])) > 2')
+        for expr in refused:
+            with self.subTest(expr):
+                self.assertTrue(level_refusals(body(expr)), expr)
+        allowed = ('lot["pnl"] / (lot["qty"] * lot["entry"]) < -0.05', 'lot["pnl"] / (lot["value"] - lot["pnl"]) < -0.05',
+                   'lot["value"] > lot["qty"] * lot["entry"]', 'lot["value"] / lot["qty"] / lot["entry"] - 1 > 0.04',
+                   'lot["qty"] > 0', 'lot["qty"] * (lot["mark"] - lot["entry"]) < 0', 'lot["value"] / ctx.equity > 0.6',
+                   'lot["pnl"] * (1 / lot["value"]) > 0.05', 'ctx.cash * (1 / ctx.equity) < 0.5',
+                   'lot["value"] - lot["pnl"] > 0', 'ctx.prices["SPY"] / (lot["qty"] * lot["entry"] / lot["qty"]) < 0.95')
+        for expr in allowed:
+            with self.subTest(expr):
+                self.assertEqual(level_refusals(body(expr)), [], expr)
+
+    def test_what_the_static_rule_cannot_see_is_named_for_the_two_paid_readers(self):
+        from pathlib import Path
+
+        from league.swarm import elane_train
+
+        # The position's own state used as the anchor: a weight set against the lot's own return. The static rule
+        # passes it (a weight cap is an honest rule), so the rubric and its facts must name it.
+        self.assertEqual(level_refusals(WEIGHT_LOCK), [])
+        self.assertIsNone(elane_train.check_code(WEIGHT_LOCK, ["SPY"]))
+        rubric = " ".join(elane_review.REVIEW.split())
+        fact = " ".join(elane_review.FACTS["run"].split())
+        for text in (rubric, fact):
+            self.assertIn(self.RULE, text)
+            for words in ("qty times its entry or exit", "its value less its pnl", "exit times qty less net",
+                          "weight in the sleeve", "a lot's tag"):
+                self.assertIn(words, text)
+        finding = {"code_excerpt": 'small = asked * own / (lot["value"] / ctx.equity) >= 1.0 + ctx.params["lock"]',
+                   "contract_reference": "run",
+                   "counterexample": "a lot bought with half the budget weighs under half of a sleeve that is ahead, so "
+                                     "the next entry is a token size; mid-run the same lot weighs otherwise"}
+        answer = {"json": {"verdict": "fail", "reasons": ["a profit lock on the lot's weight"], "findings": [finding]},
+                  "text": ""}
+        self.assertEqual(grounded(answer, WEIGHT_LOCK)["verdict"], "fail", "a reader's failure on it binds")
+        # The design says plainly what the rule cannot see, and the authors' prompts say what it refuses.
+        design = " ".join((Path(elane_review.__file__).parent / "ELANE_E2.md").read_text(encoding="utf-8").split())
+        self.assertIn("What the static rule cannot see", design)
+        self.assertIn(self.RULE[0].lower() + self.RULE[1:-1], design)
+        self.assertIn("what a lot cost", " ".join(elane_train.RESEARCHER_SYSTEM.split()))
+        self.assertIn("whatever its spelling", " ".join(elane_train.RESEARCHER_SYSTEM.split()))
+
+
+class TheLockWithNoMemoryOnE1sEngine(unittest.TestCase):
+    """The residual on E1's own engine and runner over a synthetic zero-drift store (an invented market): the verifier's
+    first program and the tag-carried one trade the reviewer's lock lot for lot, and the Train bar's restart check
+    matches every session of each, for neither keeps anything in STATE. The static rule is what refuses them. The
+    weight lock is the one the static rule cannot see: it shrinks its entries as the lock does and passes both."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        from pathlib import Path
+
+        from league.equity import config, synth
+        from league.equity.runner import Isolated
+        from league.live.decider import InlineDecider
+        from league.swarm import elane, elane_train
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = synth.synthetic_store(Path(cls.tmp.name) / "flat" / elane.STORE_DIR, symbols=("SPY",), seed=0, drift=0.0)
+        cls.decider = InlineDecider()
+        runner = Isolated(cls.decider, root)
+        cls.lock = RUN_ANCHORED["the profit lock (equity over budget against a PARAMS value)"].replace(
+            '"lock": 0.03', '"lock": 0.01').replace(
+            '    share = ctx.params["small"] if ahead >= ctx.params["lock"] else ctx.params["share"]\n'
+            '    return [{"buy": "SPY", "share": share, "at": "open"}]\n',
+            '    small = ahead >= ctx.params["lock"]\n    return [{"buy": "SPY", "share": ctx.params["small"] if small '
+            'else ctx.params["share"], "at": "open", "tag": "s" if small else "f"}]\n')
+        cls.runs = {name: [runner.train(code, {}, name=name, start=first, end=last, k=config.K_BASE)
+                           for first, last in elane_train.TRAIN_SPANS]
+                    for name, code in (("lock", cls.lock), ("first", VERIFIERS_FIRST), ("tag", TAG_CARRIED),
+                                       ("weight", WEIGHT_LOCK))}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def lots(self, name: str) -> list:
+        for run in self.runs[name]:
+            self.assertEqual(run.result["status"], "ok", name)
+        return [[(lot["entry_day"], str(lot["qty"]), str(lot["entry_px"]), lot["exit_day"], str(lot["exit_px"]))
+                 for lot in run.result["lots"]] for run in self.runs[name]]
+
+    def token(self, name: str) -> int:
+        """The lots bought at the token size (2% of the run's capital, against 50%)."""
+        return sum(1 for run in self.runs[name] for lot in run.result["lots"]
+                   if float(lot["qty"]) * float(lot["entry_px"]) < 100.0)
+
+    def restart(self, name: str, code: str) -> dict:
+        from league.swarm import elane_train
+
+        return elane_train.restart_check(self.decider, code, {}, name=name,
+                                         streams=[elane_train.state_inputs(run) for run in self.runs[name]])
+
+    def test_the_lock_is_the_reviewers_program_and_it_locks(self):
+        self.assertIn("ahead = ctx.equity / ctx.budget - 1.0", self.lock)
+        self.assertIn('"tag": "s" if small else "f"', self.lock)
+        lots = self.lots("lock")
+        self.assertGreater(sum(len(span) for span in lots), 100)
+        self.assertGreater(self.token("lock"), 0, "once ahead it trades a token size")
+
+    def test_with_no_memory_the_same_trades_and_the_restart_check_passes(self):
+        from league.swarm import elane_train
+
+        lock = self.lots("lock")
+        for name, code in (("first", VERIFIERS_FIRST), ("tag", TAG_CARRIED)):
+            with self.subTest(name):
+                self.assertEqual(self.lots(name), lock, "lot for lot the reviewer's profit lock")
+                check = self.restart(name, code)
+                self.assertTrue(check["held"], check)
+                self.assertEqual(check["matched"], check["sessions"], "nothing in STATE for a restart to empty")
+                self.assertIn("equity level rule", elane_train.check_code(code, ["SPY"]), "the static rule refuses it")
+
+    def test_the_weight_lock_passes_the_static_rule_and_the_restart_check(self):
+        from league.swarm import elane_train
+
+        self.lots("weight")
+        self.assertGreater(self.token("weight"), 0, "it shrinks its entries once the run is ahead, as the lock does")
+        check = self.restart("weight", WEIGHT_LOCK)
+        self.assertTrue(check["held"], check)
+        self.assertEqual(check["matched"], check["sessions"])
+        self.assertIsNone(elane_train.check_code(WEIGHT_LOCK, ["SPY"]), "left to the two paid readers (the rubric)")
 
 
 class TheMemoryRule(unittest.TestCase):

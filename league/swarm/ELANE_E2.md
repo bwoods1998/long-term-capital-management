@@ -23,6 +23,13 @@ neither of E2's rounds starts, no key is written, no event is made and no model 
 switch-on the captain sets `elane.birth_share` 0.25 and `elane.e2.usd_day` 8.0 (amendment A16); the equity births are
 counted apart from the options births (their own population).
 
+**The pace, said plainly** (the captain's decision on the verification's note). The equity lanes' research spend
+(births, Train research and the equity review together) is `elane.e2.pace_share` of the researchers' hourly pace, the
+Sail model line: about a quarter of it at the shipped default 0.25, and never more than half (the bound stays 0 to
+0.5). `elane.e2.usd_day` is only a cap above it: it can end a day's spend earlier, it never raises it. The split is
+the captain's to set, with the settings tool, at switch-on (`python3 set_swarm.py elane.e2.pace_share=<share>
+--apply`); left alone it is 0.25. The shipped default and the bound are not changed by this note.
+
 **E2's dollars are a share of the swarm's Sail model line** (`elane.e2.pace_share`, 0.25, held to 0-0.5; the
 integration review's blocker). The budget rule gives the swarm one hourly line for Sail models
 (`researcher.sail_usd_per_hour` after the budget's overlay: $0.3333 an hour, $8.00 a day, at the owner's ceiling;
@@ -193,7 +200,8 @@ Stopping, from the lightest:
      `prev = px`) is not read as the number it starts as; a function's body keeps the refusals of both readings (the
      first is the order its statements run in), and on that first reading a key of the program's own that holds
      nothing yet (the price kept from the last call) is unknown. What it cannot follow (a tuple or a dict stored
-     whole, a container read in another function, a level's digits, an unknown call) is the paid review's.
+     whole, a container read in another function, a level's digits, a level through a call it does not know) is the
+     paid review's.
    - RUN-START DEPENDENCE, in the same pass (the integration review's seal-1): every judged run starts flat with the
      same capital (`ctx.budget`, a constant in a replay), so a program that reads its own profit since the run began
      and sizes on it (a profit lock) trades one way from a fresh start and another mid-run, and the share screen's
@@ -205,6 +213,49 @@ Stopping, from the lightest:
      check, and the position's own state among the sleeve's dollars now (cash over equity, a lot's value over
      equity). FOR THE CAPTAIN: the root is E1's (the floor's worlds never start flat while every judged window does);
      the static rule and the rubric below are the guard until the screen's floor sees fresh starts.
+   - THE RUN'S CAPITAL FROM A LOT, in the same pass (the verification's seal-1 residual). The anchor need not come
+     from ctx. The House sizes an entry as the asked share of the run's capital, so what a lot cost is that capital
+     times a share the program chose itself. A program with no memory at all rebuilt the capital from its own lots (a
+     lot's `qty` times its `entry` or `exit`, its `value` less its `pnl`, `exit` times `qty` less `net`), held
+     `ctx.cash` or `ctx.equity` against it, and was the profit lock again: on synthetic stores it traded the lock lot
+     for lot, and the restart check matched every session, for it keeps nothing in STATE. A program that stops or
+     shrinks once it is ahead passes a positive-sum, t-above-a-floor screen far more often than the screen's
+     false-positive line says, so this was a hole in the judge for every program the swarm breeds. Now a lot's `qty`
+     and what a lot cost ARE the run's anchor: the sleeve's dollars now against them are refused as against
+     `ctx.budget`, and they are refused against a constant or a PARAMS value. The pass follows the spellings (a
+     number of shares times a price is dollars, dollars over a price a number of shares; a lot's own dollars now
+     times or over anything but a constant read as what the lot cost: its `value` over its `mark` is its qty, its
+     `value` over its own return its cost; the run's dollars stay the run's dollars through a product of two of
+     them, a reciprocal, an exponent, `pow`, their text and a call the pass does not know). The run's dollars
+     written into an intent's `tag` are refused too: the House keeps a lot's tag across a restart, so the first
+     equity a run saw, carried from lot to lot, is the lock's memory where the restart check cannot look (the same
+     trades as the lock on synthetic stores, every session matched). Allowed: a lot's own return however it is
+     written (`mark / entry`, `pnl / value`, `pnl / (qty * entry)`, `pnl / (value - pnl)`), a stop on the average
+     entry of several lots (`sum(qty * entry) / sum(qty)` is a price), a sign check, a count of sessions held, a
+     size from the sleeve or from `ctx.budget`, a label in a tag. The cost, stated: an honest program that writes a
+     lot's weight through its qty (`qty * price / ctx.equity`), or scales a lot's value by a ratio before setting it
+     against the sleeve, is refused with the reason and must write the weight as `lot["value"] / ctx.equity`.
+   - **What the static rule cannot see.** Said plainly, because the two paid readers are the only guard here:
+     1. THE POSITION'S OWN STATE USED AS THE ANCHOR. A lot's weight in the sleeve (`lot["value"] / ctx.equity`), a
+        lot's `pnl` over `ctx.equity` and the sleeve's cash share (`ctx.cash / ctx.equity`) are allowed against a
+        constant: a weight cap is an honest rule. But a weight is the asked share times the lot's own return times
+        budget over equity, so a weight set against the lot's own return, or read in the lot's entry session, is the
+        run's profit. Nothing static tells that from the honest cap. A program built on it (in the tests:
+        `WEIGHT_LOCK`) shrinks its entries once the run is ahead as the lock does, keeps no memory, and passes the
+        static rule AND the restart check.
+     2. WHAT THE PASS CANNOT FOLLOW: a function reached through an expression (`(lambda d: d["qty"])(lot)`), a tuple
+        or a dict stored whole, a container read in another function, a lot's tag read back as a number, a call the
+        pass does not know on a value that is not the run's dollars. Such a value is unknown and is never refused on
+        a guess.
+     3. MEMORY IN STATE: the first equity a run saw, kept in STATE, passes the static rule; the Train bar's restart
+        check judges it (it fails a program whose trades change when STATE is emptied).
+     4. WHAT THE HOUSE'S OWN ANSWERS TELL: `ctx.rejects` and an entry the House cut say something about the
+        sleeve's cash; the pass does not read them.
+     The two paid readers' rubric (`REVIEW`, "RUN-START DEPENDENCE", and its fact `run`) names the pattern and each
+     of these spellings, and ends on the rule itself: a rule whose trading depends on how far the run is ahead or
+     behind is refused, whatever its spelling. A reader's failure that cites it binds (a verbatim excerpt, the
+     reference `run`, a counterexample). The root stays E1's: until the screen's floor sees fresh starts, a profit
+     lock the readers miss is judged by a screen whose false-positive line does not hold for it.
    - THE MEMORY RULE (static, free; seal-5): an object that belongs to `numpy` or `math` (`np.typecodes`) is shared
      by every program and run in the swarm's one decider child and survives the restart check's fresh load. A bred
      program calls a module's functions and reads its constants and types; any other object of a module read as a
@@ -214,7 +265,8 @@ Stopping, from the lightest:
    - THE PAID REVIEW AND AUDIT, at a version's first bar pass and before it is the Validation try: two different models
      (`review_routes`; the audit never on the reviewer's model) read the exact program, its card and its own Train facts
      under the gate's leakage rubric adapted to daily share programs (absolute levels, calendar reconstruction,
-     run-start dependence, lookahead). A failure must be grounded (a verbatim excerpt, a contract reference, a
+     run-start dependence in every spelling, the run's capital rebuilt from a lot and a lot's weight used as the
+     anchor among them, lookahead). A failure must be grounded (a verbatim excerpt, a contract reference, a
      counterexample), else it reads
      unclear; `review_max_unclear` unclear reads fail. A failure is a Train failure of that version ("REVIEW") and spends
      no try. The review's dollars are E2's (`usd_day`), on ledger rows of their own ("review:<route>"). WHILE SAIL'S
