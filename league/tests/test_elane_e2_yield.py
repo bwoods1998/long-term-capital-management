@@ -312,8 +312,12 @@ class ThePace(YieldCase):
         self.assertAlmostEqual(elane_yield.day_line(self.lined(20.0 * 0.4 / 24, usd_day=0.5)), 0.5, msg="usd_day under it binds")
         self.assertAlmostEqual(elane_yield.day_line(self.lined(20.0 * 0.4 / 24, pace_share=0.5)), 4.0)
         self.assertAlmostEqual(elane_yield.usd_hour(ceiling, 1.0), 0.25, msg="the loop hands in its own reading of the line")
-        for raw in (0.51, -0.1, "x", True, None):
+        # Release E2.2: the share's bound is 0 to 4 (it was 0 to 0.5; league/tests/test_elane_e2_yield2.py holds what
+        # bounds E2 in its place). A value outside is still its default.
+        for raw in (4.01, -0.1, "x", True, None):
             self.assertEqual(elane_yield.cfg(self.lined(1.0, pace_share=raw))["pace_share"], 0.25, raw)
+        for raw in (0.51, 1.0, 4.0):
+            self.assertEqual(elane_yield.cfg(self.lined(1.0, pace_share=raw))["pace_share"], raw)
 
     def test_only_e2s_own_rows_count_and_they_leave_the_hour(self):
         s = self.lined(0.4)  # E2's pace: 0.10 an hour, 2.40 a day
