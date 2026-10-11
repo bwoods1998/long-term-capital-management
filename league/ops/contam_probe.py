@@ -61,14 +61,14 @@ AS BUILT, beside the words above.
   only when that room is zero. The probe's dollars are E2's (booked inside its day's line), so a run never takes
   more than the day has left, and it asks nothing more once the day's line is spent by anyone (the room is read again
   before every call: the swarm's own equity questions spend the same line meanwhile). Where E2's day line is under
-  `usd_run` (E2 holds its day to a share of the swarm's Sail model line), a probe moves on by what each Saturday's
-  line gives it and finishes over the next weeks, where "skipped while the room is under `usd_run`" would have
-  skipped every run and told nobody.
-- THE KEY's prefix is E2's own (`KEY_PREFIX`, "swarm:elane:probe"): the swarm tells the equity lanes' model dollars
-  from the options researchers' by a request key that begins "swarm:elane:" (league/swarm/elane_yield.py; the
-  loop's hourly pace), so the probe's dollars sit in the equity lanes' meters and one probe does not pause every
-  options researcher for the hour after it. What makes a key repeat or not is unchanged: the route, `probe_n` and
-  the batch's hash.
+  `usd_run` (as when E2 holds its day to a share of the swarm's Sail model line), a probe moves on by what each
+  Saturday's line gives it and finishes over the next weeks, where "skipped while the room is under `usd_run`"
+  would have skipped every run and told nobody.
+- THE KEY's prefix is E2's own (`KEY_PREFIX`, "swarm:elane:probe"). E2's request keys begin "swarm:elane:", the mark
+  by which the swarm's meters tell the equity lanes' model dollars from the options researchers' (where they read
+  the spend rows by key: E2's own pace and the researchers' hourly one). Under it the probe's dollars sit in the
+  equity lanes' meters, and one probe does not pause every options researcher for the hour after it. What makes a
+  key repeat or not is unchanged: the route, `probe_n` and the batch's hash.
 - THE UNIVERSE is the House's (`league.ops.equity_data.universe()`: every symbol the daily store is fetched for). S1's
   symbols are its index ETFs; S2's every ETF but SPY; S3's the stocks; S4's every symbol but SPY.
 - A PERIOD (`periods`) is a calendar month ("YYYY-MM") or, for S4, an ISO week named by the day it ends on; it belongs
