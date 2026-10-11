@@ -431,9 +431,9 @@ Every signature of `test_e3_skeleton.SIGNATURES` stands. What other packages and
   11.7-11.9 (E's one commit). No stub is left: `test_e3_skeleton` still holds every signature and column.
 - **THE BASE MOVED, and three things followed.**
   1. *The slice* (section 4, item 2): E1's store hands `history` + 1 sessions before a run's first by itself.
-     `Shadow.slice` asks for NEEDS' own history; `Shadow.official` reads its one-session slice at `bars.first` (it
-     read index 0, the look-back session's place, and answered None for every symbol: the timing table and every
-     live-like re-price would have been empty). Package D's fake of the shadow follows. A store that went back to
+     `Shadow.slice` asks for NEEDS' own history; `Shadow.official` reads its slice's one run session at `bars.first`
+     (it expected a slice of exactly one session, found the look-back session beside it and answered None for every
+     symbol: the timing table and every live-like re-price would have been empty). Package D's fake of the shadow follows. A store that went back to
      `history` sessions fails `test_forward_shadow.NoDayBeforeItsCodeExisted` by name.
   2. *The audit rows* (item 14): E1 now marks each audited symbol's rows on its own verdict. `forward_audit` still
      reads the book's note first, because the evening fetch still resets the guilty raw row; its test on E1's real

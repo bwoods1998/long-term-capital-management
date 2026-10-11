@@ -94,6 +94,13 @@ def at(day: dt.date | str, hour: int, minute: int = 0) -> float:
     return dt.datetime(day.year, day.month, day.day, hour, minute, tzinfo=schedule.NY).timestamp()
 
 
+def schedule_iso(epoch: float) -> str:
+    """An epoch as the ops jobs write a time (`league.ops.schedule.iso`)."""
+    from league.ops import schedule as ops_schedule
+
+    return ops_schedule.iso(epoch)
+
+
 def forward_sessions(n: int) -> list[dt.date]:
     """The first `n` forward days (D1: from `forward_db.t0()`)."""
     days = [forward_db.t0()]
@@ -588,9 +595,10 @@ class TheWholeNight(unittest.TestCase):
         last = days[-1]
         self.assertEqual((groups[(last, "train_pass")]["n"], groups[(last, "control:index")]["n"]), (2, 5))
         self.assertIsNotNone(groups[(last, "control:index")]["mean_x0"])
-        # A second run of the job the same evening wrote nothing again (the receipts say how many days each wrote).
+        # Each forward day's meters were written by one run of the job and by no later one (the receipts say how many
+        # days each run wrote; the first run also wrote the day before the first night).
         wrote = [jobs["forward_report"]["days"] for jobs in w.receipts.values()]
-        self.assertEqual(sum(wrote), len(days))
+        self.assertEqual((sum(wrote), wrote[1:]), (len(days), [1] * (NIGHTS - 1)))
 
     def test_the_report_file_the_dlane_section_and_the_funnel_read_them(self):
         w = self.w
@@ -943,6 +951,17 @@ class WithEveryModeOff(unittest.TestCase):
         out = dlane(self.root, self.settings, now)
         self.assertEqual([a["id"] for a in out["alarms"] if a["id"][:2] in ("FW", "RR", "CP", "MM")], [])
         self.assertIsNone(out["forward_record"], "no report was written: nothing to show")
+        # The switch was turned off an hour after a report that carried a warning: the alarm does not outlive it.
+        row = {"id": "FW2", "level": "warning", "new": True,
+               "text": "FW2 stale: programs were left stale two nights running"}
+        (self.root / forward_report.FILE).write_text(json.dumps({"at": schedule_iso(now - 3600.0), "mode": "record",
+                                                                  "alarms": [row]}))
+        on = {**self.settings, "elane": {**self.settings["elane"], "forward": {"mode": "record"}}}
+        self.assertEqual([a["id"] for a in forward_report.alarms(self.root, now=now, settings=on)], ["FW2"])
+        self.assertEqual(forward_report.alarms(self.root, now=now, settings=self.settings), [])
+        out = dlane(self.root, self.settings, now)
+        self.assertEqual([a["id"] for a in out["alarms"] if a["id"][:2] in ("FW", "RR", "CP", "MM")], [])
+        (self.root / forward_report.FILE).unlink()
         counts = funnel.window(self.root, now - 86400.0, now)["forward_record"]
         self.assertEqual(set(counts.values()), {0})
         self.assertFalse((self.root / forward_db.DB).exists(), "reading the record creates no store")
