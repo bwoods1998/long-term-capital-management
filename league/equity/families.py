@@ -27,7 +27,7 @@ twin leg.
 THE SEAT RULE (release E5-A; league/equity/bands.py, `equity_money.probe.seat`). Under "first-come" the read is the
 one above, unchanged: a Candidate waiting for a seat has no row, and the swarm's queue by pass time is the rule.
 Under "activity-1-free" the book itself decides who takes a free seat, so `_rows` asks the swarm's reader for
-`waiting=True`: every passed Candidate that could hold a seat has a row, each row carries `passed_at` and
+`queued=True`: every passed Candidate that could hold a seat has a row, each row carries `passed_at` and
 `seat_activity` (K's two counts, written beside the look by league/swarm/elane.py), and `seats()` says how many seats
 the swarm's roster allows (`elane.roster_seats`, failing closed: an unreadable roster seats nobody new).
 
@@ -92,8 +92,8 @@ class EquityFamilies:
 
         # THE SEAT RULE: under "first-come" the swarm's own queue is the rule and the read is release E5-S's, to the
         # byte; under any other rule the book ranks the waiting Candidates itself, so it reads them too.
-        waiting = {} if B.seat_settings().first_come else {"waiting": True}
-        return [dict(row) for row in bands.read(self.root, family=family, lanes=LANES, strict=True, **waiting)
+        queued = {} if B.seat_settings().first_come else {"queued": True}
+        return [dict(row) for row in bands.read(self.root, family=family, lanes=LANES, strict=True, **queued)
                 if str(row.get("lane") or "") in LANES]
 
     def seats(self) -> int:

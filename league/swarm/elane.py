@@ -121,7 +121,7 @@ keeps their series, not their lots). NO SEALED FIGURE IS READ OR PRINTED BY EITH
 capability, neither calls `Isolated.look`, both read the unsealed Validation and Train-era windows only, and what
 they keep is four whole numbers (close days and sessions), which count lots by size and exit day and read no price,
 return or P&L. The counts are House-only (family state; a private `_counts` in the gate's event): the EquityBook reads
-them in its rows (`bands.read(..., waiting=True)`: `seat_activity`) and every report shows a rank position, never K.
+them in its rows (`bands.read(..., queued=True)`: `seat_activity`) and every report shows a rank position, never K.
 
 Standard library only at import (league/equity/__init__.py and config.py); the screen, the runner and the store (numpy)
 are imported where they are used, on the House.
@@ -1547,7 +1547,7 @@ def seat_recorded(state: Any, version: Any, sha: Any) -> bool:
 
 
 def seat_activity(state: Any, version: Any, sha: Any) -> dict[str, Any] | None:
-    """K's two counts of the program a row stands for, as the EquityBook reads them (`bands.read(..., waiting=True)`:
+    """K's two counts of the program a row stands for, as the EquityBook reads them (`bands.read(..., queued=True)`:
     `seat_activity`): the `SEAT_KEY` record while it is this version's and this run sha's, else None (the program then
     ranks after every program whose counts can be read, until `seat_backfill` writes them)."""
     if not seat_recorded(state, version, sha):

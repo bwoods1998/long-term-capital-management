@@ -92,7 +92,7 @@ THE SEAT RULE (release E5-A; the captain's A24; `equity_money.probe.seat`, leagu
 (the rollback) everything above is the rule: the queue is `seating`'s, by `banded_at`. Under "activity-1-free" THE
 EQUITYBOOK IS THE ONE SOURCE of who holds a seat and who waits: a free seat goes to the best-ranked waiting program
 by K, and an idle seat yields, by the book's own rows, which no reader here can see. So the book's reader asks
-`read(root, lanes=LANES, waiting=True)`: EVERY passed Candidate that could hold a seat has a row (`seat` "queue":
+`read(root, lanes=LANES, queued=True)`: EVERY passed Candidate that could hold a seat has a row (`seat` "queue":
 the book's plan decides; a seatless one still has none), and each row carries `passed_at` (`banded_at`) and
 `seat_activity` (K's two counts as `elane.look` or `elane.seat_backfill` wrote them beside the look: None until then).
 The default read is unchanged. `roster(root, lanes=LANES)` then reports the book's own plan (`seat_plan`: its kv
@@ -420,17 +420,17 @@ def _banded(db: sqlite3.Connection, *, equity: bool = False) -> list[dict[str, A
 
 
 def read(root: str | Path, *, family: str | None = None, lanes: Any = None,
-         strict: bool = False, waiting: bool = False) -> list[dict[str, Any]]:
+         strict: bool = False, queued: bool = False) -> list[dict[str, Any]]:
     """The rows (the module docstring); `family`: that family's row only. [] when there is no store or it cannot be read
     within a second. `lanes` (THE EQUITY LANES): None the options lanes only (every existing reader); `LANES` (or one
     equity lane) the equity rows only (`_read_equity`); "all" both. `strict` (the equity rows only): raise
-    `EquityUnreadable` in place of that [] (the options rows are read as before). `waiting` (the equity rows only; THE
+    `EquityUnreadable` in place of that [] (the options rows are read as before). `queued` (the equity rows only; THE
     SEAT RULE): every passed Candidate that could hold a seat has a row, with `passed_at` and `seat_activity`."""
     if lanes is not None:
         if lanes == "all":
             return read(root, family=family) + _read_equity(root, family=family, lanes=EQUITY_LANES, strict=strict,
-                                                            waiting=waiting)
-        return _read_equity(root, family=family, lanes=lanes, strict=strict, waiting=waiting)
+                                                            queued=queued)
+        return _read_equity(root, family=family, lanes=lanes, strict=strict, queued=queued)
     path = Path(root) / DB_NAME
     if not path.exists():
         return []
@@ -568,13 +568,13 @@ class EquityUnreadable(RuntimeError):
 
 
 def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bool = False,
-                 waiting: bool = False) -> list[dict[str, Any]]:
+                 queued: bool = False) -> list[dict[str, Any]]:
     """`read(root, lanes=...)`: the equity rows (the module docstring), the lanes `lanes` names. [] when there is no
     store, it cannot be read within a second, or the equity identity cannot be computed (fail-closed); with `strict`
     each of those three raises `EquityUnreadable` instead, so the caller can tell them from a store with no row. One
     family's own trouble (its code file or its version row cannot be read) leaves that family out either way: the
     EquityBook asks the store about a missing family before it retires its instance (league/equity/families.py
-    `standing`). `waiting` (THE SEAT RULE, the module docstring): a Candidate waiting for a seat has a row too (only a
+    `standing`). `queued` (THE SEAT RULE, the module docstring): a Candidate waiting for a seat has a row too (only a
     seatless one has none), a Candidate's `seat` is "queue", and every row carries `passed_at` and `seat_activity`."""
     wanted = {str(x) for x in ([lanes] if isinstance(lanes, str) else lanes)}
     unknown = sorted(wanted - set(EQUITY_LANES))
@@ -599,7 +599,7 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
             fams = [f for f in _families(db, family, equity=True) if f["band"] in LIVE_BANDS]
             seat = equity_seating(_banded(db, equity=True), elane.roster_seats(root)) \
                 if any(f["band"] == "candidate" for f in fams) else {"probe": [], "seated": [], "waiting": [], "seatless": []}
-            hidden = set(seat["seatless"]) if waiting else set(seat["waiting"]) | set(seat["seatless"])
+            hidden = set(seat["seatless"]) if queued else set(seat["waiting"]) | set(seat["seatless"])
             versions = {}
             for fam in fams:
                 fam["state"] = loads(fam["state"], {}) or {}
@@ -638,14 +638,14 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
         lane = lane_of_spec(spec)
         symbols = [str(r).upper() for r in loads(fam["roots"], []) or []]
         looked = state.get(elane.LOOK_KEY) if isinstance(state.get(elane.LOOK_KEY), Mapping) else {}
-        # THE SEAT RULE (`waiting`): the book's plan decides a Candidate's seat ("queue"), from these two fields.
+        # THE SEAT RULE (`queued`): the book's plan decides a Candidate's seat ("queue"), from these two fields.
         extra = {"passed_at": _finite(state.get("banded_at")),
-                 "seat_activity": elane.seat_activity(state, int(v["n"]), sha)} if waiting else {}
+                 "seat_activity": elane.seat_activity(state, int(v["n"]), sha)} if queued else {}
         out.append({
             "family": fam["id"], "band": fam["band"], "structure": fam["structure"], "roots": symbols, "symbols": symbols,
             "lane": lane, "label": elane.label(lane), "seeded": spec.get("seeded") is True,
             "seat": "sized" if fam["band"] == "sized" else "probe" if fam["band"] == "probe" else
-            "queue" if waiting else "seated",
+            "queue" if queued else "seated",
             "holdout_passed": True, "validation_passed": True, "version": int(v["n"]), "code": code, "params": params,
             "run_sha": sha, "typical_max_loss_usd": None, "seed_era": True, "forward": state.get("forward"),
             "version_created_at": v.get("created_at"), "version_selected_at": state.get("banded_at"),

@@ -1325,12 +1325,12 @@ is the code. "First come" above describes the rollback value.
   Train-era count from `Isolated.segments` again. No gate capability, no `Isolated.look`, no sealed window; a
   failure is one House warning and is tried again after `SEAT_RETRY_SECONDS`. `seat_recorded`, `seat_activity`
   read it. An equity identity adoption keeps the key (it is not in `EQUITY_SELECTION_KEYS`).
-- **8.3** (CHANGES; swarm, league/swarm/bands.py): `read(root, lanes=LANES, waiting=True)` (and `_read_equity`):
+- **8.3** (CHANGES; swarm, league/swarm/bands.py): `read(root, lanes=LANES, queued=True)` (and `_read_equity`):
   every passed Candidate that could hold a seat has a row; a Candidate's `seat` is "queue"; every row carries
   `passed_at` (`banded_at`) and `seat_activity` (`elane.seat_activity`: the two counts, or None). The default read
   is unchanged, key for key. `seat_plan(root)` reads the book's kv `eq_seat` from live.sqlite, read only;
   `roster(root, lanes=LANES)` adds `rule`, `plan` and `order` (its own lists stay by pass time and say so).
-- **5.5** (CHANGES; book, league/equity/families.py): `EquityFamilies._rows` asks `waiting=True` unless the rule is
+- **5.5** (CHANGES; book, league/equity/families.py): `EquityFamilies._rows` asks `queued=True` unless the rule is
   "first-come" (then the call is release E5-S's, argument for argument); `seats() -> int` is `elane.roster_seats`,
   0 when closed or unreadable. `MemoryEquityFamilies(rows, seats=None)`: `seats()` None means the table's count.
 - **5.5** (CHANGES; book, league/equity/live.py): `_sync_instances` under "first-come" is release E5-S's band sync.

@@ -73,14 +73,14 @@ class StoreBacked(unittest.TestCase):
 
     def test_the_seat_rule_decides_whether_the_waiting_candidates_are_read(self):
         """THE SEAT RULE (release E5-A): under the rule in force the book ranks the waiting Candidates itself, so its
-        reader asks the swarm's for them (`waiting=True`); under "first-come" (the rollback) the call is release
+        reader asks the swarm's for them (`queued=True`); under "first-come" (the rollback) the call is release
         E5-S's, argument for argument, and the swarm's own queue hides them."""
         from league.equity import bands as B
         from league.tests.equity_design import seat_rule
 
         self.assertEqual(B.seat_settings().rule, B.ACTIVITY_FREE, "the rule in force")
         self.families.read()
-        self.assertEqual(self.asked[-1], {"waiting": True})
+        self.assertEqual(self.asked[-1], {"queued": True})
         with seat_rule("first-come"):
             self.families.read()
             self.assertEqual(self.asked[-1], {}, "first come: the read is the one before the seat rule")

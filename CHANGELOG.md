@@ -53,7 +53,7 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
 - **Where it lives.** The row and its bounds: league/constitution.py. Its reader and the pure rule (`seat_settings`,
   `seat_counts`, `seat_k`, `seat_order`, `seat_idle`, `seat_plan`): league/equity/bands.py. The book applies it and
   is the one source of the plan (league/equity/live.py `_seat_bands`, kv `eq_seat`, `health.json` `equity.seats`);
-  the swarm's reader shows the book every waiting Candidate (`bands.read(..., waiting=True)`) and its roster reports
+  the swarm's reader shows the book every waiting Candidate (`bands.read(..., queued=True)`) and its roster reports
   the book's plan. K's two counts are written beside the look, once (league/swarm/elane.py `elane_seat`), and for
   a program that passed before the release by `elane.seat_backfill` in the gate's equity round, from unsealed runs
   only. league/live/money.py is not edited: `EquityTable` does not read the block.

@@ -203,6 +203,20 @@ class TheRow(unittest.TestCase):
             self.assertIn(sentence, page)
         self.assertEqual(swarm_bands.SEAT_PLAN_KEY, L.SEAT_KEY, "the swarm reads the book's own key")
 
+    def test_the_readers_new_keyword_shadows_nothing_of_the_options_read(self):
+        """The swarm's `read` grew one keyword for the book (`queued`). It is not named `waiting`: that is this
+        module's own function, which the OPTIONS read calls to hide the Candidates waiting for a `dlane.roster` seat
+        (a parameter of that name made the options read fail whenever the roster was on; league/tests/
+        test_swarm_roster.py holds the read itself)."""
+        import inspect
+
+        for fn in (swarm_bands.read, swarm_bands._read_equity):
+            names = set(inspect.signature(fn).parameters)
+            self.assertIn("queued", names)
+            self.assertFalse(names & {n for n in dir(swarm_bands) if callable(getattr(swarm_bands, n))},
+                             f"{fn.__name__}: a parameter shadows a function of the module")
+        self.assertTrue(callable(swarm_bands.waiting))
+
 
 # =========================================================================================================== the ranks
 class TheRanks(unittest.TestCase):
@@ -459,7 +473,7 @@ class TheLookKeepsTheCounts(unittest.TestCase):
         self.assertIsNone(elane.seat_activity(fam["state"], 2, sha), "another version: its own counts, not these")
         self.assertIsNone(elane.seat_activity(fam["state"], 1, "x" * 64))
         # The book's row carries them (and the pass time); the default read does not.
-        [row] = swarm_bands.read(self.root, lanes=elane.LANES, waiting=True)
+        [row] = swarm_bands.read(self.root, lanes=elane.LANES, queued=True)
         self.assertEqual((row["family"], row["seat"], row["seat_activity"], row["passed_at"]),
                          ("seed-overnight-spy", "queue", {"validation": want["validation"], "train": want["train"]},
                           fam["state"]["banded_at"]))
@@ -544,7 +558,7 @@ class TheLookKeepsTheCounts(unittest.TestCase):
         self.assertEqual(len(said), 1)
         self.assertTrue(said[0]["alert"])
         self.assertIn("ranks after every program whose counts can be read", said[0]["text"])
-        [row] = swarm_bands.read(self.root, lanes=elane.LANES, waiting=True)
+        [row] = swarm_bands.read(self.root, lanes=elane.LANES, queued=True)
         self.assertIsNone(row["seat_activity"])
         self.assertIsNone(B.seat_k(row["seat_activity"]))
         self.assertEqual(elane.seat_backfill(self.gate), [], "the runner is back, but the hour has not passed")
