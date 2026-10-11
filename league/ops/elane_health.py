@@ -1369,25 +1369,7 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
     # "At least" unless the clock starts at a version scored: since when work is owed is read inside the lookback.
     lead = (f"No equity version was scored on Train for {'' if exact else 'at least '}{_hours(idle)} h"
             + (f" of the swarm's running time (it was down {_hours(down)} h more)" if down > 0 else "") + f" while {owed}.")
-    if broken is None and seen is not None:
-        # STARVED BY A SETTING, not broken: E2 is held, or was inside these hours, and the record shows no failing
-        # lane. The captain's chosen budget at work: judged CLEAR, never standing, never mailed; the cost is said.
-        if spent and scored_today:
-            head = [f"{spent} and {scored_today} equity versions were scored since 00:00 UTC: no stall. E2 asks again at "
-                    "00:00 UTC."]
-        else:
-            head = [lead, f"STARVED BY A SETTING, not broken: {hold}"]
-        parts = [*head, *lost, *([] if spent and scored_today else [NO_STALL]), *lever]
-        return {"stalled": False, "judged": True, "what": " ".join(parts),
-                "numbers": {**numbers, "kind": line, "starved": True}, "doing": DOING["starved"], "owner_step": None,
-                "onset": None, "keep": keep}
-    # With no family in research the work owed is the equity pass's: barren passes are `elane_births`' to explain,
-    # before anything the Train rounds of families now gone left behind (programs refused, steps that failed).
-    kind = broken or ("raised" if tally["raised"] else "house" if tally["house"] or houses else
-                      "unanswered" if tally["unanswered"] or any("unanswered" in fam["waits"] for fam in waiting) else
-                      "barren" if not researching and tally["passes"] else
-                      "refused" if tally["refused"] else "errors" if tally["errors"] else
-                      "silent" if tally["rounds"] else "no_round")
+    # What the lane's own record shows since it went idle, in words.
     said = [f"{tally['rounds']} Train rounds ran"]
     if tally["raised"]:
         said.append(f"{tally['raised']} rounds raised")
@@ -1402,8 +1384,31 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
         said.append(f"{tally['errors']} steps failed with an error of their own")
     if waiting:
         said.append(f"{len(waiting)} of {len(researching)} families wait out a backoff")
+    shown = len(said) > 1  # anything but how many rounds ran
     if train_at is not None:
         said.append(f"the Train round last started {max(0.0, now - train_at) / 60.0:.0f} min ago")
+    if broken is None and seen is not None:
+        # STARVED BY A SETTING, not broken: E2 is held, or was inside these hours, and the record shows no failing
+        # lane. The captain's chosen budget at work: judged CLEAR, never standing, never mailed; the cost is said,
+        # and so is what the steps taken show that is under `BROKEN_MIN_FAILS` or no failure of the lane's (questions
+        # no route answered, programs a static rule refused).
+        if spent and scored_today:
+            head = [f"{spent} and {scored_today} equity versions were scored since 00:00 UTC: no stall. E2 asks again at "
+                    "00:00 UTC."]
+        else:
+            head = [lead, f"STARVED BY A SETTING, not broken: {hold}"]
+        parts = [*head, *(["Since the lanes went idle " + "; ".join(said) + "."] if shown else []), *lost,
+                 *([] if spent and scored_today else [NO_STALL]), *lever]
+        return {"stalled": False, "judged": True, "what": " ".join(parts),
+                "numbers": {**numbers, "kind": line, "starved": True}, "doing": DOING["starved"], "owner_step": None,
+                "onset": None, "keep": keep}
+    # With no family in research the work owed is the equity pass's: barren passes are `elane_births`' to explain,
+    # before anything the Train rounds of families now gone left behind (programs refused, steps that failed).
+    kind = broken or ("raised" if tally["raised"] else "house" if tally["house"] or houses else
+                      "unanswered" if tally["unanswered"] or any("unanswered" in fam["waits"] for fam in waiting) else
+                      "barren" if not researching and tally["passes"] else
+                      "refused" if tally["refused"] else "errors" if tally["errors"] else
+                      "silent" if tally["rounds"] else "no_round")
     may = "E2 may ask a model now" if held is not None else "whether E2 may ask a model now could not be read"
     pace: list[str] = []
     if held_now:  # BROKEN by its record while E2 is also held: the line is said second, and is not the fault

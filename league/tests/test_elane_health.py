@@ -1323,11 +1323,17 @@ class OwedWorkAndNothingScored(Case):
             self.assertNotIn("an invented failure", json.dumps(check))
         # Questions no route answered and programs a static rule refused are no failing lane: held, it does not stand
         # (the routes heal by themselves; the refusals are `elane_refused`'s, which stands on them early).
+        # What the steps taken show is SAID all the same, in the sentence and the numbers.
         checks = self.held_mixture(lambda f: {"family": f, "error": "no route answered", "errors": ["x"], "retry_in": 600.0})
         self.assertEqual((checks["elane_idle"]["stalled"], checks["elane_idle"]["numbers"]["kind"],
                           checks["elane_idle"]["numbers"]["unanswered"]), (False, "pace", 7))
+        self.assertIn("so no model is asked. Since the lanes went idle 7 Train rounds ran; 7 questions got no answer from a "
+                      "model route. Of the 12 equity Train steps due in the last 3 h, 4 were taken and 8 were skipped",
+                      checks["elane_idle"]["what"])
         checks = self.held_mixture(lambda f: refused_step(f, by_key))
         self.assertEqual((checks["elane_idle"]["stalled"], checks["elane_idle"]["numbers"]["refused_answers"]), (False, 7))
+        self.assertIn("Since the lanes went idle 7 Train rounds ran; 7 programs were refused before a run (see elane_refused).",
+                      checks["elane_idle"]["what"])
         self.assertEqual((checks["elane_refused"]["stalled"], checks["elane_refused"]["numbers"]["top_rule_n"]), (True, 7))
         # ONE failure before a hold is no broken lane (a store rewritten for a minute, then the day's dollars spent):
         # it takes `BROKEN_MIN_FAILS`, or a family waiting out a House backoff after as many failures.
@@ -1337,6 +1343,7 @@ class OwedWorkAndNothingScored(Case):
         self.spend(0.5, 0.05)
         check = self.equity()["elane_idle"]
         self.assertEqual((check["stalled"], check["numbers"]["house_failures"], check["numbers"]["starved"]), (False, 1, True))
+        self.assertIn("Since the lanes went idle 1 Train rounds ran; 1 steps failed on the House's side (store 1).", check["what"])
         self.record(a, infra={"version": 2, "kind": "store", "count": 4, "next_at": NOW + 3600.0})
         check = self.equity()["elane_idle"]
         self.assertEqual((check["stalled"], check["numbers"]["kind"], check["owner_step"]), (True, "house", self.HOUSE))
