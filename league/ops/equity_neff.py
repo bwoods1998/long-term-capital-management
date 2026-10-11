@@ -6,7 +6,8 @@ On Train segment 2 (2022-24: no sealed row), names with a full series: R = the c
 SECTOR-RESIDUAL returns (a name's close-to-close return less its sector's equal-weight mean, sectors re-formed monthly
 by `league.xs.ctx.derive`); neff_rho = n / (1 + (n - 1) x the mean off-diagonal of R); neff_pr = (the sum of R's
 eigenvalues)^2 / the sum of their squares. Into `<state>/equity-daily/neff.json` {"sp500": {"window", "names", "rho",
-"neff_rho", "neff_pr", "computed_at"}}. Receipts and the funnel carry N_eff, never a return. Every sum is `math.fsum`.
+"neff_rho", "neff_pr", "computed_at"}} (and, beside them, "sessions", "columns", "dropped", "months",
+"months_skipped", "coverage"). Receipts and the funnel carry N_eff, never a return. Every sum is `math.fsum`.
 
 THE DEFINITION, to the last step (`residuals`, `neff`; each a formula `test_equity_neff.py` checks on synthetic data):
 - The slice is `PanelStore.train` over the whole second span of `league.xs.config.TRAIN_SEGMENTS`, with its look-back.
@@ -243,10 +244,9 @@ def measure(bars: Any) -> dict[str, Any]:
 def run(ctx: Any) -> dict[str, Any]:
     """The job. Its first statement is `league.xs.config.quiet(ctx.now(), WALL_S)`. {"ok": True, "panel", "names",
     "sessions", "columns", "neff_rho", "neff_pr", "window", "dropped", "months", "months_skipped"} and neff.json
-    written; {"status": "skipped",
-    "why"} inside a quiet window, before the panel store exists, and while its coverage verdict is "insufficient";
-    {"status": "failed", "ok": False, "error"} when the store or the matrix cannot be read (the last neff.json
-    stays)."""
+    written; {"status": "skipped", "why"} inside a quiet window, before the panel store exists, and while its
+    coverage verdict is "insufficient"; {"status": "failed", "ok": False, "error"} when the store or the matrix
+    cannot be read (the last neff.json stays)."""
     from ..xs import config as xs_config
 
     try:
