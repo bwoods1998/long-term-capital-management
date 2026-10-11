@@ -42,20 +42,20 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
 - **The pair in force**, in rule arithmetic of the two numbers:
 
 <!-- equity-design:begin -->
-THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
+THE DESIGN IN FORCE: 5 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
 (`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.125 x E.
-A lot in every seat asks for 0.75 x E of ETFs; the lane holds at most 0.75 x E of them, 0.15 x E of
+A lot in every seat asks for 0.625 x E of ETFs; the lane holds at most 0.625 x E of them, 0.125 x E of
 open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 4 whole lots fit; the
-next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 6 of
-6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,666.
-Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
+next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 5 of
+5 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
+5 of 5 in the $400 window alone; the window alone holds all 5 up to E = $3,200.
+Whole sleeves (programs that hold several ETFs) ask for 1.25 x E; the lane holds at most 1.00 x E,
 0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
-the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
+the equity lots: $400 - 0.125 x E against the one-ETF lots above. The gateway's day line (4x
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7e41909a` / `e909eb10`.
+Money digest `50cd8863`, full digest `2195caac` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7e41909a` / `e909eb10`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over
