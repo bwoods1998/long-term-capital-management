@@ -893,7 +893,9 @@ class WithEveryModeOff(unittest.TestCase):
         after = sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*") if p.is_file())
         self.assertEqual(sorted(set(after) - set(files)), [forward_report.FILE])
         doc = read_json(self.root / forward_report.FILE, None)
-        self.assertEqual((sorted(doc), doc["mode"], doc["alarms"]), (["alarms", "at", "mode"], "off", []))
+        self.assertEqual((sorted(doc), doc["mode"], doc["alarms"]), (sorted(forward_report.OFF_KEYS), "off", []))
+        self.assertEqual((doc["memory"]["contrib"], doc["contamination"], doc["receipts"]), (0, None, []),
+                         "no forward part; what has another switch is read (the memory's counts) and has nothing to say")
         self.assertEqual(swarm_rows(self.store), before)
         for name in (forward_db.DB, fill_minutes.DIR, "contamination.json", "forward-decider.log"):
             self.assertFalse((self.root / name).exists(), name)

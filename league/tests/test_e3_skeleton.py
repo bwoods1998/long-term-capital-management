@@ -384,7 +384,8 @@ class TheSharedConstants(unittest.TestCase):
         self.assertEqual(forward_db.MODES, ("off", "record"))
         self.assertEqual(forward_db.REASONS, ("train_pass", "train_fail", "seed", "live", "control"))
         self.assertTrue(set(forward_db.ONCE_KINDS) <= set(forward_db.EVENT_KINDS))
-        self.assertEqual(set(forward_db.EVENT_KINDS.values()), {"A", "B", "D"})
+        self.assertEqual(set(forward_db.EVENT_KINDS.values()), {"A", "B", "C", "D"})
+        self.assertEqual([k for k, owner in forward_db.EVENT_KINDS.items() if owner == "C"], ["meter_partial"])
         self.assertEqual(set(forward_db.WRITERS.values()), {"A", "B", "C", "D", "all"})
         self.assertTrue({"stopped", "resumed", "suspect", "live"} <= set(forward_db.TAGS))
 

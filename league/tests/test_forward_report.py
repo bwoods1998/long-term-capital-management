@@ -47,6 +47,10 @@ from league.swarm import elane_memory
 
 RECORD = {"elane": {"forward": {"mode": "record"}}}
 OFF = {"elane": {"forward": {"mode": "off"}}}
+#: The forward record and the contamination probe both on (CP1 and CP2 follow the probe's own switch), over routes of
+#: the fixtures' own.
+PROBING = {"elane": {"forward": {"mode": "record"}, "contam": {"mode": "record"},
+                     "e2": {"routes": ["sail:fake_a", "sail:fake_b", "sail:fake_c"]}}}
 T0 = ES.next_session(config.LOOK_CAP)
 #: The first 300 forward days (D1: the sessions after the look cap).
 DAYS = R.forward_days(T0, T0 + dt.timedelta(days=440))[:300]
@@ -139,9 +143,20 @@ def fake_counts(db):
 
 class Fixture(unittest.TestCase):
     """A state root with a forward store (its real DDL), the fakes in place, and writers of the rows the other
-    packages write. The clock is `self.now`; a row's `at` is the clock's unless given."""
+    packages write. The clock is `self.now`; a row's `at` is the clock's unless given.
+
+    THE ROWS HERE ARE SPARSE (a registered program with a checkpoint and no day, a day written for one program of
+    six): each test writes what its own meter reads. A day's meters wait for the rows its registered programs are
+    owed (`forward_report._awaited`), which these fixtures never have whole, so the wait is taken out here (`WAITS`
+    False) and held by a class of its own on rows that are whole or short on purpose (`ADaysMetersWaitForItsRows`)."""
+
+    WAITS = False
 
     def setUp(self):
+        if not self.WAITS:
+            patcher = mock.patch.object(R, "_awaited", lambda db, day: 0)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
@@ -565,8 +580,49 @@ class TheMeter(Fixture):
         self.assertEqual((row["m"], row["bh"], row["by_"], row["min_p"]), (10, FS.bh(ps), FS.by(ps), 0.005))
         self.assertEqual((row["bh"], row["by_"]), (1, 0))
         meter = self.section()["meter"]
-        self.assertEqual((meter["reading"], meter["unreliable"], meter["q"]), ("none yet", False, 0.10))
+        self.assertEqual((meter["reading"], meter["unreliable"], meter["q"]), ("none yet", None, 0.10))
+        self.assertEqual((meter["m"], meter["bh"], meter["by_"], meter["floor"]), (10, 1, 0, R.METER_MIN))
+        self.assertEqual((meter["controls_m"], meter["controls_bh"], meter["controls_by"], meter["controls_p10"]),
+                         (0, None, None, None), "no control to check the calibration on: not read, never False")
         self.assertNotIn("min_p", meter, "one program's figure: stored, never reported")
+
+    def test_under_the_floor_the_counts_and_the_reading_are_shown_to_no_one(self):
+        """THE METER'S FLOOR (the review's finding): with one lineage in the family, BH is 1 exactly when that
+        lineage's p is at or under q: a forward verdict on one program, weeks before any look or live tag. The first
+        lineages to reach a checkpoint are the captain's own seeds."""
+        self.assertEqual(R.METER_MIN, forward_db.RC_MIN_GROUP)
+        seeds = [self.register(f"seed-{i}@1", reason="seed") for i in range(R.METER_MIN)]
+        for pid in seeds[:-1]:
+            self.check(pid, 20, DAYS[20], 0.0001)                     # four lineages, each far under q
+        self.night(DAYS[21])
+        self.now = ny(DAYS[21], 19)
+        self.meters()
+        (stored,) = [r for r in self.table("fwd_meter") if r["day"] == DAYS[21]]
+        self.assertEqual((stored["m"], stored["bh"], stored["by_"]), (4, 4, 4), "the store keeps the whole row")
+        meter = self.section()["meter"]
+        self.assertEqual((meter["m"], meter["bh"], meter["by_"], meter["reading"]), (4, None, None, R.METER_UNREAD))
+        self.assertNotIn("min_p", meter)
+        counts = R.funnel_rows(self.root, 0.0, self.now + 1.0)
+        self.assertEqual((counts["bh"], counts["by"]), (0, 0), "the funnel's are integers: 0 under the floor")
+        text = json.dumps([self.section(), counts])
+        self.assertNotIn("edge somewhere", text)
+        # The fifth lineage's checkpoint: the family is at the floor and its counts are shown.
+        self.check(seeds[-1], 20, DAYS[22], 0.9)
+        self.night(DAYS[23])
+        self.now = ny(DAYS[23], 19)
+        self.meters()
+        meter = self.section()["meter"]
+        self.assertEqual((meter["m"], meter["bh"], meter["by_"], meter["reading"]), (5, 4, 4, "edge somewhere"))
+        counts = R.funnel_rows(self.root, 0.0, self.now + 1.0)
+        self.assertEqual((counts["bh"], counts["by"]), (4, 4))
+        # The controls' side has its own floor: four controls are no calibration check.
+        for n in range(4):
+            self.check(self.control("index", n), 20, DAYS[24], 0.5, p_x0=0.0001)
+        self.night(DAYS[25])
+        self.now = ny(DAYS[25], 19)
+        self.meters()
+        meter = self.section()["meter"]
+        self.assertEqual((meter["controls_m"], meter["controls_by"], meter["unreliable"]), (4, None, None))
 
     def test_the_controls_are_read_on_their_cost_free_p(self):
         self.check(self.register(), 20, DAYS[20], 0.5)
@@ -589,7 +645,92 @@ class TheMeter(Fixture):
         self.meters()
         meter = self.section()["meter"]
         self.assertEqual((meter["controls_by"], meter["unreliable"], meter["controls_p10"]), (5, True, 1.0))
+        self.assertEqual((meter["m"], meter["bh"], meter["reading"]), (1, None, R.METER_UNREAD),
+                         "one lineage: its count is shown to no one, the controls' check beside it is")
         self.assertEqual(meter["engines"], [])
+
+
+class ADaysMetersWaitForItsRows(Fixture):
+    """A day's rows are first-write and never recomputed: written the night a budget cut (or a vendor bar came late),
+    the day's N_eff, CEY and group counts were short of the programs left without a row, for good. The wait is real
+    here (`WAITS`): every registered program has its rows, or lacks them on purpose."""
+
+    WAITS = True
+
+    def population(self, n: int, days: int, seed: int = 3) -> list[int]:
+        rng = np.random.default_rng(seed)
+        pids = [self.register(f"fam-{i}@1") for i in range(n)]
+        for pid in pids:
+            self.series(pid, DAYS[:days], rng.normal(0, 0.01, days))
+        return pids
+
+    def members(self, day: str) -> int:
+        return {r["day"]: r["members"] for r in self.table("fwd_cey")}[day]
+
+    def test_a_day_is_written_once_no_program_owed_it_is_without_its_row(self):
+        rng = np.random.default_rng(3)
+        whole = self.population(4, 12)
+        stale = self.register("stale@1")
+        self.series(stale, DAYS[:11], rng.normal(0, 0.01, 11))           # the budget left it stale on the twelfth night
+        for day in DAYS[:12]:
+            self.night(day)
+        out = self.meters()
+        self.assertEqual((out["days"], out["waiting"]), (11, {"day": DAYS[11], "programs": 1}))
+        self.assertEqual(self.table("fwd_cey")[-1]["day"], DAYS[10], "the day waits: nothing of it is written")
+        self.assertEqual([r for r in self.table("fwd_meter") + self.table("fwd_groups") if r["day"] == DAYS[11]], [])
+        self.assertEqual(self.meters()["days"], 0)
+        # The next night's whole recompute fills its row, and both days are written, in order, with all five.
+        self.now = ny(DAYS[12], 19)
+        self.series(stale, DAYS[11:13], rng.normal(0, 0.01, 2))
+        for pid in whole:
+            self.day(pid, DAYS[12], float(rng.normal(0, 0.01)))
+        self.night(DAYS[12])
+        out = self.meters()
+        self.assertEqual((out["days"], out.get("waiting")), (2, None))
+        self.assertEqual((self.members(DAYS[11]), self.members(DAYS[12])), (5, 5), "none short of the program left stale")
+        groups = {(r["day"], r["grp"]): r["n"] for r in self.table("fwd_groups")}
+        self.assertEqual(groups[(DAYS[11], "train_pass")], 5)
+        self.assertEqual(self.table("fwd_events"), [], "a day written whole is no partial day")
+
+    def test_after_its_wait_a_day_is_written_as_it_stands_and_marked_partial(self):
+        rng = np.random.default_rng(4)
+        whole = self.population(4, 12)
+        halted = self.register("halted@1")
+        self.series(halted, DAYS[:11], rng.normal(0, 0.01, 11))          # its symbol has no bar from the twelfth day on
+        for day in DAYS[:12]:
+            self.night(day)
+        for i in range(12, 12 + R.METER_WAIT_NIGHTS):
+            self.assertEqual(self.meters().get("waiting"), {"day": DAYS[11], "programs": 1}, DAYS[i])
+            self.now = ny(DAYS[i], 19)
+            for pid in whole:
+                self.day(pid, DAYS[i], float(rng.normal(0, 0.01)))
+            self.night(DAYS[i])
+        out = self.meters()
+        self.assertEqual(out["days"], 1, "the waiting day, as it stands; the next one waits its own nights")
+        self.assertEqual(out["waiting"], {"day": DAYS[12], "programs": 1})
+        self.assertEqual(self.members(DAYS[11]), 4)
+        (event,) = self.table("fwd_events")
+        self.assertEqual((event["kind"], event["day"], json.loads(event["payload"])["programs"]),
+                         ("meter_partial", DAYS[11], 1))
+        self.assertEqual(R._partial_days(self.db), {DAYS[11]})
+        self.assertEqual(forward_db.EVENT_KINDS["meter_partial"], "C")
+
+    def test_who_is_owed_a_day(self):
+        self.population(2, 3)
+        day = DAYS[2]
+        self.assertEqual(R._awaited(self.db, day), 0)
+        self.control("index", 0)                                         # a control is run in the parent: never awaited
+        self.register("later@1", first_day=DAYS[3])                      # its first day is after the day
+        self.register("retro@1", registered_at=close(day) + 3600.0)      # the registry held it after the day's close
+        stopped = self.register("stopped@1")
+        self.tag(stopped, "stopped", f"cap:{DAYS[1]}")
+        self.assertEqual(R._awaited(self.db, day), 0)
+        owed = self.register("owed@1")
+        self.assertEqual(R._awaited(self.db, day), 1)
+        self.day(owed, day, 0.0, engine=self.label("eq-1+cccccccccccc+fwd-1") - 1)
+        self.assertEqual(R._awaited(self.db, day), 2 + 1,
+                         "a row under an older engine is not the day's row: every program is owed it under the newest")
+        self.assertEqual(R._awaited(self.db, "2026-10-17"), 0, "no session, nothing owed")
 
 
 # ============================================================================================== D9: RC
@@ -1051,9 +1192,23 @@ class TheReadersAlarms(Fixture):
                                         "alarms": [self.ROW, {"id": "FW2", "text": "no level"}, "junk",
                                                    {"id": 7, "level": "warning", "text": "t"},
                                                    {"id": "CP1", "level": "info", "text": "CP1 route x: t"}]})
-        got = R.alarms(self.root, now=self.now + 3600, settings=RECORD)
-        self.assertEqual(got, [self.ROW, {"id": "CP1", "level": "info", "text": "CP1 route x: t", "new": False}])
+        got = R.alarms(self.root, now=self.now + 3600, settings=PROBING)
+        cp1 = {"id": "CP1", "level": "info", "text": "CP1 route x: t", "new": False}
+        self.assertEqual(got, [self.ROW, cp1])
         self.assertTrue(all(set(a) == {"id", "level", "text", "new"} for a in got))
+        # EACH ALARM FOLLOWS ITS OWN SWITCH: the forward record's, the probe's.
+        self.assertEqual(R.alarms(self.root, now=self.now + 3600, settings=RECORD), [self.ROW], "the probe is off")
+        probing_only = {"elane": {"forward": {"mode": "off"}, "contam": {"mode": "record"}}}
+        self.assertEqual(R.alarms(self.root, now=self.now + 3600, settings=probing_only), [cp1], "the forward record is off")
+        self.assertEqual(R.alarms(self.root, now=self.now + 3600, settings=OFF), [])
+
+    def test_which_alarm_follows_which_switch(self):
+        both_off = {"elane": {"forward": {"mode": "off"}, "contam": {"mode": "off"}, "memory": {"mode": "off"}}}
+        for alarm in R.ALARMS:
+            self.assertEqual(R.raised(alarm, PROBING), True, alarm)
+            self.assertEqual(R.raised(alarm, both_off), alarm[:2] in ("RR", "MM"), alarm)
+            self.assertEqual(R.raised(alarm, RECORD), alarm[:2] != "CP", alarm)
+        self.assertFalse(R.raised("XX1", PROBING), "no alarm of the report")
 
     def test_a_stale_report_is_one_fw1_row_when_a_program_is_owed(self):
         self.register(first_day=DAYS[0])
@@ -1231,6 +1386,30 @@ class EachForwardAlarm(Fixture):
         (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW5"]
         self.assertIn(f"for 10 forward days running (since {DAYS[20]}) while 1 equity births went on", alarm["text"])
 
+    def test_fw5_reads_no_partial_day(self):
+        """A day whose meters were written short of a program's row (`meter_partial`: a night the budget cut) says
+        nothing of what the generators do: FW5 reads it neither in its run of days nor in its medians."""
+        store = self.swarm()
+        self.equity_family(store, "eq-a")
+        self.now = ny(DAYS[25], 12)
+        store.event("swarm.born", "eq-a", {"lane": "beta"})
+        self.cey([0.10] * 20 + [0.05] * 10)                         # ten days under the median: the budget began to bind
+        self.now = ny(DAYS[29], 20)
+        self.assertIn("FW5", self.ids(), "read as whole days, they are the alarm")
+        for day in DAYS[20:30]:
+            self.event("meter_partial", day=day, payload={"programs": 40, "once": "day"})
+        self.assertNotIn("FW5", self.ids())
+        # Whole days after them are read against the whole days before them.
+        with self.db:
+            for i, day in enumerate(DAYS[30:40]):
+                self.db.execute("INSERT INTO fwd_cey(day, n_w, members, neff, neff_raw, cey_day, cey_total, at) "
+                                "VALUES(?, 60, 5, 1.0, 1.0, ?, 0.0, 1.0)", (day, 0.09 - 0.001 * i))
+        self.now = ny(DAYS[35], 12)
+        store.event("swarm.born", "eq-a", {"lane": "beta"})
+        self.now = ny(DAYS[39], 20)
+        (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW5"]
+        self.assertIn(f"for 10 forward days running (since {DAYS[30]})", alarm["text"])
+
     def test_fw5_needs_equity_births_in_those_days(self):
         store = self.swarm()
         self.equity_family(store, "eq-a")
@@ -1370,6 +1549,9 @@ class EachForwardAlarm(Fixture):
 
 
 class TheOtherAlarms(Fixture):
+    def section(self, settings=PROBING) -> dict:   # CP1 and CP2 are raised while the probe is on
+        return R.section(self.root, now=self.now, settings=settings)
+
     def receipts(self, *rows) -> None:
         db = sqlite3.connect(str(self.root / RR.DB))
         self.addCleanup(db.close)
@@ -1427,7 +1609,58 @@ class TheOtherAlarms(Fixture):
         self.assertEqual([(a["id"], a["level"]) for a in rows], [("CP1", "info"), ("CP1", "info")])
         self.assertIn(f"CP1 route sail:fake_a unprobed: no completed probe since {S.iso(self.now - 46 * 86400)[:10]}",
                       rows[0]["text"])
+        self.assertNotIn("ever", rows[0]["text"])
         self.assertIn("CP1 route sail:fake_c unprobed", rows[1]["text"])
+        self.assertIn("(no probe of it has ever completed)", rows[1]["text"])
+        self.assertEqual(self.section(RECORD)["alarms"], [], "with the probe off a route nobody probes is not unprobed")
+
+    def test_cp1_counts_from_a_routes_last_completed_probe_never_from_its_last_attempt(self):
+        """The review's finding: the router cannot answer from the ops child, so three routes take turns each
+        Saturday and every run ends "stopped": "error". Read by its last attempt, each route's clock restarted every
+        third week and nothing was ever told."""
+        self.history = []
+        week = 7 * 86400.0
+        first = self.now - 9 * week
+        self.contamination(**{f"sail:fake_{name}": {"first_attempted_at": S.iso(first + i * week), "attempts": 3,
+                                                   "attempted_at": S.iso(self.now - (2 - i) * week), "idle": 2}
+                              for i, name in enumerate("abc")})
+        rows = self.section()["alarms"]
+        self.assertEqual([a["id"] for a in rows], ["CP1", "CP1", "CP1"])
+        for i, (name, row) in enumerate(zip("abc", rows)):
+            self.assertIn(f"CP1 route sail:fake_{name} unprobed: no completed probe since "
+                          f"{S.iso(first + i * week)[:10]} (no probe of it has ever completed)", row["text"])
+            self.assertTrue(R.text_ok(row["text"]))
+        # A probe that completes resets it; an attempt since does not move it.
+        self.contamination(**{"sail:fake_a": {"at": S.iso(self.now - 10 * 86400), "first_attempted_at": S.iso(first),
+                                              "attempted_at": S.iso(self.now), "probes": 1, "idle": 1, "cells": {}}})
+        self.assertEqual([a["text"].split(":")[1].split()[0] for a in self.section()["alarms"]], [],
+                         "a, completed ten days ago; b and c have no row and were first seen configured by this report")
+
+    def test_cp1_reads_a_configured_route_the_file_has_no_row_for(self):
+        """A served route the probe never marked (the job skipped, or failed before its mark, every Saturday): its
+        clock starts at the first report that saw it configured, carried from report to report."""
+        self.history = []
+        first = self.section()
+        self.assertEqual(first["alarms"], [])
+        self.assertEqual(first["contamination"], {"version": None, "routes": {}, "first_seen": {
+            f"sail:fake_{name}": S.iso(self.now) for name in "abc"}})
+        write_json(self.root / R.FILE, first)
+        began = self.now
+        self.now += 44 * 86400
+        again = self.section()
+        self.assertEqual((again["alarms"], again["contamination"]["first_seen"]), ([], first["contamination"]["first_seen"]))
+        write_json(self.root / R.FILE, again)
+        self.now += 2 * 86400
+        self.contamination(**{"sail:fake_b": {"at": S.iso(self.now - 86400), "probes": 1, "idle": 0, "cells": {}}})
+        rows = self.section()["alarms"]
+        self.assertEqual([(a["id"], a["level"]) for a in rows], [("CP1", "info"), ("CP1", "info")])
+        for name, row in zip("ac", rows):
+            self.assertIn(f"CP1 route sail:fake_{name} unprobed: no completed probe since {S.iso(began)[:10]} (no probe "
+                          "of it has ever completed)", row["text"])
+        # A route no longer configured is dropped, and one that returns starts again.
+        fewer = {"elane": {**PROBING["elane"], "e2": {"routes": ["sail:fake_b"]}}}
+        self.assertEqual((self.section(fewer)["alarms"], list(self.section(fewer)["contamination"]["first_seen"])),
+                         ([], ["sail:fake_b"]))
 
     def test_cp1_a_readable_recent_cell_newly_recalled(self):
         at = S.iso(self.now - 86400)
@@ -1500,9 +1733,55 @@ class TheJob(Fixture):
         self.now = ny(DAYS[4], 12)
         ctx = self.ctx(OFF)
         out = R.run(ctx)
-        self.assertEqual(out["status"], "skipped")
-        self.assertEqual(read_json(self.root / R.FILE), {"at": S.iso(self.now), "mode": "off", "alarms": []})
+        self.assertEqual((out["status"], out["alarms"]), ("skipped", []))
+        self.assertEqual(read_json(self.root / R.FILE), {"at": S.iso(self.now), "mode": "off", "memory": None,
+                                                         "contamination": None, "receipts": [], "alarms": []})
+        self.assertEqual(sorted(read_json(self.root / R.FILE)), sorted(R.OFF_KEYS))
         self.assertEqual((ctx.alerts, self.table("fwd_cey")), ([], []))
+
+    def test_with_the_forward_record_off_what_has_another_switch_or_none_is_still_told(self):
+        """The review's finding: the operator rolls the forward record back while the memory and the probe stay on.
+        A receipt left unread, a route nobody has probed and the swarm's memory alert were in no report and no alarm."""
+        self.register(first_day=DAYS[0])
+        self.series(1, DAYS[:3], [0.01, 0.0, -0.01])
+        self.night(DAYS[1], stale=3)
+        self.night(DAYS[2], stale=3)                                  # FW2's, were the forward record on
+        self.now = ny(DAYS[4], 12)
+        deployed = self.now - 9 * 86400
+        db = sqlite3.connect(str(self.root / RR.DB))
+        self.addCleanup(db.close)
+        db.executescript(RR.SCHEMA)
+        db.execute("INSERT INTO l3_receipts(id, kind, release, metric, direction, min_delta, window_hours, deployed_at, "
+                   "value, verdict, at) VALUES('fake-a', 'declared', 'E3', 'forward_record.program_sessions', 'up', 1, "
+                   "72, ?, 3, NULL, ?)", (deployed, deployed))
+        db.commit()
+        write_json(self.root / "contamination.json", {"version": "contam-1", "history": [], "routes": {
+            "sail:fake_a": {"at": S.iso(self.now - 50 * 86400), "probes": 1, "idle": 0, "cells": {}},
+            "sail:fake_b": {"attempted_at": S.iso(self.now), "first_attempted_at": S.iso(self.now), "idle": 3}}})
+        store = self.swarm()
+        self.equity_family(store, "eq-a")
+        store.event("swarm.status", "eq-a", {"action": "elane_memory", "alert": True, "version": 2,
+                                             "text": "the seen spans could not be read (ValueError): v2 is not scored"})
+        off = {"elane": {**PROBING["elane"], "forward": {"mode": "off"}, "memory": {"mode": "record"}}}
+        ctx = self.ctx(off)
+        out = R.run(ctx)
+        self.assertEqual((out["status"], out["alarms"]), ("skipped", ["RR1", "CP1", "CP2", "MM1"]))
+        doc = read_json(self.root / R.FILE)
+        self.assertEqual((sorted(doc), doc["mode"]), (sorted(R.OFF_KEYS), "off"), "no forward part is written")
+        self.assertEqual([a["id"] for a in doc["alarms"]], ["RR1", "CP1", "CP2", "MM1"])
+        self.assertEqual(sorted(a["text"].split(":")[1].split()[0] for a in ctx.alerts), ["CP2", "MM1", "RR1"],
+                         "each warning is a House alert; CP1 is info")
+        self.assertEqual(self.table("fwd_cey"), [], "no meter is written while the forward record is off")
+        # The dlane report's reader hands them on, and none of FW1-FW8 with them.
+        got = R.alarms(self.root, now=self.now + 60, settings=off)
+        self.assertEqual([a["id"] for a in got], ["RR1", "CP1", "CP2", "MM1"])
+        # The probe switched off too: its two alarms go, the receipt's and the memory's stay.
+        quiet = {"elane": {**off["elane"], "contam": {"mode": "off"}}}
+        self.assertEqual(R.run(self.ctx(quiet))["alarms"], ["RR1", "MM1"])
+        self.assertEqual([a["id"] for a in R.alarms(self.root, now=self.now + 60, settings=quiet)], ["RR1", "MM1"])
+        # Back on: the forward alarms return with the next report.
+        on = {"elane": {**PROBING["elane"], "memory": {"mode": "record"}}}
+        self.assertEqual(R.run(self.ctx(on))["alarms"], ["FW1", "FW2", "RR1", "CP1", "CP2", "MM1"])
 
     def test_it_writes_the_meters_then_the_report_and_alerts_each_warning(self):
         rng = np.random.default_rng(2)
@@ -1513,7 +1792,7 @@ class TheJob(Fixture):
         write_json(self.root / "contamination.json", {"version": "contam-1", "history": [], "routes": {
             "sail:fake_a": {"at": S.iso(ny(DAYS[10], 12) - 50 * 86400), "probes": 1, "idle": 0, "cells": {}}}})
         self.now = ny(DAYS[10], 19)
-        ctx = self.ctx(RECORD)
+        ctx = self.ctx(PROBING)
         out = R.run(ctx)
         self.assertEqual((out["ok"], out["through"], out["days"], out["cey"], out["alarms"]),
                          (True, DAYS[10], 11, 11, ["FW2", "CP1"]))
@@ -1681,7 +1960,7 @@ class TheReportShowsOnlyWhatItMay(Fixture):
         receipts.close()
         write_json(self.root / "contamination.json", {"version": "contam-1", "history": [], "routes": {
             "sail:fake_a": {"at": S.iso(self.now - 50 * 86400), "probes": 1, "idle": 3, "cells": {}}}})
-        (self.root / "swarm.json").write_text(json.dumps(RECORD))
+        (self.root / "swarm.json").write_text(json.dumps(PROBING))
         self.release = self.base / "release"
         (self.release / RR.DECLARATIONS).parent.mkdir(parents=True)
         (self.release / RR.DECLARATIONS).write_text(json.dumps({"schema": 1, "receipts": []}))
@@ -1784,6 +2063,30 @@ class TheReportShowsOnlyWhatItMay(Fixture):
         allowed = (".cey.", ".meter.controls_p10", ".meter.q", ".fills.", ".rc.pairs", ".receipts")
         for path, value in numbers(doc):
             self.assertTrue(path.startswith(allowed), f"{path} = {value}: a figure outside the aggregates")
+
+    def test_no_meter_count_over_fewer_lineages_than_the_floor(self):
+        """THE METER'S FLOOR: with one or two lineages in the family, BH and BY are a forward verdict on a program
+        that has no live tag. The first lineages to reach a 20-day checkpoint are the captain's own seeds, and the
+        captain reads this report: the file, the dlane section and the funnel show the family's size and no count."""
+        for i, p_x in enumerate((0.0001, 0.9)):
+            self.check(self.register(f"captains-seed-{i}@1", reason="seed"), 20, DAYS[20], p_x)
+        self.night(DAYS[21])
+        self.now = ny(DAYS[21], 19)
+        (self.root / "swarm.json").write_text(json.dumps(RECORD))
+        release = self.base / "release"
+        release.mkdir(exist_ok=True)
+        R.run(Context("forward_report", root=self.root, due_at=self.now, base=self.base, release=release, config={},
+                      clock=lambda: self.now))
+        (stored,) = [r for r in self.table("fwd_meter") if r["day"] == DAYS[21]]
+        self.assertEqual((stored["m"], stored["bh"]), (2, 1), "recorded whole: one of the two seeds is under q")
+        for doc in (read_json(self.root / R.FILE), R.read_section(self.root)):
+            meter = doc["meter"]
+            self.assertEqual((meter["m"], meter["bh"], meter["by_"], meter["reading"], meter["floor"]),
+                             (2, None, None, R.METER_UNREAD, R.METER_MIN))
+            self.assertEqual(meter["unreliable"], None)
+        counts = R.funnel_rows(self.root, 0.0, self.now + 1.0)
+        self.assertEqual((counts["bh"], counts["by"], counts["checkpoints"]), (0, 0, 2))
+        self.assertTrue(all(isinstance(v, int) and not isinstance(v, bool) for v in counts.values()))
 
     def test_no_rc_difference_before_a_pairs_read(self):
         self.everything()

@@ -44,6 +44,23 @@ READINGS THE SPEC LEFT OPEN, each fixed here and held by a test:
   smallest p a lineage does have. It stays in the store and is never in the report (one program's figure).
 - A GROUP'S ROW is written every forward day, n 0 and its means NULL when no pid of it has a counted row.
 
+A DAY'S METERS WAIT FOR ITS ROWS (`_awaited`; the review's fix). A day's rows are first-write and never recomputed,
+and a night the budget cut, or one a vendor bar came late to, leaves programs without their row for the day until
+the next night's whole recompute fills it. Written the night itself, the day's N_eff and CEY (the goal's measure of
+compounding) and its RC group counts would be short of those programs for good. So a day is written once no active
+registered program that was owed it (its `first_day` on or before the day, held by the registry at the day's close)
+is still without its row under the newest engine, or once `METER_WAIT_NIGHTS` later nights have run, whichever
+comes first; in the second case it is written as it stands and one `meter_partial` event (once a day; the count of
+programs still without a row) marks it. The days after a waiting day wait behind it (CEY is a running sum). FW5
+reads no partial day: neither in its run of days nor in its medians.
+
+THE METER'S FLOOR (`METER_MIN`; the review's fix). BH and BY over one or two lineages are a verdict on a program
+(with one lineage, BH is 1 exactly when that lineage's p is at or under q), and no program without a "live" tag has
+its forward verdict shown to anyone. The store keeps the whole row; the report and the funnel show `m` always and
+the counts and the reading only once the family holds `METER_MIN` lineages (the controls' side once it holds as many
+controls): under it the report's `bh`, `by_` and `unreliable` are None with the reading "too few lineages to read",
+and the funnel's `bh` and `by` are 0.
+
 THE REPORT (`section`, written to `FILE`; read by the dlane report through `read_section`): `SECTION_KEYS`. Forward
 rows reach only this file, the dlane report's `forward_record` section and `forward_twins.a14_reading`: no
 per-program forward figure for a pid without a "live" tag, no RC difference before a pair's read, no figure of the
@@ -59,9 +76,16 @@ THE FUNNEL (`funnel_rows`, read by league/ops/funnel.py `window` as `forward_rec
 
 THE ALARMS (`alarms`; `ALARMS`: id -> level). Each row is {"id", "level": "info" | "warning", "text", "new"}; the
 dlane report carries them and each warning is also a `ctx.alert` of the job that finds it. EVERY TEXT HOLDS IDS, COUNTS
-AND DATES ONLY: no decimal figure, no "bp", no "%", no return, no dollar figure (`text_ok`). With
-`elane.forward.mode` off none of FW1-FW8 is raised. Each alarm is read on its own: one that cannot be read (a store
-locked that minute) is an info row under its id that says so, never silence and never the loss of the others.
+AND DATES ONLY: no decimal figure, no "bp", no "%", no return, no dollar figure (`text_ok`). Each alarm is read on
+its own: one that cannot be read (a store locked that minute) is an info row under its id that says so, never
+silence and never the loss of the others.
+EACH ALARM FOLLOWS ITS OWN SWITCH (`raised`; the review's fix: the first build silenced all thirteen with the forward
+mode). With `elane.forward.mode` off none of FW1-FW8 is raised and no forward part of the report is read; with
+`elane.contam.mode` off neither CP1 nor CP2 is (a route nobody probes any more is not "unprobed"); RR1, RR2 and MM1
+have no switch: the release receipts have none, and a memory alert is the swarm's own failure, which the memory mode
+does not reach (a family born with a hidden year keeps its seen spans whatever the mode). So with the forward record
+rolled back the job still writes `FILE` ({"at", "mode": "off", "memory", "contamination", "receipts", "alarms"}),
+still raises RR, CP and MM, and `alarms` still hands them to the dlane report.
 - FW1 (warning): the mode is "record" AND (no `fwd_days` row by 09:00 ET the next session for the last closed forward
   day on which at least one active registry row had `first_day` <= that day, OR the report is stale): a stalled job.
   Silent on an empty registry, on the sessions before a first registration's `first_day`, and while the mode is off.
@@ -94,7 +118,13 @@ locked that minute) is an info row under its id that says so, never silence and 
 - RR1 (warning): a declared release receipt unread 24 h after its window closed; RR2 (info): a receipt read "flat"
   or "wrong_way" (listed for `RR2_DAYS` days, never reverted).
 - CP1 (info): a route unprobed for 45 days, or a readable 2025 or 2026H1 cell newly "recalled"; CP2 (warning): a route
-  whose last three attempts added no cell.
+  whose last three attempts added no cell. THE ROUTES CP1 READS are the swarm's configured ones
+  (`elane_yield.cfg(settings)["routes"]`) and every route the probe's file holds, and its 45 days count from the
+  route's last COMPLETED probe; for a route with none, from the earliest of its first attempt (the file's
+  `first_attempted_at`, which the probe writes once and never moves) and the first report that saw it configured
+  (`contamination.first_seen`, carried from report to report). Read off the file's rows by their last attempt, a
+  route whose probe never finishes restarted its clock every Saturday and a route with no row was never read: a
+  probe that cannot answer from the ops child was told by nothing.
 - MM1 (warning): a `swarm.status` "elane_memory" alert in the last 24 h.
 FW8 and MM1 read back to the report before this one when that is longer than 24 h (never past `LOOKBACK_DAYS`): the
 job does not run between a Friday night and a Monday morning, and what happened then is still told once.
@@ -131,6 +161,8 @@ DUE_GRACE_HOURS = 3.0
 #: The report's top-level keys (`section`).
 SECTION_KEYS = ("at", "mode", "t0", "through", "engine", "registry", "shadow", "checkpoints", "meter", "cey", "fills",
                 "rc", "memory", "contamination", "receipts", "alarms")
+#: The report's keys while the forward record is off (`run`): no forward part.
+OFF_KEYS = ("at", "mode", "memory", "contamination", "receipts", "alarms")
 #: `funnel_rows`' keys, every value an integer (never a figure).
 FUNNEL_KEYS = ("registered", "registered_total", "lineages", "controls", "program_sessions", "program_sessions_total",
                "stale", "errors", "checkpoints", "bh", "by", "oof_seen", "oof_rows")
@@ -166,6 +198,12 @@ CP1_ERAS = ("2025", "2026H1")
 CP2_IDLE = 3
 #: RR2 lists a receipt read "flat" or "wrong_way" for this many days after its read.
 RR2_DAYS = 7
+#: A DAY'S METERS WAIT FOR ITS ROWS: at most this many later nights (it is then written as it stands, marked partial).
+METER_WAIT_NIGHTS = 3
+#: THE METER'S FLOOR: BH, BY and the reading are shown once the family holds this many lineages (D9's own floor).
+METER_MIN = forward_db.RC_MIN_GROUP
+#: The reading under the floor.
+METER_UNREAD = "too few lineages to read"
 #: MM1 and FW8 read the last 24 hours, or back to the report before this one, never past this many days.
 RECENT_HOURS = 24.0
 LOOKBACK_DAYS = 7
@@ -197,6 +235,24 @@ def _settings(root: Path, settings: Mapping[str, Any] | None, config: Any = None
         return settings_mod.load(root, config=config if isinstance(config, Mapping) else None)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _probing(settings: Mapping[str, Any] | None) -> bool:
+    """Whether the contamination probe is on (`elane.contam.mode`): CP1 and CP2's switch."""
+    from . import contam_probe
+
+    return contam_probe.mode(settings) != "off"
+
+
+def raised(alarm: Any, settings: Mapping[str, Any] | None) -> bool:
+    """EACH ALARM FOLLOWS ITS OWN SWITCH (the module docstring): FW1-FW8 the forward mode, CP1 and CP2 the probe's;
+    RR1, RR2 and MM1 have none."""
+    group = str(alarm)[:2]
+    if group == "FW":
+        return _mode(settings) != "off"
+    if group == "CP":
+        return _probing(settings)
+    return str(alarm) in ALARMS
 
 
 def text_ok(text: Any) -> bool:
@@ -549,7 +605,7 @@ def rc_pairs(db: sqlite3.Connection, day: str) -> list[dict[str, Any]]:
 
 
 def _write_day(root: str | Path, db: sqlite3.Connection, day: str, *, now: float, settings: Mapping[str, Any] | None,
-               cap: int, history: dict[tuple[str, ...], float | None]) -> dict[str, int]:
+               cap: int, history: dict[tuple[str, ...], float | None], awaited: int = 0) -> dict[str, int]:
     """One forward day's D6, D7, D8 and D9 rows, computed and then written in one transaction; the rows written."""
     n = forward_stats.neff(_population(db, day, cap)[1])
     cey_day = float(n["neff"]) / forward_stats.YEAR_SESSIONS
@@ -583,7 +639,32 @@ def _write_day(root: str | Path, db: sqlite3.Connection, day: str, *, now: float
             "replay_multiple, at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (day, n["n_w"], n["members"], n["neff"], n["neff_raw"], cey_day, total, sim_py, hist_iy,
              forward_stats.replay_multiple(sim_py, hist_iy, total), float(now))).rowcount
+        if awaited and wrote["cey"]:
+            # Written after its wait, short of these programs' rows: marked once, and FW5 reads no such day.
+            forward_db.event(db, "meter_partial", day=day, at=float(now), once="day",
+                             payload={"why": f"written after {METER_WAIT_NIGHTS} later nights with programs still "
+                                             "without their row for the day", "programs": int(awaited)})
     return wrote
+
+
+def _awaited(db: sqlite3.Connection, day: str) -> int:
+    """How many active registered programs that were owed `day` (first day on or before it; held by the registry at
+    its close) have no row for it under the newest engine: the programs a night left stale or without data."""
+    engine, closed = forward_db.engine_now(db), _close_at(day)
+    if engine is None or closed is None:
+        return 0
+    missing = guard.ids(db, "SELECT r.pid FROM fwd_registry r WHERE r.lane!='control' AND r.first_day<=? AND "
+                            "r.registered_at<=? AND NOT EXISTS (SELECT 1 FROM fwd_days d WHERE d.pid=r.pid AND d.day=? "
+                            "AND d.engine=?)", (day, closed, day, int(engine)))
+    if not missing:
+        return 0
+    stopped = set(guard.ids(db, "SELECT DISTINCT pid FROM fwd_tags WHERE tag='stopped'"))
+    return sum(1 for pid in missing if pid not in stopped or forward_db.active(db, int(pid)))
+
+
+def _partial_days(db: sqlite3.Connection) -> set[str]:
+    """The days whose meters were written short of a program's row (`meter_partial`)."""
+    return {str(day) for day in guard.ids(db, "SELECT DISTINCT day FROM fwd_events WHERE kind='meter_partial'")}
 
 
 def meters(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapping[str, Any] | None
@@ -593,7 +674,8 @@ def meters(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Ma
 
     A DAY THAT CANNOT BE WRITTEN STOPS THE PASS THERE: the answer then also holds "error": {"day", "why" (the
     exception's name)}, nothing of that day is written (one transaction a day) and no later day is (CEY is a running
-    sum: a later day written first would stand without it for good). The next pass begins at that day again."""
+    sum: a later day written first would stand without it for good). The next pass begins at that day again. So does
+    A DAY THAT WAITS FOR ITS ROWS (the module docstring): the answer then holds "waiting": {"day", "programs"}."""
     out: dict[str, Any] = {"days": 0, "cey": 0, "meter": 0, "groups": 0}
     through = _one(db, "SELECT max(through) FROM fwd_runs WHERE through IS NOT NULL")
     if through is None:
@@ -601,11 +683,17 @@ def meters(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Ma
     have = set(guard.ids(db, "SELECT day FROM fwd_cey"))
     cap = int(_cfg(settings)["neff_max_members"])
     history: dict[tuple[str, ...], float | None] = {}
+    nights = [str(n) for n in guard.ids(db, "SELECT DISTINCT through FROM fwd_runs WHERE through IS NOT NULL")]
     for day in forward_days(forward_db.t0(), through):
         if day in have:
             continue
         try:
-            wrote = _write_day(root, db, day, now=now, settings=settings, cap=cap, history=history)
+            # A DAY'S METERS WAIT FOR ITS ROWS (the module docstring): the pass stops at a day still awaited.
+            awaited = _awaited(db, day)
+            if awaited and sum(1 for night in nights if night > day) < METER_WAIT_NIGHTS:
+                out["waiting"] = {"day": day, "programs": awaited}
+                break
+            wrote = _write_day(root, db, day, now=now, settings=settings, cap=cap, history=history, awaited=awaited)
         except Exception as exc:  # noqa: BLE001 - named, and the pass stops: unread is never zero
             out["error"] = {"day": day, "why": type(exc).__name__}
             break
@@ -698,15 +786,25 @@ def _checkpoints(db: sqlite3.Connection) -> dict[str, Any]:
 
 
 def _meter(db: sqlite3.Connection) -> dict[str, Any] | None:
-    """The latest `fwd_meter` row as the report shows it: counts and the controls' share; never `min_p`."""
+    """The latest `fwd_meter` row as the report shows it: counts and the controls' share; never `min_p`, and no
+    count over a family under `METER_MIN` (THE METER'S FLOOR, the module docstring: `m` is always shown)."""
     rows = _rows(db, "SELECT day, m, bh, by_, controls_m, controls_bh, controls_by, controls_p10 FROM fwd_meter "
                      "ORDER BY day DESC LIMIT 1")
     engines = [int(e) for e in guard.ids(db, "SELECT DISTINCT engine FROM fwd_days ORDER BY engine")]
     if not rows:
         return {"day": None, "engines": engines}
     row = rows[0]
-    return {**row, "q": forward_db.Q, "reading": "none yet" if not row["by_"] else "edge somewhere",
-            "unreliable": bool(row["controls_by"]), "engines": engines}
+    if int(row["m"] or 0) < METER_MIN:      # THE METER'S FLOOR: a count over fewer lineages is a verdict on a program
+        row.update(bh=None, by_=None)
+        reading = METER_UNREAD
+    else:
+        reading = "none yet" if not row["by_"] else "edge somewhere"
+    unreliable: bool | None = bool(row["controls_by"])
+    if int(row["controls_m"] or 0) < METER_MIN:
+        row.update(controls_bh=None, controls_by=None, controls_p10=None)
+        unreliable = None
+    return {**row, "q": forward_db.Q, "reading": reading, "unreliable": unreliable, "floor": METER_MIN,
+            "engines": engines}
 
 
 def _cey(db: sqlite3.Connection) -> dict[str, Any] | None:
@@ -720,8 +818,11 @@ def _cey(db: sqlite3.Connection) -> dict[str, Any] | None:
 
 def _under_median(db: sqlite3.Connection) -> tuple[int, str | None]:
     """(for how many forward days running, ending at the latest, cey_day was under the median of the last
-    `MEDIAN_DAYS` forward days up to it; the first of those days)."""
-    rows = _rows(db, f"SELECT day, cey_day FROM fwd_cey ORDER BY day DESC LIMIT {MEDIAN_DAYS + 10 * FW5_DAYS}")[::-1]
+    `MEDIAN_DAYS` forward days up to it; the first of those days). A PARTIAL day (`meter_partial`: written short of a
+    program's row) is read as no day at all: a night the budget cut says nothing of what the generators do."""
+    partial = _partial_days(db)
+    rows = [row for row in _rows(db, "SELECT day, cey_day FROM fwd_cey ORDER BY day DESC LIMIT "
+                                     f"{MEDIAN_DAYS + 10 * FW5_DAYS + len(partial)}")[::-1] if row["day"] not in partial]
     run, first = 0, None
     for i in range(len(rows) - 1, max(-1, len(rows) - 1 - 10 * FW5_DAYS), -1):
         window = [float(r["cey_day"]) for r in rows[max(0, i - MEDIAN_DAYS + 1):i + 1]]
@@ -825,24 +926,45 @@ def _memory(root: Path) -> dict[str, Any] | None:
     return guard.read(path, lambda db: dict(elane_memory.counts(db))) if path.exists() else None
 
 
-def _contamination(root: Path) -> dict[str, Any] | None:
-    """`<state>/contamination.json` as the report carries it: one row a route, its cells as counts and names only."""
+def _configured_routes(settings: Mapping[str, Any] | None) -> list[str]:
+    """The model routes the swarm is configured to ask (`elane.e2.routes`): what the probe is owed on."""
+    from ..swarm import elane_yield
+
+    return [str(key) for key in elane_yield.cfg(settings)["routes"]]
+
+
+def _first_seen(previous: Any, settings: Mapping[str, Any] | None, now: float) -> dict[str, str]:
+    """{route: when a report first saw it configured}, carried from the report before this one (THE ROUTES CP1 READS,
+    the module docstring); a route no longer configured is dropped. {} while the probe is off."""
+    if not _probing(settings):
+        return {}
+    held = (previous.get("contamination") or {}).get("first_seen") if isinstance(previous, Mapping) and isinstance(
+        previous.get("contamination"), Mapping) else None
+    held = held if isinstance(held, Mapping) else {}
+    return {key: held[key] if S.epoch(held.get(key)) is not None else S.iso(now) for key in _configured_routes(settings)}
+
+
+def _contamination(root: Path, first_seen: Mapping[str, str] | None = None) -> dict[str, Any] | None:
+    """`<state>/contamination.json` as the report carries it: one row a route, its cells as counts and names only; and
+    `first_seen` (`_first_seen`). None with no file and no configured route."""
     from . import contam_probe
 
     doc = read_json(root / contam_probe.FILE, None)
     if not isinstance(doc, Mapping) or not isinstance(doc.get("routes"), Mapping):
-        return None
+        return {"version": None, "routes": {}, "first_seen": dict(first_seen)} if first_seen else None
     routes: dict[str, Any] = {}
     for key, row in sorted(doc["routes"].items()):
         if not isinstance(row, Mapping):
             continue
         cells = [(f"{stratum}/{era}", cell) for stratum, eras in sorted((row.get("cells") or {}).items())
                  if isinstance(eras, Mapping) for era, cell in sorted(eras.items()) if isinstance(cell, Mapping)]
-        routes[str(key)] = {"at": row.get("at"), "attempted_at": row.get("attempted_at"), "model": row.get("model"),
-                            "probes": row.get("probes"), "idle": row.get("idle"), "partial": "partial" in row,
+        routes[str(key)] = {"at": row.get("at"), "attempted_at": row.get("attempted_at"),
+                            "first_attempted_at": row.get("first_attempted_at"), "model": row.get("model"),
+                            "probes": row.get("probes"), "attempts": row.get("attempts"), "idle": row.get("idle"),
+                            "partial": "partial" in row,
                             "cells": len(cells), "readable": sum(1 for _, c in cells if c.get("readable") is True),
                             "recalled": [name for name, c in cells if c.get("recalled") is True]}
-    return {"version": doc.get("version"), "routes": routes}
+    return {"version": doc.get("version"), "routes": routes, "first_seen": dict(first_seen or {})}
 
 
 def _receipts(root: Path, now: float) -> list[dict[str, Any]]:
@@ -1100,13 +1222,27 @@ def _receipt_alarms(receipts: Any, now: float) -> list[dict[str, Any]]:
 
 
 def _probe_alarms(root: Path, contamination: Any, now: float) -> list[dict[str, Any]]:
+    """CP1 and CP2 (THE ROUTES CP1 READS, the module docstring): every route the file holds and every configured one
+    (`contamination.first_seen`)."""
     out = []
     routes = contamination.get("routes") if isinstance(contamination, Mapping) else None
-    for key, row in (routes or {}).items():
+    routes = routes if isinstance(routes, Mapping) else {}
+    first_seen = contamination.get("first_seen") if isinstance(contamination, Mapping) else None
+    first_seen = first_seen if isinstance(first_seen, Mapping) else {}
+    for key in [*routes, *(k for k in first_seen if k not in routes)]:
+        row = routes.get(key) if isinstance(routes.get(key), Mapping) else {}
         at = S.epoch(row.get("at"))
-        seen = at if at is not None else S.epoch(row.get("attempted_at"))
+        if at is not None:
+            seen, never = at, ""
+        else:
+            # No probe of it ever completed: from its first attempt (written once, never moved) or the first report that
+            # saw it configured, whichever is earlier (its last attempt is read too: all a row of an earlier build has).
+            known = [t for t in (S.epoch(row.get("first_attempted_at")), S.epoch(row.get("attempted_at")),
+                                 S.epoch(first_seen.get(key))) if t is not None]
+            seen = min(known) if known else None
+            never = " (no probe of it has ever completed)"
         if seen is not None and now - seen > CP1_DAYS * 86400.0:
-            out.append(_row("CP1", f"no completed probe since {S.iso(seen)[:10]}", f"route {key} unprobed"))
+            out.append(_row("CP1", f"no completed probe since {S.iso(seen)[:10]}{never}", f"route {key} unprobed"))
         recalled = [name for name in row.get("recalled") or () if name.split("/")[-1] in CP1_ERAS]
         before = _previously_recalled(root, key, row.get("at")) if recalled else None
         fresh = [name for name in recalled if before is None or name not in before]
@@ -1156,8 +1292,8 @@ def section(root: str | Path, *, now: float, settings: Mapping[str, Any] | None)
     out.update(at=S.iso(now), mode=mode, t0=_part(lambda: forward_db.t0().isoformat()))
     alarms: list[dict[str, Any]] = []
     db = None
-    try:
-        db = forward_db.open_db(root, readonly=True)
+    try:  # with the forward record off no forward part is read (EACH ALARM FOLLOWS ITS OWN SWITCH)
+        db = forward_db.open_db(root, readonly=True) if mode != "off" else None
     except Exception:  # noqa: BLE001 - no forward store yet (or one that cannot be opened): nothing recorded to report
         db = None
     if db is not None:
@@ -1178,12 +1314,12 @@ def section(root: str | Path, *, now: float, settings: Mapping[str, Any] | None)
         finally:
             db.close()
     out["memory"] = _part(lambda: _memory(root))
-    out["contamination"] = _part(lambda: _contamination(root))
+    out["contamination"] = _part(lambda: _contamination(root, _first_seen(previous, settings, now)))
     out["receipts"] = _part(lambda: _receipts(root, now))
     alarms += _each(((("FW7", lambda: _decide_alarm(root)),) if mode != "off" else ())
-                    + (("RR1", lambda: _receipt_alarms(out["receipts"], now)),
-                       ("CP1", lambda: _probe_alarms(root, out["contamination"], now)),
-                       ("MM1", lambda: _memory_alarm(root, since))))
+                    + (("RR1", lambda: _receipt_alarms(out["receipts"], now)),)
+                    + ((("CP1", lambda: _probe_alarms(root, out["contamination"], now)),) if _probing(settings) else ())
+                    + (("MM1", lambda: _memory_alarm(root, since)),))
     known = {_head(a.get("text")) for a in (previous.get("alarms") or ()) if isinstance(a, Mapping)} \
         if isinstance(previous, Mapping) and isinstance(previous.get("alarms"), list) else set()
     out["alarms"] = [{**a, "new": _head(a["text"]) not in known} for a in alarms]
@@ -1220,7 +1356,8 @@ def funnel_rows(root: str | Path, start: float, end: float) -> dict[str, int]:
     A program-session and a checkpoint are counted once, when first written (the row of its first engine: the night a
     label moves writes every stored day again and counts nothing twice); the `_total`s, `lineages` and `controls` are
     everything up to `end`; `stale` is the last night's that ended in the window; `errors` the window's nights'
-    errors and the nights that failed at their preflight; `bh` and `by` the latest meter row written before `end`."""
+    errors and the nights that failed at their preflight; `bh` and `by` the latest meter row written before `end`
+    whose family holds `METER_MIN` lineages (0 with none: THE METER'S FLOOR, the module docstring)."""
     from . import funnel
 
     root, a, b = Path(root), float(start), float(end)
@@ -1235,7 +1372,7 @@ def funnel_rows(root: str | Path, start: float, end: float) -> dict[str, int]:
         def read(db: sqlite3.Connection) -> dict[str, int]:
             registry = "SELECT count(*) FROM fwd_registry WHERE lane{op}'control' AND registered_at<?"
             night = _rows(db, "SELECT stale FROM fwd_runs WHERE finished>=? AND finished<? ORDER BY run DESC LIMIT 1", (a, b))
-            meter = _rows(db, "SELECT bh, by_ FROM fwd_meter WHERE at<? ORDER BY day DESC LIMIT 1", (b,))
+            meter = _rows(db, "SELECT bh, by_ FROM fwd_meter WHERE at<? AND m>=? ORDER BY day DESC LIMIT 1", (b, METER_MIN))
             return {"registered": _one(db, registry.format(op="!=") + " AND registered_at>=?", (b, a)),
                     "registered_total": _one(db, registry.format(op="!="), (b,)),
                     "lineages": _one(db, "SELECT count(DISTINCT lineage) FROM fwd_registry WHERE lane!='control' AND "
@@ -1262,8 +1399,9 @@ def funnel_rows(root: str | Path, start: float, end: float) -> dict[str, int]:
 
 
 def alarms(root: str | Path, *, now: float, settings: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
-    """The forward alarms for the dlane report: [] when `forward_db.mode(settings)` is "off" or the file says `mode`
-    "off"; the file's alarms when it is under `STALE_HOURS` old; else one FW1 row. Every row is {"id", "level",
+    """The alarms for the dlane report: the file's alarms when it is under `STALE_HOURS` old, each by its own switch
+    (`raised`: with `forward_db.mode(settings)` "off" none of FW1-FW8, with the probe off no CP; RR and MM always);
+    with a stale or absent file one FW1 row, or [] while the forward record is off. Every row is {"id", "level",
     "text", "new"}. Never raises for a missing or unreadable file.
 
     `settings` None: the swarm's own, as it loads them. A report that is old with no run of the job overdue since is
@@ -1272,14 +1410,13 @@ def alarms(root: str | Path, *, now: float, settings: Mapping[str, Any] | None =
     registration's first day and a store not yet created owe nothing)."""
     try:
         root, now = Path(root), float(now)
-        if _mode(_settings(root, settings)) == "off":
-            return []
+        settings = _settings(root, settings)
         doc = read_json(root / FILE, None)
-        if isinstance(doc, Mapping) and doc.get("mode") == "off":
-            return []
         at = S.epoch(doc.get("at")) if isinstance(doc, Mapping) else None
         if isinstance(doc, Mapping) and not _stale(at, now):
-            return _alarm_rows(doc)
+            return [row for row in _alarm_rows(doc) if raised(row["id"], settings)]
+        if _mode(settings) == "off" or (isinstance(doc, Mapping) and doc.get("mode") == "off"):
+            return []     # a stale report is FW1's to tell, and FW1 is silent while the forward record is off
         if not (root / forward_db.DB).exists():
             return []
         try:
@@ -1301,9 +1438,10 @@ def alarms(root: str | Path, *, now: float, settings: Mapping[str, Any] | None =
 
 
 def run(ctx: Any) -> dict[str, Any]:
-    """THE JOB (league/ops/registry.py). With the mode "off" it writes {"at", "mode": "off", "alarms": []} to `FILE`
-    and returns skipped; else `meters`, then `section` written to `FILE`; each warning alarm is also a
-    `ctx.alert("warning", text)`. The receipt holds counts, never a figure.
+    """THE JOB (league/ops/registry.py). With the forward mode "off" it writes the report's parts that are not the
+    forward record's (`OFF_KEYS`: {"at", "mode": "off", "memory", "contamination", "receipts", "alarms"}; the alarms
+    RR, CP and MM, each by its own switch) to `FILE` and returns skipped; else `meters`, then `section` written to
+    `FILE`. Each warning alarm is also a `ctx.alert("warning", text)`. The receipt holds counts, never a figure.
 
     THE REPORT IS WRITTEN WHATEVER THE METERS DID: when a day's meters cannot be written (a store locked, a row that
     cannot be read), that day and the days after it stay unwritten for the next run, the report and its alarms are
@@ -1312,8 +1450,16 @@ def run(ctx: Any) -> dict[str, Any]:
     root, now = Path(ctx.root), float(ctx.now())
     settings = _settings(root, None, getattr(ctx, "config", None))
     if _mode(settings) == "off":
-        write_json(root / FILE, {"at": S.iso(now), "mode": "off", "alarms": []})
-        return {"status": "skipped", "why": "the forward record is off (elane.forward.mode)"}
+        # The forward record is off: no meter, no forward part. What has another switch, or none, is still written
+        # and still raised (the memory counts, the probe's file, the release receipts; RR, CP, MM).
+        whole = section(root, now=now, settings=settings)
+        doc = {key: whole[key] for key in OFF_KEYS}
+        write_json(root / FILE, doc)
+        for alarm in doc["alarms"]:
+            if alarm["level"] == "warning":
+                ctx.alert("warning", f"forward: {alarm['text']}")
+        return {"status": "skipped", "why": "the forward record is off (elane.forward.mode)",
+                "alarms": [alarm["id"] for alarm in doc["alarms"]]}
     wrote: dict[str, Any] = {"days": 0, "cey": 0, "meter": 0, "groups": 0}
     try:
         db = forward_db.open_db(root)
@@ -1336,6 +1482,7 @@ def run(ctx: Any) -> dict[str, Any]:
     return {"ok": True, **out}
 
 
-__all__ = ["FILE", "GATE_REASON", "STALE_HOURS", "SECTION_KEYS", "FUNNEL_KEYS", "ALARMS", "RC_PAIRS", "run", "meters",
+__all__ = ["FILE", "GATE_REASON", "STALE_HOURS", "SECTION_KEYS", "OFF_KEYS", "FUNNEL_KEYS", "ALARMS", "RC_PAIRS",
+           "METER_WAIT_NIGHTS", "METER_MIN", "raised", "run", "meters",
            "representatives", "population", "sim_program_years", "hist_independent_years", "rc_pairs", "section",
            "read_section", "funnel_rows", "alarms", "text_ok", "forward_days"]
