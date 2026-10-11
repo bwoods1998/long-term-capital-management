@@ -255,7 +255,8 @@ Stopping, from the lightest:
         pass does not know on a value that is not the run's dollars. Such a value is unknown and is never refused on
         a guess, and the run's dollars plus, less, times or over it are unknown with it.
      3. MEMORY IN STATE: the first equity a run saw, kept in STATE, passes the static rule; the Train bar's restart
-        check judges it (it fails a program whose trades change when STATE is emptied).
+        check judges it (it fails a program whose trades change when STATE is emptied; in the tests `STATE_KEPT`,
+        the verifier's third program, is the lock lot for lot and fails that check).
      4. WHAT THE HOUSE'S OWN ANSWERS TELL: `ctx.rejects`, and whether an entry of constant dollars was filled, cut
         or skipped, say something about the sleeve's cash (a third lot that exists only when cash was left over); the
         pass does not read them.

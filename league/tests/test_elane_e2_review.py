@@ -758,6 +758,23 @@ def decide(ctx):
 ''',
 }
 
+#: The verifier's third program (v_lock_equiv.py `STATEFUL`, its rule word for word): the first equity the run saw kept
+#: in STATE. The static rule passes it (the sleeve's dollars against the sleeve's dollars); the Train bar's restart
+#: check is what refuses it, for a restart empties STATE and the lock starts again.
+STATE_KEPT = '''NEEDS = {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 4}
+PARAMS = {"share": 0.5, "lock": 0.01, "small": 0.02}
+STATE = {}
+
+
+def decide(ctx):
+    STATE.setdefault("e0", ctx.equity)
+    if ctx.positions:
+        return []
+    ahead = ctx.equity / STATE["e0"] - 1.0
+    small = ahead >= ctx.params["lock"]
+    return [{"buy": "SPY", "share": ctx.params["small"] if small else ctx.params["share"], "at": "open", "tag": "s" if small else "f"}]
+'''
+
 #: WHAT THE STATIC RULE CANNOT SEE (elane_review's docstring, 1d; ELANE_E2.md): the position's own state used as the
 #: anchor. A lot's weight in the sleeve is the asked share times the lot's own return times budget over equity, so the
 #: weight set against that return is the run's profit, and nothing static tells it from an honest weight cap. This
@@ -1358,6 +1375,7 @@ class TheLockWithNoMemoryOnE1sEngine(unittest.TestCase):
     """The residual on E1's own engine and runner over a synthetic zero-drift store (an invented market): the verifier's
     first program and the tag-carried one trade the reviewer's lock lot for lot, and the Train bar's restart check
     matches every session of each, for neither keeps anything in STATE. The static rule is what refuses them. The
+    verifier's third keeps the first equity in STATE: the static rule passes it and the restart check refuses it. The
     weight lock is the one the static rule cannot see: it shrinks its entries as the lock does and passes both."""
 
     @classmethod
@@ -1383,7 +1401,7 @@ class TheLockWithNoMemoryOnE1sEngine(unittest.TestCase):
         cls.runs = {name: [runner.train(code, {}, name=name, start=first, end=last, k=config.K_BASE)
                            for first, last in elane_train.TRAIN_SPANS]
                     for name, code in (("lock", cls.lock), ("first", VERIFIERS_FIRST), ("tag", TAG_CARRIED),
-                                       ("weight", WEIGHT_LOCK))}
+                                       ("weight", WEIGHT_LOCK), ("state", STATE_KEPT))}
 
     @classmethod
     def tearDownClass(cls):
@@ -1424,6 +1442,16 @@ class TheLockWithNoMemoryOnE1sEngine(unittest.TestCase):
                 self.assertTrue(check["held"], check)
                 self.assertEqual(check["matched"], check["sessions"], "nothing in STATE for a restart to empty")
                 self.assertIn("equity level rule", elane_train.check_code(code, ["SPY"]), "the static rule refuses it")
+
+    def test_the_lock_kept_in_state_is_the_restart_checks_to_refuse(self):
+        from league.swarm import elane_train
+
+        self.assertIsNone(elane_train.check_code(STATE_KEPT, ["SPY"]), "the static rule passes it")
+        self.assertEqual(self.lots("state"), self.lots("lock"), "uninterrupted, it is the reviewer's profit lock")
+        check = self.restart("state", STATE_KEPT)
+        self.assertFalse(check["held"], check)
+        self.assertLess(check["matched"], check["sessions"])
+        self.assertLess(check["share"], elane_train.BAR["state_match"], "the Train bar fails it (STATE)")
 
     def test_the_weight_lock_passes_the_static_rule_and_the_restart_check(self):
         from league.swarm import elane_train
