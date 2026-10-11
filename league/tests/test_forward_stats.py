@@ -14,11 +14,15 @@ from __future__ import annotations
 
 import math
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
 from league.ops import forward_db
 from league.ops import forward_stats as FS
+
+REPO = Path(__file__).resolve().parents[2]
 
 
 def independent(rng: np.random.Generator, members: int, sessions: int) -> np.ndarray:
@@ -264,6 +268,54 @@ class TheEffectiveNumber(unittest.TestCase):
         self.assertEqual(FS.neff(independent(rng, 1, 30)), {"members": 1, "n_w": 30, "neff": 1.0, "neff_raw": 1.0})
         with self.assertRaises(ValueError):
             FS.neff(independent(rng, 3, 30), min_days=2)
+
+    def test_the_pairs_are_summed_in_blocks_of_rows_to_the_same_exact_sums(self):
+        """`_participation` reads the pairs `BLOCK_ROWS` rows at a time; each sum is `math.fsum`'s over every pair
+        i != j, whatever the block (it is correctly rounded: the order cannot move it)."""
+        rng = np.random.default_rng(11)
+        X = rng.standard_normal((53, 60))
+        X[40:, :35] = np.nan                                       # thirteen members with a shorter record
+        rho, n_ij = FS.pairwise_corr(X)
+        off = ~np.eye(53, dtype=bool)
+        square, n = (rho * rho)[off], n_ij[off].astype(np.float64)
+        total = math.fsum((1.0 - (1.0 - square) * (n - 1.0) / (n - 2.0)).tolist())
+        raw = math.fsum(square.tolist())
+        want = (min(53.0, 53 * 53 / (53 + max(0.0, total))), 53 * 53 / (53 + raw))
+        for rows in (1, 7, 52, 53, 54, FS.BLOCK_ROWS):
+            with mock.patch.object(FS, "BLOCK_ROWS", rows):
+                self.assertEqual(FS._participation(rho, n_ij), want, rows)
+        self.assertEqual((FS.neff(X)["neff"], FS.neff(X)["neff_raw"]), want)
+
+    def test_the_largest_setting_fits_the_report_jobs_own_address_space(self):
+        """The review's finding, measured under the job's own limit (league/ops/__main__.py `limit`: what the child
+        holds at its start plus the registry's 500 MB, with the runner's thread environment): at
+        `neff_max_members`' upper bound the whole N x N temporaries and the Python list of every pair raised
+        MemoryError, the day's meters were not written, and the next pass began at that day again, for good."""
+        import os
+        import subprocess
+        import sys
+
+        from league.ops import runner
+
+        top = int(forward_db.BOUNDS["neff_max_members"][1])
+        self.assertEqual((top, runner.EXTRA_MB), (3000, 500))
+        code = ("import sys\n"
+                "from league.ops.__main__ import limit\n"
+                f"limit(300, {runner.EXTRA_MB})\n"
+                "import numpy as np\n"
+                "from league.ops import forward_db, forward_report, forward_stats\n"
+                f"x = np.random.default_rng(1).standard_normal(({top}, forward_db.NEFF_WINDOW))\n"
+                "try:\n"
+                "    out = forward_stats.neff(x)\n"
+                "except MemoryError:\n"
+                "    print('MemoryError')\n"
+                "else:\n"
+                "    print(out['members'], out['neff'] > 0.9 * out['members'])\n")
+        env = {**os.environ, "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
+               "PYTHONDONTWRITEBYTECODE": "1"}
+        done = subprocess.run([sys.executable, "-c", code], cwd=str(REPO), env=env, capture_output=True, text=True,
+                              timeout=300)
+        self.assertEqual(done.stdout.strip(), f"{top} True", done.stderr[-400:])
 
     def test_the_draws_order_does_not_move_it(self):
         rng = np.random.default_rng(12)

@@ -182,16 +182,32 @@ def pairwise_corr(X: Any) -> tuple[Any, Any]:  # noqa: N803 - the contract's nam
     return _corr(*_runs(X))
 
 
+#: `_participation` reads the members' pairs this many rows at a time. Whole, the N x N temporaries and the Python
+#: list of every pair outgrew the ops child's address space at 3,000 members (measured under the job's own limit: a
+#: MemoryError, after which no day's meters were ever written again).
+BLOCK_ROWS = 256
+
+
 def _participation(rho: Any, n_ij: Any) -> tuple[float, float]:
-    """(N_eff, the unadjusted ratio) of N >= 2 members' correlations (D6), each sum exact."""
+    """(N_eff, the unadjusted ratio) of N >= 2 members' correlations (D6), each sum exact: `math.fsum` over every
+    pair i != j, read `BLOCK_ROWS` rows at a time (the sum is the same whatever the order: it is correctly
+    rounded)."""
     import numpy as np
 
     count = int(rho.shape[0])
-    off = ~np.eye(count, dtype=bool)
-    square, n = (rho * rho)[off], n_ij[off].astype(np.float64)
-    adjusted = 1.0 - (1.0 - square) * (n - 1.0) / (n - 2.0)
-    total = math.fsum(adjusted.tolist())
-    raw = math.fsum(square.tolist())
+
+    def pairs(adjust: bool) -> Any:
+        for start in range(0, count, BLOCK_ROWS):
+            stop = min(count, start + BLOCK_ROWS)
+            value = rho[start:stop] * rho[start:stop]
+            if adjust:
+                n = n_ij[start:stop].astype(np.float64)
+                value = 1.0 - (1.0 - value) * (n - 1.0) / (n - 2.0)
+            own = np.arange(start, stop)
+            value[own - start, own] = 0.0      # i == j is no pair: an exact zero in an exact sum
+            yield from value.ravel().tolist()
+
+    total, raw = math.fsum(pairs(True)), math.fsum(pairs(False))
     return min(float(count), count * count / (count + max(0.0, total))), count * count / (count + raw)
 
 

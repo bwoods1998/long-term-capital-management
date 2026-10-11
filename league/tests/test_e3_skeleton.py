@@ -55,7 +55,7 @@ SIGNATURES = {
     "league.ops.forward_db.engine_id": "(db, label, *, at)",
     "league.ops.forward_db.engine_now": "(db)",
     "league.ops.forward_db.engine_label": "(db, id)",
-    "league.ops.forward_db.programs": "(db, *, reasons=, active=)",
+    "league.ops.forward_db.programs": "(db, *, reasons=, active=, code=)",   # `code` False: a listing (the review's fix)
     "league.ops.forward_db.active": "(db, pid)",
     "league.ops.forward_db.suspect": "(db, pid)",
     "league.ops.forward_db.program": "(db, key)",

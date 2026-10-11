@@ -607,6 +607,42 @@ class Programs(unittest.TestCase):
         self.assertIsInstance(first.first_close, dt.date)
         self.assertEqual(first.first_day, F.first_day(first.first_close))
 
+    def test_a_listing_holds_every_field_but_the_text_and_no_row_it_does_not_answer_with(self):
+        """The review's finding: the night's queue was the whole registry fetched at once with every row's text, the
+        stopped rows too: about 6 KB of the ops child's address space a row, for rows the night never runs."""
+        import dataclasses
+
+        whole, listed = F.programs(self.db), F.programs(self.db, code=False)
+        self.assertEqual([dataclasses.replace(p, code="") for p in whole], listed)
+        self.assertEqual({p.code for p in listed}, {""})
+        self.assertTrue(all(p.code for p in whole))
+        self.assertEqual([p.pid for p in F.programs(self.db, reasons=("seed",), code=False)], [3])
+        self.assertTrue(F.tag(self.db, 2, "stopped", "cap:2026-10-20", at=100.0))
+
+        # One row in hand at a time, and a stopped row is never kept: the rows are read from the cursor.
+        class Watched:
+            def __init__(self, db):
+                self.db, self.fetched_all = db, 0
+
+            def execute(self, sql, params=()):
+                cursor, outer = self.db.execute(sql, params), self
+
+                class Cursor:
+                    def __iter__(self):
+                        return iter(cursor)
+
+                    def fetchall(self):
+                        outer.fetched_all += sql.count("fwd_registry")
+                        return cursor.fetchall()
+
+                    def fetchone(self):
+                        return cursor.fetchone()
+                return Cursor()
+        watched = Watched(self.db)
+        self.assertEqual([p.pid for p in F.programs(watched, code=False)], [1, 3, 4])
+        self.assertEqual([p.pid for p in F.programs(watched)], [1, 3, 4])
+        self.assertEqual(watched.fetched_all, 0, "the registry is never fetched whole")
+
     def test_a_stop_and_its_undo(self):
         self.assertTrue(all(F.active(self.db, pid) for pid in (1, 2, 3, 4, 99)))
         self.assertTrue(F.tag(self.db, 2, "stopped", "cap:2026-10-20", at=100.0))

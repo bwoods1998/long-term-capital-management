@@ -541,12 +541,15 @@ class Shadow:
         seed and train_pass, then train_fail, then the suspects; inside a class the programs whose last attempt
         failed twice in the child go last (`_behind`), and else the oldest last-stored day first, then pid (so the
         programs a budget left stale go first the next night). A program with no stored day stands at its
-        `first_close`; one whose first day is after `through` has nothing to store and is not due."""
+        `first_close`; one whose first day is after `through` has nothing to store and is not due.
+
+        The queue is A LISTING (`forward_db.programs(..., code=False)`: no program text is held for the thousands
+        the night may never reach); `run_program` and `run_from` load the program they run (`_whole`)."""
         last = self._last_stored()
         live = {int(row[0]) for row in self.db.execute("SELECT DISTINCT pid FROM fwd_tags WHERE tag='live'").fetchall()}
         behind = self._behind()
         rows = []
-        for program in forward_db.programs(self.db, active=True):
+        for program in forward_db.programs(self.db, active=True, code=False):    # A LISTING: `_whole` loads the one run
             if program.lane == "control" or program.reason == "control" or program.first_day > self.through:
                 continue
             stored = last.get(program.pid)
@@ -592,9 +595,23 @@ class Shadow:
         return screen.series(result.get("lots") or [], bars, universe=list(needs.symbols),
                              capital=result.get("capital") or config.SLEEVE_USD)
 
+    def _whole(self, program: Program) -> Program:
+        """`program` with its text: itself, or, for a row of a listing (`due`: its `code` is ""), the registry's row
+        loaded whole. The text run is the one the registry hashed: a row whose text is not its `program_sha`'s is
+        refused (a ValueError: the data's, never run)."""
+        if program.code:
+            return program
+        whole = forward_db.program(self.db, program.key)
+        if whole is None or whole.pid != program.pid:
+            raise ValueError(f"{program.key}: the registry holds no such program to run")
+        if hashlib.sha256(whole.code.encode()).hexdigest() != whole.program_sha:
+            raise ValueError(f"{program.key}: the registry's text is not its program sha's")
+        return whole
+
     def run_from(self, program: Program, first_day: dt.date, *, k: float = 1.0) -> ShadowRun | None:
         """D3's run of `program` started flat at another first day (the twin runs of league/ops/forward_twins.py);
         None when that day is after `through`. Raises as `run_program` does."""
+        program = self._whole(program)
         bars = self.slice(program, first_day=first_day)
         if bars is None:
             return None
@@ -620,6 +637,7 @@ class Shadow:
     def run_program(self, program: Program) -> tuple[ShadowRun, Mapping[str, Any]]:
         """(the k 1.0 run, the k 1.5 result) of one program on its forward days. Raises E1's `runner.RunFailed` or
         the decider's `DeciderError` (the child's), or `MissingData`, `StoreRefused`, `ValueError` (the data's)."""
+        program = self._whole(program)
         bars = self.slice(program)
         if bars is None:
             raise ValueError(f"{program.key} has no forward day through {self.night_day}")

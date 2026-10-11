@@ -1653,6 +1653,34 @@ class TheNight(Case):
                 self.assertNotRegex(json.dumps(event["payload"]), r"\d+\.\d+", kind)
                 self.assertIn("why", event["payload"])
 
+    def test_the_queue_is_a_listing_and_the_program_run_is_the_registrys_own_text(self):
+        """The night's queue holds no program text (`forward_db.programs(..., code=False)`); the one program a run
+        is made of is loaded whole, and its text must be the one the registry hashed."""
+        import dataclasses
+
+        pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
+        other = register(self.db, "flip@1", FLIPPER, first_close=BEFORE)
+        shadow = self.shadow(FWD[2])
+        due = shadow.due()
+        self.assertEqual([(p.pid, p.code) for p in due], [(pid, ""), (other, "")])
+        whole = shadow._whole(due[0])
+        self.assertEqual((whole.code, whole.pid, shadow._whole(whole) is whole), (ALWAYS, pid, True))
+        receipt = shadow.night()
+        self.assertEqual((receipt["programs"], receipt["data_failed"], len(self.rows(pid))), (2, 0, 3))
+        # A text that is not its sha's is never run: the data's, one event, nobody marked.
+        real = forward_db.program
+        swapped = lambda db, key: dataclasses.replace(real(db, key), code=FLIPPER) if key == "always@1" else real(db, key)  # noqa: E731
+        child = Ticking(self)
+        with mock.patch.object(forward_db, "program", swapped):
+            receipt = self.night(FWD[3], decider=child)
+        self.assertEqual((receipt["programs"], receipt["data_failed"]), (1, 1))
+        self.assertNotIn("always@1", [name for name, _ in child.runs])
+        self.assertEqual(len(self.rows(pid)), 3)
+        (event,) = self.events("data_failed", pid)
+        self.assertIn("program sha", event["payload"]["why"])
+        self.assertEqual(self.count("fwd_tags"), 0)
+        self.assertEqual(self.night(FWD[4])["new_days"], 2 + 1, "the next night fills the day it was not run")
+
     def test_past_the_nights_deadline_no_step_is_started(self):
         """The review's finding: the deadline (300 s before the next session's 09:00 New York) was read by the due
         loop alone. A morning catch-up (the House back at 08:40 on a session) went on into the timing table, the

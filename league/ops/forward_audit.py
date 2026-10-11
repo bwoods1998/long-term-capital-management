@@ -90,7 +90,7 @@ def mark(db: sqlite3.Connection, bars: list[tuple[str, str]], *, now: float) -> 
     if not bars:
         return 0
     holders: dict[str, list[forward_db.Program]] = {}
-    for program in forward_db.programs(db, active=False):
+    for program in forward_db.programs(db, active=False, code=False):    # a listing: the marks read NEEDS, no text
         if program.lane == "control" or program.reason == "control":
             continue
         needs = program.needs if isinstance(program.needs, Mapping) else {}

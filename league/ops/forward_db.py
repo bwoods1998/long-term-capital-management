@@ -770,18 +770,36 @@ def _stopped(db: sqlite3.Connection, pid: int | None = None) -> set[int]:
             if r["stopped"] is not None and (r["resumed"] is None or r["stopped"] > r["resumed"])}
 
 
-def programs(db: sqlite3.Connection, *, reasons: Sequence[str] | None = None, active: bool = True) -> list[Program]:
+#: What `programs` reads of a row: everything a `Program` holds (the chain's hashes and the author are not in it).
+_PROGRAM_COLUMNS = ("pid", "key", "family", "version", "lane", "reason", "ugroup", "lineage", "params", "needs",
+                    "program_sha", "run_sha", "created_at", "first_close", "first_day", "route", "alpha_f")
+
+
+def programs(db: sqlite3.Connection, *, reasons: Sequence[str] | None = None, active: bool = True,
+             code: bool = True) -> list[Program]:
     """The registry's rows as `Program`s in pid order (of `reasons` only when given; `active` True: those `active`
-    says are; False: every row)."""
-    sql, params = "SELECT * FROM fwd_registry", []
+    says are; False: every row).
+
+    `code` False: A LISTING. Each `Program.code` is "" (never a registered program's text: the registry's job
+    refuses a version whose text declares no NEEDS), and whoever runs one loads it whole first (`program(db, key)`;
+    league/ops/forward_shadow.py `_whole`). WHAT IS HELD (the review's
+    fix): the rows are read one at a time and a stopped row is dropped as it is read, so the list holds the rows it
+    answers with and no other, and a listing holds no program text at all. Fetched whole with every row's code
+    (about 6 KB a row, the stopped ones too) the nightly queue outgrew the ops child's address space at some 60,000
+    registry rows, after which the job failed every night."""
+    columns = ", ".join(_PROGRAM_COLUMNS) + (", code" if code else ", '' AS code")
+    sql, params = f"SELECT {columns} FROM fwd_registry", []
     if reasons is not None:
         params = [str(r) for r in reasons]
         if not params:
             return []
         sql += f" WHERE reason IN ({', '.join('?' * len(params))})"
     stopped = _stopped(db) if active else set()
-    return [_program(row) for row in db.execute(sql + " ORDER BY pid", params).fetchall()
-            if int(row["pid"]) not in stopped]
+    out = []
+    for row in db.execute(sql + " ORDER BY pid", params):     # the cursor, never `fetchall`: one row in hand at a time
+        if int(row["pid"]) not in stopped:
+            out.append(_program(row))
+    return out
 
 
 def active(db: sqlite3.Connection, pid: int) -> bool:
