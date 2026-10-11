@@ -141,17 +141,23 @@ JOBS: tuple[Job, ...] = (
         what="the direction lane's report (operator-only): the funnel per lane, the Probe envelope, the DONE meter of the "
              "pinned rule (done_screen, done_all) beside the same-risk buy-and-hold, alarms A1-A9, PL1 and K5, into "
              "<state>/dlane-report.json; the program loss line (A1.3), the lane off too"),
-    # THE PANEL LANE's data and measurement jobs (release E4, "breadth"; league/xs/E4_INTERFACES.md). Each one's first
-    # statement is `league.xs.config.quiet(now, its own wall)`: a start that could still be working at a wall of the
-    # session (09:25-09:45 and 15:50-16:35 ET) is a `skipped` receipt, and the occurrence is not lost (the at-start one
-    # of `equity_universe` runs at its next daily time, and `equity_panel` after it). They read the gateway and write
-    # their own files under <state>/equity-daily/, so they run in a pause too; with `elane.panel.mode` "off" nothing
-    # else of the lane runs. They go last: at a House start every older job that is due at the same instant goes first.
-    Job("equity_universe", "league.ops.equity_universe", (S.at_start(), S.daily(1, 40)), grace=3 * HOUR, cpu=120,
+    # THE PANEL LANE's data and measurement jobs (release E4, "breadth"; league/xs/E4_INTERFACES.md). WITH THE LANE'S
+    # SWITCH OFF NONE OF THEM RUNS: each one's first statements are the switch (`league.ops.equity_universe.lane_off`:
+    # `elane.panel.mode` "off" in the box's settings is a `skipped` receipt: no gateway call, no file) and
+    # `league.xs.config.quiet(now, its own wall)`: a start that could still be working at a wall of the session
+    # (09:25-09:45 and 15:50-16:35 ET) is a `skipped` receipt too, and the occurrence is not lost (it runs at its next
+    # daily time). They read the gateway and write their own files under <state>/equity-daily/, so they run in a pause
+    # too. They go last: at a House start every older job that is due at the same instant goes first.
+    # NO AT-START TRIGGER (the review's live-9): at a House start before an open the chain's whole fetch (55 minutes of
+    # wall) held the one ops child past the pre-open's grace. `equity_panel` HAS ITS OWN DAILY TIME (the review's
+    # live-4), fifteen minutes after the universe job's (one child at a time: it starts when that one has ended): its
+    # only trigger was `after("equity_universe")`, so a night the universe job failed fetched no bars, ran no I6, and
+    # raised none of the panel job's own alarms. It now runs every night on the last good universe.
+    Job("equity_universe", "league.ops.equity_universe", (S.daily(1, 40),), grace=3 * HOUR, cpu=120,
         wall=900, in_pause=True, owner="breadth",
         what="the point-in-time S&P 500 membership from a pinned public file and the changes table (the gateway's "
              "reader), the assets and their aids, the audit, into <state>/equity-daily/universe/ (counts only out)"),
-    Job("equity_panel", "league.ops.equity_panel", (S.after("equity_universe"),), grace=3 * HOUR, cpu=600, wall=3300,
+    Job("equity_panel", "league.ops.equity_panel", (S.daily(1, 55),), grace=3 * HOUR, cpu=600, wall=3300,
         in_pause=True, owner="breadth",
         what="the panel's daily bars through the venue's asof (never 2020), the store's vintage rule, the coverage "
              "audit and its verdict, the nightly I6, into <state>/equity-daily/panel/"),

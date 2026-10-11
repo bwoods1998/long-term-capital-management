@@ -257,6 +257,8 @@ class TheJob(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.state = Path(self.tmp.name) / "state"
+        self.state.mkdir()
+        (self.state / "swarm.json").write_text('{"elane": {"panel": {"mode": "train"}}}', encoding="utf-8")   # the lane's switch is up
         self.root = self.state / FR.STORE_DIR
         self.inbox = self.root / FR.DIR / FR.INBOX
         self.gateway = Gateway()
@@ -324,8 +326,9 @@ class TheJob(unittest.TestCase):
             self.place(f"{stem}.csv", lines)
         out = FR.run(self.ctx)
         self.assertEqual((out["ok"], out["missing"], sorted(out["files"])), (True, [], sorted(FR.FILES)))
-        files = [p for p in self.state.rglob("*") if p.is_file()]
+        files = [p for p in self.root.rglob("*") if p.is_file()]
         self.assertEqual(sorted(p.name for p in files), sorted(f"{stem}.json" for stem in FR.FILES))
+        self.assertEqual(sorted(p.name for p in self.state.iterdir()), [self.root.name, "swarm.json"])
         for path in files:
             text = path.read_text()
             for year in (2020, 2021, 2025, 2026):

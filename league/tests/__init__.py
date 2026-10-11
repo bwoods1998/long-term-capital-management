@@ -31,3 +31,16 @@ _niches.NICHES_PATH = LEGACY_NICHES_PATH
 REAL_POLICY_PATH = _settings.POLICY_PATH
 EMPTY_POLICY_PATH = Path(__file__).resolve().parent / "fixtures" / "policy_empty.json"
 _settings.POLICY_PATH = EMPTY_POLICY_PATH
+
+# THE PANEL LANE'S CLOCK (release E4, the review's live-4). `league.swarm.elane_xs.live_ready` reads the panel store's
+# FRESHNESS by the calendar and a clock (`elane_xs.CLOCK`: the process's own): a store two closed sessions behind the
+# clock holds every open of the lane. The tests' synthetic panels (`league.xs.synth`) all end on Friday 2026-10-09, so
+# on the wall clock every test that reads the lane "live" would pass until Tuesday 2026-10-13 and fail for ever after.
+# For the whole test process the lane's clock is the weekend after that Friday; a test of the freshness leg hands in its
+# own `now`, or patches `elane_xs.CLOCK`.
+import datetime as _dt
+
+from league.swarm import elane_xs as _elane_xs
+
+PANEL_NOW = _dt.datetime(2026, 10, 11, 16, 0, tzinfo=_dt.timezone.utc).timestamp()
+_elane_xs.CLOCK = lambda: PANEL_NOW

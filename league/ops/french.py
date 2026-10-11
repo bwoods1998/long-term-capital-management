@@ -232,7 +232,11 @@ def run(ctx: Any) -> dict[str, Any]:
     "why"} with no route at all (not an alarm) or inside a quiet window; {"status": "failed", "ok": False, "error",
     ...} when a file a route gave could not be read (it is left where it was, and nothing of it is written)."""
     from ..xs import config as xs_config
+    from .equity_universe import lane_off
 
+    off = lane_off(ctx.root)    # WITH THE LANE'S SWITCH OFF NOTHING OF E4 RUNS (`elane.panel.mode`): its data too
+    if off is not None:
+        return {"status": "skipped", "why": off}
     try:
         why = xs_config.quiet(ctx.now(), WALL_S)
     except Exception as exc:  # noqa: BLE001 - a job that cannot learn whether it stands at a wall does not start

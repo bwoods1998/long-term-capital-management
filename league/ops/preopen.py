@@ -32,9 +32,9 @@ and went stale (GOAL Appendix C 7); here each check asks what the running House 
              it carries them); the account's margin multiplier and its pattern-day-trader flag and day-trade count
              REPORTED, never a bar (the venue may still flag pattern day traders: the design's fact 7); and THE PANEL
              LANE (release E4): while the equity book holds a panel program that is not retired, or a lot of one, the
-             lane's own readiness rule holds (`league.swarm.elane_xs.live_ready`: the universe deploy in force, the
-             tradable share, the universe's age, the nightly I6, the twin marker; the leg that fails is named). With no
-             panel program nothing of the panel is read
+             lane's own readiness rule holds (`league.swarm.elane_xs.live_ready`: the store fresh by this job's clock,
+             the universe deploy in force, the tradable share, the universe's age, the nightly I6, the twin marker;
+             the leg that fails is named). With no panel program nothing of the panel is read
 
 Read-only (`guard.readonly()`; GET only). Each FAIL is one House warning ("preopen 5 swarm FAIL: ..."); the receipt
 holds every line. The warning is PUBLIC (`ops.alert`) and the runner scrubs only what carries a `$`
@@ -292,7 +292,7 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
         from ..swarm import elane_xs
         from ..swarm import settings as SS
 
-        ready, why = elane_xs.live_ready(root, SS.load(root, config=config))
+        ready, why = elane_xs.live_ready(root, SS.load(root, config=config), now=now)
         return {"instances": len(rows), "holding": sum(1 for r in rows if r["lots"]), "ready": ready is True,
                 "why": None if why is None else str(why)[:200]}
 
@@ -616,8 +616,8 @@ def check_equity(h: Mapping[str, Any]) -> Check:
     elif isinstance(panel, Mapping) and panel.get("instances"):
         count = f"{panel['instances']} live panel program(s), {panel.get('holding') or 0} holding a lot"
         c.req(panel.get("ready") is True,
-              f"{count}: the panel lane is ready (the universe deploy, the tradable share, the universe's age, the nightly "
-              "I6, the twin marker)" if panel.get("ready") is True
+              f"{count}: the panel lane is ready (the store's freshness, the universe deploy, the tradable share, the "
+              "universe's age, the nightly I6, the twin marker)" if panel.get("ready") is True
               else f"{count}, and the panel lane is NOT ready: {panel.get('why') or 'no leg named'} (its opens stop; "
                    "exits go on)")
     else:

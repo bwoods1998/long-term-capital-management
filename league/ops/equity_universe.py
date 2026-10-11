@@ -211,6 +211,29 @@ def quiet_now(now: float, need_s: float) -> str | None:
         return "league.xs.config.quiet is not built (package C's C0): no panel job starts without its quiet windows"
 
 
+#: What a data job of the panel lane answers with the lane's switch off.
+LANE_OFF = "the panel lane is off (elane.panel.mode)"
+
+
+def lane_off(root: str | Path) -> str | None:
+    """THE LANE'S SWITCH, for the panel's data jobs (`equity_universe`, `equity_panel`, `equity_spreads`,
+    `equity_neff`, `french`): why a job may not run as the box's settings stand, or None. WITH EVERY E4 SWITCH OFF
+    NOTHING OF E4 RUNS: `elane.panel.mode` "off" (what policy.json ships) is a `skipped` receipt before the first
+    gateway call and the first file. The SETTING is read (`league.swarm.elane_xs.cfg` of the state root's settings),
+    never the effective mode, which reads "off" until these very jobs have written the store: the captain's first
+    step up ("train") starts the data, and the lane's research follows on its own once the store has a coverage
+    verdict it can stand on (to read that verdict before any birth, raise the mode with `elane.panel.birth_share` 0).
+    A switch that cannot be read is off."""
+    try:
+        from ..swarm import elane_xs
+        from ..swarm import settings as swarm_settings
+
+        mode = elane_xs.cfg(swarm_settings.load(Path(root)))["mode"]
+    except Exception as exc:  # noqa: BLE001 - a switch that cannot be read is off
+        return f"the panel lane's switch could not be read ({type(exc).__name__}): read as off"
+    return LANE_OFF if mode == "off" else None
+
+
 def _sha(data: bytes | str) -> str:
     return hashlib.sha256(data if isinstance(data, bytes) else data.encode("utf-8")).hexdigest()
 
@@ -1303,11 +1326,12 @@ def _joins(gateway: Any, root: Path, spells: Sequence[tuple], previous: Mapping[
 
 
 def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
-    """The job (league/ops/context.py is the `ctx`). Its first statement is `league.xs.config.quiet(ctx.now(),
-    WALL_S)`: a start that could still be working at a wall answers {"status": "skipped", "why"}. Else {"ok": True,
-    counts and verdicts} with the universe written, or {"status": "failed", "error"} with nothing written and the
-    last good universe in place. `sleep`: the tests'."""
-    why = quiet_now(ctx.now(), WALL_S)
+    """The job (league/ops/context.py is the `ctx`). Its first statements are the lane's switch (`lane_off`: with
+    `elane.panel.mode` "off" nothing of E4 runs) and `league.xs.config.quiet(ctx.now(), WALL_S)`: a start that could
+    still be working at a wall answers {"status": "skipped", "why"}. Else {"ok": True, counts and verdicts} with the
+    universe written, or {"status": "failed", "error"} with nothing written and the last good universe in place.
+    `sleep`: the tests'."""
+    why = lane_off(ctx.root) or quiet_now(ctx.now(), WALL_S)
     if why is not None:
         return {"status": "skipped", "why": why}
     from .equity_data import last_closed
@@ -1490,6 +1514,6 @@ __all__ = ["PIN", "REPO", "FILE", "RAW", "ATOM", "WEB", "ASSETS", "AGENT", "WALL
            "FIRST_AID", "TICKER", "STORE_DIR", "SOURCE_FILE", "SPELLS_FILE", "ASSETS_FILE", "TRADABLE_FILE",
            "MANIFEST_FILE", "JOINS_FILE", "VENUE_FILE", "WALL_SHARE", "VENUE_KEEP_EVERY", "OutOfWall", "HASHED",
            "BAR_MASKS", "VENUE_MASK", "spans", "in_store", "store_sessions",
-           "quiet_now", "known_through", "parse_changes", "row_key", "confirmed", "apply_changes", "usable",
+           "quiet_now", "lane_off", "LANE_OFF", "known_through", "parse_changes", "row_key", "confirmed", "apply_changes", "usable",
            "columns", "rename_candidates", "pair_key", "rename_test", "folder", "ensure_salt", "read_universe",
            "remask"]

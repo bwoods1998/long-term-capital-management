@@ -429,6 +429,8 @@ class TheJob(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / "state"
+        self.state.mkdir()
+        (self.state / "swarm.json").write_text('{"elane": {"panel": {"mode": "train"}}}', encoding="utf-8")   # the lane's switch is up
         self.root = self.state / EN.STORE_DIR
         self.ctx = Context("equity_neff", root=self.state, due_at=NOW, clock=lambda: NOW, gateway=object(), config={},
                            settings_value={})

@@ -532,8 +532,8 @@ class ThePreopenEquityCheck(unittest.TestCase):
 
         ready = self.house(panel={"instances": 2, "holding": 1, "ready": True, "why": None})
         self.assertTrue(self.check(ready)[0])
-        self.assertIn((True, "2 live panel program(s), 1 holding a lot: the panel lane is ready (the universe deploy, the "
-                             "tradable share, the universe's age, the nightly I6, the twin marker)"), check_equity(ready).items)
+        self.assertIn((True, "2 live panel program(s), 1 holding a lot: the panel lane is ready (the store's freshness, "
+                             "the universe deploy, the tradable share, the universe's age, the nightly I6, the twin marker)"), check_equity(ready).items)
         ok, headline, _ = self.check(self.house(panel={"instances": 1, "holding": 1, "ready": False,
                                                        "why": "the twin marker is two sessions behind"}))
         self.assertEqual((ok, headline), (False, "1 live panel program(s), 1 holding a lot, and the panel lane is NOT ready: the "
@@ -563,9 +563,12 @@ class ThePreopenEquityCheck(unittest.TestCase):
         self.assertIn("INSTANCE_KIND_DDL = \"ALTER TABLE eq_instances ADD COLUMN kind TEXT NOT NULL DEFAULT 'equity'\"", source)
         asked = []
 
-        def rule(root, settings):
+        def rule(root, settings, *, now=None):
             asked.append((root, settings))
+            clocks.append(now)
             return False, "the universe deploy is not in force"
+
+        clocks = []
 
         def instance(db, iid, *, kind=None, retired=None):
             cols = "id, family, version, lane, run_sha, code, params, band, max_hold, created_at, retired_at"
@@ -607,6 +610,7 @@ class ThePreopenEquityCheck(unittest.TestCase):
             self.assertEqual(read(), {"instances": 1, "holding": 0, "ready": False,
                                       "why": "the universe deploy is not in force"})
             self.assertEqual([r for r, _ in asked], [root])
+            self.assertEqual(clocks, [1789000000.0], "the store's freshness is read by the job's own clock")
             self.assertIsInstance(asked[0][1], dict, "the swarm's settings as the swarm loads them")
             lot(db, "xs-gone@1:r", "closing")
             lot(db, "xs-a@1:r", "open")

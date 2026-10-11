@@ -244,15 +244,46 @@ class WithEverySwitchOff(_Root):
         with mock.patch.object(xs_zero_edge, "build_runner", side_effect=AssertionError("a child with the lane off")):
             self.assertEqual(xs_zero_edge.run(ctx), {"status": "skipped", "why": "the panel lane is off (elane.panel.mode)"})
 
+    def test_the_data_jobs_are_skipped_and_ask_the_gateway_nothing(self):
+        """WITH EVERY E4 SWITCH OFF NOTHING OF E4 RUNS: the data jobs too (the review's live-9: at the first House
+        start after the release they went at once, a whole panel fetch of about 1,000 gateway calls among them, and
+        the spreads job asked 6,000 calls a night). Each one's first statement is the lane's switch."""
+        from league.ops import equity_neff, equity_panel, equity_spreads, equity_universe, french
+        from league.ops.context import Context
+
+        class Gateway:
+            def __getattr__(self, name):
+                raise AssertionError(f"the gateway was asked ({name}) with the lane off")
+
+        before = sorted(str(p.relative_to(self.root)) for p in self.root.rglob("*") if p.is_file())
+        now = at(SUNDAY, 2, 30)
+        for module in (equity_universe, equity_panel, equity_spreads, equity_neff, french):
+            name = module.__name__.rsplit(".", 1)[1]
+            ctx = Context(name, root=self.root, due_at=now, clock=lambda: now, gateway=Gateway(), config={},
+                          settings_value={})
+            with mock.patch.object(xconfig, "quiet", side_effect=AssertionError("asked the walls with the lane off")):
+                self.assertEqual(module.run(ctx), {"status": "skipped", "why": equity_universe.LANE_OFF}, name)
+            self.assertEqual(ctx.alerts, [], name)
+        self.assertEqual(sorted(str(p.relative_to(self.root)) for p in self.root.rglob("*") if p.is_file()), before,
+                         "and nothing was written")
+        # THE SETTING is read, never the effective mode (which reads "off" until these jobs have written the store):
+        # the captain's first step up starts the data.
+        self.assertEqual(equity_universe.lane_off(self.root), equity_universe.LANE_OFF)
+        self.switch({"elane": {"mode": "off", "panel": {"mode": "train"}}})
+        self.assertEqual((elane_xs.mode(self.settings, self.root), equity_universe.lane_off(self.root)), ("off", None))
+        (self.root / "swarm.json").write_text('{"elane": {"panel": {"mo', encoding="utf-8")   # caught mid-write
+        self.assertEqual(equity_universe.lane_off(self.root), equity_universe.LANE_OFF, "a switch not read is off")
+
     def test_the_data_jobs_are_registered_read_only_unpaid_and_never_in_a_session(self):
-        """The data jobs have no switch (the lane cannot be judged before its store exists): they read, they spend no
-        model dollar, they send no order, and no row of them is due inside a session."""
+        """The data jobs read, they spend no model dollar, they send no order, no row of them is due inside a session,
+        and none starts with the House or behind another job's success (each has its own time of night)."""
         rows = {job.name: job for job in registry.JOBS}
         self.assertEqual([job.name for job in registry.JOBS][-len(E4_JOBS):], list(E4_JOBS), "last: after every older job")
         writes = re.compile(r"\.(put|delete|patch|submit|cancel)\(|/v2/orders|orders_path|ORDERS")
         for name in E4_JOBS:
             job = rows[name]
             self.assertEqual((job.paid, job.in_pause, job.owner), (False, True, "breadth"), name)
+            self.assertEqual([t.kind for t in job.triggers if t.kind in ("start", "after")], [], name)
             module = importlib.import_module(job.module)
             self.assertTrue(callable(module.run), name)
             self.assertEqual(job.wall, module.WALL_S, f"{name}: the row's wall is the module's own")
@@ -430,6 +461,7 @@ class TheDataJobsOnTheRealStore(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / "state"
         self.root = synth.synthetic_panel(self.state / elane_xs.STORE_DIR, n_assets=40, gate=True)
+        (self.state / "swarm.json").write_text('{"elane": {"panel": {"mode": "train"}}}', encoding="utf-8")   # the lane's switch is up
         self.now = at(SUNDAY, 2, 30)                               # a Sunday night: no wall is near
         self.gateway = Quotes(bp=lambda symbol, start: 4.0 + len(symbol))
         self.ctx = lambda name: Context(name, root=self.state, due_at=self.now, clock=lambda: self.now,

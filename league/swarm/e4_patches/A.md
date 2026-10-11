@@ -108,3 +108,12 @@ Python 3.14 (the log is named in package A's report).
   (the spec's own rule: no second verdict for "the same bars").
 - No gateway change: `GET /v1/alpaca/v2/stocks/bars` (with `asof`), `GET /v1/alpaca/v2/assets/<SYM>` and
   `POST /v1/web/fetch` are routes the gateway already allows.
+
+**After the review (the fix pass; the diff above is the record of what was applied).** The registry now differs from
+it in two triggers and nothing else, and `TheRegistryRows.REVIEWED` names them: `equity_universe` runs daily at 01:40Z
+with NO at-start trigger (at a House start before an open the chain's whole fetch, 55 minutes of wall, held the one
+ops child past the pre-open's grace), and `equity_panel` has ITS OWN daily time, 01:55Z, in place of
+`after("equity_universe")` (a night the universe job failed fetched no bars, ran no I6 and raised none of the panel
+job's alarms; one child runs at a time, so on a normal night it still starts when the universe job has ended). Every
+data job's first statement is now the lane's switch (`league.ops.equity_universe.lane_off`): with
+`elane.panel.mode` "off" it answers `skipped` before its first gateway call.

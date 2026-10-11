@@ -1207,10 +1207,11 @@ def tradable_rows(days: Sequence[dt.date], aids: Sequence[int], assets: Mapping[
 
 
 def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
-    """The job. Its first statement is `league.xs.config.quiet(ctx.now(), WALL_S)`. {"ok": True, counts and
-    verdicts} with the store written, {"status": "skipped", "why"}, or {"status": "failed", "error"} with nothing
-    written and the last good store in place. `sleep`: the tests'."""
-    why = U.quiet_now(ctx.now(), WALL_S)
+    """The job. Its first statements are the lane's switch (`equity_universe.lane_off`: with `elane.panel.mode` "off"
+    nothing of E4 runs) and `league.xs.config.quiet(ctx.now(), WALL_S)`. {"ok": True, counts and verdicts} with the
+    store written, {"status": "skipped", "why"}, or {"status": "failed", "error"} with nothing written and the last
+    good store in place. `sleep`: the tests'."""
+    why = U.lane_off(ctx.root) or U.quiet_now(ctx.now(), WALL_S)
     if why is not None:
         return {"status": "skipped", "why": why}
     from ..xs import config as xs_config

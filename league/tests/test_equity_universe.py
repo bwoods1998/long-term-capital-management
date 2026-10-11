@@ -690,6 +690,7 @@ class TheJob(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name) / "state"
         self.root.mkdir()
+        (self.root / "swarm.json").write_text('{"elane": {"panel": {"mode": "train"}}}', encoding="utf-8")    # the lane's switch is up
         self.gateway = FakeGateway()
         self.gateway.page(U.RAW.format(commit=U.PIN), fake_file(self.FILED))
         self.gateway.page(U.COMMITS, json.dumps([{"sha": U.PIN}]))

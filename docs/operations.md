@@ -47,7 +47,16 @@ program closes several lots a week, and its residual does not care which way the
   the universe's). No options evidence and no ETF evidence is reset.
 
 **With every E4 switch off nothing of E4 runs, spends or trades:** no birth, no Train run, no fetch of the live path,
-no model question. The data jobs are registered and read only (through the gateway's data routes and its web reader).
+no model question, AND NO DATA JOB: with `elane.panel.mode` "off" each of the five data jobs (`equity_universe`,
+`equity_panel`, `equity_spreads`, `equity_neff`, `french`) answers a `skipped` receipt before its first gateway call
+and its first file (`league/ops/equity_universe.py` `lane_off`), as the zero-edge job does. They read the SETTING,
+never the effective mode (which reads "off" until they have written the store): **the captain's first step up,
+"train", starts the data that night**, and the lane's research follows on its own once the store has a coverage
+verdict it can stand on. To read that verdict before any birth, raise the mode with
+`elane.panel.birth_share=0` and set the share afterwards. The jobs read only (the gateway's data routes and its web
+reader), and none starts with the House: `equity_universe` runs at 01:40Z and `equity_panel` at 01:55Z every night,
+each on its own trigger, so a night the membership job fails still fetches the bars, runs the I6 and raises the
+panel job's alarms on the last good universe.
 
 **The switch** is `elane.panel.mode` (policy.json; swarm.json over it; read on the next loop pass, no deploy). On the
 owner's machine: `python3 set_swarm.py elane.panel.mode=train --apply`. Each step is the captain's, and each falls back
@@ -56,9 +65,9 @@ to the one before:
 | mode | what it opens | what it needs first (the EFFECTIVE mode, `league/swarm/elane_xs.py` `mode`, reads lower without it) |
 |---|---|---|
 | "off" | nothing | (the shipped value) |
-| "train" | panel births in the equity pass, and the Train bar **equity-xs-v1** | `elane.mode` "gate" (E1's switch); the panel store written (`equity_panel`) with a coverage verdict that is not "insufficient" |
+| "train" | the data jobs (from the SETTING alone); panel births in the equity pass, and the Train bar **equity-xs-v1** | `elane.mode` "gate" (E1's switch); the panel store written (`equity_panel`) with a coverage verdict that is not "insufficient" |
 | "gate" | the one Validation try and the one look under XS1 | XS1's receipt pinned (no receipt, no look); the spreads table covering at least `spreads_min_share` of the eligible names (below it a Train pass is "provisional costs" and the mode reads "train") |
-| "live" | a passer may take one of E1's roster seats | `live_ready`: the universe deploy in force, today's tradable share of eligible names at least `live_min_tradable_share`, the committed universe younger than `universe_max_age_days`, the last nightly I6 equal, AND the forward twin's marker (`xs-twins.json`). Any one missing: the mode reads "gate" |
+| "live" | a passer may take one of E1's roster seats | `live_ready`: THE PANEL STORE FRESH BY THE CLOCK (its last session is the last closed session or the one before: one missed night is tolerated at the next morning's sends, a second holds every open), the universe deploy in force, today's tradable share of eligible names at least `live_min_tradable_share`, the committed universe younger than `universe_max_age_days`, the last nightly I6 equal, AND the forward twin's marker (`xs-twins.json`, itself no older than the session before the last closed one). Any one missing: the mode reads "gate" |
 
 **Two things are owed, and both hold real money back, by design.** (1) **The forward twin** (package J:
 `league/ops/forward_xs.py`, the registry row and the nightly shadow twin of a panel program) is built on release E3's
@@ -342,8 +351,9 @@ step at a time, and each step is the rollback of the one above it):
    nobody either:** a swarm.json, a panel manifest or a twin marker caught mid-write gives the family no row (so
    nothing opens) and the store's word is "unknown" (so nothing is sold on it).
 2. `elane.panel.mode=train`: no Validation try and no look; births and Train research go on.
-3. `elane.panel.mode=off`: no panel birth, no Train run, nothing of the panel in any request. The data jobs go on
-   reading (they spend no model dollar and send no order).
+3. `elane.panel.mode=off`: no panel birth, no Train run, nothing of the panel in any request, and no data job (each
+   answers `skipped`: the store stays as it is and goes stale; a lane switched on again later starts with a whole
+   refetch the first night).
 4. E1's switches stand above all of it: `elane.mode=off` stops every equity round, the panel's too; and
    `equity_money.enabled` false (a constitution change) stops every equity open. Exits never wait on a switch.
 A panel lot is an equity lot: **Roll back: flatten first** (the next section) is the rule for a House rollback while
@@ -392,9 +402,10 @@ under 3 h on Sunday; gateway calls about 45 a day, 56 more a session while a pan
 weekly refetch, and 6,000 a night for about nine nights while the spreads table is first filled.
 
 **Verify after R-E4a** (read-only): policy.json on the box has the `elane.panel` block with `mode` "off" and
-`elane.screens.equity_xs` holding the receipt's sha256; before the switch the swarm log has no panel line and
-`swarm.sqlite` no panel family; `equity_universe` and `equity_panel` have receipts with counts and a coverage
-verdict, and no price or ticker in them; the House's start re-ratifies no grant (the money digest did not move) and
+`elane.screens.equity_xs` holding the receipt's sha256; before the switch the swarm log has no panel line,
+`swarm.sqlite` no panel family, and the data jobs' receipts say `skipped` ("the panel lane is off"); after the
+captain's first step up (`elane.panel.mode=train`), the next night's `equity_universe` and `equity_panel` have
+receipts with counts and a coverage verdict, and no price or ticker in them; the House's start re-ratifies no grant (the money digest did not move) and
 sends no ETF band and no options band back to the Gym (neither identity moved).
 
 **Not handled, stated.** No panel program is shadowed forward until package J lands, so a style-open passer is

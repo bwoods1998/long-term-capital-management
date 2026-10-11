@@ -342,6 +342,7 @@ class TheJob(unittest.TestCase):
         self.state = Path(self.tmp.name) / "state"
         self.root = self.state / SP.STORE_DIR
         (self.root / "universe").mkdir(parents=True)
+        (self.state / "swarm.json").write_text('{"elane": {"panel": {"mode": "train"}}}', encoding="utf-8")   # the lane's switch is up
         (self.root / "universe" / "UNIVERSE_MANIFEST.json").write_text("{}")
         (self.root / "universe" / "assets.json").write_text(json.dumps(
             {str(aid): {"symbol": name, "alpaca": {"exchange": "NYSE" if aid % 2 else "NASDAQ"} if aid != 105 else None}

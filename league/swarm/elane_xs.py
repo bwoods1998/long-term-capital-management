@@ -17,11 +17,16 @@ when the panel manifest is missing or its coverage verdict is "insufficient"; at
 receipt (`league.xs.screen.pinned_receipt`: NO RECEIPT, NO LOOK) or with `hs_share` under `spreads_min_share`; at most
 "gate" unless `live_ready`. WITH EVERY SWITCH OFF NOTHING OF E4 RUNS, SPENDS OR TRADES.
 
-`live_ready(root, settings)`: the universe deploy is in force (`live_from` set), today's tradable share of eligible
-names is at least `live_min_tradable_share`, the committed universe is younger than `universe_max_age_days`, the last
-nightly `i6.equal` is True, AND THE TWIN MARKER (`league.xs.book.TWINS_FILE`, package J's): the file exists, its
-`through` is the panel store's `fetched_through` or the session before, and no listed instance is more than one
-session behind its `due` day. So with J unmerged, or its nightly run stopped for two nights, "live" reads as "gate".
+`live_ready(root, settings)`: THE STORE IS FRESH BY THE CALENDAR AND THE CLOCK (the manifest's `fetched_through` is
+the last closed NYSE session or the one before: `CLOCK`, `_last_closed`), the universe deploy is in force (`live_from`
+set), today's tradable share of eligible names is at least `live_min_tradable_share`, the committed universe is
+younger than `universe_max_age_days`, the last nightly `i6.equal` is True, AND THE TWIN MARKER
+(`league.xs.book.TWINS_FILE`, package J's): the file exists, its `through` is the panel store's `fetched_through` or
+the session before AND no older than the session before the last closed one, and no listed instance is more than one
+session behind its `due` day. So with J unmerged, or its nightly run stopped for two nights, "live" reads as "gate";
+and so does a panel store that stopped being written: every other leg is read from the last manifest, and without
+the clock a store five nights stale kept the lane "live" on its last good I6 for as long as its files stayed as they
+were. One missed night is tolerated at the next morning's sends; a second holds every open.
 The swarm process reads that one file and never the forward record's own store (release E3's seal T1).
 
 THE TRAIN BAR equity-xs-v1 (in-sample filter; never evidence; E4-SPEC 8.3). One run a SEEN SPAN (`seen_spans`), each
@@ -253,6 +258,9 @@ SAME_LINEAGE_XS = ("its program is the same lineage as a panel program already l
 TRAIN_ENDED = ("its program was ended by its own errors on a whole Train segment: no Train series could be kept for "
                "it, so it took no Validation try")
 EARLY_CAUSES = {"same lineage": SAME_LINEAGE_XS, "train run": TRAIN_ENDED}
+
+#: THE CLOCK the lane's freshness is read by (`_live_legs`: epoch seconds). The process's own; a test hands in its own.
+CLOCK: Callable[[], float] = time.time
 
 _runners: dict[str, Any] = {}
 _deciders: dict[str, Any] = {}
@@ -527,8 +535,30 @@ def _session_before(day: dt.date) -> dt.date | None:
     return days[-1] if days else None
 
 
-def _twins_ready(root: str | Path, through: dt.date) -> str | None:
-    """THE TWIN MARKER's leg of `live_ready`: why it fails, or None (the module docstring)."""
+def _last_closed(now: float) -> dt.date | None:
+    """The last NYSE session whose close has passed at epoch `now` (`league.equity.schedule.moments`: 16:00 New York,
+    13:00 on an early close), None when the calendar holds none in ten days."""
+    from ..equity import schedule as S
+
+    day = S.ny_day(float(now))
+    for _ in range(10):
+        m = S.moments(day)
+        if m is not None and m.close_at <= float(now):
+            return day
+        day -= dt.timedelta(days=1)
+    return None
+
+
+def _fresh_floor(now: float) -> dt.date | None:
+    """The oldest session a nightly file may be through and still be FRESH at `now`: the session before the last closed
+    one (one missed night is tolerated at the next morning's sends; from that day's close on it is stale)."""
+    last = _last_closed(now)
+    return None if last is None else _session_before(last)
+
+
+def _twins_ready(root: str | Path, through: dt.date, floor: dt.date | None = None) -> str | None:
+    """THE TWIN MARKER's leg of `live_ready`: why it fails, or None (the module docstring). `floor`: the oldest
+    session the marker may be through by the clock (`_fresh_floor`)."""
     from ..xs import book as xbook
 
     doc = _read_json(Path(root) / STORE_DIR / xbook.TWINS_FILE)
@@ -536,7 +566,7 @@ def _twins_ready(root: str | Path, through: dt.date) -> str | None:
         return "the twin marker is missing (the forward record's nightly run has not written it: package J)"
     marked = _day(doc.get("through"))
     before = _session_before(through)
-    if marked is None or marked not in (through, before):
+    if marked is None or marked not in (through, before) or (floor is not None and marked < floor):
         return "the twin marker is behind the panel store (the forward record's nightly run stopped)"
     instances = doc.get("instances")
     if not isinstance(instances, Mapping):
@@ -568,8 +598,13 @@ def _tradable_share(root: str | Path, day: dt.date) -> float | None:
     return sum(1 for _, symbol in members if symbol in allowed) / len(members)
 
 
-def _live_legs(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[bool, str | None]:
-    """`live_ready`'s legs, in its order: (ready, the first leg that fails). It RAISES on a leg it cannot read."""
+STALE = "the panel store is stale"
+
+
+def _live_legs(root: str | Path, settings: Mapping[str, Any] | None, *, now: float | None = None
+               ) -> tuple[bool, str | None]:
+    """`live_ready`'s legs, in its order: (ready, the first leg that fails). It RAISES on a leg it cannot read. `now`:
+    epoch seconds (`CLOCK()` when None)."""
     c = cfg(settings)
     manifest = _manifest(root)
     if manifest is None:
@@ -577,6 +612,12 @@ def _live_legs(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[bo
     through = _day(manifest.get("fetched_through"))
     if through is None:
         return False, "the panel manifest names no last session"
+    floor = _fresh_floor(CLOCK() if now is None else now)
+    if floor is None:
+        return False, "the calendar names no closed session (the panel store's freshness cannot be read)"
+    if through < floor:
+        return False, (f"{STALE}: its last session is {through.isoformat()} and the session before the last closed one "
+                       f"is {floor.isoformat()} (the nightly equity_panel job has not written it for two nights)")
     since = _day(manifest.get("live_from")) if manifest.get("live_from") else None
     if since is None:
         return False, "the universe deploy is not in force (the panel manifest's live_from is not set)"
@@ -590,19 +631,21 @@ def _live_legs(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[bo
     i6 = manifest.get("i6")
     if not isinstance(i6, Mapping) or i6.get("equal") is not True:
         return False, "the last nightly I6 did not hold (the live ctx is not proved equal to the Gym's)"
-    why = _twins_ready(root, through)
+    why = _twins_ready(root, through, floor)
     if why is not None:
         return False, why
     return True, None
 
 
-def live_ready(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[bool, str | None]:
-    """(ready, the first leg that fails): the universe deploy, the tradable share, the universe's age, the last I6,
-    the twin marker (the module docstring). THE UNIVERSE'S AGE is read from the manifest's `universe_at` (the first
-    session the stock list now in force was read by the panel job) and, where the job writes none, from `live_from`
-    (the first deploy): it fails closed `universe_max_age_days` after whichever it reads. Never raises."""
+def live_ready(root: str | Path, settings: Mapping[str, Any] | None, *, now: float | None = None
+               ) -> tuple[bool, str | None]:
+    """(ready, the first leg that fails): the store's freshness by the clock, the universe deploy, the tradable share,
+    the universe's age, the last I6, the twin marker (the module docstring). THE UNIVERSE'S AGE is read from the
+    manifest's `universe_at` (the first session the stock list now in force was read by the panel job) and, where the
+    job writes none, from `live_from` (the first deploy): it fails closed `universe_max_age_days` after whichever it
+    reads. `now`: epoch seconds (`CLOCK()` when None). Never raises."""
     try:
-        return _live_legs(root, settings)
+        return _live_legs(root, settings, now=now)
     except Exception as exc:  # noqa: BLE001 - a leg that cannot be read is not ready
         return False, f"the live legs cannot be read ({type(exc).__name__})"
 

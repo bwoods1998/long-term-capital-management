@@ -248,7 +248,11 @@ def run(ctx: Any) -> dict[str, Any]:
     coverage verdict is "insufficient"; {"status": "failed", "ok": False, "error"} when the store or the matrix
     cannot be read (the last neff.json stays)."""
     from ..xs import config as xs_config
+    from .equity_universe import lane_off
 
+    off = lane_off(ctx.root)    # WITH THE LANE'S SWITCH OFF NOTHING OF E4 RUNS (`elane.panel.mode`): its data too
+    if off is not None:
+        return {"status": "skipped", "why": off}
     try:
         why = xs_config.quiet(ctx.now(), WALL_S)
     except Exception as exc:  # noqa: BLE001 - a job that cannot learn whether it stands at a wall does not start

@@ -226,6 +226,42 @@ class TheLiveLegs(unittest.TestCase):
             F.ready(self.root, i6=i6)
             self.assertIn("I6", self.ready()[1])
 
+    def test_the_store_is_fresh_by_the_calendar_and_the_clock(self):
+        """Every other leg is read from the last manifest, so a panel store that stopped being written kept the lane
+        "live" on its last good I6 for as long as its files stayed as they were. The store's last session (Friday
+        2026-10-09 here) must be the last closed session or the one before, by the clock handed in."""
+        F.ready(self.root)
+
+        def at(day, hour, minute=0):
+            return dt.datetime(2026, 10, day, hour, minute, tzinfo=dt.timezone.utc).timestamp()
+
+        def ready(now):
+            return elane_xs.live_ready(self.root, self.settings, now=now)
+
+        self.assertEqual(ready(at(9, 20, 1)), (True, None), "Friday, a minute after the close: the night's job is to come")
+        self.assertEqual(ready(at(11, 16)), (True, None), "the weekend")
+        self.assertEqual(ready(at(12, 13, 31)), (True, None), "Monday's open: Friday is the last closed session")
+        self.assertEqual(ready(at(12, 20, 1)), (True, None), "Monday after the close: Friday is the one before")
+        self.assertEqual(ready(at(13, 13, 31)), (True, None), "Tuesday's sends: ONE missed night is tolerated")
+        ok, why = ready(at(13, 20, 1))                    # Tuesday's close: Monday's night never ran, nor is Tuesday's due
+        self.assertFalse(ok)
+        self.assertEqual(why, "the panel store is stale: its last session is 2026-10-09 and the session before the last "
+                              "closed one is 2026-10-12 (the nightly equity_panel job has not written it for two nights)")
+        self.assertTrue(why.startswith(elane_xs.STALE))
+        self.assertFalse(ready(at(16, 14))[0], "and five nights later")
+        # The process's own clock when none is handed in (the tests' is the weekend: league/tests/__init__.py).
+        self.assertEqual(self.ready(), (True, None))
+        with mock.patch.object(elane_xs, "CLOCK", lambda: at(16, 14)):
+            self.assertEqual(self.ready()[0], False)
+            self.assertEqual(elane_xs.mode(self.settings, self.root), "gate", "a stale store reads the lane at most gate")
+        self.assertEqual(elane_xs.mode(self.settings, self.root), "live")
+        # THE TWIN MARKER likewise: through the store's last session or the one before is not enough once the clock
+        # has moved two sessions past it.
+        F.ready(self.root, fetched_through="2026-10-13")
+        F.write_twins(self.root, through="2026-10-12")
+        self.assertEqual(ready(at(14, 13, 31)), (True, None))
+        self.assertIn("twin marker is behind", ready(at(14, 20, 1))[1], "Wednesday's close: the marker is two behind")
+
     def test_the_twin_marker(self):
         F.write_manifest(self.root, live_from="2026-09-01")
         self.assertIn("twin marker is missing", self.ready()[1], "with package J unmerged, live reads as gate")

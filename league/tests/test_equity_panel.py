@@ -301,6 +301,7 @@ class Fixture(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / "state"
         self.state.mkdir()
+        (self.state / "swarm.json").write_text('{"elane": {"panel": {"mode": "train"}}}', encoding="utf-8")   # the lane's switch is up
         self.root = self.state / U.STORE_DIR
         self.names, companies, spells = index(self.N)
         self.spells = [*spells, *self.EXTRA_SPELLS]
@@ -839,6 +840,7 @@ class WhatMasksAMember(Fixture):
         (state / U.STORE_DIR).mkdir(parents=True)
         spells = [*self.spells, ("QNOA", D(2010, 1, 4), None), ("QNOB", D(2010, 1, 4), None)]
         write_universe(state / U.STORE_DIR, spells)
+        (state / "swarm.json").write_text((self.state / "swarm.json").read_text(encoding="utf-8"), encoding="utf-8")
         ctx = Context("equity_panel", root=state, due_at=NOW, clock=lambda: NOW, gateway=self.market, config={},
                       settings_value={})
         receipt = P.run(ctx, sleep=lambda s: None)
@@ -1647,6 +1649,12 @@ class TheRegistryRows(unittest.TestCase):
         "xs_zero_edge": ((("weekly", 6, 6, 0), ("weekly", 6, 8, 0), ("weekly", 6, 10, 0), ("weekly", 6, 12, 0)),
                          100 * 60, 2400, 3000),
     }
+    #: THE REVIEW'S TWO TRIGGERS (the registry differs from the patch's record in these and nothing else).
+    #: `equity_universe` has no at-start trigger (live-9: at a House start before an open the chain's whole fetch held
+    #: the one ops child past the pre-open's grace); `equity_panel` has its own daily time, fifteen minutes after the
+    #: universe job's (live-4: its only trigger was `after("equity_universe")`, so a night the universe job failed
+    #: fetched no bars, ran no I6 and raised none of the panel job's own alarms).
+    REVIEWED = {"equity_universe": (("daily", 1, 40),), "equity_panel": (("daily", 1, 55),)}
 
     @classmethod
     def setUpClass(cls):
@@ -1705,12 +1713,19 @@ class TheRegistryRows(unittest.TestCase):
         self.assertIn(")", [line.strip() for line in self.context], "the rows end the JOBS tuple")
         have = self.registry.by_name()
         present = [name for name in self.SPEC if name in have]
-        if present:   # applied: all six, exactly these, and last
+        if present:   # applied: all six, exactly these, and last; the review's two triggers and nothing else differ
+            import dataclasses
+
             self.assertEqual(present, list(self.SPEC))
-            self.assertEqual([have[name] for name in self.SPEC], list(self.rows))
+            for row in self.rows:
+                mine = have[row.name]
+                self.assertEqual(tuple(self.trigger(t) for t in mine.triggers),
+                                 self.REVIEWED.get(row.name, self.SPEC[row.name][0]), row.name)
+                self.assertEqual(dataclasses.replace(mine, triggers=row.triggers), row, row.name)
             self.assertEqual([job.name for job in self.registry.JOBS][-6:], list(self.SPEC))
-            for line in self.added:
-                self.assertIn(line, source)
+            starts = [job.name for job in self.registry.JOBS if job.name in self.SPEC
+                      and any(t.kind in ("start", "after") for t in job.triggers)]
+            self.assertEqual(starts, [], "no E4 job starts with the House or behind another job's success")
         else:         # not yet: no name is taken, and the rows go after every job the registry has
             self.assertEqual(set(self.SPEC) & set(have), set())
             self.assertIn("dlane", have)
