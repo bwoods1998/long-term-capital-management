@@ -35,9 +35,9 @@ THE EQUITY LANES (release E1, Oct 2026), apart, under `equity` (the daily page's
   `equity`: the Probe programs among them);
 - `research` (release E2.4; league/ops/elane_health.py `research_counts`): the lanes' RESEARCH funnel in the window:
   equity passes (asked, barren, cut short, skipped by reason) and families born, proposals refused by reason class,
-  programs refused before a run by rule, versions scored, disqualified and failed by code, bar passes, review
-  refusals and passes, families retired (stalled, refuted) and E2's own model dollars. A read that fails is
-  {"error": ...} there, never a zero;
+  programs refused before a run by rule, the Train rounds' steps taken and skipped by reason (`train_steps`),
+  versions scored, disqualified and failed by code, bar passes, review refusals and passes, families retired
+  (stalled, refuted) and E2's own model dollars. A read that fails is {"error": ...} there, never a zero;
 - from the live book (`book_counts`'s `equity`): the EquityBook's orders placed and filled, lots opened and closed (a
   close is one lot fully closed), and the programs holding a lot now.
 

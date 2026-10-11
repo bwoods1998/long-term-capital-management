@@ -1030,6 +1030,9 @@ class OwedWorkAndNothingScored(Case):
         self.assertEqual(entry["what"], check["what"][:-len(self.FLOOR) - 1], "the mail: every sentence but the last, whole")
         self.assertEqual(list(entry["numbers"])[:6], ["kind", "steps_due", "steps_skipped", "researching", "held_now",
                                                       "births_wanted"])
+        for name in ("pace_usd_hour", "spent_last_hour_usd", "day_line_usd", "spent_today_usd"):
+            self.assertIn(name, check["numbers"], "E2's dollars are in the receipt")
+            self.assertNotIn(name, entry["numbers"], "and not among the mail's two-place figures: the sentence says them")
         self.assertEqual(len(ctx.alerts), 1)
         # It needs nobody: the Done meter's day is not failed by it (`TheDoneMeterCountsThem`).
 

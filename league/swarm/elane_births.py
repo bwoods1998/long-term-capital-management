@@ -532,7 +532,8 @@ def refusal_said(item: Mapping[str, Any], settings: Mapping[str, Any] | None) ->
     if known:
         foreign = f": {', '.join(known)} {'is' if len(known) == 1 else 'are'} known to the code and not open"
     if unknown:
-        foreign += (", and " if known else ": ") + f"{unknown} named {'is' if unknown == 1 else 'are'} no symbol the House knows"
+        foreign += ((", and " if known else ": ")
+                    + f"{unknown} named {'is' if unknown == 1 else 'are'} no symbol the House knows")
     fields = ([f for f in item["fields"] if isinstance(f, str) and f in CARD_FIELDS]
               if isinstance(item.get("fields"), list) else [])
     more = item.get("other_fields") if type(item.get("other_fields")) is int and item.get("other_fields") > 0 else 0

@@ -96,11 +96,13 @@ class House:
         self.now, self.started, self.release = float(start), float(start), release
         self.store = SwarmStore(self.root, clock=lambda: self.now)
         case.addCleanup(self.store.close)
-        (self.root / "swarm.json").write_text(json.dumps({"elane": {"mode": "gate", "birth_share": 0.25, "e2": dict(e2 or {})}}))
+        lanes = {"mode": "gate", "birth_share": 0.25, "e2": dict(e2 or {})}
+        (self.root / "swarm.json").write_text(json.dumps({"elane": lanes}))
         self.gateway = Gateway(lambda: self.now)
         self.results: dict[str, Any] = {}
         self.router = Router(self, lambda call: fx.answer([], cost=0.0))
-        runner = fx.FakeRunner(lambda code, k: self.results.get(code) or fx.train_result(k=k, pnl=180.0 if k == 1.0 else 120.0))
+        runner = fx.FakeRunner(lambda code, k: self.results.get(code)
+                               or fx.train_result(k=k, pnl=180.0 if k == 1.0 else 120.0))
         with ops_guard.readonly():
             self.settings = settings_mod.load(self.root, config={})
         self.arch = Architect(self.store, self.router, self.settings, clock=lambda: self.now)
@@ -110,7 +112,8 @@ class House:
         self.beat()
 
     def beat(self) -> None:
-        (self.root / EH.HEARTBEAT).write_text(json.dumps({"at": self.now, "started_at": self.started, "release": self.release}))
+        beat = {"at": self.now, "started_at": self.started, "release": self.release}
+        (self.root / EH.HEARTBEAT).write_text(json.dumps(beat))
 
     def keep_options(self) -> None:
         """The options lanes healthy at `now` (a birth, ten Gym runs and a Validation run): none of their causes stand."""

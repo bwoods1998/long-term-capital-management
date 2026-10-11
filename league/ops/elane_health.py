@@ -372,8 +372,8 @@ DOING = {
     "elane_dq": ("Each disqualified version's author is shown the line of its own file the first error was raised at and "
                  "what is wrong there; a family whose versions all end so is retired STALLED. Nothing loosens the bar or "
                  "the sandbox."),
-    "elane_births": ("The equity pass asks again at its own cadence and shows its next request the last pass's refusals "
-                     "with their reasons. Nothing loosens the admission."),
+    "elane_births": ("The equity pass asks again at its own cadence and tells its next request the last pass's refusals "
+                     "by class, in closed words. Nothing loosens the admission."),
     "elane_refused": ("Each refusal is in its author's next brief with what to write instead; it costs one write attempt, "
                       "never a scored version. Nothing loosens a rule."),
     "starved": ("E2 asks again by itself once it may (its hour's spend under its pace, 00:00 UTC for its day, room under "
@@ -388,13 +388,15 @@ REPORT = "python3 -m league.ops.elane_health --state /workspace/state"
 IDLE_OWNER_KINDS = ("raised", "house", "errors", "silent", "no_round")
 #: The gateway's cuts of a stall entry (gateway/lib/email.mjs: `sentence(entry.what, 400)`, `sentence(entry.doing, 700)`,
 #: STALL_STEP_CHARS, STALL_NUMBERS), the figures of each cause its mail shows first (`mailed`), and what a check's
-#: numbers hold that is no figure (kept on the House: the receipt and the report).
+#: numbers hold that the mail does not list (kept on the House: the receipt and the report): what is no figure, and
+#: E2's own dollar figures, which the notice's two decimal places would misstate (a pace of a cent and two thirds is
+#: not $0.02; the sentence says them to the tenth of a cent).
 WHAT_CHARS, DOING_CHARS, STEP_CHARS, FIGURES = 400, 700, 400, 16
 MAIL_FIGURES = {"elane_dq": ("scored", "faulted", "families", "top_error", "basis"),
                 "elane_births": ("barren_passes", "kind", "born", "setting"),
                 "elane_idle": ("kind", "steps_due", "steps_skipped", "idle_hours", "researching", "held_now"),
                 "elane_refused": ("answers", "top_rule", "top_rule_n")}
-NOT_MAILED = ("judged", "examples", "hint")
+NOT_MAILED = ("judged", "examples", "hint", "pace_usd_hour", "spent_last_hour_usd", "day_line_usd", "spent_today_usd")
 
 
 # ---------------------------------------------------------------------------------------------- small readers
@@ -1057,7 +1059,8 @@ def _work(f: Mapping[str, Any], start: float, now: float) -> dict[str, Any]:
     return out
 
 
-def _lever(kind: str, held: Mapping[str, Any] | None, c: Mapping[str, Any], *, now_held: bool = True) -> tuple[str, list[str]]:
+def _lever(kind: str, held: Mapping[str, Any] | None, c: Mapping[str, Any], *,
+           now_held: bool = True) -> tuple[str, list[str]]:
     """WHICH OF E2'S LINES BINDS, and the owner's lever for it, from the figures the check holds (`_held`: the hourly
     pace, the day's line, what was booked against each; `lanes`' settings): (what binds, the lever's sentences: the
     lever, the command that sets it, and the budget's where it binds first; [] for no lever). The hourly pace is
@@ -1086,7 +1089,8 @@ def _lever(kind: str, held: Mapping[str, Any] | None, c: Mapping[str, Any], *, n
                  if now_held else f" (a line of {_usd(held['day_line_usd'])} a UTC day)")
         if usd_day <= held["limit_usd_hour"] * 24.0:
             return what, [f"The day's line is elane.e2.usd_day ({_usd(usd_day)}), under 24 hours at the hourly pace: the "
-                          "lever is elane.e2.usd_day.", "Set it with python3 set_swarm.py elane.e2.usd_day=<dollars> --apply."]
+                          "lever is elane.e2.usd_day.",
+                          "Set it with python3 set_swarm.py elane.e2.usd_day=<dollars> --apply."]
         return what, [f"The day's line is 24 hours at the hourly pace, under elane.e2.usd_day ({_usd(usd_day)}), which "
                       "does not bind: the lever is elane.e2.pace_share.", *pace[1:]]
     if kind == "sail_day":
@@ -1506,9 +1510,9 @@ def mailed(entries: Sequence[Mapping[str, Any]],
     """THE STALL JOB'S CALL for the notice (the module docstring, THE NOTICE): the notice's entries (`stall.cause_facts`,
     one a standing cause), each equity cause's fitted to what the gateway prints: its sentence whole inside the
     gateway's cut (`found`: the checks, for the sentence each fitted, `mail`), and its figures with the mail's first
-    (`MAIL_FIGURES`), without what is no figure (`NOT_MAILED`, a list, a dict, a None). Each stays AN ENTRY OF ITS OWN
-    under its own cause: none is folded into another's. Every other entry is returned as it is, and so is the whole
-    list should the fitting fail: the notice goes out whatever these four hold."""
+    (`MAIL_FIGURES`), without what the mail does not list (`NOT_MAILED`, a list, a dict, a None). Each stays AN ENTRY
+    OF ITS OWN under its own cause: none is folded into another's. Every other entry is returned as it is, and so is
+    the whole list should the fitting fail: the notice goes out whatever these four hold."""
     try:
         out = []
         for entry in entries:
@@ -1588,7 +1592,7 @@ def text(doc: Mapping[str, Any]) -> str:
         if check.get("owner_step"):
             lines.append(f"  Owner step: {check['owner_step']}")
         figures = ", ".join(f"{k} {v}" for k, v in (check.get("numbers") or {}).items()
-                            if v is not None and k not in NOT_MAILED)
+                            if v is not None and k not in ("judged", "examples", "hint"))
         lines += [f"  {figures}"] if figures else []
     funnel = doc.get("funnel") or {}
     lines += ["", f"The research funnel, last {funnel.get('hours'):g} h:" if _num(funnel.get("hours")) is not None
