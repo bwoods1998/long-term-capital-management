@@ -1,0 +1,228 @@
+# Release E4 "breadth": the contract between its packages
+
+Release E4 adds the PANEL lane: programs that pick 5 to 12 names out of the day's S&P 500 members by a symmetric
+cross-sectional rule, see salted slots with no ticker and no date, and are judged on their daily RESIDUAL against
+matched placebo portfolios by the screen XS1. This file is what every package builds against. Step 0 created every
+new module as an importable stub with its public names, the shared dataclasses and constants, and the one table's DDL;
+`league/tests/test_e4_stubs.py` holds them still. A stub's body raises `NotImplementedError` until its owner lands it.
+
+Base: commit 0e8bbaa7 (E1's share lane and E2's births, integrated). E1 and E2 were still receiving review fixes when
+this was written: build against what the base has, and anchor every patch by statement, never by line.
+
+**Authority, in order.** The captain's amendments (A1-A20) and his rulings on this build (section 3); the pinned
+pre-registration XSCREEN-1, revision 2 (sha256 c46aec17..., pinned 2026-10-11 03:03:08Z), WHERE IT SPEAKS (section 4);
+the build spec E4-SPEC revision 2; the roadmap; the design. The spec and the pre-registration were revised in parallel
+without seeing each other. Where they disagree on the program contract and inputs, the residual and its cells, the
+stress leg, the House exit law, the gate, the lineage rule or the forward checkpoints, THE PRE-REGISTRATION WINS, and
+the stubs already say what it says. Where the spec names existing code and the code differs, THE CODE WINS (section 5).
+
+**Rules for every package.** The repository is public: no market data, no price or return of a real year, no census
+figure, no per-program outcome, no membership history (the point-in-time table lives on the House only; the one
+committed list is the dateless tradable union). Tests use `league.xs.synth` and `league.equity.synth` stores and
+fixtures marked fake. No push, no pull request, no deploy; no contact with the House, Sail, Alpaca, the gateway or a
+broker; no secret or env file read. Edit NOTHING under `league/live/`, `league/gym/`, `gateway/`, in the 4
+`LEAGUE_FILES`, or in an evidence module of league/equity (`evaluator.EQUITY_EVIDENCE`). Edit an existing file only
+through your own patch file (section 2). Standard library and numpy only; nothing may depend on a numpy routine whose
+stream differs by version. `league/xs/` stays FLAT. Every statistic uses `math.fsum` (the CI runs Python 3.11 and
+3.14 and the built-in `sum` is not the same sum on both); every new test passes on both. One test process at a time.
+
+## 1. The package split: who owns which file
+
+Each file has ONE owner. NEW files in **bold**. Eight packages are built now: A, B, C (C0 is its first commit and
+merges first), D, E, G, H and I. Package F (the screen's study XSCREEN-1) is a separate team's private work and is not
+in this build. Package J (the forward twin) waits for release E3: it is OWED (section 3).
+
+| key | owns (new files) | existing files it changes at integration (through `league/swarm/e4_patches/<key>.md`) |
+|---|---|---|
+| A data | **`scripts/panel_probe.py`** (step -1's coverage probe: BUILT at Step 0, A owns it from here), **`league/ops/equity_universe.py`**, **`league/ops/equity_panel.py`**; tests **`league/tests/test_panel_probe.py`** (written at Step 0), **`test_equity_universe.py`**, **`test_equity_panel.py`** | `league/ops/registry.py` (the six job rows) |
+| B costs and counts | **`league/ops/equity_spreads.py`**, **`league/ops/equity_neff.py`**, **`league/ops/french.py`**; tests **`test_equity_spreads.py`**, **`test_equity_neff.py`**, **`test_french.py`** | `league/ops/funnel.py` (independent asset-years), `league/ops/twins.py` (a panel lot's half-spread); after release E3 and never before: `league/ops/contam_probe.py` |
+| C xs core | C0, merged first and alone: **`league/xs/config.py`** whole and **`league/xs/store.py`**'s writer (`write_panel`, the layout, the 2020 refusal) with **`test_xs_store.py`**'s writer tests. Then the rest of `store.py`, **`ctx.py`**, **`program.py`**, **`synth.py`**, **`XS.md`** (the contract shown to authors), `league/xs/__init__.py`; tests **`test_xs_ctx.py`**, **`test_xs_program.py`**, **`test_xs_seal.py`** | none |
+| D xs engine | **`league/xs/engine.py`**, **`results.py`**, **`placebo.py`**, **`runner.py`**, `league/xs/child.py` (the A13 stub, now written); tests **`test_xs_engine.py`**, **`test_xs_placebo.py`**, **`test_xs_runner.py`**, **`test_xs_i6.py`** | `league/tests/test_equity_decider.py` (the panel kind now serves five ops) |
+| E xs screen | **`league/xs/screen.py`**, **`league/xs/identity.py`**; fixture **`league/tests/fixtures/equity_screen_xs_fake.json`**; tests **`test_xs_screen.py`**, **`test_xs_identity.py`** | `league/swarm/evaluator.py` (`adopt_xs`; `adopt_equity` skips panel families) |
+| G swarm | **`league/swarm/elane_xs.py`**, **`league/ops/xs_zero_edge.py`**, **`league/swarm/E4.md`**; tests **`test_elane_xs.py`**, **`test_elane_xs_bar.py`**, **`test_elane_xs_seal.py`**, **`test_xs_zero_edge.py`** | `league/swarm/store.py`, `bands.py`, `elane.py`, `cards.py`, `dlane.py` (one structure literal), `elane_births.py`, `elane_train.py`, `elane_seal.py`, `elane_yield.py`, `settings.py`, `policy.json`, `loop.py` |
+| H live | **`league/xs/book.py`**; tests **`test_xs_book.py`**, **`test_equity_book_panel.py`** | `league/equity/kinds.py` (`BOOKS`, `book_for`, `kind_of`), `league/equity/live.py` (B1-B15 less B7 and B12, ONE patch), `league/ops/dlane_report.py` (a panel close's lines) |
+| I money and universe | **`scripts/gen_universe.py`**; tests **`league/tests/test_gen_universe.py`** | R-E4a: `league/ci.py` and `league/tests/test_ci.py` (protected paths; `stock_agreement` names at most 10 tickers a side), `docs/operations.md`, `CHANGELOG.md`. R-E4b, THE UNIVERSE (moves the money digest; deployed separately): `league/constitution.py`, `league/tests/test_equity_money.py`, `league/ops/preopen.py`, and the gateway's `gateway/lib/caps.mjs` and `gateway/test/stock-buys.test.mjs` AS A PATCH FILE in the captain's scratch, never an edit of `gateway/` |
+| J forward (OWED) | **`league/ops/forward_xs.py`** (a stub exists); tests **`test_forward_xs.py`**, **`test_forward_xs_twin.py`** | E3's seven forward modules, after E3 is merged |
+| the integrator | `league/xs/E4_INTERFACES.md` (this file), `league/tests/test_e4_stubs.py`, `league/swarm/e4_patches/README.md` | applies every patch file, in `README.md`'s order |
+
+Files no package edits: `league/live/**`, `league/gym/**`, `gateway/**`, the evidence modules of league/equity,
+`league/equity/INTERFACES.md`, `docs/benchmarks/equity_screen_2.json`, `league/ops/equity_data.py`, anything under
+`<state>`. `docs/benchmarks/equity_screen_xs_1.json` is the captain's: he lands it when the study finishes.
+
+No path is in two rows. A package that needs a change to a file it does not own asks its owner (a line in its
+report), or the integrator when the file is a shared shape of section 6.
+
+**Merge order on green CI: C0, A, B, C, D, E, G, H, then I.** C0 first because A is built on it; A second because its
+coverage verdict is the fact the release rests on. Package I's constitution change is ONE separate commit, marked
+"UNIVERSE (moves the money digest; deployed separately)", made LAST by the integrator.
+
+## 2. Patches to existing files
+
+A change to a file that existed before E4 is written by its E4 author into that author's OWN file
+`league/swarm/e4_patches/<key>.md`, as an exact unified diff against the integration head with the test that holds
+it, and applied by the integrator in the order of `league/swarm/e4_patches/README.md` (which lists all eighteen).
+Seven authors appending to one file from seven worktrees would conflict at every merge; one file an author cannot.
+
+## 3. The captain's rulings on this build (binding)
+
+1. **Package F is not built here.** A separate team runs XSCREEN-1 from the pinned pre-registration.
+   `league/xs/screen.py` is written from the pre-registration and reads its thresholds from the receipt
+   `docs/benchmarks/equity_screen_xs_1.json`, which lands later. Until then tests use a fake receipt, and A SCREEN WITH
+   NO PINNED RECEIPT REFUSES EVERY PROGRAM. The study's own numpy reference and its conformance vectors
+   (HOUSE-RULE-XS1.md, conformance_xs1.json) land with the receipt; `test_xs_screen.TheStudyVectors` and
+   `test_xs_placebo.TheStudyVectors` (skipped until then) must reproduce them.
+2. **Package J waits for release E3.** Its stub is kept, and the rule stands exactly as the spec has it: WHILE J IS
+   NOT MERGED, OR ITS NIGHTLY RUN HAS NOT WRITTEN THE MARKER (`league.xs.book.TWINS_FILE`), `elane.panel.mode` "live"
+   READS AS "gate" (`elane_xs.live_ready`). J is owed: patches 17 and 18 with it.
+3. **Package I is built, and no builder edits `gateway/`.** Its gateway changes are a patch file with their tests'
+   expected results; its constitution change is one separate commit made last.
+4. **A17 is granted.** For a panel program, a hold-day fetch failure of a held name is an alarm and never counts
+   toward A8.5's two-failed-decides exit; a failed decide on a rebalance day still counts.
+   `league.xs.book.HOLD_DAY_FAILS_EXIT` is False.
+5. **Step -1's probe is built at Step 0** (`scripts/panel_probe.py`): read-only, its only request a bars GET through
+   the House's own gateway client, counts and coverage shares out, never a price. So it does NOT use the web reader:
+   the spell file is a local path, and the facts that need the reader, quotes or assets (the spec's facts 2, 3 and 4)
+   are stated "not probed" in its receipt. Package A's jobs verify them.
+
+## 4. Where the pinned pre-registration overrides the spec
+
+The stubs' docstrings are already written to these. Each line: the spec's text, what binds instead, where it lives.
+
+| the spec said | what binds (the pre-registration's section) | where |
+|---|---|---|
+| D4: eligible = member at t, a valid bar, 60 valid closes of 253 | **U(d)** (3.1): member on d, d + 1 AND d + 2; a valid close on d and d - 1; the class of the month; the three characteristics exist (so 253 sessions of history). The House adds tradable and unmasked (narrower) | `store.PanelBars.elig0`, `ctx.Derived.elig`, `config.MEMBER_AHEAD` |
+| D6: beta and sector need 60 valid days; sector = the highest correlation of raw returns | **at least 200 valid returns** (3.2); sector = the fund whose MARKET-RESIDUAL returns correlate most with the name's; the funds in the order XLB, XLE, XLF, XLI, XLK, XLP, XLU, XLV, XLY, XLRE, XLC | `config.MIN_VALID`, `config.FUNDS`, `ctx.derive` |
+| D6: nested terciles, mt = 3 for a missing momentum | **the cells of 3.3**: (beta groups, momentum groups) by the sector's eligible count ((3, 3) from 45, (2, 2) from 20, (1, 2) from 10, (1, 1) from 5), a pooled "small" cell for sectors under 5; a name with no momentum is not eligible. Cell id = 100 x sector + 10 x beta group + momentum group; small = 9999 | `config.RUNGS`, `SMALL_CELL`, `CELL_SECTOR`, `CELL_BETA`; `ctx.Derived.bg`, `mg`, `cell` |
+| D7: the ctx carries normalised open, high, low, close arrays, `rvol`, event flags | **the contract C1**: `ret`, `oret`, `iret`, `range`, `rel_volume` (6 decimals), `sector`, `beta` (2 decimals), the same five for the market; `weekday`, `session_of_month`, `sessions_left_in_month`, `last_session_of_week`. NO price array, NO event flag, no size or liquidity handle. The spec's DITHER stays, underneath (it only adds noise: narrower, never wider) | `ctx.XsCtx.__slots__`, `ctx.FIELDS`, `config.DITHER_HALF`, `BETA_PLACES` |
+| D10: top-ups at a 25% shortfall; orders past 24 dropped one by one | **THE KEEP RULE** (C3): a held name in the target is kept, no trade and no resize; a name not held is bought as ONE lot of w x E0; at most 12 buys and 12 sells, and a target that needs more is REFUSED WHOLE (a hold) | `engine.plan_orders`, `config.MAX_BUYS`, `MAX_SELLS` |
+| D11: the Gym sleeve is $500; a name's half-spread is at least 1 bp | **E0 = $1,000** (C3, C8: E1's `SLEEVE_USD`; the stress leg charges the smaller live sleeve's fee instead); **never under 3 bp a fill** (C5) | `config.XS_SLEEVE_USD`, `HS_FLOOR_BP` |
+| D12: a vanished name whose spell ended by a deal takes no haircut | **one exit law** (C6, 3.5, 5.5): a name out of U at any close is sold at the next open; a name whose bars end exits at its last close x (1 - 0.30), for the lot, its counterparts and its cell's members ALIKE. How a spell ended is counted beside, and sets no price | `engine` (module docstring), `config.VANISH_*`, `store.PanelBars.exit` |
+| D13: x = the cash book's return minus a sector basket's dollars | **the residual of 3.4**: E1's constant-weight accounting on E0; x = r - B, B the cost-free mean of each lot's CELL (fixed at its decision, the exit law applied to every member); the stress residual **x15 = x - 0.5 s - f**; the universe excess **u** (4.6: one cell, all of U) | `placebo.residual`, `placebo.SERIES`, `results.DAILY`, `config.STRESS_*` |
+| D14: 1,000 placebos, one generator a placebo, a draw by `floor(u x m)` | **the law of 3.5**: one `default_rng(seed)` a run; per decision and cell one `rng.random((draws, len(C)))`, keys of members the draw holds raised by 2, the smallest keys win; **999 draws**; the look's seed from sha256("XS1\|receipt sha\|code sha\|placebo"); p_plac = (1 + count) / 1000 | `placebo.run`, `look_seed`, `DRAWS` |
+| 9.1: pass = pre-check AND sum x > 0 AND t >= c_used AND p_plac <= 0.10; the floor is `floor_s2` at L 194 and 251 | **the gate of 4.3-4.4**: pre-check AND sum_H x > 1e-12 AND **sum_H x15 > 1e-12** AND t_H >= c_used AND **p_plac <= 0.12** (count <= 119 of 999); c_used = max(c_XS, c_p + 0.05); the own floor at **L 194 only**, cells: both pools together (each at least 251), each pool of at least 550 alone | `screen` (module docstring), `screen.PLACEBO_COUNT_MAX`, `MIN_POOL_*` |
+| 8.4: the look's run is the holdout's, as E1's | **one run from Validation's first session through the holdout** (4.1); the series is cut in two | `runner.Isolated.look`, `store.WINDOWS`, `screen.split` |
+| 9.2: `ReceiptXS(... n_placebo, strata, c_XS_floor, c_XS_margin ...)`, alpha at most 0.10, at least 1,000 placebos | **the receipt of 10.1**: `c_XS`, `c_margin`, `alpha_plac` 0.12, `placebo_draws` 999, the rung (R0, or R1 when the ladder fell back; R2 and R3 are never adopted), the flags and the screen's flags, the sentence | `screen.ReceiptXS`, `RECEIPT_KEYS`, `PIN_KEYS`, `elane_xs.SCREEN_NULLS` |
+| D22: the same lineage = a 0.7 correlation of the Train x with a program looked at, or the template; E1's retry rule | **4.6**: the template, or 0.7 or more in the residual x OR in the universe excess u, against a program looked at OR refused at the pre-check; **no Validation-only retry**; an XS1 lineage takes no S2 look and the reverse | `screen.same_lineage`, `retry_permitted`, `elane_xs.same_lineage`, `TRAIN_U_KEY`, `PRECHECK_KEY` |
+| 9.1 (4): the sentence's fields | **the sentence of 10.2**, its placeholders {c_used}, {c_p}, {own_fp}, {n_cell}, {basket}, {label}, {flags} | `screen.BESIDE_FIELDS`, `screen.beside_line` |
+| 10.6: a panel row's forward route | **the checkpoints of section 11**: 20, 60, 120 and 250 forward sessions; pass = t_n >= c_FX AND sum x > 0 AND sum x15 > 0 AND the placebo rank <= alpha_f (0.12 fresh, 0.03 after an XS1 look) | `screen.CHECKPOINTS`, `ALPHA_F`; package J (owed) |
+
+**The duties the pre-registration gives the House** (package G keeps them; `elane_xs`'s module docstring):
+1. keep BOTH Train series (the residual x and the universe excess u, by session) of every program that reaches the
+   pre-check, passed or refused: `elane_xs.TRAIN_X_KEY`, `TRAIN_U_KEY`, with `PRECHECK_KEY`;
+2. count the XS1 looks of each agenda cell: `elane_xs.cell_looks`;
+3. state beside EVERY live panel trade the sentence its receipt fixes: recorded with the look
+   (`elane_xs.LOOK_KEY`), handed out by `elane_xs.beside_line`, printed by package H's report patch.
+
+**What the pre-registration leaves to this build** (its DR6), so the spec stands: the Train bar equity-xs-v1 (it now
+reads the residual of 3.4 and ranks against `placebo.stat` under `placebo.train_seed`), the spreads job, the universe
+deploy, the switch, sizing and the live rules by close date. And the spec's STANDING TARGET (a buy live could not make
+is planned again each close until the next called decision): the pre-registration is silent on it; it is kept, and
+such a buy is a lot with its own decision day and cell.
+
+## 5. Where the code at the base differs from the spec's words (the code wins)
+
+- `league.swarm.elane.card_errors(card, structure, symbols, settings)` takes four arguments;
+  `elane_xs.card_errors(card, settings)` takes two (G's dispatch adapts).
+- `league.swarm.elane.same_lineage(store, fam, lane, template, train)` returns the FAMILY ID it matches or None, and
+  fails closed with `LineageUnread`. `elane_xs.same_lineage` does the same (the spec said bool).
+- `elane.mode` is a SETTING (`elane.MODES` = ("off", "gate"); the reader is `elane.on(settings)`). The effective panel
+  mode is `elane_xs.mode`.
+- `league.swarm.elane_train.restart_check(decider, code, params, *, name, streams, every, first)` resets by SESSION
+  (`BAR` `state_every` 20, `state_first` 7). The panel's `elane_xs.state_check` resets by CALL (after 3, 10, 13, 20...).
+- `league.swarm.bands.equity_seating(fams, seats)` has no `seatable` keyword yet (G's patch 2 adds it);
+  `bands.seating` has one.
+- `league.swarm.evaluator` already has `EQUITY_SELECTION_KEYS` and `EQUITY_EVIDENCE_EXTRA = ("synth",)`: the xs lists
+  mirror them (`identity.XS_EVIDENCE_EXTRA`; E's `XS_SELECTION_KEYS`).
+- `league.swarm.elane_seal.SEALED_KEYS` is a frozenset (G's patch 8 unions `elane_xs.SEALED`: EIGHT keys, the spec's
+  six plus `elane_xs_train_u` and `elane_xs_precheck`).
+- `league.equity.runner.RUN_BUDGET_SECONDS` is 1200; the panel's own is 600. E1's `Isolated` takes no `nice`.
+- `league.equity.store`'s window `LOOK` is the HOLDOUT alone; the panel's "look" window starts at Validation's first
+  session (section 4). The gate mark's constant is `GATE_MARK`.
+- `league.equity.screen.floor_s2` reads L 194 and 251 over `S2_SETS` (the second pool alone, both together); its
+  enumeration `_exact_cell` is private. The panel's floor has L 194 only and a first-pool-alone cell, so it is NOT
+  `floor_s2` as it stands: package E either calls `_exact_cell` (a private E1 name: then pin it by name in
+  `test_xs_identity.py` beside the three of `identity.XS_PRIVATE_E1`, and say so in its report) or writes the
+  enumeration inside `league/xs/screen.py`. Either way `test_xs_screen.py` holds it to a brute-force tuple loop.
+- `league.ops.equity_data.fetch(gateway, symbols, start, end, *, adjustment, timeframe)` has no `asof`:
+  `equity_panel.fetch_asof` pages for itself.
+- THE VENDOR'S CENTS. At this base E1's morning audit compares as-of prices on a four-decimal grid
+  (`league.equity.live.VENDOR_HALF_STEP`). E1 gained the shared helper `league.equity.config.rounding_bound` AFTER this
+  base (its commit 547206fa, with `engine.ratio_tolerance`). So league/xs carries ITS OWN copy, same name and figures:
+  `league.xs.config.rounding_bound`, `ADJUSTED_HALF_STEP`, `ROUNDING_GUARD` (built, not a stub). Use it for every
+  as-of price, split and dividend reading; the integrator makes it a re-export once E1's is in the base. A live ctx is
+  not byte-identical to a later store's by assumption: the I6 tests build both sides under one vintage, and the
+  nightly I6 measures the real thing.
+- E3's modules (`elane_folds`, `forward_*`, `fill_minutes`, `contam_probe`) do not exist at this base: import them
+  inside the function that needs them, and handle their absence (`elane_xs.assign` answers None without them).
+- The integration branch moved one commit past the base while this was written (an E2 budget fix in the swarm's
+  loop), and E1's branch three (the vendor's cents; the seeds' look order; the data job's audit): G's and H's anchors
+  are by statement for that reason.
+
+## 6. The shared shapes, and where each lives
+
+| name | module (owner) | read by |
+|---|---|---|
+| the lane's constants; `rounding_bound`; `quiet`, `rebalance_session`, `decision_due` | `league/xs/config.py` (C, in C0) | every package |
+| `PanelBars`, `Slice`, `PanelStore`, `Universe`, `write_panel`, `ids_for`, the layout | `league/xs/store.py` (C; `write_panel` in C0) | A (writes through it), D, G, H, J |
+| `XsCtx`, `Fields`, `Inputs`, `Derived`, `derive`, `build`, `ctx_bytes` | `league/xs/ctx.py` (C) | D (engine, child, placebo), H, A (the nightly I6) |
+| `Needs`, `parse_needs`, `load_program`, `normalize_target` | `league/xs/program.py` (C) | D, G, J |
+| `synthetic_panel`, `planted_panel`, `cent_panel`, `same_ctx_cases` | `league/xs/synth.py` (C) | every package's tests |
+| `EngineConfig`, `plan_orders`, `Log`, `run` | `league/xs/engine.py` (D) | the child (D), H (the same `plan_orders` live) |
+| the result record, `DAILY`, `view`, `pooled`, `t_stat` | `league/xs/results.py` (D) | E, G, J |
+| `residual`, `run`, `p_value`, `stat`, `look_seed`, `train_seed` | `league/xs/placebo.py` (D) | E (the look), G (the Train bar's rank) |
+| `Isolated`, `Run`, `state_stream`, the run failures (E1's own classes) | `league/xs/runner.py` (D) | G, J, `xs_zero_edge` |
+| `child.handle`: ops "load", "drop", "decide", "needs", "run" | `league/xs/child.py` (D) | the decider; H (the decide answer: `hold`, `target`, `at`, `orders`, `rejects`, `ineligible`, `stats`, `ctx_sha`, `failed`) |
+| `ReceiptXS`, `pinned_receipt`, `series`, `split`, `precheck`, `floor`, `verdict`, `same_lineage`, `beside_line` | `league/xs/screen.py` (E) | G |
+| `xs_fingerprint`, `xs_identity`, the lists | `league/xs/identity.py` (E) | G (`bands._xs_sha`), E's `adopt_xs`, J |
+| `SCHEMA` (`eq_rebalances`), `INSTANCE_KIND_DDL`, `Columns`, `Fetched`, `kept`, the twin marker's name | `league/xs/book.py` (H) | A (the nightly I6 reads the kept fetch and the table, read-only), G (`live_ready` reads the marker), J |
+| the lane's settings, keys and names; `mode`, `live_ready`, `is_panel`, `seatable`, `validate`, `look` | `league/swarm/elane_xs.py` (G) | G's patches; H's report (`beside_line`) |
+| the universe files, `tradable`, the panel manifest's `coverage`, `verdict`, `hs_share`, `i6`, `live_from` | `league/ops/equity_universe.py`, `equity_panel.py` (A) | C's `Universe` and `PanelStore` read them; G's `mode`; I (tradable.json) |
+| spreads.json, neff.json | `league/ops/equity_spreads.py`, `equity_neff.py` (B) | A (`hs_table`), B's funnel patch |
+
+THE TABLE (live.sqlite; created by `EquityBook.__init__` from `league.xs.book.SCHEMA` beside E1's own): one
+`eq_rebalances` row an instance and decision session; `eq_instances` gains `kind TEXT NOT NULL DEFAULT 'equity'` by a
+guarded ALTER. The swarm store gains no table: family-state keys `elane_xs` (the Train record) and the eight sealed
+keys of `elane_xs.SEALED`; kv `xs_evaluator`, `elane_xs_cpu`, `elane_xs_zero_edge`, `elane_xs_alerts`.
+
+## 7. What must not move, and what is off
+
+- E4 moves NEITHER the equity identity NOR the options execution fingerprint (A13): nothing of E4 enters league/equity's
+  evidence import closure; the panel has its own identity inside league/xs (`identity.xs_fingerprint`).
+  `league/xs/book.py` and `identity.py` are plumbing. H's patch to `league/equity/live.py` and `kinds.py` is plumbing.
+- The money digest moves ONLY by package I's universe commit, alone, marked, deployed separately.
+- Live trading of baskets is real money: every wall of E1 holds (long only, cash only, a stock at most 20% of equity,
+  the shared loss budget with stocks weighing 0.40, the kill switch and the stops, never a forced or hand-placed
+  trade). The panel reaches the venue only through E1's EquityBook.
+- With every E4 switch off (`elane.panel.mode` "off", as policy.json ships it) nothing of E4 runs, spends or trades:
+  no birth, no run, no fetch of the live path. The data jobs are registered and read only.
+
+## 8. Open points, for the captain and the integrator
+
+Each is a place the two texts had to be reconciled at Step 0; the stub says which way it went.
+1. **E0 is $1,000, not $500** (`config.XS_SLEEVE_USD`), because the pre-registered accounting and stress leg are on
+   E1's Gym sleeve. Cost: a small live lot's cent fees are charged by the stress leg, not by the plain t.
+2. **A name's half-spread is never under 3 bp** (`config.HS_FLOOR_BP`; the spec said 1): the registered contract
+   costs every fill 3 bp and may be made narrower, never wider. Cost: up to 2 bp a side over what a liquid name pays.
+3. **The standing target is kept** though the registered contract does not describe it (section 4's last paragraph).
+4. **The deal exit's no-haircut rule is gone** (the registered exit law is one haircut for all). With membership read
+   two sessions ahead a deal's name leaves U, and is sold, before its bars end, so the case is rare.
+5. **Membership is read two sessions ahead** (`config.MEMBER_AHEAD`). The Gym reads it from the store; live knows only
+   the changes the universe job has read by the decision. A change learnt late is a live-versus-Gym gap the nightly I6
+   shows.
+6. **Entry validity peeks one session ahead in the Gym** (a buy needs a valid close the session after its fill:
+   the pre-registration's 5.3, "data validity, never a return"); live cannot. Package D counts such refusals.
+7. **A program's ctx carries no event flag** (FOMC, CPI, jobs), unlike an E1 program's: the registered contract's
+   calendar is four counts. G's brief and E2's review rubric for a panel program must not offer them.
+8. **The cell id's formula** is what the study's reference draft uses; the pre-registration fixes the order of the
+   draws by "cells in ascending id" and the study's HOUSE-RULE-XS1.md will fix the ids. D and E re-check on its landing.
+9. **`screen.RECEIPT_KEYS`** is the pre-registration's table; the real receipt's exact key list is the study's.
+
+## 9. Tests
+
+    mkdir -p /dev/shm/eqe4-<key> && TMPDIR=/dev/shm/eqe4-<key> \
+      /home/bwoods1998/Work/long-term-capital-management/.venv/bin/python -m unittest <modules>
+
+Python 3.14 with numpy 2.5 there; Python 3.11 with numpy 2.4 is `~/Work/ltcm-v3/.venv311/bin/python` (the CI's other
+leg: every new test passes on both). The seals each package owes are named in E4-SPEC section 14 (X1-X17); the
+pre-registration's own tests T2 (the hand-checked vector of its 3.6), T5 (the placebo law and the exit law), T8 (119
+passes and 120 fails) and T15 (u is the one-cell residual) are D's and E's to reproduce on synthetic panels.
