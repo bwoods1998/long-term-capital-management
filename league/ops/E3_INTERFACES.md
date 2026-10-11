@@ -192,10 +192,11 @@ Every existing name the spec calls was checked against 5a6906ff. Signatures matc
     them (the DDL's comment), as `run_failed`'s `completed` does; `sessions`, `errors`, `stale` and `seconds` are the
     start's own. A second start of a night therefore never writes `programs` 0 beside a `run_failed` event.
 17. **The shadow's receipt and its one warning (B).** Beside the spec's keys the receipt holds `finals`, `register`
-    (the sync's counts) and `house`: the programs left without rows by a failure of the House's own (in `errors`);
-    `controls` holds `checks`, `restated`, `errors` and `data_failed` too. The job raises ONE `ctx.alert("warning")`
-    a night for what leaves no event (`forward_shadow.house_failures`): `house`, the controls left without rows by
-    anything but the data, and each step that raised (the sync, the controls, the final checkpoints, the twins).
+    (the sync's counts), `marks` (item 14) and `house`: the programs left without rows by a failure of the House's
+    own (in `errors`); `controls` holds `checks`, `restated`, `errors` and `data_failed` too. The job raises ONE
+    `ctx.alert("warning")` a night for what leaves no event (`forward_shadow.house_failures`): `house`, the controls
+    left without rows by anything but the data, and each step that raised (the sync, the audit marks, the controls,
+    the final checkpoints, the twins).
     A `restated` event is one a program and cause (section 3): FW3 counts restatements, and their days are the
     payloads' `days`; `"bars": "moved"` is the routine ex-day one, `"same"` the one worth a warning.
 
