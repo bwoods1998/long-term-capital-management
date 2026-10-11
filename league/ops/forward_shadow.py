@@ -279,7 +279,9 @@ class Shadow:
 
     Attributes: `store` (the `EquityStore` opened with the capability), `through` (its `fetched_through`: the night's
     name) and `engine` (tonight's engine id); `night_day` (`through` as ISO text: the `day` of every event of the
-    night) and `spent` (the child seconds spent so far)."""
+    night) and `spent` (the child seconds spent so far). What it was made with stays readable for the twins
+    (league/ops/forward_twins.py): `root`, `db`, `settings`, `cfg` (`forward_db.cfg(settings)`), `clock` and
+    `decider` (the child that answers now: THE RETRY's fresh one once it has run)."""
 
     def __init__(self, root: str | Path, db: sqlite3.Connection, *, decider: Any, settings: Mapping[str, Any] | None,
                  clock: Callable[[], float] = time.time, fresh: Callable[[], Any] | None = None):

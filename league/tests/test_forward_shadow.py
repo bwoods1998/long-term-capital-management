@@ -731,6 +731,17 @@ class NoDayBeforeItsCodeExisted(Case):
         self.assertEqual(rows[1]["bars"], self.hash_at(bars, 1, program.needs))
         self.assertNotEqual(rows[1]["bars"], self.hash_at(bars, 1, {**program.needs, "history": 1}))
 
+    def test_a_slice_with_no_session_to_decide_at_is_refused(self):
+        # A store whose calendar starts at the program's first day holds no close for its first decision.
+        pid = register(self.db, "always@1", ALWAYS, first_close=FWD[2])
+        synth.synthetic_store(self.root / STORE_DIR, symbols=SYMBOLS, start=FWD[3], end=END, seed=7, gate=True,
+                              as_of=FWD[6])
+        shadow = self.shadow(FWD[6], write=False)
+        with self.assertRaises(ValueError):
+            shadow.slice(self.program(pid))
+        receipt = shadow.night()
+        self.assertEqual((receipt["programs"], receipt["data_failed"], self.rows(pid)), (0, 1, []))
+
     def test_every_new_row_carries_the_bars_hash_of_the_decision_before_it(self):
         pid = register(self.db, "flip@1", FLIPPER, first_close=FWD[0])
         shadow = self.shadow(FWD[8])
@@ -1000,6 +1011,15 @@ class Finals(Case):
         self.assertEqual(self.night(FWD[21])["finals"], 0)
         self.assertEqual([(c["n"], c["final"]) for c in self.checks(pid)], [(20, 0)])
 
+    def test_a_resumed_program_is_run_again_and_has_no_final(self):
+        pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
+        self.night(FWD[4])
+        forward_db.tag(self.db, pid, "stopped", f"cap:{FWD[4].isoformat()}", at=self.t)
+        forward_db.tag(self.db, pid, "resumed", f"{self.t + 60.0}|a test's undo", at=self.t + 60.0)
+        receipt = self.night(FWD[6])
+        self.assertEqual((receipt["finals"], receipt["programs"], receipt["new_days"]), (0, 1, 2))
+        self.assertEqual((self.checks(pid), len(self.rows(pid))), ([], 7))     # every day the stop left out is filled
+
     def test_one_with_fewer_than_two_counted_days_has_none(self):
         pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
         self.night(FWD[0])
@@ -1025,6 +1045,13 @@ class Disqualified(Case):
         self.assertEqual(len(self.checks(good)), 1)
         self.assertEqual(self.count("fwd_tags"), 0)            # the stop is the registry's, from the events
         self.assertEqual(self.events("run_failed"), [])
+        # Written twice in one night (a retry after a write the store refused): still one event, no second row.
+        shadow = self.shadow(FWD[28])
+        run, result15 = shadow.run_program(self.program(pid))
+        self.assertEqual(shadow.write(run, result15), {"new_days": 1, "restated": 0, "checks": 0})
+        self.t += 60.0
+        self.assertEqual(shadow.write(run, result15), {"new_days": 0, "restated": 0, "checks": 0})
+        self.assertEqual([e["day"] for e in self.events("run_disqualified", pid)], iso(FWD[26:29]))
 
 
 # ======================================================================================================== whose failure
@@ -1035,7 +1062,8 @@ class WhoseFailure(Case):
         for through in FWD[2:5]:
             with self.assertRaises(forward_shadow.NightFailed):
                 self.night(through, decider=Dead())
-        with self.assertRaises(forward_shadow.NightFailed):   # the same night again: no second event
+        self.t += 1800.0
+        with self.assertRaises(forward_shadow.NightFailed):   # the same night again, later: no second event
             self.shadow(FWD[4], write=False, decider=Dead()).night()
         self.assertEqual([e["day"] for e in self.events("night_failed")], iso(FWD[2:5]))
         self.assertIn("DeciderError", self.events("night_failed")[0]["payload"]["why"])
@@ -1052,8 +1080,20 @@ class WhoseFailure(Case):
         with self.assertRaises(forward_shadow.NightFailed) as raised:
             self.shadow(FWD[3], decider=refusing).night()
         self.assertIn("RunFailed", str(raised.exception))
-        self.assertEqual([e["day"] for e in self.events("night_failed")], iso(FWD[2:4]))
-        self.assertEqual((self.count("fwd_runs"), self.count("fwd_days")), (0, 0))
+        # A child that answers its ping "not ok", and a canary the child ran to another status than "ok".
+        deaf = Ticking(self)
+        deaf.ping = lambda: {"ok": False}
+        with self.assertRaises(forward_shadow.NightFailed) as raised:
+            self.shadow(FWD[4], decider=deaf).night()
+        self.assertIn("ping", str(raised.exception))
+        self.assertEqual(deaf.runs, [])                        # nothing is asked of a child that does not answer
+        odd = Ticking(self)
+        odd.kind = lambda *a, **k: {"ok": True, "result": {"status": "disqualified", "lots": [], "capital": "1000"}}
+        with self.assertRaises(forward_shadow.NightFailed) as raised:
+            self.shadow(FWD[5], decider=odd).night()
+        self.assertIn("disqualified", str(raised.exception))
+        self.assertEqual([e["day"] for e in self.events("night_failed")], iso(FWD[2:6]))
+        self.assertEqual((self.count("fwd_runs"), self.count("fwd_days"), self.synced), (0, 0, []))
 
     def test_the_canary_runs_through_the_same_child_op_over_the_last_five_forward_days(self):
         decider = Ticking(self)
@@ -1092,6 +1132,20 @@ class WhoseFailure(Case):
         self.assertEqual((receipt["programs"], receipt["new_days"], receipt["data_failed"]), (1, 4, 0))
         self.assertEqual([row["day"] for row in self.rows(pid)], iso(FWD[:7]))
         self.assertEqual(len(self.events("data_failed", pid)), 2)
+
+    def test_a_store_rewritten_under_the_night_is_that_programs_data_failed(self):
+        on_spy = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
+        on_qqq = register(self.db, "flip@1", FLIPPER, first_close=BEFORE)
+        shadow = self.shadow(FWD[3])
+        path = self.root / STORE_DIR / "bars" / "QQQ.npz"      # not read yet: the canary and the first program read SPY
+        path.write_bytes(path.read_bytes()[:-8] + b"rewrites")
+        receipt = shadow.night()
+        self.assertEqual((receipt["programs"], receipt["data_failed"], receipt["errors"], receipt["retried"]),
+                         (1, 1, 0, 0))
+        (event,) = self.events("data_failed", on_qqq)
+        self.assertEqual((event["payload"]["class"], event["payload"]["symbol"]), ("MissingData", "QQQ"))
+        self.assertEqual((len(self.rows(on_spy)), self.rows(on_qqq), self.count("fwd_tags")), (4, [], 0))
+        self.assertEqual(self.night(FWD[4])["new_days"], 1 + 5)                # the store is whole again
 
     def test_a_symbol_with_no_bar_in_the_run_is_the_datas(self):
         pid = register(self.db, "dia@1", ON_DIA, first_close=BEFORE)
@@ -1178,6 +1232,32 @@ class WhoseFailure(Case):
         self.assertEqual(self.events("run_failed") + self.events("data_failed"), [])
         self.assertEqual((self.rows(bad), len(self.rows(good)), self.count("fwd_tags")), ([], 4, 0))
         self.assertEqual(self.night(FWD[4])["new_days"], 5 + 1)               # the next night fills it
+
+    def test_a_program_is_one_transaction(self):
+        # The checkpoint's arithmetic fails after the days were inserted: none of that program's rows stays.
+        pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
+        with mock.patch.object(forward_stats, "t_stat", side_effect=RuntimeError("a meter's bug")):
+            receipt = self.night(FWD[20])
+        self.assertEqual((receipt["programs"], receipt["errors"], receipt["new_days"]), (0, 1, 0))
+        self.assertEqual((self.rows(pid), self.checks(pid), self.events("run_failed")), ([], [], []))
+        receipt = self.night(FWD[21])
+        self.assertEqual((receipt["programs"], receipt["new_days"], receipt["checks"]), (1, 22, 1))
+
+    def test_a_result_that_does_not_fit_its_bars_has_no_rows(self):
+        pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
+        shadow = self.shadow(FWD[3])
+        run, result15 = shadow.run_program(self.program(pid))
+        odd = forward_db.ShadowRun(program=run.program, result={**run.result, "status": "error"}, bars=run.bars,
+                                   series=run.series)
+        short = forward_db.ShadowRun(program=run.program, result=run.result, bars=run.bars,
+                                     series=screen.series(run.result["lots"], run.bars, universe=["SPY"],
+                                                          capital=run.result["capital"], last=run.bars.n - 2))
+        lost = {**result15, "lots": [{**result15["lots"][0], "entry_day": "2031-01-02"}]}
+        for bad_run, bad_15 in ((odd, result15), (short, result15), (run, lost)):
+            with self.assertRaises(ValueError):
+                shadow.write(bad_run, bad_15)
+        self.assertEqual((self.rows(pid), self.count("fwd_events") - len(self.events("engine_moved"))), ([], 0))
+        self.assertEqual(shadow.write(run, result15)["new_days"], 4)
 
     def test_the_registry_or_the_twins_failing_loses_no_day(self):
         pids = [register(self.db, "always@1", ALWAYS, first_close=BEFORE),
