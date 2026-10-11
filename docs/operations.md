@@ -242,7 +242,9 @@ deploy); (2) the gateway serves 1Min bars with `vw` for the universe 45 minutes 
 price is used and `fwd_fillgap.field` says which); (3) the probe's router reaches the model routes from an ops child
 (else CP2 fires at the third idle attempt); (4) the House's seconds a program-night, from the first three nights'
 `fwd_runs`, to set `cpu_seconds_night`; (5) E2's scored versions a day, which set the registry's size; (6) the
-probe's spend rows land in the swarm store under the equity lanes' key mark. **Roll back** by the switches above,
+probe's spend rows land in the swarm store under the equity lanes' key mark; (7) the swarm starts the hidden run's
+own decider child beside its evidence child (`<state>/equity-hidden-decider.log` appears at the first scored version
+of a hidden-year family; else each such version raises MM1 and leaves no out-of-fold row, and its verdict stands). **Roll back** by the switches above,
 with what each does not reach. A CODE rollback (the previous release) leaves `forward.sqlite`, the fill minutes and
 the memory tables where they are: nothing of the older release reads them, a family born with a hidden year is then
 scored on E2's two whole spans again (its bar moves: prefer the switches), and when the release returns the shadow
