@@ -289,6 +289,43 @@ class TheSundayDeploy(SwarmCase):
         self.assertEqual([a for a in self.alerts if a[0] == "error"], [])
 
 
+    def test_every_minute_from_the_deploy_to_tuesdays_open_the_pass_is_quiet(self):
+        """The seating pass runs every minute between two decisions: it asks a program once a close, reads the vendor
+        only for a decision's bars and their morning audit, and alerts nobody."""
+        book, state, venue, market, official, tick = self.book()
+        asked, errors = [], []
+        real = book.decider.kind
+
+        def kind(name, op, payload, **kw):
+            if op == "decide":
+                asked.append([job["key"] for job in payload["jobs"]])
+            return real(name, op, payload, **kw)
+
+        book.decider.kind = kind
+        minutes = [(SUNDAY, hh, mm) for hh in range(12, 24) for mm in range(60)]
+        minutes += [(MONDAY, hh, mm) for hh in range(24) for mm in range(60)]
+        minutes += [(TUESDAY, hh, mm) for hh in range(10) for mm in range(60)]
+        for day, hh, mm in minutes:
+            if (day, hh, mm) == (SUNDAY, 19, 0):
+                self.clock.set(T.at(day, hh, mm))
+                self.born_validated_and_looked()
+            if day != SUNDAY and (hh, mm) in ((9, 30), (15, 54)):
+                self.quote(market, official[day][0 if hh == 9 else 1])
+            out = tick(day, hh, mm)
+            if out.get("errors"):
+                errors.append((day, hh, mm, out["errors"]))
+        inst = key_of(SPY)
+        self.assertEqual(errors, [])
+        self.assertEqual(asked, [[inst], [inst]], "Friday's close on Sunday evening, Monday's close at 16:30")
+        # Two decisions' bars and their two morning audits: raw and adjusted, once each.
+        self.assertEqual(len(market.bar_calls), 8, market.bar_calls)
+        self.assertEqual([(b["side"], b["symbol"]) for b in venue.sent], [("buy", "SPY"), ("sell", "SPY")])
+        self.assertEqual([(lot.opened_day, lot.exit_day, lot.reason) for lot in book._lots(open_only=False)],
+                         [(MONDAY.isoformat(), TUESDAY.isoformat(), "program")])
+        self.assertEqual(self.alerts, [])
+        self.assertEqual(state.get("eq_decide")["instances"], [inst])
+
+
 class Seating(T.BookTest):
     """The seating pass at its interfaces (the swarm's band rule stubbed: `seat`)."""
 
@@ -1089,12 +1126,16 @@ class BuyAndHold(T.BookTest):
     def test_two_fetches_are_read_again_in_one_or_not_priced(self):
         """The first close was stored weeks before the last, and an ex-date lies between: the stored `before` is not
         adjusted for it, so its ratio to `last` would lose the dividend. Never mixed: read again in one fetch (the daily
-        band sync) or left unpriced (a sizing at send time)."""
-        h = self.harness()
+        band sync, once the record has the closes the sizing-up rule needs) or left unpriced (a sizing at send time)."""
+        h = self.harness(table=T.equity_table(sized_min_trades=2))
         inst = h.instance()
         self.closed(h, inst)
         self.bars(h, "100", "102", shas=("a", "b"))
         self.assertIsNone(h.book._record_of(inst.family, inst.version, None).bh_pnl)
+        self.assertEqual(h.market.bar_calls, [])
+        early = T.dataclasses.replace(h.table, equity=T.equity_table(sized_min_trades=3))
+        with mock.patch.object(h.book, "table", early):             # a record the rule cannot size up yet: no read
+            self.assertIsNone(h.book._record_of(inst.family, inst.version, None, refetch=True).bh_pnl)
         self.assertEqual(h.market.bar_calls, [])
         h.market.bar_rows["all"]["SPY"] = [{"t": "2026-10-08T04:00:00Z", "c": 99.25}, {"t": "2026-10-09T04:00:00Z", "c": 7.0},
                                            {"t": "2026-10-12T04:00:00Z", "c": 102.0}]

@@ -2745,11 +2745,15 @@ class EquityBook:
         order (net return on notional each), their net cash, the same-risk buy-and-hold over the same sessions
         (`_bh_pnl`), its whole sessions at Probe, its realized Probe net, its priced twins' gaps and EDM1's sigma.
         `refetch`: the buy-and-hold may read the vendor (the daily band sync asks so; a sizing at send time never
-        does)."""
+        does), and only once the record holds the closes the sizing-up rule needs before it reads the figure at all
+        (`sized.min_trades`): the sync runs before the day's own bars are read, so the last exit day's close is not
+        stored yet for a program that closed a lot that day."""
         key = instance_key(family, version)
         lots = [Lot.of(r) for r in self.state.rows(
             "SELECT * FROM eq_lots WHERE instance=? AND status='closed' ORDER BY closed_at, lid", (key,))]
         returns = tuple(float(lot.cash / lot.entry_notional) for lot in lots if lot.entry_notional > 0)
+        et = self._et()
+        refetch = bool(refetch and et is not None and len(returns) >= int(et.sized_min_trades))
         pnl = sum((lot.cash for lot in lots), ZERO)
         since = (self.state.get("eq_band_since", {}) or {}).get(key) or {}
         probe_sessions = 0
