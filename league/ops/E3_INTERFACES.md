@@ -180,7 +180,9 @@ Every existing name the spec calls was checked against 5a6906ff. Signatures matc
     whose values changed (the symbol that did differ) back to unaudited. The book's kv `eq_bars_audit` ({day:
     {"symbols", "at"}}, its last 30 failed audits) names the symbols that differed. `forward_audit` marks a day
     the note names for THOSE symbols and reads the rows only for a day the note does not name, so a program whose
-    bars were right keeps its day and a morning that was missed is made up later.
+    bars were right keeps its day and a morning that was missed is made up later. The shadow's night reads the book
+    the same way before it reads any checkpoint (`Shadow.marks`; the receipt's `marks`), so the checkpoint of record
+    never counts a day whose mark the 09:05 job missed.
 15. **A label that returns (B).** Every reader takes the newest engine id (`forward_db.engine_now`) as the current
     series. A label that already has a row which is not the newest (a rollback of an evidence module) would be
     written under its old id while every meter read a series nobody writes. The shadow opens a NEW series for it,

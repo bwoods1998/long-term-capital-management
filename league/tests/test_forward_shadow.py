@@ -42,7 +42,8 @@ from league.equity.program import load_program, parse_needs
 from league.equity.store import (STORE_DIR, EquityStore, StoreRefused, from_ordinal, mint_equity_gate_capability,
                                  ordinal, write_store)
 from league.live.decider import Decider, DeciderError, InlineDecider
-from league.ops import forward_controls, forward_db, forward_register, forward_shadow, forward_stats, forward_twins
+from league.ops import (forward_audit, forward_controls, forward_db, forward_register, forward_shadow, forward_stats,
+                        forward_twins)
 from league.ops.context import Context
 
 # ------------------------------------------------------------------------------------------------- the synthetic days
@@ -116,6 +117,28 @@ def cents(root: Path) -> None:
                 arrays[column] = np.round(arrays[column], 2)
 
     rewrite(root, change)
+
+
+def write_book(root: Path, note: Mapping[dt.date, Sequence[str]]) -> None:
+    """The live book as E1's morning audit leaves it for each day of `note` ({day: the symbols whose bars differed}):
+    its own DDL (league/equity/live.py), the House state's kv with the audit's note, and every fetched row of the
+    day marked (league/ops/forward_audit.py, WHICH BARS DIFFERED). Invented rows."""
+    from league.equity import live as eq_live
+
+    db = sqlite3.connect(Path(root) / forward_audit.LIVE_DB)
+    try:
+        db.executescript(eq_live.SCHEMA)
+        db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        for day in note:
+            for symbol in SYMBOLS:
+                db.execute("INSERT OR REPLACE INTO eq_bars(day, symbol, adjustment, o, h, l, c, v, fetched_at, sha, "
+                           "audit) VALUES (?,?,'raw','1','1','1','1','1',0.0,'an invented sha','mismatch')",
+                           (day.isoformat(), symbol))
+        db.execute("INSERT OR REPLACE INTO kv(key, value) VALUES (?,?)", (forward_audit.NOTE_KEY, json.dumps(
+            {day.isoformat(): {"symbols": list(symbols), "at": 0.0} for day, symbols in note.items()})))
+        db.commit()
+    finally:
+        db.close()
 
 
 def gated(root: Path) -> EquityStore:
@@ -1045,6 +1068,36 @@ class Checkpoints(Case):
         self.assertAlmostEqual(check["sum_r"], math.fsum(row["r"] for row in counted), places=15)
         self.assertEqual(len(self.rows(pid)), 22)              # the marked row stays
 
+    def test_a_mark_the_morning_job_missed_is_made_up_before_the_checkpoint_is_read(self):
+        # The book's morning re-fetch found SPY's bar of FWD[7] different, and the 09:05 job did not run. The night
+        # reads the book the same way before it reads any checkpoint: the row of record never counts that day.
+        on_spy = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
+        on_qqq = register(self.db, "qqq@1", ALWAYS.replace('"SPY"', '"QQQ"'), first_close=BEFORE)
+        self.assertEqual(self.night(FWD[19])["marks"], 0)      # no live book: nothing to read
+        write_book(self.root, {FWD[7]: ["SPY"]})
+        receipt = self.night(FWD[20])
+        self.assertEqual((receipt["marks"], receipt["checks"]), (1, 1))        # QQQ's holder has its twenty
+        self.assertEqual([(e["pid"], e["day"]) for e in self.events("audit_mismatch")], [(on_spy, FWD[7].isoformat())])
+        self.assertEqual((len(self.checks(on_qqq)), self.checks(on_spy)), (1, []))
+        receipt = self.night(FWD[21])
+        self.assertEqual((receipt["marks"], receipt["checks"]), (0, 1))        # once a (pid, day)
+        (check,) = self.checks(on_spy)
+        counted = [row for row in self.rows(on_spy) if row["day"] != FWD[7].isoformat()][:20]
+        self.assertEqual((check["n"], check["day"]), (20, FWD[20].isoformat()))
+        self.assertAlmostEqual(check["sum_r"], math.fsum(row["r"] for row in counted), places=15)
+        # The morning job, when it runs, finds the mark there: nothing is written twice.
+        self.assertEqual(forward_audit.mark(self.db, forward_audit.mismatches(self.root / forward_audit.LIVE_DB),
+                                            now=self.t), 0)
+
+    def test_a_book_the_night_cannot_read_marks_nobody_and_the_night_goes_on(self):
+        pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
+        (self.root / forward_audit.LIVE_DB).write_bytes(b"not a database, " * 64)
+        receipt = self.night(FWD[3])
+        self.assertEqual((receipt["marks"], receipt["programs"], len(self.rows(pid))),
+                         ({"error": "DatabaseError"}, 1, 4))
+        self.assertEqual(self.events("audit_mismatch"), [])
+        self.assertEqual(forward_shadow.house_failures(receipt), ["the audit marks raised DatabaseError"])
+
     def test_the_grid_goes_on_every_250_after_250(self):
         self.assertEqual(list(forward_shadow._grid(19)), [])
         self.assertEqual(list(forward_shadow._grid(260)), [20, 60, 120, 250])
@@ -1401,7 +1454,8 @@ class TheNight(Case):
         self.assertEqual((row["started"], row["finished"], row["seconds"]), (began, began + 10.0, 10.0))
         self.assertEqual(set(receipt), {"through", "engine", "programs", "sessions", "new_days", "restated", "checks",
                                         "stale", "errors", "data_failed", "disqualified", "retried", "budget_hit",
-                                        "seconds", "controls", "twins", "head", "finals", "register", "house"})
+                                        "seconds", "controls", "twins", "head", "finals", "register", "marks",
+                                        "house"})
         self.assertEqual((receipt["through"], receipt["engine"], receipt["seconds"], receipt["head"]),
                          (FWD[3].isoformat(), shadow.engine, 10.0, row["head"]))
         self.assertEqual(receipt["twins"], {"begin": {"days": 0, "rows": 0}, "rows": 2, "errors": 0,

@@ -33,16 +33,17 @@ A slice with no session before its first run session is refused (a ValueError: t
 CHECKPOINTS (D4). A program's COUNTED days are its `fwd_days` rows of tonight's engine id with status "ok" and no
 `audit_mismatch` event, in day order (`forward_db.counted_days`); its STORED days are those rows of any status.
 Checkpoint n (in `forward_db.CHECKPOINTS`, then every `CHECKPOINT_EVERY`) is written on the first night the program
-has n counted days and the n-th is before the store's last day (so its morning audit has run). Over the first n
-counted days: `t_r` = mean(r) / sd(r, ddof 1) * sqrt(n) (None when sd < 1e-12), `sum_r`, `sum_r15`, `t_x` the same t
-of x, `mean_w`, `p_x = forward_stats.p_one_sided(t_x, n)` (None when `t_x` is None). No verdict, no threshold. A FINAL
-checkpoint (`final` 1, n = its counted days, written once, when n >= 2 and no row (pid, n) exists) is written for a
-program stopped off the grid, so no program leaves the record by failing. THE CHECKPOINT OF RECORD for (pid, n) is
-the row written first, whatever engine later recomputes it. Sums and means use `math.fsum`.
+has n counted days and the n-th is before the store's last day (so its morning audit has run; THE MORNING MARKS,
+MADE UP, below). Over the first n counted days: `t_r` = mean(r) / sd(r, ddof 1) * sqrt(n) (None when sd < 1e-12),
+`sum_r`, `sum_r15`, `t_x` the same t of x, `mean_w`, `p_x = forward_stats.p_one_sided(t_x, n)` (None when `t_x` is
+None). No verdict, no threshold. A FINAL checkpoint (`final` 1, n = its counted days, written once, when n >= 2 and
+no row (pid, n) exists) is written for a program stopped off the grid, so no program leaves the record by failing.
+THE CHECKPOINT OF RECORD for (pid, n) is the row written first, whatever engine later recomputes it. Sums and means
+use `math.fsum`.
 
 THE NIGHT (`Shadow.night`): `preflight`; `forward_register.sync`; `engine_id` (a new label: one `engine_moved` event,
 and that night every active program's whole history is written again under the new id; rows of an older id stay and
-are never read as the current series); `forward_twins.begin`; `controls`; `finals`; `due()` in order until the child
+are never read as the current series); `marks`; `forward_twins.begin`; `controls`; `finals`; `due()` in order until the child
 seconds spent reach `cpu_seconds_night` or the clock is within 300 s of the next session's 09:00 ET (the rest are
 `stale`: a `budget_hit` event, once a night); `forward_twins.on_run` after each `write`; THE RETRY;
 `forward_twins.finish`; one `fwd_runs` row (`programs` = the programs whose run completed THAT NIGHT, whichever start
@@ -51,6 +52,14 @@ of the job ran them: what the registry's suspect rule reads beside `run_failed`,
 child seconds it spent; the receipt's `programs` is this start's too). Each league/ops/forward_twins.py call sits in
 its own try/except: a twins failure never loses a shadow day; so do the registry's sync, the controls and the finals,
 each named in the receipt when it failed.
+
+THE MORNING MARKS, MADE UP (`Shadow.marks`). A checkpoint is the record a later verdict reads, written once, and it
+must not count a day whose bars the book's morning re-fetch found different. The marks are the morning job's
+(league/ops/forward_audit.py, 09:05 New York time, 40 minutes of grace): a morning it did not run, or ran before the
+book's audit had finished, would leave a day unmarked on the night its checkpoint is due. So the night reads the
+book the same way before any checkpoint is read (`forward_audit.mismatches`, `mark`: the book's audit of every day
+before the store's last has run by then) and writes what the morning missed; an event is once a (pid, day), so what
+the morning wrote is written by nobody twice. A book that cannot be read marks nobody and is named in the receipt.
 
 A LABEL THAT RETURNS. Every reader of the record takes the NEWEST engine id as the current series
 (`forward_db.engine_now`: the meters, the session caps of the stop rules, the twins). A label that already has a row
@@ -99,16 +108,16 @@ its restatement cannot be told apart this way: `"bars"` "none", `moved` and `sam
 ex-days as every holder's, so "same" there would name the routine case as the notable one).
 
 The receipt: {through, engine, programs, sessions, new_days, restated, checks, stale, errors, data_failed,
-disqualified, retried, budget_hit, seconds, controls, twins, head, finals, register, house}: counts and verdicts,
-never a program's figure. Every event payload and receipt text holds ids, counts, dates and class names only (a
+disqualified, retried, budget_hit, seconds, controls, twins, head, finals, register, marks, house}: counts and
+verdicts, never a program's figure. Every event payload and receipt text holds ids, counts, dates and class names only (a
 decimal figure in a failure's text is masked).
 
 THE HOUSE'S OWN FAILURES ARE SAID ONCE A NIGHT (`house_failures`; the job raises ONE `ctx.alert("warning", ...)` for
 them). What a night leaves no event for would else be read by nobody: `house` (in `errors`: the programs left without
 rows by a write the forward store refused, by a retry with no fresh child, or by failing twice on a night no other
 program's run completed), the controls left without rows by anything but the data, and each step of the night that
-raised (the registry's sync, the controls, the final checkpoints, the twins). The data's failures and a program that
-failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms read those.
+raised (the registry's sync, the audit marks, the controls, the final checkpoints, the twins). The data's failures
+and a program that failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms read those.
 
 Standard library and numpy only.
 """
@@ -134,7 +143,7 @@ from ..equity.program import parse_needs
 from ..equity.runner import KIND, RunFailed
 from ..equity.store import (STORE_DIR, EquityStore, MissingData, StoreRefused, as_date, from_ordinal,
                             mint_equity_gate_capability)
-from . import forward_controls, forward_db, forward_register, forward_stats, forward_twins
+from . import forward_audit, forward_controls, forward_db, forward_register, forward_stats, forward_twins
 from .forward_db import Program, ShadowRun
 
 #: The reason the job mints its `EquityGateCapability` with (the forward days are sealed).
@@ -274,8 +283,8 @@ def house_failures(receipt: Mapping[str, Any]) -> list[str]:
         if unmade > 0:
             out.append(f"{unmade} controls left without rows")
     twins = receipt.get("twins")
-    parts = [("the registry's sync", receipt.get("register")), ("the controls", controls),
-             ("the final checkpoints", receipt.get("finals"))]
+    parts = [("the registry's sync", receipt.get("register")), ("the audit marks", receipt.get("marks")),
+             ("the controls", controls), ("the final checkpoints", receipt.get("finals"))]
     if isinstance(twins, Mapping):
         parts += [("the twins' timing table", twins.get("begin")), ("the twins' own runs", twins.get("finish"))]
     for name, part in parts:
@@ -702,6 +711,16 @@ class Shadow:
              None if any(v is None for v in stress) else math.fsum(float(v) for v in stress), t_x, math.fsum(w) / n,
              forward_stats.p_one_sided(t_x, n), t_x0, p_x0, int(final), self.clock()))
 
+    # ------------------------------------------------------------------------------------------------------- marks
+    def marks(self) -> int:
+        """THE MORNING MARKS, MADE UP (the module docstring): the `audit_mismatch` events the morning job would write
+        from the live book as it stands now; how many were written (one already there writes nothing). 0 with no
+        live book; `sqlite3.Error` when the book cannot be read."""
+        live = self.root / forward_audit.LIVE_DB
+        if not live.exists():
+            return 0
+        return forward_audit.mark(self.db, forward_audit.mismatches(live), now=self.clock())
+
     # ---------------------------------------------------------------------------------------------------- controls
     def controls(self) -> dict[str, int]:
         """The controls' rows, in the parent (no child): {"groups", "rows"}. For each registered control:
@@ -873,6 +892,7 @@ class Shadow:
         synced = self._guarded(lambda: forward_register.sync(self.root, self.db, now=self.clock(),
                                                              settings=self.settings))
         engine = self.engine
+        marks = self._guarded(self.marks)
         twins: dict[str, Any] = {"begin": self._guarded(
             lambda: forward_twins.begin(self.root, self.db, self, now=self.clock()))}
         controls = self._guarded(self.controls)
@@ -955,7 +975,7 @@ class Shadow:
                 "errors": int(tally["errors"]), "data_failed": int(tally["data_failed"]),
                 "disqualified": int(tally["disqualified"]), "retried": retried, "budget_hit": 1 if stale else 0,
                 "seconds": round(self.spent, 3), "controls": controls, "twins": twins, "head": head,
-                "finals": finals, "register": synced, "house": int(tally["house"])}
+                "finals": finals, "register": synced, "marks": marks, "house": int(tally["house"])}
 
 
 __all__ = ["GATE_REASON", "DECIDER_LOG", "QUIET", "CANARY", "NightFailed", "quiet", "house_failures", "run", "Shadow"]
