@@ -1810,9 +1810,19 @@ class TheLanesAnswers(Case):
             "The last equity version was scored 0.5 h ago, while 3 families are in Train research. BROKEN, not starved: E2 "
             "may ask a model now and 6 of the 10 program questions the equity lanes asked in the last 6 h were lost to a "
             "fault, not to a setting (6 answers held no program; by route: sail:pro_asap 6 of 10)."))
-        # It stands since this run saw it (the lane is not idle: no idle hours are told as how long).
+        # It stands since the job first saw it (the lane is not idle: no idle hours are told as how long), and half an
+        # hour on, a version scored between the two runs, it still stands since then.
         self.assertEqual((self.notify.entry("elane_idle")["since"], out["notice"]["notice_id"]),
                          (iso(NOW), "stall:owner:elane_idle"))
+        fams = [f["id"] for f in self.store.families(alive=True, lanes=EH.LANES)]
+        self.record(fams[1], versions={"9": verdict(-0.2, "Y1")})
+        self.round(-0.2, scored_step(fams[1], 9, "Y1"))
+        out, _ = self.run_at(now=NOW + 0.5 * HOUR)
+        check = self.own(out)["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["idle_hours"],
+                          check["numbers"]["questions_lost"], check["numbers"]["questions_asked"]),
+                         (True, "answers", 0.3, 6, 11))
+        self.assertEqual(json.loads((self.root / ST.STATE_FILE).read_text())["causes"]["elane_idle"]["seen_at"], iso(NOW))
         # ONE IN TEN: nothing stands, nothing is warned or mailed, and the receipt says the one and what it takes.
         self.setUp()
         self.scoring(lambda i: i == 4)

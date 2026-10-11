@@ -1643,7 +1643,9 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
              *(also if found != "answers" else []), *([judged] if kept_only and judged else []), *pace]
     return {
         "stalled": True, "judged": True, "what": " ".join(parts),
-        "numbers": numbers, "owner_step": owner, "onset": idle_from if late else now if stood is None else stood,
+        # Since when: since the lanes went idle; for a lane not idle (broken by its answers while it still scores), since
+        # the job first saw it stand (no onset: `stall.run` then counts from its own `seen_at`).
+        "numbers": numbers, "owner_step": owner, "onset": idle_from if late else None,
         "doing": DOING["elane_births" if kind == "barren" else "answers" if kind == "answers" else "broken"],
         "mail": _lead(parts, WHAT_CHARS), "parts": parts, "keep": keep}
 
