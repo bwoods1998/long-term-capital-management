@@ -1857,6 +1857,63 @@ class RaisedLikeAnyCause(Case):
         out, _ = self.run_at(now=NOW + 1.5 * HOUR)
         self.assertFalse(out["notice"]["sent"])
 
+    def test_a_house_warning_keeps_an_owner_step_whole(self):
+        """The second check's wording (a): the House warning of `elane_dq` with the short hint passed the alert's 900
+        characters and was cut inside the owner step ("...or the static rule that should refuse it, in a r"). The step
+        is whole; what is shortened is what the floor does, then the last of the cause's own sentences."""
+        self.assertEqual(EH.WARN_CHARS, 900)
+        self.assertLess(len(EH.DOING["elane_dq"]), 170, "kept short")
+        # The replay's case: four of four in two families, early, no reading sentence on record (the hint in the step).
+        a, b = self.bred("alpha-one"), self.bred("beta-two")
+        self.ago(1.0)
+        for fid in (a, b):
+            self.record(fid, versions={str(n): verdict(0.5 + n / 10.0, "DQ") for n in (1, 2)})
+            self.store.event("swarm.elane", fid, {"pass": "stalled", "codes": ["DQ"], "versions": 2})
+        out, ctx = self.run_at()
+        check = self.own(out)["elane_dq"]
+        self.assertIn("mostly TypeError (most often ctx.bars[sym] read by key or as rows", check["owner_step"])
+        text = next(a["text"] for a in ctx.alerts if a["text"].startswith("stall: elane_dq: "))
+        self.assertTrue(text.endswith(f" Owner step: {check['owner_step']}."), text)
+        self.assertTrue(text.endswith("in a release; python3 -m league.ops.elane_health --state /workspace/state lists the lines."))
+        self.assertTrue(text.startswith(f"stall: elane_dq: {check['what']} Each disqualified version's author is shown"), text)
+        self.assertLessEqual(len(text), EH.WARN_CHARS)
+        # A longer sentence (families retired, a class named second, the reading rule's own sentence): the cause's
+        # sentences whole, the step whole, and what the floor does is what is cut.
+        self.setUp()
+        a, b = self.bred("alpha-one"), self.bred("beta-two", lane="beta")
+        self.record(a, versions={"1": verdict(5.0, "DQ"), "2": verdict(4.0, "DQ"), "3": verdict(3.0, "DQ"),
+                                 "4": verdict(2.0, "DQ", reason="25 errors (first: line 40: KeyError: 'XLK')")})
+        self.record(b, versions={"1": verdict(2.5, "DQ"), "2": verdict(2.0, "DQ"), "3": verdict(1.5, "LOAD"),
+                                 "4": verdict(1.0, "Y1", "P1")})
+        self.round(2.0, refused_step(a, refusal(BY_KEY)), refused_step(a, refusal(BY_KEY)), refused_step(a, refusal(LOT_ATTR)))
+        self.ago(1.0)
+        self.store.event("swarm.elane", a, {"pass": "stalled", "codes": ["DQ"], "versions": 4})
+        out, ctx = self.run_at()
+        check = self.own(out)["elane_dq"]
+        text = next(a["text"] for a in ctx.alerts if a["text"].startswith("stall: elane_dq: "))
+        self.assertGreater(len(f"stall: elane_dq: {check['what']} {check['doing']} Owner step: {check['owner_step']}."), 900)
+        self.assertTrue(text.startswith(f"stall: elane_dq: {check['what']} Each disqualified version's author is shown"), text)
+        self.assertTrue(text.endswith(f"... Owner step: {check['owner_step']}."), text)
+        self.assertLessEqual(len(text), EH.WARN_CHARS)
+        # The fit by itself: any other cause's warning is returned as it is, and so is one with no owner step or one
+        # that fits; of one that does not, the leading sentences that fit, the next one cut, and the step whole.
+        long = "stall: births: " + "x" * 2000
+        self.assertEqual(EH.warning("births", {"owner_step": "an invented step", "parts": ["x"]}, long), long)
+        self.assertEqual(EH.warning("elane_idle", {"owner_step": None, "parts": ["x"]}, long), long)
+        self.assertEqual(EH.warning("elane_idle", {"owner_step": "an invented step"}, "stall: elane_idle: short"),
+                         "stall: elane_idle: short")
+        self.assertEqual(EH.warning("elane_idle", None, long), long, "never raises")
+        step = "s" * 400
+        check = {"owner_step": step, "parts": ["A" * 299 + ".", "B" * 299 + ".", "C" * 49 + "."], "doing": "D" * 100,
+                 "what": "unused"}
+        fitted = EH.warning("elane_idle", check, "stall: elane_idle: " + "y" * 1500)
+        self.assertEqual(len(fitted), 900)
+        self.assertTrue(fitted.startswith("stall: elane_idle: " + "A" * 299 + ". " + "B" * 100), fitted)
+        self.assertTrue(fitted.endswith(f"B... Owner step: {step}."))
+        self.assertNotIn("C", fitted)
+        self.assertNotIn("D", fitted)
+        # Every standing equity cause of the first replay's morning: the step whole in its warning (`TheReplays`).
+
     def test_a_notice_whose_fitting_fails_still_goes_out_under_the_causes_own_names(self):
         self.broken()
         with mock.patch.object(EH, "MAIL_FIGURES", None):
@@ -2355,24 +2412,29 @@ class TheOutputSettingsAreHeldToTheProvidersLimit(unittest.TestCase):
 
 # ---------------------------------------------------------------------------------------------- the replays
 class TheReplays(unittest.TestCase):
-    """The two replays of the independent check of Oct 11, on an invented House where the real equity pass, Train
-    round, pace and stall job run (league/tests/elane_e24_house.py): a lane starved at its pace, which the cause must
-    tell while a version is still scored about hourly; and a lane that runs as designed and spends its day's dollars
-    before the day ends, on which the cause must not stand in the evening."""
+    """The replays of the two independent checks of Oct 11, on an invented House where the real equity pass, Train
+    round, pace and stall job run (league/tests/elane_e24_house.py). THE RULING they hold: `elane_idle` alarms on a
+    broken lane only. A lane at its pace (the morning's trickle) and a lane that spends its day (the 54-hour healthy
+    lane) never stand and are never mailed, and what the settings cost is counted in the receipt and the funnel; a
+    lane whose every Train run fails on the House's side stands BROKEN with its owner step at any pace; and a slow
+    lane's programs refused by one rule are told early and do not lapse."""
 
     def write(self, code: str, usd: float) -> dict:
         return fx.answer([], cost=usd) | {"json": {"program": code, "note": "an invented note"}}
 
-    def steps(self, house: E24.House) -> dict:
-        return guard.read(house.root / EH.SWARM_DB, lambda db: EH.research_counts(db, house.started, house.now + 1.0))["train_steps"]
+    def steps(self, house: E24.House, start: float | None = None, end: float | None = None) -> dict:
+        return guard.read(house.root / EH.SWARM_DB, lambda db: EH.research_counts(
+            db, house.started if start is None else start, (house.now if end is None else end) + 1.0))["train_steps"]
 
-    def test_a_lane_starved_at_its_pace_stands_while_a_version_is_still_scored_hourly(self):
+    def morning(self, by_key: bool = False) -> E24.House:
         """The morning of Oct 11 as the check replayed it: the swarm starts at 07:02 and a births pass bears three
         families; A's and B's versions are disqualified (two families retired for it), C's first question gets no
         answer and then it fails the bar; the next births pass is cut short and the passes after it propose only sector
-        ETFs. A write costs more than E2's hourly pace, so each Train round takes one step and skips two."""
+        ETFs. A write costs more than E2's hourly pace, so each Train round takes one step and skips two. `by_key`: the
+        same generators under the tree as it runs now: A's and B's programs, the architect's and the researcher's,
+        read a symbol's bars by key, and the reading rule refuses each before a run."""
         house = E24.House(self, E24.at("2026-11-02T07:02:00Z"), e2={"min_per_pass": 3})
-        shares = (0.5, 0.45, 0.4, 0.35)
+        shares = (0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15)
 
         def dq(code: str, cls: str) -> str:
             house.results[code] = fx.train_result(status="disqualified") | {"reason": f"25 errors (first: line 9: {cls}: {SECRET})"}
@@ -2382,11 +2444,17 @@ class TheReplays(unittest.TestCase):
             house.results[code] = fx.train_result(by_year=fx.year_rows(trades=5))  # fails Y1: the bar doing its work
             return code
 
-        a = [dq(fx.program("SPY", s), cls) for s, cls in zip(shares, ("TypeError", "TypeError", "TypeError", "KeyError"))]
-        b = [dq(fx.program("QQQ", s), cls) for s, cls in zip(shares, ("TypeError", "TypeError", "AttributeError"))]
-        b.append(fx.program("QQQ", 0.35))
-        house.results[b[-1]] = fx.ProgramRefused("an invented refusal at load")
-        c = [thin(fx.program("IWM", s)) for s in shares]
+        def keyed(sym: str, share: float) -> str:
+            return fx.program(sym, share).replace("    out = [", f'    zebra = ctx.bars["{sym}"]["close"]\n    out = [', 1)
+
+        if by_key:
+            a, b = [keyed("SPY", s) for s in shares], [keyed("QQQ", s) for s in shares]
+        else:
+            a = [dq(fx.program("SPY", s), cls) for s, cls in zip(shares, ("TypeError", "TypeError", "TypeError", "KeyError"))]
+            b = [dq(fx.program("QQQ", s), cls) for s, cls in zip(shares, ("TypeError", "TypeError", "AttributeError"))]
+            b.append(fx.program("QQQ", 0.35))
+            house.results[b[-1]] = fx.ProgramRefused("an invented refusal at load")
+        c = [thin(fx.program("IWM", s)) for s in shares[:4]]
         births = [
             fx.answer([fx.proposal("fam-a", symbols=("SPY",), code=a[0]),
                        fx.proposal("fam-b", symbols=("QQQ",), code=b[0],
@@ -2421,52 +2489,69 @@ class TheReplays(unittest.TestCase):
             return fx.answer([], cost=0.0)
 
         house.router.script = answer
+        return house
+
+    def test_the_morning_at_its_pace_never_stands_idle_and_its_work_lost_is_counted(self):
+        """The first check's blocker and the second's major B, under the ruling: of the 26 Train steps of nine hours 14
+        were skipped at E2's pace while three families waited. That is the chosen budget at work: `elane_idle` never
+        stands and nothing of it is warned or mailed; the steps the pace cost are in the check's sentence and numbers
+        at every run and in the research funnel. The faults of that morning are the other causes', each told."""
+        house = self.morning()
         house.run(house.started + 9 * E24.HOUR)
         rows = {iso(row["at"])[11:16]: row for row in house.rows}
         idle = {at: row["checks"]["elane_idle"] for at, row in rows.items()}
         # THE TRICKLE: of the 26 Train steps of nine hours, 14 were skipped at E2's pace; a version an hour was scored.
         self.assertEqual(self.steps(house), {"taken": 12, "skipped": {"pace": 14, "usd_day": 0, "sail_day": 0, "other": 0}})
         self.assertEqual(house.steps, {"taken": 12, "skipped": 14}, "the funnel counts what the rounds did")
-        # Told at 10:20, the first run with six steps due in its three hours and most of them skipped, and at every run
-        # after while it lasts: STARVED, by work lost, at its pace; nobody's step.
-        standing = [at for at, check in idle.items() if check["stalled"]]
-        self.assertEqual(standing, ["10:20", "10:50", "11:20", "11:50", "12:20", "12:50", "13:20", "13:50", "14:20", "14:50"])
-        for at in standing:
-            check = idle[at]
-            self.assertEqual((check["numbers"]["kind"], check["numbers"]["basis"], check["owner_step"]),
-                             ("pace", "work_lost", None), at)
-            self.assertIn((check["numbers"]["steps_due"], check["numbers"]["steps_skipped"]), ((9, 6), (8, 5)), at)
-            self.assertIn("STARVED, not broken: E2's hourly pace binds", check["what"])
-            self.assertIn("The lever is elane.e2.pace_share.", check["what"])
-            # A version was scored inside the last hour and a quarter: no idle lane, by its hours.
-            self.assertLess(rows[at]["at"] - TS.at(check["numbers"]["last_scored_at"]), 1.25 * E24.HOUR, at)
-        self.assertEqual((idle["10:20"]["numbers"]["steps_due"], idle["10:20"]["numbers"]["steps_skipped"],
-                          idle["10:20"]["numbers"]["scored_today"], idle["14:50"]["numbers"]["scored_today"]), (9, 6, 6, 10))
-        # Before it, too few of the steps due were skipped (or too few were due); none of those runs stood.
-        self.assertEqual([(idle[at]["numbers"]["steps_due"], idle[at]["numbers"]["steps_skipped"]) for at in ("08:20", "09:20")],
-                         [(8, 3), (11, 5)])
-        # The other causes of that morning, each told by itself: most versions unjudged (the owner's step, early: four
-        # of four at 08:20, and standing at every run until the bar judges half of the last six), and barren passes
-        # (the owner's step once six hours passed with no birth). Each owner cause is mailed the run it gets its step.
+        # ZERO STANDS: judged at every run, clear, nobody's step, no House warning, in no mail.
+        self.assertEqual(len(idle), 18)
+        for at, check in idle.items():
+            self.assertEqual((check["stalled"], check["numbers"]["judged"], check["owner_step"]), (False, True, None), at)
+        self.assertFalse([text for row in house.rows for text in row["alerts"] if text.startswith("stall: elane_idle")])
+        self.assertFalse([mail for mail in house.gateway.mails if "elane_idle" in mail["causes"]])
+        # THE COST IS SAID at every run that has any: the steps due in its three hours, taken and skipped at the pace,
+        # whether E2 is held now, that it is no stall, and the lever. The funnel of the same hours counts the same.
+        self.assertEqual([(idle[at]["numbers"]["steps_due"], idle[at]["numbers"]["steps_skipped"])
+                          for at in ("08:20", "09:20", "10:20", "13:20", "14:50")], [(8, 3), (11, 5), (9, 6), (9, 6), (8, 5)])
+        for at in ("10:20", "13:20"):
+            check, now = idle[at], rows[at]["at"]
+            self.assertEqual({k: check["numbers"][k] for k in ("kind", "steps_due", "steps_taken", "steps_skipped",
+                                                               "skipped_pace", "held_now", "basis")},
+                             {"kind": "pace", "steps_due": 9, "steps_taken": 3, "steps_skipped": 6, "skipped_pace": 6,
+                              "held_now": "pace", "basis": "idle_hours"}, at)
+            self.assertIn("Of the 9 equity Train steps due in the last 3 h, 3 were taken and 6 were skipped because E2 might "
+                          "ask no model (its hourly pace 6); 3 versions were scored. E2's hourly pace binds ($0.02", check["what"])
+            self.assertIn(" booked in the last hour against a pace of $0.017 an hour: elane.e2.pace_share 0.25 of the Sail "
+                          f"model line), so no model is asked. {EH.NO_STALL} The lever is elane.e2.pace_share.", check["what"])
+            self.assertEqual(self.steps(house, now - 3 * E24.HOUR, now),
+                             {"taken": 3, "skipped": {"pace": 6, "usd_day": 0, "sail_day": 0, "other": 0}}, at)
+            # A version was scored inside the last hour and a quarter: the lane is no idle lane.
+            self.assertLess(now - TS.at(check["numbers"]["last_scored_at"]), 1.25 * E24.HOUR, at)
+        # The faults of that morning, each told by its own cause: most versions unjudged (the owner's step, early: four
+        # of four at 08:20, and HELD from then on: no version of a second family is judged by the bar after it stood),
+        # and barren passes (the owner's step once six hours passed with no birth). Each is mailed the run it gets its
+        # step.
         dq = {at: row["checks"]["elane_dq"] for at, row in rows.items()}
         self.assertEqual([at for at, check in dq.items() if check["stalled"]],
                          [at for at in rows if "08:20" <= at <= "15:50"], "no lapse while nothing is fixed")
         self.assertTrue(all(check["owner_step"] for check in dq.values() if check["stalled"]))
         self.assertEqual((dq["08:20"]["numbers"]["basis"], dq["08:20"]["numbers"]["scored"]), ("early", 4))
+        self.assertEqual((dq["15:50"]["numbers"]["standing_since"], dq["15:50"]["numbers"]["bar_families_since"]),
+                         ("2026-11-02T08:20:00Z", 1))
         self.assertEqual([(iso(mail["at"])[11:16], mail["key"]) for mail in house.gateway.mails],
                          [("08:20", "stall:owner:elane_dq"), ("13:20", "stall:owner:elane_births+elane_dq")])
-        self.assertEqual(house.gateway.mails[1]["causes"], ["elane_dq", "elane_births", "elane_idle"],
-                         "the mail of 13:20 lists the starved lane beside the two owner steps, each its own entry")
+        self.assertEqual(house.gateway.mails[1]["causes"], ["elane_dq", "elane_births"])
         self.assertEqual([row["errors"] for row in house.rows], [[]] * len(house.rows))
         for row in house.rows:
             self.assertNotIn(SECRET, json.dumps(row))
 
-    def test_a_healthy_lane_that_spends_its_day_is_clear_every_evening(self):
+    def test_a_healthy_lane_at_its_pace_that_spends_its_day_never_stands_in_54_hours(self):
         """The check's 54-hour healthy lane: every program runs and fails the bar on Y1 or Y2 (the bar doing its
         work), the passes bear families in open cells, families are refuted and retired and new ones are born. The
-        budget is the floor's, so E2's pace and day bind as they do every day: the day's line is spent by about 16:30
-        UTC. Before this fix `elane_idle` stood STARVED from 19:50 to 00:20 and from 19:20 to 00:20 UTC, the runs
-        around the scoreboard's 23:30Z page among them."""
+        budget is the floor's, so E2's pace and day bind as they do every day: the pace costs most of the daytime's
+        Train steps and the day's line is spent by about 16:30 UTC. Before the first fix `elane_idle` stood STARVED
+        every evening; after it, STARVED BY WORK LOST in the daytime, flapping, with a mail a day. Under the ruling it
+        stands at none of the 108 runs."""
         classes = ("trend_momentum", "reversal_liquidity", "relative_value", "calendar_flow", "event_premium", "equity_premium")
         holdings = ("days_1_3", "days_4_10", "days_11_plus")
         cells = (("equity", "trend"), ("equity", "reversal"), ("equity", "low_vol"), ("equity", "rotation"),
@@ -2514,35 +2599,148 @@ class TheReplays(unittest.TestCase):
         scored = sum(len(((f.get("state") or {}).get(EH.STATE_KEY) or {}).get("versions") or {}) for f in fams)
         self.assertEqual((len(fams), scored), (18, 61), "a lane that breeds, scores and refutes")
         idle = [(iso(row["at"]), row["checks"]["elane_idle"]) for row in house.rows]
-        # EVERY EVENING: from the run after the day's dollars are spent to the last run of the UTC day the cause is
-        # judged, clear, and says the day's dollars are spent. Both evenings, 23:20 and 23:50 among their runs.
+        # ZERO STANDS in 54 hours: judged at every run, clear, nobody's step, no House warning, in no mail.
+        for at, check in idle:
+            self.assertEqual((check["stalled"], check["numbers"]["judged"], check["owner_step"]), (False, True, None), at)
+        self.assertFalse([text for row in house.rows for text in row["alerts"] if text.startswith("stall: elane_idle")])
+        self.assertFalse([mail for mail in house.gateway.mails if "elane_idle" in mail["causes"]])
+        # EVERY EVENING: from the run after the day's dollars are spent to the last run of the UTC day it says the
+        # day's dollars are spent. Both evenings, 23:20 and 23:50 among their runs (the scoreboard's 23:30Z page).
         spent = [(at, check) for at, check in idle if check["numbers"].get("held_now") == "usd_day"]
         self.assertEqual([(spent[0][0], spent[-1][0], len(spent))], [("2026-11-03T16:50:00Z", "2026-11-04T23:50:00Z", 31)])
         for at, check in spent:
-            self.assertEqual((check["stalled"], check["numbers"]["judged"], check["owner_step"]), (False, True, None), at)
             self.assertTrue(check["what"].startswith("E2's model dollars for the UTC day are spent ($0.408 of a day's line of "
                                                      "$0.400) and "), at)
             self.assertIn(" equity versions were scored since 00:00 UTC: no stall. E2 asks again at 00:00 UTC.", check["what"])
         evenings = [at for at, _ in idle if "19:20" <= at[11:16] <= "23:50"]
         self.assertEqual(len(evenings), 20)
-        self.assertLessEqual(set(evenings), {at for at, _ in spent}, "the hours the check found it standing")
-        for at in ("2026-11-03T23:20:00Z", "2026-11-03T23:50:00Z", "2026-11-04T23:20:00Z", "2026-11-04T23:50:00Z"):
-            self.assertIn(at, {a for a, _ in spent})
+        self.assertLessEqual(set(evenings), {at for at, _ in spent}, "the hours the first check found it standing")
+        # THE DAY: this lane's pace is the budget's floor's, and it costs it most of its Train steps (90 of 151 were
+        # skipped). At the runs the fixed rule stood on (six steps due, most of them skipped) the cost is SAID, in the
+        # sentence and the numbers, and stands on nothing; the funnel carries the same total.
+        self.assertEqual(self.steps(house), {"taken": 61, "skipped": {"pace": 86, "usd_day": 4, "sail_day": 0, "other": 0}})
+        most = [(at, check) for at, check in idle
+                if check["numbers"]["steps_due"] >= 6 and 2 * check["numbers"]["steps_skipped"] > check["numbers"]["steps_due"]]
+        self.assertGreater(len(most), 40, "the runs the work-lost rule would have stood on")
+        for at, check in most:
+            n = check["numbers"]
+            self.assertIn(f"Of the {n['steps_due']} equity Train steps due in the last 3 h, {n['steps_taken']} were taken and "
+                          f"{n['steps_skipped']} were skipped because E2 might ask no model (", check["what"], at)
+            self.assertEqual(n["steps_skipped"], n["skipped_pace"] + n["skipped_usd_day"] + n["skipped_sail_day"], at)
         # Nothing in 54 hours is the owner's step, no cause of a broken generator stands, and nothing was unreadable.
         for row in house.rows:
             self.assertEqual((row["errors"], [c for c in ("elane_dq", "elane_refused") if row["checks"][c]["stalled"]]), ([], []))
             self.assertEqual([c for c in EH.CAUSES if row["checks"][c]["owner_step"]], [])
         self.assertTrue(all(mail["key"].startswith("stall:info:") and not mail["owner"] for mail in house.gateway.mails))
-        # THE DAY: this lane's pace is the budget's floor's, and it costs it most of its Train steps (90 of 151 were
-        # skipped). That is told, as what it is: STARVED by work lost at its pace, needing nobody, never in an evening.
-        self.assertEqual(self.steps(house), {"taken": 61, "skipped": {"pace": 86, "usd_day": 4, "sail_day": 0, "other": 0}})
-        told = [(at, check) for at, check in idle if check["stalled"]]
-        self.assertTrue(told and {at for at, _ in told}.isdisjoint({at for at, _ in spent}))
-        for at, check in told:
-            self.assertEqual((check["numbers"]["kind"], check["numbers"]["basis"], check["owner_step"]),
-                             ("pace", "work_lost", None), at)
-            self.assertGreater(check["numbers"]["steps_skipped"], 0.5 * check["numbers"]["steps_due"])
-        self.assertLessEqual(sum(1 for mail in house.gateway.mails if "elane_idle" in mail["causes"]), 4, "a mail a day or so")
+
+    HOUSE = OwedWorkAndNothingScored.HOUSE
+
+    def test_a_lane_whose_every_train_run_fails_on_the_houses_side_is_broken_at_its_pace(self):
+        """The second check's first major, on the real loop (its probe_broken_loop): the budget at its floor, the
+        shipped share, one write costing more than the hourly pace, and every Train run failing on the House's side
+        (E1's store not written). In 14.3 hours 24 families were born and no version was scored; `elane_idle` said
+        "STARVED, not broken" at 29 of 29 runs and the owner's step never came. BROKEN is judged first: the owner's
+        step at the first run past three hours, at every run after, and the pace said second."""
+        house = E24.House(self, E24.at("2026-11-02T07:02:00Z"), e2={"min_per_pass": 3})
+
+        class Missing(dict):
+            def get(self, code, default=None):
+                return fx.MissingData("an invented store not written")
+
+        house.results = Missing()
+        count = itertools.count(1)
+        agendas = ("trend", "reversal", "low_vol", "rotation", "turn_of_month", "other")
+
+        def proposal(i: int, sym: str) -> dict:
+            return fx.proposal(f"fam-{i}", lane="equity", agenda=agendas[i % 6], symbols=(sym,),
+                               mechanism=" ".join(f"w{i}x{j}" for j in range(9)) + f" premium on {sym}.") | {"program": None}
+
+        def answer(call: dict):
+            key = str(call.get("key") or "")
+            if key.startswith("swarm:elane:births:"):
+                n = next(count)
+                return fx.answer([proposal(n * 10 + j, ("SPY", "QQQ", "IWM", "DIA")[(n + j) % 4]) for j in range(3)], cost=0.004)
+            if key.startswith("swarm:elane:train:"):
+                sym = (house.store.family(key.split(":")[3]) or {}).get("roots", ["SPY"])[0]
+                return self.write(fx.program(sym, share=round(0.1 + next(count) / 1000.0, 4)), 0.02)
+            if fx.is_review(call):
+                return fx.review_answer("pass", cost=0.0)
+            return fx.answer([], cost=0.0)
+
+        house.router.script = answer
+        house.run(house.started + 14.3 * E24.HOUR)
+        fams = house.store.families(alive=None, lanes=EH.LANES)
+        scored = sum(len(((f.get("state") or {}).get(EH.STATE_KEY) or {}).get("versions") or {}) for f in fams)
+        self.assertEqual((len(house.rows), len(fams), scored), (29, 24, 0), "families are born and nothing is scored")
+        self.assertGreater(house.steps["skipped"], house.steps["taken"], "at its pace: most Train steps are skipped")
+        idle = [(iso(row["at"])[11:16], row["checks"]["elane_idle"]) for row in house.rows]
+        # Under three hours with nothing scored it is not idle yet; from the first run past them (10:20, +3.3 h) it
+        # stands BROKEN at every run, with the House's owner step, whatever the pace holds at that moment.
+        standing = [at for at, check in idle if check["stalled"]]
+        self.assertEqual(standing, [at for at, _ in idle if at >= "10:20"])
+        self.assertEqual(len(standing), 23)
+        held = 0
+        for at, check in idle:
+            self.assertNotIn("STARVED", check["what"] if check["stalled"] else "", at)
+            if not check["stalled"]:
+                self.assertEqual((check["numbers"]["judged"], check["owner_step"]), (True, None), at)
+                continue
+            self.assertEqual((check["numbers"]["kind"], check["owner_step"]), ("house", self.HOUSE), at)
+            self.assertGreaterEqual(check["numbers"]["house_failures"], EH.BROKEN_MIN_FAILS, at)
+            if check["numbers"]["held_now"] == "pace":
+                held += 1
+                self.assertIn("BROKEN, whatever E2's own lines hold: ", check["what"], at)
+                self.assertIn(" E2 is also held now: E2's hourly pace binds (", check["what"], at)
+                self.assertTrue(check["what"].endswith("That is its setting at work: a broken lane scores nothing at any pace."))
+            else:
+                self.assertIn("BROKEN, not starved: E2 may ask a model now and ", check["what"], at)
+        self.assertGreater(held, 10, "E2 was at its pace at most of the runs it stood")
+        first = dict(idle)["10:20"]
+        self.assertTrue(first["what"].startswith("No equity version was scored on Train for at least 3.3 h while 9 families "
+                                                 "are in Train research"), first["what"])
+        # Mailed as the owner's step the run it first stands (the gateway's key is its own), and one House warning then,
+        # with the step whole. (The STARVED notice it replaced was two info mails in the first hour.)
+        owner = [(iso(mail["at"])[11:16], mail["key"]) for mail in house.gateway.mails if "elane_idle" in mail["owner"]]
+        self.assertEqual(owner, [("10:20", "stall:owner:elane_idle")])
+        warned = [(iso(row["at"])[11:16], text) for row in house.rows for text in row["alerts"]
+                  if text.startswith("stall: elane_idle")]
+        self.assertEqual([at for at, _ in warned], ["10:20"])
+        self.assertTrue(warned[0][1].endswith(f" Owner step: {self.HOUSE}."), warned[0][1])
+        self.assertLessEqual(len(warned[0][1]), EH.WARN_CHARS)
+        for row in house.rows:
+            self.assertNotIn("an invented store not written", json.dumps(row))
+
+    def test_a_slow_lanes_programs_refused_by_one_rule_are_told_early_and_do_not_lapse(self):
+        """The second check's slow replay of the reading-rule world (replay-2-starved): the same morning under the tree
+        as it runs now, at one write an hour. `elane_refused` stood at +5.3 h (the eighth program), was mailed once,
+        and from 13:20 read "Not judged: the equity generators wrote 6 programs in the last 6 h" at every run for ten
+        hours, while two programs in three were still refused by the reading rule."""
+        house = self.morning(by_key=True)
+        house.run(house.started + 15.9 * E24.HOUR)
+        refused = [(iso(row["at"])[11:16], row["checks"]["elane_refused"]) for row in house.rows]
+        standing = [at for at, check in refused if check["stalled"]]
+        # Told at the run that sees the fifth program refused by the reading rule, before the eighth is written, and at
+        # EVERY run after it: early, then on the last eight written.
+        self.assertEqual(standing, [at for at, _ in refused if at >= standing[0]], "no lapse while nothing is fixed")
+        self.assertLess(standing[0], "12:20", "earlier than the eighth program")
+        first = dict(refused)[standing[0]]
+        self.assertEqual((first["numbers"]["basis"], first["numbers"]["top_rule"], first["numbers"]["top_rule_n"]),
+                         ("early", "reading", EH.REFUSED_EARLY))
+        self.assertIn("were refused before a run by ONE static rule, the reading rule", first["what"])
+        self.assertIn(f"Fewer than 8 are written, and these {EH.REFUSED_EARLY} are already most of 8.", first["what"])
+        self.assertEqual({check["numbers"]["basis"] for at, check in refused if at >= "13:20"}, {"last_written"})
+        for at, check in refused:
+            if check["stalled"]:
+                self.assertTrue(check["owner_step"].startswith("the equity generators are not being taught the reading rule"))
+                self.assertGreater(2 * check["numbers"]["top_rule_n"], check["numbers"]["answers"], at)
+        mails = [(iso(mail["at"])[11:16], mail["key"]) for mail in house.gateway.mails if "elane_refused" in mail["owner"]]
+        self.assertEqual(mails[0], (standing[0], "stall:owner:elane_refused"))
+        # The lane is at its pace all the while (one write an hour, two steps in three skipped): the idle cause says the
+        # cost and never stands.
+        self.assertFalse([at for row in house.rows for at in [iso(row["at"])] if row["checks"]["elane_idle"]["stalled"]])
+        self.assertGreater(self.steps(house)["skipped"]["pace"], self.steps(house)["taken"])
+        for row in house.rows:
+            self.assertNotIn("zebra", json.dumps(row), "a refusal quotes the program's source; nothing here repeats it")
 
 
 # ---------------------------------------------------------------------------------------------- the report
