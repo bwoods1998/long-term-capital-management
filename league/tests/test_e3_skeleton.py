@@ -167,7 +167,8 @@ SIGNATURES = {
 }
 
 #: THE CONTRACT'S COLUMNS, in order (the spec's DDL; `fwd_days.bars` and `fwd_twins.live_bars`, `shadow_bars` and
-#: `cause` are the bars hash's, found after the spec).
+#: `cause` are the bars hash's, found after the spec; `fwd_twins.rebased` and `base_agree` are the captain's A29,
+#: `forward_db.ADDED_COLUMNS`).
 COLUMNS = {
     "fwd_kv": ("key", "value"),
     "fwd_engines": ("id", "label", "at"),
@@ -191,7 +192,7 @@ COLUMNS = {
                    "entry_slip_bp", "exit_slip_bp", "timing_entry_bp", "timing_exit_bp", "exec_entry_bp",
                    "exec_exit_bp", "side_gap_bp", "twin_gap_bp", "at"),
     "fwd_twins": ("instance", "day", "pid", "live_keys", "shadow_keys", "agree", "why", "at", "live_bars",
-                  "shadow_bars", "cause"),
+                  "shadow_bars", "cause", "rebased", "base_agree"),
     "fwd_part": ("instance", "through", "pid", "matched", "missed", "extra", "at"),
     "mem_seen": ("family", "version", "cell", "horizon", "hidden_year", "gid", "bar_passed", "fails", "drift_share",
                  "gross_bp", "cost_bp", "rt_per_year", "seen_sha", "at"),

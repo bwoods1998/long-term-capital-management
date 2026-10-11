@@ -76,7 +76,8 @@ change under `gateway/`; nothing waits in `PENDING_GATEWAY`).
 - **The fills** (`fill_minutes.py`, `forward_twins.py`): the send-minute 1Min bars of the universe; the live-like
   price beside each official open and close; the live-like re-price of every shadow day; for each closed live lot, its
   fill gap against E1's twin split into timing and execution; and, session by session, whether the live program's
-  intents were the ones a twin run started flat at its first decision gives.
+  intents were the ones a twin run started flat at its first decision gives (a twin set to the live book after each
+  session that differs, since the captain's A29: "The twin is re-based after a difference", below).
 - **The memory tables** (`league/swarm/elane_folds.py`, `elane_effects.py`, `elane_memory.py`; in the swarm store):
   **the hidden year**, below.
 - **The contamination probe** (`contam_probe.py`, Saturday 00:10Z, at most `elane.contam.usd_run` dollars a run, one
@@ -133,6 +134,55 @@ close):
   nights the forward job did not run are seen by nobody;
 - unmeasured, A14 does not hold and the checkpoint is not final. A checkpoint that held without A14 can only stop
   holding; none can start. The pinned Done rule is not edited.
+
+**The twin is re-based after a difference, so a miss counts once** (the captain's A29, 20:13Z Oct 11, 2026;
+registered before the first real share order and before any twin row existed; it amends how the intents half above
+is COMPUTED, never its bounds: the 95%, the 15 bp, the keys and the pooling are as registered;
+`league/ops/forward_twins.py` `live_seed`, `RebasedTwin`).
+- **Why.** As registered, every session was compared with a twin run that never misses a fill. The rehearsal of
+  the first real-money session measured that ONE missed buy of a program that buys only when flat leaves the live
+  book a session behind that twin for good (about half its sessions differ from then on), and that one such program
+  fails the pooled 95% bound for every program at the checkpoint. That counts one execution failure many times. The
+  clause asks whether live execution matches replay; the number of sessions on which it did not is that measure.
+- **The rule.** A session whose intent keys differ is counted as differing, exactly as registered (the same row,
+  whatever its cause). THEN the twin's book is set to the live book as it stands after that session, and the
+  sessions after it are compared from the same state. A re-based twin that differs again counts again and is
+  re-based again.
+- **The live book after a session** is read from `live.sqlite`, read-only: the instance's `eq_lots` rows opened on or
+  before that session and not closed by it, each with the size its own buy asked (`eq_intents.share` or `usd`), and
+  its `eq_intents` rows for the next session decided by then (the program's buys and sells, and the House's own
+  planned exits: the maximum hold, a carried exit, a flatten queued by then). No status is read.
+- **The re-based twin** is the engine's own account (the same fills at the official prices, the same sizing, fees,
+  corporate actions and hold rules): each held lot is bought by the engine in its own entry session for the size its
+  buy asked (the replay's lot on the Gym's sleeve: no dollar of the live account enters it), the planned intents are
+  executed the next session with no miss, and from then on the program decides. Only the BOOK is set: the program is
+  one instance asked every session in order, in the night's decider child. A lot the Gym cannot hold as the live
+  book does is counted (`unheld` in the event) and not held: the next session then differs and counts.
+- **What is written** (`forward.sqlite`, append-only as before): each session's row with two more columns, `rebased`
+  (the re-bases behind the twin it was compared with) and `base_agree` (the same session against the UN-RE-BASED
+  twin run, which is still made whole every night); one `twin_rebased` event a re-base (the lots it started from,
+  as symbols, days and fill points, and counts). A store from before this release gains the two columns at its next
+  writable open (`ALTER TABLE ... ADD COLUMN`: no row is rewritten; an older row reads no re-base and its own
+  `agree` as the un-re-based answer). The twin's book is stored nowhere: it is recomputed each night from the rows,
+  the live book and the store.
+- **Rows written before this release** stand as written and are read by the same rule: the latest stored differing
+  session re-bases the twin for the sessions not yet written (the twin goes through the stored sessions after it in
+  order); an earlier one, whose next session was already written against the un-re-based twin, re-based nothing
+  then and re-bases nothing now.
+- **Unchanged.** Every program's un-re-based shadow (its forward record from registration, `fwd_days`) is written
+  every night as before, and so is participation (`fwd_part`), which is read against the un-re-based twin run. A
+  retired session is unreadable and re-bases nothing; a revived instance's new run starts flat. A session compared
+  with a re-based twin has no split rule (its inputs are the engine account's own, which holds a lot's quantity as
+  it was at each close); the split rule stands for sessions compared with the twin run.
+- **Read it.** Beside each instance, never in a rule: `fills.rebase` of the forward report (and of the `dlane`
+  report's `forward_record`) and `a14.rebase` of each Done checkpoint say how many times its twin was re-based and
+  the un-re-based twin's own agreement over the same sessions (`rebases`, `sessions`, `agreed`, `share`), so a
+  program whose live path has left its replay's days is seen, not hidden. The night's receipt counts `rebased`.
+- **Its cost, as the captain stated it.** A program can run for weeks on other days than its unconditional replay
+  and still read consistent after the one counted difference; the forward record beside it says so.
+- **On the rehearsal's three 30-session paths** (the real book on a fake venue, the real forward stack): the buy
+  fills, 28 of 28 and no re-base; Monday's buy missed, one differing session and one re-base, 28 of 29 (as
+  registered: 15 of 29); a later rebuy missed once, the same (as registered: 21 of 29).
 
 **The hidden year** (a loosening of the Train bar, reported in the report's `loosened`). A family born while
 `elane.memory.mode` is "record" is given one of the seven Train years as its hidden year, by rotation inside its cell
@@ -433,8 +483,8 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   Train runs, Validations) is reported beside it, never a bar. Counting the equity lanes in those three counts would
   be the owner's change of the pinned rule. The equity lanes' own stall causes are the next bullet; item 7's other
   half, "no owner step waiting", reads theirs like any cause's.
-- **The equity lanes' own alarms (release E2.4, `feat/equity-e24-health`, not deployed: the gateway first, then an
-  owner deploy; `league/ops/elane_health.py`).** On Oct 11 the lanes' first hours went wrong four ways (most scored
+- **The equity lanes' own alarms (release E2.4, deployed 20:25Z Oct 11, the gateway first, then an owner deploy;
+  `league/ops/elane_health.py`).** On Oct 11 the lanes' first hours went wrong four ways (most scored
   versions disqualified by one misreading of the contract, a births pass cut short, another refused whole for symbols
   outside the universe, the lanes starved at their pace) and no alarm fired: the captain found each by hand. The
   `stall` job now judges four equity causes at every run, read-only, and raises them like any cause: standing in
@@ -780,12 +830,27 @@ confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the Ho
 - The stock paper proof, STAGED (A8.7 as amended by A10.1; `league/live/paper.py` `StockPaperProof`, run by the equity
   book in its own OPEN window): stage BUY (kv `paper_proof_stock_buy`) buys a fractional SPY marketable limit on
   `alpaca-paper` from 09:30:30 ET to the 09:45 entry cut-off and passes on its fill, its lot row and the reconciled
-  position: it gates every REAL equity BUY. Stage SELL (kv `paper_proof_stock_sell`) sells that lot in the next
-  session's open window, first (real exits wait for it), and passes on the whole sale, the FILL activities and the
-  position back at its baseline: it gates every REAL equity SALE. A SELL stage that ends its window unpassed is "failed":
-  an error alert with the owner's step (look at the practice account's SPY position and orders), real lots stay held
-  (the max-hold rule applies once it passes) and new real buys stop until it passes; the next open window buys again
-  and the one after sells. The attempt row is kv `paper_proof_stock`. Only the equity book waits on it (options entries
+  position: it gates every REAL equity BUY, with no end. Stage SELL (kv `paper_proof_stock_sell`) sells that lot in
+  the next session's open window, first (real exits wait for it), and passes on the whole sale, the FILL activities
+  and the position back at its baseline: it gates every REAL equity SALE, **and that wait has an end (the captain's
+  A28, registered before the first real share order): the session's entry cut-off, the open + 900 s (09:45 ET), the
+  minute the book stops trying open entries.** The practice sale is sent in the window's first minute and normally
+  witnessed in its second, so a real exit normally waits one minute. From the cut-off on EVERY exit goes through the
+  normal path whatever the stage says: a program's own sale, the maximum-hold exit, a demoted or retired program's
+  lots, a carried exit, the owner's flatten, and a close-window sale (its window, the close - 300 s, is past the
+  cut-off by construction, on a half day too: it never waits on the stage). The normal path is unchanged: its
+  collar, one working order a symbol, the day's order count, the minimum hold, the gateway's kill switch. The owner
+  is told ONCE A SESSION, by one error alert that begins "the sale path is unproven today" and names the stage's own
+  reason (its failure, or where its attempt stands), with one `equity.alert` record (kv `eq_sell_unproven` {day, why,
+  at}; `league/equity/live.py` `_sell_unproven`). **Why:** an exit must never be blocked; a proof exists to stop new
+  risk, not to trap old risk (before A28 a stage that could not pass held every real lot for days, the maximum-hold
+  exit and the flatten among them, while it also stopped every new buy). **Its cost, stated:** a real sale can go
+  through a path the practice account did not prove that day. A SELL stage that ends its window unpassed is
+  "failed": an error alert with the owner's step (look at the practice account's SPY position and orders; that
+  alert's words "Real equity lots stay held" are the proof's own, from before A28, and are no longer true past the
+  cut-off: `league/live/paper.py` is inside the options execution fingerprint and is not edited for a sentence) and
+  **new real buys stop until it passes** (unchanged); the next open window buys again and the one after sells. The
+  attempt row is kv `paper_proof_stock`. Only the equity book waits on it (options entries
   never do); its client ids are `lq-pp-...`. **Stage BUY never waits on the options route's own paper proofs**
   (`paper_proof`, `paper_proof_single`): it goes in the first open window after the deploy. While it has nothing to do
   (waiting outside its BUY window, or holding its lot outside the SELL stage's window) the proof makes no call to the
@@ -1170,7 +1235,10 @@ options replay gap alone (that gap divides by the maximum loss, a long lot's who
 thousand basis points). The fill-gap half is the
 mean `gap_bp` of the counted equity closes with a final priced twin; the intents-agreement half is read from the
 forward record's twins (the live and the shadow intents, session by session); unmeasured, A14 does not hold and the
-reading says why. The close-date figures are not computed yet and no forward rule moves a seat. A reading with no
+reading says why. **The intents half is computed against a twin that is re-based after each differing session (the
+captain's A29, registered before the first real share order: **The forward record**, "The twin is re-based after a
+difference"); the three sentences below and both bounds are as registered.** The close-date figures are not computed
+yet and no forward rule moves a seat. A reading with no
 equity close is read by the pinned rule's own measure, as before. The Done rule itself is unchanged.
 - Done's "live fills consistent with their replay" is read at each Done checkpoint, over its counted closes: the mean
   fill gap against the official-price model is at most 15 bp a side AND the live and the shadow intents agree on at
@@ -1436,7 +1504,11 @@ options fingerprint) or the equity evidence modules.
    reason is required). The command only writes a key-value (`owner_equity_flatten`); the book reads it first at its
    next minute, in the House's own thread, and runs `EquityBook.flatten` once: every open lot queued to exit at the
    next window through the normal order path (never a market order; the min hold stands, so a lot bought today leaves
-   at the next open), recorded as `equity.flatten` with who and why. `python3 -m league.live --root /workspace/state
+   at the next open), recorded as `equity.flatten` with who and why. **The stock paper proof never holds a flatten
+   past the entry cut-off (A28):** a flatten read inside the open window before 09:45 ET, on a day the proof's SELL
+   stage has not passed, waits with every other exit until the 09:45 minute and is sent in it; read at any later
+   minute it is sent in that minute, each time with the session's one "the sale path is unproven today" alert. A
+   passed SELL stage holds nothing. `python3 -m league.live --root /workspace/state
    --status` shows the command under `equity.pending_owner_actions` until the House has read it (within a minute; it
    stays pending while the House runs no equity book, and on a minute the equity book skips). A flatten that fails
    keeps its key and is tried again the next minute. Run it again if a lot appears afterwards (a buy that was still

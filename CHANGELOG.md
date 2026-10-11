@@ -26,10 +26,10 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261011T190534Z-dc7e047c9530` (main `e36c7e39`, release E5-S, 19:06Z Oct 11), the
-gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
+The running House release is `20261011T202519Z-50def634e716` (main `81963c87`, release E2.4, 20:25Z Oct 11), the
+gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
 
-### Release E5-A: the seat rule of the share lane ("activity-1-free"; the captain's A24 with A30), on `feat/equity-e5a-seat-rule` (unreleased; an owner deploy on top of releases E5-S and E2.4; THE MONEY DIGEST MOVES, the grant re-ratifies; no fingerprint moves)
+### Release E5-A: the seat rule of the share lane ("activity-1-free"; the captain's A24 with A30), on `feat/equity-e5a-seat-rule` (unreleased; one owner deploy with release E3.1 below, from `release/e31-e5a`, on top of releases E5-S and E2.4; THE MONEY DIGEST MOVES, the grant re-ratifies; no fingerprint moves)
 
 - **What it is.** Who takes a free seat was first come. It is now the seat rule the captain registered at 13:42Z
   Oct 11, before the first live share close and before any program waited, as amended by A30 at 20:47Z the same
@@ -114,7 +114,79 @@ gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is b
 - **Merged with main** (release E2.4, the equity lanes' alarms, and release E5-S as deployed): no line of either
   is changed here.
 
-### Release E2.4: the equity lanes alarm on their own stalls, their research funnel, and an architect kept inside the universe and told in closed words, on `feat/equity-e24-health` (unreleased; a gateway deploy FIRST, then an owner deploy on main's E3; no identity moves; no setting changes)
+### Release E3.1: an exit's wait for the practice proof has an end, and the twin is re-based after a difference, on `feat/equity-e31-exits-twin` (unreleased; one owner deploy with release E5-A above, from `release/e31-e5a`, on main `81963c87`; no identity moves of its own: the options execution fingerprint, the equity identity, the money digest and the constitution digest are main's; no evidence reset)
+
+Two rules the captain registered at 20:13Z Oct 11, 2026, from the rehearsal of the first real-money share session,
+**both before the first real share order** (and A29 before any twin row existed). Plumbing only: `league/equity/live.py`
+and `league/ops/forward_db.py`, `forward_twins.py`, `forward_report.py`; no file of `league/live`, `league/gym`, the
+equity evidence modules, the constitution or the gateway is edited.
+
+- **A28, an exit's wait for the practice proof has an end** (amends A10.1). Until now every real sale (a program's
+  own, the maximum-hold exit, the owner's flatten) waited for the stock paper proof's SELL stage with no end: if the
+  practice sale could not be witnessed, real lots stayed held for days and new buys stopped. From this release the
+  wait ends at the open window's entry cut-off (`schedule.Moments.entry_until`, the open + 900 s, the minute the
+  book stops trying open entries): after it every exit goes through the normal path, with one error alert a session
+  saying the sale path is unproven and naming the stage's own reason (kv `eq_sell_unproven`). A close-window sale
+  is past the cut-off by construction and never waits on the stage. Unchanged: stage BUY gates every real buy with
+  no end; a failed SELL stage stops new buys; the minimum hold, the kill switch and the stops. **Why:** an exit must
+  never be blocked; a proof exists to stop new risk, not to trap old risk. **Its cost, as the captain stated it:** a
+  real sale can go through a path the practice account did not prove that day. The proof's own alarm still says
+  "Real equity lots stay held" (`league/live/paper.py` is inside the options fingerprint and is not edited for a
+  sentence); docs/operations.md says which words stand.
+- **A29, the twin is re-based after a difference, so a miss counts once** (amends how A14's intent agreement is
+  computed, never its bounds). A14 compared each live session's intents with a replay twin that never misses a
+  fill; the rehearsal measured that ONE missed buy of a program that buys only when flat leaves it a session behind
+  its twin for good (about half its sessions differ from then on), and that one such program fails the pooled 95%
+  bound for every program at the checkpoint. From this release a session whose intent keys differ is counted as
+  differing, exactly as registered; THEN the twin's book is set to the live book as it stands after that session
+  (its lots, and what it had planned for the next session, read from `live.sqlite` read-only), so the sessions after
+  it are compared from the same state. A re-based twin that differs again counts again and is re-based again. The
+  95% bound, the 15 bp gap bound, the keys and the pooling do not move, and on a path with no difference the rows
+  are byte for byte the rows of the release before (their sha256, taken on main `e36c7e39`, is pinned in the
+  tests). The un-re-based shadow of every program (its forward record from registration) is still written every
+  night, unchanged, and the reports say beside each instance how many times its twin was re-based and the
+  un-re-based twin's own agreement (`fills.rebase`, each checkpoint's `a14.rebase`). **Why:** the clause asks
+  whether live execution matches replay; the number of sessions on which it did not is that measure. **Its cost, as
+  the captain stated it:** a program can run for weeks on other days than its unconditional replay and still read
+  consistent after the one counted difference; the forward record beside it says so.
+- **The store.** `forward.sqlite`'s `fwd_twins` gains two nullable columns (`rebased`, `base_agree`) and the forward
+  log one event kind (`twin_rebased`). A store made before them is migrated at its next writable open with `ALTER
+  TABLE ... ADD COLUMN`: no row is rewritten, the append-only triggers stand, and an older row reads no re-base.
+  Rows written before this release stand as written; a stored differing session re-bases the twin for the sessions
+  not yet written. No setting, job or alarm changes.
+- **How the re-based twin is made.** The engine's own account (`league.equity.engine._Account`), driven from ops
+  with the seeded lots bought by the engine in their own entry sessions and every decide asked of the night's
+  decider child; one instance of the program asked every session in order, so only the book is set. No program
+  text runs in the job's process and nothing of the engine is re-implemented.
+- **Measured on the rehearsal's harness** (the real book on a fake venue with invented prices, the real forward
+  stack). The week: a week in which the proof passes is order for order the week it was; with the practice account
+  listing no FILL activity, or the practice sale resting, Tuesday's sales and Thursday's maximum-hold exit go at
+  the cut-off, and a flatten queued before the open is out by the cut-off's next minute (before: every lot still
+  held on Friday). The thirty sessions
+  of the program that buys when flat: every buy filled, 28 of 28 sessions agree and nothing is re-based; Monday's
+  buy missed, one differing session, one re-base, then agreement (28 of 29; as registered 15 of 29); a later rebuy
+  missed once, the same (28 of 29; as registered 21 of 29).
+- **Roll back:** the previous House release. It ignores `eq_sell_unproven`, the two columns and the event (its
+  inserts name their columns), and its nights compare every session with the un-re-based twin again.
+
+
+### 20:25Z Oct 11, 2026: release E2.4, the equity lanes' own alarms (#540), House `20261011T202519Z-50def634e716`, main `81963c87`; gateway `9c0651a3`
+
+Gateway first (`9c0651a3`, 456/456; rollback `f9528af2`): its notice list names the four equity causes. Then the owner
+deploy: CI green on the exact head; no order in flight at 20:25:10Z; promoted, the watchdog clean (rollback
+`20261011T190534Z-dc7e047c9530`), nightly back 20:36Z, updater repointed. Verified 20:36Z: health clean, real money on;
+execution fingerprint `b60410ad`, constitution `c3c061b0`, money `6c0bc42b` and gate contract `397b22b772b3` unchanged.
+
+- Seen on the House after: the 20:50Z stall run carried the four checks, each "Not judged" for its own reason, with
+  no error and no owner step.
+- No deploy (`swarm.json`), 21:25Z: `elane.birth_share` 0.5 -> 0. The idea space on four index funds was spent on the
+  lanes' first day: the last two equity passes proposed six families each and the graveyard refused all twelve, and
+  no family was left in research. The barren-births cause would have become an owner's step six hours after the
+  last birth; the decision it asks for was already made (the universe stays four index funds under a raw-P&L
+  screen; breadth is the panel), so the equity births are off until a panel lane is at "train". The options lanes
+  got their earlier room back (`gym.max_boxes` 2 -> 3, `architect.every_seconds` 10800 -> 5400).
+
+### Release E2.4: the equity lanes alarm on their own stalls, their research funnel, and an architect kept inside the universe and told in closed words, on `feat/equity-e24-health` (DEPLOYED 20:25Z Oct 11; a gateway deploy FIRST, then an owner deploy on main's E3; no identity moves; no setting changes)
 
 In the equity lanes' first hours (Oct 11) most scored versions were disqualified by one misreading of the contract,
 families were retired for it, the lanes were starved at their pace, one births pass was cut short and another bore
@@ -348,8 +420,6 @@ Money digest `11a1dc0c`, full digest `00c2bf6f` (`PINNED_DIGEST`); the rollback,
   states (and still E1's with that block left out).
 - **Also changed.** `league/ops/dlane_report.py`: A8.6's statement is built from the rows (`equity_probe_note`), no
   longer a sentence with A20's figures in it. The gateway is not edited.
-
-
 ### 14:37Z Oct 11, 2026: release E3, record and measure (#539), House `20261011T143700Z-c8e41ae6e37f`, main `7d2d3c84`; gateway `f9528af2`
 
 Gateway first (`f9528af2`, 14:36:49Z): its merge list gains E3's three swarm modules, a tightening. Then the owner
