@@ -107,6 +107,43 @@ class OnE1(unittest.TestCase):
             self.round()
             self.assertEqual(self.validated, [("e2-adopt", 1)])
 
+    def test_a_looked_at_programs_lineage_survives_e1s_adoption_for_a_bred_near_copy(self):
+        # The integration review's seal-2 (E1's fix 8ffdc6bb, carried by the merge of feat/equity-e1): `adopt_equity`
+        # cleared `elane_train_r`, the Train series D3's correlation test reads, for every ALIVE equity family, so after
+        # any equity identity move a re-worded copy of a program that PASSED its look (alive: candidate, probe, sized)
+        # was no longer the same lineage and took a second sealed look. E2 is what breeds such copies.
+        from league.swarm import evaluator
+
+        seed = self.store.add_family({"id": "seed-x", "mechanism": "An invented always-in overnight idea on SPY.",
+                                      "structure": "etf", "roots": ["SPY"], "lane": "beta", "symbols": ["SPY"]},
+                                     origin="seed")
+        version = self.store.add_version(seed["id"], fx.program(), {}, author="seed")
+        days = list(range(17000, 17300))
+        series = {"days": days, "r": [((i * 37) % 11 - 5) / 1000.0 for i in range(len(days))]}
+        # What E1's look leaves on a program that passed it and trades.
+        self.store.set_state(seed["id"], **{elane.LOOK_KEY: {"version": 1, "verdict": {"passed": True}},
+                                            elane.TRAIN_R_KEY: series,
+                                            elane.TEMPLATE_KEY: elane.lineage_key("beta", version["sha"]),
+                                            "banded_evaluator": {"engine": "e1", "equity_sha256": "a" * 64}})
+        self.store.update_family(seed["id"], band="probe")
+        self.store.put(evaluator.EQUITY_KEY, {"equity": "a" * 64, "engine": "e1"})
+        copy = fx.e2_family(self.store, "e2-near-copy", lane="equity", symbols=("SPY", "QQQ"), code=fx.program(share=0.3),
+                            mechanism="A differently worded idea that trades the same sessions as the seed.")
+        self.assertEqual(elane.same_lineage(self.store, copy, "equity", "equity:another-template", series), "seed-x")
+        out = evaluator.adopt_equity(self.store, {"equity": "b" * 64, "engine": "e1"})
+        self.assertTrue(out["adopted"])
+        state = self.store.family("seed-x")["state"]
+        self.assertIsInstance(state.get(elane.LOOK_KEY), dict, "the adoption grants no other look")
+        self.assertEqual(state.get(elane.TRAIN_R_KEY), series, "the look's Train series stays with the look")
+        self.assertNotIn(elane.TRAIN_R_KEY, evaluator.EQUITY_SELECTION_KEYS)
+        self.assertEqual(elane.same_lineage(self.store, self.store.family("e2-near-copy"), "equity",
+                                            "equity:another-template", series), "seed-x",
+                         "after the adoption the bred near-copy is still refused at the look")
+        # And with the series gone for any other reason the test fails closed: never a second look by omission.
+        self.store.set_state("seed-x", **{elane.TRAIN_R_KEY: None})
+        with self.assertRaises(elane.LineageUnread):
+            elane.same_lineage(self.store, self.store.family("e2-near-copy"), "equity", "equity:another-template", series)
+
     def test_e1s_graveyard_binds_its_own_lane_only(self):
         from league.swarm import cards
         from league.swarm.architect import Architect
