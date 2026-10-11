@@ -1459,14 +1459,21 @@ def visible_graveyard(store: Any, query: str = "", limit: int = 8, *, settings: 
     kinds of row, ranked over the rows that are left: a family born before T0 and retired since `SWITCH_AT` (it learned
     on the hidden years), and a game-arm family (its reasons and notes tell its SELECT outcomes). A store that never had a
     T0: exactly the store's read."""
+    from . import elane_seal
+
+    # THE SEAL OF THE EQUITY LANES (release E2, A9 D3; league/swarm/elane_seal.py): no reader here (the researchers' tool,
+    # the architect, the strategist, the diagnostician) reads an equity-lane row; with none, the read as before.
+    sealed = elane_seal.equity_ids(store)
     start, played = _hidden(store, settings)
     if start is None:
-        return store.graveyard(query, limit=limit)
+        if not sealed:
+            return store.graveyard(query, limit=limit)
+        return [r for r in store.graveyard(query, limit=limit + len(sealed)) if r["family"] not in sealed][:limit]
     from .store import rank_graveyard
 
     rows = store._all("SELECT g.*, f.born_at AS _born, f.retired_at AS _retired, f.id AS _id FROM graveyard g "
                       "LEFT JOIN families f ON f.id=g.family ORDER BY g.at DESC, g.family")
-    kept = [r for r in rows if not _quarantined(r, start, played)]
+    kept = [r for r in rows if not _quarantined(r, start, played) and r["family"] not in sealed]
     out = []
     for r in rank_graveyard(kept, query)[:limit]:
         r["roots"] = _loads(r["roots"], [])
