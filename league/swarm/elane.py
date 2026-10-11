@@ -57,6 +57,16 @@ run reproduced and pre-checked again, then the ONE sealed look with a freshly mi
 equity identity (`banded_evaluator` {"engine", "equity_sha256", "run_sha"}). From there the EquityBook moves its band
 (league/equity/bands.py `next_band`), inside `roster` seats.
 
+THE RUN'S STATUS, AND A RUN THAT DOES NOT RETURN. Every run the look reads is read by its status first, as Validation's
+is. A Train-era run its own errors ended ("disqualified") gives no floor (refused at the floor, no look spent); one with
+no data is no history there (the screen's rule). A holdout run that ended "disqualified" is a look SPENT AND FAILED: a
+partial series is never judged. A holdout run the House could not make at all (the capability, the store's slice, the
+NEEDS call, "no_data") is no look and is owed again. But once the sealed run was sent and no result came back
+(league/equity/runner.py `RunLost`: the child failed, was killed or ran past its budget while the program held its
+holdout), it is owed again only once: the second time (`LOOK_SENDS`) the look is spent and failed, with a House warning
+each time, so a program cannot stop answering until its holdout suits it. The evidence child's hash seed is pinned
+(`EVIDENCE_HASH_SEED`), so the run owed again is the same run.
+
 THE REVIEW (E1). The gate's paid program review and audit read options programs. In E1 an equity look is taken only for
 a captain-seeded program (its code is reviewed in the release's pull request) or a version whose state carries a passed
 review and audit of its exact program (`reviewed`): the architect's and researcher's equity births (E2) wait for the
@@ -123,6 +133,16 @@ TRY_KEY = "elane_try"
 #: each version's Validation verdict ({str(n): {entered, at, stale}}) and EDM1's sigma by version.
 LOOK_KEY = "elane_look"
 FLOOR_KEY = "elane_floor"
+#: THE SEALED RUN, SENT AND NOT ANSWERED (`look`; league/equity/runner.py `RunLost`): the family state's count of it
+#: for one program ({sha, count, at}), and how often a program's sealed run may be sent. A first run that does not
+#: return is owed again (a House that lost its child once costs no lineage its look); a second spends the look as
+#: FAILED. Without the line a program that stops answering when its holdout goes badly would be shown it again.
+LOST_KEY = "elane_look_lost"
+LOOK_SENDS = 2
+#: The hash seed of the swarm's evidence child (`isolated_runner`): every Validation, Train-era and sealed run is the
+#: same run on every start of the child (a program that iterates a set of strings would otherwise differ from process
+#: to process; the options Gym pins PYTHONHASHSEED=0 for the same reason, league/gym/driver.py).
+EVIDENCE_HASH_SEED = 0
 TRAIN_R_KEY = "elane_train_r"
 TEMPLATE_KEY = "elane_template"
 VALIDATION_KEY = "elane_validation"
@@ -161,8 +181,8 @@ SPENT_TRY = "its equity lineage has used its one Validation try (one Validation 
 SAME_LINEAGE = ("its program is the same lineage as a program already looked at (A9 D3: Train daily returns "
                 "correlating at 0.7 or more, or the same template): one sealed look a lineage, so it was refused "
                 "before any look")
-FLOOR_INELIGIBLE = ("the share screen has no eligible program floor for it (too little Train-era history, or no "
-                    "threshold on the screen's grid): it was refused before any look")
+FLOOR_INELIGIBLE = ("the share screen has no eligible program floor for it (too little Train-era history, a Train-era "
+                    "run its own errors ended, or no threshold on the screen's grid): it was refused before any look")
 REFUSED_BEFORE_LOOK = ("the gate refused its program before the sealed look (its recorded Validation no longer passes "
                        "the screen's pre-check, or the lineage's look was already spent): no look was taken")
 REFUSED_CAUSES = {"same lineage": SAME_LINEAGE, "screen floor": FLOOR_INELIGIBLE}
@@ -745,7 +765,8 @@ _runners_lock = threading.Lock()
 
 def isolated_runner(root: str | Path) -> Any:
     """The swarm process's `league.equity.runner.Isolated` over <root>/equity-daily with its own decider child
-    (`league.live.decider.Decider`, its log <root>/equity-decider.log), built once a process."""
+    (`league.live.decider.Decider`, its log <root>/equity-decider.log, its hash seed pinned: `EVIDENCE_HASH_SEED`),
+    built once a process."""
     key = str(Path(root).resolve())
     with _runners_lock:
         runner = _runners.get(key)
@@ -753,7 +774,9 @@ def isolated_runner(root: str | Path) -> Any:
             from ..equity.runner import Isolated
             from ..live.decider import Decider
 
-            runner = Isolated(Decider(log=Path(root) / "equity-decider.log"), Path(root) / STORE_DIR)
+            decider = Decider(log=Path(root) / "equity-decider.log")
+            decider.hash_seed = EVIDENCE_HASH_SEED  # the evidence child is deterministic across its restarts
+            runner = Isolated(decider, Path(root) / STORE_DIR)
             _runners[key] = runner
         return runner
 
@@ -907,6 +930,24 @@ def reviewed(state: Mapping[str, Any], sha: str) -> bool:
     return review.get("sha") == sha and review.get("verdict") == "pass" and audit.get("verdict") == "pass"
 
 
+def _status(run: Any) -> str:
+    """A run's status ("ok" | "disqualified" | "no_data"; "unknown" when its result names none)."""
+    result = getattr(run, "result", None)
+    return str((result if isinstance(result, Mapping) else {}).get("status") or "unknown")
+
+
+def _segment_series(S: Any, runs: Sequence[Any]) -> tuple[list[Any], str | None]:
+    """THE FLOOR'S INPUTS from the program's Train-era runs (the screen's rule: one series per span, None where the
+    program has no history): ([`screen.Series` | None], None), a "no_data" run read as None; or ([], the status) when a
+    run ended any other way than "ok" ("disqualified": the program's own errors ended it, so its series is partial and
+    no floor is read from it)."""
+    statuses = [_status(run) for run in runs]
+    bad = next((s for s in statuses if s not in ("ok", "no_data")), None)
+    if bad is not None:
+        return [], bad
+    return [None if status == "no_data" else _series(S, run) for run, status in zip(runs, statuses)], None
+
+
 def _train_series(segments: Sequence[Any]) -> dict[str, list]:
     """The Train-era daily series a look keeps for THE LINEAGE: {"days": [int ordinal], "r": [float]}, every segment's
     sessions in order (House-only: never in a view)."""
@@ -986,7 +1027,10 @@ def _restore_train(gate: Any, fid: str) -> bool:
 
     try:
         runs = _runner(gate).segments(version["code"], dict(version.get("params") or {}), name=str(fid))
-        train = _train_series([_series(S, run) for run in runs])
+        segments, bad = _segment_series(S, runs)
+        if bad is not None:
+            raise ValueError(f"a Train-era run ended {bad}")
+        train = _train_series(segments)
     except Exception as exc:  # noqa: BLE001 - it stays unread, and the look that asked waits
         store.event("swarm.gate", str(fid), {"action": "equity_lineage_unread", "version": version.get("n"),
                                              "error": type(exc).__name__})
@@ -1053,7 +1097,10 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     receipt=)`, kept a version while `screen.floor_fits` the receipt; a floor the verdict would refuse spends no look);
     the look with a freshly minted `EquityGateCapability` (`Isolated.look`), only once the daily store holds its whole
     calibrated holdout (`_holdout_gap`); `screen.verdict` and `screen.beside_line` recorded with the look, under the
-    screen that judged it. True passed (the family becomes a Candidate), False failed, None not run (no look spent)."""
+    screen that judged it. THE RUN'S STATUS FIRST (the module docstring): a Train-era run that ended "disqualified"
+    refuses the floor; a holdout run that did is a look spent and failed, never judged; a sealed run sent and not
+    answered is owed once, then the look is spent and failed (`LOOK_SENDS`). True passed (the family becomes a
+    Candidate), False failed, None not run (no look spent)."""
     store, settings = gate.store, gate.settings
     fid, n = str(fam["id"]), int(version["n"])
     lane = lane_of(store, fam)
@@ -1077,6 +1124,7 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
               screen=screen)
         return None
     from ..equity import screen as S
+    from ..equity.runner import RunFailed, RunLost
     from ..equity.store import mint_equity_gate_capability
     from .evaluator import equity_fingerprint
 
@@ -1099,9 +1147,11 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     code, params = version["code"], dict(version.get("params") or {})
     floors = state.get(FLOOR_KEY) if isinstance(state.get(FLOOR_KEY), Mapping) else {}
     try:
-        segments = [_series(S, run) for run in runner.segments(code, params, name=fid)]
+        segments, ended = _segment_series(S, runner.segments(code, params, name=fid))
         cached = floors.get(str(n))
-        if S.floor_fits(cached, receipt):
+        if ended is not None:
+            floor = {"eligible": False, "why": f"a Train-era run ended {ended}: its series is partial"}
+        elif S.floor_fits(cached, receipt):
             floor = dict(cached)  # computed once a version under this receipt (deterministic: S2 exact, S1 its seeds)
         else:
             # The pinned receipt's own floor (A11: `floor_s2` for receipt 2). A floor kept for the version under
@@ -1175,9 +1225,40 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
             return None
     try:
         capability = mint_equity_gate_capability(Path(store.root) / STORE_DIR, reason=f"the equity look of {fid} v{n}")
-        h = _series(S, runner.look(code, params, name=fid, gate=capability))
-        verdict = _plain(S.verdict(v, h, receipt=receipt, program_floor=floor, s1_floor=s1x))
-        beside = str(S.beside_line(verdict, receipt))
+        ran = runner.look(code, params, name=fid, gate=capability)
+        ended = _status(ran)
+        if ended in NOT_A_TRY:
+            raise RunFailed(f"the holdout run ended {ended}")  # the House could not run it: no look, owed again
+        if ended != "ok":
+            # THE RUN'S STATUS FIRST (as Validation's): a holdout run its own errors ended ("disqualified") left a
+            # partial series. It is never judged: the look is spent and FAILED.
+            verdict = {"screen": screen, "passed": False, "status": ended,
+                       "why": f"the holdout run ended {ended}: a partial series is never judged"}
+            beside = f"no verdict: {verdict['why']}"
+        else:
+            h = _series(S, ran)
+            verdict = _plain(S.verdict(v, h, receipt=receipt, program_floor=floor, s1_floor=s1x))
+            beside = str(S.beside_line(verdict, receipt))
+    except RunLost as exc:
+        # THE SEALED RUN WAS SENT AND DID NOT RETURN (`LOOK_SENDS`): the program held its holdout. Owed again once;
+        # the second time the look is spent and FAILED, so no program is shown its holdout a third time.
+        held = (store.family(fid) or {}).get("state") or {}
+        held = held.get(LOST_KEY) if isinstance(held.get(LOST_KEY), Mapping) else {}
+        count = (int(held.get("count") or 0) if held.get("sha") == sha else 0) + 1
+        spent = count >= LOOK_SENDS
+        store.event("swarm.gate", fid, {"action": "look_lost", "version": n, "lane": lane, "count": count,
+                                        "spent": spent, "error": type(exc).__name__})
+        store.event("swarm.status", fid, {  # a House warning (the swarm's alerts are its status rows)
+            "action": "equity_look_lost", "alert": True, "version": n, "count": count, "spent": spent,
+            "text": f"the sealed equity look of {fid} v{n} was sent and did not return ({count} of {LOOK_SENDS}): "
+                    + ("its look is spent and failed" if spent else "it is owed once more; read equity-decider.log")})
+        if not spent:
+            store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True,
+                                        **{LOST_KEY: {"sha": sha, "count": count, "at": store.now()}})
+            return None
+        verdict = {"screen": screen, "passed": False, "status": "lost",
+                   "why": f"the sealed run was sent {LOOK_SENDS} times and did not return"}
+        beside = f"no verdict: {verdict['why']}"
     except Exception as exc:  # noqa: BLE001 - the look did not land: owed again next round (no look row)
         store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "look", "error": type(exc).__name__})
@@ -1188,7 +1269,8 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     figures = {"c_pF1": verdict.get("c_pF1")} if screen == "S2" else {"c_used": verdict.get("c_used")}
     detail = {"lane": lane, "label": label(lane), "screen": screen, "receipt": receipt.receipt_sha256,
               **figures, "c_H": verdict.get("c_H"), "s1x": verdict.get("label"),
-              "seeded": seeded(store, fid), "beside": beside, "passed": passed}
+              "seeded": seeded(store, fid), "beside": beside, "passed": passed,
+              **({"status": verdict["status"], "why": verdict.get("why")} if verdict.get("status") else {})}
     with store.atomic():
         store.add_look(fid, n, sha, passed=passed, p_value=None, detail=detail)
         store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None)
@@ -1275,7 +1357,7 @@ __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_K
            "try_open", "lineage_spent",
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
-           "ROUND_KEY", "ROUND_SECONDS", "round_order", "SAME_LINEAGE", "FLOOR_INELIGIBLE", "REFUSED_BEFORE_LOOK",
+           "ROUND_KEY", "ROUND_SECONDS", "round_order", "LOST_KEY", "LOOK_SENDS", "EVIDENCE_HASH_SEED", "SAME_LINEAGE", "FLOOR_INELIGIBLE", "REFUSED_BEFORE_LOOK",
            "REFUSED_CAUSES",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",
            "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LineageUnread", "LOSS_LINE",

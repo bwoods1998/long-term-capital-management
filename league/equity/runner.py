@@ -29,6 +29,12 @@ slices the store for NEEDS symbols and history, and sends ("kind", "equity", "ru
 `results.view` decides what a researcher sees). A child failure raises `RunFailed` (no trial is counted); a program the
 child refuses (it does not load) raises `ProgramRefused` (a `CodeRefused`). The parent re-checks the child's NEEDS
 (`program.parse_needs`) before it slices anything, so a child's answer never widens what is read.
+
+SENT, AND NOT ANSWERED (`RunLost`, a `RunFailed`). A failure before the bars leave the parent (the NEEDS call, the
+store's slice) is the House's and raises `RunFailed`. Once the "run" was sent, the program held its bars: a child that
+then fails, is killed, runs past its budget or answers an error raises `RunLost`. The difference matters for the sealed
+look alone (league/swarm/elane.py `look`): a program that could choose not to answer, and be owed its look again, would
+draw its holdout more than once.
 """
 
 from __future__ import annotations
@@ -50,6 +56,11 @@ NEEDS_BUDGET_SECONDS = 60.0
 
 class RunFailed(RuntimeError):
     """The isolated run did not return a result (the child failed, timed out or refused the program)."""
+
+
+class RunLost(RunFailed):
+    """The run was sent (the program held its bars) and no result came back: the child failed, was killed, ran past its
+    budget or answered an error AFTER the send (the module docstring)."""
 
 
 class ProgramRefused(CodeRefused):
@@ -119,12 +130,15 @@ class Isolated:
     def _run(self, code: str, params: Mapping[str, Any] | None, name: str, bars: Any, k: float) -> Run:
         payload = {"code": code, "params": dict(params or {}), "name": name, "bars": bars, "k": float(k),
                    "capital": None}
-        answer = self._ask("run", payload, self.budget_seconds)
+        try:
+            answer = self._ask("run", payload, self.budget_seconds)
+        except RunFailed as exc:  # after the send: the program held its bars (`RunLost`); a refused load is not a run
+            raise RunLost(str(exc)) from None
         result = answer.get("result")
         if not isinstance(result, Mapping):
-            raise RunFailed("the decider child returned no result")
+            raise RunLost("the decider child returned no result")
         if result.get("status") == "error":
-            raise RunFailed(str(result.get("reason") or "the run ended in an error"))
+            raise RunLost(str(result.get("reason") or "the run ended in an error"))
         return Run(dict(result), bars)
 
     def train(self, code: str, params: Mapping[str, Any] | None, *, name: str, start: dt.date | None = None,
@@ -159,5 +173,5 @@ class Isolated:
                 for first, last in config.TRAIN_ERA_SEGMENTS]
 
 
-__all__ = ["RunFailed", "ProgramRefused", "Run", "RUN_BUDGET_SECONDS", "NEEDS_BUDGET_SECONDS", "KIND", "run_bars",
-           "Isolated"]
+__all__ = ["RunFailed", "RunLost", "ProgramRefused", "Run", "RUN_BUDGET_SECONDS", "NEEDS_BUDGET_SECONDS", "KIND",
+           "run_bars", "Isolated"]

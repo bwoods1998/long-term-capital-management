@@ -8,6 +8,8 @@ SwarmStore, Tournament and Gate, `runner.Isolated` over an `InlineDecider`, the 
 from __future__ import annotations
 
 import json
+import sys
+import unittest
 from unittest import mock
 
 from league.equity import BETA, EQUITY_ENGINE_VERSION
@@ -25,11 +27,18 @@ MOVED = {"equity": "e" * 64, "engine": EQUITY_ENGINE_VERSION}
 
 
 class PickyRunner(FakeRunner):
-    """`FakeRunner` whose Train-era runs fail for the families named in `broken`."""
+    """`FakeRunner` whose Train-era runs fail for the families named in `broken`, and whose runs end with the status
+    `ended` names for their window ("segment-1", "segment-2", "validation", "holdout"; else the runner's own)."""
 
     def __init__(self, **kw):
         super().__init__(**kw)
         self.broken: set[str] = set()
+        self.ended: dict[str, str] = {}
+
+    def _run(self, name, window, k):
+        run = super()._run(name, window, k)
+        run.result["status"] = self.ended.get(window, run.result["status"])
+        return run
 
     def segments(self, code, params, *, name):
         if name in self.broken:
@@ -292,3 +301,212 @@ class TheOrderOfTheLooks(FixCase):
         self.born("b3", code=CODE + "# a third program\n")
         self.validated("b3", precheck=False)
         self.assertEqual(elane.lineage_spent(self.store, self.store.family("b3"), ON), elane.SPENT_TRY)
+
+
+class TheRunsStatus(FixCase):
+    """s2-2: `look` never read the holdout run's status, so a run its own errors ended ("disqualified") was judged on
+    its partial series and could pass, while Validation refuses any status but "ok". The Train-era runs fed the floor
+    the same way."""
+
+    def test_a_disqualified_holdout_run_is_a_spent_failed_look_never_a_pass(self):
+        version, sha = self.ready()
+        self.runner.ended = {"holdout": "disqualified"}
+        with screen(passed=True) as mint:
+            self.assertIs(self.gate.look(self.store.family("b1"), version, sha), False)
+        self.assertEqual(mint.verdict.call_count, 0, "a partial series is never judged")
+        (look,) = self.looks()
+        self.assertEqual((look["passed"], look["detail"]["status"], look["detail"]["passed"]), (0, "disqualified", False))
+        fam = self.store.family("b1")
+        state = fam["state"]
+        self.assertEqual((fam["band"], state["gated_sha"], state["gate_ready"], state["gate"], state.get("look_inflight")),
+                         ("gym", sha, False, "fail", None))
+        self.assertEqual((state[elane.LOOK_KEY]["verdict"]["passed"], state[elane.LOOK_KEY]["verdict"]["status"]),
+                         (False, "disqualified"))
+        self.assertNotIn("banded_evaluator", state, "no band proof")
+        self.assertTrue(state[elane.TRAIN_R_KEY]["days"], "the look is spent: its lineage record is kept for D3")
+        self.assertEqual(elane.lineage_spent(self.store, fam, ON), elane.SPENT_LOOK)
+        with screen():
+            self.assertEqual(self.tournament.equity_round()["retired"], ["b1"])
+
+    def test_a_holdout_run_the_house_could_not_make_is_no_look(self):
+        version, sha = self.ready()
+        self.runner.ended = {"holdout": "no_data"}
+        with screen() as mint:
+            self.assertIsNone(self.gate.look(self.store.family("b1"), version, sha))
+        state = self.store.family("b1")["state"]
+        self.assertEqual((self.looks(), mint.verdict.call_count, state["gate_ready"], state.get("look_inflight")),
+                         ([], 0, True, None))
+        self.assertNotIn(elane.LOST_KEY, state, "the House's failure counts against no program")
+        self.runner.ended = {}
+        with screen():
+            self.assertTrue(self.gate.look(self.store.family("b1"), version, sha), "owed again, and taken")
+
+    def test_a_disqualified_train_era_run_refuses_the_floor_before_any_look(self):
+        version, sha = self.ready()
+        self.runner.ended = {"segment-2": "disqualified"}
+        with screen() as mint:
+            self.assertIsNone(self.gate.look(self.store.family("b1"), version, sha))
+        self.assertEqual((self.looks(), mint.call_count, mint.floor.call_count), ([], 0, 0), "no floor from a partial run")
+        (refusal,) = self.store.refusals("b1")
+        self.assertEqual(refusal["stage"], "screen floor")
+        self.assertIn("disqualified", refusal["reason"])
+        self.assertEqual(elane.lineage_spent(self.store, self.store.family("b1"), ON), elane.FLOOR_INELIGIBLE)
+
+    def test_a_train_era_span_with_no_data_is_no_history_for_the_floor(self):
+        version, sha = self.ready()
+        self.runner.ended = {"segment-1": "no_data"}
+        with screen() as mint:
+            self.assertTrue(self.gate.look(self.store.family("b1"), version, sha))
+        (segments,), kw = mint.floor.call_args
+        self.assertIsNone(segments[0], "the screen's rule: None where the program has no history")
+        self.assertEqual(list(segments[1].days), [10, 11, 12, 13, 14])
+        self.assertEqual(self.store.family("b1")["state"][elane.TRAIN_R_KEY]["days"], [10, 11, 12, 13, 14])
+
+
+class TheSealedRunSentOnce(FixCase):
+    """s2-4: a look whose run did not return was owed again with nothing recorded, without limit, so a program that
+    stops answering when its holdout goes badly could be shown its holdout again; and the evidence child's hash seed
+    was random, so the next run could differ."""
+
+    def test_a_sealed_run_that_does_not_return_is_owed_once_then_the_look_is_spent(self):
+        from league.equity.runner import RunLost
+
+        version, sha = self.ready()
+        self.runner.look_error = RunLost("the decider child failed the run: the child was killed")
+        with screen() as mint:
+            self.assertIsNone(self.gate.look(self.store.family("b1"), version, sha))
+        state = self.store.family("b1")["state"]
+        self.assertEqual((self.looks(), state["gate_ready"], state.get("look_inflight")), ([], True, None))
+        self.assertEqual((state[elane.LOST_KEY]["sha"], state[elane.LOST_KEY]["count"]), (sha, 1))
+        alerts = [e["payload"] for e in self.store.events_after(0, limit=100_000)
+                  if e["kind"] == "swarm.status" and e["payload"].get("action") == "equity_look_lost"]
+        self.assertEqual([(a["alert"], a["count"], a["spent"]) for a in alerts], [(True, 1, False)], "a House warning")
+        with screen() as mint:
+            self.assertIs(self.gate.look(self.store.family("b1"), version, sha), False)
+        (look,) = self.looks()
+        self.assertEqual((look["passed"], look["detail"]["status"]), (0, "lost"))
+        self.assertEqual(mint.verdict.call_count, 0)
+        self.assertEqual(elane.LOOK_SENDS, 2)
+        self.assertEqual(elane.lineage_spent(self.store, self.store.family("b1"), ON), elane.SPENT_LOOK)
+        self.assertEqual([c[0] for c in self.runner.calls].count("look"), 2, "its holdout was sent twice, never a third time")
+
+    def test_a_house_failure_before_the_send_is_owed_and_counts_against_nobody(self):
+        from league.equity.runner import RunFailed
+        from league.equity.store import StoreRefused
+
+        version, sha = self.ready()
+        for error in (RunFailed("the decider child failed the needs"), StoreRefused("the store cannot be read"),
+                      RuntimeError("the child died")) * 2:
+            self.runner.look_error = error
+            with screen():
+                self.assertIsNone(self.gate.look(self.store.family("b1"), version, sha))
+        state = self.store.family("b1")["state"]
+        self.assertEqual((self.looks(), state["gate_ready"]), ([], True))
+        self.assertNotIn(elane.LOST_KEY, state)
+        self.runner.look_error = None
+        with screen():
+            self.assertTrue(self.gate.look(self.store.family("b1"), version, sha))
+
+    def test_the_runner_tells_a_run_that_was_sent_from_one_that_was_not(self):
+        import datetime as dt
+        import tempfile
+        from pathlib import Path
+
+        from league.equity import runner as R
+        from league.equity import synth
+        from league.equity.program import CodeRefused
+
+        class Child:
+            """A decider whose "needs" answers and whose "run" does what `run` says."""
+
+            def __init__(self, run):
+                self.run, self.ops = run, []
+
+            def kind(self, kind, op, payload, *, budget_seconds=None):
+                self.ops.append(op)
+                if op == "needs":
+                    return {"ok": True, "needs": {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2}}
+                if isinstance(self.run, Exception):
+                    raise self.run
+                return self.run
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = synth.constant_store(Path(tmp) / "store", start=dt.date(2025, 1, 2), sessions=30)
+            for run in (TimeoutError("the decider did not answer in time"), {"ok": False, "error": "the child broke"},
+                        {"ok": True, "result": None}, {"ok": True, "result": {"status": "error", "reason": "engine"}}):
+                with self.assertRaises(R.RunLost, msg=repr(run)):
+                    R.Isolated(Child(run), root).validation(CODE, {}, name="p")
+            self.assertTrue(issubclass(R.RunLost, R.RunFailed), "every earlier reader of RunFailed still catches it")
+            with self.assertRaises(CodeRefused):
+                R.Isolated(Child({"ok": False, "refused": True, "error": "no decide"}), root).validation(CODE, {}, name="p")
+            child = Child({"ok": True, "result": {"status": "ok"}})
+            child.kind = mock.Mock(side_effect=TimeoutError("the decider did not answer in time"))
+            with self.assertRaises(R.RunFailed) as raised:
+                R.Isolated(child, root).validation(CODE, {}, name="p")
+            self.assertNotIsInstance(raised.exception, R.RunLost, "the NEEDS call failed: nothing was sent")
+
+    def test_the_evidence_child_pins_its_hash_seed(self):
+        import tempfile
+
+        from league.live import decider as D
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(elane._runners, {}, clear=True):
+            runner = elane.isolated_runner(tmp)
+            self.assertEqual((runner.decider.hash_seed, elane.EVIDENCE_HASH_SEED), (0, 0))
+        self.assertIsNone(D.Decider.hash_seed, "every other child is as it was (the options book's, the equity book's)")
+        spawned: list[tuple] = []
+
+        def popen(command, **kw):
+            spawned.append((list(command), dict(kw.get("env") or {})))
+            raise OSError("not started: the command and its environment are the test")
+
+        for seed in (None, 0):
+            child = D.Decider(allow_unisolated=True)
+            child.hash_seed = seed
+            child.netns = False
+            child._netns_retry_at = float("inf")
+            with mock.patch.object(D.subprocess, "Popen", side_effect=popen), self.assertRaises(OSError):
+                child._spawn()
+        (plain, plain_env), (pinned, pinned_env) = spawned
+        self.assertEqual(plain[1:], ["-E", "-s", "-m", "league.live.decider"])
+        self.assertNotIn("PYTHONHASHSEED", plain_env)
+        self.assertEqual(pinned[1:], ["-s", "-m", "league.live.decider"], "-E would ignore the seed")
+        self.assertEqual(pinned_env["PYTHONHASHSEED"], "0")
+        self.assertEqual({k for k in pinned_env if k.startswith("PYTHON")}, {"PYTHONHASHSEED"}, "no other PYTHON* name")
+        self.assertEqual({k: v for k, v in pinned_env.items() if k != "PYTHONHASHSEED"}, plain_env)
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "the decider child's limits are Linux's")
+class TheEvidenceChildIsDeterministic(unittest.TestCase):
+    """s2-4, in the real child: a program whose trade follows the iteration order of a set of strings is the same run
+    on every start of the evidence child (four starts; unpinned they agree about one time in sixty)."""
+
+    PROGRAM = ("NEEDS = {'symbols': ['SPY', 'QQQ', 'IWM', 'DIA'], 'history': 2}\nPARAMS = {}\n\n\n"
+               "def decide(ctx):\n"
+               "    if ctx.positions:\n        return []\n"
+               "    first = list(set(ctx.symbols))[0]\n"
+               "    return [{'buy': first, 'share': 0.2, 'at': 'open', 'tag': 'set-order'}]\n")
+
+    def test_the_same_run_on_every_start(self):
+        import tempfile
+        from pathlib import Path
+
+        from league.equity import synth
+        from league.equity.runner import Isolated
+        from league.live import decider as D
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = synth.synthetic_store(Path(tmp) / "store", start=__import__("datetime").date(2024, 6, 3),
+                                         end=__import__("datetime").date(2025, 3, 31))
+            child = D.Decider(python=sys.executable, allow_unisolated=True)
+            child.hash_seed = elane.EVIDENCE_HASH_SEED
+            self.addCleanup(child.close)
+            runner = Isolated(child, root, budget_seconds=120.0)
+            seen = set()
+            for _ in range(4):
+                run = runner.validation(self.PROGRAM, {}, name="set-order")
+                self.assertEqual(run.result["status"], "ok")
+                seen.add((run.result["result_sha"], tuple(sorted({lot["symbol"] for lot in run.result["lots"]}))))
+                child._kill()  # the next run starts a new child (a deploy, a failure)
+            self.assertEqual(len(seen), 1, seen)
+            self.assertEqual(child.pid is not None and len(next(iter(seen))[1]), 1, "one symbol, bought once")
