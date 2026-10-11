@@ -74,9 +74,10 @@ full grid a cell under E3's own hash rule, the same questions for every route.
   E3's own cells and questions are byte for byte what they were (`qset` is still E3's questions' sha; the panel's is
   `panel_qset` beside it, so a membership revision drops a partial's panel cells and nothing of E3's).
 - **The permit** (`<state>/xs-look-permit.json`, 0600) is written from that file's content each time a result is
-  published and after every other run that had a plan: one row for every route whose published result carries all three strata,
-  `at`, `model` and two words a cell (`readable`, `recalled`), no count and no rate. It is what a panel look waits
-  on (A22 (3), below). A recalled cell does not hold a look back: the reading is recorded beside the look.
+  published and after every other run that had a plan: one row for every route whose published result carries all
+  three strata, `at`, `model` and two words a cell (`readable`, `recalled`), no count and no rate. It is what a
+  panel look waits on (A22 (3), below). A recalled cell does not hold a look back: the reading is recorded beside
+  the look.
 - **A route published before the panel's strata existed is due at once** (its result is not whole), E3's cells
   asked again with it. **One route a Saturday** is E3's cadence, unmoved: with N routes the last route's permit is N
   probes away, each of several Saturdays at the shipped line. The captain's levers are E3's (`elane.contam.usd_run`,
