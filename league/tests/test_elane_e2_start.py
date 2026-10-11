@@ -37,8 +37,8 @@ SHIFTS = tuple(BAR["start_shifts"])
 # ----------------------------------------------------------------------------------------------------------- the plan
 class ThePlan(unittest.TestCase):
     def test_the_rules_are_the_bars_constants(self):
-        self.assertEqual((SHIFTS, BAR["start_warm"], BAR["start_min"], BAR["start_match"], BAR["start_active"]),
-                         ((61, 127), 20, 120, 0.99, 0.95))
+        self.assertEqual((SHIFTS, BAR["start_warm"], BAR["start_min"], BAR["start_match"], BAR["start_active"],
+                          BAR["start_sized"]), ((61, 127), 20, 120, 0.99, 0.95, 0))
         for shift in SHIFTS:  # two different primes: no clock's period divides both
             self.assertTrue(all(shift % p for p in range(2, shift)), shift)
         self.assertNotEqual(*SHIFTS)
@@ -196,12 +196,14 @@ def invented(offset: int, *, flags: Callable[[int, int, int], str] | None = None
     """One run of an invented span as the start check reads it: its first decision `offset` sessions into the span,
     `sessions` the span's decision sessions. `flags(i, age, offset)` is what the program is told at span session `i`
     (the run's own `age` sessions after its first decision); `lots(i, age, offset)` whether the run holds a lot then
-    (default: every odd session, whatever the run). A lot's id is counted from the run's start."""
+    (default: every odd session, whatever the run), or the lot's entry price when it is a number (another lot than the
+    other runs hold). A lot's id is counted from the run's start."""
     def stream() -> Any:
         for i in range(offset, sessions):
             age = i - offset
             held = lots(i, age, offset) if lots is not None else bool(i % 2)
-            lot = {"id": 1 + age, "symbol": "SPY", "class": "etf", "qty": 1.0, "entry": 100.0 + i, "mark": 101.0 + i,
+            entry = float(held) if isinstance(held, float) else 100.0 + i
+            lot = {"id": 1 + age, "symbol": "SPY", "class": "etf", "qty": 1.0, "entry": entry, "mark": 101.0 + i,
                    "value": 101.0 + i, "pnl": 1.0, "held_sessions": 1, "at": "close", "tag": f"run {offset}"}
             yield {"symbols": ["SPY"], "positions": [lot] if held else [], "orders": [], "closed": [], "rejects": [],
                    "cash": 500.0, "equity": 1000.0 + age, "budget": 1000.0, "caps": {"SPY": 500.0}, "age": age,
@@ -238,7 +240,8 @@ class TheRule(unittest.TestCase):
                          (0.99, 0.95, 22, [61, 127], []))
         self.assertEqual((out["active"], out["active_matched"], out["active_share"]), (412, 412, 1.0),
                          "this program asks an order on every session")
-        self.assertEqual((out["disqualified"], out["failed"], out["sized"], out["size_gap"]), (0, 0, 0, {}))
+        self.assertEqual((out["disqualified"], out["failed"], out["sized"], out["resized"], out["size_gap"]),
+                         (0, 0, 0, 0, {}))
         # One instance a run, loaded once and never reset: each decided on every session of its own run.
         self.assertEqual(self.decider.loads, ["e2-start:p:0:a", "e2-start:p:0:s61", "e2-start:p:0:s127"])
         self.assertEqual(self.decider.decides, 300 + 239 + 173)
@@ -288,21 +291,44 @@ class TheRule(unittest.TestCase):
                                              "later": "nothing"})
 
     def test_every_later_run_must_reach_the_share_and_the_lowest_is_the_one_read(self):
-        def at(*ages: int) -> Callable[[int, int, int], str]:
-            return lambda i, age, offset: "small" if offset == 61 and age in ages else ""
+        def at(*ages: int) -> Callable[[int, int, int], str]:  # another fill point: other orders
+            return lambda i, age, offset: "open" if offset == 61 and age in ages else ""
         out = self.check(span(flags=at(30, 40)))
         self.assertEqual(self.rows(out), [(0, 61, 239, 22, 237, True), (0, 127, 173, 22, 173, True)])
-        self.assertEqual((out["held"], out["share"], out["sized"], out["size_gap"]), (True, 0.9916, 2, {"share": 0.48}),
+        self.assertEqual((out["held"], out["share"], out["sized"], out["resized"]), (True, 0.9916, 0, 0),
                          "two of 239 sessions: inside the 1%")
         self.assertEqual(out["first_miss"]["session"], 30, "what differed is on record even when the run holds")
         out = self.check(span(flags=at(30, 40, 50)))
         self.assertEqual(self.rows(out), [(0, 61, 239, 22, 236, False), (0, 127, 173, 22, 173, True)])
         self.assertEqual((out["held"], out["share"], out["matched"], out["sessions"]), (False, 0.9874, 409, 412),
                          "three of 239 is over 1% of that run, though all the runs together match 99.3%")
-        self.assertEqual(out["first_miss"], {"span": 0, "shift": 61, "session": 30, "what": "size",
+        self.assertEqual(out["first_miss"], {"span": 0, "shift": 61, "session": 30, "what": "orders",
                                              "base": "sell SPY at the open; buy SPY 0.5 of the sleeve at the close",
-                                             "later": "sell SPY at the open; buy SPY 0.02 of the sleeve at the close"})
+                                             "later": "sell SPY at the open; buy SPY 0.5 of the sleeve at the open"})
         self.assertEqual(out["runs"][0]["misses"], [30, 40, 50])
+
+    def test_the_same_lots_and_the_same_orders_in_another_size_are_never_allowed(self):
+        """ONE session on which a later run shows the same book as the run from the span's start, asks the same orders
+        and asks another size fails it, however high its shares: with the same bars, calendar, lots and orders, the
+        size was taken from how the run stands."""
+        once = span(flags=lambda i, age, offset: "small" if offset == 61 and age == 40 else "")
+        out = self.check(once)
+        row = out["runs"][0]
+        self.assertEqual((row["matched"], row["share"], row["active_share"]), (238, 0.9958, 0.9958), "inside both shares")
+        self.assertEqual((row["sized"], row["resized"], row["held"], out["held"]), (1, 1, False, False))
+        self.assertEqual((out["resized"], out["size_gap"], out["first_miss"]["what"]), (1, {"share": 0.48}, "size"))
+        self.assertIn("on 1 of them the two runs held the same lots too, and no such session is allowed",
+                      start_text({"start": out}))
+        with mock.patch.dict(BAR, {"start_sized": 1}):
+            self.assertTrue(self.check(span(flags=lambda i, age, offset: "small" if offset == 61 and age == 40 else ""))
+                            ["held"], "the rule is one constant")
+        # Where the two runs hold OTHER lots (after the warm-up every session is compared, whatever the books), a
+        # size that differs is one differing session like any other: inside the shares it is allowed.
+        def other_lot(i: int, age: int, offset: int) -> Any:
+            return 55.5 if offset == 61 and age == 40 else bool(i % 2)
+        out = self.check(span(flags=lambda i, age, offset: "small" if offset == 61 and age == 40 else "", lots=other_lot))
+        row = out["runs"][0]
+        self.assertEqual((row["sized"], row["resized"], row["matched"], row["held"]), (1, 0, 238, True))
 
     def test_a_program_that_asks_on_few_sessions_is_read_on_those_too(self):
         """A program that trades one session in twenty: the run started 61 sessions in asks an order on 11 of its 239
@@ -311,7 +337,7 @@ class TheRule(unittest.TestCase):
             def flags(i: int, age: int, offset: int) -> str:
                 if i % 20:
                     return "quiet"
-                return "small" if offset == 61 and i in differ else ""
+                return "open" if offset == 61 and i in differ else ""  # another fill point: other orders
             return flags
         out = self.check(span(flags=sparse()))
         self.assertEqual((out["held"], out["sessions"], out["active"], out["active_matched"]), (True, 412, 19, 19))
@@ -332,7 +358,7 @@ class TheRule(unittest.TestCase):
         row = out["runs"][0]
         self.assertEqual(row["misses"], [32, 34, 36, 38, 40, 42, 44, 46],
                          "a size within the tolerance is the same size; the rest are other orders")
-        self.assertEqual((row["failed"], row["sized"], row["disqualified"]), (1, 1, 0))
+        self.assertEqual((row["failed"], row["sized"], row["resized"], row["disqualified"]), (1, 1, 1, 0))
         self.assertEqual(out["first_miss"]["what"], "orders")
         self.assertEqual(out["first_miss"]["later"], "sell SPY at the open; buy SPY about $500 at the close")
         # 38 is an even age of the run started on an odd session: a lot is held, so the order of the orders shows.
@@ -503,8 +529,8 @@ class TheBarOnTheFakes(ResearchCase):
         self.assertEqual([(r["span"], r["shift"], r["sessions"], r["matched"], r["held"]) for r in v1["start"]["runs"]],
                          [(0, 61, 239, 179, False), (0, 127, 173, 113, False), (1, 61, 239, 179, False),
                           (1, 127, 173, 113, False)])
-        self.assertEqual((v1["start"]["share"], v1["start"]["sized"], v1["start"]["size_gap"]),
-                         (round(113 / 173, 4), 240, {"share": 0.48}))
+        self.assertEqual((v1["start"]["share"], v1["start"]["sized"], v1["start"]["resized"], v1["start"]["size_gap"]),
+                         (round(113 / 173, 4), 240, 240, {"share": 0.48}))
         self.assertEqual(v1["start"]["first_miss"],
                          {"span": 0, "shift": 61, "session": 0, "what": "size",
                           "base": "sell SPY at the open; buy SPY 0.02 of the sleeve at the close",
@@ -534,7 +560,8 @@ class TheBarOnTheFakes(ResearchCase):
         self.assertIn("first differed (its session 1), the two runs asked the same orders in different sizes: the run "
                       "from the span's start asked [sell SPY at the open; buy SPY 0.02 of the sleeve at the close], the "
                       "later run asked [sell SPY at the open; buy SPY 0.5 of the sleeve at the close].", brief)
-        self.assertIn("only a buy's size differed (by at most 0.48 of the sleeve)", brief)
+        self.assertIn("only a buy's size differed (by at most 0.48 of the sleeve); on 240 of them the two runs held the "
+                      "same lots too, and no such session is allowed", brief)
         self.assertIn("NEVER from how the run stands: not ctx.equity, ctx.cash or ctx.caps", brief)
         self.assertIn("decide from ctx's bars, its calendar fields and each lot's own facts", brief)
         # A record of counts, sessions counted from a run's own start and the program's own orders: never a day.
@@ -717,7 +744,8 @@ class TheBarOnTheFakes(ResearchCase):
                       "program's orders (each order's kind, symbol and fill point, each buy's size; tags apart) match the "
                       "run from the span's start on at least 99% of each later run's sessions (and on at least 95% of "
                       "those on which either run asked an order)", text)
-        self.assertIn("20 sessions more) and before that wherever the two runs hold the same lots", text)
+        self.assertIn("20 sessions more) and before that wherever the two runs hold the same lots; and where the two "
+                      "runs hold the same lots and ask the same orders, never in another size.", text)
         system = " ".join(elane_train.RESEARCHER_SYSTEM.split())
         for said in (text, system):
             self.assertIn("never from how", said.replace("NEVER", "never"))
@@ -725,6 +753,7 @@ class TheBarOnTheFakes(ResearchCase):
             self.assertIn("constant share of the sleeve", said)
         self.assertNotRegex(text, r"\b20(20|21|25|26)\b")
         self.assertIn("THE START RULE (part of the bar)", system)
+        self.assertIn("never differ in size alone while the two runs hold the same lots", system)
         self.assertIn("START", elane_train.FAILS)
         self.assertIn("its decisions depend on when its run started", elane_train.FAILS["START"])
         self.assertEqual(start_text({}), "")
@@ -913,6 +942,19 @@ def decide(ctx):
                 "tag": "s" if locked else "f"})
     return out
 '''
+#: A lock that changes WHETHER the program trades, never how much: every session until its run is 1% ahead, then only
+#: after the week's first close. What the check does not catch (`test_what_the_check_does_not_catch`).
+SKIPS = '''NEEDS = {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2}
+PARAMS = {"share": 0.5, "lock": 0.01}
+
+
+def decide(ctx):
+    out = [{"sell": lot["id"], "at": "open"} for lot in ctx.positions]
+    ahead = ctx.equity / ctx.budget - 1.0 >= ctx.params["lock"]
+    if not ahead or ctx.weekday == 0:
+        out.append({"buy": "SPY", "share": ctx.params["share"], "at": "open"})
+    return out
+'''
 #: A program that trades once a month (bought at the open after the month's last close, sold at the open after its
 #: fifteenth session), with a lock and without.
 MONTHLY = '''NEEDS = {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 30}
@@ -1057,6 +1099,7 @@ class StartOnE1(unittest.TestCase):
                 self.assertIn(out["first_miss"]["what"], ("size",), "the same orders, another size")
                 self.assertIn("0.02 of the sleeve", out["first_miss"]["base"] + out["first_miss"]["later"])
                 self.assertGreater(out["sized"], 5)
+                self.assertEqual(out["resized"], out["sized"], "and the same lots every time: flat, a lot just closed")
 
     def test_the_weight_lock_fails_and_its_twin_with_no_lock_passes(self):
         self.assert_passes(self.check(WEIGHT_PLAIN, self.flat))
@@ -1066,6 +1109,7 @@ class StartOnE1(unittest.TestCase):
         out = self.check(WEIGHT_LOCKED, self.flat)
         self.assert_fails(out)
         self.assertGreater(out["sized"], 50)
+        self.assertEqual(out["resized"], out["sized"])
         self.assertLess(out["active_share"], 0.5)
 
     def test_the_verifiers_own_programs_fail_as_written(self):
@@ -1114,7 +1158,8 @@ class StartOnE1(unittest.TestCase):
         self.assertIsNone(elane_train.check_code(PNL_SIZED, ["SPY"]), "a size proportional to the sleeve is no level")
         out = self.check(PNL_SIZED)
         self.assert_fails(out)
-        self.assertEqual((out["matched"], out["sized"]), (0, out["sessions"]), "every session: the same orders, another size")
+        self.assertEqual((out["matched"], out["sized"], out["resized"]), (0, out["sessions"], out["sessions"]),
+                         "every session: the same lots, the same orders, another size")
         self.assertGreater(out["size_gap"]["usd"], 1.0)
         text = start_text({"start": out})
         self.assertIn("only a buy's size differed", text)
@@ -1146,33 +1191,54 @@ class StartOnE1(unittest.TestCase):
         self.assert_passes(self.check(MONTHLY_PLAIN))
         out = self.check(MONTHLY_LOCKED)
         self.assert_fails(out)
+        self.assertGreater(out["resized"], 0, "the same lots, the same orders, another size")
         self.assertLess(out["active"], 0.12 * out["sessions"], "it asks an order on few sessions")
-        hidden = [r for r in out["runs"] if not r["held"] and r["share"] >= BAR["start_match"]]
-        self.assertTrue(hidden, "a later run differs on under 1% of its sessions and over 5% of its trades")
-        with mock.patch.dict(BAR, {"start_active": 0.0}):
-            sessions_only = self.check(MONTHLY_LOCKED)
-        self.assertGreater(sum(r["held"] for r in sessions_only["runs"]), sum(r["held"] for r in out["runs"]))
+        # THE SHARE OF ITS TRADES, apart from the size rule (which refuses this lock by itself): a later run differs
+        # on under 1% of its sessions and over 5% of its trades, and the share of all sessions alone passes it.
+        with mock.patch.dict(BAR, {"start_sized": 10 ** 6}):
+            shares = self.check(MONTHLY_LOCKED)
+            hidden = [r for r in shares["runs"] if not r["held"] and r["share"] >= BAR["start_match"]]
+            self.assertTrue(hidden, shares)
+            with mock.patch.dict(BAR, {"start_active": 0.0}):
+                sessions_only = self.check(MONTHLY_LOCKED)
+        self.assertGreater(sum(r["held"] for r in sessions_only["runs"]), sum(r["held"] for r in shares["runs"]))
+
+    def test_a_lock_that_closes_within_days_of_every_start_is_refused_by_its_sizes(self):
+        """On a market that pays every session a run is 1% ahead within days of its start, so `LATCH` (here with no
+        long look-back) differs from the run that started earlier on a handful of a later run's first sessions: well
+        inside the two shares. Each of those sessions shows the same lots and the same orders in another size."""
+        code = LATCH.replace('"history": 504', '"history": 2')
+        with ALL_MISSES:
+            out = self.check(code, self.paying)
+        self.assert_fails(out)
+        self.assertTrue(all(r["share"] >= BAR["start_match"] and r["active_share"] >= BAR["start_active"]
+                            for r in out["runs"]), "the two shares alone pass every later run")
+        self.assertTrue(all(0 < r["resized"] == r["sessions"] - r["matched"] <= 9 for r in out["runs"]), out)
+        self.assertLess(max(k for r in out["runs"] for k in r["misses"]), 15, "a later run's first sessions")
+        lots = [lot for run in self.runs for lot in run.result["lots"]]
+        token = [lot for lot in lots if float(lot["qty"]) * float(lot["entry_px"]) < 100.0]
+        self.assertGreater(len(token), 0.97 * len(lots), "on Train it is a token-size program")
+        with mock.patch.dict(BAR, {"start_sized": 10 ** 6}):
+            self.assertTrue(self.check(code, self.paying)["held"], "the rule without the size rule passes it")
 
     def test_what_the_check_does_not_catch(self):
         """Stated, and held here so that it stays stated: (1) a lock no Train run ever reaches never changed an order;
-        (2) a lock that closes within a session or two of EVERY start differs on so few sessions that it stays inside
-        the two tolerances. On Train such a program trades its token size nearly always."""
+        (2) a lock that changes WHETHER the program trades, never how much, and closes within days of every start:
+        while it is open the fresh run holds lots the earlier run does not (the books differ, so before the warm-up
+        ends nothing is compared), and once warmed up both are locked."""
         never = LATCH.replace('"history": 504', '"history": 2').replace('"lock": 0.01', '"lock": 5.0')
         out = self.check(never, self.paying)
         self.assert_passes(out)
         token = [lot for run in self.runs for lot in run.result["lots"] if float(lot["qty"]) * float(lot["entry_px"]) < 100.0]
         self.assertEqual(token, [], "no run was ever five times its capital ahead: the lock never closed")
-        at_once = LATCH.replace('"history": 504', '"history": 2')
         with ALL_MISSES:
-            out = self.check(at_once, self.paying)
-        self.assertTrue(out["held"], "the market pays every session: each run is 1% ahead within days of its start")
-        lots = [lot for run in self.runs for lot in run.result["lots"]]
-        token = [lot for lot in lots if float(lot["qty"]) * float(lot["entry_px"]) < 100.0]
-        self.assertGreater(len(token), 0.97 * len(lots), "on Train it is a token-size program")
+            out = self.check(SKIPS, self.paying)
+        self.assertTrue(out["held"], out)
+        self.assertEqual((out["sized"], out["resized"]), (0, 0), "it never asks another size")
         misses = [k for r in out["runs"] for k in r["misses"]]
-        self.assertTrue(0 < len(misses) <= 30 and max(misses) < 15, "what differed: a later run's first sessions")
-        self.assertTrue(all(r["share"] >= BAR["start_match"] and r["active_share"] >= BAR["start_active"]
-                            for r in out["runs"]))
+        self.assertLessEqual(len(misses), 4, "a session or two where a later run is flat in its first days")
+        per_week = [len(run.result["lots"]) / (len(run.result["daily"]) / 5.0) for run in self.runs]
+        self.assertTrue(all(0.8 < x < 1.3 for x in per_week), "locked, it trades once a week: a lot a session before")
 
     # ------------------------------------------------------------------ the House's side, and the cost
     def test_a_child_that_dies_mid_check_is_the_houses_on_e1s_decider(self):

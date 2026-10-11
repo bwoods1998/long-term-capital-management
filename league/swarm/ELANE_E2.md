@@ -184,13 +184,20 @@ Stopping, from the lightest:
      `share` or `usd` within the restart check's `SIZE_TOL`; a sell names its lot's SYMBOL (two runs number their
      lots apart); tags are ignored. A decide that failed in one run and not the other, and a session an instance was
      disqualified at, match nothing.
-     THE RULE. A version passes START when EVERY later run matches run A on at least `start_match` (99%) of its
-     compared sessions AND on at least `start_active` (95%) of those on which either run asked an order. THE SECOND
-     SHARE IS THE BUILD'S ADDITION, and why: a program that trades once a week asks nothing on four sessions in
-     five, one that trades once a month on nineteen in twenty, so on all sessions alone a fifth of a monthly
-     program's trades could differ inside the 1% (in the tests `MONTHLY_LOCKED` has a later run that differs on
-     under 1% of its sessions and over 5% of its trades). Either constant is one line in `BAR`; `start_active` 0
-     switches the second share off.
+     THE RULE. A version passes START when EVERY later run (1) matches run A on at least `start_match` (99%) of its
+     compared sessions, (2) matches it on at least `start_active` (95%) of those on which either run asked an order,
+     and (3) on NO session (`start_sized` 0) shows the same book as run A and asks the same orders in another size.
+     (2) AND (3) ARE THE BUILD'S ADDITIONS, and why. (2): a program that trades once a week asks nothing on four
+     sessions in five, one that trades once a month on nineteen in twenty, so on all sessions alone a fifth of a
+     monthly program's trades could differ inside the 1% (in the tests `MONTHLY_LOCKED` has a later run that differs
+     on under 1% of its sessions and over 5% of its trades). (3): a lock that closes within a few trades of every
+     start differs from the earlier run on a handful of sessions, inside both shares (in the tests `LATCH` on a
+     market that pays every session: at most nine sessions of some nine hundred in each later run, and on Train it
+     trades its token size 97% of the time). But on each of those sessions the two runs see the same bars, the same
+     calendar and the same lots and ask the same orders: a size that differs there can only have been taken from how
+     the run stands, which is what a lock that shrinks its lots is, and no honest size does it (a size from the
+     bars, the calendar, the lots' own facts or a constant is the same in both runs). Each rule is one constant in
+     `BAR` (`start_active` 0 and a large `start_sized` switch the additions off).
      WHAT FITS. A shift is used in a span that leaves its later run at least `start_min` (120) warmed-up sessions; a
      span too short goes without it and the record says so (`skipped`). On the Train spans (1,006 and 753 sessions)
      the 61-session start fits every program the contract allows; the 127-session start does not fit 2022-24 for a
@@ -221,21 +228,26 @@ Stopping, from the lightest:
      a half to two times the restart check (0.8 to 1.7 seconds; the bar's own four runs take 0.4 to 0.9). A version
      that fails Y1-R1 or STATE costs nothing more.
      WHAT IT DOES NOT CATCH, stated: (1) a lock no Train run ever reaches (a threshold above anything the program
-     earned on Train never changed an order there); (2) a lock that closes within a session or two of EVERY start,
-     so that what differs stays inside the 1% and the 5% (such a program trades its token size on nearly every Train
-     session: on Train it is a token-size program); (3) what the two tolerances allow in general: a later run may
-     differ on 1% of its sessions and 5% of its trades; (4) what the run's record does not keep for the ctx
-     (`ctx.rejects` is empty for every instance: a program steered by the House's refusals is decided here without
-     them); (5) dependence on the run's start that shows only in a judged window's first weeks and never 61 or 127
-     sessions into a Train span is not separable from (2). The two paid readers and E1's screen remain behind it.
+     earned on Train never changed an order there); (2) a lock that changes WHETHER the program trades and never
+     how much (it skips sessions once ahead, at its full size when it does trade) and closes within days of every
+     start: while it is open the fresh run holds lots the earlier run does not, so before the warm-up ends the two
+     books differ and nothing is compared, and once warmed up both runs are locked (in the tests: `SKIPS`; a
+     program that stops trading altogether once ahead is a case of it, held back only by the bar's forty lots a
+     year); (3) what the two shares allow in general: a later run may differ in its ORDERS on 1% of its sessions and
+     5% of its trades; (4) what the run's record does not keep for the ctx (`ctx.rejects` is empty for every
+     instance: a program steered by the House's refusals is decided here without them). The two paid readers and
+     E1's screen remain behind it, and the root stays E1's: a screen floor built from fresh starts would not need
+     any of this.
      WHAT IT REFUSES THAT IS HONEST, stated: (1) a hold that simply ends at the House's maximum-hold exit and is
      bought again at once (always in the market in lots of N sessions): its trading days are counted from the run's
      first session, a later run never falls in step, and live it would trade on other days than any replay; the cure
      is to exit and re-enter on ctx's calendar or a market condition, and the brief says so. A trend or signal
      program that the House's exit interrupts falls in step again at its next flat stretch and passes (in the tests:
      `TREND`). (2) A buy sized in dollars worked out from `ctx.equity`, `ctx.cash` or `ctx.caps` (compounding the
-     sleeve): the static rule allows it and this check refuses it, since every such size differs between two runs;
-     size by a constant `share` (the House sizes a share on the sleeve itself). (3) A weight cap or a rule on the
+     sleeve, "what is left", the House's room), or from the cash share or a lot's weight: the static rule allows it
+     and this check refuses it at the first session two runs hold the same lots, since such a size differs between
+     two runs; size by a constant `share` (the House sizes a share on the sleeve itself and cuts it to the cash and
+     the room). (3) A weight cap or a rule on the
      cash share that binds often: allowed by the static rule, and run-dependent where it binds (a lot's weight is
      its asked share times its own return times capital over equity); it passes while it flips fewer than 1% of a
      later run's sessions. (4) A count kept in STATE across lots (a wait after an exit): it differs for a session or

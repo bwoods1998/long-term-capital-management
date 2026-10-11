@@ -45,11 +45,13 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   it fails the bar with the code **START**: the program's fault, like STATE (no Validation try spent, nothing said of
   the mechanism). Why it is the right property: the House starts every program live on a fresh date, so a program
   whose decisions depend on its run's start cannot agree with its own replay.
-- **Two rules the build added to the rule as first written, each with the program that showed why** (one constant
+- **Three rules the build added to the rule as first written, each with the program that showed why** (one constant
   each): a later run is ALSO compared before its warm-up ends wherever the two runs hold the same lots (a lock that
   latches hid in the warm-up, and a program chose its own warm-up by declaring 504 sessions of look-back it never
-  read); and every later run must also match on 95% of the sessions on which either run asked an order (a program
-  that trades once a month could differ on a fifth of its trades inside 1% of its sessions).
+  read); every later run must also match on 95% of the sessions on which either run asked an order (a program that
+  trades once a month could differ on a fifth of its trades inside 1% of its sessions); and no session may show the
+  same lots and the same orders in another size (a lock that closes within days of every start differed on a
+  handful of sessions, inside both shares, each of them the same orders at another size).
 - **What its author reads** after a START failure: which later run fell short, the sessions that differed (counted
   from that run's own first decision, never a day), what the two runs asked where they first differed, and that a
   program must decide from ctx's bars, calendar and each lot's own facts alone, never from how its run stands. The
@@ -61,10 +63,11 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
 - **Cost, measured on the build machine:** four more Train runs a version that reaches the check (eight instead of
   four) and one more decide a session of six of them: 1.4 to 2.6 seconds a version (one to four symbols, any
   look-back), one and a half to two times the restart check. Versions that fail Y1-R1 or STATE cost nothing more.
-- **Not caught, stated** (`league/swarm/ELANE_E2.md`): a lock that closes within a session or two of every start, a
-  lock no Train run reaches, and what the two tolerances allow. **Refused though honest, stated:** a hold that simply
-  ends at the House's maximum-hold exit and is bought again at once, a buy sized in dollars worked out from the
-  sleeve's equity or cash, a weight cap that binds on more than 1% of sessions; each with its cure in the brief.
+- **Not caught, stated** (`league/swarm/ELANE_E2.md`): a lock no Train run reaches, a lock that changes whether the
+  program trades (never how much) and closes within days of every start, and what the two shares allow in other
+  orders. **Refused though honest, stated:** a hold that simply ends at the House's maximum-hold exit and is bought
+  again at once, a buy sized in dollars worked out from the sleeve's equity, cash or room, a weight cap that binds
+  on more than 1% of sessions; each with its cure in the brief.
 - **Files:** `league/swarm/elane_train.py` (the check, the record, the texts), `elane_births.py` and
   `elane_review.py` (words only), the tests (`league/tests/test_elane_e2_start.py`, new; the fakes; three counts in
   the Train and seal tests that now hold the later runs), `league/swarm/ELANE_E2.md`, `docs/operations.md`. Nothing

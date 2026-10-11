@@ -39,8 +39,9 @@ version PASSES when all hold:
       (and so would one whose decide fails once its STATE is gone).
   START  (release E2.1; checked once STATE holds) each Train span run again from `start_shifts` (61 and 127) decision
       sessions in, every run starting flat, gives the orders of the run from the span's first session on at least
-      `start_match` (99%) of each later run's compared sessions, and on at least `start_active` (95%) of those on
-      which either run asked an order (THE START CHECK below). The House starts every program live on a fresh date,
+      `start_match` (99%) of each later run's compared sessions and on at least `start_active` (95%) of those on
+      which either run asked an order, and never the same orders in another size where the two runs show the same
+      book (THE START CHECK below). The House starts every program live on a fresh date,
       and every judged window starts flat: a program whose decisions depend on when its run started (a profit lock, a
       size from the run's own standing, a clock counted from its first trade) trades live other than its replay, and
       the share screen's false-positive line does not hold for it.
@@ -109,10 +110,13 @@ pattern; this check runs the program and looks.
   each order's kind, symbol and fill point; a buy's `share` or `usd` within `SIZE_TOL`; a sell names its lot's
   symbol (two runs number their lots apart); tags are ignored (a program's own words). A decide that failed in one run
   and not the other, and a session an instance was disqualified at, match nothing, as in the restart check.
-  THE RULE. A version passes START when EVERY later run matches run A on at least `start_match` (99%) of its compared
-  sessions AND on at least `start_active` (95%) of those on which either run asked an order (a program that trades
-  once a month asks nothing on nineteen sessions in twenty: read on all sessions alone, a fifth of its trades could
-  differ inside the 1%); else it fails the bar with the code START: the program's fault, like STATE (it judges a
+  THE RULE. A version passes START when EVERY later run (1) matches run A on at least `start_match` (99%) of its
+  compared sessions, (2) matches it on at least `start_active` (95%) of those on which either run asked an order (a
+  program that trades once a month asks nothing on nineteen sessions in twenty: read on all sessions alone, a fifth
+  of its trades could differ inside the 1%), and (3) on NO session (`start_sized` 0) shows the same book as run A and
+  asks the same orders in another size (`resized`: with the same bars, calendar, lots and orders, a size that differs
+  is a size taken from how the run stands, which is what a profit lock that shrinks its lots does; the two shares
+  alone let one that closes within a few trades of every start through); else it fails the bar with the code START: the program's fault, like STATE (it judges a
   program, not the mechanism, so it refutes nothing and spends no Validation try). Its record keeps the counts by
   later run and the sessions that differed, counted from the later run's own first decision (never a day), and what
   the two runs asked where they first differed; the next brief says so and says what a program may decide from
@@ -242,12 +246,13 @@ TRAIN_LABEL = "Train years 2016-19 and 2022-24"
 #: `start_shifts`, `start_warm`, `start_min`, `start_match`, `start_active`: THE START CHECK (the later starts, in
 #: decision sessions into a Train span: two different primes, so no clock's period divides both; the sessions added to
 #: a later run's warm-up; the warmed-up sessions a later run must have for its shift to be used; the share of its
-#: compared sessions that must match; and the share that must match of those on which either run asked an order, so a
-#: program that trades on few sessions cannot hide what differs among the sessions that ask nothing).
+#: compared sessions that must match; the share that must match of those on which either run asked an order, so a
+#: program that trades on few sessions cannot hide what differs among the sessions that ask nothing; and `start_sized`,
+#: the sessions a later run may show the same book and ask the same orders as run A in ANOTHER SIZE: none).
 BAR: dict[str, Any] = {"min_active_years": 3, "year_min_trades": 40, "year_min_days": 20, "year_t_floor": -1.0,
                        "cost_ratio": 0.5, "state_every": 20, "state_first": 7, "state_match": 0.99,
                        "start_shifts": (61, 127), "start_warm": 20, "start_min": 120, "start_match": 0.99,
-                       "start_active": 0.95}
+                       "start_active": 0.95, "start_sized": 0}
 #: The decide limits the restart check loads its instances with (league/equity/EQUITY.md: 1 second a call, 25 errors).
 DECIDE_TIMEOUT, DECIDE_MAX_ERRORS = 1.0, 25
 #: THE SAME SIZE (the restart check): two buys' sizes within these are one size. A `share` within one part in a million
@@ -266,8 +271,9 @@ FAILS: dict[str, str] = {
     "START": f"run again from later starts ({' and '.join(str(x) for x in BAR['start_shifts'])} sessions into a Train "
              f"span, each run starting flat as a live program does on its first day), the program's orders matched the "
              f"run from the span's start on fewer than {BAR['start_match']:.0%} of a later run's compared sessions (or "
-             f"on fewer than {BAR['start_active']:.0%} of those on which either run asked an order): its decisions "
-             "depend on when its run started",
+             f"on fewer than {BAR['start_active']:.0%} of those on which either run asked an order, or the two runs "
+             "held the same lots and asked the same orders in another size): its decisions depend on when its run "
+             "started",
     "WINDOW": f"the Train result carried a day outside the {TRAIN_LABEL} and was refused whole",
     "Y1": f"active (at least {BAR['year_min_trades']} closed lots on {BAR['year_min_days']} entry days) in fewer than "
           f"{BAR['min_active_years']} of the {len(TRAIN_YEARS)} Train years",
@@ -651,7 +657,8 @@ def bar_text() -> str:
             f"span's start on at least {BAR['start_match']:.0%} of each later run's sessions (and on at least "
             f"{BAR['start_active']:.0%} of those on which either run asked an order), compared once the later "
             "run has warmed up (the longer of the program's history and maximum hold, and "
-            f"{BAR['start_warm']} sessions more) and before that wherever the two runs hold the same lots. "
+            f"{BAR['start_warm']} sessions more) and before that wherever the two runs hold the same lots; and where "
+            "the two runs hold the same lots and ask the same orders, never in another size. "
             f"{START_ADVICE} Reported beside, never a bar: the same-exposure "
             "buy-and-hold over the same sessions, the mean time-matched excess (MTE) and the drift share. The first "
             "version that passes is the lineage's ONE Validation try, then ONE sealed look; their outcomes are sealed and "
@@ -1297,13 +1304,14 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
     {sessions (compared, all later runs), matched, share (the LOWEST later run's: the one the rule reads), need,
     active (the compared sessions on which either run asked an order), active_matched, active_share (the lowest later
     run's), active_need, warm, shifts, held (every later run matched on at least `BAR["start_match"]` of its compared
-    sessions AND on at least `BAR["start_active"]` of its active ones), runs ([{span, shift, sessions, early (those
-    compared before its warm-up ended: the same book), matched, share, active, active_matched, active_share, held,
-    disqualified, failed, sized, misses (its first `START_MISSES` differing sessions, counted from its own first
+    sessions AND on at least `BAR["start_active"]` of its active ones AND has at most `BAR["start_sized"]` resized
+    sessions), runs ([{span, shift, sessions, early (those compared before its warm-up ended: the same book), matched,
+    share, active, active_matched, active_share, held, disqualified, failed, sized (the same orders, another size),
+    resized (those of `sized` on which the two runs showed the same book), misses (its first `START_MISSES` differing sessions, counted from its own first
     decision), first_miss ({session, what ("orders" | "size" | "failed" | "disqualified"), base, later: the two runs'
-    orders in words})}]), skipped ([{span, shift, why}]), disqualified, failed, sized, size_gap, first_miss ({span,
-    shift, session, what, base, later} of the first later run that did not hold, else of the first that differed at
-    all)}.
+    orders in words})}]), skipped ([{span, shift, why}]), disqualified, failed, sized, resized, size_gap, first_miss
+    ({span, shift, session, what, base, later} of the first later run that did not hold, else of the first that
+    differed at all)}.
 
     NEVER A SILENT PASS, as the restart check (`_decided`): an instance the child reloaded or lost, a decider that
     restarted, an answer without its counts or a ctx that could not be built raise `StartCheckInterrupted`; so do a
@@ -1351,7 +1359,7 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
                 others.append({"key": key, "inputs": iter(run.inputs),
                                "out": {"span": span, "shift": shift, "sessions": 0, "early": 0, "matched": 0,
                                        "active": 0, "active_matched": 0, "disqualified": 0, "failed": 0, "sized": 0,
-                                       "misses": [], "first_miss": None}})
+                                       "resized": 0, "misses": [], "first_miss": None}})
             seen = 0
             for i, inputs in enumerate(base.inputs):
                 if i >= len(days):
@@ -1373,10 +1381,11 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
                 for other, theirs in live:
                     out = other["out"]
                     k = i - out["shift"]  # the later run's own decision session
+                    alike = same_book(inputs, theirs)
                     if k < warm:
                         # Before its warm-up ends a later run is held to the base run only where both show the same
                         # book: there nothing but the run's own standing can make the two decides differ.
-                        if not same_book(inputs, theirs):
+                        if not alike:
                             continue
                         out["early"] += 1
                     rb, erred_b = answers[other["key"]]
@@ -1395,6 +1404,7 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
                         same, gaps = same_intents(mine, yours)
                         if gaps:
                             out["sized"] += 1
+                            out["resized"] += int(alike)  # the same book, the same orders, another size
                             for unit, gap in gaps.items():
                                 size_gap[unit] = max(size_gap.get(unit, 0.0), gap)
                         if not same:
@@ -1432,7 +1442,8 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
         out["share"] = round(out["matched"] / out["sessions"], 4) if out["sessions"] else 0.0
         out["active_share"] = round(out["active_matched"] / out["active"], 4) if out["active"] else 1.0
         out["held"] = (bool(out["sessions"]) and out["matched"] >= need * out["sessions"] - 1e-9
-                       and out["active_matched"] >= busy * out["active"] - 1e-9)
+                       and out["active_matched"] >= busy * out["active"] - 1e-9
+                       and out["resized"] <= int(BAR["start_sized"]))
     sessions = sum(out["sessions"] for out in runs)
     matched = sum(out["matched"] for out in runs)
     worst = next((out for out in runs if not out["held"]), None) or next((out for out in runs if out["first_miss"]), None)
@@ -1443,7 +1454,7 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
             "active_share": min(out["active_share"] for out in runs), "active_need": busy,
             "warm": warm, "shifts": [int(x) for x in BAR["start_shifts"]], "runs": runs, "skipped": skipped,
             "disqualified": sum(out["disqualified"] for out in runs), "failed": sum(out["failed"] for out in runs),
-            "sized": sum(out["sized"] for out in runs),
+            "sized": sum(out["sized"] for out in runs), "resized": sum(out["resized"] for out in runs),
             "size_gap": {unit: float(f"{gap:.2g}") for unit, gap in sorted(size_gap.items())},
             "held": all(out["held"] for out in runs), "first_miss": first_miss}
 
@@ -1452,7 +1463,7 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
 #: and what the two runs asked where they first differed, in words of a closed vocabulary (`_order_text`): no day, no
 #: market figure, nothing a program writes freely.
 START_KEYS = ("sessions", "matched", "share", "need", "active", "active_matched", "active_share", "active_need", "warm",
-              "shifts", "runs", "skipped", "disqualified", "failed", "sized", "size_gap", "first_miss")
+              "shifts", "runs", "skipped", "disqualified", "failed", "sized", "resized", "size_gap", "first_miss")
 
 
 def with_start(verdict: Mapping[str, Any], check: Mapping[str, Any]) -> dict[str, Any]:
@@ -1463,7 +1474,8 @@ def with_start(verdict: Mapping[str, Any], check: Mapping[str, Any]) -> dict[str
     if not check.get("held") or not check.get("sessions"):
         out.update(passed=False, fails=["START"],
                    why=f"{FAILS['START']}: the lowest later run matched {_pct(check.get('share'))} of its sessions and "
-                       f"{_pct(check.get('active_share'))} of those with an order")
+                       f"{_pct(check.get('active_share'))} of those with an order; {check.get('resized')} sessions the "
+                       "same lots and orders in another size")
     return out
 
 
@@ -1668,7 +1680,8 @@ adjusted as of each session and rounded, so the carried value drifts from what c
 (they must agree to six places of a share); recompute it from ctx.bars at every call. THE START RULE (part of the bar):
 the House starts every program live on a fresh date and every judged run starts flat, so the bar runs your program again
 from later starts inside each Train span and fails it (START) unless its orders match the run from the span's start on
-99% of each later run's sessions and on 95% of those where either run asked an order. Decide from ctx.bars, ctx's calendar fields and each lot's own facts (its symbol, entry,
+99% of each later run's sessions and on 95% of those where either run asked an order, and never differ in size alone
+while the two runs hold the same lots. Decide from ctx.bars, ctx's calendar fields and each lot's own facts (its symbol, entry,
 mark, held_sessions, its own return) alone, never from how your run stands: not ctx.equity, ctx.cash or ctx.caps, not a
 lot's qty, value, pnl or weight in the sleeve as a measure of the run, not a lot's id, not a value carried from earlier
 lots in a tag or in STATE, not a count of sessions, lots or wins since the run began. Size a buy by a constant share of
@@ -1795,9 +1808,12 @@ def start_text(v: Mapping[str, Any]) -> str:
     gaps = start.get("size_gap") if isinstance(start.get("size_gap"), Mapping) else {}
     by = " and ".join(x for x in (f"{_num(gaps.get('share')):.2g} of the sleeve" if _num(gaps.get("share")) else "",
                                   f"${_num(gaps.get('usd')):.2g}" if _num(gaps.get("usd")) else "") if x)
+    resized = int(_num(start.get("resized")) or 0)
+    alike = (f"; on {resized} of them the two runs held the same lots too, and no such session is allowed (with the "
+             "same bars, lots and orders, a size that differs is taken from how the run stands)" if resized else "")
     size = (f" On {sized} sessions in all the orders were the same and only a buy's size differed"
-            + (f" (by at most {by})" if by else "") + ": size a buy by a constant share of the sleeve, never by dollars "
-            "worked out from ctx.equity, ctx.cash or ctx.caps." if sized else "")
+            + (f" (by at most {by})" if by else "") + f"{alike}: size a buy by a constant share of the sleeve, never by "
+            "dollars worked out from ctx.equity, ctx.cash or ctx.caps." if sized else "")
     rest = f"; {len(failed) - 2} more later runs fell short too" if len(failed) > 2 else ""
     return (f"{head}: {'; '.join(said)}{rest} (sessions are counted from a later run's own first decision).{where}{size} "
             f"{START_ADVICE}")
