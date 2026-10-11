@@ -74,9 +74,12 @@ EQUITY_EVIDENCE = ("__init__", "config", "store", "program", "ctx", "engine", "r
 EQUITY_EVIDENCE_ROOTS = ("runner", "child", "screen", "engine")
 EQUITY_EVIDENCE_EXTRA = ("synth",)
 #: An equity family's state keys an adoption archives and clears beside `SELECTION_KEYS` (its evidence under the old
-#: engine: the Validation runs' spread, the screen's floor, the Train series a lineage check reads). Its tries and its
-#: look (`elane_try`, `elane_look`) are never cleared: a lineage's spent try and look stay spent.
-EQUITY_SELECTION_KEYS = ("validation_r_sd_by_version", "elane_floor", "elane_train_r")
+#: engine: the Validation runs' spread and the screen's floor, both run again before any look). Its tries and its look
+#: (`elane_try`, `elane_look`) are never cleared: a lineage's spent try and look stay spent. Nor is THE LOOK'S LINEAGE
+#: RECORD (`elane_train_r`, the looked version's Train daily series, and `elane_template`): A9 D3's correlation test
+#: reads it for every later program of either equity lane, and nothing can write it again (the look is spent), so an
+#: adoption that cleared it would hand a re-coded copy of a program already looked at a second sealed look.
+EQUITY_SELECTION_KEYS = ("validation_r_sd_by_version", "elane_floor")
 
 
 def _equity_lanes() -> tuple[str, ...]:
@@ -131,8 +134,9 @@ def adopt_equity(store: Any, expected: Mapping[str, Any] | None) -> dict[str, An
     back to "gym" for fresh qualification (its frozen lots keep their exits), in one transaction; options families are
     never touched. {adopted, families, previous, current}.
 
-    A missing identity cannot authorize adoption. Runs, trials, the lineage's tries and its look, refusals, forward
-    records and the band's history stay; the family's `equity_evaluator` names the identity it is now judged under."""
+    A missing identity cannot authorize adoption. Runs, trials, the lineage's tries and its look with its lineage record
+    (`EQUITY_SELECTION_KEYS`: the Train series and the template D3 reads are kept), refusals, forward records and the
+    band's history stay; the family's `equity_evaluator` names the identity it is now judged under."""
     if expected is None:
         return {"adopted": False, "families": 0, "reason": "equity identity unavailable"}
     from .bands import LIVE_BANDS

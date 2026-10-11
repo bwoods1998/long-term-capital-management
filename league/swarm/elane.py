@@ -59,7 +59,10 @@ equity review.
 THE LINEAGE (A9 D3): a program whose Train daily returns correlate >= 0.7 with a program already looked at in either
 equity lane (`league.equity.screen.same_lineage`, over the House-only Train series each look keeps, `TRAIN_R_KEY`), or
 that uses the same template in its own lane (`TEMPLATE_KEY`: its code's sha, lane-scoped by `lineage_key`), is the same
-lineage: one look a lineage. Look and Validation outcomes of share programs are never fed back to generators or the
+lineage: one look a lineage. The series and the template are THE LOOK'S LINEAGE RECORD: kept for good, an equity
+identity adoption included (league/swarm/evaluator.py `EQUITY_SELECTION_KEYS` leaves them), and the test FAILS CLOSED:
+a program already looked at that keeps no series has it written again from its looked version's Train-era runs
+(`_restore_train`), and where that cannot be done the look waits (`LineageUnread`). Look and Validation outcomes of share programs are never fed back to generators or the
 diagnostician: no graveyard row is written for an equity family in E1 (the options architect reads the graveyard), and
 no options reader sees an equity family (`SwarmStore.families`).
 
@@ -862,11 +865,22 @@ def _train_series(segments: Sequence[Any]) -> dict[str, list]:
     return {"days": days, "r": r}
 
 
+class LineageUnread(RuntimeError):
+    """THE LINEAGE cannot be judged: `family` was looked at (or its look is in flight) and keeps no Train series
+    (`TRAIN_R_KEY`) for D3's correlation test. The look waits (`look`); it never passes D3 unjudged."""
+
+    def __init__(self, family: str):
+        super().__init__(f"{family} keeps no Train series of its look")
+        self.family = str(family)
+
+
 def same_lineage(store: Any, fam: Mapping[str, Any], lane: str, template: str,
                  train: Mapping[str, Sequence]) -> str | None:
     """THE LINEAGE (A9 D3): the family already looked at that `fam`'s program is the same lineage as, or None: the same
     template in its own lane (`TEMPLATE_KEY`, lane-scoped), or Train daily returns correlating >= 0.7 on their common
-    sessions with any equity program already looked at, in either equity lane (`league.equity.screen.same_lineage`)."""
+    sessions with any equity program already looked at, in either equity lane (`league.equity.screen.same_lineage`).
+    FAILS CLOSED (`LineageUnread`): a family that was looked at, or a living one whose look is in flight, with no Train
+    series kept is never skipped (a retired family's marker of a look that never landed is: nothing was looked at)."""
     import numpy as np
 
     from ..equity import screen as S
@@ -876,12 +890,17 @@ def same_lineage(store: Any, fam: Mapping[str, Any], lane: str, template: str,
         if str(other["id"]) == str(fam["id"]):
             continue
         state = other.get("state") or {}
-        if not isinstance(state.get(LOOK_KEY), Mapping) and not (state.get("look_inflight") or {}).get("sha"):
+        looked = isinstance(state.get(LOOK_KEY), Mapping)
+        if not looked and not (state.get("look_inflight") or {}).get("sha"):
             continue
         if lane_of(store, other) == lane and state.get(TEMPLATE_KEY) == template:
             return str(other["id"])
         theirs = state.get(TRAIN_R_KEY) if isinstance(state.get(TRAIN_R_KEY), Mapping) else {}
         pairs = dict(zip(theirs.get("days") or [], theirs.get("r") or []))
+        if not pairs:
+            if looked or not other.get("retired_at"):
+                raise LineageUnread(str(other["id"]))
+            continue
         common = sorted(set(mine) & set(pairs))
         if len(common) < 3:
             continue
@@ -890,6 +909,38 @@ def same_lineage(store: Any, fam: Mapping[str, Any], lane: str, template: str,
         if bool(S.same_lineage(a, b, same_template=False)):
             return str(other["id"])
     return None
+
+
+def _restore_train(gate: Any, fid: str) -> bool:
+    """THE LOOK'S LINEAGE RECORD written again: a looked-at family's missing Train series (`TRAIN_R_KEY`), from its
+    looked version's Train-era runs (`Isolated.segments`: the runs its look kept the series of; Train-era data only,
+    nothing sealed, no try and no look). False when it cannot be (no recorded look: the gate's round owes a look in
+    flight again; no program to run; a run that failed or gave no session)."""
+    store = gate.store
+    other = store.family(str(fid)) or {}
+    state = other.get("state") or {}
+    looked = state.get(LOOK_KEY) if isinstance(state.get(LOOK_KEY), Mapping) else None
+    try:
+        version = store.version(str(fid), int(looked["version"])) if looked else None
+    except (KeyError, TypeError, ValueError):
+        version = None
+    if not version or not version.get("code"):
+        return False
+    from ..equity import screen as S
+
+    try:
+        runs = _runner(gate).segments(version["code"], dict(version.get("params") or {}), name=str(fid))
+        train = _train_series([_series(S, run) for run in runs])
+    except Exception as exc:  # noqa: BLE001 - it stays unread, and the look that asked waits
+        store.event("swarm.gate", str(fid), {"action": "equity_lineage_unread", "version": version.get("n"),
+                                             "error": type(exc).__name__})
+        return False
+    if not train["days"]:
+        return False
+    store.set_state(str(fid), **{TRAIN_R_KEY: train})
+    store.event("swarm.gate", str(fid), {"action": "equity_lineage_restored", "version": version.get("n"),
+                                         "sessions": len(train["days"])})
+    return True
 
 
 def _refuse(gate: Any, fid: str, n: int, sha: str, stage: str, why: str, *, screen: str | None) -> None:
@@ -1013,11 +1064,23 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         return None
     template = lineage_key(lane, str(version.get("sha") or ""))
     train = _train_series(segments)
-    try:
-        twin = same_lineage(store, fam, lane, template, train)
-    except Exception as exc:  # noqa: BLE001 - a lineage that cannot be read spends no look
-        store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "lineage", "error": type(exc).__name__})
-        return None
+    restored: set[str] = set()
+    while True:
+        try:
+            twin = same_lineage(store, fam, lane, template, train)
+            break
+        except LineageUnread as exc:
+            # D3 FAILS CLOSED: a program already looked at keeps no Train series. Its looked version's Train-era runs
+            # write it again (once a family a look); where they cannot, this look waits: it never passes D3 unjudged.
+            if exc.family in restored or not _restore_train(gate, exc.family):
+                _wait(gate, fid, n, sha, f"the lineage cannot be judged (A9 D3): {exc.family} was looked at, or its "
+                      "look is in flight, and keeps no Train series to compare with", screen=screen)
+                return None
+            restored.add(exc.family)
+        except Exception as exc:  # noqa: BLE001 - a lineage that cannot be read spends no look
+            store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "lineage",
+                                            "error": type(exc).__name__})
+            return None
     if twin is not None:
         _refuse(gate, fid, n, sha, "same lineage",
                 f"the same lineage as {twin}, already looked at (A9 D3: Train correlation >= 0.7 or the same template)",
@@ -1157,4 +1220,5 @@ __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_K
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",
-           "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LOSS_LINE", "loss_line"]
+           "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LineageUnread", "LOSS_LINE",
+           "loss_line"]

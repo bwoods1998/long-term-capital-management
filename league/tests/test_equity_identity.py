@@ -231,6 +231,7 @@ class Adoption(StoreCase):
         self.store.set_state("eq-beta", banded_version=1, elane_try={"version": 1, "precheck": True},
                              elane_look={"version": 1, "verdict": {"passed": True}}, gate_ready=True,
                              validation_r_sd_by_version={"1": 0.01}, elane_floor={"1": {"c_p": 1.2}},
+                             elane_train_r={"days": [1, 2, 3], "r": [0.01, -0.02, 0.0]}, elane_template="beta:t",
                              banded_evaluator={"engine": EQUITY_ENGINE_VERSION, "equity_sha256": "old-equity-code",
                                                "run_sha": "r"})
 
@@ -249,8 +250,11 @@ class Adoption(StoreCase):
         state = fam["state"]
         self.assertEqual(state["elane_try"], {"version": 1, "precheck": True}, "a spent try stays spent")
         self.assertEqual(state["elane_look"]["version"], 1, "a spent look stays spent")
-        for key in ("validation_r_sd_by_version", "elane_floor", "elane_train_r"):
+        for key in ("validation_r_sd_by_version", "elane_floor"):
             self.assertIsNone(state[key])
+        # The look's lineage record stays with the look (A9 D3 reads it for every later program; nothing rewrites it).
+        self.assertEqual(state["elane_train_r"], {"days": [1, 2, 3], "r": [0.01, -0.02, 0.0]})
+        self.assertEqual(state["elane_template"], "beta:t")
         self.assertFalse(state["gate_ready"])
         self.assertEqual(state["equity_evaluator"], current)
         self.assertEqual(state["previous_evaluator_selection"]["elane_floor"], {"1": {"c_p": 1.2}})
