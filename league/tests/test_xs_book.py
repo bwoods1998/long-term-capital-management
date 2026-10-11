@@ -604,12 +604,15 @@ class TheJob(Case):
         self.assertEqual([p["col"] for p in inp.positions],
                          [self.cols.symbols.index("N005"), self.cols.symbols.index("N007")])
         self.assertEqual(inp.positions[0], {"lid": 1, "col": inp.positions[0]["col"], "qty": 2.0, "value": 110.0,
-                                            "entry_value": 100.0, "held_sessions": 5, "at": "open", "tag": "xs"})
+                                            "entry_value": 100.0, "held_sessions": 5, "at": "open", "tag": ""},
+                         "the House's own tag of its intents (`TAG`) never reaches a program: the Gym's lots carry none")
         self.assertEqual(inp.positions[1]["value"], 60.0, "never marked: its entry price")
         self.assertEqual(inp.closed[0], {"lid": 3, "col": self.cols.symbols.index("N009"), "net_ret": 0.04,
                                          "held_sessions": 4, "reason": "house", "tag": "ineligible"})
         self.assertEqual((inp.closed[1]["reason"], inp.closed[1]["tag"], inp.closed[1]["net_ret"]),
                          ("program", "mine", -0.02))
+        sold = self.inputs(closed=[lot(5, "N010", status=L.LOT_CLOSED, exit_day="2026-10-12", reason="program")])
+        self.assertEqual(sold.closed[0]["tag"], "", "nor on a lot its own sale closed")
         self.assertEqual((inp.history, inp.max_names, inp.ref), (60, 8, 12))
         self.assertEqual((inp.cash, inp.equity, inp.budget, inp.rejects), (390.0, 560.0, 557.25, ("budget",)))
         self.assertEqual(inp.ids.tolist(), self.cols.ids.tolist())
@@ -818,8 +821,8 @@ class TheSaltNeverLeaves(Case):
         for symbol in self.cols.symbols:
             self.assertNotIn(symbol.encode(), blob, symbol)
         texts = self.strings(payload["jobs"][0]["inputs"]) + self.strings(payload["jobs"][0]["standing"])
-        self.assertEqual({t for t in texts if isinstance(t, str)}, {"open", "xs"},
-                         "the only words in a job are a fill point and a tag")
+        self.assertEqual({t for t in texts if isinstance(t, str)}, {"open", ""},
+                         "the only words in a job are a fill point and a lot's tag (the Gym's: none on a held lot)")
         self.assertEqual([t for t in texts if isinstance(t, bytes)], [self.cols.dither_key])
         ints = {a.tobytes() for a in vars(self.job).values() if isinstance(a, np.ndarray) and a.dtype.kind == "i"}
         self.assertNotIn(self.cols.aids.tobytes(), ints)

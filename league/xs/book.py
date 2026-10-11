@@ -590,6 +590,17 @@ def _column_of(cols: Columns) -> dict[str, int]:
     return {s: k for k, s in enumerate(cols.symbols)}
 
 
+def _ctx_tag(lot: Any) -> str:
+    """A lot's tag AS A PROGRAM IS TOLD IT: what the Gym's engine tells it, which tags no lot of its own orders ("")
+    and tags a House exit of an ineligible name `INELIGIBLE`. Every intent of a panel decision is stamped `TAG` (the
+    book's own mark of who planned it), E1's fill copies the intent's tag onto the lot, and the ctx's bytes hash a
+    lot's tag: handed through, a live program read "xs" on every lot it held where its replay reads "", so no live
+    decision's `ctx_sha` with a position could equal its twin's, and one line of program code could tell live from
+    replay (the pre-registration's C1: what a program sees is identical live and in replay)."""
+    tag = str(_get(lot, "tag") or "")
+    return "" if tag == TAG else tag
+
+
 def inputs(cols: Columns, fetched: Fetched, *, day: dt.date, needs: Mapping[str, Any], lots: Sequence[Any],
            closed: Sequence[Any], rejects: Sequence[str], cash: Any, equity: Any, budget: Any,
            params: Mapping[str, Any]) -> Any:
@@ -614,7 +625,7 @@ def inputs(cols: Columns, fetched: Fetched, *, day: dt.date, needs: Mapping[str,
         positions.append({"lid": int(_get(lot, "lid")), "col": where[symbol], "qty": float(qty),
                           "value": float(qty * price), "entry_value": float(_dec(_get(lot, "entry_notional")) or ZERO),
                           "held_sessions": S.sessions_between(str(_get(lot, "opened_day")), iso),
-                          "at": str(_get(lot, "entry_at") or "open"), "tag": str(_get(lot, "tag") or "")})
+                          "at": str(_get(lot, "entry_at") or "open"), "tag": _ctx_tag(lot)})
     done = []
     for lot in closed:
         symbol = str(_get(lot, "symbol") or "").upper()
@@ -627,7 +638,7 @@ def inputs(cols: Columns, fetched: Fetched, *, day: dt.date, needs: Mapping[str,
                      "held_sessions": S.sessions_between(str(_get(lot, "opened_day")),
                                                          str(_get(lot, "exit_day") or iso)),
                      "reason": reason if reason in ("program", "max_hold") else "house",
-                     "tag": INELIGIBLE if reason == INELIGIBLE else str(_get(lot, "tag") or "")})
+                     "tag": INELIGIBLE if reason == INELIGIBLE else _ctx_tag(lot)})
     return X.inputs_from_arrays(np.asarray(fetched.days), np.asarray(fetched.raw), np.asarray(fetched.all), day=day,
                                 elig0=eligible(cols, fetched, day), ids=np.asarray(cols.ids),
                                 dither_key=cols.dither_key, sector_perm=np.asarray(cols.sector_perm),

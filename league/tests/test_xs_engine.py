@@ -1252,6 +1252,40 @@ class WhatAProgramIsTold(EngineCase):
         self.assertGreater(held, 100)
         self.assertGreater(closed, 20)
 
+    def test_a_lots_tag_is_the_same_word_live_as_in_the_gym(self):
+        """The review's spec-4 (the pre-registration's C1: what a program sees is identical live and in replay). THE
+        GYM tags no lot of the program's own orders ("") and a House exit of an ineligible name "ineligible". LIVE,
+        every intent of a panel decision is stamped `book.TAG` and E1's fill copies it onto the lot: handed through,
+        a live program read "xs" where its replay reads "", the two `ctx_sha` could never be equal with a position
+        held, and `any(p["tag"] for p in ctx.positions)` told live from replay."""
+        from types import SimpleNamespace
+
+        from league.xs import book as xbook
+
+        gym_open = {row["tag"] for _, book in self.seen for row in book["positions"]}
+        gym_closed = {(row["reason"], row["tag"]) for _, book in self.seen for row in book["closed"]}
+        self.assertEqual(gym_open, {""}, "an open lot of the Gym carries no tag")
+        self.assertTrue(gym_closed <= {("program", ""), ("max_hold", ""), ("house", ""), ("house", xbook.INELIGIBLE),
+                                       ("vanished", "")}, gym_closed)
+        self.assertIn(("program", ""), gym_closed)
+        self.assertEqual(xbook._ctx_tag(SimpleNamespace(tag=xbook.TAG)), "", "the live adapter says the Gym's word")
+        self.assertEqual(xbook._ctx_tag({"tag": xbook.TAG}), "")
+        self.assertEqual(xbook._ctx_tag(SimpleNamespace(tag=xbook.INELIGIBLE)), xbook.INELIGIBLE)
+        self.assertEqual(xbook._ctx_tag(SimpleNamespace(tag=None)), "")
+        # And the ctx's bytes hash a lot's tag (so the difference was in every live `ctx_sha` with a position held).
+        t, book = next((t, b) for t, b in self.seen if b["positions"])
+        needs = program.Needs("sp500", 20, 10, "weekly", 0, 6)
+        same = dict(needs=needs, closed=[], rejects=[], cash=book["cash"], equity=book["equity"], budget=book["budget"],
+                    params={})
+        gym = ctx.ctx_bytes(ctx.build(ctx.inputs_from_panel(self.bars, t, positions=book["positions"], **same)))
+        live = ctx.ctx_bytes(ctx.build(ctx.inputs_from_panel(
+            self.bars, t, positions=[{**row, "tag": xbook.TAG} for row in book["positions"]], **same)))
+        self.assertNotEqual(gym, live, "the ctx's bytes read the tag")
+        told = ctx.ctx_bytes(ctx.build(ctx.inputs_from_panel(
+            self.bars, t, positions=[{**row, "tag": xbook._ctx_tag({"tag": xbook.TAG})} for row in book["positions"]],
+            **same)))
+        self.assertEqual(gym, told)
+
     def test_the_lots_closed_and_the_rejects_since_the_last_call_reach_the_next_call_once(self):
         called = {row["t"] for row in self.log.decisions if row["called"]}
         told: dict[int, int] = {}
