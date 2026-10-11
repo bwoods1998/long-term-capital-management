@@ -33,6 +33,19 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    Allowed: sizing proportional to them (`"usd": 0.5 * ctx.equity`, `min(ctx.cash, ctx.caps[s])`), a sign or zero
    check (`lot["pnl"] < 0`, `ctx.caps[s] <= 0`), and the position's own state among the sleeve's dollars now
    (`ctx.cash / ctx.equity`, a lot's `value` over `ctx.equity`, `pnl` over `value`).
+1c. THE MEMORY RULE (`memory_refusals`; static, free; the integration review's seal-5). The swarm's one decider child
+   runs every equity program and run in ONE interpreter (Train runs, the restart check, Validation, the sealed look),
+   and the Gym's code rules (league/gym/safety.py) refuse attribute assignment but not a change to an object that
+   hangs off an imported module (`np.typecodes.setdefault("anchor", x)`). Such an object is memory OUTSIDE STATE: it
+   survives the restart check's fresh load (so a first-seen price kept there passes STATE and a deploy would clear it
+   live), and it is shared by every program and run in the child, the look's run included. For the programs the swarm
+   breeds the rule shuts the door whole: of `numpy` and `math` a program CALLS functions (`np.mean(x)`,
+   `np.linalg.norm(x)`, `np.maximum.accumulate(x)`), reads constants and types (`np.nan`, `math.pi`, `np.float64`)
+   and hands on a function the level rule knows (`key=np.abs`); any other object of a module read as a value (held,
+   aliased, indexed, passed on, reached by `getattr`, imported by name) is refused, reader and writer alike. It runs
+   in `elane_train.check_code` beside the level rule. Why here and not in league/gym/safety.py: that file is in the
+   options execution fingerprint and the equity evidence identity, and a hardening rule there would reset every band
+   proof; the root (one interpreter for every run) is E1's, for its next identity move.
 2. THE PAID REVIEW AND AUDIT (`EquityReview`): at a version's first Train pass (equity-v1), BEFORE it is the lineage's
    Validation try, two different models read the exact program, its card and its own Train facts (never a Validation
    or look figure: A9 D3) under `REVIEW` (the gate's leakage rubric for daily share programs) and answer
@@ -813,6 +826,106 @@ def level_text(code: Any) -> str | None:
             + "; ".join(found[:4]) + (f"; and {len(found) - 4} more" if len(found) > 4 else ""))
 
 
+# ------------------------------------------------------------------------------------------------------- the memory rule
+#: What of a module a program may read as a VALUE (the module docstring, 1c): its constants and its scalar and array
+#: types. Everything else of `numpy` and `math` is reached by CALLING it (or by handing a known function on, below).
+MODULE_VALUES = frozenset({
+    "nan", "inf", "pi", "e", "tau", "newaxis", "euler_gamma", "NaN", "NAN", "Inf", "Infinity", "PINF", "NINF", "PZERO",
+    "NZERO", "ndarray", "generic", "number", "floating", "integer", "signedinteger", "unsignedinteger", "inexact",
+    "bool_", "bool", "float16", "float32", "float64", "float_", "double", "single", "half", "longdouble", "int8", "int16",
+    "int32", "int64", "int_", "intp", "intc", "uint8", "uint16", "uint32", "uint64", "uint", "uintp", "complex64",
+    "complex128", "str_", "object_", "dtype"})
+#: numpy's submodules whose functions a program may call (`np.linalg.norm(x)`); the others are shut by name already
+#: (league/gym/safety.py `NUMPY_BANNED`).
+MODULE_PARTS = frozenset({"linalg", "fft", "polynomial", "emath", "exceptions", "dtypes"})
+#: A ufunc's own methods (`np.maximum.accumulate(x)`).
+UFUNC_METHODS = frozenset({"reduce", "accumulate", "outer", "reduceat", "at"})
+#: The functions a program may hand on as a value (`key=np.abs`): the ones the level rule knows by name.
+MODULE_FUNCTIONS = KEEP | COMBINE | LOG | EXP | UNITLESS | COMPARES | BUCKETS | frozenset(ARITHMETIC)
+
+
+def memory_refusals(code: Any) -> list[str]:
+    """THE MEMORY RULE (the module docstring, 1c): every place the program reads an object that BELONGS TO A MODULE as a
+    value (`np.typecodes`, `t = np.typecodes`, `from numpy import typecodes`, `getattr(np, "typecodes")`, the module
+    itself handed on), as "line N: why". Such an object lives in the decider child's interpreter, not in the program: it
+    is shared by every program and run there and survives the restart check's fresh load, so it is memory outside STATE.
+    [] for none, and for a file that does not parse (the code rules refuse that)."""
+    try:
+        tree = ast.parse(str(code or ""))
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return []
+    modules: dict[str, str] = {}
+    imported: dict[str, str] = {}
+    parent: dict[int, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent[id(child)] = node
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                modules[a.asname or a.name.split(".")[0]] = a.name.split(".")[0]
+        elif isinstance(node, ast.ImportFrom) and str(node.module or "") != "__future__":
+            for a in node.names:
+                imported[a.asname or a.name] = a.name
+    found: list[tuple[int, str]] = []
+
+    def called(node: ast.AST) -> bool:
+        up = parent.get(id(node))
+        return isinstance(up, ast.Call) and up.func is node
+
+    def chain(node: ast.AST) -> tuple[list[str], ast.AST]:
+        """The attributes read one after another from `node` (`np.a.b.c`: [a, b, c]) and the outermost of them."""
+        names: list[str] = []
+        while True:
+            up = parent.get(id(node))
+            if not (isinstance(up, ast.Attribute) and up.value is node):
+                return names, node
+            names.append(up.attr)
+            node = up
+
+    def refuse(node: ast.AST, what: str) -> None:
+        found.append((int(getattr(node, "lineno", 0) or 0),
+                      f"reads {what} as a value: an object that belongs to a module is shared by every program the "
+                      "House's decider runs and outlives a restart (memory outside STATE)"))
+
+    def judge(node: ast.AST, names: list[str], top: ast.AST, owner: str) -> None:
+        """`names` read from a module (or, from its second name on, from one of its parts)."""
+        while len(names) > 1 and names[0] in MODULE_PARTS:
+            owner, names = f"{owner}.{names[0]}", names[1:]
+        if not names:
+            refuse(node, f"the module {owner}")
+        elif len(names) == 1:
+            if not called(top) and names[0] not in MODULE_VALUES and names[0] not in MODULE_FUNCTIONS:
+                refuse(node, f"{owner}.{names[0]}")
+        elif not (len(names) == 2 and names[0] in MODULE_FUNCTIONS and names[1] in UFUNC_METHODS and called(top)):
+            refuse(node, f"{owner}.{names[0]} (through .{'.'.join(names[1:])})")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name) or not isinstance(node.ctx, ast.Load):
+            continue
+        if node.id in modules:
+            names, top = chain(node)
+            judge(node, names, top, modules[node.id])
+        elif node.id in imported:
+            names, top = chain(node)
+            judge(node, [imported[node.id], *names], top, "the module's")
+    seen, out = set(), []
+    for item in sorted(found):
+        if item not in seen:
+            seen.add(item)
+            out.append(f"line {item[0]}: {item[1]}")
+    return out
+
+
+def memory_text(code: Any) -> str | None:
+    """Why a program is refused by THE MEMORY RULE, in one sentence for its author, or None."""
+    found = memory_refusals(code)
+    if not found:
+        return None
+    return ("refused by the equity memory rule (call numpy's and math's functions and read their constants; never hold, "
+            "alias, index or change an object that belongs to a module: it is not your program's memory): "
+            + "; ".join(found[:4]) + (f"; and {len(found) - 4} more" if len(found) > 4 else ""))
+
+
 # ------------------------------------------------------------------------------------------------------- the paid review
 #: The contract references a failure may cite (`grounded`).
 FACTS: dict[str, str] = {
@@ -976,4 +1089,5 @@ def holds(state: Mapping[str, Any] | None, sha: str) -> bool:
 
 
 __all__ = ["OBJECTIVE", "STATE_REVIEW", "DEFAULTS", "BOUNDS", "BAR_FIELDS", "LOT_FIELDS", "FACTS", "REVIEW", "cfg",
-           "model_of", "level_refusals", "level_text", "grounded", "question", "record", "holds"]
+           "model_of", "level_refusals", "level_text", "memory_refusals", "memory_text", "grounded", "question", "record",
+           "holds"]

@@ -1062,8 +1062,9 @@ def needs_literal(code: str) -> dict[str, Any] | None:
 
 def check_code(code: Any, symbols: Sequence[str]) -> str | None:
     """Why a program cannot be a version of a family trading `symbols`, or None: the Gym's static rules
-    (`league.gym.safety.check_program`, never executed here), NEEDS a literal dict whose symbols are the family's, and the
-    equity level rule (`elane_review.level_text`)."""
+    (`league.gym.safety.check_program`, never executed here), NEEDS a literal dict whose symbols are the family's, the
+    equity memory rule (`elane_review.memory_text`: no object of a module held as memory) and the equity level rule
+    (`elane_review.level_text`)."""
     from ..gym.safety import CodeRefused, check_program
 
     text = str(code or "")
@@ -1083,7 +1084,13 @@ def check_code(code: Any, symbols: Sequence[str]) -> str | None:
     foreign = [str(s) for s in named if str(s).upper() not in own]
     if foreign:
         return f"NEEDS names {', '.join(foreign[:6])}, outside the family's symbols ({', '.join(sorted(own))})"
-    # THE LEVEL RULE (league/swarm/elane_review.py): a raw price or volume level held against a constant or a PARAMS value.
+    # THE MEMORY RULE (league/swarm/elane_review.py): an object that belongs to a module is memory outside STATE, shared
+    # by every program in the decider child.
+    memory = elane_review.memory_text(text)
+    if memory is not None:
+        return memory
+    # THE LEVEL RULE (league/swarm/elane_review.py): a raw price or volume level held against a constant or a PARAMS
+    # value, and the run's own dollars held against a constant or the run's anchor.
     return elane_review.level_text(text)
 
 
@@ -1657,9 +1664,10 @@ class EquityResearcher:
         if version is None or not version.get("code"):
             return {"family": fid, "version": n, "error": "the version cannot be read"}
         code = str(version["code"])
-        static = elane_review.level_text(code)
+        static = elane_review.memory_text(code) or elane_review.level_text(code)
         if static is not None:
-            return self.review_failed(fam, n, "the level rule", [static])
+            return self.review_failed(fam, n, "the level rule" if static.startswith("refused by the equity level") else
+                                      "the memory rule", [static])
         held = elane_yield.hold(self.store, self.settings, self.clock())
         if held is not None:  # the day's line, or E2's own hourly pace: no model is asked
             return {"family": fid, "version": n, "skipped": held}

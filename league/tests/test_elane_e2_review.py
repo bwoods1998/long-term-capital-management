@@ -561,6 +561,68 @@ def decide(ctx):
         self.assertEqual(grounded(answer, code)["verdict"], "fail", "a reader's failure on it binds")
 
 
+class TheMemoryRule(unittest.TestCase):
+    """The integration review's seal-5: a program could keep memory in an object that hangs off numpy, which survives
+    the restart check's fresh load and is shared by every program and run in the swarm's one decider child."""
+
+    HEAD = 'import math\nimport numpy as np\nNEEDS = {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2}\nPARAMS = {}\n\n'
+    #: The reviewer's two programs: one writes the key, another program reads it in a later run of the same child.
+    WRITER = HEAD + 'def decide(ctx):\n    np.typecodes.setdefault("anchor", 123.25)\n    return []\n'
+    READER = HEAD + ('def decide(ctx):\n    if np.typecodes.get("anchor") == 123.25:\n'
+                     '        return [{"buy": "SPY", "share": 0.5}]\n    return []\n')
+    OTHERS = {
+        "a subscript store": 'def decide(ctx):\n    np.typecodes["anchor"] = ctx.prices["SPY"]\n    return []\n',
+        "an alias": 'def decide(ctx):\n    t = np.typecodes\n    t.update(anchor=1)\n    return []\n',
+        "an import by name": 'from numpy import typecodes\ndef decide(ctx):\n    typecodes.setdefault("a", 1)\n    return []\n',
+        "a literal getattr": 'def decide(ctx):\n    getattr(np, "typecodes").setdefault("a", 1)\n    return []\n',
+        "the module handed on": 'def put(m):\n    return m\ndef decide(ctx):\n    put(np)\n    return []\n',
+        "the module aliased": 'def decide(ctx):\n    n = np\n    return []\n',
+        "a table of the module's": 'def decide(ctx):\n    k = len(np.sctypeDict)\n    return []\n',
+        "an object handed to a helper": ('def put(d, v):\n    d["anchor"] = v\ndef decide(ctx):\n'
+                                         '    put(np.typecodes, 1.0)\n    return []\n'),
+    }
+
+    def test_the_writer_and_the_reader_are_both_refused_before_they_are_stored_or_run(self):
+        from league.gym.safety import check_program
+        from league.swarm import elane_train
+
+        for name, code in (("the writer", self.WRITER), ("the reader", self.READER)):
+            check_program(code)  # the Gym's own code rules have nothing against either
+            why = elane_train.check_code(code, ["SPY"])
+            self.assertIsNotNone(why, name)
+            self.assertIn("equity memory rule", why)
+            self.assertIn("numpy.typecodes", why)
+            self.assertIn("line 7", why)
+
+    def test_every_way_to_an_object_of_a_module_is_refused(self):
+        for name, body in self.OTHERS.items():
+            with self.subTest(name):
+                found = elane_review.memory_refusals(self.HEAD + body)
+                self.assertTrue(found, name)
+                self.assertTrue(all(f.startswith("line ") for f in found))
+
+    def test_calls_constants_types_and_known_functions_pass(self):
+        own = self.HEAD + '''from numpy import mean, nan
+STATE = {}
+def decide(ctx):
+    c = np.asarray(ctx.bars["SPY"].close, dtype=np.float64)
+    peak = np.maximum.accumulate(c)
+    worst = float(np.min(c / peak - 1.0)) if len(c) else nan
+    size = math.sqrt(2.0) / math.pi * float(np.linalg.norm(np.diff(np.log(c)))) if len(c) > 1 else np.nan
+    order = sorted(range(len(c)), key=np.abs)
+    STATE["seen"] = int(np.add.reduce(np.isfinite(c)))
+    with np.errstate(divide="ignore"):
+        ok = isinstance(c, np.ndarray) and math.isfinite(worst) and mean(c) > 0 and size == size and order is not None
+    return [{"buy": "SPY", "share": 0.5}] if ok and worst > -0.1 and c[-1] is not np.newaxis else []
+'''
+        self.assertEqual(elane_review.memory_refusals(own), [])
+        self.assertEqual(level_refusals(own), [])
+        for code in (SCALE_FREE, SLEEVE_SIZED, *SEED_SHAPES):
+            self.assertEqual(elane_review.memory_refusals(code), [])
+        self.assertIsNone(elane_review.memory_text(SCALE_FREE))
+        self.assertEqual(elane_review.memory_refusals("def decide(ctx:"), [])
+
+
 class ThePaidReview(unittest.TestCase):
     CODE = 'NEEDS = {"symbols": ["SPY"]}\nSTATE = {}\ndef decide(ctx):\n    STATE["n"] = STATE.get("n", 0) + 1\n    return []\n'
 
