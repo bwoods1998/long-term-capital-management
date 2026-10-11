@@ -983,7 +983,9 @@ class TheJobsOwnParts(unittest.TestCase):
         self.on(questions_per_cell=20, batch=40)
         SwarmStore(self.root).close()
         synth.synthetic_store(self.root / STORE_DIR, symbols=("SPY", "QQQ", "XLK", "AAPL"), seed=8, gate=True)
-        router = ProbeRouter()
+        # The calls cost nothing here: the run's dollar bound is E2's own day line as the swarm's settings give it
+        # (policy.json and the budget's levers), which is not this test's to fix; the bound has its own tests above.
+        router = ProbeRouter(cost=0.0)
         built = []
 
         def build(root, store, settings_, *, config=None):
@@ -992,7 +994,8 @@ class TheJobsOwnParts(unittest.TestCase):
         with mock.patch("league.swarm.models.build_router", build):
             out = P.run(self.ctx())
         self.assertEqual(built, [(self.root, {})])
-        self.assertEqual((out["finished"], out["stopped"]), (True, None), out)
+        self.assertEqual((out["finished"], out["stopped"], out["usd"]), (True, None, 0.0), out)
+        self.assertGreater(out["bound"], 0.0)
         doc = json.loads((self.root / P.FILE).read_text())
         (route,) = doc["routes"]
         self.assertEqual(route, elane_yield.cfg(None)["routes"][0], "E2's first route, never tried")
