@@ -605,7 +605,8 @@ Release E4's panel lane holds a look back until the probe has asked three strata
 probe gained a seam for them and nothing else of its behaviour moved: `run(ctx)`, THE JOB, hands no plan and is this
 release's probe to the byte (`league/tests/test_contam_probe.py` passes unchanged; the registry row is untouched).
 
-- **The import rules of section 1 stand as written, and so does every seal test.** `contam_probe.py` imports
+- **Patch 18 moved no import rule of section 1 and no seal test** (section 13's one addition is package J's, for
+  the forward modules; the probe imports none of it: `test_contam_xs.TheWiring`). `contam_probe.py` imports
   nothing of `league/xs` and no module outside section 1's list. The panel store is opened by a module of release
   E4, `league/ops/contam_xs.py`, which imports no module of this release (T1's rule for the sealed trees is the
   report's own for league/ops: `test_forward_report.TheReportShowsOnlyWhatItMay`). The two meet only through

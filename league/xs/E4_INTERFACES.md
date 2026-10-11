@@ -546,12 +546,12 @@ panel sleeve.
 | the coverage probe | two built-in test tickers; one verdict for two questions; the token's file beside `--root`; exit 2 for everything; a ladder's end read as the limit; a refusal retried | the test names read off the spell file; `asof_differs` and `differs_accepted` apart from `test_accepted`; the file beside the release, a missing token said at once; exit 3 for a probe that could not run; `reading` "found", "at least" or "not measured"; a 4xx but 429 is refused once and is no error | `scripts/panel_probe.py` |
 
 Open after the ship pass, stated: package J (built since: section 13); patch 18 with the look permit (built since,
-not wired: section 14); the universe commit and the money row
-(a held basket uses the whole window: after a loss a partial rotation is a name short, and live and its twin part
-there); the receipt at the captain's bar (landed since: section 15); the gateway's follow-up for the two protected
-paths; a name that joined the index after 2024 is charged the universe's half-spread (sampling its own Train-era days is a spec change for
-package B); Validation and the look ask the quiet rule once for two or three runs (Train asks before each); every
-budget of the lane on the box's one core is an estimate until its first receipts are read.
+not wired: section 14); the universe commit and the money row (a held basket uses the whole window: after a loss a
+partial rotation is a name short, and live and its twin part there); the receipt at the captain's bar (landed
+since: section 15); the gateway's follow-up for the two protected paths; a name that joined the index after 2024
+is charged the universe's half-spread (sampling its own Train-era days is a spec change for package B); Validation
+and the look ask the quiet rule once for two or three runs (Train asks before each); every budget of the lane on
+the box's one core is an estimate until its first receipts are read.
 
 ## 13. Package J as built (Oct 11, 2026; `feat/equity-e4-j`; nothing pushed, nothing deployed)
 
@@ -624,8 +624,9 @@ as it did). H: `dlane_report.PANEL_OWED` now says "not recorded yet" and `PANEL_
 passer. A: the registry has thirteen rows after `dlane` (E3's six, `forward_xs`, E4's six). E3's contract gains its
 own section 13 (league/ops/E3_INTERFACES.md): the import rule admits `league/ops/forward_xs.py` and holds it.
 
-**Still owed after package J:** patch 18 with the look permit; the universe commit and the money row; the receipt
-at the captain's bar; `fill_minutes`' panel symbols; the forward route's verdict (c_FX and the placebo rank over the
+**Still owed after package J:** patch 18 with the look permit (built since, not wired: section 14); the universe
+commit and the money row; the receipt at the captain's bar (landed since: section 15); `fill_minutes`' panel
+symbols; the forward route's verdict (c_FX and the placebo rank over the
 first n sessions: `runner.Isolated.forward(placebos=, seed=)` exists and nothing asks it); panel controls.
 
 ## 14. The probe's panel strata and the look's permit (patch 18; Oct 11, 2026; `feat/equity-e4-p`; BUILT, NOT WIRED; nothing pushed, nothing deployed)
@@ -726,3 +727,59 @@ bound no longer reaches the owner's 15% wall (2 seeds of 20 at 1.30, none at 1.3
 (`league/swarm/e4_patches/E.md`'s one call); (3) `xs1_conformance.json` from the study's vector builder at the new
 `k_XS`, the inputs file made again from it, and the two by-hand vectors derived again at it;
 (4) `test_e4_stubs.VECTORS_SHA256`. `TheCommittedPin` fails until the four agree.
+
+## 16. The merge of the three (Oct 11, 2026; `feat/equity-e4`; nothing pushed, nothing deployed)
+
+Sections 13, 14 and 15 were written on three branches cut from one head (the ship pass's, section 12), each as its
+own section 13. They are merged in that order and numbered in it, every line of each kept; main had not moved past
+`7d2d3c84`. Each is a record of its own branch: where one calls another's work owed, this section says what is true
+of the merged tree.
+
+**What the tree holds, and what each piece opens.**
+
+| the piece | state | what it opens |
+|---|---|---|
+| the data jobs, panel births, the Train bar, the review, the zero-edge column (sections 1 to 12) | built | mode "train" |
+| the forward row and nightly shadow of every scored panel version, the twin of a live instance and its marker (section 13) | built; the job `forward_xs` | a record from the first scored version; the marker is one leg of `live_ready` |
+| the receipt at the captain's bar (section 15) | in the tree with its pin and its vectors | the receipt the "gate" row needs |
+| the probe's panel strata and the look permit's writer (section 14) | built, NOT handed to the House's job | nothing yet: every look waits until the captain allows one import in release E3's seal test |
+| the universe commit, the money row of a panel sleeve, the gateway's patches | NOT in the tree | a seat: step two |
+
+**ONE release, in two steps.** STEP ONE is this tree, deployed with `elane.panel.mode` "off" and put to "train" by
+the captain's settings change: the first four rows above. Above "train" the tree holds itself back whatever the
+setting (at "gate" every look waits on its route's permit; "live" reads as "gate" while no universe deploy is in
+force). STEP TWO STILL NEEDS, each the owner's: (1) the universe commit (section 10's R-E4b; it
+needs the House's own `tradable.json`, which exists only once the lane has been at "train"); (2) the money row for
+a panel sleeve (a constitution row and the lines of the book that read it: not built; section 12's send after a
+window loss is what it answers); (3) the gateway patch (the universe's static half and its generated list, and the
+merge list's follow-up for the two protected paths: patch files in the captain's scratch, never an edit of
+`gateway/`); (4) the owner's deploy, the gateway first, with ONE money-digest move. And, before any look, the
+hand-over of the probe's plan (section 14).
+
+**Where two packages met, and what the merge did.**
+
+| where | package J | patch 18 | A23 | as merged |
+|---|---|---|---|---|
+| this file and `league/ops/E3_INTERFACES.md` | a section 13 in each | a section 13 in each | a section 13 here | here 13, 14, 15; there 13 (J) and 14 (patch 18); every reference follows its own section |
+| release E3's import list (`test_e3_seal_imports.OPS_MAY`) | names `league.ops.forward_xs` (`E4_OPS`), held under the same seal | untouched; its `test_contam_xs.TheWiring` held that the list names nothing of the panel | | J's list stands. `TheWiring` holds that the list names that ONE module of the panel and that the probe imports none of it. The merge edited no seal test |
+| `test_e4_e2e`, `test_e4_integration` (docstrings), `test_e4_stubs` | the twin marker's writer is J's | the permit's writer is patch 18's | the vectors' sha256 | all three statements |
+| docs/operations.md, CHANGELOG.md, `league/swarm/E4.md`, `league/swarm/e4_patches/README.md` | | | | one release in two steps; what step two still needs |
+
+**The identities of the merged tree.** The options execution fingerprint, the equity identity and the money digest
+are main's (`7d2d3c84`) on both Pythons. The xs identity is 2f0083bc..., the value section 15 gives for its own
+branch: neither package J nor patch 18 changed a file under `league/xs` but this contract. No panel band exists
+under it. The forward ENGINE LABEL (none of those ids) gains the xs fingerprint only once the registry holds a
+panel row (section 13, point 8).
+
+**What a package said of the tree that the merge changed.** Patch 18's "no seal test was changed" is true of patch
+18: release E3's import list did gain one module, package J's, for the forward modules, and under J's change every
+E3 ops module may import it (the probe included, which does not). Section 15's "a merge with another change under
+`league/xs` gives another value" did not come to pass: the value is section 15's.
+
+**Open for the captain, each argued where it was built.** Section 13: the panel night as its own job; one run a
+program a night at 1.0x; rows a session behind and twins two; whether the seal's one new name is an extension or a
+weakening. Section 14: the wiring (one allowance in E3's seal test, for one function). Section 15: the two
+report-only arms run again at the House's bar (an alternative receipt that reads them "unmeasured" is built and not
+landed), and the CI hold of the vectors' bar to the pin's. Not measured by anyone on the box: the ops child's
+address-space cap against a panel run that opens the panel store once a run (`league.xs.runner.Isolated`; section
+13 fixed it for the panel night alone, and the zero-edge job runs the plain runner in an ops child).
