@@ -661,7 +661,8 @@ def may_validate(store: Any, fam: Mapping[str, Any] | None, n: Any) -> bool:
 
 def compact(score: Mapping[str, Any], *, at: str, ident: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """A version's verdict as the record keeps it (Train figures and its restart check's counts only), with the identity
-    it was judged under."""
+    it was judged under. Of a verdict's words the record keeps `said` alone (`program_fault`: what its author may
+    read), never its raw `why`."""
     out = {"at": at, "objective": OBJECTIVE, "passed": bool(score.get("passed")), "fails": list(score.get("fails") or []),
            "score": score.get("score"), "active_years": score.get("active_years"), "pnl_10": score.get("pnl_10"),
            "pnl_15": score.get("pnl_15"), "ratio": score.get("ratio"), "years": dict(score.get("years") or {}),
@@ -669,12 +670,49 @@ def compact(score: Mapping[str, Any], *, at: str, ident: Mapping[str, Any] | Non
            "identity": dict(ident) if isinstance(ident, Mapping) else None}
     if isinstance(score.get("state"), Mapping):
         out["state"] = dict(score["state"])
+    if isinstance(score.get("said"), str) and score["said"]:
+        out["why"] = score["said"][:400]
     return out
 
 
-def program_fault(code: str, why: str) -> dict[str, Any]:
-    """The verdict of a version judged on its program alone (RUN, DQ, LOAD): no figure."""
-    return {"objective": OBJECTIVE, "passed": False, "fails": [code], "why": f"{FAILS[code]}: {why}"[:400], "score": None,
+#: The exception classes a disqualification may name to its author (`dq_said`): Python's own and numpy's, by name. A
+#: program defines no class (league/gym/safety.py), so its errors are of these; any other word is not shown.
+ERROR_CLASSES = frozenset({
+    "ArithmeticError", "AssertionError", "AttributeError", "FloatingPointError", "IndexError", "KeyError", "LookupError",
+    "MemoryError", "NameError", "NotImplementedError", "OverflowError", "RecursionError", "RuntimeError", "StopIteration",
+    "TypeError", "UnboundLocalError", "ValueError", "ZeroDivisionError", "LinAlgError", "AxisError", "Exception"})
+_DQ_ERRORS = re.compile(r"^(\d{1,6}) errors \(first: (.*)\)$", re.S)
+_DQ_LINE = re.compile(r"^line (\d{1,6})$")
+
+
+def dq_said(reason: Any) -> str:
+    """WHAT A DISQUALIFICATION SAYS TO ITS AUTHOR: counts, a line of its own file and an exception CLASS, never the
+    exception's text. E1's reason carries the program's own message (`25 errors (first: line 12: ValueError: <up to 160
+    characters the program chose>)`), and a program can put anything it read there (a bar of the 2020-21 reserve it
+    reads as look-back), so the text never reaches a record or a brief."""
+    text = str(reason or "")
+    found = _DQ_ERRORS.match(text)
+    if found:
+        parts = found.group(2).split(": ", 2)
+        where = parts[0] if parts and _DQ_LINE.match(parts[0]) else ""
+        kind = parts[1] if len(parts) > 1 and parts[1] in ERROR_CLASSES else ""
+        if not kind and "ran past" in (parts[0] if parts else ""):
+            kind = "time limit"
+        first = " ".join(x for x in (f"a {kind}" if kind and kind != "time limit" else
+                                     "a decide past its time limit" if kind else "", f"at {where}" if where else "") if x)
+        return f"{int(found.group(1))} errors in decide" + (f", the first {first}" if first else "")
+    if text.startswith("decide used") and "budget" in text:
+        return "its decides ran past the run's time budget"
+    return "its own errors or timeouts"
+
+
+def program_fault(code: str, why: str, *, said: str | None = None) -> dict[str, Any]:
+    """The verdict of a version judged on its program alone (RUN, DQ, LOAD): no figure. `why` is the House's own record
+    of the step; `said` is what the version's record keeps and its author reads in the next brief (`compact`): the
+    House's own refusal text for LOAD (static, bounded: a program that would not load read no market data), counts and
+    an exception class for DQ (`dq_said`), the failure's class for RUN."""
+    return {"objective": OBJECTIVE, "passed": False, "fails": [code], "why": f"{FAILS[code]}: {why}"[:400],
+            "said": f"{FAILS[code]}: {said}"[:400] if said else None, "score": None,
             "years": {}, "active_years": 0, "pnl_10": None, "pnl_15": None, "ratio": None, "summary": {}, "beside": {}}
 
 
@@ -1484,10 +1522,11 @@ class EquityResearcher:
         rest)."""
         why = f"{type(exc).__name__}: {str(exc)[:200]}"
         if _named(exc, LOAD_REFUSALS):
-            return program_fault("LOAD", str(exc)[:300]), None
+            refusal = " ".join(str(exc).split())[:300]
+            return program_fault("LOAD", refusal, said=refusal), None
         kind = "run" if _named(exc, RUN_FAILURES) else ("state" if check else "store")
         out = self.house_failure(fam, n, why, kind=kind)
-        return (None, out) if out is not None else (program_fault("RUN", why), None)
+        return (None, out) if out is not None else (program_fault("RUN", why, said=f"a {type(exc).__name__}"), None)
 
     def restart(self, fid: str, code: str, params: Mapping[str, Any], runs: Sequence[Any]) -> dict[str, Any]:
         """THE RESTART CHECK of a version on its uninterrupted 1.0x Train runs (`restart_check` over `state_inputs`),
@@ -1570,7 +1609,7 @@ class EquityResearcher:
             if "disqualified" in statuses:
                 why = next((str(r["reason"]) for rs in parts.values() for r in rs if r.get("reason")),
                            "its own errors or timeouts")
-                verdict = program_fault("DQ", why)
+                verdict = program_fault("DQ", why, said=dq_said(why))
             elif statuses != {"ok"}:
                 return self.house_failure(fam, n, f"the Train runs ended {', '.join(sorted(statuses))}",
                                           kind="store") or {}
@@ -1820,7 +1859,7 @@ __all__ = ["OBJECTIVE", "STATE_KEY", "TRAIN_AT_KEY", "TRAIN_OK_KEY", "TRAIN_FIRS
            "RESERVE_YEARS", "TRAIN_YEARS", "TRAIN_LABEL", "BAR", "FAILS", "JUDGED", "DEFAULTS", "AGENDA", "GROUPS",
            "MAP_LABEL", "cfg", "lane_on", "symbols_group", "cell_of", "cell_text", "outside_years", "combine", "year_rows",
            "train_score", "bar_text", "record_of", "e2_family", "passed_version", "identity", "judged", "tried",
-           "pass_current", "may_validate", "compact", "program_fault", "KIND", "StateCheckInterrupted", "state_inputs",
+           "pass_current", "may_validate", "compact", "dq_said", "program_fault", "KIND", "StateCheckInterrupted", "state_inputs",
            "SIZE_TOL", "same_intents", "restart_check", "with_state", "restart_text", "train_map",
            "closed_cells", "train_map_text", "refuted_rows", "needs_literal", "check_code", "program_of", "contract_text",
            "RESEARCHER_SYSTEM", "version_text", "EquityResearcher", "versions_of", "BETA", "EQUITY", "LANES"]

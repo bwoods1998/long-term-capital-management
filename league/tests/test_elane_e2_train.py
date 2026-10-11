@@ -446,6 +446,52 @@ class WhatAVerdictIs(ResearchCase):
         self.assertEqual(self.rec(b["id"])["versions"]["1"]["fails"], ["LOAD"])
         self.assertIn("v1: the program was disqualified", self.researcher.brief(self.store.family(a["id"])))
 
+    def test_a_load_refusal_reaches_its_author_and_a_disqualifications_own_words_never_do(self):
+        # The integration review's seal-6: the record dropped every verdict's reason, so an author whose program the
+        # child refused to load ("NEEDS history 9999 is above the lane's 504 sessions") revised blind, each LOAD failure
+        # spending one of its four Train versions. LOAD's text is the House's own (a program that did not load read no
+        # market data). A disqualification's reason carries the program's own exception text, which can hold anything it
+        # read (a bar of the reserve it sees as look-back): only counts and the error's class are kept.
+        dq, refused, late = fx.program(share=0.34), fx.program(share=0.33), fx.program(share=0.32)
+        leak = "25 errors (first: line 12: ValueError: SENTINEL close 412.55 volume 9876543 on the bar)"
+        self.results[(dq, 1.0)] = {**fx.train_result(status="disqualified"), "reason": leak}
+        self.results[(refused, 1.0)] = fx.ProgramRefused("NEEDS history 9999 is above the lane's 504 sessions")
+        self.results[(late, 1.0)] = {**fx.train_result(status="disqualified"),
+                                     "reason": "decide used 912 s, over the run's budget of 900 s"}
+        a = fx.e2_family(self.store, "dq", code=dq)
+        b = fx.e2_family(self.store, "load", code=refused, symbols=("QQQ",))
+        c = fx.e2_family(self.store, "late", code=late, symbols=("IWM",))
+        self.researcher.run()
+        self.assertEqual(self.rec(b["id"])["versions"]["1"]["fails"], ["LOAD"])
+        brief = self.researcher.brief(self.store.family(b["id"]))
+        self.assertIn("v1: the decider child refused to load the program: NEEDS history 9999 is above the lane's 504 "
+                      "sessions.", brief)
+        kept = json.dumps(self.rec(a["id"]))
+        brief = self.researcher.brief(self.store.family(a["id"]))
+        for text in (kept, brief):
+            for word in ("SENTINEL", "412.55", "9876543", "on the bar"):
+                self.assertNotIn(word, text)
+        self.assertIn("v1: the program was disqualified on Train by its own errors or timeouts: 25 errors in decide, the "
+                      "first a ValueError at line 12.", brief)
+        self.assertIn("its decides ran past the run's time budget", self.researcher.brief(self.store.family(c["id"])))
+
+    def test_a_disqualification_names_counts_a_line_and_a_known_class_only(self):
+        said = elane_train.dq_said
+        self.assertEqual(said("25 errors (first: line 7: KeyError: 'XLK')"), "25 errors in decide, the first a KeyError at line 7")
+        self.assertEqual(said("25 errors (first: line 7: Close412: 412.55)"), "25 errors in decide, the first at line 7")
+        self.assertEqual(said("25 errors (first: 412.55: ValueError: x)"), "25 errors in decide, the first a ValueError")
+        self.assertEqual(said("25 errors (first: decide ran past 1.00 s)"),
+                         "25 errors in decide, the first a decide past its time limit")
+        self.assertEqual(said("25 errors (first: 412.55 was the close)"), "25 errors in decide")
+        self.assertEqual(said("an invented reason holding 412.55"), "its own errors or timeouts")
+        self.assertEqual(said(None), "its own errors or timeouts")
+        # A run the child kept failing (RUN): the failure's class, never its text.
+        verdict = elane_train.program_fault("RUN", "RunFailed: stderr held 412.55", said="a RunFailed")
+        kept = elane_train.compact(verdict, at="2026-10-10T00:00:00Z")
+        self.assertNotIn("412.55", json.dumps(kept))
+        self.assertTrue(kept["why"].endswith(": a RunFailed"))
+        self.assertNotIn("why", elane_train.compact(elane_train.program_fault("DQ", "raw text 412.55"), at="x"))
+
     def test_a_family_with_no_judged_version_stalls_with_no_graveyard_row(self):
         settings = fx.settings(train_budget=2, train_per_round=5)
         researcher = EquityResearcher(self.store, self.router, settings, runner=self.runner, clock=self.clock)
