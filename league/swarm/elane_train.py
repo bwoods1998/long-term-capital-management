@@ -24,7 +24,8 @@ THE LOOSENING, stated: the bar reads seven Train years, not the nine of 2016-202
 of seven, "no year's t below the floor" has two years fewer to fail in, and the two P&L rules sum seven years.
 
 THE BAR, equity-v1 (the design's section 6b on the Train years; `train_score`, then `restart_check`, then
-`start_check`). The summed runs at 1.0x and at 1.5x the half-spread (`league.equity.config.K_BASE`, `K_STRESS`). A version PASSES when all hold:
+`start_check`). The summed runs at 1.0x and at 1.5x the half-spread (`league.equity.config.K_BASE`, `K_STRESS`). A
+version PASSES when all hold:
   Y1  ACTIVE in at least `min_active_years` (3) of the seven Train years: a year with at least `year_min_trades` (40)
       closed lots and `year_min_days` (20) entry days, on the 1.0x runs;
   Y2  no Train year's t (the year's daily P&L t, `by_year.t_daily`; a flat year reads 0) below `year_t_floor` (-1.0),
@@ -39,10 +40,10 @@ THE BAR, equity-v1 (the design's section 6b on the Train years; `train_score`, t
   START  (release E2.1; checked once STATE holds) each Train span run again from `start_shifts` (61 and 127) decision
       sessions in, every run starting flat, gives the orders of the run from the span's first session on at least
       `start_match` (99%) of each later run's compared sessions, and on at least `start_active` (95%) of those on
-      which either run asked an order (THE START CHECK below). The House starts every
-      program live on a fresh date, and every judged window starts flat: a program whose decisions depend on when its
-      run started (a profit lock, a size from the run's own standing, a clock counted from its first trade) trades
-      live other than its replay, and the share screen's false-positive line does not hold for it.
+      which either run asked an order (THE START CHECK below). The House starts every program live on a fresh date,
+      and every judged window starts flat: a program whose decisions depend on when its run started (a profit lock, a
+      size from the run's own standing, a clock counted from its first trade) trades live other than its replay, and
+      the share screen's false-positive line does not hold for it.
 REPORTED BESIDE, NEVER A BAR: the same-exposure buy-and-hold over the same sessions (`bh.pnl`), the mean
 time-matched excess (MTE: `mte.mean`, `mte.t`) and the DRIFT SHARE (the buy-and-hold P&L over the program's, while
 the program's is above zero: near one, the program earned what holding its average exposure earned). Every number
@@ -111,10 +112,11 @@ pattern; this check runs the program and looks.
   THE RULE. A version passes START when EVERY later run matches run A on at least `start_match` (99%) of its compared
   sessions AND on at least `start_active` (95%) of those on which either run asked an order (a program that trades
   once a month asks nothing on nineteen sessions in twenty: read on all sessions alone, a fifth of its trades could
-  differ inside the 1%); else it fails the bar with the code START: the program's fault, like STATE (it judges a program, not the
-  mechanism, so it refutes nothing and spends no Validation try). Its record keeps the counts by later run and the
-  sessions that differed, counted from the later run's own first decision (never a day), and what the two runs asked
-  where they first differed; the next brief says so and says what a program may decide from (`start_text`).
+  differ inside the 1%); else it fails the bar with the code START: the program's fault, like STATE (it judges a
+  program, not the mechanism, so it refutes nothing and spends no Validation try). Its record keeps the counts by
+  later run and the sessions that differed, counted from the later run's own first decision (never a day), and what
+  the two runs asked where they first differed; the next brief says so and says what a program may decide from
+  (`start_text`).
   WHAT FITS (`start_plan`). A shift is used in a span that leaves its later run at least `start_min` (120) warmed-up
   sessions; a span too short for a shift goes without it and the record says so (`skipped`). On the Train spans
   (1,006 and 753 sessions) the 61-session start fits every program the contract allows; the 127-session start does
@@ -134,16 +136,16 @@ disqualified by its own errors or timeouts ("DQ"), the child refused to load it 
 in a row while other programs' Train judgments completed after the first of those failures ("RUN"), its intents
 changed when its STATE was emptied ("STATE"), or its orders changed with the day its run started ("START"). Anything
 else is the House's (no equity store yet, the store being rewritten, a decider child that could not start, a restart
-check or a start check that could not run or finish, a result outside the Train years, "no_data"): the version is NOT scored, spends no budget and asks no model; it is tried again after a
-backoff (`train_every_seconds` doubling with every failure of any kind, at most `BACKOFF_MAX`); a result outside the
-Train years is also an alert, and so is a restart check or a start check that could not finish `train_max_errors`
-times. THE HOUSE'S
-FAILURES ARE COUNTED BY KIND (`house_failure`; the record's `infra`): "in a row" for RUN means the child's failures of
-this version one after another, so a failure of another kind in between (a restart check the House interrupted, whose
-attempt ran the version's Train runs through; a store being rewritten) starts the row again and never counts toward
-RUN; the restart check's alert and the start check's each count that kind's failures since the version was last judged,
-whatever came between, and each is sent once. Of the verdicts, only Y1, Y2, P1 and R1 judge the MECHANISM (`JUDGED`); the others judge a program
-that could not be judged.
+check or a start check that could not run or finish, a result outside the Train years, "no_data"): the version is NOT
+scored, spends no budget and asks no model; it is tried again after a backoff (`train_every_seconds` doubling with
+every failure of any kind, at most `BACKOFF_MAX`); a result outside the Train years is also an alert, and so is a
+restart check or a start check that could not finish `train_max_errors` times. THE HOUSE'S FAILURES ARE COUNTED BY
+KIND (`house_failure`; the record's `infra`): "in a row" for RUN means the child's failures of this version one after
+another, so a failure of another kind in between (a restart check the House interrupted, whose attempt ran the
+version's Train runs through; a store being rewritten) starts the row again and never counts toward RUN; the restart
+check's alert and the start check's each count that kind's failures since the version was last judged, whatever came
+between, and each is sent once. Of the verdicts, only Y1, Y2, P1 and R1 judge the MECHANISM (`JUDGED`); the others
+judge a program that could not be judged.
 
 THE REVIEW (league/swarm/elane_review.py). A program holding a raw price or volume level against a constant or a PARAMS
 value is refused before it is stored (`check_code`), and so is one that reads its own profit since the run began: the
@@ -154,8 +156,8 @@ that version ("REVIEW") and spends no try.
 
 THE RECORD (family state `STATE_KEY`, E2's own; `record_of`). Per version: its verdict, its fails, its Train figures,
 its restart check's counts (`state`), its start check's (`start`) and the equity identity it was judged under
-(`identity`); the family's `status`
-("researching", "passed", "refuted", "stalled", "closed"), `passed_version`, a pending `review`, the `passed_review`
+(`identity`); the family's `status` ("researching", "passed", "refuted", "stalled", "closed"), `passed_version`, a
+pending `review`, the `passed_review`
 (E2's copy of the record E1 reads), its write `attempts`, its `refused` programs and an `infra` backoff. The FIRST
 version that passes the bar AND the review ends the family's Train research: it is the lineage's one Validation try
 (`may_validate`, the guard E1's tournament applies: ELANE_E2_PATCHES.md patch 5; the family's `best_version` and
@@ -1756,7 +1758,7 @@ def start_text(v: Mapping[str, Any]) -> str:
     if not failed:
         return head + "."
     said = []
-    for r in failed[:4]:
+    for r in failed[:2]:
         misses = [int(k) + 1 for k in (r.get("misses") or []) if _num(k) is not None]
         lost = int(_num(r.get("sessions")) or 0) - int(_num(r.get("matched")) or 0)
         more = f" and {lost - len(misses)} more" if lost > len(misses) else ""
@@ -1782,7 +1784,8 @@ def start_text(v: Mapping[str, Any]) -> str:
     size = (f" On {sized} sessions in all the orders were the same and only a buy's size differed"
             + (f" (by at most {by})" if by else "") + ": size a buy by a constant share of the sleeve, never by dollars "
             "worked out from ctx.equity, ctx.cash or ctx.caps." if sized else "")
-    return (f"{head}: {'; '.join(said)} (sessions are counted from a later run's own first decision).{where}{size} "
+    rest = f"; {len(failed) - 2} more later runs fell short too" if len(failed) > 2 else ""
+    return (f"{head}: {'; '.join(said)}{rest} (sessions are counted from a later run's own first decision).{where}{size} "
             f"{START_ADVICE}")
 
 
