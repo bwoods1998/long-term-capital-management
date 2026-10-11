@@ -92,6 +92,8 @@ LOT_FIELDS = ("entry", "mark", "exit")
 NOW_FIELDS = ("equity", "cash")
 ANCHOR_FIELDS = ("budget",)
 MONEY_KEYS = ("value", "pnl", "net")
+#: A lot's share count (the module docstring, 1d): the capital it was bought with over its fill price.
+QTY_KEY = "qty"
 #: A constant this close to zero is a sign check or an epsilon, never a level.
 ZERO = 1e-6
 #: Functions whose result keeps the units of their arguments (a mean of prices is a price).
@@ -101,7 +103,8 @@ KEEP = frozenset({
     "floor", "ceil", "trunc", "float", "int", "sqrt", "cumsum", "maximum", "minimum", "fmax", "fmin", "clip", "array",
     "asarray", "asanyarray", "ravel", "copy", "sort", "flatten", "concatenate", "hstack", "vstack", "stack", "where",
     "nan_to_num", "average", "convolve", "std", "nanstd", "var", "nanvar", "ptp", "diff", "ediff1d", "gradient", "sorted",
-    "list", "tuple", "reversed", "full_like", "take", "float64", "float32", "squeeze", "atleast_1d", "next", "iter"})
+    "list", "tuple", "reversed", "full_like", "take", "float64", "float32", "squeeze", "atleast_1d", "next", "iter",
+    "prod", "nanprod", "cumprod", "nancumprod", "nancumsum", "fsum", "reduce", "accumulate"})
 #: Of those, the ones whose result on a LOG level is scale-free (a dispersion or a difference of logs).
 SPREAD = frozenset({"std", "nanstd", "var", "nanvar", "ptp", "diff", "ediff1d", "gradient"})
 #: The ones that combine their arguments: a level among them with a constant is a clip or a floor at a level.
@@ -118,7 +121,10 @@ COMPARES = frozenset({"greater", "greater_equal", "less", "less_equal", "equal",
 #: numpy's arithmetic functions, by the operator each is.
 ARITHMETIC: dict[str, type] = {"add": ast.Add, "subtract": ast.Sub, "multiply": ast.Mult, "divide": ast.Div,
                                "true_divide": ast.Div, "floor_divide": ast.FloorDiv, "mod": ast.Mod, "remainder": ast.Mod,
-                               "fmod": ast.Mod, "power": ast.Pow, "float_power": ast.Pow, "divmod": ast.FloorDiv}
+                               "fmod": ast.Mod, "power": ast.Pow, "float_power": ast.Pow, "pow": ast.Pow,
+                               "divmod": ast.FloorDiv}
+#: Functions that write a value as text (`float(str(ctx.equity))` is the same dollars read back).
+TEXT = frozenset({"str", "format"})
 #: Functions that place a value among the points of a table: a level placed among constants is a level bucket.
 BUCKETS = frozenset({"digitize", "searchsorted", "interp"})
 MODULES = frozenset({"np", "numpy", "math"})
@@ -126,6 +132,21 @@ MODULES = frozenset({"np", "numpy", "math"})
 _L, _G, _C, _U = "L", "G", "C", "U"
 #: The sleeve's dollars now, the run's anchor, both met in one value; a ratio of two different symbols' levels.
 _M, _B, _X, _K = "M", "B", "X", "K"
+#: WHAT RIDES WITH THE RUN'S DOLLARS (the module docstring, 1d), so the pass can tell a lot's own return in dollars (its
+#: pnl over what it cost: allowed) from the run's profit (the sleeve's dollars over what a lot cost: refused).
+#: With M: `_SLEEVE`, ctx.equity or ctx.cash went in (without it the dollars are a lot's own: its value, pnl or net);
+#: `_VALUE` and `_PNL`, a lot's value, and its pnl or a closed lot's net, went in. With B: `_CTX`, ctx.budget or
+#: ctx.caps went in (without it the anchor is THE CAPITAL A LOT WAS BOUGHT WITH: its qty, its qty times a price, its
+#: value less its pnl). With either: `_SHARES`, the dollars were divided by a price (a number of shares: a lot's qty,
+#: cash over a price), so dollars over them are a price again.
+_SLEEVE, _CTX, _VALUE, _PNL, _SHARES = "$S", "$A", "$v", "$p", "$q"
+_RIDERS = frozenset({_SLEEVE, _CTX, _VALUE, _PNL, _SHARES})
+#: A lot's dollar fields as the pass reads them (`_Levels._field`).
+_LOT_DOLLARS: dict[str, frozenset[str]] = {
+    "value": frozenset({_M, _VALUE}), "pnl": frozenset({_M, _PNL}), "net": frozenset({_M, _PNL}),
+    QTY_KEY: frozenset({_B, _SHARES})}
+_NOW = frozenset({_M, _SLEEVE})
+_ANCHOR = frozenset({_B, _CTX})
 #: The container marks: ctx.prices, ctx.bars, one symbol's bars, PARAMS, ctx.caps, ctx.positions or ctx.closed, one lot.
 _PRICES, _BARS, _BAR, _PARAMS, _CAPS, _LOTS, _LOT = "PRICES", "BARS", "BAR", "PARAMS", "CAPS", "LOTS", "LOT"
 _CONTAINERS = frozenset({_PRICES, _BARS, _BAR, _PARAMS, _CAPS, _LOTS, _LOT})
@@ -161,9 +182,17 @@ def _norm(tags: Iterable[str]) -> frozenset[str]:
             return frozenset({mark}) | _origin(t)
     if _K in t:
         return frozenset({_K})
-    if _X in t or (_M in t and _B in t):
+    if _X in t:
         return frozenset({_X})
-    for mark in (_M, _B, _U, _C):
+    if _M in t and _B in t:
+        if t & {_SLEEVE, _CTX}:
+            return frozenset({_X})
+        return frozenset({_B}) | (t & {_SHARES})  # a lot's dollars now with what it cost: the lot's own dollars still
+    if _M in t:
+        return frozenset({_M}) | (t & {_SLEEVE, _VALUE, _PNL, _SHARES})
+    if _B in t:
+        return frozenset({_B}) | (t & {_CTX, _SHARES})
+    for mark in (_U, _C):
         if mark in t:
             return frozenset({mark})
     return _NONE
@@ -187,9 +216,37 @@ def _const(t: frozenset[str]) -> bool:
 
 
 def _meets(a: frozenset[str], b: frozenset[str]) -> bool:
-    """The sleeve's dollars now on one side and the run's anchor on the other (or a value that already holds both)."""
+    """The sleeve's dollars now on one side and the run's anchor on the other (or a value that already holds both). The
+    anchor is ctx's (`ctx.budget`, `ctx.caps`) or the capital a lot was bought with (its qty, its qty times a price, its
+    value less its pnl). ONE PAIR IS NO MEETING: a lot's own dollars now (its value, pnl or net, nothing of the sleeve's)
+    against what a lot cost, which is the lot's own return written in dollars (`lot["pnl"] / (lot["qty"] *
+    lot["entry"])`)."""
     both = a | b
-    return _money(a) and _money(b) and (_X in both or (_M in both and _B in both))
+    if not (_money(a) and _money(b)):
+        return False
+    if _X in both:
+        return True
+    return _M in both and _B in both and bool(both & {_SLEEVE, _CTX})
+
+
+def _dollars(t: frozenset[str]) -> frozenset[str]:
+    """The marks of the run's dollars in a value, with what rides with them."""
+    return t & ({_M, _B, _X} | _RIDERS)
+
+
+def _lots_own(t: frozenset[str]) -> bool:
+    """A lot's own dollars now (its value, pnl or net) with nothing of the sleeve's or the anchor's in them."""
+    return _M in t and not t & {_B, _X, _SLEEVE}
+
+
+def _scaled(m: frozenset[str], by: frozenset[str]) -> frozenset[str]:
+    """The run's dollars `m` times or over a value `by` that is none of them. By a constant they are what they were.
+    A LOT'S OWN DOLLARS NOW times or over anything else stop being its dollars now: its value over its mark is its qty,
+    its value over its own return (or its pnl over that return less one) is what it cost. They read as the capital the
+    lot was bought with from there on."""
+    if _const(by) or not _lots_own(m):
+        return m
+    return frozenset({_B}) | (m & {_SHARES})
 
 
 def _cross(a: frozenset[str], b: frozenset[str]) -> bool:
@@ -202,11 +259,15 @@ def _what(t: frozenset[str]) -> str:
         return "a price or volume level (or its log)"
     if _K in t:
         return "the ratio of two different symbols' prices"
-    return "the sleeve's dollars of this run (ctx.equity, ctx.cash, ctx.budget, ctx.caps, a lot's value or pnl)"
+    return ("the sleeve's dollars of this run (ctx.equity, ctx.cash, ctx.budget, ctx.caps, a lot's value, pnl or qty, "
+            "or what a lot cost)")
 
 
-ANCHORED = ("the sleeve's dollars now against the run's anchor (ctx.budget, ctx.caps): the run's own profit since it "
-            "began, which reads where the run starts")
+TAGGED = ("keeps the run's dollars in a lot's tag (the House keeps a tag across a restart: the sleeve's dollars of an "
+          "earlier call carried from lot to lot are a memory of where the run started)")
+ANCHORED = ("the sleeve's dollars now against the run's anchor (ctx.budget, ctx.caps, or the capital a lot was bought "
+            "with: its qty times a price, its value less its pnl): the run's own profit since it began, which reads "
+            "where the run starts")
 
 
 def _key(node: ast.AST) -> str | None:
@@ -434,9 +495,19 @@ class _Levels:
             self._assign(target.value, None, tag, env)
         elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
             self._tag(target.slice, env)  # closes[s] = c[-1], STATE["px"] = px: read back as what was put in
+            self._tagged(target, target.slice, tag)
             self._store(target.value.id, _key(target.slice), value, tag, env)
         else:  # an attribute, a nested container: evaluated, never followed (left to the paid review)
             self._tag(target, env)
+
+    def _tagged(self, node: ast.AST, key: ast.AST | str | None, tag: frozenset[str]) -> None:
+        """An intent's "tag" is the one text of a program's the House keeps with a lot and hands back (`lot["tag"]`), a
+        restart of the decider included. A label is what it is for; the run's dollars written there (`"tag":
+        str(ctx.equity)`) are the sleeve's dollars of an earlier call, read back from the next lot: the profit lock's
+        memory, which the Train bar's restart check cannot see (it resets STATE, never a lot)."""
+        name = key if isinstance(key, str) else _key(key) if key is not None else None
+        if name == "tag" and _money(self._unit(tag)):
+            self._refuse(node, TAGGED)
 
     def _store(self, name: str, key: str | None, value: ast.AST | None, tag: frozenset[str],
                env: dict[str, set[str]]) -> None:
@@ -491,7 +562,7 @@ class _Levels:
         if _VALUES in tag:
             for mark, held in ((_PRICES, _L), (_CAPS, _B), (_BARS, _BAR), (_LOTS, _LOT), (_PARAMS, _C)):
                 if mark in tag:
-                    return frozenset({held})
+                    return _ANCHOR if held == _B else frozenset({held})
             return frozenset({_U})
         if tag & _VIEWS:
             return frozenset({_U})
@@ -547,7 +618,7 @@ class _Levels:
             # The program's own key. Under a name the House uses for a lot's field ("entry", "pnl"), or in a value the
             # pass cannot place (a helper's argument), it may be the House's row all the same: both readings hold, so
             # writing a zero over a lot's entry launders nothing.
-            return self._join([own, out]) if (key in LOT_FIELDS or key in MONEY_KEYS or _U in base) else own
+            return self._join([own, out]) if (key in LOT_FIELDS or key in _LOT_DOLLARS or _U in base) else own
         if key and key == key.upper() and any(ch.isalpha() for ch in key) and isinstance(holder, ast.Name) \
                 and _level(base) and _level(out):
             out = frozenset(t for t in out if not t.startswith("@")) | {"@" + key}
@@ -559,7 +630,7 @@ class _Levels:
         if _BAR in base:
             return (frozenset({_L}) | _origin(base)) if name in BAR_FIELDS else _NONE if name == "ret" else frozenset({_U})
         if _LOT in base:
-            return frozenset({_L}) if name in LOT_FIELDS else frozenset({_M}) if name in MONEY_KEYS else frozenset({_U})
+            return frozenset({_L}) if name in LOT_FIELDS else _LOT_DOLLARS.get(str(name), frozenset({_U}))
         return None
 
     def _subscript(self, base: frozenset[str], key: str | None, slice_: ast.AST | None = None) -> frozenset[str]:
@@ -575,13 +646,13 @@ class _Levels:
         if _PARAMS in base:
             return frozenset({_C})
         if _CAPS in base:
-            return frozenset({_B})
+            return _ANCHOR
         if _LOTS in base:
             return frozenset({_LOTS if isinstance(slice_, ast.Slice) else _LOT})
         if key in LOT_FIELDS:
             return frozenset({_L})
-        if key in MONEY_KEYS and _U in base:  # a lot handed around (a helper's argument): never the program's own dict
-            return frozenset({_M})
+        if key in _LOT_DOLLARS and _U in base:  # a lot handed around (a helper's argument): never the program's own dict
+            return _LOT_DOLLARS[key]
         return _norm(base) if base else _NONE
 
     def _attribute(self, base: frozenset[str], attr: str, module: bool) -> frozenset[str]:
@@ -596,9 +667,9 @@ class _Levels:
         if attr in ("positions", "closed"):
             return frozenset({_LOTS})
         if attr in NOW_FIELDS and not module:
-            return frozenset({_M})
+            return _NOW
         if attr in ANCHOR_FIELDS and not module:
-            return frozenset({_B})
+            return _ANCHOR
         field = self._field(base, attr)
         if field is not None:
             return field
@@ -705,7 +776,10 @@ class _Levels:
         if isinstance(node, ast.Dict):
             for k in node.keys:
                 self._tag(k, env)
-            return self._join([self._tag(v, env) for v in node.values], many=True)
+            values = [self._tag(v, env) for v in node.values]
+            for k, v in zip(node.keys, values):
+                self._tagged(node, k, v)
+            return self._join(values, many=True)
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
             inner = {k: set(v) for k, v in env.items()}
             for gen in node.generators:
@@ -728,6 +802,14 @@ class _Levels:
             tag = self._tag(node.value, env)
             self._assign(node.target, node.value, tag, env)
             return tag
+        if isinstance(node, (ast.JoinedStr, ast.FormattedValue)):
+            # f"{ctx.equity}": the run's dollars written as text are the run's dollars read back (`TEXT`); a level's
+            # digits stay unknown, as through `str`.
+            parts = node.values if isinstance(node, ast.JoinedStr) else [node.value, node.format_spec]
+            tags = [self._unit(self._tag(part, env)) for part in parts if part is not None]
+            if any(_money(t) for t in tags):
+                return _norm(m for t in tags if _money(t) for m in _dollars(t))
+            return frozenset({_U})
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.expr):
                 self._tag(child, env)
@@ -781,7 +863,7 @@ class _Levels:
                     and (_held(base) or self._own(func.value, _key(node.args[0]), env) is not None):
                 # STATE.get("px", 0.0), closes.get("SPY"): what the program put there, or the default
                 return self._join([self._keyed(func.value, base, node.args[0], env), *raw[1:]])
-            if name == "get" and node.args and (_key(node.args[0]) in LOT_FIELDS or _key(node.args[0]) in MONEY_KEYS):
+            if name == "get" and node.args and (_key(node.args[0]) in LOT_FIELDS or _key(node.args[0]) in _LOT_DOLLARS):
                 return self._subscript(base, _key(node.args[0]), node.args[0])  # a lot's field by .get, as by [...]
             if isinstance(func.value, ast.Name) and not base & (_CONTAINERS | _VIEWS):
                 holder = func.value.id  # a container of the program's own: what is put in is what is read back
@@ -805,6 +887,9 @@ class _Levels:
                 args = [base] + args  # a method of a value (close.mean()): the value is its first argument
         elif isinstance(func, ast.Name):
             name, method = func.id, False
+            if name == "dict":  # dict(buy="SPY", share=0.5, tag=...): an intent written as a call
+                for arg, tag in named.items():
+                    self._tagged(node, arg, tag)
             if name in self.functions:
                 return self._invoke(name, node, raw, named)
             if name in self.returns:
@@ -841,6 +926,9 @@ class _Levels:
                 self._refuse(node, f"clips or floors {_what(held)} against a constant or a PARAMS value ({name})"
                              if not _level(held) else
                              f"clips or floors a price or volume level against a constant or a PARAMS value ({name})")
+        if name in TEXT and any(_money(u) for u in units):
+            # str(ctx.equity), "{}".format(ctx.cash): the run's dollars written as text are the run's dollars read back
+            return _norm(t for u in units if _money(u) for t in _dollars(u))
         if name in UNITLESS:
             return _NONE
         if name in LOG:
@@ -867,6 +955,10 @@ class _Levels:
                 self._refuse(node, "rounds a price or volume level to a fixed grid (a level bucket)" if _level(units[0])
                              else f"rounds {_what(units[0])} to a fixed grid (a bucket)")
             return joined
+        if any(_money(u) for u in units):
+            # A call the pass does not know, handed the run's dollars (math.copysign(ctx.equity, 1), np.dot of qtys and
+            # entries, x.item()): the run's dollars still. A level through an unknown call stays unknown (above).
+            return _norm(t for u in units if _money(u) for t in _dollars(u))
         return frozenset({_U})
 
     def _binop(self, node: ast.AST, a: frozenset[str], op: ast.operator, b: frozenset[str]) -> frozenset[str]:
@@ -893,7 +985,9 @@ class _Levels:
             if _K in a or _K in b:
                 return frozenset({_K})
             if _money(a) or _money(b):
-                return _norm([*(a & {_M, _B, _X}), *(b & {_M, _B, _X})])
+                if _lots_own(a) and _lots_own(b) and ((_VALUE in a and _PNL in b) or (_PNL in a and _VALUE in b)):
+                    return frozenset({_B})  # a lot's value less its pnl: what it cost (the capital it was bought with)
+                return _norm([*_dollars(a), *_dollars(b)])
             return frozenset({_C}) if _const(a) and _const(b) else _NONE
         if isinstance(op, (ast.FloorDiv, ast.Mod)):
             if (_held(a) and (_const(b) or not b)) or (_held(b) and _const(a)):
@@ -906,9 +1000,13 @@ class _Levels:
                 if _meets(a, b):
                     self._refuse(node, f"divides {ANCHORED}")
                     return frozenset({_U})
+                if (_SHARES in a) != (_SHARES in b):
+                    return frozenset({_L})  # dollars over a number of shares: a price (a lot's cost over its qty)
                 return _NONE  # cash over equity, a lot's value over the sleeve's: the position's state, scale-free
             if (_money(a) and _L in b) or (_L in a and _money(b)):
-                return frozenset({_L})  # the sleeve's dollars over a price: a level in other units
+                # The run's dollars over a price: a number of shares, and the run's dollars still (cash over a price
+                # against a lot's qty is cash against what the lot cost).
+                return _scaled(a if _money(a) else b, b if _money(a) else a) | {_SHARES}
             if _U in a or _U in b or (_G in a and _L in b) or (_L in a and _G in b) or (_G in a and _G in b):
                 return frozenset({_U})
             if _L in a or _L in b:
@@ -918,9 +1016,9 @@ class _Levels:
             if _K in a or _K in b:
                 return frozenset({_K})
             if _money(a):
-                return a
+                return _scaled(a, b)
             if _money(b):
-                return b  # 1000.0 / ctx.equity, 1 / ctx.budget: the run's dollars still, written as a reciprocal
+                return _scaled(b, a)  # 1000.0 / ctx.equity, 1 / ctx.budget: the run's dollars still, as a reciprocal
             if _G in a:
                 return a
             return frozenset({_C}) if _const(a) and _const(b) else _NONE
@@ -930,9 +1028,13 @@ class _Levels:
             if _meets(a, b):  # ctx.equity * (1 / ctx.budget): the ratio, written as a product
                 self._refuse(node, f"sets {ANCHORED}")
                 return frozenset({_X})
+            if _money(a) and _money(b):  # dollars times dollars: the run's dollars still, never a value of no unit
+                return _norm([*_dollars(a), *_dollars(b)]) - {_SHARES}
             if _money(a) or _money(b):
-                other = b if _money(a) else a
-                return (a if _money(a) else b) if (not other or _const(other)) else frozenset({_U})
+                m, other = (a, b) if _money(a) else (b, a)
+                if _L in other:  # a number of shares times a price: dollars (a lot's qty times its entry: what it cost)
+                    return _scaled(m, other) - {_SHARES}
+                return _scaled(m, other) if (not other or _const(other)) else frozenset({_U})
             if _L in a or _L in b:
                 return frozenset({_L}) | _origin(a) | _origin(b)
             if _G in a or _G in b:
@@ -943,6 +1045,8 @@ class _Levels:
         if isinstance(op, ast.Pow):
             if _held(a):
                 return a
+            if _held(b):
+                return b  # 1.001 ** ctx.equity: the run's dollars (or a level) still, written as an exponent
             return frozenset({_C}) if _const(a) and _const(b) else frozenset({_U}) if (_U in a or _U in b) else _NONE
         return frozenset({_U})
 
