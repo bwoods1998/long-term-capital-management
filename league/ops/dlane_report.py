@@ -171,8 +171,9 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   and no forward rule moves a seat (`PREREGISTERED["status"]` says so in the report). A reading with no equity close
   is read by the pinned rule's own measure, as before.
 - THE FORWARD RECORD (release E3; league/ops/forward_report.py): `forward_record` is that job's report as it last wrote
-  it (None when absent or stale), and its alarms (FW1-FW8, RR1, RR2, CP1, CP2, MM1: ids, counts and dates only) ride
-  this report's `alarms`, so the `dlane` stall cause mails a warning. Read only, and never this report's failure.
+  it (None when absent or stale), and its alarms (FW1-FW8, RR1, RR2, CP1, CP2, MM1, and the panel lane's FX1-FX3: ids,
+  counts and dates only) ride this report's `alarms`, so the `dlane` stall cause mails a warning. Read only, and
+  never this report's failure.
 - P(DONE | ZERO EDGE) IS THE OPTIONS RULES' FIGURE (`ZERO_EDGE_EQUITY_NOTE`): it was never measured for share closes,
   and a delta-one lane's is far higher. A report that holds an equity close says so on the figure and in each
   checkpoint's `equity` block; no figure for the equity lanes is stated.

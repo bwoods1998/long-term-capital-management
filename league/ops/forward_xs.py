@@ -205,11 +205,6 @@ def group(row: Any, name: str) -> str:
     return GROUP_PREFIX + str(name) if is_panel(row) else str(name)
 
 
-def night_job(ugroup: Any) -> str:
-    """The job whose nights a registry row's stop rules read: the panel night's for a panel row, else E3's own."""
-    return JOB if isinstance(ugroup, str) and ugroup.startswith(UGROUP_PREFIX) else E3_JOB
-
-
 # ---------------------------------------------------------------------------------------------------------- 1. registry
 def judged(verdict: Any) -> bool:
     """Whether a panel version's verdict was JUDGED ON THE BAR: it carries Train facts (a version judged on its
@@ -466,7 +461,9 @@ def _shadow_class() -> Any:
             self._gate = mint_equity_gate_capability(store_root, GATE_REASON)
             self.panel = XS.PanelStore(store_root, gate=self._gate)
             self.panel_through: dt.date = self.panel.fetched_through
-            self.through = schedule.previous_session(self.panel_through)
+            self.through = self.panel_through
+            for _ in range(ROW_LAG):        # ROWS LAG ONE SESSION: the night's day is the last whose rows are final
+                self.through = schedule.previous_session(self.through)
             self.night_day = self.through.isoformat()
             self.cfg = {**self.cfg, "cpu_seconds_night": night_budget(db, self.cfg, clock())}
             self.twin_due: dict[str, str | None] = {}
@@ -1177,7 +1174,7 @@ def run(ctx: Any) -> dict[str, Any]:
 
 __all__ = ["UGROUP_PREFIX", "UGROUP", "ROUTE", "ALPHA_F", "WEIGHT_TOL", "GROUP_PREFIX", "GROUPS", "JOB", "E3_JOB",
            "KIND", "TAG", "ROW_LAG", "TWIN_LAG", "UNREADABLE", "CANARY", "ALARMS", "BESIDE_KEY", "MARKER_KEYS",
-           "MARKER_ROW", "Series", "is_panel", "registered", "engine_label", "group", "night_job", "judged", "needs_of",
+           "MARKER_ROW", "Series", "is_panel", "registered", "engine_label", "group", "judged", "needs_of",
            "look_key", "scored_rows", "scored", "live_row", "series", "night_budget", "is_panel_night", "panel_shadow",
            "read_live", "keys", "live_keys", "agree", "twin", "rebalance_agreement", "write_marker", "audit_marks",
            "raised", "alarms", "beside", "run"]
