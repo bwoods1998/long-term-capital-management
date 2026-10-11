@@ -24,14 +24,31 @@ replacement can go in the same minute. ONE DAY ORDER COUNT (A8.3): at most `orde
 orders a day (cancels counted, as the options book counts its own), entries leaving room for every open lot's exit and
 one cancel of it, and none while the House-wide count would leave less than the options book's `exit_reserve()`.
 
+THE HOUSE'S MINUTE (the clock every window runs on): `tick(now)` is handed the minute's start, three seconds past the
+wall minute, and runs AFTER the whole options minute, so its sends go later by however long that took (up to most of a
+minute). A moment is due at the first minute at or after it: the open window's first send is the 09:31 minute's (09:30:30
+is its earliest moment, never its send time), the close window's the 15:55 minute's, and a re-price goes at most once a
+minute, its age counted from the minute an order was sent in (`answer.tick`), never from `placed_at` (the wall clock at
+its POST). EVERY CUT-OFF IS JUDGED AGAIN ON THE WALL CLOCK at the send (`_send`): nothing is written or POSTed at or
+after its window's cut-off (09:45:00 an open entry, 15:59:30 every exit and every close entry), since a day order POSTed
+at or after the close would rest for the next session; and no order is cancelled for a re-price its replacement could
+not follow. THE GATEWAY'S UNREAD READINGS (`RETRY_CAPS`: 424 positions, 424 orders, 503 equity, 409 stock_close; nothing
+was sent and nothing judged) go again next minute like the House's own rate refusal: never an entry's end, never one of
+the `MAX_EXIT_REFUSALS` that carry an exit to the next session; an order refused before the venue widens no collar.
+ONE INTENT, ONE LOT: every fill of a buy intent's orders joins the lot its first fill opened (`_intent_lot`).
+THE OWNER'S COMMANDS (`OWNER_FLATTEN`, `OWNER_CLEAR_FREEZE`: `python3 -m league.live --flatten-equity "<why>"`,
+`--clear-equity-freeze "<why>"`) are key-values read first every minute and done once, in the House's own thread.
+
 THE WINDOWS (`schedule`): OPEN: exits first at open+30 s (09:30:30 ET), entries after the exits filled or 2 minutes,
 sized on cash after the exit fills (no entry is funded by an exit that has not filled: the account is read again before
 the entries are sized, and an unfilled sale adds nothing to its cash); collar `entry_collar_bp` (10 ETF / 25 stock) on
 the first send, widening by the same step each re-price to `max_collar_bp` (50 / 100), and at the widest collar
 re-priced only when the quote has moved through the limit (`_reprice_due`: the day's order count is shared); entries stop at open+15 min
 (09:45); exits continue to close-5 min (15:55), then go at the bid at the widest collar in the close window. CLOSE (A2):
-at close-5 min (15:55:00) exits first then entries, marketable limits re-priced every 30 s to close-30 s (15:59:30),
-then recorded missed. PRE-OPEN (09:25): the day's first reconciliation reading and an activities read (a split or a
+at close-5 min (15:55:00) exits first, then entries once those exits filled or a minute passed (`CLOSE_EXIT_WAIT_S`: as
+at the open, sized on the cash after the exits), marketable limits re-priced every 30 s to close-30 s (15:59:30), then
+recorded missed. In either window an entry sized to nothing is not final while an exit may still fill (`_exits_due`): it
+is sized again each minute, and its cut-off records it missed with the reason. PRE-OPEN (09:25): the day's first reconciliation reading and an activities read (a split or a
 dividend posted overnight); the windows' orders are the decide's intents (`eq_intents`), each written `pending` at its
 own send with that minute's quote, never at 09:25 with a pre-open price. A missed entry is recorded, never chased; an exit the windows could not fill is recorded missed
 and carried to the next session's open (a "house_exit" intent of the same reason). MIN HOLD: a lot never sells in the
