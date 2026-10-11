@@ -1,13 +1,16 @@
 """Release E2.4, THE EQUITY LANES' HEALTH (league/ops/elane_health.py): the equity lanes' own stall causes (`elane_dq`,
 `elane_births`, `elane_idle`, `elane_refused`) raised through the stall job's machinery (league/ops/stall.py), each judged
-only while the lanes are on and on enough evidence counted from the running release's first start; the notice, in
-which each is an entry of its own under a cause the gateway words; the Done meter's item 7 counting their owner
-steps; the lanes' research funnel (league/ops/funnel.py `equity.research`, the `scoreboard` job's receipt); the
-operator's report; what the equity architect's next request is shown of a barren pass, in closed words
-(league/swarm/elane_births.py `last_text`); and the lanes' output settings held to the model provider's own limit. The
-closed words are held to the code that writes the records (the equity pass, the Train round, the static rules, a
-disqualification's record) by running that code, and the two replays of Oct 11 (a lane starved at its pace, a healthy
-lane that spends its day) run the real equity pass, Train round and stall job (league/tests/elane_e24_house.py).
+only while the lanes are on and on enough evidence counted from the running release's first start, with what the job
+keeps for them under that release (the idle clock, the last hold read, when `elane_dq` stood, the unreadable lanes'
+warning); the notice, in which each is an entry of its own under a cause the gateway words, and the House warning,
+which keeps an owner step whole; the Done meter's item 7 counting their owner steps; the lanes' research funnel
+(league/ops/funnel.py `equity.research`, the `scoreboard` job's receipt); the operator's report; what the equity
+architect's next request is shown of a barren pass, in closed words (league/swarm/elane_births.py `last_text`); and
+the lanes' output settings held to the model provider's own limit. The closed words are held to the code that writes
+the records (the equity pass, the Train round, the static rules, a disqualification's record) by running that code,
+and the replays of the two checks of Oct 11 (the morning at its pace and a healthy lane that spends its day, on
+neither of which the idle cause may stand; a lane whose Train runs fail on the House's side, broken at its pace; a
+slow lane's refusals) run the real equity pass, Train round and stall job (league/tests/elane_e24_house.py).
 
 Every family, program, refusal, dollar and number here is invented."""
 
@@ -1291,8 +1294,14 @@ class OwedWorkAndNothingScored(Case):
                                                  "Train research. BROKEN, whatever E2's own lines hold: 2 Train rounds ran; "
                                                  "2 steps failed on the House's side (store 2). E2 is also held now"))
         self.assertLessEqual(len(entry["what"]), EH.WHAT_CHARS)
-        self.assertEqual(list(entry["numbers"])[:6], ["kind", "idle_hours", "researching", "held_now", "steps_due",
-                                                      "steps_skipped"])
+        # What the gateway prints of the figures (its first sixteen): what the lane's record shows first, each a figure.
+        self.assertEqual(list(entry["numbers"])[:10], ["kind", "idle_hours", "researching", "held_now", "house_failures",
+                                                       "step_errors", "rounds_raised", "train_rounds", "steps_due",
+                                                       "steps_skipped"])
+        for name, value in list(entry["numbers"].items())[:EH.FIGURES]:
+            self.assertNotEqual(figure(value), "unknown", (name, value))
+        for name in EH.NOT_MAILED:
+            self.assertNotIn(name, entry["numbers"])
 
     def held_mixture(self, taken) -> dict:
         """The second check's mixtures (probe_mask): three families, nothing scored for seven hours, a round every 48

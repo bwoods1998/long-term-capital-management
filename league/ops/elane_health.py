@@ -433,7 +433,8 @@ WARN_CHARS = 900
 WHAT_CHARS, DOING_CHARS, STEP_CHARS, FIGURES = 400, 700, 400, 16
 MAIL_FIGURES = {"elane_dq": ("scored", "faulted", "families", "top_error", "basis"),
                 "elane_births": ("barren_passes", "kind", "born", "setting"),
-                "elane_idle": ("kind", "idle_hours", "researching", "held_now", "steps_due", "steps_skipped"),
+                "elane_idle": ("kind", "idle_hours", "researching", "held_now", "house_failures", "step_errors",
+                               "rounds_raised", "train_rounds", "steps_due", "steps_skipped"),
                 "elane_refused": ("answers", "top_rule", "top_rule_n", "basis")}
 NOT_MAILED = ("judged", "examples", "hint", "pace_usd_hour", "spent_last_hour_usd", "day_line_usd", "spent_today_usd")
 

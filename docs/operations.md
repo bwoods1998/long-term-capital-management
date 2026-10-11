@@ -507,8 +507,7 @@ the look on the House; real money only at Probe, inside the shared loss budget).
     (`python3 set_swarm.py elane.e2.pace_share=<lines> --apply`). The research funnel carries the same counts for
     the day and the release (`train_steps`; the passes' `skipped`). **The cost of this ruling: a lane starved by a
     setting is seen in the funnel and the receipt, not in the mail.** Read `train_steps` in the `scoreboard` job's
-    receipt when you set a pace: on Oct 11 the pace cost the lanes more than half their Train steps and nothing
-    will mail that.
+    receipt when you set a pace: nothing will mail what it costs.
     The idle clock is kept per release (`stall.json` `elane.idle`): from the later of the last version scored and
     when the work became owed, less the time the swarm was down (at a restart, from the heartbeat the last run read
     to the new start), so a broken lane that is restarted every two hours is still judged idle; its hours say "at

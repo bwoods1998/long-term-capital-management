@@ -115,16 +115,6 @@ class House:
         beat = {"at": self.now, "started_at": self.started, "release": self.release}
         (self.root / EH.HEARTBEAT).write_text(json.dumps(beat))
 
-    def restart(self, release: str | None = None) -> None:
-        """The swarm restarts at `now`: the same release (the watchdog's, a settings apply) unless `release` names
-        another. Its settings are read again."""
-        self.started = self.now
-        self.release = release or self.release
-        with ops_guard.readonly():
-            self.settings = settings_mod.load(self.root, config={})
-        self.arch.settings = self.researcher.settings = self.settings
-        self.beat()
-
     def keep_options(self) -> None:
         """The options lanes healthy at `now` (a birth, ten Gym runs and a Validation run): none of their causes stand."""
         if self.store.family("opt") is None:
