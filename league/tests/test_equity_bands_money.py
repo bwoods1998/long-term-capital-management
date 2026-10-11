@@ -113,6 +113,11 @@ class EDM1(unittest.TestCase):
         self.assertIn("EDM1", edm1(record(own), TABLE))                    # sum -0.12 < -1.645 x 0.0042 x sqrt(10)
         sigma, source = B.edm1_sigma(record([-0.01] * 10))
         self.assertEqual((sigma, source.startswith("the rule's fallback")), (B.EDM1_FALLBACK_SIGMA, True))
+        # Equal returns whose rounding leaves a tiny sd (the built-in sum on Python 3.11): still no sd of its own.
+        noisy = [-0.01 + (1e-18 if i % 2 else -1e-18) for i in range(10)]
+        self.assertEqual(B.edm1_sigma(record(noisy))[0], B.EDM1_FALLBACK_SIGMA)
+        for equal in (0.1, 0.07, 1 / 3, -0.0123456789):
+            self.assertEqual(B.edm1_sigma(record([equal] * 10))[0], B.EDM1_FALLBACK_SIGMA, equal)
         # Nine closes: the record's own sd is not yet read; with the table's line at 5 the fallback is the sigma.
         from dataclasses import replace
 
