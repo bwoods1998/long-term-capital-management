@@ -88,7 +88,13 @@ dithered by half a cent before any ratio is taken, so the cent grid cannot give 
 `{slot: weight}` at the open or the close, long only, each weight at most 0.20, the sum at most 1.00, 5 names or more
 when invested. **The KEEP rule** turns a target into lots: a held name that is still in the target is kept untouched; a
 name that left it is sold whole; a new name is bought as one lot; at most 12 buys and 12 sells, and a target that
-needs more is refused whole. The House's own exits are the same in the Gym and live: a name out of the eligible set
+needs more is refused whole. **The sleeve is a CONSTANT-WEIGHT book, in the Gym and live alike** (the pre-registered
+contract's C3 and C8: a new name is ONE lot of weight x the budget, and nothing compounds): a buy's room is the
+budget less what the open lots COST AT ENTRY, so a loss never shrinks the next lot and a gain in the held names takes
+no room from it (`league/xs/engine.py` `_committed`; `league/xs/book.py` `committed`, which the book's sizing reads
+for a panel program's sleeve; every wall of the ACCOUNT is still read at its marks). One narrowing, stated: the
+open lots' entry weights never pass 1.00, so where a kept lot holds more than the new target gives it the last new
+names are cut to the room. The House's own exits are the same in the Gym and live: a name out of the eligible set
 at any close is sold at the next open, a lot at its maximum hold likewise, and a name whose bars end exits at its last
 close less a 30% haircut (for the lot, its placebo counterparts and its cell's members alike). **The standing
 target:** a buy a session could not make (a sale that filled late, a quote too wide, a budget cut, a venue refusal) is

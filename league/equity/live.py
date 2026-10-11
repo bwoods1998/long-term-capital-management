@@ -1918,6 +1918,15 @@ class EquityBook:
         own_value = sum((lot.value for lot in own_lots), ZERO) + sum((o.remaining * o.limit_px for o in own_buys), ZERO)
         own_symbol = (sum((lot.value for lot in own_lots if lot.symbol == symbol), ZERO)
                       + sum((o.remaining * o.limit_px for o in own_buys if o.symbol == symbol), ZERO))
+        book = self._adapter(inst.kind) if inst.kind != EQUITY_KIND else None
+        if book is not None and hasattr(book, "committed"):
+            # A PANEL PROGRAM'S SLEEVE IS READ ON ENTRY NOTIONALS (the pre-registered contract's constant-weight
+            # book, C3 and C8, as the Gym engine sizes its twin): a held name that rose takes no room from the next
+            # lot, and a loss gives none back. Every wall of the account below is read at its marks, as before: a
+            # stock's share of equity, the invested cap, the House's cash, the shared loss budget.
+            own_value = book.committed(own_lots, working=[o.remaining * o.limit_px for o in own_buys])
+            own_symbol = book.committed(own_lots, symbol=symbol,
+                                        working=[o.remaining * o.limit_px for o in own_buys if o.symbol == symbol])
         sleeve = self._sleeve_share(inst) * E
         x = Z.SizingInputs(symbol=symbol, klass=klass, share=intent.share if usd is None else None,
                            usd=intent.usd if usd is None else usd, limit_price=limit, E=E, sleeve_equity=sleeve,
@@ -2929,7 +2938,9 @@ class EquityBook:
         E = self.sizing_equity() or ZERO
         budget = self._sleeve_share(inst) * E if self._et() is not None else ZERO
         own_value = sum((lot.value for lot in lots), ZERO)
-        cash = max(ZERO, budget - own_value)
+        # THE CONSTANT-WEIGHT BOOK (the pre-registration's C3, C8; the Gym engine's own): the sleeve's free room is its
+        # budget less the open lots' ENTRY notionals, and its equity that room plus the lots at their marks.
+        cash = adapter.sleeve_room(budget, lots)
         is_called = bool(adapter.called(t, needs))
         standing = None
         if not is_called:

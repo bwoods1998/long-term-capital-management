@@ -1110,6 +1110,50 @@ class AMismatchedRebalanceIsVoidWhole(PanelCase):
                          "no name is sold at one open and bought back at the next")
 
 
+class TheSleeveIsReadOnEntryNotionals(PanelCase):
+    """THE CONSTANT-WEIGHT BOOK, live as in the Gym (the pre-registration's C3 and C8; the review's spec-3): a panel
+    buy's room in its sleeve is the budget less the open lots' ENTRY notionals. E1's own reading is at the marks:
+    right for one ETF lot, and it cut the fifth name of a basket whose four held names had gained."""
+
+    def test_a_basket_that_gained_still_buys_its_next_lot_whole(self):
+        h = self.h
+        for symbol in ("N000", "N001", "N002", "N003"):
+            lot = h.seed(symbol)
+            lot.mark = lot.entry_px * D("1.10")                       # each up 10%: 0.88 of the sleeve at its marks
+            h.book._save_lot(lot)
+        h.plan(["N000", "N001", "N002", "N003", "N010"])
+        h.decide(FRIDAY)
+        [buy] = [i for i in h.panel_intents() if i.kind == "buy"]
+        self.assertEqual((buy.symbol, buy.usd), ("N010", D("111.45")))
+        h.run(MONDAY, (8, 31), (9, 26), (9, 31), (9, 33))
+        [body] = h.sent("buy")
+        self.assertGreater(self.usd(body), D("111.40"), "whole: a fifth of the sleeve, the gain of the others aside")
+        self.assertLessEqual(self.usd(body), D("111.45"))
+        self.assertEqual(h.panel_intents(kind="buy")[0].status, "done")
+
+    def test_what_the_program_is_told_is_the_same_book(self):
+        h = self.h
+        for symbol, factor in (("N000", "1.10"), ("N001", "0.80")):
+            lot = h.seed(symbol)
+            lot.mark = lot.entry_px * D(factor)
+            h.book._save_lot(lot)
+        h.plan(["N000", "N001", "N010", "N011", "N012"])
+        h.decide(FRIDAY)
+        inputs = h.child.seen[-1]["inputs"]
+        self.assertAlmostEqual(inputs.budget, 557.25, places=2)
+        self.assertAlmostEqual(inputs.cash, 557.25 - 2 * 111.45, places=2, msg="the budget less two ENTRY notionals")
+        marked = sum(float(lot.value) for lot in h.book._lots(instance=KEY))
+        self.assertAlmostEqual(inputs.equity, inputs.cash + marked, places=2, msg="and the lots at their marks beside")
+        self.assertEqual(adapter.committed(h.book._lots(instance=KEY)), D("222.90"))
+        self.assertEqual(adapter.committed(h.book._lots(instance=KEY), symbol="N000", working=["5.55"]), D("117.00"))
+        self.assertEqual(adapter.sleeve_room("200", h.book._lots(instance=KEY)), D("0"), "never below zero")
+
+    def test_an_etf_program_of_the_books_own_kind_is_sized_at_its_marks_as_before(self):
+        self.assertIn("if book is not None and hasattr(book, \"committed\"):", inspect.getsource(L.EquityBook._size))
+        self.assertIn("book = self._adapter(inst.kind) if inst.kind != EQUITY_KIND else None",
+                      inspect.getsource(L.EquityBook._size))
+
+
 # ------------------------------------------------------------------------------------------------------------- B15
 class PanelLotsAreMarked(PanelCase):
     def setUp(self):

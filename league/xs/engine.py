@@ -8,10 +8,25 @@ planned (`plan_orders`); on every other close the STANDING target's buys are pla
 entries, close exits, close entries (E1's order), at E1's own functions, imported, never copied:
 `league.equity.engine.fill_price(official, side, hs, k)` with hs = `bars.hs[col, 0 | 1]`, `league.equity.config
 .sell_fees`, `league.equity.sizing.size_entry` (class "stock", the sleeve `cfg.capital`, `config.POSITION_SHARE`,
-`config.RISK_WEIGHT`, no budget room, `config.MIN_NAME_USD`), `league.equity.config.may_sell` and `max_hold_due`, and
-splits and dividends by `league.equity.engine.split_factor` on the adj/raw ratio step, each step read with
-`config.rounding_bound` (the vendor's cents: `ratio_tolerance`, `split_of`). Sleeve cash >= 0 after every fill
-(asserted). Deterministic: the same inputs give the same `result_sha`. There is no state reset inside a run.
+`config.RISK_WEIGHT`, no budget room, `config.MIN_NAME_USD`) ON THE CONSTANT-WEIGHT BOOK below, `league.equity.config
+.may_sell` and `max_hold_due`, and splits and dividends by `league.equity.engine.split_factor` on the adj/raw ratio
+step, each step read with `config.rounding_bound` (the vendor's cents: `ratio_tolerance`, `split_of`). Deterministic:
+the same inputs give the same `result_sha`. There is no state reset inside a run.
+
+THE SIZING BOOK IS CONSTANT-WEIGHT (the pinned pre-registration's C3 and C8: a slot not held is bought as ONE lot of
+w x E0, and nothing compounds). A buy's room is read on ENTRY NOTIONALS against the fixed capital E0 (`_committed`):
+the sleeve's free room is E0 less the entry notionals of the open lots, the name cap `config.POSITION_SHARE` x E0
+less the name's own, and NO PROFIT OR LOSS, FEE OR DIVIDEND EVER ENTERS IT. So a target of 5 x 0.20 opens five lots of
+weight 0.20 after a loss as after a gain. (This engine once sized on a per-run CASH book: a weekly full rotation
+loses about 3.6% of E0 a year to costs alone, so the last lot of 13 to 21% of rebalances was cut, to a weight as low
+as 0.01, and 19 to 300 buys a run were dropped for want of cash, while the live sleeve is set to its share of equity
+each day and buys the lot whole: Train, the floor's pools and the look were on a 4.x-name book the live program does
+not trade.) ONE NARROWING, stated: the open lots' ENTRY weights never pass 1.00, so where a kept lot holds more than
+the new target gives it (the KEEP rule never resizes), the last buys of that target are cut to the room or skipped
+under the minimum, and the standing target buys them when the room exists. The daily `equity` of a result is the
+P&L's own book (E0 plus what the lots made, realized and open), which the sizing never reads; what a program is told
+as `cash` is the sizing book's free room, and as `equity` that room plus its lots at their marks (the live book's own
+two figures: league/xs/book.py `sleeve_room`).
 DECISIONS run at the close of every session from the one before the run's first (a history session: its orders
 execute on the run's first session) to the one before its last (a decision at the last close could never execute).
 
@@ -339,8 +354,19 @@ class _Account:
     def reject(self, text: str) -> None:
         self.rejects.append(text)
 
-    def _assert_cash(self, what: str) -> None:
-        assert self.cash >= 0, f"the sleeve's cash went below zero after {what} (an engine bug): {self.cash}"
+    def _committed(self, col: int | None = None) -> Decimal:
+        """THE CONSTANT-WEIGHT SIZING BOOK (the module docstring): the entry notionals of the open lots (of one
+        column's, with `col`). What a buy's room is read on; no P&L is in it."""
+        return sum((lot.notional for lot in self.lots.values() if col is None or lot.col == col), Decimal(0))
+
+    def _room(self) -> Decimal:
+        """The sleeve's free room for new lots: E0 less the open lots' entry notionals (never below zero)."""
+        return max(Decimal(0), self.capital - self._committed())
+
+    def _assert_book(self, what: str) -> None:
+        committed = self._committed()
+        assert committed <= self.capital, (f"the open lots' entry notionals passed the capital after {what} (an "
+                                           f"engine bug): {committed} of {self.capital}")
 
     def _value(self, *, col: int | None = None, marks: Mapping[int, float] | None = None) -> Decimal:
         total = Decimal(0)
@@ -413,7 +439,6 @@ class _Account:
     def _close_lot(self, lot: _Lot, j: int, at: str, reason: str, tag: str, fill: Decimal, fees: Decimal) -> None:
         proceeds = lot.qty * fill
         self.cash += proceeds - fees
-        self._assert_cash(f"closing lot {lot.lid}")
         lot.exit_index, lot.exit_at, lot.exit_px, lot.proceeds, lot.reason = j, at, fill, proceeds, reason
         lot.tag = tag
         lot.fees += fees
@@ -493,14 +518,14 @@ class _Account:
             assert price is not None
             limit = _decimal_price(_e1_engine.fill_price(price, "buy", float(self.hs[col, 0 if at == OPEN else 1]),
                                                          self.k))
-            marks = {col: price}
-            own = self._value(col=col, marks=marks)
+            # THE CONSTANT-WEIGHT BOOK (the module docstring; C3, C8): every figure an entry notional against E0.
+            committed, room, own = self._committed(), self._room(), self._committed(col)
             sized = sizing.size_entry(sizing.SizingInputs(
                 symbol=f"slot {slot}", klass=_e1.STOCK, share=None, usd=Decimal(str(order["usd"])), limit_price=limit,
-                E=self.capital, sleeve_equity=self.capital, sleeve_free_cash=self.cash, sleeve_symbol_value=own,
+                E=self.capital, sleeve_equity=self.capital, sleeve_free_cash=room, sleeve_symbol_value=own,
                 position_share=config.POSITION_SHARE, account_symbol_value=own,
-                invested_now=self._value(marks=marks), invested_share=Decimal("1.00"), available_cash=self.cash,
-                cash=self.cash, any_short=False, budget_room=None, weight=config.RISK_WEIGHT,
+                invested_now=committed, invested_share=Decimal("1.00"), available_cash=room,
+                cash=room, any_short=False, budget_room=None, weight=config.RISK_WEIGHT,
                 min_order_usd=config.MIN_NAME_USD))
             qty = Decimal(sized.qty).quantize(_QTY, rounding=ROUND_DOWN) if sized.qty > 0 else Decimal(0)
             if qty <= 0:
@@ -513,9 +538,9 @@ class _Account:
                    "hs_open": float(self.hs[col, 0]), "hs_close": float(self.hs[col, 1]), "cell": cell,
                    "members": members}
             lot = _Lot(self.next_lid, col, slot, qty, limit, decided, j, at, price, row)
-            self.cash -= lot.notional
-            self._assert_cash(f"buying lot {lot.lid}")
+            self.cash -= lot.notional          # (the P&L's book: it may stand below zero after a loss; sizing never reads it)
             self.lots[lot.lid] = lot
+            self._assert_book(f"buying lot {lot.lid}")
             self.log.lots.append(row)
             self.next_lid += 1
 
@@ -556,8 +581,9 @@ class _Account:
         """The close of session j: U(j) and the cells (`ctx.derive`), the House exits, then the program's call on a
         decision day, or the standing target's buys on every other."""
         positions, closed = self._positions(j), self._closed_rows(j)
-        book = {"positions": positions, "closed": closed, "rejects": list(self.rejects), "cash": float(self.cash),
-                "equity": float(self.cash + self._value()), "budget": float(self.capital)}
+        room = self._room()
+        book = {"positions": positions, "closed": closed, "rejects": list(self.rejects), "cash": float(room),
+                "equity": float(room + self._value()), "budget": float(self.capital)}
         inputs = _ctx.inputs_from_panel(self.bars, j, needs=self.needs, params=self.program.params, **book)
         derived = _ctx.derive(inputs)
         called = bool(config.decision_due(self.days[j], self.needs.rebalance, self.needs.weekday))

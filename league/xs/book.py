@@ -636,6 +636,29 @@ def inputs(cols: Columns, fetched: Fetched, *, day: dt.date, needs: Mapping[str,
                                 budget=float(budget), params=params)
 
 
+def committed(lots: Sequence[Any], *, symbol: str | None = None, working: Sequence[Any] = ()) -> Decimal:
+    """THE CONSTANT-WEIGHT SIZING BOOK, live as in the Gym (the pinned pre-registration's C3 and C8; league/xs/engine.py
+    `_committed`): the ENTRY notionals of the instance's open lots (of one symbol's, with `symbol`), plus `working`:
+    the dollars of its buys still working. What a panel buy's room is read on: no mark and no P&L is in it, so a
+    held name that rose takes no room from the next lot and a loss gives none back. (E1's own book reads a sleeve at
+    its marks, which is right for one ETF lot and cut the fifth name of a basket whose four held names had gained.)"""
+    want = None if symbol is None else str(symbol).upper()
+    total = ZERO
+    for lot in lots:
+        if _open(lot) and (want is None or str(_get(lot, "symbol") or "").upper() == want):
+            total += _dec(_get(lot, "entry_notional")) or ZERO
+    for usd in working:
+        total += _dec(usd) or ZERO
+    return total
+
+
+def sleeve_room(budget: Any, lots: Sequence[Any], *, working: Sequence[Any] = ()) -> Decimal:
+    """The sleeve's free room for new lots: `budget` less `committed`, never below zero. What the sizing reads as
+    the sleeve's free cash, and what a program is told as `ctx.cash` (its `ctx.equity` is this plus its lots at
+    their marks)."""
+    return max(ZERO, (_dec(budget) or ZERO) - committed(lots, working=working))
+
+
 def last_called(rows: Sequence[Mapping[str, Any]], *, before: str | None = None) -> str:
     """The day of the instance's last decision in which its program was asked (a called row with a `ctx_sha`), "" when
     none: what "since the last call" means for a ctx's `closed` and `rejects`."""
@@ -927,6 +950,6 @@ __all__ = ["KIND", "MAX_INTENTS", "FETCH_CHUNK", "FETCH_TICK_S", "KEEP_SESSIONS"
            "HOLD_DAY_FAILS_EXIT", "TAG", "INELIGIBLE", "TWINS_FILE", "TWINS_VERSION", "REBALANCE_STATUS", "AUDIT_STATUS",
            "LABEL", "SCHEMA", "REBALANCE_COLUMNS", "INSTANCE_KIND_COLUMN", "INSTANCE_KIND_DDL", "ColumnsRefused",
            "Columns", "Fetched", "slots", "sessions_through", "columns", "union", "view", "called", "needs_of", "fetch",
-           "complete", "bars_sha", "keep", "kept", "same", "eligible", "inputs", "last_called", "standing", "intents",
+           "complete", "bars_sha", "keep", "kept", "same", "eligible", "inputs", "committed", "sleeve_room", "last_called", "standing", "intents",
            "skipped", "target_pairs", "marks", "rebalance_row", "event", "spy_closes", "spy_span", "date_record",
            "date_t", "cost_sentence"]

@@ -90,7 +90,7 @@ sessions, oldest first, the last one session t.
 | `ctx.positions` | your open lots: `{id, slot, weight, ret, held_sessions, at, tag}`: `id` the lot's, `slot` its name's id, `weight` its share of your equity, `ret` its return since entry, `held_sessions` the sessions since its entry session (0 at that session's own close), `at` how it was filled |
 | `ctx.closed` | lots closed since your last call: `{id, slot, net_ret, held_sessions, reason, tag}`; `net_ret` after costs, over the lot's entry dollars; `reason` "program", "max_hold", "house" or "vanished" |
 | `ctx.rejects` | why orders of your last target were refused |
-| `ctx.cash`, `ctx.equity` | your sleeve's free cash, and its equity (cash + lots), dollars |
+| `ctx.cash`, `ctx.equity` | your sleeve's free room for new lots (`ctx.budget` less what your open lots cost at entry), and that room plus your lots at their marks, dollars. Neither compounds: what you made or lost on closed lots is in neither |
 | `ctx.budget` | the sleeve's size your weights are shares of (the Gym: $1,000; it does not compound) |
 | `ctx.weekday` | 0 Monday .. 4 Friday, of session t |
 | `ctx.session_of_month`, `ctx.sessions_left_in_month` | 1 on the month's first session; 0 on its last |
@@ -127,8 +127,11 @@ whose slot has left `ctx.ids` is being sold by the House at the next open: leave
 
 **The KEEP rule turns a target into orders:**
 - a slot you hold that is absent from the target is sold, whole, at the next fill point;
-- a slot you do not hold is bought as ONE lot of `weight x ctx.budget` dollars (under $10: skipped, and said);
-- a slot you hold that is in the target is KEPT: no trade, no resize, whatever its weight;
+- a slot you do not hold is bought as ONE lot of `weight x ctx.budget` dollars (under $10: skipped, and said), after
+  a loss as after a gain: the sleeve is read on what your open lots cost at entry, never on what they are worth;
+- a slot you hold that is in the target is KEPT: no trade, no resize, whatever its weight. So a kept lot keeps the
+  weight it was bought at: if your new target gives it less and spends the difference on new names, the last of
+  them is cut to the room that is left (your open lots' entry weights never pass 1.00);
 - at most 12 buys and 12 sells a decision: a target that needs more is refused whole (the reject says "order cap")
   and the decision is a hold. A rule that wants more staggers itself.
 

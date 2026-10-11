@@ -932,19 +932,68 @@ class EntryValidityAndTheStandingTarget(EngineCase):
                     self.assertGreaterEqual(len(refused), 2)
                     self.assertTrue(all(p["targets"] == [] and p["buys"] == [] for p in refused))
 
-    def test_the_cash_cut_a_buy_the_sleeve_cannot_fund_is_cut_and_never_a_negative_cash(self):
-        bars = panel(drift=-0.004)                      # a falling market: each rotation leaves less cash
+    def test_after_a_net_loss_a_full_target_still_opens_five_lots_of_weight_a_fifth(self):
+        """THE CONSTANT-WEIGHT BOOK (the pinned pre-registration's C3 and C8: a slot not held is bought as ONE lot of
+        w x E0; nothing compounds). The engine once sized on a per-run cash book: in a falling market each rotation
+        left less cash, the fifth lot of a 5 x 0.20 target was cut (to a weight as low as 0.01) and buys were dropped
+        for want of cash, while the live sleeve is set to its share of equity each day and buys the lot whole."""
+        bars = panel(drift=-0.004)                      # a falling market: each rotation loses
 
         def decide(value: Any, state: dict) -> Any:
             state["n"] = state.get("n", 0) + 1
             ids = sorted(value.ids)
             return {"target": {int(s): 0.2 for s in ids[5 * (state["n"] % 2):][:5]}, "at": "open"}
 
-        result, log = self.run_log(Program(decide), bars)
-        self.assertLess(result["summary"]["pnl"], -20)
+        seen: list[tuple[float, float, float]] = []
+
+        def watching(value: Any, state: dict) -> Any:
+            seen.append((value.cash, value.equity, value.budget))
+            return decide(value, state)
+
+        result, log = self.run_log(Program(watching), bars)
+        self.assertLess(result["summary"]["pnl"], -20, "a net loss")
         weights = [lot["weight"] for lot in log.lots]
-        self.assertLess(min(weights), 0.199, "the last buy of a rotation is cut to the cash the sleeve has")
+        self.assertGreaterEqual(len(weights), 25)
+        self.assertEqual(len(weights) % 5, 0, "every rotation opened its five lots")
+        self.assertGreater(min(weights), 0.19999, "each of weight a fifth: a loss never shrinks the next lot")
         self.assertLessEqual(max(weights), 0.2 + 1e-12, "and nothing compounds: a lot is never more than w x E0")
+        self.assertFalse([p for p in result["picks"] if p["dropped"]], "no buy was dropped for want of cash")
+        # THE P&L'S OWN BOOK is not the sizing's: the equity series still says what the lots made.
+        equity = results.column(result, "equity")
+        self.assertAlmostEqual(equity[-1] - 1000.0, result["summary"]["pnl"], places=2)
+        self.assertLess(min(equity), 980.0)
+        # What the program is told: the budget never moves; fully invested, its free room is cents, whatever it lost.
+        self.assertEqual({budget for _, _, budget in seen}, {1000.0})
+        self.assertEqual(seen[0][:2], (1000.0, 1000.0))
+        self.assertTrue(all(0.0 <= cash < 0.02 for cash, _, _ in seen[1:]), seen[:4])
+
+    def test_the_open_lots_entry_weights_never_pass_one_a_kept_lot_keeps_its_own(self):
+        """THE ONE NARROWING: the KEEP rule never resizes, so five kept lots of weight 0.16 that the new target gives
+        0.10 each still hold 0.80 of E0, and of the target's three new names at 0.15 the first is whole, the second
+        is cut to the 0.05 that is left and the third has no room (the standing target buys it when there is). A
+        cut is on ENTRY notionals: the kept names' gain takes no room, and their loss would give none."""
+        bars = panel(drift=0.004)                       # a rising market: the kept names gain
+
+        def decide(value: Any, state: dict) -> Any:
+            state["n"] = state.get("n", 0) + 1
+            ids = state.setdefault("ids", [int(s) for s in sorted(value.ids)])
+            if state["n"] == 1:
+                return {"target": {s: 0.16 for s in ids[:5]}, "at": "open"}         # five lots: 0.80 of E0
+            if state["n"] == 2:                                                      # keep them, and ask for three more
+                return {"target": {**{s: 0.1 for s in ids[:5]}, **{s: 0.15 for s in ids[5:8]}}, "at": "open"}
+            return {"hold": True}
+
+        result, log = self.run_log(Program(decide), bars)
+        self.assertGreater(result["summary"]["pnl"], 20, "the kept names gained")
+        weights = [round(lot["weight"], 4) for lot in log.lots]
+        self.assertEqual(weights, [0.16] * 5 + [0.15, 0.05], "whole, then cut to the room, on entry notionals")
+        dropped = [d for p in result["picks"] for d in p["dropped"]]
+        self.assertTrue(dropped and all("sized to nothing" in why or "last session" in why for _, why in dropped),
+                        dropped[:3])
+        self.assertIn("the sleeve has $0.00 of free cash", dropped[0][1])
+        self.assertEqual(len({slot for slot, _ in dropped}), 1, "the third new name, asked again by the standing target")
+        self.assertLessEqual(math.fsum(lot["weight"] for lot in log.lots if lot["exit"] is None), 1.0 + 1e-12)
+        self.assertGreater(math.fsum(lot["weight"] for lot in log.lots if lot["exit"] is None), 0.9999)
 
 
 # ============================================================================================= the result record
