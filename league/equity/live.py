@@ -2333,7 +2333,6 @@ class EquityBook:
                                seats=seats, settings=rule, late=late, yielded_today=yielded)
 
         plan = plan_now(memory.get("yield_day") == day)                                              # (3) the idle test
-        idle = list(plan["idle"])
         if plan["yields"]:                                                                           # (4) one yield
             goes = facts[plan["yields"]]
             row = next(r for r in holders if str(r["family"]) == goes.family)
@@ -2343,7 +2342,6 @@ class EquityBook:
             if self._yield(row, why, str(plan["for"]), rule, since, memory, flags, day, now, out):
                 holders.remove(row)
                 waiting.append(row)
-                idle.remove(goes.family)
                 facts[goes.family] = self._seat_facts(row, since, flags, day)
                 last = memory.get("last")
             plan = plan_now(True)           # the queue as it stands: with the yielded program flagged, or without a yield
@@ -2385,6 +2383,9 @@ class EquityBook:
                                             "why": f"its seating did not take ({why[:200]}): the seat goes to the next "
                                                    "waiting program"}, agent=f.family)
         memory.update(idle=flags, passed={k: v for k, v in passed.items() if v == day}, last=last)
+        # What the plan SHOWS as idle is the test itself on each holder, in the seating pass too (which never acts on
+        # it): a seated program that is idle and keeps its seat because nobody unflagged waits is said so.
+        idle = [f for f in (str(r["family"]) for r in holders) if B.seat_idle(facts[f], rule)]
         self._seat_note(memory, rule, seats, day, holders, waiting, facts, idle, sticky, out, late=late)
 
     def _yield(self, row: dict, why: str, taker: str, rule: B.SeatSettings, since: dict, memory: dict, flags: dict,
