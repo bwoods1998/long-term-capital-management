@@ -478,7 +478,9 @@ class EquityPass:
             return self.finish({"skipped": "full", "why": "no equity birth is wanted now", **quota.event()})
         held = elane_yield.hold(self.store, self.settings, began)
         if held is not None:
-            return self.finish({"skipped": "usd_day" if held == elane_yield.DAY_SPENT else "pace", "why": held})
+            skipped = ("usd_day" if held == elane_yield.DAY_SPENT else
+                       "sail_day" if held.startswith(elane_yield.SAIL_DAY) else "pace")
+            return self.finish({"skipped": skipped, "why": held})
         candidates = elane_yield.routes(self.settings, self.router)
         turn = elane_yield.next_turn(self.store)
         first, why_route = elane_yield.choose(self.store, self.settings, candidates, turn=turn, train_key=STATE_KEY)
