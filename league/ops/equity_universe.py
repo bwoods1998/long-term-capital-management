@@ -1257,8 +1257,9 @@ def _joins(gateway: Any, root: Path, spells: Sequence[tuple], previous: Mapping[
            rows: Sequence[Mapping[str, Any]], *, last: dt.date, sleep: Callable[[float], None],
            check: Callable[[], None] = lambda: None) -> dict[str, Any]:
     """D2r over the candidates this run must decide: {"joins": [(X, Y)], "tested", "joined", "untestable", "listed"
-    (pairs the changes table itself shows as an index change)}. A pair both of whose spells already have an aid is
-    decided for good and is not read again; every answer is kept in joins.json as it comes."""
+    (pairs the changes table itself shows as an index change), "waiting" (spells of an untested pair that begin after
+    the last closed session: they take no aid tonight)}. A pair both of whose spells already have an aid is decided
+    for good and is not read again; every answer is kept in joins.json as it comes."""
     known = {(t, s) for row in (previous or {}).values() for t, s, _, _ in _spells_of(row)}
     path = folder(root) / JOINS_FILE
     cache = _load(path)
@@ -1271,7 +1272,7 @@ def _joins(gateway: Any, root: Path, spells: Sequence[tuple], previous: Mapping[
             left.setdefault(str(row["removed"]), []).append(day)
         if day is not None and row.get("added"):
             came.setdefault(str(row["added"]), []).append(day)
-    out = {"joins": [], "tested": 0, "joined": 0, "untestable": 0, "listed": 0}
+    out = {"joins": [], "tested": 0, "joined": 0, "untestable": 0, "listed": 0, "waiting": []}
     for a, b in rename_candidates(spells):
         if (a[0], a[1]) in known and (b[0], b[1]) in known:
             continue
@@ -1282,6 +1283,11 @@ def _joins(gateway: Any, root: Path, spells: Sequence[tuple], previous: Mapping[
             if any(abs((day - a[2]).days) <= RENAME_DAYS for day in left.get(a[0], ())) \
                     or any(abs((day - b[1]).days) <= RENAME_DAYS for day in came.get(b[0], ())):
                 out["listed"] += 1
+                continue
+            if b[1] > last:
+                # The spell has not begun in the store: nothing can be read of it yet, and an aid given tonight could
+                # never be joined later. It waits (no asset tonight; it is a member of no stored session).
+                out["waiting"].append(b)
                 continue
             check()
             answer = rename_test(gateway, a, b, last=last, sleep=sleep)
@@ -1375,7 +1381,8 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
         counts["venue_failed"] += failed
         venue = {t: venue_cache[t] for t in tickers}
         joined = _joins(ctx.gateway, root, spells, previous, wiki["rows"], last=last, sleep=sleep, check=check)
-        table = assign(spells, previous, joined["joins"], exits=ended, venue=venue)
+        waiting = set(joined["waiting"])
+        table = assign([s for s in spells if s not in waiting], previous, joined["joins"], exits=ended, venue=venue)
         recorded = before.get("sha256") if before.get("commit") == commit else None
         result = audit(spells, previous=old_pin,
                        source={"sha256": _sha(text), "recorded": recorded, "spells": filed,
@@ -1462,7 +1469,8 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
             "wiki": {"verdict": wiki["verdict"], "rows": wiki["rows"], "applied": wiki["changes_applied"],
                      "pending": len(wiki["seen"]) - len(wiki["applied"]), "complete": wiki["complete"],
                      "malformed": wiki["malformed"]},
-            "joins": {k: built["joins"][k] for k in ("tested", "joined", "untestable", "listed")},
+            "joins": {**{k: built["joins"][k] for k in ("tested", "joined", "untestable", "listed")},
+                      "waiting": len(built["joins"]["waiting"])},
             "venue": dict(counts), "tradable": len(listed["stock"]), "masked": dict(sorted(masked.items())),
             "stale_days": stale, "pin": {"advanced": built["commit"] != commit, "refused": bool(pin.get("refused"))},
             "salt": salt}

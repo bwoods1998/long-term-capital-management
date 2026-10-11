@@ -928,6 +928,50 @@ class TheJob(unittest.TestCase):
         week, _ = self.run_job(NOW + 8 * 86400)
         self.assertEqual(week["venue"]["venue_asked"], 503, "every row again after a week (one more ticker is in by now)")
 
+    def test_a_rename_is_tested_by_the_bars_and_a_spell_that_has_not_begun_waits_for_them(self):
+        """D2r in the job: the file shows QOLD ending and QNEW starting on one day and the changes table shows no
+        index change there. The venue's bars say whether it is one company."""
+        day = D(2021, 6, 1)
+        filed = [(t, s, day if t == name(9) else e) for t, s, e in self.FILED] + [("QNEW", day, None)]
+        self.gateway.page(U.RAW.format(commit=U.PIN), fake_file(filed))
+        self.gateway.venue["QNEW"] = dict(VENUE_OK)
+
+        def one_company(path, params):
+            answer = fake_bars(path, params)
+            if params["symbols"] in (name(9), "QNEW"):
+                answer["bars"] = {params["symbols"]: fake_bars(path, {**params, "symbols": "QSAME"})["bars"]["QSAME"]}
+            return answer
+        self.gateway.bars = one_company
+        receipt, _ = self.run_job()
+        self.assertTrue(receipt["ok"], receipt)
+        self.assertEqual(receipt["joins"], {"tested": 1, "joined": 1, "untestable": 0, "listed": 3, "waiting": 0})
+        table = self.read(U.ASSETS_FILE)
+        row = next(r for r in table.values() if r["symbol"] == "QNEW")
+        self.assertEqual([s[0] for s in row["spells"]], [name(9), "QNEW"])
+        self.assertEqual(row["renames"], [[name(9), "QNEW", "2021-06-01"]])
+        self.assertEqual(receipt["assets"], 503, "one asset, not two")
+        asked = self.gateway.gets("/v1/alpaca/v2/stocks/bars")
+        self.assertEqual([(c[2]["symbols"], c[2]["asof"]) for c in asked], [(name(9), "2021-05-28"), ("QNEW", "2021-07-01")])
+        self.assertEqual(json.loads((self.base / U.JOINS_FILE).read_text()), {f"{name(9)}|2021-06-01|QNEW|2021-06-01": True})
+        again, _ = self.run_job(NOW + 3600)
+        self.assertEqual((again["joins"]["tested"], len(self.gateway.gets("/v1/alpaca/v2/stocks/bars"))), (0, 2),
+                         "decided for good: both spells have their aid")
+
+    def test_a_spell_that_begins_after_the_last_close_takes_no_aid_until_its_rename_can_be_read(self):
+        soon = D(2022, 4, 1)   # the file is a day ahead of the last closed session
+        filed = [(t, s, soon if t == name(9) else e) for t, s, e in self.FILED] + [("QNEW", soon, None)]
+        self.gateway.page(U.RAW.format(commit=U.PIN), fake_file(filed))
+        self.gateway.venue["QNEW"] = dict(VENUE_OK)
+        receipt, _ = self.run_job()
+        self.assertTrue(receipt["ok"], receipt)
+        self.assertEqual((receipt["joins"]["waiting"], receipt["joins"]["tested"]), (1, 0))
+        self.assertNotIn("QNEW", {r["symbol"] for r in self.read(U.ASSETS_FILE).values()})
+        self.assertEqual(self.gateway.gets("/v1/alpaca/v2/stocks/bars"), [])
+        self.assertFalse((self.base / U.JOINS_FILE).exists(), "nothing is decided, so nothing is kept")
+        later, _ = self.run_job(NOW + 86400)   # Friday April 1 has closed: the two tickers are read
+        self.assertEqual((later["joins"]["waiting"], later["joins"]["tested"], later["joins"]["joined"]), (0, 1, 0))
+        self.assertIn("QNEW", {r["symbol"] for r in self.read(U.ASSETS_FILE).values()})
+
     def test_remask_is_the_panel_jobs_one_write(self):
         self.run_job()
         root = self.root / U.STORE_DIR
