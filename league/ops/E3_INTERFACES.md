@@ -99,8 +99,13 @@ an error. What step 0 fixed for it:
   from `ctx.inputs_from_bars`, `elane_train.state_inputs` or `ctx.inputs_from_fetch`.
 - `fwd_days.bars` (B): the bars hash of the decision a day's orders came from (the Gym's inputs at the close of the
   session before it). NULL on a control's row (a control reads no bar). A `restated` event's payload says whether a
-  bars hash on or before that day moved (`"bars": "moved" | "same"`). About 17 bytes a row on top of the spec's
-  measured 85.
+  bars hash on or before that day moved (`"bars": "moved" | "same"`). PACKAGE B's FINDING: the same cents rounding
+  moves nearly every stored day of every holder past `TOL` on each ex-day (the vendor rescales the whole adjusted
+  history), so `restated` is ONE event a program and cause, not one a day: `day` is the first restated day, the
+  payload counts `days`, `first`, `last`, `moved` and `same`, and `"bars"` is "same" when any restated day has no
+  moved bars behind it (the notable case), else "moved" (the routine ex-day one); on a control's event, which has
+  no decision to compare, it is "none" with `moved` and `same` 0. The hash is about 17 bytes a row on top of the
+  spec's measured 85.
 - `fwd_twins.shadow_bars`, `live_bars`, `cause` (D): the twin decision's hash, the live decision's (NULL when not
   known), and on a row with `agree` 0 one of `forward_db.CAUSES`: "bars" (both known, they differ), "program" (they
   are equal), "unknown" (the live one is not known). `forward_twins.shadow_bars`, `live_bars` and `cause` are D's
@@ -127,8 +132,12 @@ Every existing name the spec calls was checked against 5a6906ff. Signatures matc
    slice's index `max(first - 1, 0)`. With the spec's `history=needs.history` a history-0 program has no session
    before `first_day` in its slice, so its first decision would fall at `first_day`'s close, a session later than D2
    says and than the live book decides, and a twin would have no decision at `d_first`. `Shadow.slice` therefore
-   takes `history=max(needs.history, 1)`. The ctx is unchanged: `ctx.inputs_from_bars` reads NEEDS' history, not the
-   slice's. B holds this with a test.
+   takes `history=needs.history + 1` (package B's finding, on E1's own builders: `ctx.inputs_from_bars` reads the
+   NEEDS history + 1 sessions ending at the decision WHEN THE SLICE HOLDS THEM, and a slice with `history` sessions
+   holds one fewer at the first decision, index `first - 1`; the live book's `ctx.inputs_from_fetch` always reads
+   history + 1. With one more session the first decision's ctx is byte for byte the live one's, so a program that
+   waits for its full history does not decide a session late in the shadow only, and a twin's bars hash at
+   `d_first` can equal the live decision's; every later decision is unchanged). B holds this with a test.
 3. **The engine's result statuses (B).** A result is "ok", "disqualified", "no_data" or "error". `fwd_days.status`
    holds the first two only. "error" (`results.failed`) is the child's failure, read as `runner.Isolated` reads it
    (`RunFailed`); "no_data" (a NEEDS symbol with no bar in the run) is the data's (`data_failed`, no row).
@@ -166,6 +175,30 @@ Every existing name the spec calls was checked against 5a6906ff. Signatures matc
 13. **Two run shas.** `fwd_registry.run_sha` and `eq_instances.run_sha` are both the swarm's `gate.run_sha(version)`
     (the code sha with the version's params), which is what D compares. E1's `EquityProgram.run_sha` (the code sha
     with the MERGED params) is another value: never compare the two.
+14. **Which bars the morning audit found different (B; measured on E1's own book).** E1's `_audit` writes "mismatch"
+    on EVERY `eq_bars` row of the decision's day when any one symbol differs, and that evening's fetch sets a row
+    whose values changed (the symbol that did differ) back to unaudited. The book's kv `eq_bars_audit` ({day:
+    {"symbols", "at"}}, its last 30 failed audits) names the symbols that differed. `forward_audit` marks a day
+    the note names for THOSE symbols and reads the rows only for a day the note does not name, so a program whose
+    bars were right keeps its day and a morning that was missed is made up later. The shadow's night reads the book
+    the same way before it reads any checkpoint (`Shadow.marks`; the receipt's `marks`), so the checkpoint of record
+    never counts a day whose mark the 09:05 job missed.
+15. **A label that returns (B).** Every reader takes the newest engine id (`forward_db.engine_now`) as the current
+    series. A label that already has a row which is not the newest (a rollback of an evidence module) would be
+    written under its old id while every meter read a series nobody writes. The shadow opens a NEW series for it,
+    `<label>~<the id it follows>` in `fwd_engines`, with one `engine_moved` event: tonight's engine id is always
+    `engine_now`, and `engine_label` of such an id carries the suffix.
+16. **`fwd_runs.programs` (B)** counts the programs whose run completed THAT NIGHT, whichever start of the job ran
+    them (the DDL's comment), as `run_failed`'s `completed` does; `sessions`, `errors`, `stale` and `seconds` are the
+    start's own. A second start of a night therefore never writes `programs` 0 beside a `run_failed` event.
+17. **The shadow's receipt and its one warning (B).** Beside the spec's keys the receipt holds `finals`, `register`
+    (the sync's counts), `marks` (item 14) and `house`: the programs left without rows by a failure of the House's
+    own (in `errors`); `controls` holds `checks`, `restated`, `errors` and `data_failed` too. The job raises ONE
+    `ctx.alert("warning")` a night for what leaves no event (`forward_shadow.house_failures`): `house`, the controls
+    left without rows by anything but the data, and each step that raised (the sync, the audit marks, the controls,
+    the final checkpoints, the twins).
+    A `restated` event is one a program and cause (section 3): FW3 counts restatements, and their days are the
+    payloads' `days`; `"bars": "moved"` is the routine ex-day one, `"same"` the one worth a warning.
 
 Readings step 0 fixed where the spec was silent (each is in its stub's docstring): `forward_db.events(..., since=)`
 takes an epoch and returns the rows with `at >= since`, each a dict with its `payload` parsed; `tags` lists each
