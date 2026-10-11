@@ -510,3 +510,102 @@ class TheEvidenceChildIsDeterministic(unittest.TestCase):
                 child._kill()  # the next run starts a new child (a deploy, a failure)
             self.assertEqual(len(seen), 1, seen)
             self.assertEqual(child.pid is not None and len(next(iter(seen))[1]), 1, "one symbol, bought once")
+
+
+class ATryOwedAgain(FixCase):
+    """s2-3: `next_try` asked only about the family's candidate (its best version, else its newest) or R3's retry while
+    the first try's pre-check stood failed, so a validated version that is not the candidate and whose verdict went
+    stale was never validated again: the family waited for good. evidence-11: a version validated again re-derived
+    R3's retry hash from the versions that exist now."""
+
+    def rounds(self, **kw):
+        with screen(**kw), mock.patch.object(S, "retry_permitted", return_value=True):
+            return self.tournament.equity_round()
+
+    def test_a_stale_verdict_of_a_version_that_is_no_longer_the_candidate(self):
+        """Shape (a): v1 validated and gate-ready, a later v2 exists, an adoption clears best_version."""
+        v1 = self.born("b1")
+        self.store.update_family("b1", best_version=1)
+        self.assertEqual(self.rounds()["validated"]["b1"]["version"], 1)
+        self.store.add_version("b1", CODE + "# a later version\n", {}, author="test")
+        adopt_equity(self.store, MOVED)
+        fam = self.store.family("b1")
+        self.assertEqual((fam["best_version"], elane.candidate(fam, self.store)), (None, 2), "the candidate moved to v2")
+        self.assertEqual(elane.next_try(self.store, fam, ON), 1, "its own try, owed again: not the candidate's")
+        self.assertIsNone(elane.lineage_spent(self.store, fam, ON))
+        self.runner.calls.clear()
+        out = self.rounds()
+        self.assertEqual((out["validated"]["b1"]["version"], out["validated"]["b1"]["entered"]), (1, True))
+        self.assertEqual(len(elane.lineage_tries(self.store, "b1")), 1, "the same try: none was spent")
+        looked, mint = self.gate_round()
+        self.assertEqual(looked["looked"], [{"family": "b1", "passed": True, "lane": BETA}])
+        self.assertEqual(self.store.looks()[0]["run_sha"], run_sha(v1))
+        self.assertEqual(self.rounds()["validated"], {}, "v2 never takes a try of its own")
+
+    def test_r3s_retry_gone_stale_after_the_stores_daily_write(self):
+        """Shape (b): v1 fails its pre-check, R3's retry v2 enters, the data job writes the next day (every result_sha
+        moves), the look marks v2 stale."""
+        self.born("b1")
+        v2 = self.store.add_version("b1", CODE + "# the retry, written before the first try\n", {}, author="test")
+        self.store.update_family("b1", best_version=1)
+        self.assertEqual(self.rounds(precheck=False)["validated"]["b1"]["entered"], False)
+        out = self.rounds()
+        self.assertEqual((out["validated"]["b1"]["version"], out["validated"]["b1"]["entered"]), (2, True), "R3's retry")
+        self.runner.result_sha = "validation-sha-after-the-daily-write"
+        looked, mint = self.gate_round()
+        state = self.store.family("b1")["state"]
+        self.assertEqual((looked["looked"], state["gate_ready"], state[elane.VERDICTS_KEY]["2"]["stale"]), ([], False, True))
+        fam = self.store.family("b1")
+        self.assertEqual(elane.next_try(self.store, fam, ON), 2, "the retry is validated again: the same retry")
+        self.assertIsNone(elane.lineage_spent(self.store, fam, ON), "never retired unjudged")
+        out = self.rounds()
+        self.assertEqual((out["validated"]["b1"]["version"], out["validated"]["b1"]["entered"], out["retired"]),
+                         (2, True, []))
+        looked, mint = self.gate_round()
+        self.assertEqual(looked["looked"], [{"family": "b1", "passed": True, "lane": BETA}])
+        self.assertEqual(self.store.looks()[0]["run_sha"], run_sha(v2))
+        self.assertEqual(len(elane.lineage_tries(self.store, "b1")), 2, "the first try and its one retry, no third")
+
+    def test_a_stale_verdict_of_a_version_that_may_not_be_tried_is_not_asked(self):
+        self.born("b1")
+        self.store.update_family("b1", best_version=1)
+        self.rounds()
+        self.store.add_version("b1", CODE + "# never tried\n", {}, author="test")
+        state = self.store.family("b1")["state"]
+        self.store.set_state("b1", **{elane.VERDICTS_KEY: {**state[elane.VERDICTS_KEY],
+                                                           "2": {"entered": True, "at": "x", "stale": True},
+                                                           "9": {"entered": True, "at": "x", "stale": True}}})
+        self.assertIsNone(elane.next_try(self.store, self.store.family("b1"), ON),
+                          "a stale mark buys no try: v2 was never the lineage's try, v9 does not exist")
+
+    def test_the_retry_hash_is_recorded_once_at_the_first_try(self):
+        """evidence-11: v1 passes with no later version (retry_sha None); v2 is written afterwards; v1 is validated
+        again and fails its pre-check on restated data. v2 was written after the first verdict: no retry."""
+        self.born("b1")
+        self.store.update_family("b1", best_version=1)
+        self.rounds()
+        self.assertIsNone(self.store.family("b1")["state"][elane.TRY_KEY]["retry_sha"])
+        self.store.add_version("b1", CODE + "# written after the first verdict\n", {}, author="test")
+        adopt_equity(self.store, MOVED)
+        out = self.rounds(precheck=False)
+        self.assertEqual((out["validated"]["b1"]["version"], out["validated"]["b1"]["entered"]), (1, False))
+        held = self.store.family("b1")["state"][elane.TRY_KEY]
+        self.assertIsNone(held["retry_sha"], "kept as recorded, None included")
+        fam = self.store.family("b1")
+        self.assertFalse(elane.try_open(self.store, fam, 2, ON))
+        self.assertEqual(elane.lineage_spent(self.store, fam, ON), elane.SPENT_TRY)
+        self.assertEqual(self.rounds()["retired"], ["b1"])
+
+    def test_a_recorded_retry_hash_survives_the_validation_of_the_retry_and_of_the_first_again(self):
+        self.born("b1")
+        v2 = self.store.add_version("b1", CODE + "# the retry, written before the first try\n", {}, author="test")
+        self.store.add_version("b1", CODE + "# a third version\n", {}, author="test")
+        self.store.update_family("b1", best_version=1)
+        self.rounds(precheck=False)
+        self.assertEqual(self.store.family("b1")["state"][elane.TRY_KEY]["retry_sha"], run_sha(v2))
+        self.rounds()  # R3's retry
+        self.assertEqual(self.store.family("b1")["state"][elane.TRY_KEY]["version"], 2)
+        adopt_equity(self.store, MOVED)
+        self.rounds(precheck=False)  # v1 again (the lowest stale): the hash is still v2's, never the newest version's
+        held = self.store.family("b1")["state"][elane.TRY_KEY]
+        self.assertEqual((held["version"], held["retry_sha"]), (1, run_sha(v2)))

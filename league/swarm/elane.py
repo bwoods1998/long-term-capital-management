@@ -612,9 +612,13 @@ def try_open(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, 
 
 
 def next_try(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> int | None:
-    """The version the tournament's equity round validates now, or None: the family's candidate (`candidate`) while
-    `try_open` allows it and it has no current verdict (none recorded for it, or the recorded one went stale: `look`
-    found the recorded run did not reproduce), else R3's pre-registered retry version while it is open."""
+    """The version the tournament's equity round validates now, or None. First A TRY OWED AGAIN: a version already
+    tried whose recorded verdict went stale (`look` found its recorded run did not reproduce after the store's daily
+    write, or an equity identity adoption marked it), the lowest first, while `try_open` allows it (it does, for the
+    lineage's own try and its admitted retry: the same try) and WHATEVER THE FAMILY'S CANDIDATE IS NOW: the candidate
+    moves when a later version is written or an adoption clears `best_version`, and a stale verdict nobody asks about
+    again would leave the family waiting for good. Then the family's candidate (`candidate`) while `try_open` allows it
+    and it has no current verdict, else R3's pre-registered retry version while it is open."""
     try:
         if lane_of(store, fam) is None:
             return None
@@ -626,6 +630,10 @@ def next_try(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | N
             noted = verdicts.get(str(n))
             return not isinstance(noted, Mapping) or noted.get("stale") is True
 
+        for n in sorted(int(key) for key, noted in verdicts.items()
+                        if isinstance(noted, Mapping) and noted.get("stale") is True and str(key).isdigit()):
+            if store.version(str(fam["id"]), n) is not None and try_open(store, fam, n, settings):
+                return n
         n = candidate(fam, store)
         if n is not None and due(n) and try_open(store, fam, n, settings):
             return int(n)
@@ -887,14 +895,17 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     first = any(t["family"] == fid and t["version"] == n for t in tries[:k])
     state = fam.get("state") or {}
     held = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else {}
-    if first and held.get("version") == n and held.get("retry_sha") is not None:
-        retry_sha = held.get("retry_sha")  # the retry's hash is the first try's, recorded once
+    if "retry_sha" in held:
+        # RECORDED ONCE, at the lineage's first try, and kept by every later Validation of the family, None included:
+        # a version validated again (stale after the store's daily write or an adoption) never registers a retry
+        # version that was written after the first verdict.
+        retry_sha = held.get("retry_sha")
     elif first:
         # R3 (A9 D3): the retry version is pre-registered: a version written before this first try, hashed now.
         later = [v for v in store.versions(fid) if int(v["n"]) > n]
         retry_sha = _run_sha(later[0]) if later else None
     else:
-        retry_sha = held.get("retry_sha")
+        retry_sha = None
     sd = _num((result.get("summary") or {}).get("sd_net_return"))
     sigma = dict(state.get(SIGMA_KEY) or {}) if isinstance(state.get(SIGMA_KEY), Mapping) else {}
     if sd is not None and sd > 0:
