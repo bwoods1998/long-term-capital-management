@@ -200,6 +200,19 @@ class Registered(unittest.TestCase):
         for p in F.programs(h.db, reasons=("train_fail",)):
             self.assertEqual(run_sha({"sha": p.program_sha, "params": p.params}), p.run_sha)
 
+    def test_what_the_registry_froze_is_what_the_lane_loads(self):
+        # The shadow slices its bars by the row's NEEDS and the decider child loads NEEDS from the row's code: one thing.
+        from league.equity import program as P
+
+        h = House(self)
+        fid = h.family("alpha", {1: FAILED}, symbols=("IWM",), params={"share": 0.4})
+        h.sync()
+        row = F.program(h.db, f"{fid}@1")
+        loaded = P.load_program(row.code, name=row.key, params=row.params)
+        self.assertEqual(loaded.needs.as_dict(), row.needs)
+        self.assertEqual((loaded.sha, loaded.params["share"]), (row.program_sha, 0.4))
+        self.assertEqual(row.ugroup, elane_train.symbols_group(loaded.needs.symbols))
+
     def test_a_second_run_adds_nothing(self):
         h = House(self)
         a = h.family("alpha", {1: PASSED, 2: FAILED}, codes=2, passed_version=1)

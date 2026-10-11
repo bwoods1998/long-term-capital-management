@@ -423,8 +423,8 @@ def fwd_engine() -> str:
 @contextlib.contextmanager
 def _tx(db: sqlite3.Connection) -> Iterator[None]:
     """One write of this module: its own transaction when the caller holds none (begun and committed here, rolled
-    back whole on any error), else a part of the caller's (the caller commits: `with db:` around several calls makes
-    them one transaction, as the forward shadow's one transaction a program)."""
+    back whole on any error), else a part of the caller's, which the caller commits (`transaction` is this, by its
+    public name: the forward shadow's one transaction a program)."""
     if db.in_transaction:
         yield
         return
@@ -460,8 +460,8 @@ def open_db(root: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
     THE FIRST VALUE STANDS: a store whose `fgs_prereg` is another sha than this release's `FGS_SHA` keeps it, and this
     release's sha is one more `prereg` event (once a sha), never an overwrite: a forward screen that differs from the
     pinned shape judges only days after its own pin. A writable connection is in sqlite3's default transaction mode,
-    as the in-memory databases the packages test on: a write made with `execute` is the caller's to commit (`with
-    db:`); this module's own writes commit themselves unless the caller already holds a transaction (`_tx`)."""
+    as the in-memory databases the packages test on: a write made with `execute` is the caller's to commit; this
+    module's own writes commit themselves unless the caller already holds a transaction (`transaction`)."""
     path = Path(root) / DB
     if readonly:
         from . import guard

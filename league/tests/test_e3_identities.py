@@ -13,7 +13,6 @@ were built on). A release with its jobs registered and its settings missing, or 
 
 from __future__ import annotations
 
-import datetime as dt
 import hashlib
 import json
 import tempfile
@@ -271,10 +270,14 @@ class TheWiringIsWhole(unittest.TestCase):
 
         for name in E3_JOBS:
             self.assertTrue(callable(importlib.import_module(f"league.ops.{name}").run), name)
-        self.assertIn("equity_data", jobs)
-        # The shadow never starts inside a session by the clock: its one trigger follows the daily store.
-        self.assertEqual(jobs["equity_data"].triggers, (S.at_start(), S.daily(22, 30)))
-        self.assertEqual(dt.time(22, 30), jobs["equity_data"].triggers[1].at)
+        for name in E3_JOBS:
+            for trigger in jobs[name].triggers:
+                if trigger.kind == "after":
+                    self.assertIn(trigger.job, jobs, f"{name} follows a job that exists")
+        # The shadow has no clock trigger of its own: it follows the daily store, and the report follows the shadow.
+        self.assertEqual([t.kind for t in jobs["forward_shadow"].triggers], ["after"])
+        self.assertEqual((jobs["forward_shadow"].triggers[0].job, jobs["forward_report"].triggers[0].job),
+                         ("equity_data", "forward_shadow"))
 
     def test_the_three_policy_blocks(self):
         elane = policy_elane()
