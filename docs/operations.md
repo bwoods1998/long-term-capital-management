@@ -183,12 +183,21 @@ close, is not expected to trade.** `seed-overnight-qqq` buys at a close only aft
 equity buy. Two rules hold the order (`league/swarm/elane.py`):
 - `round_order`: both equity rounds walk the seeds as one block in the declared order, whatever second each was born
   in (the store's own order is by the second of birth and then the id: the alphabet's, or a clock tick's);
-- `seed_wait`: a seed's look is not taken while a seed declared before it still has its own look to come, so a look
-  the House owes again (a run it could not make, a turn that raised) never hands the lineage to the later seed. The
-  wait spends nothing, shows in the round's `waits`, and is bounded at 30 minutes (`SEED_WAIT_SECONDS`, six rounds):
-  past that the later seed is looked at whatever the earlier one's state, with a House warning ("the declared order of
-  the seeds' looks did not hold"), so one seed that can never be looked at does not starve the rest. **The operator's
-  hold on the earlier seed (`gate_hold`) releases the later ones at once.** A family that is no seed waits for none.
+- `seed_wait`, **strict within a lineage, with no timeout** (amendment A18): each seed's `lineage` in the list
+  declares the lineage it is in (the two overnight seeds are one; the reversal seed is its own). A seed's look is
+  never taken while a seed declared before it in the same lineage is alive without a verdict: it waits until that
+  earlier seed has been looked at (D3 then refuses the later one), has FAILED its Validation pre-check with no retry
+  owed, or is retired. So a look the House owes again (a run it could not make, a turn that raised), a slow data job
+  or a hold never hands the lineage's one look to the later seed. The wait spends nothing and shows in the round's
+  `waits` and in the family's `gate` word. It is asked at the look's last step before the sealed run, so its clock
+  counts only the rounds in which the later seed's own look was otherwise ready. After 30 counted minutes
+  (`SEED_WAIT_SECONDS`) ONE House warning (`equity_seed_waits`) names both seeds and why the earlier one has no
+  verdict yet; it is said again at most daily while the wait lasts, and cleared when the wait ends
+  (`equity_seed_wait_over`). **The warning is no timeout: the later seed keeps waiting. The operator's hold on the
+  earlier seed (`gate_hold`) holds the later seed of its lineage too; to give the lineage's look to the later seed,
+  retire the earlier one.** Seeds of different lineages never wait on each other (`seed-reversal-index` waits for
+  nobody, and nobody for it), a family that is no seed waits for none, and a seed whose order cannot be read is not
+  looked at that round (nothing spent).
 A program refused at the gate before its look retires with its cause said (`elane.SAME_LINEAGE`,
 `elane.FLOOR_INELIGIBLE`), not as a spent Validation try. After the first look, read the refusal rows on the box to
 confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the House).

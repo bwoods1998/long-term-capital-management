@@ -107,6 +107,14 @@ class TheEquityLaneEndToEnd(unittest.TestCase):
 
         tournament = Tournament(self.store, None, ON, clock=self.clock)
         tournament.equity_runner = self.runner
+        # THE DECLARED ORDER IS STRICT WITHIN A LINEAGE (A18; `elane.seed_wait`): SPY's look is never taken while
+        # QQQ's seed, declared before it in the overnight lineage, is alive without a verdict. On this invented
+        # market QQQ's seed FAILS its Validation pre-check (no retry owed), so the lineage's one look is SPY's.
+        ahead = self.store.family("seed-overnight-qqq")
+        self.assertEqual(elane.seed_ahead(self.store, fam, ON), ahead["id"], "before the earlier seed's verdict")
+        early = elane.validate(tournament, ahead, self.store.version(ahead["id"], ahead["best_version"]))
+        self.assertFalse(early["entered"], early)
+        self.assertIsNone(elane.seed_ahead(self.store, fam, ON))
         verdict = elane.validate(tournament, fam, version)
         self.assertTrue(verdict["entered"], verdict)
         state = self.store.family(SEED)["state"]

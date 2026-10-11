@@ -193,7 +193,9 @@ refuses it (the look waits, nothing is spent), and so does a daily store that en
 (A12). The look records its lane, the screen that judged it ("S2"), the receipt, c_H,used (S1: c_used) and the line
 stated beside every live trade, in its `detail` and its `swarm.gate` event. An equity look is never
 counted by the options lanes' leakage alarms (`alarms`). A look in flight from a process that died (`look_inflight`
-older than this process) is owed again.
+older than this process) is owed again. A captain-seeded program's look waits, with no timeout and nothing spent,
+while a seed declared before it in its own declared lineage is alive without a verdict (`elane.seed_wait`, amendment
+A18; the round's `waits`).
 
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
@@ -1333,11 +1335,17 @@ class Gate:
                 out.setdefault("errors", {})[fid] = type(exc).__name__
                 self.store.event("swarm.gate", fid, {"action": "equity_round_error", "error": type(exc).__name__,
                                                      "text": str(exc)[:300]})
+        try:  # a seed's wait that ended without being asked again (D3 refused it, it was retired): its warning clears
+            elane.seed_waits_over(self.store, self.settings)
+        except Exception as exc:  # noqa: BLE001 - a record that cannot be cleared is cleared next round
+            self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
+                                                  "text": "the seeds' waits could not be read"})
 
     def _equity_look(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
         """One family's turn in the equity round (`equity_round`): a look in flight from a dead process owed again, then
-        its one look when it is gate-ready, in the Gym band, not held, not already done with and, for a seed, when no
-        seed declared before it still has its look to come (`out["waits"]`: {family: the seed it waits for})."""
+        its one look when it is gate-ready, in the Gym band, not held and not already done with. A SEED'S LOOK that
+        waited at its last step for an earlier seed of its declared lineage (`elane.seed_wait`, asked by `elane.look`:
+        strict, no timeout) is listed in `out["waits"]`: {family: the seed it waits for}."""
         fid = str(fam["id"])
         state = fam.get("state") or {}
         marker = state.get("look_inflight") or {}
@@ -1358,15 +1366,15 @@ class Gate:
         sha = run_sha(version)
         if state.get("gated_sha") == sha:
             return
-        # THE SEEDS' DECLARED ORDER holds across rounds (`elane.seed_wait`): a seed's look waits, nothing spent, while a
-        # seed declared before it still has its own look to come (a bounded wait; the operator's hold releases it).
-        ahead = elane.seed_wait(self.store, fam, self.settings)
-        if ahead is not None:
-            out.setdefault("waits", {})[fid] = ahead
-            return
+        asked = state.get(elane.SEED_WAIT_KEY)
         looked = self.look(fam, version, sha)
         if looked is not None:
             out["looked"].append({"family": fid, "passed": looked, "lane": elane.lane_of(self.store, fam)})
+            return
+        # THE SEEDS' DECLARED ORDER (`elane.seed_wait`): the look asked it this turn (each ask moves the record).
+        wait = ((self.store.family(fid) or {}).get("state") or {}).get(elane.SEED_WAIT_KEY)
+        if isinstance(wait, Mapping) and wait != asked:
+            out.setdefault("waits", {})[fid] = wait.get("for")
 
     def look(self, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> bool | None:
         """The one holdout look. None when the gate box did not run it (no look is spent). The version is marked as

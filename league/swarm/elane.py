@@ -94,13 +94,18 @@ like any family. THEIR LOOKS ARE TAKEN IN THAT DECLARED ORDER, and the order is 
 2026, from Train-era figures only, before any Validation or look; the reason is beside the list): the two overnight
 seeds are one lineage under D3, so only the first of them declared is ever judged and the other is refused with no
 look and retired as the same lineage. Two rules hold it: `round_order` (both equity rounds walk the seeds as one block,
-in the list's order, whatever second each was born in) and `seed_wait` (a seed's look is not taken while a seed
-declared before it still has its look to come, so a look the House owes again never hands the lineage to the later
-seed; the wait is bounded at `SEED_WAIT_SECONDS`, past which the later seed is looked at with a House warning, and the
-operator's hold on the earlier seed releases the later ones at once). A version refused at the gate before its look
-retires for what happened (`REFUSED_CAUSES`: the same lineage, no eligible floor), not as a spent Validation try. Every
-report says plainly that these three were seeded by the captain's build agents (`SEEDED_NOTE`), and the Done meter
-reads Done with and without them (`seeded`).
+in the list's order, whatever second each was born in) and `seed_wait`, which is STRICT WITHIN A LINEAGE (amendment
+A18): each seed's `lineage` in the list declares the lineage it is in, and a seed's look is never taken while a seed
+declared before it in the same lineage is alive without a verdict (`seed_owed`). THERE IS NO TIMEOUT: the later seed
+waits until the earlier one has been looked at (D3 then refuses the later one), has FAILED its Validation pre-check
+with no retry owed, or is retired, so a look the House owes again, a hold or a slow data job never hands the lineage's
+one look to the wrong seed. `look` asks it at its last step before the sealed run, so the wait's clock counts only the
+rounds in which the later seed's own look was otherwise ready; a counted wait past `SEED_WAIT_SECONDS` is ONE House
+warning naming both seeds and why the earlier one has no verdict yet (again at most daily), cleared when the wait
+ends. Seeds of different lineages never wait on each other, and a family that is no seed waits for none. A version
+refused at the gate before its look retires for what happened (`REFUSED_CAUSES`: the same lineage, no eligible floor),
+not as a spent Validation try. Every report says plainly that these three were seeded by the captain's build agents
+(`SEEDED_NOTE`), and the Done meter reads Done with and without them (`seeded`).
 
 Standard library only at import (league/equity/__init__.py and config.py); the screen, the runner and the store (numpy)
 are imported where they are used, on the House.
@@ -132,10 +137,15 @@ SEEDS_KEY = "elane_seeds"
 #: daily bars, and a look that waits for the data job is asked again each round).
 ROUND_KEY = "elane_round_at"
 ROUND_SECONDS = 300.0
-#: THE SEEDS' DECLARED ORDER ACROSS ROUNDS (`seed_wait`): the family state's key of a seed's wait for the seeds declared
-#: before it ({for, since, passed}), and the longest it waits (six rounds; a run owed again is made within two).
+#: THE SEEDS' DECLARED ORDER, STRICT WITHIN A LINEAGE (`seed_wait`, amendment A18): the family state's key of a seed's
+#: wait for the earlier seed of its declared lineage ({for, why, since, at, waited, asks, alerted}); the counted wait
+#: past which ONE House warning names both seeds (NO TIMEOUT: the wait goes on); the seconds before that warning is
+#: said again while the wait lasts; and the longest time between two asks that still counts as waiting (two rounds:
+#: the clock counts only the rounds in which the later seed's own look was otherwise ready).
 SEED_WAIT_KEY = "elane_seed_wait"
 SEED_WAIT_SECONDS = 1800.0
+SEED_WAIT_REPEAT_SECONDS = 86400.0
+SEED_WAIT_GAP_SECONDS = 2 * ROUND_SECONDS
 #: The family state's key of its equity lineage's Validation try ({version, at, first, precheck, entered, retry_sha}).
 TRY_KEY = "elane_try"
 #: The family state's keys (league/equity/INTERFACES.md section 8.4): the one look ({version, at, verdict, beside,
@@ -432,55 +442,134 @@ def round_order(store: Any, fams: Sequence[Mapping[str, Any]]) -> list[Mapping[s
     return sorted(fams, key=key)
 
 
+def _seed_lineages(store: Any) -> dict[str, str]:
+    """{family id: the lineage its seed is DECLARED in (`seeds.EQUITY_SEEDS` `lineage`; a seed that declares none is a
+    lineage of its own)} of the seeds born in this store (`SEEDS_KEY`)."""
+    from . import seeds
+
+    declared = {str(spec["id"]): str(spec.get("lineage") or spec["id"]) for spec in seeds.EQUITY_SEEDS}
+    return {str(fid): declared[str(sid)] for sid, fid in (store.get(SEEDS_KEY) or {}).items() if str(sid) in declared}
+
+
+def seed_owed(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[str, Any] | None) -> str | None:
+    """WHY A SEED HAS NO VERDICT YET (so it can still spend its lineage's one look), or None when it cannot: it is
+    retired, it was looked at (its lineage's look is spent, passed or failed), or it FAILED its Validation pre-check
+    with no retry owed (`lineage_spent` reads `SPENT_TRY` on a recorded failed pre-check). Everything else is a seed
+    alive without a verdict, and the words say which: its look in flight, its look owed (with the gate's last word
+    when it waits), its Validation or its pre-registered retry owed, or a version the gate is done with before any
+    look, which the tournament's next equity step retires. The operator's hold (`gate_hold`) is no verdict."""
+    if not fam or fam.get("retired_at"):
+        return None
+    fid = str(fam["id"])
+    state = fam.get("state") or {}
+    if isinstance(state.get(LOOK_KEY), Mapping) or store.lineage_looks(fid) >= cfg(settings)["looks_per_lineage"]:
+        return None
+    hold = "; the operator holds it (gate_hold)" if state.get("gate_hold") else ""
+    if (state.get("look_inflight") or {}).get("sha"):
+        return "its sealed look is in flight, or owed again after the process that sent it stopped" + hold
+    held = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else {}
+    spent = lineage_spent(store, fam, settings)
+    if spent == SPENT_TRY and held.get("precheck") is False:
+        return None
+    if spent is not None:
+        return "the gate is done with it before any look, and it retires at the tournament's next equity step" + hold
+    if held.get("entered") is True and state.get("validation_version") == held.get("version"):
+        word = str(state.get("gate") or "")
+        return "its one sealed look is still owed" + hold + (f"; the gate's last word: {word[:120]}"
+                                                             if word.startswith("waiting") else "")
+    if held.get("precheck") is False:
+        return "its pre-registered Validation retry is still owed" + hold
+    return "its Validation is still owed" + hold
+
+
 def seed_ahead(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
-    """The seed declared before `fam` in `seeds.EQUITY_SEEDS` whose one look is still to come (alive, not held by the
-    operator, its lineage not spent: `lineage_spent` is None while it is owed its try or its look), or None. A family
-    that is no seed has none ahead."""
+    """THE SEED `fam`'S LOOK WAITS FOR, or None: the first seed declared before it in `seeds.EQUITY_SEEDS`, IN ITS OWN
+    DECLARED LINEAGE (`_seed_lineages`), that is alive without a verdict (`seed_owed`). A seed of another lineage is
+    never waited for, and a family that is no seed has none ahead. Raises as the store does."""
     place = _seed_places(store)
-    mine = place.get(str(fam["id"]))
+    fid = str(fam["id"])
+    mine = place.get(fid)
     if mine is None:
         return None
-    for fid in sorted((f for f, rank in place.items() if rank < mine), key=lambda f: place[f]):
-        other = store.family(fid)
-        if not other or other.get("retired_at") or (other.get("state") or {}).get("gate_hold"):
-            continue
-        if lineage_spent(store, other, settings) is None:
-            return fid
+    lineage = _seed_lineages(store)
+    for other in sorted((f for f, rank in place.items() if rank < mine and lineage.get(f) == lineage.get(fid)),
+                        key=lambda f: place[f]):
+        if seed_owed(store, store.family(other), settings) is not None:
+            return other
     return None
+
+
+def _seed_wait_end(store: Any, fid: str, held: Mapping[str, Any]) -> None:
+    """A seed's wait ended: its record (`SEED_WAIT_KEY`) is cleared, and the House warning with it when one was said
+    (a `swarm.status` row with `alert` false, as the funding watch clears its own)."""
+    store.set_state(str(fid), **{SEED_WAIT_KEY: None})
+    if held.get("alerted") is not None:
+        store.event("swarm.status", str(fid), {
+            "action": "equity_seed_wait_over", "alert": False, "ahead": held.get("for"),
+            "text": f"the equity seed {fid} no longer waits for {held.get('for')}, declared before it in its lineage: "
+                    "the wait is over"})
 
 
 def seed_wait(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
-    """THE DECLARED ORDER HOLDS ACROSS ROUNDS: the earlier-declared seed `fam`'s look waits for now (`seed_ahead`), or
-    None when its look may be taken. The wait spends nothing (league/swarm/gate.py `_equity_look`): of two seeds of one
-    lineage the first declared is the one judged, also in a round where its look is owed again (a run the House could
-    not make, a turn that raised) and the later seed's could be taken. IT IS BOUNDED, so one seed whose look can never
-    be taken does not starve the seeds after it (the review's s2-7): `SEED_WAIT_SECONDS` from the first round `fam`
-    waited (`SEED_WAIT_KEY` {for, since, passed} in its state); past that its look is taken whatever the earlier
-    seed's state, said once as a House warning. THE OPERATOR'S HOLD on the earlier seed (`gate_hold`) releases the
-    later ones at once. A store that cannot say holds nothing back."""
-    try:
-        ahead = seed_ahead(store, fam, settings)
-        if ahead is None:
-            return None
-        fid = str(fam["id"])
-        state = fam.get("state") or {}
-        held = dict(state[SEED_WAIT_KEY]) if isinstance(state.get(SEED_WAIT_KEY), Mapping) else None
-        now = float(store.clock())
-        if held is None:
-            store.set_state(fid, **{SEED_WAIT_KEY: {"for": ahead, "since": now}})
-            return ahead
-        if held.get("passed") is None and now - float(held.get("since") or now) < SEED_WAIT_SECONDS:
-            return ahead
-        if held.get("passed") is None:
-            store.set_state(fid, **{SEED_WAIT_KEY: {**held, "for": ahead, "passed": now}})
-            store.event("swarm.status", fid, {  # a House warning (the swarm's alerts are its status rows)
-                "action": "equity_seed_order_passed", "alert": True, "ahead": ahead,
-                "text": f"the equity seed {fid} waited {int(SEED_WAIT_SECONDS // 60)} minutes for the look of {ahead}, "
-                        "declared before it, and is looked at first: the declared order of the seeds' looks did not "
-                        "hold"})
-    except Exception:  # noqa: BLE001
+    """THE SEEDS' DECLARED ORDER IS STRICT WITHIN A LINEAGE (amendment A18): the earlier-declared seed of its lineage
+    `fam`'s look waits for (`seed_ahead`), or None when its look may be taken. Asked by `look` at its last step before
+    the sealed run, and the wait spends nothing. THERE IS NO TIMEOUT: of two seeds of one lineage the first declared
+    is the one judged, however long its look is owed (a run the House cannot make, the operator's hold, a wait of its
+    own); the later seed's look is taken only once the earlier one has been looked at (D3 then refuses the later
+    one), has FAILED its Validation pre-check with no retry owed, or is retired.
+
+    THE RECORD (`SEED_WAIT_KEY` in `fam`'s state): {for, why (`seed_owed` of the earlier seed), since, at (the last
+    ask), waited, asks, alerted}. `waited` counts the time between two asks only when they are at most
+    `SEED_WAIT_GAP_SECONDS` apart, so rounds in which the later seed's own look was not ready, or the House was down,
+    count as nothing. A counted wait of `SEED_WAIT_SECONDS` raises ONE House warning naming both seeds and why the
+    earlier one has no verdict yet; it is said again after `SEED_WAIT_REPEAT_SECONDS` while the wait lasts, and
+    cleared when the wait ends (`_seed_wait_end`; `seed_waits_over` for a wait that ends without being asked again).
+    Raises as the store does: `look` takes no look of a seed whose order cannot be read."""
+    fid = str(fam["id"])
+    ahead = seed_ahead(store, fam, settings)
+    state = (store.family(fid) or fam).get("state") or {}
+    held = dict(state[SEED_WAIT_KEY]) if isinstance(state.get(SEED_WAIT_KEY), Mapping) else None
+    if ahead is None:
+        if held is not None:
+            _seed_wait_end(store, fid, held)
         return None
-    return None
+    held = held or {}
+    why = seed_owed(store, store.family(ahead), settings) or "it has no verdict yet"
+    now = float(store.clock())
+    last, said = _num(held.get("at")), _num(held.get("alerted"))
+    step = now - last if last is not None else 0.0
+    waited = float(_num(held.get("waited")) or 0.0) + (step if 0.0 <= step <= SEED_WAIT_GAP_SECONDS else 0.0)
+    record = {"for": ahead, "why": why, "since": held.get("since", now), "at": now, "waited": waited,
+              "asks": int(_num(held.get("asks")) or 0) + 1, "alerted": said}
+    if waited >= SEED_WAIT_SECONDS and (said is None or now - said >= SEED_WAIT_REPEAT_SECONDS):
+        record["alerted"] = now
+        store.event("swarm.status", fid, {  # a House warning (the swarm's alerts are its status rows)
+            "action": "equity_seed_waits", "alert": True, "ahead": ahead, "why": why, "minutes": int(waited // 60),
+            "repeat": said is not None,
+            "text": f"the equity seed {fid} has waited {int(waited // 60)} minutes for {ahead}, declared before it in "
+                    f"its lineage, which has no verdict yet: {why}. There is no timeout (A18): {fid} is looked at "
+                    f"only once {ahead} has been looked at (then {fid} is refused as the same lineage), has failed "
+                    "its Validation pre-check with no retry owed, or is retired"})
+    store.set_state(fid, **{SEED_WAIT_KEY: record})
+    return ahead
+
+
+def seed_waits_over(store: Any, settings: Mapping[str, Any] | None) -> list[str]:
+    """THE WAITS THAT ENDED WITHOUT BEING ASKED AGAIN (the gate's equity round calls it last): a seed that keeps a
+    wait's record (`SEED_WAIT_KEY`) and is retired, or has no earlier seed of its lineage without a verdict any more
+    (the earlier one was looked at, so D3 refused this one before the wait's step), has the record cleared and its
+    warning with it (`_seed_wait_end`). A seed still waiting, whose own look was not ready this round, keeps it.
+    Returns the families whose wait ended."""
+    ended: list[str] = []
+    for fid in sorted(_seed_places(store)):
+        fam = store.family(fid) or {}
+        held = (fam.get("state") or {}).get(SEED_WAIT_KEY)
+        if not isinstance(held, Mapping):
+            continue
+        if fam.get("retired_at") or seed_ahead(store, fam, settings) is None:
+            _seed_wait_end(store, fid, held)
+            ended.append(fid)
+    return ended
 
 
 def candidate(fam: Mapping[str, Any], store: Any = None) -> int | None:
@@ -1210,8 +1299,10 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     calibrated holdout (`_holdout_gap`); `screen.verdict` and `screen.beside_line` recorded with the look, under the
     screen that judged it. THE RUN'S STATUS FIRST (the module docstring): a Train-era run that ended "disqualified"
     refuses the floor; a holdout run that did is a look spent and failed, never judged; a sealed run sent and not
-    answered is owed once, then the look is spent and failed (`LOOK_SENDS`). True passed (the family becomes a
-    Candidate), False failed, None not run (no look spent)."""
+    answered is owed once, then the look is spent and failed (`LOOK_SENDS`). THE LAST STEP BEFORE THE SEALED RUN is the
+    seeds' declared order (`seed_wait`, A18): a seed waits, nothing spent, while an earlier seed of its declared
+    lineage is alive without a verdict. True passed (the family becomes a Candidate), False failed, None not run (no
+    look spent)."""
     store, settings = gate.store, gate.settings
     fid, n = str(fam["id"]), int(version["n"])
     lane = lane_of(store, fam)
@@ -1323,6 +1414,21 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     if not pre.get("passed"):
         _refuse(gate, fid, n, sha, "precheck", f"{screen}'s Validation pre-check does not pass on the recorded run",
                 screen=screen)
+        return None
+    # THE SEEDS' DECLARED ORDER, STRICT WITHIN A LINEAGE (A18; `seed_wait`), asked at the last step before the sealed
+    # run: everything this look needs of its own is ready, so the wait's clock counts only such rounds. What follows
+    # (S1-X's rate, the activity figures) is beside the look and refuses nothing.
+    try:
+        ahead = seed_wait(store, fam, settings)
+    except Exception as exc:  # noqa: BLE001 - a seed whose order cannot be read is not looked at (nothing spent)
+        if seeded(store, fid):
+            store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "seed order",
+                                            "error": type(exc).__name__})
+            return None
+        ahead = None  # a family that is no seed waits for no seed
+    if ahead is not None:
+        _wait(gate, fid, n, sha, f"the seeds' declared order (A18): {ahead}, declared before it in its lineage, has "
+              "no verdict yet", screen=screen)
         return None
     s1x = _s1x_floor(S, segments, receipt)  # S1-X's rate beside an S2 verdict: Train-era series only, before the look
     activity = _invested_shares(v, segments)  # beside the look, never its condition
@@ -1472,7 +1578,8 @@ __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_K
            "try_open", "lineage_spent",
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
-           "ROUND_KEY", "ROUND_SECONDS", "round_order", "seed_ahead", "seed_wait", "SEED_WAIT_KEY", "SEED_WAIT_SECONDS",
+           "ROUND_KEY", "ROUND_SECONDS", "round_order", "seed_ahead", "seed_owed", "seed_wait", "seed_waits_over",
+           "SEED_WAIT_KEY", "SEED_WAIT_SECONDS", "SEED_WAIT_REPEAT_SECONDS", "SEED_WAIT_GAP_SECONDS",
            "LOST_KEY", "LOOK_SENDS", "EVIDENCE_HASH_SEED", "SAME_LINEAGE",
            "FLOOR_INELIGIBLE", "REFUSED_BEFORE_LOOK", "REFUSED_CAUSES",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",

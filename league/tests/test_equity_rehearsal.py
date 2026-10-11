@@ -38,6 +38,7 @@ from league.equity import screen as S
 from league.equity.engine import run, split_factor
 from league.equity.runner import RunFailed
 from league.swarm import elane, seeds
+from league.swarm.gate import run_sha
 from league.tests import test_equity_book as T
 from league.tests import test_equity_engine as E
 from league.tests import test_equity_fx_swarm as FS
@@ -327,21 +328,30 @@ class NamedRunner(FS.PickyRunner):
 
 
 def own_series(lots, bars, *, universe, capital, first=None, last=None):
-    """The gate harness's `series`, with the reversal seed on a Train series of its own (the two overnight seeds, and
-    any other family, share one: one lineage, as the rehearsal found the two overnight seeds on real bars)."""
+    """The gate harness's `series`, with the reversal seed on a Train series of its own, and so a family named
+    "own..." (the two overnight seeds, and any other family, share one: one lineage, as the rehearsal found the two
+    overnight seeds on real bars)."""
     days = {"segment-1": np.arange(0, 5), "segment-2": np.arange(10, 15)}.get(bars.window, np.arange(100, 105))
     r = np.linspace(-0.01, 0.01, len(days))
     if "reversal" in str(getattr(bars, "name", "")):
         r = np.asarray([0.01, -0.01, 0.012, -0.008, 0.0])[:len(days)]
+    elif str(getattr(bars, "name", "")).startswith("own"):
+        r = np.asarray([0.0, 0.01, -0.01, 0.0, 0.0])[:len(days)]
     return S.Series(days=days.astype(np.int32), r=r, w=np.ones(len(days)), b=np.zeros(len(days)),
                     exits=np.zeros(len(days), dtype=int), invested=np.ones(len(days), dtype=bool))
 
 
 class TheSeedsDeclaredOrder(FS.FixCase):
-    """rehearsal-5: on real Train series the two overnight seeds are one lineage, so D3 gives only one of them a look,
-    and which one was left to the store's order. The captain decided it before any Validation or look: the declared
+    """rehearsal-5: the two overnight seeds are one lineage, so D3 gives only one of them a look, and which one was
+    left to the store's order. The captain decided it before any Validation or look (amendment A18): the declared
     order of `seeds.EQUITY_SEEDS` is the order of the looks, and it is seed-overnight-qqq, seed-reversal-index,
-    seed-overnight-spy."""
+    seed-overnight-spy.
+
+    verify-evidence-1: WITHIN A LINEAGE THE ORDER IS STRICT. The first fix held the later seed for 30 minutes at
+    most, once, on a clock that ran even while no look could be taken at all; after it ran out, one run of the earlier
+    seed the House could not make handed the lineage's one sealed look to the later seed for good. There is no
+    timeout now: the later seed's look waits until the earlier seed of its lineage has been looked at, has failed its
+    Validation pre-check with no retry owed, or is retired, and a long wait is one House warning."""
 
     def setUp(self):
         super().setUp()
@@ -354,16 +364,31 @@ class TheSeedsDeclaredOrder(FS.FixCase):
             self.tournament.equity_round()
         return born
 
-    def round(self):
+    def round(self, **kw):
         """One equity round of the gate: D3 by the screen's real rule, each family on its own Train series."""
         out = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
-        with screen(), mock.patch.object(S, "same_lineage", FS.REAL_SAME_LINEAGE), \
+        with screen(**kw), mock.patch.object(S, "same_lineage", FS.REAL_SAME_LINEAGE), \
                 mock.patch.object(S, "series", side_effect=own_series):
             self.gate.equity_round(out)
         return out
 
+    def rounds(self, seconds, **kw):
+        """The gate's rounds over `seconds`, one every `elane.ROUND_SECONDS`; the last round's answer."""
+        out = None
+        for _ in range(int(seconds // elane.ROUND_SECONDS)):
+            self.clock.advance(elane.ROUND_SECONDS)
+            out = self.round(**kw)
+        return out
+
     def looks_asked(self):
         return [c[1] for c in self.runner.calls if c[0] == "look"]
+
+    def said(self, action="equity_seed_waits"):
+        return [e for e in self.store.events_after(0, limit=100_000)
+                if e["kind"] == "swarm.status" and e["payload"].get("action") == action]
+
+    def waiting(self, fid=SPY):
+        return self.store.family(fid)["state"].get(elane.SEED_WAIT_KEY)
 
     def test_the_declared_order_and_its_reason_are_written_down(self):
         self.assertEqual([spec["id"] for spec in seeds.EQUITY_SEEDS], [QQQ, REVERSAL, SPY])
@@ -374,6 +399,15 @@ class TheSeedsDeclaredOrder(FS.FixCase):
         self.assertNotRegex(said, r"\d\.\d\d", "the reason in words: no Train-era figure in a public file")
         page = " ".join((REPO / "docs" / "operations.md").read_text().split())
         self.assertIn("seed-overnight-qqq, seed-reversal-index, seed-overnight-spy", page)
+
+    def test_the_lineages_are_declared_beside_the_order(self):
+        lineage = {spec["id"]: spec["lineage"] for spec in seeds.EQUITY_SEEDS}
+        self.assertEqual(lineage[QQQ], lineage[SPY], "the two overnight seeds are ONE lineage (A18)")
+        self.assertNotEqual(lineage[REVERSAL], lineage[QQQ], "the reversal seed is a lineage of its own")
+        self.seeded()
+        self.assertEqual(elane._seed_lineages(self.store), lineage)
+        # The declaration is the wait's alone: it is no part of a family's record, so no family's spec moves.
+        self.assertNotIn("lineage", seeds.equity_family_spec(seeds.EQUITY_SEEDS[0]))
 
     def test_the_declared_order_is_the_look_order(self):
         self.assertEqual(self.seeded(), [QQQ, REVERSAL, SPY])
@@ -411,67 +445,212 @@ class TheSeedsDeclaredOrder(FS.FixCase):
         self.runner.calls.clear()
         self.runner.unmade = {QQQ}                    # the House cannot make its sealed run in this round
         out = self.round()
-        self.assertEqual(out["looked"], [])
-        self.assertEqual(out["waits"], {REVERSAL: QQQ, SPY: QQQ})
-        self.assertEqual(self.looks_asked(), [QQQ], "nothing sealed was run for the seeds after it")
-        self.assertEqual((self.looks(), self.store.refusals()), ([], []), "a wait: no look and no try is spent")
-        for fid in (QQQ, REVERSAL, SPY):
+        self.assertEqual([row["family"] for row in out["looked"]], [REVERSAL], "a lineage of its own waits for nobody")
+        self.assertEqual(out["waits"], {SPY: QQQ})
+        self.assertEqual(self.looks_asked(), [QQQ, REVERSAL], "nothing sealed was run for the later seed of the lineage")
+        self.assertEqual(([row["family"] for row in self.looks()], self.store.refusals()), ([REVERSAL], []),
+                         "a wait: no look and no try is spent")
+        for fid in (QQQ, SPY):
             state = self.store.family(fid)["state"]
             self.assertEqual((state["gate_ready"], state.get("look_inflight")), (True, None), fid)
+        state = self.store.family(SPY)["state"]
+        self.assertEqual(state["gate_outcome"]["result"], "waiting")
+        self.assertIn(QQQ, state["gate"])
+        self.assertEqual((self.waiting()["for"], self.waiting()["waited"]), (QQQ, 0.0))
         self.runner.unmade = set()
         self.clock.advance(elane.ROUND_SECONDS)
         out = self.round()
-        self.assertEqual([row["family"] for row in out["looked"]], [QQQ, REVERSAL], "the next round, as declared")
+        self.assertEqual([row["family"] for row in out["looked"]], [QQQ], "the next round, as declared")
         self.assertIn(QQQ, self.store.refusals(SPY)[0]["reason"])
+        self.assertNotIn("waits", out)
+        self.assertIsNone(self.waiting(), "the wait ended with the earlier seed's verdict")
+        self.assertEqual(self.said() + self.said("equity_seed_wait_over"), [], "a short wait is no news")
 
-    def test_the_wait_is_bounded_and_said_once(self):
-        """One seed whose look can never be taken does not starve the seeds after it (the review's s2-7)."""
+    def test_the_wait_has_no_timeout_and_its_warning_is_said_once(self):
+        """verify-evidence-1: past the old bound the later seed was looked at whatever the earlier one's state."""
         self.seeded()
         self.runner.unmade = {QQQ}
-        self.assertEqual(self.round()["waits"], {REVERSAL: QQQ, SPY: QQQ})
-        self.clock.advance(elane.SEED_WAIT_SECONDS - 1)
-        self.assertEqual(self.round()["waits"], {REVERSAL: QQQ, SPY: QQQ})
-        self.clock.advance(1)
-        out = self.round()
-        self.assertEqual([row["family"] for row in out["looked"]], [REVERSAL, SPY])
-        self.assertNotIn("waits", out)
-        warned = [e for e in self.store.events_after(0, limit=100_000)
-                  if e["kind"] == "swarm.status" and e["payload"].get("action") == "equity_seed_order_passed"]
-        self.assertEqual([(e["family"], e["payload"]["ahead"], e["payload"]["alert"]) for e in warned],
-                         [(REVERSAL, QQQ, True), (SPY, QQQ, True)])
-        self.assertIn("the declared order of the seeds' looks did not hold", warned[0]["payload"]["text"])
+        self.assertEqual(self.round()["waits"], {SPY: QQQ})
+        out = self.rounds(elane.SEED_WAIT_SECONDS - elane.ROUND_SECONDS)
+        self.assertEqual((out["waits"], self.said()), ({SPY: QQQ}, []), "inside the line: a wait, and nothing said")
+        out = self.rounds(elane.ROUND_SECONDS)
+        self.assertEqual((out["waits"], out["looked"]), ({SPY: QQQ}, []), "past the line it still waits")
+        (warned,) = self.said()
+        payload = warned["payload"]
+        self.assertEqual((warned["family"], payload["ahead"], payload["alert"], payload["repeat"]), (SPY, QQQ, True, False))
+        self.assertIn(SPY, payload["text"][:300])
+        self.assertIn(QQQ, payload["text"][:300])
+        self.assertIn("its one sealed look is still owed", payload["text"][:300], "why the earlier one has no verdict")
+        self.assertIn("no timeout", payload["text"])
+        out = self.rounds(2 * 3600)
+        self.assertEqual((out["waits"], len(self.said())), ({SPY: QQQ}, 1), "hours later: still waiting, said once")
+        self.assertNotIn(SPY, self.looks_asked(), "the later seed's sealed run was never made")
+        self.assertEqual([row["family"] for row in self.looks()], [REVERSAL])
+        # A day after the warning it is said again, once.
+        self.store.set_state(SPY, **{elane.SEED_WAIT_KEY: {
+            **self.waiting(), "alerted": self.clock() - elane.SEED_WAIT_REPEAT_SECONDS + 2 * elane.ROUND_SECONDS}})
+        self.rounds(elane.ROUND_SECONDS)
+        self.assertEqual(len(self.said()), 1, "not yet a day")
+        self.rounds(2 * elane.ROUND_SECONDS)
+        self.assertEqual([e["payload"]["repeat"] for e in self.said()], [False, True], "at most daily")
+        # The earlier seed's run is made: it is judged, the later one is refused as its lineage, the warning clears.
         self.runner.unmade = set()
-        self.clock.advance(elane.ROUND_SECONDS)
-        self.round()
-        self.assertEqual(self.store.refusals(QQQ)[0]["stage"], "same lineage", "the lineage's look was spent by then")
+        out = self.rounds(elane.ROUND_SECONDS)
+        self.assertEqual([row["family"] for row in out["looked"]], [QQQ])
+        self.assertEqual(self.store.refusals(SPY)[0]["stage"], "same lineage")
+        self.assertEqual(self.store.refusals(QQQ), [], "the seed A18 names spent the lineage's look")
+        (over,) = self.said("equity_seed_wait_over")
+        self.assertEqual((over["family"], over["payload"]["alert"], over["payload"]["ahead"]), (SPY, False, QQQ))
+        self.assertIsNone(self.waiting())
+        self.assertNotIn(SPY, self.looks_asked())
 
-    def test_the_operators_hold_on_the_earlier_seed_releases_the_later_ones(self):
+    def test_rounds_in_which_no_look_could_be_taken_do_not_run_the_clock(self):
+        """verify-evidence-1's own scenario: all three seeds wait for the data job for longer than the old bound, the
+        store lands, and in that round the House cannot make the earlier seed's sealed run once."""
+        self.seeded()
+        gap = "the daily store ends before the look's holdout: the sealed look waits for the data job"
+        for _ in range(8):
+            out = self.round(gap=gap)
+            self.assertEqual((out["looked"], out.get("waits")), ([], None))
+            self.clock.advance(elane.ROUND_SECONDS)
+        self.assertEqual(self.said(), [], "nothing was looked at and no order was broken")
+        self.assertIsNone(self.waiting(), "the wait was never asked: its own look was not ready")
+        self.runner.unmade = {QQQ}
+        out = self.round()
+        self.assertEqual(([row["family"] for row in out["looked"]], out["waits"]), ([REVERSAL], {SPY: QQQ}))
+        self.runner.unmade = set()
+        out = self.rounds(elane.ROUND_SECONDS)
+        self.assertEqual([row["family"] for row in out["looked"]], [QQQ])
+        self.assertEqual((self.store.refusals(SPY)[0]["stage"], self.store.refusals(QQQ)), ("same lineage", []))
+
+    def test_the_clock_counts_only_the_rounds_its_own_look_was_ready(self):
+        self.seeded()
+        self.runner.unmade = {QQQ}
+        self.assertEqual(self.round()["waits"], {SPY: QQQ})
+        out = self.rounds(8 * elane.ROUND_SECONDS, gap="the daily store ends before the look's holdout")
+        self.assertNotIn("waits", out, "its own look waits for the data job: the order is not asked")
+        self.assertEqual(self.rounds(elane.ROUND_SECONDS)["waits"], {SPY: QQQ})
+        self.assertEqual((self.said(), self.waiting()["waited"]), ([], 0.0), "45 minutes on the wall, none of them counted")
+        self.rounds(elane.SEED_WAIT_SECONDS - elane.ROUND_SECONDS)
+        self.assertEqual(self.said(), [])
+        self.rounds(elane.ROUND_SECONDS)
+        self.assertEqual(len(self.said()), 1, "30 minutes of rounds in which only the order held it")
+
+    def test_the_operators_hold_on_the_earlier_seed_holds_its_lineage_and_no_other(self):
         self.seeded()
         self.store.set_state(QQQ, gate_hold=True)
         out = self.round()
-        self.assertEqual((out["held"], [row["family"] for row in out["looked"]]), ([QQQ], [REVERSAL, SPY]))
-        self.assertNotIn("waits", out)
+        self.assertEqual((out["held"], [row["family"] for row in out["looked"]], out["waits"]),
+                         ([QQQ], [REVERSAL], {SPY: QQQ}))
+        self.assertIn("gate_hold", elane.seed_owed(self.store, self.store.family(QQQ), ON))
+        self.rounds(elane.SEED_WAIT_SECONDS)
+        (warned,) = self.said()
+        self.assertIn("gate_hold", warned["payload"]["text"][:300], "the warning says why")
+        # The operator gives the lineage's look to the later seed by retiring the earlier one.
+        self.store.retire(QQQ, "retired by hand")
+        out = self.rounds(elane.ROUND_SECONDS)
+        self.assertEqual([row["family"] for row in out["looked"]], [SPY])
+        self.assertEqual(len(self.said("equity_seed_wait_over")), 1)
+        self.assertIsNone(self.waiting())
 
-    def test_a_seed_whose_lineage_is_spent_or_that_is_retired_holds_nobody_back(self):
+    def test_a_seed_that_failed_its_pre_check_or_is_retired_holds_nobody_back(self):
         self.seeded()
         self.store.set_state(QQQ, gate_ready=False, **{elane.TRY_KEY: {"version": 1, "precheck": False,
                                                                         "entered": False}})
         self.assertEqual(elane.lineage_spent(self.store, self.store.family(QQQ), ON), elane.SPENT_TRY)
-        self.assertIsNone(elane.seed_ahead(self.store, self.store.family(REVERSAL), ON))
+        self.assertIsNone(elane.seed_owed(self.store, self.store.family(QQQ), ON), "FAILED, and no retry owed")
+        self.assertIsNone(elane.seed_ahead(self.store, self.store.family(SPY), ON))
         self.store.retire(REVERSAL, "retired by hand")
         out = self.round()
         self.assertEqual([row["family"] for row in out["looked"]], [SPY], "the lineage's look is the next seed's")
+        self.assertNotIn("waits", out)
+
+    def test_a_retired_earlier_seed_holds_nobody_back(self):
+        self.seeded()
+        self.store.retire(QQQ, "retired by hand")
+        self.assertIsNone(elane.seed_owed(self.store, self.store.family(QQQ), ON))
+        out = self.round()
+        self.assertEqual([row["family"] for row in out["looked"]], [REVERSAL, SPY])
+        self.assertNotIn("waits", out)
+
+    def test_an_earlier_seed_owed_its_validation_or_its_retry_has_no_verdict(self):
+        born = elane.birth_seeds(self.store, ON)
+        self.assertEqual(born, [QQQ, REVERSAL, SPY])
+        self.assertIn("Validation is still owed", elane.seed_owed(self.store, self.store.family(QQQ), ON))
+        self.assertEqual(elane.seed_ahead(self.store, self.store.family(SPY), ON), QQQ, "before any Validation")
+        with screen():
+            self.tournament.equity_round()
+        # Its first try FAILED the pre-check and its pre-registered retry (R3) is open: still no verdict.
+        retry = self.store.add_version(QQQ, self.store.version(QQQ, 1)["code"], {"share": 0.4}, author="test")
+        self.store.set_state(QQQ, gate_ready=False, **{elane.TRY_KEY: {"version": 1, "precheck": False, "entered": False,
+                                                                        "retry_sha": run_sha(retry)}})
+        with screen(), mock.patch.object(S, "retry_permitted", return_value=True):
+            self.assertIsNone(elane.lineage_spent(self.store, self.store.family(QQQ), ON))
+            self.assertIn("retry", elane.seed_owed(self.store, self.store.family(QQQ), ON))
+            self.assertEqual(elane.seed_ahead(self.store, self.store.family(SPY), ON), QQQ)
+        with screen():  # the receipt permits no retry: the failed pre-check is its verdict
+            self.assertIsNone(elane.seed_ahead(self.store, self.store.family(SPY), ON))
+
+    def test_an_earlier_seed_refused_before_its_look_holds_until_it_is_retired(self):
+        """The gate is done with it without a look (here: no eligible floor), and the tournament's next step retires
+        it. Until then it is alive without a verdict, so the later seed of its lineage waits that one round."""
+        self.seeded()
+        elane._refuse(self.gate, QQQ, 1, run_sha(self.store.version(QQQ, 1)), "screen floor", "no eligible floor",
+                      screen="S1")
+        self.assertEqual(elane.lineage_spent(self.store, self.store.family(QQQ), ON), elane.FLOOR_INELIGIBLE)
+        self.assertIn("retires", elane.seed_owed(self.store, self.store.family(QQQ), ON))
+        out = self.round()
+        self.assertEqual(([row["family"] for row in out["looked"]], out["waits"]), ([REVERSAL], {SPY: QQQ}))
+        with screen():
+            self.assertEqual(self.tournament.equity_round()["retired"], [QQQ])
+        self.assertEqual(self.store.family(QQQ)["retire_reason"], elane.FLOOR_INELIGIBLE)
+        out = self.rounds(elane.ROUND_SECONDS)
+        self.assertEqual([row["family"] for row in out["looked"]], [SPY])
+        self.assertIsNone(self.waiting())
+
+    def test_seeds_of_different_lineages_never_wait_on_each_other(self):
+        self.seeded()
+        self.runner.unmade = {REVERSAL}
+        out = self.round()
+        self.assertEqual([row["family"] for row in out["looked"]], [QQQ])
+        self.assertNotIn("waits", out)
+        self.assertEqual(self.store.refusals(SPY)[0]["stage"], "same lineage", "refused by D3: it waited for nobody")
+        self.assertIsNone(elane.seed_ahead(self.store, self.store.family(REVERSAL), ON))
+        self.assertIsNone(self.waiting(REVERSAL))
 
     def test_a_family_that_is_no_seed_waits_for_no_seed(self):
         self.seeded()
         self.ready("b1", code=CODE + "# not a seed\n")
         self.runner.unmade = {QQQ}
         out = self.round()
-        self.assertEqual([row["family"] for row in out["looked"]], ["b1"])
-        self.assertEqual(out["waits"], {REVERSAL: QQQ, SPY: QQQ})
+        self.assertEqual(sorted(row["family"] for row in out["looked"]), sorted(["b1", REVERSAL]))
+        self.assertEqual(out["waits"], {SPY: QQQ})
         self.assertIsNone(elane.seed_ahead(self.store, self.store.family("b1"), ON))
-        with mock.patch.object(self.store, "get", side_effect=RuntimeError("unreadable")):
-            self.assertIsNone(elane.seed_wait(self.store, self.store.family(SPY), ON), "a store that cannot say")
+        self.assertIsNone(elane.seed_wait(self.store, self.store.family("b1"), ON))
+        self.assertIsNone(self.waiting("b1"))
+
+    def test_an_order_that_cannot_be_read_takes_no_seeds_look(self):
+        """STRICT, so it fails closed: a wait spends nothing, a look taken out of order is spent for good."""
+        self.seeded()
+        version, sha = self.ready("own1", seeded=False, code=CODE + "# not a seed\n")
+        self.store.set_state("own1", review={"sha": sha, "verdict": "pass", "audit": {"verdict": "pass"}})
+        self.runner.calls.clear()
+        with mock.patch.object(elane, "_seed_places", side_effect=RuntimeError("unreadable")):
+            with self.assertRaises(RuntimeError):
+                elane.seed_wait(self.store, self.store.family(SPY), ON)
+            out = self.round()
+        self.assertEqual([row["family"] for row in out["looked"]], ["own1"], "a family that is no seed is untouched")
+        self.assertEqual(self.looks_asked(), ["own1"], "no seed's sealed run was made")
+        self.assertNotIn("waits", out)
+        for fid in (QQQ, REVERSAL, SPY):
+            state = self.store.family(fid)["state"]
+            self.assertEqual((state["gate_ready"], state.get("look_inflight")), (True, None), fid)
+            failed = [e["payload"] for e in self.store.events_after(0, limit=100_000)
+                      if e["kind"] == "swarm.gate" and e.get("family") == fid and e["payload"].get("action") == "look_failed"]
+            self.assertEqual([p["stage"] for p in failed], ["seed order"], fid)
+        self.assertEqual((self.store.refusals(), [row["family"] for row in self.looks()]), ([], ["own1"]))
+        out = self.rounds(elane.ROUND_SECONDS)
+        self.assertEqual([row["family"] for row in out["looked"]], [QQQ, REVERSAL], "readable again: as declared")
 
 
 # ------------------------------------------------------------------------------------------- the event tables
