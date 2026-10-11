@@ -1,7 +1,7 @@
 # E4 patches authored by package G
 
 Package G (swarm) authors patches 1, 2, 4, 5, 6, 7, 8 and 9 of `README.md`'s table, the two test edits patch 9 needs,
-and proposes one more (1b: two league/ops files no E4 package owns).
+and proposes one more (1b: league/ops/stall.py, which no E4 package owns).
 
 HOW THESE DIFFS WERE MADE AND CHECKED. Package G's own branch (`feat/equity-e4-g`) holds its owned files only. A second
 branch, `feat/equity-e4-g-int` (worktree `~/Work/ltcm-v3/eqe4-g-int`), is that branch with every edit below APPLIED to
@@ -108,37 +108,25 @@ index 52942313..1bc73235 100644
 +           "equity_family"]
 ```
 
-## Patch 1b (proposed; no E4 package owns these two files): `league/ops/stall.py`, `league/ops/preopen.py`
+## Patch 1b (proposed; no E4 package owns this file): `league/ops/stall.py`
 
-The ops' two copies of the options scope know the panel.
+The stall monitor's two copies of the options scope know the panel.
 
-ANCHORS: `OPTIONS_FAMILIES` and `OPTIONS_RUNS` in stall.py; in preopen.py the statement that counts the options
-population (`"NULL AND structure NOT IN ('etf', 'stock')"`).
+ANCHORS: `OPTIONS_FAMILIES` and `OPTIONS_RUNS` in stall.py.
 WHAT: both spell the equity structures out to keep the options population, births and Gym runs apart from the equity
-lanes'. With a panel family alive, unpatched, both would count it as an OPTIONS family (the stall monitor's population
-and run counts; the pre-open's population against its floor). They are league/ops files and import nothing of
-league.swarm at module level, so the literal is extended in place, not imported.
-HELD BY: `test_elane_xs.NoStructureLiteralOutsideTheStore.test_the_ops_two_copies_of_the_scope_know_the_panel` (each
-held equal to `store.OPTIONS_ONLY_SQL` / `EQUITY_ONLY_SQL`). THE INTEGRATOR'S CALL: apply it with patch 1, or hand it to
-the files' owner; without it nothing trades wrongly, two ops counts are off by the panel families.
+lanes'. With a panel family alive, unpatched, the stall monitor would count it as an OPTIONS family (its population
+and run counts). It is a league/ops file that imports nothing of league.swarm at module level, so the literal is
+extended in place, not imported.
+THE PRE-OPEN'S TWO COPIES (league/ops/preopen.py) ARE PACKAGE I's: its patch (e4_patches/I.md) reads
+`store.OPTIONS_ONLY_SQL` in both, which patch 1 here builds from the tuple, so they need patch 1 and nothing more of
+package G. No diff of preopen.py is in this file (an earlier draft of it carried one; it would have met package I's
+on the same lines).
+HELD BY: `test_elane_xs.NoStructureLiteralOutsideTheStore.test_the_stall_monitors_copies_of_the_scope_know_the_panel`
+(each held equal to `store.OPTIONS_ONLY_SQL` / `EQUITY_ONLY_SQL`), and `.test_the_pre_open_reads_the_stores_scope`
+(skipped until package I's patch is applied; then the pre-open spells no structure out). THE INTEGRATOR'S CALL: apply
+it with patch 1, or hand it to the file's owner; without it nothing trades wrongly, the monitor's counts are off by
+the panel families.
 ```diff
-diff --git a/league/ops/preopen.py b/league/ops/preopen.py
-index 67e3b833..467d94ac 100644
---- a/league/ops/preopen.py
-+++ b/league/ops/preopen.py
-@@ -208,9 +208,10 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float,
-         # heartbeat, or the guard's check inside it, written in between is stamped after `now`.
-         read_at = float(clock()) if clock is not None else now
-         st = hb.get("status") or {}
--        # The options population against its floor: the equity lanes' families are their own (release E2).
-+        # The options population against its floor: the equity lanes' families are their own (release E2; a panel
-+        # family, release E4, among them: league/swarm/store.py `OPTIONS_ONLY_SQL`).
-         alive = guard.read(root / "swarm.sqlite", lambda db: guard.ids(db, "SELECT count(*) FROM families WHERE retired_at IS "
--                                                                           "NULL AND structure NOT IN ('etf', 'stock')"))[0]
-+                                                                           "NULL AND structure NOT IN ('etf', 'stock', 'panel')"))[0]
-         return {"raw_is_object": isinstance(raw, dict), "raw_live": raw.get("live") if isinstance(raw, dict) else None,
-                 "defaults_live": dict(SS.DEFAULTS["live"]),
-                 "eff_gym": {k: (eff.get("gym") or {}).get(k) for k in ("enabled", "image_checkpoint", "gate_checkpoint")},
 diff --git a/league/ops/stall.py b/league/ops/stall.py
 index f2e95ba6..ac6614e1 100644
 --- a/league/ops/stall.py
