@@ -905,7 +905,11 @@ def _fills(db: sqlite3.Connection) -> dict[str, Any]:
     lots = _rows(db, "SELECT * FROM fwd_lotgap")
     columns = ("model_bp", "entry_slip_bp", "exit_slip_bp", "timing_entry_bp", "timing_exit_bp", "exec_entry_bp",
                "exec_exit_bp", "side_gap_bp", "twin_gap_bp")
-    twins = _rows(db, "SELECT instance, pid, agree, cause FROM fwd_twins")
+    # A29's two columns beside the registered ones (a store nobody has opened for writing since the release that added
+    # them reads NULL there: no re-base, and each row compared with the un-re-based twin itself).
+    beside = "rebased, base_agree" if forward_db.has_column(db, "fwd_twins", "rebased") \
+        and forward_db.has_column(db, "fwd_twins", "base_agree") else "NULL AS rebased, NULL AS base_agree"
+    twins = _rows(db, f"SELECT instance, pid, agree, cause, {beside} FROM fwd_twins")
     causes = {cause: 0 for cause in forward_db.CAUSES}
     for row in twins:
         if row["agree"] == 0:
@@ -927,7 +931,31 @@ def _fills(db: sqlite3.Connection) -> dict[str, Any]:
             "intents": {"sessions": len(readable), "agreed": agreed, "disagreed": len(readable) - agreed, "causes": causes,
                         "unreadable": len(twins) - len(readable),
                         "share": agreed / len(readable) if readable else None, "bound": forward_db.A14_AGREE},
-            "by_instance": [row for row in _instances(lots, twins) if row["pid"] in live]}
+            "by_instance": [row for row in _instances(lots, twins) if row["pid"] in live],
+            "rebase": _rebase(twins, live)}
+
+
+def _rebase(twins: Sequence[Mapping[str, Any]], live: set[int]) -> dict[str, Any]:
+    """BESIDE THE INTENTS, NEVER IN A RULE (the captain's A29: the twin is re-based after a difference, so a miss
+    counts once): how many times the twins were re-based, and the agreement of the UN-RE-BASED twin runs over the
+    same sessions (`sessions`: those with a readable un-re-based comparison; `agreed`; `share`), in all and one row a
+    LIVE instance, so a program whose live path has left its replay's days is seen. A row from before the release
+    was compared with the un-re-based twin itself (`rebased` NULL: its `agree`)."""
+    out: dict[str, dict[str, Any]] = {}
+    for row in twins:
+        held = out.setdefault(str(row["instance"]), {"instance": str(row["instance"]), "pid": row["pid"], "rebases": 0,
+                                                     "sessions": 0, "agreed": 0})
+        held["rebases"] = max(held["rebases"], int(row["rebased"] or 0))
+        first = row["agree"] if row["rebased"] is None else row["base_agree"]
+        if first is not None:
+            held["sessions"] += 1
+            held["agreed"] += 1 if int(first) == 1 else 0
+    rows = [{**held, "pid": None if held["pid"] is None else int(held["pid"]),
+             "share": held["agreed"] / held["sessions"] if held["sessions"] else None} for _, held in sorted(out.items())]
+    sessions, agreed = sum(r["sessions"] for r in rows), sum(r["agreed"] for r in rows)
+    return {"rebases": sum(r["rebases"] for r in rows), "sessions": sessions, "agreed": agreed,
+            "share": agreed / sessions if sessions else None,
+            "by_instance": [r for r in rows if r["pid"] in live]}
 
 
 def _instances(lots: Sequence[Mapping[str, Any]], twins: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -1351,7 +1379,8 @@ def section(root: str | Path, *, now: float, settings: Mapping[str, Any] | None)
     cause; suspects), `shadow` (programs, sessions, stale, `run_failed`, `data_failed`, `run_disqualified`, the last
     `night_failed`), `checkpoints`, `meter` (with `engines`: the distinct engine ids in `fwd_days`), `cey` (with
     `neff_raw` beside), `fills` (timing, livelike, lots, participation, intents: agreed, disagreed by cause,
-    unreadable), `rc` (one object a pair; group counts), `memory` (counts), `contamination`, `receipts`, `alarms`.
+    unreadable; `rebase`: A29's re-bases and the un-re-based twins' own agreement beside, in all and a live
+    instance), `rc` (one object a pair; group counts), `memory` (counts), `contamination`, `receipts`, `alarms`.
     Each object carries its tables' column names; what may appear is bounded by the module docstring."""
     root, now = Path(root), float(now)
     mode = _mode(settings)

@@ -1238,22 +1238,30 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
             rows.clear()
 
         fresh = [day for day in wanted if day not in stored]
-        differed: str | None = None     # A29: the latest differing session the twin is not yet re-based after
+        differed: int | None = None     # A29: the latest differing session the twin is not yet re-based after
         chain: RebasedTwin | None = None
         try:
-            for day in wanted:
+            for i, day in enumerate(wanted):
                 gone = retired is not None and day >= retired.isoformat()
                 found = base.get(day)
                 if fresh and day <= fresh[-1]:
-                    if differed is not None and not gone:
-                        # A29: THE TWIN'S BOOK IS SET TO THE LIVE BOOK AS IT STOOD AFTER THAT SESSION, and the
-                        # sessions after it are compared from there. What is gathered is written first: a re-base
-                        # that cannot be made tonight never costs the rows before it.
+                    # A29: THE TWIN'S BOOK IS SET TO THE LIVE BOOK AS IT STOOD AFTER THE DIFFERING SESSION, and the
+                    # sessions after it are compared from there: when the session to compare is not written yet,
+                    # or when the re-base is on record (its event: an earlier night compared the next session with
+                    # it, and tonight's twin is made the same way). A stored differing session that neither holds
+                    # of (a row from before this release, with stored rows after it) re-based nothing then and
+                    # re-bases nothing now; the latest one re-bases the sessions not yet written.
+                    if differed is not None and not gone and (day not in stored or wanted[differed] in based):
+                        # What is gathered is written first: a re-base that cannot be made tonight never costs
+                        # the rows before it.
                         flush()
                         chain = chain or RebasedTwin(getattr(shadow, "decider", None), run)
-                        seed = live_seed(book, iid, differed)
+                        seed = live_seed(book, iid, wanted[differed])
                         info = chain.rebase(seed)
-                        if forward_db.event(db, "twin_rebased", pid=pid, day=differed, at=float(now), once=iid, payload={
+                        for between in wanted[differed + 1:i]:
+                            chain.step(between)     # stored sessions since: the twin goes through them in order
+                        if forward_db.event(db, "twin_rebased", pid=pid, day=wanted[differed], at=float(now), once=iid,
+                                            payload={
                                 "instance": iid, "held": [[lot["symbol"], lot["entry_day"], lot["entry_at"]]
                                                           for lot in seed["lots"]],
                                 "unheld": info["unheld"],
@@ -1262,13 +1270,13 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
                                        "as registered): the twin's book is the live book as it stood after it, and "
                                        "the sessions after it are compared from the same state"}):
                             out["rebased"] += 1
-                        based = sorted({*based, differed})
+                        based = sorted({*based, wanted[differed]})
                         differed = None
                     if chain is not None:
                         found = chain.step(day)
                 if day in stored:
                     if stored[day] == 0:
-                        differed = day
+                        differed = i
                     continue
                 if found is None:
                     continue
@@ -1288,7 +1296,7 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
                              why, float(now), seen, bars, cause(agreed, seen, bars), sum(1 for d in based if d < day),
                              unrebased))
                 if agreed is False:
-                    differed = day
+                    differed = i
         except TwinInterrupted as exc:
             flush()
             forward_db.event(db, "twin_interrupted", pid=pid, day=night, at=float(now), once=iid, payload={
