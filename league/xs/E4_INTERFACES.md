@@ -18,12 +18,16 @@ lineage rule or the forward checkpoints, THE PRE-REGISTRATION WINS, and the stub
 the spec names existing code and the code differs, THE CODE WINS (section 5).
 
 **THE STUDY IS DONE** (2026-10-11 07:00Z): XS1 is ADOPTED by its own mechanical rule, at rung R0. Its receipt
-(`equity_screen_xs_1.json`, sha256 98acbb83ffec165dcd4e831a6d5f123b99a6bc5c4ca3acb114e75782555e52e3) is copied
+(`equity_screen_xs_1.json`, sha256 98acbb83ffec165dcd4e831a6d5f123b99a6bc5c4ca3acb114e75782555e52e3) was copied
 VERBATIM to `docs/benchmarks/equity_screen_xs_1.json` and pinned in policy.json `elane.screens.equity_xs` BY THE
-INTEGRATOR, in one commit, so the tree never holds a receipt without its pin. The captain may later replace it with
+INTEGRATOR, in one commit, so the tree never holds a receipt without its pin. The captain may replace it with
 a rebuilt receipt at another c_XS: READ EVERY THRESHOLD FROM THE RECEIPT AT RUNTIME, NEVER WRITE ONE IN CODE OR IN A
-TEST (a test that needs a figure reads the file, or the fake). Until the pin lands, a screen with no pinned receipt
-refuses every program. The captain's amendment A22 came with the study's review: section 4a.
+TEST (a test that needs a figure reads the file, or the fake). With no pinned receipt the screen refuses every
+program. The captain's amendment A22 came with the study's review: section 4a. **AND HE DID REPLACE IT (A23, section
+4a): the file in the tree is now the study's receipt REBUILT at c_XS 1.38** (sha256
+f7ce98b1f35621da258bf0b9d4462ee69f46c41963021df59218833433abbe53), with its pin and with every conformance vector
+computed again at that bar by the study's own vector builder (section 13). The registered receipt above stays the
+study's result: the rebuilt file names it (`house_bar.registered_receipt_sha256`).
 
 **Rules for every package.** The repository is public: no market data, no price or return of a real year, no census
 figure, no per-program outcome, no membership history (the point-in-time table lives on the House only; the one
@@ -56,8 +60,8 @@ in this build. Package J (the forward twin) waits for release E3: it is OWED (se
 
 Files no package edits: `league/live/**`, `league/gym/**`, `gateway/**`, the evidence modules of league/equity,
 `league/equity/INTERFACES.md`, `docs/benchmarks/equity_screen_2.json`, `league/ops/equity_data.py`, anything under
-`<state>`. `docs/benchmarks/equity_screen_xs_1.json` is the study's receipt: the integrator lands it, no package
-writes or edits it.
+`<state>`. `docs/benchmarks/equity_screen_xs_1.json` is the study's receipt (since A23: that receipt rebuilt at the
+captain's bar by the study's own builder): the integrator lands it, no package writes or edits it.
 
 No path is in two rows. A package that needs a change to a file it does not own asks its owner (a line in its
 report), or the integrator when the file is a shared shape of section 6.
@@ -148,8 +152,11 @@ From the study's review. The receipt is pinned as built; these four are HOUSE ru
 | (3) | **The equity code review (no embedded return table, no calendar recognition) and the contamination probe run BEFORE a panel look.** The review's rubric for a panel program is `elane_xs.REVIEW_XS` (G's patch 7). The probe is release E3's (`league/ops/contam_probe.py`) with the panel strata P4-P6 of patch 18: `elane_xs.probed` holds a look back until the route that wrote the program has a published result with those strata. SO NO PANEL LOOK RUNS UNTIL RELEASE E3 AND PATCH 18 ARE MERGED AND THE PROBE HAS RUN ONCE (stated in section 8) | G (`probed`, the rubric); B (patch 18, after E3) |
 | (4) | **A conformance vector for the 2022-24 floor cell alone**, beside the study's eight | E (`league/tests/fixtures/xs1_conformance_c.json`, by hand; `test_xs_screen` holds `floor` to it) |
 
-PENDING with the captain at integration: whether the House runs at the receipt as registered or at a rebuilt one with
-a higher c_XS. Nothing in the build depends on the answer: every threshold is read from the pinned receipt.
+DECIDED (the captain's A23, Oct 11): **the House runs XS1 at c_XS 1.38, not the registered 1.30.** 1.38 is the
+registered rule's own answer once the measured finite-pool bias is added (the pre-registration's DR5 line, which the
+study reported beside its decision), and a known bias left out of a bar is a loosened rule. The receipt was rebuilt
+at 1.38 by the study's own builder and landed with its pin and its vectors (section 13). Nothing in the build
+depended on the answer: every threshold is read from the pinned receipt. The four rules above are unchanged.
 
 ## 5. Where the code at the base differs from the spec's words (the code wins)
 
@@ -339,7 +346,9 @@ passes and 120 fails) and T15 (u is the one-cell residual) are D's and E's to re
 
 **The study's conformance vectors** (synthetic inputs; no market data; `test_e4_stubs.TheStudysVectors` holds the two
 files to each other):
-- `league/tests/fixtures/xs1_conformance.json`: the study's file, byte for byte (sha256 386995d8...). Vectors "V1
+- `league/tests/fixtures/xs1_conformance.json`: the file the study's own vector builder writes at the bar of the
+  receipt in the tree (sha256 691f4340..., `k_XS` 138; the study's pinned file, 386995d8..., is the same builder's
+  at its registered bar, and was the fixture until the captain's A23). Vectors "V1
   pass", "V2 fail", "V3 pre-check", "V4 stress", "V5 own floor", "V6 ineligible" (each: `inputs`, `lots`, `placebos`,
   `series`, `floor`, `look`), "CH" (characteristics on a 253-session window and the cells of 100 names: literal
   inputs) and "H" (the hand vector: literal inputs). Validation is sessions 0..249, the holdout 250..443; the
@@ -363,7 +372,10 @@ files to each other):
   own_fp); from the series and the placebo t's, the pre-check, the look's legs, the grid index, the placebo count and
   the verdict; whether a look was spent; and its own ninth vector. The names 0..23 are the columns, in that order.
 - THE VECTORS RUN UNDER THEIR OWN BAR: a receipt whose c_XS is the vector file's `k_XS` / 100, never the pinned
-  receipt's, so a rebuilt receipt at another c_XS moves no vector.
+  receipt's. AND THAT BAR IS HELD EQUAL TO THE PINNED RECEIPT'S (`test_xs_screen.TheCommittedPin
+  .test_the_committed_vectors_run_at_the_pinned_bar`, since the captain's A23): a receipt at another c_XS lands with
+  the vectors whose verdict hangs on the bar computed again at it by the study's vector builder, the inputs file
+  made again from them, and the two by hand derived again (section 13 says what moved the first time).
 
 ## 10. As integrated (Oct 11, 2026; `feat/equity-e4`; nothing pushed, nothing deployed)
 
@@ -405,7 +417,8 @@ after it carry 5ad1f01e's three. The xs identity is new (no band exists under an
   it once package I's patch stopped its skip). `test_dlane_report_panel`: H's test of an unreadable style rule makes
   the rule unreadable itself, and a passer with no style verdict reads "style-open: unmeasured" (its own test).
 - policy.json ships `elane.panel.mode` "off" (the spec's shipped value); `elane.screens.equity_xs` is
-  `screen.pin(RECEIPT_PATH)` of the receipt at sha256 98acbb83, written whole.
+  `screen.pin(RECEIPT_PATH)` of the receipt at sha256 98acbb83, written whole (since A23 of the rebuilt receipt,
+  sha256 f7ce98b1: section 13).
 
 **The seams no package could test alone, now held** (`league/tests/test_e4_integration.py`, beside the end-to-end
 test): package B's spreads and N_eff jobs on package C's real store, and package A's and the twins' readers of their
@@ -505,7 +518,8 @@ this tree with the lane's switch able to reach "train" (the data jobs, panel bir
 identity a judge binds to and no money rule (the options execution fingerprint, the equity identity and the money
 digest are main's on both Pythons; the xs identity moves, and no panel band exists under it). Step two is what a
 look and a seat still need, each owed: the probe's panel strata with the look permit and the receipt at the
-captain's bar; the forward twin (package J), the universe commit and the money row of a panel sleeve.
+captain's bar (landed since: section 13); the forward twin (package J), the universe commit and the money row of a
+panel sleeve.
 
 **What the merge changed in this contract** (sections 5, 8 and 10 above are records of their own day):
 
@@ -533,7 +547,58 @@ captain's bar; the forward twin (package J), the universe commit and the money r
 
 Open after the ship pass, stated: package J; patch 18 with the look permit; the universe commit and the money row
 (a held basket uses the whole window: after a loss a partial rotation is a name short, and live and its twin part
-there); the receipt at the captain's bar; the gateway's follow-up for the two protected paths; a name that joined
-the index after 2024 is charged the universe's half-spread (sampling its own Train-era days is a spec change for
+there); the receipt at the captain's bar (landed since: section 13); the gateway's follow-up for the two protected
+paths; a name that joined the index after 2024 is charged the universe's half-spread (sampling its own Train-era days is a spec change for
 package B); Validation and the look ask the quiet rule once for two or three runs (Train asks before each); every
 budget of the lane on the box's one core is an estimate until its first receipts are read.
+
+## 13. The receipt at the captain's bar (A23; Oct 11, 2026; `feat/equity-e4-r`; nothing pushed, nothing deployed)
+
+**The decision.** The House runs XS1 at c_XS 1.38, not the registered 1.30 (section 4a). 1.38 is not chosen in this
+tree: it is the study's own figure for the pre-registration's DR5 line (the smallest feasible threshold once every
+real-signal cell's rate and bound are raised by its archetype's measured finite-pool bias), which the registered
+receipt already stated as `cost_of_rule.c_XS_with_finite_pool_bias`.
+
+**How the receipt was built.** By the study's own code from its saved run, in the captain's private scratch, the
+bar the only thing changed: the study's report read its saved jobs (per-world gate indices, which do not depend on
+the threshold) at grid step 138 where it had read them at 130, and the study's receipt builder wrote the file. Checked
+first: the builder on the saved report gives the registered receipt again byte for byte, and the report built
+again at 130 from the saved jobs equals the saved report. Every false-positive, bound, family-wise, bias and power
+row therefore comes from the simulations the study saved; none was estimated and no world was simulated again for
+them. Two report-only arms (the takeover-and-collapse arm and the style-tilt arm, which the pre-registration reads
+"at the adopted threshold") had been saved at 130 only, so they were run again at 138 by the study's own command
+on its pinned panel files, after the same command at 130 gave the study's saved arm results again field for
+field; they decide nothing (`style_known_rate`, `style_known_max` and the sentence's style figure read them). One
+key is added, `house_bar`: what the file is, the registered bar and the registered receipt's sha256, the rule, the
+decision, how it was built. `ladder` keeps the registered rule's own row (R0, feasible at 1.30). The registered
+receipt is unchanged in the study's directory and in this repository's history.
+
+**What moved in the tree.**
+
+| what | before | now |
+|---|---|---|
+| `docs/benchmarks/equity_screen_xs_1.json` | the registered receipt, sha256 98acbb83..., c_XS 1.30 | the receipt rebuilt at the House's bar, sha256 f7ce98b1..., c_XS 1.38; every figure read "at the adopted threshold" is read at 1.38; the rule, stratum, margin, placebo bar, windows, lineage, flags, limits and note are word for word the registered receipt's |
+| policy.json `elane.screens.equity_xs` | `screen.pin` of the registered receipt | `screen.pin` of the rebuilt one, written whole: `receipt_sha256`, `c_XS` and the sentence `beside` differ, nothing else |
+| `league/tests/fixtures/xs1_conformance.json` | the study's pinned file (386995d8..., `k_XS` 130) | the study's vector builder's file at `k_XS` 138 (691f4340...). V1 (the smallest planted drift that passes), V5 (a t between the screen's bar and the own floor) and V6 (V1's prices) are other worlds: their plant moved with the bar. V2, V3 and V4 keep their worlds and verdicts; their `k_used` is 138 and with it `HO_at_k_used` and `own_fp`. CH and H are unchanged. The plain reference and the study's code agree on all eight |
+| `league/tests/fixtures/xs1_conformance_inputs.npz` | made from the 130 vectors | made the same way from the 138 vectors: the prices, series and placebo t's of V1, V5 and V6 differ (25 arrays); the other 176 are equal |
+| `league/tests/fixtures/xs1_conformance_c.json` | `k_XS` 130 | `k_XS` 138 and nothing else: both by-hand vectors' own floors (1.73 and 2.05) bind above either bar |
+| `test_e4_stubs.VECTORS_SHA256` | 386995d8... | 691f4340... |
+| CI | the pin is the receipt file's | and the three vector files' bar is the pinned receipt's (`test_xs_screen.TheCommittedPin.test_the_committed_vectors_run_at_the_pinned_bar`) |
+| the docstrings of `league/xs/screen.py` and `league/xs/placebo.py` | "the study's file, byte for byte" | what the receipt and the vectors now are. No statement of either module changed |
+| the xs identity | 0493e206... | 6c4cfa28... (two evidence modules' docstrings; no panel band exists under either) |
+
+**What did not move.** The options execution fingerprint, the equity identity and the money digest (main's, on
+both Pythons); no line of code that judges, sizes or trades; the four rules of A22.
+
+**The cost, stated** (the two receipts' own `power` rows, own floors on, the 48 rows of the calibration sets): at
+a planted net residual edge of +10% a year the holdout-only power is 0.29 to 2.64 points lower at 1.38 than at 1.30
+(median 1.93) and the full gate's 0.25 to 2.59 lower (18 of the 48 rows lose 2 points or more); at +4% a year the
+full gate's is 0.10 to 1.94 lower (median 1.22). The rows themselves are in docs/operations.md. What it buys
+(`fp_zero_edge_max`, `beside_calibrated_reading`): the largest zero-edge rate of any calibration cell falls from
+11.15% to 10.02%, the largest 95% bound from 14.82% to 13.11%, and over twenty more bootstrap seeds the worst
+bound no longer reaches the owner's 15% wall (2 seeds of 20 at 1.30, none at 1.38).
+
+**A receipt at another bar lands the same way**, in one commit: (1) the receipt file; (2) the pin, by `screen.pin`
+(`league/swarm/e4_patches/E.md`'s one call); (3) `xs1_conformance.json` from the study's vector builder at the new
+`k_XS`, the inputs file made again from it, and the two by-hand vectors derived again at it;
+(4) `test_e4_stubs.VECTORS_SHA256`. `TheCommittedPin` fails until the four agree.
