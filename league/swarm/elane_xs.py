@@ -3314,9 +3314,11 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         kept = {} if train_x is None else {TRAIN_X_KEY: train_x, TRAIN_U_KEY: train_u}
         store.set_state(fid, gated_sha=sha, gate_ready=False, gate="pass" if passed else "fail", dormant_cycles=0,
                         gate_outcome={"sha": sha, "result": "passed" if passed else "failed", "at": gate.clock()},
-                        **{LOOK_KEY: {"version": n, "at": store.now(), "verdict": verdict, "beside": beside,
-                                      "seat": seat, "seat_why": unseated if passed else None, "cell": list(cell),
-                                      "n_cell": n_cell, "probe": reading},
+                        # (`passed` beside the verdict's own: the operator report's `style_open_passers`, package
+                        # H's, reads the record's top level)
+                        **{LOOK_KEY: {"version": n, "at": store.now(), "passed": passed, "verdict": verdict,
+                                      "beside": beside, "seat": seat, "seat_why": unseated if passed else None,
+                                      "cell": list(cell), "n_cell": n_cell, "probe": reading},
                            FLOOR_KEY: {**dict(floors), str(n): floor}, elane.TEMPLATE_KEY: template, **kept})
         current = store.family(fid) or {}
         if passed and seat == SEAT_CANDIDATE and current.get("band") == "gym" and not current.get("retired_at"):

@@ -873,6 +873,7 @@ class TheLook(GateCase):
         self.assertEqual((got["band"], got["state"]["gate"]), ("gym", "fail"))
         self.assertNotIn("banded_evaluator", got["state"])
         self.assertIsNone(got["state"][elane_xs.LOOK_KEY]["seat"])
+        self.assertIs(got["state"][elane_xs.LOOK_KEY]["passed"], False)
         self.assertEqual(elane_xs.lineage_spent(self.store, got, self.settings), elane.SPENT_LOOK)
         self.assertIsNone(self.look(fam), "its one look is spent")
         self.assertEqual(len(self.store.looks()), 1)
@@ -945,6 +946,7 @@ class TheCaptainsA22(TheLook):
         looked = state[elane_xs.LOOK_KEY]
         self.assertEqual((looked["seat"], looked["seat_why"]), (elane_xs.SEAT_STYLE, "style-open: size +"))
         self.assertTrue(looked["verdict"]["passed"])
+        self.assertIs(looked["passed"], True, "the record's top level says so too (the operator report reads it there)")
         self.assertTrue(self.store.looks()[0]["passed"], "the look is spent and its pass recorded")
         self.assertEqual(self.store.looks()[0]["detail"]["seat"], "style-open")
         self.assertIsNone(elane_xs.lineage_spent(self.store, got, self.settings), "alive: the forward route is its way")
