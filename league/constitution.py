@@ -1098,7 +1098,8 @@ CONSTITUTION: dict[str, Any] = {
 }
 
 # ---- THE SEAT RULE (`equity_money.probe.seat`; the captain's A24, registered 13:42Z Oct 11, 2026, before the first live
-# share close and before any program waited for a seat; release E5-A). IT DECIDES WHO MAY OPEN NEXT, AND NOTHING ELSE.
+# share close and before any program waited for a seat, AS AMENDED BY A30 at 20:47Z the same day, before the rule was
+# live; release E5-A). A24 WITH A30 IS THE RULE IN FORCE. IT DECIDES WHO MAY OPEN NEXT, AND NOTHING ELSE.
 # - `rule`: "activity-1-free" (in force) or "first-come" (the rollback: release E5-S's behaviour exactly, seats by the
 #   time of the look pass).
 # - A FREE SEAT goes to the best-ranked WAITING passed program. Its rank is K: the smaller of its Validation close days
@@ -1110,12 +1111,24 @@ CONSTITUTION: dict[str, Any] = {
 #   loss budget, for `idle_sessions` seated sessions is flagged idle. It keeps its seat while nobody waits and yields
 #   it at once when an unflagged program waits. A buy refused by the instrument cap, the invested cap or cash does not
 #   count as asked. A yielded program returns only into a free seat, by the same rank, with no new look.
+# - A30 (1), FREE SEATS FIRST, is A24's reading: a free seat is filled before the idle test, and an idle seat yields
+#   only for an unflagged program that would still wait once every free seat is filled. (The study that measured the
+#   rule ran the idle test first: its gain of the rule was measured under that slower order.)
+# - A30 (2), THE IDLE CLOCK DOES NOT RUN WHILE THE HOUSE REFUSES EVERY OPEN: a session in which the House refused opens
+#   for a House-wide reason (paused, the kill switch, a stop, a freeze, the grant not ratified, the paper proof's BUY
+#   stage not passed: what the book's `_open_block` answers before it looks at the instance) is left out of every
+#   program's idle count and of its seated-session count for the idle test. (A24 counts a loss-budget refusal as asked
+#   because giving that seat away helps nobody; the same holds when the House itself would not open.)
+# - A30 (3), A LOST BUY IS NOT FLAT: a buy whose answer was lost keeps its program from being read flat, and so from
+#   yielding, for as long as the book may still take the lost order back. No seat change ends in a House sale of a lot
+#   that shows up afterwards.
 # - NOBODY TRADING IS EVER STOPPED BY THE SEAT RULE. OUTRANKING (a better-ranked arrival making a seated program
 #   exit-only) is NOT ADOPTED: it may be switched on only by A24's own pre-registered line, as a new value of `rule`.
 #   Never a forced or hand-placed trade; no lot is ever sold by the seat rule.
 # - Seeded and bred programs follow the same rule. EDM1 (`demotion`) covers waiting programs too.
 # - ITS COSTS, PLAINLY (A24): closes concentrate in frequent traders, so Done reached this way is weaker evidence of
-#   skill; a daily slice of a quarter sleeve can buy rank; a slow, non-idle incumbent keeps its seat.
+#   skill; a daily slice of a quarter sleeve can buy rank; a slow, non-idle incumbent keeps its seat. A30 states and
+#   accepts, unchanged: that daily quarter-sleeve slice buys immunity from the idle rule too.
 # - Rollback, one owner deploy: `rule` "first-come" (one money-digest move; the standing grant re-ratifies at the
 #   House's start; no fingerprint move, no evidence reset; nobody is unseated by it). `k_floor` is ONE value (K is
 #   fixed per program, so a moved floor would rank old and new programs on two measures: a new floor is a new rule

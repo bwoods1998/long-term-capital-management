@@ -88,7 +88,7 @@ every live trade) and `forward`. THE EQUITY ROSTER (`elane.roster`, `elane.roste
 apart from `dlane.roster`: a Probe family holds one, the Candidates queue for the rest by `banded_at` (`seating` with
 `equity_seatable`), and a Candidate waiting for a seat has no row; unlike the options roster, 0 seats no equity program
 at all. `read(root, lanes="all")` is both. `roster(root, lanes=LANES)` is the equity roster for reports.
-THE SEAT RULE (release E5-A; the captain's A24; `equity_money.probe.seat`, league/equity/bands.py). Under "first-come"
+THE SEAT RULE (release E5-A; the captain's A24 with A30; `equity_money.probe.seat`, league/equity/bands.py). Under "first-come"
 (the rollback) everything above is the rule: the queue is `seating`'s, by `banded_at`. Under "activity-1-free" THE
 EQUITYBOOK IS THE ONE SOURCE of who holds a seat and who waits: a free seat goes to the best-ranked waiting program
 by K, and an idle seat yields, by the book's own rows, which no reader here can see. So the book's reader asks

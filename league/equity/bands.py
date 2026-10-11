@@ -19,9 +19,10 @@ THE BANDS (the EquityBook moves them, writing through its families reader, leagu
 - probe | sized -> candidate, exits only and sticky for the version: `edm1` names why (EDM1), or the program's realized
   Probe net reached `demotion.program_loss_usd` (-$300; the swarm's `elane.program_loss_usd` retires it too).
 
-THE SEAT RULE (release E5-A; the captain's A24; the constitution's `equity_money.probe.seat`, read here by
-`seat_settings`, never by league/live/money.py). Owner: swarm. Pure functions; the EquityBook applies them
-(league/equity/live.py `_seat_bands`) and is THE ONE SOURCE of who holds a seat and who waits.
+THE SEAT RULE (release E5-A; the captain's A24 as amended by A30 before it went live; the constitution's
+`equity_money.probe.seat`, read here by `seat_settings`, never by league/live/money.py). Owner: swarm. Pure
+functions; the EquityBook applies them (league/equity/live.py `_seat_bands`) and is THE ONE SOURCE of who holds a
+seat and who waits.
 - "first-come" (the rollback): release E5-S's behaviour exactly; nothing below is called.
 - "activity-1-free" (in force): a FREE seat goes to the best-ranked waiting passed program (`seat_order`): not
   idle-flagged before idle-flagged, then the higher K, then the earlier look pass, then the family id. K (`seat_k`) is
@@ -32,8 +33,10 @@ THE SEAT RULE (release E5-A; the captain's A24; the constitution's `equity_money
   after every program whose counts can.
 - THE IDLE SEAT (`seat_idle`): a seated program that is flat and has had no asked buy for `idle_sessions` seated
   sessions. It keeps its seat while nobody waits; when an unflagged program would still wait once every free seat is
-  filled (`seat_plan`), ONE idle program a decision day yields (`seat_yielder`: the lowest K, then the latest
-  seated, the latest pass, the higher id) and is flagged.
+  filled (`seat_plan`: FREE SEATS FIRST, A30 (1)), ONE idle program a decision day yields (`seat_yielder`: the lowest
+  K, then the latest seated, the latest pass, the higher id) and is flagged. What "flat" is (A30 (3): a lost buy is
+  not, while the book may take it back) and which sessions count (A30 (2): not one in which the House refused every
+  open) are the book's to say, from its own rows: `SeatFacts` carries its answers.
 - No function here stops a program that trades, sells a lot or names an exit: the rule only orders who may OPEN next.
 """
 
@@ -370,9 +373,11 @@ def seat_k(activity: Any) -> Fraction | None:
 class SeatFacts:
     """One passed program as the seat rule reads it. `k`: `seat_k` (None: unreadable). `passed_at`: when its look
     passed (epoch seconds; None: unknown, after every known time). `flagged`: it yielded an idle seat and has not been
-    seated since. For a seated program: `seat_day` (the decision day it took its seat), `seated_sessions` (sessions
-    since), `quiet_sessions` (sessions since its last asked buy; None: it never asked) and `flat` (no lot, no working
-    order, no planned or sent intent)."""
+    seated since. For a seated program: `seat_day` (the day its sessions count from: the decision day it took its
+    seat, or the session it was seated in when that session's open had begun), `seated_sessions` (sessions since),
+    `quiet_sessions` (sessions since its last asked buy; None: it never asked) and `flat` (no lot, no order that may
+    still fill, no planned or sent intent). The book makes the two counts and LEAVES OUT every session in which the
+    House refused every open (A30 (2); `EquityBook._refused_days`): this module only compares them."""
 
     family: str
     k: Fraction | None = None
@@ -439,10 +444,11 @@ def seat_plan(holders: Sequence[SeatFacts], waiting: Sequence[SeatFacts], *, sea
     not call this then: its band sync is release E5-S's own; the answer is here for the vectors).
 
     FREE SEATS FIRST (A24's words: an idle seat yields "when an unflagged program WAITS"; a program a free seat takes
-    does not wait). The study's simulator (EQDONE-3) ran the idle test before the seating, so with a seat free and
-    one unflagged arrival it made the idle program yield and seated it again in the same sync, its clock restarted:
-    the same programs seated, a yield nobody needed. Here that program keeps its seat and its clock, and yields as
-    soon as an unflagged program has no seat to take.
+    does not wait. The captain's A30 (1) records this as A24's reading). The study's simulator (EQDONE-3) ran the
+    idle test before the seating, so with a seat free and one unflagged arrival it made the idle program yield and
+    seated it again in the same sync, its clock restarted: the same programs seated, a yield nobody needed. Here
+    that program keeps its seat and its clock, and yields as soon as an unflagged program has no seat to take. The
+    study's gain of the rule was measured under its own, slower order.
 
     WHAT IT NEVER SAYS: that a program holding a lot, a working order or a planned intent leaves its seat (an idle
     program is flat by definition), or that a better-ranked arrival takes a held seat (outranking is not adopted)."""

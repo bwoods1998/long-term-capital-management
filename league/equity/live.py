@@ -84,7 +84,8 @@ EXPORTS: a closed lot goes to the forward record (league/equity/families.py `add
 dividends, notional, hold and its twin key `eq:<lid>`. A dividend paid after a lot was exported reaches `eq_lots` (which
 the Done meter and the band rules read) but not that forward row.
 
-THE SEAT RULE (release E5-A; the captain's A24; `equity_money.probe.seat`, league/equity/bands.py `seat_settings`).
+THE SEAT RULE (release E5-A; the captain's A24 as amended by A30 before it went live; `equity_money.probe.seat`,
+league/equity/bands.py `seat_settings`).
 THE BOOK IS THE ONE SOURCE of who holds a seat and who waits: its plan is the kv `eq_seat` (`SEAT_KEY`), which
 `health()["seats"]`, the swarm's `bands.roster(root, lanes=LANES)` and the dlane report all read; nobody else ranks.
 - "first-come" (the rollback): `_sync_instances` is release E5-S's, to the line: the swarm's reader shows the
@@ -93,14 +94,23 @@ THE BOOK IS THE ONE SOURCE of who holds a seat and who waits: its plan is the kv
   best-ranked one (`bands.seat_order`: not idle-flagged first, the higher K, the earlier pass, the id), in the day's
   decision and in the seating pass alike, and a seating that does not take (the row changed, the band rule says no)
   FALLS THROUGH to the next in the same sync. EDM1 covers a waiting program that has a real record (it is marked
-  sticky and never returns). THE IDLE SEAT, at the day's decision only: a seated program that is FLAT (`_flat`: no
-  lot open or closing, no working order, no planned or sent intent) and has had no ASKED buy (`_last_ask`: a buy
+  sticky and never returns, with the same record and alert whether the day's pass or its own seating names it).
+  THE IDLE SEAT, at the day's decision only: a seated program that is FLAT (`_flat`: no lot open or closing, no
+  order that may still fill, no planned or sent intent) and has had no ASKED buy (`_last_ask`: a buy
   that reached the venue, or one the LOSS BUDGET cut or refused; a buy refused by the instrument cap, the invested
   cap or cash is not asked) for `idle_sessions` sessions of its seat is idle. It keeps its seat while no unflagged
-  program is left waiting once every free seat is filled; when one is, ONE idle program a decision day yields
-  (`_yield`): its band goes back to Candidate,
+  program is left waiting once every free seat is filled (FREE SEATS FIRST: A30 (1)); when one is, ONE idle
+  program a decision day yields (`_yield`): its band goes back to Candidate,
   NOT sticky, its instance is retired with the reason "yielded", and it waits flagged idle, behind every unflagged
   program, until a seat is free (no new look; the same instance key, so its record goes on).
+- THE IDLE CLOCK DOES NOT RUN WHILE THE HOUSE REFUSES EVERY OPEN (A30 (2); `_open_note`, `OPEN_NOTE_KEY`): a
+  session with an entry window in which the House looked and never once would have opened, for a reason that is
+  the House's and no program's, is left out of every program's seated sessions and of its sessions since its
+  last asked buy.
+- A LOST BUY IS NOT FLAT (A30 (3); `_flat`, `LOST_TAKE_BACK_DAYS`): an order the book gave up as lost may still be
+  taken back when the venue shows it after all, and until it cannot be, and a day more, its program is not flat.
+  More widely: a program is flat only when the order path has no order of its own left to read the venue for, so
+  no lot can be booked to a program after it yielded.
 - THE RULE ONLY DECIDES WHO MAY OPEN NEXT. It retires an instance only inside the one state transaction that found
   it flat, so `_house_exits` has nothing of it to sell; it plans no exit, cancels no order and makes no trading
   program exit-only. Outranking is not built here.
@@ -268,7 +278,7 @@ FEE_PROCEEDS = re.compile(r"of \$(\d+(?:\.\d+)?)")
 #: Sessions after a lot's exit day without a fee row for that day before the owner is told (once a lot).
 FEES_LATE_SESSIONS = 5
 #: THE SEAT RULE (the module docstring): the kv of the book's seat plan and memory ({rule, seats, day, holders, waiting,
-#: idle {family: {day, why}}, yield_day, passed {family: day}, last}: rank positions, never K); how a yielded
+#: idle {family: {day, why}}, yield_day, passed {family: day}, left_out [{day, why}], last}: rank positions, never K); how a yielded
 #: instance's `why` starts; and the words `league.equity.sizing.size_entry` names the loss budget's cap by (its
 #: `why["budget"]`), which is how a buy cut under the minimum order says that the budget cut it (a test holds them).
 SEAT_KEY = "eq_seat"
@@ -979,9 +989,10 @@ class EquityBook:
 
     def seats(self) -> dict[str, Any] | None:
         """THE SEAT PLAN as the last band sync wrote it (`SEAT_KEY`; THE SEAT RULE, the module docstring): {rule, seats,
-        day, holders [{family, version, band, seeded, since, seated_sessions, quiet_sessions, flat, idle}], waiting
-        [{family, version, rank, seeded, flagged, why}] (None under "first-come": the swarm's roster orders them, by
-        pass time), idle (the programs that yielded an idle seat and wait flagged), last (the last change of hands and
+        day, holders [{family, version, band, seeded, since, seated_sessions, quiet_sessions, left_out, flat, idle}],
+        waiting [{family, version, rank, seeded, flagged, why}] (None under "first-come": the swarm's roster orders
+        them, by pass time), idle (the programs that yielded an idle seat and wait flagged), left_out (the sessions
+        in which the House refused every open, left out of the idle clock), last (the last change of hands and
         why)}. Rank positions only: K is never in it. None before the first sync."""
         plan = self.state.get(SEAT_KEY)
         return dict(plan) if isinstance(plan, Mapping) else None

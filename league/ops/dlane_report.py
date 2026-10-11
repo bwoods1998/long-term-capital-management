@@ -172,13 +172,16 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   and no forward rule moves a seat (`PREREGISTERED["status"]` says so in the report). A reading with no equity close
   is read by the pinned rule's own measure, as before.
 - THE SEATS (release E5-A; the captain's A24, `SEAT_RULE`, registered Oct 11, 2026, before the first live share close
-  and before any program waited for a seat; it replaced A14's forward seat sentence, which was written and never
-  active): `equity.seats` is the EquityBook's own seat plan (its kv `eq_seat` in live.sqlite, read with the book: the
-  book is the one source of who holds a seat and who waits), as {rule, seats, holders (each with its seat's day, its
-  seated sessions, whether it is flat and idle, and whether it was SEEDED), seeded_seats and its sentence (which seats
-  the captain-seeded programs hold: said in every report), waiting (each program's rank POSITION, never K, and
-  whether it is flagged idle; under "first-come" the swarm's roster by pass time), idle_flagged, last_change (the
-  last change of hands and why), preregistered (the rule's text and its stated costs)}. K is never in a report.
+  and before any program waited for a seat, and amended by A30, `A30_SEAT_AMENDMENT`, before it went live; it
+  replaced A14's forward seat sentence, which was written and never active): `equity.seats` is the EquityBook's own
+  seat plan (its kv `eq_seat` in live.sqlite, read with the book: the book is the one source of who holds a seat and
+  who waits), as {rule, seats, holders (each with its seat's day, its seated sessions, the sessions left out of them
+  because the House refused every open, whether it is flat and idle, and whether it was SEEDED), seeded_seats and its
+  sentence (which seats the captain-seeded programs hold: said in every report), waiting (each program's rank
+  POSITION, never K, and whether it is flagged idle; under "first-come" the swarm's roster by pass time),
+  idle_flagged, left_out (the sessions the idle clock did not run in, each with the House's reason), last_change
+  (the last change of hands and why), preregistered (the rule's text, its stated costs and A30's amendment)}. K is
+  never in a report.
 - THE FORWARD RECORD (release E3; league/ops/forward_report.py): `forward_record` is that job's report as it last wrote
   it (None when absent or stale), and its alarms (FW1-FW8, RR1, RR2, CP1, CP2, MM1: ids, counts and dates only) ride
   this report's `alarms`, so the `dlane` stall cause mails a warning. Read only, and never this report's failure.
@@ -283,10 +286,26 @@ A24_SEAT_RULE = (
 A24_SEAT_COSTS = (
     "The seat rule's costs, stated: closes concentrate in frequent traders, so Done reached this way is weaker "
     "evidence of skill; a daily slice of a quarter sleeve can buy rank; a slow, non-idle incumbent keeps its seat.")
+#: A30, THE SEAT RULE AS AMENDED BEFORE IT WENT LIVE (the captain's amendment of 20:47Z Oct 11, 2026, from release E5-A's
+#: independent check; no seat had changed hands by the rule). A24 above stays as it was registered; these sentences
+#: ride beside it in every report (`equity.seats.preregistered.amended`) and in docs/operations.md (the same test holds
+#: the page to them). A24 with A30 is the rule in force.
+A30_SEAT_AMENDMENT = (
+    "Amended before the rule was live (A30). Free seats first: a free seat is filled before the idle test, and an idle "
+    "seat yields only for an unflagged program that would still wait once every free seat is filled; the study that "
+    "measured the rule ran the idle test first, so its gain was measured under that slower order. The idle clock does "
+    "not run while the House refuses every open: a session in which the House refused opens for a House-wide reason "
+    "(paused, the kill switch, a stop, a freeze, the grant not ratified, the paper proof's BUY stage not passed) is "
+    "left out of every program's idle count and of its seated-session count for the idle test. A lost buy is not flat: "
+    "a buy whose answer was lost keeps its program from being read flat, and so from yielding, for as long as the book "
+    "may still take the lost order back, so no seat change ends in a House sale of a lot that shows up afterwards. "
+    "Stated and accepted, not changed: a daily quarter-sleeve slice buys rank and immunity from the idle rule.")
 SEAT_RULE = {
     "id": "A24", "registered": "2026-10-11T13:42Z",
     "before": "the first live share close, and before any program waited for a seat",
     "rule": A24_SEAT_RULE, "costs": A24_SEAT_COSTS, "outranking": "not adopted",
+    "amended": {"id": "A30", "registered": "2026-10-11T20:47Z",
+                "before": "the rule was live: no seat had changed hands by it", "text": A30_SEAT_AMENDMENT},
     "rollback": "equity_money.probe.seat.rule \"first-come\" (one owner deploy, one money-digest move; nobody is unseated)",
     "replaces": "A14's forward seat sentence (`done.preregistered.forward_seat_rule`): written, never active",
 }
@@ -295,9 +314,9 @@ PREREGISTERED = {
     "consistency": A14_CONSISTENCY, "beside_done": A14_BESIDE_DONE, "forward_seat_rule": A14_SEAT_RULE,
     # A24 (Oct 11, 2026; release E5-A) replaced the sentence above before any seat could change hands by it.
     "seat_rule": "A24 replaced the forward seat sentence above on Oct 11, 2026, before the first live share close: it "
-                 "was written and never active. Since release E5-A the seat rule in force is A24's "
-                 "(`equity.seats.preregistered`), under which an idle seated program may yield its seat whatever its "
-                 "closes; it reads no P&L of the forward record.",
+                 "was written and never active. Since release E5-A the seat rule in force is A24's, as A30 amended "
+                 "it before it went live (`equity.seats.preregistered`), under which an idle seated program may yield "
+                 "its seat whatever its closes; it reads no P&L of the forward record.",
     "status": "consistency is computed since release E3 (each checkpoint's `a14`: the size of the mean fill gap "
               "either way, and the intents); the close-date figures are not computed yet and no forward rule moves a "
               "seat",
@@ -983,17 +1002,19 @@ def equity_section(book: Mapping[str, Any], every: Sequence[Mapping[str, Any]], 
 def equity_seats(root: str | Path | None, book: Mapping[str, Any], seeded: Iterable[str]) -> dict[str, Any]:
     """THE SEATS (release E5-A; A24, `SEAT_RULE`): the EquityBook's own seat plan as it last wrote it (`book`'s
     `seat_plan`: the book is the one source), for the owner: {rule, seats, as_of (the decision day of the plan), holders
-    [{family, version, band, seeded, since, seated_sessions, quiet_sessions, flat, idle}], seeded_seats (the holders
-    the captain's build agents seeded) and `seeded_statement` (said in every report), waiting [{family, rank, seeded,
-    flagged}] in the plan's order (a rank POSITION, never K), idle_flagged, last_change, order, preregistered}. Under
+    [{family, version, band, seeded, since, seated_sessions, quiet_sessions, left_out, flat, idle}], seeded_seats (the
+    holders the captain's build agents seeded) and `seeded_statement` (said in every report), waiting [{family, rank,
+    seeded, flagged}] in the plan's order (a rank POSITION, never K), idle_flagged, left_out ([{day, why}]: the
+    sessions in which the House refused every open, left out of the idle clock: A30), last_change, order,
+    preregistered}. Under
     "first-come" the book ranks nobody: `waiting` is the swarm's roster by pass time (`bands.roster(root, lanes=LANES)`),
     and `order` says so. Before the book's first plan the holders are its live instances and `why` says so. Never
     raises: what cannot be read is None with a `why`."""
     seeded = set(seeded or ())
     plan = book.get("seat_plan") if isinstance(book.get("seat_plan"), Mapping) else None
     out: dict[str, Any] = {"rule": None, "seats": None, "as_of": None, "holders": [], "seeded_seats": [],
-                           "seeded_statement": None, "waiting": None, "idle_flagged": [], "last_change": None,
-                           "order": None, "why": None, "preregistered": dict(SEAT_RULE)}
+                           "seeded_statement": None, "waiting": None, "idle_flagged": [], "left_out": [],
+                           "last_change": None, "order": None, "why": None, "preregistered": dict(SEAT_RULE)}
     if plan is None:
         holders = [{"family": str(r.get("family")), "version": _int(r.get("version")), "band": r.get("band"),
                     "seeded": bool(int(r.get("seeded") or 0)) or str(r.get("family")) in seeded}
@@ -1004,6 +1025,9 @@ def equity_seats(root: str | Path | None, book: Mapping[str, Any], seeded: Itera
                    for h in plan.get("holders") or [] if isinstance(h, Mapping)]
         out.update(rule=plan.get("rule"), seats=_int(plan.get("seats")), as_of=plan.get("day"), order=plan.get("order"),
                    idle_flagged=sorted(str(f) for f in (plan.get("idle") or {})) if isinstance(plan.get("idle"), Mapping) else [],
+                   left_out=[{"day": str(x.get("day")), "why": str(x.get("why") or "")[:240]}
+                             for x in plan.get("left_out") or [] if isinstance(x, Mapping)]
+                   if isinstance(plan.get("left_out"), list) else [],
                    last_change=dict(plan["last"]) if isinstance(plan.get("last"), Mapping) else None)
         if isinstance(plan.get("waiting"), list):
             out["waiting"] = [{"family": str(w.get("family")), "rank": _int(w.get("rank")),
@@ -3085,7 +3109,7 @@ def lane_off(ctx: Any, root: Path, settings: Mapping[str, Any] | None) -> dict[s
 
 
 __all__ = ["run", "report", "FILE", "CONTAMINATION", "PREREGISTERED", "A14_CONSISTENCY", "A14_BESIDE_DONE",
-           "A14_SEAT_RULE", "A24_SEAT_RULE", "A24_SEAT_COSTS", "SEAT_RULE", "equity_seats", "A14_GAP_BP", "A14_AGREEMENT", "a14_consistency", "ZERO_EDGE_EQUITY_NOTE", "LOOSENED",
+           "A14_SEAT_RULE", "A24_SEAT_RULE", "A24_SEAT_COSTS", "A30_SEAT_AMENDMENT", "SEAT_RULE", "equity_seats", "A14_GAP_BP", "A14_AGREEMENT", "a14_consistency", "ZERO_EDGE_EQUITY_NOTE", "LOOSENED",
            "TIGHTENED", "closes", "meter", "reading", "replay_gap",
            "replay_twins", "twin_records",
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",

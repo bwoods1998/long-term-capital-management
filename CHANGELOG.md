@@ -29,10 +29,11 @@ any other deploy.
 The running House release is `20261011T190534Z-dc7e047c9530` (main `e36c7e39`, release E5-S, 19:06Z Oct 11), the
 gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
 
-### Release E5-A: the seat rule of the share lane ("activity-1-free"; the captain's A24), on `feat/equity-e5a-seat-rule` (unreleased; an owner deploy on top of release E5-S; THE MONEY DIGEST MOVES, the grant re-ratifies; no fingerprint moves)
+### Release E5-A: the seat rule of the share lane ("activity-1-free"; the captain's A24 with A30), on `feat/equity-e5a-seat-rule` (unreleased; an owner deploy on top of releases E5-S and E2.4; THE MONEY DIGEST MOVES, the grant re-ratifies; no fingerprint moves)
 
 - **What it is.** Who takes a free seat was first come. It is now the seat rule the captain registered at 13:42Z
-  Oct 11, before the first live share close and before any program waited: `equity_money.probe.seat` = {`rule`
+  Oct 11, before the first live share close and before any program waited, as amended by A30 at 20:47Z the same
+  day, before the rule was live: `equity_money.probe.seat` = {`rule`
   "activity-1-free", `k_floor` "0.25", `idle_sessions` 10}, a row of the money table with its bounds and choices.
   A FREE seat goes to the best-ranked waiting passed program. The rank K is the smaller of the program's Validation
   close days and its Train-era close days per 250 sessions, a day counted only when the lots closed on it sum to a
@@ -43,6 +44,35 @@ gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is b
   waiting, and yields at once when one is (one yield a decision day). A buy refused by the instrument cap, the
   invested cap or cash does not count as asked. The yielded program waits flagged, behind every unflagged one,
   and returns only into a free seat, by the same rank, with no new look.
+- **A30, from the release's independent check (the rule in force is A24 with A30).** (1) FREE SEATS FIRST is A24's
+  reading: a free seat is filled before the idle test, and an idle seat yields only for an unflagged program that
+  would still wait; the study's simulator ran the idle test first, so its gain of the rule was measured under
+  that slower order. (2) THE IDLE CLOCK DOES NOT RUN WHILE THE HOUSE REFUSES EVERY OPEN: a session with an entry
+  window in which the House looked and never once would have opened (paused, the kill switch, a stop, a freeze,
+  the grant not ratified, the paper proof's BUY stage not passed: what `_open_block` answers before it looks at
+  the instance) is left out of every program's seated sessions and of its sessions since its last asked buy.
+  The book keeps the note itself, every minute of the two entry windows, from the House's own answer (kv
+  `eq_open_note`); nothing a program writes reaches it. Before, a ten-session pause handed the most active
+  programs' seats to the slowest waiting ones. (3) A LOST BUY IS NOT FLAT: an order given up as lost keeps its
+  program from being read flat for as long as the order path may still take it back (three days), and a day more.
+  Stated and accepted, not changed: a daily quarter-sleeve slice buys rank and immunity from the idle rule.
+- **The check's blocker, and the question it is one case of.** A buy whose answer was lost and which the book gave
+  up as lost did not keep its program from yielding; when the venue showed the order filled afterwards, the lot
+  was booked to the yielded program and the House sold it at the next open. Fixed at the root (A30 (3)), with the
+  check's probe as a test. The wider question, whether ANY lot can be booked to a program after it yielded, is
+  answered in code and asked of the order path itself: a lot is booked only by a buy's fill, a fill only when the
+  order path reads the venue's row of an order, and it reads only orders pending, working or unknown and lost
+  ones inside their take-back; `_flat` is false for exactly those (league/tests/test_equity_seats_a30.py writes an
+  order in every status the book has, on each side and at each age, lets the venue show it filled and runs the
+  House's minute: whenever a fill is booked the program was not flat). A lot of a yielded program, should one
+  ever exist, is an ERROR alert and never silent.
+- **The check's minors.** EDM1 naming a waiting program at its seating writes the `waiting_demoted` record and
+  the warning, drops its flag and takes it out of the plan at once. The yield's two writes cannot be split: the
+  swarm's write is last inside the live state's transaction, and a commit that fails after it moves the band
+  back. `elane_seat` is in the seal's key list, with a two-worlds test on K. A stale idle flag is dropped whenever
+  its family's band is live at a sync, under either rule, and under "first-come" a yielded program's return is no
+  longer a decision late. A seat taken in the seating pass once a session's open has begun counts from the session
+  after (chosen: the idle test names nobody before ten whole sessions; the mark's own day is unchanged).
 - **What it never does.** No trading program is stopped: OUTRANKING IS NOT ADOPTED, and the table does not allow
   it as a value. No lot is sold, no exit is planned and no order is cancelled by the seat rule; a yield retires an
   instance only inside the one state transaction that found it flat. `size_entry` and every owner line are
@@ -58,7 +88,9 @@ gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is b
   a program that passed before the release by `elane.seat_backfill` in the gate's equity round, from unsealed runs
   only. league/live/money.py is not edited: `EquityTable` does not read the block.
 - **Its costs, as A24 states them.** Closes concentrate in frequent traders, so Done reached this way is weaker
-  evidence of skill; a daily slice of a quarter sleeve can buy rank; a slow, non-idle incumbent keeps its seat.
+  evidence of skill; a daily slice of a quarter sleeve can buy rank (and, A30 adds, immunity from the idle rule:
+  nothing in the pipeline refuses it); a slow, non-idle incumbent keeps its seat. Not covered by A30 (2), stated: a
+  session the House did not look at in either entry window (it was not running) counts for the idle clock.
 - **Against the study's simulator** (EQDONE-3, whose seat logic was the reference): the rule built is the rule
   simulated, with these differences, each resolved toward A24. (1) Free seats are filled before any idle yield: the
   simulator yielded and re-seated an idle program in one sync when a seat was free, restarting its clock. (2) A
@@ -72,11 +104,15 @@ gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is b
   by the tree's own digest functions; each pair with the block left out is still release E5-S's pin,
   `DIGESTS_E5S`). The options execution fingerprint (`b60410ad`) and the equity identity (`78022ca6`) are release
   E5-S's: no file of league/live, league/gym or the equity evidence modules is edited.
-- **At the deploy.** Nobody is unseated; each seat keeps its own day and the idle clock counts from it. The grant
-  re-ratifies at the House's start. The swarm's next equity round writes K's counts for every passed program.
+- **At the deploy.** Nobody is unseated; each seat keeps its own day and the idle clock counts from it; the open
+  note starts with the release. The grant re-ratifies at the House's start. The swarm's next equity round writes
+  K's counts for every passed program.
 - **Rollback**, one owner deploy: `equity_money.probe.seat.rule` "first-come" (one money-digest move; the grant
   re-ratifies; nobody is unseated). Under it the band sync and the swarm's read are release E5-S's line for line:
-  league/tests/test_equity_seats.py holds a week recorded on release E5-S to it, entry for entry.
+  league/tests/test_equity_seats.py holds a week recorded on release E5-S to it, entry for entry. No open note is
+  kept under it.
+- **Merged with main** (release E2.4, the equity lanes' alarms, and release E5-S as deployed): no line of either
+  is changed here.
 
 ### Release E2.4: the equity lanes alarm on their own stalls, their research funnel, and an architect kept inside the universe and told in closed words, on `feat/equity-e24-health` (unreleased; a gateway deploy FIRST, then an owner deploy on main's E3; no identity moves; no setting changes)
 

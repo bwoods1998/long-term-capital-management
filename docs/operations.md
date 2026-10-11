@@ -1185,10 +1185,11 @@ The official-price model is the engine's fill (the session's official open or cl
 decisions replayed on the same sessions. Closes that share a close date are one cluster of the t.
 
 **The seat rule** (release E5-A; the captain's A24, registered 13:42Z Oct 11, 2026, before the first live share close
-and before any program waited for a seat; `equity_money.probe.seat` in league/constitution.py holds its name and
-constants: `rule` "activity-1-free", `k_floor` "0.25", `idle_sessions` 10). It replaced A14's forward seat sentence
-above, which was written and never active. The same two sentences ride in every `dlane` report
-(`equity.seats.preregistered`):
+and before any program waited for a seat, and amended by the captain's A30 at 20:47Z the same day, before the rule
+was live; `equity_money.probe.seat` in league/constitution.py holds its name and constants: `rule`
+"activity-1-free", `k_floor` "0.25", `idle_sessions` 10). A24 WITH A30 IS THE RULE IN FORCE. It replaced A14's
+forward seat sentence above, which was written and never active. The same three sentences ride in every `dlane`
+report (`equity.seats.preregistered`; A30's under `amended`):
 - The seat rule is "activity-1-free" (the rollback value is "first-come"). A free seat goes to the best-ranked waiting
   passed program. Its rank K is the smaller of its Validation close days and its Train-era close days per 250
   sessions, a day counted only when the lots it closed that day sum to at least 0.25 of its sleeve (read as 0.25 minus
@@ -1202,6 +1203,15 @@ above, which was written and never active. The same two sentences ride in every 
   trade, and no lot is ever sold by it.
 - The seat rule's costs, stated: closes concentrate in frequent traders, so Done reached this way is weaker evidence
   of skill; a daily slice of a quarter sleeve can buy rank; a slow, non-idle incumbent keeps its seat.
+- Amended before the rule was live (A30). Free seats first: a free seat is filled before the idle test, and an idle
+  seat yields only for an unflagged program that would still wait once every free seat is filled; the study that
+  measured the rule ran the idle test first, so its gain was measured under that slower order. The idle clock does
+  not run while the House refuses every open: a session in which the House refused opens for a House-wide reason
+  (paused, the kill switch, a stop, a freeze, the grant not ratified, the paper proof's BUY stage not passed) is left
+  out of every program's idle count and of its seated-session count for the idle test. A lost buy is not flat: a buy
+  whose answer was lost keeps its program from being read flat, and so from yielding, for as long as the book may
+  still take the lost order back, so no seat change ends in a House sale of a lot that shows up afterwards. Stated
+  and accepted, not changed: a daily quarter-sleeve slice buys rank and immunity from the idle rule.
 
 In plain words, and where each part lives:
 - **Who takes a free seat.** The best-ranked program among those that passed their look and hold no seat. The rank
@@ -1219,29 +1229,83 @@ In plain words, and where each part lives:
   House warning, once, and is tried again hourly. K IS NEVER PRINTED: the health page, the ledger and the report
   show a rank POSITION (first, second, ...), and the counts stay in the swarm's store on the box.
 - **The idle seat.** At the day's decision (never in the seating pass), a seated program is IDLE when all three
-  hold: it has held its seat for ten sessions (counted from the seat's own day); it is flat (no lot open or
-  closing, no working order, no planned or sent intent); and it has not ASKED for a buy in the last ten sessions.
-  Asked means a buy of its own reached the venue, or the loss budget cut or refused it. A buy refused by the
-  instrument cap, the invested cap, cash, its own sleeve or the gateway before the venue is NOT asked. An idle
+  hold: it has held its seat for ten sessions; it is flat; and it has not ASKED for a buy in the last ten
+  sessions. Asked means a buy of its own reached the venue, or the loss budget cut or refused it. A buy refused by
+  the instrument cap, the invested cap, cash, its own sleeve or the gateway before the venue is NOT asked. An idle
   program keeps its seat while no unflagged program is left waiting once every free seat is filled. When one is,
   ONE idle program a decision day yields (the lowest K; then the latest seated): its band goes back to Candidate,
   never sticky, its instance is retired with the reason "yielded", and it waits flagged idle, behind every
   unflagged program. It returns only into a free seat, by the same rank, with no new Validation and no new look,
   under the same instance key (its record goes on); seating clears the flag and starts its clock again. Two rare
   traders do not rotate: a seated idle program keeps its seat while only idle-flagged programs wait.
+- **Free seats first** (A30 (1): this is A24's reading). At a band sync every free seat is filled before the idle
+  test acts: a program that a free seat takes does not wait, so an idle seat yields only for an unflagged program
+  that would STILL wait. The study that measured the rule (EQDONE-3) ran the idle test first: with a seat free it
+  made the idle program yield and seated it again in the same sync, its clock restarted. Its measured gain of the
+  rule is therefore the gain under that slower order; the built order hands an idle seat on sooner in that one
+  corner and touches no trading program.
+- **Flat** (`_flat`, read from the book's own rows every time; A30 (3)). No lot open or closing; no intent planned
+  or sent; and NO ORDER THAT MAY STILL FILL: an order pending, working or unknown at any age, or one GIVEN UP AS
+  LOST while the book may still take it back. The order path looks for a lost order in the venue's orders for
+  three calendar days after its session's (`LOST_TAKE_BACK_DAYS`) and, when the venue shows it after all, books
+  its fills to its program's lot; the seat rule reads such an order as not flat for those days and one more
+  (`LOST_HOLDS_SEAT_DAYS`: the two read the day off two clocks, and the seat rule's window is the wider). So a
+  program whose buy was lost keeps its seat until the order can no longer come back, and the lot that shows up is
+  its own to hold and to sell. Every other order status is the order's end: the order path never reads the venue
+  for it again, and a lot is booked by a buy's fill and by nothing else. No program can yield while a lot could
+  still be booked to it. Should the book ever hold a lot of a program that yielded (a fault of the order path,
+  never the rule's doing), the lot leaves at the next open by the House's rule for a program that no longer runs,
+  and an ERROR alert says the seat rule's promise was broken: tell the captain.
+- **The idle clock and the House** (A30 (2)). A session in which the House refused every open is left out of every
+  program's seated sessions and of its sessions since its last asked buy. HOW A SESSION IS KNOWN TO BE ONE: the
+  book keeps a note of its own (`live.sqlite` kv `eq_open_note`), written every minute of a session's two entry
+  windows (the open window's entry minutes, 09:30:30 to 09:45 ET, and the close window's, 15:55 to 15:59:30)
+  from the House's answer to "may a real equity open of ANY program go now?": exactly what `_open_block` answers
+  before it looks at the instance (the House's own `real_block`: real money off, the grant, the kill switch, a
+  stop, either book's reconciliation, the assignment latch, the options paper proof, the pause, the account read,
+  cash below zero; then the lane's own: `equity_money.enabled` off, the stock proof's BUY stage not passed or its
+  SELL stage failed, the equity book's freezes). A window is CLEAR
+  from the first minute the House would have opened in it and stays clear. A session is left out when the House
+  looked in one of its two windows and never once would have opened there (either window: a program may buy at
+  the open or at the close, and a stop that trips at noon refuses the close's entries). One refused minute in a
+  window that then cleared leaves nothing out: every entry of that window had its chance. WHY A PROGRAM CANNOT
+  FORGE IT: the note is written from the House's own answer for a program that is live by construction
+  (`OPEN_PROBE`), whether or not anybody planned a buy; no intent, tag, reason or order of a program is read to
+  make it, and nothing a program returns from `decide` is a word of `_open_block`. WHAT IT DOES NOT COVER, stated:
+  a session the House did not look at (it was not running in either entry window, or the rule in force was
+  "first-come", under which no note is kept) counts as any other; a long outage with programs waiting is the
+  watchdog's to end, and the captain may set the rule to "first-come" for its length. The plan shows each holder's
+  `left_out` beside its `seated_sessions`, and lists the sessions left out with the House's reason (`left_out`).
+- **A seat's first session.** A seat taken at the day's decision, or in the seating pass before the next session's
+  open, counts its sessions from that next session. A seat taken in the seating pass once that session's open has
+  begun (09:30:30 ET) counts from the session AFTER it: the program could not use that open, so the session is
+  not one of its ten. (`eq_band_since` keeps the decision day as `day`, as every other reader of the mark knows
+  it, and the session the count starts from as `seat`; the plan's `since` shows the latter.) Chosen over dating
+  every seat on the decision day, which would have let the idle test name a program after nine whole sessions.
 - **What the rule never does.** It stops no program that trades: OUTRANKING IS NOT ADOPTED (a better-ranked arrival
   never makes a seated program exit-only; that would be a new value of `rule`, which the table does not allow, and
   may come only by A24's own pre-registered line). It plans no exit, cancels no order and sells no lot. A program
   is retired by a yield only inside the one state transaction that found it flat, so the House's exit rules
   (`_house_exits`: the maximum hold, two failed decides, a retired or demoted program) have nothing of it to sell.
+  THE YIELD WRITES TWO DATABASES AND HAS ONE OUTCOME: the band lives in the swarm's store, everything else in
+  `live.sqlite`. The swarm's write is the last statement before the live state's commit, so a live write that
+  fails, or a row that changed, rolls the whole yield back with the band untouched; should the commit itself fail
+  after the swarm took the band, the band is moved back to the seat's own before the error goes on (an ERROR
+  alert when even that cannot be written; the next decision's band sync, which runs before any program is asked,
+  then seats the program again by rank or retires it with nothing to sell).
   Every owner line is enforced at every send as before, whatever the seats: `size_entry` is not touched.
 - **EDM1 and the waiting.** The demotion rule covers a waiting program that has a real record (one that yielded):
   if EDM1 names it while it waits it is marked sticky and takes no seat again under that version. A seating that
   does not take (the family's row changed under it, or the band rule says no) falls through to the next waiting
-  program in the same sync, so a free seat is never held for a program that cannot take it.
+  program in the same sync, so a free seat is never held for a program that cannot take it. When EDM1 names a
+  waiting program AT ITS SEATING (its twins were priced between two syncs; the seating pass runs no EDM1 pass of
+  its own), the book writes the same `waiting_demoted` record and the same House warning as the day's own pass,
+  drops its idle flag and takes it out of the plan's waiting list in that same sync.
 - **One source.** The book computes the plan and writes it (`live.sqlite` kv `eq_seat`): `health.json`
-  `equity.seats` is {rule, seats, holders [family, since, seated_sessions, quiet_sessions, flat, idle, seeded],
-  waiting [family, rank, flagged, seeded], idle (the flagged), sticky, last (the last change of hands and why)}.
+  `equity.seats` is {rule, seats, holders [family, since, seated_sessions, quiet_sessions, left_out, flat, idle,
+  seeded], waiting [family, rank, flagged, seeded], idle (the flagged: only programs that wait; a flag is dropped
+  whenever its program's band is live at a sync, under either rule), sticky, left_out [day, why] (the sessions the
+  idle clock did not run in), last (the last change of hands and why)}.
   The swarm's `bands.roster(root, lanes=LANES)` reports that same plan under `plan` and says its own lists are by
   pass time; the `dlane` report's `equity.seats` is the plan again, with `seeded_seats` and one sentence saying
   which seats the captain-seeded programs hold. Each change is a ledger record `equity.seat` (seated, yielded,
@@ -1249,24 +1313,38 @@ In plain words, and where each part lives:
   in one line of its summary.
 - **Its costs, as A24 states them.** Closes concentrate in frequent traders, so Done reached this way is weaker
   evidence of skill. A daily slice of a quarter sleeve can buy rank. A slow, non-idle incumbent keeps its seat.
-  And two this build found in the rule's own words. A sale is not an ask, so a program that held one lot for more
-  than ten sessions is idle at the first decision after it is flat, unless a buy of its own reached the venue
-  since; it then yields if an unflagged program waits. And while the House itself refuses every open (the lane's
-  switch off, the kill switch, a stop, a freeze, the grant not yet ratified, the paper proof not passed), no buy
-  reaches the venue, so a flat program's idle clock runs on through no doing of its own.
+  A30 states and accepts one more of the same kind, unchanged: a daily quarter-sleeve slice buys rank AND immunity
+  from the idle rule (a program that buys a quarter of its sleeve at each close and sells it at the next open has
+  a K near the top in both windows and is never flat for long; nothing in the pipeline refuses it; if such programs
+  appear, the answer is a pre-registered change under a new rule name, not a patch). And one this build found in
+  the rule's own words: a sale is not an ask, so a program that held one lot for more than ten sessions is idle at
+  the first decision after it is flat, unless a buy of its own reached the venue since; it then yields if an
+  unflagged program waits. (The build's other finding, that the idle clock ran on while the House itself refused
+  every open, is what A30 (2) changed: such sessions are left out, above.)
 - **At the deploy.** Nobody is unseated: every seated program keeps its seat and its seat's own day, and the idle
-  clock counts from that day. The first band sync reads the waiting Candidates; a free seat goes to the
-  best-ranked of them. The swarm's next equity round writes K's counts for every passed program.
+  clock counts from that day. The open note starts with the release: a session before it has no note and counts
+  as any other. The first band sync reads the waiting Candidates; a free seat goes to the best-ranked of them. The
+  swarm's next equity round writes K's counts for every passed program.
 - **Rollback**, one owner deploy: `equity_money.probe.seat.rule` "first-come". One money-digest move; the standing
   grant re-ratifies at the House's start; no fingerprint moves and no evidence is reset. Under "first-come" the
   band sync and the swarm's read are release E5-S's, line for line (a test holds a recorded week to it): nobody is
   unseated, an idle seat never yields, and a program that had yielded queues as one that came back from Probe
-  (behind every fresh Candidate) and runs again under its own instance key when a seat is free.
+  (behind every fresh Candidate) and runs again under its own instance key when a seat is free: its band and its
+  instance come back in the same pass (the seating pass too), it is asked for the same close, and its idle flag
+  is dropped. Under "first-come" no open note is kept and the book asks the House nothing it did not ask before;
+  a roll forward counts the sessions under "first-come" as any other.
 - Proof: `league/tests/test_equity_seats.py` (the row and its bounds; the ranks; 31 conformance vectors,
   `fixtures/equity_seat_vectors.json`; a lot of exactly the floor through the real engine; the look's counts and
   the backfill with no sealed read; each "asked" case through the real sizing and order path; no rotation; no
   sale and no exit-only on any path; EDM1 while waiting; the fall-through; first come on the recorded week,
-  `fixtures/equity_seat_first_come.json`; the deploy night).
+  `fixtures/equity_seat_first_come.json`; the deploy night); `league/tests/test_equity_seats_a30.py` (A30 and the
+  independent check's findings: the lost buy that shows up after all, with the order path asked status by status
+  whether it could still book a fill of an order whose program reads flat; the ten-session pause after which no
+  trader yields, and the program idle of its own choice that yields at its own tenth session; each House-wide
+  reason; what is a refused session and what is not; EDM1 at the seating; the yield's two writes under a live
+  write that fails, a row that changed and a commit that fails; the stale flag; first come's return; the seat's
+  first session); `league/tests/test_equity_seats_seal.py` (two worlds that differ only in K: every generator
+  reads the same bytes, and the seal's list names the key).
 
 **P(Done | zero edge) beside equity closes.** `done.p_done_zero_edge` is the options Probe rules' simulation figure. It
 was never measured for share closes: a delta-one lane reaches Done whenever the market rises, so its zero-edge P(Done)

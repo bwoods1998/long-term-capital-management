@@ -311,6 +311,31 @@ class TheSeats(EquityFixture):
         for word in ("close_days", "seat_activity", '"k"'):
             self.assertNotIn(word, json.dumps(seats))
 
+    def test_a30_and_the_sessions_left_out_of_the_idle_clock_ride_in_the_report(self):
+        """A30 amended A24 before the rule was live: its sentences ride beside A24's own, and the sessions in which
+        the House refused every open (left out of the idle clock) are in the report, each with the House's reason."""
+        self.eq_family("bred-rotation")
+        self.plan({"rule": "activity-1-free", "seats": 6, "idle_sessions": 10, "day": "2026-10-23",
+                   "holders": [{"family": "bred-rotation", "version": 2, "band": "probe", "seeded": False,
+                                "since": "2026-10-12", "seated_sessions": 7, "quiet_sessions": None, "left_out": 2,
+                                "flat": True, "idle": False}],
+                   "waiting": [], "idle": {}, "sticky": [], "order": "the book's plan (equity_money.probe.seat)",
+                   "left_out": [{"day": "2026-10-15", "why": "open window: the House is paused"},
+                                {"day": "2026-10-16", "why": "close window: the daily stop"}, "not a row"],
+                   "last": None})
+        seats = self.report()["equity"]["seats"]
+        self.assertEqual(seats["left_out"], [{"day": "2026-10-15", "why": "open window: the House is paused"},
+                                             {"day": "2026-10-16", "why": "close window: the daily stop"}])
+        self.assertEqual((seats["holders"][0]["seated_sessions"], seats["holders"][0]["left_out"]), (7, 2))
+        amended = seats["preregistered"]["amended"]
+        self.assertEqual((amended["id"], amended["registered"], amended["text"]),
+                         ("A30", "2026-10-11T20:47Z", R.A30_SEAT_AMENDMENT))
+        self.assertEqual(seats["preregistered"]["rule"], R.A24_SEAT_RULE, "A24 stays as it was registered")
+        self.assertIn("as A30 amended it before it went live", self.report()["done"]["preregistered"]["seat_rule"])
+        # A plan written before this release names no session: an empty list, never an error.
+        self.plan({"rule": "activity-1-free", "seats": 6, "day": "2026-10-23", "holders": [], "waiting": []})
+        self.assertEqual(self.report()["equity"]["seats"]["left_out"], [])
+
     def test_first_come_and_a_book_with_no_plan_say_how_the_waiting_are_ordered(self):
         """Under "first-come" the book ranks nobody: the waiting are the swarm's roster, by pass time, and the block
         says so; a book that has written no plan at all reports its live instances and says why."""

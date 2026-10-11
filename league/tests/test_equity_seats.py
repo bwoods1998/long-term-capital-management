@@ -199,8 +199,20 @@ class TheRow(unittest.TestCase):
         self.assertEqual((R.SEAT_RULE["id"], R.SEAT_RULE["registered"], R.SEAT_RULE["outranking"]),
                          ("A24", "2026-10-11T13:42Z", "not adopted"))
         page = re.sub(r"\s+", " ", (REPO / "docs" / "operations.md").read_text(encoding="utf-8"))
-        for sentence in (R.A24_SEAT_RULE, R.A24_SEAT_COSTS):
+        for sentence in (R.A24_SEAT_RULE, R.A24_SEAT_COSTS, R.A30_SEAT_AMENDMENT):
             self.assertIn(sentence, page)
+        # A30 amended A24 before the rule was live: its three points and what it left as it was, in the words the
+        # captain registered, beside A24's own (which are unchanged).
+        amended = R.A30_SEAT_AMENDMENT
+        for words in ("a free seat is filled before the idle test", "would still wait once every free seat is filled",
+                      "measured under that slower order", "does not run while the House refuses every open",
+                      "paused, the kill switch, a stop, a freeze, the grant not ratified, the paper proof's BUY stage "
+                      "not passed", "left out of every program's idle count and of its seated-session count",
+                      "A lost buy is not flat", "no seat change ends in a House sale",
+                      "a daily quarter-sleeve slice buys rank and immunity from the idle rule"):
+            self.assertIn(words, amended)
+        self.assertEqual((R.SEAT_RULE["amended"]["id"], R.SEAT_RULE["amended"]["registered"],
+                          R.SEAT_RULE["amended"]["text"]), ("A30", "2026-10-11T20:47Z", amended))
         self.assertEqual(swarm_bands.SEAT_PLAN_KEY, L.SEAT_KEY, "the swarm reads the book's own key")
 
     def test_the_readers_new_keyword_shadows_nothing_of_the_options_read(self):
