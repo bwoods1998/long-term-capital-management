@@ -254,3 +254,41 @@ Each anchor of the spec's section 11 names a statement that exists at 5a6906ff, 
 
 Each D call from B's night sits in its own try/except (a twins failure never loses a shadow day), and nothing C adds
 to `meter`, `report`, `funnel.window` or `stall.run` may raise (the spec's 11.4-11.6 guards).
+
+## 7. What package D's build added (fills and twins; additive: no signature or column above changed)
+
+- **What D reads of B's `Shadow`.** `store` (its `symbols()`), `through`, `official`, `run_from`, and the constructor's
+  `decider` and `settings` UNDER THOSE NAMES (read with `getattr`: with no `settings` attribute D loads the swarm's
+  settings itself; with no `decider` every twin is one `twin_interrupted` event a night and no row).
+- **A retired instance (D12; `forward_twins.UNREADABLE` is now `("split", "retired")`).** The book retires or demotes
+  an instance inside a session's decide step, before it asks the program, so from that session (`d_retired`: `d_first`'s
+  rule on `retired_at`) no live decision exists, while D13's range runs through the session before the instance's last
+  counted exit (the House's exit at the next open). Those sessions get a row with `agree` NULL and `why` "retired":
+  shown, counted in `unreadable`, left out of every share, never `missing` (so a checkpoint can be final). The row
+  keeps both key lists, so `Counter(live_keys) == Counter(shadow_keys)` can still be read from it. Once a retired
+  instance's rows are written through the session before its last lot closed it has no twin run again, and its
+  participation counts entries through its retirement only.
+- **`a14_reading` reads `d_first(I)` as the day of the instance's first `fwd_twins` row** (the rows are written in day
+  order from `d_first`); an instance with no row yet has every session from the one before its first counted lot's
+  entry `missing`. It opens the forward store through `forward_db.open_db(root, readonly=True)` and the swarm store's
+  kv read-only, and any raise of either is "unmeasured" (holds False, final False), never an error of the Done meter.
+- **The forward mode "off" (or settings that cannot be read) is off for every D entry point**: `begin`, `on_run` and
+  `finish` write nothing and `fill_minutes.run` is skipped, whatever `fill_minutes` and `twins` say.
+- **A child that fails a twin's run** (`RunFailed`, `DeciderError`) is the House's, as an interrupted decide is: one
+  `twin_interrupted` event (once an (instance, night)), no row, tried again the next night. A data error of the run
+  is counted in `finish`'s receipt (`failed`, `errors`) and costs no other instance its rows.
+- **A minutes file is written once**, so `fill_minutes.run` writes none for a day whose answer lacks the send-minute
+  bar of `equity_data.CALENDAR_SYMBOL` in either window (a failed receipt: retried inside its grace, then by the
+  backfill); and a closed lot's `fwd_lotgap` row waits while the minutes job may still fetch a missing file of its
+  entry or exit day (the last `BACKFILL_SESSIONS` forward days), then is written with what there is. A day that is
+  not ready never holds up the days after it: the run writes every ready day of its backfill and fails at its end
+  (`day`: the first it left; `unready`: how many).
+- **The engine id of a re-price.** `on_run` files a run's `fwd_ll` rows under the id of the newest `fwd_days` row of
+  the run's last day (what B's `write` just wrote), and under `forward_db.engine_now` only when there is none. FOR
+  THE INTEGRATOR, not D's to fix: B writes a night under `engine_id(fwd_engine())`, while `engine_now` (A's
+  `counted_days` default, C's meters) is the LARGEST id. They are the same id until an engine label COMES BACK (a
+  rollback restores an equity fingerprint that already has its id while a newer id exists); from that night the
+  shadow writes under the old id and every reader of "the newest engine" reads the abandoned series.
+- **Names added**: in `fill_minutes` `FILL_POINTS`, `STAMP`, `LOOKBACK_DAYS`, `livelike_of`, `inside`, `path_of`,
+  `days_on_disk`, `due_days`; in `forward_twins` `LIVE_DB`, `SWARM_DB`, `KIND`, `DECIDE_TIMEOUT`, `DECIDE_MAX_ERRORS`,
+  `REAL_SUFFIX`, `RUN_FAILURES`, `FINISH_KEYS`, `d_retired`, `registry_key`, `read_book`, `twin_records`.
