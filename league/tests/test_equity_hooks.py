@@ -244,13 +244,9 @@ class BuildingTheBook(unittest.TestCase):
         self.assertIsInstance(kw["stock_proof"], P.StockPaperProof)
         self.assertEqual(kw["stock_proof"].key, "paper_proof_stock")
         self.assertEqual(kw["sizing_equity"](), D("2229"))
-        # One proof at a time on the practice account: the stock proof starts once the options route's have passed.
-        self.assertTrue(kw["stock_proof"].after(), "no options proof on this House")
-        self.live.proof = types.SimpleNamespace(passed=lambda: True)
-        self.live.proof_single = types.SimpleNamespace(passed=lambda: False)
-        with mock.patch.object(B, "EquityBook", Book), mock.patch.object(EF, "MemoryEquityFamilies", lambda: "memory"):
-            H.build_book(self.live)
-        self.assertFalse(made["kw"]["stock_proof"].after())
+        # A10.1: stage BUY goes in the first open window after the deploy; the proof is given no wait on the options
+        # route's own paper proofs (league/tests/test_equity_fx_hooks.py runs it beside an unpassed options proof).
+        self.assertFalse(hasattr(kw["stock_proof"], "after"))
 
     def test_a_book_that_cannot_be_built(self):
         from league.equity import live as B

@@ -121,9 +121,9 @@ def build_book(live: Any) -> Any | None:
         from .paper import StockPaperProof
 
         families = EquityFamilies(live.root) if isinstance(live.families, SwarmFamilies) else MemoryEquityFamilies()
-        earlier = tuple(p for p in (getattr(live, "proof", None), getattr(live, "proof_single", None)) if p is not None)
-        proof = (StockPaperProof(live.state, live.paper, record=live.record, clock=live.clock, alert=live.alert,
-                                 after=lambda: all(p.passed() for p in earlier))
+        # A10.1: stage BUY goes in the FIRST open window after the deploy, whatever the options route's own paper
+        # proofs say (they trade option contracts and read only their own legs; this one reads only its SPY shares).
+        proof = (StockPaperProof(live.state, live.paper, record=live.record, clock=live.clock, alert=live.alert)
                  if getattr(live, "paper", None) is not None else None)
         return EquityBook(live.state, live.real, live.market, table, families, decider=live.decider, stock_proof=proof,
                           sizing_equity=live.sizing_equity, options_book=live.book, root=live.root, clock=live.clock,

@@ -657,6 +657,32 @@ class TheIdleProof(unittest.TestCase):
         self.assertEqual(self.paper.reads, reads, "failed for the day and flat of orders: idle until the next window")
 
 
+# --------------------------------------------------------------------------------- the stock proof's start (amend-11)
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheFirstOpenWindow(LiveCase):
+    """A10.1: stage BUY goes in the FIRST open window after the deploy. It waited for both of the options route's paper
+    proofs to read passed, so a House whose options proofs had not passed lost the window (and a day)."""
+
+    def setUp(self):
+        super().setUp()
+        self.paper = PaperStocks(self.market)
+
+    def test_stage_buy_does_not_wait_for_the_options_routes_proofs(self):
+        live = self.make([], config={"require_paper_proof": True})
+        self.assertIsInstance(live.equity, L.EquityBook)
+        self.assertFalse(live.proof.passed() or live.proof_single.passed())
+        self.run_to(9, 31)
+        [buy] = [b for b in self.paper.sent if b.get("symbol") == "SPY" and not b.get("legs")]
+        self.assertEqual((buy["side"], buy["type"]), ("buy", "limit"))
+        self.assertTrue(buy["client_order_id"].startswith("lq-pp-"))
+        self.run_to(9, 32)
+        self.assertTrue(live.equity.stock_proof.buy_passed(), live.equity.stock_proof.status())
+        self.assertFalse(live.proof.passed(), "the options route's own proof has not even begun (09:35)")
+        self.assertEqual(self.venue.sent, [], "nothing real went for it")
+        self.run_to(9, 45)
+        self.assertTrue(live.proof.passed(), "and the options proof ran beside it, on its own contracts")
+
+
 @unittest.skipUnless(HAVE, "numpy not installed")
 class TheOptionsExitsStand(LiveCase):
     """Nothing here delays an options exit: a Probe family's vertical still opens and closes with the equity book
