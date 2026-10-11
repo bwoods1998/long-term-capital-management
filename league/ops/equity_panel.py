@@ -1135,6 +1135,21 @@ def i6_check(root: str | Path, gateway: Any, day: dt.date, *, live: str | Path |
 
 
 # ------------------------------------------------------------------------------------------------- the job
+def coverage_floor(root: str | Path) -> float:
+    """D19's coverage floor: THE LANE'S OWN SETTING `elane.panel.coverage_min` (policy.json, the box's swarm.json over
+    it), held to its bound by `league.swarm.elane_xs.cfg` (tighten only: [0.97, 1.0]; a value outside reads as the
+    default). The setting was in the lane's block, its bounds and its documents and was read by NOTHING: this job read
+    `<state>/ops.json` `equity_panel.coverage_min`, so a captain who tightened the lane's key changed no verdict and
+    nothing said so. A setting that cannot be read is the default."""
+    try:
+        from ..swarm import elane_xs
+        from ..swarm import settings as swarm_settings
+
+        return float(elane_xs.cfg(swarm_settings.load(Path(root)))["coverage_min"])
+    except Exception:  # noqa: BLE001 - unread: the default (the lower bound: never looser than the rule's own)
+        return 0.97
+
+
 def _fact(manifest: Mapping[str, Any] | None, key: str) -> Any:
     return (manifest or {}).get(key)
 
@@ -1358,9 +1373,7 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
         return _fail(ctx, root, f"{masked_now} of {current} current members are masked (over "
                          f"{int(MASKED_MEMBERS_MAX * 100)}%): nothing written, the last good store stays",
                          mode=built["mode"], masked=dict(sorted(by_mask.items())))
-    setting = ctx.job_settings().get("coverage_min") if hasattr(ctx, "job_settings") else None
-    floor = float(setting) if isinstance(setting, (int, float)) and not isinstance(setting, bool) \
-        and 0.97 <= setting <= 1.0 else 0.97
+    floor = coverage_floor(ctx.root)
     block = coverage(member, raw, days, masked=hidden, floor=floor)
     with np.errstate(invalid="ignore"):
         zero_volume = int((member & has & ~valid_bars(raw) & (raw[:, :, 3] > 0)).sum())
@@ -1452,4 +1465,4 @@ __all__ = ["BARS", "WALL_S", "TRIES", "BACKOFF_S", "INCREMENTAL_SESSIONS", "FULL
            "hs_table", "i6_check", "run", "BATCH", "PAGE_LIMIT", "MAX_PAGES", "LOOKBACK_DAYS", "KEEP_ENDED_DAYS",
            "MIN_SAMPLES", "JUMP_COLUMNS", "WHOLE_BATCH", "SECOND_READS_RUN", "LIVE_FROM_SHARE", "I6_FLOOR", "LIVE_DB", "SPREADS_FILE", "FAILURES_FILE", "live_panels", "Request",
            "requests", "Grid", "Panel", "load_panel", "ratios_equal", "valid_bars", "sane_bars", "jumps", "hs_share",
-           "compare_bars", "ref_audit", "tradable_rows"]
+           "compare_bars", "ref_audit", "tradable_rows", "coverage_floor"]

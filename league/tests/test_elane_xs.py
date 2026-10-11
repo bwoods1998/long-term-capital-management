@@ -466,6 +466,12 @@ class CardsAndCells(unittest.TestCase):
                                  "4 index exits of unknown kind take the vanish haircut"])
         F.panel_family(self.store, "rev-a")
         self.assertIn(notes[0], elane_xs.train_map_text(self.store, self.settings))
+        # THE THIN LOOK-BACK NOTE reads the lane's own `coverage_min` (the review's spec-5: it read the default,
+        # whatever the captain had set).
+        F.write_manifest(self.store.root, coverage={"2016": {"share": 0.975}, "2021": {"share": 0.995}})
+        self.assertEqual(elane_xs.map_notes(self.store.root)[:1], ["4 index exits of unknown kind take the vanish haircut"])
+        tighter = {"elane": {"mode": "gate", "panel": {"mode": "train", "coverage_min": 0.99}}}
+        self.assertIn("thin look-back in the first months after 2016", elane_xs.map_notes(self.store.root, tighter))
 
 
 class TheQuotaAndTheHiddenYear(unittest.TestCase):

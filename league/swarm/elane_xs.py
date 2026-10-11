@@ -949,10 +949,11 @@ def closed_cells(store: Any, settings: Mapping[str, Any] | None) -> list[tuple[s
     return [r["cell"] for r in train_map(store) if r["refuted"] >= cap and not r["passed"]]
 
 
-def map_notes(root: str | Path | None) -> list[str]:
+def map_notes(root: str | Path | None, settings: Mapping[str, Any] | None = None) -> list[str]:
     """What the panel store says of the bar's data, for the Train map's label (rules and counts of the House's own
-    data job, never a price): the Train years dropped for coverage, a thin history year, and the Train-era index exits
-    whose kind the changes table could not say (they take the vanish haircut)."""
+    data job, never a price): the Train years dropped for coverage, a thin history year (under the lane's own
+    `coverage_min`: `cfg(settings)`, the floor the data job judged the store at), and the Train-era index exits whose
+    kind the changes table could not say (they take the vanish haircut)."""
     from ..xs import config as xconfig
 
     manifest = _manifest(root)
@@ -966,7 +967,7 @@ def map_notes(root: str | Path | None) -> list[str]:
             notes.append(f"dropped from the bar for thin coverage: {', '.join(dropped)}")
     coverage = manifest.get("coverage") if isinstance(manifest.get("coverage"), Mapping) else {}
     thin = [str(y) for y in xconfig.HISTORY_YEARS
-            if (_num((coverage.get(str(y)) or {}).get("share")) or 1.0) < DEFAULTS["coverage_min"]]
+            if (_num((coverage.get(str(y)) or {}).get("share")) or 1.0) < cfg(settings)["coverage_min"]]
     if thin:
         notes.append(f"thin look-back in the first months after {', '.join(thin)}")
     listed = _read_json(Path(root) / STORE_DIR / UNIVERSE_MANIFEST) if root is not None else None
@@ -985,7 +986,7 @@ def train_map_text(store: Any, settings: Mapping[str, Any] | None, *, limit: int
         return ""
     closed = set(closed_cells(store, settings))
     zero = zero_edge_rate(store)
-    notes = map_notes(getattr(store, "root", None))
+    notes = map_notes(getattr(store, "root", None), settings)
     said = (f"the bar passed {zero['passes']} of {zero['programs']} random-score programs with no edge"
             if zero["programs"] else "the zero-edge rate is not measured yet")
     lines = [f"PANEL TRAIN MAP (lane / mechanism / panel; {MAP_LABEL}" + ("; " + "; ".join(notes) if notes else "")

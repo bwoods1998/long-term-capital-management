@@ -1608,12 +1608,28 @@ class TheJob(Fixture):
         self.assertEqual(panel.hs[self.column(panel, self.names[0])].tolist(), [0.0006, 0.0004])
         self.assertEqual(panel.hs[self.column(panel, self.names[20])].tolist(), [0.0011, 0.0007])
 
-    def test_the_coverage_floor_is_the_owners_setting_inside_its_bound(self):
+    def test_the_coverage_floor_is_the_lanes_own_setting_inside_its_bound(self):
+        """The review's spec-5: `elane.panel.coverage_min` (the lane's block, its bounds, its documents) was read by
+        nothing; the job read ops.json's `equity_panel.coverage_min`, so tightening the lane's key changed no
+        verdict."""
+        def switch(value) -> None:
+            (self.state / "swarm.json").write_text(json.dumps({"elane": {"panel": {"mode": "train", "coverage_min": value}}}),
+                                                   encoding="utf-8")
+
         with mock.patch.object(P, "coverage", wraps=P.coverage) as spy:
-            self.run_job(settings={"equity_panel": {"coverage_min": 0.99}})
-            self.assertEqual(spy.call_args.kwargs["floor"], 0.99)
-            self.run_job(NOW + 60, settings={"equity_panel": {"coverage_min": 0.5}})
+            self.run_job()
+            self.assertEqual(spy.call_args.kwargs["floor"], 0.97, "the default")
+            switch(0.99)
+            self.run_job(NOW + 60)
+            self.assertEqual(spy.call_args.kwargs["floor"], 0.99, "the captain's tighter floor is the job's")
+            switch(0.5)
+            self.run_job(NOW + 120)
             self.assertEqual(spy.call_args.kwargs["floor"], 0.97, "a value outside its bound reads as its default")
+            switch(0.99)
+            self.run_job(NOW + 180, settings={"equity_panel": {"coverage_min": 0.98}})
+            self.assertEqual(spy.call_args.kwargs["floor"], 0.99, "ops.json holds no second copy of the lane's setting")
+        self.assertEqual(P.coverage_floor(self.state), 0.99)
+        self.assertEqual(P.coverage_floor(self.state / "nowhere"), 0.97)
 
     def test_a_store_that_does_not_match_its_manifest_is_fetched_whole_again(self):
         self.run_job()
