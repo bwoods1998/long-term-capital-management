@@ -26,8 +26,8 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261011T190534Z-dc7e047c9530` (main `e36c7e39`, release E5-S, 19:06Z Oct 11), the
-gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
+The running House release is `20261011T202519Z-50def634e716` (main `81963c87`, release E2.4, 20:25Z Oct 11), the
+gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
 
 ### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; main's releases through E5-S and E2.4 merged under it; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 
@@ -243,7 +243,164 @@ gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is b
 - Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
   the universe deploy and its rollback, the alarms).
 
-### Release E2.4: the equity lanes alarm on their own stalls, their research funnel, and an architect kept inside the universe and told in closed words, on `feat/equity-e24-health` (unreleased; a gateway deploy FIRST, then an owner deploy on main's E3; no identity moves; no setting changes)
+### Release E5-A: the seat rule of the share lane ("activity-1-free"; the captain's A24 with A30), on `feat/equity-e5a-seat-rule` (unreleased; one owner deploy with release E3.1 below, from `release/e31-e5a`, on top of releases E5-S and E2.4; THE MONEY DIGEST MOVES, the grant re-ratifies; no fingerprint moves)
+
+- **What it is.** Who takes a free seat was first come. It is now the seat rule the captain registered at 13:42Z
+  Oct 11, before the first live share close and before any program waited, as amended by A30 at 20:47Z the same
+  day, before the rule was live: `equity_money.probe.seat` = {`rule`
+  "activity-1-free", `k_floor` "0.25", `idle_sessions` 10}, a row of the money table with its bounds and choices.
+  A FREE seat goes to the best-ranked waiting passed program. The rank K is the smaller of the program's Validation
+  close days and its Train-era close days per 250 sessions, a day counted only when the lots closed on it sum to a
+  quarter of the sleeve (less 0.0005, the engine's rounding); ties go to the earlier look pass, then the family
+  id. K reads no P&L and no sealed window, and no public text prints it (a rank position only).
+- **The idle seat.** A seated program that is flat and has had no buy reach the venue, and none cut or refused by
+  the loss budget, for ten sessions of its seat is idle. It keeps its seat while no unflagged program is left
+  waiting, and yields at once when one is (one yield a decision day). A buy refused by the instrument cap, the
+  invested cap or cash does not count as asked. The yielded program waits flagged, behind every unflagged one,
+  and returns only into a free seat, by the same rank, with no new look.
+- **A30, from the release's independent check (the rule in force is A24 with A30).** (1) FREE SEATS FIRST is A24's
+  reading: a free seat is filled before the idle test, and an idle seat yields only for an unflagged program that
+  would still wait; the study's simulator ran the idle test first, so its gain of the rule was measured under
+  that slower order. (2) THE IDLE CLOCK DOES NOT RUN WHILE THE HOUSE REFUSES EVERY OPEN: a session with an entry
+  window in which the House looked and never once would have opened (paused, the kill switch, a stop, a freeze,
+  the grant not ratified, the paper proof's BUY stage not passed: what `_open_block` answers before it looks at
+  the instance) is left out of every program's seated sessions and of its sessions since its last asked buy.
+  The book keeps the note itself, every minute of the two entry windows, from the House's own answer (kv
+  `eq_open_note`); nothing a program writes reaches it. Before, a ten-session pause handed the most active
+  programs' seats to the slowest waiting ones. (3) A LOST BUY IS NOT FLAT: an order given up as lost keeps its
+  program from being read flat for as long as the order path may still take it back (three days), and a day more.
+  Stated and accepted, not changed: a daily quarter-sleeve slice buys rank and immunity from the idle rule.
+- **The check's blocker, and the question it is one case of.** A buy whose answer was lost and which the book gave
+  up as lost did not keep its program from yielding; when the venue showed the order filled afterwards, the lot
+  was booked to the yielded program and the House sold it at the next open. Fixed at the root (A30 (3)), with the
+  check's probe as a test. The wider question, whether ANY lot can be booked to a program after it yielded, is
+  answered in code and asked of the order path itself: a lot is booked only by a buy's fill, a fill only when the
+  order path reads the venue's row of an order, and it reads only orders pending, working or unknown and lost
+  ones inside their take-back; `_flat` is false for exactly those (league/tests/test_equity_seats_a30.py writes an
+  order in every status the book has, on each side and at each age, lets the venue show it filled and runs the
+  House's minute: whenever a fill is booked the program was not flat). A lot of a yielded program, should one
+  ever exist, is an ERROR alert and never silent.
+- **The check's minors.** EDM1 naming a waiting program at its seating writes the `waiting_demoted` record and
+  the warning, drops its flag and takes it out of the plan at once. The yield's two writes cannot be split: the
+  swarm's write is last inside the live state's transaction, and a commit that fails after it moves the band
+  back. `elane_seat` is in the seal's key list, with a two-worlds test on K. A stale idle flag is dropped whenever
+  its family's band is live at a sync, under either rule, and under "first-come" a yielded program's return is no
+  longer a decision late. A seat taken in the seating pass once a session's open has begun counts from the session
+  after (chosen: the idle test names nobody before ten whole sessions; the mark's own day is unchanged).
+- **What it never does.** No trading program is stopped: OUTRANKING IS NOT ADOPTED, and the table does not allow
+  it as a value. No lot is sold, no exit is planned and no order is cancelled by the seat rule; a yield retires an
+  instance only inside the one state transaction that found it flat. `size_entry` and every owner line are
+  untouched (the base's cap tests run unchanged).
+- **Also in it.** EDM1 covers a waiting program that has a real record (sticky: it does not return). A seating
+  that does not take falls through to the next waiting program in the same sync. Seeded and bred programs follow
+  the same rule, and the `dlane` report says which seats the seeds hold (`equity.seats`).
+- **Where it lives.** The row and its bounds: league/constitution.py. Its reader and the pure rule (`seat_settings`,
+  `seat_counts`, `seat_k`, `seat_order`, `seat_idle`, `seat_plan`): league/equity/bands.py. The book applies it and
+  is the one source of the plan (league/equity/live.py `_seat_bands`, kv `eq_seat`, `health.json` `equity.seats`);
+  the swarm's reader shows the book every waiting Candidate (`bands.read(..., queued=True)`) and its roster reports
+  the book's plan. K's two counts are written beside the look, once (league/swarm/elane.py `elane_seat`), and for
+  a program that passed before the release by `elane.seat_backfill` in the gate's equity round, from unsealed runs
+  only. league/live/money.py is not edited: `EquityTable` does not read the block.
+- **Its costs, as A24 states them.** Closes concentrate in frequent traders, so Done reached this way is weaker
+  evidence of skill; a daily slice of a quarter sleeve can buy rank (and, A30 adds, immunity from the idle rule:
+  nothing in the pipeline refuses it); a slow, non-idle incumbent keeps its seat. Not covered by A30 (2), stated: a
+  session the House did not look at in either entry window (it was not running) counts for the idle clock.
+- **Against the study's simulator** (EQDONE-3, whose seat logic was the reference): the rule built is the rule
+  simulated, with these differences, each resolved toward A24. (1) Free seats are filled before any idle yield: the
+  simulator yielded and re-seated an idle program in one sync when a seat was free, restarting its clock. (2) A
+  buy counts as asked when its order reached the venue, filled or not; the simulator's orders always fill. (3) K
+  is compared as an exact fraction and a close day's weights are summed in decimal; the simulator used floats.
+  (4) The seating pass fills a free seat between two decisions; the simulator seats once a day. (5) A seating
+  that does not take falls through; the simulator's always takes. (6) A program without its two counts ranks
+  last until the backfill writes them; the simulator knows every K. (7) The swarm's roster can lower the seats.
+- **Identities.** The money digest moves once, with the block: the pair in force is in the design block of release
+  E5-S below, and every pair of the grid moved with it (`DIGESTS` in league/tests/equity_design.py, regenerated
+  by the tree's own digest functions; each pair with the block left out is still release E5-S's pin,
+  `DIGESTS_E5S`). The options execution fingerprint (`b60410ad`) and the equity identity (`78022ca6`) are release
+  E5-S's: no file of league/live, league/gym or the equity evidence modules is edited.
+- **At the deploy.** Nobody is unseated; each seat keeps its own day and the idle clock counts from it; the open
+  note starts with the release. The grant re-ratifies at the House's start. The swarm's next equity round writes
+  K's counts for every passed program.
+- **Rollback**, one owner deploy: `equity_money.probe.seat.rule` "first-come" (one money-digest move; the grant
+  re-ratifies; nobody is unseated). Under it the band sync and the swarm's read are release E5-S's line for line:
+  league/tests/test_equity_seats.py holds a week recorded on release E5-S to it, entry for entry. No open note is
+  kept under it.
+- **Merged with main** (release E2.4, the equity lanes' alarms, and release E5-S as deployed): no line of either
+  is changed here.
+
+### Release E3.1: an exit's wait for the practice proof has an end, and the twin is re-based after a difference, on `feat/equity-e31-exits-twin` (unreleased; one owner deploy with release E5-A above, from `release/e31-e5a`, on main `81963c87`; no identity moves of its own: the options execution fingerprint, the equity identity, the money digest and the constitution digest are main's; no evidence reset)
+
+Two rules the captain registered at 20:13Z Oct 11, 2026, from the rehearsal of the first real-money share session,
+**both before the first real share order** (and A29 before any twin row existed). Plumbing only: `league/equity/live.py`
+and `league/ops/forward_db.py`, `forward_twins.py`, `forward_report.py`; no file of `league/live`, `league/gym`, the
+equity evidence modules, the constitution or the gateway is edited.
+
+- **A28, an exit's wait for the practice proof has an end** (amends A10.1). Until now every real sale (a program's
+  own, the maximum-hold exit, the owner's flatten) waited for the stock paper proof's SELL stage with no end: if the
+  practice sale could not be witnessed, real lots stayed held for days and new buys stopped. From this release the
+  wait ends at the open window's entry cut-off (`schedule.Moments.entry_until`, the open + 900 s, the minute the
+  book stops trying open entries): after it every exit goes through the normal path, with one error alert a session
+  saying the sale path is unproven and naming the stage's own reason (kv `eq_sell_unproven`). A close-window sale
+  is past the cut-off by construction and never waits on the stage. Unchanged: stage BUY gates every real buy with
+  no end; a failed SELL stage stops new buys; the minimum hold, the kill switch and the stops. **Why:** an exit must
+  never be blocked; a proof exists to stop new risk, not to trap old risk. **Its cost, as the captain stated it:** a
+  real sale can go through a path the practice account did not prove that day. The proof's own alarm still says
+  "Real equity lots stay held" (`league/live/paper.py` is inside the options fingerprint and is not edited for a
+  sentence); docs/operations.md says which words stand.
+- **A29, the twin is re-based after a difference, so a miss counts once** (amends how A14's intent agreement is
+  computed, never its bounds). A14 compared each live session's intents with a replay twin that never misses a
+  fill; the rehearsal measured that ONE missed buy of a program that buys only when flat leaves it a session behind
+  its twin for good (about half its sessions differ from then on), and that one such program fails the pooled 95%
+  bound for every program at the checkpoint. From this release a session whose intent keys differ is counted as
+  differing, exactly as registered; THEN the twin's book is set to the live book as it stands after that session
+  (its lots, and what it had planned for the next session, read from `live.sqlite` read-only), so the sessions after
+  it are compared from the same state. A re-based twin that differs again counts again and is re-based again. The
+  95% bound, the 15 bp gap bound, the keys and the pooling do not move, and on a path with no difference the rows
+  are byte for byte the rows of the release before (their sha256, taken on main `e36c7e39`, is pinned in the
+  tests). The un-re-based shadow of every program (its forward record from registration) is still written every
+  night, unchanged, and the reports say beside each instance how many times its twin was re-based and the
+  un-re-based twin's own agreement (`fills.rebase`, each checkpoint's `a14.rebase`). **Why:** the clause asks
+  whether live execution matches replay; the number of sessions on which it did not is that measure. **Its cost, as
+  the captain stated it:** a program can run for weeks on other days than its unconditional replay and still read
+  consistent after the one counted difference; the forward record beside it says so.
+- **The store.** `forward.sqlite`'s `fwd_twins` gains two nullable columns (`rebased`, `base_agree`) and the forward
+  log one event kind (`twin_rebased`). A store made before them is migrated at its next writable open with `ALTER
+  TABLE ... ADD COLUMN`: no row is rewritten, the append-only triggers stand, and an older row reads no re-base.
+  Rows written before this release stand as written; a stored differing session re-bases the twin for the sessions
+  not yet written. No setting, job or alarm changes.
+- **How the re-based twin is made.** The engine's own account (`league.equity.engine._Account`), driven from ops
+  with the seeded lots bought by the engine in their own entry sessions and every decide asked of the night's
+  decider child; one instance of the program asked every session in order, so only the book is set. No program
+  text runs in the job's process and nothing of the engine is re-implemented.
+- **Measured on the rehearsal's harness** (the real book on a fake venue with invented prices, the real forward
+  stack). The week: a week in which the proof passes is order for order the week it was; with the practice account
+  listing no FILL activity, or the practice sale resting, Tuesday's sales and Thursday's maximum-hold exit go at
+  the cut-off, and a flatten queued before the open is out by the cut-off's next minute (before: every lot still
+  held on Friday). The thirty sessions
+  of the program that buys when flat: every buy filled, 28 of 28 sessions agree and nothing is re-based; Monday's
+  buy missed, one differing session, one re-base, then agreement (28 of 29; as registered 15 of 29); a later rebuy
+  missed once, the same (28 of 29; as registered 21 of 29).
+- **Roll back:** the previous House release. It ignores `eq_sell_unproven`, the two columns and the event (its
+  inserts name their columns), and its nights compare every session with the un-re-based twin again.
+
+
+### 20:25Z Oct 11, 2026: release E2.4, the equity lanes' own alarms (#540), House `20261011T202519Z-50def634e716`, main `81963c87`; gateway `9c0651a3`
+
+Gateway first (`9c0651a3`, 456/456; rollback `f9528af2`): its notice list names the four equity causes. Then the owner
+deploy: CI green on the exact head; no order in flight at 20:25:10Z; promoted, the watchdog clean (rollback
+`20261011T190534Z-dc7e047c9530`), nightly back 20:36Z, updater repointed. Verified 20:36Z: health clean, real money on;
+execution fingerprint `b60410ad`, constitution `c3c061b0`, money `6c0bc42b` and gate contract `397b22b772b3` unchanged.
+
+- Seen on the House after: the 20:50Z stall run carried the four checks, each "Not judged" for its own reason, with
+  no error and no owner step.
+- No deploy (`swarm.json`), 21:25Z: `elane.birth_share` 0.5 -> 0. The idea space on four index funds was spent on the
+  lanes' first day: the last two equity passes proposed six families each and the graveyard refused all twelve, and
+  no family was left in research. The barren-births cause would have become an owner's step six hours after the
+  last birth; the decision it asks for was already made (the universe stays four index funds under a raw-P&L
+  screen; breadth is the panel), so the equity births are off until a panel lane is at "train". The options lanes
+  got their earlier room back (`gym.max_boxes` 2 -> 3, `architect.every_seconds` 10800 -> 5400).
+
+### Release E2.4: the equity lanes alarm on their own stalls, their research funnel, and an architect kept inside the universe and told in closed words, on `feat/equity-e24-health` (DEPLOYED 20:25Z Oct 11; a gateway deploy FIRST, then an owner deploy on main's E3; no identity moves; no setting changes)
 
 In the equity lanes' first hours (Oct 11) most scored versions were disqualified by one misreading of the contract,
 families were retired for it, the lanes were starved at their pace, one births pass was cut short and another bore
@@ -445,7 +602,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7e41909a` / `e909eb10`.
+Money digest `11a1dc0c`, full digest `00c2bf6f` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8c226cf1` / `def9f80f`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over
@@ -472,11 +629,11 @@ Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback,
   file of league/live, league/gym or the equity evidence modules is edited (league/live/money.py's two comments on
   the table's rows stay as A20 wrote them for that reason). The money digest and `PINNED_DIGEST` are the pair's, in
   the block above; every pair of the grid is pinned in `league/tests/equity_design.py`, and `set_design 3 0.50` is
-  E1's `7e41909a` / `e909eb10` again, to the last hex (the rollback, one owner deploy).
+  the rollback of the pair, one owner deploy. On this release alone it was E1's `7e41909a` / `e909eb10` again, to
+  the last hex; with release E5-A's seat block in the table the pair's digests are the ones the block above
+  states (and still E1's with that block left out).
 - **Also changed.** `league/ops/dlane_report.py`: A8.6's statement is built from the rows (`equity_probe_note`), no
   longer a sentence with A20's figures in it. The gateway is not edited.
-
-
 ### 14:37Z Oct 11, 2026: release E3, record and measure (#539), House `20261011T143700Z-c8e41ae6e37f`, main `7d2d3c84`; gateway `f9528af2`
 
 Gateway first (`f9528af2`, 14:36:49Z): its merge list gains E3's three swarm modules, a tightening. Then the owner

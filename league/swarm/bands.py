@@ -88,6 +88,16 @@ every live trade) and `forward`. THE EQUITY ROSTER (`elane.roster`, `elane.roste
 apart from `dlane.roster`: a Probe family holds one, the Candidates queue for the rest by `banded_at` (`seating` with
 `equity_seatable`), and a Candidate waiting for a seat has no row; unlike the options roster, 0 seats no equity program
 at all. `read(root, lanes="all")` is both. `roster(root, lanes=LANES)` is the equity roster for reports.
+THE SEAT RULE (release E5-A; the captain's A24 with A30; `equity_money.probe.seat`, league/equity/bands.py). Under "first-come"
+(the rollback) everything above is the rule: the queue is `seating`'s, by `banded_at`. Under "activity-1-free" THE
+EQUITYBOOK IS THE ONE SOURCE of who holds a seat and who waits: a free seat goes to the best-ranked waiting program
+by K, and an idle seat yields, by the book's own rows, which no reader here can see. So the book's reader asks
+`read(root, lanes=LANES, queued=True)`: EVERY passed Candidate that could hold a seat has a row (`seat` "queue":
+the book's plan decides; a seatless one still has none), and each row carries `passed_at` (`banded_at`) and
+`seat_activity` (K's two counts as `elane.look` or `elane.seat_backfill` wrote them beside the look: None until then).
+The default read is unchanged. `roster(root, lanes=LANES)` then reports the book's own plan (`seat_plan`: its kv
+`eq_seat` in live.sqlite, read only) under `plan`, and says in `order` which of the two orders its lists are in; it
+never computes a second queue by K.
 `read(root, lanes=LANES, strict=True)` (the EquityBook's reader asks so) RAISES `EquityUnreadable` where the plain read
 answers [] for a store it could not read (no store, a read that failed within its second, no equity identity): the book
 must tell "no equity row" from "could not read", because it retires an instance whose family is gone and a retirement
@@ -321,13 +331,41 @@ def _equity_seatable(root: str | Path) -> Any:
         return lambda structure: equity_seatable(structure) and str(structure or "") != "panel"
 
 
+#: The EquityBook's kv key of its seat plan in <root>/live.sqlite (league/equity/live.py `SEAT_KEY`; a test holds the two
+#: equal), and the file's name (league/live/state.py).
+SEAT_PLAN_KEY = "eq_seat"
+LIVE_DB_NAME = "live.sqlite"
+
+
+def seat_plan(root: str | Path) -> dict[str, Any] | None:
+    """THE EQUITYBOOK'S SEAT PLAN as it last wrote it (THE SEAT RULE, the module docstring): {rule, seats, day, holders
+    [{family, seated_sessions, idle, seeded, ...}], waiting [{family, rank, flagged, seeded}], last} from the kv
+    `eq_seat` of <root>/live.sqlite, read only, within a second. None when there is no book, no plan yet or it cannot
+    be read. It carries rank positions and never K."""
+    path = Path(root) / LIVE_DB_NAME
+    if not path.exists():
+        return None
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = db.execute("SELECT value FROM kv WHERE key=?", (SEAT_PLAN_KEY,)).fetchone()
+        finally:
+            db.close()
+        plan = json.loads(row[0]) if row and row[0] else None
+    except (sqlite3.Error, OSError, ValueError, TypeError):
+        return None
+    return dict(plan) if isinstance(plan, Mapping) else None
+
+
 def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
     """The roster as it stands, for reports: {seats, closed, probe, seated, waiting, seatless} (`seated`: the Probe
     families and the Candidates holding a seat). None when it is off or the store cannot be read. `lanes` (THE EQUITY
-    LANES: `LANES`): the equity roster (`elane.roster`) over the equity families, never off; it also says WHY each
-    seatless Candidate holds no seat (`seatless_why` {family: words}: for a panel Candidate the leg its lane waits
-    for, `elane_xs.status`: a Candidate listed "seatless" with no word on what it waits for told the operator
-    nothing)."""
+    LANES: `LANES`): the equity roster (`elane.roster`) over the equity families, never off; it also carries `rule`
+    (the seat rule in force), `plan` (`seat_plan`: the EquityBook's own, or None) and `order`: under "first-come" the
+    lists are the queue itself, by pass time; under any other rule the lists are still by pass time and are NOT who
+    is next (the book's plan is, and `order` says so). It also says WHY each seatless Candidate holds no seat
+    (`seatless_why` {family: words}: for a panel Candidate the leg its lane waits for, `elane_xs.status`: a Candidate
+    listed "seatless" with no word on what it waits for told the operator nothing)."""
     equity = lanes is not None
     if equity:
         from . import elane
@@ -350,8 +388,22 @@ def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
     out = {"seats": max(seats, 0), "closed": seats == ROSTER_CLOSED, "probe": seat["probe"],
            "seated": sorted(seat["probe"] + seat["seated"]), "waiting": seat["waiting"], "seatless": seat["seatless"]}
     if equity:
+        rule = _seat_rule()
+        out.update(rule=rule, plan=seat_plan(root),
+                   order="by pass time: these lists are the queue (first come)" if rule == "first-come" else
+                   "by pass time: NOT who is next under this rule; the EquityBook's plan is (`plan`)")
         out["seatless_why"] = _seatless_why(root, fams, seat["seatless"])
     return out
+
+
+def _seat_rule() -> str:
+    """`equity_money.probe.seat.rule` in force (league/equity/bands.py `seat_settings`; "first-come" when unreadable)."""
+    try:
+        from ..equity.bands import seat_settings
+
+        return str(seat_settings().rule)
+    except Exception:  # noqa: BLE001 - the rollback value: the queue by pass time
+        return "first-come"
 
 
 def _seatless_why(root: str | Path, fams: Sequence[Mapping[str, Any]], seatless: Sequence[str]) -> dict[str, str]:
@@ -431,15 +483,17 @@ def _banded(db: sqlite3.Connection, *, equity: bool = False) -> list[dict[str, A
 
 
 def read(root: str | Path, *, family: str | None = None, lanes: Any = None,
-         strict: bool = False) -> list[dict[str, Any]]:
+         strict: bool = False, queued: bool = False) -> list[dict[str, Any]]:
     """The rows (the module docstring); `family`: that family's row only. [] when there is no store or it cannot be read
     within a second. `lanes` (THE EQUITY LANES): None the options lanes only (every existing reader); `LANES` (or one
     equity lane) the equity rows only (`_read_equity`); "all" both. `strict` (the equity rows only): raise
-    `EquityUnreadable` in place of that [] (the options rows are read as before)."""
+    `EquityUnreadable` in place of that [] (the options rows are read as before). `queued` (the equity rows only; THE
+    SEAT RULE): every passed Candidate that could hold a seat has a row, with `passed_at` and `seat_activity`."""
     if lanes is not None:
         if lanes == "all":
-            return read(root, family=family) + _read_equity(root, family=family, lanes=EQUITY_LANES, strict=strict)
-        return _read_equity(root, family=family, lanes=lanes, strict=strict)
+            return read(root, family=family) + _read_equity(root, family=family, lanes=EQUITY_LANES, strict=strict,
+                                                            queued=queued)
+        return _read_equity(root, family=family, lanes=lanes, strict=strict, queued=queued)
     path = Path(root) / DB_NAME
     if not path.exists():
         return []
@@ -654,13 +708,15 @@ class EquityUnreadable(RuntimeError):
     second, or no equity identity to check a band against). Never raised for a store that was read and holds no row."""
 
 
-def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bool = False) -> list[dict[str, Any]]:
+def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bool = False,
+                 queued: bool = False) -> list[dict[str, Any]]:
     """`read(root, lanes=...)`: the equity rows (the module docstring), the lanes `lanes` names. [] when there is no
     store, it cannot be read within a second, or the equity identity cannot be computed (fail-closed); with `strict`
     each of those three raises `EquityUnreadable` instead, so the caller can tell them from a store with no row. One
     family's own trouble (its code file or its version row cannot be read) leaves that family out either way: the
     EquityBook asks the store about a missing family before it retires its instance (league/equity/families.py
-    `standing`)."""
+    `standing`). `queued` (THE SEAT RULE, the module docstring): a Candidate waiting for a seat has a row too (only a
+    seatless one has none), a Candidate's `seat` is "queue", and every row carries `passed_at` and `seat_activity`."""
     wanted = {str(x) for x in ([lanes] if isinstance(lanes, str) else lanes)}
     unknown = sorted(wanted - set(EQUITY_LANES))
     if unknown:
@@ -693,7 +749,9 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
                                            "band")
             seat = equity_seating(_banded(db, equity=True), elane.roster_seats(root), seatable=_equity_seatable(root)) \
                 if any(f["band"] == "candidate" for f in fams) else {"probe": [], "seated": [], "waiting": [], "seatless": []}
-            hidden = set(seat["waiting"]) | set(seat["seatless"])
+            # (`queued`, THE SEAT RULE: a waiting Candidate has a row too. A SEATLESS one never has, and a panel
+            # Candidate is seatless while the panel lane is not live, so the book's seat plan never sees it.)
+            hidden = set(seat["seatless"]) if queued else set(seat["waiting"]) | set(seat["seatless"])
             if any(f["structure"] == "panel" and f["band"] != "candidate" for f in fams) \
                     and not _equity_seatable(root)("panel"):
                 # RELEASE E4, THE SEAT OF A SEATED PANEL FAMILY: the seat rule that gives a panel Candidate a row only
@@ -743,17 +801,21 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
         symbols = [str(r).upper() for r in loads(fam["roots"], []) or []]
         look_key = "elane_xs_look" if panel else elane.LOOK_KEY  # `elane_xs.LOOK_KEY`: XS1's sentence beside its trades
         looked = state.get(look_key) if isinstance(state.get(look_key), Mapping) else {}
+        # THE SEAT RULE (`queued`): the book's plan decides a Candidate's seat ("queue"), from these two fields.
+        extra = {"passed_at": _finite(state.get("banded_at")),
+                 "seat_activity": elane.seat_activity(state, int(v["n"]), sha)} if queued else {}
         out.append({
             "family": fam["id"], "band": fam["band"], "structure": fam["structure"], "roots": symbols, "symbols": symbols,
             "lane": lane, "label": elane.label(lane), "seeded": spec.get("seeded") is True,
-            "seat": "sized" if fam["band"] == "sized" else "probe" if fam["band"] == "probe" else "seated",
+            "seat": "sized" if fam["band"] == "sized" else "probe" if fam["band"] == "probe" else
+            "queue" if queued else "seated",
             "holdout_passed": True, "validation_passed": True, "version": int(v["n"]), "code": code, "params": params,
             "run_sha": sha, "typical_max_loss_usd": None, "seed_era": True, "forward": state.get("forward"),
             "version_created_at": v.get("created_at"), "version_selected_at": state.get("banded_at"),
             "validation_version": state.get("validation_version"),
             "validation_r_sd_by_version": dict(state.get(elane.SIGMA_KEY) or {})
             if isinstance(state.get(elane.SIGMA_KEY), Mapping) else {},
-            "beside": looked.get("beside"),
+            "beside": looked.get("beside"), **extra,
         })
     return out
 
@@ -1113,5 +1175,6 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
 
 __all__ = ["read", "observe", "incubator", "incubator_refusal", "program_refusal", "owed_bars", "priority", "practice_tier",
            "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES",
-           "seating", "waiting", "roster", "equity_seatable", "equity_seats", "equity_seating",
+           "seating", "waiting", "roster", "seat_plan", "SEAT_PLAN_KEY", "equity_seatable", "equity_seats",
+           "equity_seating",
            "current_equity_evaluator", "equity_proof_current", "equity_seat_withdrawn", "EquityUnreadable"]

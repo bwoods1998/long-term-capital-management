@@ -271,6 +271,88 @@ class WhatRidesBeside(EquityFixture):
         self.assertEqual(out["done"]["without_seeded"]["all"]["running"]["closes"], 0)
 
 
+class TheSeats(EquityFixture):
+    """THE SEATS in every report (release E5-A; the captain's A24): the EquityBook's own plan, which seats the
+    captain-seeded programs hold, who waits in what order (a rank position, never K), and the rule's own words."""
+
+    def plan(self, plan: dict) -> None:
+        self.live.put("eq_seat", plan)          # the book's own kv (league/equity/live.py `SEAT_KEY`)
+
+    def test_the_seat_plan_rides_in_the_report_with_the_seats_the_seeds_hold(self):
+        self.eq_family("seed-overnight-qqq")
+        self.eq_family("bred-rotation")
+        self.eq_family("bred-waiting", band="candidate")
+        self.store.put(elane.SEEDS_KEY, {"seed-overnight-qqq": "seed-overnight-qqq"})
+        self.plan({"rule": "activity-1-free", "seats": 6, "idle_sessions": 10, "day": "2026-10-23",
+                   "holders": [{"family": "seed-overnight-qqq", "version": 1, "band": "probe", "seeded": True,
+                                "since": "2026-10-09", "seated_sessions": 10, "quiet_sessions": 1, "flat": False, "idle": False},
+                               {"family": "bred-rotation", "version": 2, "band": "probe", "seeded": False,
+                                "since": "2026-10-12", "seated_sessions": 9, "quiet_sessions": None, "flat": True, "idle": False}],
+                   "waiting": [{"family": "bred-waiting", "version": 1, "rank": 1, "seeded": False, "flagged": False, "ranked": True},
+                               {"family": "seed-reversal-index", "version": 1, "rank": 2, "seeded": True, "flagged": True, "ranked": True}],
+                   "idle": {"seed-reversal-index": {"day": "2026-10-23", "why": "it yielded an idle seat and waits for a free one"}},
+                   "sticky": [], "order": "the book's plan (equity_money.probe.seat)",
+                   "last": {"day": "2026-10-23", "action": "seated", "family": "bred-rotation", "rank": 1, "why": "a free seat"}})
+        seats = self.report()["equity"]["seats"]
+        self.assertEqual((seats["rule"], seats["seats"], seats["as_of"], seats["order"]),
+                         ("activity-1-free", 6, "2026-10-23", "the book's plan (equity_money.probe.seat)"))
+        self.assertEqual([(h["family"], h["seeded"], h["seated_sessions"], h["idle"]) for h in seats["holders"]],
+                         [("seed-overnight-qqq", True, 10, False), ("bred-rotation", False, 9, False)])
+        self.assertEqual(seats["seeded_seats"], ["seed-overnight-qqq"])
+        self.assertEqual(seats["seeded_statement"],
+                         "2 of 6 seats are held; programs seeded by the captain's build agents hold 1 of them: "
+                         "seed-overnight-qqq. Seeded and bred programs follow the same seat rule.")
+        self.assertEqual(seats["waiting"], [{"family": "bred-waiting", "rank": 1, "seeded": False, "flagged": False},
+                                            {"family": "seed-reversal-index", "rank": 2, "seeded": True, "flagged": True}])
+        self.assertEqual((seats["idle_flagged"], seats["last_change"]["family"]), (["seed-reversal-index"], "bred-rotation"))
+        self.assertEqual(seats["preregistered"], R.SEAT_RULE)
+        self.assertEqual(seats["preregistered"]["rule"], R.A24_SEAT_RULE)
+        self.assertIn("A24 replaced the forward seat sentence", self.report()["done"]["preregistered"]["seat_rule"])
+        for word in ("close_days", "seat_activity", '"k"'):
+            self.assertNotIn(word, json.dumps(seats))
+
+    def test_a30_and_the_sessions_left_out_of_the_idle_clock_ride_in_the_report(self):
+        """A30 amended A24 before the rule was live: its sentences ride beside A24's own, and the sessions in which
+        the House refused every open (left out of the idle clock) are in the report, each with the House's reason."""
+        self.eq_family("bred-rotation")
+        self.plan({"rule": "activity-1-free", "seats": 6, "idle_sessions": 10, "day": "2026-10-23",
+                   "holders": [{"family": "bred-rotation", "version": 2, "band": "probe", "seeded": False,
+                                "since": "2026-10-12", "seated_sessions": 7, "quiet_sessions": None, "left_out": 2,
+                                "flat": True, "idle": False}],
+                   "waiting": [], "idle": {}, "sticky": [], "order": "the book's plan (equity_money.probe.seat)",
+                   "left_out": [{"day": "2026-10-15", "why": "open window: the House is paused"},
+                                {"day": "2026-10-16", "why": "close window: the daily stop"}, "not a row"],
+                   "last": None})
+        seats = self.report()["equity"]["seats"]
+        self.assertEqual(seats["left_out"], [{"day": "2026-10-15", "why": "open window: the House is paused"},
+                                             {"day": "2026-10-16", "why": "close window: the daily stop"}])
+        self.assertEqual((seats["holders"][0]["seated_sessions"], seats["holders"][0]["left_out"]), (7, 2))
+        amended = seats["preregistered"]["amended"]
+        self.assertEqual((amended["id"], amended["registered"], amended["text"]),
+                         ("A30", "2026-10-11T20:47Z", R.A30_SEAT_AMENDMENT))
+        self.assertEqual(seats["preregistered"]["rule"], R.A24_SEAT_RULE, "A24 stays as it was registered")
+        self.assertIn("as A30 amended it before it went live", self.report()["done"]["preregistered"]["seat_rule"])
+        # A plan written before this release names no session: an empty list, never an error.
+        self.plan({"rule": "activity-1-free", "seats": 6, "day": "2026-10-23", "holders": [], "waiting": []})
+        self.assertEqual(self.report()["equity"]["seats"]["left_out"], [])
+
+    def test_first_come_and_a_book_with_no_plan_say_how_the_waiting_are_ordered(self):
+        """Under "first-come" the book ranks nobody: the waiting are the swarm's roster, by pass time, and the block
+        says so; a book that has written no plan at all reports its live instances and says why."""
+        self.eq_family("seed-overnight-qqq")
+        seats = self.report()["equity"]["seats"]
+        self.assertIsNone(seats["rule"])
+        self.assertIn("no seat plan yet", seats["why"])
+        self.assertEqual(seats["preregistered"]["id"], "A24")
+        self.plan({"rule": "first-come", "seats": 6, "day": "2026-10-12", "waiting": None,
+                   "holders": [{"family": "seed-overnight-qqq", "version": 1, "band": "probe", "seeded": True, "since": "2026-10-09"}],
+                   "order": "by pass time: the swarm's roster (first come)"})
+        seats = self.report()["equity"]["seats"]
+        self.assertEqual((seats["rule"], seats["order"], seats["seeded_seats"]),
+                         ("first-come", "by pass time: the swarm's roster (first come)", ["seed-overnight-qqq"]))
+        self.assertEqual(seats["waiting"], [], "the swarm's roster: nobody waits")
+
+
 class TheFunnelAndTheBudget(EquityFixture):
     def test_the_funnel_and_the_bands_have_equity_rows(self):
         self.eq_family("born-beta")

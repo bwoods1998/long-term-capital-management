@@ -70,6 +70,55 @@ its retirement to the one before it ran again are "retired" (unreadable: shown, 
 `missing`); participation is the current run's. A retirement and a revival between two nights that `finish` did
 not run are seen by nobody: the nightly job is what keeps them.
 
+THE TWIN IS RE-BASED AFTER A DIFFERENCE, SO A MISS COUNTS ONCE (the captain's A29, Oct 11, 2026; registered before the
+first real share order and before any twin row existed; it amends how D12's agreement is computed, never its bounds,
+its keys or its pooling). As registered, every session was compared with THE TWIN RUN above, which never misses a
+fill; the rehearsal of the first real-money session measured that ONE missed buy of a program that buys only when
+flat leaves the live book a session behind that twin for good (about half its sessions differ from then on), and one
+such program fails the pooled 95% bound for every program at the checkpoint: one execution failure counted many
+times. THE RULE: a session whose keys differ is written as differing, exactly as registered (the same row, whatever
+its cause); THEN the twin's book is set to the live book as it stands after that session, so the sessions after it
+are compared from the same state. A re-based twin that differs again counts again and is re-based again.
+- THE LIVE BOOK AFTER SESSION d (`live_seed`; `read_book`'s rows of live.sqlite, read-only, none of them a status):
+  the instance's `eq_lots` rows with `opened_day` <= d and no `exit_day` at or before d (its lots at that close), each
+  with the size its own buy asked (`eq_intents.share` or `usd`); and its `eq_intents` rows with `exec_day` =
+  `next_session(d)` and `decided_day` <= d: the program's buys and sells of that decision and the House's exits
+  planned for that open (kind "house_exit": the maximum hold, a carried exit, a flatten queued by then).
+- THE RE-BASED TWIN (`RebasedTwin`) is E1's own engine account (league/equity/engine.py `_Account`: its fills at the
+  official prices, `sizing.size_entry`, its fees, its corporate actions, its minimum and maximum hold, nothing
+  re-implemented here) on the twin run's own bars and capital, SEEDED: each held lot is bought by the engine at the
+  official price of its own entry session and fill point for the size its buy asked (the replay's lot, on the Gym
+  sleeve: no dollar of the live account enters it); the planned intents are then executed in `next_session(d)` with
+  no miss; and from that close on the registered program decides on the account's own ctx, each decide asked of
+  the night's decider child. ONLY THE BOOK IS SET: the program's instance is ONE, loaded once and asked every
+  session in order as the twin run's is (the un-re-based run's own decisions up to the first differing session,
+  the re-based account's after it), so its memory is the twin's own throughout; NEVER A SILENT RELOAD, as above. A
+  lot the Gym cannot hold as the live book does (no official price that session, sized to nothing) is counted in
+  the event's `unheld` and simply not held: the next session then differs and counts.
+- WHERE THE TWIN'S BOOK LIVES: nowhere. It is recomputed every night from the rows (`fwd_twins.agree`), the live book
+  and the store, as the twin run is: the twin compared at session x was seeded at the LATEST differing session of
+  its run before x (flat at its first decision when there is none). A night that has a session to write after a
+  differing one asks the program each session of the run twice (the twin run's pass, and this one); a run that
+  never differed is the twin run's pass alone, as before.
+- WHAT IS WRITTEN: the row of every session as before, with `rebased` (the re-bases behind the twin it was compared
+  with, counted over the instance) and `base_agree` (the same comparison against the UN-RE-BASED twin run, which is
+  still made whole every night: a program whose live path has left its replay's days is seen, never hidden; `fwd_part`
+  reads that run too, as before); one `twin_rebased` event (once an (instance, session)) the night a re-based twin is
+  first compared, holding the lots it was seeded with (symbols, days and fill points), the count it could not hold
+  and the counts of what was planned.
+- ROWS FROM BEFORE THIS RELEASE stand as written (the store is append-only) and are read by the same rule: the
+  LATEST stored differing session re-bases the twin for the sessions not yet written (the twin goes through the
+  stored sessions after it in order); an earlier one, whose next session was already written against the
+  un-re-based twin, re-based nothing then and re-bases nothing now. Their `rebased` reads 0 and their `base_agree`
+  their `agree` (they were compared with the un-re-based twin).
+- A RETIRED SESSION is unreadable as before, and re-bases nothing. THE SPLIT RULE stands for every session compared
+  with the twin run (its inputs are rebuilt from the run's result, which keeps a lot's post-split quantity); a
+  session compared with a re-based twin has no such rule, because its inputs are the engine account's own, which
+  holds a lot's quantity as it was at each close: it is read. A REVIVED INSTANCE's new run starts flat, as before:
+  a difference of an earlier run re-bases nothing of a later one.
+THE COST, as the captain stated it: a program can run for weeks on other days than its unconditional replay and still
+read consistent after the one counted difference; the un-re-based figures beside it say so.
+
 A DISAGREEMENT IS DATA, NEVER AN ERROR (THE BARS HASH, league/ops/forward_db.py; found after the spec, binding). The
 vendor rounds adjustment=all prices to cents, so the as-of bars a live decision read and the store's are not always
 byte-identical, and an intent can flip for that cause alone. Every `fwd_twins` row carries `shadow_bars`
@@ -91,6 +140,9 @@ ones; share = agreed / all those sessions; intents ok iff share >= `forward_db.A
 intents ok is True. It is final iff every close of C_eq has a final twin and `missing` = 0. Unmeasured never holds.
 `d_first(I)` is read as the day of the instance's first `fwd_twins` row (the rows are written in day order from it);
 an instance with no row yet has every session from the one before its first counted lot's entry missing.
+BESIDE IT, never in its rule (A29; the reading's `rebase`, `A14_REBASE_KEYS`): over the same counted sessions, how many
+times the twins were re-based and the agreement of the UN-RE-BASED twin runs (`sessions`, `agreed`, `share`), in all
+and an instance (`A14_REBASE_INSTANCE_KEYS`).
 
 RELEASE E4 (package J). An instance whose registry row is a PANEL row is twinned by the panel night, on the panel
 store, from its run's own picks and with weights (league/ops/forward_xs.py `twin`): `_one_instance` hands it over
@@ -119,12 +171,18 @@ from .forward_db import ShadowRun
 #: retired the instance at.
 UNREADABLE = ("split", "retired")
 #: Every key `a14_reading` returns, on every branch (a missing store included).
-A14_KEYS = ("applies", "holds", "final", "why", "gap", "intents", "by_instance")
+A14_KEYS = ("applies", "holds", "final", "why", "gap", "intents", "by_instance", "rebase")
 A14_GAP_KEYS = ("closes", "priced", "unpriced", "pending", "mean_gap_bp", "bound_bp", "ok")
 #: `disagreed` and `causes` ({cause: sessions}, `forward_db.CAUSES`) are counted beside the share, never in its rule.
 A14_INTENT_KEYS = ("instances", "sessions", "agreed", "missing", "unreadable", "share", "bound", "ok", "disagreed",
                    "causes")
 A14_INSTANCE_KEYS = ("instance", "sessions", "agreed", "missing", "unreadable")
+#: A29, BESIDE THE READING AND NEVER IN ITS RULE (`a14_reading`'s "rebase"): `rebases` (how many times the counted
+#: instances' twins were re-based within the counted sessions) and the UN-RE-BASED twin runs' own agreement over the
+#: same sessions (`sessions`: those with a readable un-re-based comparison; `agreed`; `share`, None with none), in all
+#: and an instance.
+A14_REBASE_KEYS = ("rebases", "sessions", "agreed", "share", "by_instance")
+A14_REBASE_INSTANCE_KEYS = ("instance", "rebases", "sessions", "agreed", "share")
 #: The live book and the swarm store under the state root (league/ops/twins.py's names).
 LIVE_DB = "live.sqlite"
 SWARM_DB = "swarm.sqlite"
@@ -138,7 +196,11 @@ REAL_SUFFIX = ":r"
 RUN_FAILURES = ("RunFailed", "DeciderError", "BudgetSpent")
 #: The receipt keys of `finish` (counts).
 FINISH_KEYS = ("instances", "twins", "disagreed", "lots", "interrupted", "live_bars", "unreadable", "unregistered",
-               "mismatched", "failed", "deferred")
+               "mismatched", "failed", "deferred", "rebased")
+#: The decider key a RE-BASED twin's instance is loaded under (A29; the twin run's own is "e3-twin:<key>").
+REBASED_KEY = "e3-rebased:"
+#: The House's own exit reasons as a program reads them in `ctx.closed` (league/equity/live.py `_ctx_reason`).
+CTX_REASONS = ("program", "max_hold")
 _MISSING = object()
 
 
@@ -331,6 +393,33 @@ def _decisions(run: ShadowRun) -> Iterator[tuple[str, Any, dict[int, dict[str, s
         raise TwinInterrupted(f"the twin run does not fit its bars: {str(exc)[:200]}") from None
 
 
+def _answer(decider: Any, key: str, inputs: Any, asked: int, restarts: Any) -> Mapping[str, Any]:
+    """One "decide" of a twin's loaded instance, its `asked`-th since its load: the child's row for `key`. NEVER A
+    SILENT RELOAD (`shadow_intents`): `TwinInterrupted` when the child failed, restarted, lost the instance, could not
+    build its ctx, or answered another count of calls than it was asked."""
+    try:
+        answer = decider.kind(KIND, "decide", {"jobs": [{"key": key, "inputs": inputs}]})
+    except Exception as exc:  # noqa: BLE001 - the child failed (it was restarted: the instance lost its memory)
+        raise TwinInterrupted(f"the decider child failed a twin's decide ({type(exc).__name__})") from None
+    if getattr(decider, "restarts", None) != restarts:
+        raise TwinInterrupted("the decider child restarted during the twin's decides (its instance was "
+                              "reloaded with fresh memory)")
+    results = answer.get("results") if isinstance(answer, Mapping) and answer.get("ok") else None
+    row = results.get(key) if isinstance(results, Mapping) else None
+    if not isinstance(row, Mapping) or row.get("missing"):
+        raise TwinInterrupted("the twin's instance went missing in the decider child")
+    if row.get("error"):
+        raise TwinInterrupted(f"the child could not build a twin's ctx: {str(row.get('error'))[:160]}")
+    stats = row.get("stats") if isinstance(row.get("stats"), Mapping) else {}
+    calls = stats.get("calls")
+    if not stats.get("disqualified") and (isinstance(calls, bool) or not isinstance(calls, int) or calls != asked):
+        # A disqualified instance answers nothing and counts no call; any other must have run every decide
+        # it was asked since its load, or the child reloaded it with fresh memory.
+        raise TwinInterrupted(f"the decider child reloaded the twin's instance (it answered its decide "
+                              f"{calls!r}, not {asked}): its memory was lost")
+    return row
+
+
 def _twin(decider: Any, run: ShadowRun) -> list[tuple[str, list[str], str]]:
     """[(decision day, the twin's keys, the bars hash of that decision)] of a twin run, in day order: one instance
     loaded once, one "decide" a session, dropped at the end. `TwinInterrupted` as `shadow_intents` says."""
@@ -351,28 +440,8 @@ def _twin(decider: Any, run: ShadowRun) -> list[tuple[str, list[str], str]]:
             raise TwinInterrupted(f"the twin's program did not load in the decider child ({type(exc).__name__})") \
                 from None
         for day, inputs, held in _decisions(run):
-            try:
-                answer = decider.kind(KIND, "decide", {"jobs": [{"key": key, "inputs": inputs}]})
-            except Exception as exc:  # noqa: BLE001 - the child failed (it was restarted: the instance lost its memory)
-                raise TwinInterrupted(f"the decider child failed a twin's decide ({type(exc).__name__})") from None
             asked += 1
-            if getattr(decider, "restarts", None) != restarts:
-                raise TwinInterrupted("the decider child restarted during the twin's decides (its instance was "
-                                      "reloaded with fresh memory)")
-            results = answer.get("results") if isinstance(answer, Mapping) and answer.get("ok") else None
-            row = results.get(key) if isinstance(results, Mapping) else None
-            if not isinstance(row, Mapping) or row.get("missing"):
-                raise TwinInterrupted("the twin's instance went missing in the decider child")
-            if row.get("error"):
-                raise TwinInterrupted(f"the child could not build a twin's ctx: {str(row.get('error'))[:160]}")
-            stats = row.get("stats") if isinstance(row.get("stats"), Mapping) else {}
-            calls = stats.get("calls")
-            if not stats.get("disqualified") and (isinstance(calls, bool) or not isinstance(calls, int)
-                                                  or calls != asked):
-                # A disqualified instance answers nothing and counts no call; any other must have run every decide
-                # it was asked since its load, or the child reloaded it with fresh memory.
-                raise TwinInterrupted(f"the decider child reloaded the twin's instance (it answered its decide "
-                                      f"{calls!r}, not {asked}): its memory was lost")
+            row = _answer(decider, key, inputs, asked, restarts)
             out.append((day, keys_of(row.get("intents"), needs=needs, held=held), forward_db.bars_hash(inputs)))
     finally:
         try:
@@ -450,8 +519,11 @@ def _live_keys(rows: Sequence[Mapping[str, Any]], needs: Sequence[str]) -> dict[
 
 
 _INTENTS_SQL = ("SELECT i.iid, i.instance, i.decided_day, i.at, i.kind, i.symbol, i.lid, l.symbol AS lot_symbol, "
-                "l.opened_day AS lot_day FROM eq_intents i LEFT JOIN eq_lots l ON l.lid = i.lid "
-                "WHERE i.kind IN ('buy', 'sell', 'cancel'){where} ORDER BY i.iid")
+                "l.opened_day AS lot_day, i.exec_day, i.share, i.usd, i.tag FROM eq_intents i LEFT JOIN eq_lots l "
+                "ON l.lid = i.lid WHERE i.kind IN ('buy', 'sell', 'cancel'){where} ORDER BY i.iid")
+#: The House's own planned exits (A29's seed reads them; D12's keys never do).
+_EXITS_SQL = ("SELECT iid, instance, decided_day, exec_day, at, lid, tag FROM eq_intents WHERE kind='house_exit' "
+              "ORDER BY iid")
 
 
 def live_intents(live_path: str | Path, instance: str, *, needs: Sequence[str]) -> dict[str, list[str]]:
@@ -516,25 +588,28 @@ def live_bars(live_path: str | Path, instance: str, day: str, *, needs: Mapping[
 def read_book(live_path: str | Path) -> dict[str, Any]:
     """The live book as the twins read it, in one read-only pass: {"instances": [`eq_instances` rows by id], "lots":
     {instance: [its `eq_lots` rows by lid]}, "intents": {instance: [its buy, sell and cancel rows by iid, each with
-    its lot's symbol and day]}, "decision_day": the day of the book's `eq_decision`, "since": {instance: the day its
-    band was last set, the book's `eq_band_since` (a revival sets it)}}. A book from before E1 (no `eq_instances`) is
-    empty."""
+    its lot's symbol and day]}, "exits": {instance: [the House's own planned exits, its "house_exit" rows by iid]},
+    "decision_day": the day of the book's `eq_decision`, "since": {instance: the day its band was last set, the
+    book's `eq_band_since` (a revival sets it)}}. A book from before E1 (no `eq_instances`) is empty."""
     from . import guard
 
     def read(db: sqlite3.Connection) -> dict[str, Any]:
         tables = _tables(db)
-        out: dict[str, Any] = {"instances": [], "lots": {}, "intents": {}, "decision_day": None, "since": {}}
+        out: dict[str, Any] = {"instances": [], "lots": {}, "intents": {}, "exits": {}, "decision_day": None,
+                               "since": {}}
         if "eq_instances" not in tables:
             return out
         out["instances"] = guard.rows(db, "SELECT id, family, version, lane, run_sha, band, last_decided_day, "
                                           "created_at, retired_at FROM eq_instances ORDER BY id")
         if "eq_lots" in tables:
-            for lot in guard.rows(db, "SELECT lid, instance, symbol, entry_at, opened_day, status, exit_at, exit_day "
-                                      "FROM eq_lots ORDER BY lid"):
+            for lot in guard.rows(db, "SELECT lid, instance, symbol, entry_at, opened_day, status, exit_at, exit_day, "
+                                      "iid, tag FROM eq_lots ORDER BY lid"):
                 out["lots"].setdefault(str(lot["instance"]), []).append(lot)
             if "eq_intents" in tables:
                 for row in guard.rows(db, _INTENTS_SQL.format(where="")):
                     out["intents"].setdefault(str(row["instance"]), []).append(row)
+                for row in guard.rows(db, _EXITS_SQL):
+                    out["exits"].setdefault(str(row["instance"]), []).append(row)
         if "kv" in tables:
             decision = _kv(db, "eq_decision")
             out["decision_day"] = str(decision.get("day")) if isinstance(decision, Mapping) and decision.get("day") \
@@ -545,6 +620,217 @@ def read_book(live_path: str | Path) -> dict[str, Any]:
         return out
 
     return guard.read(live_path, read)
+
+
+# ----------------------------------------------------------------------------- A29: the twin re-based on the live book
+def _size(row: Mapping[str, Any] | None) -> dict[str, float] | None:
+    """A buy's size as its program gave it ({"share": s} | {"usd": u}; league/equity/program.py's rule: exactly one, a
+    share in (0, 1] or dollars above zero), from its `eq_intents` row; None when the row holds no such size (the book
+    recorded the intent refused: the Gym never executes it either)."""
+    if row is None:
+        return None
+    share, usd = _num(row.get("share")), _num(row.get("usd"))
+    if (share is None) == (usd is None):
+        return None
+    if share is not None:
+        return {"share": share} if 0 < share <= 1 else None
+    return {"usd": usd} if usd > 0 else None
+
+
+def live_seed(book: Mapping[str, Any], instance: str, after: Any) -> dict[str, Any]:
+    """THE LIVE BOOK AS IT STOOD AFTER SESSION `after` (A29, the module docstring), from `read_book`'s rows (no status
+    is read, and no column the book rewrites once the session is past): {"after", "next", "lots": [{"lid", "symbol",
+    "entry_day", "entry_at", "tag", "size" ({"share"} | {"usd"} | None: no buy of the book names it)}] (by lid: the
+    instance's lots opened on or before `after` and not closed by it), "buys": [{"symbol", "at", "tag", "size"}] (the
+    buys the program decided at `after`'s close, less those with no size), "sells": [{"lid", "at", "tag"}] (its sells
+    of that close that name a lot), "exits": [{"lid", "reason"}] (the House's own exits planned for the next
+    session's open by then)}."""
+    from ..equity import schedule
+
+    iid, after = str(instance), _iso(after)
+    nxt = schedule.next_session(_date(after)).isoformat()
+    intents = [row for row in book.get("intents", {}).get(iid, [])]
+    bought: dict[int, Mapping[str, Any]] = {}
+    for row in intents:
+        if row["kind"] == "buy" and row.get("lid") is not None:
+            bought.setdefault(int(row["lid"]), row)
+    by_iid = {int(row["iid"]): row for row in intents if row["kind"] == "buy"}
+    lots = []
+    for lot in book.get("lots", {}).get(iid, []):
+        opened, left = str(lot.get("opened_day") or ""), str(lot.get("exit_day") or "")
+        if not opened or opened > after or (left and left <= after):
+            continue
+        buy = bought.get(int(lot["lid"])) or (by_iid.get(int(lot["iid"])) if lot.get("iid") is not None else None)
+        lots.append({"lid": int(lot["lid"]), "symbol": str(lot.get("symbol") or "").upper(), "entry_day": opened,
+                     "entry_at": str(lot.get("entry_at") or "open"), "tag": str(lot.get("tag") or ""),
+                     "size": _size(buy)})
+    held = {lot["lid"] for lot in lots}
+    decided = [row for row in intents if str(row.get("decided_day")) == after and str(row.get("exec_day")) == nxt
+               and row.get("at") in fill_minutes.FILL_POINTS]
+    buys = [{"symbol": str(row["symbol"]).strip().upper(), "at": row["at"], "tag": str(row.get("tag") or ""),
+             "size": _size(row)} for row in decided if row["kind"] == "buy" and row.get("symbol") and _size(row)]
+    sells = [{"lid": int(row["lid"]), "at": row["at"], "tag": str(row.get("tag") or "")} for row in decided
+             if row["kind"] == "sell" and row.get("lid") is not None and int(row["lid"]) in held]
+    exits = [{"lid": int(row["lid"]), "reason": str(row.get("tag") or "house")}
+             for row in book.get("exits", {}).get(iid, [])
+             if str(row.get("exec_day")) == nxt and str(row.get("decided_day") or "") <= after
+             and row.get("lid") is not None and int(row["lid"]) in held]
+    return {"after": after, "next": nxt, "lots": lots, "buys": buys, "sells": sells, "exits": exits}
+
+
+class RebasedTwin:
+    """THE RE-BASED TWIN of one run of a live instance (A29, the module docstring), over the twin run `run`'s bars,
+    capital and half-spread multiple. ONE instance of the registered program, loaded once and asked every session in
+    order, as the twin run's own instance is (`_twin`): only the BOOK its decisions are asked on changes.
+    - Until the first re-base the instance is asked the un-re-based run's own decisions (`rebase` asks every one up
+      to its session before anything else: the program's memory is the registered twin's).
+    - `rebase(seed)` sets the book to the live book after `seed["after"]` (`live_seed`): E1's own engine account
+      (league/equity/engine.py `_Account`), in which (1) each seeded lot is bought by the engine in its own entry
+      session, at its fill point, for the size its buy asked, and carried to that close through the engine's
+      sessions (its corporate actions and marks; no decide, no exit rule); (2) the live book's planned intents are
+      the account's own for the next session: the program's buys and sells, the House's exits, and the engine's
+      maximum-hold rule on the seeded lots, which is the book's. It answers {"held": the seeded lots the account
+      holds, "unheld": those the Gym could not hold as the live book does}.
+    - `step(day)` runs the account's next session as `engine.run` does (the fills, the marks, the decide) and
+      answers (the twin's keys, the bars hash) of `day`'s decision, None when the bars hold no decision there.
+    THE ENGINE'S RUNNER is this object (what `_Account` reads of one: `decide(ctx)`, `last_failed`): the engine hands
+    it the ctx it built from its account, the same Gym inputs are built again from it (`ctx.inputs_from_bars`: the
+    account's own positions, closed lots, rejects, cash, equity, budget, caps and params, and the bars through that
+    close) and asked of the night's decider child, so no program text ever runs in the job's own process. NEVER A
+    SILENT RELOAD (`_answer`: `TwinInterrupted`). `close()` drops the instance."""
+
+    def __init__(self, decider: Any, run: ShadowRun):
+        from ..equity.program import parse_needs
+
+        self.decider, self.run, self.bars = decider, run, run.bars
+        self.days = _days(run.bars.days)
+        self.index = {day: i for i, day in enumerate(self.days)}
+        self.needs = parse_needs(run.result.get("needs"))
+        program = run.program
+        self.key = f"{REBASED_KEY}{program.key}"
+        self.payload = {"code": str(program.code), "params": dict(program.params or {}), "name": str(program.key),
+                        "timeout": DECIDE_TIMEOUT, "max_errors": DECIDE_MAX_ERRORS}
+        self.restarts = getattr(decider, "restarts", None)
+        self.asked, self.loaded, self.last_failed = 0, False, False
+        self.account: Any = None
+        self.at: int | None = None      # the bars' index of the last session the instance decided at
+        self._answered: tuple[list[str], str] | None = None
+
+    # ------------------------------------------------------------------------------------------------ the instance
+    def _ask(self, inputs: Any) -> Mapping[str, Any]:
+        if not self.loaded:
+            if self.decider is None:
+                raise TwinInterrupted("the night carries no decider to ask the twin's decides of")
+            try:
+                self.decider.kind_load(KIND, self.key, self.payload)
+            except Exception as exc:  # noqa: BLE001 - the child's: the twin is tried again the next night
+                raise TwinInterrupted("the twin's program did not load in the decider child "
+                                      f"({type(exc).__name__})") from None
+            self.loaded = True
+        self.asked += 1
+        return _answer(self.decider, self.key, inputs, self.asked, self.restarts)
+
+    def close(self) -> None:
+        if self.loaded:
+            self.loaded = False
+            try:
+                self.decider.kind_drop(KIND, self.key)
+            except Exception:  # noqa: BLE001 - a drop that fails leaves an instance a restart clears
+                pass
+
+    def decide(self, ctx: Any) -> list[dict[str, Any]]:
+        """THE ENGINE'S CALL (`_Account.decide`), with the ctx it built from its account at the session `at`: the
+        program's intents, asked of the child."""
+        from ..equity import ctx as C
+        from ..equity.program import normalize_intents
+
+        inputs = C.inputs_from_bars(self.bars, int(self.at), needs=self.needs, positions=ctx.positions,
+                                    closed=ctx.closed, rejects=ctx.rejects, cash=ctx.cash, equity=ctx.equity,
+                                    budget=ctx.budget, caps=ctx.caps, params=ctx.params)
+        row = self._ask(inputs)
+        # A8.5's failed decide, as the child says it (the runner's `last_failed`: what the engine counts).
+        self.last_failed = bool(row.get("failed"))
+        held = {lot.lid: {"symbol": lot.symbol, "entry_day": self.days[lot.entry_index]}
+                for lot in self.account.lots.values()}
+        self._answered = (keys_of(row.get("intents"), needs=self.needs.symbols, held=held),
+                          forward_db.bars_hash(inputs))
+        return normalize_intents(row.get("intents"))
+
+    def step(self, day: Any) -> tuple[list[str], str] | None:
+        """THE NIGHT'S CALL: the session `day` run in the account (the fills, the marks, the decide), and (the twin's
+        keys, the bars hash) of its decision; None before the first re-base or when the bars hold no decision there."""
+        j = self.index.get(_iso(day))
+        if self.account is None or j is None or j >= int(self.bars.n) - 1:
+            return None
+        if j != int(self.at) + 1:
+            raise ValueError(f"the re-based twin is asked {day} out of order (it stands at {self.days[int(self.at)]})")
+        self.account.session(j)
+        self.account.mark_close(j)
+        self.at, self._answered = j, None
+        self.account.decide(j)
+        return self._answered
+
+    # ------------------------------------------------------------------------------------------------- the re-base
+    def rebase(self, seed: Mapping[str, Any]) -> dict[str, int]:
+        import types
+        from decimal import Decimal as D
+
+        from ..equity import config
+        from ..equity import engine as E
+
+        after = _iso(seed["after"])
+        at = self.index.get(after)
+        if at is None:
+            raise ValueError(f"the session {after} is outside the twin run's bars")
+        if self.at is None:
+            # THE REGISTERED TWIN'S MEMORY: every decision of the un-re-based run through `after`, in order.
+            for day, inputs, _held in _decisions(self.run):
+                if day > after:
+                    break
+                self._ask(inputs)
+        elif self.at != at:
+            raise ValueError(f"the twin is re-based after {after} while it stands at {self.days[int(self.at)]}")
+        first, result = int(self.bars.first), self.run.result
+        program = types.SimpleNamespace(needs=self.needs, params=dict(result.get("params") or {}),
+                                        start=lambda **limits: self)
+        acct = E._Account(program, self.bars, E.EngineConfig(
+            capital=D(str(result.get("capital") or config.SLEEVE_USD)), k=float(result.get("k") or config.K_BASE)))
+        # (1) THE SEEDED LOTS, each bought by the engine in its own entry session.
+        entered: dict[int, list[Mapping[str, Any]]] = {}
+        info = {"held": 0, "unheld": 0}
+        for lot in seed.get("lots") or ():
+            j = self.index.get(str(lot.get("entry_day")))
+            if j is None or not first <= j <= at or not lot.get("size") \
+                    or lot.get("entry_at") not in fill_minutes.FILL_POINTS:
+                info["unheld"] += 1
+                continue
+            entered.setdefault(j, []).append(lot)
+        mine: dict[int, int] = {}       # the live lot's id -> the account's
+        for j in range(min(entered), at + 1) if entered else ():
+            wanted = {f"seed:{lot['lid']}": lot for lot in entered.get(j, ())}
+            acct.pending = [{"buy": lot["symbol"], "at": lot["entry_at"], "tag": mark, **lot["size"]}
+                            for mark, lot in wanted.items()]
+            acct.session(j)
+            acct.mark_close(j)
+            for held in acct.lots.values():
+                lot = wanted.pop(held.tag, None) if held.entry_index == j else None
+                if lot is not None:
+                    mine[int(lot["lid"])], held.tag = held.lid, str(lot.get("tag") or "")
+            info["unheld"] += len(wanted)
+        info["held"] = len(mine)
+        acct.rejects, acct.closed_since, acct.fails = [], [], 0
+        # (2) WHAT THE LIVE BOOK HAD PLANNED for the next session, as the account's own.
+        acct.pending = [{"buy": buy["symbol"], "at": buy["at"], "tag": buy["tag"], **buy["size"]}
+                        for buy in seed.get("buys") or ()]
+        acct.pending += [{"sell": mine[sell["lid"]], "at": sell["at"], "tag": sell["tag"]}
+                         for sell in seed.get("sells") or () if sell["lid"] in mine]
+        acct.house = {mine[leave["lid"]]: (leave["reason"] if leave["reason"] in CTX_REASONS else "house")
+                      for leave in seed.get("exits") or () if leave["lid"] in mine}
+        for held in acct.lots.values():
+            if config.max_hold_due(at - held.entry_index, self.needs.max_hold_sessions):
+                acct.house.setdefault(held.lid, "max_hold")
+        self.account, self.at = acct, at
+        return info
 
 
 def twin_records(root: str | Path) -> dict[str, dict[str, Any]]:
@@ -895,7 +1181,11 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
                     "instance": iid, "bars": found, "why": "the bars hash of the live decision, taken that night"}):
                 out["live_bars"] += 1
     runs = _epochs(db, inst, book, pid, now=now)
-    have = {str(r[0]) for r in db.execute("SELECT day FROM fwd_twins WHERE instance=?", (iid,))}
+    # The rows the store holds: {day: agree}. A29 reads them too: a stored differing session re-bases the twin.
+    stored = {str(r[0]): r[1] for r in db.execute("SELECT day, agree FROM fwd_twins WHERE instance=?", (iid,))}
+    have = set(stored)
+    based = sorted({str(e["day"]) for e in forward_db.events(db, "twin_rebased", pid=pid) if e.get("day")
+                    and isinstance(e.get("payload"), Mapping) and e["payload"].get("instance") == iid})
     parted = db.execute("SELECT 1 FROM fwd_part WHERE instance=? AND through=?", (iid, night)).fetchone() is not None
     live = _live_keys(book["intents"].get(iid, []), needs)
     for k, (first, retired) in enumerate(runs):
@@ -932,37 +1222,111 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
                 "instance": iid, "why": str(exc)[:240]})
             out["interrupted"] += 1
             return
+        # THE UN-RE-BASED TWIN RUN (as registered): every row of a run that never differed is compared with it, and
+        # every row's `base_agree` is.
+        base = {day: (keys, bars) for day, keys, bars in decisions}
         unreadable = split_sessions(run)
-        rows, kept = [], set(wanted)
-        for day, keys, bars in decisions:
-            if day not in kept or day in have:
-                continue
-            mine = live.get(day, [])
-            if retired is not None and day >= retired.isoformat():
-                agreed, why = None, "retired"
-            elif day in unreadable:
-                agreed, why = None, "split"
-            else:
-                agreed, why = agree(mine, keys), None
-            seen = hashes.get((iid, day))
-            rows.append((iid, day, pid, json.dumps(mine), json.dumps(keys), None if agreed is None else int(agreed), why,
-                         float(now), seen, bars, cause(agreed, seen, bars)))
         last = min(through, retired) if retired is not None else through
         part = participation(
             [lot for lot in lots if start.isoformat() <= str(lot.get("opened_day") or "") <= last.isoformat()],
             [lot for lot in (run.result.get("lots") or []) if isinstance(lot, Mapping)
              and start.isoformat() <= str(lot.get("entry_day") or "") <= last.isoformat()])
-        with db:    # one transaction a run of the instance: its sessions in day order, and the night's participation
-            db.executemany("INSERT OR IGNORE INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, why, at, "
-                           "live_bars, shadow_bars, cause) VALUES(?,?,?,?,?,?,?,?,?,?,?)", rows)
-            if current:     # the participation of the run the book holds now (an earlier run's stands as written)
-                db.execute("INSERT OR IGNORE INTO fwd_part(instance, through, pid, matched, missed, extra, at) "
-                           "VALUES(?,?,?,?,?,?,?)",
-                           (iid, night, pid, part["matched"], part["missed"], part["extra"], float(now)))
-        have.update(row[1] for row in rows)
-        out["twins"] += len(rows)
-        out["disagreed"] += sum(1 for row in rows if row[5] == 0)
-        out["unreadable"] += sum(1 for row in rows if row[5] is None)
+        rows: list[tuple] = []
+        parting = [current]
+
+        def flush() -> None:
+            """One transaction: the sessions gathered so far in day order and, the first time, the night's
+            participation of the run the book holds now (an earlier run's stands as written)."""
+            with db:
+                db.executemany("INSERT OR IGNORE INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, "
+                               "why, at, live_bars, shadow_bars, cause, rebased, base_agree) "
+                               "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+                if parting.pop():
+                    db.execute("INSERT OR IGNORE INTO fwd_part(instance, through, pid, matched, missed, extra, at) "
+                               "VALUES(?,?,?,?,?,?,?)",
+                               (iid, night, pid, part["matched"], part["missed"], part["extra"], float(now)))
+            parting.append(False)
+            have.update(row[1] for row in rows)
+            stored.update((row[1], row[5]) for row in rows)
+            out["twins"] += len(rows)
+            out["disagreed"] += sum(1 for row in rows if row[5] == 0)
+            out["unreadable"] += sum(1 for row in rows if row[5] is None)
+            rows.clear()
+
+        fresh = [day for day in wanted if day not in stored]
+        differed: int | None = None     # A29: the latest differing session the twin is not yet re-based after
+        chain: RebasedTwin | None = None
+        try:
+            for i, day in enumerate(wanted):
+                gone = retired is not None and day >= retired.isoformat()
+                found = base.get(day)
+                if fresh and day <= fresh[-1]:
+                    # A29: THE TWIN'S BOOK IS SET TO THE LIVE BOOK AS IT STOOD AFTER THE DIFFERING SESSION, and the
+                    # sessions after it are compared from there: when the session to compare is not written yet,
+                    # or when the re-base is on record (its event: an earlier night compared the next session with
+                    # it, and tonight's twin is made the same way; a twin already re-based tonight goes on in order).
+                    # A stored differing session none of these holds of is a row from before this release whose next
+                    # session was written against the un-re-based twin: it stays the latest until another differs,
+                    # and the latest one re-bases the sessions not yet written.
+                    if differed is not None and not gone and (day not in stored or wanted[differed] in based
+                                                              or chain is not None):
+                        # What is gathered is written first: a re-base that cannot be made tonight never costs
+                        # the rows before it.
+                        flush()
+                        chain = chain or RebasedTwin(getattr(shadow, "decider", None), run)
+                        seed = live_seed(book, iid, wanted[differed])
+                        info = chain.rebase(seed)
+                        for between in wanted[differed + 1:i]:
+                            chain.step(between)     # stored sessions since: the twin goes through them in order
+                        payload = {"instance": iid, "unheld": info["unheld"],
+                                   "held": [[lot["symbol"], lot["entry_day"], lot["entry_at"]] for lot in seed["lots"]],
+                                   "planned": {k: len(seed[k]) for k in ("buys", "sells", "exits")},
+                                   "why": "the live and the twin intents differed at this session (its row is counted "
+                                          "as registered): the twin's book is the live book as it stood after it, and "
+                                          "the sessions after it are compared from the same state"}
+                        if forward_db.event(db, "twin_rebased", pid=pid, day=wanted[differed], at=float(now), once=iid,
+                                            payload=payload):
+                            out["rebased"] += 1
+                        based = sorted({*based, wanted[differed]})
+                        differed = None
+                    if chain is not None:
+                        found = chain.step(day)
+                if day in stored:
+                    if stored[day] == 0:
+                        differed = i
+                    continue
+                if found is None:
+                    continue
+                keys, bars = found
+                mine = live.get(day, [])
+                if gone:
+                    agreed, why = None, "retired"
+                elif chain is None and day in unreadable:
+                    agreed, why = None, "split"
+                else:
+                    agreed, why = agree(mine, keys), None
+                first_keys = base.get(day)
+                unrebased = None if gone or day in unreadable or first_keys is None \
+                    else int(agree(mine, first_keys[0]))
+                seen = hashes.get((iid, day))
+                rows.append((iid, day, pid, json.dumps(mine), json.dumps(keys), None if agreed is None else int(agreed),
+                             why, float(now), seen, bars, cause(agreed, seen, bars), sum(1 for d in based if d < day),
+                             unrebased))
+                if agreed is False:
+                    differed = i
+        except TwinInterrupted as exc:
+            flush()
+            forward_db.event(db, "twin_interrupted", pid=pid, day=night, at=float(now), once=iid, payload={
+                "instance": iid, "why": str(exc)[:240]})
+            out["interrupted"] += 1
+            return
+        except Exception:
+            flush()     # the sessions compared before it stand; the failure is this instance's tonight (`finish`)
+            raise
+        finally:
+            if chain is not None:
+                chain.close()
+        flush()
 
 
 def finish(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float) -> dict[str, Any]:
@@ -972,7 +1336,8 @@ def finish(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float)
     sides disagree, its cause), one `fwd_part` row for `through`. For every closed live lot with a final priced E1
     twin and no `fwd_lotgap` row: its row (D11; timing and execution None when `fill_minutes` is false).
     {"instances", "twins", "disagreed", "lots", "interrupted", "live_bars"} (counts), with `FINISH_KEYS`' others
-    beside ("unreadable", "unregistered", "mismatched", "failed", "deferred") and, when an instance's twin could not
+    beside ("unreadable", "unregistered", "mismatched", "failed", "deferred", and "rebased": the twins re-based for
+    the first time tonight, A29) and, when an instance's twin could not
     be made, "errors" (ids and class names). It reads `shadow.through`, `shadow.run_from`, and the night's `decider`
     and `settings` as the shadow holds them; one instance's failure never costs another its rows. Before each
     instance's twin run it reads `shadow.late()` (the night's deadline, 300 s before the next session's 09:00 New
@@ -1025,7 +1390,8 @@ def _blank(*, applies: bool, holds: bool, final: bool, why: str | None) -> dict[
             "intents": {"instances": 0, "sessions": 0, "agreed": 0, "missing": 0, "unreadable": 0, "share": None,
                         "bound": forward_db.A14_AGREE, "ok": None, "disagreed": 0,
                         "causes": {name: 0 for name in forward_db.CAUSES}},
-            "by_instance": []}
+            "by_instance": [],
+            "rebase": {"rebases": 0, "sessions": 0, "agreed": 0, "share": None, "by_instance": []}}
 
 
 def _twin_rows(root: Path, instances: Sequence[str]) -> tuple[dict[str, dict[str, dict[str, Any]]], bool]:
@@ -1037,8 +1403,12 @@ def _twin_rows(root: Path, instances: Sequence[str]) -> tuple[dict[str, dict[str
     except Exception:  # noqa: BLE001 - no forward store, or one that cannot be opened: unmeasured
         return {}, False
     try:
-        rows = guard.batched(db, "SELECT instance, day, agree, why, cause FROM fwd_twins WHERE instance IN ({marks})",
-                             list(instances))
+        # A29's two columns ride beside the registered ones; a store no job has opened for writing since the release
+        # that added them does not hold them yet, and its rows read as before (NULL there).
+        beside = ", rebased, base_agree" if forward_db.has_column(db, "fwd_twins", "rebased") \
+            and forward_db.has_column(db, "fwd_twins", "base_agree") else ", NULL AS rebased, NULL AS base_agree"
+        rows = guard.batched(db, f"SELECT instance, day, agree, why, cause{beside} FROM fwd_twins WHERE instance IN "
+                                 "({marks})", list(instances))
     except Exception:  # noqa: BLE001 - a store that cannot be read is unmeasured, never an error of the Done meter
         return {}, False
     finally:
@@ -1052,9 +1422,10 @@ def _twin_rows(root: Path, instances: Sequence[str]) -> tuple[dict[str, dict[str
 def a14_reading(root: str | Path, counted: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """THE A14 READING (D13, the module docstring) of a checkpoint's counted closes (`dlane_report.equity_closes`-shaped
     rows: it reads `equity`, `pid`, `instance`, `day`). ALWAYS a dict holding every key of `A14_KEYS`, with "gap":
-    {`A14_GAP_KEYS`}, "intents": {`A14_INTENT_KEYS`} and "by_instance": [{`A14_INSTANCE_KEYS`}], on every branch (a
-    missing store included). It opens the forward store and the swarm store read-only and NEVER RAISES for a missing
-    store (unmeasured: holds False, final False)."""
+    {`A14_GAP_KEYS`}, "intents": {`A14_INTENT_KEYS`}, "by_instance": [{`A14_INSTANCE_KEYS`}] and "rebase":
+    {`A14_REBASE_KEYS`} with its own "by_instance": [{`A14_REBASE_INSTANCE_KEYS`}], on every branch (a missing store
+    included). It opens the forward store and the swarm store read-only and NEVER RAISES for a missing store
+    (unmeasured: holds False, final False). "rebase" is BESIDE the reading (A29) and enters no part of its rule."""
     from ..equity import schedule
 
     closes = [c for c in counted or () if isinstance(c, Mapping) and c.get("equity")]
@@ -1097,6 +1468,8 @@ def a14_reading(root: str | Path, counted: Sequence[Mapping[str, Any]]) -> dict[
     for instance in sorted(by_instance):
         mine = {"instance": instance, "sessions": 0, "agreed": 0, "missing": 0, "unreadable": 0}
         out["by_instance"].append(mine)
+        apart = {"instance": instance, "rebases": 0, "sessions": 0, "agreed": 0, "share": None}
+        out["rebase"]["by_instance"].append(apart)
         try:
             last = schedule.previous_session(max(_date(c.get("day")) for c in by_instance[instance]))
             found = sorted(day for day in rows.get(instance, {}) if day <= last.isoformat())
@@ -1110,8 +1483,17 @@ def a14_reading(root: str | Path, counted: Sequence[Mapping[str, Any]]) -> dict[
             mine["missing"] += 1    # its days cannot be read: unmeasured, never held
             mine["sessions"] += 1
             continue
+        behind = [int(rows[instance][day]["rebased"] or 0) for day in days if day in rows.get(instance, {})]
+        apart["rebases"] = max(behind) - min(behind) if behind else 0
         for day in days:
             row = rows.get(instance, {}).get(day)
+            if row is not None:
+                # BESIDE (A29): the same session against the UN-RE-BASED twin run. A row from before the release was
+                # compared with that run itself (`rebased` NULL: its `agree`).
+                first = row["agree"] if row["rebased"] is None else row["base_agree"]
+                if first is not None:
+                    apart["sessions"] += 1
+                    apart["agreed"] += 1 if int(first) == 1 else 0
             if row is None:
                 mine["missing"] += 1
             elif row["agree"] is None:
@@ -1126,6 +1508,12 @@ def a14_reading(root: str | Path, counted: Sequence[Mapping[str, Any]]) -> dict[
             mine["sessions"] += 1
     for key in ("sessions", "agreed", "missing", "unreadable"):
         intents[key] = sum(row[key] for row in out["by_instance"])
+    for apart in out["rebase"]["by_instance"]:
+        apart["share"] = round(apart["agreed"] / apart["sessions"], 6) if apart["sessions"] else None
+    for key in ("rebases", "sessions", "agreed"):
+        out["rebase"][key] = sum(row[key] for row in out["rebase"]["by_instance"])
+    if out["rebase"]["sessions"]:
+        out["rebase"]["share"] = round(out["rebase"]["agreed"] / out["rebase"]["sessions"], 6)
     if intents["sessions"]:
         intents["share"] = round(intents["agreed"] / intents["sessions"], 6)
         intents["ok"] = intents["agreed"] >= forward_db.A14_AGREE * intents["sessions"] - 1e-9
@@ -1145,7 +1533,8 @@ def a14_reading(root: str | Path, counted: Sequence[Mapping[str, Any]]) -> dict[
     return out
 
 
-__all__ = ["UNREADABLE", "A14_KEYS", "A14_GAP_KEYS", "A14_INTENT_KEYS", "A14_INSTANCE_KEYS", "LIVE_DB", "SWARM_DB",
-           "FINISH_KEYS", "TwinInterrupted", "begin", "on_run", "finish", "livelike_series", "lot_gap", "d_first",
+__all__ = ["UNREADABLE", "A14_KEYS", "A14_GAP_KEYS", "A14_INTENT_KEYS", "A14_INSTANCE_KEYS", "A14_REBASE_KEYS",
+           "A14_REBASE_INSTANCE_KEYS", "LIVE_DB", "SWARM_DB", "FINISH_KEYS", "REBASED_KEY", "TwinInterrupted", "begin",
+           "on_run", "finish", "live_seed", "RebasedTwin", "livelike_series", "lot_gap", "d_first",
            "d_retired", "keys_of", "shadow_intents", "shadow_bars", "live_bars", "cause", "split_sessions",
            "live_intents", "agree", "participation", "registry_key", "read_book", "twin_records", "a14_reading"]

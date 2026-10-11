@@ -46,9 +46,12 @@ class StoreBacked(unittest.TestCase):
         self.rows = [row(self.fid), row("an-options-family", lane=None)]
         self.families = F.EquityFamilies(self.root)
 
-        def fake_read(root, *, family=None, lanes=None, strict=False):
+        self.asked: list[dict] = []
+
+        def fake_read(root, *, family=None, lanes=None, strict=False, **more):
             self.assertEqual(lanes, LANES)
             self.assertTrue(strict, "the book's reader must tell an unreadable store from one with no row")
+            self.asked.append(dict(more))
             out = [dict(r) for r in self.rows if family is None or r["family"] == family]
             for r in out:
                 r["band"] = (self.store.family(r["family"]) or {}).get("band", r["band"])
@@ -67,6 +70,36 @@ class StoreBacked(unittest.TestCase):
         self.assertEqual([r["family"] for r in rows], [self.fid])
         self.assertEqual(rows[0]["validation_r_sd"], 0.25)
         self.assertEqual(self.families.last_error, "")
+
+    def test_the_seat_rule_decides_whether_the_waiting_candidates_are_read(self):
+        """THE SEAT RULE (release E5-A): under the rule in force the book ranks the waiting Candidates itself, so its
+        reader asks the swarm's for them (`queued=True`); under "first-come" (the rollback) the call is release
+        E5-S's, argument for argument, and the swarm's own queue hides them."""
+        from league.equity import bands as B
+        from league.tests.equity_design import seat_rule
+
+        self.assertEqual(B.seat_settings().rule, B.ACTIVITY_FREE, "the rule in force")
+        self.families.read()
+        self.assertEqual(self.asked[-1], {"queued": True})
+        with seat_rule("first-come"):
+            self.families.read()
+            self.assertEqual(self.asked[-1], {}, "first come: the read is the one before the seat rule")
+            expected = self.families.read()[0]
+            self.assertTrue(self.families.confirm_band(expected, "probe", "a seat is free"))
+            self.assertEqual(self.asked[-1], {}, "and so is the read inside the band's confirmation")
+
+    def test_the_roster_seats_fail_closed(self):
+        """`seats()`: the swarm's roster (`elane.roster_seats`); 0 when it is closed or cannot be read."""
+        from league.swarm import elane
+
+        with mock.patch.object(elane, "roster_seats", return_value=4):
+            self.assertEqual(self.families.seats(), 4)
+        with mock.patch.object(elane, "roster_seats", return_value=elane.ROSTER_CLOSED):
+            self.assertEqual(self.families.seats(), 0, "an unreadable roster seats nobody new")
+        with mock.patch.object(elane, "roster_seats", side_effect=OSError("no file")):
+            self.assertEqual(self.families.seats(), 0)
+        self.assertIsNone(F.MemoryEquityFamilies().seats(), "a reader with no word of the roster: the table's count")
+        self.assertEqual(F.MemoryEquityFamilies(seats=2).seats(), 2)
 
     def test_an_unreadable_store_reads_as_no_rows_and_says_why(self):
         with mock.patch("league.swarm.bands.read", side_effect=TypeError("read() got an unexpected keyword 'lanes'")):

@@ -1,0 +1,1497 @@
+{
+ "alerts": [
+  [
+   "warning",
+   "equity: a-third@1:r is demoted: its band is candidate: it decides no more and its lots exit at the next open"
+  ],
+  [
+   "warning",
+   "equity: m-first@1:r is retired: its family is retired: it decides no more and its lots exit at the next open"
+  ]
+ ],
+ "errors": [],
+ "events": [
+  [
+   "equity.band",
+   {
+    "family": "a-third",
+    "from": "candidate",
+    "to": "probe",
+    "version": 1,
+    "why": "passed its lane's sealed look and holds an equity roster seat"
+   }
+  ],
+  [
+   "equity.band",
+   {
+    "family": "m-first",
+    "from": "candidate",
+    "to": "probe",
+    "version": 1,
+    "why": "passed its lane's sealed look and holds an equity roster seat"
+   }
+  ],
+  [
+   "equity.band",
+   {
+    "family": "z-second",
+    "from": "candidate",
+    "to": "probe",
+    "version": 1,
+    "why": "passed its lane's sealed look and holds an equity roster seat"
+   }
+  ],
+  [
+   "equity.instance",
+   {
+    "band": "probe",
+    "instance": "a-third@1:r",
+    "lane": "beta"
+   }
+  ],
+  [
+   "equity.instance",
+   {
+    "band": "probe",
+    "instance": "m-first@1:r",
+    "lane": "beta"
+   }
+  ],
+  [
+   "equity.instance",
+   {
+    "band": "probe",
+    "instance": "z-second@1:r",
+    "lane": "beta"
+   }
+  ],
+  [
+   "equity.bars",
+   {
+    "day": "2026-10-09",
+    "present": [
+     "IWM",
+     "QQQ",
+     "SPY"
+    ],
+    "symbols": [
+     "IWM",
+     "QQQ",
+     "SPY"
+    ]
+   }
+  ],
+  [
+   "equity.decide",
+   {
+    "day": "2026-10-09",
+    "decided": [
+     "a-third@1:r: 0",
+     "m-first@1:r: 1",
+     "z-second@1:r: 1"
+    ],
+    "failed": {}
+   }
+  ],
+  [
+   "equity.fill",
+   {
+    "_px": "600.100000",
+    "at": "open",
+    "eid": 1,
+    "family": "m-first",
+    "fees": "0",
+    "lid": 1,
+    "qty": "0.927652",
+    "real_money": true,
+    "side": "buy",
+    "symbol": "SPY"
+   }
+  ],
+  [
+   "equity.order",
+   {
+    "_limit": "600.71",
+    "at": "open",
+    "collar_bp": 10,
+    "eid": 1,
+    "family": "m-first",
+    "instance": "m-first@1:r",
+    "qty": "0.927652",
+    "real_money": true,
+    "replaces": null,
+    "side": "buy",
+    "status": "filled",
+    "symbol": "SPY",
+    "why": "entry (intent: 0.927652 SPY at 600.71: the intent's $557.25)"
+   }
+  ],
+  [
+   "equity.intent",
+   {
+    "at": "open",
+    "iid": 1,
+    "instance": "m-first@1:r",
+    "kind": "buy",
+    "status": "done",
+    "symbol": "SPY",
+    "why": "filled 0.927652 shares"
+   }
+  ],
+  [
+   "equity.fill",
+   {
+    "_px": "500.100000",
+    "at": "close",
+    "eid": 2,
+    "family": "z-second",
+    "fees": "0",
+    "lid": 2,
+    "qty": "1.113141",
+    "real_money": true,
+    "side": "buy",
+    "symbol": "QQQ"
+   }
+  ],
+  [
+   "equity.order",
+   {
+    "_limit": "500.61",
+    "at": "close",
+    "collar_bp": 10,
+    "eid": 2,
+    "family": "z-second",
+    "instance": "z-second@1:r",
+    "qty": "1.113141",
+    "real_money": true,
+    "replaces": null,
+    "side": "buy",
+    "status": "filled",
+    "symbol": "QQQ",
+    "why": "entry (intent: 1.113141 QQQ at 500.61: the intent's $557.25)"
+   }
+  ],
+  [
+   "equity.intent",
+   {
+    "at": "close",
+    "iid": 2,
+    "instance": "z-second@1:r",
+    "kind": "buy",
+    "status": "done",
+    "symbol": "QQQ",
+    "why": "filled 1.113141 shares"
+   }
+  ],
+  [
+   "equity.band",
+   {
+    "family": "a-third",
+    "from": "probe",
+    "to": "candidate",
+    "version": 1,
+    "why": "EDM1: EDM1: its realized Probe net $-301.00 reached the program loss line $-300.00: exits only"
+   }
+  ],
+  [
+   "equity.instance",
+   {
+    "instance": "a-third@1:r",
+    "retired": true,
+    "why": "demoted: its band is candidate"
+   }
+  ],
+  [
+   "equity.bars",
+   {
+    "day": "2026-10-12",
+    "present": [
+     "IWM",
+     "QQQ",
+     "SPY"
+    ],
+    "symbols": [
+     "IWM",
+     "QQQ",
+     "SPY"
+    ]
+   }
+  ],
+  [
+   "equity.decide",
+   {
+    "day": "2026-10-12",
+    "decided": [
+     "m-first@1:r: 0",
+     "z-second@1:r: 1"
+    ],
+    "failed": {}
+   }
+  ],
+  [
+   "equity.band",
+   {
+    "family": "k-fourth",
+    "from": "candidate",
+    "to": "probe",
+    "version": 1,
+    "why": "passed its lane's sealed look and holds an equity roster seat"
+   }
+  ],
+  [
+   "equity.instance",
+   {
+    "band": "probe",
+    "instance": "k-fourth@1:r",
+    "lane": "beta"
+   }
+  ],
+  [
+   "equity.bars",
+   {
+    "day": "2026-10-12",
+    "present": [
+     "DIA",
+     "IWM",
+     "QQQ",
+     "SPY"
+    ],
+    "symbols": [
+     "DIA",
+     "IWM",
+     "QQQ",
+     "SPY"
+    ]
+   }
+  ],
+  [
+   "equity.decide",
+   {
+    "day": "2026-10-12",
+    "decided": [
+     "k-fourth@1:r: 1"
+    ],
+    "failed": {}
+   }
+  ],
+  [
+   "equity.fees_posted",
+   {
+    "lots": 1
+   }
+  ],
+  [
+   "equity.intent",
+   {
+    "at": "open",
+    "iid": 4,
+    "instance": "k-fourth@1:r",
+    "kind": "buy",
+    "status": "refused",
+    "symbol": "DIA",
+    "why": "sizing (budget): refused: the shared loss budget has $-125.36 of room, $-626.83 of etf at weight 0.20"
+   }
+  ],
+  [
+   "equity.intent",
+   {
+    "at": "close",
+    "iid": 3,
+    "instance": "z-second@1:r",
+    "kind": "buy",
+    "status": "refused",
+    "symbol": "QQQ",
+    "why": "sizing (budget): refused: the shared loss budget has $-125.36 of room, $-626.83 of etf at weight 0.20"
+   }
+  ],
+  [
+   "equity.band",
+   {
+    "family": "b-fifth",
+    "from": "candidate",
+    "to": "probe",
+    "version": 1,
+    "why": "passed its lane's sealed look and holds an equity roster seat"
+   }
+  ],
+  [
+   "equity.instance",
+   {
+    "band": "probe",
+    "instance": "b-fifth@1:r",
+    "lane": "beta"
+   }
+  ],
+  [
+   "equity.instance",
+   {
+    "instance": "m-first@1:r",
+    "retired": true,
+    "why": "retired: its family is retired"
+   }
+  ],
+  [
+   "equity.bars",
+   {
+    "day": "2026-10-13",
+    "present": [
+     "DIA",
+     "QQQ",
+     "SPY"
+    ],
+    "symbols": [
+     "DIA",
+     "QQQ",
+     "SPY"
+    ]
+   }
+  ],
+  [
+   "equity.decide",
+   {
+    "day": "2026-10-13",
+    "decided": [
+     "b-fifth@1:r: 0",
+     "k-fourth@1:r: 1",
+     "z-second@1:r: 1"
+    ],
+    "failed": {}
+   }
+  ],
+  [
+   "equity.house_exits",
+   {
+    "day": "2026-10-13",
+    "lots": 1
+   }
+  ],
+  [
+   "equity.fill",
+   {
+    "_px": "599.900000",
+    "at": "open",
+    "eid": 3,
+    "family": "m-first",
+    "fees": "0.01",
+    "lid": 1,
+    "qty": "0.927652",
+    "real_money": true,
+    "side": "sell",
+    "symbol": "SPY"
+   }
+  ],
+  [
+   "equity.close",
+   {
+    "cash": "-0.195530400000",
+    "family": "m-first",
+    "instance": "m-first@1:r",
+    "lid": 1,
+    "reason": "retired",
+    "symbol": "SPY"
+   }
+  ],
+  [
+   "equity.order",
+   {
+    "_limit": "599.30",
+    "at": "open",
+    "collar_bp": 10,
+    "eid": 3,
+    "family": "m-first",
+    "instance": "m-first@1:r",
+    "qty": "0.927652",
+    "real_money": true,
+    "replaces": null,
+    "side": "sell",
+    "status": "filled",
+    "symbol": "SPY",
+    "why": "exit (retired)"
+   }
+  ],
+  [
+   "equity.intent",
+   {
+    "at": "open",
+    "iid": 5,
+    "instance": "k-fourth@1:r",
+    "kind": "buy",
+    "status": "refused",
+    "symbol": "DIA",
+    "why": "sizing (budget): refused: the shared loss budget has $-13.51 of room, $-67.55 of etf at weight 0.20"
+   }
+  ],
+  [
+   "equity.intent",
+   {
+    "at": "close",
+    "iid": 6,
+    "instance": "z-second@1:r",
+    "kind": "buy",
+    "status": "refused",
+    "symbol": "QQQ",
+    "why": "sizing (budget): refused: the shared loss budget has $-13.51 of room, $-67.55 of etf at weight 0.20"
+   }
+  ],
+  [
+   "equity.bars",
+   {
+    "day": "2026-10-14",
+    "present": [
+     "DIA",
+     "QQQ",
+     "SPY"
+    ],
+    "symbols": [
+     "DIA",
+     "QQQ",
+     "SPY"
+    ]
+   }
+  ],
+  [
+   "equity.decide",
+   {
+    "day": "2026-10-14",
+    "decided": [
+     "b-fifth@1:r: 0",
+     "k-fourth@1:r: 1",
+     "z-second@1:r: 1"
+    ],
+    "failed": {}
+   }
+  ]
+ ],
+ "families": {
+  "a-third": {
+   "band": "candidate",
+   "retired": false
+  },
+  "b-fifth": {
+   "band": "probe",
+   "retired": false
+  },
+  "k-fourth": {
+   "band": "probe",
+   "retired": false
+  },
+  "m-first": {
+   "band": "retired",
+   "retired": true
+  },
+  "z-second": {
+   "band": "probe",
+   "retired": false
+  }
+ },
+ "kv": {
+  "eq_band_since": {
+   "a-third@1:r": {
+    "band": "candidate",
+    "day": "2026-10-12"
+   },
+   "b-fifth@1:r": {
+    "band": "probe",
+    "day": "2026-10-13"
+   },
+   "k-fourth@1:r": {
+    "band": "probe",
+    "day": "2026-10-12"
+   },
+   "m-first@1:r": {
+    "band": "probe",
+    "day": "2026-10-09"
+   },
+   "z-second@1:r": {
+    "band": "probe",
+    "day": "2026-10-09"
+   }
+  },
+  "eq_decide": {
+   "at": 1792009863.0,
+   "day": "2026-10-14",
+   "instances": [
+    "b-fifth@1:r",
+    "k-fourth@1:r",
+    "z-second@1:r"
+   ],
+   "status": "done"
+  },
+  "eq_failed": null,
+  "eq_sticky": {
+   "a-third@1:r": "EDM1: EDM1: its realized Probe net $-301.00 reached the program loss line $-300.00: exits only"
+  },
+  "eq_synced": "2026-10-14"
+ },
+ "sent": [
+  {
+   "limit_price": "600.71",
+   "qty": "0.927652",
+   "side": "buy",
+   "symbol": "SPY",
+   "time_in_force": "day",
+   "type": "limit"
+  },
+  {
+   "limit_price": "500.61",
+   "qty": "1.113141",
+   "side": "buy",
+   "symbol": "QQQ",
+   "time_in_force": "day",
+   "type": "limit"
+  },
+  {
+   "limit_price": "599.30",
+   "qty": "0.927652",
+   "side": "sell",
+   "symbol": "SPY",
+   "time_in_force": "day",
+   "type": "limit"
+  }
+ ],
+ "tables": {
+  "eq_instances": [
+   {
+    "band": "candidate",
+    "code": "NEEDS = {'symbols': ['IWM'], 'history': 2}\nPARAMS = {}\n\n\ndef decide(ctx):\n    return []\n# a-third\n",
+    "created_at": 1791741603.0,
+    "failed_decides": 0,
+    "family": "a-third",
+    "id": "a-third@1:r",
+    "lane": "beta",
+    "last_decided_day": "2026-10-09",
+    "max_hold": 5,
+    "params": "{}",
+    "retired_at": 1791836463.0,
+    "run_sha": "1e6f22c7f9cbdcd7c072d48e4b1a08c4d3a824fe23098c8d3f0be3bc6faeebd3",
+    "seeded": 0,
+    "version": 1,
+    "why": "demoted: its band is candidate"
+   },
+   {
+    "band": "probe",
+    "code": "NEEDS = {'symbols': ['SPY'], 'history': 2}\nPARAMS = {}\n\n\ndef decide(ctx):\n    return []\n# b-fifth\n",
+    "created_at": 1791922863.0,
+    "failed_decides": 0,
+    "family": "b-fifth",
+    "id": "b-fifth@1:r",
+    "lane": "beta",
+    "last_decided_day": "2026-10-14",
+    "max_hold": 5,
+    "params": "{}",
+    "retired_at": null,
+    "run_sha": "0dffc66b2c4394c50f5a881e22e06f80bab537260176502bca6de5ed098caa2e",
+    "seeded": 0,
+    "version": 1,
+    "why": ""
+   },
+   {
+    "band": "probe",
+    "code": "NEEDS = {'symbols': ['DIA'], 'history': 2}\nPARAMS = {}\n\n\ndef decide(ctx):\n    return []\n# k-fourth\n",
+    "created_at": 1791837123.0,
+    "failed_decides": 0,
+    "family": "k-fourth",
+    "id": "k-fourth@1:r",
+    "lane": "beta",
+    "last_decided_day": "2026-10-14",
+    "max_hold": 5,
+    "params": "{}",
+    "retired_at": null,
+    "run_sha": "ce06183e419b648c8a9420447cd1450e238fcc99811396bf9599b628badc2c40",
+    "seeded": 0,
+    "version": 1,
+    "why": ""
+   },
+   {
+    "band": "probe",
+    "code": "NEEDS = {'symbols': ['SPY'], 'history': 2}\nPARAMS = {}\n\n\ndef decide(ctx):\n    return []\n# m-first\n",
+    "created_at": 1791741603.0,
+    "failed_decides": 0,
+    "family": "m-first",
+    "id": "m-first@1:r",
+    "lane": "beta",
+    "last_decided_day": "2026-10-12",
+    "max_hold": 5,
+    "params": "{}",
+    "retired_at": 1791922863.0,
+    "run_sha": "d0dae5362c3a387c923785d7c49b87c8241c55113765d1b1d403c5c42af1b84a",
+    "seeded": 0,
+    "version": 1,
+    "why": "retired: its family is retired"
+   },
+   {
+    "band": "probe",
+    "code": "NEEDS = {'symbols': ['QQQ'], 'history': 2}\nPARAMS = {}\n\n\ndef decide(ctx):\n    return []\n# z-second\n",
+    "created_at": 1791741603.0,
+    "failed_decides": 0,
+    "family": "z-second",
+    "id": "z-second@1:r",
+    "lane": "beta",
+    "last_decided_day": "2026-10-14",
+    "max_hold": 5,
+    "params": "{}",
+    "retired_at": null,
+    "run_sha": "79224041e15b37809adeb95d641b2f290eb9ff24162bff1864e58242d8c5cefa",
+    "seeded": 0,
+    "version": 1,
+    "why": ""
+   }
+  ],
+  "eq_intents": [
+   {
+    "at": "open",
+    "bars_sha": "050ea760d292c20c0d39d248bddece1066ca22a701920b10053a79486438cbde",
+    "created_at": 1791741603.0,
+    "ctx_sha": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "decided_day": "2026-10-09",
+    "exec_day": "2026-10-12",
+    "family": "m-first",
+    "iid": 1,
+    "instance": "m-first@1:r",
+    "kind": "buy",
+    "lid": 1,
+    "share": "0.5",
+    "status": "done",
+    "symbol": "SPY",
+    "tag": "",
+    "updated_at": 1791811983.0,
+    "usd": null,
+    "version": 1,
+    "why": "filled 0.927652 shares"
+   },
+   {
+    "at": "close",
+    "bars_sha": "6b6525b2d0e10849997d5bf4a0f82eb08e38f697607d6b5c96607cc5e35b75ee",
+    "created_at": 1791741603.0,
+    "ctx_sha": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "decided_day": "2026-10-09",
+    "exec_day": "2026-10-12",
+    "family": "z-second",
+    "iid": 2,
+    "instance": "z-second@1:r",
+    "kind": "buy",
+    "lid": 2,
+    "share": "0.5",
+    "status": "done",
+    "symbol": "QQQ",
+    "tag": "",
+    "updated_at": 1791835083.0,
+    "usd": null,
+    "version": 1,
+    "why": "filled 1.113141 shares"
+   },
+   {
+    "at": "close",
+    "bars_sha": "004b127d5ad54033ec3002fc6fb5c686add38055dfada0ee38f1753fa25193ac",
+    "created_at": 1791837063.0,
+    "ctx_sha": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "decided_day": "2026-10-12",
+    "exec_day": "2026-10-13",
+    "family": "z-second",
+    "iid": 3,
+    "instance": "z-second@1:r",
+    "kind": "buy",
+    "lid": null,
+    "share": "0.5",
+    "status": "refused",
+    "symbol": "QQQ",
+    "tag": "",
+    "updated_at": 1791921303.0,
+    "usd": null,
+    "version": 1,
+    "why": "sizing (budget): refused: the shared loss budget has $-125.36 of room, $-626.83 of etf at weight 0.20"
+   },
+   {
+    "at": "open",
+    "bars_sha": "3a30fab6fb136a50e4f09955186d4b10dc96a7518d3f06ca36360afb2387192c",
+    "created_at": 1791837123.0,
+    "ctx_sha": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "decided_day": "2026-10-12",
+    "exec_day": "2026-10-13",
+    "family": "k-fourth",
+    "iid": 4,
+    "instance": "k-fourth@1:r",
+    "kind": "buy",
+    "lid": null,
+    "share": "0.5",
+    "status": "refused",
+    "symbol": "DIA",
+    "tag": "",
+    "updated_at": 1791898263.0,
+    "usd": null,
+    "version": 1,
+    "why": "sizing (budget): refused: the shared loss budget has $-125.36 of room, $-626.83 of etf at weight 0.20"
+   },
+   {
+    "at": "open",
+    "bars_sha": "cdf3f17b77d448a7d3a5d6a8c91b8dba63795ece455d4b7b219b7e01bc4d67f7",
+    "created_at": 1791923463.0,
+    "ctx_sha": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "decided_day": "2026-10-13",
+    "exec_day": "2026-10-14",
+    "family": "k-fourth",
+    "iid": 5,
+    "instance": "k-fourth@1:r",
+    "kind": "buy",
+    "lid": null,
+    "share": "0.5",
+    "status": "refused",
+    "symbol": "DIA",
+    "tag": "",
+    "updated_at": 1791984663.0,
+    "usd": null,
+    "version": 1,
+    "why": "sizing (budget): refused: the shared loss budget has $-13.51 of room, $-67.55 of etf at weight 0.20"
+   },
+   {
+    "at": "close",
+    "bars_sha": "3d0b0778c47514e2495595ef88a2d03e8d8ef56e7958ea018686ff3a3210e379",
+    "created_at": 1791923463.0,
+    "ctx_sha": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "decided_day": "2026-10-13",
+    "exec_day": "2026-10-14",
+    "family": "z-second",
+    "iid": 6,
+    "instance": "z-second@1:r",
+    "kind": "buy",
+    "lid": null,
+    "share": "0.5",
+    "status": "refused",
+    "symbol": "QQQ",
+    "tag": "",
+    "updated_at": 1792007703.0,
+    "usd": null,
+    "version": 1,
+    "why": "sizing (budget): refused: the shared loss budget has $-13.51 of room, $-67.55 of etf at weight 0.20"
+   },
+   {
+    "at": "open",
+    "bars_sha": null,
+    "created_at": 1791923463.0,
+    "ctx_sha": null,
+    "decided_day": "2026-10-13",
+    "exec_day": "2026-10-14",
+    "family": "m-first",
+    "iid": 7,
+    "instance": "m-first@1:r",
+    "kind": "house_exit",
+    "lid": 1,
+    "share": null,
+    "status": "done",
+    "symbol": "SPY",
+    "tag": "retired",
+    "updated_at": 1791984663.0,
+    "usd": null,
+    "version": 1,
+    "why": "the lot is sold"
+   },
+   {
+    "at": "open",
+    "bars_sha": "33c15b509c7518a89db25d66e26f6f8fb082de3ff147df4f742e2d57bd7e990c",
+    "created_at": 1792009863.0,
+    "ctx_sha": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "decided_day": "2026-10-14",
+    "exec_day": "2026-10-15",
+    "family": "k-fourth",
+    "iid": 8,
+    "instance": "k-fourth@1:r",
+    "kind": "buy",
+    "lid": null,
+    "share": "0.5",
+    "status": "planned",
+    "symbol": "DIA",
+    "tag": "",
+    "updated_at": 1792009863.0,
+    "usd": null,
+    "version": 1,
+    "why": ""
+   },
+   {
+    "at": "close",
+    "bars_sha": "f18c945831feee108f4181c24a908fc3dda2612d583b135eaefe76abc93b3346",
+    "created_at": 1792009863.0,
+    "ctx_sha": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "decided_day": "2026-10-14",
+    "exec_day": "2026-10-15",
+    "family": "z-second",
+    "iid": 9,
+    "instance": "z-second@1:r",
+    "kind": "buy",
+    "lid": null,
+    "share": "0.5",
+    "status": "planned",
+    "symbol": "QQQ",
+    "tag": "",
+    "updated_at": 1792009863.0,
+    "usd": null,
+    "version": 1,
+    "why": ""
+   }
+  ],
+  "eq_lots": [
+   {
+    "cash": "-0.195530400000",
+    "class": "etf",
+    "closed_at": 1791984663.0,
+    "div": "0",
+    "entry_at": "open",
+    "entry_notional": "556.683965200000",
+    "entry_px": "600.100000",
+    "exit_at": "open",
+    "exit_day": "2026-10-14",
+    "exit_px": "599.900000",
+    "family": "m-first",
+    "fees": "0.01",
+    "iid": 1,
+    "info": "{\"exit_notional\":\"556.498434800000\",\"exit_qty\":\"0.927652\"}",
+    "instance": "m-first@1:r",
+    "lane": "beta",
+    "lid": 1,
+    "mark": "604.5",
+    "marked_at": 1791923463.0,
+    "opened_at": 1791811863.0,
+    "opened_day": "2026-10-12",
+    "opened_qty": "0.927652",
+    "probe": 1,
+    "qty": "0",
+    "reason": "retired",
+    "status": "closed",
+    "symbol": "SPY",
+    "tag": "",
+    "version": 1
+   },
+   {
+    "cash": "-556.681814100000",
+    "class": "etf",
+    "closed_at": null,
+    "div": "0",
+    "entry_at": "close",
+    "entry_notional": "556.681814100000",
+    "entry_px": "500.100000",
+    "exit_at": null,
+    "exit_day": null,
+    "exit_px": null,
+    "family": "z-second",
+    "fees": "0",
+    "iid": 2,
+    "info": "{}",
+    "instance": "z-second@1:r",
+    "lane": "beta",
+    "lid": 2,
+    "mark": "504.75",
+    "marked_at": 1792009863.0,
+    "opened_at": 1791834903.0,
+    "opened_day": "2026-10-12",
+    "opened_qty": "1.113141",
+    "probe": 1,
+    "qty": "1.113141",
+    "reason": null,
+    "status": "open",
+    "symbol": "QQQ",
+    "tag": "",
+    "version": 1
+   },
+   {
+    "cash": "-301",
+    "class": "etf",
+    "closed_at": 1791835143.0,
+    "div": "0",
+    "entry_at": "close",
+    "entry_notional": "220",
+    "entry_px": "220",
+    "exit_at": "close",
+    "exit_day": "2026-10-12",
+    "exit_px": "219",
+    "family": "a-third",
+    "fees": "0",
+    "iid": null,
+    "info": "{\"fee_basis\":\"broker\",\"fees_day\":\"2026-10-12\",\"fees_estimate\":\"0\"}",
+    "instance": "a-third@1:r",
+    "lane": "beta",
+    "lid": 3,
+    "mark": null,
+    "marked_at": null,
+    "opened_at": 1791575763.0,
+    "opened_day": "2026-10-09",
+    "opened_qty": "1",
+    "probe": 1,
+    "qty": "0",
+    "reason": "program",
+    "status": "closed",
+    "symbol": "IWM",
+    "tag": "",
+    "version": 1
+   }
+  ],
+  "eq_orders": [
+   {
+    "answer": [
+     "at",
+     "filled_at",
+     "final",
+     "reject_reason",
+     "status",
+     "submitted_at",
+     "tick"
+    ],
+    "at": "open",
+    "attempts": 1,
+    "avg_px": "600.10",
+    "class": "etf",
+    "collar_bp": 10,
+    "day": "2026-10-12",
+    "eid": 1,
+    "family": "m-first",
+    "fees_est": "0",
+    "filled_qty": "0.927652",
+    "iid": 1,
+    "instance": "m-first@1:r",
+    "lid": 1,
+    "limit_px": "600.71",
+    "placed_at": 1791811863.0,
+    "probe": 1,
+    "qty": "0.927652",
+    "replaces": null,
+    "side": "buy",
+    "status": "filled",
+    "symbol": "SPY",
+    "updated_at": 1791811863.0,
+    "why": "entry (intent: 0.927652 SPY at 600.71: the intent's $557.25)"
+   },
+   {
+    "answer": [
+     "at",
+     "filled_at",
+     "final",
+     "reject_reason",
+     "status",
+     "submitted_at",
+     "tick"
+    ],
+    "at": "close",
+    "attempts": 1,
+    "avg_px": "500.10",
+    "class": "etf",
+    "collar_bp": 10,
+    "day": "2026-10-12",
+    "eid": 2,
+    "family": "z-second",
+    "fees_est": "0",
+    "filled_qty": "1.113141",
+    "iid": 2,
+    "instance": "z-second@1:r",
+    "lid": 2,
+    "limit_px": "500.61",
+    "placed_at": 1791834903.0,
+    "probe": 1,
+    "qty": "1.113141",
+    "replaces": null,
+    "side": "buy",
+    "status": "filled",
+    "symbol": "QQQ",
+    "updated_at": 1791834903.0,
+    "why": "entry (intent: 1.113141 QQQ at 500.61: the intent's $557.25)"
+   },
+   {
+    "answer": [
+     "at",
+     "filled_at",
+     "final",
+     "reject_reason",
+     "status",
+     "submitted_at",
+     "tick"
+    ],
+    "at": "open",
+    "attempts": 1,
+    "avg_px": "599.90",
+    "class": "etf",
+    "collar_bp": 10,
+    "day": "2026-10-14",
+    "eid": 3,
+    "family": "m-first",
+    "fees_est": "0.02",
+    "filled_qty": "0.927652",
+    "iid": 7,
+    "instance": "m-first@1:r",
+    "lid": 1,
+    "limit_px": "599.30",
+    "placed_at": 1791984663.0,
+    "probe": 1,
+    "qty": "0.927652",
+    "replaces": null,
+    "side": "sell",
+    "status": "filled",
+    "symbol": "SPY",
+    "updated_at": 1791984663.0,
+    "why": "exit (retired)"
+   }
+  ]
+ },
+ "ticks": [
+  {
+   "at": "14:00",
+   "day": "2026-10-11",
+   "out": {
+    "decided": [
+     "a-third@1:r: 0",
+     "m-first@1:r: 1",
+     "z-second@1:r: 1"
+    ],
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "a-third:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "14:01",
+   "day": "2026-10-11",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "a-third:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "14:02",
+   "day": "2026-10-11",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "a-third:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "09:26",
+   "day": "2026-10-12",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "a-third:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "09:31",
+   "day": "2026-10-12",
+   "out": {
+    "entries": 2,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "a-third:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "09:33",
+   "day": "2026-10-12",
+   "out": {
+    "entries": 2,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "a-third:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "12:00",
+   "day": "2026-10-12",
+   "out": {
+    "entries": 1,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "a-third:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "15:55",
+   "day": "2026-10-12",
+   "out": {
+    "entries": 1,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "a-third:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "15:58",
+   "day": "2026-10-12",
+   "out": {
+    "entries": 1,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "a-third:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:21",
+   "day": "2026-10-12",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "k-fourth:candidate",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:31",
+   "day": "2026-10-12",
+   "out": {
+    "decided": [
+     "m-first@1:r: 0",
+     "z-second@1:r: 1"
+    ],
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "k-fourth:candidate",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:32",
+   "day": "2026-10-12",
+   "out": {
+    "decided": [
+     "k-fourth@1:r: 1"
+    ],
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "k-fourth:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:33",
+   "day": "2026-10-12",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "k-fourth:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "09:26",
+   "day": "2026-10-13",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "k-fourth:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "09:31",
+   "day": "2026-10-13",
+   "out": {
+    "entries": 2,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "k-fourth:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "09:33",
+   "day": "2026-10-13",
+   "out": {
+    "entries": 1,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "k-fourth:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "12:00",
+   "day": "2026-10-13",
+   "out": {
+    "entries": 1,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "k-fourth:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "15:55",
+   "day": "2026-10-13",
+   "out": {
+    "entries": 1,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "k-fourth:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "15:58",
+   "day": "2026-10-13",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "k-fourth:probe",
+    "m-first:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:21",
+   "day": "2026-10-13",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:31",
+   "day": "2026-10-13",
+   "out": {
+    "decided": [
+     "b-fifth@1:r: 0",
+     "k-fourth@1:r: 1",
+     "z-second@1:r: 1"
+    ],
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:32",
+   "day": "2026-10-13",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:33",
+   "day": "2026-10-13",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "09:26",
+   "day": "2026-10-14",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "09:31",
+   "day": "2026-10-14",
+   "out": {
+    "entries": 2,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "09:33",
+   "day": "2026-10-14",
+   "out": {
+    "entries": 1,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "12:00",
+   "day": "2026-10-14",
+   "out": {
+    "entries": 1,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "15:55",
+   "day": "2026-10-14",
+   "out": {
+    "entries": 1,
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "15:58",
+   "day": "2026-10-14",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:21",
+   "day": "2026-10-14",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:31",
+   "day": "2026-10-14",
+   "out": {
+    "decided": [
+     "b-fifth@1:r: 0",
+     "k-fourth@1:r: 1",
+     "z-second@1:r: 1"
+    ],
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:32",
+   "day": "2026-10-14",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  },
+  {
+   "at": "16:33",
+   "day": "2026-10-14",
+   "out": {
+    "frozen": null,
+    "working": 0
+   },
+   "rows": [
+    "b-fifth:probe",
+    "k-fourth:probe",
+    "z-second:probe"
+   ]
+  }
+ ]
+}

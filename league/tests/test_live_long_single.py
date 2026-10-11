@@ -84,17 +84,17 @@ class TheDeclaredType(unittest.TestCase):
 
     def test_the_money_table_and_its_digest_are_unchanged(self):
         from league.equity import config
-        from league.tests.equity_design import DIGESTS, in_force, reference
+        from league.tests.equity_design import DIGESTS, e1, in_force
 
-        def e1() -> dict:
+        def narrow() -> dict:       # E1's universe put back (release E4's list grows around it and is a row of its own)
             out = copy.deepcopy(CONSTITUTION)
             out["equity_money"]["universe"] = {klass: [s for s, k in config.UNIVERSE.items() if k == klass]
                                                for klass in config.CLASSES}
             return out
 
-        with reference():
-            self.assertEqual(money_digest(e1()), MONEY_DIGEST)
-        self.assertEqual(money_digest(e1()), DIGESTS[in_force()][0])
+        with e1():      # A20's design as E1 deployed it: before the seat rule's block (release E5-A)
+            self.assertEqual(money_digest(narrow()), MONEY_DIGEST)
+        self.assertEqual(money_digest(narrow()), DIGESTS[in_force()][0])
         self.assertEqual(CONSTITUTION["options_money"]["real_types"], ["debit_vertical", "long_butterfly", "long_call", "long_put"])
         self.assertEqual(M.Table.from_constitution().real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put"))
         self.assertTrue(digest())

@@ -249,7 +249,9 @@ class TheGrantReRatifies(StandingCase):
     THESE ARE E1's DIGESTS, at A20's design (three seats at 0.50): every test here runs with the two rows at that
     design (`setUp`: `reference`), whatever pair release E5-S's `set_design` has put in force. A MOVE OF THE PAIR is a
     digest of its own, ratified the same way and by the owner's deploy alone (`test_a_design_move_...`), and the move
-    back to A20's design lands on E1's digest exactly."""
+    back to A20's design lands on E1's digest exactly. SINCE RELEASE E5-A the table also carries the seat rule's
+    block (`equity_money.probe.seat`), a money rule of its own digest: E1's digests are read with that block left out
+    (`equity_design.e1`), and the block's own move, and its rollback row, are held in league/tests/test_equity_seats.py."""
 
     BEFORE = "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7"
     E1 = "7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a"
@@ -257,10 +259,10 @@ class TheGrantReRatifies(StandingCase):
     QUARTER = "3a7c52d58911d0c1a39f58cbe79547e343683a18004355b52a9390c8aec04fd2"
 
     def setUp(self):
-        from league.tests.equity_design import reference
+        from league.tests.equity_design import e1
 
         super().setUp()
-        at_a20 = reference()
+        at_a20 = e1()
         at_a20.__enter__()
         self.addCleanup(at_a20.__exit__, None, None, None)
         # These digests are release E1's: read with E1's universe (release E4's is a digest of its own, below).
@@ -334,8 +336,11 @@ class TheGrantReRatifies(StandingCase):
         """Release E5-S: the seats and the sleeve move together (`set_design SEATS SLEEVE`), each pair of the grid a
         money digest of its own (league/tests/equity_design.py `DIGESTS`). A grant ratified on E1's digest holds
         nothing under any other pair until the owner's deploy of that release re-ratifies it; the updater alone
-        never does; and `set_design 3 0.50` is E1's digest again, on which the grant is ratified as before."""
-        from league.tests.equity_design import CANDIDATES, DIGESTS, REFERENCE, design
+        never does; and `set_design 3 0.50` is E1's digest again, on which the grant is ratified as before. (Read on
+        the table before the seat rule's block, as every test of this class: the pins are release E5-S's,
+        `DIGESTS_E5S`. With the block, each pair is on its own pin of `DIGESTS`: league/tests/test_constitution.py.)"""
+        from league.tests.equity_design import CANDIDATES, REFERENCE, design
+        from league.tests.equity_design import DIGESTS_E5S as DIGESTS
 
         grant = self.pinned_before()
         self.standing(grant, release="r-e1", rows=owner_deploy(self.clock() - 60, release="r-e1"))

@@ -409,6 +409,100 @@ def mirror(book: Book, instance: str, run, decided: list[tuple[str, list, set[in
             record(book, instance, day, intents, held, needs, lots, base=base)
 
 
+def live_path(book: Book, instance: str, program, bars, *, base: int = 100, drop=frozenset(), missed_buys=frozenset(),
+              missed_exits=frozenset(), money=None) -> dict:
+    """THE LIVE BOOK OF AN INSTANCE THAT IS ITS OWN DECISIONS' DOING (what `mirror` is not, once a decide is skipped:
+    it writes the twin run's lots whatever the book decided). E1's engine account is run in this process on `bars`,
+    the registered program deciding at every close as the live child does, with what a live session can do to it:
+    - `drop`: decision days whose decide recorded no intent of the program (the House's own exit rules still plan);
+    - `missed_buys`: sessions whose entries the windows missed (the intents stay recorded; nothing is bought);
+    - `missed_exits`: sessions whose exits the windows missed: each is carried to the next session's open as the
+      House's exit, as league/equity/live.py `_carry` writes it (kind "house_exit", the first intent's decision day).
+    The book's rows are written as league/equity/live.py writes them: `eq_intents` with `exec_day`, the buy's `share`
+    or `usd`, its `tag`, and its `lid` once it filled; a "house_exit" row for each exit of the House's; `eq_lots` with
+    the `iid` of the buy that opened it (ids `base` + the account's). `money(lot)`: more columns of a lot's row.
+    {"lots": [the lots as the engine's result holds them], "days": the bars' days}."""
+    from league.equity.program import load_program
+
+    loaded = load_program(program.code, name=program.key, params=program.params)
+    acct = engine._Account(loaded, bars, engine.EngineConfig())
+    days = [(dt.date(1970, 1, 1) + dt.timedelta(days=int(d))).isoformat() for d in bars.days]
+    family = instance.split("@")[0]
+    first, n = int(bars.first), int(bars.n)
+    waiting: list[dict] = []        # the buy rows of the last decision, until their session
+    bought: dict[int, int] = {}     # the account's lot id -> the iid of the buy that opened it
+    planned: set[tuple[int, str]] = set()
+
+    def row(kind: str, decided: str, exec_day: str, *, at_: str = "open", symbol=None, lid=None, share=None, usd=None,
+            tag: str = "", status: str = "planned") -> int:
+        book.iid += 1
+        book.db.execute("INSERT INTO eq_intents(iid, instance, family, version, decided_day, exec_day, at, kind, symbol, "
+                        "lid, share, usd, tag, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (book.iid, instance, family, 1, decided, exec_day, at_, kind, symbol, lid,
+                         None if share is None else str(share), None if usd is None else str(usd), tag, status, 0.0, 0.0))
+        return book.iid
+
+    def leaves(lid: int, reason: str, decided: str, exec_day: str) -> None:
+        if (lid, exec_day) not in planned:
+            planned.add((lid, exec_day))
+            row("house_exit", decided, exec_day, symbol=acct.lots[lid].symbol, lid=base + lid, tag=reason)
+
+    for j in range(max(first - 1, 0), n):
+        day = days[j]
+        if j >= first:
+            carried: dict[int, str] = {}
+            if day in missed_buys:
+                acct.pending = [i for i in acct.pending if "buy" not in i]
+            if day in missed_exits:
+                carried = {int(i["sell"]): "program" for i in acct.pending if "sell" in i and int(i["sell"]) in acct.lots}
+                carried.update({lid: reason for lid, reason in acct.house.items() if lid in acct.lots
+                                and lid not in carried})
+                acct.pending, acct.house = [i for i in acct.pending if "sell" not in i], {}
+            before = set(acct.lots)
+            acct.session(j)
+            acct.mark_close(j)
+            for lid in sorted(set(acct.lots) - before):
+                lot = acct.lots[lid]
+                buy = next((b for b in waiting if b["symbol"] == lot.symbol and b["at"] == lot.entry_at
+                            and "lid" not in b), None)
+                if buy is not None:
+                    buy["lid"], bought[lid] = lid, buy["iid"]
+                    book.db.execute("UPDATE eq_intents SET lid=?, status='done' WHERE iid=?", (base + lid, buy["iid"]))
+            waiting = []
+            for lid, reason in carried.items():
+                if lid in acct.lots and j < n - 1:
+                    acct.house[lid] = reason
+                    leaves(lid, reason, days[j - 1], days[j + 1])
+        if j < n - 1:
+            acct.decide(j)
+            if day in drop:
+                acct.pending = []
+            nxt = days[j + 1]
+            for intent in acct.pending:
+                if "buy" in intent:
+                    iid = row("buy", day, nxt, at_=intent["at"], symbol=intent["buy"], share=intent.get("share"),
+                              usd=intent.get("usd"), tag=intent.get("tag") or "",
+                              status="planned" if intent["buy"] in acct.needs.symbols else "refused")
+                    waiting.append({"iid": iid, "symbol": intent["buy"], "at": intent["at"]})
+                elif "sell" in intent:
+                    held = acct.lots.get(int(intent["sell"]))
+                    row("sell", day, nxt, at_=intent["at"], symbol=held.symbol if held else None,
+                        lid=base + held.lid if held else None, tag=intent.get("tag") or "",
+                        status="planned" if held else "refused")
+                else:
+                    row("cancel", day, nxt, status="refused")
+            for lid, reason in acct.house.items():
+                if lid in acct.lots:
+                    leaves(lid, reason, day, nxt)
+    lots = [engine._lot(acct, lot) for lot in sorted([*acct.closed, *acct.lots.values()], key=lambda lot: lot.lid)]
+    for lot in lots:
+        lid = int(lot["lid"])
+        book.lot(base + lid, instance, lot["symbol"], lot["entry_day"], lot["entry_at"], exit_day=lot["exit_day"],
+                 exit_at=lot["exit_at"], iid=bought.get(lid), **(money(lot) if money is not None else {}))
+    book.db.commit()
+    return {"lots": lots, "days": days}
+
+
 class WithAStore(unittest.TestCase):
     """A synthetic gated store through `STORE_END` (built once a class), a forward store in memory, the fakes in."""
 
@@ -1088,7 +1182,12 @@ class TheTwins(WithAStore):
         self.assertEqual(json.loads(rows[D4]["shadow_keys"]), ["B|SPY|close"])
         self.assertEqual((rows[D4]["live_keys"], rows[D4]["agree"], rows[D4]["cause"]), ("[]", 0, "unknown"),
                          "a decide that failed left no intent: counted, its cause not known")
-        self.assertEqual(sum(1 for r in rows.values() if r["agree"] == 0), 1)
+        # Against the twin run itself that is the one session that differs, as before A29 (`base_agree`). The
+        # fixture's book then sells a lot no decision of its own bought (`mirror` writes the run's lots whatever
+        # decide it skips), so the twin re-based on that book differs once more, and agrees from there
+        # (league/tests/test_forward_rebase.py holds the rule on books that are their own decisions' doing).
+        self.assertEqual([r["day"] for r in rows.values() if r["base_agree"] == 0], [D4])
+        self.assertEqual([r["day"] for r in rows.values() if r["agree"] == 0], [D4, "2026-10-16"])
 
     def test_a_state_losing_program_disagrees_after_a_reload(self):
         # A deploy reloads the live child at the fifth decision: its clock starts again, the twin's goes on.
@@ -1284,8 +1383,8 @@ class TheLiveSide(WithAStore):
         db.commit()
         db.close()
         self.assertEqual(forward_twins.live_intents(old, self.iid, needs=("SPY",)), {})
-        self.assertEqual(forward_twins.read_book(old), {"instances": [], "lots": {}, "intents": {}, "decision_day": None,
-                                                        "since": {}})
+        self.assertEqual(forward_twins.read_book(old), {"instances": [], "lots": {}, "intents": {}, "exits": {},
+                                                        "decision_day": None, "since": {}})
         self.assertIsNone(forward_twins.live_bars(old, self.iid, D1, needs={"symbols": ["SPY"], "history": 1}))
 
     def test_the_book_as_the_night_reads_it(self):
@@ -1750,7 +1849,7 @@ class TheSeals(WithAStore):
         self.assertNotIn("DELETE ", source)
         kinds = {k for k, package in forward_db.EVENT_KINDS.items() if package == "D"}
         self.assertEqual(kinds, {"no_minute", "twin_unregistered", "twin_sha_mismatch", "twin_interrupted", "live_bars",
-                                 "twin_retired", "twin_revived"})
+                                 "twin_retired", "twin_revived", "twin_rebased"})
         for kind in kinds:
             self.assertIn(f'"{kind}"', source, kind)
             self.assertIn(kind, forward_db.ONCE_KINDS)

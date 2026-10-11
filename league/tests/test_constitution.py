@@ -154,18 +154,26 @@ class ConstitutionTest(unittest.TestCase):
         is A20's design's (three seats at 0.50), read here with the two rows at that design (`reference`) whatever
         pair is in force, so `set_design 3 0.50` is shown to bring E1's digests back to the last hex; the pair in
         force is one of the pre-registered grid's, and its own digests are the grid's pins
-        (league/tests/equity_design.py `DIGESTS`), `PINNED_DIGEST` among them. No other row may move with it."""
+        (league/tests/equity_design.py `DIGESTS`), `PINNED_DIGEST` among them. No other row may move with it.
+
+        SINCE RELEASE E5-A THE TABLE CARRIES THE SEAT RULE'S BLOCK (`equity_money.probe.seat`, the captain's A24), a
+        money rule like every other row: it moved every pair's digests once, by itself. So each pair WITH THE BLOCK
+        LEFT OUT is still on release E5-S's pin (`DIGESTS_E5S`), and E1's own digests are read at A20's design with
+        the block left out (`e1`). The rollback of the pair, `set_design 3 0.50`, lands on the reference's pin of
+        `DIGESTS` (the block stays); the rollback of the rule is the block's own row, "first-come"."""
         import copy
 
         from league.constitution import RISK_FREE, money_digest
         from league.equity import config
-        from league.tests.equity_design import CANDIDATES, DIGESTS, REFERENCE, constitution_at, in_force, reference
+        from league.tests.equity_design import (CANDIDATES, DIGESTS, DIGESTS_E5S, REFERENCE, constitution_at, e1,
+                                                in_force, without_seat)
 
         # RELEASE E4's UNIVERSE (R-E4b; scripts/gen_universe.py) grows `equity_money.universe.stock` around E1's 18 names
         # and moves both digests of every pair again, AND NOTHING ELSE MOVES WITH IT: every pinned figure below is read
         # on the constitution with E1's universe put back (`league.equity.config.UNIVERSE`, which E4 never changes), so
         # it holds before the universe deploy and after it, and a row that moved with the list would fail them.
-        def e1(constitution: dict | None = None) -> dict:
+        # (`narrow` is that copy; `e1` is the design module's: A20's design with the seat rule's block left out.)
+        def narrow(constitution: dict | None = None) -> dict:
             out = copy.deepcopy(CONSTITUTION if constitution is None else constitution)
             out["equity_money"]["universe"] = {klass: [s for s, k in config.UNIVERSE.items() if k == klass]
                                                for klass in config.CLASSES}
@@ -173,40 +181,45 @@ class ConstitutionTest(unittest.TestCase):
 
         pair = in_force()
         self.assertIn(pair, CANDIDATES, "the seats and the sleeve in force are one of the grid's pairs")
-        self.assertEqual((money_digest(e1()), digest(e1())), DIGESTS[pair], "the pair in force is on its pinned digests")
+        self.assertEqual((money_digest(narrow()), digest(narrow())), DIGESTS[pair], "the pair in force is on its pinned digests")
         self.assertEqual(digest(), PINNED_DIGEST)
-        if CONSTITUTION["equity_money"]["universe"] != e1()["equity_money"]["universe"]:
-            self.assertNotEqual(money_digest(), money_digest(e1()), "the universe is a money rule: the grant re-ratifies")
+        if CONSTITUTION["equity_money"]["universe"] != narrow()["equity_money"]["universe"]:
+            self.assertNotEqual(money_digest(), money_digest(narrow()), "the universe is a money rule: the grant re-ratifies")
         else:
             self.assertEqual((money_digest(), PINNED_DIGEST), DIGESTS[pair], "the pair in force is on its pinned digests")
         for candidate in CANDIDATES:
-            at = e1(constitution_at(*candidate))
+            at = narrow(constitution_at(*candidate))
             self.assertEqual((money_digest(at), digest(at)), DIGESTS[candidate], candidate)
+            bare = without_seat(at)
+            self.assertEqual((money_digest(bare), digest(bare)), DIGESTS_E5S[candidate],
+                             f"{candidate}: the seat rule's block alone moved the pair's digests")
         self.assertEqual(len({money for money, _ in DIGESTS.values()}), len(CANDIDATES), "every pair is a digest of its own")
-        self.assertEqual(DIGESTS[REFERENCE], ("7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a",
-                                              "e909eb1040231bc078e878df2d87fad7a1001d86ab3eac32be5f45f2b82c1895"),
-                         "the rollback is E1's pair, exactly")
-        with reference():
-            self.assertEqual(money_digest(e1()), "7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a")
-            self.assertEqual(digest(e1()), "e909eb1040231bc078e878df2d87fad7a1001d86ab3eac32be5f45f2b82c1895")
+        self.assertEqual(set(DIGESTS.values()) & set(DIGESTS_E5S.values()), set(), "every pin moved with the block")
+        self.assertEqual(DIGESTS_E5S[REFERENCE], ("7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a",
+                                                  "e909eb1040231bc078e878df2d87fad7a1001d86ab3eac32be5f45f2b82c1895"),
+                         "A20's design before the seat rule's block is E1's pair, exactly")
+        with e1():
+            self.assertEqual(money_digest(narrow()), "7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a")
+            self.assertEqual(digest(narrow()), "e909eb1040231bc078e878df2d87fad7a1001d86ab3eac32be5f45f2b82c1895")
             before = copy.deepcopy(CONSTITUTION)
             del before["equity_money"]
             self.assertEqual(money_digest(before), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
-            off = e1()
+            off = narrow()
             off["equity_money"]["enabled"] = False
             self.assertEqual(money_digest(off), "23f17a1467610f8d252b55c6d6748f8fb1311a0142e3f92c43d4bff710886579")
             # A20's rollback: the sleeve back at a quarter of E, the sizing-up step still parked, is a pair of its own...
-            quarter = e1()
+            quarter = narrow()
             quarter["equity_money"]["probe"]["sleeve_share"] = "0.25"
             self.assertEqual(money_digest(quarter), "3a7c52d58911d0c1a39f58cbe79547e343683a18004355b52a9390c8aec04fd2")
             self.assertEqual(digest(quarter), "6d19fddd271cc46682e48e09ae14364976b76077ca084198874f47dbf4340b43")
-            self.assertEqual((money_digest(quarter), digest(quarter)), DIGESTS[(3, "0.25")], "the grid's own pair")
+            self.assertEqual((money_digest(quarter), digest(quarter)), DIGESTS_E5S[(3, "0.25")],
+                             "the grid's own pair, before the seat rule's block")
             # ...and with the rule's own 20 closes back too it is the pair the branch carried before A20, and nothing else.
             quarter["equity_money"]["sized"]["min_trades"] = 20
             self.assertEqual(money_digest(quarter), "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367")
             self.assertEqual(digest(quarter), "65b0e025a08d4c3a8f78e487eb1a0f83ad9bfed307563c02acbd50ac4a6308bb")
             # The row alone (the sleeve at 0.50, sizing up as pre-registered) is the digest of the commit before the park.
-            unparked = e1()
+            unparked = narrow()
             unparked["equity_money"]["sized"]["min_trades"] = 20
             self.assertEqual(money_digest(unparked), "d8c96f66d556c2123b9e797c901075f43af34ad182de3b965fceeca0a7c97f14")
         self.assertFalse(any(path[0] == "equity_money" for path in RISK_FREE))
@@ -227,7 +240,9 @@ class ConstitutionTest(unittest.TestCase):
         em = CONSTITUTION["equity_money"]
         self.assertIs(em["enabled"], True)
         self.assertEqual((em["invested_share"], em["cash_reserve_usd"]), ("1.00", "50"))
-        self.assertEqual(em["probe"], {"sleeve_share": sleeve, "max_programs": seats, "min_order_usd": "10"})
+        self.assertEqual(em["probe"], {"sleeve_share": sleeve, "max_programs": seats, "min_order_usd": "10",
+                                       # THE SEAT RULE (release E5-A, the captain's A24): its three rows, as registered.
+                                       "seat": {"rule": "activity-1-free", "k_floor": "0.25", "idle_sessions": 10}})
         self.assertEqual(em["position_share"], {"etf": "0.50", "stock": "0.20"})
         self.assertEqual(em["open_risk_weight"], {"etf": "0.20", "stock": "0.40"})
         self.assertEqual(em["sized"]["sleeve_share"], "0.50", "left as pre-registered at every design: never under the Probe's")

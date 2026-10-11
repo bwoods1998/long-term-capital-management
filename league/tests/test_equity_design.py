@@ -329,8 +329,22 @@ class TheDeploy(RealMoney):
                 "since": {k: v for k, v in (h.state.get("eq_band_since") or {}).items() if k in ids}}
 
     def test_seats_three_to_n_seats_the_waiting_candidate_first_come_and_nothing_else_moves(self):
+        """UNDER BOTH VALUES OF THE SEAT RULE (release E5-A): "first-come" is this test as release E5-S wrote it (a
+        waiting Candidate has no row; the earlier pass is seated first). Under "activity-1-free" the book reads the
+        waiting Candidates too (they have rows and no instance) and seats by rank; neither of these two has the
+        rule's two counts, so they rank by the earlier pass and the same one is seated."""
+        from league.equity import bands as EB
+
+        for rule in EB.SEAT_RULES:
+            with X.seat_rule(rule):
+                self.seats_three_to_n(rule)
+
+    def seats_three_to_n(self, rule: str):
+        from league.equity import bands as EB
+
+        first_come = rule == EB.FIRST_COME
         for seats in (4, 5, 6):
-            with self.subTest(seats=seats):
+            with self.subTest(seats=seats, rule=rule):
                 root = self.fresh()
                 self.store = self.swarm(root)
                 # BEFORE: three seats, all held. The House's first minute makes the three instances and asks them for
@@ -347,8 +361,15 @@ class TheDeploy(RealMoney):
                 h.decider.plans[key["z-early"]] = [{"buy": "DIA", "share": 0.5, "at": "close"}]
                 h.tick(14, 0, day=SUNDAY)
                 h.tick(14, 1, day=SUNDAY)
-                self.assertEqual(sorted(r["family"] for r in h.families.read()), ["p1", "p2", "p3"],
-                                 "three seats: a waiting Candidate has no row")
+                if first_come:
+                    self.assertEqual(sorted(r["family"] for r in h.families.read()), ["p1", "p2", "p3"],
+                                     "three seats: a waiting Candidate has no row")
+                else:
+                    self.assertEqual(sorted((r["family"], r["band"]) for r in h.families.read()
+                                            if r["band"] == "candidate"), [("a-late", "candidate"), ("z-early", "candidate")],
+                                     "the book ranks the waiting itself: they have rows, and no instance (below)")
+                    self.assertEqual([w["family"] for w in h.book.seats()["waiting"]], ["z-early", "a-late"],
+                                     "the book's plan: the earlier pass first (neither has the rule's counts)")
                 self.assertEqual(bands.roster(root, lanes=LANES)["waiting"], ["a-late", "z-early"])
                 self.assertEqual(sorted(i.id for i in h.book._instances(alive=True)),
                                  sorted(key[f] for f in ("p1", "p2", "p3")))
@@ -362,7 +383,8 @@ class TheDeploy(RealMoney):
                 self.redeploy(h, seats, "0.50")
                 out = h.tick(15, 0, day=SUNDAY)                     # the first band sync on the release: the seating pass
                 seated = ["z-early"] if seats == 4 else ["a-late", "z-early"]
-                self.assertEqual(sorted(r["family"] for r in h.families.read()), sorted(["p1", "p2", "p3", *seated]))
+                self.assertEqual(sorted(r["family"] for r in h.families.read() if first_come or r["band"] != "candidate"),
+                                 sorted(["p1", "p2", "p3", *seated]))
                 for family in ("z-early", "a-late"):
                     inst = h.book._instance(key[family])
                     if family in seated:

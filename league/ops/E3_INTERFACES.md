@@ -560,7 +560,95 @@ rows' `first_attempted_at` and `attempts`. **Names added:** `elane_memory.HIDDEN
   are partial; FW2 goes on naming it. **Names added:** `forward_report._behind`. No table, column, event kind,
   setting or receipt key changed.
 
-## 13. Release E4's package J on this record (Oct 11, 2026; additive: no signature, column or event kind changed)
+## 13. Release E3.1: two rules registered before the first real share order (the captain's A28 and A29, Oct 11, 2026)
+
+Both come from the rehearsal of the first real-money session, and both were registered (20:13Z Oct 11, 2026) before
+any real share order or twin row existed.
+
+**A28, AN EXIT'S WAIT FOR THE PRACTICE PROOF HAS AN END** (the EquityBook's rule, not this record's: league/equity/
+live.py `_work_exit`, `_sell_proof`, `_sell_unproven`; league/equity/INTERFACES.md; it is here because the forward
+record measures what it prevents). Every real sale waited for the stock paper proof's SELL stage with no end: if the
+practice sale could not be witnessed, real lots stayed held for days (a program's sale, the maximum-hold exit, the
+owner's flatten) and new buys stopped. THE RULE: the wait ends at the open window's entry cut-off
+(`schedule.Moments.entry_until`, the open + 900 s); after it every exit goes through the normal path, with one
+error alert a session saying the sale path is unproven. UNCHANGED: stage BUY gates every real buy with no end; a
+failed SELL stage stops new buys; the minimum hold, the kill switch and the stops. **Why:** an exit must never be
+blocked; a proof exists to stop new risk, not to trap old risk. **The cost, as the captain stated it:** a real sale
+can go through a path the practice account did not prove that day. For this record: a sale held past its session
+left the live lot where its twin was flat, and every session after it differed.
+
+**A29, THE TWIN IS RE-BASED AFTER A DIFFERENCE, SO A MISS COUNTS ONCE.** It amends how D12's intent agreement is
+COMPUTED. A14's bounds (`forward_db.A14_AGREE` 0.95, `A14_GAP_BP` 15), the keys (`keys_of`), what a row's registered
+columns hold and the pooling (`a14_reading`'s rule) do not move: on a path with no difference the rows are byte for
+byte the rows of the release before (`league/tests/test_forward_rebase.py` pins their sha256, taken on that
+release's tree), and a differing session's own row is that release's row too.
+
+- **The rule.** A session whose keys differ is written as differing, as registered (whatever its cause). THEN the
+  twin's book is set to the live book as it stands after that session, and the sessions after it are compared from
+  the same state. A re-based twin that differs again counts again and is re-based again. **Why:** the registered
+  twin never misses a fill, so ONE missed buy of a program that buys only when flat left the live book a session
+  behind it for good (about half its sessions differing from then on), and one such program failed the pooled bound
+  for every program at the checkpoint: one execution failure counted many times. **The cost, as the captain stated
+  it:** a program can run for weeks on other days than its unconditional replay and still read consistent after the
+  one counted difference; the un-re-based figures beside it say so.
+- **The live book after session d** (`forward_twins.live_seed(book, instance, after)`, from `read_book`'s rows of
+  live.sqlite; read-only; no status and no column the book rewrites later): `lots` = the instance's `eq_lots` rows
+  with `opened_day` <= d and no `exit_day` at or before d, each with the `size` its own buy asked (the `eq_intents`
+  row whose `lid` is the lot's, else the lot's `iid`: `share` or `usd`; None when no buy of the book names it);
+  `buys` and `sells` = its `eq_intents` rows of kind "buy" and "sell" with `decided_day` = d and `exec_day` =
+  `next_session(d)` (a buy with no size and a sell of a lot not held are left out, as the Gym never executes them);
+  `exits` = its kind "house_exit" rows with `exec_day` = `next_session(d)` and `decided_day` <= d. `read_book` reads
+  them in its one pass: `eq_lots.iid`, `tag`; `eq_intents.exec_day`, `share`, `usd`, `tag`; and `exits` {instance:
+  its "house_exit" rows}.
+- **The re-based twin** (`forward_twins.RebasedTwin(decider, run)`; `rebase(seed) -> {"held", "unheld"}`,
+  `step(day) -> (keys, bars hash) | None`, `close()`). It is E1's own engine account (`league.equity.engine._Account`
+  on the twin run's bars, capital and half-spread multiple: nothing of the engine is re-implemented in ops, and no
+  equity evidence module is edited). (1) Each seeded lot is bought by the engine in its own entry session, at its
+  fill point, for the size its buy asked, and carried to d's close through the engine's sessions (corporate actions
+  and marks; no decide, no exit rule): the replay's lot on the Gym sleeve, so no dollar of the live account enters
+  it. (2) The planned intents are the account's own for `next_session(d)`: the program's buys and sells, the House's
+  exits (a reason other than "program" or "max_hold" reads "house", as the book's `_ctx_reason`), and the engine's
+  maximum-hold rule on the seeded lots. (3) From then on the account runs as `engine.run` does. The engine's runner
+  is the `RebasedTwin` itself: each decide is asked of the night's decider child on `ctx.inputs_from_bars` of the
+  account's own state (no program text runs in the job's process). ONLY THE BOOK IS SET: one instance of the program
+  (key `REBASED_KEY` + the registry key), loaded once and asked every session in order: the un-re-based run's own
+  decisions through the first differing session, the account's after it. NEVER A SILENT RELOAD (`_answer`, the
+  check `_twin` makes: `TwinInterrupted`). A lot the Gym cannot hold as the live book does (no size, no official
+  price, sized to nothing, outside NEEDS or the bars) is `unheld` and not held.
+- **The night** (`finish`, per run of an instance): the un-re-based twin run and its decides are made whole, as
+  before. Sessions are then read in day order. A differing session re-bases the twin for the next one when that
+  one is not written yet, or when the re-base is on record (its event), so a later night makes the same twin. ROWS
+  FROM BEFORE THIS RELEASE: the latest stored differing session re-bases the twin for the sessions not yet written
+  (the twin goes through the stored sessions after it in order); an earlier one, whose next session was written
+  against the un-re-based twin, re-based nothing then and re-bases nothing now. What is gathered is written before each re-base (one transaction
+  a stretch, the night's `fwd_part` row with the first), so a re-base that cannot be made tonight (`twin_interrupted`,
+  as before) never costs the rows before it. A retired session re-bases nothing. THE SPLIT RULE stands for sessions
+  compared with the twin run; a session compared with a re-based twin is read (its inputs hold a lot's quantity as
+  it was at each close). `fwd_part` is read against the un-re-based twin run, as before.
+- **The store** (`forward_db`): `fwd_twins` gains `rebased INTEGER` (the instance's re-bases before that session,
+  counted from its `twin_rebased` events; 0 for the twin as registered) and `base_agree INTEGER` (1 | 0 | NULL: the
+  same session against the UN-RE-BASED twin run; NULL when that comparison is unreadable). `ADDED_COLUMNS` lists
+  them and `_migrate` (in a writable `open_db`) adds each to a store made before it with `ALTER TABLE ... ADD
+  COLUMN`: the declaration changes, no row is rewritten, the append-only triggers stand; an older row reads NULL
+  there (`rebased` NULL is 0, and its un-re-based answer is its `agree`). `has_column(db, table, column)` is the
+  reader's question on a store nobody has opened for writing yet (`a14_reading` and the report ask it and read
+  NULL). Event kind `twin_rebased` (D; in `ONCE_KINDS`, once an (instance, session); `day` the differing session;
+  payload `instance`, `held` [[symbol, entry day, fill point]], `unheld`, `planned` {buys, sells, exits}, `why`),
+  written the night the re-based twin is first compared. The twin's book is stored nowhere.
+- **The readings, beside and never in a rule.** `a14_reading` returns `rebase` (`A14_REBASE_KEYS`: `rebases`,
+  `sessions`, `agreed`, `share`, `by_instance` [`A14_REBASE_INSTANCE_KEYS`]): over the counted sessions, the
+  re-bases (the rise of `rebased` across them) and the un-re-based twin runs' own agreement; `A14_KEYS` gains that
+  one key, and `gap`, `intents`, `by_instance`, `holds`, `final` and `why` are computed as before. The forward
+  report's `fills` gains `rebase` in the same shape (one row a live instance), which the `dlane` report carries in
+  `forward_record`. `finish`'s receipt gains `rebased` (`FINISH_KEYS`).
+- **Names added:** `forward_db.ADDED_COLUMNS`, `has_column`; `forward_twins.live_seed`, `RebasedTwin`,
+  `REBASED_KEY`, `CTX_REASONS`, `A14_REBASE_KEYS`, `A14_REBASE_INSTANCE_KEYS`. No setting, no job, no alarm and no
+  identity changed (the options execution fingerprint, the equity identity and both digests are main's).
+- **Its tests' live books** (`test_forward_twins.live_path`) are their own decisions' doing: the engine account
+  deciding through the program, with a session's entries or exits taken away. A book that holds a lot no decision
+  of its own bought (`mirror` with a skipped decide) cannot be followed by a twin set to it, and differs once more.
+
+## 14. Release E4's package J on this record (Oct 11, 2026; additive: no signature, column or event kind changed)
 
 Release E4's panel lane (programs that pick names out of the S&P 500 panel) has its half of the forward record in
 ONE new ops module, `league/ops/forward_xs.py`, which writes this release's own tables through this release's
@@ -599,13 +687,13 @@ modules. What changed HERE, each a few lines (the record: league/swarm/e4_patche
   held ONLY panel programs as stalled each morning (no row of the last closed day by 09:00): the House's registry
   holds the seeds and the controls.
 
-## 14. What release E4's patch 18 added to the probe (Oct 11, 2026; additive: no signature, key or column above changed)
+## 15. What release E4's patch 18 added to the probe (Oct 11, 2026; additive: no signature, key or column above changed)
 
 Release E4's panel lane holds a look back until the probe has asked three strata of the panel (its A22 (3)). The
 probe gained a seam for them and nothing else of its behaviour moved: `run(ctx)`, THE JOB, hands no plan and is this
 release's probe to the byte (`league/tests/test_contam_probe.py` passes unchanged; the registry row is untouched).
 
-- **Patch 18 moved no import rule of section 1 and no seal test** (section 13's one addition is package J's, for
+- **Patch 18 moved no import rule of section 1 and no seal test** (section 14's one addition is package J's, for
   the forward modules; the probe imports none of it: `test_contam_xs.TheWiring`). `contam_probe.py` imports
   nothing of `league/xs` and no module outside section 1's list. The panel store is opened by a module of release
   E4, `league/ops/contam_xs.py`, which imports no module of this release (T1's rule for the sealed trees is the

@@ -1340,6 +1340,11 @@ class Gate:
         except Exception as exc:  # noqa: BLE001 - a record that cannot be cleared is cleared next round
             self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
                                                   "text": "the seeds' waits could not be read"})
+        # THE SEAT RULE'S TWO COUNTS (release E5-A, A24; `elane.seat_backfill`): a program that passed its look before
+        # they were kept beside it gets them once, from unsealed runs only (no look, no try, no band move).
+        written = elane.seat_backfill(self)
+        if written:
+            out["seat_counts"] = written
 
     def _equity_look(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
         """One family's turn in the equity round (`equity_round`): a look in flight from a dead process owed again, then
