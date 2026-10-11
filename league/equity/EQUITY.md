@@ -31,6 +31,11 @@ imports `math` and `numpy` only; no `print`, `repr`, `open`, `eval`, `exec`, cla
 functions; no bare `except:`; **no year or date literal**. A decide call has 1 second; 25 errors or timeouts disqualify
 the run. Be deterministic.
 
+What you have: Python's plain builtins (`len`, `range`, `sum`, `min`, `max`, `abs`, `round`, `sorted`, `enumerate`,
+`zip`, `float`, `int`, `str`, `list`, `dict`, `set`, `tuple`, `isinstance`, the common exceptions), `math`, and numpy
+as the House has it, all but its file, memory, random and date functions (`np.mean`, `np.std`, `np.nanmean`,
+`np.isfinite`, `np.diff`, `np.log`, `np.argsort` and the rest). There is no pandas.
+
 ## NEEDS
 
 | key | meaning | default |
@@ -50,19 +55,19 @@ As the options contract: a dict of numbers, booleans, strings or short lists, bo
 
 | field | what |
 |---|---|
-| `ctx.symbols` | your NEEDS symbols, in your order |
-| `ctx.bars[sym]` | `open`, `high`, `low`, `close`, `volume`, `ret` arrays, oldest first, the last element session t, at most `history` + 1 long; prices adjusted for splits and dividends AS OF t (never by a later event) and rounded to 4 decimals; volume in shares as traded; `ret` the close-to-close return (NaN first); NaN where there was no bar |
-| `ctx.prices[sym]` | session t's close (NaN if `sym` had no bar at t) |
+| `ctx.symbols` | a tuple: your NEEDS symbols, in your order |
+| `ctx.bars[sym]` | ONE OBJECT a symbol (`ctx.bars` is a dict by symbol) whose six arrays are read BY ATTRIBUTE: `ctx.bars[sym].open`, `.high`, `.low`, `.close`, `.volume`, `.ret` (never `ctx.bars[sym]["close"]`, never rows: "Reading ctx" below). Each is a read-only float64 numpy array, oldest first, the last element session t, at most `history` + 1 long and shorter while fewer sessions lie before t (a run that begins at the store's first session starts with ONE element); prices adjusted for splits and dividends AS OF t (never by a later event) and rounded to 4 decimals; volume in shares as traded; `ret` the close-to-close return (NaN first); NaN where there was no bar |
+| `ctx.prices[sym]` | a float: session t's close (NaN if `sym` had no bar at t); `ctx.prices` is a dict by symbol |
 | `ctx.weekday` | 0 Monday .. 4 Friday |
-| `ctx.events`, `ctx.events_next` | booleans for t and the next session: fomc, cpi, jobs, monthly_opex, quarter_end, half_day. **fomc, cpi and jobs come from tables with a first and a last row (below): outside them the flag is False and says nothing** |
+| `ctx.events`, `ctx.events_next` | dicts of booleans read by key (`ctx.events["fomc"]`), for t and the next session: fomc, cpi, jobs, monthly_opex, quarter_end, half_day. **fomc, cpi and jobs come from tables with a first and a last row (below): outside them the flag is False and says nothing** |
 | `ctx.session_of_month`, `ctx.sessions_to_month_end` | 1 on the month's first session; 0 on its last |
-| `ctx.positions` | your open lots: `{id, symbol, class, qty, entry, mark, value, pnl, held_sessions, at, tag}`; `entry` the fill a share (split-adjusted), `mark` t's close, `pnl` (mark - entry) x qty (dividends not included: they are cash), `held_sessions` the sessions since the lot's entry session (0 at the entry session's own close), `at` how the lot was filled ("open" or "close") |
-| `ctx.orders` | your pending orders: always empty today (everything you ask executes, or is refused, in the next session) |
-| `ctx.closed` | lots closed since your last call: `{id, symbol, qty, entry, exit, net, held_sessions, reason, tag}`; `net` dollars after fees with dividends; `reason` "program", "max_hold" or "house" |
-| `ctx.rejects` | why your intents of the last call were refused, and any exit of yours that waits |
+| `ctx.positions` | your open lots: a LIST of DICTS (`lot["id"]`, never `lot.id`; the list is not keyed by symbol), each `{id, symbol, class, qty, entry, mark, value, pnl, held_sessions, at, tag}`; `entry` the fill a share (split-adjusted), `mark` t's close, `pnl` (mark - entry) x qty (dividends not included: they are cash), `held_sessions` the sessions since the lot's entry session (0 at the entry session's own close), `at` how the lot was filled ("open" or "close"); `mark`, `value` and `pnl` are None while the symbol has no price |
+| `ctx.orders` | your pending orders, a list: always empty today (everything you ask executes, or is refused, in the next session) |
+| `ctx.closed` | lots closed since your last call: a list of dicts, each `{id, symbol, qty, entry, exit, net, held_sessions, reason, tag}`; `net` dollars after fees with dividends; `reason` "program", "max_hold" or "house" |
+| `ctx.rejects` | a list of strings: why your intents of the last call were refused, and any exit of yours that waits |
 | `ctx.cash`, `ctx.equity` | your sleeve's free cash, and its equity (cash + lots at t's close) |
 | `ctx.budget` | the sleeve equity your entries are sized on (the Gym: the run's capital E0, $1,000) |
-| `ctx.caps[sym]` | dollars you may still add to `sym` now: the instrument cap (50% of the sizing equity an ETF, 20% a stock) less your holding of `sym`, at most your cash |
+| `ctx.caps[sym]` | a float: dollars you may still add to `sym` now: the instrument cap (50% of the sizing equity an ETF, 20% a stock) less your holding of `sym`, at most your cash; `ctx.caps` is a dict by symbol |
 | `ctx.params` | your PARAMS (a copy: changing it changes nothing) |
 
 ## Intents
@@ -89,6 +94,53 @@ sleeve, capped by the instrument's cap, the same share of your sleeve, your slee
 the shared loss budget; shares are floored to 6 decimals; under $10 it is skipped. Whatever is refused is said in the
 next `ctx.rejects`: a buy of a symbol outside your NEEDS, a sell of a lot that is not open, a sell of a lot bought in
 the same session, a cancel, an entry sized to nothing, a session without an official price.
+
+## Reading ctx: a worked example
+
+A whole program that reads a rolling window the way ctx gives it. It loads and trades as written (a test runs this
+block on the engine):
+
+```python
+import numpy as np
+
+NEEDS = {"symbols": ["SPY", "QQQ"], "history": 60, "max_hold_sessions": 20}
+PARAMS = {"window": 20, "share": 0.25}
+
+
+def decide(ctx):
+    n = int(ctx.params["window"])
+    intents = []
+    for sym in ctx.symbols:
+        close = ctx.bars[sym].close                      # ONE object a symbol: its arrays by attribute
+        lots = [lot for lot in ctx.positions if lot["symbol"] == sym]      # a lot is a dict in a list
+        if len(close) <= n or not np.all(np.isfinite(close[-n - 1:])):
+            continue                                     # a short or broken window: wait, never index past it
+        above = close[-1] > float(np.mean(close[-n:]))   # a price against its own average: scale-free
+        if above and not lots:
+            intents.append({"buy": sym, "share": ctx.params["share"], "at": "open"})
+        elif not above:
+            intents += [{"sell": lot["id"], "at": "open"} for lot in lots]  # a lot is sold by its id
+    return intents
+```
+
+Common faults. Each fails in `decide`, and 25 errors disqualify the run; the swarm refuses the ones it can see in the
+source before a program is run (league/swarm/elane_review.py, the reading rule):
+
+- **`ctx.bars[sym]["close"]` raises TypeError.** A symbol's bars are one object: write `ctx.bars[sym].close`.
+- **Bars are arrays, not rows.** There is no `for bar in ctx.bars[sym]`, no `len(ctx.bars[sym])`, no
+  `ctx.bars[sym][-1]`: take `close = ctx.bars[sym].close`, then `close[-1]`, `close[-20:]`, `len(close)`. An array has
+  no `.iloc`, `.rolling` or `.pct_change`, and it is read-only (copy it before you change it).
+- **A window can be short, and it can hold NaN.** A run's first sessions have little or no history behind them, so
+  `close[-20]` raises IndexError there and `close[-20:]` is silently shorter: check `len(close)` first. `ret[0]` is
+  NaN and every array is NaN where the symbol had no bar; a comparison with NaN is False, so check `np.isfinite(...)`
+  or use `np.nanmean`.
+- **A lot is a dict in a list.** `lot["id"]`, `lot["symbol"]`, `lot["held_sessions"]`, never `lot.id`; and
+  `ctx.positions["SPY"]` raises: find a symbol's lots with a loop.
+- **A lot is sold by its id.** `{"sell": lot["id"]}`; `{"sell": "SPY"}` is dropped and counted as an error.
+- **An intent has exactly one of `buy`, `sell`, `cancel`, and `"at"` is `"open"` or `"close"`.**
+  `{"symbol": "SPY", "side": "buy"}` and `"at": "market"` are dropped and counted as errors.
+- **ctx has the fields of the table above and no other, never a date.** `ctx.events` is a dict
+  (`ctx.events["fomc"]`); `ctx.prices[sym]` and `ctx.caps[sym]` are floats.
 
 ## The House's exit rules (the same in the Gym)
 

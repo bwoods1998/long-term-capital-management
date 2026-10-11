@@ -1,7 +1,7 @@
 """Release E2.2, E2'S OWN PACE INSIDE THE HOUSE'S SAIL DAY (league/swarm/elane_yield.py `pace_hour`, `usd_hour`,
 `sail_day`, `hold`): `elane.e2.pace_share` is held to 0-4 (it was 0-0.5: at the ceiling the equity lanes stood still
-after twenty minutes of work an hour while most of the day's Sail research dollars went unspent), and what bounds E2 in
-place of half the researchers' line is held here:
+for most of each hour while most of the day's Sail research dollars went unspent), and what bounds E2 in place of half
+the researchers' line is held here:
 
 - E2's pace is its own (`pace_share` x the Sail model line), its day `elane.e2.usd_day`, and never more than a day at
   that pace;

@@ -74,8 +74,8 @@ from the options researchers and held by three lines, read before EVERY model ca
   else spent, inside the Sail day above. `allocation.plan_usd_per_hour`, when set, counts E2's dollars as research
   spend like any Sail model dollar.
 WHY THE PACE IS E2'S OWN (release E2.2, Oct 11, 2026). `pace_share` was held to 0-0.5 ("at most half the line"), so at
-the ceiling the equity lanes had at most $0.17 an hour, $4 a day, and after twenty minutes of work in an hour every
-later step was skipped at the pace. The line is only the model share of a Sail day planned around Gym boxes, and an
+the ceiling the equity lanes had at most $0.17 an hour, $4 a day, and stood still for most of each hour at the
+pace. The line is only the model share of a Sail day planned around Gym boxes, and an
 equity Train run needs no Gym box (it runs on the House: A3), so most of the day's Sail research dollars went unspent
 while the equity lanes waited. The owner's goal chooses lanes by measured yield per dollar. The bound is now 0-4 (four
 lines an hour), the shipped default is unchanged, and what bounds E2 beyond its own two settings is the House's Sail

@@ -53,7 +53,7 @@ from typing import Any, Mapping, Sequence
 
 from ..equity import BETA, EQUITY, LANES
 from ..equity import config as eqconfig
-from . import elane_seal, elane_train, elane_yield
+from . import elane_review, elane_seal, elane_train, elane_yield
 from .elane_train import AGENDA, STATE_KEY
 from .elane_yield import ROLE
 
@@ -289,6 +289,7 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
         "max_hold_sessions (at most 60); an ETF position is at most half the sleeve; fills pay the half-spread (1 bp "
         "the index ETFs, 3 bp the other ETFs, 5 bp TLT and GLD) and sells the SEC and FINRA fees. The whole contract is "
         "in your system prompt.",
+        "- " + elane_review.READING_CTX,
         "- THE RATION: ONE Validation try and ONE sealed look a LINEAGE. A family continuing an idea (its parent, or a "
         "dead family of the same slice and idea), the same template, or a program whose Train daily returns correlate "
         "0.7 or more with one already looked at, is the same lineage: once a lineage has its try, a proposal continuing "
