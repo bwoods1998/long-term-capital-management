@@ -487,6 +487,85 @@ class TheMinuteClock(T.BookTest):
                 self.assertEqual([o.placed_at for o in orders], [T.at(MONDAY, 9, mm) + lag for mm in range(31, 36)],
                                  "placed_at stays the wall clock at the POST")
 
+    #: THE HOUSE'S MINUTE STARTS (ops-10 as the verification left it): each pass starts `MINUTE_OFFSET` seconds into its
+    #: minute plus the wait's own lateness, so two starts are 60 s apart give or take milliseconds. `jitter[i]` is the
+    #: seconds minute i started late.
+    JITTERS = {"each start 2 ms earlier in its minute than the last (59.998 s apart)": [0.016 - 0.002 * i for i in range(8)],
+               "alternating: 5 ms late, 1 ms late": [0.005 if i % 2 == 0 else 0.001 for i in range(8)],
+               "alternating: on time, 400 ms late": [0.0 if i % 2 == 0 else 0.4 for i in range(8)],
+               "one start 1.5 s late, the next on time": [1.5, 0.0, 1.5, 0.0, 1.5, 0.0, 1.5, 0.0],
+               "exactly 60 s apart": [0.0] * 8}
+
+    def jittered(self, jitter, hh, first, lag=2.0):
+        """A harness whose minute i starts `jitter[i]` seconds late (the House's `now`); `tick(i)` runs that minute."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        h = lagged(T.Harness(Path(tmp.name)), lag)
+        self.addCleanup(h.state.close)
+
+        def tick(i):
+            h.clock.set(T.at(MONDAY, hh, first + i) + jitter[i])
+            return h.book.tick(h.clock(), account_row=h.venue.account(), positions=None, open_orders=None,
+                               real_block=lambda opening=True: h.blocked, killed=lambda: h.kill)
+
+        return h, tick
+
+    def test_a_minute_that_started_a_hair_early_is_still_a_minute(self):
+        """ops-10, the part the first fix left: `now - tick < 60` skipped every minute that started milliseconds
+        earlier in its minute than the one the order was sent in, so the open window re-priced every second minute
+        again. The age of an order that carries the minute's stamp is counted in whole House minutes."""
+        for label, jitter in self.JITTERS.items():
+            with self.subTest(label):
+                h, tick = self.jittered(jitter, 9, 31)
+                h.intent(h.instance(), "buy", symbol="SPY", share="0.5")
+                h.venue.fill = "none"
+                sent = []
+                for i in range(5):
+                    tick(i)
+                    sent.append(len(h.orders()))
+                self.assertEqual(sent, [1, 2, 3, 4, 5], "one a minute")
+                self.assertEqual([o.collar_bp for o in h.orders()], [10, 20, 30, 40, 50])
+
+    def test_the_close_window_under_the_same_jitter(self):
+        for label, jitter in self.JITTERS.items():
+            with self.subTest(label):
+                h, tick = self.jittered(jitter, 15, 55, lag=20.0)
+                h.intent(h.instance(), "buy", symbol="SPY", share="0.5", at_="close")
+                h.venue.fill = "none"
+                for i in range(4):
+                    tick(i)
+                self.assertEqual([o.collar_bp for o in h.orders()], [10, 20, 30, 40], "15:55 to 15:58, each minute")
+
+    def test_two_passes_in_one_house_minute_re_price_nothing(self):
+        h, tick = self.jittered([0.0, 20.0], 9, 31)
+        h.intent(h.instance(), "buy", symbol="SPY", share="0.5")
+        h.venue.fill = "none"
+        tick(0)
+        h.clock.set(T.at(MONDAY, 9, 31) + 40.0)                             # the same minute, forty seconds on
+        h.book.tick(h.clock(), account_row=h.venue.account(), positions=None, open_orders=None,
+                    real_block=lambda opening=True: h.blocked, killed=lambda: h.kill)
+        self.assertEqual(len(h.orders()), 1, "its age is no whole minute yet")
+
+    def test_an_order_without_the_stamp_is_aged_exactly_from_its_post(self):
+        """The fallback is as it was: an order written by a process that stopped before its answer has no stamp, and
+        its age is the wall clock's from `placed_at`, compared exactly."""
+        h = self.harness()
+        h.intent(h.instance(), "buy", symbol="SPY", share="0.5")
+        h.venue.fill = "none"
+        h.tick(9, 31)
+        [order] = h.orders()
+        order.answer = {k: v for k, v in order.answer.items() if k != "tick"}
+        h.book._save_order(order)
+        m = S.moments(MONDAY, h.book._offsets())
+        placed = h.orders()[0].placed_at
+        self.assertFalse(h.book._reprice_due(h.orders()[0], placed + 59.998, 60.0, m), "59.998 s is not 60")
+        self.assertTrue(h.book._reprice_due(h.orders()[0], placed + 60.0, 60.0, m))
+        stamped = h.orders()[0]
+        stamped.answer = {**stamped.answer, "tick": placed}
+        self.assertTrue(h.book._reprice_due(stamped, placed + 59.998, 60.0, m), "stamped: the next House minute")
+        self.assertFalse(h.book._reprice_due(stamped, placed + 59.998, 120.0, m), "two minutes asked, one passed")
+        self.assertTrue(h.book._reprice_due(stamped, placed + 119.997, 120.0, m))
+
     def test_the_close_window_re_prices_every_minute_and_never_after_its_cut_off(self):
         h = lagged(self.harness(), 40.0)                                    # the options minute took forty seconds
         it = h.intent(h.instance(), "buy", symbol="SPY", share="0.5", at_="close")

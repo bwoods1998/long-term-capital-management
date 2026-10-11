@@ -63,6 +63,12 @@ What they did find is fixed here, each with a test that failed before.
   exactly like a failed pre-check. Such a verdict, and a refused one, is now under `validation_errors`
   {family: error} in the round's log line and in the heartbeat's `status.equity`; `validated` holds real verdicts
   only. A report only: no rule and no fingerprint moves.
+- **A re-price goes every minute, whatever the milliseconds** (`league/equity/live.py` `_reprice_due`,
+  `house_minute`; ops-10, which the review's fix left half done). Two House minute starts are 60 seconds apart give
+  or take the milliseconds each pass started late, so "60 seconds old" was false for every minute that started a
+  hair earlier in its minute than the last, and the open window re-priced every second minute again. An order that
+  carries its minute's stamp is now aged in whole House minutes; one without it is aged from its POST in seconds,
+  exactly, as before. `league/equity/live.py` is plumbing: neither identity moves.
 
 ### Release E1, the rehearsal on real data: the data job, the vendor's cents, the seeds' order, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
 

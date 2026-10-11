@@ -28,8 +28,10 @@ THE HOUSE'S MINUTE (the clock every window runs on): `tick(now)` is handed the m
 wall minute, and runs AFTER the whole options minute, so its sends go later by however long that took (up to most of a
 minute). A moment is due at the first minute at or after it: the open window's first send is the 09:31 minute's (09:30:30
 is its earliest moment, never its send time), the close window's the 15:55 minute's, and a re-price goes at most once a
-minute, its age counted from the minute an order was sent in (`answer.tick`), never from `placed_at` (the wall clock at
-its POST). EVERY CUT-OFF IS JUDGED AGAIN ON THE WALL CLOCK at the send (`_send`): nothing is written or POSTed at or
+minute, its age counted in whole House minutes (`house_minute`) from the minute an order was sent in (`answer.tick`),
+never in seconds between two minute starts (they are 60 seconds apart give or take milliseconds) and never from
+`placed_at` (the wall clock at its POST). EVERY CUT-OFF IS JUDGED AGAIN ON THE WALL CLOCK at the send (`_send`):
+nothing is written or POSTed at or
 after its window's cut-off (09:45:00 an open entry, 15:59:30 every exit and every close entry), since a day order POSTed
 at or after the close would rest for the next session; no order is cancelled for a re-price its replacement could
 not follow; and one the venue still shows working on a later day than its own is cancelled wherever the minute finds
@@ -286,6 +288,12 @@ def collar_for(attempt: int, entry_bp: int, max_bp: int) -> int:
     """The collar of a window's `attempt`-th send (0 first): the entry collar, widened by the same step each re-price,
     never past the maximum."""
     return int(min(int(entry_bp) * (int(attempt) + 1), int(max_bp)))
+
+
+def house_minute(t: float) -> int:
+    """THE HOUSE MINUTE a pass's `now` is in: the wall minute it started in (league/live/step.py starts each pass
+    `MINUTE_OFFSET` seconds into its minute, plus the wait's own lateness, so a start is never near a minute's edge)."""
+    return int(float(t) // 60)
 
 
 def _has_table(rows: Callable[..., list], name: str) -> bool:
@@ -1645,11 +1653,18 @@ class EquityBook:
         House's minute clock, from the `now` of the minute it was sent in (`answer.tick`) to this minute's `now`:
         `placed_at` is the wall clock at the POST, later than its minute's `now` by however long the options minute
         ran, and an age counted from it is always under a minute at the next minute (a 60-second re-price then went
-        every second minute). An order without the stamp (written by a process that stopped before its answer) is
-        aged from `placed_at`."""
+        every second minute). THE AGE IS IN WHOLE HOUSE MINUTES (`house_minute`): two minute starts are 60 seconds
+        apart give or take the milliseconds each pass started late, so their difference in seconds is under 60 as
+        often as over it, and an age compared in seconds skipped every minute that started a hair earlier in its
+        minute than the last. An order without the stamp (written by a process that stopped before its answer) is
+        aged from `placed_at`, in seconds, exactly."""
+        if order.status != "working":
+            return False
         sent = order.answer.get("tick")
-        since = float(sent) if isinstance(sent, (int, float)) and not isinstance(sent, bool) else order.placed_at
-        if order.status != "working" or now - since < reprice:
+        if isinstance(sent, (int, float)) and not isinstance(sent, bool):
+            if (house_minute(now) - house_minute(float(sent))) * 60 < reprice:
+                return False
+        elif now - order.placed_at < reprice:
             return False
         if order.collar_bp < self._collars(order.klass)[1]:
             return True
@@ -3137,4 +3152,4 @@ def _as_of_equal(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fre
 __all__ = ["SCHEMA", "WORKING", "TERMINAL", "LOT_OPEN", "LOT_CLOSING", "LOT_CLOSED", "REAL_SUFFIX", "SHARE_TOLERANCE",
            "CLIENT_PREFIX", "client_id", "ProbeFigures", "probe_figures", "expected_shares_rows", "working_buys_worst",
            "orders_today", "invested", "EquityBook", "Lot", "Order", "Intent", "Instance", "instance_key", "order_body",
-           "limit_for", "collar_for", "export_row", "qty_text", "HOUSE_REASONS", "EXIT_KINDS"]
+           "limit_for", "collar_for", "house_minute", "export_row", "qty_text", "HOUSE_REASONS", "EXIT_KINDS"]

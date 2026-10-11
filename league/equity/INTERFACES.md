@@ -1051,7 +1051,9 @@ above and this section differ, this section is the code.
 ### 15.1 The order path (book; league/equity/live.py, league/equity/schedule.py, league/live/__main__.py)
 - **Key-values** (ADDS to 5.1): `owner_equity_flatten` and `owner_equity_clear_freeze` {why, at, by}: written only by
   the owner's command (league/live/__main__.py), read first every minute and deleted by the book (`EquityBook._owner`).
-  `eq_orders.answer` also carries `tick` (the minute's `now` the order was sent in; a re-price is aged from it) and
+  `eq_orders.answer` also carries `tick` (the minute's `now` the order was sent in; a re-price is aged from it in
+  whole House minutes, `live.house_minute(t)` = the wall minute a pass started in, since two minute starts are 60 s
+  apart give or take milliseconds; an order without it is aged in seconds from `placed_at`, exactly) and
   `retry` (true on a gateway refusal whose cap is in `RETRY_CAPS`); `eq_lots.info.exit_unread_told` (the day the
   owner was told).
 - **Constants** (ADDS to 5.2): `OWNER_FLATTEN`, `OWNER_CLEAR_FREEZE`, `RETRY_CAPS` (positions, orders, equity,

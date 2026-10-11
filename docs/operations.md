@@ -224,7 +224,8 @@ by the same offsets from the 13:00 close):
 - **The send times are effective, not nominal**: 09:30:30 and 15:55:00 are the earliest moments, never the send
   times. The House's minute starts 3 s past the wall minute and the equity book runs after the options minute, so the
   open window's first send is the 09:31 minute's (09:31:03 plus the options minute) and the close window's the 15:55
-  minute's (15:55:03 plus the same), with one re-price a minute at most. The close window therefore has the 15:55 to
+  minute's (15:55:03 plus the same), with one re-price a minute at most (an order's age is counted in whole House
+  minutes, so a minute that started milliseconds early is still a minute). The close window therefore has the 15:55 to
   15:58 minutes, and 15:59's only when the options minute ends before 15:59:30. Nothing is POSTed at or after a
   cut-off by the wall clock (09:45:00 an open entry; 15:59:30 every exit and every close entry), and an order the
   venue still shows working on a later day than its own is cancelled at the first minute that sees it.
