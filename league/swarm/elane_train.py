@@ -92,7 +92,8 @@ and is sent once. Of the verdicts, only Y1, Y2, P1 and R1 judge the MECHANISM (`
 that could not be judged.
 
 THE REVIEW (league/swarm/elane_review.py). A program holding a raw price or volume level against a constant or a PARAMS
-value is refused before it is stored (`check_code`). At a version's first bar pass two different models read it under
+value is refused before it is stored (`check_code`), and so is one that reads its own profit since the run began: the
+sleeve's dollars against a constant, the run's capital or what a lot cost (the level rule's 1b and 1d). At a version's first bar pass two different models read it under
 the leakage rubric (`EquityResearcher.review_step`) before it may be its lineage's Validation try: a pass of both
 writes the record E1's look reads (`state["review"]`) and makes it the family's pass; a failure is a Train failure of
 that version ("REVIEW") and spends no try.

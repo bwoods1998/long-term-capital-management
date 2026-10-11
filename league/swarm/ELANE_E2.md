@@ -259,8 +259,10 @@ Stopping, from the lightest:
      4. WHAT THE HOUSE'S OWN ANSWERS TELL: `ctx.rejects`, and whether an entry of constant dollars was filled, cut
         or skipped, say something about the sleeve's cash (a third lot that exists only when cash was left over); the
         pass does not read them.
-     The two paid readers' rubric (`REVIEW`, "RUN-START DEPENDENCE", and its fact `run`) names the pattern and each
-     of these spellings, and ends on the rule itself: a rule whose trading depends on how far the run is ahead or
+     The two paid readers' rubric (`REVIEW`, "RUN-START DEPENDENCE", and its fact `run`) names the pattern (the
+     capital rebuilt from a program's own lots, a lot's weight or the cash share used as the anchor, the sleeve's
+     dollars of an earlier call carried in STATE or in a lot's tag) and ends on the rule itself, which covers the
+     spellings it does not list: a rule whose trading depends on how far the run is ahead or
      behind is refused, whatever its spelling. A reader's failure that cites it binds (a verbatim excerpt, the
      reference `run`, a counterexample). The root stays E1's: until the screen's floor sees fresh starts, a profit
      lock the readers miss is judged by a screen whose false-positive line does not hold for it.
