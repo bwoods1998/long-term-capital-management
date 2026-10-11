@@ -1483,7 +1483,12 @@ class TheDeployNight(SeatCase):
 
     # ------------------------------------------------------------------------------------------------ the House
     def house(self) -> T.Harness:
-        h = T.Harness(self.state_root, cash=str(E), E=str(E), table=M.Table.from_constitution().equity)
+        # THE DESIGN TONIGHT'S RELEASE SETS, stated (no test assumes the pair in force): six seats at a quarter of E,
+        # on the table's side and on the swarm's roster.
+        patcher = mock.patch.dict(elane.DEFAULTS, {"roster": 6})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        h = T.Harness(self.state_root, cash=str(E), E=str(E), table=X.table_at(6, "0.25").equity)
         self.addCleanup(h.state.close)
         h.families = EquityFamilies(self.state_root)
         self.addCleanup(lambda: h.families._store is not None and h.families._store.close())

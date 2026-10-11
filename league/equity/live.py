@@ -97,7 +97,8 @@ THE BOOK IS THE ONE SOURCE of who holds a seat and who waits: its plan is the kv
   lot open or closing, no working order, no planned or sent intent) and has had no ASKED buy (`_last_ask`: a buy
   that reached the venue, or one the LOSS BUDGET cut or refused; a buy refused by the instrument cap, the invested
   cap or cash is not asked) for `idle_sessions` sessions of its seat is idle. It keeps its seat while no unflagged
-  program waits; when one does, ONE idle program a decision day yields (`_yield`): its band goes back to Candidate,
+  program is left waiting once every free seat is filled; when one is, ONE idle program a decision day yields
+  (`_yield`): its band goes back to Candidate,
   NOT sticky, its instance is retired with the reason "yielded", and it waits flagged idle, behind every unflagged
   program, until a seat is free (no new look; the same instance key, so its record goes on).
 - THE RULE ONLY DECIDES WHO MAY OPEN NEXT. It retires an instance only inside the one state transaction that found
@@ -2269,11 +2270,13 @@ class EquityBook:
     def _seat_bands(self, rows: list[dict], et: Any, rule: B.SeatSettings, sticky: dict, since: dict, day: str,
                     now: float, out: dict, *, late: bool) -> None:
         """THE SEAT RULE "activity-1-free" AT A BAND SYNC (A24; the module docstring), on rows that hold every passed
-        Candidate. In order, as the study's simulator runs a sync: (1) the holders judged as before the rule (EDM1,
-        sticky; the sizing-up step); (2) EDM1 over the waiting programs that have a real record; (3) the idle test;
-        (4) one idle seat yields when an unflagged program waits, there is a seat for it and none yielded today;
-        (5) the free seats, best-ranked first, falling through a seating that does not take. `late` (the seating pass):
-        (5) only. `rows`, `sticky` and `since` are updated in place; the plan is written to `SEAT_KEY`."""
+        Candidate. In order: (1) the holders judged as before the rule (EDM1, sticky; the sizing-up step); (2) EDM1
+        over the waiting programs that have a real record; (3) the plan (`bands.seat_plan`: the idle test, and who
+        would still wait once every free seat is filled); (4) one idle seat yields when an unflagged program would
+        still wait, and none yielded today (`_yield`); (5) the seats now free, best-ranked first, falling through a
+        seating that does not take. `late` (the seating pass): (5) only. `rows`, `sticky` and `since` are updated in
+        place; the plan is written to `SEAT_KEY`. (The study's simulator ran the idle test before filling a free
+        seat; `bands.seat_plan` says what that changes and why A24's words decide it.)"""
         memory = dict(self.state.get(SEAT_KEY, {}) or {})
         flags = {str(k): v for k, v in (memory.get("idle") or {}).items()} if isinstance(memory.get("idle"), Mapping) else {}
         passed = dict(memory.get("passed") or {}) if isinstance(memory.get("passed"), Mapping) else {}

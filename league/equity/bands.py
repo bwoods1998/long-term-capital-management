@@ -31,8 +31,9 @@ THE SEAT RULE (release E5-A; the captain's A24; the constitution's `equity_money
   two counts beside the look, once (league/swarm/elane.py `SEAT_KEY`). A program whose counts cannot be read ranks
   after every program whose counts can.
 - THE IDLE SEAT (`seat_idle`): a seated program that is flat and has had no asked buy for `idle_sessions` seated
-  sessions. It keeps its seat while nobody waits; when an unflagged program waits, ONE idle program a decision day
-  yields (`seat_yielder`: the lowest K, then the latest seated, the latest pass, the higher id) and is flagged.
+  sessions. It keeps its seat while nobody waits; when an unflagged program would still wait once every free seat is
+  filled (`seat_plan`), ONE idle program a decision day yields (`seat_yielder`: the lowest K, then the latest
+  seated, the latest pass, the higher id) and is flagged.
 - No function here stops a program that trades, sells a lot or names an exit: the rule only orders who may OPEN next.
 """
 
