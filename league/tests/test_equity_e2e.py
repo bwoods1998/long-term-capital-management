@@ -97,13 +97,24 @@ class TheEquityLaneEndToEnd(unittest.TestCase):
     # ------------------------------------------------------------------------------------------- the swarm's part
     def born_validated_and_looked(self) -> dict:
         born = elane.birth_seeds(self.store, ON)
-        self.assertEqual(born, ["seed-overnight-spy", "seed-overnight-qqq", "seed-reversal-index"])
+        # Born in the declared order of the looks (league/swarm/seeds.py says why). This test follows SPY's seed, the
+        # one that buys at every close, through the lane's parts by asking for its look directly; in a round the look
+        # order is the declared one (league/tests/test_equity_rehearsal.py `TheSeedsDeclaredOrder`).
+        self.assertEqual(born, ["seed-overnight-qqq", "seed-reversal-index", "seed-overnight-spy"])
         fam = self.store.family(SEED)
         version = self.store.version(SEED, fam["best_version"])
         self.assertEqual((fam["structure"], fam["spec"]["lane"], fam["band"]), ("etf", "beta", "gym"))
 
         tournament = Tournament(self.store, None, ON, clock=self.clock)
         tournament.equity_runner = self.runner
+        # THE DECLARED ORDER IS STRICT WITHIN A LINEAGE (A18; `elane.seed_wait`): SPY's look is never taken while
+        # QQQ's seed, declared before it in the overnight lineage, is alive without a verdict. On this invented
+        # market QQQ's seed FAILS its Validation pre-check (no retry owed), so the lineage's one look is SPY's.
+        ahead = self.store.family("seed-overnight-qqq")
+        self.assertEqual(elane.seed_ahead(self.store, fam, ON), ahead["id"], "before the earlier seed's verdict")
+        early = elane.validate(tournament, ahead, self.store.version(ahead["id"], ahead["best_version"]))
+        self.assertFalse(early["entered"], early)
+        self.assertIsNone(elane.seed_ahead(self.store, fam, ON))
         verdict = elane.validate(tournament, fam, version)
         self.assertTrue(verdict["entered"], verdict)
         state = self.store.family(SEED)["state"]
@@ -240,8 +251,16 @@ class TheEquityLaneEndToEnd(unittest.TestCase):
         sleeve = table.equity.probe_sleeve_share * E
         self.assertEqual((lot.status, lot.entry_at, lot.opened_day, lot.probe), ("open", "close", MONDAY.isoformat(), True))
         self.assertLessEqual(lot.entry_notional, sleeve * D("0.5"), "the intent's half of a Probe sleeve, at most")
-        [order] = state.rows("SELECT why FROM eq_orders")
+        [order] = state.rows("SELECT why, qty, limit_px FROM eq_orders")
         self.assertTrue(order["why"].startswith("entry (intent:"), order["why"])   # the intent bound, no cap cut it
+        # THE PROBE SLEEVE AT 0.50 (the captain's A20): a one-ETF program's lot is a quarter of E AT ITS LIMIT (the ask
+        # and the entry collar above it, to the cent), its shares floored to six places; it fills at the ask, under it.
+        self.assertEqual(table.equity.probe_sleeve_share, D("0.50"))
+        limit = D(order["limit_px"])
+        self.assertEqual(D(order["qty"]), (D("0.25") * E / limit).quantize(D("0.000001"), rounding="ROUND_DOWN"))
+        self.assertEqual(lot.qty, D(order["qty"]))
+        self.assertLessEqual(lot.qty * limit, D("0.25") * E)
+        self.assertGreater(lot.qty * limit, D("0.25") * E - limit * D("0.000001"))
         self.assertEqual(lot.entry_px, market.quotes["SPY"][1], "a marketable limit filled at the ask")
         # The shared loss budget counts the lot's open risk at the ETF weight (both lanes, one budget).
         _, _, _, at_risk, _ = R.probe_figures(state.rows, day=MONDAY.isoformat(), table=table)

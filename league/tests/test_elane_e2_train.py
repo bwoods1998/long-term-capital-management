@@ -284,6 +284,33 @@ class TheResearcher(ResearchCase):
         self.assertEqual(out["steps"][0]["fails"], ["REVIEW"])
         self.assertIn("stayed unclear", self.rec(fam["id"])["versions"]["1"]["review"]["reasons"][0])
 
+    def test_the_hold_is_read_again_before_the_audit(self):
+        # The verification's nit: E2's dollars were read once for the two calls of a step, so the audit was asked on
+        # dollars the review's own call had just used up. Here the review's answer spends the whole day's line.
+        fam = fx.e2_family(self.store, "held-audit", code=fx.program(share=0.42))
+        line = elane_yield.day_line(self.settings)
+        self.reviews.append(fx.review_answer("pass", model="pro_balanced", cost=line + 1.0))
+        out = self.researcher.run()
+        step = out["steps"][0]["review"]
+        self.assertEqual((step["skipped"], step["stage"]), (elane_yield.DAY_SPENT, "audit"))
+        asked = [c["key"].split(":")[2] for c in self.router.calls if fx.is_review(c)]
+        self.assertEqual(asked, ["review"], "the review alone: no audit on a spent day")
+        rec = self.rec(fam["id"])
+        self.assertEqual(rec["review"]["review"]["verdict"], "pass", "the review's pass is kept")
+        self.assertNotIn("audit", rec["review"])
+        self.assertIsNone(rec.get("passed_version"))
+        self.assertFalse(may_validate(self.store, self.store.family(fam["id"]), 1), "no try without the audit")
+        # The same day: nothing more is asked. The next UTC day the audit alone is asked, and the pass is the try.
+        self.researcher.run()
+        self.assertEqual(len([c for c in self.router.calls if fx.is_review(c)]), 1)
+        self.clock.t += 86400.0
+        self.researcher.run()
+        asked = [c["key"].split(":")[2] for c in self.router.calls if fx.is_review(c)]
+        self.assertEqual(asked, ["review", "audit"], "the audit alone: the review is not asked twice")
+        self.assertNotEqual(*[c["sail_profile"] for c in self.router.calls if fx.is_review(c)])
+        self.assertEqual(self.rec(fam["id"])["passed_version"], 1)
+        self.assertTrue(may_validate(self.store, self.store.family(fam["id"]), 1))
+
     def test_the_audit_is_another_model(self):
         settings = fx.settings(train_budget=3, review_routes=["sail:pro_balanced", "sail:pro_asap", "sail:k3_balanced"])
         researcher = EquityResearcher(self.store, self.router, settings, runner=self.runner, clock=self.clock)
@@ -292,6 +319,95 @@ class TheResearcher(ResearchCase):
         readers = [c["sail_profile"] for c in self.router.calls if fx.is_review(c)]
         self.assertEqual(readers, ["pro_balanced", "k3_balanced"], "pro_asap is the reviewer's model: never its audit")
         self.assertEqual(self.rec(fam["id"])["passed_version"], 1)
+
+    def test_an_audit_answered_by_the_reviewers_model_is_discarded_and_the_next_candidate_is_asked(self):
+        # The integration review's seal-7: the router's window fallback sent the audit's first candidate to the
+        # reviewer's own model; the step returned, the next candidate was never asked, and the same key was asked again
+        # every round. Now the answer is booked and discarded and glm_balanced is asked in the same step.
+        fam = fx.e2_family(self.store, "stalled-window", code=fx.program(share=0.41))
+
+        def script(call):
+            if not fx.is_review(call):
+                return fx.answer([])
+            if call["sail_profile"] == "pro_balanced":
+                return fx.review_answer("pass", model="pro_balanced")
+            if call["sail_profile"] == "k3_balanced":  # the stall flagged on this very call: answered on pro_asap
+                return {**fx.review_answer("pass", model="pro_asap"),
+                        "sail_fallback": {"from": "k3_balanced", "to": "pro_asap", "why": "stall"}}
+            return fx.review_answer("pass", model=call["sail_profile"])
+        self.router.script = script
+        self.researcher.run()
+        readers = [c["sail_profile"] for c in self.router.calls if fx.is_review(c)]
+        self.assertEqual(readers, ["pro_balanced", "k3_balanced", "glm_balanced"])
+        rec = self.rec(fam["id"])
+        self.assertEqual(rec["passed_version"], 1)
+        self.assertEqual((rec["passed_review"]["route"], rec["passed_review"]["audit"]["route"]),
+                         ("sail:pro_balanced", "sail:glm_balanced"))
+        rows = elane_yield.ledger(self.store)["routes"]
+        self.assertEqual(rows["review:sail:pro_asap"]["requests"], 1, "the discarded answer's dollars are booked, once")
+
+    def test_every_review_question_has_a_key_of_its_own_and_a_blank_answer_is_no_read(self):
+        from league.swarm.models import ModelError
+
+        fam = fx.e2_family(self.store, "keys", code=fx.program(share=0.39))
+        blank = {"text": "", "json": None, "route": "sail", "model": "pro_balanced", "cost_usd": 0.0}
+        answers = [ModelError("busy"), blank, fx.review_answer("maybe"), fx.review_answer("pass", model="pro_balanced")]
+        self.router.script = lambda call: (answers.pop(0) if call["sail_profile"] == "pro_balanced" and
+                                           call["key"].startswith("swarm:elane:review:") else
+                                           ModelError("busy") if call["key"].startswith("swarm:elane:review:") else
+                                           fx.review_answer("pass", model=call["sail_profile"]) if fx.is_review(call) else
+                                           fx.answer([]))
+        for _ in range(4):
+            self.researcher.run()
+            self.clock.advance(elane_train.BACKOFF_MAX)
+        keys = [c["key"] for c in self.router.calls if c["key"].startswith("swarm:elane:review:") and
+                c["sail_profile"] == "pro_balanced"]
+        self.assertEqual(len(keys), 4)
+        self.assertEqual(len(set(keys)), 4, "no key is asked twice: a repeated key is a re-read, booked again")
+        rec = self.rec(fam["id"])
+        self.assertEqual(rec["passed_version"], 1, "a failed call, a blank answer and one unclear read, then the pass")
+        review = [c for c in self.router.calls if c["key"].startswith("swarm:elane:audit:")]
+        self.assertEqual(len(review), 1)
+
+    def test_a_blank_answer_never_counts_as_an_unclear_read(self):
+        fam = fx.e2_family(self.store, "blank", code=fx.program(share=0.38))
+        blank = {"text": "", "json": None, "route": "sail", "model": "pro_balanced", "cost_usd": 0.0}
+        self.router.script = lambda call: blank if fx.is_review(call) else fx.answer([])
+        for n in (1, 2, 3):
+            out = self.researcher.run()
+            rec = self.rec(fam["id"])
+            self.assertEqual((rec["review"].get("unclear"), rec["review"]["blank"]["review"]), ({}, n), out)
+        self.assertEqual(rec["versions"]["1"]["fails"], [], "three blank answers failed the version at REVIEW before")
+        self.researcher.run()  # past `review_max_unclear` blanks a route that only answers nothing reads unclear
+        self.assertEqual(self.rec(fam["id"])["review"]["unclear"], {"review": 1})
+
+    def test_a_question_no_route_answered_backs_the_family_off(self):
+        from league.swarm.models import ModelError
+
+        fam = fx.e2_family(self.store, "silent")  # no program yet: its step is a write
+        self.router.script = lambda call: ModelError("busy")
+        out = self.researcher.run()
+        self.assertEqual(out["steps"][0]["error"], "no route answered")
+        first = len(self.router.calls)
+        self.assertEqual(first, len(elane_yield.DEFAULTS["routes"]), "nothing was sent: every route is tried once")
+        every = elane_train.DEFAULTS["train_every_seconds"]
+        waits = []
+        for _ in range(3):
+            rec = self.rec(fam["id"])
+            waits.append(rec["unanswered"]["next_at"] - rec["unanswered"]["at"])
+            self.clock.advance(waits[-1] - 1)
+            self.assertEqual(self.researcher.run()["steps"], [], "inside its backoff the family asks nothing")
+            self.clock.advance(2)
+            self.researcher.run()
+        self.assertEqual(waits, [2 * every, 4 * every, 8 * every], "doubling with every question in a row left unanswered")
+        self.assertIsNone(self.rec(fam["id"]).get("attempts"), "an unanswered question is no attempt")
+        self.router.script = self.script
+        self.answers.append(self.program_answer(fx.program(share=0.37)))
+        self.clock.advance(elane_train.BACKOFF_MAX)
+        self.researcher.run()
+        rec = self.rec(fam["id"])
+        self.assertNotIn("unanswered", rec)
+        self.assertEqual(rec["attempts"], 1)
 
     def test_no_reviewer_answering_counts_nothing(self):
         from league.swarm.models import ModelError
@@ -303,8 +419,15 @@ class TheResearcher(ResearchCase):
         rec = self.rec(fam["id"])
         self.assertEqual((rec["review"]["version"], rec["review"].get("unclear")), (1, {}))
         self.router.script = self.script
+        # The family waits out a backoff before it asks again (the review's loop-2), then its review is read.
+        self.assertEqual(rec["unanswered"]["count"], 1)
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"])
+        self.assertEqual(self.researcher.run()["steps"], [], "still waiting: no question, no model")
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"])
         self.researcher.run()
-        self.assertEqual(self.rec(fam["id"])["passed_version"], 1)
+        rec = self.rec(fam["id"])
+        self.assertEqual(rec["passed_version"], 1)
+        self.assertNotIn("unanswered", rec)
 
     def test_a_failed_version_is_revised_on_its_birth_route_and_the_revision_passes(self):
         first = fx.program(share=0.4)
@@ -411,6 +534,105 @@ class WhatAVerdictIs(ResearchCase):
         self.researcher.run()
         self.assertEqual({self.rec(f["id"])["status"] for f in fams}, {"passed"}, "the store came: judged at last")
 
+    def test_a_standing_failure_of_the_houses_is_an_alert_once_for_the_lanes(self):
+        # The integration review's loop-5: with no equity store (or a child that cannot start) every Train score ended
+        # in a backoff doubling to six hours, births went on until the lanes were full, and nobody was told (only a
+        # restart check that could not finish, or a result outside Train, alerted).
+        def alerts() -> list:
+            return [(e["payload"]["action"], e["payload"].get("kind"), e.get("family")) for e in self.store.events_after(0)
+                    if e["kind"] == "swarm.status" and e["payload"].get("alert")]
+
+        self.runner.answer = lambda code, k: fx.MissingData("no equity store at /state/equity-daily (no VERSION file)")
+        fams = [fx.e2_family(self.store, f"fam-{i}", code=fx.program(share=0.5 + 0.01 * i),
+                             mechanism=f"Invented mechanism number {i}: holders are paid for overnight index risk.")
+                for i in range(3)]
+        need = elane_train.DEFAULTS["train_max_errors"]
+        for n in range(1, need + 1):
+            self.assertEqual(alerts(), [], f"{n - 1} failures a version are no news")
+            self.clock.advance(elane_train.BACKOFF_MAX)
+            self.researcher.run()
+        told = alerts()
+        self.assertEqual([(a, k) for a, k, _ in told], [("elane_train_house", "store")],
+                         "three families met the same missing store: one alert for the lanes")
+        text = [e["payload"]["text"] for e in self.store.events_after(0) if e["kind"] == "swarm.status"][-1]
+        self.assertIn("the equity lanes' Train is not running", text)
+        self.assertIn("the last equity Train judgment: never", text)
+        for fam in fams:
+            self.assertEqual(self.rec(fam["id"])["versions"], {}, "nothing is scored on the House's failure")
+        # Still standing a round later: no second alert inside the six hours; then one again.
+        self.clock.advance(elane_train.BACKOFF_MAX - 60)
+        self.researcher.run()
+        self.assertEqual(len(alerts()), 1)
+        fx.e2_family(self.store, "fam-late", code=fx.program(share=0.61), symbols=("QQQ",))
+        for _ in range(need):
+            self.clock.advance(elane_train.BACKOFF_MAX)
+            self.researcher.run()
+        self.assertEqual([(a, k) for a, k, _ in alerts()], [("elane_train_house", "store")] * 2)
+        # A child that fails every program's runs (none judged meanwhile) is told the same way, under its own kind.
+        self.runner.answer = lambda code, k: fx.RunFailed("the decider child could not start")
+        fx.e2_family(self.store, "fam-run", code=fx.program(share=0.62), symbols=("IWM",))
+        for _ in range(need):
+            self.clock.advance(elane_train.BACKOFF_MAX)
+            self.researcher.run()
+        self.assertIn(("elane_train_house", "run"), [(a, k) for a, k, _ in alerts()])
+        self.assertEqual(self.rec("fam-run")["versions"], {}, "no other program was judged: never the program's RUN")
+
+    def test_a_round_starts_only_with_work_it_can_do_and_an_empty_one_leaves_no_event(self):
+        # The integration review's merge-4: `idle` was False while ANY family of E2's was alive, so with one family at
+        # Candidate (alive for weeks, nothing left to do) a round ran every ten minutes: 144 empty events and log lines
+        # a day. Same while every researching family waited out a backoff.
+        def events() -> int:
+            return len([e for e in self.store.events_after(0) if e["kind"] == "swarm.elane"])
+
+        fam = fx.e2_family(self.store, "candidate", code=fx.program(share=0.48))
+        self.assertTrue(self.researcher.due())
+        self.researcher.run()
+        self.assertEqual(self.rec(fam["id"])["status"], "passed")
+        self.store.update_family(fam["id"], band="candidate")
+        seen = events()
+        for _ in range(5):
+            self.clock.advance(elane_train.DEFAULTS["train_every_seconds"] + 1)
+            self.assertTrue(self.researcher.idle())
+            self.assertFalse(self.researcher.due(), "a living pass with nothing to do starts no round")
+        self.assertEqual(self.researcher.run()["steps"], [])
+        self.assertEqual(events(), seen, "and a round that found nothing leaves no event")
+        # Work appears: an adoption cleared what E1's look reads (the upkeep's), and the round restores it and says so.
+        self.store.update_family(fam["id"], best_version=None)
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"] + 1)
+        self.assertFalse(self.researcher.idle())
+        self.assertTrue(self.researcher.due())
+        out = self.researcher.run()
+        self.assertEqual(out.get("restored"), [fam["id"]])
+        self.assertEqual(events(), seen + 1)
+        # A family waiting out its backoff is no work either; once it ends, it is.
+        self.runner.answer = lambda code, k: fx.MissingData("no store")
+        waits = fx.e2_family(self.store, "waits", code=fx.program(share=0.47), symbols=("QQQ",))
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"] + 1)
+        self.researcher.run()
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"] + 1)
+        retry = self.researcher.run()["steps"][0]["retry_in"]  # its second failure: twice the round's cadence
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"] + 1)
+        self.assertLess(elane_train.DEFAULTS["train_every_seconds"] + 1, retry)
+        self.assertFalse(self.researcher.due(), "inside its backoff")
+        self.clock.advance(retry)
+        self.assertTrue(self.researcher.due())
+        self.assertIsNotNone(self.rec(waits["id"])["infra"])
+
+    def test_a_family_that_needs_a_model_is_no_work_while_e2_may_ask_none(self):
+        settings = fx.settings(usd_day=0.0)
+        researcher = EquityResearcher(self.store, self.router, settings, runner=self.runner, clock=self.clock)
+        unwritten = fx.e2_family(self.store, "unwritten")
+        self.assertTrue(researcher.needs_model(self.store.family(unwritten["id"])))
+        self.assertTrue(researcher.idle())
+        self.assertFalse(researcher.due(), "its next step asks a model, and the day's line is spent")
+        self.assertFalse(self.researcher.idle(), "with dollars it is work")
+        scored = fx.e2_family(self.store, "to-score", code=fx.program(share=0.46), symbols=("QQQ",))
+        self.assertFalse(researcher.needs_model(self.store.family(scored["id"])))
+        self.assertFalse(researcher.idle(), "a program to Train-score needs no model")
+        self.assertFalse(researcher.due(), "nothing to do was looked at a moment ago")
+        self.clock.advance(elane_train.IDLE_LOOK_SECONDS + 1)
+        self.assertTrue(researcher.due(), "looked at again after IDLE_LOOK_SECONDS")
+
     def test_the_backoff_grows_and_waits(self):
         fam = fx.e2_family(self.store, "waits", code=fx.program(share=0.38))
         self.runner.answer = lambda code, k: fx.MissingData("no store")
@@ -445,6 +667,64 @@ class WhatAVerdictIs(ResearchCase):
         self.assertEqual(self.rec(a["id"])["versions"]["1"]["fails"], ["DQ"])
         self.assertEqual(self.rec(b["id"])["versions"]["1"]["fails"], ["LOAD"])
         self.assertIn("v1: the program was disqualified", self.researcher.brief(self.store.family(a["id"])))
+
+    def test_a_load_refusal_reaches_its_author_and_a_disqualifications_own_words_never_do(self):
+        # The integration review's seal-6: the record dropped every verdict's reason, so an author whose program the
+        # child refused to load ("NEEDS history 9999 is above the lane's 504 sessions") revised blind, each LOAD failure
+        # spending one of its four Train versions. LOAD's text is the House's own (a program that did not load read no
+        # market data). A disqualification's reason carries the program's own exception text, which can hold anything it
+        # read (a bar of the reserve it sees as look-back): only counts and the error's class are kept.
+        dq, refused, late = fx.program(share=0.34), fx.program(share=0.33), fx.program(share=0.32)
+        leak = "25 errors (first: line 12: ValueError: SENTINEL close 412.55 volume 9876543 on the bar)"
+        self.results[(dq, 1.0)] = {**fx.train_result(status="disqualified"), "reason": leak}
+        self.results[(refused, 1.0)] = fx.ProgramRefused("NEEDS history 9999 is above the lane's 504 sessions")
+        self.results[(late, 1.0)] = {**fx.train_result(status="disqualified"),
+                                     "reason": "decide used 912 s, over the run's budget of 900 s"}
+        a = fx.e2_family(self.store, "dq", code=dq)
+        b = fx.e2_family(self.store, "load", code=refused, symbols=("QQQ",))
+        c = fx.e2_family(self.store, "late", code=late, symbols=("IWM",))
+        self.researcher.run()
+        self.assertEqual(self.rec(b["id"])["versions"]["1"]["fails"], ["LOAD"])
+        brief = self.researcher.brief(self.store.family(b["id"]))
+        self.assertIn("v1: the decider child refused to load the program: NEEDS history 9999 is above the lane's 504 "
+                      "sessions.", brief)
+        kept = json.dumps(self.rec(a["id"]))
+        brief = self.researcher.brief(self.store.family(a["id"]))
+        for text in (kept, brief):
+            for word in ("SENTINEL", "412.55", "9876543", "on the bar"):
+                self.assertNotIn(word, text)
+        self.assertIn("v1: the program was disqualified on Train by its own errors or timeouts: 25 errors in decide, the "
+                      "first a ValueError at line 12.", brief)
+        self.assertIn("its decides ran past the run's time budget", self.researcher.brief(self.store.family(c["id"])))
+
+    def test_a_disqualification_names_counts_a_line_and_a_known_class_only(self):
+        said = elane_train.dq_said
+        self.assertEqual(said("25 errors (first: line 7: KeyError: 'XLK')"), "25 errors in decide, the first a KeyError at line 7")
+        self.assertEqual(said("25 errors (first: line 7: Close412: 412.55)"), "25 errors in decide, the first at line 7")
+        self.assertEqual(said("25 errors (first: 412.55: ValueError: x)"), "25 errors in decide, the first a ValueError")
+        self.assertEqual(said("25 errors (first: decide ran past 1.00 s)"),
+                         "25 errors in decide, the first a decide past its time limit")
+        self.assertEqual(said("25 errors (first: 412.55 was the close)"), "25 errors in decide")
+        self.assertEqual(said("an invented reason holding 412.55"), "its own errors or timeouts")
+        self.assertEqual(said(None), "its own errors or timeouts")
+        # A disqualification with no count to name says its sentence once (it read "... by its own errors or timeouts:
+        # its own errors or timeouts." in the author's brief), and one with a count keeps both halves.
+        bare = elane_train.program_fault("DQ", "an invented reason holding 412.55", said=said("an invented reason"))
+        self.assertEqual(bare["said"], elane_train.FAILS["DQ"])
+        text = elane_train.version_text(1, elane_train.compact(bare, at="2026-10-10T00:00:00Z"))
+        self.assertEqual(text, "v1: the program was disqualified on Train by its own errors or timeouts.")
+        self.assertEqual(text.count("its own errors or timeouts"), 1)
+        counted = elane_train.program_fault("DQ", "25 errors (first: line 7: KeyError: 'XLK')",
+                                            said=said("25 errors (first: line 7: KeyError: 'XLK')"))
+        self.assertEqual(elane_train.version_text(2, elane_train.compact(counted, at="2026-10-10T00:00:00Z")),
+                         "v2: the program was disqualified on Train by its own errors or timeouts: 25 errors in decide, "
+                         "the first a KeyError at line 7.")
+        # A run the child kept failing (RUN): the failure's class, never its text.
+        verdict = elane_train.program_fault("RUN", "RunFailed: stderr held 412.55", said="a RunFailed")
+        kept = elane_train.compact(verdict, at="2026-10-10T00:00:00Z")
+        self.assertNotIn("412.55", json.dumps(kept))
+        self.assertTrue(kept["why"].endswith(": a RunFailed"))
+        self.assertNotIn("why", elane_train.compact(elane_train.program_fault("DQ", "raw text 412.55"), at="x"))
 
     def test_a_family_with_no_judged_version_stalls_with_no_graveyard_row(self):
         settings = fx.settings(train_budget=2, train_per_round=5)

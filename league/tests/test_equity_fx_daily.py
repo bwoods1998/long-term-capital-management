@@ -38,6 +38,8 @@ from league.tests import test_equity_e2e as E2E
 
 SUNDAY = dt.date(2026, 10, 11)
 FRIDAY, MONDAY, TUESDAY, WEDNESDAY = T.FRIDAY, T.MONDAY, T.TUESDAY, T.WEDNESDAY
+#: Money's own band rule (`T.BookTest` stubs it at its interface for the book's plumbing tests).
+REAL_NEXT_BAND = B.next_band
 SPY, QQQ = "seed-overnight-spy", "seed-overnight-qqq"
 #: Programs for the real child (the decider's "equity" kind, in process).
 BOOM = ("NEEDS = {'symbols': ['SPY'], 'history': 5, 'max_hold_sessions': 40}\nPARAMS = {}\n\n\n"
@@ -1064,8 +1066,9 @@ class Audit(T.BookTest):
 
 
 class AsOf(unittest.TestCase):
-    """Two readings of one adjustment=all series, the second rescaled by an event after t (the vendor rounds each price
-    to four decimals): the same as-of prices, to the rounding."""
+    """Two readings of one adjustment=all series, the second rescaled by an event after t: the same as-of prices, to
+    the vendor's rounding. The bound is the cent's (`config.rounding_bound`: the rehearsal on real bars found the
+    adjusted series rounded to the cent, league/tests/test_equity_rehearsal.py), so the finer grid here agrees too."""
 
     def readings(self, price: float, factor: float, rescale: float):
         days = [f"2026-10-{d:02d}" for d in (5, 6, 7, 8, 9)]
@@ -1083,10 +1086,12 @@ class AsOf(unittest.TestCase):
                 self.assertEqual(L._bars_verdict(raw, old_all, fresh_raw, fresh_all, day), "ok")
 
     def test_a_price_that_really_changed_does_not(self):
+        # A cent on one adjusted close is the vendor's own rounding (two cent-rounded prices on either side of a
+        # restatement differ by that much); a move of a fifth of a percent is not, at any of these prices.
         for price in (600.0, 41.07):
             raw, old_all, fresh_raw, fresh_all, day = self.readings(price, 0.9871, 0.9925)
             first = sorted(fresh_all)[0]
-            fresh_all[first]["c"] = round(fresh_all[first]["c"] + 0.01, 4)      # a cent on one adjusted close
+            fresh_all[first]["c"] = round(fresh_all[first]["c"] * 1.002, 4)
             self.assertFalse(L._as_of_equal(raw, old_all, fresh_raw, fresh_all, day), price)
             self.assertEqual(L._bars_verdict(raw, old_all, fresh_raw, fresh_all, day), "mismatch")
 
@@ -1171,6 +1176,76 @@ class BuyAndHold(T.BookTest):
         self.assertEqual(h.book._sleeve_share(sized), D("0.50"))
         self.assertEqual(len(h.market.bar_calls), calls, "a sizing at send time reads no bar")
 
+
+# ------------------------------------------------------------------------------------- the sizing-up step, parked
+class TheSizingUpStepIsParked(T.BookTest):
+    """The captain's decision on the review of A20's study (Oct 11, 2026): `equity_money.sized.min_trades` is 1000 at
+    the table in force. The owner's loss budget covers all real money, and a Sized program's lots carry no Probe mark
+    (their closes would join neither the window, the total nor the program's -$300 line), so no equity program is
+    Sized: every real equity close stays inside the budget's tallies. The rule itself stays as pre-registered."""
+
+    def winner(self, equity_table):
+        """A Probe program with 999 winning real closes (a spread among them, the buy-and-hold priced and beaten, long
+        at Probe) in the real book under `equity_table`; (the harness, its instance, its families row)."""
+        h = self.harness(table=equity_table)
+        h.families.rows = {SPY: T.family_row(band="probe")}
+        inst = h.instance()
+        h.state.put("eq_band_since", {inst.id: {"band": "probe", "day": "2026-01-02"}})
+        with h.state.transaction():
+            for i in range(999):
+                lot = h.lot(inst, "SPY", "0.5", "600", opened=FRIDAY)
+                lot.status, lot.qty, lot.cash, lot.exit_day, lot.closed_at = "closed", D(0), D("3" if i % 2 else "1"), \
+                    MONDAY.isoformat(), T.at(MONDAY, 9, 31)
+                h.book._save_lot(lot)
+        h.venue.held.clear()
+        for day, close in (("2026-10-08", "100"), ("2026-10-12", "100.001")):   # one fetch: one series
+            h.state.execute("INSERT OR REPLACE INTO eq_bars(day, symbol, adjustment, c, fetched_at, sha) "
+                            "VALUES(?,?,?,?,0,?)", (day, "SPY", "all", close, "a"))
+        return h, inst, h.families.rows[SPY]
+
+    def synced(self, h):
+        """The decision's own band sync, with money's real rule (the base class stubs it)."""
+        h.decide_setup(MONDAY)
+        with mock.patch.object(B, "next_band", REAL_NEXT_BAND):
+            h.tick(16, 31)
+        return h.families.moves
+
+    def test_a_program_with_999_winning_real_closes_is_still_probe_and_its_closes_are_in_the_tallies(self):
+        from league.live import money as M
+        from league.live import real as R
+
+        in_force = M.EquityTable.from_constitution()                # the table in force, not the harness's invented one
+        h, inst, row = self.winner(in_force)
+        et = h.table.equity
+        self.assertEqual((et.sized_min_trades, h.table.probe_loss_basis), (1000, "net"))
+        record = h.book._record_of(inst.family, inst.version, row)
+        self.assertEqual((record.n, record.pnl, record.realized_net), (999, D("1997"), D("1997")))
+        self.assertEqual(REAL_NEXT_BAND(row, record, et, seat_free=True),
+                         ("probe", "999 real closes, under the 1000 sizing up needs"))
+        self.assertEqual(self.synced(h), [], "no band move")
+        self.assertEqual((h.families.rows[SPY]["band"], h.book._instance(inst.id).band), ("probe", "probe"))
+        # Its closes are in the Probe tallies, every one: a Sized lot (no mark) would be in none of them.
+        figures = L.probe_figures(h.state.rows, weights=et.open_risk_weight)
+        self.assertEqual((len(figures.closes), sum(cash for _, cash in figures.closes)), (999, D("1997")))
+        self.assertEqual(h.state.rows("SELECT COUNT(*) AS n FROM eq_lots WHERE status='closed' AND probe=1")[0]["n"], 999)
+        # And so in the shared loss budget: a later loss is read against them (the net basis), from inception.
+        loss = h.lot(inst, "SPY", "0.5", "600", opened=FRIDAY)
+        loss.status, loss.qty, loss.cash, loss.exit_day, loss.closed_at = "closed", D(0), D("-2500"), \
+            MONDAY.isoformat(), T.at(MONDAY, 9, 32)
+        h.book._save_lot(loss)
+        _, _, total, _, _ = R.probe_figures(h.state.rows, day=MONDAY.isoformat(), table=h.table)
+        self.assertEqual(total, D("503"), "2,500 lost less the 1,997 its Probe closes had made")
+
+    def test_what_the_park_holds_back(self):
+        """The same program under the rule's own 20 closes: the book's sync moves it to Sized. Parking is the row."""
+        from league.live import money as M
+
+        pre_registered = T.dataclasses.replace(M.EquityTable.from_constitution(), sized_min_trades=20)
+        h, inst, row = self.winner(pre_registered)
+        moves = self.synced(h)
+        self.assertEqual([(family, band) for family, band, _ in moves], [(SPY, "sized")])
+        self.assertIn("999 real closes", moves[0][2])
+        self.assertEqual(h.families.rows[SPY]["band"], "sized")
 
 if __name__ == "__main__":
     unittest.main()

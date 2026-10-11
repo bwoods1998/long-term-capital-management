@@ -165,3 +165,29 @@ class ReadSeats(StoreCase):
         self.assertEqual(h["bands"]["live_missing_from_read"], [])
         self.assertEqual(h["bands"]["roster"]["waiting"], ["c"])
         self.assertNotIn("live-band families with no band row", json.dumps(preopen.check_bands(h).row()))
+
+    def test_preopen_check_6_counts_the_options_lanes_only(self):
+        # The integration review's merge-2: check 6 read EVERY living Candidate/Probe/Sized family against the options
+        # band rows (`bands.read(root)`: the options lanes) and the options roster, so each equity family in a live band
+        # (a seed that passed its look; every program release E2 breeds that does) was "missing a band row" and the
+        # check failed every trading day, hiding a real options family without one. Equity bands are check 10's.
+        self.banded("a", "probe")
+        self.store.add_family({**SPEC, "id": "eq-seed", "structure": "etf", "lane": "beta", "symbols": ["SPY"],
+                               "roots": ["SPY"]}, origin="seed")
+        self.store.add_version("eq-seed", CODE, {}, author="test")
+        self.store.set_band("eq-seed", "candidate", reason="passed its sealed look")
+        self.store.add_family({**SPEC, "id": "eq-live", "structure": "etf", "lane": "equity", "symbols": ["QQQ"],
+                               "roots": ["QQQ"]}, origin="architect")
+        self.store.add_version("eq-live", CODE, {}, author="test")
+        self.store.set_band("eq-live", "probe", reason="the money table")
+        self.assertEqual([r["family"] for r in bands.read(self.root)], ["a"], "the options rows only")
+        h = preopen.collect(self.root, self.root, self.root, None, now=time.time(), config={})
+        self.assertEqual(h["bands"]["live_missing_from_read"], [])
+        self.assertNotIn("live-band families with no band row", json.dumps(preopen.check_bands(h).row()))
+        # An options family in a live band with no band row is still named, and no equity family beside it.
+        self.store.add_family({**SPEC, "id": "opt-bare"}, origin="test")
+        self.store.add_version("opt-bare", CODE, {}, author="test")
+        self.store.set_band("opt-bare", "candidate", reason="no proof stored")
+        h = preopen.collect(self.root, self.root, self.root, None, now=time.time(), config={})
+        self.assertEqual(h["bands"]["live_missing_from_read"], ["opt-bare"])
+        self.assertIn("live-band families with no band row: ['opt-bare']", json.dumps(preopen.check_bands(h).row()))

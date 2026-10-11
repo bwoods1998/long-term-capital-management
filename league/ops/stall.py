@@ -473,9 +473,11 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
     one = lambda sql, params=(): (guard.ids(db, sql, params) or [None])[0]  # noqa: E731
     marks = ",".join("?" * len(F.NOT_RUN))
     #: A Gym evaluation: a row with a trial the Gym neither refused nor failed (an F1 verdict's rows carry no trial). RELEASE
-    #: E2: the equity lanes' runs (their Train runs on the House) are no Gym evaluation; their Validations still count.
-    evaluated_all = f"status NOT IN ({marks}) AND trials > 0"
-    evaluated = f"{evaluated_all} AND {OPTIONS_RUNS}"
+    #: E2: the equity lanes' runs (their Train runs AND their Validations on the House) are no evaluation of the Gym's and
+    #: no Validation of the options tournament's: an equity Validation never reads a stalled options pipeline as moving,
+    #: and an equity family between its Train pass and its try is owed no options Validation (the integration review's
+    #: loop-4 and merge-3). The equity lanes' own are `equity_validation_runs` and `equity_awaiting_ids`, beside.
+    evaluated = f"status NOT IN ({marks}) AND trials > 0 AND {OPTIONS_RUNS}"
     out: dict[str, Any] = {}
     out["births"] = int(one(f"SELECT count(*) FROM events WHERE kind='swarm.born' AND at>=? AND {OPTIONS_BIRTHS}",
                             (iso(BIRTH_HOURS),)) or 0)
@@ -516,27 +518,34 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
     out["last_gym_run_at"] = one(f"SELECT max(at) FROM runs WHERE {evaluated}", F.NOT_RUN)
     out["cycles"] = int(one("SELECT count(*) FROM events WHERE kind='swarm.cycle' AND at>=?", (iso(GYM_HOURS),)) or 0)
     since_v = iso(VALIDATION_HOURS)
-    out["validation_runs"] = int(one(f"SELECT count(*) FROM runs WHERE \"window\"='validation' AND at>=? AND {evaluated_all}",
+    out["validation_runs"] = int(one(f"SELECT count(*) FROM runs WHERE \"window\"='validation' AND at>=? AND {evaluated}",
                                      (since_v, *F.NOT_RUN)) or 0)
     out["validation_inherited"] = int(one(f"SELECT count(*) FROM runs WHERE \"window\"='validation' AND at>=? AND status NOT IN "
-                                          f"({marks}) AND trials = 0", (since_v, *F.NOT_RUN)) or 0)
+                                          f"({marks}) AND trials = 0 AND {OPTIONS_RUNS}", (since_v, *F.NOT_RUN)) or 0)
     # The last verdict with a row: a validation the Gym evaluated or one read from an identical program (F1).
-    out["last_validation_at"] = one(f"SELECT max(at) FROM runs WHERE \"window\"='validation' AND status NOT IN ({marks})",
-                                    F.NOT_RUN)
+    out["last_validation_at"] = one(f"SELECT max(at) FROM runs WHERE \"window\"='validation' AND status NOT IN ({marks}) "
+                                    f"AND {OPTIONS_RUNS}", F.NOT_RUN)
+    # THE EQUITY LANES' own Validations on the House (release E1), reported beside: never a part of the cause above.
+    out["equity_validation_runs"] = int(one(
+        f"SELECT count(*) FROM runs WHERE \"window\"='validation' AND at>=? AND status NOT IN ({marks}) AND NOT ({OPTIONS_RUNS})",
+        (since_v, *F.NOT_RUN)) or 0)
     judged = 0
     for verdicts in F.json_rows(db, "swarm.tournament", "$.validation.judged", since_v, S.iso(now + 1)):
         judged += len(verdicts) if isinstance(verdicts, Mapping) else 0
     out["judged"] = judged
     awaiting: list[str] = []
     bests = 0
-    for fam in guard.rows(db, "SELECT id, best_version, validated_version, state FROM families WHERE retired_at IS NULL"):
+    equity_awaiting: list[str] = []
+    for fam in guard.rows(db, "SELECT id, best_version, validated_version, state, structure FROM families "
+                              "WHERE retired_at IS NULL"):
         n = candidate(fam["best_version"], fam["state"])
         if n is None:
             continue
-        bests += 1
+        equity = str(fam["structure"]) in ("etf", "stock")  # `OPTIONS_FAMILIES`: an equity family is the equity round's
+        bests += 0 if equity else 1
         if fam["validated_version"] is None or int(fam["validated_version"]) != n:
-            awaiting.append(str(fam["id"]))
-    out["train_bests"], out["awaiting_ids"] = bests, awaiting
+            (equity_awaiting if equity else awaiting).append(str(fam["id"]))
+    out["train_bests"], out["awaiting_ids"], out["equity_awaiting_ids"] = bests, awaiting, equity_awaiting
     last = guard.rows(db, "SELECT at, payload FROM events WHERE kind='swarm.tournament' ORDER BY seq DESC LIMIT 1")
     round_ = None
     if last:

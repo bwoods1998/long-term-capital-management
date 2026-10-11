@@ -144,9 +144,11 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   program was seeded by the captain's build agents.
 - DONE WITH AND WITHOUT THE THREE SEEDED PROGRAMS (A8.12): `done.without_seeded` repeats both meters over the closes of
   every program but the seeded ones (the swarm store's kv `elane_seeds` and the book's `eq_instances.seeded`).
-- THE SHARED BUDGET'S CONSEQUENCE (A8.6): `equity.options_probe_room` says plainly that while the equity lane holds its
-  full Probe sleeves (max_programs x sleeve_share x E, open risk at the ETF weight) the options Probe lane has only
-  the rest of the $400 window: about $400 - 0.15 x E, effectively off.
+- THE SHARED BUDGET'S CONSEQUENCE (A8.6): `equity.options_probe_room` says plainly that while the equity lane holds all
+  it may (the lower of its Probe sleeves, max_programs x sleeve_share x E, and the invested cap, invested_share x E:
+  the cap's 1.00 x E since the captain's A20 set the sleeves at 0.50, three of which ask for 1.50 x E; open risk at
+  the ETF weight) the options Probe lane has only the rest of the $400 window: about $400 - 0.20 x E, effectively
+  off. Three one-ETF programs hold less (a lot of 0.25 x E each: 0.15 x E of open risk), and the statement says so.
 - PRE-REGISTERED BEFORE THE FIRST EQUITY CLOSE (the captain's A14, Oct 10, 2026; `PREREGISTERED`, verbatim in every
   report as `done.preregistered` and in docs/operations.md; TEXT NOW, the code in a later release): how the Done rule's
   "live fills consistent with their replay" is read (`A14_CONSISTENCY`: the mean fill gap against the official-price
@@ -260,8 +262,11 @@ ZERO_EDGE_EQUITY_NOTE = (
 #: A8.6: the shared loss budget's consequence for the options Probe lane, said in the report and the docs.
 EQUITY_PROBE_NOTE = (
     "THE LOSS BUDGET IS SHARED (A8.6): the equity lane's open Probe risk counts in the same $400 window and $800 total as "
-    "the options Probe lane. While the equity lane is invested at max_programs x sleeve_share x E (3 x 0.25 E), its open "
-    "risk at the ETF weight (0.20) is 0.15 x E, and the options Probe lane has only the window's rest: effectively off.")
+    "the options Probe lane. The equity lane holds at most the lower of its Probe sleeves (max_programs x sleeve_share x "
+    "E: 3 x 0.50 E) and the invested cap (invested_share x E: 1.00 E), so its open risk at the ETF weight (0.20) is at "
+    "most 0.20 x E; three one-ETF programs hold a lot of 0.25 x E each, 0.15 x E of open risk. The options Probe lane "
+    "has only the window's rest ($400 less its realized loss less 0.20 x the equity lots), and no room under the "
+    "invested cap once the equity lane is invested to it: effectively off.")
 #: PT1 (THE PROBE TOTAL AT $800, Oct 10, 2026): PREREG-T measured the $800 total and the -$300 program loss line at this
 #: roster alone (at no roster the operator's grid found the $800 total almost all cost), and L-D's $400 total and -$200
 #: line are the rules it measured them against.
@@ -774,10 +779,17 @@ def attach_equity(close: dict[str, Any], twin: Mapping[str, Any] | None, screens
 
 
 def options_probe_room(equity_usd: Any, constitution: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """A8.6 (`EQUITY_PROBE_NOTE`) in figures: the equity lane's open risk with every Probe sleeve invested
-    (`equity_money.probe.max_programs` x `sleeve_share` x E at the ETF weight `open_risk_weight.etf`), and what that leaves
-    of the options Probe lane's window (`options_money.probe.loss_budget_usd`). E is the House's sizing equity
-    (`dlane.unit_context`); the constitution's rows are read as they stand (no `equity_money` block: no figure)."""
+    """A8.6 (`EQUITY_PROBE_NOTE`) in figures: the equity lane's open risk when it holds all it may, at the ETF weight
+    `open_risk_weight.etf`, and what that leaves of the options Probe lane's window
+    (`options_money.probe.loss_budget_usd`). What the lane may hold is the LOWER of every Probe sleeve invested
+    (`equity_money.probe.max_programs` x `sleeve_share` x E) and THE INVESTED CAP (`invested_share` x E): since the
+    captain's A20 (Oct 11, 2026: sleeves of 0.50 x E) three whole sleeves ask for 1.50 x E and the cap's 1.00 x E is
+    the bound, so the open risk is 0.20 x E at most, not the sleeves' 0.30 x E (three one-ETF programs, a lot of
+    0.25 x E each, hold 0.15 x E of it: the figure here is the lane's most). `bound` names what set the figure: "sleeves",
+    "invested_cap", or "budget" when that open risk in dollars would pass the window itself (every equity entry is cut
+    to the budget's room, so the lane's open risk is never above it). A table with no `invested_share` row is read by
+    its sleeves alone (the larger figure). E is the House's sizing equity (`dlane.unit_context`); the constitution's
+    rows are read as they stand (no `equity_money` block: no figure)."""
     if constitution is None:
         from ..constitution import CONSTITUTION as constitution  # noqa: N811
     em = (constitution or {}).get("equity_money") or {}
@@ -786,19 +798,28 @@ def options_probe_room(equity_usd: Any, constitution: Mapping[str, Any] | None =
     probe = em.get("probe") or {}
     share, weight = _dec(probe.get("sleeve_share")), _dec((em.get("open_risk_weight") or {}).get("etf"))
     programs = _int(probe.get("max_programs"))
+    cap = _dec(em.get("invested_share"))
     out: dict[str, Any] = {"statement": EQUITY_PROBE_NOTE, "window_budget_usd": _usd(budget), "sleeve_share": None,
-                           "max_programs": programs, "etf_weight": None, "open_risk_share_of_e": None,
+                           "max_programs": programs, "invested_share": None, "invested_share_of_e": None, "bound": None,
+                           "etf_weight": None, "open_risk_share_of_e": None,
                            "sizing_equity_usd": _num(equity_usd), "equity_open_risk_usd": None,
                            "options_window_room_usd": None}
     if share is None or weight is None or programs is None or budget is None:
         out["why"] = "the constitution has no equity_money probe row yet: the statement stands without figures"
         return out
-    risk = Decimal(programs) * share * weight
-    out.update(sleeve_share=str(share), etf_weight=str(weight), open_risk_share_of_e=float(risk))
+    sleeves = Decimal(programs) * share
+    held = sleeves if cap is None or sleeves <= cap else cap
+    risk = held * weight
+    out.update(sleeve_share=str(share), etf_weight=str(weight), invested_share=None if cap is None else str(cap),
+               invested_share_of_e=float(held), bound="sleeves" if held == sleeves else "invested_cap",
+               open_risk_share_of_e=float(risk))
     e = _dec(equity_usd)
     if e is not None:
-        out["equity_open_risk_usd"] = _usd(risk * e)
-        out["options_window_room_usd"] = _usd(max(Decimal(0), budget - risk * e))
+        dollars = risk * e
+        if dollars > budget:
+            dollars, out["bound"] = budget, "budget"
+        out["equity_open_risk_usd"] = _usd(dollars)
+        out["options_window_room_usd"] = _usd(max(Decimal(0), budget - dollars))
     else:
         out["why"] = "no sizing equity read: the share of E stands without dollars"
     return out
@@ -1484,6 +1505,12 @@ class Research247:
       2026) a day with none is not held ("no stall receipt"), as a day with no budget receipt is not: the stall job
       failing all day (an unreadable swarm store) or missed is a day nobody looked for an owner step, never a day with
       none waiting.
+    RELEASE E2, WHICH LANES THE RULE MEANS: the day's three counts are the OPTIONS lanes' (the pinned rule's "Gym runs"
+    are the Gym's, and it was written when every birth and Validation was an options one). The equity lanes' births,
+    their Train runs on the House and their Validations are reported BESIDE (`equity`), never a part of a count and
+    never a bar: an equity row must not make a day hold while the options researchers were paused (the integration
+    review's loop-4), and a day without an equity birth fails nothing. Counting the equity lanes in item 7 is the
+    owner's change of the pinned rule, not this reader's.
     A day holds when births, Gym runs and Validations are each above 0, `at_budget` is True, the day has a stall receipt
     and `owner` is empty; the window holds when every day does. The operator's edits of swarm.json and budget.json in the
     window are LISTED (`edits`, from their before-copies) beside it: the pinned rule reads "no captain" as no owner step
@@ -1518,12 +1545,19 @@ class Research247:
         start, end = f"{day}T00:00:00Z", (datetime.fromisoformat(day) + timedelta(days=1)).date().isoformat() + "T00:00:00Z"
         one = lambda sql, params: int((self.store._all(sql, params) or [{"n": 0}])[0]["n"] or 0)  # noqa: E731
         marks = ",".join("?" * len(NOT_RUN))
-        births = one("SELECT count(*) AS n FROM events WHERE kind='swarm.born' AND at>=? AND at<?", (start, end))
+        # THE OPTIONS LANES' counts (the class docstring): the stall facts' own filters (league/ops/stall.py).
+        from .stall import OPTIONS_BIRTHS, OPTIONS_RUNS
+
+        born = "SELECT count(*) AS n FROM events WHERE kind='swarm.born' AND at>=? AND at<?"
+        births = one(f"{born} AND {OPTIONS_BIRTHS}", (start, end))
         births += one("SELECT count(*) AS n FROM families WHERE origin='game' AND born_at>=? AND born_at<?", (start, end))
-        gym = one(f"SELECT count(*) AS n FROM runs WHERE at>=? AND at<? AND status NOT IN ({marks}) AND trials > 0",
-                  (start, end, *NOT_RUN))
-        validation_rows = one(f"SELECT count(*) AS n FROM runs WHERE \"window\"='validation' AND at>=? AND at<? AND "
-                              f"status NOT IN ({marks})", (start, end, *NOT_RUN))
+        ran = f"SELECT count(*) AS n FROM runs WHERE at>=? AND at<? AND status NOT IN ({marks})"
+        gym = one(f"{ran} AND trials > 0 AND {OPTIONS_RUNS}", (start, end, *NOT_RUN))
+        validation_rows = one(f"{ran} AND \"window\"='validation' AND {OPTIONS_RUNS}", (start, end, *NOT_RUN))
+        # THE EQUITY LANES, beside: their births, their Train runs on the House and their Validations.
+        equity = {"births": one(f"{born} AND NOT ({OPTIONS_BIRTHS})", (start, end)),
+                  "train_runs": one(f"{ran} AND \"window\"='train' AND NOT ({OPTIONS_RUNS})", (start, end, *NOT_RUN)),
+                  "validations": one(f"{ran} AND \"window\"='validation' AND NOT ({OPTIONS_RUNS})", (start, end, *NOT_RUN))}
         judged = 0
         for row in self.store._all("SELECT payload FROM events WHERE kind='swarm.tournament' AND at>=? AND at<?",
                                    (start, end)):
@@ -1563,7 +1597,7 @@ class Research247:
         if owner:
             whys.append(f"an owner step waiting ({', '.join(sorted(owner))})")
         out = {"day": day, "births": births, "gym_runs": gym, "validations": validation_rows + judged,
-               "validation_rows": validation_rows, "judged": judged, "at_budget": at_budget,
+               "validation_rows": validation_rows, "judged": judged, "equity": equity, "at_budget": at_budget,
                "limited_by": sorted(limits), "owner": sorted(owner), "stall_receipts": stalls,
                "holds": not whys, "why": "; ".join(whys) or None}
         self.days[day] = out
@@ -1589,8 +1623,9 @@ class Research247:
                  if failing else "no day in the window"),
                 "days": days, "edits": edits[-EDITS_LISTED:], "edits_count": len(edits),
                 "note": "DONE-RULE item 7 as pinned: births, Gym runs and Validations every UTC day, at the research "
-                        "budget (no taper), with no owner step waiting; the operator's edits of swarm.json and "
-                        "budget.json are listed beside it, never a bar"}
+                        "budget (no taper), with no owner step waiting; the counts are the options lanes' and the "
+                        "equity lanes' are reported beside each day (`equity`), never a bar; the operator's edits of "
+                        "swarm.json and budget.json are listed beside it, never a bar"}
 
 
 # ------------------------------------------------------------------------------------------------- the funnel

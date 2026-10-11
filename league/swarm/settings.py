@@ -521,7 +521,9 @@ DEFAULTS: dict[str, Any] = {
     # is here, so the policy layer's shape holds "elane" to an object (`policy_shape`); "off" is the rollback.
     # RELEASE E2 (the equity lanes' births; league/swarm/ELANE_E2.md): its switch is `elane.birth_share` (E1's key, held
     # to 0-0.5 by `elane.cfg`; policy.json ships 0) and its settings are the nested `elane.e2` block (policy.json
-    # carries the code's defaults; `elane.e2.usd_day` is its dollars a UTC day, held to 0-100). The layers merge deep,
+    # carries the code's defaults; `elane.e2.usd_day` is its dollars a UTC day, held to 0-100, and
+    # `elane.e2.pace_share`, held to 0-0.5, its share of the Sail model line `researcher.sail_usd_per_hour`: E2's hourly
+    # pace, and the cap of its day; league/swarm/elane_yield.py). The layers merge deep,
     # so swarm.json sets one key of the block at a time, and each key is held inside its bound where it is read
     # (elane_births.py, elane_train.py, elane_review.py, elane_yield.py `cfg`: a malformed value is its default).
     "elane": {"mode": "off"},
