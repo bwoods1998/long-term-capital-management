@@ -35,8 +35,9 @@ THE CAUSES (`CAUSES`; `checks`). Each has `what`, `numbers`, `doing` (what the f
 WHEN A CAUSE IS JUDGED (`lanes`). Only while the lanes are on (`elane.mode` "gate" and `elane.birth_share` above zero,
 as the swarm loads its settings), release E2's rounds are in the running tree, the floor is not paused (a maintenance
 pause or a stopped swarm stops the lanes by design), E2's own dollars are not set to zero (`elane.e2.usd_day` or
-`elane.e2.pace_share` at 0: the lanes paused by setting) and the store holds an equity family or an equity pass at all.
-Else every cause reads "Not judged" and says why. And only on enough evidence, counted SINCE THE RUNNING SWARM STARTED
+`elane.e2.pace_share` at 0: the lanes paused by setting), the store holds an equity family or an equity pass at all,
+and the owner has not switched the four off (`<state>/ops.json` `stall.elane` false: `switched_off`). Else every cause
+reads "Not judged" and says why. And only on enough evidence, counted SINCE THE RUNNING SWARM STARTED
 (the heartbeat's `started_at`): a release that fixes a fault restarts the swarm, so what the generators did under the
 earlier release is not held against this one, and a House that just started is not judged on its first minutes. A
 cause with too little evidence says how much it has and how much it needs. A lane is not judged idle while the swarm
@@ -66,16 +67,19 @@ window (the House tries at every run). Once the gateway words the four (a gatewa
 
 THE RESEARCH FUNNEL (`research_counts`; the funnel's `equity.research`, which the `scoreboard` job's receipt carries
 for the day and the release, and `python3 -m league.ops.elane_health`): equity passes (asked, barren, cut short,
-skipped by reason) and families born, proposals refused by reason class, programs refused before a run by rule, versions scored,
-disqualified and failed by code (Y1, Y2, P1, R1, STATE and any other the bar names), bar passes, review refusals and
-passes, families retired (stalled, refuted) and E2's model dollars by purpose. Counts and E2's own dollars only.
+skipped by reason) and families born, proposals refused by reason class, programs refused before a run by rule,
+versions scored, disqualified and failed by code (Y1, Y2, P1, R1, STATE and any other the bar names), bar passes,
+review refusals and passes, families retired (stalled, refuted) and E2's model dollars by purpose. Counts and E2's
+own dollars only.
 
 THE REPORT (`report`, `text`; `python3 -m league.ops.elane_health --state DIR [--hours N] [--json]`), read-only, for an
 operator on the box: the four checks, the funnel, and each family's versions (the fail codes, a disqualification's
 class and line) and refusals (the rule and its sentence in closed words).
 
-Standard library only at import; the swarm's own readers (`elane`, `elane_births`, `elane_train`, `elane_yield`) are
-imported inside the functions that need them, and a failure there is "Not judged" with its error, never a failed run.
+Standard library only at import; the swarm's own readers (`elane`, `elane_births`, `elane_yield`, the architect and
+the loop for whether E2's rounds are there; `elane_train` for the contract's sentence of an error class; the code's
+universe) are imported inside the functions that need them, and a failure there is "Not judged" with its error, never
+a failed run.
 """
 from __future__ import annotations
 
