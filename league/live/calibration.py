@@ -732,6 +732,9 @@ class Calibration:
         loss = M.D(max_loss)
         if exposure.book_loss + loss > table.book_share * equity:
             return f"the book's cap: ${M.cents(exposure.book_loss)} open of ${M.cents(table.book_share * equity)}"
+        invested = M.invested_refusal(table, equity, exposure, loss)
+        if invested:
+            return invested
         if loss > min(table.gateway_order_max_loss, table.gateway_order_share * equity):
             return "the gateway's per-order cap"
         # The account-wide day cap, less the room kept for the families' Probe opens (`money.probe_room`): the

@@ -54,6 +54,73 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
 - Operations: [docs/operations.md](docs/operations.md), "The equity lanes' births" (switch on, read, stop, the budget,
   the yield record).
 
+### Release E1, the review's fixes on the swarm, evidence, ops and docs side, on `feat/equity-e1-fx-swarm` (unreleased; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
+
+The adversarial review of `feat/equity-e1` (five reviewers, Oct 10) found 56 defects; these are the 18 on the swarm,
+evidence, ops and docs side (the order path's, the daily step's and the live hooks' are their own branches).
+
+- **The equity rounds run on their own** (`league/swarm/loop.py` `equity_rounds`, every `elane.ROUND_SECONDS`, 300 s).
+  The equity Validation ran only inside the hourly tournament after the options Validation, and the look only inside
+  the options gate round, both started only while the research guard allows and the options Gym is ready. A3 says an
+  equity run needs no Gym box, yet under the brake, with the Gym down or after an options Validation that raised, the
+  seeds were born and never judged. The two equity steps now run on one thread of their own (Validation, then the
+  look, so a version validated in a round is looked at in the same round), outside the branch that holds the options
+  rounds; `Tournament.run` and `Gate.run` no longer call them. The heartbeat carries `status.equity`.
+- **The seeds' looks follow the seed list** (`elane.round_order`): they ran in (born second, id) order, so in the ids'
+  alphabet (QQQ's overnight seed before SPY's) or by a clock tick, and under D3 the later of two seeds of one lineage
+  is refused with no look. Now SPY's overnight seed, QQQ's, then the index reversal. A version refused at the gate
+  before its look retires for what happened (`elane.SAME_LINEAGE`, `FLOOR_INELIGIBLE`), no longer as "used its one
+  Validation try".
+- **A look's lineage record survives an equity identity adoption**: `adopt_equity` cleared `elane_train_r`, the Train
+  series D3's correlation test reads, for families already looked at, so after any identity move a re-coded copy of a
+  looked-at program got its own sealed look. The series now stays with the look; `same_lineage` fails closed (a
+  looked-at program with no series has it written again from its looked version's Train-era runs, else the look waits).
+- **The look reads each run's status**: a holdout run its own errors ended ("disqualified") was judged on its partial
+  series and could pass. It is now a look spent and failed; a Train-era run that ended so refuses the floor; a span
+  with no data is no history, the screen's own rule.
+- **A sealed run is sent at most twice** (`elane.LOOK_SENDS`; `league/equity/runner.py` `RunLost`): a look whose run
+  did not return was owed again without limit. One the child took whole and did not answer (it ran past its budget
+  or exited) is owed once, then the look is spent and failed, with a House warning each time; every other failure (the
+  store, a child that could not start or did not take the request, an answer that is not a result) is the House's and
+  counts against nobody. **The
+  evidence child's hash seed is pinned** (`Decider.hash_seed`, 0 for the swarm's equity child, as the options Gym's
+  PYTHONHASHSEED=0): a program that iterates a set of strings no longer differs from one start of the child to the next.
+- **A tried version whose verdict went stale is validated again** (`elane.next_try`), whichever version the family's
+  candidate is by then: a validated v1 with a later v2 after an adoption, and R3's retry after the store's daily write,
+  waited for good. R3's retry hash is recorded once, at the lineage's first try, and kept (None included).
+- **The calendar is in the equity identity** (`evaluator.EQUITY_CALENDAR_FILES`: `ltcm/__init__.py`,
+  `ltcm/broker.py`, `ltcm/data/__init__.py`): the NYSE calendar the store and the ctx read was in the evidence's import
+  closure and not hashed. A CI test holds the list to what the evidence imports outside league/. **From E1 on a byte
+  changed in one of those three moves the equity identity.**
+- **The Gym's first decision reads its whole window** (`league/equity/store.py` `_slice`: `history` + 1 sessions
+  before the run's first): it read one row fewer than a live decision, so a program reading its oldest row raised
+  there in the Gym and ran live.
+- **The seeds say where they came from**: the source and each program's header said "Written before any data was
+  seen", untrue for seed-reversal-index, whose theta and h are the cell a pre-registered census selected on earlier
+  history. The overnight seeds are "written from a published prior"; the reversal seed says how its parameters were
+  chosen and that no 2020, 2021, 2025 or 2026 session was used. No figure.
+- **The Done meter beside equity closes** (`league/ops/dlane_report.py`): item 4 of a reading that holds an equity
+  close is read by A14 (`a14_consistency`), never by the options replay gap, whose 0.10 of the maximum loss is a
+  thousand basis points of a long lot. The fill-gap half is computed (a mean past 15 bp a side fails it); the
+  intents-agreement half has no reader yet, so item 4 of such a reading is not read and **no Done is declared on equity
+  closes until it lands**. P(Done | zero edge) says it is the options rules' figure only when an equity close is
+  counted. The screen's row beside a trade carries S1-X's label as `s1x` and the lane's as `lane_label` (one `label`
+  read the lane's where S1-X's was meant). The funnel's equity Validation counts read the verdicts' own events (they
+  read the hourly tournament row, which never held an equity family: always zero).
+- Recorded for E2's review, never a condition of the look: each look keeps the share of sessions its program was
+  invested on in Validation and on each Train-era span (`elane._invested_shares`). The screen's floor is the program's
+  own Train-era behaviour, so a program sparser there lowers its own threshold (never below the receipt's floor); the
+  rule that would refuse on it needs a pre-registered factor and is not written.
+- Docs: `docs/operations.md` "The equity lane": the rounds, the order of the looks, what a look does with a run that
+  went wrong, the sizing-up rule and EDM1 as pre-registered (sigma's order and the sleeve floor included), the equity
+  freeze and the owner's two commands, the morning audit's real consequences, the Sunday-to-Monday timeline, the
+  client ids.
+- Proof: `league/tests/test_equity_fx_swarm.py` (46 tests, each naming its finding; 44 fail on `feat/equity-e1` as it
+  was, and two are guards that hold on both).
+  Existing tests changed where they held the defect: `test_equity_identity` (the adoption cleared the series; the
+  fingerprint's file list), `test_equity_store` and `test_equity_runner` (the slice's `first`), `test_dlane_report_equity`
+  (the funnel's fixture, A14's status words, the row's `label`).
+
 ### Release E1, ready for review: S2 is the gate, the equity identity covers evidence only, the Done text pre-registered, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; no further money-digest move)
 
 - **S2 is the House's share screen** (the captain's A11). Both lanes' blocks of policy.json pin receipt 2
@@ -79,14 +146,16 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   fails the verdict's windows and would have spent the lineage's one look.
 - **The equity identity covers the evidence modules only** (A13): `evaluator.equity_fingerprint` hashes
   `EQUITY_EVIDENCE` (league/equity's `__init__`, `config`, `store`, `program`, `ctx`, `engine`, `results`, `runner`,
-  `synth`, `sizing`, `screen`, `child`), the four shared league files and the Gym modules they import. The plumbing
+  `synth`, `sizing`, `screen`, `child`), the four shared league files and the Gym modules they import (and, since the
+  review's fixes above, the calendar's three `ltcm` files). The plumbing
   (`live`, `actions`, `schedule`, `families`, `bands`, `kinds`) is out, so a plumbing fix no longer sends every live
   equity band back to the Gym; the I6 ctx test and the twins police that live and Gym agree. A CI test holds the list
   to the import closure of the runner, the child, the screen and the engine (plus `synth`). **The panel kind's slot**:
   `kinds.KINDS["panel"]` = `league.xs.child`, the child's runtime carries `league/xs/`, and `league/xs/child.py`
   refuses every op until the cross-sectional lane is built there.
-- **Pre-registered before the first equity close** (A14; text now, code later; `docs/operations.md` and every `dlane`
-  report's `done.preregistered`): Done's "live fills consistent with their replay" is the mean fill gap against the
+- **Pre-registered before the first equity close** (A14; text first, its fill-gap half read since the review's fixes
+  above; `docs/operations.md` and every `dlane` report's `done.preregistered`): Done's "live fills consistent with
+  their replay" is the mean fill gap against the
   official-price model at most 15 bp a side AND live and shadow intents agreeing on at least 95% of the counted
   sessions, read at each Done checkpoint; Done is reported beside the number of distinct close dates and a
   date-clustered t; the forward seat rule is written and inactive (an incumbent with fewer than 5 real closes is never

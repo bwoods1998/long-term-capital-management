@@ -476,6 +476,9 @@ class HouseTest:
         if exposure.book_loss + unit + room > book:
             return M.Plan(0, cap, f"the book's cap: ${M.cents(exposure.book_loss)} of ${M.cents(book)} open maximum "
                                   f"loss, and ${M.cents(room)} is kept for the families' opens")
+        invested = M.invested_refusal(table, equity, exposure, unit)
+        if invested:
+            return M.Plan(0, cap, invested)
         order_cap = min(table.gateway_order_max_loss, table.gateway_order_share * equity)
         if unit > order_cap:
             return M.Plan(0, cap, f"the gateway's per-order cap ${M.cents(order_cap)} is under one structure's "

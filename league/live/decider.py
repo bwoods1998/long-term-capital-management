@@ -434,6 +434,14 @@ class _Base:
 class Decider(_Base):
     """The child process (the module docstring)."""
 
+    #: A PINNED HASH SEED for this child, or None (release E1's review; an addition: None is the child exactly as it
+    #: was, the options book's and the equity book's). The swarm's equity evidence child sets it (league/swarm/elane.py
+    #: `isolated_runner`), so a Validation run or a sealed look is the same run on every start of the child: a program
+    #: that iterates a set of strings otherwise differs from process to process, as the options Gym knows
+    #: (league/gym/driver.py pins PYTHONHASHSEED=0). `_spawn` then starts the interpreter without -E, which would
+    #: ignore the variable; the environment is the same explicit one, and it holds no other PYTHON* name.
+    hash_seed: int | None = None
+
     def __init__(self, *, timeout: float = 1.0, max_errors: int = 25, memory_mb: int = MEMORY_MB,
                  python: str = sys.executable, log: str | Path | None = None, allow_unisolated: bool = False):
         super().__init__(timeout=timeout, max_errors=max_errors)
@@ -495,6 +503,9 @@ class Decider(_Base):
                 self._runtime.chmod(0o555)
             cwd = self._runtime
         command = [self.python, "-E", "-s", "-m", "league.live.decider"]
+        if self.hash_seed is not None:  # A PINNED HASH SEED (the class attribute's note); None: the line above stands
+            command = [self.python, "-s", "-m", "league.live.decider"]
+            env["PYTHONHASHSEED"] = str(int(self.hash_seed))
         if netns:
             command = ["unshare", "--net", "--map-root-user", *command]
         if self.log:

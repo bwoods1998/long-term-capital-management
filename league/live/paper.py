@@ -440,15 +440,11 @@ class StockPaperProof:
     stop until it passes); `passed()` is both; `status()` for the health page."""
 
     def __init__(self, state: LiveState, account: Account, *, record: Callable[..., Any] | None = None,
-                 clock: Callable[[], float] | None = None, alert: Callable[[str, str], Any] | None = None,
-                 after: Callable[[], bool] | None = None):
+                 clock: Callable[[], float] | None = None, alert: Callable[[str, str], Any] | None = None):
         self.state, self.account = state, account
         self.record = record or (lambda *a, **k: None)
         self.alert = alert or (lambda *a, **k: None)
         self.clock = clock or time.time
-        #: Whether the practice account's earlier proofs (the options route's `PaperProof`s) have passed: ONE PROOF AT A
-        #: TIME on the practice account, the options route's first; a new attempt starts only then (None: no wait).
-        self.after = after
         self.key = STOCK_KEY
 
     def _row(self) -> dict:
@@ -626,13 +622,17 @@ class StockPaperProof:
     def step(self, now: float, *, market: Any, window: Any = None) -> dict:
         """Advance the one durable attempt (the module docstring) inside the book's OPEN window of the day (`window`:
         the book's `schedule.Moments`, None on a day without a session). Never raises for the venue's trouble: an
-        unreadable reading is the row's `why`, and nothing new is sent without readable evidence."""
+        unreadable reading is the row's `why`, and nothing new is sent without readable evidence. A minute with nothing
+        to do (`_idle`) reads nothing of the practice account."""
         row = self._row()
         if self.passed():
             return row
         if row.get("schema") != 1:
             row = self._new()
+            self._put(row)
         today = dt.datetime.fromtimestamp(now, NEW_YORK).date()
+        if self._idle(row, today, now, window):
+            return row
         try:
             if row.get("orders"):
                 work = row["orders"][-1]
@@ -651,14 +651,30 @@ class StockPaperProof:
         self._put(row)
         return row
 
+    def _idle(self, row: Mapping[str, Any], today: dt.date, now: float, window: Any) -> bool:
+        """Whether this minute has nothing for the proof to do, so the practice account is not read at all (the book
+        steps the proof every minute, around the clock, until both stages pass): no order of it is still working, and
+        it is waiting outside a BUY window it may still use, or holding its lot with stage BUY passed outside the SELL
+        stage's window (the buy's own session, a day without a session, before the window's first send, or after its
+        end once the day's failure is recorded). Exactly the minutes in which `_advance` would return the row as it
+        is."""
+        work = row["orders"][-1] if row.get("orders") else None
+        if work is not None and not work.get("terminal"):
+            return False
+        opened = window is not None and float(window.open_send) <= now
+        if row.get("status") == "waiting":
+            return not opened or row.get("tried_day") == today.isoformat() or now >= float(window.entry_until)
+        if row.get("status") == "held" and self.buy_passed():
+            if not opened or today.isoformat() <= str(row.get("buy_day")):
+                return True
+            return now >= float(window.exit_until) and row.get("sell_day") != today.isoformat()
+        return False
+
     def _advance(self, row: dict, held: Decimal, today: dt.date, now: float, window: Any, market: Any) -> dict:
         status = row["status"]
         opened = window is not None and float(window.open_send) <= now
         if status == "waiting":
             if not opened or row.get("tried_day") == today.isoformat() or now >= float(window.entry_until):
-                return row
-            if self.after is not None and not self.after():
-                row["why"] = "waiting for the options route's paper proofs on the practice account (one proof at a time)"
                 return row
             _, ask = self._quote(market)
             limit = (ask * (1 + Decimal(STOCK_COLLAR_BP) / 10000)).quantize(CENT, rounding=ROUND_UP)
