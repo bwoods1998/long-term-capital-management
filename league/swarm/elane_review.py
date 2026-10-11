@@ -91,6 +91,29 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    in `elane_train.check_code` beside the level rule. Why here and not in league/gym/safety.py: that file is in the
    options execution fingerprint and the equity evidence identity, and a hardening rule there would reset every band
    proof; the root (one interpreter for every run) is E1's, for its next identity move.
+1e. THE READING RULE (`reading_refusals`, `READING_CTX`; static, free; release E2.2). Most of the first programs the
+   equity researcher wrote on the House read `ctx.bars[sym]` by key (`ctx.bars[sym]["close"]`) or as rows: every
+   decide raised a TypeError, the version was disqualified, and each cost model dollars and one of its family's scored
+   versions. What a program receives is E1's (league/equity/ctx.py; EQUITY.md "Reading ctx"), and the misreadings that
+   can be SEEN in the source are refused here, before a version is stored or run, each with what to write instead:
+   a symbol's bars read by key, by position or as rows, iterated, measured, unpacked or put into arithmetic (they are
+   ONE object whose six arrays are read by attribute: `ctx.bars[sym].close`), or a field they do not have; a field ctx
+   does not have; a lot or a closed lot read by attribute (each is a dict in a list: `lot["id"]`), a key it does not
+   have, `ctx.positions` or `ctx.closed` read as a dict by symbol; `ctx.events` read by attribute or by an unknown
+   flag; `ctx.prices[sym]` or `ctx.caps[sym]` (floats) subscripted; and, among the dicts `decide` returns, an intent
+   with none or two of "buy", "sell", "cancel", an "at" that is neither "open" nor "close", a buy with neither
+   "share" nor "usd" (or a constant size outside its range) and a sell that names a symbol or a whole lot instead of
+   the lot's id. The pass follows a name only while EVERY binding of it in its function gives it the same kind of
+   value (`bars = ctx.bars[sym]`, a loop over `ctx.positions`, `ctx.bars.items()`, a helper's parameter when every
+   call hands it the same kind), and an intent only from `decide`'s own return (a list, a name appended to, a helper's
+   return); a name bound two ways, a value through a call it does not know, a dict changed after it was written, a
+   read inside a `try` that has a handler and a kind of value the program asks the type of (`isinstance(bars, dict)`:
+   it reads it both ways on purpose) are left alone, never refused on a guess. A symbol's bars are the one kind whose
+   type check excuses nothing by itself: they are never a dict or rows, so the check counts only beside a sound read
+   of a bar (one of its six arrays by attribute); "a dict, else rows" misreads on every branch and is refused. It reads nothing but the source, so it
+   says nothing of any market. It runs first of the three rules in `elane_train.check_code`: a refusal is recorded
+   with its reason for the next brief and counts one of the family's write attempts (`train_max_attempts`), never one
+   of its scored versions.
 2. THE PAID REVIEW AND AUDIT (`EquityReview`): at a version's first Train pass (equity-v1), BEFORE it is the lineage's
    Validation try, two different models read the exact program, its card and its own Train facts (never a Validation
    or look figure: A9 D3) under `REVIEW` (the gate's leakage rubric for daily share programs) and answer
@@ -1247,6 +1270,842 @@ def memory_text(code: Any) -> str | None:
             + "; ".join(found[:4]) + (f"; and {len(found) - 4} more" if len(found) > 4 else ""))
 
 
+# ------------------------------------------------------------------------------------------------------- the reading rule
+#: WHAT A PROGRAM RECEIVES (league/equity/ctx.py; a test holds each tuple to that module's own definitions, and the
+#: intent's words to league/equity/program.py's): ctx's fields, one symbol's bars' fields, an open lot's keys, a closed
+#: lot's keys, the event flags, and the intent's kinds and fill points.
+READ_CTX = ("symbols", "bars", "prices", "weekday", "events", "events_next", "session_of_month", "sessions_to_month_end",
+            "positions", "orders", "closed", "rejects", "cash", "equity", "budget", "caps", "params")
+READ_BAR = ("symbol", "open", "high", "low", "close", "volume", "ret")
+READ_LOT = ("id", "symbol", "class", "qty", "entry", "mark", "value", "pnl", "held_sessions", "at", "tag")
+READ_CLOSED = ("id", "symbol", "qty", "entry", "exit", "net", "held_sessions", "reason", "tag")
+READ_EVENTS = ("fomc", "cpi", "jobs", "monthly_opex", "quarter_end", "half_day")
+INTENT_KINDS = ("buy", "sell", "cancel")
+INTENT_AT = ("open", "close")
+#: The keys of an intent the House reads (league/equity/program.py `_intent`): written into a dict AFTER its display
+#: (`order["at"] = "close"`), the display alone no longer says what the intent is.
+INTENT_KEYS = frozenset({*INTENT_KINDS, "share", "usd", "at"})
+#: The kinds of value the pass knows (`_Reading.kinds`): ctx; `ctx.bars` and its views; ONE symbol's bars; one of its
+#: arrays; the lists of lots and one lot of each; the dicts of floats and one float of each; the rest of ctx.
+_R_CTX, _R_BARS, _R_BAR, _R_ARR, _R_VALUES, _R_ITEMS = "ctx", "bars", "bar", "arr", "bars.values", "bars.items"
+_R_LOTS, _R_LOT, _R_SHUT, _R_SHUT1, _R_ENUM, _R_ENUM1 = "lots", "lot", "closed", "closed1", "lots.enum", "closed.enum"
+_R_PRICES, _R_PRICE, _R_CAPS, _R_CAP, _R_EVENTS = "prices", "price", "caps", "cap", "events"
+_R_REJECTS, _R_REJECT, _R_SYMBOLS, _R_SYM, _R_ID = "rejects", "reject", "symbols", "sym", "lot.id"
+_R_OF_CTX: dict[str, str] = {"bars": _R_BARS, "positions": _R_LOTS, "closed": _R_SHUT, "prices": _R_PRICES,
+                             "caps": _R_CAPS, "events": _R_EVENTS, "events_next": _R_EVENTS, "rejects": _R_REJECTS,
+                             "symbols": _R_SYMBOLS}
+#: What one element of a kind is (a loop over it, a subscript that is no slice), what a pair of one is, and what a
+#: lot's key holds.
+_R_EACH: dict[str, str] = {_R_LOTS: _R_LOT, _R_SHUT: _R_SHUT1, _R_REJECTS: _R_REJECT, _R_SYMBOLS: _R_SYM,
+                           _R_BARS: _R_SYM, _R_VALUES: _R_BAR}
+_R_PAIR: dict[str, tuple[str | None, str | None]] = {_R_ITEMS: (_R_SYM, _R_BAR), _R_ENUM: (None, _R_LOT),
+                                                     _R_ENUM1: (None, _R_SHUT1)}
+_R_KEY: dict[str, str] = {"id": _R_ID, "symbol": _R_SYM}
+_R_ROWS = frozenset({_R_LOT, _R_SHUT1})
+_R_LISTS = frozenset({_R_LOTS, _R_SHUT, _R_REJECTS})
+_R_DICTS = frozenset({_R_BARS, _R_PRICES, _R_CAPS, _R_EVENTS})
+#: The names a dict and a list answer to as attributes (anything else read from a lot or from `ctx.positions` is no
+#: method: the misreading).
+DICT_METHODS = frozenset({"get", "items", "keys", "values", "copy", "pop", "popitem", "setdefault", "update", "clear",
+                          "fromkeys"})
+LIST_METHODS = frozenset({"append", "extend", "insert", "remove", "pop", "clear", "index", "count", "sort", "reverse",
+                          "copy"})
+#: Builtins that iterate, measure or convert their argument: handed ONE symbol's bars they raise.
+_R_WALKS = frozenset({"len", "list", "tuple", "sorted", "reversed", "enumerate", "zip", "iter", "next", "sum", "max",
+                      "min", "any", "all", "set", "frozenset", "map", "filter", "dict", "float", "int", "abs", "round",
+                      "range"})
+_R_ORDER = (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn)
+#: The dict and list methods that change one in place (a dict or list so changed is no longer its display).
+_R_CHANGES = frozenset({"update", "setdefault", "pop", "popitem", "clear", "remove", "sort", "reverse"})
+#: What each misreading is told (the same words as EQUITY.md's "Reading ctx").
+_BARS_ARE = ("ctx.bars[sym] is ONE object whose six arrays are read BY ATTRIBUTE (open, high, low, close, volume, ret: "
+             "numpy arrays, oldest first, the last element this session)")
+_LOT_IS = "a lot is a dict in the list ctx.positions (a closed lot in ctx.closed)"
+#: READING CTX, for everyone who writes an equity program (the equity architect's lanes block, the equity researcher's
+#: system prompt and its brief after a disqualification or a refusal by this rule): one sentence and the two lines. No
+#: outcome and no figure: what E1's ctx builder gives (league/equity/ctx.py), which the contract's worked example runs.
+READING_CTX = (
+    "READING CTX (a program that misreads it is refused before it runs, or fails in decide and is disqualified): "
+    "ctx.bars[sym] is ONE object whose six numpy arrays (open, high, low, close, volume, ret; oldest first, the last "
+    "element this session) are read BY ATTRIBUTE, never by key and never as rows; a lot is a dict in the list "
+    "ctx.positions and is sold by its id:\n"
+    "    close = ctx.bars[sym].close        # never ctx.bars[sym][\"close\"]; check len(close) before you index a window\n"
+    "    sells = [{\"sell\": lot[\"id\"], \"at\": \"open\"} for lot in ctx.positions if lot[\"symbol\"] == sym]\n"
+    "The contract's \"Reading ctx\" has a whole worked program and the common faults.")
+
+
+def _text(node: ast.AST | None) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _src(node: ast.AST) -> str:
+    try:
+        return " ".join(ast.unparse(node).split())[:60]
+    except Exception:  # noqa: BLE001 - an expression that cannot be written back is named by its kind
+        return type(node).__name__
+
+
+class _Scope:
+    """One function's names (or the module's, or a comprehension's): each name's bindings, as (how, ...) tuples."""
+
+    def __init__(self, node: ast.AST, up: "_Scope | None", *, own: bool = True):
+        self.node, self.up, self.own = node, up, own  # `own` False: a comprehension (a walrus binds above it)
+        self.names: dict[str, list[tuple]] = {}
+
+    def bind(self, name: str, how: tuple) -> None:
+        self.names.setdefault(name, []).append(how)
+
+    def find(self, name: str) -> "_Scope | None":
+        scope: _Scope | None = self
+        while scope is not None and name not in scope.names:
+            scope = scope.up
+        return scope
+
+
+class _Reading:
+    """THE READING RULE's pass (the module docstring, 1e) over one parsed program: `run()` gives its (line, why) rows."""
+
+    def __init__(self, tree: ast.Module):
+        self.tree = tree
+        self.found: list[tuple[int, str]] = []
+        self.scope_of: dict[int, _Scope] = {}
+        self.memo: dict[tuple[int, str], frozenset[str] | None] = {}
+        self.busy: set[tuple[int, str]] = set()
+        self.calls: dict[str, list[ast.Call]] = {}
+        self.heads: set[int] = set()  # the names that are a call's function (`f` in `f(x)`)
+        self.defs: dict[str, list[ast.AST]] = {}
+        self.module = _Scope(tree, None)
+        #: What the program writes into dicts and lists of its own after they were made: the string keys written or
+        #: taken out anywhere (`touched`), the names changed in place (`changed`), and whether something was changed in
+        #: a way the pass cannot place (`rebuilt`: a computed key or an update on something that is no plain local name).
+        self.touched: set[str] = set()
+        self.changed: set[str] = set()
+        self.rebuilt = False
+        #: WHAT THE PROGRAM ITSELF TAKES CARE OF: the nodes inside a `try` that has a handler (a read that raises there
+        #: is caught: whether the program then trades is Train's to judge), and the kinds of value it asks the type of
+        #: (`isinstance(bars, dict)`, `hasattr(lot, "id")`: it reads them both ways on purpose). Neither is refused.
+        self.guarded: set[int] = set()
+        self.probed: set[str] = set()
+        self.build(tree, self.module)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Try) and node.handlers:
+                self.guarded |= {id(sub) for stmt in node.body for sub in ast.walk(stmt)}
+            elif type(node).__name__ == "TryStar":
+                self.guarded |= {id(sub) for stmt in node.body for sub in ast.walk(stmt)}
+        #: Functions read as a value somewhere (handed on, stored, returned): their parameters may be anything.
+        self.loose = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+                      and id(n) not in self.heads and n.id in self.defs}
+
+    # ------------------------------------------------------------------ the names
+    def targets(self, target: ast.AST, scope: _Scope, how: Any) -> None:
+        """Bind an assignment's or a loop's target: a name by `how(None)`, a flat pair's names by `how(i)`, anything
+        else as unknown."""
+        if isinstance(target, ast.Name):
+            scope.bind(target.id, how(None))
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            flat = all(isinstance(e, ast.Name) for e in target.elts)
+            for i, e in enumerate(target.elts):
+                if isinstance(e, ast.Name):
+                    scope.bind(e.id, how(i) if flat else ("other",))
+                else:
+                    self.unknown(e, scope)
+        else:
+            self.unknown(target, scope)
+
+    @staticmethod
+    def unknown(node: ast.AST, scope: _Scope) -> None:
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Name) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+                scope.bind(sub.id, ("other",))
+
+    def placed(self, receiver: ast.AST, scope: _Scope) -> bool:
+        """Whether a dict or list changed in place is a plain name of the program's own making (assigned, never a loop's
+        variable, a parameter or a name from outside): its change is then that name's alone."""
+        if not isinstance(receiver, ast.Name):
+            return False
+        home = scope.find(receiver.id)
+        return home is not None and all(how[0] == "value" for how in home.names[receiver.id])
+
+    def writes(self, node: ast.AST, scope: _Scope) -> None:
+        """Book a change in place (`touched`, `changed`, `rebuilt`): a subscript written or deleted, or a changing
+        method called."""
+        if isinstance(node, ast.Subscript):
+            receiver, key = node.value, _text(node.slice)
+            computed = key is None and not isinstance(node.slice, ast.Slice) and not (
+                isinstance(node.slice, ast.Constant) or (isinstance(node.slice, ast.UnaryOp)
+                                                         and isinstance(node.slice.operand, ast.Constant)))
+        else:
+            receiver, name = node.func.value, node.func.attr  # type: ignore[attr-defined]
+            args = list(node.args)  # type: ignore[attr-defined]
+            key = _text(args[0]) if args and name in ("setdefault", "pop") else None
+            computed = name == "update" or (name in ("setdefault", "pop") and bool(args) and key is None)
+            if name == "update":
+                shown = [a for a in args if isinstance(a, ast.Dict) and all(_text(k) is not None for k in a.keys)]
+                named = [k.arg for k in node.keywords]  # type: ignore[attr-defined]
+                if len(shown) == len(args) and None not in named:
+                    self.touched |= {_text(k) or "" for a in shown for k in a.keys} | {str(n) for n in named}
+                    computed = False
+        if key is not None:
+            self.touched.add(key)
+        if isinstance(receiver, ast.Name):
+            self.changed.add(receiver.id)
+        if computed and not self.placed(receiver, scope):
+            self.rebuilt = True
+
+    def build(self, node: ast.AST, scope: _Scope) -> None:
+        self.scope_of[id(node)] = scope
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope.bind(node.name, ("def", node))
+            self.defs.setdefault(node.name, []).append(node)
+            inner = _Scope(node, scope)
+            a = node.args
+            for i, arg in enumerate([*a.posonlyargs, *a.args]):
+                inner.bind(arg.arg, ("param", node, i, arg.arg))
+            for arg in a.kwonlyargs:
+                inner.bind(arg.arg, ("param", node, None, arg.arg))
+            for arg in (a.vararg, a.kwarg):
+                if arg is not None:
+                    inner.bind(arg.arg, ("other",))
+            for sub in (*a.defaults, *(d for d in a.kw_defaults if d is not None), *node.decorator_list):
+                self.build(sub, scope)
+            for sub in node.body:
+                self.build(sub, inner)
+            return
+        if isinstance(node, ast.Lambda):
+            inner = _Scope(node, scope)
+            for sub in ast.walk(node.args):
+                if isinstance(sub, ast.arg):
+                    inner.bind(sub.arg, ("other",))
+            self.build(node.body, inner)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            inner = _Scope(node, scope, own=False)
+            for n, gen in enumerate(node.generators):
+                where = scope if n == 0 else inner
+                self.scope_of[id(gen)] = where
+                self.build(gen.iter, where)
+                self.targets(gen.target, inner, lambda i, gen=gen, where=where: ("each", gen.iter, where, i))
+                self.build(gen.target, inner)
+                for cond in gen.ifs:
+                    self.build(cond, inner)
+            for sub in ((node.key, node.value) if isinstance(node, ast.DictComp) else (node.elt,)):
+                self.build(sub, inner)
+            return
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            self.targets(node.target, scope, lambda i: ("each", node.iter, scope, i))
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                value = node.value
+                if isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List)) \
+                        and len(target.elts) == len(value.elts) \
+                        and not any(isinstance(e, ast.Starred) for e in (*target.elts, *value.elts)):
+                    for t, v in zip(target.elts, value.elts):
+                        self.targets(t, scope, lambda i, v=v: ("value", v, scope) if i is None else ("other",))
+                else:
+                    self.targets(target, scope, lambda i: ("value", value, scope) if i is None else ("other",))
+        elif isinstance(node, ast.AnnAssign):
+            self.targets(node.target, scope,
+                         lambda i: ("value", node.value, scope) if i is None and node.value is not None else ("other",))
+        elif isinstance(node, ast.NamedExpr):
+            home = scope
+            while not home.own and home.up is not None:
+                home = home.up
+            self.targets(node.target, home, lambda i: ("value", node.value, scope) if i is None else ("other",))
+        elif isinstance(node, ast.AugAssign):
+            if isinstance(node.target, ast.Name):
+                scope.bind(node.target.id, ("more",))  # `out += [...]`: of no known kind, and no second assignment
+        elif isinstance(node, ast.Delete):
+            self.unknown(node, scope)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                scope.bind((alias.asname or alias.name).split(".")[0], ("other",))
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            # A name another function may rebind is of no known kind there or here (every scope it can live in).
+            for name in node.names:
+                home: _Scope | None = scope
+                while home is not None:
+                    home.bind(name, ("other",))
+                    home = home.up
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    self.unknown(item.optional_vars, scope)
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name:
+                scope.bind(node.name, ("other",))
+        elif type(node).__name__ in ("MatchAs", "MatchStar"):
+            if getattr(node, "name", None):
+                scope.bind(node.name, ("other",))
+        elif type(node).__name__ == "MatchMapping":
+            if getattr(node, "rest", None):
+                scope.bind(node.rest, ("other",))
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                self.calls.setdefault(node.func.id, []).append(node)
+                self.heads.add(id(node.func))
+        for sub in ast.iter_child_nodes(node):
+            self.build(sub, scope)
+
+    def settle(self) -> None:
+        """Book every change in place and every kind the program asks the type of, once every name is bound (`writes`
+        asks how a changed name was bound)."""
+        for node in ast.walk(self.tree):
+            scope = self.scope_of.get(id(node))
+            if scope is None:
+                continue
+            if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                self.writes(node, scope)
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _R_CHANGES:
+                self.writes(node, scope)
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.args \
+                    and node.func.id in ("isinstance", "hasattr", "callable") and scope.find(node.func.id) is None:
+                self.probed |= self.kinds(node.args[0], scope) or frozenset()
+
+    def name(self, name: str, scope: _Scope) -> frozenset[str] | None:
+        """The kinds a name holds where it is read: every binding of it in its scope gives a known kind, else None."""
+        home = scope.find(name)
+        if home is None:
+            return None
+        key = (id(home), name)
+        if key in self.memo:
+            return self.memo[key]
+        if key in self.busy:
+            return None  # bound from itself (`x = x[1:]`): unknown
+        self.busy.add(key)
+        out: set[str] | None = set()
+        for how in home.names[name]:
+            got = self.bound(how)
+            if got is None:
+                out = None
+                break
+            out |= got
+        self.busy.discard(key)
+        self.memo[key] = frozenset(out) if out else None
+        return self.memo[key]
+
+    def bound(self, how: tuple) -> frozenset[str] | None:
+        if how[0] == "value":
+            return self.kinds(how[1], how[2])
+        if how[0] == "each":
+            whole = self.kinds(how[1], how[2])
+            if whole is None:
+                return None
+            out = set()
+            for kind in whole:
+                if how[3] is None:
+                    each = _R_EACH.get(kind)
+                else:
+                    each = (_R_PAIR.get(kind) or (None, None))[how[3]] if how[3] in (0, 1) else None
+                if each is None:
+                    return None
+                out.add(each)
+            return frozenset(out)
+        if how[0] == "param":
+            return self.param(how[1], how[2], how[3])
+        return None
+
+    def param(self, fn: ast.AST, index: int | None, name: str) -> frozenset[str] | None:
+        """A parameter's kinds: decide's first is ctx; a helper's are what EVERY call of it hands in (None when it is
+        never called by name, is read as a value somewhere, is defined twice, or a call spreads its arguments)."""
+        fname = getattr(fn, "name", "")
+        home = self.scope_of.get(id(fn))
+        if len(self.defs.get(fname, ())) != 1 or home is None or len(home.names.get(fname, ())) != 1:
+            return None
+        if fname == "decide" and home is self.module:
+            return frozenset({_R_CTX}) if index == 0 else None
+        calls = self.calls.get(fname, [])
+        if not calls or fname in self.loose:
+            return None
+        out: set[str] = set()
+        for call in calls:
+            if any(isinstance(a, ast.Starred) for a in call.args) or any(k.arg is None for k in call.keywords):
+                return None
+            given = next((k.value for k in call.keywords if k.arg == name), None)
+            if given is None and index is not None and index < len(call.args):
+                given = call.args[index]
+            got = self.kinds(given, self.scope_of[id(call)]) if given is not None else None
+            if got is None:
+                return None
+            out |= got
+        return frozenset(out) or None
+
+    # ------------------------------------------------------------------ the kinds
+    def kinds(self, node: ast.AST | None, scope: _Scope) -> frozenset[str] | None:
+        """The kinds of value an expression gives, when the pass knows them all; None for anything else."""
+        if isinstance(node, ast.Name):
+            return self.name(node.id, scope)
+        if isinstance(node, ast.Attribute):
+            return self.field(self.kinds(node.value, scope), node.attr)
+        if isinstance(node, ast.Subscript):
+            whole = self.kinds(node.value, scope)
+            if whole is None:
+                return None
+            cut = isinstance(node.slice, ast.Slice)
+            out = set()
+            for kind in whole:
+                if kind in _R_LISTS or kind == _R_SYMBOLS:
+                    each = kind if cut else _R_EACH[kind]
+                elif cut:
+                    each = None
+                elif kind == _R_BARS:
+                    each = _R_BAR
+                elif kind in (_R_PRICES, _R_CAPS):
+                    each = _R_PRICE if kind == _R_PRICES else _R_CAP
+                elif kind in _R_ROWS:
+                    each = _R_KEY.get(_text(node.slice) or "")
+                else:
+                    each = None
+                if each is None:
+                    return None
+                out.add(each)
+            return frozenset(out)
+        if isinstance(node, ast.Call):
+            return self.called(node, scope)
+        if isinstance(node, ast.IfExp):
+            a, b = self.kinds(node.body, scope), self.kinds(node.orelse, scope)
+            return a | b if a is not None and b is not None else None
+        if isinstance(node, ast.NamedExpr):
+            return self.kinds(node.value, scope)
+        return None
+
+    @staticmethod
+    def field(whole: frozenset[str] | None, attr: str) -> frozenset[str] | None:
+        if whole is None:
+            return None
+        out = set()
+        for kind in whole:
+            if kind == _R_CTX:
+                each = _R_OF_CTX.get(attr)
+            elif kind == _R_BAR:
+                each = _R_SYM if attr == "symbol" else _R_ARR if attr in READ_BAR else None
+            else:
+                each = None
+            if each is None:
+                return None
+            out.add(each)
+        return frozenset(out)
+
+    def called(self, node: ast.Call, scope: _Scope) -> frozenset[str] | None:
+        func = node.func
+        first = node.args[0] if node.args and not isinstance(node.args[0], ast.Starred) else None
+        if isinstance(func, ast.Attribute):
+            whole = self.kinds(func.value, scope)
+            if whole is None or len(whole) != 1:
+                return None
+            (kind,) = whole
+            if kind == _R_BARS:
+                if func.attr == "get" and first is not None and not node.keywords and \
+                        (len(node.args) == 1 or (len(node.args) == 2 and (
+                            (isinstance(node.args[1], ast.Constant) and node.args[1].value is None)
+                            or (isinstance(node.args[1], (ast.List, ast.Tuple, ast.Dict)) and not ast.dump(node.args[1]).count("Constant")
+                                and not getattr(node.args[1], "elts", getattr(node.args[1], "keys", None)))))):
+                    return frozenset({_R_BAR})
+                if node.args or node.keywords:
+                    return None
+                return {"values": frozenset({_R_VALUES}), "items": frozenset({_R_ITEMS})}.get(func.attr)
+            if kind in _R_ROWS and func.attr == "get" and len(node.args) == 1 and not node.keywords:
+                each = _R_KEY.get(_text(first) or "")
+                return frozenset({each}) if each else None
+            if kind in _R_LISTS and func.attr == "copy" and not node.args:
+                return whole
+            return None
+        if isinstance(func, ast.Name) and scope.find(func.id) is None and first is not None and not node.keywords:
+            whole = self.kinds(first, scope)
+            if func.id == "getattr" and len(node.args) == 2 and _text(node.args[1]) is not None:
+                return self.field(whole, _text(node.args[1]) or "")
+            if whole is None or len(whole) != 1 or len(node.args) != 1:
+                return None
+            (kind,) = whole
+            if func.id == "enumerate":
+                return {_R_LOTS: frozenset({_R_ENUM}), _R_SHUT: frozenset({_R_ENUM1})}.get(kind)
+            if func.id in ("list", "tuple", "reversed") and kind in (*_R_LISTS, _R_SYMBOLS):
+                return whole
+            if func.id == "dict" and kind in _R_ROWS:
+                return whole
+        return None
+
+    # ------------------------------------------------------------------ the misreadings
+    def say(self, node: ast.AST, why: str, *, raises: bool = True) -> None:
+        """Book a misreading; one that RAISES is left alone inside a `try` with a handler (`guarded`)."""
+        if raises and id(node) in self.guarded:
+            return
+        self.found.append((int(getattr(node, "lineno", 0) or 0), why))
+
+    def known(self, node: ast.AST | None, scope: _Scope) -> frozenset[str] | None:
+        """`kinds`, less anything the program asks the type of (`probed`: None, it reads that both ways on purpose)."""
+        whole = self.kinds(node, scope) if node is not None else None
+        return None if whole is None or whole & self.probed else whole
+
+    def all_of(self, node: ast.AST | None, scope: _Scope, kinds: Iterable[str]) -> bool:
+        whole = self.known(node, scope)
+        return whole is not None and whole <= frozenset(kinds)
+
+    def rows(self, node: ast.AST, what: str) -> None:
+        self.say(node, f"{what}: {_BARS_ARE}; there are no rows to walk, count or unpack: take a window of one array, "
+                       "close = ctx.bars[sym].close; close[-20:], len(close)")
+
+    def check(self, node: ast.AST) -> None:
+        scope = self.scope_of.get(id(node))
+        if scope is None:
+            return
+        if isinstance(node, ast.Subscript):
+            self.subscript(node, scope)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+            self.attribute(node, node.value, node.attr, scope)
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            if self.all_of(node.iter, scope, (_R_BAR,)):
+                self.rows(node.iter, f"`{_src(node.iter)}` is iterated as rows and raises a TypeError")
+        elif isinstance(node, ast.Call):
+            self.call(node, scope)
+        elif isinstance(node, ast.Assign):
+            if any(isinstance(t, (ast.Tuple, ast.List)) for t in node.targets) and self.all_of(node.value, scope, (_R_BAR,)):
+                self.rows(node, f"`{_src(node.value)}` is unpacked and raises a TypeError")
+        elif isinstance(node, ast.BinOp) and not isinstance(node.left, ast.JoinedStr) and _text(node.left) is None:
+            for side in (node.left, node.right):
+                if self.all_of(side, scope, (_R_BAR,)):
+                    self.say(side, f"`{_src(side)}` is put into arithmetic and raises a TypeError: {_BARS_ARE}; compute "
+                                   "on one array, ctx.bars[sym].close")
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+            if self.all_of(node.operand, scope, (_R_BAR,)):
+                self.say(node, f"`{_src(node.operand)}` is put into arithmetic and raises a TypeError: {_BARS_ARE}")
+        elif isinstance(node, ast.Compare):
+            sides = [node.left, *node.comparators]
+            for i, op in enumerate(node.ops):
+                if not isinstance(op, _R_ORDER):
+                    continue
+                for side in ((sides[i + 1],) if isinstance(op, (ast.In, ast.NotIn)) else (sides[i], sides[i + 1])):
+                    if self.all_of(side, scope, (_R_BAR,)):
+                        self.say(side, f"`{_src(side)}` is compared or searched and raises a TypeError: {_BARS_ARE}; "
+                                       "compare a value of one array, ctx.bars[sym].close[-1]")
+
+    def subscript(self, node: ast.Subscript, scope: _Scope) -> None:
+        whole = self.known(node.value, scope)
+        if whole is None:
+            return
+        key = _text(node.slice)
+        load = isinstance(node.ctx, ast.Load)
+        if whole == {_R_BAR}:
+            if key is not None and key in READ_BAR:
+                self.say(node, f"`{_src(node)}` reads a symbol's bars by key and raises a TypeError: {_BARS_ARE}; write "
+                               f"`{_src(node.value)}.{key}`")
+            elif key is not None:
+                self.say(node, f"`{_src(node)}` reads a symbol's bars by key and raises a TypeError: {_BARS_ARE}; they "
+                               f"have no {key!r}")
+            else:
+                self.rows(node, f"`{_src(node)}` reads a symbol's bars by position and raises a TypeError")
+        elif whole <= {_R_LOTS, _R_SHUT} and key is not None:
+            self.say(node, f"`{_src(node)}` reads ctx.positions (or ctx.closed) as a dict and raises a TypeError: it is a "
+                           "LIST of lots, each a dict; find a symbol's lots with [lot for lot in ctx.positions if "
+                           "lot[\"symbol\"] == sym]")
+        elif whole <= {_R_PRICE, _R_CAP}:
+            self.say(node, f"`{_src(node)}` subscripts a float and raises a TypeError: ctx.prices[sym] is this session's "
+                           "close and ctx.caps[sym] dollars; a symbol's history is ctx.bars[sym].close")
+        elif whole <= _R_ROWS and key is not None and load:
+            if key not in self.keys(whole):
+                self.say(node, f"`{_src(node)}`: {self.keys_of(whole)} has no key {key!r} (a KeyError)")
+        elif whole == {_R_EVENTS} and key is not None and load and key not in READ_EVENTS:
+            self.say(node, f"`{_src(node)}`: ctx.events and ctx.events_next hold {', '.join(READ_EVENTS)} only (a "
+                           "KeyError)")
+        elif whole == {_R_REJECT} and key is not None:
+            self.say(node, f"`{_src(node)}`: ctx.rejects is a list of strings (each says why an intent was refused), "
+                           "not of dicts (a TypeError)")
+
+    @staticmethod
+    def keys(whole: frozenset[str]) -> list[str]:
+        """The keys at least one of the kinds of lot has (a key outside them is in no lot the name can hold)."""
+        return [k for kind, keys in ((_R_LOT, READ_LOT), (_R_SHUT1, READ_CLOSED)) if kind in whole for k in keys]
+
+    @staticmethod
+    def keys_of(whole: frozenset[str]) -> str:
+        if whole == {_R_SHUT1}:
+            return f"a closed lot ({', '.join(READ_CLOSED)})"
+        if whole == {_R_LOT}:
+            return f"an open lot ({', '.join(READ_LOT)})"
+        return f"a lot (open: {', '.join(READ_LOT)}; closed: {', '.join(READ_CLOSED)})"
+
+    def attribute(self, node: ast.AST, value: ast.AST, attr: str, scope: _Scope) -> None:
+        whole = self.known(value, scope)
+        if whole is None:
+            return
+        told = f"`{_src(value)}.{attr}`"
+        if whole == {_R_CTX} and attr not in READ_CTX:
+            self.say(node, f"{told}: ctx has no field {attr!r} (an AttributeError); its fields are "
+                           f"{', '.join(READ_CTX)}, and it never holds a date")
+        elif whole == {_R_BAR} and attr not in READ_BAR:
+            self.say(node, f"{told}: a symbol's bars have open, high, low, close, volume and ret only (an "
+                           f"AttributeError): {_BARS_ARE}")
+        elif whole <= _R_ROWS and attr not in DICT_METHODS:
+            self.say(node, f"{told} reads a lot by attribute and raises an AttributeError: {_LOT_IS}; write "
+                           f"`{_src(value)}[\"{attr}\"]` ({self.keys_of(whole)})")
+        elif whole <= _R_LISTS and attr not in LIST_METHODS:
+            what = "ctx.rejects is a list of strings" if whole == {_R_REJECTS} else \
+                "ctx.positions and ctx.closed are LISTS of lots, each a dict: loop over them"
+            self.say(node, f"{told}: {what} (an AttributeError)")
+        elif whole <= _R_DICTS and attr not in DICT_METHODS:
+            what = ("ctx.events is a dict of booleans read by key: ctx.events[\"fomc\"]" if whole == {_R_EVENTS} else
+                    "ctx.bars, ctx.prices and ctx.caps are dicts by symbol: ctx.bars[\"SPY\"].close, ctx.prices[\"SPY\"]")
+            self.say(node, f"{told}: {what} (an AttributeError)")
+
+    def call(self, node: ast.Call, scope: _Scope) -> None:
+        func = node.func
+        plain = [a for a in node.args if not isinstance(a, ast.Starred)]
+        if isinstance(func, ast.Name) and scope.find(func.id) is None:
+            if func.id == "getattr" and len(node.args) == 2 and _text(node.args[1]) is not None:
+                self.attribute(node, node.args[0], _text(node.args[1]) or "", scope)
+            elif func.id in _R_WALKS:
+                for arg in plain:
+                    if self.all_of(arg, scope, (_R_BAR,)):
+                        self.rows(arg, f"`{func.id}({_src(arg)})` walks, counts or converts a symbol's bars and raises a "
+                                       "TypeError")
+        elif isinstance(func, ast.Attribute):
+            owner = func.value
+            if isinstance(owner, ast.Name) and owner.id in MODULES and scope.find(owner.id) is self.module:
+                for arg in plain:
+                    if self.all_of(arg, scope, (_R_BAR,)):
+                        self.say(arg, f"`{owner.id}.{func.attr}({_src(arg)})` is handed a symbol's bars whole: "
+                                      f"{_BARS_ARE}; hand it one array, ctx.bars[sym].close")
+            whole = self.known(owner, scope)
+            key = _text(plain[0]) if plain else None
+            if whole is not None and func.attr == "get" and key is not None:
+                if whole <= _R_ROWS and key not in self.keys(whole):
+                    self.say(node, f"`{_src(node)}`: {self.keys_of(whole)} has no key {key!r}; the get is always its "
+                                   "default", raises=False)
+                elif whole == {_R_EVENTS} and key not in READ_EVENTS:
+                    self.say(node, f"`{_src(node)}`: ctx.events and ctx.events_next hold {', '.join(READ_EVENTS)} only; "
+                                   "the get is always its default", raises=False)
+
+    # ------------------------------------------------------------------ the intents
+    @staticmethod
+    def inside(stmt: ast.AST) -> Iterable[ast.AST]:
+        """Every node of a statement that belongs to its own function (no nested def's or lambda's body)."""
+        stack = [stmt]
+        while stack:
+            node = stack.pop()
+            yield node
+            for sub in ast.iter_child_nodes(node):
+                if not isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                    stack.append(sub)
+
+    def returned(self, fn: ast.AST, depth: int = 0, seen: set[int] | None = None) -> list[tuple[ast.Dict, _Scope, str | None]]:
+        """THE INTENTS A FUNCTION RETURNS that the source shows as dict displays, each with its scope and the one name it
+        was assigned to (None: written in place): in a return value, in a list it returns, appended or added to the ONE
+        list a returned name was assigned (a name assigned twice, or changed in place otherwise, is followed nowhere:
+        it may have held something else), and in the return of a helper it passes on."""
+        seen = set() if seen is None else seen
+        out: list[tuple[ast.Dict, _Scope, str | None]] = []
+        if id(fn) in seen or depth > CALL_DEPTH:
+            return out
+        seen.add(id(fn))
+        body = [n for stmt in getattr(fn, "body", []) for n in self.inside(stmt)]
+        inner = self.scope_of.get(id(fn.body[0])) if getattr(fn, "body", None) else None  # type: ignore[attr-defined]
+        if inner is None:
+            return out
+        names: set[str] = set()
+
+        def puts(name: str) -> list[tuple[ast.AST, bool]] | None:
+            """(what goes into a local name, whether by its one assignment); None for a name the pass does not follow."""
+            got: list[tuple[ast.AST, bool]] = []
+            assigned = 0
+            for n in body:
+                if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets):
+                    got.append((n.value, True))
+                    assigned += 1
+                elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.target.id == name:
+                    assigned += 1
+                    if n.value is not None:
+                        got.append((n.value, True))
+                elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name) and n.target.id == name:
+                    if not isinstance(n.op, ast.Add):
+                        return None
+                    got.append((n.value, False))
+                elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) \
+                        and n.func.value.id == name and n.func.attr in (*PUTS, *PUTS_MANY):
+                    at = PUTS.get(n.func.attr, 0)
+                    if len(n.args) > at and not n.keywords:
+                        got.append((n.args[at], False))
+            home = inner.find(name)
+            if assigned != 1 or home is not inner or any(how[0] not in ("value", "more") for how in inner.names[name]):
+                return None
+            return got
+
+        def walk(node: ast.AST | None, via: str | None = None, level: int = 0) -> None:
+            if node is None or level > 40:
+                return
+            step = level + 1
+            if isinstance(node, ast.Dict):
+                out.append((node, self.scope_of.get(id(node), inner), via))
+            elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+                for e in node.elts:
+                    walk(e.value if isinstance(e, ast.Starred) else e, None, step)
+            elif isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+                walk(node.elt, None, step)
+            elif isinstance(node, ast.IfExp):
+                walk(node.body, None, step)
+                walk(node.orelse, None, step)
+            elif isinstance(node, ast.BoolOp):
+                for v in (node.values if isinstance(node.op, ast.Or) else node.values[-1:]):
+                    walk(v, None, step)
+            elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                walk(node.left, None, step)
+                walk(node.right, None, step)
+            elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+                walk(node.value, None, step)
+            elif isinstance(node, ast.Name):
+                if node.id in names:
+                    return
+                names.add(node.id)
+                into = puts(node.id)
+                changed = node.id in self.changed
+                for put, assigned in into or ():
+                    if isinstance(put, ast.Dict):
+                        # The name's one value is a dict display: an intent of that name (left alone if it is changed).
+                        if assigned and len(into or ()) == 1:
+                            walk(put, node.id, step)
+                        elif not assigned and not changed:
+                            walk(put, None, step)
+                    elif not changed:
+                        walk(put, None, step)
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                made = self.defs.get(node.func.id, [])
+                if len(made) == 1 and self.scope_of.get(id(made[0])) is self.module \
+                        and len(self.module.names.get(node.func.id, ())) == 1 and inner.find(node.func.id) is self.module:
+                    out.extend(self.returned(made[0], depth + 1, seen))
+                elif node.func.id in ("list", "tuple", "sorted", "reversed") and len(node.args) == 1 \
+                        and inner.find(node.func.id) is None:
+                    walk(node.args[0], None, step)
+
+        for n in body:
+            if isinstance(n, ast.Return):
+                walk(n.value)
+        return out
+
+    def intent(self, node: ast.Dict, scope: _Scope, via: str | None) -> None:
+        keys = [_text(k) for k in node.keys]
+        if any(k is None for k in keys) or self.rebuilt or (via is not None and via in self.changed):
+            return  # a computed key, a dict built on another (**), or a dict changed after it was written: not judged
+        row = dict(zip(keys, node.values))
+        kinds = [k for k in INTENT_KINDS if k in row]
+        shown = "{" + ", ".join(f'"{k}"' for k in keys) + "}"
+        fixed = not (self.touched & INTENT_KEYS)  # no intent key is written into any dict after its display
+        if not kinds:
+            if fixed and not keys:
+                self.say(node, "decide returns an empty dict: a dict is read as ONE intent, and one with none of \"buy\", "
+                               "\"sell\", \"cancel\" is dropped and counted as an error (25 errors disqualify the run); "
+                               "for no order return []", raises=False)
+            elif fixed:
+                self.say(node, f"decide returns the dict {shown}, which has none of \"buy\", \"sell\", \"cancel\": an "
+                               "intent has EXACTLY one of them (it is dropped and counted as an error, and 25 errors "
+                               "disqualify the run); write {\"buy\": \"SPY\", \"share\": 0.5, \"at\": \"open\"} or "
+                               "{\"sell\": lot[\"id\"], \"at\": \"open\"}", raises=False)
+            return
+        if len(kinds) > 1:
+            if not self.touched & set(INTENT_KINDS):
+                self.say(node, f"the intent {shown} has {' and '.join(repr(k) for k in kinds)}: an intent has EXACTLY one "
+                               "of \"buy\", \"sell\", \"cancel\" (it is dropped and counted as an error); return one "
+                               "intent for the sell and another for the buy", raises=False)
+            return
+        kind = kinds[0]
+        if kind == "cancel":
+            return
+        at = row.get("at")
+        if isinstance(at, ast.Constant) and at.value not in INTENT_AT and "at" not in self.touched:
+            self.say(at, f"the intent's \"at\" is {at.value!r}: it is \"open\" or \"close\" (the NEXT session's; left out, "
+                         "it is \"open\"); anything else drops the intent and counts as an error", raises=False)
+        value = row[kind]
+        if kind == "sell":
+            whole = self.known(value, scope)
+            if _text(value) is not None or (whole is not None and whole <= {_R_SYM, _R_LOT, _R_SHUT1, _R_BAR}):
+                self.say(value, f"the intent sells `{_src(value)}`: a lot is sold whole BY ITS ID, never by its symbol "
+                                "(the intent is dropped and counted as an error); write {\"sell\": lot[\"id\"]} for each "
+                                "lot in ctx.positions you want out of", raises=False)
+            return
+        if isinstance(value, ast.Constant) and not (isinstance(value.value, str) and value.value.strip()):
+            self.say(value, f"the intent buys {value.value!r}: \"buy\" names a symbol of your NEEDS, e.g. \"SPY\"",
+                     raises=False)
+
+        def given(key: str) -> bool:
+            return key in row and not (isinstance(row[key], ast.Constant) and row[key].value is None)
+        if fixed and not given("share") and not given("usd"):
+            self.say(node, f"the buy {shown} has neither \"share\" nor \"usd\": a buy has exactly one (\"share\": 0.5 is "
+                           "half of the sleeve's equity; \"usd\": 250.0 is dollars); without one it is dropped and "
+                           "counted as an error", raises=False)
+        elif fixed and given("share") and given("usd") and all(isinstance(row[k], ast.Constant) for k in ("share", "usd")):
+            self.say(node, "the buy has both \"share\" and \"usd\": a buy has exactly one of them (it is dropped and "
+                           "counted as an error)", raises=False)
+        for key, high, what in (("share", 1.0, "a share of the sleeve's equity above 0 and at most 1 (0.5 is half)"),
+                                ("usd", math.inf, "dollars above 0")):
+            size = row.get(key)
+            sign = -1.0 if isinstance(size, ast.UnaryOp) and isinstance(size.op, ast.USub) else 1.0
+            inner = size.operand if isinstance(size, ast.UnaryOp) and isinstance(size.op, (ast.USub, ast.UAdd)) else size
+            if not isinstance(inner, ast.Constant) or inner.value is None or key in self.touched:
+                continue
+            number = inner.value
+            if isinstance(number, bool) or not isinstance(number, (int, float)) or not 0.0 < sign * float(number) <= high:
+                self.say(size, f"the buy's \"{key}\" is `{_src(size)}`: it is {what}; the intent is dropped and counted "
+                               "as an error", raises=False)
+
+    def run(self) -> list[tuple[int, str]]:
+        self.settle()
+        # A symbol's bars are never a dict, a list or a tuple, so asking their type excuses a misreading only when the
+        # program ALSO reads them the right way somewhere (one of the six arrays by attribute: the sound branch behind
+        # the check). With no such read every branch misreads, and the refusal is no guess.
+        if _R_BAR in self.probed:
+            sound = False
+            for node in ast.walk(self.tree):
+                scope = self.scope_of.get(id(node))
+                if scope is None:
+                    continue
+                if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load) and node.attr in READ_BAR[1:] \
+                        and self.kinds(node.value, scope) == {_R_BAR}:
+                    sound = True
+                    break
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("getattr", "hasattr") \
+                        and len(node.args) >= 2 and _text(node.args[1]) in READ_BAR[1:] \
+                        and self.kinds(node.args[0], scope) == {_R_BAR}:
+                    sound = True
+                    break
+            if not sound:
+                self.probed = self.probed - {_R_BAR}
+        for node in ast.walk(self.tree):
+            self.check(node)
+        decide = self.defs.get("decide", [])
+        if len(decide) == 1 and self.scope_of.get(id(decide[0])) is self.module \
+                and len(self.module.names.get("decide", ())) == 1:
+            for node, scope, via in self.returned(decide[0]):
+                self.intent(node, scope, via)
+        seen, out = set(), []
+        for item in sorted(self.found):
+            if item not in seen:
+                seen.add(item)
+                out.append(item)
+        return out
+
+
+def reading_refusals(code: Any) -> list[str]:
+    """THE READING RULE (the module docstring, 1e): every place the program can be SEEN to misread what ctx gives or to
+    return a malformed intent, as "line N: what is wrong and what to write" ([] for none, and for a file that does not
+    parse: the code rules refuse that). Reads the source only."""
+    try:
+        tree = ast.parse(str(code or ""))
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return []
+    try:
+        found = _Reading(tree).run()
+    except Exception:  # noqa: BLE001 - a shape the pass cannot follow is never refused on a guess (its Train run judges it)
+        return []
+    return [f"line {line}: {why}" for line, why in found]
+
+
+def reading_text(code: Any) -> str | None:
+    """Why a program is refused by THE READING RULE, in one sentence for its author, or None."""
+    found = reading_refusals(code)
+    if not found:
+        return None
+    return ("refused before it ran by the equity reading rule (the program misreads what ctx gives, or returns an intent "
+            "the House drops: on the House it would fail in decide and be disqualified; the contract's \"Reading ctx\" "
+            "has a worked example): " + "; ".join(found[:4]) + (f"; and {len(found) - 4} more" if len(found) > 4 else ""))
+
+
 # ------------------------------------------------------------------------------------------------------- the paid review
 #: The contract references a failure may cite (`grounded`).
 FACTS: dict[str, str] = {
@@ -1425,4 +2284,5 @@ def holds(state: Mapping[str, Any] | None, sha: str) -> bool:
 
 __all__ = ["OBJECTIVE", "STATE_REVIEW", "DEFAULTS", "BOUNDS", "BAR_FIELDS", "LOT_FIELDS", "FACTS", "REVIEW", "cfg",
            "model_of", "level_refusals", "level_text", "memory_refusals", "memory_text", "grounded", "question", "record",
-           "holds"]
+           "holds", "READ_CTX", "READ_BAR", "READ_LOT", "READ_CLOSED", "READ_EVENTS", "INTENT_KINDS", "INTENT_AT",
+           "READING_CTX", "reading_refusals", "reading_text"]

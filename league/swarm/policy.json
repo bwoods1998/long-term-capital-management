@@ -272,6 +272,27 @@
       "explore_every": 3,
       "usd_day": 8.0,
       "pace_share": 0.25
+    },
+    "forward": {
+      "mode": "record",
+      "controls_per_group": 50,
+      "cpu_seconds_night": 1800,
+      "run_budget_seconds": 120,
+      "stop_after_sessions": 500,
+      "stop_fail_after_sessions": 250,
+      "neff_max_members": 1500,
+      "fill_minutes": true,
+      "twins": true
+    },
+    "memory": {
+      "mode": "record"
+    },
+    "contam": {
+      "mode": "record",
+      "usd_run": 3.0,
+      "every_days": 28,
+      "batch": 20,
+      "questions_per_cell": 120
     }
   },
   "engineer": {

@@ -150,7 +150,8 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   the ETF weight) the options Probe lane has only the rest of the $400 window: about $400 - 0.20 x E, effectively
   off. Three one-ETF programs hold less (a lot of 0.25 x E each: 0.15 x E of open risk), and the statement says so.
 - PRE-REGISTERED BEFORE THE FIRST EQUITY CLOSE (the captain's A14, Oct 10, 2026; `PREREGISTERED`, verbatim in every
-  report as `done.preregistered` and in docs/operations.md; TEXT NOW, the code in a later release): how the Done rule's
+  report as `done.preregistered` and in docs/operations.md; the consistency reading computed since release E3): how
+  the Done rule's
   "live fills consistent with their replay" is read (`A14_CONSISTENCY`: the mean fill gap against the official-price
   model at most 15 bp a side AND the live and the shadow intents agreeing on at least 95% of the counted sessions, read
   at each Done checkpoint over its counted closes; else "not consistent" beside the P&L), what every Done reading is
@@ -159,11 +160,19 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   BY THE OPTIONS MEASURE (`a14_consistency`): the pinned replay gap divides by the maximum loss, which for a long lot is
   its whole notional, so its 0.10 bound would let a thousand basis points of notional through where A14 says 15 a side.
   The fill-gap half is computed (the mean of the counted equity closes' final priced twins' `gap_bp`, at most
-  `A14_GAP_BP` in size); a mean past the bound fails item 4 ("not consistent" beside the P&L). The intents-agreement
-  half has no reader yet, so until it lands item 4 of such a reading is NOT READ and never True: the reading does not
-  hold, and it says why. The close-date figures and the forward seat rule are not computed either
-  (`PREREGISTERED["status"]` says so in the report). A reading with no equity close is read by the pinned rule's own
-  measure, as before.
+  `A14_GAP_BP` in size); a mean past the bound fails item 4 ("not consistent" beside the P&L). CONSISTENCY IS
+  COMPUTED SINCE RELEASE E3 (`a14_of`; league/ops/forward_twins.py `a14_reading`; each checkpoint's `a14`): the
+  intents-agreement half's reader has landed, so a checkpoint that holds an equity close needs the SIZE of the mean
+  fill gap of its priced twins within 15 bp a side, either way, AND the live and the shadow intents agreeing on 95% of
+  its counted sessions, beside the pinned rule's own measure (CONSISTENT WITH REPLAY, above). The meter hands each
+  checkpoint's reading its A14 (`reading(..., a14=)`); a reading handed none (the running figures, never a Done
+  reading) keeps the fill-gap half and is still NOT READ. Unmeasured, unreadable or misshapen, A14 does not hold and
+  the reading is not final; a frozen final reading is carried as it was. The close-date figures are not computed yet
+  and no forward rule moves a seat (`PREREGISTERED["status"]` says so in the report). A reading with no equity close
+  is read by the pinned rule's own measure, as before.
+- THE FORWARD RECORD (release E3; league/ops/forward_report.py): `forward_record` is that job's report as it last wrote
+  it (None when absent or stale), and its alarms (FW1-FW8, RR1, RR2, CP1, CP2, MM1: ids, counts and dates only) ride
+  this report's `alarms`, so the `dlane` stall cause mails a warning. Read only, and never this report's failure.
 - P(DONE | ZERO EDGE) IS THE OPTIONS RULES' FIGURE (`ZERO_EDGE_EQUITY_NOTE`): it was never measured for share closes,
   and a delta-one lane's is far higher. A report that holds an equity close says so on the figure and in each
   checkpoint's `equity` block; no figure for the equity lanes is stated.
@@ -253,7 +262,7 @@ EQUITY_DIRECTION = (
     "program's profit is the market's direction, not alpha, and a delta-one lane can reach Done whenever the market rises: "
     "a Done read on such closes is weak evidence of skill.")
 #: A14 (the captain's pre-registration of Oct 10, 2026, written BEFORE the first equity close so that it cannot be read
-#: after the fact; text now, its code in a later release): how the Done rule's "live fills consistent with their
+#: after the fact; text first, its consistency reading computed since release E3): how the Done rule's "live fills consistent with their
 #: replay" is read, what every Done reading is reported beside, and the forward seat rule. The three sentences are in
 #: every report verbatim (`done.preregistered`) and in docs/operations.md (league/tests/test_dlane_report_equity.py
 #: holds the page to these words). The Done rule itself (DONE-RULE.md, `dlane.DONE`) is unchanged.
@@ -275,10 +284,9 @@ A14_AGREEMENT = 0.95
 PREREGISTERED = {
     "id": "A14", "registered": "2026-10-10", "before": "the first equity close",
     "consistency": A14_CONSISTENCY, "beside_done": A14_BESIDE_DONE, "forward_seat_rule": A14_SEAT_RULE,
-    "status": "partly computed: a reading that holds an equity close reads item 4 by A14 and never by the options "
-              "replay gap. The fill-gap half is computed from the equity twins (a mean past 15 bp a side fails item 4); "
-              "the intents-agreement half has no reader yet, so item 4 of such a reading is not read and the reading "
-              "does not hold. No reading carries the close-date figures, and no forward rule moves a seat",
+    "status": "consistency is computed since release E3 (each checkpoint's `a14`: the size of the mean fill gap "
+              "either way, and the intents); the close-date figures are not computed yet and no forward rule moves a "
+              "seat",
 }
 #: P(DONE | ZERO EDGE) BESIDE EQUITY CLOSES: the figure the report carries is the options Probe rules' simulation. No
 #: figure for the share lanes is stated (none is committed); this sentence rides on the figure and in each checkpoint's
@@ -454,6 +462,11 @@ LOOSENED: tuple[dict[str, str], ...] = (
              "rose), so up to three more such lotteries in all; their profit is index beta minus option costs, reported "
              "beside the same-risk buy-and-hold, never alpha; what G1 cannot see is a gate that only tilts inside its "
              "bands (a size that halves, a hold between 4 and 6 sessions, a strike that keeps the risk in band)"},
+    # RELEASE E3 (league/swarm/elane_folds.py): the hidden work year.
+    {"rule": "the equity Train bar", "was": "the seven Train years 2016-19 and 2022-24 (A15)",
+     "now": "six seen years for a family born with a hidden year, each stretch of them a run starting flat (release E3)",
+     "cost": "more zero-edge versions pass Train and take a Validation try; the screen's false-positive rate per program "
+             "is unchanged (Train is in-sample)"},
 )
 #: And what D-1 TIGHTENED (said beside the loosenings), with release L-D's rolling budget, a tightening of its NET.
 TIGHTENED: tuple[str, ...] = (
@@ -489,6 +502,8 @@ TIGHTENED: tuple[str, ...] = (
     "Oct 10, a loosening listed with its cost); a bad stretch that ages out of the window frees no room in the total. "
     "Measured cost of the window (the budget simulation, post-hoc, as traded, holds 2/3/5): P(Done) at 12 weeks "
     "6.0/3.3/1.0% against 10.0/7.6/4.5% with the $400 total alone, at 24 weeks 11.1/8.7/5.9% against 11.0/9.0/7.6%",
+    "A14's fill gap is read as the size of the mean gap, either way (release E3): fills better than the official-price "
+    "model by more than 15 bp a side also read not consistent",
 )
 
 
@@ -1085,6 +1100,22 @@ def equity_yield(store: Any, settings: Mapping[str, Any] | None) -> dict[str, An
         return {"error": type(exc).__name__}
 
 
+def a14_of(store: Any, counted: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """RELEASE E3, amendment A14 (league/ops/forward_twins.py `a14_reading`): over a checkpoint's counted closes, the size
+    of the mean fill gap against the official-price model within 15 bp a side AND live and shadow intents agreeing on
+    95% of the counted sessions. With no equity close it does not apply (holds); unreadable, unmeasured or misshapen, it
+    does not hold. Never raises, and always carries applies, holds, final and why."""
+    if not any(c.get("equity") for c in counted):
+        return {"applies": False, "holds": True, "final": True, "why": None}
+    try:
+        from . import forward_twins
+        r = forward_twins.a14_reading(Path(store.root), counted)
+        return {**r, "applies": r.get("applies") is not False, "holds": r.get("holds") is True,
+                "final": r.get("final") is True, "why": r.get("why")}  # a non-dict raises into the except
+    except Exception as exc:  # noqa: BLE001 - unread is not held
+        return {"applies": True, "holds": False, "final": False, "why": f"A14 could not be read ({type(exc).__name__})"}
+
+
 def _order(close: Mapping[str, Any]) -> tuple:
     """Close order across both books: the close time, then an options close before an equity close, then its id."""
     pid = close["pid"]
@@ -1315,9 +1346,12 @@ def replay_twins(counted: Sequence[Mapping[str, Any]], twins: Mapping[str, Mappi
 
 def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: dict[str, list] | None = None,
             done: Mapping[str, Any] | None = None, lanes: Lanes | None = None,
-            twins: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
+            twins: Mapping[str, Mapping[str, Any]] | None = None,
+            a14: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The Done rule over exactly `counted` (the meter's closes, in close order): {closes, programs, net_usd, net_known,
-    estimate_closes, unpriced, per_program_ok, consistent_ok, holds, why, by_route, by_program, bh}."""
+    estimate_closes, unpriced, per_program_ok, consistent_ok, holds, why, by_route, by_program, bh}. `a14` (release E3):
+    the forward record's A14 reading of exactly these closes (`a14_of`), handed in by the meter at a checkpoint, which
+    holds item 4 to it there; with none, a reading that holds an equity close is not read (the running figures)."""
     from ..swarm import dlane
 
     rule = dict(done or dlane.DONE)
@@ -1381,10 +1415,12 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
     item4 = measured_ok and not inconsistent
     # A14 (pre-registered before the first equity close): a reading that holds an equity close reads "consistent with
     # replay" by A14's own measure, never by the gap above alone (a long lot's maximum loss is its notional, so the
-    # options bound of 0.10 is a thousand basis points of it). A fill gap past the bound fails item 4; while the
-    # intents-agreement half has no reader, item 4 is not read and never True.
-    a14 = a14_consistency(counted)
-    if a14 is not None:
+    # options bound of 0.10 is a thousand basis points of it). A fill gap past the bound fails item 4. RELEASE E3
+    # landed the intents half's reader: a checkpoint's reading is handed its A14 by the meter (`a14`), which holds
+    # item 4, the reading and its `why` to it there; a reading handed none is not read and never True.
+    read = isinstance(a14, Mapping)
+    a14 = a14_consistency(counted, a14 if read else None)
+    if a14 is not None and not read:
         whys.append(a14["why"])
         item4 = False
     by_route: dict[str, dict[str, Any]] = {}
@@ -1412,16 +1448,20 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
             **({"a14": a14} if a14 is not None else {})}
 
 
-def a14_consistency(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+def a14_consistency(counted: Sequence[Mapping[str, Any]], forward: Mapping[str, Any] | None = None
+                    ) -> dict[str, Any] | None:
     """A14's READING OF "CONSISTENT WITH REPLAY" over a reading's EQUITY closes (`A14_CONSISTENCY`), or None when it
     holds none. {closes, priced, unpriced, mean_gap_bp, bound_bp, fill_gap_ok, intents {agreement, bound, status},
-    consistent, why}:
+    consistent, why}. WITH `forward` (release E3: the forward record's reading of these closes, `a14_of`) BOTH HALVES
+    ARE READ: the answer is that reading (applies, holds, final, why, gap, intents, by_instance) with the fill-gap half
+    of these rows beside it, `consistent` and `holds` True only when it holds AND the rows' own mean gap is not past
+    the bound (two readings of one gap: either saying no is no), and a `why` when they are not. Without it:
     - THE FILL GAP (computed): the mean of `gap_bp` over the counted equity closes whose twin is final and priced
       (league/ops/twins.py `equity_twin`: the live net return less the official-price model's, basis points a side,
       negative when the fills were worse); `fill_gap_ok` is |mean| <= `A14_GAP_BP`, None while no close is priced. Every
       close with no final priced twin is counted in `unpriced`, never dropped silently.
-    - THE INTENTS (not read): the live and the shadow intents agreeing on at least `A14_AGREEMENT` of the counted
-      sessions has no reader yet.
+    - THE INTENTS (not read here): the live and the shadow intents agreeing on at least `A14_AGREEMENT` of the
+      counted sessions are read at a Done checkpoint, by the forward record's twins (release E3).
     - `consistent`: False when the fill gap is past its bound; else None (NOT READ: a half is missing). Never True
       until both halves are read, so `reading` never holds item 4 on equity closes by the options measure."""
     rows = [c for c in counted if c.get("equity")]
@@ -1436,7 +1476,8 @@ def a14_consistency(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any] | No
     mean = statistics.fmean(gaps) if gaps else None
     fill_ok = None if mean is None else abs(mean) <= A14_GAP_BP
     intents = {"agreement": None, "bound": A14_AGREEMENT,
-               "status": "not read: the live and shadow intents have no reader yet (A14's second half)"}
+               "status": "not read here: the live and the shadow intents are read at a Done checkpoint (A14's second "
+                         "half; release E3)"}
     if fill_ok is False:
         why = (f"not consistent (A14): the mean fill gap is {mean:.1f} bp a side over {len(gaps)} priced equity closes, "
                f"past the {A14_GAP_BP:g} bp bound")
@@ -1444,8 +1485,19 @@ def a14_consistency(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any] | No
         measured = (f"the mean fill gap is {mean:.1f} bp a side over {len(gaps)} of {len(rows)} equity closes, inside "
                     f"the {A14_GAP_BP:g} bp bound" if mean is not None else
                     f"no equity close of {len(rows)} has a final priced twin yet")
-        why = (f"item 4 is not read for a reading with equity closes (A14 pending): {measured}; the intents-agreement "
-               "half has no reader yet")
+        why = (f"item 4 is not read for a reading with equity closes outside a Done checkpoint: {measured}; the "
+               "intents-agreement half is read at each checkpoint (release E3)")
+    if isinstance(forward, Mapping):  # RELEASE E3 (`a14_of`): both halves, the rows' own fill-gap half beside them
+        held = forward.get("holds") is True and fill_ok is not False
+        if held:
+            why = None
+        elif fill_ok is not False:
+            why = "; ".join(w for w in (None if mean is not None else f"no equity close of {len(rows)} has a final "
+                                                                      "priced twin yet",
+                                        str(forward.get("why") or "not held")) if w)
+        return {**forward, "closes": len(rows), "priced": len(gaps), "unpriced": len(rows) - len(gaps),
+                "mean_gap_bp": None if mean is None else round(mean, 2), "bound_bp": A14_GAP_BP, "fill_gap_ok": fill_ok,
+                "consistent": held, "applies": True, "holds": held, "final": forward.get("final") is True, "why": why}
     return {"closes": len(rows), "priced": len(gaps), "unpriced": len(rows) - len(gaps),
             "mean_gap_bp": None if mean is None else round(mean, 2), "bound_bp": A14_GAP_BP, "fill_gap_ok": fill_ok,
             "intents": intents, "consistent": False if fill_ok is False else None, "why": why}
@@ -1597,7 +1649,11 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
     not hold), and says whether its inputs are FINAL (`finality`; `final_why` otherwise). It HOLDS when items 3, 4 (A1.1)
     and 7 all hold; a Done claim is made only on a holding FINAL checkpoint (the meter's `holds`; alarm A8). A final
     reading is FROZEN: when the `previous` report's meter has the checkpoint final, it is carried forward as it was,
-    whatever the inputs say now (nightly rows are replaced each night; the reading may not flip after A8)."""
+    whatever the inputs say now (nightly rows are replaced each night; the reading may not flip after A8).
+
+    A14 (release E3; `a14_of`): a checkpoint's reading also needs A14 over its counted closes (it holds outright with no
+    equity close); it is in the checkpoint's `holds`, its item 4 and `consistent_ok`, carried whole as `a14`, and a
+    reading whose A14 is not final is not final. The `running` figures are untouched."""
     from ..swarm import dlane
 
     rule = dlane.DONE
@@ -1614,7 +1670,9 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
             checkpoints.append({**frozen[k], "frozen": True})
             prev_k, k = k, k + int(rule["checkpoint_every"])
             continue
-        at = reading(counted[:k], store, nightly_cache=cache, lanes=lanes, twins=twins)
+        a14 = a14_of(store, counted[:k])
+        at = reading(counted[:k], store, nightly_cache=cache, lanes=lanes, twins=twins, a14=a14)
+        a14 = at.get("a14") or a14  # with an equity close: that reading, the rows' own fill-gap half beside it
         first_day, last_day = research_window(counted, k, prev_k)
         r247 = {"holds": False, "first_day": first_day, "last_day": last_day, "why": "research 24/7 was not read"}
         if callable(research):
@@ -1628,17 +1686,24 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
         if not day_ended:
             fin = {**fin, "final": False, "why": "; ".join(w for w in (fin["why"], f"the research window's last day "
                                                                                   f"({last_day}) has not ended") if w)}
+        if not a14["final"]:
+            fin = {**fin, "final": False, "why": "; ".join(w for w in (fin["why"], "A14: a twin or a shadow session has "
+                                                                                  "not landed") if w)}
         item7 = r247.get("holds") is True
-        whys = [w for w in (at["why"], None if item7 else f"research 24/7 (item 7): {r247.get('why') or 'not held'}") if w]
+        whys = [w for w in (at["why"], None if item7 else f"research 24/7 (item 7): {r247.get('why') or 'not held'}",
+                            None if a14["holds"] else f"A14 (live fills consistent with their replay): "
+                                                      f"{a14.get('why') or 'not held'}") if w]
         programs = [{"family": p["family"], "lane": p["lane"], "closes": p["closes"], "matched": p["replay"]["matched"],
                      "gap": p["replay"]["gap"], "consistent": p["replay"]["consistent"], "net_usd": p["net_usd"],
                      **({"label": p["label"]} if p.get("label") else {})} for p in at["by_program"]]
         checkpoints.append({"at_close": k, "closed_at": _iso(counted[k - 1]["closed_at"]),
-                            "holds": at["holds"] and item7, "why": "; ".join(whys) or None,
-                            "items": {**at["items"], "7": item7}, "final": fin["final"], "final_why": fin["why"],
+                            "holds": at["holds"] and item7 and a14["holds"], "why": "; ".join(whys) or None,
+                            "items": {**at["items"], "4": at["items"]["4"] and a14["holds"], "7": item7},
+                            "final": fin["final"], "final_why": fin["why"],
                             "closes": at["closes"], "programs": at["programs"],
                             "programs_with_min_closes": at["programs_with_min_closes"], "net_usd": at["net_usd"],
-                            "consistent_ok": at["consistent_ok"], "measured_programs": at["measured_programs"],
+                            "consistent_ok": at["consistent_ok"] and a14["holds"], "a14": a14,
+                            "measured_programs": at["measured_programs"],
                             "replay_coverage": at["replay_coverage"], "by_program": programs,
                             "research_247": r247, "by_route": at["by_route"], "bh": at["bh"],
                             **({"equity": at["equity"]} if at.get("equity") else {}),
@@ -2915,6 +2980,14 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
         }
         out["alarms"] = alarms(store, settings, lanes, book, every, envelope, done, k5, unit, previous, now=now,
                                today=today, losses=losses) + pt1_alarms(out["roster"], settings)
+        try:  # RELEASE E3: the forward record's section and alarms (league/ops/forward_report.py); never the report's failure
+            from . import forward_report
+            out["forward_record"] = forward_report.read_section(root)
+            out["alarms"] = out["alarms"] + [a for a in forward_report.alarms(root, now=now, settings=settings)
+                                             if isinstance(a, dict) and isinstance(a.get("id"), str)
+                                             and a.get("level") in ("info", "warning") and isinstance(a.get("text"), str)]
+        except Exception:  # noqa: BLE001 - the report goes on without it
+            out.setdefault("forward_record", None)
     finally:
         store.close()
     return out

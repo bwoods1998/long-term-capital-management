@@ -221,8 +221,8 @@ class WhatRidesBeside(EquityFixture):
         """A14 (the captain's pre-registration, before the first equity close): Done's "fills consistent" reading (15
         bp a side AND 95% of the counted sessions, at each checkpoint), the close-date figures beside every reading
         and the inactive forward seat rule are in the report, verbatim, and in docs/operations.md in the same words;
-        the status says plainly what is computed (the fill-gap half) and what is not (the intents half, the
-        close-date figures, the seat rule)."""
+        the status says plainly what is computed (consistency, since release E3: the size of the mean fill gap
+        either way, and the intents) and what is not (the close-date figures, the seat rule)."""
         import re
         from pathlib import Path
 
@@ -239,8 +239,8 @@ class WhatRidesBeside(EquityFixture):
             self.assertIn(words, R.A14_BESIDE_DONE)
         for words in ("written and inactive", "fewer than 5 real closes", "never unseated", "except by EDM1"):
             self.assertIn(words, R.A14_SEAT_RULE)
-        for words in ("partly computed", "fill-gap half is computed", "intents-agreement half has no reader yet",
-                      "does not hold", "No reading carries the close-date figures"):
+        for words in ("computed since release E3", "the size of the mean fill gap either way", "the intents",
+                      "the close-date figures are not computed yet", "no forward rule moves a seat"):
             self.assertIn(words, pre["status"])
         page = re.sub(r"\s+", " ", (Path(R.__file__).resolve().parents[2] / "docs" / "operations.md").read_text())
         for sentence in (R.A14_CONSISTENCY, R.A14_BESIDE_DONE, R.A14_SEAT_RULE):

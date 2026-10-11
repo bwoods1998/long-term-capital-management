@@ -53,7 +53,7 @@ from typing import Any, Mapping, Sequence
 
 from ..equity import BETA, EQUITY, LANES
 from ..equity import config as eqconfig
-from . import elane_seal, elane_train, elane_yield
+from . import elane_folds, elane_review, elane_seal, elane_train, elane_yield
 from .elane_train import AGENDA, STATE_KEY
 from .elane_yield import ROLE
 
@@ -312,6 +312,7 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
         "max_hold_sessions (at most 60); an ETF position is at most half the sleeve; fills pay the half-spread (1 bp "
         "the index ETFs, 3 bp the other ETFs, 5 bp TLT and GLD) and sells the SEC and FINRA fees. The whole contract is "
         "in your system prompt.",
+        "- " + elane_review.READING_CTX,
         "- THE RATION: ONE Validation try and ONE sealed look a LINEAGE. A family continuing an idea (its parent, or a "
         "dead family of the same slice and idea), the same template, or a program whose Train daily returns correlate "
         "0.7 or more with one already looked at, is the same lineage: once a lineage has its try, a proposal continuing "
@@ -509,7 +510,9 @@ class EquityPass:
             return self.finish({"skipped": "full", "why": "no equity birth is wanted now", **quota.event()})
         held = elane_yield.hold(self.store, self.settings, began)
         if held is not None:
-            return self.finish({"skipped": "usd_day" if held == elane_yield.DAY_SPENT else "pace", "why": held})
+            skipped = ("usd_day" if held == elane_yield.DAY_SPENT else
+                       "sail_day" if held.startswith(elane_yield.SAIL_DAY) else "pace")
+            return self.finish({"skipped": skipped, "why": held})
         candidates = elane_yield.routes(self.settings, self.router)
         turn = elane_yield.next_turn(self.store)
         first, why_route = elane_yield.choose(self.store, self.settings, candidates, turn=turn, train_key=STATE_KEY)
@@ -721,6 +724,17 @@ class EquityPass:
                 "lane": lane, "agenda": agenda, "rejection": " ".join(str(row.get("rejection") or "").split())[:400],
                 "sketch": " ".join(str(row.get("sketch") or "").split())[:800], "lessons": [],
                 "card_sha": cards.card_sha(card), elane_yield.ROUTE_KEY: route.key}
+        try:  # RELEASE E3 (D14): the hidden year, the genome id and the reserved forecast, stamped at birth
+            spec.update(elane_folds.birth_fields(self.store, self.settings, lane=lane, agenda=agenda, symbols=symbols,
+                                                 expected_oof=row.get("expected_oof")))
+        except Exception as exc:  # noqa: BLE001 - the birth goes on: seven Train years, no out-of-fold row
+            spec.update(elane_folds.FALLBACK)
+            try:
+                self.store.event("swarm.status", None, {"action": "elane_memory", "alert": True,
+                                                        "text": f"a birth got no hidden year ({type(exc).__name__}): "
+                                                                f"{slug} reads seven Train years"})
+            except Exception:  # noqa: BLE001
+                pass
         cited = [str(x) for x in (row.get("differs_from") or []) if str(x) in known_rows][:3] \
             if isinstance(row.get("differs_from"), list) else []
         try:

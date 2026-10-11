@@ -23,6 +23,21 @@ or store and would cost a long-look-back program most of 2022 (the captain's cal
 THE LOOSENING, stated: the bar reads seven Train years, not the nine of 2016-2024, so "active in three years" is three
 of seven, "no year's t below the floor" has two years fewer to fail in, and the two P&L rules sum seven years.
 
+THE HIDDEN YEAR (release E3, D14; league/swarm/elane_folds.py). A family born while `elane.memory.mode` is "record"
+carries one of the seven Train years in its spec as its HIDDEN YEAR, for good. Its versions are run once a SEEN SPAN
+(`elane_folds.seen_spans`: the Train spans with that year cut out, two or three runs a k, each starting flat with a
+fresh STATE), and `combine`, `train_score`, the restart check and the stored runs read those runs and nothing else: no
+session of the hidden year is a run session of any of them, so no row, figure, lot, STATE or cash of it exists in the
+bar, the record, the brief or the Train map. THE HIDDEN RUN (one more run a k over the year alone) is made after the
+verdict is recorded, by `elane_memory.ingest`, and its result goes to the memory's sealed tables alone: never
+`add_run`, never the record. WHAT OF THE HIDDEN YEAR DOES REACH A SEEN RUN, stated as for the reserve: its BARS, as
+look-back in the stretch that follows it (never more than NEEDS `history` + 1 sessions), and the store-file hashes of
+a stored run. STATED COST: the stretch after the hidden year starts flat, and a version costs up to three seen runs
+and one hidden run a k. THE LOOSENING, stated: such a family's bar reads six seen years, not seven (Y1's three active
+years are three of six; Y2 has one year fewer to fail in; the two P&L rules sum six), so more zero-edge versions pass
+Train; the screen's false-positive rate per program is untouched (Train is in-sample). A family with no hidden year
+(every family born before E3, or with the mode off) reads the seven Train years exactly as before.
+
 THE BAR, equity-v1 (the design's section 6b on the Train years; `train_score`, then `restart_check`). The summed runs at
 1.0x and at 1.5x the half-spread (`league.equity.config.K_BASE`, `K_STRESS`). A version PASSES when all hold:
   Y1  ACTIVE in at least `min_active_years` (3) of the seven Train years: a year with at least `year_min_trades` (40)
@@ -149,7 +164,7 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from ..equity import BETA, EQUITY, LANES
 from ..equity import config as eqconfig
-from . import elane_review, elane_seal, elane_yield
+from . import elane_folds, elane_memory, elane_review, elane_seal, elane_yield
 
 # ----------------------------------------------------------------------------------------------------------- vocabulary
 OBJECTIVE = "equity-v1"
@@ -707,16 +722,47 @@ ERROR_CLASSES = frozenset({
     "TypeError", "UnboundLocalError", "ValueError", "ZeroDivisionError", "LinAlgError", "AxisError", "Exception"})
 _DQ_ERRORS = re.compile(r"^(\d{1,6}) errors \(first: (.*)\)$", re.S)
 _DQ_LINE = re.compile(r"^line (\d{1,6})$")
+#: THE HOUSE'S OWN WORDS FOR A MALFORMED INTENT (E1's league/equity/program.py `_intent`; a test holds this table to what
+#: E1 says): a closed vocabulary, none of it the program's, so a disqualification may name which one its first error
+#: was. Matched whole; what is shown is this table's text.
+INTENT_FAULTS = ("an intent is a dict", "an intent has exactly one of 'buy', 'sell' or 'cancel'",
+                 "'cancel' names an order id (a whole number)", "'at' is 'open' or 'close'",
+                 "'sell' names a lot id (a whole number)", "'buy' names a symbol",
+                 "a buy has exactly one of 'share' (of the sleeve's equity) or 'usd'", "a buy's 'share' is in (0, 1]",
+                 "a buy's 'usd' is a positive number")
+_DQ_MALFORMED = "malformed intent: "
+_DQ_NO_LIST = re.compile(r"^decide returned an? [A-Za-z_][A-Za-z0-9_.]{0,40}; it returns a list of intents$")
+_DQ_TOO_MANY = re.compile(r"^decide returned \d{1,9} intents; only the first \d{1,3} count$")
+
+
+def house_fault(first: str) -> str:
+    """A disqualification's first error when it is one of THE HOUSE'S OWN sentences about what decide returned (never an
+    exception a program raised: those read "line N: Class: text"), in fixed words; "" for anything else. No count and no
+    name the program chose is repeated: the count of intents it returned is its own number."""
+    if first.startswith(_DQ_MALFORMED):
+        rest = first[len(_DQ_MALFORMED):]
+        return f"a malformed intent ({rest})" if rest in INTENT_FAULTS else "a malformed intent"
+    if _DQ_NO_LIST.match(first):
+        return "a return that is no list of intents (decide returns a list of intent dicts, one dict, [] or None)"
+    if _DQ_TOO_MANY.match(first):
+        return f"more intents than one call may return (at most {eqconfig.MAX_INTENTS}; the rest are dropped)"
+    return ""
 
 
 def dq_said(reason: Any) -> str:
     """WHAT A DISQUALIFICATION SAYS TO ITS AUTHOR: counts, a line of its own file and an exception CLASS, never the
     exception's text. E1's reason carries the program's own message (`25 errors (first: line 12: ValueError: <up to 160
     characters the program chose>)`), and a program can put anything it read there (a bar of the 2020-21 reserve it
-    reads as look-back), so the text never reaches a record or a brief."""
+    reads as look-back), so the text never reaches a record or a brief. What the author is shown in its place is the
+    line of its own file the error was raised at and what that kind of error is here (`dq_source`, in the brief). A
+    first error that is the House's own sentence about what decide returned (a malformed intent, a return that is no
+    list) is named in fixed words (`house_fault`)."""
     text = str(reason or "")
     found = _DQ_ERRORS.match(text)
     if found:
+        told = house_fault(found.group(2))
+        if told:  # the House's own sentence about decide's return (a closed vocabulary), named in fixed words
+            return f"{int(found.group(1))} errors in decide, the first {told}"
         parts = found.group(2).split(": ", 2)
         where = parts[0] if parts and _DQ_LINE.match(parts[0]) else ""
         kind = parts[1] if len(parts) > 1 and parts[1] in ERROR_CLASSES else ""
@@ -728,6 +774,56 @@ def dq_said(reason: Any) -> str:
     if text.startswith("decide used") and "budget" in text:
         return "its decides ran past the run's time budget"
     return "its own errors or timeouts"
+
+
+#: WHAT EACH CLASS OF ERROR MOST OFTEN IS IN AN EQUITY PROGRAM (`dq_source`): one fixed sentence a class, the House's
+#: own words about E1's contract (league/equity/EQUITY.md, "Reading ctx"), said when the reading rule sees nothing on the
+#: line. Rules only: nothing here is read from a run.
+DQ_HINTS: dict[str, str] = {
+    "TypeError": "A TypeError in decide is most often ctx.bars[sym] read by key or as rows (it is ONE object: read "
+                 "ctx.bars[sym].close), ctx.positions read as a dict (it is a list of lots), or None in arithmetic (a "
+                 "lot's mark, value and pnl are None while its symbol has no price)",
+    "AttributeError": "An AttributeError in decide is most often a field ctx or a symbol's bars do not have, a lot read "
+                      "by attribute (a lot is a dict: lot[\"qty\"]), or a pandas method on a numpy array (there is no "
+                      ".iloc, .rolling or .pct_change: use numpy on the array)",
+    "KeyError": "A KeyError in decide is most often a symbol outside your NEEDS read from ctx.bars, ctx.prices or "
+                "ctx.caps, a key a lot does not have, or a STATE key read before it was written (STATE starts empty)",
+    "IndexError": "An IndexError in decide is most often an array shorter than the window indexed: a run's first "
+                  "sessions have little or no history behind them (an array can hold a single element), so check "
+                  "len(close) before close[-20]",
+    "ValueError": "A ValueError in decide is most often an empty or all-NaN window handed to a numpy function, or a "
+                  "write into one of ctx's arrays (they are read-only: copy one before you change it)",
+    "ZeroDivisionError": "A ZeroDivisionError in decide is a division by a price, a range, a volatility or a count that "
+                         "is zero on some session: guard it",
+    "NameError": "A NameError in decide is a name read that the file never defines (only math and numpy import; there "
+                 "is no print, type or id, and no AttributeError or NameError to name in an except)",
+    "UnboundLocalError": "An UnboundLocalError in decide is a name assigned on one path and read on another: give it a "
+                         "value before the branch",
+}
+_DQ_AT = re.compile(r"\bat line (\d{1,6})\b")
+_DQ_CLASS = re.compile(r"\bthe first an? ([A-Za-z]+) at line\b")
+
+
+def dq_source(code: Any, said: Any, n: Any = None) -> str:
+    """WHAT A DISQUALIFIED VERSION'S AUTHOR IS SHOWN BESIDE ITS VERDICT ("" when its record names no line of the file):
+    the line of ITS OWN FILE the first error was raised at (as its author wrote it: nothing a run read is in it), what
+    THE READING RULE sees on that line (league/swarm/elane_review.py: versions scored before the rule ran in
+    `check_code` are told what it would have refused), else what that class of error most often is in an equity
+    program (`DQ_HINTS`: one fixed sentence a class). `said` is the record's own sentence (`dq_said`: counts, a line, a
+    class); the exception's text is in neither."""
+    found = _DQ_AT.search(str(said or ""))
+    lines = str(code or "").splitlines()
+    if not found or not 1 <= int(found.group(1)) <= len(lines):
+        return ""
+    at = int(found.group(1))
+    source = " ".join(lines[at - 1].split())[:160]
+    if not source:
+        return ""
+    seen = [row.split(": ", 1)[1] for row in elane_review.reading_refusals(code) if row.startswith(f"line {at}: ")]
+    kind = _DQ_CLASS.search(str(said or ""))
+    hint = seen[0][:500] if seen else DQ_HINTS.get(kind.group(1) if kind else "", "")
+    whose = f" of v{n}" if n is not None else ""
+    return f"Line {at}{whose} reads `{source}`." + (f" {hint}." if hint else "")
 
 
 def program_fault(code: str, why: str, *, said: str | None = None) -> dict[str, Any]:
@@ -1137,6 +1233,7 @@ def needs_literal(code: str) -> dict[str, Any] | None:
 def check_code(code: Any, symbols: Sequence[str]) -> str | None:
     """Why a program cannot be a version of a family trading `symbols`, or None: the Gym's static rules
     (`league.gym.safety.check_program`, never executed here), NEEDS a literal dict whose symbols are the family's, the
+    equity reading rule (`elane_review.reading_text`: what ctx gives read the wrong way, a malformed intent), the
     equity memory rule (`elane_review.memory_text`: no object of a module held as memory) and the equity level rule
     (`elane_review.level_text`)."""
     from ..gym.safety import CodeRefused, check_program
@@ -1158,6 +1255,12 @@ def check_code(code: Any, symbols: Sequence[str]) -> str | None:
     foreign = [str(s) for s in named if str(s).upper() not in own]
     if foreign:
         return f"NEEDS names {', '.join(foreign[:6])}, outside the family's symbols ({', '.join(sorted(own))})"
+    # THE READING RULE (league/swarm/elane_review.py, release E2.2): what ctx gives read the wrong way (a symbol's bars
+    # by key or as rows, a lot by attribute, a malformed intent) fails in decide on the House: refused here, before a
+    # version is stored or run, with what to write instead.
+    reading = elane_review.reading_text(text)
+    if reading is not None:
+        return reading
     # THE MEMORY RULE (league/swarm/elane_review.py): an object that belongs to a module is memory outside STATE, shared
     # by every program in the decider child.
     memory = elane_review.memory_text(text)
@@ -1189,12 +1292,16 @@ def program_of(answer: Mapping[str, Any] | None) -> tuple[str | None, str, str |
     return (code if isinstance(code, str) and code.strip() else None), " ".join(str(data.get("note") or "").split())[:400], None
 
 
+#: The most of EQUITY.md a generator is handed (a test holds the file under it: its worked example is never cut off).
+CONTRACT_CHARS = 20000
+
+
 def contract_text() -> str:
     """EQUITY.md, the program contract, as the House holds it (core's file; a short stand-in when it cannot be read)."""
     from pathlib import Path
 
     try:
-        return (Path(__file__).resolve().parents[1] / "equity" / "EQUITY.md").read_text()[:12000]
+        return (Path(__file__).resolve().parents[1] / "equity" / "EQUITY.md").read_text()[:CONTRACT_CHARS]
     except OSError:
         return ("An equity program is one Python file: NEEDS = {\"symbols\": [...], \"history\": n, \"max_hold_sessions\": n}, "
                 "PARAMS = {...}, and decide(ctx) returning intents: {\"buy\": SYM, \"share\": 0..1, \"at\": \"open\" | "
@@ -1232,6 +1339,8 @@ adjusted as of each session and rounded, so the carried value drifts from what c
 Reply with ONE JSON object: {"program": "<the whole Python file>", "note": "what this version changes and why, one or two
 sentences"}; or, once a version of yours was judged by the bar (Y1, Y2, P1 or R1) and no honest revision is left,
 {"stop": "why, in one or two sentences"}. PARAMS are your program's own declaration (the House runs it as written).
+
+""" + elane_review.READING_CTX + """
 
 THE PROGRAM CONTRACT (league/equity/EQUITY.md):
 """
@@ -1575,12 +1684,18 @@ class EquityResearcher:
             if card.get(name):
                 lines.append(f"CARD {name.upper()}: {card[name]}")
         lines.append(bar_text())
+        if elane_folds.hidden_year(fam) is not None:  # RELEASE E3 (D14): said once, no year named
+            lines.append(elane_folds.BRIEF_NOTE)
         done = sorted(((int(k), v) for k, v in versions_of(rec).items()), key=lambda kv: kv[0])
+        shown = {n: self.dq_shown(facts["id"], n, v) for n, v in done}
         if done:
-            lines.append(f"YOUR VERSIONS ON TRAIN ({TRAIN_LABEL}):\n" + "\n".join(f"- {version_text(n, v)}" for n, v in done))
+            lines.append(f"YOUR VERSIONS ON TRAIN ({TRAIN_LABEL}):\n" + "\n".join(
+                f"- {version_text(n, v)}" + (f" {shown[n]}" if shown[n] else "") for n, v in done))
         refused = [r for r in (rec.get("refused") or []) if isinstance(r, Mapping)][-3:]
         if refused:
             lines.append("PROGRAMS REFUSED BEFORE THEY RAN:\n" + "\n".join(f"- {r.get('why')}" for r in refused))
+        if any(v.get("fails") == ["DQ"] for _, v in done) or any("equity reading rule" in str(r.get("why")) for r in refused):
+            lines.append(elane_review.READING_CTX)
         latest = self.store.latest_version(facts["id"])
         if latest is not None and latest.get("code"):
             lines.append(f"YOUR NEWEST PROGRAM (v{latest['n']}):\n```python\n{str(latest['code'])[:12000]}\n```")
@@ -1589,6 +1704,18 @@ class EquityResearcher:
                      + ("" if judged(rec) else "; none judged by the bar yet, so a stop is not accepted") + ". Write version "
                      f"{(latest['n'] + 1) if latest is not None else 1}: the whole file.")
         return "\n\n".join(lines)
+
+    def dq_shown(self, fid: str, n: int, v: Mapping[str, Any]) -> str:
+        """What a disqualified version's author is shown beside its verdict (`dq_source`: the line of its own file the
+        first error was raised at, and what is wrong there); "" for any other verdict, or when the version cannot be
+        read."""
+        if list(v.get("fails") or []) != ["DQ"]:
+            return ""
+        try:
+            version = self.store.version(fid, n)
+        except Exception:  # noqa: BLE001 - the brief goes without the line
+            return ""
+        return dq_source((version or {}).get("code"), v.get("why"), n)
 
     def write(self, fam: Mapping[str, Any]) -> dict[str, Any]:
         """Ask the family's birth route for its next program; store it as a version once it passes the static checks
@@ -1756,17 +1883,24 @@ class EquityResearcher:
         code, params = str(version.get("code") or ""), dict(version.get("params") or {})
         runs: dict[float, list[Any]] = {}
         verdict: dict[str, Any] | None = None
+        try:  # RELEASE E3 (D14): a family born with a hidden year runs its SEEN spans only; any other, TRAIN_SPANS
+            spans = elane_folds.seen_spans(elane_folds.hidden_year(fam))
+        except Exception as exc:  # noqa: BLE001 - the House's: nothing is scored on spans that cannot be read
+            self.store.event("swarm.status", fid, {"action": "elane_memory", "alert": True, "version": n,
+                                                   "text": f"the seen spans could not be read ({type(exc).__name__}): "
+                                                           f"v{n} is not scored"})
+            return self.house_failure(fam, n, f"the seen spans could not be read ({type(exc).__name__})", kind="store") or {}
         try:
             for k in (eqconfig.K_BASE, eqconfig.K_STRESS):
                 runs[float(k)] = [self.runner().train(code, params, name=fid, start=first, end=last, k=float(k))
-                                  for first, last in TRAIN_SPANS]
+                                  for first, last in spans]
         except Exception as exc:  # noqa: BLE001 - a refusal is the program's; a run failure is judged below
             verdict, out = self.fault(fam, n, exc)
             if out is not None:
                 return out
         if verdict is None:
             parts = {k: [dict(getattr(run, "result", run) or {}) for run in rs] for k, rs in runs.items()}
-            if any(outside_years(result, spans=[span]) for rs in parts.values() for result, span in zip(rs, TRAIN_SPANS)):
+            if any(outside_years(result, spans=[span]) for rs in parts.values() for result, span in zip(rs, spans)):
                 return self.house_failure(fam, n, f"a Train result carried a day outside its span of the {TRAIN_LABEL}",
                                           kind="window") or {}
             statuses = {str(result.get("status")) for rs in parts.values() for result in rs}
@@ -1814,6 +1948,19 @@ class EquityResearcher:
             if verdict["passed"] and r.get("passed_version") is None:
                 r["review"] = {"version": n, "unclear": {}, "at": at}  # THE REVIEW, before the pass is the try
         rec = _update(self.store, fid, put)
+        try:  # RELEASE E3: the forward registry's time evidence, as E2's own event kind (no new kind for the House mirror)
+            self.store.event("swarm.elane", fid, {"pass": "scored", "version": n, "sha": str(version.get("sha") or ""),
+                                                  "bar_passed": bool(verdict["passed"]), "fails": list(verdict["fails"]),
+                                                  "objective": OBJECTIVE, "judged": verdict.get("pnl_10") is not None})
+        except Exception:  # noqa: BLE001 - the verdict stands; the registry then dates the version from its own sighting
+            pass
+        try:  # RELEASE E3: record, never judge (the seen facts; the hidden year's own runs into the sealed tables)
+            elane_memory.ingest(self.store, fam, n, runner=self.runner(), code=code, params=params, seen=runs,
+                                verdict=verdict, settings=self.settings)
+        except Exception as exc:  # noqa: BLE001 - the verdict stands without the record
+            self.store.event("swarm.status", fid, {"action": "elane_memory", "alert": True, "version": n,
+                                                   "text": f"the memory ingest failed ({type(exc).__name__}): nothing "
+                                                           f"recorded for v{n}"})
         out: dict[str, Any] = {"family": fid, "version": n, "passed": bool(verdict["passed"]), "fails": verdict["fails"]}
         if verdict["passed"]:
             out["review"] = self.review_step(self.store.family(fid) or fam, n)
@@ -2067,3 +2214,5 @@ __all__ = ["OBJECTIVE", "STATE_KEY", "TRAIN_AT_KEY", "TRAIN_OK_KEY", "HOUSE_ALER
            "SIZE_TOL", "same_intents", "restart_check", "with_state", "restart_text", "train_map",
            "closed_cells", "train_map_text", "refuted_rows", "needs_literal", "check_code", "program_of", "contract_text",
            "RESEARCHER_SYSTEM", "version_text", "EquityResearcher", "versions_of", "BETA", "EQUITY", "LANES"]
+# Release E2.2's names (the disqualification's brief, the contract's cut), listed apart from the list above.
+__all__ += ["dq_source", "house_fault", "INTENT_FAULTS", "DQ_HINTS", "CONTRACT_CHARS"]

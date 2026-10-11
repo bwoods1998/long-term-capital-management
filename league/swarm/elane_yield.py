@@ -42,24 +42,47 @@ are recorded for the operator and are never read by `choose`: a route chosen on 
 the holdout back into which model writes the next programs. A Train pass is the first stage every route's programs
 reach alike, and it is a Train fact. (`choose` is tested to give the same route whatever those outcomes are.)
 
-E2'S DOLLARS: A SHARE OF THE SWARM'S SAIL MODEL LINE, COUNTED APART (`pace_share`, `usd_day`; `hold`, `pace`, `room`).
-The budget rule gives the swarm ONE hourly line for Sail models (`researcher.sail_usd_per_hour` after the budget's
-overlay: `model_line`; $0.3333 an hour, $8.00 a day, at the owner's ceiling and $0.0667 an hour at the floor). E2's
-births, Train research and review are paid from that line and counted apart from the options researchers:
-- E2'S HOURLY PACE (`usd_hour`) is `pace_share` (0.25) of the line. Before every model call (the equity pass, a Train
-  write, a review or audit read) E2 reads what the swarm booked for its own request keys in the trailing hour
-  (`spent_since`: the spend rows whose key is "swarm:elane:...", holds for unanswered calls included) and asks nothing
-  at or over the pace (`hold`). The budget tightens it with the line: at the floor E2's pace is a quarter of the
+E2'S DOLLARS: ITS OWN PACE, COUNTED APART, INSIDE THE HOUSE'S SAIL DAY (`pace_share`, `usd_day`; `hold`, `pace`, `room`,
+`sail_day`). The budget rule gives the swarm ONE hourly line for Sail models (`researcher.sail_usd_per_hour` after the
+budget's overlay: `model_line`; $0.3333 an hour, $8.00 a day, at the owner's ceiling and $0.0667 an hour at the floor)
+and ONE Sail research day (league/ops/budget.py `sail_caps`: the Sail guard's cap on what the swarm books on Sail in a
+UTC day, models and Gym boxes together; $20 at the ceiling). E2's births, Train research and review are counted apart
+from the options researchers and held by three lines, read before EVERY model call (`hold`):
+- E2'S HOURLY PACE (`pace_hour`) is `pace_share` (0.25; held to 0-4) x the line. Before every model call (the equity
+  pass, a Train write, a review or audit read) E2 reads what the swarm booked for its own request keys in the trailing
+  hour (`spent_since`: the spend rows whose key is "swarm:elane:...", holds for unanswered calls included) and asks
+  nothing at or over the pace. The budget tightens it with the line: at the floor E2's pace is its share of the
   floor's.
-- THE DAY'S LINE (`day_line`) is `usd_day` dollars a UTC day, and never more than a day at the hourly pace
-  (`pace_share` x the line x 24): once E2's day (`spent_today`: the larger of this ledger's day and the swarm's meter
-  for E2's keys, so a hold the ledger never heard of counts) reaches it, no equity question is asked until the next
-  UTC day.
+- THE DAY'S LINE (`day_line`) is `usd_day` dollars a UTC day (8; held to 0-100), and never more than a day at the
+  hourly pace (`pace_share` x the line x 24): once E2's day (`spent_today`: the larger of this ledger's day and the
+  swarm's meter for E2's keys, so a hold the ledger never heard of counts) reaches it, no equity question is asked
+  until the next UTC day.
+- THE HOUSE'S SAIL DAY (`sail_day`; release E2.2). E2 asks nothing while the Sail guard's own record (kv `GUARD_KEY`,
+  written at each of its checks) says it is braked, holds new research or has no fresh reading; nor once the swarm's
+  booked Sail spend of the UTC day (the guard's own meter, `SAIL_KINDS`, read FRESH before each call, not at the
+  guard's last check) is within `SAIL_ROOM_USD` (the dollar every question of E2's is held to need) of the line
+  where the guard holds new research: its research cap less THE GATE'S RESERVE and, while `guard.pace_day`, the day's
+  even pace. So E2 stops BEFORE the guard would hold anyone: the dollar that reaches the guard's line is never E2's,
+  and the day's Sail total never passes the guard's cap on E2's account. (At a high pace E2 uses the day up to that
+  dollar, so busy options lanes reach the line themselves late in the UTC day and all new research waits for
+  midnight; at the floor budget with the options lanes at the day's even pace E2 never has the dollar and asks
+  nothing.) A store no guard ever checked
+  has no record and holds nothing here: the loop starts E2's rounds only while its guard allows new research
+  (`guard.allows("research")`), and a guard allows nothing before its first good reading.
 - THE OPTIONS RESEARCHERS' PACE (league/swarm/loop.py `Swarm.pace_status`) leaves E2's rows out of their own spend,
-  as it leaves the architect's (F1), and gives E2's dollars of the trailing hour, at most E2's hourly pace, back to
-  the line: the researchers pause at the line less what E2 took, so E2 never takes more than its share from them and
-  the two together fit the line. The Sail guard's day counts every dollar; `allocation.plan_usd_per_hour`, when set,
-  counts E2's dollars as research spend like any Sail model dollar.
+  as it leaves the architect's (F1), and takes what E2 spent in the trailing hour, AT MOST THE LINE'S SHARE
+  (`usd_hour`: `min(pace_share, LINE_SHARE_MAX)` of the line, never more than half of it), off their limit. So
+  whatever E2's pace, the researchers keep at least half their line; at a share of a half or less the two together
+  fit the line, as before. What E2 spends above the line's share is paid from the day's Sail research dollars nobody
+  else spent, inside the Sail day above. `allocation.plan_usd_per_hour`, when set, counts E2's dollars as research
+  spend like any Sail model dollar.
+WHY THE PACE IS E2'S OWN (release E2.2, Oct 11, 2026). `pace_share` was held to 0-0.5 ("at most half the line"), so at
+the ceiling the equity lanes had at most $0.17 an hour, $4 a day, and stood still for most of each hour at the
+pace. The line is only the model share of a Sail day planned around Gym boxes, and an
+equity Train run needs no Gym box (it runs on the House: A3), so most of the day's Sail research dollars went unspent
+while the equity lanes waited. The owner's goal chooses lanes by measured yield per dollar. The bound is now 0-4 (four
+lines an hour), the shipped default is unchanged, and what bounds E2 beyond its own two settings is the House's Sail
+day, never half the researchers' line.
 The equity review's dollars (league/swarm/elane_review.py) are booked on rows of their own ("review:<route>"), never on
 a birth route's row, so they move no route's yield.
 
@@ -92,9 +115,23 @@ DEFAULTS: dict[str, Any] = {
     "usd_day": 8.0,
     "pace_share": 0.25,
 }
-#: Bounds of the numbers above (a value outside is its default). `pace_share`: at most half the line is ever E2's.
+#: Bounds of the numbers above (a value outside is its default). `pace_share`: E2's own hourly pace in lines, at most
+#: four (release E2.2; it was at most half: the module docstring says why). What E2 takes from the researchers' own
+#: limit stays at most half the line (`LINE_SHARE_MAX`), and the House's Sail day bounds the rest (`sail_day`).
 BOUNDS = {"min_births": (1, 1000), "sample_requests": (1, 10000), "explore_every": (2, 100), "usd_day": (0.0, 100.0),
-          "pace_share": (0.0, 0.5)}
+          "pace_share": (0.0, 4.0)}
+#: THE LINE'S SHARE: the most of the researchers' hourly line E2's dollars ever take off their limit (`usd_hour`, the
+#: loop's reading), whatever `pace_share` is. The researchers keep at least half their line.
+LINE_SHARE_MAX = 0.5
+#: The dollars every question of E2's is held to need (`ask_on`'s `need_usd`), and so the room E2 leaves under the line
+#: where the Sail guard holds new research (`sail_day`): E2 stops a question's dollar before the guard would.
+SAIL_ROOM_USD = 1.0
+#: THE SAIL GUARD'S OWN RECORD (league/swarm/guard.py `SailGuard.check` writes it at every check) and the spend kinds its
+#: day counts (`guard.SWARM_SAIL_KINDS`; a test holds the two equal): Sail models and Gym boxes.
+GUARD_KEY = "guard"
+SAIL_KINDS = ("sail_model", "gym_box")
+#: How `sail_day`'s reasons begin (the rounds' skip text; the equity pass names the skip by it).
+SAIL_DAY = "the House's Sail day"
 #: HOW A SPEND ROW OF E2'S IS TOLD (the swarm's `spend` table): every model call's row carries its request key (`key`,
 #: `hold`, `settles` or `releases` in its detail), and E2's keys are "swarm:elane:<births|train|review|audit>:..." (a
 #: window fallback's key keeps the prefix). The loop's `ARCHITECT_KEY` is the same mark for the architect's pass.
@@ -298,18 +335,32 @@ def model_line(settings: Mapping[str, Any] | None) -> tuple[float, bool]:
     return (value, True) if valid else (0.0, False)
 
 
-def usd_hour(settings: Mapping[str, Any] | None, line: float | None = None) -> float:
-    """E2'S HOURLY PACE in dollars: `pace_share` of the swarm's Sail model line (`line`: the loop's own reading, else
-    `model_line`)."""
+def pace_hour(settings: Mapping[str, Any] | None, line: float | None = None) -> float:
+    """E2'S HOURLY PACE in dollars: `pace_share` x the swarm's Sail model line (`line`: a reading handed in, else
+    `model_line`). E2's own line: what it may spend on models in an hour."""
     if line is None:
         line, _ = model_line(settings)
     return max(0.0, float(cfg(settings)["pace_share"]) * max(0.0, float(line)))
 
 
+def usd_hour(settings: Mapping[str, Any] | None, line: float | None = None) -> float:
+    """THE LINE'S SHARE in dollars an hour: the most of the researchers' line E2's dollars take off their limit,
+    `min(pace_share, LINE_SHARE_MAX)` x the line (`line`: the loop's own reading, else `model_line`). THE LOOP'S HOOK:
+    league/swarm/loop.py `Swarm.pace_status` calls this with its reading of the line and takes what E2 spent in the
+    hour, at most this, off the researchers' limit, so whatever E2's pace the researchers keep at least half their
+    line. Up to a share of a half it is E2's hourly pace itself (`pace_hour`), as it was before release E2.2; the name
+    is from then. The heartbeat's `researcher_pace.equity` block shows this number as E2's limit: above a share of a
+    half E2's own pace is `pace_hour` (`pace`, and the operator's `report`)."""
+    if line is None:
+        line, _ = model_line(settings)
+    share = min(float(cfg(settings)["pace_share"]), LINE_SHARE_MAX)
+    return max(0.0, share * max(0.0, float(line)))
+
+
 def day_line(settings: Mapping[str, Any] | None) -> float:
     """THE DAY'S LINE: `usd_day`, never more than a day at E2's hourly pace (the budget's overlay tightens it with the
     line)."""
-    return min(float(cfg(settings)["usd_day"]), usd_hour(settings) * 24.0)
+    return min(float(cfg(settings)["usd_day"]), pace_hour(settings) * 24.0)
 
 
 def room(store: Any, settings: Mapping[str, Any] | None, now: float) -> float:
@@ -320,7 +371,7 @@ def room(store: Any, settings: Mapping[str, Any] | None, now: float) -> float:
 def pace(store: Any, settings: Mapping[str, Any] | None, now: float, *, line: float | None = None) -> dict[str, Any]:
     """E2'S HOURLY PACE now: {limit_usd_per_hour, spent_last_hour_usd, paused, reason}. Paused at or over the limit (a
     zero limit, from a zero share or a line that cannot be read, pauses at once)."""
-    limit = usd_hour(settings, line)
+    limit = pace_hour(settings, line)
     spent = spent_since(store, float(now) - 3600.0)
     paused = spent >= limit
     return {"limit_usd_per_hour": round(limit, 6), "spent_last_hour_usd": round(spent, 6), "paused": paused,
@@ -333,11 +384,78 @@ def pace(store: Any, settings: Mapping[str, Any] | None, now: float, *, line: fl
 DAY_SPENT = "E2's model dollars for the day are spent (elane.e2.usd_day)"
 
 
+def sail_spent_today(store: Any, now: float) -> float | None:
+    """The swarm's booked Sail spend this UTC day (`SAIL_KINDS`: the Sail guard's own meter of the research cap,
+    `store.spent` since midnight), read fresh; None when the store cannot say."""
+    try:
+        return max(0.0, float(store.spent(list(SAIL_KINDS), since=_day_start(now))))
+    except Exception:  # noqa: BLE001 - a meter that cannot be read is unknown, never zero
+        return None
+
+
+def sail_day(store: Any, settings: Mapping[str, Any] | None, now: float) -> str | None:
+    """THE HOUSE'S SAIL DAY (the module docstring): why the Sail guard's day holds E2 now (a text beginning `SAIL_DAY`),
+    or None. Reads the guard's own record (`GUARD_KEY`) and, fresh, the swarm's booked Sail spend of the UTC day.
+
+    None for a store no guard ever checked (no record: nothing to read; the loop's own `guard.allows("research")`
+    stands before E2's rounds). With a record, FAIL CLOSED, as the guard itself: braked, new research held, no good
+    reading for `guard.stale_seconds`, a record with no research cap, or a meter that cannot be read each hold E2. Else
+    E2 is held once the day's spend is within `SAIL_ROOM_USD` of the guard's research line: the research cap less THE
+    GATE'S RESERVE, and (while `guard.pace_day`) the day's even pace, each exactly as `SailGuard.check` computes it;
+    and once Sail's own meter of the day, as the guard last read it, is that near the account's line."""
+    try:
+        record = store.get(GUARD_KEY)
+    except Exception:  # noqa: BLE001 - a store that cannot be read holds E2 (its other lines could not be read either)
+        return f"{SAIL_DAY} could not be read (the swarm's store gave no guard record)"
+    if not isinstance(record, Mapping) or not record:
+        return None
+    block = settings.get("guard") if isinstance(settings, Mapping) else None
+    block = block if isinstance(block, Mapping) else {}
+    if record.get("braked"):
+        return f"{SAIL_DAY} is closed: the Sail guard is braked ({str(record.get('reason') or 'no reason kept')[:200]})"
+    if record.get("research_held"):
+        return f"{SAIL_DAY} holds new research ({str(record.get('held') or 'no reason kept')[:200]})"
+    stale = _num(block.get("stale_seconds"))
+    stale = 600.0 if stale is None else stale
+    if float(now) - (_num(record.get("last_ok")) or 0.0) >= stale:
+        return f"{SAIL_DAY} is unknown: the Sail guard has no good reading in the last {stale:.0f} s"
+    last = record.get("last") if isinstance(record.get("last"), Mapping) else {}
+    research, account = _num(last.get("budget_research_usd_day")), _num(last.get("budget_account_usd_day"))
+    if research is None:
+        return f"{SAIL_DAY} is unknown: the Sail guard's record carries no research cap"
+    spent = sail_spent_today(store, now)
+    if spent is None:
+        return f"{SAIL_DAY} is unknown: the swarm's Sail spend of the day could not be read"
+    reserve = max(0.0, _num(last.get("gate_reserve_usd")) or 0.0)
+    line, what = research - reserve, f"its research line ${research - reserve:.2f} (${research:.2f} less the gate's reserve)"
+    pace_day = block.get("pace_day", True)
+    if pace_day and research > 0:
+        slack = _num(block.get("pace_slack"))
+        slack = 0.05 if slack is None else slack
+        paced = research * min(1.0, (float(now) - _day_start(now)) / 86400.0 + max(0.0, slack))
+        if paced < line:
+            line, what = paced, f"the ${paced:.2f} of its ${research:.2f} due by now (the day's even pace)"
+    if spent >= line - SAIL_ROOM_USD:
+        return (f"{SAIL_DAY} has no room for an equity question: the swarm booked ${spent:.2f} on Sail today, within "
+                f"${SAIL_ROOM_USD:.2f} of {what}; E2 stops before the Sail guard would hold new research")
+    metered = last.get("metered_today") if _today(_num(last.get("at")) or 0.0) == _today(now) else None
+    metered = _num(metered)
+    if account is not None and metered is not None and metered >= account - reserve - SAIL_ROOM_USD:
+        return (f"{SAIL_DAY} has no room for an equity question: Sail's own meter read ${metered:.2f} today, within "
+                f"${SAIL_ROOM_USD:.2f} of the account's line ${account - reserve:.2f}; E2 stops before the Sail guard "
+                "would hold new research")
+    return None
+
+
 def hold(store: Any, settings: Mapping[str, Any] | None, now: float) -> str | None:
-    """Why E2 may ask no model now, or None: THE DAY'S LINE is spent (`DAY_SPENT`), or E2 is at ITS HOURLY PACE. Read
-    before every model call of E2's (the equity pass, a Train write, a review or audit read)."""
+    """Why E2 may ask no model now, or None: THE DAY'S LINE is spent (`DAY_SPENT`), THE HOUSE'S SAIL DAY has no room
+    (`sail_day`: a text beginning `SAIL_DAY`), or E2 is at ITS HOURLY PACE. Read before every model call of E2's (the
+    equity pass, a Train write, a review or audit read)."""
     if room(store, settings, now) <= 0:
         return DAY_SPENT
+    held = sail_day(store, settings, now)
+    if held is not None:
+        return held
     return pace(store, settings, now)["reason"]
 
 
@@ -451,7 +569,7 @@ def report(store: Any, settings: Mapping[str, Any] | None, *, train_key: str) ->
         out[key] = row
     return {"routes": out, "review": review, "turn": book_["turn"], "days": book_["days"], "usd_day": cfg(settings)["usd_day"],
             "day_line": round(day_line(settings), 6), "pace_share": cfg(settings)["pace_share"],
-            "usd_hour": round(usd_hour(settings), 6),
+            "usd_hour": round(pace_hour(settings), 6), "line_share_usd_hour": round(usd_hour(settings), 6),
             "rule": "the route choice reads births, dollars and Train passes only (A9 D3)"}
 
 
@@ -461,7 +579,7 @@ def ask_on(router: Any, route: Route, *, role: str, system: str, user: str, key:
     """One question on exactly one route (no fallback inside the router): Sail with no paid route before it, OpenAI with
     no Sail after it, Claude for its role with nothing after it."""
     common = {"role": role, "system": system, "user": user, "family": family, "key": key, "max_output": int(max_output),
-              "effort": effort, "need_usd": 1.0}
+              "effort": effort, "need_usd": SAIL_ROOM_USD}
     if route.kind == "sail":
         return router.ask(openai_model=None, sail_profile=route.name, claude=False, **common)
     if route.kind == "openai":
@@ -549,4 +667,5 @@ __all__ = ["LEDGER_KEY", "ROUTE_KEY", "ROLE", "DEFAULTS", "BOUNDS", "REVIEW_PREF
            "Route", "cfg", "e2_settings", "routes", "served", "ledger", "book",
            "book_births", "next_turn", "spent_since", "spent_today", "model_line", "usd_hour", "day_line", "room", "pace",
            "hold", "answer_usd", "train_counts", "choose", "report", "ask_on", "ask", "booked_for", "unsent", "UNCONFIRMED",
-           "SENT_UNANSWERED"]
+           "SENT_UNANSWERED", "LINE_SHARE_MAX", "SAIL_ROOM_USD", "GUARD_KEY", "SAIL_KINDS", "SAIL_DAY", "pace_hour",
+           "sail_spent_today", "sail_day"]

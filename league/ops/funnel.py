@@ -36,6 +36,10 @@ THE EQUITY LANES (release E1, Oct 2026), apart, under `equity` (the daily page's
 - from the live book (`book_counts`'s `equity`): the EquityBook's orders placed and filled, lots opened and closed (a
   close is one lot fully closed), and the programs holding a lot now.
 
+THE FORWARD RECORD (release E3), apart, under `forward_record` (league/ops/forward_report.py `funnel_rows`; the daily
+page's table reads none of it): programs registered, lineages, controls, program-sessions, stale, errors, checkpoints,
+the BH and BY counts and the memory tables' rows in the window. Integers only, never a figure.
+
 INDEPENDENT ASSET-YEARS (release E4), apart, under `asset_years` (the daily page's table reads none of them): per
 equity lane and structure ("etf", "stock", "panel"), the Gym's Train runs in the window as simulated program-years
 beside the independent asset-years they read (their Train years x the N_eff of their data: the panel's `neff_pr` of
@@ -386,6 +390,11 @@ def window(root: str | Path, start: float, end: float) -> dict[str, Any]:
         out["book"] = book_counts(root, start, end)
     except Exception as exc:  # noqa: BLE001
         out["errors"]["book"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+    try:  # RELEASE E3: the forward record's counts (league/ops/forward_report.py: integers only, never a figure)
+        from . import forward_report
+        out["forward_record"] = forward_report.funnel_rows(root, start, end)
+    except Exception as exc:  # noqa: BLE001 - unread is never zero
+        out["errors"]["forward_record"] = f"{type(exc).__name__}: {str(exc)[:200]}"
     try:  # RELEASE E4: independent asset-years beside simulated program-years (league/ops/equity_neff.py)
         from . import equity_neff
 

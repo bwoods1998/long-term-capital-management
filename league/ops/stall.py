@@ -119,8 +119,15 @@ first refusal of the owner's deploy or of the grant, the pause file, the kill), 
 cause standing.
 
 NEVER ACTS. The job reads (every SQLite open `mode=ro`, inside `guard.readonly()`; the gateway's `/v1/health`, a GET),
-writes only `stall.json`, and posts only the notice: it moves no money, changes no setting, starts and stops nothing. It
-runs in a maintenance pause too (read-only, like `preopen` and `clock`), so a pause left on is itself reported.
+writes only `stall.json` and the release receipts' own store (below), and posts only the notice: it moves no money,
+changes no setting, starts and stops nothing. It runs in a maintenance pause too (read-only, like `preopen` and
+`clock`), so a pause left on is itself reported.
+
+RELEASE RECEIPTS (release E3; league/ops/release_receipts.py `step`): each run declares the running release's receipts
+(`league/ops/release_receipts.json`: the funnel metric a deploy expects to move) the first time it sees them and
+reads each back once its window has closed, into `<state>/release-receipts.sqlite`; the run's receipt carries what it
+declared, read and could not (`receipts`). Listed, never reverted; no cause of `CAUSES`; a failure there is an entry of
+`receipts.errors` and the stall alarm goes on.
 """
 from __future__ import annotations
 
@@ -2015,11 +2022,16 @@ def run(ctx: Any) -> dict[str, Any]:
         if kind is not None and not notice["sent"] and notice.get("why"):
             text += f" (notice: {notice['why']})"
         _alert(ctx, text)
+    try:  # RELEASE E3: the release receipts (league/ops/release_receipts.py): declared at a deploy, read back after its window
+        from . import release_receipts
+        receipts = release_receipts.step(root, _get(ctx, "base"), _get(ctx, "release"), now=now)
+    except Exception as exc:  # noqa: BLE001 - the stall alarm goes on without it
+        receipts = {"errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
     write_json(root / STATE_FILE, {"schema": 2, "at": S.iso(now), "causes": told, "mail": mail,
                                    "nightly_error": nightly_error, "done_told": done_told})
     return {"stalled": stalled, "cleared": cleared, "warned": warned, "notice": notice,
             "checks": {c: {k: found[c].get(k) for k in ("stalled", "what", "numbers", "doing", "owner_step")} for c in CAUSES},
-            "ceiling": ceiling, "errors": errors, "warning": bool(stalled or errors)}
+            "ceiling": ceiling, "errors": errors, "warning": bool(stalled or errors), "receipts": receipts}
 
 
 __all__ = ["run", "checks", "swarm_facts", "owner_deploy", "pause_facts", "grant_facts", "kill_facts", "cause_facts",

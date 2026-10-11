@@ -185,13 +185,17 @@ class RunnerHolds(unittest.TestCase):
         # The read-only checks (the stall alarm among them: a pause left on is one of its causes), the close economics,
         # the budget and its hourly refresh, the fast lane's direction closes and report, the learning game's report and
         # the direction lane's; (release E1) the equity lane's daily store and its twins' measurement records; and
+        # (release E3) the five jobs of the forward record, which write only their own store and files (a forward day
+        # not recorded is lost for good). Release E3's contamination probe spends model dollars: paid, never in a pause.
         # (release E4) the panel lane's data and measurement jobs, which read the gateway and write their own files.
         self.assertEqual({j.name for j in JOBS if j.in_pause}, {"budget", "budget_refresh", "clock", "preopen", "economics",
                                                                 "stall", "direction", "fast_lane", "game", "dlane",
-                                                                "equity_data", "equity_twins", "equity_universe",
+                                                                "equity_data", "equity_twins", "forward_register",
+                                                                "fill_minutes", "forward_shadow", "forward_report",
+                                                                "forward_audit", "equity_universe",
                                                                 "equity_panel", "equity_spreads", "equity_neff",
                                                                 "french", "xs_zero_edge"})
-        self.assertEqual({j.name for j in JOBS if j.paid}, {"postmortem", "agenda", "engineer"})
+        self.assertEqual({j.name for j in JOBS if j.paid}, {"postmortem", "agenda", "engineer", "contam_probe"})
         longest = max(j.wall for j in JOBS)
         self.assertGreaterEqual(jobs["grant"].grace, longest + 5 * 60, "an hourly grant waits behind the longest job, never missed")
         self.assertEqual(len(jobs["drills"].triggers), 2)

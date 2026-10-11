@@ -160,6 +160,19 @@ FORBIDDEN: tuple[str, ...] = (
     # league/equity/ since E1 (league/equity/kinds.py `RUNTIME`): league/xs/ (the panel kind's slot, A13) and
     # ltcm/broker.py (`ltcm.data`, the engine's NYSE calendar, imports it).
     "league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py",
+    # THE EQUITY LANES' BIRTHS, TRAIN AND REVIEW (release E2, Oct 2026): the Train bar equity-v1 with its restart and
+    # start checks and the Train map (elane_train.py), the equity quota and admission (elane_births.py), the route
+    # choice by yield per dollar (elane_yield.py), the seal of Validation and look outcomes and of the 2020-21 reserve
+    # (elane_seal.py, A9 D3 and A15) and the equity review and level rule (elane_review.py): selection constants and
+    # secrecy rules, like dlane.py. In the gateway's merge list too since its follow-up of Oct 11, 2026.
+    "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
+    "league/swarm/elane_seal.py", "league/swarm/elane_review.py",
+    # THE EQUITY LANES' FOLDS, OUT-OF-FOLD EFFECTS AND MEMORY TABLES (release E3, Oct 2026): secrecy rules and a
+    # Train-bar input. elane_folds.py assigns a family's hidden Train year and cuts its seen spans, so it decides what
+    # the Train bar reads; elane_effects.py and elane_memory.py make and keep the hidden year's sealed tables, which
+    # no generator may read. In the gateway's merge list too, with the release (Oct 11, 2026). Release E3's other
+    # files were behind the wall already (league/ops/, docs/benchmarks/, league/swarm/policy.json).
+    "league/swarm/elane_folds.py", "league/swarm/elane_effects.py", "league/swarm/elane_memory.py",
 )
 #: THE EQUITY LANE (release E1, Oct 2026): its tree (the engine, the sizing, the bands, the screen and the book that
 #: trade real money, its evidence modules their own identity) and its swarm lane (births, the look, the roster) are
@@ -171,25 +184,19 @@ FORBIDDEN: tuple[str, ...] = (
 #: MERGE_FORBIDDEN, which gateway/test/merge.test.mjs holds to that list as written) cannot change in E1: gateway/ ships
 #: separately. A gateway follow-up adds them to MERGE_FORBIDDEN and moves them into the list above, leaving this
 #: empty; until then league/tests/test_ci.py allows exactly these in `FORBIDDEN` beyond the gateway's list. E1's own
-#: four entries made that move with its gateway follow-up; what waits here now is release E2's.
-#: THE EQUITY LANES' BIRTHS, TRAIN AND REVIEW (release E2, Oct 2026): the Train bar equity-v1, its restart check and the
-#: Train map (elane_train.py), the equity quota and admission (elane_births.py), the route choice by yield per dollar
-#: (elane_yield.py), the seal of Validation and look outcomes and of the 2020-21 reserve (elane_seal.py, A9 D3 and A15)
-#: and the equity review and level rule (elane_review.py): selection constants and secrecy rules, like dlane.py. The
-#: updater never self-deploys a change to them from this release on; the gateway's merge route refuses them once its
-#: own follow-up adds the five to MERGE_FORBIDDEN (gateway/ ships separately, as it did for E1).
+#: four entries made that move with its gateway follow-up, release E2's five modules (the equity births, Train bar,
+#: route rule, seal and review) with theirs on Oct 11, 2026, and release E3's three (the folds, the out-of-fold
+#: effects and the memory tables) with the release itself, the same day; what waits here now is release E4's.
 #: THE PANEL LANE (release E4, Oct 2026): its swarm lane (league/swarm/elane_xs.py: the Train bar equity-xs-v1, the one
 #: Validation try, the look under the screen XS1, lineage, the look cap of an agenda cell and the seat rule that keeps
 #: a style-open passer out of a live seat, the captain's A22: selection constants and secrecy rules, like
 #: elane_train.py) and the universe generator (scripts/gen_universe.py: what writes the constitution's and the
 #: gateway's stock lists, so a money rule's author). The rest of the lane is behind the wall above already: league/xs/
 #: (the panel's evidence, its screen and its live adapter), league/ops/ (its data jobs) and docs/benchmarks/ (XS1's
-#: receipt). The two wait here with E2's five for the same gateway follow-up.
-PENDING_GATEWAY: tuple[str, ...] = (
-    "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
-    "league/swarm/elane_seal.py", "league/swarm/elane_review.py",
-    "league/swarm/elane_xs.py", "scripts/gen_universe.py",
-)
+#: receipt). The updater never self-deploys a change to the two from this release on; the gateway's merge route
+#: refuses them once its own follow-up adds them to MERGE_FORBIDDEN (gateway/ ships separately, as it did for E1 and
+#: E2), and that follow-up moves them into the list above.
+PENDING_GATEWAY: tuple[str, ...] = ("league/swarm/elane_xs.py", "scripts/gen_universe.py")
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to
