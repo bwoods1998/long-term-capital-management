@@ -1108,7 +1108,9 @@ class TheSeedsThroughTheRoundsForReal(LoopCase):
     """s2-7 and s2-6 with nothing faked but the market: the swarm's own loop object, the real store, tournament and gate,
     `runner.Isolated` over the decider's in-process twin, the real S2 screen under the repository's pinned receipt, on
     a SYNTHETIC store (invented prices with a strong drift, so a seed passes). With the brake on and the Gym off, one
-    equity round takes the three seeds from birth to their looks, SPY's first."""
+    equity round takes the three seeds from birth to their Validation and, for each that enters the gate, its look,
+    in the list's declared order. On this invented market only SPY's every-close seed enters: the two declared before
+    it fail their Validation pre-check, so their tries are spent and its look waits for neither (`elane.seed_wait`)."""
 
     def test_one_round_under_the_brake_validates_and_looks_at_the_seeds_in_the_lists_order(self):
         from league.equity import synth
@@ -1137,17 +1139,20 @@ class TheSeedsThroughTheRoundsForReal(LoopCase):
         self.assertEqual(out["errors"], {})
         self.assertNotIn("look_errors", out)
         self.assertTrue(out["validated"]["seed-overnight-spy"], "the overnight seed enters on a drifting market")
+        self.assertNotIn("waits", out, "no seed declared before it still has a look to come")
         looks = self.store.looks()
-        self.assertEqual(looks[0]["family"], "seed-overnight-spy", "SPY's overnight seed is looked at first")
+        entered = [fid for fid in listed if out["validated"][fid]]
+        self.assertEqual(looks[0]["family"], entered[0], "the first look is the first declared seed that entered")
+        self.assertEqual(looks[0]["family"], "seed-overnight-spy")
         self.assertEqual((looks[0]["passed"], looks[0]["detail"]["screen"]), (1, "S2"))
         spy = self.store.family("seed-overnight-spy")
         self.assertEqual(spy["band"], "candidate")
         self.assertEqual(spy["state"]["banded_evaluator"]["equity_sha256"], equity_fingerprint())
         self.assertEqual(sorted(spy["state"][elane.LOOK_KEY]["activity"]), ["ratio", "train", "validation"])
         # Every other seed that entered the gate was judged in the same round: looked at, or refused before its look
-        # (D3 against SPY's seed, or its own floor); none is left waiting on an options round.
+        # (D3 against a seed already looked at, or its own floor); none is left waiting on an options round.
         looked = {look["family"] for look in looks}
-        for fid in listed[1:]:
+        for fid in listed:
             state = self.store.family(fid)["state"]
             if out["validated"][fid]:
                 self.assertFalse(state["gate_ready"], fid)
