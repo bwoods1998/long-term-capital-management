@@ -478,8 +478,9 @@ What it adds, so its author starts from a decided shape (E4-SPEC 15, row 18; the
 - AND THE PROBE'S JOB WRITES THE PERMIT (decided when E4 was merged over E3: release E3's seal lets no module of
   league/swarm name the probe's file or import the probe, so the swarm cannot read it, and must not: the file holds
   counts and rates of the eras programs are judged on). Each time it publishes a route's result the job rewrites
-  `<state>/xs-probe.json` (`elane_xs.PROBE_FILE`; atomic, 600): {"version": "xs-probe-1" (`elane_xs.PROBE_VERSION`),
-  "routes": {route: {"at", "model", "cells": {"P4" | "P5" | "P6": {era: {"readable": bool, "recalled": bool}}}}}},
+  `<state>/xs-look-permit.json` (`elane_xs.PROBE_FILE`; atomic, 600): {"version": "xs-look-permit-1"
+  (`elane_xs.PROBE_VERSION`), "routes": {route: {"at", "model", "cells": {"P4" | "P5" | "P6": {era: {"readable":
+  bool, "recalled": bool}}}}}},
   one row for every route with a published result that carries all three panel strata, and NOTHING ELSE of a cell
   (no n, no accuracy, no base rate, no p). That file is what `elane_xs.probed` reads; a file of another version, or
   none, is no permit and every panel look waits.

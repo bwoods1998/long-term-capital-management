@@ -141,8 +141,8 @@ SEAT_UNSTATED = "unstated"
 MAX_CELL_LOOKS = 2
 #: THE PROBE'S PERMIT for panel looks (duty 3 above): written by the probe's job in league/ops, read here. A file of
 #: another version is no permit (the look waits).
-PROBE_FILE = "xs-probe.json"
-PROBE_VERSION = "xs-probe-1"
+PROBE_FILE = "xs-look-permit.json"
+PROBE_VERSION = "xs-look-permit-1"
 PROBE_STRATA = ("P4", "P5", "P6")
 REVIEW_XS = (
     "an embedded return table: constants, a string or a structure that could hold returns, ranks or outcomes of "
