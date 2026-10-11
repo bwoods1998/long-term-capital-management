@@ -65,9 +65,10 @@ calendar is dropped unread.
 
 WHAT COMES OUT: COUNTS AND COVERAGE SHARES, NEVER A PRICE, and no ticker either. The receipt, printed and written to
 `<root>/equity-daily/probe.json` (600, atomic): {"version", "at", "by_year": {year: {"member_days", "with_bar",
-"share"}}, "sessions": {year: n}, "spells", "open", "ended", "no_bars", "reused", "errors", "requests", "requests_failed",
-"requests_refused", "coverage_min", "pass", "verdict", "facts"}. PASS: every probe year at or above 0.97. Verdict
-"pass" | "fail" | "incomplete" (a request still failed after its tries and a year is under the bar: run it again).
+"share"}}, "sessions": {year: n}, "spells", "open", "ended", "no_bars", "reused", "errors", "requests",
+"requests_failed", "requests_refused", "coverage_min", "pass", "verdict", "facts"}. PASS: every probe year at or above
+0.97. Verdict "pass" | "fail" | "incomplete" (a request still failed after its tries and a year is under the bar: run
+it again).
 `--list` prints, on the terminal only and never into the receipt, the tickers of the spells with no bars, reused or
 in error (no date and no price beside them).
 
@@ -619,7 +620,8 @@ def house_gateway(release: str | Path, root: str | Path, env: str | Path | None 
         token_from_env()
     except Exception:  # noqa: BLE001 - its own text is not repeated
         raise NoGateway(f"GATEWAY_TOKEN is not set in this process and was not found in the House's environment "
-                        f"file ({where}): give the file with --env, or run the probe as the House's processes run") from None
+                        f"file ({where}): give the file with --env, or run the probe as the House's processes "
+                        "run") from None
     return Context("panel_probe", root=root, due_at=time.time(), release=release).gateway
 
 

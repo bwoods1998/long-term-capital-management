@@ -92,9 +92,9 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   folds record in the committed policy), and E3's count of a cell's births holds no panel family; a scored panel
   version is neither registered nor refused by E3's registry (package J's, owed); three of E3's seal tests failed
   on the lane and the LANE changed, no seal: it imports no memory module (the fold's switch, hash and genome id
-  are spelled in `elane_xs`, held equal by a test), and the swarm reads a LOOK PERMIT (`<state>/
-  xs-look-permit.json`: two words a stratum and era, written by the probe's job) where it read the contamination
-  probe's own file. FIXED: **the live panel fetch placed no bar** (`rows_to_arrays` refused the Decimal prices the
+  are spelled in `elane_xs`, held equal by a test), and the swarm reads a LOOK PERMIT
+  (`<state>/xs-look-permit.json`: two words a stratum and era, written by the probe's job) where it read the
+  contamination probe's own file. FIXED: **the live panel fetch placed no bar** (`rows_to_arrays` refused the Decimal prices the
   House's venue client hands; every fake venue handed floats, which is why the whole live week passed: the fakes
   now decode as the client does). **The spreads' share fell with the index's turnover for ever** (it counted
   today's members; a name that joined after 2024 can never be sampled): it is the share of the Train eras'
