@@ -509,10 +509,12 @@ class NoThresholdReachesAGenerator(unittest.TestCase):
         settings = F.settings("gate")
         F.panel_family(store, "rev-a", record={"status": "passed", "passed_version": 1,
                                                "versions": {"1": {"score": 3.1, "fails": []}}})
+        block, contract = elane_xs.request_text(store, settings, 4), elane_xs.contract_text()
+        self.assertIn(contract, block, "the architect's block ends with the contract, whole")
         texts = {"the researcher's system text": elane_xs.RESEARCHER_SYSTEM, "the review's rubric": elane_xs.REVIEW_SYSTEM,
                  "the bar": elane_xs.bar_text(), "the agenda": elane_xs.agenda_text(settings),
-                 "the architect's block": elane_xs.request_text(store, settings, 4), "the map's label": elane_xs.MAP_LABEL,
-                 "the contract's stand-in": elane_xs.CONTRACT_FALLBACK,
+                 "the architect's block": block.replace(contract, ""), "the map's label": elane_xs.MAP_LABEL,
+                 "the contract's stand-in": elane_xs.CONTRACT_FALLBACK, "the contract": contract,
                  "the map": elane_xs.train_map_text(store, settings)}
         pinned = F.pinned_receipt(world.pin)
         for where, text in texts.items():
@@ -521,6 +523,8 @@ class NoThresholdReachesAGenerator(unittest.TestCase):
                          pinned.receipt_sha256[:12]):
                 self.assertNotIn(word, text, where)
             for count in ("999", "119", "1000", "1,000"):  # the placebo draws and the bar on them (a year is no count)
+                if where == "the contract" and count == "999":
+                    continue  # XS.md (package C's) says how many portfolios the screen draws: never the bar on them
                 self.assertIsNone(re.search(rf"(?<![\d.]){re.escape(count)}(?!\d)", text), (where, count))
             for sentence in re.split(r"(?<=[.;:])\s+", " ".join(text.split())):
                 if not re.search(r"XS1|screen|Validation|\blook\b|holdout", sentence):
