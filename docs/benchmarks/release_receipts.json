@@ -1,0 +1,23 @@
+{
+ "schema": 1,
+ "receipts": [
+  {
+   "id": "E3-forward",
+   "release": "E3",
+   "metric": "forward_record.program_sessions",
+   "direction": "up",
+   "min_delta": 1,
+   "window_hours": 168,
+   "why": "the forward record accrues program-sessions (a week: the first row of a Thursday or Friday deploy lands after the weekend)"
+  },
+  {
+   "id": "E3-oof",
+   "release": "E3",
+   "metric": "forward_record.oof_rows",
+   "direction": "up",
+   "min_delta": 1,
+   "window_hours": 168,
+   "why": "every scored version of a hidden-year family leaves an OOF row; it needs equity births on (elane.birth_share above 0 with elane.mode gate), else it reads flat"
+  }
+ ]
+}
