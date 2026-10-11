@@ -103,7 +103,7 @@ The stubs' docstrings are already written to these. Each line: the spec's text, 
 | D4: eligible = member at t, a valid bar, 60 valid closes of 253 | **U(d)** (3.1): member on d, d + 1 AND d + 2; a valid close on d and d - 1; the class of the month; the three characteristics exist (so 253 sessions of history). The House adds tradable and unmasked (narrower) | `store.PanelBars.elig0`, `ctx.Derived.elig`, `config.MEMBER_AHEAD` |
 | D6: beta and sector need 60 valid days; sector = the highest correlation of raw returns | **at least 200 valid returns** (3.2); sector = the fund whose MARKET-RESIDUAL returns correlate most with the name's; the funds in the order XLB, XLE, XLF, XLI, XLK, XLP, XLU, XLV, XLY, XLRE, XLC | `config.MIN_VALID`, `config.FUNDS`, `ctx.derive` |
 | D6: nested terciles, mt = 3 for a missing momentum | **the cells of 3.3**: (beta groups, momentum groups) by the sector's eligible count ((3, 3) from 45, (2, 2) from 20, (1, 2) from 10, (1, 1) from 5), a pooled "small" cell for sectors under 5; a name with no momentum is not eligible. Cell id = 100 x sector + 10 x beta group + momentum group; small = 9999 | `config.RUNGS`, `SMALL_CELL`, `CELL_SECTOR`, `CELL_BETA`; `ctx.Derived.bg`, `mg`, `cell` |
-| D7: the ctx carries normalised open, high, low, close arrays, `rvol`, event flags | **the contract C1**: `ret`, `oret`, `iret`, `range`, `rel_volume` (6 decimals), `sector`, `beta` (2 decimals), the same five for the market; `weekday`, `session_of_month`, `sessions_left_in_month`, `last_session_of_week`. NO price array, NO event flag, no size or liquidity handle. The spec's DITHER stays, underneath (it only adds noise: narrower, never wider) | `ctx.XsCtx.__slots__`, `ctx.FIELDS`, `config.DITHER_HALF`, `BETA_PLACES` |
+| D7: the ctx carries normalised open, high, low, close arrays, `rvol`, event flags | **the contract C1**: `ret`, `oret`, `iret`, `range`, `rel_volume` (6 decimals), `sector`, `beta` (2 decimals), the same five for the market; `weekday`, `session_of_month`, `sessions_left_in_month`, `last_session_of_week`. NO price array, NO event flag, no size or liquidity handle. The spec's DITHER stays, underneath (it only adds noise: narrower, never wider), AS PACKAGE C BUILT IT (section 8, points 18-21): on the ADJUSTED price's own cent grid, with no as-of product | `ctx.XsCtx.__slots__`, `ctx.FIELDS`, `config.DITHER_HALF`, `BETA_PLACES` |
 | D10: top-ups at a 25% shortfall; orders past 24 dropped one by one | **THE KEEP RULE** (C3): a held name in the target is kept, no trade and no resize; a name not held is bought as ONE lot of w x E0; at most 12 buys and 12 sells, and a target that needs more is REFUSED WHOLE (a hold) | `engine.plan_orders`, `config.MAX_BUYS`, `MAX_SELLS` |
 | D11: the Gym sleeve is $500; a name's half-spread is at least 1 bp | **E0 = $1,000** (C3, C8: E1's `SLEEVE_USD`; the stress leg charges the smaller live sleeve's fee instead); **never under 3 bp a fill** (C5) | `config.XS_SLEEVE_USD`, `HS_FLOOR_BP` |
 | D12: a vanished name whose spell ended by a deal takes no haircut | **one exit law** (C6, 3.5, 5.5): a name out of U at any close is sold at the next open; a name whose bars end exits at its last close x (1 - 0.30), for the lot, its counterparts and its cell's members ALIKE. How a spell ended is counted beside, and sets no price | `engine` (module docstring), `config.VANISH_*`, `store.PanelBars.exit` |
@@ -205,11 +205,11 @@ a higher c_XS. Nothing in the build depends on the answer: every threshold is re
 
 | name | module (owner) | read by |
 |---|---|---|
-| the lane's constants; `rounding_bound`; `quiet`, `rebalance_session`, `decision_due` | `league/xs/config.py` (C, in C0) | every package |
-| `PanelBars`, `Slice`, `PanelStore`, `Universe`, `write_panel`, `ids_for`, the layout | `league/xs/store.py` (C; `write_panel` in C0) | A (writes through it), D, G, H, J |
-| `XsCtx`, `Fields`, `Inputs`, `Derived`, `derive`, `build`, `ctx_bytes` | `league/xs/ctx.py` (C) | D (engine, child, placebo), H, A (the nightly I6) |
+| the lane's constants; `rounding_bound`; `quiet`, `rebalance_session`, `decision_due`, `next_session` | `league/xs/config.py` (C, in C0) | every package |
+| `PanelBars`, `Slice`, `PanelStore`, `Universe`, `write_panel`, `ids_for`, the layout; ADDED BY C: `valid_bars` (D4's valid bar), `coverage` (D19's block: A's `equity_panel.coverage` may be this function), `write_universe` (the universe directory's one writer: the salt written once, the manifest last), `write_panel`'s keywords `masked`, `coverage`, `vanished`, `full_at`, `revisions`, `hs_share`, `live_from`, `i6` (the manifest's other facts; each has a fail-closed default), `PanelStore.class_out(day)`, `.elig0_row(day, aids)` (a LIVE day's `Columns.elig0`), `.tradable_aids(day)`, `.live_from`, `.universe()`, `.train(..., aids=)`, `Universe.member`, `.masked`, `.left`, `.exit`, `.class_aids`, `.has` | `league/xs/store.py` (C; `write_panel` in C0) | A (writes through it), D, G, H, J |
+| `XsCtx`, `Fields`, `Inputs`, `Derived`, `derive`, `build`, `ctx_bytes`; ADDED BY C: `characteristics` and `cells` (the pre-registration's 3.2 and 3.3 on plain arrays: the vector CH is held on them), `group_counts`, `dither`, `lot_dither`, `fetch_sessions`, and `build(inputs, derived=None)` (the engine hands the `Derived` it already holds) | `league/xs/ctx.py` (C) | D (engine, child, placebo), H, A (the nightly I6) |
 | `Needs`, `parse_needs`, `load_program`, `normalize_target` | `league/xs/program.py` (C) | D, G, J |
-| `synthetic_panel`, `planted_panel`, `cent_panel`, `same_ctx_cases` | `league/xs/synth.py` (C) | every package's tests |
+| `synthetic_panel` (ADDED: `raw_places`, `masked`, `live_from`), `planted_panel`, `cent_panel`, `same_ctx_cases` (each case also carries `aids`, `run_key`, `slice`, `straddles`), `bar_rows` | `league/xs/synth.py` (C) | every package's tests |
 | `EngineConfig`, `plan_orders`, `Log`, `run` | `league/xs/engine.py` (D) | the child (D), H (the same `plan_orders` live) |
 | the result record, `DAILY`, `view`, `pooled`, `t_stat` | `league/xs/results.py` (D) | E, G, J |
 | `residual`, `run`, `p_value`, `stat`, `look_seed`, `train_seed` | `league/xs/placebo.py` (D) | E (the look), G (the Train bar's rank) |
@@ -292,6 +292,39 @@ Each is a place the two texts had to be reconciled at Step 0; the stub says whic
 17. **The Probe sleeve moved after the spec's feasibility table** (the captain's A20: 0.50 x E in all, three seats).
     E4-SPEC 0 and 10.4 computed a basket in a 0.25 x E sleeve. No stub carries the figure: package H recomputes
     10.4's table with E1's `size_entry` at the constitution's values in force and states it in its report.
+
+18. **THE DITHER SITS ON THE ADJUSTED PRICE'S OWN CENT GRID, AND NO AS-OF PRODUCT IS FORMED** (package C; league/xs/
+    ctx.py's module docstring). E4-SPEC D7 moves each bar's RAW price by half a raw cent and carries it through the
+    as-of factor. The vendor rounds adjustment=all to the cent, so the grid a ratio of two history prices keeps is the
+    adjusted price's, and half a raw cent covers only part of an adjusted cent wherever a later dividend or split has
+    shrunk the adjusted price: `test_xs_seal.TheLevelCannotBeSearched` shows the lattice search finding the level
+    within 1% on a 4-for-1 split history dithered D7's way. So each adjusted price is moved by half a cent of its
+    own grid (never less noise), every field is a plain ratio of dithered adjusted prices (the as-of factor and its
+    4-decimal rounding cancel), and a bar's fields are the same numbers in every ctx of a run. `derive` reads the
+    adjusted closes directly for the same reason. `league.equity.ctx.as_of` is not imported; `_factor_row` names the
+    market's row at t and the row a held lot of a halted name is marked at.
+19. **`rel_volume` is narrower than the registered field**: the volume is put on the total-return basis (x raw close /
+    adjusted close: a split leaves no step that would date a session) and moved by a relative dither of at most half
+    a percent (a share count is a lattice too, and an exact count names a stock and a day); NaN for the oldest 62 of
+    a decision's 253 sessions and with fewer than 32 valid bars among its 63.
+20. **`ctx.cash`, `ctx.equity` and `ctx.budget` are rounded to the cent, and `ctx.equity` is the cash plus the lots
+    marked at their dithered closes** (with one lot held, an exact equity series is that lot's exact marks). The
+    engine and the book go on passing the sleeve's true figures in `Inputs`.
+21. **What the dither does not close, stated**: on the LIVE path a fetch made after the vendor restates a name's
+    history (an ex-date) shows its bars under another vintage, each moved by the vendor's own cent rounding. A
+    program that kept the earlier view in STATE could read the scale of those moves and bound the adjusted level to
+    about 5% an ex-date. It does not exist in any run on the store (one vintage: Train, Validation, the look, the
+    forward twin), only where nothing is hindsight. The review's rubric ("any search for a price level") is the
+    guard; the captain may prefer a second one.
+22. **The class of the month is chosen among the pair's classes that are index members at the month's first
+    session** (E4-SPEC D4 does not say whose volume is compared when one class is no member): every other aid of the
+    pair is out for that month, a class that joins mid-month too; a pair with no member that day has no choice.
+23. **A slice's look-back, and a live fetch's sessions (`ctx.fetch_sessions`), stay inside one span of
+    `config.SPANS`**: the row before 2021-01-04 in the store is 2019-12-31, and no look-back or return crosses the
+    reserve (E4-SPEC D1: a segment's first decision holds 252 sessions).
+24. **A target that names a held slot which has left `ctx.ids` is malformed** (E4-SPEC D10: every id is in
+    `ctx.ids`): XS.md tells the author to leave such a slot out (the House sells it at the next open). The engine
+    counts it as the program's error, never as a failed decide.
 
 ## 9. Tests
 
