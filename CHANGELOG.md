@@ -26,7 +26,7 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261011T143700Z-c8e41ae6e37f` (main `7d2d3c84`, release E3, 14:37Z Oct 11), the
+The running House release is `20261011T190534Z-dc7e047c9530` (main `e36c7e39`, release E5-S, 19:06Z Oct 11), the
 gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
 
 ### Release E2.4: the equity lanes alarm on their own stalls, their research funnel, and an architect kept inside the universe and told in closed words, on `feat/equity-e24-health` (unreleased; a gateway deploy FIRST, then an owner deploy on main's E3; no identity moves; no setting changes)
@@ -185,6 +185,83 @@ owner when the lanes next go wrong.
   notice held to the gateway's cause list and its cuts; hostile text in every field of a barren pass; the three
   checks' replays, `league/tests/elane_e24_house.py`) and `gateway/test/stall-notice.test.mjs`. Operations:
   [docs/operations.md](docs/operations.md), "The equity lanes' own alarms" and "The stall alarm and the funnel".
+
+### 19:06Z Oct 11, 2026: release E5-S, six seats at a Probe sleeve of 0.25 x E (#541), House `20261011T190534Z-dc7e047c9530`, main `e36c7e39`
+
+Owner deploy only; the gateway is unchanged (`f9528af2`). CI green on the exact head; no order in flight at 19:05:19Z;
+promoted 19:06:21Z (rollback `20261011T143700Z-c8e41ae6e37f`; the money rollback is the pair "3 0.50"), nightly back
+19:16Z, updater repointed. Verified 19:16Z: health clean, real money on; money `7e41909a` -> `6c0bc42b` and
+constitution `e909eb10` -> `c3c061b0` (the grant holds the new digest); execution fingerprint `b60410ad` and gate
+contract `397b22b772b3` unchanged; no evidence reset.
+
+- Why this pair: the share lanes' first day bred programs that passed sealed looks faster than seats freed, and the
+  owner asked for Done as soon as possible. A pre-registered study put more seats at a smaller lot as a SPEED BET,
+  not a better chance: the same dollars at risk, the thirtieth real close sooner, about level at twelve weeks and
+  worse if the first counted close is a loss (the smaller lot is slower out of that hole). Its review advised
+  keeping three seats until that close was known; the captain shipped six for the owner's stated aim and says so.
+- Seen on the House after: the two waiting programs and one that passed during the deploy were seated at the first
+  band sync, first come; all six seats are held (two seeded, four bred); three buys are planned for Monday's open.
+- No deploy (`swarm.json`): 13:24Z `elane.e2.train_per_round` 3 -> 5, 15:57Z -> 4; 14:01Z
+  `births_max_output_tokens` 32000 (a value over the provider's limit had made one births pass fail on every route);
+  14:57Z `elane.e2.routes` without the route whose answers came back cut short.
+
+### Release E5-S: the seats and the sleeve of the share lane are two numbers, on `feat/equity-e5s-seats` (DEPLOYED 19:06Z Oct 11 at six seats and a sleeve of 0.25; an owner deploy on main `7d2d3c84`; THE MONEY DIGEST MOVES with the pair, the grant re-ratifies; no fingerprint moves, no evidence reset)
+
+- **What it is.** `equity_money.probe.max_programs` (the seats) and `probe.sleeve_share` are set together by one
+  mechanical step, `set_design SEATS SLEEVE` (the captain's tool, kept beside the build's record, not in the tree).
+  It rewrites the two rows, `elane.roster` (league/swarm/policy.json and the default in league/swarm/elane.py),
+  `PINNED_DIGEST`, and the design blocks of four documents (below, the constitution's `probe` comment,
+  docs/operations.md and league/equity/INTERFACES.md section 17), and nothing else; run again it changes nothing.
+  The seats' bound goes from three to six (`EQUITY_MONEY_BOUNDS["probe.max_programs"]`, Claude's decision under goal
+  item 4, its cost in the constitution's comment); the sleeve's bound stays 0.50; `sized.sleeve_share` stays 0.50
+  at every pair (the Sized sleeve's floor is the Probe's in the code itself; the step stays parked).
+- **The pair in force**, in rule arithmetic of the two numbers:
+
+<!-- equity-design:begin -->
+THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
+(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.125 x E.
+A lot in every seat asks for 0.75 x E of ETFs; the lane holds at most 0.75 x E of them, 0.15 x E of
+open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 4 whole lots fit; the
+next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 6 of
+6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
+6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,666.
+Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
+0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
+the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
+equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
+collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
+0.50 x E.
+Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7e41909a` / `e909eb10`.
+<!-- equity-design:end -->
+
+- **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over
+  seats 3, 4, 5, 6 x sleeve 0.50, 0.33, 0.25. The build left a working pair in the tree; the branch is not a
+  release until the verdict's pair is set by the same step. Why the two move together: Done reads 30 real
+  closes whose P&L sums above zero, more programs trading at once make closes sooner, and a smaller lot a program
+  keeps the same shared loss budget over them. Its cost: more programs, the screen's false positives among them, on
+  real money at once; the same spread and fees per dollar on a lot that earns a loss back more slowly; closes made
+  sooner by long-only index ETFs are weak evidence of skill. It buys closes, not edge.
+- **No owner line moves.** An ETF at most 0.50 x E across all programs, at most 1.00 x E invested, the cash reserve,
+  the shared loss budget ($400 net in any rolling 20 sessions, $800 net in total), the program's -$300 line, the
+  stops and the kill switch, the stock proof's gates: `size_entry` and the book apply each at every pair
+  (`league/tests/test_equity_design.py`, `test_equity_sleeve.py`: every pair of the grid through the House's own
+  sizing function). A seat only decides who may open: no lot is ever sold because a number changed.
+- **At the deploy.** A Candidate waiting for a seat is seated at the first band sync, first come, and asked for the
+  same close; a buy already planned is sized at its send under the sleeve in force; a lot larger than a smaller
+  sleeve keeps its own exits, and its program's next entries are held to the sleeve in force; seats moved down
+  unseat nobody. All of it is the code as it was, now tested through the real book and the real swarm store.
+- **What a pair can make bind** (docs/operations.md, **The seats and the sleeve**): cut or refused entries where the
+  seats' lots do not all fit (the Gym fills them; A14 reads the difference); the day's 60 equity orders, sized for
+  three programs, on a day most orders are re-priced; the gateway's day line on a day every entry climbs its whole
+  ladder, at the pairs `league/tests/test_ci.py` names. None sells anything.
+- **Identities.** The options execution fingerprint (`b60410ad`) and the equity identity (`78022ca6`) are main's: no
+  file of league/live, league/gym or the equity evidence modules is edited (league/live/money.py's two comments on
+  the table's rows stay as A20 wrote them for that reason). The money digest and `PINNED_DIGEST` are the pair's, in
+  the block above; every pair of the grid is pinned in `league/tests/equity_design.py`, and `set_design 3 0.50` is
+  E1's `7e41909a` / `e909eb10` again, to the last hex (the rollback, one owner deploy).
+- **Also changed.** `league/ops/dlane_report.py`: A8.6's statement is built from the rows (`equity_probe_note`), no
+  longer a sentence with A20's figures in it. The gateway is not edited.
+
 
 ### 14:37Z Oct 11, 2026: release E3, record and measure (#539), House `20261011T143700Z-c8e41ae6e37f`, main `7d2d3c84`; gateway `f9528af2`
 

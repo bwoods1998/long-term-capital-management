@@ -10,10 +10,11 @@ the hook. `table` is a `league.live.money.EquityTable` (read by attribute; this 
 
 THE BANDS (the EquityBook moves them, writing through its families reader, league/equity/families.py):
 - candidate -> probe: the family passed its lane's look (its row's `holdout_passed`) and an equity roster seat is free
-  (`elane.roster`, league/swarm/bands.py `seating`): its sleeve is `probe.sleeve_share` x E (0.50: A5 as amended by
-  the captain's A20, Oct 11, 2026);
-- probe -> sized: `sized_up` holds on its version's real closes: its sleeve is then `sized_sleeve_share` x E (since A20
-  the Probe's own 0.50 x E: the Sized cap, 0.50, is the Probe sleeve). PARKED at the table in force
+  (`elane.roster`, league/swarm/bands.py `seating`; at most `probe.max_programs` live programs): its sleeve is
+  `probe.sleeve_share` x E (the seats and the sleeve are the table's two numbers, set together: release E5-S, the
+  constitution's `probe` comment);
+- probe -> sized: `sized_up` holds on its version's real closes: its sleeve is then `sized_sleeve_share` x E (never
+  below the Probe's, at most the larger of the Probe sleeve and `sized.sleeve_share`). PARKED at the table in force
   (`sized.min_trades` 1000): no equity program is Sized, so every equity close stays in the loss budget's tallies;
 - probe | sized -> candidate, exits only and sticky for the version: `edm1` names why (EDM1), or the program's realized
   Probe net reached `demotion.program_loss_usd` (-$300; the swarm's `elane.program_loss_usd` retires it too).
@@ -138,9 +139,11 @@ def sized_sleeve_share(record: EquityRecord, table: Any) -> Decimal:
     `sized.sleeve_share` (0.50), never below `probe.sleeve_share` (a Sized program never trades smaller than a Probe).
     Floored to `SLEEVE_PLACES`. A record that sizes nothing (no bound above zero) gets the Probe's share.
 
-    AT THE TABLE IN FORCE (the captain's A20, Oct 11, 2026: `probe.sleeve_share` 0.50) the cap EQUALS the floor, so
-    the answer is the Probe's 0.50 for every record: a Sized program keeps the Probe sleeve and sizes nothing up. The
-    rule itself is unchanged (league/tests/test_equity_bands_money.py holds both)."""
+    WHERE THE PROBE SLEEVE IS THE CAP ITSELF (0.50: the captain's A20, Oct 11, 2026) the cap EQUALS the floor, so the
+    answer is the Probe's for every record: a Sized program keeps the Probe sleeve and sizes nothing up. Under a
+    smaller Probe sleeve (release E5-S: the seats and the sleeve are set together) the answer is between the Probe's
+    and the cap. The rule itself is unchanged at any sleeve (league/tests/test_equity_bands_money.py holds both); THE
+    STEP IS PARKED either way (`sized.min_trades` 1000)."""
     floor, cap = Decimal(table.probe_sleeve_share), Decimal(table.sized_sleeve_share)
     returns = _returns(record)
     bounds = stats.mean_bounds(returns, 1.0 - float(table.sized_confidence)) if len(returns) >= 2 else None

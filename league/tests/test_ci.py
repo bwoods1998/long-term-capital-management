@@ -389,54 +389,106 @@ class TheEquityLane(unittest.TestCase):
         refused = self.tree(constitution={self.ENABLED_LINE: self.ENABLED_LINE.replace("True", "1")})
         self.assertIn("equity_money.enabled = 1 is not exactly one of [False, True]", " ".join(refused))
 
-    SLEEVE_ROW = '"probe": {"sleeve_share": "0.50",'
+    @property
+    def probe_row(self):
+        """The `probe` row as the tree's constitution writes it, with the two numbers in force (release E5-S: the
+        seats and the sleeve are set together, so no test names them)."""
+        from league.tests.equity_design import in_force
+
+        seats, sleeve = in_force()
+        return f'"probe": {{"sleeve_share": "{sleeve}", "max_programs": {seats}, "min_order_usd": "10"}},'
+
+    def row_at(self, seats, sleeve):
+        return f'"probe": {{"sleeve_share": "{sleeve}", "max_programs": {seats}, "min_order_usd": "10"}},'
 
     def test_the_probe_sleeve_is_held_to_its_bound(self):
-        """THE PROBE SLEEVE AT 0.50 (the captain's A20, Oct 11, 2026): the tree as it stands sits at the bound's loose
-        end; one step past it (the study rule's own 0.66 among them) is refused by CI, by name, before the gateway is
-        compared; the rollback (a quarter of E) and the stop of new seats (0) are tightenings and pass."""
-        self.assertEqual(self.constitution.count(self.SLEEVE_ROW), 1)
+        """THE PROBE SLEEVE'S BOUND (the captain's A20, Oct 11, 2026: 0.50 of E): the tree as it stands is inside it;
+        one step past it (the study rule's own 0.66 among them) is refused by CI, by name, before the gateway is
+        compared; every sleeve of the pre-registered grid, a quarter of E among them, and the stop of new seats (0)
+        are inside it and pass."""
+        from league.tests.equity_design import SLEEVES, in_force
+
+        seats, sleeve = in_force()
+        self.assertEqual(self.constitution.count(self.probe_row), 1)
         self.assertEqual(self.constitution.count('"probe.sleeve_share": ("0", "0.50"),'), 1)
         self.assertEqual(self.tree(), [])
         for past in ("0.51", "0.5001", "0.66", "1.00"):
-            refused = self.tree(constitution={self.SLEEVE_ROW: self.SLEEVE_ROW.replace("0.50", past)})
+            refused = self.tree(constitution={self.probe_row: self.row_at(seats, past)})
             self.assertEqual(refused, [f"league/constitution.py: equity_money.probe.sleeve_share = '{past}' is outside "
                                        "[0, 0.50]"], past)
-        for tighter in ("0.25", "0.49", "0"):
-            self.assertEqual(self.tree(constitution={self.SLEEVE_ROW: self.SLEEVE_ROW.replace("0.50", tighter)}), [],
-                             tighter)
+        for inside in (*SLEEVES, "0.49", "0"):
+            self.assertEqual(self.tree(constitution={self.probe_row: self.row_at(seats, inside)}), [], inside)
+
+    def test_the_seats_are_held_to_their_bound(self):
+        """THE SEATS' BOUND (release E5-S, Oct 11, 2026: six): the tree as it stands is inside it; one seat past it is
+        refused by CI, by name; every count of the pre-registered grid, and 0 (no new seat), pass, at every sleeve of
+        the grid: the two numbers are any pair inside their bounds."""
+        from league.tests.equity_design import CANDIDATES, in_force
+
+        seats, sleeve = in_force()
+        self.assertEqual(self.constitution.count('"probe.max_programs": ("0", "6"),'), 1)
+        for past in (7, 12):
+            refused = self.tree(constitution={self.probe_row: self.row_at(past, sleeve)})
+            self.assertEqual(refused, [f"league/constitution.py: equity_money.probe.max_programs = {past} is outside "
+                                       "[0, 6]"], past)
+        refused = self.tree(constitution={self.probe_row: self.row_at("4.5", sleeve)})
+        self.assertEqual(refused, ["league/constitution.py: equity_money.probe.max_programs = 4.5 is not a whole count"])
+        for count, share in (*CANDIDATES, (0, sleeve)):
+            self.assertEqual(self.tree(constitution={self.probe_row: self.row_at(count, share)}), [], (count, share))
+
+    #: THE GATEWAY'S DAY LINE, by sleeve (rule arithmetic, written out: the day's real stock buys at qty x limit, a
+    #: cancelled one too, are at most STOCK_DAY_EQUITY_MULTIPLE = 4 x equity; a one-ETF lot is half a sleeve; the
+    #: collar's ladder is five sends): how many sends of one such lot the line admits (4 / the lot, floored), and how
+    #: many entries can each climb the whole ladder (that count over five, floored).
+    DAY_LINE = {"0.50": (16, 3), "0.33": (24, 4), "0.25": (32, 6)}
 
     def test_the_probe_lot_and_the_lane_stay_inside_the_gateways_caps(self):
         """The gateway judges a real stock buy against the ACCOUNT's equity, and the House sizes on E, never above it.
-        Read from the release's own files: a one-ETF Probe program's lot (`probe.sleeve_share` x `position_share.etf`
-        of E: 0.25 since A20) and the House's largest ETF order (`position_share.etf` x E) are inside the gateway's
-        ETF share of an order and of a symbol's position; the lane at its invested cap (`invested_share` x E) is inside
-        the gateway's book line on a multiplier of 1; and the gateway's day line (every buy admitted, a cancelled one
-        too) admits sixteen sends of such a lot a day: three entries, each sent five times (the collar's whole
-        ladder), and one more."""
+        Read from the release's own files, AT EVERY PAIR OF THE GRID and at the pair in force: a one-ETF Probe
+        program's lot (`probe.sleeve_share` x `position_share.etf` of E) and the House's largest ETF order
+        (`position_share.etf` x E) are inside the gateway's ETF share of an order and of a symbol's position; the lane
+        at its invested cap (`invested_share` x E) is inside the gateway's book line on a multiplier of 1; and the
+        gateway's day line (every buy admitted, a cancelled one too) admits every seat's lot sent once, with room.
+        HOW MUCH ROOM IS THE PAIR'S OWN (`DAY_LINE`): at 0.50 sixteen sends of a lot, so three entries can each climb
+        the collar's whole ladder of five; at 0.33 twenty-four and four; at 0.25 thirty-two and six. A pair with more
+        seats than that count fits its ordinary day (one send an entry) and not the day every entry climbs the whole
+        ladder: the gateway then refuses the sends past its line (cap `stock_day`), the entry is missed, nothing is
+        sold. `WHOLE_LADDERS` states which pairs those are."""
         import re
         from decimal import Decimal
 
         from league.constitution import CONSTITUTION
+        from league.tests.equity_design import CANDIDATES, in_force
 
         def var(name):
             [value] = re.findall(rf'^\s*"{name}"\s*:\s*"([^"]*)"', self.wrangler, flags=re.M)
             return Decimal(value)
 
         em = CONSTITUTION["equity_money"]
-        lot = Decimal(em["probe"]["sleeve_share"]) * Decimal(em["position_share"]["etf"])
-        self.assertEqual(lot, Decimal("0.25"))
-        self.assertLess(lot, var("STOCK_ETF_EQUITY_SHARE"))
-        self.assertLessEqual(Decimal(em["position_share"]["etf"]), var("STOCK_ETF_EQUITY_SHARE"))
+        etf, day = Decimal(em["position_share"]["etf"]), var("STOCK_DAY_EQUITY_MULTIPLE")
+        self.assertEqual(day, Decimal(4))
+        self.assertLessEqual(etf, var("STOCK_ETF_EQUITY_SHARE"))
         self.assertLessEqual(Decimal(em["invested_share"]), min(var("STOCK_MAX_EQUITY_MULTIPLE"), Decimal(1)))
-        seats = em["probe"]["max_programs"]
-        self.assertLessEqual(seats * lot, var("STOCK_DAY_EQUITY_MULTIPLE"))
-        self.assertEqual(int(var("STOCK_DAY_EQUITY_MULTIPLE") / lot), 16)
-        self.assertEqual(int(var("STOCK_DAY_EQUITY_MULTIPLE") / lot) // seats, 5)
-        # The collar's ladder is five sends (the entry collar widened by its own step to the maximum): each of the
-        # three entries can climb all of it inside the day line.
+        # The collar's ladder is five sends (the entry collar widened by its own step to the maximum).
         path = em["order_path"]
-        self.assertEqual(path["max_collar_bp"]["etf"] // path["entry_collar_bp"]["etf"], 5)
+        ladder = path["max_collar_bp"]["etf"] // path["entry_collar_bp"]["etf"]
+        self.assertEqual(ladder, 5)
+        whole = {}
+        for seats, sleeve in (*CANDIDATES, in_force()):
+            lot = Decimal(sleeve) * etf
+            self.assertLess(lot, var("STOCK_ETF_EQUITY_SHARE"), (seats, sleeve))
+            self.assertLessEqual(seats * lot, day, "every seat's lot, sent once, is inside the day line")
+            sends = int(day / lot)
+            self.assertEqual((sends, sends // ladder), self.DAY_LINE[sleeve], (seats, sleeve))
+            # What the lane can hold of the seats' lots is at most the invested cap; each of those sent five times:
+            whole[(seats, sleeve)] = ladder * min(seats * lot, Decimal(em["invested_share"])) <= day
+        self.assertEqual({pair for pair, fits in whole.items() if fits}, self.WHOLE_LADDERS)
+        self.assertIn(in_force(), CANDIDATES)
+
+    #: The pairs whose every seat can climb the collar's whole ladder inside the gateway's day line on the same day:
+    #: five sends of what the lane holds of the seats' lots (seats x half a sleeve, the invested cap's 1.00 x E at
+    #: most) are at most 4 x E. The others fit an ordinary day and are stated in the release's notes.
+    WHOLE_LADDERS = {(3, "0.50"), (3, "0.33"), (4, "0.33"), (3, "0.25"), (4, "0.25"), (5, "0.25"), (6, "0.25")}
 
     def test_a_constitution_before_the_equity_lane_has_nothing_to_check(self):
         text = self.constitution.replace("def equity_money_problems(", "def _no_equity_money_problems(")

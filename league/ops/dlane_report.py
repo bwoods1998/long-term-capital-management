@@ -145,10 +145,11 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
 - DONE WITH AND WITHOUT THE THREE SEEDED PROGRAMS (A8.12): `done.without_seeded` repeats both meters over the closes of
   every program but the seeded ones (the swarm store's kv `elane_seeds` and the book's `eq_instances.seeded`).
 - THE SHARED BUDGET'S CONSEQUENCE (A8.6): `equity.options_probe_room` says plainly that while the equity lane holds all
-  it may (the lower of its Probe sleeves, max_programs x sleeve_share x E, and the invested cap, invested_share x E:
-  the cap's 1.00 x E since the captain's A20 set the sleeves at 0.50, three of which ask for 1.50 x E; open risk at
-  the ETF weight) the options Probe lane has only the rest of the $400 window: about $400 - 0.20 x E, effectively
-  off. Three one-ETF programs hold less (a lot of 0.25 x E each: 0.15 x E of open risk), and the statement says so.
+  it may (the lower of its Probe sleeves, max_programs x sleeve_share x E, and the invested cap, invested_share x E;
+  open risk at the ETF weight) the options Probe lane has only the rest of the $400 window: effectively off. One-ETF
+  programs hold half a sleeve each, and the statement says what that is. The seats and the sleeve are the table's
+  two numbers (release E5-S: the constitution's `probe` comment): the statement and the figures are read from the
+  rows in force (`equity_probe_note`), never written here.
 - PRE-REGISTERED BEFORE THE FIRST EQUITY CLOSE (the captain's A14, Oct 10, 2026; `PREREGISTERED`, verbatim in every
   report as `done.preregistered` and in docs/operations.md; the consistency reading computed since release E3): how
   the Done rule's
@@ -267,14 +268,23 @@ ZERO_EDGE_EQUITY_NOTE = (
     "This P(Done | zero edge) is the options Probe rules' simulation figure only. It was never measured for the MARKET "
     "BETA and EQUITY lanes' share closes: a delta-one lane reaches Done whenever the market rises, so its zero-edge "
     "P(Done) is far higher than this figure, and a Done read on share closes is weak evidence of skill.")
-#: A8.6: the shared loss budget's consequence for the options Probe lane, said in the report and the docs.
-EQUITY_PROBE_NOTE = (
-    "THE LOSS BUDGET IS SHARED (A8.6): the equity lane's open Probe risk counts in the same $400 window and $800 total as "
-    "the options Probe lane. The equity lane holds at most the lower of its Probe sleeves (max_programs x sleeve_share x "
-    "E: 3 x 0.50 E) and the invested cap (invested_share x E: 1.00 E), so its open risk at the ETF weight (0.20) is at "
-    "most 0.20 x E; three one-ETF programs hold a lot of 0.25 x E each, 0.15 x E of open risk. The options Probe lane "
-    "has only the window's rest ($400 less its realized loss less 0.20 x the equity lots), and no room under the "
-    "invested cap once the equity lane is invested to it: effectively off.")
+#: A8.6: the shared loss budget's consequence for the options Probe lane, said in the report and the docs. THE
+#: SENTENCE, with its figures left open: `equity_probe_note` fills them from the constitution's rows (the seats and
+#: the sleeve are two numbers that move together, release E5-S), and `EQUITY_PROBE_NOTE`, below it, is the sentence at
+#: the constitution in force.
+EQUITY_PROBE_SENTENCE = (
+    "THE LOSS BUDGET IS SHARED (A8.6): the equity lane's open Probe risk counts in the same ${window} window and ${total} "
+    "total as the options Probe lane. The equity lane holds at most the lower of its Probe sleeves (max_programs x "
+    "sleeve_share x E: {seats} x {sleeve} E) and the invested cap (invested_share x E: {invested} E), so its open risk at "
+    "the ETF weight ({weight}) is at most {most} x E; {seats} one-ETF programs ask for a lot of {lot} x E each, of which "
+    "the lane holds at most {one_held} x E, {one_risk} x E of open risk. The options Probe lane has only the window's "
+    "rest (${window} less its realized loss less {weight} x the equity lots), and no room under the invested cap once "
+    "the equity lane is invested to it: effectively off.")
+#: The same statement for a constitution that has no equity rows to read (a tree before the lane): no figure.
+EQUITY_PROBE_BARE = (
+    "THE LOSS BUDGET IS SHARED (A8.6): the equity lane's open Probe risk counts in the same window and total as the "
+    "options Probe lane, which has only the window's rest and no room under the invested cap once the equity lane is "
+    "invested to it: effectively off.")
 #: PT1 (THE PROBE TOTAL AT $800, Oct 10, 2026): PREREG-T measured the $800 total and the -$300 program loss line at this
 #: roster alone (at no roster the operator's grid found the $800 total almost all cost), and L-D's $400 total and -$200
 #: line are the rules it measured them against.
@@ -793,18 +803,56 @@ def attach_equity(close: dict[str, Any], twin: Mapping[str, Any] | None, screens
     return close
 
 
+def _share_text(value: Decimal) -> str:
+    """A share of E as the statement writes it: two decimals at least, four at most."""
+    text = f"{value.quantize(Decimal('0.0001'))}"
+    while len(text.split(".")[1]) > 2 and text.endswith("0"):
+        text = text[:-1]
+    return text
+
+
+def equity_probe_note(constitution: Mapping[str, Any] | None = None) -> str:
+    """A8.6's statement (`EQUITY_PROBE_SENTENCE`) with the figures of `constitution`'s rows (None: the one in force):
+    the seats and the sleeve (`equity_money.probe.max_programs`, `sleeve_share`), the invested share, the ETF weight,
+    the lane's most (the lower of the sleeves and the invested cap, at the weight), a one-ETF program's lot (the
+    sleeve's own `position_share.etf`) and what the lane holds of the seats' lots (the lower of seats x lot and the
+    invested cap), and the options table's window and total. `EQUITY_PROBE_BARE` when a row cannot be read."""
+    if constitution is None:
+        from ..constitution import CONSTITUTION as constitution  # noqa: N811
+    em = (constitution or {}).get("equity_money") or {}
+    em = em if isinstance(em, Mapping) else {}
+    probe = em.get("probe") if isinstance(em.get("probe"), Mapping) else {}
+    budget = ((constitution or {}).get("options_money") or {}).get("probe") or {}
+    seats, sleeve = _int(probe.get("max_programs")), _dec(probe.get("sleeve_share"))
+    cap, weight = _dec(em.get("invested_share")), _dec((em.get("open_risk_weight") or {}).get("etf"))
+    etf = _dec((em.get("position_share") or {}).get("etf"))
+    window, total = _dec(budget.get("loss_budget_usd")), _dec(budget.get("loss_total_usd"))
+    if None in (seats, sleeve, cap, weight, etf, window, total):
+        return EQUITY_PROBE_BARE
+    lot = sleeve * etf
+    one_held = min(Decimal(seats) * lot, cap)
+    return EQUITY_PROBE_SENTENCE.format(
+        window=f"{window:f}", total=f"{total:f}", seats=seats, sleeve=_share_text(sleeve), invested=_share_text(cap),
+        weight=_share_text(weight), most=_share_text(min(Decimal(seats) * sleeve, cap) * weight), lot=_share_text(lot),
+        one_held=_share_text(one_held), one_risk=_share_text(one_held * weight))
+
+
+#: A8.6's statement at the constitution in force (the report's `equity.options_probe_room.statement`).
+EQUITY_PROBE_NOTE = equity_probe_note()
+
+
 def options_probe_room(equity_usd: Any, constitution: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """A8.6 (`EQUITY_PROBE_NOTE`) in figures: the equity lane's open risk when it holds all it may, at the ETF weight
+    """A8.6 (`equity_probe_note`) in figures: the equity lane's open risk when it holds all it may, at the ETF weight
     `open_risk_weight.etf`, and what that leaves of the options Probe lane's window
     (`options_money.probe.loss_budget_usd`). What the lane may hold is the LOWER of every Probe sleeve invested
-    (`equity_money.probe.max_programs` x `sleeve_share` x E) and THE INVESTED CAP (`invested_share` x E): since the
-    captain's A20 (Oct 11, 2026: sleeves of 0.50 x E) three whole sleeves ask for 1.50 x E and the cap's 1.00 x E is
-    the bound, so the open risk is 0.20 x E at most, not the sleeves' 0.30 x E (three one-ETF programs, a lot of
-    0.25 x E each, hold 0.15 x E of it: the figure here is the lane's most). `bound` names what set the figure: "sleeves",
+    (`equity_money.probe.max_programs` x `sleeve_share` x E) and THE INVESTED CAP (`invested_share` x E): where the
+    sleeves ask for more than the cap (A20's three sleeves of 0.50 x E asked for 1.50 x E) the cap is the bound and
+    the open risk is the cap's share at the weight, not the sleeves' (one-ETF programs, half a sleeve each, hold less:
+    the figure here is the lane's most). `bound` names what set the figure: "sleeves",
     "invested_cap", or "budget" when that open risk in dollars would pass the window itself (every equity entry is cut
     to the budget's room, so the lane's open risk is never above it). A table with no `invested_share` row is read by
     its sleeves alone (the larger figure). E is the House's sizing equity (`dlane.unit_context`); the constitution's
-    rows are read as they stand (no `equity_money` block: no figure)."""
+    rows are read as they stand, the two numbers of release E5-S among them (no `equity_money` block: no figure)."""
     if constitution is None:
         from ..constitution import CONSTITUTION as constitution  # noqa: N811
     em = (constitution or {}).get("equity_money") or {}
@@ -814,7 +862,8 @@ def options_probe_room(equity_usd: Any, constitution: Mapping[str, Any] | None =
     share, weight = _dec(probe.get("sleeve_share")), _dec((em.get("open_risk_weight") or {}).get("etf"))
     programs = _int(probe.get("max_programs"))
     cap = _dec(em.get("invested_share"))
-    out: dict[str, Any] = {"statement": EQUITY_PROBE_NOTE, "window_budget_usd": _usd(budget), "sleeve_share": None,
+    out: dict[str, Any] = {"statement": equity_probe_note(constitution), "window_budget_usd": _usd(budget),
+                           "sleeve_share": None,
                            "max_programs": programs, "invested_share": None, "invested_share_of_e": None, "bound": None,
                            "etf_weight": None, "open_risk_share_of_e": None,
                            "sizing_equity_usd": _num(equity_usd), "equity_open_risk_usd": None,

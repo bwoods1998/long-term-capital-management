@@ -287,20 +287,24 @@ class TheFunnelAndTheBudget(EquityFixture):
         self.assertEqual(out["bands_now"]["beta"]["probe"], 1)
 
     def test_the_shared_budget_leaves_the_options_probe_lane_little_room_a8_6(self):
-        """The lane holds the LOWER of its Probe sleeves and the invested cap. Since the captain's A20 (the sleeves at
-        0.50 x E) three whole sleeves ask for 1.50 x E, so the invested cap's 1.00 x E is the bound: 0.20 x E of open
-        risk at most (three one-ETF programs, a lot of 0.25 x E each, hold 0.15 x E of it; the note says both)."""
+        """The lane holds the LOWER of its Probe sleeves and the invested cap. THE FIXTURE IS A20's DESIGN, stated
+        here row by row (three sleeves of 0.50 x E ask for 1.50 x E, so the invested cap's 1.00 x E is the bound:
+        0.20 x E of open risk at most; three one-ETF programs, a lot of 0.25 x E each, hold 0.15 x E of it). The
+        table in force is read when none is passed, whatever its two numbers are (release E5-S): its figures are
+        computed below from its own rows, by the rule written out, and the statement carries them."""
+        from decimal import Decimal as D
+
         from league.constitution import CONSTITUTION
+        from league.tests.equity_design import CANDIDATES, constitution_at, in_force, rows_of
 
         constitution = {"options_money": {"probe": {"loss_budget_usd": "400"}},
                         "equity_money": {"probe": {"sleeve_share": "0.50", "max_programs": 3}, "invested_share": "1.00",
                                          "open_risk_weight": {"etf": "0.20", "stock": "0.40"}}}
-        em, probe = CONSTITUTION["equity_money"], CONSTITUTION["options_money"]["probe"]
-        self.assertEqual((em["probe"]["sleeve_share"], em["probe"]["max_programs"], em["invested_share"],
-                          em["open_risk_weight"]["etf"], probe["loss_budget_usd"]), ("0.50", 3, "1.00", "0.20", "400"),
-                         "the fixture is the table in force")
         room = R.options_probe_room(2000, constitution)
-        self.assertEqual(room, R.options_probe_room(2000), "and the table in force is read when none is passed")
+        self.assertEqual(room["statement"], R.EQUITY_PROBE_BARE, "a fixture without every row: no figure in the words")
+        figures = {k: v for k, v in room.items() if k != "statement"}
+        whole = R.options_probe_room(2000, constitution_at(3, "0.50"))
+        self.assertEqual(figures, {k: v for k, v in whole.items() if k != "statement"}, "the fixture is A20's design")
         self.assertEqual((room["open_risk_share_of_e"], room["invested_share_of_e"], room["bound"]),
                          (0.2, 1.0, "invested_cap"))
         self.assertEqual((room["equity_open_risk_usd"], room["options_window_room_usd"]), (400.0, 0.0))
@@ -325,14 +329,51 @@ class TheFunnelAndTheBudget(EquityFixture):
         self.assertEqual((round(room["open_risk_share_of_e"], 6), room["equity_open_risk_usd"],
                           room["options_window_room_usd"], room["bound"], room["invested_share"]),
                          (0.3, 300.0, 100.0, "sleeves", None))
-        self.assertEqual(room["statement"], R.EQUITY_PROBE_NOTE)
-        self.assertIn("effectively off", R.EQUITY_PROBE_NOTE)
-        self.assertIn("3 x 0.50 E", R.EQUITY_PROBE_NOTE)
-        self.assertIn("at most 0.20 x E", R.EQUITY_PROBE_NOTE)
-        self.assertIn("three one-ETF programs hold a lot of 0.25 x E each, 0.15 x E of open risk", R.EQUITY_PROBE_NOTE)
-        self.assertIn("$400 less its realized loss less 0.20 x the equity lots", R.EQUITY_PROBE_NOTE)
         self.assertIn("why", R.options_probe_room(2000, {"options_money": {"probe": {"loss_budget_usd": "400"}}}))
         self.assertIn("why", R.options_probe_room(None, constitution))
+        # THE STATEMENT AT A20's DESIGN, word for word where it carries a figure...
+        note = R.equity_probe_note(constitution_at(3, "0.50"))
+        self.assertEqual(whole["statement"], note)
+        self.assertIn("effectively off", note)
+        self.assertIn("3 x 0.50 E", note)
+        self.assertIn("at most 0.20 x E", note)
+        self.assertIn("3 one-ETF programs ask for a lot of 0.25 x E each, of which the lane holds at most 0.75 x E, "
+                      "0.15 x E of open risk", note)
+        self.assertIn("$400 less its realized loss less 0.20 x the equity lots", note)
+        # ...and AT EVERY PAIR OF THE GRID and the pair in force, by the rule written out: the lane's most is the
+        # lower of seats x sleeve and the invested share; a one-ETF lot is the sleeve x an ETF's share; what the lane
+        # holds of the seats' lots is the lower of seats x lot and the invested share; open risk is each at the weight.
+        def text(share):
+            out = f"{share.quantize(D('0.0001'))}"
+            while len(out.split(".")[1]) > 2 and out.endswith("0"):
+                out = out[:-1]
+            return out
+
+        for pair in (*CANDIDATES, in_force()):
+            at = CONSTITUTION if pair == in_force() else constitution_at(*pair)
+            r = rows_of(at)
+            most, lot = min(r.seats * r.sleeve, r.invested), r.sleeve * r.etf
+            held = min(r.seats * lot, r.invested)
+            note = R.equity_probe_note(at)
+            for words in (f"(max_programs x sleeve_share x E: {r.seats} x {text(r.sleeve)} E)",
+                          f"is at most {text(most * r.weight)} x E; {r.seats} one-ETF programs ask for a lot of "
+                          f"{text(lot)} x E each, of which the lane holds at most {text(held)} x E, "
+                          f"{text(held * r.weight)} x E of open risk.",
+                          "same $400 window and $800 total", "effectively off"):
+                self.assertIn(words, note, pair)
+            room = R.options_probe_room(2000, at)
+            self.assertEqual(room["statement"], note, pair)
+            self.assertEqual((room["max_programs"], room["sleeve_share"]), (r.seats, str(r.sleeve)), pair)
+            risk = most * r.weight
+            bound = "sleeves" if r.seats * r.sleeve <= r.invested else "invested_cap"
+            self.assertEqual((room["open_risk_share_of_e"], room["invested_share_of_e"]), (float(risk), float(most)), pair)
+            self.assertEqual(room["bound"], bound if risk * 2000 <= 400 else "budget", pair)
+            self.assertEqual(room["equity_open_risk_usd"], float(min(risk * 2000, D(400))), pair)
+            self.assertEqual(room["options_window_room_usd"], float(max(D(0), 400 - risk * 2000)), pair)
+        room = R.options_probe_room(2000)
+        self.assertEqual(room, R.options_probe_room(2000, CONSTITUTION), "the table in force is read when none is passed")
+        self.assertEqual(room["statement"], R.EQUITY_PROBE_NOTE)
+        self.assertEqual(R.EQUITY_PROBE_NOTE, R.equity_probe_note())
         self.assertEqual(self.report()["equity"]["options_probe_room"]["statement"], R.EQUITY_PROBE_NOTE)
 
     def test_a_book_from_before_e1_reads_as_no_equity(self):
