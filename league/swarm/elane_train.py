@@ -765,7 +765,7 @@ DQ_HINTS: dict[str, str] = {
     "ZeroDivisionError": "A ZeroDivisionError in decide is a division by a price, a range, a volatility or a count that "
                          "is zero on some session: guard it",
     "NameError": "A NameError in decide is a name read that the file never defines (only math and numpy import; there "
-                 "is no print, type or id)",
+                 "is no print, type or id, and no AttributeError or NameError to name in an except)",
     "UnboundLocalError": "An UnboundLocalError in decide is a name assigned on one path and read on another: give it a "
                          "value before the branch",
 }

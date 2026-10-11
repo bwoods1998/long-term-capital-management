@@ -103,7 +103,11 @@ Two things seen in the equity births' first hour on the House, each fixed in E2'
     rules in `elane_train.check_code`): the misreadings that can be seen in the source are refused before a version
     is stored or run, each with its line and what to write instead. It follows a name only while every binding gives
     it one kind of value and never refuses on a guess. A refusal costs one of the family's write attempts, never one
-    of its scored versions.
+    of its scored versions. After the release's independent check (three shapes it let through that E1 then
+    disqualified): a check of a bar's type excuses a misreading only beside a sound read of the bar, so a helper
+    that reads bars "as a dict, else as rows" is refused, and so is `ctx.bars.get(sym, [])` measured or indexed. The
+    contract now lists the exception names a program has (there is no `AttributeError` or `NameError`) and says
+    that a price or a dollar amount held against a constant is refused.
   - **The disqualification's brief.** E1's run result does carry the exception's text, and E2 keeps it out of every
     record and brief on purpose (a program chooses that text and reads reserve bars as look-back). The author is now
     shown the line of its own file the first error was raised at and what is wrong there (what the reading rule sees
@@ -116,14 +120,17 @@ Two things seen in the equity births' first hour on the House, each fixed in E2'
   0.25, unchanged), `elane.e2.usd_day` stays the day's cap (shipped 8.0, held to 0 to 100), and what bounds E2 beyond
   the two is the House's Sail day: E2 reads the Sail guard's own record and, fresh before each model call, the
   swarm's Sail spend of the day, and stops a dollar before the line where the guard holds new research (its cap less
-  the gate's reserve, and the day's even pace), so it never brings the guard's hold on the options researchers and
-  the day's total never passes the guard's cap on its account. The options researchers keep at least half their line
+  the gate's reserve, and the day's even pace), so the dollar that reaches the guard's line is never E2's and
+  the day's total never passes the guard's cap on its account. (The release's independent check, stated: at a high
+  pace busy options lanes then reach the line themselves late in the UTC day and all new research waits for midnight,
+  one to two and a half hours at four lines; and at the floor budget with the options lanes at the day's even pace
+  E2 asks nothing all day, where it asked a little before.) The options researchers keep at least half their line
   whatever E2's pace (`elane_yield.usd_hour`, the loop's reading, is `min(pace_share, 0.5)` of the line: unchanged, a
   share above one would have paused every researcher).
 - **What the captain sets** (no deploy of its own, read on the next loop pass): BOTH `elane.e2.pace_share` and
   `elane.e2.usd_day`, since E2's day is the smaller of `usd_day` and a day at its pace:
   `python3 set_swarm.py elane.e2.pace_share=<lines> elane.e2.usd_day=<dollars> --apply`. Left alone, nothing changes
-  for a share of a half or less.
+  for a share of a half or less at the ceiling budget (at the floor, see the check's note above).
 - **Open, for the captain** (`league/swarm/ELANE_E2_PATCHES.md`, the last section): the heartbeat's
   `researcher_pace.equity` block shows the line's share as E2's limit, so above a share of a half it reads "paused"
   while E2 is under its own pace (a patch for `league/swarm/loop.py`, not applied; E2's pace is in the `dlane`

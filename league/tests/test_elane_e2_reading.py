@@ -243,6 +243,41 @@ MISREAD: dict[str, tuple[str, int, tuple[str, ...]]] = {
                 return {}
             return {"buy": "SPY", "share": 0.25, "at": "close"} if ctx.weekday == 0 else {}
      ''', 10, ("decide returns an empty dict", "for no order return []")),
+    "bars behind a check of their type, in a helper": ('''
+        def _closes(bars):
+            if isinstance(bars, dict):
+                return np.asarray(bars["close"], dtype=float)
+            return np.asarray([b["close"] for b in bars], dtype=float)
+
+        def decide(ctx):
+            out = []
+            for sym in ctx.symbols:
+                c = _closes(ctx.bars[sym])
+                if len(c) > 5 and c[-1] > np.mean(c[-5:]):
+                    out.append({"buy": sym, "share": 0.25})
+            return out
+     ''', 11, ("reads a symbol's bars by key", "is iterated as rows", "write `bars.close`")),
+    "bars behind a check of their type, in one expression": ('''
+        def decide(ctx):
+            out = []
+            for sym in ctx.symbols:
+                bars = ctx.bars[sym]
+                closes = bars["close"] if isinstance(bars, dict) else [bar["close"] for bar in bars]
+                if len(closes) > 5 and closes[-1] > sum(closes[-5:]) / 5.0:
+                    out.append({"buy": sym, "share": 0.25})
+            return out
+     ''', 12, ("reads a symbol's bars by key", "is iterated as rows")),
+    "bars got with an empty default, measured and indexed": ('''
+        def decide(ctx):
+            bars = ctx.bars.get("SPY", [])
+            if len(bars) < 6:
+                return []
+            last = bars[-1]
+            prev = bars[-6]
+            if last["close"] > prev["close"]:
+                return [{"buy": "SPY", "share": 0.25}]
+            return []
+     ''', 10, ("`len(bars)` walks, counts or converts a symbol's bars", "by position")),
 }
 #: The two misreadings the disqualified programs had, in five shapes (the release's reason).
 FIVE = ("bars by key", "bars by key through a name", "bars as rows, sliced and looped", "bars as rows in a comprehension",
@@ -395,7 +430,8 @@ SOUND: dict[str, str] = {
 
 
 #: WHAT A PROGRAM GUARDS ITSELF: a misreading inside a `try` that catches it, and a value read both ways behind a check
-#: of its type. Both run on E1 as written, so the rule refuses neither.
+#: of its type. Both run on E1 as written, so the rule refuses neither. (A check of a bar's type excuses a misreading
+#: only beside a sound read of the bar: with none, every branch misreads, and the three shapes above are refused.)
 GUARDED: dict[str, str] = {
     "a read the program catches itself": '''
         def decide(ctx):
@@ -503,6 +539,9 @@ class TheTexts(unittest.TestCase):
         self.assertGreaterEqual(len(builtins), 15)
         for name in builtins:
             self.assertIn(name, runtime._SAFE_BUILTIN_NAMES, name)
+        for absent in ("AttributeError", "NameError"):
+            self.assertNotIn(absent, runtime._SAFE_BUILTIN_NAMES, absent)
+            self.assertIn(f"`{absent}`", contract(), "the contract says which exception names a program lacks")
         numpy_names = [n.split(".", 1)[1] for n in names if n.startswith("np.")]
         self.assertGreaterEqual(len(numpy_names), 6)
         for name in numpy_names:

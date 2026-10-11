@@ -32,9 +32,12 @@ functions; no bare `except:`; **no year or date literal**. A decide call has 1 s
 the run. Be deterministic.
 
 What you have: Python's plain builtins (`len`, `range`, `sum`, `min`, `max`, `abs`, `round`, `sorted`, `enumerate`,
-`zip`, `float`, `int`, `str`, `list`, `dict`, `set`, `tuple`, `isinstance`, the common exceptions), `math`, and numpy
-as the House has it, all but its file, memory, random and date functions (`np.mean`, `np.std`, `np.nanmean`,
-`np.isfinite`, `np.diff`, `np.log`, `np.argsort` and the rest). There is no pandas.
+`zip`, `float`, `int`, `str`, `list`, `dict`, `set`, `tuple`, `isinstance`, and `hasattr` and `getattr` with a literal
+name), these exception names (`Exception`, `ValueError`, `TypeError`, `KeyError`, `IndexError`, `LookupError`,
+`ZeroDivisionError`, `ArithmeticError`, `OverflowError`, `RuntimeError`, `AssertionError`, `StopIteration`), `math`,
+and numpy as the House has it, all but its file, memory, random and date functions (`np.mean`, `np.std`,
+`np.nanmean`, `np.isfinite`, `np.diff`, `np.log`, `np.argsort` and the rest). There is no pandas. There is no
+`AttributeError` and no `NameError` either: an `except` that names one raises as soon as an error reaches it.
 
 ## NEEDS
 
@@ -143,6 +146,11 @@ others trade on nothing without a word. The swarm refuses the ones it can see in
   `None`), never `{}`: a dict is read as one intent.
 - **ctx has the fields of the table above and no other, never a date.** `ctx.events` is a dict
   (`ctx.events["fomc"]`); `ctx.prices[sym]` and `ctx.caps[sym]` are floats.
+- **No price and no dollar amount against a constant.** The swarm refuses a program that compares, offsets, buckets or
+  clips a price or a share volume, or `ctx.cash`, `ctx.equity`, `ctx.budget`, `ctx.caps[sym]` or a lot's `value`,
+  `pnl` or `qty`, with a constant or a `PARAMS` value (also `ctx.caps[sym] < 10.0` and `ctx.cash > 20`). Hold a price
+  against the same symbol's own prices (a ratio to its average or recent high), size by a share of the sleeve, and
+  exit on a lot's own return (`lot["mark"] / lot["entry"]`).
 
 ## The House's exit rules (the same in the Gym)
 

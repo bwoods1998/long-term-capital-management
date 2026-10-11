@@ -62,8 +62,11 @@ from the options researchers and held by three lines, read before EVERY model ca
   booked Sail spend of the UTC day (the guard's own meter, `SAIL_KINDS`, read FRESH before each call, not at the
   guard's last check) is within `SAIL_ROOM_USD` (the dollar every question of E2's is held to need) of the line
   where the guard holds new research: its research cap less THE GATE'S RESERVE and, while `guard.pace_day`, the day's
-  even pace. So E2 stops BEFORE the guard would hold anyone: E2's spending never brings the guard's hold on the
-  researchers, and the day's Sail total never passes the guard's cap on E2's account. A store no guard ever checked
+  even pace. So E2 stops BEFORE the guard would hold anyone: the dollar that reaches the guard's line is never E2's,
+  and the day's Sail total never passes the guard's cap on E2's account. (At a high pace E2 uses the day up to that
+  dollar, so busy options lanes reach the line themselves late in the UTC day and all new research waits for
+  midnight; at the floor budget with the options lanes at the day's even pace E2 never has the dollar and asks
+  nothing.) A store no guard ever checked
   has no record and holds nothing here: the loop starts E2's rounds only while its guard allows new research
   (`guard.allows("research")`), and a guard allows nothing before its first good reading.
 - THE OPTIONS RESEARCHERS' PACE (league/swarm/loop.py `Swarm.pace_status`) leaves E2's rows out of their own spend,

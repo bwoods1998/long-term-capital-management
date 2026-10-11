@@ -120,8 +120,10 @@ model share of a day planned around Gym boxes and an equity Train run needs no G
   swarm's booked Sail spend of the UTC day (models and Gym boxes). It asks nothing while the guard is braked, holds
   new research or has no good reading; nor once the day's spend is within a dollar of the line where the guard holds
   new research (its research cap less THE GATE'S RESERVE, and the day's even pace while `guard.pace_day`). So E2
-  stops before the guard would hold anyone: its spending never brings the guard's hold on the options researchers,
-  and the day's Sail total never passes the guard's cap on E2's account. In the log a step skipped for it reads
+  stops before the guard would hold anyone: the dollar that reaches the guard's line is never E2's, and the day's
+  Sail total never passes the guard's cap on E2's account. At a high pace E2 uses the day up to that dollar, so busy
+  options lanes reach the line themselves late in the UTC day and all new research waits for midnight (one to two
+  and a half hours at four lines); at the floor budget E2 may ask nothing all day. In the log a step skipped for it reads
   "the House's Sail day ..." and the equity pass's line says `skipped` "sail_day" (beside "pace" and "usd_day").
   What follows, stated: early in a UTC day E2 has room once the day's due dollars exceed the day's spend by that
   dollar (at once at the ceiling; hours into the day at the floor), and over a day E2 takes what the options lanes

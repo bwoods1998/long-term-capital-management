@@ -57,9 +57,13 @@ equity pass, a Train write, a review or audit read; `elane_yield.hold`):
   has no good reading for `guard.stale_seconds`; nor once the day's spend is within a dollar (`SAIL_ROOM_USD`, the
   dollar every question of E2's is held to need) of the line where the guard holds new research: its research cap
   less THE GATE'S RESERVE and, while `guard.pace_day`, the day's even pace. So E2 stops BEFORE the guard would hold
-  anyone: E2's own spending never brings the guard's hold on the options researchers, and the day's Sail total never
-  passes the guard's cap on E2's account (league/tests/test_elane_e2_yield2.py runs a day at four lines against the
-  real guard, a minute at a time). A record with no research cap, or a spend that cannot be read, holds E2 (unknown
+  anyone: the dollar that reaches the guard's line is never E2's, and the day's Sail total never passes the guard's
+  cap on E2's account (league/tests/test_elane_e2_yield2.py runs a day at four lines against the real guard, a
+  minute at a time). What that does NOT say (the release's independent check, a simulated day): at a high pace E2
+  uses the day up to a dollar under the line, so BUSY options lanes then reach the line themselves late in the UTC
+  day and all new research, theirs included, waits for midnight (at four lines, one to two and a half hours); and at
+  the floor budget, with the options lanes spending at the day's even pace, E2 never has its dollar of room and asks
+  nothing all day, where before this release it asked a little. A record with no research cap, or a spend that cannot be read, holds E2 (unknown
   is never money). What follows from the even pace, stated: early in a UTC day E2 has room once the day's due dollars
   exceed the day's spend by that dollar (at once at the ceiling, whose slack is a dollar; hours into the day at the
   floor), and over a day E2 takes what the options lanes leave of the day's pace, no more.
@@ -115,7 +119,10 @@ one of the family's scored versions. Three layers, none of which touches a file 
    in its function gives it one kind of value, and an intent only from `decide`'s own return; a name bound two ways,
    a value through a call it does not know, a dict changed after it was written, a read inside a `try` that has a
    handler, and a kind of value the program asks the type of (`isinstance(bars, dict)`) are left alone: never
-   refused on a guess. **What a refusal costs:** the question's model dollars and one of the family's write attempts
+   refused on a guess. One exception since the release's independent check: a symbol's bars are never a dict or
+   rows, so asking THEIR type excuses a misreading only when the program also reads a bar's array by attribute
+   somewhere (the sound branch); a helper that reads them "as a dict, else as rows" misreads on every branch and is
+   refused, as is `ctx.bars.get(sym, [])` measured or indexed. **What a refusal costs:** the question's model dollars and one of the family's write attempts
    (`train_max_attempts`, 7); never one of its scored versions (`train_budget`, 4), as for the level and memory
    rules. Every shape the rule refuses is run on E1's real isolated runner in the tests and is disqualified there;
    the shapes it leaves alone run clean; the rule's tables are held to E1's own definitions, so a field E1 adds or

@@ -108,7 +108,9 @@ ABSOLUTE PRICE-LEVEL CONSTANTS, CALENDAR RECONSTRUCTION); this is that review fo
    call hands it the same kind), and an intent only from `decide`'s own return (a list, a name appended to, a helper's
    return); a name bound two ways, a value through a call it does not know, a dict changed after it was written, a
    read inside a `try` that has a handler and a kind of value the program asks the type of (`isinstance(bars, dict)`:
-   it reads it both ways on purpose) are left alone, never refused on a guess. It reads nothing but the source, so it
+   it reads it both ways on purpose) are left alone, never refused on a guess. A symbol's bars are the one kind whose
+   type check excuses nothing by itself: they are never a dict or rows, so the check counts only beside a sound read
+   of a bar (one of its six arrays by attribute); "a dict, else rows" misreads on every branch and is refused. It reads nothing but the source, so it
    says nothing of any market. It runs first of the three rules in `elane_train.check_code`: a refusal is recorded
    with its reason for the next brief and counts one of the family's write attempts (`train_max_attempts`), never one
    of its scored versions.
@@ -1693,8 +1695,10 @@ class _Reading:
             (kind,) = whole
             if kind == _R_BARS:
                 if func.attr == "get" and first is not None and not node.keywords and \
-                        (len(node.args) == 1 or (len(node.args) == 2 and isinstance(node.args[1], ast.Constant)
-                                                 and node.args[1].value is None)):
+                        (len(node.args) == 1 or (len(node.args) == 2 and (
+                            (isinstance(node.args[1], ast.Constant) and node.args[1].value is None)
+                            or (isinstance(node.args[1], (ast.List, ast.Tuple, ast.Dict)) and not ast.dump(node.args[1]).count("Constant")
+                                and not getattr(node.args[1], "elts", getattr(node.args[1], "keys", None)))))):
                     return frozenset({_R_BAR})
                 if node.args or node.keywords:
                     return None
@@ -2042,6 +2046,26 @@ class _Reading:
 
     def run(self) -> list[tuple[int, str]]:
         self.settle()
+        # A symbol's bars are never a dict, a list or a tuple, so asking their type excuses a misreading only when the
+        # program ALSO reads them the right way somewhere (one of the six arrays by attribute: the sound branch behind
+        # the check). With no such read every branch misreads, and the refusal is no guess.
+        if _R_BAR in self.probed:
+            sound = False
+            for node in ast.walk(self.tree):
+                scope = self.scope_of.get(id(node))
+                if scope is None:
+                    continue
+                if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load) and node.attr in READ_BAR[1:] \
+                        and self.kinds(node.value, scope) == {_R_BAR}:
+                    sound = True
+                    break
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("getattr", "hasattr") \
+                        and len(node.args) >= 2 and _text(node.args[1]) in READ_BAR[1:] \
+                        and self.kinds(node.args[0], scope) == {_R_BAR}:
+                    sound = True
+                    break
+            if not sound:
+                self.probed = self.probed - {_R_BAR}
         for node in ast.walk(self.tree):
             self.check(node)
         decide = self.defs.get("decide", [])
