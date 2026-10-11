@@ -435,3 +435,9 @@ file say the same):
    flag "style-open"; the SEAT rule reads the House's own holdings-based loadings (`league/xs/style.py`), not the flag.
 7. First-night budgets of the data jobs are estimates (A: about 570 asset calls and 900-1,000 bar calls; a peak of
    about 0.5 GB for the first whole fetch), to be read off the House's first receipts.
+8. THE UNIVERSE'S AGE: `elane_xs.live_ready` reads the manifest's `universe_at`, which no job writes yet; it falls
+   back to `live_from` and so fails closed `universe_max_age_days` (400) after the FIRST universe deploy, whatever was
+   regenerated since. Before the first yearly regeneration the panel job must write `universe_at` (the first session
+   it read the list now in force), or the lane stops there.
+9. `equity_panel` has one trigger, `after("equity_universe")`: a night the universe job fails or is skipped, the
+   panel's bars and the nightly I6 do not run either (A's open issue 5); the I6's age is not yet a leg of `live_ready`.

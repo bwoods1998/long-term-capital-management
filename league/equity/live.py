@@ -193,7 +193,8 @@ EXIT_KINDS = ("sell", "house_exit")
 #: The bands a live equity instance runs in.
 LIVE_BANDS = ("probe", "sized")
 #: Why the House itself exits a lot (`eq_lots.reason`, a house_exit intent's tag); "program" is the program's own sale.
-HOUSE_REASONS = ("max_hold", "house", "demoted", "retired", "flatten", "forced", "carried")
+#: "ineligible" (release E4): a panel lot whose name left the eligible set at a close (league/xs/book.py `INELIGIBLE`).
+HOUSE_REASONS = ("max_hold", "house", "demoted", "retired", "flatten", "forced", "carried", "ineligible")
 #: The collars when the equity table cannot be read (exits only then): the design's.
 DEFAULT_COLLARS = {"entry": {"etf": 10, "stock": 25}, "max": {"etf": 50, "stock": 100}}
 #: Seconds between two reads of the activities (`actions.TYPES`), and of the watched types (`actions.WATCH`).

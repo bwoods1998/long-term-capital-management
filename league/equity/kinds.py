@@ -5,11 +5,11 @@ Owner: hooks. `league/live/decider.py` imports THIS module only (never another o
 an options decision (uid 65534, its own network namespace, rlimits, an empty environment). A later kind is a row
 here and a module beside it: no league/live edit, so the options execution fingerprint does not move for it.
 
-THE PANEL SLOT (the captain's A13): "panel" -> `league.xs.child`, a module OUTSIDE this package whose `handle` refuses
-every op today. A later release builds the cross-sectional lane inside league/xs/, so it lands without an edit of
-league/live (the options fingerprint) and without one of league/equity's evidence modules (the equity identity,
-`league.swarm.evaluator.EQUITY_EVIDENCE`). This module is plumbing: it is NOT in the equity identity, so a row added
-here retires no equity lineage.
+THE PANEL SLOT (the captain's A13): "panel" -> `league.xs.child`, a module OUTSIDE this package. Release E4 built the
+cross-sectional lane inside league/xs/ (its child serves "needs", "load", "run", "decide" and "drop"), so it landed
+without an edit of league/live (the options fingerprint) and without one of league/equity's evidence modules (the
+equity identity, `league.swarm.evaluator.EQUITY_EVIDENCE`). This module is plumbing: it is NOT in the equity identity,
+so a row added here retires no equity lineage.
 
 THE CHILD'S RUNTIME: on the root production House the child runs from a root-owned, read-only copy of exactly the files
 it may import (`league.live.decider` `runtime_files`): the options decision's own, and `RUNTIME` here (the 4
@@ -30,8 +30,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-#: kind -> the importable module whose `handle(op, payload, state) -> dict` the child calls. "panel" is a slot (A13):
-#: league/xs/child.py refuses every op until the panel lane is built there.
+#: kind -> the importable module whose `handle(op, payload, state) -> dict` the child calls. "panel" is the slot of A13,
+#: built by release E4 (league/xs/child.py).
 KINDS: dict[str, str] = {"equity": "league.equity.child", "panel": "league.xs.child"}
 
 #: What every kind's child may import, beside the options decision's files: a path ending in "/" is every *.py file
