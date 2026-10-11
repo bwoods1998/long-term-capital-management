@@ -1,8 +1,9 @@
-"""Release E2, THE EQUITY TRAIN (league/swarm/elane_train.py): the bar equity-v1 on the Train window only, the record, the
-minimal equity researcher (write, score, review, revise, refute, stall) through E1's isolated runner, what a verdict is
-(the program's own doing, never the House's), the equity review at the first pass, the guard E1's tournament applies
-(`may_validate`), the identity a pass is judged under, and the equity Train map. E1's runner, switch and card admission
-are fakes as INTERFACES fixes them (league/tests/elane_e2_fakes.py). Every family, program and number here is invented."""
+"""Release E2, THE EQUITY TRAIN (league/swarm/elane_train.py): the bar equity-v1 on the Train years only (2016-19 and
+2022-24, one run a span, summed; 2020-21 refused as 2025-26 is), its restart check (STATE), the record, the minimal equity
+researcher (write, score, review, revise, refute, stall) through E1's isolated runner, what a verdict is (the program's
+own doing, never the House's), the equity review at the first pass, the guard E1's tournament applies (`may_validate`),
+the identity a pass is judged under, and the equity Train map. E1's runner, decider kinds, switch and card admission are
+fakes as INTERFACES fixes them (league/tests/elane_e2_fakes.py). Every family, program and number here is invented."""
 
 from __future__ import annotations
 
@@ -11,8 +12,9 @@ import unittest
 from unittest import mock
 
 from league.swarm import elane_review, elane_train, elane_yield
-from league.swarm.elane_train import (BAR, OBJECTIVE, TRAIN_FIRST, TRAIN_LAST, EquityResearcher, closed_cells,
-                                      may_validate, record_of, train_map, train_map_text, train_score)
+from league.swarm.elane_train import (BAR, OBJECTIVE, RESERVE_YEARS, TRAIN_FIRST, TRAIN_LABEL, TRAIN_LAST, TRAIN_SPANS,
+                                      TRAIN_YEARS, EquityResearcher, closed_cells, combine, may_validate, outside_years,
+                                      record_of, restart_check, train_map, train_map_text, train_score)
 from league.swarm.gate import run_sha
 from league.tests import elane_e2_fakes as fx
 
@@ -42,7 +44,7 @@ class TheBar(unittest.TestCase):
         s = self.score()
         self.assertTrue(s["passed"], s["why"])
         self.assertEqual(s["objective"], OBJECTIVE)
-        self.assertEqual(s["active_years"], 9)
+        self.assertEqual(s["active_years"], 7, "the seven Train years: 2016-19 and 2022-24")
         self.assertEqual(s["fails"], [])
         self.assertAlmostEqual(s["beside"]["drift_share"], 50.0 / 180.0, places=4)  # beside, never a bar
 
@@ -62,7 +64,7 @@ class TheBar(unittest.TestCase):
         self.assertEqual(self.score(fx.train_result(by_year=bad))["fails"], ["Y2"])
         edge = fx.year_rows(override={"2022": {"t_daily": -1.0}})
         self.assertTrue(self.score(fx.train_result(by_year=edge))["passed"], "-1.0 itself is not below the floor")
-        flat = fx.year_rows(override={"2020": {"t_daily": None, "trades": 0, "days_traded": 0}})
+        flat = fx.year_rows(override={"2023": {"t_daily": None, "trades": 0, "days_traded": 0}})
         self.assertTrue(self.score(fx.train_result(by_year=flat))["passed"])
 
     def test_p1_and_r1_at_the_stress(self):
@@ -79,11 +81,73 @@ class TheBar(unittest.TestCase):
         self.assertEqual(self.score(fx.train_result(end="2025-03-31"))["fails"], ["WINDOW"])
         self.assertEqual(self.score(stress=fx.train_result(k=1.5, start="2015-06-01"))["fails"], ["WINDOW"])
 
+    def test_the_reserve_years_are_refused_whole_as_a_later_year_is(self):
+        self.assertEqual((TRAIN_YEARS, RESERVE_YEARS), ((2016, 2017, 2018, 2019, 2022, 2023, 2024), (2020, 2021)))
+        for first, last in TRAIN_SPANS:
+            self.assertTrue(TRAIN_FIRST <= first <= last <= TRAIN_LAST, "inside E1's Train window")
+            self.assertFalse(set(range(first.year, last.year + 1)) & set(RESERVE_YEARS))
+        for year in ("2020", "2021", "2025"):
+            leaked = fx.year_rows(years=(*fx.TRAIN_YEARS, int(year)))
+            s = self.score(fx.train_result(by_year=leaked))
+            self.assertEqual(s["fails"], ["WINDOW"], year)
+            self.assertEqual((s["years"], s["pnl_10"], s["summary"]), ({}, None, {}), "no figure of it")
+        # Any row of a reserve day: a daily row, a trade's exit, a lot's entry, an entry day, a booked dividend, a
+        # by-year row of the buy-and-hold or the exposure, the run's own start or end.
+        clean = fx.train_result()
+        for row in ({"daily": [*clean["daily"], ["2021-06-15", 4.0, 1000.0, 0.3]]},
+                    {"trades": [{"id": 1, "day": "2019-12-30", "entry_day": "2019-12-30", "exit_day": "2020-01-02"}]},
+                    {"lots": [{"lid": 1, "entry_day": "2021-12-31", "exit_day": "2022-01-04"}]},
+                    {"actions": [{"symbol": "SPY", "day": "2020-03-20", "kind": "dividend"}]},
+                    {"bh": {"pnl": 50.0, "by_year": {"2019": 6.0, "2020": 7.0}}},
+                    {"exposure": {"mean": 0.3, "by_year": {"2021": 0.3}}},
+                    {"entry_days": ["2018-05-01", "2021-03-01"]}, {"end": "2020-06-30"}, {"start": "2021-01-04"}):
+            s = self.score(fx.train_result() | row)
+            self.assertEqual((s["fails"], s["years"], s["pnl_10"]), (["WINDOW"], {}, None), row)
+        inside = {"bh": {"pnl": 50.0, "by_year": {"2019": 6.0}}, "exposure": {"mean": 0.3, "by_year": {"2022": 0.3}},
+                  "actions": [{"symbol": "SPY", "day": "2019-03-15", "kind": "dividend"}],
+                  "lots": [{"lid": 1, "entry_day": "2019-12-30", "exit_day": None}]}
+        self.assertTrue(self.score(fx.train_result() | inside)["passed"], "rows of Train days are no leak")
+        self.assertEqual(outside_years(clean), [])
+        # A span's run is held to its own span: a 2022 row in the 2016-2019 run is outside it.
+        first = fx.span_result(clean, *TRAIN_SPANS[0])
+        self.assertEqual(outside_years(first, spans=[TRAIN_SPANS[0]]), [])
+        self.assertIn("2022", outside_years({**first, "by_year": {**first["by_year"], "2022": {}}}, spans=[TRAIN_SPANS[0]]))
+
+    def test_the_two_spans_are_summed(self):
+        whole = fx.train_result(pnl=180.0)
+        parts = [fx.span_result(whole, *span) for span in TRAIN_SPANS]
+        self.assertEqual([sorted(p["by_year"]) for p in parts], [["2016", "2017", "2018", "2019"], ["2022", "2023", "2024"]])
+        summed = combine(parts)
+        self.assertEqual(summed["status"], "ok")
+        self.assertEqual(sorted(summed["by_year"]), [str(y) for y in TRAIN_YEARS])
+        self.assertAlmostEqual(summed["summary"]["pnl"], 180.0, places=2)
+        self.assertEqual(summed["summary"]["trades"], 7 * 60)
+        self.assertAlmostEqual(summed["bh"]["pnl"], 50.0, places=2)
+        pooled = elane_train._daily_t([row[1] for row in whole["daily"]])
+        self.assertEqual(summed["summary"]["t_daily"], pooled, "the t of both spans' daily rows together")
+        self.assertEqual(outside_years(summed), [])
+        # Without daily rows the t is pooled from each run's mean and t (the same samples give the same t).
+        xs = [row[1] for row in whole["daily"]]
+        halves = [xs[:16], xs[16:]]
+        no_daily = [{"status": "ok", "summary": {"days": len(h), "mean_pnl_daily": sum(h) / len(h),
+                                                 "t_daily": elane_train._daily_t(h)}} for h in halves]
+        self.assertAlmostEqual(combine(no_daily)["summary"]["t_daily"], pooled, places=2)
+        self.assertEqual(combine([parts[0], {**parts[1], "status": "disqualified", "reason": "errors"}])["status"],
+                         "disqualified")
+
     def test_the_bar_text_names_rules_only(self):
         text = elane_train.bar_text()
-        self.assertIn("2016-2024", text)
+        self.assertIn(TRAIN_LABEL, text)
+        self.assertEqual(TRAIN_LABEL, "Train years 2016-19 and 2022-24")
+        self.assertIn("3 of the 7 Train years", text)
+        self.assertIn("(STATE) run again with its STATE emptied every 20 sessions", text)
+        self.assertIn("at least 99% of the sessions", text)
         self.assertIn("ONE Validation try", text)
-        self.assertNotRegex(text, r"\b20(25|26)\b")
+        self.assertNotRegex(text, r"\b20(20|21|25|26)\b")
+        self.assertIn(TRAIN_LABEL, elane_train.MAP_LABEL)
+        self.assertIn(f"Train runs ({TRAIN_LABEL})", " ".join(elane_train.RESEARCHER_SYSTEM.split()))
+        self.assertIn(f"STATE emptied every {BAR['state_every']} sessions", " ".join(elane_train.RESEARCHER_SYSTEM.split()))
+        self.assertIn(f"{BAR['state_match']:.0%} of sessions", " ".join(elane_train.RESEARCHER_SYSTEM.split()))
 
 
 class ResearchCase(unittest.TestCase):
@@ -126,12 +190,16 @@ class TheResearcher(ResearchCase):
         out = self.researcher.run()
         self.assertEqual((out["steps"][0]["passed"], out["steps"][0]["review"]["review"]), (True, "pass"))
         self.assertEqual([(c["k"], c["start"], c["end"]) for c in self.runner.calls],
-                         [(1.0, TRAIN_FIRST, TRAIN_LAST), (1.5, TRAIN_FIRST, TRAIN_LAST)], "Train only, both stresses")
+                         [(k, *span) for k in (1.0, 1.5) for span in TRAIN_SPANS],
+                         "the Train spans only (never 2020-21), one run a span, both stresses")
         fam = self.store.family(fam["id"])
         self.assertEqual((fam["best_version"], record_of(fam)["status"], record_of(fam)["passed_version"]), (1, "passed", 1))
         self.assertEqual(self.researcher.queue(), [], "a passing family researches no more")
         runs = self.store.runs(fam["id"], window="train")
-        self.assertEqual(sorted(r["stress"] for r in runs), [1.0, 1.5])
+        self.assertEqual(sorted(r["stress"] for r in runs), [1.0, 1.0, 1.5, 1.5])
+        state = record_of(fam)["versions"]["1"]["state"]
+        self.assertEqual((state["sessions"], state["matched"], state["every"]),
+                         (2 * fx.STATE_SESSIONS, 2 * fx.STATE_SESSIONS, BAR["state_every"]), "the restart check held")
         self.assertEqual(self.writes(), [], "the architect's program needed no model call")
         # THE REVIEW: two readers on two different models, before the pass is the try; E1's `reviewed` shape.
         readers = [c["sail_profile"] for c in self.router.calls if fx.is_review(c)]
@@ -400,6 +468,228 @@ class WhatAVerdictIs(ResearchCase):
         self.assertEqual(alerts[0]["payload"]["action"], "elane_train_window")
 
 
+class TheRestartCheck(ResearchCase):
+    """A15: the Train bar's STATE check. The House's decider child restarts on every deploy and a restart empties a
+    program's STATE, so a version is run again with its STATE emptied every 20 sessions and must give the uninterrupted
+    run's intents on 99% of the sessions (E1's decider kinds faked in this process: a load is a fresh STATE)."""
+
+    def test_a_stateless_program_passes(self):
+        fam = fx.e2_family(self.store, "stateless", code=fx.program(share=0.26))
+        out = self.researcher.run()
+        self.assertEqual((out["steps"][0]["passed"], out["steps"][0]["review"]["review"]), (True, "pass"))
+        state = self.rec(fam["id"])["versions"]["1"]["state"]
+        self.assertEqual((state["sessions"], state["matched"], state["share"], state["first_miss"], state["disqualified"]),
+                         (2 * fx.STATE_SESSIONS, 2 * fx.STATE_SESSIONS, 1.0, None, 0))
+        decider = self.runner.decider
+        # Each span: A loaded once, B loaded fresh at sessions 0, 20 and 40; every instance dropped at the end.
+        self.assertEqual(decider.loads, [f"e2-state:{fam['id']}:{span}:{x}" for span in (0, 1)
+                                         for x in ("a", "b0", "b1", "b2")])
+        self.assertEqual(decider.instances, {})
+
+    def test_a_program_that_counts_sessions_in_state_fails_state(self):
+        settings = fx.settings(train_budget=1, train_per_round=5)
+        researcher = EquityResearcher(self.store, self.router, settings, runner=self.runner, clock=self.clock)
+        fam = fx.e2_family(self.store, "counter", code=fx.COUNTER)
+        out = researcher.run()
+        self.assertEqual((out["steps"][0]["passed"], out["steps"][0]["fails"]), (False, ["STATE"]))
+        self.assertEqual([c for c in self.router.calls if fx.is_review(c)], [], "no review of a failed version")
+        rec = self.rec(fam["id"])
+        v1 = rec["versions"]["1"]
+        self.assertEqual((v1["fails"], v1["passed"]), (["STATE"], False))
+        self.assertLess(v1["state"]["matched"], BAR["state_match"] * v1["state"]["sessions"])
+        self.assertEqual(v1["state"]["first_miss"]["span"], 0)
+        self.assertTrue(v1["years"], "its Train figures are kept for its brief")
+        # STATE judges the program, not the mechanism: the spent budget stalls the family (no graveyard row, no cell).
+        self.assertEqual(rec["status"], "stalled")
+        self.assertIsNone(self.store._one("SELECT 1 FROM graveyard WHERE family=?", (fam["id"],)))
+        self.assertEqual(elane_train.refuted_rows(self.store), [])
+        text = elane_train.version_text(1, v1)
+        self.assertIn("met Y1, Y2, P1 and R1 but failed STATE", text)
+        self.assertIn("(STATE) run again with its STATE emptied every 20 sessions", text)
+        self.assertIn(f"matched the uninterrupted run's on {v1['state']['matched']} of {v1['state']['sessions']}", text)
+
+    def test_a_state_failure_is_told_and_a_revision_that_reads_ctx_passes(self):
+        fam = fx.e2_family(self.store, "told", code=fx.COUNTER)
+        out = self.researcher.run()
+        self.assertEqual(out["steps"][0]["fails"], ["STATE"])
+        self.assertEqual(self.rec(fam["id"])["status"], "researching", "a scored version of the budget, not the end")
+        self.answers.append(self.program_answer(fx.CACHE, "holdings from ctx.positions, a cache in STATE"))
+        out = self.researcher.run()
+        brief = self.writes()[0]["user"]
+        self.assertIn("v1: met Y1, Y2, P1 and R1 but failed STATE", brief)
+        self.assertIn("Restart check: with STATE emptied every 20 sessions", brief)
+        self.assertIn("they first differed on session 1 after a reset", brief)
+        self.assertIn("none judged by the bar yet, so a stop is not accepted", brief, "STATE judges no mechanism")
+        self.assertEqual((out["steps"][0]["version"], out["steps"][0]["score"]["passed"]), (2, True))
+        rec = self.rec(fam["id"])
+        self.assertEqual((rec["passed_version"], rec["versions"]["2"]["state"]["matched"]),
+                         (2, rec["versions"]["2"]["state"]["sessions"]))
+
+    def test_a_cache_of_values_recomputable_from_ctx_passes(self):
+        fam = fx.e2_family(self.store, "cache", code=fx.CACHE)
+        out = self.researcher.run()
+        self.assertTrue(out["steps"][0]["passed"], out)
+        state = self.rec(fam["id"])["versions"]["1"]["state"]
+        self.assertEqual(state["matched"], state["sessions"])
+        self.assertEqual(self.rec(fam["id"])["passed_version"], 1)
+
+    def test_the_check_counts_every_session_of_both_spans(self):
+        decider = fx.FakeDecider()
+
+        def streams():
+            return [fx.state_inputs(None), fx.state_inputs(None)]
+        for code, held in ((fx.program(), True), (fx.CACHE, True), (fx.COUNTER, False)):
+            out = restart_check(decider, code, {}, name="p", streams=streams())
+            self.assertEqual((out["sessions"], out["held"], out["every"]), (2 * fx.STATE_SESSIONS, held, 20), code[:40])
+        # The counter's clock is a multiple of 7 sessions: after a reset its buys come on other sessions.
+        out = restart_check(decider, fx.COUNTER, {}, name="p", streams=streams())
+        self.assertEqual(out["first_miss"], {"span": 0, "session": 20, "after_reset": 0})
+        self.assertEqual(out["matched"], 2 * (fx.STATE_SESSIONS - 6))
+        # Reset at every session, a program that only reads ctx still matches; a counter that never resets matches too.
+        self.assertTrue(restart_check(decider, fx.CACHE, {}, name="p", streams=streams(), every=1)["held"])
+        self.assertTrue(restart_check(decider, fx.COUNTER, {}, name="p", streams=streams(), every=1000)["held"])
+        self.assertEqual(decider.instances, {})
+
+    def test_the_check_runs_only_once_the_rest_of_the_bar_holds(self):
+        code = fx.program(share=0.25)
+        self.failing(code)
+        fx.e2_family(self.store, "fails-p1", code=code)
+        out = self.researcher.run()
+        self.assertEqual(out["steps"][0]["fails"], ["P1", "R1"])
+        self.assertEqual(self.runner.decider.decides, 0, "no restart check for a version the bar already failed")
+
+    def test_a_child_that_restarts_during_the_check_is_the_houses(self):
+        fam = fx.e2_family(self.store, "restarted", code=fx.program(share=0.24))
+        self.runner.decider.restart_after = 10
+        out = self.researcher.run()
+        self.assertEqual(out["steps"][0]["house"], "state")
+        self.assertIn("restarted during the restart check", out["steps"][0]["why"])
+        rec = self.rec(fam["id"])
+        self.assertEqual((rec["versions"], rec["infra"]["kind"]), ({}, "state"), "nothing scored, no budget spent")
+        self.assertEqual(self.store.runs(fam["id"], window="train"), [], "no run stored for an unfinished verdict")
+        self.assertEqual(self.runner.decider.instances, {}, "every instance dropped")
+        self.assertFalse(may_validate(self.store, self.store.family(fam["id"]), 1), "no try without the check")
+        self.assertEqual(self.alerts(), [], "one restart of the child is no news")
+        self.clock.advance(elane_train.BACKOFF_MAX)
+        self.researcher.run()
+        self.assertEqual(self.rec(fam["id"])["passed_version"], 1, "judged once the check could finish")
+
+    def alerts(self) -> list:
+        return [e["payload"]["action"] for e in self.store.events_after(0)
+                if e["kind"] == "swarm.status" and e["payload"].get("alert")]
+
+    def test_an_instance_reloaded_without_a_counted_restart_is_caught(self):
+        """E1's decider reloads its instances into a child that died between two requests without counting a restart:
+        instance A then has fresh memory too, and a session counter would agree with its reset twin."""
+        fam = fx.e2_family(self.store, "reloaded", code=fx.COUNTER)
+        decider = self.runner.decider
+        decider.reload_after = 2 * 25  # before the span's 26th session, six sessions after B's reset
+        out = self.researcher.run()
+        self.assertEqual(out["steps"][0]["house"], "state")
+        self.assertIn("reloaded an instance during the restart check", out["steps"][0]["why"])
+        self.assertEqual((decider.restarts, self.rec(fam["id"])["versions"]), (0, {}), "uncounted, and still not scored")
+        self.assertEqual(decider.instances, {})
+        # Whatever the program: a stateless one's check stops too (the check never guesses what a reload cost).
+        with self.assertRaises(elane_train.StateCheckInterrupted):
+            decider.reload_after = decider.decides + 2 * 25
+            restart_check(decider, fx.program(), {}, name="p", streams=[fx.state_inputs(None)])
+        # A reload where every instance is fresh anyway (a span's first session) loses no memory: the check goes on.
+        decider.reload_after = decider.decides
+        self.assertTrue(restart_check(decider, fx.CACHE, {}, name="p", streams=[fx.state_inputs(None)])["held"])
+        self.assertIsNone(decider.reload_after, "the reload happened")
+
+    def test_a_decider_that_cannot_tell_a_reload_never_passes_and_alerts(self):
+        """The safe degrade: without the call count in E1's decide answer the check cannot know its instances kept their
+        memory, so the version is not scored (the House's), never passed; the third failure in a row is an alert."""
+        fam = fx.e2_family(self.store, "untold", code=fx.program(share=0.22))
+        self.runner.decider.counts = False
+        for n in range(1, elane_train.DEFAULTS["train_max_errors"] + 2):
+            out = self.researcher.run()
+            self.assertEqual(out["steps"][0]["house"], "state", out)
+            self.assertIn("no call count", out["steps"][0]["why"])
+            self.assertEqual(self.alerts(), ["elane_train_state"] if n >= elane_train.DEFAULTS["train_max_errors"] else [])
+            self.clock.advance(elane_train.BACKOFF_MAX)
+        rec = self.rec(fam["id"])
+        self.assertEqual((rec["status"], rec["versions"], rec.get("passed_version")), ("researching", {}, None))
+        self.assertFalse(may_validate(self.store, self.store.family(fam["id"]), 1))
+        self.assertEqual(self.writes(), [], "no model is asked to rewrite a program the House could not check")
+        self.assertEqual(self.store.runs(fam["id"], window="train"), [])
+        self.runner.decider.counts = True
+        self.researcher.run()
+        self.assertEqual(self.rec(fam["id"])["passed_version"], 1, "the count came back: judged")
+
+    def test_no_decider_means_no_pass(self):
+        fam = fx.e2_family(self.store, "no-decider", code=fx.program(share=0.23))
+        self.runner.decider = None
+        out = self.researcher.run()
+        self.assertEqual(out["steps"][0]["house"], "state")
+        self.assertIsNone(self.rec(fam["id"]).get("passed_version"), "no pass without its restart check")
+        # A decider without E1's kinds at all (an AttributeError) is the House's too.
+        self.runner.decider = object()
+        self.clock.advance(elane_train.BACKOFF_MAX)
+        out = self.researcher.run()
+        self.assertEqual((out["steps"][0]["house"], self.rec(fam["id"])["versions"]), ("state", {}))
+
+    def test_no_session_compared_is_no_pass(self):
+        decider = fx.FakeDecider()
+        for streams in ([], [iter(())], [fx.state_inputs(None), iter(())]):
+            with self.assertRaises(elane_train.StateCheckInterrupted):
+                restart_check(decider, fx.program(), {}, name="p", streams=streams)
+            self.assertEqual(decider.instances, {})
+        verdict = elane_train.with_state({"passed": True, "fails": []}, {"sessions": 0, "matched": 0, "held": True})
+        self.assertEqual((verdict["passed"], verdict["fails"]), (False, ["STATE"]), "a check of nothing holds nothing")
+
+    def test_a_disqualified_instance_matches_nothing(self):
+        """A program that fails every decide answers nothing with and without its memory: two silent instances agree, and
+        E1 disqualifies an instance at its `max_errors`-th error. Sessions an instance is disqualified at match nothing."""
+        decider = fx.FakeDecider()
+        with mock.patch.object(elane_train, "DECIDE_MAX_ERRORS", 3):
+            out = restart_check(decider, fx.RAISES, {}, name="p", streams=[fx.state_inputs(None)])
+        self.assertEqual((out["sessions"], out["matched"], out["disqualified"], out["held"]),
+                         (fx.STATE_SESSIONS, 2, fx.STATE_SESSIONS - 2, False))
+        self.assertEqual(out["first_miss"], {"span": 0, "session": 2, "after_reset": 2})
+        text = elane_train.restart_text({"state": out})
+        self.assertIn(f"on {fx.STATE_SESSIONS - 2} sessions an instance was disqualified by its own errors", text)
+
+    def test_a_child_that_fails_the_check_is_run_only_once_other_programs_are_judged(self):
+        """A child that fails the check's decides is judged as a run's failure: the House's, and RUN only once ANOTHER
+        program's Train judgment completed after its first failure (its own Train runs, which complete before its check
+        every time, prove nothing against its own check)."""
+        fam = fx.e2_family(self.store, "check-crasher", code=fx.program(share=0.21))
+        decider = self.runner.decider
+        decider.fails = fx.DeciderError("the decider did not answer in time; the child was killed")
+        tries = elane_train.DEFAULTS["train_max_errors"] + 2
+        for i in range(tries):
+            out = self.researcher.run()
+            self.assertEqual(out["steps"][0]["house"], "run", out)
+            if i < tries - 1:
+                self.clock.advance(elane_train.BACKOFF_MAX)
+        self.assertEqual(self.rec(fam["id"])["versions"], {}, "its own runs completing do not make it RUN")
+        self.assertEqual(self.store.runs(fam["id"], window="train"), [])
+        # While it waits out its backoff another program is judged through (it fails P1, so it needs no check), and a
+        # second program meets the same failing child for the first time.
+        other = fx.program("QQQ", share=0.2)
+        self.failing(other)
+        fx.e2_family(self.store, "judged-meanwhile", code=other, symbols=("QQQ",))
+        second = fx.e2_family(self.store, "check-crasher-2", code=fx.program("IWM", share=0.18), symbols=("IWM",))
+        self.researcher.run()
+        self.assertEqual((self.rec(fam["id"])["versions"], self.rec(second["id"])["infra"]["kind"]), ({}, "run"))
+        # The child judged another program after the first one's first failure: the fault is that program's own.
+        self.clock.advance(elane_train.BACKOFF_MAX)
+        self.researcher.run()
+        v1 = self.rec(fam["id"])["versions"]["1"]
+        self.assertEqual((v1["fails"], v1["passed"]), (["RUN"], False))
+        self.assertNotIn("state", v1, "no restart check finished")
+        # That RUN verdict is no judgment the child completed: the second program, which no other program's judgment
+        # followed, stays the House's however often its check fails.
+        for _ in range(tries):
+            self.clock.advance(elane_train.BACKOFF_MAX)
+            self.researcher.run()
+        rec = self.rec(second["id"])
+        self.assertEqual((rec["versions"], rec["infra"]["kind"]), ({}, "run"))
+        self.assertGreater(rec["infra"]["count"], elane_train.DEFAULTS["train_max_errors"])
+
+
 class TheIdentity(ResearchCase):
     """Finding 7 of the adversarial review: a Train pass judged under another equity identity."""
 
@@ -431,6 +721,33 @@ class TheIdentity(ResearchCase):
         self.assertEqual(fam["best_version"], 1)
         self.assertTrue(may_validate(self.store, fam, 1))
         self.assertEqual(len([c for c in self.router.calls if fx.is_review(c)]), 2, "the same program: no new review")
+
+    def test_a_stale_pass_is_scored_again_with_its_restart_check(self):
+        """A pass under another identity is not kept on its Train figures alone: its restart check runs again, and while
+        the House cannot finish it the pass stays stale (E1 validates nothing)."""
+        fam = fx.e2_family(self.store, "rechecked", code=fx.program(share=0.19))
+        self.researcher.run()
+        before = self.runner.decider.decides
+        self.adopt(fam["id"])
+        self.runner.decider.restart_after = before + 10
+        out = self.researcher.run()
+        self.assertEqual(out["steps"][0]["house"], "state")
+        rec = self.rec(fam["id"])
+        self.assertEqual((rec["status"], rec["versions"]["1"]["identity"]["equity"]), ("passed", "a" * 64), "still stale")
+        self.assertFalse(may_validate(self.store, self.store.family(fam["id"]), 1))
+        self.clock.advance(elane_train.BACKOFF_MAX)
+        out = self.researcher.run()
+        self.assertEqual(out["steps"][0]["rescored"], "kept")
+        self.assertGreater(self.runner.decider.decides, before + 4 * fx.STATE_SESSIONS, "the check ran again, whole")
+        self.assertEqual(self.rec(fam["id"])["versions"]["1"]["state"]["matched"], 2 * fx.STATE_SESSIONS)
+        # A pass whose program no longer keeps its intents (here: the child's answers differ) is withdrawn with STATE.
+        self.ident = {"equity": "c" * 64, "engine": "equity-engine-1"}
+        real = elane_train.restart_check
+        with mock.patch.object(elane_train, "restart_check",
+                               lambda *a, **kw: {**real(*a, **kw), "matched": 0, "share": 0.0, "held": False}):
+            out = self.researcher.run()
+        self.assertEqual((out["steps"][0]["rescored"], out["steps"][0]["fails"]), ("withdrawn", ["STATE"]))
+        self.assertIsNone(self.rec(fam["id"]).get("passed_version"))
 
     def test_a_pass_that_fails_under_the_new_identity_is_withdrawn(self):
         code = fx.program(share=0.28)

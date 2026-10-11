@@ -468,14 +468,17 @@ FACTS: dict[str, str] = {
                 "table of dates, levels or events, is prohibited. A warm-up that waits for enough history is permitted.",
     "context": "Only ctx's fields exist (league/equity/EQUITY.md): symbols, bars (open, high, low, close, volume, ret), "
                "prices, weekday, events, events_next, session_of_month, sessions_to_month_end, positions, orders, closed, "
-               "rejects, cash, equity, budget, caps, params. Module STATE persists within one run, never across runs.",
+               "rejects, cash, equity, budget, caps, params. Module STATE persists between calls of one loaded program, "
+               "never across runs, and a restart of the House's decider empties it (the Train bar's STATE check, not "
+               "this review, judges a program that needs it to persist).",
     "fills": "decide(ctx) runs after session t's close; every intent executes in the NEXT session at its open or close. "
              "A rule that needs session t+1's prices to decide is lookahead.",
 }
 REVIEW = """You review long-only ETF programs before their ONE Validation try and ONE sealed holdout look. A program is one Python
-file (NEEDS, PARAMS, decide(ctx)) that the House runs once a session after the close on daily bars: on Train (2016-2024),
-then unchanged on Validation (2025), the holdout and real money. Its author saw only its Train runs, but the models that
-write programs remember the market's history, so a program can encode a remembered period without any figure in sight.
+file (NEEDS, PARAMS, decide(ctx)) that the House runs once a session after the close on daily bars: on the Train years
+(2016-19 and 2022-24), then unchanged on Validation (2025), the holdout and real money. Its author saw only its Train
+runs, but the models that write programs remember the market's history, so a program can encode a remembered period
+without any figure in sight.
 Refuse it (verdict "fail") for any of:
 - LEAKAGE: recognizing the calendar or a specific period. Refuse ABSOLUTE LEVELS: a price, an average or range of prices,
   a lot's entry or mark, a share volume, or the log of any of them, compared with, offset by, bucketed by or clipped at a
@@ -581,7 +584,7 @@ def question(fam: Mapping[str, Any], version: Mapping[str, Any], *, card: Mappin
         if (card or {}).get(name):
             lines.append(f"Card {name}: {' '.join(str(card[name]).split())[:600]}")
     if train:
-        lines.append(f"Its Train verdict (2016-2024, the only data its author saw): {train}")
+        lines.append(f"Its Train verdict (Train years 2016-19 and 2022-24, the only data its author saw): {train}")
     lines.append(f"```python\n{str(version.get('code') or '')[:16000]}\n```\nPARAMS overrides: "
                  f"{json.dumps(version.get('params') or {}, sort_keys=True)}")
     return "\n\n".join(lines)

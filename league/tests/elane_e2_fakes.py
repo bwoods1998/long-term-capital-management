@@ -1,7 +1,8 @@
 """Fakes for release E2's tests (the equity lanes' births, Train, seal and yield): E1's switch and card admission as the
 interfaces fix them (league/equity/INTERFACES.md sections 8.1-8.3; E1's own implementations land with E1), a store that
-accepts the equity structures, a scripted router and an isolated runner. Every family, program and number here is
-invented; no market data is read."""
+accepts the equity structures, a scripted router, an isolated runner that answers each Train span with that span's rows,
+and the decider kinds the restart check drives (a program loaded in this process, its STATE fresh at every load) over an
+invented ctx stream. Every family, program and number here is invented; no market data is read."""
 
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Mapping
 from unittest import mock
 
-from league.swarm import cards, elane
+from league.swarm import cards, elane, elane_train
 from league.swarm import store as store_mod
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock
@@ -78,7 +79,8 @@ def switch_on(case: Any) -> None:
                mock.patch.object(elane, "cfg", fake_cfg),
                mock.patch.object(cards, "validate", fake_validate),
                mock.patch.object(store_mod, "STRUCTURES", tuple(dict.fromkeys((*store_mod.STRUCTURES, "etf", "stock")))),
-               mock.patch.object(SwarmStore, "families", lanes_families)]
+               mock.patch.object(SwarmStore, "families", lanes_families),
+               mock.patch.object(elane_train, "state_inputs", state_inputs)]
     for p in patches:
         p.start()
         case.addCleanup(p.stop)
@@ -154,8 +156,12 @@ class FakeRouter:
         return out
 
 
+#: The Train years (2016-19 and 2022-24; 2020-21 is the reserve: league/swarm/elane_train.py `TRAIN_SPANS`).
+TRAIN_YEARS = (2016, 2017, 2018, 2019, 2022, 2023, 2024)
+
+
 def year_rows(*, trades: int = 60, days: int = 30, pnl: float = 20.0, t: float = 0.6,
-              years: Any = range(2016, 2025), override: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
+              years: Any = TRAIN_YEARS, override: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
     rows = {str(y): {"trades": trades, "days": 252, "days_traded": days, "pnl": pnl, "t_daily": t, "exposure_mean": 0.3,
                      "bh_pnl": 6.0} for y in years}
     for y, row in (override or {}).items():
@@ -163,17 +169,56 @@ def year_rows(*, trades: int = 60, days: int = 30, pnl: float = 20.0, t: float =
     return rows
 
 
+def daily_rows(by_year: Mapping[str, Any]) -> list[list[Any]]:
+    """Four invented daily rows a by-year row ([day, pnl, equity, exposure]), dated inside its year, summing to its P&L."""
+    out = []
+    for y, row in sorted(by_year.items()):
+        pnl = float(row.get("pnl") or 0.0)
+        for month, part in (("03", 0.4), ("06", 0.1), ("09", 0.3), ("12", 0.2)):
+            out.append([f"{y}-{month}-15", round(pnl * part, 2), 1000.0, 0.3])
+    return out
+
+
 def train_result(*, k: float = 1.0, pnl: float = 180.0, status: str = "ok", by_year: Mapping[str, Any] | None = None,
                  bh: float = 50.0, start: str = "2016-01-04", end: str = "2024-12-31") -> dict[str, Any]:
-    """An invented Train result (league/equity/results.py's keys)."""
+    """An invented Train result over every Train year (league/equity/results.py's keys); `FakeRunner` answers each span
+    with its part (`span_result`)."""
     years = dict(by_year if by_year is not None else year_rows())
     return {"run_id": f"eq-run-{next(_N)}", "program": "p", "status": status, "window": "train", "start": start,
-            "end": end, "k": k, "trials": 1 if status == "ok" else 0,
+            "end": end, "k": k, "trials": 1 if status == "ok" else 0, "symbols": ["SPY"],
             "summary": {"trades": sum(int(r.get("trades") or 0) for r in years.values()),
                         "days_traded": sum(int(r.get("days_traded") or 0) for r in years.values()), "pnl": pnl,
                         "fees": 3.0, "t_daily": 1.7, "win_rate": 0.55, "exposure_mean": 0.3, "max_drawdown": 40.0,
                         "mean_net_return": 0.001},
-            "by_year": years, "bh": {"pnl": bh}, "mte": {"mean": 0.0004, "t": 0.9, "n": 400}}
+            "by_year": years, "daily": daily_rows(years), "bh": {"pnl": bh}, "mte": {"mean": 0.0004, "t": 0.9, "n": 400}}
+
+
+def span_result(full: Mapping[str, Any], start: Any, end: Any) -> dict[str, Any]:
+    """An invented whole-Train result cut to one Train span, as E1's runner answers `train(start, end)`: the by-year and
+    daily rows of the span's years, its counts, and the P&L, fees and buy-and-hold in proportion to its years. A row of a
+    year in no span (a leak to catch) goes with the span on its side of 2022: 2020, 2021 or 2015 with the first, 2025 or
+    2026 with the second; the result's own start goes with the first span and its end with the second."""
+    first = end is not None and end.year < 2022
+    by_year = dict(full.get("by_year") or {})
+    rows = {y: r for y, r in by_year.items() if (int(str(y)[:4]) < 2022) == first}
+    share = len(rows) / len(by_year) if by_year else 0.5
+    out = {**dict(full), "run_id": f"{full.get('run_id')}-{'a' if first else 'b'}", "by_year": rows,
+           "daily": [d for d in full.get("daily") or [] if (int(str(d[0])[:4]) < 2022) == first],
+           "start": full.get("start") if first else start.isoformat(),
+           "end": end.isoformat() if first else full.get("end")}
+    summary = dict(full.get("summary") or {})
+    for key in ("pnl", "fees"):
+        if summary.get(key) is not None:
+            summary[key] = summary[key] * share
+    summary.update(trades=sum(int(r.get("trades") or 0) for r in rows.values()),
+                   days_traded=sum(int(r.get("days_traded") or 0) for r in rows.values()))
+    out["summary"] = summary
+    if isinstance(full.get("bh"), Mapping) and full["bh"].get("pnl") is not None:
+        out["bh"] = {"pnl": full["bh"]["pnl"] * share}
+    if isinstance(full.get("mte"), Mapping) and full["mte"].get("n"):
+        out["mte"] = {"mean": full["mte"].get("mean"), "t": (full["mte"].get("t") or 0.0) * share ** 0.5,
+                      "n": int(full["mte"]["n"] * share)}
+    return out
 
 
 def review_answer(verdict: str = "pass", *, excerpt: str | None = None, reference: str = "levels",
@@ -193,18 +238,163 @@ def is_review(call: Mapping[str, Any]) -> bool:
 
 
 class FakeRunner:
-    """E1's `runner.Isolated.train` (INTERFACES 4.8): `answer(code, k) -> result` (an Exception raises); calls kept."""
+    """E1's `runner.Isolated` (INTERFACES 4.8): `train(start, end)` answers the span's part (`span_result`) of
+    `answer(code, k)` (an invented whole-Train result; an Exception raises); calls kept. Its `decider` is a
+    `FakeDecider` (the restart check's kinds)."""
 
     def __init__(self, answer_: Callable[[str, float], Any] | None = None):
         self.calls: list[dict[str, Any]] = []
         self.answer = answer_ or (lambda code, k: train_result(k=k, pnl=180.0 if k == 1.0 else 120.0))
+        self.decider = FakeDecider()
 
     def train(self, code: str, params: Any, *, name: str, start: Any = None, end: Any = None, k: float = 1.0) -> Any:
         self.calls.append({"code": code, "params": params, "name": name, "start": start, "end": end, "k": k})
         out = self.answer(code, k)
         if isinstance(out, BaseException):
             raise out
-        return SimpleNamespace(result=out, bars=None)
+        return SimpleNamespace(result=span_result(out, start, end), bars=None)
+
+
+class FakeDecider:
+    """E1's decider kinds the restart check drives (league/live/decider.py `kind_load`, `kind` "decide", `kind_drop`)
+    in this process: a load executes the invented program's file in a namespace of its own (so its STATE starts empty,
+    as a fresh instance's does in E1's child), a decide calls its `decide` with the job's invented inputs as the ctx
+    and answers E1's `stats` (the instance's `calls` since its load, its `errors`, `disqualified` once they reach the
+    load's `max_errors`: a disqualified instance answers nothing and counts no call, as E1's runner).
+
+    What a test can make of the child: `restart_after` (a restart E1's decider counts in `restarts`, once that many
+    decides were answered), `reload_after` (the child died between two requests: every instance is loaded again with
+    fresh memory before the next decide, and `restarts` does not move, as in E1's `Decider._ask`), `counts` False (an
+    answer without `stats.calls`), `fails` (an exception every decide raises: a child that failed)."""
+
+    def __init__(self) -> None:
+        self.instances: dict[str, dict[str, Any]] = {}
+        self.loads: list[str] = []
+        self.decides = 0
+        self.restarts = 0
+        self.restart_after: int | None = None
+        self.reload_after: int | None = None
+        self.counts = True
+        self.fails: BaseException | None = None
+
+    def _fresh(self, key: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        space: dict[str, Any] = {}
+        exec(compile(str(payload["code"]), f"<{key}>", "exec"), space)  # noqa: S102 - an invented test program
+        params = {**dict(space.get("PARAMS") or {}), **dict(payload.get("params") or {})}
+        self.instances[key] = {"space": space, "params": params, "payload": dict(payload), "calls": 0, "errors": 0,
+                               "disqualified": None}
+        return self.instances[key]
+
+    def kind_load(self, kind: str, key: str, payload: Mapping[str, Any], *, budget_seconds: Any = None) -> dict:
+        assert kind == "equity", kind
+        instance = self._fresh(str(key), payload)
+        self.loads.append(str(key))
+        return {"needs": dict(instance["space"].get("NEEDS") or {}), "params": instance["params"]}
+
+    def kind_drop(self, kind: str, key: str, *, budget_seconds: float = 10.0) -> None:
+        self.instances.pop(str(key), None)
+
+    def kind(self, kind: str, op: str, payload: Mapping[str, Any], *, budget_seconds: Any = None) -> dict:
+        assert (kind, op) == ("equity", "decide"), (kind, op)
+        if self.fails is not None:
+            raise self.fails
+        if self.reload_after is not None and self.decides >= self.reload_after:
+            self.reload_after = None
+            for key, instance in list(self.instances.items()):
+                self._fresh(key, instance["payload"])
+        results: dict[str, Any] = {}
+        for job in payload.get("jobs") or ():
+            key = str(job["key"])
+            instance = self.instances.get(key)
+            if instance is None:
+                results[key] = {"intents": [], "stats": None, "missing": True}
+                continue
+            intents: list = []
+            if not instance["disqualified"]:
+                instance["calls"] += 1
+                try:
+                    intents = list(instance["space"]["decide"](SimpleNamespace(**dict(job["inputs"]),
+                                                                               params=instance["params"])) or [])
+                except Exception:  # noqa: BLE001 - a failed decide is no intent and one error, as E1's runner counts it
+                    instance["errors"] += 1
+                    if instance["errors"] >= int(instance["payload"].get("max_errors", 25)):
+                        instance["disqualified"] = f"{instance['errors']} errors"
+            stats = {"calls": instance["calls"], "errors": instance["errors"], "disqualified": instance["disqualified"]}
+            results[key] = {"intents": json.loads(json.dumps(intents)), "stats": stats if self.counts else {}}
+            self.decides += 1
+        if self.restart_after is not None and self.decides >= self.restart_after:
+            self.restarts += 1
+            self.restart_after = None
+        return {"ok": True, "results": results}
+
+
+#: The decision sessions the invented ctx stream gives a Train span (two resets at the check's 20).
+STATE_SESSIONS = 45
+
+
+def state_inputs(run: Any) -> Any:
+    """The restart check's ctx stream, invented (E1's ctx builds the real one: league/swarm/elane_train.py
+    `state_inputs`): `STATE_SESSIONS` decision sessions of one Train span, each with its symbols' last closes, the
+    calendar fields and, every other session, an open lot."""
+    symbols = [str(s) for s in ((getattr(run, "result", None) or {}).get("symbols") or ["SPY"])]
+    for i in range(STATE_SESSIONS):
+        closes = [100.0 + ((j * 7) % 11) - 5.0 for j in range(i + 1)][-31:]
+        yield {"symbols": symbols, "bars": {s: SimpleNamespace(close=list(closes)) for s in symbols},
+               "prices": {s: closes[-1] for s in symbols}, "weekday": i % 5, "session_of_month": i % 21 + 1,
+               "sessions_to_month_end": 20 - i % 21, "events": {}, "events_next": {},
+               "positions": [{"id": 1000 + i, "symbol": symbols[0], "qty": 1.0, "held_sessions": 1}] if i % 2 else [],
+               "orders": [], "closed": [], "rejects": [], "cash": 500.0, "equity": 1000.0, "budget": 1000.0,
+               "caps": {s: 500.0 for s in symbols}}
+
+
+#: An invented program that counts sessions in STATE (a clock of its own): its intents change when STATE is emptied.
+COUNTER = '''import math
+
+NEEDS = {"symbols": ["SPY"], "history": 5, "max_hold_sessions": 3}
+PARAMS = {"share": 0.5, "every": 7}
+STATE = {}
+
+
+def decide(ctx):
+    STATE["n"] = STATE.get("n", 0) + 1
+    out = [{"sell": lot["id"], "at": "open"} for lot in ctx.positions]
+    if STATE["n"] % ctx.params["every"] == 0:
+        out.append({"buy": "SPY", "share": ctx.params["share"], "at": "close"})
+    return out
+'''
+
+#: An invented program that raises at every call (a decide that fails is no intent: two silent instances agree).
+RAISES = '''import math
+
+NEEDS = {"symbols": ["SPY"], "history": 5, "max_hold_sessions": 3}
+PARAMS = {"share": 0.5}
+
+
+def decide(ctx):
+    raise ValueError("an invented failure")
+'''
+
+#: An invented program whose STATE only caches a value it recomputes from ctx (a moving average keyed by the closes).
+CACHE = '''import math
+
+NEEDS = {"symbols": ["SPY"], "history": 30, "max_hold_sessions": 3}
+PARAMS = {"share": 0.5, "n": 20}
+STATE = {}
+
+
+def decide(ctx):
+    close = ctx.bars["SPY"].close
+    key = (len(close), float(close[-1]))
+    if STATE.get("key") != key:
+        tail = [float(x) for x in close[-ctx.params["n"]:] if math.isfinite(float(x))]
+        STATE["key"] = key
+        STATE["mean"] = sum(tail) / len(tail) if tail else None
+    out = [{"sell": lot["id"], "at": "open"} for lot in ctx.positions]
+    mean = STATE["mean"]
+    if mean is not None and float(close[-1]) > mean and not ctx.positions:
+        out.append({"buy": "SPY", "share": ctx.params["share"], "at": "close"})
+    return out
+'''
 
 
 def e2_family(store: SwarmStore, slug: str, *, lane: str = "beta", agenda: str = "overnight",
@@ -225,6 +415,10 @@ def e2_family(store: SwarmStore, slug: str, *, lane: str = "beta", agenda: str =
 
 class RunFailed(RuntimeError):
     """The name E1's runner gives a child that failed a run (league/equity/runner.py `RunFailed`)."""
+
+
+class DeciderError(RuntimeError):
+    """The name E1's decider gives a child that failed a request (league/live/decider.py `DeciderError`)."""
 
 
 class ProgramRefused(ValueError):
@@ -252,5 +446,7 @@ def reviewed(store: SwarmStore, fid: str, n: int = 1) -> None:
 
 
 __all__ = ["UNIVERSE", "lane_block", "settings", "fake_cfg", "fake_validate", "switch_on", "new_store", "PROGRAM",
-           "program", "card", "proposal", "answer", "FakeRouter", "year_rows", "train_result", "FakeRunner", "e2_family",
-           "review_answer", "is_review", "RunFailed", "ProgramRefused", "MissingData", "reviewed"]
+           "program", "card", "proposal", "answer", "FakeRouter", "TRAIN_YEARS", "year_rows", "daily_rows", "train_result",
+           "span_result", "FakeRunner", "FakeDecider", "STATE_SESSIONS", "state_inputs", "COUNTER", "RAISES", "CACHE",
+           "e2_family", "review_answer", "is_review", "RunFailed", "DeciderError", "ProgramRefused", "MissingData",
+           "reviewed"]

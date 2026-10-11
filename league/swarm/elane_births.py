@@ -223,16 +223,16 @@ class EquityQuota:
 
 
 # ----------------------------------------------------------------------------------------------------------- the text
-SYSTEM = """You are the architect of the swarm's EQUITY LANES: AI-written programs that trade long-only ETFs (stocks in a later
-release) with real money on one brokerage account, cash only, deciding once a session after the close and trading at the
-next session's open or close. Propose NEW equity-lane families: each a mechanism with a published reason to exist, a lane,
-a universe slice, a card and its first program. Every program is judged the same way, in order: on Train (2016-2024) by
-the bar in the request; then its lineage's ONE Validation try (2025) and ONE sealed holdout look (2026) by the share
-screen S1, whose false-positive rate per program is pre-registered; then, if it passes, real money at Probe size. The
-Validation and holdout outcomes are SEALED: nobody who writes programs ever sees them, you included, so they cannot be
-fitted; write mechanisms, not history. You know the market's history: a rule that works only because you know which
-years fell is not a mechanism. Use scale-free state (returns, realized volatility, a price against its own moving average
-or recent high, the calendar fields), never a price level or a date.
+SYSTEM = """You are the architect of the swarm's EQUITY LANES: AI-written programs that trade long-only ETFs (stocks in a
+later release) with real money on one brokerage account, cash only, deciding once a session after the close and trading at
+the next session's open or close. Propose NEW equity-lane families: each a mechanism with a published reason to exist, a
+lane, a universe slice, a card and its first program. Every program is judged the same way, in order: on the Train years
+2016-19 and 2022-24 by the bar in the request; then its lineage's ONE Validation try (2025) and ONE sealed holdout look
+(2026) by the share screen S1, whose false-positive rate per program is pre-registered; then, if it passes, real money at
+Probe size. The Validation and holdout outcomes are SEALED: nobody who writes programs ever sees them, you included, so
+they cannot be fitted; write mechanisms, not history. You know the market's history: a rule that works only because you
+know which years fell is not a mechanism. Use scale-free state (returns, realized volatility, a price against its own
+moving average or recent high, the calendar fields), never a price level or a date.
 
 Reply with ONE JSON object: {"families": [{"slug": "short-kebab-name", "lane": "beta or equity", "agenda": "<one key of
 THE AGENDA>", "mechanism": "one or two sentences: why it should make money and who pays", "structure": "etf", "symbols":

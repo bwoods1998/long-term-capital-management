@@ -2,30 +2,60 @@
 Validation try (equity-v1), the Train runs on the House, the equity review at the first pass, the equity TRAIN MAP the
 architect reads, and the minimal equity researcher that writes and revises a family's program on Train alone.
 
-THE BAR, equity-v1 (the design's section 6b, unchanged; `train_score`). A version runs over the House store's Train
-window (2016-01-04..2024-12-31; never a day of 2025 or 2026: `TRAIN_FIRST`, `TRAIN_LAST`; a result that carries another
-year is refused whole and judged on nothing) at 1.0x and at 1.5x the half-spread (`league.equity.config.K_BASE`,
-`K_STRESS`), through E1's isolated runner (`league.equity.runner.Isolated.train`: the program in the decider child,
-never in the swarm process). It PASSES when all hold:
-  Y1  ACTIVE in at least `min_active_years` (3) Train years: a year with at least `year_min_trades` (40) closed lots
-      and `year_min_days` (20) entry days, on the 1.0x run;
+THE TRAIN YEARS (amendment A15). E2's Train is the TRAIN SPANS (`TRAIN_SPANS`): 2016-01-04..2019-12-31 and
+2022-01-03..2024-12-31, seven years (`TRAIN_YEARS`). A version's Train run is two runs of E1's isolated runner
+(`league.equity.runner.Isolated.train(start, end)`, one a span: the program in the decider child, never in the swarm
+process), each starting flat, SUMMED (`combine`). 2020-2021 is THE RESERVE (`RESERVE_YEARS`), kept for a later
+accessor: no E2 run has a session in it, and a result carrying a row of a day outside its own span (a 2020 or 2021 row
+exactly as a 2025 or 2026 one: a by-year row, a daily row, a trade's, a lot's or a booked dividend's day, its start or
+end) is refused whole and judged on nothing (WINDOW). The 2022 run's first decisions look back on 2021's bars as
+history (NEEDS `history`), as a Validation run looks back on 2024's; no 2020-2021 session is ever a run session, so no
+2020-2021 figure or P&L exists to reach a family's record, the Train map, the yield ledger or a generator. THE
+LOOSENING, stated: the bar reads seven Train years, not the nine of 2016-2024, so "active in three years" is three of
+seven, "no year's t below the floor" has two years fewer to fail in, and the two P&L rules sum seven years.
+
+THE BAR, equity-v1 (the design's section 6b on the Train years; `train_score`, then `restart_check`). The summed runs at
+1.0x and at 1.5x the half-spread (`league.equity.config.K_BASE`, `K_STRESS`). A version PASSES when all hold:
+  Y1  ACTIVE in at least `min_active_years` (3) of the seven Train years: a year with at least `year_min_trades` (40)
+      closed lots and `year_min_days` (20) entry days, on the 1.0x runs;
   Y2  no Train year's t (the year's daily P&L t, `by_year.t_daily`; a flat year reads 0) below `year_t_floor` (-1.0),
-      on the 1.0x run;
-  P1  the 1.5x run's net P&L over Train above zero;
-  R1  the 1.0x net P&L above zero and the 1.5x P&L at least `cost_ratio` (0.5) of it.
+      on the 1.0x runs;
+  P1  the 1.5x runs' net P&L over Train above zero;
+  R1  the 1.0x net P&L above zero and the 1.5x P&L at least `cost_ratio` (0.5) of it;
+  STATE  (checked once Y1-R1 hold) the program run again with its STATE emptied every `state_every` (20) sessions
+      gives the uninterrupted run's intents on at least `state_match` (99%) of the Train sessions (THE RESTART CHECK
+      below). The House's decider child restarts on every deploy and a restart empties a program's memory: a program
+      whose decisions hang on STATE beyond a cache of what ctx gives again would trade live other than its replay.
 REPORTED BESIDE, NEVER A BAR: the same-exposure buy-and-hold over the same sessions (`bh.pnl`), the mean
 time-matched excess (MTE: `mte.mean`, `mte.t`) and the DRIFT SHARE (the buy-and-hold P&L over the program's, while
 the program's is above zero: near one, the program earned what holding its average exposure earned). Every number
 here is a Train figure. The bar's constants are rules (`BAR`), never a market result.
 
+THE RESTART CHECK (`restart_check`, `state_inputs`). E1's decider child keeps a loaded program instance across "decide"
+requests (the live path's hooks: `kind_load`, `kind(..., "decide", ...)`, `kind_drop`), so an instance's STATE lives
+until it is dropped. For each Train span two instances of the version are loaded: A, never reset, and B, dropped and
+loaded fresh every `state_every` sessions. At every decision session of the span both read THE SAME ctx (`state_inputs`:
+E1's Gym inputs over the span's own 1.0x run: its bars, its open lots marked at the close, the lots it closed that
+session, its cash, equity and caps), so only the program's own memory can make their intents differ; a session matches
+when both answer the same list, and a session an instance was disqualified at (its own errors) matches nothing. A
+failed STATE check is the program's ("STATE": like DQ, LOAD, RUN and REVIEW it judges a program, not the mechanism).
+NEVER A SILENT PASS: the check holds only on sessions it really compared. Each answer's `stats.calls` (E1's runner
+counts an instance's decides) must be the number of decides that instance was asked since it was loaded: an instance
+the child reloaded (a restart, counted by the decider's `restarts` or not) has lost its memory, and the check stops.
+A check that cannot run or finish (no decider on the runner, an answer without the call count, a reloaded or missing
+instance, a ctx that cannot be built, a span with no session) is the House's: the version is not scored, and the
+`train_max_errors`-th failure in a row is an alert. A child that fails a decide is judged as a run's failure is.
+
 WHAT A VERDICT IS (`score`). Only the PROGRAM's own doing is judged: its runs finished ("ok": the bar), it was
 disqualified by its own errors or timeouts ("DQ"), the child refused to load it ("LOAD": a `ProgramRefused`, a
-`CodeRefused` or a `NeedsRefused`), or the child failed its run `train_max_errors` times in a row while other programs'
-Train runs completed after its first failure ("RUN"). Anything else is the House's (no equity store yet, the store
-being rewritten, a decider child that could not start, a result outside the window, "no_data"): the version is NOT
-scored, spends no budget and asks no model; it is tried again after a backoff (`train_every_seconds` doubling, at most
-`BACKOFF_MAX`), and a result outside the window is also an alert. Of the verdicts, only Y1, Y2, P1 and R1 judge the
-MECHANISM (`JUDGED`); the others judge a program that could not be judged.
+`CodeRefused` or a `NeedsRefused`), the child failed its run (or its restart check's decides) `train_max_errors` times
+in a row while other programs' Train judgments completed after its first failure ("RUN"), or its intents changed when
+its STATE was emptied ("STATE"). Anything else is the House's (no equity store yet, the store being rewritten, a
+decider child that could not start, a restart check that could not run or finish, a result outside the Train years,
+"no_data"): the version is NOT scored, spends no budget and asks no model; it is tried again after a backoff
+(`train_every_seconds` doubling, at most `BACKOFF_MAX`); a result outside the Train years is also an alert, and so is
+a restart check that could not finish `train_max_errors` times in a row. Of the verdicts, only Y1, Y2, P1 and R1 judge
+the MECHANISM (`JUDGED`); the others judge a program that could not be judged.
 
 THE REVIEW (league/swarm/elane_review.py). A program holding a raw price or volume level against a constant or a PARAMS
 value is refused before it is stored (`check_code`). At a version's first bar pass two different models read it under
@@ -33,17 +63,17 @@ the leakage rubric (`EquityResearcher.review_step`) before it may be its lineage
 writes the record E1's look reads (`state["review"]`) and makes it the family's pass; a failure is a Train failure of
 that version ("REVIEW") and spends no try.
 
-THE RECORD (family state `STATE_KEY`, E2's own; `record_of`). Per version: its verdict, its fails, its Train figures
-and the equity identity it was judged under (`identity`); the family's `status` ("researching", "passed", "refuted",
-"stalled", "closed"), `passed_version`, a pending `review`, the `passed_review` (E2's copy of the record E1 reads), its
-write `attempts`, its `refused` programs and an `infra` backoff. The FIRST version that passes the bar AND the review
-ends the family's Train research: it is the lineage's one Validation try (`may_validate`, the guard E1's tournament
-applies: ELANE_E2_PATCHES.md patch 5; the family's `best_version` and `best_train` are set to it). A family whose Train
-budget (`train_budget` scored versions, 4) or attempts (`train_max_attempts`) are spent with no pass, or whose
-researcher stops after a judged version, is RETIRED: REFUTED on Train (a graveyard row in E2's own words, Train facts
-only, and its record's `refuted`) when at least one version was judged on the bar, else STALLED (no graveyard row, no
-cell count: no program of it could be judged, which says nothing of the mechanism). The equity generators read the
-record, never the graveyard table.
+THE RECORD (family state `STATE_KEY`, E2's own; `record_of`). Per version: its verdict, its fails, its Train figures,
+its restart check's counts (`state`) and the equity identity it was judged under (`identity`); the family's `status`
+("researching", "passed", "refuted", "stalled", "closed"), `passed_version`, a pending `review`, the `passed_review`
+(E2's copy of the record E1 reads), its write `attempts`, its `refused` programs and an `infra` backoff. The FIRST
+version that passes the bar AND the review ends the family's Train research: it is the lineage's one Validation try
+(`may_validate`, the guard E1's tournament applies: ELANE_E2_PATCHES.md patch 5; the family's `best_version` and
+`best_train` are set to it). A family whose Train budget (`train_budget` scored versions, 4) or attempts
+(`train_max_attempts`) are spent with no pass, or whose researcher stops after a judged version, is RETIRED: REFUTED
+on Train (a graveyard row in E2's own words, Train facts only, and its record's `refuted`) when at least one version
+was judged on the bar, else STALLED (no graveyard row, no cell count: no program of it could be judged, which says
+nothing of the mechanism). The equity generators read the record, never the graveyard table.
 
 THE IDENTITY (`identity`; E1's `evaluator.equity_identity`). Each verdict carries the identity it was judged under. A
 pass judged under another identity, whose version has not had its Validation try, is Train-scored again before E1 may
@@ -72,10 +102,12 @@ With `elane.mode` "off" nothing here acts. Standard library only.
 from __future__ import annotations
 
 import ast
+import datetime as dt
+import json
 import math
 import re
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from ..equity import BETA, EQUITY, LANES
 from ..equity import config as eqconfig
@@ -87,25 +119,37 @@ OBJECTIVE = "equity-v1"
 STATE_KEY = "elane_e2"
 #: The store's kv key of the researcher's last round.
 TRAIN_AT_KEY = "elane_e2_train_at"
-#: The store's kv key of the last time any E2 Train run completed (a child that fails one program while this moves on is
-#: that program's fault: "RUN").
+#: The store's kv key of the last time any E2 Train judgment completed (its runs and, where it had one, its restart
+#: check): a child that fails one program while this moves on is that program's fault ("RUN").
 TRAIN_OK_KEY = "elane_e2_train_ok_at"
 #: The longest backoff after a failure of the House's (no store, a child that could not start, a result outside Train).
 BACKOFF_MAX = 6 * 3600.0
-#: THE TRAIN WINDOW (league/equity/config.py WINDOWS["train"]): the only days a run here may read.
+#: E1's TRAIN WINDOW (league/equity/config.py WINDOWS["train"]): the outer bounds of the spans below.
 TRAIN_FIRST, TRAIN_LAST = eqconfig.WINDOWS["train"][0], eqconfig.WINDOWS["train"][1]
-TRAIN_YEARS = tuple(range(TRAIN_FIRST.year, TRAIN_LAST.year + 1))
-#: The bar's rules (the design's 6b; rules, never market figures).
+#: THE TRAIN SPANS (A15; the module docstring): the only sessions an E2 run has, each span one run starting flat.
+TRAIN_SPANS: tuple[tuple[dt.date, dt.date], ...] = ((dt.date(2016, 1, 4), dt.date(2019, 12, 31)),
+                                                    (dt.date(2022, 1, 3), dt.date(2024, 12, 31)))
+#: THE RESERVE (A15): no E2 run has a session in these years, and a result row of one is refused whole.
+RESERVE_YEARS = (2020, 2021)
+TRAIN_YEARS = tuple(y for first, last in TRAIN_SPANS for y in range(first.year, last.year + 1))
+#: The Train years in words (the map, the briefs, the architect's request).
+TRAIN_LABEL = "Train years 2016-19 and 2022-24"
+#: The bar's rules (the design's 6b; rules, never market figures). `state_every`, `state_match`: THE RESTART CHECK.
 BAR: dict[str, Any] = {"min_active_years": 3, "year_min_trades": 40, "year_min_days": 20, "year_t_floor": -1.0,
-                       "cost_ratio": 0.5}
+                       "cost_ratio": 0.5, "state_every": 20, "state_match": 0.99}
+#: The decide limits the restart check loads its instances with (league/equity/EQUITY.md: 1 second a call, 25 errors).
+DECIDE_TIMEOUT, DECIDE_MAX_ERRORS = 1.0, 25
 FAILS: dict[str, str] = {
     "RUN": "the decider child failed this program's Train run again and again while other programs' runs completed",
     "DQ": "the program was disqualified on Train by its own errors or timeouts",
     "LOAD": "the decider child refused to load the program",
     "REVIEW": "the equity review refused the program (an absolute level, a reconstructed calendar or lookahead)",
-    "WINDOW": "the Train result carried a day outside 2016-2024 and was refused whole",
+    "STATE": f"run again with its STATE emptied every {BAR['state_every']} sessions (as a restart of the House's decider "
+             f"empties it), the program's intents matched the uninterrupted run's on fewer than "
+             f"{BAR['state_match']:.0%} of the Train sessions",
+    "WINDOW": f"the Train result carried a day outside the {TRAIN_LABEL} and was refused whole",
     "Y1": f"active (at least {BAR['year_min_trades']} closed lots on {BAR['year_min_days']} entry days) in fewer than "
-          f"{BAR['min_active_years']} Train years",
+          f"{BAR['min_active_years']} of the {len(TRAIN_YEARS)} Train years",
     "Y2": f"a Train year's daily P&L t below {BAR['year_t_floor']:g}",
     "P1": "net P&L at or below zero at 1.5x the half-spread",
     "R1": f"the 1.0x net P&L at or below zero, or the 1.5x P&L under {BAR['cost_ratio']:g} of it",
@@ -121,14 +165,15 @@ BOUNDS: dict[str, tuple[float, float]] = {"train_budget": (1, 12), "train_max_at
 EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 STATUSES = ("researching", "passed", "refuted", "stalled", "closed")
 #: The fails that judge the MECHANISM on Train (the bar's). A family is REFUTED only with a version judged by one of these;
-#: RUN, DQ, LOAD and REVIEW judge a program, so a family with no other is STALLED (no graveyard row, no cell count).
+#: RUN, DQ, LOAD, REVIEW and STATE judge a program, so a family with no other is STALLED (no graveyard row, no cell count).
 JUDGED = ("Y1", "Y2", "P1", "R1")
 #: The exception classes (by name, anywhere in the class's MRO) that are a program the child would not load: "LOAD".
 LOAD_REFUSALS = ("ProgramRefused", "CodeRefused", "NeedsRefused")
 #: The exception classes that are the child failing a run (league/equity/runner.py `RunFailed`; the decider's own): the
 #: program's fault ("RUN") only once other programs' runs complete meanwhile, else the House's.
 RUN_FAILURES = ("RunFailed", "DeciderError")
-MAP_LABEL = "in-sample: the swarm's own Train runs, 2016-2024, at 1.0x and 1.5x the half-spread; the screen decides"
+MAP_LABEL = (f"in-sample: the swarm's own Train runs, {TRAIN_LABEL}, at 1.0x and 1.5x the half-spread; the screen "
+             "decides")
 REFUTED_TAG = "REFUTED"
 STALLED_TAG = "STALLED"
 
@@ -244,21 +289,156 @@ def _year_key(key: Any) -> int | None:
         return None
 
 
-def outside_years(result: Mapping[str, Any] | None) -> list[str]:
-    """The years a result's by-year rows or its start and end name outside the Train window (WINDOW)."""
+def _inside(day: Any, spans: Sequence[tuple[dt.date, dt.date]]) -> bool:
+    """Whether an ISO day (or a timestamp starting with one) lies inside one of `spans`; an unreadable day does not."""
+    try:
+        when = dt.date.fromisoformat(str(day)[:10])
+    except ValueError:
+        return False
+    return any(first <= when <= last for first, last in spans)
+
+
+def _row_days(result: Mapping[str, Any]) -> Iterator[Any]:
+    """Every day a result's rows name: its start and end, its entry days, its daily rows, and the days of its trades,
+    lots and booked dividends and splits (`actions`)."""
+    yield result.get("start")
+    yield result.get("end")
+    entry_days = result.get("entry_days")
+    if isinstance(entry_days, (list, tuple)):
+        yield from entry_days
+    daily = result.get("daily")
+    for row in daily if isinstance(daily, (list, tuple)) else ():
+        if isinstance(row, (list, tuple)) and row:
+            yield row[0]
+    for name in ("trades", "lots", "actions"):
+        rows = result.get(name)
+        for row in rows if isinstance(rows, (list, tuple)) else ():
+            if isinstance(row, Mapping):
+                yield from (row.get(k) for k in ("day", "entry_day", "exit_day"))
+
+
+def _year_maps(result: Mapping[str, Any]) -> Iterator[Mapping[Any, Any]]:
+    """Every by-year map of a result: its own, the buy-and-hold's and the exposure's."""
+    for holder in (result, result.get("bh"), result.get("exposure")):
+        rows = holder.get("by_year") if isinstance(holder, Mapping) else None
+        if isinstance(rows, Mapping):
+            yield rows
+
+
+def outside_years(result: Mapping[str, Any] | None, *,
+                  spans: Sequence[tuple[dt.date, dt.date]] = TRAIN_SPANS) -> list[str]:
+    """What of a result lies outside `spans` (the Train spans; one run is held to its own span) (WINDOW): a by-year row
+    of another year (its own, the buy-and-hold's or the exposure's), a day of its start, end, entry days, daily rows,
+    trades, lots or actions outside them, another window. A 2020 or 2021 row (THE RESERVE) is outside exactly as a 2025
+    or 2026 one is."""
     result = result or {}
+    years = {y for first, last in spans for y in range(first.year, last.year + 1)}
     out = []
-    for key in (result.get("by_year") or {}):
-        year = _year_key(key)
-        if year is None or year not in TRAIN_YEARS:
-            out.append(str(key))
-    for name in ("start", "end"):
-        day = str(result.get(name) or "")
-        if day and (day[:10] < TRAIN_FIRST.isoformat() or day[:10] > TRAIN_LAST.isoformat()):
-            out.append(day[:10])
+    for rows in _year_maps(result):
+        for key in rows:
+            year = _year_key(key)
+            if year is None or year not in years:
+                out.append(str(key))
+    for day in _row_days(result):
+        if day not in (None, "") and not _inside(day, spans):
+            out.append(str(day)[:10])
     window = result.get("window")
     if window not in (None, "train"):
         out.append(str(window))
+    return list(dict.fromkeys(out))
+
+
+def _pooled(parts: Sequence[tuple[int, float | None, float | None]]) -> tuple[float | None, float | None]:
+    """(mean, one-sample t) of the union of samples each given as (n, mean, t), every part's sample sd recovered from its
+    mean and t; (None, None) when a part of two or more points gives no t (its spread cannot be recovered)."""
+    parts = [(int(n), m, t) for n, m, t in parts if n and n > 0]
+    total = sum(n for n, _, _ in parts)
+    if not total or any(m is None for _, m, _ in parts):
+        return None, None
+    mean = sum(n * float(m) for n, m, _ in parts) / total
+    if total < 2:
+        return mean, None
+    ss = 0.0
+    for n, m, t in parts:
+        if n >= 2:
+            if not t or not m:
+                return mean, None
+            sd = abs(float(m)) * math.sqrt(n) / abs(float(t))
+            ss += (n - 1) * sd * sd
+        ss += n * (float(m) - mean) ** 2
+    sd = math.sqrt(ss / (total - 1))
+    return mean, (mean / sd * math.sqrt(total) if sd > 1e-15 else None)
+
+
+def _daily_t(daily: Sequence[Any]) -> float | None:
+    """The one-sample t of daily P&L values (E1's `results` definition: the sample sd; None under two points or with no
+    spread)."""
+    xs = [float(x) for x in daily if _num(x) is not None]
+    if len(xs) < 2:
+        return None
+    mean = sum(xs) / len(xs)
+    sd = math.sqrt(sum((x - mean) ** 2 for x in xs) / (len(xs) - 1))
+    return round(mean / sd * math.sqrt(len(xs)), 4) if sd > 1e-15 else None
+
+
+def combine(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """THE TRAIN SPANS' runs summed into one Train result (the module docstring): each started flat, so their counts,
+    P&L and fees add; the pooled daily t is the t of their daily P&L rows together (else pooled from each run's mean and
+    t); rates and exposure are weighted by trades and days; the worst drawdown is the larger. `by_year` is the union of
+    the runs' own years. Status "ok" only when every run is; a disqualified run makes the whole "disqualified"."""
+    parts = [p if isinstance(p, Mapping) else {} for p in parts]
+    statuses = [str(p.get("status")) for p in parts]
+    status = "ok" if parts and all(s == "ok" for s in statuses) else (
+        "disqualified" if "disqualified" in statuses else next((s for s in statuses if s != "ok"), "no_data"))
+    sums = [_summary(p) for p in parts]
+
+    def total(key: str, ndigits: int = 2) -> float | None:
+        xs = [x for x in (_num(s.get(key)) for s in sums) if x is not None]
+        if not xs:
+            return None
+        return int(round(sum(xs))) if ndigits == 0 else round(sum(xs), ndigits)
+
+    def weighted(key: str, weight: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None]) -> float | None:
+        pairs = [(_num(s.get(key)), weight(p, s)) for p, s in zip(parts, sums)]
+        pairs = [(x, w) for x, w in pairs if x is not None and w]
+        weights = sum(w for _, w in pairs)
+        return round(sum(x * w for x, w in pairs) / weights, 6) if weights else None
+
+    def days(p: Mapping[str, Any], s: Mapping[str, Any]) -> float | None:
+        return _num(s.get("days")) or (float(len(p["daily"])) if isinstance(p.get("daily"), list) else None)
+
+    def trades(p: Mapping[str, Any], s: Mapping[str, Any]) -> float | None:
+        return _num(s.get("trades"))
+
+    dailies = [p.get("daily") for p in parts]
+    if dailies and all(isinstance(d, list) and d for d in dailies):
+        t_daily = _daily_t([row[1] for d in dailies for row in d if isinstance(row, (list, tuple)) and len(row) > 1])
+    else:
+        _, t_daily = _pooled([(int(_num(s.get("days")) or 0), _num(s.get("mean_pnl_daily")), _num(s.get("t_daily")))
+                              for s in sums])
+        t_daily = round(t_daily, 4) if t_daily is not None else None
+    drawdowns = [x for x in (_num(s.get("max_drawdown")) for s in sums) if x is not None]
+    summary = {"trades": total("trades", 0), "days": total("days", 0), "days_traded": total("days_traded", 0),
+               "pnl": total("pnl"), "fees": total("fees"), "dividends": total("dividends"), "t_daily": t_daily,
+               "win_rate": weighted("win_rate", trades), "exposure_mean": weighted("exposure_mean", days),
+               "max_drawdown": max(drawdowns) if drawdowns else None,
+               "mean_net_return": weighted("mean_net_return", trades)}
+    by_year: dict[str, Any] = {}
+    for p in parts:
+        rows = p.get("by_year")
+        by_year.update(rows if isinstance(rows, Mapping) else {})
+    bh = [_num((p.get("bh") or {}).get("pnl")) if isinstance(p.get("bh"), Mapping) else None for p in parts]
+    mtes = [p.get("mte") if isinstance(p.get("mte"), Mapping) else {} for p in parts]
+    mte_mean, mte_t = _pooled([(int(_num(m.get("n")) or 0), _num(m.get("mean")), _num(m.get("t"))) for m in mtes])
+    out = {"status": status, "window": "train", "start": parts[0].get("start") if parts else None,
+           "end": parts[-1].get("end") if parts else None, "spans": len(parts), "summary": summary, "by_year": by_year,
+           "bh": {"pnl": round(sum(x for x in bh if x is not None), 2) if any(x is not None for x in bh) else None},
+           "mte": {"mean": round(mte_mean, 6) if mte_mean is not None else None,
+                   "t": round(mte_t, 4) if mte_t is not None else None,
+                   "n": sum(int(_num(m.get("n")) or 0) for m in mtes)}}
+    reason = next((p.get("reason") for p in parts if p.get("status") == "disqualified" and p.get("reason")), None)
+    if reason:
+        out["reason"] = reason
     return out
 
 
@@ -281,9 +461,11 @@ def _summary(result: Mapping[str, Any] | None) -> Mapping[str, Any]:
 
 
 def train_score(base: Mapping[str, Any] | None, stress: Mapping[str, Any] | None) -> dict[str, Any]:
-    """equity-v1 on a version's 1.0x (`base`) and 1.5x (`stress`) Train results (the module docstring): {objective,
-    passed, fails, why, score (the pooled daily t at 1.0x), years, active_years, pnl_10, pnl_15, ratio, summary,
-    beside}. A result outside the window (WINDOW) or not "ok" (RUN) is judged on nothing else and shows no figure."""
+    """equity-v1's Y1, Y2, P1 and R1 on a version's 1.0x (`base`) and 1.5x (`stress`) Train results, each the Train
+    spans' runs summed (`combine`; the module docstring): {objective, passed, fails, why, score (the pooled daily t at
+    1.0x), years, active_years, pnl_10, pnl_15, ratio, summary, beside}. A result outside the Train years (WINDOW) or
+    not "ok" (RUN) is judged on nothing else and shows no figure. STATE is the restart check's (`restart_check`), run
+    on the House once these hold."""
     out: dict[str, Any] = {"objective": OBJECTIVE, "passed": False, "fails": [], "why": None, "score": None,
                            "years": {}, "active_years": 0, "pnl_10": None, "pnl_15": None, "ratio": None,
                            "summary": {}, "beside": {}}
@@ -327,14 +509,18 @@ def train_score(base: Mapping[str, Any] | None, stress: Mapping[str, Any] | None
 
 def bar_text() -> str:
     """THE BAR in words (rules only)."""
-    return (f"THE TRAIN BAR ({OBJECTIVE}), on the House's Train window 2016-2024 at 1.0x and 1.5x the half-spread: "
-            f"(Y1) at least {BAR['year_min_trades']} closed lots on {BAR['year_min_days']} entry days in each of at least "
-            f"{BAR['min_active_years']} Train years; (Y2) no Train year's daily P&L t below {BAR['year_t_floor']:g}; (P1) "
-            f"net P&L above zero at 1.5x; (R1) the 1.0x net P&L above zero and the 1.5x P&L at least "
-            f"{BAR['cost_ratio']:g} of it. Reported beside, never a bar: the same-exposure buy-and-hold over the same "
-            "sessions, the mean time-matched excess (MTE) and the drift share. The first version that passes is the "
-            "lineage's ONE Validation try, then ONE sealed look; their outcomes are sealed and never shown to anyone "
-            "who writes programs.")
+    return (f"THE TRAIN BAR ({OBJECTIVE}), on the House's {TRAIN_LABEL} (one run a span, each starting flat, summed) "
+            f"at 1.0x and 1.5x the half-spread: (Y1) at least {BAR['year_min_trades']} closed lots on "
+            f"{BAR['year_min_days']} entry days in each of at least {BAR['min_active_years']} of the {len(TRAIN_YEARS)} "
+            f"Train years; (Y2) no Train year's daily P&L t below {BAR['year_t_floor']:g}; (P1) net P&L above zero at "
+            f"1.5x; (R1) the 1.0x net P&L above zero and the 1.5x P&L at least {BAR['cost_ratio']:g} of it; (STATE) run "
+            f"again with its STATE emptied every {BAR['state_every']} sessions, the program's intents match the "
+            f"uninterrupted run's on at least {BAR['state_match']:.0%} of the sessions: the House's decider restarts on "
+            "every deploy and a restart empties STATE, so keep in STATE only a cache of what ctx gives again (holdings "
+            "are in ctx.positions, the clock in ctx's calendar fields). Reported beside, never a bar: the same-exposure "
+            "buy-and-hold over the same sessions, the mean time-matched excess (MTE) and the drift share. The first "
+            "version that passes is the lineage's ONE Validation try, then ONE sealed look; their outcomes are sealed and "
+            "never shown to anyone who writes programs.")
 
 
 # ----------------------------------------------------------------------------------------------------------- the record
@@ -424,18 +610,233 @@ def may_validate(store: Any, fam: Mapping[str, Any] | None, n: Any) -> bool:
 
 
 def compact(score: Mapping[str, Any], *, at: str, ident: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """A version's verdict as the record keeps it (Train figures only), with the identity it was judged under."""
-    return {"at": at, "objective": OBJECTIVE, "passed": bool(score.get("passed")), "fails": list(score.get("fails") or []),
-            "score": score.get("score"), "active_years": score.get("active_years"), "pnl_10": score.get("pnl_10"),
-            "pnl_15": score.get("pnl_15"), "ratio": score.get("ratio"), "years": dict(score.get("years") or {}),
-            "summary": dict(score.get("summary") or {}), "beside": dict(score.get("beside") or {}),
-            "identity": dict(ident) if isinstance(ident, Mapping) else None}
+    """A version's verdict as the record keeps it (Train figures and its restart check's counts only), with the identity
+    it was judged under."""
+    out = {"at": at, "objective": OBJECTIVE, "passed": bool(score.get("passed")), "fails": list(score.get("fails") or []),
+           "score": score.get("score"), "active_years": score.get("active_years"), "pnl_10": score.get("pnl_10"),
+           "pnl_15": score.get("pnl_15"), "ratio": score.get("ratio"), "years": dict(score.get("years") or {}),
+           "summary": dict(score.get("summary") or {}), "beside": dict(score.get("beside") or {}),
+           "identity": dict(ident) if isinstance(ident, Mapping) else None}
+    if isinstance(score.get("state"), Mapping):
+        out["state"] = dict(score["state"])
+    return out
 
 
 def program_fault(code: str, why: str) -> dict[str, Any]:
     """The verdict of a version judged on its program alone (RUN, DQ, LOAD): no figure."""
     return {"objective": OBJECTIVE, "passed": False, "fails": [code], "why": f"{FAILS[code]}: {why}"[:400], "score": None,
             "years": {}, "active_years": 0, "pnl_10": None, "pnl_15": None, "ratio": None, "summary": {}, "beside": {}}
+
+
+# ----------------------------------------------------------------------------------------------------------- the restart check
+#: The decider kind the restart check loads its instances under (league/equity/kinds.py `KINDS`; E1's runner `KIND`).
+KIND = "equity"
+
+
+class StateCheckInterrupted(RuntimeError):
+    """The restart check could not run or finish on the House's side (no decider, an instance the child reloaded or lost,
+    an answer without its call count, a ctx that could not be built, a span with no session): the House's, never the
+    program's, and never a pass."""
+
+
+def _canon(intents: Any) -> str:
+    return json.dumps(intents if isinstance(intents, list) else [], sort_keys=True, default=str)
+
+
+def _asked(row: Mapping[str, Any]) -> tuple[int | None, bool]:
+    """(the decides the answering instance has run since it was loaded, whether it is disqualified) from one job's answer
+    (`stats`: E1's `EquityRunner.stats`); (None, False) when the answer carries no count."""
+    stats = row.get("stats")
+    calls = stats.get("calls") if isinstance(stats, Mapping) else None
+    if isinstance(calls, bool) or not isinstance(calls, int):
+        return None, False
+    return calls, bool(stats.get("disqualified"))
+
+
+def state_inputs(run: Any) -> Iterator[Any]:
+    """THE CTX STREAM of the restart check (the module docstring) for one Train span's uninterrupted 1.0x run (E1's
+    `runner.Run`: its result and the `store.Bars` it ran on): E1's Gym inputs (`league.equity.ctx.inputs_from_bars`) at
+    every session the engine decides on (the one before the run's first through the one before its last), holding the
+    lots the run had open at that close (marked at the close), the lots it closed in that session, its equity from the
+    daily record (E0 before the first session), the cash that leaves, the caps and the run's PARAMS. A generator: one
+    session's inputs at a time (they carry the program's history).
+
+    What the result does not keep is left out for both instances alike: the intents the engine refused
+    (`ctx.rejects` is empty), the tag of a lot still open at the run's end, and a lot's quantity before a split during
+    its hold (the result keeps its last quantity). A result that does not fit its bars (a lot's day outside them, a
+    daily record of another length) raises `StateCheckInterrupted`."""
+    from decimal import Decimal
+
+    from ..equity import config as C
+    from ..equity import ctx as X
+    from ..equity.program import parse_needs
+    from ..equity.store import from_ordinal
+
+    result = getattr(run, "result", None)
+    result = dict(result) if isinstance(result, Mapping) else {}
+    bars = getattr(run, "bars", None)
+    if bars is None:
+        raise StateCheckInterrupted("the Train run carries no bars to build the restart check's ctx from")
+    needs = parse_needs(result.get("needs"))
+    params = dict(result.get("params") or {})
+    capital = float(Decimal(str(result.get("capital") or C.SLEEVE_USD)))
+    n, first = int(bars.n), int(bars.first)
+    daily = [row for row in (result.get("daily") or []) if isinstance(row, (list, tuple)) and len(row) > 2]
+    if len(daily) != n - first:
+        raise StateCheckInterrupted(f"the Train run's daily record has {len(daily)} rows for {n - first} run sessions")
+    index = {from_ordinal(int(d)).isoformat(): i for i, d in enumerate(bars.days)}
+    trades = {int(t["id"]): t for t in (result.get("trades") or []) if isinstance(t, Mapping) and t.get("id") is not None}
+    opened: dict[int, list[tuple[int, Mapping[str, Any]]]] = {}
+    shut: dict[int, list[tuple[int, Mapping[str, Any]]]] = {}
+    for lot in result.get("lots") or []:
+        if not isinstance(lot, Mapping):
+            continue
+        entry = index.get(str(lot.get("entry_day")))
+        if entry is None:
+            raise StateCheckInterrupted(f"lot {lot.get('lid')} names an entry day outside the run's bars")
+        opened.setdefault(entry, []).append((entry, lot))
+        if lot.get("exit_day"):
+            leave = index.get(str(lot["exit_day"]))
+            if leave is None:
+                raise StateCheckInterrupted(f"lot {lot.get('lid')} names an exit day outside the run's bars")
+            shut.setdefault(leave, []).append((entry, lot))
+    equity_at = {index[str(row[0])]: float(row[2]) for row in daily if str(row[0]) in index}
+    marks: dict[str, list[float | None]] = {}
+    for sym in needs.symbols:
+        column, last, out = bars.raw[sym], None, []
+        for i in range(n):
+            value = float(column[i][3])
+            last = value if math.isfinite(value) and value > 0 else last
+            out.append(last)
+        marks[sym] = out
+    held: dict[int, tuple[int, Mapping[str, Any]]] = {}
+    equity = capital
+    for j in range(max(first - 1, 0), n - 1):
+        for entry, lot in opened.get(j, ()):
+            held[int(lot["lid"])] = (entry, lot)
+        closed = []
+        for entry, lot in shut.get(j, ()):
+            held.pop(int(lot["lid"]), None)
+            trade = trades.get(int(lot["lid"])) or {}
+            closed.append(X.closed_row(lid=int(lot["lid"]), symbol=str(lot["symbol"]), qty=float(lot["qty"]),
+                                       entry=float(lot["entry_px"]), exit=float(lot.get("exit_px") or 0.0),
+                                       net=float(trade.get("net") or 0.0), held_sessions=j - entry,
+                                       reason=str(lot.get("reason") or "program"), tag=str(trade.get("tag") or "")))
+        positions, value, own = [], 0.0, {}
+        for lid, (entry, lot) in sorted(held.items()):
+            sym = str(lot["symbol"])
+            mark = (marks.get(sym) or [None] * n)[j]
+            mark = float(lot["entry_px"]) if mark is None else mark
+            qty = float(lot["qty"])
+            positions.append(X.lot_row(lid=lid, symbol=sym, klass=str(lot.get("class") or C.class_of(sym) or C.ETF),
+                                       qty=qty, entry=float(lot["entry_px"]), mark=mark, held_sessions=j - entry,
+                                       at=str(lot.get("entry_at") or "open"), tag=str((trades.get(lid) or {}).get("tag") or "")))
+            value += qty * mark
+            own[sym] = own.get(sym, 0.0) + qty * mark
+        equity = equity_at.get(j, equity)
+        cash = max(0.0, equity - value)
+        caps = {s: round(max(0.0, min(float(C.POSITION_SHARE[C.class_of(s) or C.ETF]) * capital - own.get(s, 0.0), cash)),
+                         2) for s in needs.symbols}
+        yield X.inputs_from_bars(bars, j, needs=needs, positions=positions, closed=closed, rejects=(), cash=cash,
+                                 equity=equity, budget=capital, caps=caps, params=params)
+
+
+def restart_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, name: str,
+                  streams: Iterable[Iterable[Any]], every: int | None = None) -> dict[str, Any]:
+    """THE RESTART CHECK (the module docstring) through E1's decider kinds: for each stream (one a Train span) instance A,
+    loaded once, and instance B, loaded fresh every `every` (`BAR["state_every"]`) sessions, decide on the same inputs
+    at every session. {sessions, matched, share, every, need, disqualified (the sessions an instance was disqualified
+    at: they match nothing), held (matched on at least `BAR["state_match"]` of the sessions), first_miss ({span,
+    session, after_reset} of the first session they differed)}.
+
+    NEVER A SILENT PASS: every answer's `stats.calls` must be the decides its instance was asked since its load (A: every
+    session of the span so far; B: every session since its reset), so an instance the child reloaded is caught whether or
+    not the decider counted a restart; an answer without the count, a missing instance, a ctx that could not be built
+    and a stream with no session raise `StateCheckInterrupted` (the House's). The decider's own errors pass through (a
+    child that failed: `DeciderError`; a program it would not load: `ProgramRefused`). Every instance is dropped at the
+    end."""
+    every = max(1, int(every or BAR["state_every"]))
+    need = float(BAR["state_match"])
+    payload = {"code": str(code), "params": dict(params or {}), "name": str(name), "timeout": DECIDE_TIMEOUT,
+               "max_errors": DECIDE_MAX_ERRORS}
+    restarts = getattr(decider, "restarts", None)
+    loaded: list[str] = []
+    sessions = matched = disqualified = 0
+    first_miss: dict[str, int] | None = None
+
+    def load(key: str) -> None:
+        loaded.append(key)
+        decider.kind_load(KIND, key, payload)
+
+    def drop(key: str) -> None:
+        loaded.remove(key)
+        decider.kind_drop(KIND, key)
+
+    try:
+        for span, stream in enumerate(streams):
+            a, b = f"e2-state:{name}:{span}:a", ""
+            load(a)
+            seen = 0
+            for i, inputs in enumerate(stream):
+                if i % every == 0:
+                    if b:
+                        drop(b)
+                    b = f"e2-state:{name}:{span}:b{i // every}"
+                    load(b)
+                answer = decider.kind(KIND, "decide", {"jobs": [{"key": a, "inputs": inputs}, {"key": b, "inputs": inputs}]})
+                if getattr(decider, "restarts", None) != restarts:
+                    raise StateCheckInterrupted("the decider child restarted during the restart check (its instances "
+                                                "were reloaded with fresh memory)")
+                results = answer.get("results") if isinstance(answer, Mapping) and answer.get("ok") else None
+                if not isinstance(results, Mapping):
+                    why = answer.get("error") if isinstance(answer, Mapping) else type(answer).__name__
+                    raise StateCheckInterrupted(f"the decider child did not answer a decide: {str(why)[:200]}")
+                ra, rb = results.get(a), results.get(b)
+                if not isinstance(ra, Mapping) or not isinstance(rb, Mapping) or ra.get("missing") or rb.get("missing"):
+                    raise StateCheckInterrupted("an instance of the restart check went missing in the decider child")
+                if ra.get("error") or rb.get("error"):
+                    why = str(ra.get("error") or rb.get("error"))[:200]
+                    raise StateCheckInterrupted(f"the child could not build a ctx: {why}")
+                out = False
+                for row, due in ((ra, i + 1), (rb, i % every + 1)):
+                    calls, gone = _asked(row)
+                    if calls is None:
+                        raise StateCheckInterrupted("a decide answer carries no call count (stats.calls): an instance the "
+                                                    "child reloaded could not be told from one that kept its memory")
+                    if gone:
+                        out = True  # a disqualified instance answers nothing and counts no call: no match
+                    elif calls != due:
+                        raise StateCheckInterrupted(f"the decider child reloaded an instance during the restart check (it "
+                                                    f"answered its decide {calls}, not {due}): its memory was lost")
+                sessions, seen = sessions + 1, seen + 1
+                disqualified += int(out)
+                if not out and _canon(ra.get("intents")) == _canon(rb.get("intents")):
+                    matched += 1
+                elif first_miss is None:
+                    first_miss = {"span": span, "session": i, "after_reset": i % every}
+            if not seen:
+                raise StateCheckInterrupted(f"Train span {span} gave the restart check no session")
+    finally:
+        for key in list(loaded):
+            try:
+                decider.kind_drop(KIND, key)
+            except Exception:  # noqa: BLE001 - a drop that fails leaves an instance a restart clears
+                pass
+    if not sessions:
+        raise StateCheckInterrupted("the restart check had no Train session to compare")
+    return {"sessions": sessions, "matched": matched, "share": round(matched / sessions, 4), "every": every, "need": need,
+            "disqualified": disqualified, "held": matched >= need * sessions - 1e-9, "first_miss": first_miss}
+
+
+def with_state(verdict: Mapping[str, Any], check: Mapping[str, Any]) -> dict[str, Any]:
+    """A bar verdict with its restart check: as it was when the check held, else failed STATE (its Train figures kept, so
+    the brief shows what the program earned). A check with no session compared never holds."""
+    out = dict(verdict)
+    out["state"] = {k: check.get(k) for k in ("sessions", "matched", "share", "every", "need", "disqualified", "first_miss")}
+    if not check.get("held") or not check.get("sessions"):
+        out.update(passed=False, fails=["STATE"],
+                   why=f"{FAILS['STATE']}: {check.get('matched')} of {check.get('sessions')} sessions matched")
+    return out
 
 
 def _update(store: Any, fid: str, change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
@@ -604,18 +1005,22 @@ def contract_text() -> str:
 
 
 # ----------------------------------------------------------------------------------------------------------- the researcher
-RESEARCHER_SYSTEM = """You write ONE program for one family of the swarm's EQUITY LANES: long-only ETF programs (stocks in a later
-release) that the House runs once a session after the close, each order executing at the next session's open or close.
-You see your own family's Train runs (2016-2024) and nothing else: no Validation figure, no holdout figure and no other
-program's outcome. Validation (2025) and ONE sealed holdout look per lineage judge every program, and nothing of them ever
-reaches a program's author, so a program cannot be fitted to them: write the mechanism, not the history. The first
-version that passes the Train bar in the request AND the equity review is your lineage's ONE Validation try: send the
-version you would stake the lineage on. A rule that works only because you know which years fell is not a mechanism;
-use scale-free state (returns, volatility, a price against its own moving average or recent high, the calendar fields),
-never a price level or a date. THE LEVEL RULE refuses, before it runs, a program that holds a price, an average or range
-of prices, a lot's entry or mark, a share volume, or the log of any of them, against a constant or a PARAMS value
-(compared with, offset by, bucketed by or clipped at one); a ratio of two levels is fine. THE REVIEW (two other models)
-refuses absolute levels, a calendar reconstructed by counting sessions in STATE, tables of dates or levels, and lookahead.
+RESEARCHER_SYSTEM = """You write ONE program for one family of the swarm's EQUITY LANES: long-only ETF programs (stocks in
+a later release) that the House runs once a session after the close, each order executing at the next session's open or
+close. You see your own family's Train runs (Train years 2016-19 and 2022-24) and nothing else: no Validation figure, no
+holdout figure and no other program's outcome. Validation (2025) and ONE sealed holdout look per lineage judge every
+program, and nothing of them ever reaches a program's author, so a program cannot be fitted to them: write the mechanism,
+not the history. The first version that passes the Train bar in the request AND the equity review is your lineage's ONE
+Validation try: send the version you would stake the lineage on. A rule that works only because you know which years fell
+is not a mechanism; use scale-free state (returns, volatility, a price against its own moving average or recent high, the
+calendar fields), never a price level or a date. THE LEVEL RULE refuses, before it runs, a program that holds a price, an
+average or range of prices, a lot's entry or mark, a share volume, or the log of any of them, against a constant or a
+PARAMS value (compared with, offset by, bucketed by or clipped at one); a ratio of two levels is fine. THE REVIEW (two
+other models) refuses absolute levels, a calendar reconstructed by counting sessions in STATE, tables of dates or levels,
+and lookahead. THE STATE RULE (part of the bar): the House's decider restarts on every deploy and a restart empties STATE,
+so the bar runs your program again with STATE emptied every 20 sessions and fails it (STATE) unless its intents match the
+uninterrupted run's on 99% of sessions. Keep in STATE only a cache of what ctx gives again; read holdings from
+ctx.positions and the clock from ctx's calendar fields, never from a count you keep.
 
 Reply with ONE JSON object: {"program": "<the whole Python file>", "note": "what this version changes and why, one or two
 sentences"}; or, once a version of yours was judged by the bar (Y1, Y2, P1 or R1) and no honest revision is left,
@@ -636,7 +1041,7 @@ def _t(x: Any) -> str:
 
 
 def version_text(n: Any, v: Mapping[str, Any]) -> str:
-    """One scored version in words (Train figures and the review's reasons only)."""
+    """One scored version in words (Train figures, its restart check's counts and the review's reasons only)."""
     fails = list(v.get("fails") or [])
     if not v.get("years") and fails and fails[0] in ("RUN", "DQ", "LOAD", "WINDOW"):
         return f"v{n}: {v.get('why') or FAILS[fails[0]]}."
@@ -644,6 +1049,8 @@ def version_text(n: Any, v: Mapping[str, Any]) -> str:
     side = v.get("beside") or {}
     if "REVIEW" in fails:
         status = "passed the Train bar but the EQUITY REVIEW refused it"
+    elif "STATE" in fails:
+        status = "met Y1, Y2, P1 and R1 but failed STATE"
     else:
         status = "PASSED" if v.get("passed") else "failed " + ", ".join(fails)
     head = (f"v{n}: {status}. At 1.0x: net P&L "
@@ -658,7 +1065,27 @@ def version_text(n: Any, v: Mapping[str, Any]) -> str:
     review = v.get("review") if isinstance(v.get("review"), Mapping) else {}
     said = "; ".join(str(r) for r in (review.get("reasons") or [])[:3])
     told = f"(REVIEW) the {review.get('stage') or 'review'} refused it: {said or FAILS['REVIEW']}." if "REVIEW" in fails else ""
-    return " ".join(x for x in (head, f"By Train year: {years}." if years else "", beside, words, told) if x)
+    return " ".join(x for x in (head, f"By Train year: {years}." if years else "", beside, words, restart_text(v), told)
+                    if x)
+
+
+def restart_text(v: Mapping[str, Any]) -> str:
+    """A version's restart check in words ("" when it had none): the sessions matched and where they first differed."""
+    state = v.get("state") if isinstance(v.get("state"), Mapping) else None
+    if not state or not state.get("sessions"):
+        return ""
+    miss = state.get("first_miss") if isinstance(state.get("first_miss"), Mapping) else None
+    where = (f"; they first differed on session {int(_num(miss.get('after_reset')) or 0) + 1} after a reset" if miss else "")
+    gone = int(_num(state.get("disqualified")) or 0)
+    lost = f"; on {gone} sessions an instance was disqualified by its own errors (no match)" if gone else ""
+    return (f"Restart check: with STATE emptied every {state.get('every')} sessions, its intents matched the uninterrupted "
+            f"run's on {state.get('matched')} of {state.get('sessions')} Train sessions ({_pct(state.get('share'))}; "
+            f"{_pct(state.get('need'))} needed){where}{lost}.")
+
+
+def _pct(x: Any) -> str:
+    v = _num(x)
+    return "n/a" if v is None else f"{100 * v:.1f}%"
 
 
 def _named(exc: BaseException, names: Sequence[str]) -> bool:
@@ -825,7 +1252,7 @@ class EquityResearcher:
         lines.append(bar_text())
         done = sorted(((int(k), v) for k, v in versions_of(rec).items()), key=lambda kv: kv[0])
         if done:
-            lines.append("YOUR VERSIONS ON TRAIN (2016-2024):\n" + "\n".join(f"- {version_text(n, v)}" for n, v in done))
+            lines.append(f"YOUR VERSIONS ON TRAIN ({TRAIN_LABEL}):\n" + "\n".join(f"- {version_text(n, v)}" for n, v in done))
         refused = [r for r in (rec.get("refused") or []) if isinstance(r, Mapping)][-3:]
         if refused:
             lines.append("PROGRAMS REFUSED BEFORE THEY RAN:\n" + "\n".join(f"- {r.get('why')}" for r in refused))
@@ -889,10 +1316,33 @@ class EquityResearcher:
         return out
 
     # ------------------------------------------------------------------ the Train run
+    def fault(self, fam: Mapping[str, Any], n: int, exc: BaseException, *,
+              check: bool = False) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """A Train run's exception, or the restart check's (`check`), judged (the module docstring, WHAT A VERDICT IS): (the
+        program's verdict, None) for LOAD, or for RUN once the child failed it `train_max_errors` times while other
+        programs' Train judgments completed; else (None, the House's backoff answer: "run" a child's failure, "state" a
+        restart check that could not run or finish, "store" the rest)."""
+        why = f"{type(exc).__name__}: {str(exc)[:200]}"
+        if _named(exc, LOAD_REFUSALS):
+            return program_fault("LOAD", str(exc)[:300]), None
+        kind = "run" if _named(exc, RUN_FAILURES) else ("state" if check else "store")
+        out = self.house_failure(fam, n, why, kind=kind)
+        return (None, out) if out is not None else (program_fault("RUN", why), None)
+
+    def restart(self, fid: str, code: str, params: Mapping[str, Any], runs: Sequence[Any]) -> dict[str, Any]:
+        """THE RESTART CHECK of a version on its uninterrupted 1.0x Train runs (`restart_check` over `state_inputs`),
+        through the isolated runner's decider (E1's `Isolated.decider`)."""
+        decider = getattr(self.runner(), "decider", None)
+        if decider is None:
+            raise StateCheckInterrupted("the isolated runner has no decider: the restart check cannot run")
+        return restart_check(decider, code, params, name=fid, streams=[state_inputs(run) for run in runs])
+
     def house_failure(self, fam: Mapping[str, Any], n: int, why: str, *, kind: str) -> dict[str, Any] | None:
         """A failure of the House's (the module docstring, WHAT A VERDICT IS): nothing scored, no budget, no model call; a
-        backoff. For a child's run failure ("run") repeated `train_max_errors` times while other programs' Train runs
-        completed since its first, None: the caller judges the program RUN."""
+        backoff. For a child's run failure ("run") repeated `train_max_errors` times while other programs' Train
+        judgments completed since its first, None: the caller judges the program RUN. A result outside the Train years
+        ("window") is an alert at once; a restart check that could not run or finish ("state") at its
+        `train_max_errors`-th failure in a row (one restart of the child is no news; a check that never finishes is)."""
         c = cfg(self.settings)
         fid = str(fam["id"])
         now = self.clock()
@@ -907,52 +1357,74 @@ class EquityResearcher:
         _update(self.store, fid, lambda r: r.update(infra=record))
         if kind == "window":
             self.store.event("swarm.status", fid, {"action": "elane_train_window", "alert": True, "version": n,
-                                                   "text": "an equity Train result carried a day outside 2016-2024: "
-                                                           "refused whole; E2 judges nothing on it (check the runner)"})
+                                                   "text": f"an equity Train result carried a day outside the "
+                                                           f"{TRAIN_LABEL}: refused whole; E2 judges nothing on it "
+                                                           "(check the runner)"})
+        if kind == "state" and count == c["train_max_errors"]:
+            self.store.event("swarm.status", fid, {"action": "elane_train_state", "alert": True, "version": n,
+                                                   "text": f"the equity Train bar's restart check (STATE) could not "
+                                                           f"finish {count} times in a row: {why[:160]}; the version "
+                                                           "is not scored and cannot pass until it does (check the "
+                                                           "isolated runner's decider)"})
         return {"family": fid, "version": n, "house": kind, "why": why[:200], "retry_in": delay}
 
     def score(self, fam: Mapping[str, Any], version: Mapping[str, Any], *, rescore: bool = False) -> dict[str, Any]:
-        """Run a version over Train at 1.0x and 1.5x (E1's isolated runner) and judge it (the module docstring, WHAT A
-        VERDICT IS). A bar pass goes to the equity review (`review_step`); `rescore` (a pass judged under another equity
-        identity): passed again it stands, else the pass is withdrawn."""
+        """Run a version over the Train spans at 1.0x and 1.5x (E1's isolated runner, one run a span, summed) and judge it
+        (the module docstring, WHAT A VERDICT IS); once Y1-R1 hold, THE RESTART CHECK on the 1.0x runs. A bar pass goes
+        to the equity review (`review_step`); `rescore` (a pass judged under another equity identity): passed again it
+        stands, else the pass is withdrawn."""
         c = cfg(self.settings)
         fid, n = str(fam["id"]), int(version["n"])
-        results: list[dict[str, Any]] = []
+        code, params = str(version.get("code") or ""), dict(version.get("params") or {})
+        runs: dict[float, list[Any]] = {}
         verdict: dict[str, Any] | None = None
         try:
             for k in (eqconfig.K_BASE, eqconfig.K_STRESS):
-                run = self.runner().train(str(version.get("code") or ""), dict(version.get("params") or {}), name=fid,
-                                          start=TRAIN_FIRST, end=TRAIN_LAST, k=float(k))
-                results.append(dict(getattr(run, "result", run) or {}))
+                runs[float(k)] = [self.runner().train(code, params, name=fid, start=first, end=last, k=float(k))
+                                  for first, last in TRAIN_SPANS]
         except Exception as exc:  # noqa: BLE001 - a refusal is the program's; a run failure is judged below
-            why = f"{type(exc).__name__}: {str(exc)[:200]}"
-            if _named(exc, LOAD_REFUSALS):
-                verdict = program_fault("LOAD", str(exc)[:300])
-            else:
-                kind = "run" if _named(exc, RUN_FAILURES) else "store"
-                out = self.house_failure(fam, n, why, kind=kind)
-                if out is not None:
-                    return out
-                verdict = program_fault("RUN", why)
+            verdict, out = self.fault(fam, n, exc)
+            if out is not None:
+                return out
         if verdict is None:
-            base, stress = results[0], results[1]
-            if outside_years(base) or outside_years(stress):
-                return self.house_failure(fam, n, "a Train result carried a day outside 2016-2024", kind="window") or {}
-            statuses = {str(base.get("status")), str(stress.get("status"))}
+            parts = {k: [dict(getattr(run, "result", run) or {}) for run in rs] for k, rs in runs.items()}
+            if any(outside_years(result, spans=[span]) for rs in parts.values() for result, span in zip(rs, TRAIN_SPANS)):
+                return self.house_failure(fam, n, f"a Train result carried a day outside its span of the {TRAIN_LABEL}",
+                                          kind="window") or {}
+            statuses = {str(result.get("status")) for rs in parts.values() for result in rs}
             if "disqualified" in statuses:
-                why = str(base.get("reason") or stress.get("reason") or "its own errors or timeouts")
+                why = next((str(r["reason"]) for rs in parts.values() for r in rs if r.get("reason")),
+                           "its own errors or timeouts")
                 verdict = program_fault("DQ", why)
             elif statuses != {"ok"}:
                 return self.house_failure(fam, n, f"the Train runs ended {', '.join(sorted(statuses))}",
                                           kind="store") or {}
             else:
-                verdict = train_score(base, stress)
-                self.store.put(TRAIN_OK_KEY, self.clock())
-                for k, result in zip((eqconfig.K_BASE, eqconfig.K_STRESS), (base, stress)):
+                verdict = train_score(combine(parts[float(eqconfig.K_BASE)]), combine(parts[float(eqconfig.K_STRESS)]))
+                through = True
+                if verdict["passed"]:
+                    # THE RESTART CHECK: no pass without it. What stops it is the House's (nothing scored, no run
+                    # stored) or, for a child that keeps failing it while other programs are judged, the program's.
                     try:
-                        self.store.add_run(fid, n, result, window="train", stress=float(k), purpose="elane_train")
-                    except Exception:  # noqa: BLE001 - the verdict stands without the stored run
-                        pass
+                        check = self.restart(fid, code, params, runs[float(eqconfig.K_BASE)])
+                    except Exception as exc:  # noqa: BLE001 - judged as a run's failure is
+                        verdict, out = self.fault(fam, n, exc, check=True)
+                        if out is not None:
+                            return out
+                        through = False
+                    else:
+                        verdict = with_state(verdict, check)
+                if through:
+                    # The child judged a program through: what another program's RUN rule reads (never before the
+                    # restart check, or a version's own runs would prove the child sound against its own check's
+                    # failures; never for a check the child failed).
+                    self.store.put(TRAIN_OK_KEY, self.clock())
+                for k, rs in parts.items():
+                    for result in rs:
+                        try:
+                            self.store.add_run(fid, n, result, window="train", stress=float(k), purpose="elane_train")
+                        except Exception:  # noqa: BLE001 - the verdict stands without the stored run
+                            pass
         at = self.store.now()
         ident = identity()
         if rescore:
@@ -1167,9 +1639,11 @@ def versions_of(rec: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(k): dict(v) for k, v in versions.items() if isinstance(v, Mapping) and str(k).isdigit()}
 
 
-__all__ = ["OBJECTIVE", "STATE_KEY", "TRAIN_AT_KEY", "TRAIN_OK_KEY", "TRAIN_FIRST", "TRAIN_LAST", "TRAIN_YEARS", "BAR",
-           "FAILS", "JUDGED", "DEFAULTS", "AGENDA", "GROUPS", "MAP_LABEL", "cfg", "lane_on", "symbols_group", "cell_of",
-           "cell_text", "outside_years", "year_rows", "train_score", "bar_text", "record_of", "e2_family", "passed_version",
-           "identity", "judged", "tried", "pass_current", "may_validate", "compact", "program_fault", "train_map",
+__all__ = ["OBJECTIVE", "STATE_KEY", "TRAIN_AT_KEY", "TRAIN_OK_KEY", "TRAIN_FIRST", "TRAIN_LAST", "TRAIN_SPANS",
+           "RESERVE_YEARS", "TRAIN_YEARS", "TRAIN_LABEL", "BAR", "FAILS", "JUDGED", "DEFAULTS", "AGENDA", "GROUPS",
+           "MAP_LABEL", "cfg", "lane_on", "symbols_group", "cell_of", "cell_text", "outside_years", "combine", "year_rows",
+           "train_score", "bar_text", "record_of", "e2_family", "passed_version", "identity", "judged", "tried",
+           "pass_current", "may_validate", "compact", "program_fault", "KIND", "StateCheckInterrupted", "state_inputs",
+           "restart_check", "with_state", "restart_text", "train_map",
            "closed_cells", "train_map_text", "refuted_rows", "needs_literal", "check_code", "program_of", "contract_text",
            "RESEARCHER_SYSTEM", "version_text", "EquityResearcher", "versions_of", "BETA", "EQUITY", "LANES"]

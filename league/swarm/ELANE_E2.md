@@ -42,17 +42,49 @@ stops births at once; `elane.mode` "off" stops everything E2 does (E1's own roll
      `elane.INPUTS` and `elane.CLASSES`, no implied vol, chain, skew or intraday holding). A born family's spec carries `lane`, `symbols`, `agenda`, the
      card's sha and `e2_route`; a program that passes the static checks is its version 1.
 
-2. **Train** (`league/swarm/elane_train.py`). THE BAR equity-v1 (the design's 6b): at 1.0x and 1.5x the half-spread
-   over the House store's Train window 2016-2024 (never 2025-2026; a result that carries another year is refused whole),
-   through E1's isolated runner: at least 40 closed lots and 20 entry days in each of three or more Train years; no
-   year's daily t below -1.0; net P&L above zero at 1.5x; the 1.5x P&L at least half the 1.0x P&L (which must be above
-   zero). Beside it, never a bar: the same-exposure buy-and-hold, MTE and the drift share.
+2. **Train** (`league/swarm/elane_train.py`). THE TRAIN YEARS (amendment A15) are 2016-19 and 2022-24, seven years. A
+   version's Train run is two runs of E1's isolated runner, one a span (2016-01-04..2019-12-31 and
+   2022-01-03..2024-12-31), each starting flat, summed. 2020-2021 is THE RESERVE, kept for a later accessor: E2 runs no
+   session of it, and a result that carries a row of 2020 or 2021 is refused whole exactly as one of 2025 or 2026 is, so
+   no 2020-2021 P&L reaches a family's record, the Train map, the yield ledger or a generator. The Train map, the
+   briefs and the architect's text say "Train years 2016-19 and 2022-24". (The 2022 run's first decisions look back on
+   2021's bars as history, as a Validation run looks back on 2024's; no session of the reserve is ever traded or
+   scored.)
+
+   THE BAR equity-v1 (the design's 6b, on the Train years), on the summed runs at 1.0x and 1.5x the half-spread: at
+   least 40 closed lots and 20 entry days in each of three or more of the seven Train years; no Train year's daily t
+   below -1.0; net P&L above zero at 1.5x; the 1.5x P&L at least half the 1.0x P&L (which must be above zero); and
+   STATE, the restart check below. Beside it, never a bar: the same-exposure buy-and-hold, MTE and the drift share.
+
+   THE LOOSENING, stated (A15): the Train bar reads 7 years, not 9. The design's 6b read 2016-2024; without 2020-2021
+   a year's t has two years fewer to fall below the floor in, the two P&L rules sum seven years instead of nine, and
+   every pass (and the Train map's pooled t) stands on seven years of evidence. "Active in three years" is three of
+   seven.
+   - STATE, THE RESTART CHECK (A15; `restart_check`), run once the rest of the bar holds: the program is run again
+     with its STATE emptied every 20 sessions and must give the uninterrupted run's intents on at least 99% of the
+     Train sessions, else the version fails with code STATE (the program's fault, not the House's; like DQ, LOAD, RUN
+     and REVIEW it judges a program, never the mechanism, so it refutes nothing). Why: the House's decider child
+     restarts on every deploy and a restart empties a program's memory, so a program whose decisions hang on STATE
+     would trade live other than its replay. A program that keeps nothing passes; one that counts sessions in STATE
+     fails; one that only caches values it can recompute from ctx passes. How: through E1's decider kinds (`kind_load`,
+     "decide", `kind_drop`), per Train span, instance A is loaded once and instance B is loaded fresh every 20
+     sessions; at every decision session both read the same ctx, built by E1's ctx builder from the span's own 1.0x
+     run (its bars, open lots, closed lots, cash, equity and caps), so only memory can make their intents differ.
+     NEVER A SILENT PASS: each answer's `stats.calls` must equal the decides its instance was asked since its load, so
+     an instance the child reloaded is caught whether or not the decider counted a restart (E1's `Decider` reloads its
+     instances into a child that died between two requests without counting one); a check that cannot run or finish
+     (no decider, no call count in the answer, a reloaded or missing instance, a span with no session) is the House's:
+     the version is not scored, cannot pass, and the `train_max_errors`-th (third) failure in a row is an alert
+     (`elane_train_state`). A session an instance was disqualified at matches nothing. What the check does not
+     catch, stated: memory that changes the intents of fewer than 1% of the sessions, and whatever the run's record
+     does not keep for the ctx (the intents the engine refused: `ctx.rejects` is empty for both instances).
    - WHAT A VERDICT IS: only the program's own doing is judged: its runs finished (the bar), it was disqualified by its
-     own errors ("DQ"), the child refused to load it ("LOAD"), or the child failed its run `train_max_errors` times while
-     other programs' Train runs completed ("RUN"). A failure of the House's (no equity store yet, the store being
-     rewritten, a decider child that could not start, "no_data", a result outside Train) scores nothing, spends no
-     budget and asks no model: the family backs off (doubling, at most six hours) and is tried again; a result outside
-     Train is also an alert.
+     own errors ("DQ"), the child refused to load it ("LOAD"), the child failed its run (or its restart check's
+     decides) `train_max_errors` times while other programs' Train judgments completed ("RUN"), or its intents changed
+     when its STATE was emptied ("STATE"). A failure of the House's (no equity store yet, the store being rewritten, a
+     decider child that could not start, a restart check that could not run or finish, "no_data", a result outside the
+     Train years) scores nothing, spends no budget and asks no model: the family backs off (doubling, at most six
+     hours) and is tried again; a result outside the Train years is also an alert.
    - THE RESEARCHER (`EquityResearcher`, minimal): each round gives a few families one step: re-score a stale pass,
      review a bar pass, score the newest version, or ask the family's birth route for its first program or a revision
      (the brief holds the card, the agenda prior, the bar and the family's own Train versions and review reasons only),
@@ -62,8 +94,8 @@ stops births at once; `elane.mode` "off" stops everything E2 does (E1's own roll
      words) when the bar judged a version (Y1, Y2, P1 or R1), else STALLED (no graveyard row, no cell count). A `stop`
      before any judged version is not accepted.
    - THE IDENTITY: each verdict carries the equity identity (E1's `evaluator.equity_identity`) it was judged under. A
-     pass judged under another identity whose version has had no Validation try is Train-scored again before E1 may
-     validate it (kept or withdrawn). E1's adoption clears `best_version` and the review state; the round restores both
+     pass judged under another identity whose version has had no Validation try is Train-scored again, its restart
+     check with it, before E1 may validate it (kept or withdrawn). E1's adoption clears `best_version` and the review state; the round restores both
      for a pass that stands (`upkeep`).
    - THE EQUITY TRAIN MAP: lane x agenda x universe group, with births, Train passes (the best passing pooled t),
      refutations (each with a judged version), stalls, and CLOSED cells (`refuted_cell_cap` refutations, no pass).
@@ -89,7 +121,9 @@ stops births at once; `elane.mode` "off" stops everything E2 does (E1's own roll
    (architect.py: the digest, `graves`, `unseen`, `graveyard_ids`; researcher.py: the `graveyard` tool; game.py's
    `visible_graveyard` by patch 4, for the diagnostician). The test is invariance: two stores that differ only in what
    happened after Train give the same equity request, researcher brief, route choice, Train map and options graveyard
-   reads (league/tests/test_elane_e2_seal.py).
+   reads (league/tests/test_elane_e2_seal.py). THE RESERVE (A15) is tested the same way: two markets that differ only
+   in 2020-2021 give every E2 record, stored run, map, ledger and generator read byte for byte the same, none holds a
+   figure or a row of those years, and a runner that leaks a 2020 row is refused whole.
 
 5. **Yield per dollar** (`league/swarm/elane_yield.py`). One ledger row a model route ("sail:<profile>",
    "openai:<model>", "claude:<role>"): requests, answers, failures, dollars (births and research), births; the Train
@@ -109,14 +143,14 @@ stops births at once; `elane.mode` "off" stops everything E2 does (E1's own roll
 | file | what |
 |---|---|
 | `league/swarm/elane_births.py` | the switch, THE EQUITY QUOTA, the request's blocks, the equity pass and its admission |
-| `league/swarm/elane_train.py` | equity-v1, what a verdict is, the record, the identity, `may_validate`, the Train map and graveyard, the agenda, the equity researcher |
+| `league/swarm/elane_train.py` | the Train years and the reserve, equity-v1 with its restart check (STATE), what a verdict is, the record, the identity, `may_validate`, the Train map and graveyard, the agenda, the equity researcher |
 | `league/swarm/elane_review.py` | the equity review: the level rule, the paid review and audit's rubric and grounding, the record E1's look reads |
 | `league/swarm/elane_yield.py` | the route ledger, the operator's report, THE ROUTE CHOICE, one route a question |
 | `league/swarm/elane_seal.py` | what of an equity family a generator may read; the graveyard filter |
 | `league/swarm/architect.py` | `equity_due`, `equity_pass`; equity rows out of the digest, `graves`, `unseen`, `graveyard_ids` |
 | `league/swarm/researcher.py` | equity rows out of the `graveyard` tool |
-| `league/tests/test_elane_e2_*.py`, `elane_e2_fakes.py` | births, Train, review, seal (D3), yield; E1's names faked as INTERFACES fixes them |
-| `league/tests/test_elane_e2_e1.py` | E2 on E1's own code with the patches (skipped on the skeleton): patch 5 in E1's `equity_round`, E1's `reviewed`, adoption, the lane-scoped graveyard, patches 9 and 10 |
+| `league/tests/test_elane_e2_*.py`, `elane_e2_fakes.py` | births, Train (the seven years, the restart check), review, seal (D3 and the reserve), yield; E1's names faked as INTERFACES fixes them |
+| `league/tests/test_elane_e2_e1.py` | E2 on E1's own code with the patches (skipped on the skeleton): patch 5 in E1's `equity_round`, E1's `reviewed`, adoption, the lane-scoped graveyard, patches 9 and 10; A15 on E1's runner, ctx builder and decider (in process and a real child killed mid-check) |
 
 ## Settings (`elane.e2`; every default in code, the policy.json block in patch 6)
 
@@ -129,12 +163,17 @@ Births: `births_every_seconds`, `births_refill_seconds` (while fewer than `start
 
 ## The patches (league/swarm/ELANE_E2_PATCHES.md)
 
-E2 edits no file E1 owns. Nine patches for the integrator, each an exact unified diff against E1's head c02680d8
-(feat/equity-e1), applied together to a tree of c02680d8 plus this branch's files and tested there (the patch file says
-which modules): the loop's two rounds; the birth quota's window skipping equity births; `game.visible_graveyard`
-dropping equity rows and the learning game's ceiling counting options families; the tournament validating an E2 family
-only where `elane_train.may_validate` allows; the `elane.e2` policy block; the five modules protected (E1's
-`PENDING_GATEWAY`); the operator's yield record in the dlane report; the options population's floor in
+E2 edits no file E1 owns. Nine patches for the integrator, each an exact unified diff against the E1 head the patch
+file names (feat/equity-e1), applied together to a tree of that head plus this branch's files and tested there (the
+patch file says which modules): the loop's two rounds; the birth quota's window skipping equity births;
+`game.visible_graveyard` dropping equity rows and the learning game's ceiling counting options families; the tournament
+validating an E2 family only where `elane_train.may_validate` allows; the `elane.e2` policy block; the five modules
+protected (E1's `PENDING_GATEWAY`); the operator's yield record in the dlane report; the options population's floor in
 `store.retire_gym`; the operator's stall facts and the pre-open population check counting the options lanes only.
 E1 already scopes `dlane._born` by lane, so the release before's patch 2 is gone. The isolated runner is shared by E1's
 tournament and E2's Train round; E1 hooks' decider serializes its calls under one lock.
+
+A15 added no patch and changed no diff: the Train spans and the restart check use what E1 already provides (the
+runner's `train(start, end)` and `decider`, the decider kinds, the ctx builder; the patch file lists them), and the
+restart check's instances live in the swarm's own decider child under keys of their own, dropped when it ends. Only
+patch 10's description moved (a version is four Train runs now, so E2's runs an hour doubled).

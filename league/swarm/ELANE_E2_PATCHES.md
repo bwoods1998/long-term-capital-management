@@ -24,7 +24,36 @@ test_swarm_gate_*, test_gate_contract. Apply them with `git apply` in the order 
 | 7 | `league/ci.py`, `league/tests/test_ci.py` | money (E1) | the five E2 modules in `PENDING_GATEWAY` (so in `FORBIDDEN`), and the test's pin | E2's bar, quota, route rule, seal and review are editable by a merge route |
 | 8 | `league/ops/dlane_report.py` | ops (E1) | the operator's yield-per-dollar record (`elane_yield.report`) | the record exists in the store but no report prints it |
 | 9 | `league/swarm/store.py` | swarm (E1) | `retire_gym`'s population floor counts the options families only | with E2's families alive (up to 24 in research, passes waiting), the options floor never binds and the diagnostician can retire the options population toward zero |
-| 10 | `league/ops/stall.py`, `league/ops/preopen.py` | ops (E1) | the owner's alarms count the options lanes only: births (a `swarm.born` with an equity lane), the living population, the Gym runs (E2's Train runs on the House), the dry-births tally, and the pre-open population check | E2's births every two hours hide a dead options architect for the 12 h window, its alive families hide a population under its floor, and its Train runs (up to ~36 an hour) hide a stalled Gym |
+| 10 | `league/ops/stall.py`, `league/ops/preopen.py` | ops (E1) | the owner's alarms count the options lanes only: births (a `swarm.born` with an equity lane), the living population, the Gym runs (E2's Train runs on the House), the dry-births tally, and the pre-open population check | E2's births every two hours hide a dead options architect for the 12 h window, its alive families hide a population under its floor, and its Train runs (up to ~72 an hour since A15: two spans at two stresses a version) hide a stalled Gym |
+
+## A15 (the reserve and the restart check): no patch added, no diff changed
+
+Amendment A15 (Train on 2016-19 and 2022-24 only; the Train bar's STATE restart check) is inside E2's own files. For the
+integrator:
+
+- NO NEW PATCH. Everything the restart check needs, E1 already provides (read at E1's head 4baf7c10): the isolated
+  runner's `decider` and its `Run` (the result with the `store.Bars` it ran on), the decider kinds `kind_load`,
+  `kind(..., "decide", ...)` and `kind_drop`, the child's decide answer (`intents`, `stats.calls`,
+  `stats.disqualified`, `missing`, `error`), `ctx.inputs_from_bars`, `ctx.lot_row` and `ctx.closed_row`. The list is
+  under "What E2 reads of E1" below.
+- NO DIFF CHANGED. Patches 1 and 3-10 are as they were (A15 changes no signature a patch calls: patch 1's
+  `EquityResearcher(store, router, settings, root=, clock=)`, patch 5's `may_validate`, patch 8's `STATE_KEY`; patch
+  6's `elane.e2` block gains no key: `state_every` and `state_match` are rules in `elane_train.BAR`, not settings; patch
+  7 protects the same five modules). All nine diffs still pass `git apply --check` on E1's head 4baf7c10 (its
+  later edits of tournament.py, policy.json and dlane_report.py sit clear of the hunks); regenerate them as before if
+  E1 moves again.
+- ONE DESCRIPTION CHANGED, patch 10's: a version's Train run is now four runs (two spans at two stresses), so E2's Train
+  runs on the House are up to ~72 an hour, not ~36. The diff is the same (it counts the options lanes only).
+- IF A HOOK IS MISSING, E2 FAILS SAFE with no patch: a runner without `decider`, a decider without the kinds, or a
+  decide answer without `stats.calls` makes the restart check the House's failure (the version is not scored and
+  cannot pass; the third failure in a row raises the `elane_train_state` alert), never a pass.
+- NOT NEEDED, ONLY NOTED: E1's `Decider._ask` reloads a kind's instances into a child that died between two requests
+  without counting it in `restarts` (it counts only a request that failed). E2 does not rely on `restarts` for that
+  case: it reads each instance's `stats.calls` (league/tests/test_elane_e2_e1.py kills a real child mid-check).
+- Checked on a tree of E1's 4baf7c10 plus the nine diffs plus this branch's files: test_elane_e2_* (with
+  test_elane_e2_e1: A15 on E1's real runner, ctx builder and decider), test_researcher, test_dlane*, test_ci,
+  test_elane, test_elane_gate, test_equity_e2e, test_swarm_loop, test_loop_joints, test_ops_stall and
+  test_swarm_settings_policy pass.
 
 ## Patch 5 in words
 
@@ -419,3 +448,15 @@ index d6b054e8..67e3b833 100644
 - `evaluator.equity_identity` (each E2 verdict's stamp) and `evaluator.adopt_equity` (which clears `best_version` and
   `review`: E2's round restores both for a pass that stands).
 - The isolated runner is shared by E1's tournament and E2's Train round: E1 hooks' `decider.kind` holds `self.lock`.
+- A15, the Train spans: `Isolated.train(code, params, name=, start=, end=, k=)` cut to each span, each run starting flat
+  (a fresh runner and sleeve a call), its result's `by_year`, `daily`, `trades`, `lots`, `entry_days`, `actions`,
+  `start` and `end` (every dated row is held to the span), `summary` (trades, days, days_traded, pnl, fees, dividends,
+  mean_pnl_daily, t_daily, win_rate, exposure_mean, max_drawdown, mean_net_return), `bh.pnl` and `mte` (summed by
+  `elane_train.combine`).
+- A15, the restart check: `Isolated.decider` (the swarm's own child, never the live book's) with `kind_load("equity",
+  key, {code, params, name, timeout, max_errors})`, `kind("equity", "decide", {jobs: [{key, inputs}]})`,
+  `kind_drop`, `restarts`; the decide answer's per-key `intents`, `stats.calls` and `stats.disqualified`
+  (`EquityRunner.stats`), `missing` and `error`; `Run.bars` (`n`, `first`, `days`, `raw`) and the result's `needs`,
+  `params`, `capital`, `lots`, `trades` and `daily`; `ctx.inputs_from_bars`, `ctx.lot_row`, `ctx.closed_row`,
+  `program.parse_needs`, `store.from_ordinal`, `config.POSITION_SHARE`, `class_of`, `SLEEVE_USD`. E2's instances are
+  keyed "e2-state:<family>:<span>:<a|bN>" and dropped when the check ends, whatever ends it.

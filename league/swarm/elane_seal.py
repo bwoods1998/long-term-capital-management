@@ -18,9 +18,14 @@ and the diagnostician are generators too, of the options lanes. This module is t
   `graveyard` tool). The equity births' own rebirth index (league/swarm/elane_births.py `rebirth_index`) excludes
   every equity family but those E2 refuted on Train. The reader this release may not edit (league/swarm/game.py
   `visible_graveyard`, which the strategist and the diagnostician read) has its patch in ELANE_E2_PATCHES.md (4).
+- THE RESERVE (A15): 2020-2021 is not Train for E2. E2 runs programs over the Train spans 2016-2019 and 2022-2024
+  only (league/swarm/elane_train.py `TRAIN_SPANS`), and a result carrying a row of 2020 or 2021 is refused whole as
+  one of 2025 or 2026 is (`elane_train.outside_years`), so no 2020-2021 figure or P&L reaches a family's record, the
+  Train map, the yield ledger or any generator.
 - INVARIANCE IS THE TEST. Two stores that differ only in what happened to share programs after Train (a Validation
   try passed or failed, a look passed or failed, a band, a retirement after the look, a look row, a graveyard row with
-  an outcome lesson) give the equity request, the researcher's brief and the route choice byte for byte the same
+  an outcome lesson) give the equity request, the researcher's brief and the route choice byte for byte the same; two
+  markets that differ only in 2020-2021 give every E2 record and every generator's read byte for byte the same
   (league/tests/test_elane_e2_seal.py).
 
 Why E2 cares beyond the rule: a generator that sees which programs passed the sealed look learns the holdout, and
