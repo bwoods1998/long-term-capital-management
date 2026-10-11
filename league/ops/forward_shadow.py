@@ -45,8 +45,10 @@ and that night every active program's whole history is written again under the n
 are never read as the current series); `forward_twins.begin`; `controls`; `finals`; `due()` in order until the child
 seconds spent reach `cpu_seconds_night` or the clock is within 300 s of the next session's 09:00 ET (the rest are
 `stale`: a `budget_hit` event, once a night); `forward_twins.on_run` after each `write`; THE RETRY;
-`forward_twins.finish`; one `fwd_runs` row (`programs` = the runs completed; `sessions` = the run sessions they
-recomputed; `seconds` = the child seconds spent). Each league/ops/forward_twins.py call sits in its own try/except: a
+`forward_twins.finish`; one `fwd_runs` row (`programs` = the programs whose run completed THAT NIGHT, whichever start
+of the job ran them: what the registry's suspect rule reads beside `run_failed`, which is attributed the same way;
+`sessions`, `errors`, `stale` and `seconds` are this start's own: the run sessions it recomputed, what it left, the
+child seconds it spent; the receipt's `programs` is this start's too). Each league/ops/forward_twins.py call sits in its own try/except: a
 twins failure never loses a shadow day; so do the registry's sync, the controls and the finals, each named in the
 receipt when it failed.
 
@@ -795,12 +797,13 @@ class Shadow:
                                   "symbol": _symbol_of(exc, _symbols(program))})
         self._commit()
 
-    def _completed(self, but: int) -> int:
-        """How many OTHER programs' runs completed tonight: those with a row for the night under tonight's engine id
-        (a control's row has no bars hash and is not a run), whichever start of the job wrote it."""
+    def _completed(self, but: int | None = None) -> int:
+        """How many programs' runs completed tonight (those of every pid but `but` when given): the pids with a row
+        for the night under tonight's engine id (a control's row has no bars hash and is not a run), whichever start
+        of the job wrote it."""
         return int(self.db.execute(
-            "SELECT COUNT(DISTINCT pid) FROM fwd_days WHERE day=? AND engine=? AND pid<>? AND bars IS NOT NULL",
-            (self.night_day, self.engine, int(but))).fetchone()[0])
+            "SELECT COUNT(DISTINCT pid) FROM fwd_days WHERE day=? AND engine=? AND pid IS NOT ? AND bars IS NOT NULL",
+            (self.night_day, self.engine, None if but is None else int(but))).fetchone()[0])
 
     def _deadline(self, now: float) -> float:
         """The epoch after which no program is started: `OPEN_MARGIN_SECONDS` before the next session's 09:00 ET."""
@@ -936,7 +939,7 @@ class Shadow:
             self.db.execute(
                 "INSERT INTO fwd_runs(job, through, engine, started, finished, seconds, programs, sessions, errors, "
                 "stale, budget_hit, head) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (JOB, self.night_day, engine, started, finished, round(self.spent, 3), int(tally["programs"]),
+                (JOB, self.night_day, engine, started, finished, round(self.spent, 3), self._completed(),
                  int(tally["sessions"]), int(tally["errors"]), int(stale), 1 if stale else 0, head))
         if isinstance(synced, Mapping) and "error" not in synced:
             synced = {**{k: synced.get(k) for k in ("registered", "controls", "tagged", "stopped", "suspect")},

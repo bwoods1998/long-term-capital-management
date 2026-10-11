@@ -1254,6 +1254,11 @@ class WhoseFailure(Case):
         self.assertEqual((receipt["programs"], receipt["errors"], receipt["retried"]), (0, 1, 1))
         (event,) = self.events("run_failed", bad)
         self.assertEqual(event["payload"]["completed"], 1)     # the program, never the control's rows
+        # The night's one row says the same: the programs whose run completed THAT NIGHT (what the registry's suspect
+        # rule reads beside the event), though this start of the job completed none itself.
+        (row,) = [dict(r) for r in self.db.execute("SELECT * FROM fwd_runs").fetchall()]
+        self.assertEqual((row["through"], row["programs"], row["sessions"], row["errors"]),
+                         (FWD[3].isoformat(), 1, 0, 1))
 
     def test_a_controls_rows_are_nobodys_completed_run(self):
         bad = register(self.db, "flip@1", FLIPPER, first_close=BEFORE)
