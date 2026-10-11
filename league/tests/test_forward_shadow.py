@@ -1136,6 +1136,31 @@ class Finals(Case):
         self.assertEqual(self.night(FWD[21])["finals"], 0)
         self.assertEqual([(c["n"], c["final"]) for c in self.checks(pid)], [(20, 0)])
 
+    def test_one_stopped_by_a_cap_on_the_grid_gets_its_grid_checkpoint_not_a_final_one(self):
+        """The review's finding, on the registry's real stop rules: the cap stops a program the night its cap-th day
+        is stored, a night before D4's lag would have written that day's checkpoint, and the shipped caps are grid
+        counts (250 for a Train failer, 500 for the rest). Its last pre-registered checkpoint was flagged off-grid."""
+        settings = {"elane": {"forward": {"mode": "record", "stop_fail_after_sessions": 20, "stop_after_sessions": 20}}}
+        self.assertIn(20, forward_db.CHECKPOINTS)
+        self.assertEqual(sorted({forward_db.DEFAULTS["stop_fail_after_sessions"], forward_db.DEFAULTS["stop_after_sessions"]}
+                                - set(forward_shadow._grid(2000))), [], "the shipped caps are grid counts")
+        pid = register(self.db, "flip@1", FLIPPER, first_close=BEFORE, reason="train_fail")
+        self.on_sync = lambda db: forward_register._stops(db, {"stopped": 0, "suspect": 0}, now=self.t, settings=settings)
+        for through in FWD[:20]:
+            self.night(through, settings=settings)
+        self.assertEqual((len(self.rows(pid)), self.checks(pid)), (20, []), "day 20 is stored; its checkpoint lags a night")
+        receipt = self.night(FWD[20], settings=settings)       # the night's own sync stops it at its cap
+        self.assertEqual(forward_db.tags(self.db, pid)["stopped"][0]["value"], f"cap:{FWD[19].isoformat()}")
+        self.assertEqual((receipt["finals"], receipt["programs"], len(self.rows(pid))), (1, 0, 20))
+        (check,) = self.checks(pid)
+        self.assertEqual((check["n"], check["final"], check["day"]), (20, 0, FWD[19].isoformat()),
+                         "the grid's checkpoint, on the grid")
+        from league.ops import forward_report
+
+        counts = forward_report._checkpoints(self.db)
+        self.assertEqual((counts["20"], counts["final"]), (1, 0))
+        self.assertEqual(self.night(FWD[21], settings=settings)["finals"], 0)
+
     def test_a_resumed_program_is_run_again_and_has_no_final(self):
         pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
         self.night(FWD[4])

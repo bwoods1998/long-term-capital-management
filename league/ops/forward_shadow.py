@@ -41,7 +41,9 @@ has n counted days and the n-th is before the store's last day (so its morning a
 MADE UP, below). Over the first n counted days: `t_r` = mean(r) / sd(r, ddof 1) * sqrt(n) (None when sd < 1e-12),
 `sum_r`, `sum_r15`, `t_x` the same t of x, `mean_w`, `p_x = forward_stats.p_one_sided(t_x, n)` (None when `t_x` is
 None). No verdict, no threshold. A FINAL checkpoint (`final` 1, n = its counted days, written once, when n >= 2 and
-no row (pid, n) exists) is written for a program stopped off the grid, so no program leaves the record by failing.
+no row (pid, n) exists) is written for a program stopped off the grid, so no program leaves the record by failing; one
+stopped with a grid count of counted days and no row for it yet (its session cap, a night ahead of the lag) gets that
+grid row, `final` 0 (`finals`).
 THE CHECKPOINT OF RECORD for (pid, n) is the row written first, whatever engine later recomputes it. Sums and means
 use `math.fsum`.
 
@@ -823,9 +825,13 @@ class Shadow:
         """The FINAL checkpoint (D4) of each stopped pid that has none; how many were written.
 
         Over the pid's counted days under the newest engine id it has rows for (a stopped program is not written
-        again when the label moves): `final` 1, n = those days, when n >= 2, the last of them is before the store's
-        last day (its morning audit has run) and no row (pid, n) exists under any engine (a program stopped ON the
-        grid already has its row)."""
+        again when the label moves): n = those days, when n >= 2, the last of them is before the store's last day
+        (its morning audit has run) and no row (pid, n) exists under any engine (a program stopped ON the grid, a
+        night after its checkpoint, already has its row). `final` is 1 OFF the grid and 0 ON it (the review's fix): a
+        program stopped by its session cap stops the night its last day is stored, one night before D4's lag would
+        have written that day's checkpoint, and the shipped caps are grid counts (250 and 500). Its last
+        pre-registered checkpoint is written here, as the grid row it is: a rule that reads the grid by `final` 0
+        finds the checkpoint of every capped program."""
         written = 0
         stopped = [int(row[0]) for row in self.db.execute(
             "SELECT DISTINCT pid FROM fwd_tags WHERE tag='stopped' ORDER BY pid").fetchall()]
@@ -842,7 +848,7 @@ class Shadow:
             if self.db.execute("SELECT 1 FROM fwd_checks WHERE pid=? AND n=?", (pid, n)).fetchone() is not None:
                 continue
             with _transaction(self.db):
-                self._check(pid, counted, engine=int(newest[0]), final=1)
+                self._check(pid, counted, engine=int(newest[0]), final=0 if n in _grid(n) else 1)
             written += 1
         return written
 
