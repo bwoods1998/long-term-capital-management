@@ -584,8 +584,8 @@ receipt is unchanged in the study's directory and in this repository's history.
 | `league/tests/fixtures/xs1_conformance_c.json` | `k_XS` 130 | `k_XS` 138 and nothing else: both by-hand vectors' own floors (1.73 and 2.05) bind above either bar |
 | `test_e4_stubs.VECTORS_SHA256` | 386995d8... | 691f4340... |
 | CI | the pin is the receipt file's | and the three vector files' bar is the pinned receipt's (`test_xs_screen.TheCommittedPin.test_the_committed_vectors_run_at_the_pinned_bar`) |
-| the docstrings of `league/xs/screen.py` and `league/xs/placebo.py` | "the study's file, byte for byte" | what the receipt and the vectors now are. No statement of either module changed |
-| the xs identity | 0493e206... | 6c4cfa28... (two evidence modules' docstrings; no panel band exists under either) |
+| the docstrings of `league/xs/screen.py` and `league/xs/placebo.py`, and `screen.RECEIPT_KEYS`' comment | "the study's file, byte for byte"; the receipt's two extra keys | what the receipt and the vectors now are; its third extra key, `house_bar`. No statement of either module changed |
+| the xs identity | 0493e206... (this branch's base) | 2f0083bc... on this branch's tree (those words of two evidence modules; a merge with another change under `league/xs` gives another value). No panel band exists under either |
 
 **What did not move.** The options execution fingerprint, the equity identity and the money digest (main's, on
 both Pythons); no line of code that judges, sizes or trades; the four rules of A22.

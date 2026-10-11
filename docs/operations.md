@@ -205,8 +205,8 @@ per program:
     The pin: `receipt_sha256`, `c_XS` and the sentence. The conformance vectors: computed again at 1.38 by the
     study's own vector builder (the smallest planted drift that passes, and the t between the screen's bar and the
     own floor, are other worlds at another bar), the inputs file made again from them, and the two by-hand vectors
-    derived again (their own floors bind above either bar). The xs identity (0493e206... to 6c4cfa28...: two
-    docstrings of `league/xs`; no panel band exists under either).
+    derived again (their own floors bind above either bar). The xs identity (the words of two evidence modules of
+    `league/xs` about the receipt and the vectors; no statement of either changed, and no panel band exists).
   - **What did not move.** No line that judges, sizes or trades. The options execution fingerprint, the equity
     identity and the money digest are main's. A22's four rules, below, are unchanged.
   - **The cost: about two points of power at +10% a year.** The two receipts' own rows, `power.<archetype>` at

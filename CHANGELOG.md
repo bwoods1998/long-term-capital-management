@@ -106,7 +106,7 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   grace is three hours (with six it could hold the one ops child past a pre-open). STATED, NOT CHANGED: the send
   after a window loss (above); every budget of the lane on the box is an estimate until its first receipts.
 - **The receipt at the captain's bar (A23; Oct 11; nothing deployed; the three ids are main's on both Pythons, the
-  xs identity moves 0493e206... to 6c4cfa28... and no panel band exists under either).** THE HOUSE RUNS XS1 AT
+  xs identity moves and no panel band exists under it).** THE HOUSE RUNS XS1 AT
   c_XS 1.38, NOT THE REGISTERED 1.30. WHY: 1.38 is the registered rule's own answer once the finite-pool bias the
   study measured is added to every real-signal cell (the registered receipt's
   `cost_of_rule.c_XS_with_finite_pool_bias`), and a known bias left out of a bar is a loosened rule. WHAT MOVED:

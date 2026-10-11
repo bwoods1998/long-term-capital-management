@@ -130,7 +130,8 @@ RECEIPT_NAME = "equity_screen_xs_1"
 RECEIPT_PATH = "docs/benchmarks/equity_screen_xs_1.json"
 CONTRACT = "C-XS-1"
 #: The keys a receipt must carry (the pre-registration's 10.1); the loader refuses a receipt that lacks one, and
-#: lets a receipt carry more (the adopted one adds "eligibility" and "beside_calibrated_reading").
+#: lets a receipt carry more (the study's adds "eligibility" and "beside_calibrated_reading"; the one rebuilt at the
+#: captain's bar adds "house_bar" beside them: what it is, the registered bar and receipt, how it was built).
 RECEIPT_KEYS = ("name", "screen", "study", "rule", "contract", "fp_cap", "owner_wall", "c_XS", "c_margin",
                 "alpha_plac", "placebo_draws", "stratum", "residual", "precheck", "look", "floor", "windows", "lineage",
                 "R3_retry_permitted", "labels", "flags", "screen_flags", "ladder", "fp_zero_edge", "fp_zero_edge_B",

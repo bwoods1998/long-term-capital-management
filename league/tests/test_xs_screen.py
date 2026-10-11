@@ -699,7 +699,7 @@ class Receipts(unittest.TestCase):
         fake = json.loads(FAKE.read_text(encoding="utf-8"))
         self.assertEqual(set(screen.RECEIPT_KEYS) - set(fake), set())
         self.assertEqual(set(fake) - set(screen.RECEIPT_KEYS), {"eligibility", "beside_calibrated_reading"},
-                         "a receipt may carry more than its keys (the adopted one adds these two)")
+                         "a receipt may carry more than its keys (the study's adds these two)")
         self.assertIn("FAKE", fake["study"])
         self.assertIn("FAKE", fake["note"])
         self.assertNotEqual(fake["name"], screen.RECEIPT_NAME)
