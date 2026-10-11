@@ -303,16 +303,29 @@ class TheLoop(LoopCase):
     def test_the_share_set_back_to_zero_stops_the_births_and_lets_the_born_finish(self):
         # Stated in ELANE_E2.md and docs/operations.md: a zero share stops BIRTHS at once; the families already born
         # finish their Train research, and `elane.e2.usd_day` 0 keeps that from asking a model.
-        fx.e2_family(self.store, "e2-born")
+        fx.e2_family(self.store, "e2-born", code=fx.program())        # a program to Train-score: no model needed
+        fx.e2_family(self.store, "e2-unwritten", symbols=("QQQ",))    # no program yet: its next step asks a model
         names, sw = self.started({"mode": "gate", "birth_share": 0.0, "e2": {"usd_day": 0.0}})
         self.assertNotIn("elane", names, "no equity pass: no birth")
         self.assertFalse(sw.architect.equity_due())
         self.assertIn("elane_train", names, "the family already born still has its Train round")
         out = sw.elane_train.run()
-        self.assertEqual([s.get("skipped") for s in out["steps"]],
-                         ["E2's model dollars for the day are spent (elane.e2.usd_day)"])
+        steps = {s["family"]: s for s in out["steps"]}
+        self.assertEqual(steps["e2-unwritten"].get("skipped"), elane_yield.DAY_SPENT)
+        self.assertEqual(elane_yield.DAY_SPENT, "E2's model dollars for the day are spent (elane.e2.usd_day)")
+        self.assertIsNotNone(steps["e2-born"].get("house"), "no equity store under this root: the House's, a backoff")
         self.assertEqual(self.asked(), [], "with the day line at zero no model is asked")
-        self.assertEqual(self.e2_families(), ["e2-born"])
+        self.assertEqual(self.e2_families(), ["e2-born", "e2-unwritten"])
+        # What is left needs a model E2 may not ask (and a family waiting out its backoff): no round has work, so none
+        # starts and nothing is written (the review's merge-4: an empty round every ten minutes before).
+        self.assertTrue(sw.elane_train.idle())
+        self.store.put(elane_train.TRAIN_AT_KEY, 0)
+        events = self.footprints()["events"]
+        names.clear()
+        sw.step()
+        self.assertNotIn("elane_train", names)
+        self.assertFalse(sw.elane_train.due())
+        self.assertEqual(self.footprints()["events"], events)
 
     def test_the_switch_on_starts_both_rounds(self):
         # The positive control: the recorder sees E2's rounds once the captain's two keys are set.

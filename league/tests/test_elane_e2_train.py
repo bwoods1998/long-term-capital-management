@@ -507,6 +507,105 @@ class WhatAVerdictIs(ResearchCase):
         self.researcher.run()
         self.assertEqual({self.rec(f["id"])["status"] for f in fams}, {"passed"}, "the store came: judged at last")
 
+    def test_a_standing_failure_of_the_houses_is_an_alert_once_for_the_lanes(self):
+        # The integration review's loop-5: with no equity store (or a child that cannot start) every Train score ended
+        # in a backoff doubling to six hours, births went on until the lanes were full, and nobody was told (only a
+        # restart check that could not finish, or a result outside Train, alerted).
+        def alerts() -> list:
+            return [(e["payload"]["action"], e["payload"].get("kind"), e.get("family")) for e in self.store.events_after(0)
+                    if e["kind"] == "swarm.status" and e["payload"].get("alert")]
+
+        self.runner.answer = lambda code, k: fx.MissingData("no equity store at /state/equity-daily (no VERSION file)")
+        fams = [fx.e2_family(self.store, f"fam-{i}", code=fx.program(share=0.5 + 0.01 * i),
+                             mechanism=f"Invented mechanism number {i}: holders are paid for overnight index risk.")
+                for i in range(3)]
+        need = elane_train.DEFAULTS["train_max_errors"]
+        for n in range(1, need + 1):
+            self.assertEqual(alerts(), [], f"{n - 1} failures a version are no news")
+            self.clock.advance(elane_train.BACKOFF_MAX)
+            self.researcher.run()
+        told = alerts()
+        self.assertEqual([(a, k) for a, k, _ in told], [("elane_train_house", "store")],
+                         "three families met the same missing store: one alert for the lanes")
+        text = [e["payload"]["text"] for e in self.store.events_after(0) if e["kind"] == "swarm.status"][-1]
+        self.assertIn("the equity lanes' Train is not running", text)
+        self.assertIn("the last equity Train judgment: never", text)
+        for fam in fams:
+            self.assertEqual(self.rec(fam["id"])["versions"], {}, "nothing is scored on the House's failure")
+        # Still standing a round later: no second alert inside the six hours; then one again.
+        self.clock.advance(elane_train.BACKOFF_MAX - 60)
+        self.researcher.run()
+        self.assertEqual(len(alerts()), 1)
+        fx.e2_family(self.store, "fam-late", code=fx.program(share=0.61), symbols=("QQQ",))
+        for _ in range(need):
+            self.clock.advance(elane_train.BACKOFF_MAX)
+            self.researcher.run()
+        self.assertEqual([(a, k) for a, k, _ in alerts()], [("elane_train_house", "store")] * 2)
+        # A child that fails every program's runs (none judged meanwhile) is told the same way, under its own kind.
+        self.runner.answer = lambda code, k: fx.RunFailed("the decider child could not start")
+        fx.e2_family(self.store, "fam-run", code=fx.program(share=0.62), symbols=("IWM",))
+        for _ in range(need):
+            self.clock.advance(elane_train.BACKOFF_MAX)
+            self.researcher.run()
+        self.assertIn(("elane_train_house", "run"), [(a, k) for a, k, _ in alerts()])
+        self.assertEqual(self.rec("fam-run")["versions"], {}, "no other program was judged: never the program's RUN")
+
+    def test_a_round_starts_only_with_work_it_can_do_and_an_empty_one_leaves_no_event(self):
+        # The integration review's merge-4: `idle` was False while ANY family of E2's was alive, so with one family at
+        # Candidate (alive for weeks, nothing left to do) a round ran every ten minutes: 144 empty events and log lines
+        # a day. Same while every researching family waited out a backoff.
+        def events() -> int:
+            return len([e for e in self.store.events_after(0) if e["kind"] == "swarm.elane"])
+
+        fam = fx.e2_family(self.store, "candidate", code=fx.program(share=0.48))
+        self.assertTrue(self.researcher.due())
+        self.researcher.run()
+        self.assertEqual(self.rec(fam["id"])["status"], "passed")
+        self.store.update_family(fam["id"], band="candidate")
+        seen = events()
+        for _ in range(5):
+            self.clock.advance(elane_train.DEFAULTS["train_every_seconds"] + 1)
+            self.assertTrue(self.researcher.idle())
+            self.assertFalse(self.researcher.due(), "a living pass with nothing to do starts no round")
+        self.assertEqual(self.researcher.run()["steps"], [])
+        self.assertEqual(events(), seen, "and a round that found nothing leaves no event")
+        # Work appears: an adoption cleared what E1's look reads (the upkeep's), and the round restores it and says so.
+        self.store.update_family(fam["id"], best_version=None)
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"] + 1)
+        self.assertFalse(self.researcher.idle())
+        self.assertTrue(self.researcher.due())
+        out = self.researcher.run()
+        self.assertEqual(out.get("restored"), [fam["id"]])
+        self.assertEqual(events(), seen + 1)
+        # A family waiting out its backoff is no work either; once it ends, it is.
+        self.runner.answer = lambda code, k: fx.MissingData("no store")
+        waits = fx.e2_family(self.store, "waits", code=fx.program(share=0.47), symbols=("QQQ",))
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"] + 1)
+        self.researcher.run()
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"] + 1)
+        retry = self.researcher.run()["steps"][0]["retry_in"]  # its second failure: twice the round's cadence
+        self.clock.advance(elane_train.DEFAULTS["train_every_seconds"] + 1)
+        self.assertLess(elane_train.DEFAULTS["train_every_seconds"] + 1, retry)
+        self.assertFalse(self.researcher.due(), "inside its backoff")
+        self.clock.advance(retry)
+        self.assertTrue(self.researcher.due())
+        self.assertIsNotNone(self.rec(waits["id"])["infra"])
+
+    def test_a_family_that_needs_a_model_is_no_work_while_e2_may_ask_none(self):
+        settings = fx.settings(usd_day=0.0)
+        researcher = EquityResearcher(self.store, self.router, settings, runner=self.runner, clock=self.clock)
+        unwritten = fx.e2_family(self.store, "unwritten")
+        self.assertTrue(researcher.needs_model(self.store.family(unwritten["id"])))
+        self.assertTrue(researcher.idle())
+        self.assertFalse(researcher.due(), "its next step asks a model, and the day's line is spent")
+        self.assertFalse(self.researcher.idle(), "with dollars it is work")
+        scored = fx.e2_family(self.store, "to-score", code=fx.program(share=0.46), symbols=("QQQ",))
+        self.assertFalse(researcher.needs_model(self.store.family(scored["id"])))
+        self.assertFalse(researcher.idle(), "a program to Train-score needs no model")
+        self.assertFalse(researcher.due(), "nothing to do was looked at a moment ago")
+        self.clock.advance(elane_train.IDLE_LOOK_SECONDS + 1)
+        self.assertTrue(researcher.due(), "looked at again after IDLE_LOOK_SECONDS")
+
     def test_the_backoff_grows_and_waits(self):
         fam = fx.e2_family(self.store, "waits", code=fx.program(share=0.38))
         self.runner.answer = lambda code, k: fx.MissingData("no store")

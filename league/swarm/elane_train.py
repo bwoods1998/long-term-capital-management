@@ -161,6 +161,13 @@ TRAIN_AT_KEY = "elane_e2_train_at"
 TRAIN_OK_KEY = "elane_e2_train_ok_at"
 #: The longest backoff after a failure of the House's (no store, a child that could not start, a result outside Train).
 BACKOFF_MAX = 6 * 3600.0
+#: How often `EquityResearcher.due` looks again while no round has work (a look reads the equity families; it writes
+#: nothing), and the kv key of the equity pass's clock (league/swarm/elane_births.py `BIRTHS_AT_KEY`): a pass since the
+#: last look is looked at at once, so a family's first Train round never waits on the look.
+IDLE_LOOK_SECONDS = 30.0
+BIRTHS_AT = "elane_e2_births_at"
+#: The store's kv key of the last alert of a standing House failure, by kind ({"run": epoch, "store": epoch}).
+HOUSE_ALERT_KEY = "elane_e2_house_alert_at"
 #: E1's TRAIN WINDOW (league/equity/config.py WINDOWS["train"]): the outer bounds of the spans below.
 TRAIN_FIRST, TRAIN_LAST = eqconfig.WINDOWS["train"][0], eqconfig.WINDOWS["train"][1]
 #: THE TRAIN SPANS (A15; the module docstring): the only sessions an E2 run has, each span one run starting flat.
@@ -1285,6 +1292,9 @@ class EquityResearcher:
         self._runner = runner
         self.root = root if root is not None else getattr(store, "root", None)
         self.clock = clock
+        #: When `due` last looked and found nothing a round could do, and the equity pass's clock it saw then (in
+        #: memory: no key, no event, no log line).
+        self._looked: tuple[float, Any] = (float("-inf"), None)
 
     # ------------------------------------------------------------------ plumbing
     def runner(self) -> Any:
@@ -1295,26 +1305,62 @@ class EquityResearcher:
         return self._runner
 
     def due(self) -> bool:
-        """The lane is on, `train_every_seconds` passed since the last round, and a family of E2's has a round to be
-        given (`idle`). So while `elane.birth_share` has been zero since the start (no equity pass ever bore a family)
-        no round runs, no key is written and no event is made: with the births off E2 does nothing at all."""
+        """The lane is on, `train_every_seconds` passed since the last round (or since the last look that found nothing
+        to do), and a round has WORK it can do now (`idle`). So while `elane.birth_share` has been zero since the start
+        (no equity pass ever bore a family) no round runs, no key is written and no event is made: with the births off
+        E2 does nothing at all. Nor does a round start while every family of E2's is past its research (a Candidate or
+        a Probe program lives for weeks), waits out a backoff, or needs a model E2 may not ask now: before, one empty
+        round every ten minutes left an event and a log line each (the integration review's merge-4)."""
         if not lane_on(self.settings):
             return False
-        last = _num(self.store.get(TRAIN_AT_KEY)) or 0.0
-        if self.clock() - last < cfg(self.settings)["train_every_seconds"]:
+        now = self.clock()
+        if now - (_num(self.store.get(TRAIN_AT_KEY)) or 0.0) < cfg(self.settings)["train_every_seconds"]:
             return False
         try:
-            return not self.idle()
+            # Nothing to do is looked at again every `IDLE_LOOK_SECONDS`, and at once after an equity pass (a birth).
+            births_at = self.store.get(BIRTHS_AT)
+            if births_at == self._looked[1] and 0.0 <= now - self._looked[0] < IDLE_LOOK_SECONDS:
+                return False
+            if self.idle():
+                self._looked = (now, births_at)
+                return False
+            return True
         except Exception:  # noqa: BLE001 - a store that cannot be read gives no round
             return False
 
     def idle(self) -> bool:
-        """No family of E2's needs a round: none is alive, and none was retired elsewhere with its record still saying
-        it researches (`close_retired`'s work). The captain's seeds are never E2's."""
-        for fam in elane_seal.equity_families(self.store):
-            if e2_family(fam) and (not fam.get("retired_at") or record_of(fam).get("status", "researching") == "researching"):
+        """No round has work it can do now: no E2 family retired elsewhere with its record still saying it researches
+        (`close_retired`'s work), no standing pass whose review record or best version an adoption cleared (`upkeep`'s),
+        and no family of the queue whose step can be taken now (`needs_model`: one that must ask a model is no work
+        while E2 may ask none, `elane_yield.hold`). The captain's seeds are never E2's."""
+        for fam in elane_seal.equity_families(self.store, alive=False):
+            if e2_family(fam) and record_of(fam).get("status", "researching") == "researching":
                 return False
-        return True
+        if self.upkeep(dry=True):
+            return False
+        queue = self.queue()
+        if not queue:
+            return True
+        if elane_yield.hold(self.store, self.settings, self.clock()) is None:
+            return False
+        return all(self.needs_model(fam) for fam in queue)
+
+    def needs_model(self, fam: Mapping[str, Any]) -> bool:
+        """Whether a family's next step (`step`) asks a model: a review still to be read, or a program to be written.
+        Re-scoring a stale pass, scoring its newest version and retiring it ask none."""
+        c = cfg(self.settings)
+        fid = str(fam["id"])
+        rec = record_of(fam)
+        if rec.get("status") == "passed":
+            return False
+        pending = rec.get("review") if isinstance(rec.get("review"), Mapping) else None
+        if pending is not None and pending.get("version") is not None:
+            return True
+        latest = self.store.latest_version(fid)
+        versions = versions_of(rec)
+        if latest is not None and str(latest["n"]) not in versions:
+            return False
+        return not (len(versions) >= c["train_budget"] or int(rec.get("attempts") or 0) >= c["train_max_attempts"])
 
     def waiting(self, rec: Mapping[str, Any]) -> bool:
         """Whether a family waits out a backoff: after a failure of the House's (`infra.next_at`), or after a question
@@ -1372,7 +1418,8 @@ class EquityResearcher:
         return [r[2] for r in rows[: cfg(self.settings)["train_per_round"]]]
 
     def run(self) -> dict[str, Any]:
-        """One round: the upkeep of the passes, then a step for each family of the queue; one `swarm.elane` event."""
+        """One round: the upkeep of the passes, then a step for each family of the queue; one `swarm.elane` event when
+        anything was done (a step, a record closed, a pass restored), none for a round that found nothing."""
         self.store.put(TRAIN_AT_KEY, self.clock())
         if not lane_on(self.settings):
             return {"pass": "train", "skipped": "the equity lanes are off (elane.mode)"}
@@ -1389,7 +1436,8 @@ class EquityResearcher:
             out["closed"] = closed
         if kept:
             out["restored"] = kept
-        self.store.event("swarm.elane", None, out)
+        if steps or closed or kept:
+            self.store.event("swarm.elane", None, out)
         return out
 
     def close_retired(self) -> list[str]:
@@ -1402,10 +1450,11 @@ class EquityResearcher:
                 out.append(str(fam["id"]))
         return out
 
-    def upkeep(self) -> list[str]:
+    def upkeep(self, *, dry: bool = False) -> list[str]:
         """THE PASSES KEPT IN FORCE (the module docstring, THE IDENTITY): for each living E2 family whose current pass
         stands, the review record E1's look reads and the family's `best_version` are written again when they are missing
-        (E1's equity adoption clears both). No model is asked and nothing is run."""
+        (E1's equity adoption clears both). No model is asked and nothing is run. `dry`: the families it would write,
+        nothing written (`idle`)."""
         from .gate import run_sha
 
         out = []
@@ -1421,11 +1470,13 @@ class EquityResearcher:
             changed = False
             sha = run_sha(version)
             if kept.get("sha") == sha and not elane_review.holds(fam.get("state"), sha):
-                self.store.set_state(fid, **{elane_review.STATE_REVIEW: dict(kept)})
+                if not dry:
+                    self.store.set_state(fid, **{elane_review.STATE_REVIEW: dict(kept)})
                 changed = True
             if fam.get("best_version") != n:
-                score = (versions_of(rec).get(str(n)) or {}).get("score")
-                self.store.update_family(fid, best_version=n, best_train=score)
+                if not dry:
+                    score = (versions_of(rec).get(str(n)) or {}).get("score")
+                    self.store.update_family(fid, best_version=n, best_train=score)
                 changed = True
             if changed:
                 out.append(fid)
@@ -1583,7 +1634,11 @@ class EquityResearcher:
         None: the caller judges the program RUN (never on the strength of the House's other failures). A result outside
         the Train years ("window") is an alert at once; a restart check that could not run or finish ("state") once,
         when the version has `train_max_errors` of them (one restart of the child is no news; a check that never
-        finishes is), whatever failed in between."""
+        finishes is), whatever failed in between. A STANDING FAILURE OF THE HOUSE'S ("run": the child fails every
+        program's runs; "store": no equity store, a store being rewritten for good) is an alert too, when a version has
+        `train_max_errors` of that kind since it was last judged, and at most once every `BACKOFF_MAX` for the lanes
+        whichever family meets it (`HOUSE_ALERT_KEY`): before, every Train score ended in a backoff doubling to six
+        hours, births went on until the lanes were full, and nobody was told (the integration review's loop-5)."""
         c = cfg(self.settings)
         fid = str(fam["id"])
         now = self.clock()
@@ -1602,8 +1657,15 @@ class EquityResearcher:
             return None
         delay = min(float(c["train_every_seconds"]) * (2 ** min(count - 1, 12)), BACKOFF_MAX)
         tell = kind == "state" and kinds[kind] >= c["train_max_errors"] and kind not in alerted
-        if tell:
+        standing = kind in ("run", "store") and kinds[kind] >= c["train_max_errors"] and kind not in alerted
+        if tell or standing:
             alerted.append(kind)
+        if standing:  # one alert for the lanes, not one a family: every family meets the same missing store
+            said = self.store.get(HOUSE_ALERT_KEY)
+            said = dict(said) if isinstance(said, Mapping) else {}
+            standing = now - (_num(said.get(kind)) or float("-inf")) >= BACKOFF_MAX
+            if standing:
+                self.store.put(HOUSE_ALERT_KEY, {**said, kind: now})
         record = {"version": n, "count": count, "first_at": first, "next_at": now + delay, "kind": kind, "why": why[:240],
                   "streak": streak, "streak_at": since, "kinds": kinds, "alerted": alerted}
         _update(self.store, fid, lambda r: r.update(infra=record))
@@ -1612,6 +1674,18 @@ class EquityResearcher:
                                                    "text": f"an equity Train result carried a day outside the "
                                                            f"{TRAIN_LABEL}: refused whole; E2 judges nothing on it "
                                                            "(check the runner)"})
+        if standing:
+            what = ("the swarm's decider child failed its Train runs" if kind == "run" else
+                    "its Train runs could not start (the equity store under equity-daily is missing, unreadable or "
+                    "being rewritten, or the child gave no result)")
+            last = _num(self.store.get(TRAIN_OK_KEY))
+            self.store.event("swarm.status", fid, {
+                "action": "elane_train_house", "alert": True, "version": n, "kind": kind,
+                "text": f"the equity lanes' Train is not running: {what} {kinds[kind]} times for this version with no "
+                        f"judgment in between ({why[:160]}); no equity program is scored until it does, and the "
+                        f"families born meanwhile wait (the last equity Train judgment: "
+                        f"{'never' if last is None else time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(last))}). "
+                        "Check the equity data job and the swarm's equity-decider.log"})
         if tell:
             self.store.event("swarm.status", fid, {"action": "elane_train_state", "alert": True, "version": n,
                                                    "text": f"the equity Train bar's restart check (STATE) could not "
@@ -1918,7 +1992,7 @@ def versions_of(rec: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(k): dict(v) for k, v in versions.items() if isinstance(v, Mapping) and str(k).isdigit()}
 
 
-__all__ = ["OBJECTIVE", "STATE_KEY", "TRAIN_AT_KEY", "TRAIN_OK_KEY", "TRAIN_FIRST", "TRAIN_LAST", "TRAIN_SPANS",
+__all__ = ["OBJECTIVE", "STATE_KEY", "TRAIN_AT_KEY", "TRAIN_OK_KEY", "HOUSE_ALERT_KEY", "TRAIN_FIRST", "TRAIN_LAST", "TRAIN_SPANS",
            "RESERVE_YEARS", "TRAIN_YEARS", "TRAIN_LABEL", "BAR", "FAILS", "JUDGED", "DEFAULTS", "AGENDA", "GROUPS",
            "MAP_LABEL", "cfg", "lane_on", "symbols_group", "cell_of", "cell_text", "outside_years", "combine", "year_rows",
            "train_score", "bar_text", "record_of", "e2_family", "passed_version", "identity", "judged", "tried",

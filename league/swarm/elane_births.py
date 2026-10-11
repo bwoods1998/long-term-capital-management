@@ -58,7 +58,7 @@ from .elane_train import AGENDA, STATE_KEY
 from .elane_yield import ROLE
 
 #: The store's kv keys: the last equity pass's time and its births and refusals (for the next request).
-BIRTHS_AT_KEY = "elane_e2_births_at"
+BIRTHS_AT_KEY = elane_train.BIRTHS_AT  # "elane_e2_births_at": the Train round's `due` reads it too
 LAST_KEY = "elane_e2_last"
 #: The equity pass's settings (`elane.e2` keys; defaults here, policy.json in ELANE_E2_PATCHES.md) and their bounds.
 DEFAULTS: dict[str, Any] = {"births_every_seconds": 7200, "births_refill_seconds": 1800, "start": 8, "max_alive": 24,
