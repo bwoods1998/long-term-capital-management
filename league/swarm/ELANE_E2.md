@@ -256,8 +256,9 @@ Stopping, from the lightest:
         a guess, and the run's dollars plus, less, times or over it are unknown with it.
      3. MEMORY IN STATE: the first equity a run saw, kept in STATE, passes the static rule; the Train bar's restart
         check judges it (it fails a program whose trades change when STATE is emptied).
-     4. WHAT THE HOUSE'S OWN ANSWERS TELL: `ctx.rejects` and an entry the House cut say something about the
-        sleeve's cash; the pass does not read them.
+     4. WHAT THE HOUSE'S OWN ANSWERS TELL: `ctx.rejects`, and whether an entry of constant dollars was filled, cut
+        or skipped, say something about the sleeve's cash (a third lot that exists only when cash was left over); the
+        pass does not read them.
      The two paid readers' rubric (`REVIEW`, "RUN-START DEPENDENCE", and its fact `run`) names the pattern and each
      of these spellings, and ends on the rule itself: a rule whose trading depends on how far the run is ahead or
      behind is refused, whatever its spelling. A reader's failure that cites it binds (a verbatim excerpt, the
