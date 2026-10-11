@@ -483,8 +483,8 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   Train runs, Validations) is reported beside it, never a bar. Counting the equity lanes in those three counts would
   be the owner's change of the pinned rule. The equity lanes' own stall causes are the next bullet; item 7's other
   half, "no owner step waiting", reads theirs like any cause's.
-- **The equity lanes' own alarms (release E2.4, `feat/equity-e24-health`, not deployed: the gateway first, then an
-  owner deploy; `league/ops/elane_health.py`).** On Oct 11 the lanes' first hours went wrong four ways (most scored
+- **The equity lanes' own alarms (release E2.4, deployed 20:25Z Oct 11, the gateway first, then an owner deploy;
+  `league/ops/elane_health.py`).** On Oct 11 the lanes' first hours went wrong four ways (most scored
   versions disqualified by one misreading of the contract, a births pass cut short, another refused whole for symbols
   outside the universe, the lanes starved at their pace) and no alarm fired: the captain found each by hand. The
   `stall` job now judges four equity causes at every run, read-only, and raises them like any cause: standing in
