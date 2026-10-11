@@ -99,8 +99,12 @@ an error. What step 0 fixed for it:
   from `ctx.inputs_from_bars`, `elane_train.state_inputs` or `ctx.inputs_from_fetch`.
 - `fwd_days.bars` (B): the bars hash of the decision a day's orders came from (the Gym's inputs at the close of the
   session before it). NULL on a control's row (a control reads no bar). A `restated` event's payload says whether a
-  bars hash on or before that day moved (`"bars": "moved" | "same"`). About 17 bytes a row on top of the spec's
-  measured 85.
+  bars hash on or before that day moved (`"bars": "moved" | "same"`). PACKAGE B's FINDING: the same cents rounding
+  moves nearly every stored day of every holder past `TOL` on each ex-day (the vendor rescales the whole adjusted
+  history), so `restated` is ONE event a program and cause, not one a day: `day` is the first restated day, the
+  payload counts `days`, `first`, `last`, `moved` and `same`, and `"bars"` is "same" when any restated day has no
+  moved bars behind it (the notable case), else "moved" (the routine ex-day one). The hash is about 17 bytes a row
+  on top of the spec's measured 85.
 - `fwd_twins.shadow_bars`, `live_bars`, `cause` (D): the twin decision's hash, the live decision's (NULL when not
   known), and on a row with `agree` 0 one of `forward_db.CAUSES`: "bars" (both known, they differ), "program" (they
   are equal), "unknown" (the live one is not known). `forward_twins.shadow_bars`, `live_bars` and `cause` are D's

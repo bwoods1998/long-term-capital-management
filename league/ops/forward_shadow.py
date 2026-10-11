@@ -71,10 +71,19 @@ STATED LIMIT: a bar that never comes (a halted stock's session has none) leaves 
 rows from that day on, because `screen.series` refuses a held lot with no price; nothing is tagged meanwhile, so the
 days fill the night it does.
 
-A RESTATED DAY: a stored day of tonight's engine id whose r or w differs from the recompute by more than
-`forward_db.TOL` is a `restated` event; the row stays (the first write stands). It is DATA, never an error: its
-payload says whether the bars hash of a decision on or before that day moved ("bars": "moved" | "same"; a control
-reads no bar: "same").
+A RESTATED RECORD: a stored day of tonight's engine id whose r or w differs from the recompute by more than
+`forward_db.TOL` is RESTATED; its row stays (the first write stands). It is DATA, never an error, and it is ONE
+`restated` event a program and CAUSE, not one a day: the event's `day` is the first restated day and its `once` the
+engine id with the first 8 hex of sha256 over every restated (day, new r, new w), r and w rounded to 9 places, so
+the same restatement seen again the next nights writes nothing and another value on any day is another event. WHY ONE
+A CAUSE (found after the spec, with THE BARS HASH): the vendor rounds adjustment=all prices to cents and rescales the
+whole adjusted history at every dividend and split, so on an ex-day nearly every stored day of every program that
+held the symbol moves past `TOL` at once (measured on a synthetic store rounded to cents: 49 to 61 of 61 stored days
+of a half-sleeve lot, at prices from 51 to 670), which would be one event a stored day a holder an ex-day. The
+payload counts them: `days`, `first`, `last`, and by cause `moved` (a day with the bars hash of a decision on or
+before it moved: the store's history was restated, the routine ex-day case) and `same` (the day's own figures moved
+with every decision's inputs as they were: a correction of that day's own mark, or a recompute that is not
+deterministic); `"bars"` is "same" when any day is, else "moved" (a control reads no bar: "same").
 
 The receipt: {through, engine, programs, sessions, new_days, restated, checks, stale, errors, data_failed,
 disqualified, retried, budget_hit, seconds, controls, twins, head, finals, register}: counts and verdicts, never a
@@ -495,9 +504,9 @@ class Shadow:
     # ---------------------------------------------------------------------------------------------------- the rows
     def write(self, run: ShadowRun, result15: Mapping[str, Any]) -> dict[str, int]:
         """One transaction a program: {"new_days", "restated", "checks"}. New days are inserted under tonight's engine
-        id, each with its decision's bars hash; a stored day of that id whose r or w differs by more than
-        `forward_db.TOL` is a `restated` event (the row stays; once a (pid, day) and value: `once` = the engine id and
-        the first 8 hex of sha256 of the new r and w rounded to 9 places); the due checkpoints (D4); a k 1.0 result
+        id, each with its decision's bars hash; the stored days of that id whose r or w differs by more than
+        `forward_db.TOL` are one `restated` event (the rows stay; once a program and cause: A RESTATED RECORD, the
+        module docstring; "restated" is 1 when the event is new tonight); the due checkpoints (D4); a k 1.0 result
         of status "disqualified" is one `run_disqualified` event (once a (pid, night))."""
         program, bars, base = run.program, run.bars, run.series
         status = str(run.result.get("status"))
@@ -524,7 +533,7 @@ class Shadow:
 
     def _put(self, pid: int, days: Sequence[str], *, r: Any, w: Any, b: Any, r15: Any, r0: Any, entries: Sequence[int],
              exits: Any, status: str, bars_at: Callable[[int], str] | None) -> dict[str, int]:
-        """The rows of one pid in one transaction (`write`, `controls`): the new days, the restated events, the due
+        """The rows of one pid in one transaction (`write`, `controls`): the new days, the restated event, the due
         checkpoints, the disqualified event. `bars_at` None: a control (its rows' `bars` are NULL)."""
         engine, now = self.engine, self.clock()
         cols = {"r": [float(v) for v in r], "w": [float(v) for v in w], "b": [float(v) for v in b],
@@ -536,18 +545,8 @@ class Shadow:
             raise ValueError(f"pid {pid}: a series holds a value that is not finite")
         stored = {str(row["day"]): row for row in self.db.execute(
             "SELECT day, r, w, bars FROM fwd_days WHERE pid=? AND engine=?", (pid, engine)).fetchall()}
-        scan = {"upto": -1, "moved": None}
-
-        def moved(i: int) -> bool:
-            """Whether the bars hash of a decision on or before run session i differs from the stored one."""
-            while bars_at is not None and scan["moved"] is None and scan["upto"] < i:
-                scan["upto"] += 1
-                old = stored.get(days[scan["upto"]])
-                if old is not None and old["bars"] is not None and str(old["bars"]) != bars_at(scan["upto"]):
-                    scan["moved"] = scan["upto"]
-            return scan["moved"] is not None and scan["moved"] <= i
-
         new = restated = 0
+        differ: list[int] = []
         with _transaction(self.db):
             for i, day in enumerate(days):
                 old = stored.get(day)
@@ -561,13 +560,23 @@ class Shadow:
                     new += 1
                 elif abs(float(old["r"]) - cols["r"][i]) > forward_db.TOL or \
                         abs(float(old["w"]) - cols["w"][i]) > forward_db.TOL:
-                    value = hashlib.sha256(f"{round(cols['r'][i], 9) + 0.0:.9f}|{round(cols['w'][i], 9) + 0.0:.9f}"
-                                           .encode()).hexdigest()[:8]     # + 0.0: a negative zero is zero
-                    seq = forward_db.event(
-                        self.db, "restated", pid=pid, day=day, at=now, once=f"{engine}:{value}",
-                        payload={"why": "the night's recompute differs from the stored row: the row stays",
-                                 "engine": engine, "night": self.night_day, "bars": "moved" if moved(i) else "same"})
-                    restated += 1 if seq else 0
+                    differ.append(i)
+            if differ:
+                # The first run session whose decision's bars hash is not the stored one, up to the last restated day.
+                first_moved = None if bars_at is None else next(
+                    (i for i in range(differ[-1] + 1) if days[i] in stored and stored[days[i]]["bars"] is not None
+                     and str(stored[days[i]]["bars"]) != bars_at(i)), None)
+                moved = sum(1 for i in differ if first_moved is not None and first_moved <= i)
+                value = hashlib.sha256("\n".join(      # + 0.0: a negative zero is zero
+                    f"{days[i]}|{round(cols['r'][i], 9) + 0.0:.9f}|{round(cols['w'][i], 9) + 0.0:.9f}" for i in differ
+                ).encode()).hexdigest()[:8]
+                seq = forward_db.event(
+                    self.db, "restated", pid=pid, day=days[differ[0]], at=now, once=f"{engine}:{value}",
+                    payload={"why": "the night's recompute differs from the stored rows: the rows stay",
+                             "engine": engine, "night": self.night_day, "days": len(differ), "first": days[differ[0]],
+                             "last": days[differ[-1]], "moved": moved, "same": len(differ) - moved,
+                             "bars": "same" if moved < len(differ) else "moved"})
+                restated = 1 if seq else 0
             checks = self._checkpoints(pid, known=len(stored) + new)
             if status == "disqualified":
                 forward_db.event(self.db, "run_disqualified", pid=pid, day=self.night_day, at=now, once="night",

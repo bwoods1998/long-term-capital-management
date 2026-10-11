@@ -70,14 +70,15 @@ def evening(day: dt.date) -> float:
 
 
 def write_night(root: Path, through: dt.date, *, gaps: Mapping[str, Sequence[dt.date]] | None = None,
-                gate: bool = True) -> Path:
-    """The House's store as the daily job left it the evening of `through` (the same synthetic path every night)."""
+                gate: bool = True, dividends: Mapping[str, Sequence[tuple[dt.date, float]]] | None = None) -> Path:
+    """The House's store as the daily job left it the evening of `through` (the same synthetic path every night; a
+    dividend is in its adjusted prices from its ex-day's fetch on)."""
     return synth.synthetic_store(Path(root) / STORE_DIR, symbols=SYMBOLS, start=START, end=END, seed=7, gate=gate,
-                                 as_of=through, gaps=gaps)
+                                 as_of=through, gaps=gaps, dividends=dividends)
 
 
-def perturb(root: Path, symbol: str, day: dt.date, factor: float) -> None:
-    """Rewrite the store with `symbol`'s close of `day` moved (raw and adjusted): a vendor's correction."""
+def rewrite(root: Path, change: Any) -> None:
+    """Write the store again with `change(symbol, arrays, days)` applied to every symbol's columns."""
     store_root = Path(root) / STORE_DIR
     manifest = json.loads((store_root / "manifest.json").read_text())
     with np.load(store_root / "calendar.npz") as cal:
@@ -87,13 +88,32 @@ def perturb(root: Path, symbol: str, day: dt.date, factor: float) -> None:
         with np.load(store_root / "bars" / f"{sym}.npz") as npz:
             arrays = {name: npz[name].copy() for name in npz.files}
         days = [from_ordinal(int(d)) for d in arrays["days"]]
-        if sym == symbol:
-            for column in ("raw_c", "all_c"):
-                arrays[column][days.index(day)] = round(float(arrays[column][days.index(day)]) * factor, 4)
+        change(sym, arrays, days)
         series[sym] = {"days": days, **{name: arrays[name].tolist() for name in arrays if name != "days"}}
     write_store(store_root, calendar=calendar, series=series,
                 classes={s: row["class"] for s, row in manifest["symbols"].items()},
                 fetched_through=dt.date.fromisoformat(manifest["fetched_through"]), source="synthetic", gate=True)
+
+
+def perturb(root: Path, symbol: str, day: dt.date, factor: float) -> None:
+    """Rewrite the store with `symbol`'s close of `day` moved (raw and adjusted): a vendor's correction."""
+    def change(sym: str, arrays: dict[str, Any], days: list[dt.date]) -> None:
+        if sym == symbol:
+            for column in ("raw_c", "all_c"):
+                arrays[column][days.index(day)] = round(float(arrays[column][days.index(day)]) * factor, 4)
+
+    rewrite(root, change)
+
+
+def cents(root: Path) -> None:
+    """Rewrite the store with every price rounded to the cent, as the vendor's adjustment=all series is (THE BARS
+    HASH, league/ops/forward_db.py)."""
+    def change(sym: str, arrays: dict[str, Any], days: list[dt.date]) -> None:
+        for column in arrays:
+            if column.startswith(("raw_", "all_")) and column != "raw_v":
+                arrays[column] = np.round(arrays[column], 2)
+
+    rewrite(root, change)
 
 
 def gated(root: Path) -> EquityStore:
@@ -882,26 +902,52 @@ class Restated(Case):
             receipt = self.shadow(through, write=False).night()
             self.assertEqual(receipt["restated"], 1 if k == 0 else 0, through)
             self.assertEqual(receipt["programs"], 1)           # data, never an error: the night goes on
-        events = self.events("restated", pid)
-        self.assertEqual([(e["day"], e["payload"]["bars"]) for e in events], [(moved, "same")])
-        self.assertEqual(events[0]["payload"]["night"], FWD[5].isoformat())
+        (event,) = self.events("restated", pid)
+        self.assertEqual({k: event["payload"][k] for k in ("days", "first", "last", "moved", "same", "bars", "night")},
+                         {"days": 1, "first": moved, "last": moved, "moved": 0, "same": 1, "bars": "same",
+                          "night": FWD[5].isoformat()})
+        self.assertEqual(event["day"], moved)
         rows = {row["day"]: (row["r"], row["w"], row["at"]) for row in self.rows(pid)}
         self.assertEqual({day: rows[day] for day in stored}, stored)          # the first write stands
-        # A second, different value: a second event for that day. The day after it was stored from the first
-        # correction, so it is restated too, and the decision behind it read another close: its bars moved.
+        # A second, different value: a second event. The day after was stored from the first correction, so it is
+        # restated too, and the decision behind it read another close: its bars moved. One event holds both days.
         write_night(self.root, FWD[8])
         perturb(self.root, "SPY", FWD[4], 1.02)
         receipt = self.shadow(FWD[8], write=False).night()
-        self.assertEqual(receipt["restated"], 2)
+        self.assertEqual(receipt["restated"], 1)
         events = self.events("restated", pid)
-        self.assertEqual(sorted((e["day"], e["payload"]["bars"]) for e in events),
-                         [(moved, "same"), (moved, "same"), (after, "moved")])
-        self.assertEqual(len({e["payload"]["once"] for e in events if e["day"] == moved}), 2)
+        self.assertEqual([e["day"] for e in events], [moved, moved])
+        self.assertEqual({k: events[1]["payload"][k] for k in ("days", "first", "last", "moved", "same", "bars")},
+                         {"days": 2, "first": moved, "last": after, "moved": 1, "same": 1, "bars": "same"})
+        self.assertEqual(len({e["payload"]["once"] for e in events}), 2)
         self.assertEqual(
             {row["day"]: (row["r"], row["w"], row["at"]) for row in self.rows(pid) if row["day"] in stored}, stored)
         for event in events:                                   # a payload holds no figure
             self.assertFalse([v for v in event["payload"].values() if isinstance(v, float)])
         self.assertEqual(self.count("fwd_runs"), 5)
+
+    def test_an_ex_day_under_the_vendors_cents_is_one_event_a_holder_not_one_a_day(self):
+        # THE BARS HASH's fact, on the stored returns: the vendor rounds adjustment=all to cents and rescales the
+        # whole adjusted history at a dividend, so on the ex-day nearly every stored day of a holder moves past TOL.
+        holder = register(self.db, "always@1", ALWAYS, first_close=BEFORE)             # half a sleeve of SPY
+        other = register(self.db, "flip@1", FLIPPER, first_close=BEFORE)               # trades QQQ only
+        dividend = {"SPY": [(FWD[11], 1.5)]}
+        receipts = []
+        for through in FWD[10:14]:                             # the night before, the ex-day, two nights after
+            write_night(self.root, through, dividends=dividend)
+            cents(self.root)
+            receipts.append(self.shadow(through, write=False).night())
+        self.assertEqual([r["restated"] for r in receipts], [0, 1, 0, 0])
+        self.assertEqual([r["programs"] for r in receipts], [2, 2, 2, 2])
+        (event,) = self.events("restated")
+        payload = event["payload"]
+        self.assertEqual((event["pid"], payload["bars"], payload["same"], payload["night"]),
+                         (holder, "moved", 0, FWD[11].isoformat()))
+        self.assertGreaterEqual(payload["days"], 6)            # most of its eleven stored days, in ONE event
+        self.assertEqual(payload["moved"], payload["days"])
+        self.assertLessEqual(FWD[0].isoformat(), payload["first"])
+        self.assertLessEqual(payload["last"], FWD[10].isoformat())
+        self.assertEqual((len(self.rows(holder)), len(self.rows(other))), (14, 14))
 
     def test_a_difference_inside_the_tolerance_is_not_restated(self):
         pid = register(self.db, "always@1", ALWAYS, first_close=BEFORE)
