@@ -297,6 +297,49 @@ class TheLoop(LoopCase):
         self.assertIn("elane", names)
         self.assertIn("elane_train", names)
 
+    def test_one_equity_pass_on_the_real_router_is_born_and_booked(self):
+        # The wiring production runs: the loop's own Architect and EquityResearcher, the real ModelRouter and Provider (a
+        # scripted Sail), E1's real card admission and store. The pass asks ONE question on the first route, bears the
+        # family in its own lane's population, and books its dollars on the route's row and on the Sail research meter.
+        row = fx.proposal("e2-wired", lane="beta", agenda="overnight", symbols=("DIA",), code=fx.program("DIA"))
+        self.sail.script = lambda body: {"text": json.dumps({"families": [row]})}
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        self.assertIn("elane", names)
+        options_before = len(self.store.families(alive=True))
+        out = sw.architect.equity_pass()
+        self.assertEqual(out.get("born"), ["e2-wired"], json.dumps(out, default=str)[:900])
+        self.assertEqual(len(self.asked()), 1, "one question, on one route")
+        self.assertIn("by the share screen S2,", " ".join(json.dumps(self.asked()[0]).split()))
+        fam = self.store.family("e2-wired")
+        self.assertEqual((fam["structure"], fam["spec"]["lane"], fam["spec"]["e2_route"], fam["band"]),
+                         ("etf", "beta", "sail:pro_asap", "gym"))
+        self.assertTrue(elane_train.e2_family(fam))
+        self.assertEqual(len(self.store.families(alive=True)), options_before, "an equity birth takes no options place")
+        born = [e["payload"] for e in self.store.events_after(0, limit=10_000)
+                if e["kind"] == "swarm.born" and e.get("family") == "e2-wired"]
+        self.assertEqual([(b["lane"], b["origin"], b["route"]) for b in born], [("beta", "architect", "sail:pro_asap")])
+        book = elane_yield.ledger(self.store)
+        self.assertEqual((book["routes"]["sail:pro_asap"]["births"], book["routes"]["sail:pro_asap"]["requests"]), (1, 1))
+        spent = book["routes"]["sail:pro_asap"]["usd"]
+        self.assertGreater(spent, 0.0)
+        self.assertAlmostEqual(elane_yield.spent_today(self.store, sw.clock()), spent, places=6)
+        self.assertGreaterEqual(self.store.spent(["sail_model"]), spent, "E2's dollars are Sail research dollars")
+        # E1's tournament leaves it alone until its Train pass and review (patch 5), and its Train round is now due.
+        self.assertFalse(elane_train.may_validate(self.store, fam, elane.next_try(self.store, fam, sw.settings)))
+        self.assertTrue(sw.elane_train.due())
+        # No equity store under this root (E1's data job never ran here), and outside a root House the decider child
+        # refuses to run a program at all: either way the House's failure, a backoff and never a verdict.
+        step = sw.elane_train.run()
+        self.assertEqual(elane_train.record_of(self.store.family("e2-wired")).get("versions"), {}, json.dumps(step)[:600])
+        self.assertEqual([s.get("house") is not None for s in step["steps"]], [True], json.dumps(step)[:600])
+        self.assertEqual(len(self.asked()), 1, "a House failure asks no model")
+        # The operator's record reads it (league/ops/dlane_report.py `equity_yield`).
+        from league.ops import dlane_report
+
+        record = dlane_report.equity_yield(self.store, sw.settings)
+        self.assertEqual(record["routes"]["sail:pro_asap"]["families"], 1, record)
+        self.assertEqual(record["usd_day"], 8.0)
+
 
 if __name__ == "__main__":
     unittest.main()
