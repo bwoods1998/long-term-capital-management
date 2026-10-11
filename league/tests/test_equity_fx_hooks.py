@@ -250,13 +250,60 @@ class TheCover(LiveCase):
             self.reading(live)
             self.reading(live)
         self.assertEqual(sum(1 for _, text in self.alerts if "could not close them" in text), 1, "alerted once")
-        self.assertEqual(len(live.state.get("shares_orders")), 1, "the filled cover is kept until the book has closed it")
+        mark = live.state.get("lots_swallowed")["SPY"]
+        self.assertEqual((mark["lots"], mark["covered"], mark["px"]), ("2", True, "600.0"),
+                         "the mark is kept, with the cover's price, until the book has closed them")
         self.assertEqual(live.state.get("shares"), {"SPY": "-2"})
         self.reading(live)
         self.assertEqual(live.equity.taken, [("SPY", D("2"), D("600.0"))])
         self.assertEqual(live.state.get("shares"), {})
-        self.assertEqual(live.state.get("shares_orders"), {})
+        self.assertEqual((live.state.get("shares_orders"), live.state.get("lots_swallowed")), ({}, {}))
         self.assertEqual(sum(1 for _, text in self.alerts if "the lots are closed in the equity book" in text), 1)
+
+    def test_a_short_closed_outside_the_house_still_closes_the_lot_it_swallowed(self):
+        """The House's cover is refused and the broker (or the owner, by hand) closes the short: no cover of the
+        House's ever fills, the account is flat, and the lot's shares are gone all the same."""
+        live = self.start({"SPY": "0.4"})
+        live._book_shares("OPASN", "SPY261016C00600000", 1)
+        self.venue.held["SPY"] = D("-99.6")
+        self.venue.submit_mode = "reject"
+        live._close_shares()
+        self.reading(live)
+        self.assertEqual(live.equity.taken, [], "still short and nothing filled: nothing proves the lot gone")
+        self.assertEqual(live.state.get("lots_swallowed")["SPY"]["lots"], "0.4")
+        del self.venue.held["SPY"]                                     # closed outside the House
+        self.venue.submit_mode = "ok"
+        self.reading(live)
+        self.assertEqual(live.equity.taken, [("SPY", D("0.4"), None)], "closed at the lots' own mark: no cover's price")
+        self.assertEqual(live.state.get("lots_swallowed"), {})
+        self.assertEqual(live.state.get("shares"), {"SPY": "-99.6"},
+                         "what the House did not cover stays on the ledger: the owner's --clear-assignment")
+        self.assertEqual(len(self.stock()), 2, "both refused; nothing was sent once the short was gone")
+        self.assertEqual(sum(1 for _, text in self.alerts if "closed outside the House" in text), 1)
+
+    def test_a_short_seen_once_that_swallowed_nothing_closes_no_lot(self):
+        live = self.start({"SPY": "0.4"})
+        self.venue.held["SPY"] = D("-1")                               # one reading shows a short ...
+        self.venue.submit_mode = "reject"
+        live._close_shares()
+        self.assertIn("SPY", live.state.get("lots_swallowed"))
+        self.venue.held["SPY"] = D("0.4")                              # ... and the next one the lot, whole
+        self.reading(live)
+        self.assertEqual(live.equity.taken, [])
+        self.assertEqual(live.state.get("lots_swallowed"), {}, "nothing is missing: the mark is cleared")
+        self.assertEqual(live.equity.owned, {"SPY": D("0.4")})
+        self.assertEqual(live.state.get("shares_refused"), {}, "the refused cover's run ended with the short")
+
+    def test_the_share_handling_never_ends_the_options_pass(self):
+        live = self.make([family("vert", VERTICAL, band="probe")])
+        live.equity = FakeBook()
+        with mock.patch.object(live, "_close_shares", side_effect=ValueError("a share bug")):
+            out = self.run_to(9, 31)
+        self.assertEqual(out["state"], "session")
+        self.assertEqual(len(live.book.positions), 1, "the pass went on: the orders, the forced closes, the decisions")
+        self.assertTrue(live._stock_held, "nothing is taken to be clear")
+        self.assertTrue(any("account's shares could not be handled (ValueError: a share bug)" in text
+                            for level, text in self.alerts if level == "warning"))
 
     def test_an_unreadable_book_still_covers_to_flat_and_closes_no_lot(self):
         live = self.start({"SPY": "1"})
@@ -543,32 +590,32 @@ class TheMinute(LiveCase):
         out = live.minute()                                            # the next pass is whole again
         self.assertEqual((out["state"], len(book.ticks)), ("session", 2))
 
-    def test_the_equity_minute_is_skipped_only_when_the_account_reads_failed_late_in_the_minute(self):
+    def test_the_equity_minute_is_skipped_only_when_the_account_reads_hung_and_the_minute_is_spent(self):
         live = self.make([])
         live.equity = book = FakeBook()
         self.run_to(9, 31)
         self.assertEqual(len(book.ticks), 1)
 
-        def hang(seconds):
+        def failing(seconds):
             def positions():
-                self.clock.set(self.clock() + seconds)                # the venue's timeout
+                self.clock.set(self.clock() + seconds)                # what the read took before it failed
                 raise TimeoutError("timed out")
             return positions
 
         self.clock.set(at(MONDAY, 9, 32))
-        with mock.patch.object(self.venue, "positions", side_effect=hang(50)):
+        with mock.patch.object(self.venue, "positions", side_effect=failing(50)):
             out = live.minute()
         self.assertIn("positions: TimeoutError", " ".join(out["venue_errors"]))
-        self.assertIn("reads of the real account failed", out["equity"]["skipped"])
+        self.assertIn("reads of the real account hung (50 s in failed reads", out["equity"]["skipped"])
         self.assertEqual(len(book.ticks), 1, "the next options pass must start on time")
         self.clock.set(at(MONDAY, 9, 33))
-        with mock.patch.object(self.venue, "positions", side_effect=hang(50)):
+        with mock.patch.object(self.venue, "positions", side_effect=failing(50)):
             live.minute()
         self.assertEqual(sum(1 for _, text in self.alerts if "equity book's minute is skipped" in text), 1,
                          "said once a run of skipped minutes")
         self.clock.set(at(MONDAY, 9, 34))
-        with mock.patch.object(self.venue, "positions", side_effect=hang(1)):
-            out = live.minute()                                        # it failed at once: the minute is not spent
+        with mock.patch.object(self.venue, "positions", side_effect=failing(20)):
+            out = live.minute()                                        # it hung, but the minute is not spent (:23)
         self.assertEqual((len(book.ticks), out["equity"]), (2, {"ticked": at(MONDAY, 9, 34)}))
         self.clock.set(at(MONDAY, 9, 35))
         real = self.venue.positions
@@ -581,6 +628,18 @@ class TheMinute(LiveCase):
             out = live.minute()                                        # slow, but it answered: never skipped
         self.assertEqual(len(book.ticks), 3)
         self.assertNotIn("venue_errors", out)
+        self.clock.set(at(MONDAY, 9, 36))
+        real_orders = self.venue.orders
+
+        def slow_orders(**kw):
+            self.clock.set(self.clock() + 50)                         # a slow pass (a long read that answered) ...
+            return real_orders(**kw)
+
+        with mock.patch.object(self.venue, "orders", side_effect=slow_orders), \
+                mock.patch.object(self.venue, "positions", side_effect=failing(1)):
+            out = live.minute()                                        # ... and a read that failed at once: not hung
+        self.assertIn("positions: TimeoutError", " ".join(out["venue_errors"]))
+        self.assertEqual(len(book.ticks), 4, "one failed read in a late pass never costs the equity book its minute")
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")

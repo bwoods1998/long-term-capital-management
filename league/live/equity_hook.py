@@ -15,7 +15,7 @@ Callers:
 - league/live/step.py: `build_book` (OptionsLive.__init__: `self.equity`), `expected_shares` (`_close_shares`, the
   assignment latch, both reconciliations), `frozen` (`real_block`), `busy` (one working order a symbol across both
   books), `flux` (the symbols the options book's reconciliation leaves to the equity book's own that minute),
-  `shares_taken` (`_lots_taken`: lots an assignment swallowed, closed once the House's cover has filled), `health`
+  `shares_taken` (`_lots_taken`: lots an assignment swallowed, closed once they are proved gone), `health`
   (`OptionsLive.health`);
 - league/live/real.py: `is_equity_client_id` (`ingest`), `probe_figures` (`probe_tally`, `probe_realized`,
   `probe_figures`), `working_buys_worst` (the options reservation's available cash, A8.1), `orders_today`
@@ -196,9 +196,9 @@ def flux(book: Any | None, rows: Callable[..., list], now: float) -> set[str]:
 
 def shares_taken(book: Any | None, symbol: str, qty: Decimal, px: Decimal | None, *, why: str) -> Decimal:
     """`EquityBook.shares_taken`: `qty` shares of `symbol` the book's lots held left the account in an option
-    assignment or exercise and the House's cover of the short has filled at `px` (None: unreadable); the lots are
-    closed for them as "forced". Returns the shares closed (0 with no book); raises when the book cannot be read (the
-    caller asks again at its next reading)."""
+    assignment or exercise (the House's cover of the short filled at `px`; None when its price is unreadable or the
+    short was closed outside the House); the lots are closed for them as "forced". Returns the shares closed (0 with
+    no book); raises when the book cannot be read (the caller asks again at its next reading)."""
     if book is None:
         return ZERO
     try:

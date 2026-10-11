@@ -766,13 +766,14 @@ class EquityBook:
     def shares_taken(self, symbol: str, qty: Decimal, px: Decimal | None, *, why: str) -> Decimal:
         """SHARES AN ASSIGNMENT TOOK (league/live/step.py `_lots_taken`, through league/live/equity_hook.py): `qty`
         shares of `symbol` that this book's lots held are no longer on the account. An option's assignment or exercise
-        delivered them (the account went short while the book owned them) and the House's cover of that short has
-        filled at `px`; the gateway admits no buy that both covers and opens, so they are never bought back. The
-        symbol's open lots are closed for that many shares, oldest first, as "forced" at `px` (a lot's last mark, else
-        its entry price, when the cover's price is unreadable): no fee (the book sold nothing), the exit at "open" on
-        this New York day, each take kept in the lot's `info["taken"]`. An exit intent still planned for a lot closed
-        here ends at the next window (`_work_exit`: "the lot is sold"), and the lot is exported like any closed one.
-        Returns the shares closed (less than `qty` when the book holds less). Never an order."""
+        delivered them (the account went short while the book owned them); the gateway admits no buy that both covers
+        and opens, so they are never bought back. The symbol's open lots are closed for that many shares, oldest
+        first, as "forced" at `px`, the price the House's cover of that short filled at (a lot's last mark, else its
+        entry price, when `px` is None: the cover's price is unreadable, or the short was closed outside the House):
+        no fee (the book sold nothing), the exit at "open" on this New York day, each take kept in the lot's
+        `info["taken"]`. An exit intent still planned for a lot closed here ends at the next window (`_work_exit`: "the
+        lot is sold"), and the lot is exported like any closed one. Returns the shares closed (less than `qty` when the
+        book holds less). Never an order."""
         symbol = str(symbol).upper()
         left = D(qty, ZERO)
         price = D(px, ZERO)
