@@ -22,7 +22,14 @@ packages C, D and E merged, package G's four test modules pass with none skipped
 `test_elane_xs_seal.TheReserveAndTheHiddenYearOnTheRealEngine` runs there, over the real runner on a synthetic
 panel), and a smoke took one program through `score`, `validate` and `look` and six random-score programs through the
 zero-edge job over the real runner, results, placebo, style and screen modules (the in-process decider: the real
-child runs only in a root House, where the zero-edge job was seen to fail closed and count nothing).
+child runs only in a root House, where the zero-edge job was seen to fail closed and count nothing). With package
+E's patch 3 applied there, E's adoption tests (`test_xs_identity.ThePatch`) pass over this file's patches, and its
+`TheCommittedPin` passes on the nulls; with package H merged and its patches applied, H's `style_open_passers` lists
+a style-open passer from this package's look record, and a seated panel Candidate's band row reads as the panel
+kind (`kinds.kind_of`). ONE TEST OF PACKAGE H's needs its owner there: `test_dlane_report_panel.TheStyleOpenPassers
+.test_a_rule_that_cannot_be_read_here_leaves_the_looks_own_word` assumes the style rule cannot be read (true on H's
+own branch, where `elane_xs` and `league.xs.style` are stubs); with packages E and G in the tree the rule reads
+("style-open: unmeasured"), so the test must make the rule unreadable itself.
 
 WHAT PACKAGE G NEEDS OF THE OTHER PACKAGES' PATCHES: package E's patch 3 (`evaluator.adopt_xs`; `adopt_equity` skips
 structure "panel": WITHOUT IT `adopt_equity`, at the first start after the EQUITY identity moves, would send a panel
@@ -1018,8 +1025,9 @@ defaults). policy.json: `elane.screens` gains `equity_xs` after the two lanes' b
 `program_loss_usd`. loop.py: the statement `self.adopt_equity()` in `run`, a new method `adopt_xs` before `run`, and
 the module docstring's EQUITY LANES paragraph.
 WHAT: policy.json ships `elane.panel` at the code's defaults (mode "off") and `elane.screens.equity_xs` AS NULLS IN
-`league.xs.screen.PIN_KEYS`' ORDER: THE INTEGRATOR FILLS THE PIN from the receipt (`screen.PIN_SOURCES`) in the commit
-that lands docs/benchmarks/equity_screen_xs_1.json. `Swarm.adopt_xs` calls package E's `evaluator.adopt_xs` with
+`league.xs.screen.PIN_KEYS`' ORDER, EVERY value null (package E's `test_xs_screen.TheCommittedPin` holds a
+half-filled block to be neither a pin nor nulls): THE INTEGRATOR FILLS THE PIN from the receipt (`screen.pin`, the
+call package E's patch file gives) in the commit that lands docs/benchmarks/equity_screen_xs_1.json. `Swarm.adopt_xs` calls package E's `evaluator.adopt_xs` with
 `league.xs.identity.xs_identity()` beside `adopt_equity`; an error (E's patch 3 not merged, an identity that cannot be
 read) is logged and never stops the start, and `bands.read` judges a panel band against the running files whatever
 was adopted.
@@ -1073,7 +1081,7 @@ index 389699be..c5d0f1e3 100644
          self.store.event("swarm.status", None, {"action": "started", "pid": os.getpid(), "release": str(CODE_DIR), "adopted": adopted,
                                                  "families": len(self.store.families(alive=True))})
 diff --git a/league/swarm/policy.json b/league/swarm/policy.json
-index c00d192f..20e96b83 100644
+index c00d192f..99c67068 100644
 --- a/league/swarm/policy.json
 +++ b/league/swarm/policy.json
 @@ -177,11 +177,53 @@
@@ -1082,8 +1090,8 @@ index c00d192f..20e96b83 100644
          "beside": "S2, c_R = 0 (no pooled-t bar), c_H,used = {c_H}; this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%); its holdout-only rate at c_H,used = {honly}% (the bound when 2025 is fully known); drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); a pass under S2 is weaker evidence of edge than under S1+F1; contamination: 2025 (all of Validation) and part of the 2026 holdout can be known to the authoring models, so the FP is a property of the procedure over 2010-19 and 2022-24 history, not a guarantee in this one world"
 +      },
 +      "equity_xs": {
-+        "name": "XS1",
-+        "screen": "XS1",
++        "name": null,
++        "screen": null,
 +        "receipt_sha256": null,
 +        "c_XS": null,
 +        "c_margin": null,
@@ -1094,9 +1102,9 @@ index c00d192f..20e96b83 100644
 +        "owner_wall": null,
 +        "validation_tries": null,
 +        "holdout_looks": null,
-+        "retry": false,
-+        "flags": {},
-+        "screen_flags": [],
++        "retry": null,
++        "flags": null,
++        "screen_flags": null,
 +        "beside": null
        }
      },
