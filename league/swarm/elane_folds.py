@@ -14,18 +14,17 @@ spec, immutable, and is honoured whatever the mode is later (a family's bar must
 and `expected_oof` is reserved (None) in E3.
 
 THE LISTING RULE (`bar_years`, `runnable`; AS BUILT: D14 is silent on a symbol listed after 2016). E1's engine ends a
-run "no_data" when one of the program's symbols has no bar in it, and E2 reads that as the House's failure: the
-version is never scored. A whole Train span always holds a bar of such a symbol (XLC's first is in 2018), but a
-stretch the cut leaves may hold none (2016-17 once 2018 is hidden), and the family could then never be scored. So a
-year is RUNNABLE for a family's symbols only when every seen span of it AND its own span hold a bar of every symbol,
-by the House's equity store (its manifest's first and last bar day of each symbol: no bar is sliced and no price
-read, so no reserve session is touched), and `birth_fields` draws by the same formula over the runnable years alone:
-`R[(k_c + h(cell)) % len(R)]`, R the runnable work years in order.
-With all seven runnable (every symbol with a bar in each work year) that is the formula above exactly; with fewer,
-the cell's births still spread evenly over the years they can run. A family with no runnable year gets no hidden year
-(seven Train years, no out-of-fold row). On a House with no equity store yet there is no listing to read and the
-formula stands alone; a store that is there and cannot be read raises, and the birth's guard stamps `FALLBACK` and
-says so.
+run "no_data" when one of the program's symbols has no bar in it, and E2 reads that as the House's failure: the version
+is never scored. A whole Train span always holds a bar of such a symbol (XLC's first is in 2018), but a stretch the cut
+leaves may hold none (2016-17 once 2018 is hidden), and the family could then never be scored. So a year is RUNNABLE
+for a family's symbols only when every seen span of it AND its own span hold a bar of every symbol, by the House's
+equity store (its manifest's first and last bar day of each symbol: no bar is sliced and no price read, so no reserve
+session is touched), and `birth_fields` draws by the same formula over the runnable years alone: `R[(k_c + h(cell)) %
+len(R)]`, R the runnable work years in order. With all seven runnable (every symbol with a bar in each work year) that
+is the formula above exactly; with fewer, the cell's births still spread evenly over the years they can run. A family
+with no runnable year gets no hidden year (seven Train years, no out-of-fold row). On a House with no equity store yet
+there is no listing to read and the formula stands alone; a store that is there and cannot be read raises, and the
+birth's guard stamps `FALLBACK` and says so.
 
 THE SEEN SPANS (`seen_spans`). `seen_spans(None)` = `elane_train.TRAIN_SPANS`. `seen_spans(y)`: each Train span (first,
 last) that does not contain y as it is; the one that does, cut into the stretch before y, `(first, date(y - 1, 12,
@@ -44,11 +43,10 @@ run a seen span the same two stores gave byte-identical seen results.
 WHAT STILL REACHES A SEEN RUN, stated as A15 states it for the reserve: the hidden year's BARS as look-back in the
 stretch that follows it (a program reads the year's last sessions as it would have live: its NEEDS `history` of them
 and, where E1's slice holds it, the session its first decision is made at; never more than `history` + 1), and the
-store-file hashes of a stored run (they move with a refetch of any year and carry no figure). STATED
-COST: a hidden year inside a span starts the following stretch flat (no lot is carried across it), and a version
-costs up to 3 seen runs and 1 hidden run a k. THE LOOSENING, reported: such a family is judged on six seen years,
-not seven; more zero-edge versions pass Train, and the screen's false-positive rate per program is untouched (Train
-is in-sample).
+store-file hashes of a stored run (they move with a refetch of any year and carry no figure). STATED COST: a hidden
+year inside a span starts the following stretch flat (no lot is carried across it), and a version costs up to 3 seen
+runs and 1 hidden run a k. THE LOOSENING, reported: such a family is judged on six seen years, not seven; more
+zero-edge versions pass Train, and the screen's false-positive rate per program is untouched (Train is in-sample).
 
 `league.swarm.elane_train` and `elane_seal` are imported INSIDE FUNCTIONS only (`elane_train` and `elane_births`
 import this module at the top), and so is `league.equity.store`. Standard library only.
