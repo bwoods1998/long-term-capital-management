@@ -166,6 +166,8 @@ TAGS = ("review_pass", "review_fail", "try", "try_entered", "look_pass", "look_f
 #: `run_behind` (B; the review's fix) is an ORDER, never a mark: a program whose run failed in the night's child and
 #: again alone in a fresh one on a night no other program's run completed (so `run_failed` is not written: the
 #: House's) stands behind its class in the next nights' queue until a run of it completes; no rule counts it.
+#: `twin_retired` and `twin_revived` (D; the review's fix): the session a live instance was retired at, kept the night
+#: the book shows it (a revival clears `retired_at` in the book), and the session it ran again from.
 #: `meter_partial` (C; the review's fix): a day whose meters were written after their wait with programs still without
 #: their row for it (league/ops/forward_report.py: FW5 reads no such day).
 EVENT_KINDS: dict[str, str] = {
@@ -175,11 +177,12 @@ EVENT_KINDS: dict[str, str] = {
     "run_disqualified": "B", "restated": "B", "budget_hit": "B", "audit_mismatch": "B", "chain_ok": "B",
     "chain_broken": "B",
     "no_minute": "D", "twin_unregistered": "D", "twin_sha_mismatch": "D", "twin_interrupted": "D", "live_bars": "D",
-    "meter_partial": "C"}
+    "twin_retired": "D", "twin_revived": "D", "meter_partial": "C"}
 #: The kinds written through `event(..., once=<key>)`: a second call for the same kind, pid, day and key writes nothing.
 ONCE_KINDS = ("prereg", "register_skipped", "identity_moved", "engine_moved", "night_failed", "run_failed", "run_behind",
               "data_failed", "run_disqualified", "restated", "budget_hit", "audit_mismatch", "no_minute",
-              "twin_unregistered", "twin_sha_mismatch", "twin_interrupted", "live_bars", "meter_partial")
+              "twin_unregistered", "twin_sha_mismatch", "twin_interrupted", "live_bars", "twin_retired",
+              "twin_revived", "meter_partial")
 #: `fwd_kv` keys: the equity fingerprint last seen; `FGS_SHA` (written once through `kv_first`); the swarm event cursor.
 KV_KEYS = ("equity_sha", "fgs_prereg", "scored_seq")
 #: `fwd_twins.cause` of a session the live and the shadow intents disagree on (THE BARS HASH): "bars" when both bars

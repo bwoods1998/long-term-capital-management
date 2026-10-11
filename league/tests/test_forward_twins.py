@@ -1284,7 +1284,8 @@ class TheLiveSide(WithAStore):
         db.commit()
         db.close()
         self.assertEqual(forward_twins.live_intents(old, self.iid, needs=("SPY",)), {})
-        self.assertEqual(forward_twins.read_book(old), {"instances": [], "lots": {}, "intents": {}, "decision_day": None})
+        self.assertEqual(forward_twins.read_book(old), {"instances": [], "lots": {}, "intents": {}, "decision_day": None,
+                                                        "since": {}})
         self.assertIsNone(forward_twins.live_bars(old, self.iid, D1, needs={"symbols": ["SPY"], "history": 1}))
 
     def test_the_book_as_the_night_reads_it(self):
@@ -1642,6 +1643,83 @@ class WhatCannotBeRead(WithAStore):
         entries = [lot for lot in run.result["lots"] if lot["entry_day"] <= "2026-10-20"]
         self.assertEqual(tuple(part), (len(entries), 0, 0), "the twin's later lots are not the live instance's misses")
 
+    def revive(self, book, iid: str, day: str, *, through: str = "2026-10-30", decides: bool = True) -> None:
+        """The book brings the retired instance back in the decide step of `day` (league/equity/live.py, the seating
+        pass: the same key, `retired_at` cleared, `created_at` as it was, the band's day set), and from then on it
+        decides and fills as a program started flat at `day` does (`decides` False: it records no intent)."""
+        book.db.execute("UPDATE eq_instances SET retired_at=NULL WHERE id=?", (iid,))
+        book.db.execute("INSERT OR REPLACE INTO kv(key, value) VALUES('eq_band_since', ?)",
+                        (json.dumps({iid: {"band": "probe", "day": day}}),))
+        book.db.commit()
+        if decides:
+            key = forward_twins.registry_key(iid)
+            again = self.shadow(through).run_from(fake_program(self.db, key), schedule.next_session(dt.date.fromisoformat(day)))
+            mirror(book, iid, again, decide_loop(self.decider, again), base=500)
+
+    def test_a_revived_instance_keeps_its_retirement_and_its_twin_starts_flat_where_it_ran_again(self):
+        """The review's finding: E1's book revives a retired instance under the same key and clears `retired_at`,
+        the only thing the twins knew a retirement by. Every session of the gap, when no live decision existed, was
+        then written as a real comparison (the live side's nothing against a twin that had held its book since the
+        instance's first day): rows that cannot be corrected, read by A14 as the program disagreeing with its
+        replay."""
+        book, iid, pid, run = self.retire()                    # retired in the decide step of Oct 20
+        forward_twins.finish(self.root, self.db, self.shadow("2026-10-23"), now=1.0)
+        self.assertEqual([(e["day"], e["payload"]["instance"]) for e in events(self.db, "twin_retired")],
+                         [("2026-10-20", iid)], "kept the night the book shows it")
+        self.revive(book, iid, "2026-10-28")
+        out = forward_twins.finish(self.root, self.db, self.shadow("2026-10-30"), now=2.0)
+        self.assertEqual([(e["day"], e["payload"]["instance"]) for e in events(self.db, "twin_revived")],
+                         [("2026-10-28", iid)])
+        rows = {r["day"]: r for r in self.twin_rows()}
+        gap = forward_twins._sessions(dt.date(2026, 10, 20), dt.date(2026, 10, 27))
+        self.assertEqual({d: (rows[d]["agree"], rows[d]["why"]) for d in gap}, {d: (None, "retired") for d in gap},
+                         "no live decision existed: unreadable, never a disagreement")
+        self.assertEqual({d: rows[d]["live_keys"] for d in gap}, {d: "[]" for d in gap})
+        after = forward_twins._sessions(dt.date(2026, 10, 28), dt.date(2026, 10, 29))
+        self.assertEqual({d: (rows[d]["agree"], rows[d]["why"]) for d in after}, {d: (1, None) for d in after},
+                         "against a twin started flat at the session it ran again")
+        self.assertNotEqual(rows["2026-10-28"]["shadow_keys"], rows["2026-10-27"]["shadow_keys"],
+                            "the first decision of a flat book (it holds nothing to sell), not the old twin's")
+        self.assertEqual(sorted(rows), forward_twins._sessions(T0, dt.date(2026, 10, 29)), "every session, once")
+        self.assertEqual((out["disagreed"], out["unreadable"]), (0, len(gap) - 1), "Oct 20 was written the first night")
+        # A second night adds the next session and nothing else; no event is written twice.
+        again = forward_twins.finish(self.root, self.db, self.shadow("2026-10-30"), now=3.0)
+        self.assertEqual((again["twins"], len(events(self.db, "twin_retired")), len(events(self.db, "twin_revived"))),
+                         (0, 1, 1))
+        # A14 (D13) over a close of the revived run: the gap is unreadable, never counted against the program.
+        disk = sqlite3.connect(str(self.root / forward_db.DB))   # the reading opens the store's file, read-only
+        self.db.commit()
+        self.db.backup(disk)
+        disk.close()
+        counted = [{"equity": True, "pid": "eq:1", "instance": iid, "day": "2026-10-30", "opened_day": D2}]
+        intents = forward_twins.a14_reading(self.root, counted)["intents"]
+        self.assertEqual((intents["sessions"], intents["agreed"], intents["disagreed"], intents["unreadable"],
+                          intents["missing"]), (len(rows) - len(gap), len(rows) - len(gap), 0, len(gap), 0))
+        self.assertEqual((intents["share"], intents["ok"]), (1.0, True))
+
+    def test_a_revived_instance_that_disagrees_is_still_read_on_its_own_sessions(self):
+        book, iid, pid, run = self.retire()
+        forward_twins.finish(self.root, self.db, self.shadow("2026-10-23"), now=1.0)
+        self.revive(book, iid, "2026-10-28", decides=False)    # back, and it records no intent
+        out = forward_twins.finish(self.root, self.db, self.shadow("2026-10-30"), now=2.0)
+        rows = {r["day"]: r for r in self.twin_rows()}
+        self.assertEqual({rows[d]["why"] for d in forward_twins._sessions(dt.date(2026, 10, 20), dt.date(2026, 10, 27))},
+                         {"retired"})
+        self.assertEqual([(rows[d]["agree"], rows[d]["why"]) for d in ("2026-10-28", "2026-10-29")], [(0, None)] * 2,
+                         "a program that is running and does not do what its replay does is a disagreement")
+        self.assertEqual(out["disagreed"], 2)
+
+    def test_a_revival_the_book_does_not_date_starts_at_the_night_that_sees_it(self):
+        book, iid, pid, run = self.retire()
+        forward_twins.finish(self.root, self.db, self.shadow("2026-10-23"), now=1.0)
+        book.db.execute("UPDATE eq_instances SET retired_at=NULL WHERE id=?", (iid,))
+        book.db.commit()
+        forward_twins.finish(self.root, self.db, self.shadow("2026-10-28"), now=at("2026-10-28", 18, 35))
+        self.assertEqual([e["day"] for e in events(self.db, "twin_revived")], ["2026-10-28"])
+        rows = {r["day"]: r["why"] for r in self.twin_rows()}
+        self.assertEqual({rows[d] for d in forward_twins._sessions(dt.date(2026, 10, 20), dt.date(2026, 10, 27))},
+                         {"retired"})
+
     def test_an_instance_retired_before_it_decided_writes_nothing(self):
         register(self.db, "fake-overnight@1", OVERNIGHT)
         book = self.book()
@@ -1671,7 +1749,8 @@ class TheSeals(WithAStore):
         self.assertNotIn("UPDATE ", source)
         self.assertNotIn("DELETE ", source)
         kinds = {k for k, package in forward_db.EVENT_KINDS.items() if package == "D"}
-        self.assertEqual(kinds, {"no_minute", "twin_unregistered", "twin_sha_mismatch", "twin_interrupted", "live_bars"})
+        self.assertEqual(kinds, {"no_minute", "twin_unregistered", "twin_sha_mismatch", "twin_interrupted", "live_bars",
+                                 "twin_retired", "twin_revived"})
         for kind in kinds:
             self.assertIn(f'"{kind}"', source, kind)
             self.assertIn(kind, forward_db.ONCE_KINDS)

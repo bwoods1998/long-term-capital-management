@@ -57,6 +57,19 @@ from the instance's is a `twin_sha_mismatch` event and no twin; no registry row 
 instance). With the forward mode "off" (or settings that cannot be read) `begin`, `on_run` and `finish` write
 nothing.
 
+A REVIVED INSTANCE (`_epochs`; the review's fix). E1's book brings a retired instance back under the same key
+(league/equity/live.py, the seating pass: `retired_at` back to None, `created_at` as it was), so `retired_at` alone
+forgets the gap: every session of it, when no live decision existed, would be written as a real comparison (the live
+side's nothing against a twin that had held its book since `d_first`), in rows that are append-only and that A14
+counts. So a retirement the book shows is WRITTEN DOWN the night it is seen (a `twin_retired` event, once an (instance,
+session)), and an instance found running after a retirement on record starts a new run of its own (a `twin_revived`
+event, once: at the day the book's `eq_band_since` names for its key when that is after the retirement, else at the
+decision session of the night that first sees it back). The instance is then a sequence of RUNS, each read by D12 as
+an instance of its own: its twin is D3's run started flat at the session after its first decision; the sessions from
+its retirement to the one before it ran again are "retired" (unreadable: shown, counted, in no share, never
+`missing`); participation is the current run's. A retirement and a revival between two nights that `finish` did
+not run are seen by nobody: the nightly job is what keeps them.
+
 A DISAGREEMENT IS DATA, NEVER AN ERROR (THE BARS HASH, league/ops/forward_db.py; found after the spec, binding). The
 vendor rounds adjustment=all prices to cents, so the as-of bars a live decision read and the store's are not always
 byte-identical, and an intent can flip for that cause alone. Every `fwd_twins` row carries `shadow_bars`
@@ -497,13 +510,14 @@ def live_bars(live_path: str | Path, instance: str, day: str, *, needs: Mapping[
 def read_book(live_path: str | Path) -> dict[str, Any]:
     """The live book as the twins read it, in one read-only pass: {"instances": [`eq_instances` rows by id], "lots":
     {instance: [its `eq_lots` rows by lid]}, "intents": {instance: [its buy, sell and cancel rows by iid, each with
-    its lot's symbol and day]}, "decision_day": the day of the book's `eq_decision`}. A book from before E1 (no
-    `eq_instances`) is empty."""
+    its lot's symbol and day]}, "decision_day": the day of the book's `eq_decision`, "since": {instance: the day its
+    band was last set, the book's `eq_band_since` (a revival sets it)}}. A book from before E1 (no `eq_instances`) is
+    empty."""
     from . import guard
 
     def read(db: sqlite3.Connection) -> dict[str, Any]:
         tables = _tables(db)
-        out: dict[str, Any] = {"instances": [], "lots": {}, "intents": {}, "decision_day": None}
+        out: dict[str, Any] = {"instances": [], "lots": {}, "intents": {}, "decision_day": None, "since": {}}
         if "eq_instances" not in tables:
             return out
         out["instances"] = guard.rows(db, "SELECT id, family, version, lane, run_sha, band, last_decided_day, "
@@ -519,6 +533,9 @@ def read_book(live_path: str | Path) -> dict[str, Any]:
             decision = _kv(db, "eq_decision")
             out["decision_day"] = str(decision.get("day")) if isinstance(decision, Mapping) and decision.get("day") \
                 else None
+            since = _kv(db, "eq_band_since")
+            out["since"] = {str(key): str(row["day"]) for key, row in (since.items() if isinstance(since, Mapping)
+                                                                       else ()) if isinstance(row, Mapping) and row.get("day")}
         return out
 
     return guard.read(live_path, read)
@@ -791,6 +808,49 @@ def _last_needed(lots: Sequence[Mapping[str, Any]], retired: dt.date) -> dt.date
     return last
 
 
+def _epochs(db: sqlite3.Connection, inst: Mapping[str, Any], book: Mapping[str, Any], pid: int, *,
+            now: float) -> list[tuple[dt.date, dt.date | None]]:
+    """AN INSTANCE'S RUNS (the module docstring, A REVIVED INSTANCE), oldest first: [(the session of the run's first
+    decision, the session it was retired at | None while it runs)]. The last one is the instance as the book holds
+    it now. A retirement the book shows is written down the night it is seen (`twin_retired`, once an (instance,
+    session)): the book brings a retired instance back under the same key with `retired_at` cleared, and nothing
+    else of it says the gap was ever there. An instance found running after a retirement on record starts a new run
+    (`twin_revived`, once an (instance, session)): at the session the book's `eq_band_since` names for its key when
+    that is after the retirement, else at the decision session of the night that first sees it back."""
+    iid = str(inst["id"])
+
+    def seen(kind: str) -> list[dt.date]:
+        return sorted({_date(e["day"]) for e in forward_db.events(db, kind, pid=pid) if e.get("day")
+                       and isinstance(e.get("payload"), Mapping) and e["payload"].get("instance") == iid})
+
+    retired = d_retired(inst)
+    if retired is not None and forward_db.event(db, "twin_retired", pid=pid, day=retired.isoformat(), at=float(now),
+                                                once=iid, payload={"instance": iid, "why": "the book shows the instance "
+                                                                   "retired from this session on: kept, a revival "
+                                                                   "clears it there"}):
+        pass
+    retirements, revivals = seen("twin_retired"), seen("twin_revived")
+    if retired is None and retirements and not any(v > retirements[-1] for v in revivals):
+        named = (book.get("since") or {}).get(iid)
+        back = _date(named) if named and _date(named) > retirements[-1] else _decision_session(float(now))
+        back = max(back, retirements[-1])
+        forward_db.event(db, "twin_revived", pid=pid, day=back.isoformat(), at=float(now), once=iid, payload={
+            "instance": iid, "why": "the book runs the instance again: its twin starts flat at this session"})
+        revivals = sorted({*revivals, back})
+    out: list[tuple[dt.date, dt.date | None]] = []
+    first = d_first(inst)
+    for gone in retirements:
+        if gone < first:
+            continue
+        out.append((first, gone))
+        later = [v for v in revivals if v >= gone]
+        if not later:
+            return out      # retired still (or its return not seen yet): no run after this one
+        first = later[0]
+    out.append((first, None))
+    return out
+
+
 def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping[str, Any], book: Mapping[str, Any],
                   hashes: dict[tuple[str, str], str], out: dict[str, Any], *, now: float, late: bool = False) -> None:
     from ..equity import schedule
@@ -821,68 +881,75 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
             if forward_db.event(db, "live_bars", pid=pid, day=decided, at=float(now), once=iid, payload={
                     "instance": iid, "bars": found, "why": "the bars hash of the live decision, taken that night"}):
                 out["live_bars"] += 1
-    first, retired = d_first(inst), d_retired(inst)
-    end = schedule.previous_session(through)
-    if retired is not None:
-        stop = _last_needed(lots, retired)
-        end = end if stop is None else min(end, stop)
-    wanted = _sessions(first, end)
+    runs = _epochs(db, inst, book, pid, now=now)
     have = {str(r[0]) for r in db.execute("SELECT day FROM fwd_twins WHERE instance=?", (iid,))}
     parted = db.execute("SELECT 1 FROM fwd_part WHERE instance=? AND through=?", (iid, night)).fetchone() is not None
-    if not wanted or (all(day in have for day in wanted) and (parted or retired is not None)):
-        return      # nothing to write yet, or everything this instance will ever need is written
-    if late:
-        # THE NIGHT'S DEADLINE has passed (league/ops/forward_shadow.py `late`): no twin run is started. The live
-        # decision's bars hash above is taken all the same (the book holds it tonight only); the rows lag a session
-        # already, and the next night writes them.
-        out["deferred"] += 1
-        return
-    start = schedule.next_session(first)
-    try:
-        try:
-            run = shadow.run_from(program, start)
-        except Exception as exc:  # noqa: BLE001 - the child's failure is an interruption; the data's is the caller's
-            if not any(base.__name__ in RUN_FAILURES for base in type(exc).__mro__):
-                raise
-            raise TwinInterrupted(f"the decider child failed the twin's run ({type(exc).__name__})") from None
-        if run is None:
-            return
-        decisions = _twin(getattr(shadow, "decider", None), run)
-    except TwinInterrupted as exc:
-        forward_db.event(db, "twin_interrupted", pid=pid, day=night, at=float(now), once=iid, payload={
-            "instance": iid, "why": str(exc)[:240]})
-        out["interrupted"] += 1
-        return
     live = _live_keys(book["intents"].get(iid, []), needs)
-    unreadable = split_sessions(run)
-    rows, kept = [], set(wanted)
-    for day, keys, bars in decisions:
-        if day not in kept or day in have:
-            continue
-        mine = live.get(day, [])
-        if retired is not None and day >= retired.isoformat():
-            agreed, why = None, "retired"
-        elif day in unreadable:
-            agreed, why = None, "split"
-        else:
-            agreed, why = agree(mine, keys), None
-        seen = hashes.get((iid, day))
-        rows.append((iid, day, pid, json.dumps(mine), json.dumps(keys), None if agreed is None else int(agreed), why,
-                     float(now), seen, bars, cause(agreed, seen, bars)))
-    last = min(through, retired) if retired is not None else through
-    part = participation(
-        [lot for lot in lots if start.isoformat() <= str(lot.get("opened_day") or "") <= last.isoformat()],
-        [lot for lot in (run.result.get("lots") or []) if isinstance(lot, Mapping)
-         and start.isoformat() <= str(lot.get("entry_day") or "") <= last.isoformat()])
-    with db:    # one transaction an instance: its sessions in day order from d_first, and the night's participation
-        db.executemany("INSERT OR IGNORE INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, why, at, "
-                       "live_bars, shadow_bars, cause) VALUES(?,?,?,?,?,?,?,?,?,?,?)", rows)
-        db.execute("INSERT OR IGNORE INTO fwd_part(instance, through, pid, matched, missed, extra, at) "
-                   "VALUES(?,?,?,?,?,?,?)",
-                   (iid, night, pid, part["matched"], part["missed"], part["extra"], float(now)))
-    out["twins"] += len(rows)
-    out["disagreed"] += sum(1 for row in rows if row[5] == 0)
-    out["unreadable"] += sum(1 for row in rows if row[5] is None)
+    for k, (first, retired) in enumerate(runs):
+        current = k == len(runs) - 1
+        end = schedule.previous_session(through)
+        if not current:
+            # A run the book ended and later began again: every session up to the one before it ran again.
+            end = min(end, schedule.previous_session(runs[k + 1][0]))
+        elif retired is not None:
+            stop = _last_needed(lots, retired)
+            end = end if stop is None else min(end, stop)
+        wanted = _sessions(first, end)
+        if not wanted or (all(day in have for day in wanted) and (parted or retired is not None)):
+            continue    # nothing to write yet, or everything this run of the instance will ever need is written
+        if late:
+            # THE NIGHT'S DEADLINE has passed (league/ops/forward_shadow.py `late`): no twin run is started. The live
+            # decision's bars hash above is taken all the same (the book holds it tonight only); the rows lag a
+            # session already, and the next night writes them.
+            out["deferred"] += 1
+            return
+        start = schedule.next_session(first)
+        try:
+            try:
+                run = shadow.run_from(program, start)
+            except Exception as exc:  # noqa: BLE001 - the child's failure is an interruption; the data's the caller's
+                if not any(base.__name__ in RUN_FAILURES for base in type(exc).__mro__):
+                    raise
+                raise TwinInterrupted(f"the decider child failed the twin's run ({type(exc).__name__})") from None
+            if run is None:
+                continue
+            decisions = _twin(getattr(shadow, "decider", None), run)
+        except TwinInterrupted as exc:
+            forward_db.event(db, "twin_interrupted", pid=pid, day=night, at=float(now), once=iid, payload={
+                "instance": iid, "why": str(exc)[:240]})
+            out["interrupted"] += 1
+            return
+        unreadable = split_sessions(run)
+        rows, kept = [], set(wanted)
+        for day, keys, bars in decisions:
+            if day not in kept or day in have:
+                continue
+            mine = live.get(day, [])
+            if retired is not None and day >= retired.isoformat():
+                agreed, why = None, "retired"
+            elif day in unreadable:
+                agreed, why = None, "split"
+            else:
+                agreed, why = agree(mine, keys), None
+            seen = hashes.get((iid, day))
+            rows.append((iid, day, pid, json.dumps(mine), json.dumps(keys), None if agreed is None else int(agreed), why,
+                         float(now), seen, bars, cause(agreed, seen, bars)))
+        last = min(through, retired) if retired is not None else through
+        part = participation(
+            [lot for lot in lots if start.isoformat() <= str(lot.get("opened_day") or "") <= last.isoformat()],
+            [lot for lot in (run.result.get("lots") or []) if isinstance(lot, Mapping)
+             and start.isoformat() <= str(lot.get("entry_day") or "") <= last.isoformat()])
+        with db:    # one transaction a run of the instance: its sessions in day order, and the night's participation
+            db.executemany("INSERT OR IGNORE INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, why, at, "
+                           "live_bars, shadow_bars, cause) VALUES(?,?,?,?,?,?,?,?,?,?,?)", rows)
+            if current:     # the participation of the run the book holds now (an earlier run's stands as written)
+                db.execute("INSERT OR IGNORE INTO fwd_part(instance, through, pid, matched, missed, extra, at) "
+                           "VALUES(?,?,?,?,?,?,?)",
+                           (iid, night, pid, part["matched"], part["missed"], part["extra"], float(now)))
+        have.update(row[1] for row in rows)
+        out["twins"] += len(rows)
+        out["disagreed"] += sum(1 for row in rows if row[5] == 0)
+        out["unreadable"] += sum(1 for row in rows if row[5] is None)
 
 
 def finish(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float) -> dict[str, Any]:
