@@ -64,7 +64,7 @@ loosenings with their costs. **The loosening, stated (A33):** E3 pre-registered 
 sessions and 3%; FWD1-R reads from 5 sessions at the goal's own 15% for never-looked lineages. Most early passes are
 luck (45% of zero-edge panel passes come at checkpoint 5); an ETF forward pass says almost nothing about skill.
 
-**The pin starts the clock.** policy.json `elane.screens.forward` holds the receipt's sha256 and every figure the
+**The pin starts the clock.** policy.json `elane.forward_screen` holds the receipt's sha256 and every figure the
 House prints (CI: `league/tests/test_fwd1_rule.py` `ThePin` holds the sha to the file and each figure to the
 receipt's; the loader refuses a pin whose plan, bars, margin, haircut, caps or placebo law is not the code's). The job
 writes the time the release carrying the pin began running (the deploy record's `promoted` verdict of the running
@@ -99,7 +99,7 @@ its family is in the Gym band with the judged version under the identity the ver
 seat a mechanism cell. **A panel pass is made eligible only** (`elane_forward.eligible`): no panel seat exists in E4's
 step one, and the panel seat pool is step two's (`feat/equity-e4-step2`, B3), which reads it.
 
-**Switches and rollback.** `elane.fwd1.mode` "off" stops the job (nothing judged; the forward record goes on); `elane.fwd1.seats` "off" stops every effect on the swarm. Without the pin (`elane.screens.forward` absent or not
+**Switches and rollback.** `elane.fwd1.mode` "off" stops the job (nothing judged; the forward record goes on); `elane.fwd1.seats` "off" stops every effect on the swarm. Without the pin (`elane.forward_screen` absent or not
 FWD1) no verdict is read. A seated program keeps its seat under the money rules' own demotion.
 
 **Inspect** (on the box, read-only): `sqlite3 -readonly <state>/forward-screen.sqlite "SELECT lineage, verdict, k, day

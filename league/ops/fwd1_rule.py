@@ -39,7 +39,7 @@ THE RULE (FWD1-R, the review's section 4, with every defect's fix):
    registry's expected zero-edge passes against the observed, and "contamination zero by construction for the judged
    sessions" (`beside`).
 
-THE PIN (`pin`, `load`): policy.json `elane.screens.forward` of the REPOSITORY (never the box's swarm.json: a judge is
+THE PIN (`pin`, `load`): policy.json `elane.forward_screen` of the REPOSITORY (never the box's swarm.json: a judge is
 pinned by a reviewed pull request), {"name": "FWD1", "screen": "FWD1-R", "receipt_sha256", "plan", "c_G",
 "c_margin", "haircut_bp", "haircut_floor_bp", "panel_lots", "own_cap", "placebo", "owner_wall", "figures"}. `load`
 refuses (None, why): a missing or malformed key, a sha that is not 64 hex characters, a plan, bar, margin, haircut,
@@ -60,8 +60,9 @@ from typing import Any, Mapping, Sequence
 
 NAME = "FWD1"
 SCREEN = "FWD1-R"
-#: policy.json `elane.screens.<SCREEN_KEY>`.
-SCREEN_KEY = "forward"
+#: policy.json `elane.<PIN_BLOCK>`: the pin's own block beside the lanes' `elane.screens` (whose three keys are the
+#: lanes' sealed-look screens), read from the REPOSITORY's policy.json alone.
+PIN_BLOCK = "forward_screen"
 RECEIPT_PATH = "docs/benchmarks/forward_screen_fwd1.json"
 #: The checkpoints (counted forward sessions) and the windows' length.
 PLAN = (5, 10, 15, 20, 30, 40, 60)
@@ -115,8 +116,8 @@ class Rule:
 
 
 def pin(policy: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
-    """THE PIN: `elane.screens.forward` of the REPOSITORY's policy.json (`policy`: a parsed document, or its `elane`
-    block; default `league.swarm.settings.read_policy()`). {} when there is none."""
+    """THE PIN: `elane.forward_screen` of the REPOSITORY's policy.json (`policy`: a parsed document, or its `elane`
+    block; default `league.swarm.settings.read_policy()`), never the box's swarm.json. {} when there is none."""
     if policy is None:
         try:
             from ..swarm import settings as settings_mod
@@ -125,8 +126,7 @@ def pin(policy: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
         except Exception:  # noqa: BLE001 - no file: no pin
             policy = {}
     block = policy.get("elane") if isinstance(policy, Mapping) and isinstance(policy.get("elane"), Mapping) else policy
-    screens = block.get("screens") if isinstance(block, Mapping) and isinstance(block.get("screens"), Mapping) else {}
-    found = screens.get(SCREEN_KEY)
+    found = block.get(PIN_BLOCK) if isinstance(block, Mapping) else None
     return found if isinstance(found, Mapping) else {}
 
 
@@ -166,7 +166,7 @@ def load(block: Mapping[str, Any] | None) -> tuple[Rule | None, str | None]:
     """(the rule, None) from a pin block (`pin`), or (None, why it pins nothing). Every constant must be this code's
     (a pin cannot move a bar, a cap, the haircut or the plan: that is a captain's release with its cost stated)."""
     if not isinstance(block, Mapping) or not block:
-        return None, "no forward screen is pinned (elane.screens.forward)"
+        return None, "no forward screen is pinned (elane.forward_screen)"
     missing = [key for key in PIN_KEYS if key not in block]
     if missing:
         return None, f"the forward screen's pin lacks {', '.join(missing)}"
@@ -207,11 +207,22 @@ def rule(policy: Mapping[str, Any] | None = None) -> tuple[Rule | None, str | No
 # --------------------------------------------------------------------------------------------------------- the clock
 def start_after(pinned_at: float) -> dt.date:
     """THE CLOCK: the first session FWD1 judges, from the time the release carrying the pin began running: the session
-    after the first close after it (`forward_db.first_day(forward_db.first_close(pinned_at))`, the rule E3's D2 gives a
-    program's code: no session whose decision or fill could have been seen when the judge was pinned is judged)."""
-    from . import forward_db
+    after the first close after it, never before the look cap (the rule E3's D2 gives a program's code,
+    `forward_db.first_day(forward_db.first_close(t))`, read here from the calendar itself: this module reads no forward
+    record; a test holds the two equal): no session whose decision or fill could have been seen when the judge was
+    pinned is judged. ValueError for a time that is not finite or one the calendar does not reach."""
+    from ..equity import config, schedule
 
-    return forward_db.first_day(forward_db.first_close(float(pinned_at)))
+    t = float(pinned_at)
+    if not math.isfinite(t):
+        raise ValueError(f"the pin's time is an epoch time: {pinned_at!r}")
+    day = max(schedule.ny_day(t), config.LOOK_CAP)
+    for _ in range(schedule.HORIZON_DAYS + 1):
+        moments = schedule.moments(day)          # None: not a session
+        if moments is not None and moments.close_at > t:
+            return schedule.next_session(day)
+        day += dt.timedelta(days=1)
+    raise ValueError(f"no NYSE session closes within {schedule.HORIZON_DAYS} days after {pinned_at!r}")
 
 
 def forward_start(first_day: dt.date, pin_start: dt.date) -> dt.date:
@@ -580,7 +591,7 @@ def beside(rule_: Rule, *, typ: str, case: str, k: int, start: Any, t: float, c_
             f"record.")
 
 
-__all__ = ["NAME", "SCREEN", "SCREEN_KEY", "RECEIPT_PATH", "PLAN", "KMAX", "K_MAX", "ZERO", "TYPES", "CASES", "C_G",
+__all__ = ["NAME", "SCREEN", "PIN_BLOCK", "RECEIPT_PATH", "PLAN", "KMAX", "K_MAX", "ZERO", "TYPES", "CASES", "C_G",
            "C_MARGIN", "OWN_CAP", "HAIRCUT_BP", "HAIRCUT_FLOOR_BP", "PANEL_LOTS", "PLACEBO_DRAWS",
            "PLACEBO_COUNT_MAX", "OWNER_WALL", "XS1_LOOK_CAP", "XS1_FORWARD_BUDGET", "PANEL_WEAK_K", "PIN_KEYS",
            "FIGURE_KEYS", "Rule", "pin", "load", "rule", "start_after", "forward_start", "grid_index", "k_used",

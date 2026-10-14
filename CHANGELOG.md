@@ -45,7 +45,7 @@ on branches.
   2.6% (with the look, at most 15%), ETF N 2.8% / 5.5% (no family or regime cell over 15%). Power like for like (the
   haircut in both): PANEL N +20%/yr 48.8% against 9.0% at zero edge by 60; ETF N +10%/yr 2.4% against 1.4%. Its
   conformance vectors: `league/tests/fixtures/forward_screen_fwd1_vectors.json`.
-- **The pin starts the clock:** policy.json `elane.screens.forward` (the sha and every printed figure; CI holds both
+- **The pin starts the clock:** policy.json `elane.forward_screen` (the sha and every printed figure; CI holds both
   to the file). FWD1_START = the session after the first close after the release carrying it began running.
 - **The job** `forward_screen` (after `forward_shadow` and `forward_xs`): its own append-only
   `<state>/forward-screen.sqlite`, the permit file of ids and words the swarm reads, the operator's report with the

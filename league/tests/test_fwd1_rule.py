@@ -1,5 +1,5 @@
 """FWD1-R's rule (league/ops/fwd1_rule.py): the receipt's conformance vectors, the bar, the haircut, the placebo leg,
-the clock and THE PIN that starts it (policy.json `elane.screens.forward` held to docs/benchmarks/forward_screen_fwd1.json).
+the clock and THE PIN that starts it (policy.json `elane.forward_screen` held to docs/benchmarks/forward_screen_fwd1.json).
 
 Every input is synthetic (numpy `default_rng` streams the vectors file states); no market data, no real figure."""
 
@@ -246,12 +246,18 @@ class TheClock(unittest.TestCase):
         self.assertEqual(R.start_after(self.at("2026-10-15T14:00:00")), dt.date(2026, 10, 16))   # in Thursday's session
         self.assertEqual(R.start_after(self.at("2026-10-15T21:00:00")), dt.date(2026, 10, 19))   # after its close
         self.assertEqual(R.start_after(self.at("2026-10-17T15:00:00")), dt.date(2026, 10, 20))   # a Saturday
+        from league.ops import forward_db
+
+        for text in ("2026-10-15T14:00:00", "2026-10-15T21:00:00", "2026-10-17T15:00:00", "2026-11-26T15:00:00",
+                     "2026-11-27T19:30:00", "2026-12-24T20:00:00"):      # a holiday, a half day's close, its evening
+            t = self.at(text)
+            self.assertEqual(R.start_after(t), forward_db.first_day(forward_db.first_close(t)), text)
         self.assertEqual(R.forward_start(dt.date(2026, 10, 13), dt.date(2026, 10, 16)), dt.date(2026, 10, 16))
         self.assertEqual(R.forward_start(dt.date(2026, 10, 20), dt.date(2026, 10, 16)), dt.date(2026, 10, 20))
 
 
 class ThePin(unittest.TestCase):
-    """CI's pin: policy.json `elane.screens.forward` is the receipt file's, value for value, and this code's."""
+    """CI's pin: policy.json `elane.forward_screen` is the receipt file's, value for value, and this code's."""
 
     @classmethod
     def setUpClass(cls):

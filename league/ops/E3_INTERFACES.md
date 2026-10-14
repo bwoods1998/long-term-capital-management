@@ -725,7 +725,7 @@ release's probe to the byte (`league/tests/test_contam_probe.py` passes unchange
 E3 records and judges nothing; FWD1-R is the later release section 4 names. Its rule is `league/ops/fwd1_rule.py`, its
 job `league/ops/forward_screen.py` (registered after `forward_shadow` and after `forward_xs`), its receipt
 `docs/benchmarks/forward_screen_fwd1.json` (v2: the study FWD1-1014's own code at the adopted bars) pinned in
-policy.json `elane.screens.forward`. What it reads and what it leaves as it was:
+policy.json `elane.forward_screen`. What it reads and what it leaves as it was:
 - **Read-only.** `forward_db.open_db(root, readonly=True)`: `fwd_registry` (the lineages, their rows' `first_day`,
   `reason`, `run_sha` and `row_hash`), `forward_db.counted_days` (D4's counted days, under ONE engine id a verdict),
   `fwd_ll` (an ETF day's live-like re-price in place of r), `fwd_lotgap.side_gap_bp` (the measured adverse gap a side

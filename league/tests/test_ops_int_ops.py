@@ -189,13 +189,15 @@ class RunnerHolds(unittest.TestCase):
         # not recorded is lost for good). Release E3's contamination probe spends model dollars: paid, never in a pause.
         # (release E4) the panel lane's data and measurement jobs, which read the gateway and write their own files,
         # and its half of the forward record (`forward_xs`: it writes the forward store and the twin marker alone).
+        # (FWD1-R, A33) the forward screen's job (`forward_screen`: it reads the record read-only and writes only its
+        # own store, the permit file and its report).
         self.assertEqual({j.name for j in JOBS if j.in_pause}, {"budget", "budget_refresh", "clock", "preopen", "economics",
                                                                 "stall", "direction", "fast_lane", "game", "dlane",
                                                                 "equity_data", "equity_twins", "forward_register",
                                                                 "fill_minutes", "forward_shadow", "forward_report",
                                                                 "forward_audit", "forward_xs", "equity_universe",
                                                                 "equity_panel", "equity_spreads", "equity_neff",
-                                                                "french", "xs_zero_edge"})
+                                                                "french", "xs_zero_edge", "forward_screen"})
         self.assertEqual({j.name for j in JOBS if j.paid}, {"postmortem", "agenda", "engineer", "contam_probe"})
         longest = max(j.wall for j in JOBS)
         self.assertGreaterEqual(jobs["grant"].grace, longest + 5 * 60, "an hourly grant waits behind the longest job, never missed")
