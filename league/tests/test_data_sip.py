@@ -158,6 +158,28 @@ class Relay(unittest.TestCase):
         self.assertEqual(data.ingests, 1)
         self.assertEqual(gateway.symbols[-1], ['PLTR'])
 
+    def test_the_nightly_hand_off_allows_one_root_for_its_exact_packet_only(self):
+        """THE SOURCE GAP (Oct 14, 2026): a gap is allowed for the root the nightly hands off, for the same packet it
+        watched, and stays quarantined; another packet, or another root's gap, still fails the night."""
+        short = [bar(m) for m in range(*HOURS) if m != 825]
+        data, gateway = Data(('SPY', 'SLV')), Gateway({'SPY': self.full(), 'SLV': short})
+        with self.assertRaises(SIPError) as caught:
+            self.relay(data, gateway)
+        (gap,) = caught.exception.coverage
+        self.assertEqual((gap['root'], gap['known'], gap['missing_minutes']), ('SLV', 389, [826]))
+        self.assertEqual(data.ingests, 0)
+        for handed in ({'SLV': 'f' * 64}, {'SPY': gap['packet_sha256']}):
+            with self.subTest(handed=handed), self.assertRaisesRegex(SIPError, 'SLV 389/390'):
+                self.relay(data, gateway, source_incomplete=handed)
+        self.assertEqual(data.ingests, 0)
+        result = self.relay(data, gateway, source_incomplete={'SLV': gap['packet_sha256']})
+        self.assertEqual((result['complete'], result['source_incomplete']), (False, ['SLV']))
+        self.assertEqual(set(data.canonical), {'SPY'})                 # SLV's packet is never ingested
+        row = next(r for r in result['coverage'] if r['root'] == 'SLV')
+        self.assertTrue(row['source_incomplete'])
+        self.assertIn(row['quarantine'], [u[0] for u in data.uploads])
+        self.assertNotIn('source_incomplete', self.relay(data, Gateway({'SLV': self.full()}))['coverage'][0])
+
     def test_sparse_or_invalid_packet_never_reaches_canonical_ingest(self):
         for bars in ([bar()], [dict(bar(), v=-1)]):
             data = Data()

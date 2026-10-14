@@ -30,6 +30,53 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### The source gap: a SIP minute the source never serves no longer holds every later forward day, and the stall alarm names the day and the root, on `fix/nightly-sip-gap` (unreleased; an owner deploy: `scripts/data/nightly.py`, `sip.py` and `league/ops/stall.py` are protected files; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the constitution digest `4ef472e1` and the money digest `5b95d73e` are main's; no setting changes)
+
+- **What happened.** The nightly retried 2026-10-12 every five minutes from 06:20Z Oct 13 for two days, with "SIPError:
+  incomplete regular-session SIP bars: SLV 389/390". The source never served SLV's 13:45 ET bar (completion minute
+  826), and every retry got the same packet. The strict relay raised before it ingested any root, so none of the
+  day's 23 stock roots took its SIP file. 2026-10-13 and 2026-10-14 waited behind it ("a failed night stays
+  pending, and outages are caught up oldest first"). The research that reads the nightly's ready file stayed on
+  2026-10-09. The stall alarm's `forward` cause stood, but only in the daily INFO notice, as an error text with no
+  day and no owner step.
+- **The hand-off** (`scripts/data/nightly.py`, THE SOURCE GAP). Each failed relay records, with the day, every short
+  root's packet and since when the source has served it unchanged (`forward_days[day].sip_watch`). A changed packet
+  restarts the clock. A root whose packet has stood unchanged 6 h and past the next session's close (24 h at most)
+  goes to the forward gap ledger (`forward_days[day].sip_gaps`), but only a small gap: bars served with at most 5
+  minutes missing ("partial"), on at most 2 roots of the day. An empty or invalid packet, a wider gap (a gateway
+  answering with no bars, every root cut off at noon) or more short roots is an outage whose bars may come later: the
+  day stays strict, no hand-off is scheduled, and the owner gets the owed day's step at 36 h. The relay (`sip.relay_day(source_incomplete=...)`)
+  then allows that root's gap for that exact packet only. It ingests the complete roots and keeps the short root's
+  packet quarantined. Nothing is filled, and the root keeps the canonical file of the day's pull (the vendor's
+  option-implied series, labeled with its source). The day's proof says `source_incomplete`, never complete, and
+  the nightly refuses a proof that says otherwise. The ready file (still schema 1) carries it in `sip_coverage`, and
+  its `source_incomplete` list names every such root-day on the chain. Then the nightly goes on with the later days.
+  The historical gap queue cannot take forward days, because its plan is digest-pinned to Train-Holdout. The ledger
+  keeps its rules.
+- **The alarm** (`league/ops/stall.py`, `forward`). The controller now writes `nightly.json` `retrying` (day, since,
+  attempts, short roots with their coverage) and `completed_at`. The cause stands once the same day has been retried
+  6 h, naming the day and the root ("the nightly has retried 2026-10-12 for N h (SLV: SIP 389/390, minute 826 (13:46
+  ET) missing)"). It is the owner's step, mailed at once, once the owed day has been due 36 h with no day completed
+  in as long. While the nightly has a hand-off scheduled (`retrying.handoff_at`), the owner step waits until an hour
+  past that time, and never past 72 h owed; so does a record with an error and no `retrying`, which only the release
+  before writes (a stall run between the deploy and the new nightly's first try). While a nightly stop stands, the
+  stop is the step and the owed day's is left out (both together overran the mail's 400-character step). The retry
+  counts from the stall's own first sight of the error only when that sight was of the same day (`stall.json`
+  `nightly_error` keeps its day). A weekend is never an owed day. No new cause, so no gateway deploy.
+- **Tests.** `league/tests/test_data_source_gap.py` is new. It runs a synthetic gateway that never returns the
+  minute, a fake data box with backfill.py's ingest rule, the real relay and the real proof. It covers the clock (6
+  h, the next close, the 24 h cap, a changed packet, a second short root), the bound (every root empty, every root
+  cut off at noon, an invalid packet, 6 minutes short, a small gap beside an outage, three short roots: each held,
+  and the controller's record reaching the stall's owner step at 36 h owed), the hand-off, the proof's refusals, and
+  the controller: a deploy-time catch-up of Monday, then Tuesday and Wednesday. There are also new cases in
+  `test_data_sip.py` (one root, one packet) and `test_ops_stall.py` (6 h retried, 36 h owed, a weekend, a record
+  from before the clock on the same day and on another day, the deploy window's record from the release before, a
+  stop beside an owed day).
+- **On deploy.** The House's first tick retries 2026-10-12 with no recorded clock, so the 6 h starts then. It hands
+  SLV off 6 h after that first tick, because Oct 13's close has passed. 2026-10-13 is pulled right after (about 20
+  minutes: stages 7 and 8, the relay, the copy, the checkpoint), and 2026-10-14 runs at 06:00Z Oct 15. One gateway
+  bars call is made per try.
+
 ### Release T: E4 step one with A32, the forward screen FWD1-R, sector programs forward-only, on `rel/e4-fwd1` (unreleased; to deploy before 12:55Z Thu Oct 15, 2026 so that FWD1-R's clock starts Fri Oct 16)
 
 - **What it carries:** E4 step one merged with A32 (`feat/equity-e4-a32`, PR #544, which carries PR #543: the Probe
