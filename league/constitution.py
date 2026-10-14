@@ -1148,12 +1148,15 @@ CONSTITUTION["equity_money"]["probe"]["seat"] = {"rule": "activity-1-free", "k_f
 #   the same K; the ETF seats, their plan, the idle test and K are untouched. Every leg of the panel lane is
 #   lane-wide, so while one fails no panel row exists and nobody is seated into the pool: a program held on a failed
 #   leg keeps its seat and resumes. The swarm's `elane.panel.seats` may only lower it.
-# - `sleeve_share`: a panel program's sleeve as a share of E (0 to 0.25, and never above `probe.sleeve_share`). At
-#   0.10 x E its whole basket fits beside three open one-ETF lots at 0.50 x E with no loss in the window (3 x 0.25 x E
-#   x 0.20 + 0.10 x E x 0.40 = 0.19 x E: $395.96 of the $400 window at E = $2,084), and eight names of a tenth of it
-#   each clear the $10 order minimum even scaled to 38%. Outside that room a basket bought from flat or rotated whole
-#   is scaled to the room (league/equity/live.py `_panel_budget`), and a partial rotation's new name is refused at
-#   the send.
+# - `sleeve_share`: a panel program's sleeve as a share of E (0 to 0.25, and never above `probe.sleeve_share`: a table
+#   with the Probe sleeve under the panel sleeve is refused, so a Probe sleeve set to 0 needs `sleeve_share` 0 with
+#   it, or `seats` 0). At 0.10 x E its whole basket fits beside three HELD one-ETF lots at 0.50 x E with no loss in
+#   the window while 3 x 0.25 x E x 0.20 + 0.10 x E x 0.40 = 0.19 x E is at most $400 (E up to $2,105; $380 of it at
+#   E = $2,000). A name of an eight-name basket is 0.0125 x E, so a basket scaled under 800 / E of its sleeve (40% at
+#   E = $2,000) has names under the $10 order minimum, which are refused, not cut. Outside that room a basket bought
+#   from flat or rotated whole is scaled to the room the HELD lots leave (league/equity/live.py `_panel_budget`; the
+#   other programs' buys planned for the same open are not seen, and they are worked first), and a partial
+#   rotation's new name is refused at the send.
 # THE WINDOW STAYS ONE, FIRST COME (A8.6 as registered): no slice of the $400 is reserved for the panel, and every
 # owner line binds a panel lot through `size_entry` as it binds an ETF lot (a stock at most 0.20 x E, 1.00 x E
 # invested, the cash reserve, the shared loss budget at 0.40 of a stock's mark). ITS COST, PLAINLY: one more program

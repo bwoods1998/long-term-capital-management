@@ -602,25 +602,38 @@ Read with the amendments in force, which the text above predates:
   (`panel.seats`, 1, bound 0 to 2; the swarm's `elane.panel.seats` may only lower it) and never one of the ETF
   programs' `probe.max_programs`: the seat rule ranks the waiting panel programs inside the pool alone, by the
   same K, and the ETF seats, their plan, the idle test and K are untouched. Its sleeve is `panel.sleeve_share` x E
-  (0.10, bound 0 to 0.25, never above the Probe sleeve: a table that breaks the order is refused, so a Probe sleeve
-  set to 0 takes the panel's to 0 with it). The window stays ONE and first come (A8.6 as registered). A program
-  held on a failed leg keeps its seat; nobody is seated into it. Rule arithmetic at E = $2,084 (a one-ETF lot at
-  the Probe sleeve 0.50 is $521.00, $104.20 of open risk; a stock weighs 0.40):
+  (0.10, bound 0 to 0.25, never above the Probe sleeve: a table with the Probe sleeve under the panel sleeve is
+  refused, so an operator who sets `probe.sleeve_share` to 0 sets `panel.sleeve_share` to 0 with it, or uses
+  `panel.seats` 0). The window stays ONE and first come (A8.6 as registered). A program held on a failed leg keeps
+  its seat; nobody is seated into it. Rule arithmetic at E = $2,000 (a one-ETF lot at the Probe sleeve 0.50 is
+  $500.00, $100.00 of open risk; a stock weighs 0.40):
 
   | eight names at 0.10 x E | the decision's budget | the basket | its open risk |
   |---|---|---|---|
-  | alone, the window untouched | $208.40 (the sleeve) | 8 x $26.05 | $83.36 |
-  | beside three one-ETF lots ($312.60 at risk) | $208.40 | 8 x $26.05 | $83.36 ($395.96 of $400 in all) |
-  | beside three one-ETF lots and $50 of window loss | $93.50 | 8 x $11.68 | $37.40 |
-  | beside four one-ETF lots ($416.80 at risk) | $0 | none | the window is full |
+  | alone, the window untouched | $200.00 (the sleeve) | 8 x $25.00 | $80.00 |
+  | beside three HELD one-ETF lots ($300.00 at risk) | $200.00 | 8 x $25.00 | $80.00 ($380.00 of $400 in all) |
+  | beside three HELD one-ETF lots and $50 of window loss | $125.00 | 8 x $15.62 | $49.98 |
+  | beside four HELD one-ETF lots ($400.00 at risk) | $0 | none | the window is full |
+
+  The whole basket fits beside three one-ETF lots with no loss in the window while 0.19 x E is at most $400 (E up
+  to $2,105). THE BUDGET SEES THE LOTS ALREADY HELD, never the other programs' buys planned for the same open
+  (`_panel_budget`): the ETF programs' intents are worked first at the open (intent order, and a panel family's id
+  sorts after them), so at an open where ETF lots are also bought they take the window's room first and the basket
+  is cut name by name at the send or refused, not scaled. A name is 0.0125 x E ($25.00 at E = $2,000), so a basket
+  scaled under 800 / E of its sleeve (40% at E = $2,000) has names under the $10 order minimum: they are REFUSED,
+  and each refused entry is an A14 difference (a cut one keeps its key and is none). A held basket also takes room
+  in the shared window that a later ETF entry would have had (first come), so ETF entries are refused or cut more
+  often. Neither cost is measured yet: A32 modelled ETF programs only, and EQDONE-5 measures one panel seat at 0.10
+  beside six ETF seats at 0.50 before a panel seat opens.
 
   ITS COST, PLAINLY: one more program on real money at once (XS1's zero-edge pass rate at the House's bar is at
-  most 10.02% a cell); a basket's lots closed at one open are ONE market move, so they add to Done's count and to
-  its reads, not to its information (the direction report states the distinct close dates beside every
-  checkpoint); a lot of $26 earns or loses cents, so Done's sign is carried by the ETF lots and the -$43.75 hole;
-  the -$300 program line is 144% of a 0.10 x E sleeve. The rows of the tables below are the Probe sleeve's, which
-  a panel program took before step two. Rollback: `panel.seats` 0 (one money-digest move; nobody is unseated, no
-  lot is sold). Held by `league/tests/test_equity_panel_seats.py`.
+  most 10.02% a cell); a basket's lots closed at one open are ONE market move, so Done counts a panel program's
+  closes by close date (**Done counts a panel program's closes by date**, below) and the direction report states
+  the distinct close dates beside every checkpoint; a lot of 0.0125 x E earns or loses cents, so Done's sign is
+  carried by the ETF lots and the tally's hole; the -$300 program line is 150% of a 0.10 x E sleeve at E = $2,000.
+  The rows of the tables below are the Probe sleeve's, which a panel program took before step two. Rollback:
+  `panel.seats` 0 (one money-digest move; nobody is unseated, no lot is sold). Held by
+  `league/tests/test_equity_panel_seats.py`.
 - **The Probe sleeve** is the constitution's `equity_money.probe.sleeve_share` x E. The text's "$557 sleeve" is
   0.25 x E at about $2,229, which IS the design in force since release E5-S (six seats at 0.25 x E; **The seats and
   the sleeve**, below); between E1's deploy and E5-S it was the captain's A20, three seats at 0.50 x E, and

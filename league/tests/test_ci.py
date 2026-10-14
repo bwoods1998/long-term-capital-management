@@ -513,8 +513,9 @@ class TheEquityLane(unittest.TestCase):
                                        "[0, 0.50]"], past)
         for inside in (*SLEEVES, "0.49"):
             self.assertEqual(self.tree(constitution={self.probe_row: self.row_at(seats, inside)}), [], inside)
-        # The stop of new Probe lots (0) takes the panel's sleeve to 0 with it (step two's order rule: a panel
-        # program's sleeve is never above a Probe's); alone it is refused by name.
+        # The stop of new Probe lots (0) needs the panel's sleeve at 0 with it (step two's order rule: a panel
+        # program's sleeve is never above a Probe's): nothing moves the panel row by itself, and alone it is refused by
+        # name.
         panel = 'CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}'
         self.assertEqual(self.constitution.count(panel), 1)
         self.assertEqual(self.tree(constitution={self.probe_row: self.row_at(seats, "0"),
