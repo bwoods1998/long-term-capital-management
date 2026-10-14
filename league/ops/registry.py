@@ -217,7 +217,7 @@ JOBS: tuple[Job, ...] = (
     # read-only and writes only <state>/forward-screen.sqlite, the permit file and its report, so it runs in a pause
     # too. Its child seconds are `elane.fwd1.cpu_seconds_night` (900) inside the job's 1,200 of CPU.
     Job("forward_screen", "league.ops.forward_screen", (S.after("forward_shadow"), S.after("forward_xs")),
-        grace=3 * HOUR, cpu=1200, wall=1800, in_pause=True, owner="FWD1-R forward screen",
+        grace=2 * HOUR, cpu=1200, wall=1800, in_pause=True, owner="FWD1-R forward screen",
         what="the forward screen FWD1-R: one append-only verdict a lineage on its counted forward sessions after the "
              "pin (checkpoints 5-60, its own floor, the panel's placebo leg), the permit file of ids and words the "
              "swarm's seat path reads (switched off) and the operator's report with the registry's expected "

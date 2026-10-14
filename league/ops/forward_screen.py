@@ -95,13 +95,39 @@ NOT_JUDGED = {
 PREFERRED = ("train_pass", "seed", "live")
 #: The tags of the forward record that say a version reached a sealed pre-check or look (forward_register.py).
 SEALED_TAGS = ("try", "try_entered", "look_pass", "look_fail")
-#: An engine change touches a judged day when its r or w moves by more than this (forward_db.TOL).
+#: An engine change touches a judged day when its r, w, b or r15 moves by more than this (forward_db.TOL).
 ENGINE_TOUCH = forward_db.TOL
 #: The swarm-store family-state keys that say a family reached a sealed pre-check or look (league/swarm/elane.py
 #: `TRY_KEY`, `VERDICTS_KEY`, `LOOK_KEY`; league/swarm/elane_xs.py `PRECHECK_KEY`, `LOOK_KEY`: a test holds them).
+#: The panel's pre-check record counts only when it says `reached` True: elane_xs writes `reached` False when it
+#: refuses a version before any Validation read (a Train segment its own errors ended, the same lineage as a twin).
 SEALED_STATE = ("elane_try", "elane_verdicts", "elane_look", "elane_xs_precheck", "elane_xs_look")
-EVENT_KINDS = ("pinned", "registered", "engine_switched", "ineligible", "void", "house")
+PRECHECK_STATE = "elane_xs_precheck"
+EVENT_KINDS = ("pinned", "registered", "engine_switched", "ineligible", "void", "house", "waited", "stalled")
 APPEND_ONLY_ERROR = "forward-screen.sqlite is append-only"
+#: THE STALL RULE (the reviews' fix): a lineage whose next step waits on the House (its sides cannot be read from its
+#: own forward run, its rows under a new engine id have not come, a placebo span holds a session the House left out)
+#: on this many of the forward record's nights under one engine id is STALLED: it costs no run and is reported, and
+#: nothing marks it, until the record opens a new engine id (a whole recompute on the store as it then is), when it is
+#: asked again. A night is a day of the record (`MAX(fwd_days.day)`): a weekend or a night the record did not move
+#: counts none.
+STALL_NIGHTS = 5
+#: The statuses a lineage the job judges can stand at besides its verdict (`status_rows`): "pending" (asked each
+#: night), "ineligible" (no own floor, stated), "stopped" (its representative is stopped in the forward record: no row
+#: comes; pending again once it is resumed), "stalled" (THE STALL RULE) and "superseded" (registered under another
+#: receipt's pin: this receipt judges it no further).
+STATUSES = ("pending", "pass", "fail", "void", "ineligible", "stopped", "stalled", "superseded", "not_judged")
+#: ONE BUDGET A NIGHT: the child seconds of the job's runs (`fwd1_runs`) that ended in this window count against
+#: `cpu_seconds_night`, so the night's two runs (after each of the record's two nights) share it.
+NIGHT_WINDOW_S = 12 * 3600.0
+#: THE DEADLINE: no run is started, and none is given seconds, past the earlier of the job's own wall (the registry's,
+#: a test holds them equal) less `MARGIN_S` from its start and the next pre-open (league/ops/registry.py `preopen`:
+#: an hour before the open) less `MARGIN_S`. A run's budget is the lower of `run_budget_seconds` and what is left.
+WALL_S = 1800
+MARGIN_S = 120.0
+PREOPEN_BEFORE_S = 3600.0
+#: Less room than this before the deadline starts no run (the House's: asked again the next night).
+MIN_RUN_S = 30.0
 
 _TABLES = """
 CREATE TABLE IF NOT EXISTS fwd1_pins (sha TEXT PRIMARY KEY, release TEXT NOT NULL, pinned_at REAL NOT NULL,
@@ -123,8 +149,19 @@ CREATE TABLE IF NOT EXISTS fwd1_verdicts (lineage TEXT PRIMARY KEY, pid INTEGER 
 CREATE TABLE IF NOT EXISTS fwd1_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, kind TEXT NOT NULL,
   lineage TEXT, pid INTEGER, once TEXT, payload TEXT NOT NULL DEFAULT '{}');
 CREATE UNIQUE INDEX IF NOT EXISTS fwd1_events_once ON fwd1_events(kind, lineage, once) WHERE once IS NOT NULL;
+CREATE TABLE IF NOT EXISTS fwd1_pending (lineage TEXT NOT NULL, k INTEGER NOT NULL, engine INTEGER NOT NULL,
+  pid INTEGER NOT NULL, day TEXT NOT NULL, t REAL, s REAL NOT NULL, s15 REAL NOT NULL, g_bp REAL NOT NULL,
+  ll INTEGER NOT NULL, at REAL NOT NULL, PRIMARY KEY (lineage, k, engine)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS fwd1_runs (seq INTEGER PRIMARY KEY AUTOINCREMENT, started REAL NOT NULL,
+  finished REAL NOT NULL, seconds REAL NOT NULL, lineages INTEGER, at REAL NOT NULL);
 """
-TABLES = ("fwd1_pins", "fwd1_sides", "fwd1_lineages", "fwd1_floors", "fwd1_checks", "fwd1_verdicts", "fwd1_events")
+#: `fwd1_pending`: A CHECKPOINT'S READING, first write stands (the review's fix): its t, sums, haircut and live-like
+#: flag read on the night the representative first has k counted days, kept while the checkpoint waits on its floor or
+#: placebo leg (the budget, the House), so a later night judges those values and never a second read of inputs that
+#: changed since (a late `fwd_ll` row, a lot gap, an audit mark). `fwd1_runs`: one row a run of the job, its child
+#: seconds (ONE BUDGET A NIGHT).
+TABLES = ("fwd1_pins", "fwd1_sides", "fwd1_lineages", "fwd1_floors", "fwd1_checks", "fwd1_verdicts", "fwd1_events",
+          "fwd1_pending", "fwd1_runs")
 SCHEMA = "PRAGMA recursive_triggers=ON;\n" + _TABLES + "".join(
     f"CREATE TRIGGER IF NOT EXISTS {t}_no_{verb.lower()} BEFORE {verb} ON {t} BEGIN SELECT RAISE(ABORT, "
     f"'{APPEND_ONLY_ERROR}'); END;\n" for t in TABLES for verb in ("UPDATE", "DELETE"))
@@ -260,12 +297,17 @@ def _state(fam: Mapping[str, Any] | None) -> Mapping[str, Any]:
 
 def family_sealed(fam: Mapping[str, Any] | None) -> bool:
     """Whether a family's state says it reached a sealed pre-check or look (`SEALED_STATE`, any version): a Validation
-    try, a Validation verdict, a pre-check record or a look."""
+    try, a Validation verdict, a pre-check record that says it was reached, or a look. A panel pre-check record with
+    `reached` False is a refusal BEFORE any Validation read (league/swarm/elane_xs.py: a Train segment its own errors
+    ended, the same lineage as a twin): no sealed data was read, so it is not a sealed pre-check."""
     state = _state(fam)
     for key in SEALED_STATE:
         value = state.get(key)
-        if isinstance(value, Mapping) and value:
-            return True
+        if not isinstance(value, Mapping) or not value:
+            continue
+        if key == PRECHECK_STATE and value.get("reached") is False:
+            continue
+        return True
     return False
 
 
@@ -371,8 +413,14 @@ def register(store: sqlite3.Connection, fdb: sqlite3.Connection, families: Mappi
 
 # ------------------------------------------------------------------------------------------------------- the runs
 class OwnFloorRefused(Exception):
-    """The PROGRAM's own reason it has no own floor (a Train-era run its own errors ended: a partial series): the
-    lineage is ineligible for good, stated. Every other failure of the runs is the House's (asked again)."""
+    """The PROGRAM's own reason it has no own floor (a Train-era run its own errors ended: a partial series; a decide
+    that ran past its limit the same way in every run, E4's `TooSlow`; a Train-era series that cannot be read from its
+    own runs, which is as deterministic as the runs: asked again it fails again): the lineage is ineligible for good,
+    stated. Every other failure of the runs is the House's (asked again)."""
+
+
+class Late(RuntimeError):
+    """THE DEADLINE (`MIN_RUN_S` or less before it): no run is started. The House's: asked again the next night."""
 
 
 def _capital(result: Mapping[str, Any], default: Any) -> float:
@@ -385,17 +433,36 @@ def _capital(result: Mapping[str, Any], default: Any) -> float:
 
 
 class HouseRuns:
-    """The Train-era runs of a representative's own floor and a panel representative's placebo leg, in the job's own
-    decider child (`forward_shadow._decider`), started on first use and closed by `close`. Each method raises the
-    child's or the data's failure (never a program's mark: the checkpoint is left unwritten)."""
+    """The Train-era runs of a representative's own floor, a representative's forward run (its sides) and a panel
+    representative's placebo leg, in the job's own decider child (`forward_shadow._decider`), started on first use and
+    closed by `close`. Each method raises the child's or the data's failure (never a program's mark: the checkpoint is
+    left unwritten), or `OwnFloorRefused` for the program's own.
+
+    ONE OPEN OF THE PANEL STORE A JOB RUN (league/ops/forward_xs.py's own rule; the review's major): every panel run of
+    the job (a forward run's sides, a Train segment of the own floor, the placebo leg) reads THE ONE store of one
+    panel night (`panel_night`, built on first use with the forward record `fdb`), never a store opened for it: each
+    open maps the two bar arrays again (about 120-160 MB of address space at the real panel's size, freed only by a
+    full collection) and the ops child's address space is capped 500 MB above its start. `close` lets it go.
+
+    THE CLOCK RULE (E4's `elane_xs.steady`) holds every panel run: a run whose runtime shows a decide timeout is made
+    again and never read; `ClockUnsteady` is the House's (asked again), `TooSlow` the program's.
+
+    THE DEADLINE (`deadline`, epoch seconds; the job sets it): each run's budget is the lower of `budget_seconds` and
+    the seconds left before it, and none is started with `MIN_RUN_S` or less left (`Late`)."""
 
     def __init__(self, root: str | Path, *, budget_seconds: float, decider: Any = None,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, fdb: sqlite3.Connection | None = None,
+                 settings: Mapping[str, Any] | None = None, deadline: float = float("inf")):
         self.root = Path(root)
         self.budget_seconds = float(budget_seconds)
         self.decider = decider
         self.clock = clock
+        self.fdb = fdb
+        self.settings = settings
+        self.deadline = float(deadline)
         self._own = decider is None
+        self._night: Any = None
+        self.opens = 0                       # how many panel stores this object opened (a test reads it: one)
 
     def _child(self) -> Any:
         if self.decider is None:
@@ -405,6 +472,10 @@ class HouseRuns:
         return self.decider
 
     def close(self) -> None:
+        import gc
+
+        self._night = None
+        gc.collect()                         # the panel store's two maps go with it (its store and universe name each other)
         if self._own and self.decider is not None:
             try:
                 self.decider.close()
@@ -412,10 +483,49 @@ class HouseRuns:
                 pass
             self.decider = None
 
+    def budget(self) -> float:
+        """One run's seconds: the lower of `budget_seconds` and what is left before the deadline; `Late` with
+        `MIN_RUN_S` or less left."""
+        left = self.deadline - self.clock()
+        if left <= MIN_RUN_S:
+            raise Late("the night's deadline is too near to start a run: asked again the next night")
+        return max(1.0, min(self.budget_seconds, left))
+
+    def panel_night(self, fdb: sqlite3.Connection | None = None, settings: Mapping[str, Any] | None = None) -> Any:
+        """THE ONE PANEL NIGHT of this job run (`forward_xs.panel_shadow` on the forward record READ-ONLY: it writes
+        nothing before `night`), built on first use; its `panel` is the job run's one panel store."""
+        if self._night is None:
+            from . import forward_xs
+
+            db = fdb if fdb is not None else self.fdb
+            if db is None:
+                db = forward_db.open_db(self.root, readonly=True)
+                db.row_factory = sqlite3.Row
+                self.fdb = db
+            self._night = forward_xs.panel_shadow(self.root, db, decider=self._child(),
+                                                  settings=settings if settings is not None else self.settings,
+                                                  clock=self.clock)
+            self.opens += 1
+        self._night.decider = self._child()
+        return self._night
+
+    def _panel_iso(self) -> Any:
+        """The panel's runner over THE ONE STORE (`panel_night`), at this run's budget."""
+        from ..xs import runner as XR
+
+        panel = self.panel_night().panel
+
+        class OneStore(XR.Isolated):
+            def _store(self, gate: Any = None) -> Any:
+                return panel
+
+        return OneStore(self._child(), self.root / "equity-daily", budget_seconds=self.budget(), nice=None)
+
     def etf_pools(self, program: Any) -> tuple[Any, Any]:
         """(the 2016-19 pool, the 2022-24 pool), each (r, r15, w, b) float64 arrays from `screen.POOL_SKIP` (S2's
         convention), or None for a span the program has no history in: its runs at k 1.0 and 1.5 over each of
-        `config.TRAIN_ERA_SEGMENTS` (E1's runner in this job's child), each read by `screen.series`."""
+        `config.TRAIN_ERA_SEGMENTS` (E1's runner in this job's child), each read by `screen.series`. A series the runs
+        do not give (a ValueError of `screen.series`, two runs that differ in their sessions) is the program's own."""
         import numpy as np
 
         from ..equity import config as econfig
@@ -423,14 +533,16 @@ class HouseRuns:
         from ..equity.runner import Isolated
         from ..equity.store import EquityStore
 
-        iso = Isolated(self._child(), self.root / "equity-daily", budget_seconds=self.budget_seconds)
+        iso = Isolated(self._child(), self.root / "equity-daily", budget_seconds=self.budget())
         needs = iso._needs(program.code, program.params, program.key)
         store = EquityStore(self.root / "equity-daily")
         pools: list[Any] = []
         for first, last in econfig.TRAIN_ERA_SEGMENTS:
             bars = store.span(needs.symbols, first, last, history=needs.history)
-            runs = [iso._run(program.code, program.params, program.key, bars, k)
-                    for k in (econfig.K_BASE, econfig.K_STRESS)]
+            runs = []
+            for k in (econfig.K_BASE, econfig.K_STRESS):
+                iso.budget_seconds = self.budget()
+                runs.append(iso._run(program.code, program.params, program.key, bars, k))
             statuses = [str(run.result.get("status")) for run in runs]
             if any(s == "no_data" for s in statuses):
                 pools.append(None)
@@ -438,37 +550,65 @@ class HouseRuns:
             if any(s != "ok" for s in statuses):
                 raise OwnFloorRefused(f"a Train-era run ended {statuses}: its series is partial")
             series = []
-            for run in runs:
-                result = run.result
-                universe = [str(s) for s in (result.get("symbols") or needs.symbols)]
-                series.append(S.series(result.get("lots") or [], run.bars, universe=universe,
-                                       capital=_capital(result, econfig.SLEEVE_USD)))
+            try:
+                for run in runs:
+                    result = run.result
+                    universe = [str(s) for s in (result.get("symbols") or needs.symbols)]
+                    series.append(S.series(result.get("lots") or [], run.bars, universe=universe,
+                                           capital=_capital(result, econfig.SLEEVE_USD)))
+            except ValueError as exc:
+                raise OwnFloorRefused(f"its Train-era series cannot be read from its own runs ({str(exc)[:120]})") \
+                    from None
             base, stress = series
             if len(base.r) != len(stress.r):
-                raise ValueError("the two Train-era runs differ in their sessions")
+                raise OwnFloorRefused("its two Train-era runs differ in their sessions")
             skip = S.POOL_SKIP
             pools.append(tuple(np.asarray(a, dtype=np.float64)[skip:] for a in (base.r, stress.r, base.w, base.b)))
         return pools[0], pools[1]
 
     def panel_pools(self, program: Any) -> tuple[Any, Any]:
         """(the first Train segment's pool, the second's), each (x, x15, w) float64 arrays from XS1's `POOL_SKIP`: the
-        program's one run over each of `league.xs.config.TRAIN_SEGMENTS` (XS1's floor runs) in this job's child."""
+        program's one run over each of `league.xs.config.TRAIN_SEGMENTS` (XS1's floor runs, `Isolated.segments`'
+        slices and run keys), one segment at a time on THE ONE STORE, each through THE CLOCK RULE, its slice let go
+        before the next is cut."""
         import numpy as np
 
+        from ..swarm import elane_xs
+        from ..xs import config as XC
         from ..xs import runner as XR
         from ..xs import screen as XS
         from . import forward_xs
 
-        iso = XR.Isolated(self._child(), self.root / "equity-daily", budget_seconds=self.budget_seconds, nice=None)
+        iso = self._panel_iso()
+        needs, run_sha = iso._program(program.code, program.params, program.key)
+        store = iso._store()
+        sessions = store.sessions("train")
         pools: list[Any] = []
-        for run in iso.segments(program.code, program.params, name=program.key):
+        for start, end in XC.TRAIN_SEGMENTS:
+            first = iso._first([d for d in sessions if start <= d <= end], f"the Train segment {start}..{end}")
+
+            def one(start: Any = start, end: Any = end, first: Any = first) -> Any:
+                iso.budget_seconds = self.budget()
+                piece = store.train(start, end, history=needs.history, run_key=XR.gym_key(run_sha, "train", first))
+                return iso._run(program.code, program.params, program.key, piece, 1.0)
+
+            try:
+                run = elane_xs.steady(one, what="Train segment run")
+            except elane_xs.TooSlow as exc:
+                raise OwnFloorRefused(f"a Train-era panel run's decides ran past the limit in every run: "
+                                      f"{str(exc)[:120]}") from None
             status = str(run.result.get("status"))
             if status == "no_data":
                 pools.append(None)
                 continue
             if status != "ok":
                 raise OwnFloorRefused(f"a Train-era panel run ended {status!r}: its series is partial")
-            found = forward_xs.series(run.result)
+            try:
+                found = forward_xs.series(run.result)
+            except ValueError as exc:
+                raise OwnFloorRefused(f"its Train-era panel series cannot be read from its own run "
+                                      f"({str(exc)[:120]})") from None
+            del run
             skip = XS.POOL_SKIP
             pools.append(tuple(np.asarray(a, dtype=np.float64)[skip:] for a in (found.x, found.x15, found.w)))
         while len(pools) < 2:
@@ -478,25 +618,34 @@ class HouseRuns:
     def forward_sides(self, program: Any, typ: str, *, settings: Mapping[str, Any] | None,
                       fdb: sqlite3.Connection | None = None) -> dict[str, Any]:
         """THE SIDES of the representative's forward days: its own forward run in this job's child, as the record's
-        night runs it (ETF: E3's `Shadow.slice` and its k 1.0 run; PANEL: package J's `run_program`), opened on the
-        forward record READ-ONLY. {"r": {ISO day: the run's r}, "sides": {ISO day: the weights in and out}}: the judge
-        keeps a day's sides only where the run's r is the record's."""
+        night runs it (ETF: E3's `Shadow.slice` and its k 1.0 run; PANEL: package J's `run_program` on THE ONE
+        STORE), opened on the forward record READ-ONLY. {"r": {ISO day: the run's r}, "sides": {ISO day: the weights in
+        and out}, "entries": {ISO day: lots entering}, "exits": {ISO day: lots exiting, as the record counts them},
+        "bars": {ISO day: THE BARS HASH of the decision behind the day's orders, as the record's night computes it}}:
+        the judge keeps a day's sides only where this run is the record's day (`Night.read_sides`)."""
         from ..equity import config as econfig
-        from . import forward_shadow, forward_xs
+        from . import forward_shadow
 
-        own = fdb is None
+        own = fdb is None and self.fdb is None
         if own:
             fdb = forward_db.open_db(self.root, readonly=True)
             fdb.row_factory = sqlite3.Row
+        fdb = fdb if fdb is not None else self.fdb
         try:
             if typ == "PANEL":
-                night = forward_xs.panel_shadow(self.root, fdb, decider=self._child(), settings=settings,
-                                                clock=self.clock)
+                night = self.panel_night(fdb, settings)
+                night.cfg = {**night.cfg, "run_budget_seconds": self.budget()}
                 run, _ = night.run_program(program)
                 days, r = list(run.series.iso), list(run.series.r)
+                exits = [int(v) for v in run.series.exits]
                 result = run.result
+                hashes = {day: night.bars_hash(day) for day in days}
             else:
+                from ..equity import ctx as eq_ctx
+                from ..equity.program import parse_needs
+
                 night = forward_shadow.Shadow(self.root, fdb, decider=self._child(), settings=settings, clock=self.clock)
+                night.cfg = {**night.cfg, "run_budget_seconds": self.budget()}
                 whole = night._whole(program)
                 bars = night.slice(whole)
                 if bars is None:
@@ -507,34 +656,42 @@ class HouseRuns:
                 epoch = dt.date(1970, 1, 1)
                 days = [(epoch + dt.timedelta(days=int(d))).isoformat() for d in series.days]
                 r = [float(v) for v in series.r]
+                exits = [int(v) for v in series.exits]
+                needs = parse_needs(whole.needs)
+                hashes = {day: forward_db.bars_hash(eq_ctx.inputs_from_bars(
+                    bars, int(bars.first) + i - 1, needs=needs, cash=0.0, equity=0.0, budget=0.0, caps={}, params={}))
+                    for i, day in enumerate(days)}
         finally:
             if own:
                 fdb.close()
-        return {"r": dict(zip(days, (float(v) for v in r))), "sides": lot_sides(result)}
+        entered = Counter(str(lot.get("entry_day"))[:10] for lot in result.get("lots") or [])
+        return {"r": dict(zip(days, (float(v) for v in r))), "sides": lot_sides(result),
+                "entries": {day: int(entered.get(day, 0)) for day in days}, "exits": dict(zip(days, exits)),
+                "bars": hashes}
 
     def panel_placebo(self, program: Any, *, start: dt.date, end: dt.date, seed: int) -> dict[str, Any]:
         """THE PLACEBO LEG's draws: one panel run of the representative over the forward sessions [start, end] (its
-        judged sessions, flat at start: the forward days need the gate's capability), with `fwd1_rule.PLACEBO_DRAWS`
-        matched placebos under `seed` (XS1's law, league/xs/placebo.py). {"t": [the draws' t on the run's sessions],
-        "days": how many sessions they were read on, "n": the draws}."""
-        from ..equity.store import mint_equity_gate_capability
+        judged sessions, flat at start: the forward days need the gate's capability, which THE ONE STORE was opened
+        with), with `fwd1_rule.PLACEBO_DRAWS` matched placebos under `seed` (XS1's law, league/xs/placebo.py), through
+        THE CLOCK RULE. {"t": [the draws' t on the run's sessions], "days": how many sessions they were read on, "n":
+        the draws}. `elane_xs.TooSlow` (the program's) and `ClockUnsteady` (the House's) pass through."""
+        from ..swarm import elane_xs
         from ..xs import runner as XR
 
-        store_root = self.root / "equity-daily"
-        gate = mint_equity_gate_capability(store_root, "forward-screen placebo leg")
+        iso = self._panel_iso()
+        store = iso._store()
+        needs, run_sha = iso._program(program.code, program.params, program.key)
+        first = iso._first([d for d in store.sessions("forward") if start <= d <= end],
+                           f"the forward days {start}..{end}")
 
-        class Span(XR.Isolated):
-            def span(self, code: str, params: Any, *, name: str) -> Any:
-                store = self._store(gate)
-                needs, run_sha = self._program(code, params, name)
-                first = self._first([d for d in store.sessions("forward") if start <= d <= end],
-                                    f"the forward days {start}..{end}")
-                piece = store.bars("forward", history=needs.history, run_key=XR.gym_key(run_sha, "forward", first),
-                                   start=first, end=end)
-                return self._run(code, params, name, piece, 1.0, placebos=R.PLACEBO_DRAWS, seed=int(seed))
+        def one() -> Any:
+            iso.budget_seconds = self.budget()
+            piece = store.bars("forward", history=needs.history, run_key=XR.gym_key(run_sha, "forward", first),
+                               start=first, end=end)
+            return iso._run(program.code, program.params, program.key, piece, 1.0, placebos=R.PLACEBO_DRAWS,
+                            seed=int(seed))
 
-        run = Span(self._child(), store_root, budget_seconds=self.budget_seconds, nice=None).span(
-            program.code, program.params, name=program.key)
+        run = elane_xs.steady(one, what="placebo leg run")
         block = run.result.get("placebo") if isinstance(run.result.get("placebo"), Mapping) else {}
         span = (block.get("spans") or {}).get("run") or {}
         return {"t": list(span.get("t") or []), "days": int(span.get("days") or 0), "n": int(block.get("n") or 0),
@@ -557,37 +714,122 @@ def _counted(fdb: sqlite3.Connection, pid: int, engine: int, start: str) -> list
     return [row for row in forward_db.counted_days(fdb, pid, engine=engine) if str(row["day"]) >= start]
 
 
-def _touched(fdb: sqlite3.Connection, pid: int, old: int, new: int, days: Sequence[str]) -> bool:
-    """Whether an engine change touched the judged days: a day missing under the new id, or its r or w moved."""
-    rows = {str(r["day"]): r for r in forward_db.counted_days(fdb, pid, engine=new)}
-    olds = {str(r["day"]): r for r in forward_db.counted_days(fdb, pid, engine=old)}
-    for day in days:
-        a, b = olds.get(day), rows.get(day)
-        if a is None or b is None or abs(float(a["r"]) - float(b["r"])) > ENGINE_TOUCH or \
-                abs(float(a["w"]) - float(b["w"])) > ENGINE_TOUCH:
+def _restated_spans(fdb: sqlite3.Connection, pid: int, engine: int) -> list[tuple[str, str]]:
+    """The [first, last] day spans of the record's `restated` events of `pid` under `engine` whose cause is the
+    store's history (`bars` "moved": every restated day's decision read inputs the vendor restated; league/ops/
+    forward_shadow.py, A RESTATED RECORD)."""
+    out: list[tuple[str, str]] = []
+    for row in fdb.execute("SELECT payload FROM fwd_events WHERE kind='restated' AND pid=?", (int(pid),)):
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, Mapping) or payload.get("bars") != "moved":
+            continue
+        try:
+            same_engine = int(payload.get("engine")) == int(engine)
+        except (TypeError, ValueError):
+            same_engine = False
+        if same_engine and payload.get("first") and payload.get("last"):
+            out.append((str(payload["first"]), str(payload["last"])))
+    return out
+
+
+def _moved(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
+    """Whether a day's r, w, b or r15 differs between two rows by more than `ENGINE_TOUCH` (a missing r15 on one side
+    only is a difference)."""
+    for column in ("r", "w", "b", "r15"):
+        x, y = a.get(column), b.get(column)
+        if x is None and y is None:
+            continue
+        if x is None or y is None or abs(float(x) - float(y)) > ENGINE_TOUCH:
             return True
     return False
+
+
+def engine_reading(fdb: sqlite3.Connection, pid: int, old: int, new: int, days: Sequence[str]) -> tuple[str, int]:
+    """AN ENGINE CHANGE AND A PENDING LINEAGE (the module docstring, 3): `days` are the judged days its checkpoints of
+    record read under `old`; `new` the record's newest engine id.
+    - ("wait", 0): a judged day has no row under `new` YET. E3's night opens the new id and writes the ETF rows; the
+      panel night writes the panel rows hours later; a program the night's budget left stale is written a night later.
+      No checkpoint and no void: asked again (THE STALL RULE bounds the wait).
+    - ("touched", 0): a judged day under `new` is not counted (another status, an audit mark), or its r, w, b or r15
+      moved past `ENGINE_TOUCH` and no restatement of the store explains it: the engine moved a judged day (one engine
+      id a verdict: the lineage is void).
+    - ("carried", n): every judged day is as it was, but for n days that moved only because the vendor restated the
+      store's history since the old row was written: both rows' bars hashes are known and differ, and the record's
+      own `restated` event of the pid under `old`, bars "moved", covers the day (a dividend or a split rescales the
+      whole adjusted history; the new id's rows are a whole recompute on today's store). A judged day moved with the
+      same bars hash, or with no such event (the engine and the restatement on one night), is a touch."""
+    news = {str(r["day"]): dict(r) for r in fdb.execute("SELECT * FROM fwd_days WHERE pid=? AND engine=?",
+                                                         (int(pid), int(new)))}
+    if any(day not in news for day in days):
+        return "wait", 0
+    olds = {str(r["day"]): r for r in forward_db.counted_days(fdb, pid, engine=old)}
+    counted_new = {str(r["day"]) for r in forward_db.counted_days(fdb, pid, engine=new)}
+    spans: list[tuple[str, str]] | None = None
+    restated = 0
+    for day in days:
+        a, b = olds.get(day), news[day]
+        if a is None or day not in counted_new:
+            return "touched", 0
+        if not _moved(a, b):
+            continue
+        if spans is None:
+            spans = _restated_spans(fdb, pid, old)
+        hashes_differ = a.get("bars") is not None and b.get("bars") is not None and str(a["bars"]) != str(b["bars"])
+        if not hashes_differ or not any(first <= day <= last for first, last in spans):
+            return "touched", 0
+        restated += 1
+    return "carried", restated
+
+
+def preopen_deadline(now: float) -> float:
+    """THE DEADLINE's second term: the next pre-open (an hour before the open of the session whose close is after
+    `now`) less `MARGIN_S`; in the past while that pre-open has begun and its session is not over. +inf when the
+    calendar does not reach one."""
+    from ..equity import schedule
+
+    day = schedule.ny_day(float(now))
+    for _ in range(schedule.HORIZON_DAYS + 1):
+        moments = schedule.moments(day)
+        if moments is not None and moments.close_at > float(now):
+            return float(moments.open_at) - PREOPEN_BEFORE_S - MARGIN_S
+        day += dt.timedelta(days=1)
+    return float("inf")
+
+
+def night_spent(store: sqlite3.Connection, now: float) -> float:
+    """ONE BUDGET A NIGHT: the child seconds of the job's runs (`fwd1_runs`) that ended in the last `NIGHT_WINDOW_S`."""
+    row = store.execute("SELECT COALESCE(SUM(seconds), 0) FROM fwd1_runs WHERE finished >= ?",
+                        (float(now) - NIGHT_WINDOW_S,)).fetchone()
+    return float(row[0] or 0.0)
 
 
 class Night:
     """One night of the judge (the module docstring): `store` (the screen's own, writable), `fdb` (the forward record,
     read-only), `families` (the equity families of the swarm store, read-only), `runs` (`HouseRuns` or a test's fake),
-    `rule` (`fwd1_rule.Rule`), `pin` (the clock's row), `budget` (child seconds)."""
+    `rule` (`fwd1_rule.Rule`), `pin` (the clock's row), `budget` (child seconds left tonight), `deadline` (epoch
+    seconds: no run starts with `MIN_RUN_S` or less before it)."""
 
     def __init__(self, store: sqlite3.Connection, fdb: sqlite3.Connection, families: Mapping[str, Mapping[str, Any]], *,
                  runs: Any, rule: Any, pin: Mapping[str, Any], budget: float, clock: Callable[[], float] = time.time,
-                 settings: Mapping[str, Any] | None = None):
+                 settings: Mapping[str, Any] | None = None, deadline: float = float("inf")):
         self.store, self.fdb, self.families, self.runs, self.rule = store, fdb, families, runs, rule
         self.settings = settings
         self.pin = dict(pin)
         self.pin_start = dt.date.fromisoformat(str(pin["start"]))
         self.budget = float(budget)
+        self.deadline = float(deadline)
         self.clock = clock
         self.spent = 0.0
         self.tally: Counter = Counter()
         self.gaps = _lotgaps(fdb)
         self.engine_now = forward_db.engine_now(fdb)
         self.sealed_pids = _sealed_pids(fdb)
+        row = fdb.execute("SELECT MAX(day) FROM fwd_days").fetchone()
+        #: THE STALL RULE's night: the record's newest day.
+        self.record_day = None if row is None or row[0] is None else str(row[0])
 
     # ------------------------------------------------------------------------------------------------ helpers
     def _timed(self, call: Callable[[], Any]) -> Any:
@@ -598,7 +840,11 @@ class Night:
             self.spent += max(0.0, self.clock() - began)
 
     def _over(self) -> bool:
-        return self.spent >= self.budget
+        """The night's child seconds are spent, or THE DEADLINE leaves no room for a run."""
+        return self.spent >= self.budget or self.clock() >= self.deadline - MIN_RUN_S
+
+    def _deferred(self) -> None:
+        self.tally["deferred"] += 1
 
     def _program(self, pid: int) -> Any:
         row = self.fdb.execute("SELECT key FROM fwd_registry WHERE pid=?", (int(pid),)).fetchone()
@@ -615,21 +861,62 @@ class Night:
         row = self.store.execute("SELECT * FROM fwd1_floors WHERE pid=?", (int(pid),)).fetchone()
         return None if row is None else dict(row)
 
+    def _pending(self, lineage: str, k: int, engine: int) -> Mapping[str, Any] | None:
+        row = self.store.execute("SELECT * FROM fwd1_pending WHERE lineage=? AND k=? AND engine=?",
+                                 (lineage, int(k), int(engine))).fetchone()
+        return None if row is None else dict(row)
+
     def _sides(self, pid: int, engine: int, days: Sequence[str]) -> list[float] | None:
         held = {str(r["day"]): float(r["sides"]) for r in self.store.execute(
             "SELECT day, sides FROM fwd1_sides WHERE pid=? AND engine=?", (int(pid), int(engine)))}
         out = [held.get(day) for day in days]
         return None if any(v is None for v in out) else [float(v) for v in out]   # type: ignore[arg-type]
 
-    def read_sides(self, lin: Mapping[str, Any], program: Any, engine: int, rows: Sequence[Mapping[str, Any]]) -> int:
+    def stalled(self, lineage: str) -> bool:
+        """THE STALL RULE: whether the lineage stalled under the record's newest engine id."""
+        return self.engine_now is not None and self.store.execute(
+            "SELECT 1 FROM fwd1_events WHERE kind='stalled' AND lineage=? AND once=?",
+            (lineage, str(self.engine_now))).fetchone() is not None
+
+    def missed(self, lin: Mapping[str, Any], cause: str, engine: Any, why: str) -> bool:
+        """One of the record's nights a lineage's next step waited on the House (`waited`, once a lineage, cause,
+        engine id and record day: the job's second run of a night counts none); at `STALL_NIGHTS` such nights the
+        lineage is STALLED under the newest engine id (`stalled`, once). Whether it is stalled now. Nothing marks it."""
+        lineage, pid = str(lin["lineage"]), int(lin["rep"])
+        key = f"{cause}:{engine}"
+        with self.store:
+            event(self.store, "waited", at=self.clock(), lineage=lineage, pid=pid, once=f"{key}:{self.record_day}",
+                  payload={"why": why, "cause": cause, "engine": engine, "day": self.record_day})
+        nights = int(self.store.execute(
+            "SELECT COUNT(*) FROM fwd1_events WHERE kind='waited' AND lineage=? AND substr(once, 1, ?) = ?",
+            (lineage, len(key) + 1, key + ":")).fetchone()[0])
+        if nights < STALL_NIGHTS or self.engine_now is None:
+            return False
+        with self.store:
+            if event(self.store, "stalled", at=self.clock(), lineage=lineage, pid=pid, once=str(self.engine_now),
+                     payload={"why": f"{why}: on {nights} of the record's nights, so it costs no run until the "
+                                     "record opens a new engine id; nothing marks it", "cause": cause,
+                              "nights": nights, "engine": self.engine_now}):
+                self.tally["stalled"] += 1
+        return True
+
+    def read_sides(self, lin: Mapping[str, Any], program: Any, engine: int,
+                   rows: Sequence[Mapping[str, Any]]) -> int | None:
         """THE SIDES of the representative's counted days not yet kept (the module docstring, 2): its own forward run
-        (`runs.forward_sides`), each day kept (first write stands, under the record's engine id) only where the run's r
-        is the record's to `forward_db.TOL`. How many days it kept; 0 and a `house` event when the run failed or
-        reproduced none of them (the next night asks again)."""
+        (`runs.forward_sides`), each day kept (first write stands, under the record's engine id) where the run IS the
+        record's day: its r is the record's to `forward_db.TOL`, or THE DAY WAS RESTATED (the run made the same orders
+        that session, its lots in and out counted as the record counts them, from inputs the vendor's restatement of
+        the store's history moved: the run's bars hash of the day's decision is not the stored one; E3 keeps the first
+        write of every day, and a dividend or a split rescales the whole adjusted history, so the stored r of every
+        day before an ex-day is never reproduced again). How many days it kept (0 and a `house` event when the run
+        failed or matched none); None when THE DEADLINE left no room to start it (nothing written)."""
         lineage, pid = str(lin["lineage"]), int(lin["rep"])
         try:
             found = self._timed(lambda: self.runs.forward_sides(program, str(lin["type"]), settings=self.settings,
                                                                 fdb=self.fdb))
+        except Late:
+            self._deferred()
+            return None
         except Exception as exc:  # noqa: BLE001 - the child's or the data's: nobody is marked
             self.tally["house"] += 1
             with self.store:
@@ -637,12 +924,20 @@ class Night:
                       payload={"why": "the forward run that reads the sides did not finish", "error": type(exc).__name__})
             return 0
         ran, sides = found.get("r") or {}, found.get("sides") or {}
+        entries, exits, hashes = found.get("entries") or {}, found.get("exits") or {}, found.get("bars") or {}
         kept = 0
         with self.store:
             for row in rows:
                 day = str(row["day"])
-                if day not in ran or abs(float(ran[day]) - float(row["r"])) > forward_db.TOL:
+                if day not in ran:
                     continue
+                if abs(float(ran[day]) - float(row["r"])) > forward_db.TOL:
+                    restated = (row.get("bars") is not None and day in hashes and str(hashes[day]) != str(row["bars"])
+                                and day in entries and day in exits and int(entries[day]) == int(row["entries"])
+                                and int(exits[day]) == int(row["exits"]))
+                    if not restated:
+                        continue
+                    self.tally["sides_restated"] += 1
                 cursor = self.store.execute(
                     "INSERT OR IGNORE INTO fwd1_sides(pid, day, engine, sides, at) VALUES (?,?,?,?,?)",
                     (pid, day, int(engine), float(sides.get(day, 0.0)), self.clock()))
@@ -669,22 +964,52 @@ class Night:
                   payload={"why": why})
         self.tally["void"] += 1
 
+    def span_cause(self, pid: int, engine: int, start: str, names: Sequence[str]) -> tuple[str | None, list[str]]:
+        """THE PLACEBO SPAN (the review's fix): the placebo leg is one panel run over every session of [start, the
+        k-th counted day], and the rule reads the draws on the SAME k sessions, so a session of the span that is not a
+        counted day decides the leg. (None, []) when there is none; ("own", days) when each is the program's own (a
+        row of status "disqualified": its own run's doing), and the leg fails closed; ("house", days) when any is the
+        House's (no row of the record for it, or a morning audit mark): the checkpoint waits, nothing marks it."""
+        from ..equity import schedule
+
+        counted = set(names)
+        day, last = dt.date.fromisoformat(str(start)), dt.date.fromisoformat(str(names[-1]))
+        extra: list[str] = []
+        while day <= last:
+            if schedule.is_session(day) and day.isoformat() not in counted:
+                extra.append(day.isoformat())
+            day += dt.timedelta(days=1)
+        if not extra:
+            return None, []
+        house = False
+        for name in extra:
+            row = self.fdb.execute("SELECT status FROM fwd_days WHERE pid=? AND day=? AND engine=?",
+                                   (int(pid), name, int(engine))).fetchone()
+            marked = self.fdb.execute("SELECT 1 FROM fwd_events WHERE kind='audit_mismatch' AND pid=? AND day=?",
+                                      (int(pid), name)).fetchone() is not None
+            if row is None or marked or str(row["status"]) != "disqualified":
+                house = True
+        return ("house" if house else "own"), extra
+
     # ------------------------------------------------------------------------------------------ the own floor
     def floor(self, lin: Mapping[str, Any], program: Any) -> Mapping[str, Any] | None:
-        """The representative's own floor row, computed once (None while it cannot be: the budget, or the House's
-        failure: no row, asked again the next night)."""
+        """The representative's own floor row, computed once (None while it cannot be: the budget, the deadline, or the
+        House's failure: no row, asked again the next night)."""
         held = self._floor(int(lin["rep"]))
         if held is not None:
             return held
         if self._over():
-            self.tally["deferred"] += 1
+            self._deferred()
             return None
         typ, case = str(lin["type"]), str(lin["case_"])
         began = self.clock()
         try:
             pools = self._timed(lambda: (self.runs.etf_pools(program) if typ == "ETF" else self.runs.panel_pools(program)))
-        except OwnFloorRefused as exc:       # the program's own partial series: ineligible for good, stated
+        except OwnFloorRefused as exc:       # the program's own: ineligible for good, stated
             pools, why = None, f"no own floor: {str(exc)[:160]}"
+        except Late:
+            self._deferred()
+            return None
         except Exception as exc:  # noqa: BLE001 - the child's or the data's: no row, the next night asks again
             self.tally["house"] += 1
             with self.store:
@@ -722,6 +1047,12 @@ class Night:
         now = self.clock()
         if self._verdict(lineage) is not None:
             return None                                   # nothing judges a lineage after its verdict
+        if self.stalled(lineage):
+            self.tally["stalled_skipped"] += 1            # THE STALL RULE: no run until a new engine id
+            return None
+        if not forward_db.active(self.fdb, pid):
+            self.tally["stopped"] += 1                    # no row comes while its representative is stopped
+            return None
         rows = self.fdb.execute("SELECT pid, family FROM fwd_registry WHERE lineage=? AND reason != 'control'",
                                 (lineage,)).fetchall()
         if case == "N":
@@ -741,17 +1072,21 @@ class Night:
         start = str(lin["start"])
         if checks and self.engine_now is not None and engine != self.engine_now:
             judged_days = [str(r["day"]) for r in _counted(self.fdb, pid, engine, start)][:max(checks)]
-            if _touched(self.fdb, pid, engine, self.engine_now, judged_days):
-                with self.store:
-                    event(self.store, "engine_switched", at=now, lineage=lineage, pid=pid, once=f"{engine}>{self.engine_now}",
-                          payload={"why": "an engine change touched a pending representative's judged days", "from": engine,
-                                   "to": self.engine_now, "pids": [pid], "touched": True})
-                self._void(lin, "an engine change touched its judged days: one engine id a verdict", at=now)
-                return "void"
+            reading, restated = engine_reading(self.fdb, pid, engine, self.engine_now, judged_days)
+            if reading == "wait":
+                self.tally["engine_wait"] += 1
+                self.missed(lin, "engine", self.engine_now, "its judged days have no rows under the record's new "
+                                                            "engine id yet")
+                return None
+            touched = reading == "touched"
             with self.store:
                 event(self.store, "engine_switched", at=now, lineage=lineage, pid=pid, once=f"{engine}>{self.engine_now}",
-                      payload={"why": "an engine change left its judged days as they were", "from": engine,
-                               "to": self.engine_now, "pids": [pid], "touched": False})
+                      payload={"why": "an engine change touched a pending representative's judged days" if touched else
+                               "an engine change left its judged days as they were", "from": engine,
+                               "to": self.engine_now, "pids": [pid], "touched": touched, "restated": restated})
+            if touched:
+                self._void(lin, "an engine change touched its judged days: one engine id a verdict", at=now)
+                return "void"
             engine = self.engine_now
         days = _counted(self.fdb, pid, engine, start)
         if not days:
@@ -775,28 +1110,47 @@ class Night:
                 return None                               # the checkpoint of record is read when it is reached
             head = days[:k]
             names = [str(r["day"]) for r in head]
-            sides = self._sides(pid, engine, names)
-            if sides is None:
-                if program is None:
-                    program = self._program(pid)
-                if program is None or self._over():
-                    self.tally["deferred"] += 1
-                    return None
-                self.read_sides(lin, program, engine, head)
+            c_g = R.C_G[typ][case]
+            kept = self._pending(lineage, k, engine)
+            if kept is not None:
+                # THE CHECKPOINT'S READING as it was first read (the module docstring, 2): never read again
+                point = {"t": kept["t"], "S": float(kept["s"]), "S15": float(kept["s15"])}
+                g, used_ll = float(kept["g_bp"]), int(kept["ll"])
+            else:
                 sides = self._sides(pid, engine, names)
                 if sides is None:
-                    self.tally["no_sides"] += 1
-                    return None                           # asked again the next night
-            g = R.haircut_bp(typ, self.gaps.get(typ, []))
-            ll = self._live_like(pid, engine) if typ == "ETF" else {}
-            used_ll = int(any(n in ll for n in names))
-            try:
-                x, x15 = R.series(typ, head, g_bp=g, sides=sides, live_like=ll)
-            except ValueError:
-                self.tally["unreadable"] += 1
-                return None
-            point = R.checkpoint(x, x15, k)
-            c_g = R.C_G[typ][case]
+                    if program is None:
+                        program = self._program(pid)
+                    if program is None:
+                        return None
+                    if self._over():
+                        self._deferred()
+                        return None
+                    if self.read_sides(lin, program, engine, days[:R.KMAX]) is None:
+                        return None                       # THE DEADLINE: not started, nothing written
+                    sides = self._sides(pid, engine, names)
+                    if sides is None:
+                        self.tally["no_sides"] += 1
+                        self.missed(lin, "sides", engine, "the sides of its judged days could not be read from its own "
+                                                          "forward run")
+                        return None                       # asked again the next night
+                g = R.haircut_bp(typ, self.gaps.get(typ, []))
+                ll = self._live_like(pid, engine) if typ == "ETF" else {}
+                used_ll = int(any(n in ll for n in names))
+                try:
+                    x, x15 = R.series(typ, head, g_bp=g, sides=sides, live_like=ll)
+                except ValueError:
+                    self.tally["unreadable"] += 1
+                    return None
+                point = R.checkpoint(x, x15, k)
+                if R.legs_pass(point, c_g):
+                    # a would-be pass waits on its floor or its placebo leg: its reading is kept as it is now
+                    with self.store:
+                        self.store.execute(
+                            "INSERT OR IGNORE INTO fwd1_pending(lineage, k, engine, pid, day, t, s, s15, g_bp, ll, at) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                            (lineage, k, int(engine), pid, names[-1], point["t"], float(point["S"]),
+                             float(point["S15"]), float(g), used_ll, self.clock()))
             c_value = count = draws = None
             why = None
             passed = False
@@ -816,28 +1170,61 @@ class Night:
                 if not R.legs_pass(point, c_value):
                     why = "below c_used (the own floor + 0.05)"
                 elif typ == "PANEL":
-                    if self._over():
-                        self.tally["deferred"] += 1
-                        return None
-                    try:
-                        seed = R.placebo_seed(self.rule.receipt_sha256, str(lin["row_hash"]))
-                        block = self._timed(lambda: self.runs.panel_placebo(
-                            program, start=dt.date.fromisoformat(start), end=dt.date.fromisoformat(names[-1]), seed=seed))
-                    except Exception as exc:  # noqa: BLE001 - the child's or the data's: asked again tomorrow
+                    cause, extra = self.span_cause(pid, engine, start, names)
+                    if cause == "house":
                         self.tally["house"] += 1
                         with self.store:
                             event(self.store, "house", at=self.clock(), lineage=lineage, pid=pid,
-                                  payload={"why": "the placebo leg's run did not finish", "error": type(exc).__name__})
+                                  payload={"why": "the placebo span holds a session the House left out of the counted "
+                                                  "days (no row, or a morning audit mark): the checkpoint waits",
+                                           "days": len(extra)})
+                        self.missed(lin, "span", engine, "its placebo span holds a session the House left out of its "
+                                                         "counted days")
                         return None
-                    draws = int(block.get("n") or 0)
-                    if int(block.get("days") or 0) != k:
-                        why = (f"the placebo leg was read on {block.get('days')} sessions, not the {k} judged ones (a "
-                               "day left the counted days inside the span): the leg fails closed")
+                    if cause == "own":
+                        draws = 0
+                        why = (f"the placebo span holds {len(extra)} session(s) the program's own run disqualified: the "
+                               f"leg cannot be read on the {k} judged sessions and fails closed")
                     else:
-                        count = R.placebo_count(point["t"], block.get("t") or [])
-                        passed = R.placebo_holds(count, draws)
-                        if not passed:
-                            why = f"the placebo leg: {count} of {draws} draws at or above t"
+                        if self._over():
+                            self._deferred()
+                            return None
+                        from ..swarm import elane_xs
+
+                        block = None
+                        try:
+                            seed = R.placebo_seed(self.rule.receipt_sha256, str(lin["row_hash"]))
+                            block = self._timed(lambda: self.runs.panel_placebo(
+                                program, start=dt.date.fromisoformat(start), end=dt.date.fromisoformat(names[-1]),
+                                seed=seed))
+                        except elane_xs.TooSlow as exc:   # the program's own: its decides ran past the limit each run
+                            draws = 0
+                            why = f"the placebo leg's run: {str(exc)[:160]}: the leg fails closed"
+                        except Late:
+                            self._deferred()
+                            return None
+                        except Exception as exc:  # noqa: BLE001 - the child's or the data's: asked again tomorrow
+                            self.tally["house"] += 1
+                            with self.store:
+                                event(self.store, "house", at=self.clock(), lineage=lineage, pid=pid,
+                                      payload={"why": "the placebo leg's run did not finish", "error": type(exc).__name__})
+                            return None
+                        if block is not None:
+                            draws = int(block.get("n") or 0)
+                            if int(block.get("days") or 0) != k:
+                                self.tally["house"] += 1
+                                with self.store:
+                                    event(self.store, "house", at=self.clock(), lineage=lineage, pid=pid,
+                                          payload={"why": "the placebo leg was read on other sessions than the judged "
+                                                          "ones: the checkpoint waits", "days": block.get("days"),
+                                                   "k": k})
+                                self.missed(lin, "span", engine, "its placebo run was read on other sessions than its "
+                                                                 "judged ones")
+                                return None
+                            count = R.placebo_count(point["t"], block.get("t") or [])
+                            passed = R.placebo_holds(count, draws)
+                            if not passed:
+                                why = f"the placebo leg: {count} of {draws} draws at or above t"
                 else:
                     passed = True
             check = (lineage, k, pid, engine, names[-1], point["t"], point["S"], point["S15"], float(g), used_ll, count,
@@ -908,28 +1295,47 @@ class Night:
     # ---------------------------------------------------------------------------------------------- the night
     def run(self) -> dict[str, Any]:
         """Every judged lineage without a verdict registered under THIS receipt (a lineage registered under another
-        pin is judged no further by this one: a receipt judges only the days after its own pin), in lineage order."""
+        pin is judged no further by this one: a receipt judges only the days after its own pin), the lineages that
+        waited on the House the fewest of the record's nights under the newest engine id first, then in lineage
+        order (a lineage that keeps waiting never takes the night's budget from one that does not). A panel
+        lineage's runs are collected after it (THE ONE STORE stays; what its runs cut goes)."""
+        import gc
+
         lineages = [dict(r) for r in self.store.execute(
             "SELECT * FROM fwd1_lineages WHERE judged=1 AND receipt=? AND lineage NOT IN (SELECT lineage FROM "
             "fwd1_verdicts) ORDER BY lineage", (self.rule.receipt_sha256,))]
+        waited: Counter = Counter()
+        for row in self.store.execute("SELECT lineage, once FROM fwd1_events WHERE kind='waited'"):
+            parts = str(row["once"] or "").split(":")
+            if len(parts) >= 2 and parts[1] == str(self.engine_now):
+                waited[str(row["lineage"])] += 1
+        lineages.sort(key=lambda lin: (waited[str(lin["lineage"])], str(lin["lineage"])))
         for lin in lineages:
             try:
                 self.judge(lin)
             except sqlite3.Error:
                 self.tally["house"] += 1
+            if lin.get("type") == "PANEL":
+                gc.collect()
         return dict(self.tally)
 
 
 # ----------------------------------------------------------------------------------------------- permits and report
-def status_rows(store: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Every lineage with its status ("pending" | "pass" | "fail" | "void" | "ineligible" | "not_judged"), its last
-    checkpoint read and its verdict's words."""
+def status_rows(store: sqlite3.Connection, *, fdb: sqlite3.Connection | None = None,
+                rule: Any = None) -> list[dict[str, Any]]:
+    """Every lineage with its status (`STATUSES`), its last checkpoint read and its verdict's words. With the forward
+    record `fdb`: "stopped" (its representative is stopped there) and "stalled" (THE STALL RULE, under the record's
+    newest engine id); with the `rule` in force: "superseded" (a pending lineage registered under another receipt)."""
     verdicts = {str(r["lineage"]): dict(r) for r in store.execute("SELECT * FROM fwd1_verdicts")}
     last = {str(r["lineage"]): int(r["k"]) for r in store.execute(
         "SELECT lineage, MAX(k) AS k FROM fwd1_checks GROUP BY lineage")}
     engines = {(str(r["lineage"]), int(r["k"])): int(r["engine"]) for r in store.execute(
         "SELECT lineage, k, engine FROM fwd1_checks WHERE passed=1")}
     floors = {int(r["pid"]): dict(r) for r in store.execute("SELECT * FROM fwd1_floors")}
+    engine_now = None if fdb is None else forward_db.engine_now(fdb)
+    stalled = {str(r["lineage"]) for r in store.execute(
+        "SELECT lineage FROM fwd1_events WHERE kind='stalled' AND once=?", (str(engine_now),))} \
+        if engine_now is not None else set()
     out = []
     for lin in store.execute("SELECT * FROM fwd1_lineages ORDER BY lineage"):
         lin = dict(lin)
@@ -940,8 +1346,16 @@ def status_rows(store: sqlite3.Connection) -> list[dict[str, Any]]:
             status = str(v["verdict"])
         else:
             fl = floors.get(int(lin["rep"]))
-            status = "ineligible" if fl is not None and R.k_used(str(lin["type"]), str(lin["case_"]), fl["k_own"]) is None \
-                else "pending"
+            if fl is not None and R.k_used(str(lin["type"]), str(lin["case_"]), fl["k_own"]) is None:
+                status = "ineligible"
+            elif rule is not None and str(lin["receipt"]) != str(rule.receipt_sha256):
+                status = "superseded"
+            elif fdb is not None and not forward_db.active(fdb, int(lin["rep"])):
+                status = "stopped"
+            elif str(lin["lineage"]) in stalled:
+                status = "stalled"
+            else:
+                status = "pending"
         k = (v or {}).get("k") or last.get(str(lin["lineage"]))
         out.append({**lin, "status": status, "k": k, "words": (v or {}).get("words"),
                     "beside": (v or {}).get("beside"),
@@ -950,16 +1364,16 @@ def status_rows(store: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def write_permits(root: str | Path, store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any], at: float,
-                  labels: Mapping[int, str] | None = None) -> Path:
+                  labels: Mapping[int, str] | None = None, fdb: sqlite3.Connection | None = None) -> Path:
     """THE PERMIT FILE (the module docstring, 4), atomically, 0600: {"version", "receipt", "start", "at", "lineages":
     {lineage: {"status", "type", "case", "cell", "family", "version", "run_sha", "k", "weak", "engine", "words"}}}.
-    Every FWD1-judged lineage is listed (its status), so the swarm knows which take no sealed try; a pass names its
-    program and the forward record's engine label its verdict was read under (`labels`: {engine id: label}). No t, no
-    P&L and no figure of a program crosses."""
+    Every FWD1-judged lineage is listed (its status, `STATUSES`), so the swarm knows which take no sealed try; a pass
+    names its program and the forward record's engine label its verdict was read under (`labels`: {engine id:
+    label}). No t, no P&L and no figure of a program crosses."""
     from .context import write_json
 
     lineages: dict[str, Any] = {}
-    for row in status_rows(store):
+    for row in status_rows(store, fdb=fdb, rule=rule):
         if row["status"] == "not_judged":
             continue
         passed = row["status"] == "pass"
@@ -993,10 +1407,12 @@ def beside_for(root: str | Path | None, lineage: str) -> str | None:
     return None if row is None or not row["beside"] else str(row["beside"])
 
 
-def report(store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any]) -> dict[str, Any]:
-    """THE OPERATOR'S REPORT (the module docstring, 5): counts by type and case, the expected zero-edge passes against
-    the observed, and every pass's sentence. Operator-only (it holds each pass's t and shadow P&L)."""
-    rows = status_rows(store)
+def report(store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any],
+           fdb: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """THE OPERATOR'S REPORT (the module docstring, 5): counts by type and case and status, the expected zero-edge
+    passes against the observed, every pass's sentence, and the lineages stalled under the newest engine id with the
+    cause. Operator-only (it holds each pass's t and shadow P&L)."""
+    rows = status_rows(store, fdb=fdb, rule=rule)
     by: dict[str, Counter] = {}
     read: list[tuple[str, str, int]] = []
     for row in rows:
@@ -1005,28 +1421,39 @@ def report(store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any]) -> d
         if row["judged"] and row["k"] is not None:
             read.append((str(row["type"]), str(row["case_"]), int(row["k"])))
     expected = R.expected_passes(rule, read)
+    causes: dict[str, str] = {}
+    for row in store.execute("SELECT lineage, payload FROM fwd1_events WHERE kind='stalled' ORDER BY seq"):
+        try:
+            causes[str(row["lineage"])] = str(json.loads(row["payload"]).get("cause"))
+        except (TypeError, ValueError):
+            continue
     return {"screen": R.SCREEN, "receipt": rule.receipt_sha256, "start": pin["start"], "release": pin["release"],
             "counts": {key: dict(c) for key, c in sorted(by.items())},
             "registry": {key: {"observed": int(by.get(key, Counter())["pass"]), "expected": expected.get(key, 0.0)}
                          for key in sorted({f"{t}|{c}" for t, cs in R.CASES.items() for c in cs})},
             "passes": [{"lineage": r["lineage"], "family": r["family"], "version": r["version"], "k": r["k"],
-                        "beside": r["beside"]} for r in rows if r["status"] == "pass"]}
+                        "beside": r["beside"]} for r in rows if r["status"] == "pass"],
+            "stalled": [{"lineage": r["lineage"], "k": r["k"], "cause": causes.get(str(r["lineage"]))}
+                        for r in rows if r["status"] == "stalled"]}
 
 
 # --------------------------------------------------------------------------------------------------------- the job
 def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, now: float, base: str | Path | None,
           release: str | Path | None, runs: Any = None, families: Mapping[str, Mapping[str, Any]] | None = None,
-          clock: Callable[[], float] = time.time) -> dict[str, Any]:
+          clock: Callable[[], float] = time.time, deadline: float = float("inf")) -> dict[str, Any]:
     """One night over the state root (the module docstring): the clock's row, the lineages' first sightings, the
-    judge, the permit file and the report. The receipt (counts only). `families` (tests): the equity families by id,
-    in place of the swarm store's (read-only)."""
+    judge, the permit file and the report, and the run's own `fwd1_runs` row. The receipt (counts only). `families`
+    (tests): the equity families by id, in place of the swarm store's (read-only). `deadline`: THE DEADLINE (the job
+    passes it; +inf for a test). The child seconds are what ONE BUDGET A NIGHT leaves (`night_spent`)."""
     root = Path(root)
     c = cfg(settings)
+    began = clock()
     store = open_store(root)
     fdb = forward_db.open_db(root, readonly=True)
     fdb.row_factory = sqlite3.Row
     own_runs = runs is None
-    runs = runs if runs is not None else HouseRuns(root, budget_seconds=c["run_budget_seconds"], clock=clock)
+    runs = runs if runs is not None else HouseRuns(root, budget_seconds=c["run_budget_seconds"], clock=clock, fdb=fdb,
+                                                   settings=settings, deadline=deadline)
     try:
         pin = pinned(store, rule, base=base, release=release, now=now)
         if families is None:
@@ -1036,16 +1463,22 @@ def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, no
             families = forward_register._families(SwarmStore(root, readonly=True))
         registered = register(store, fdb, families, rule=rule, pin_start=dt.date.fromisoformat(str(pin["start"])),
                               now=now)
-        judge = Night(store, fdb, families, runs=runs, rule=rule, pin=pin, budget=c["cpu_seconds_night"], clock=clock,
-                      settings=settings)
+        budget = max(0.0, float(c["cpu_seconds_night"]) - night_spent(store, now))
+        judge = Night(store, fdb, families, runs=runs, rule=rule, pin=pin, budget=budget, clock=clock,
+                      settings=settings, deadline=deadline)
         tally = judge.run()
         labels = {int(r["id"]): str(r["label"]) for r in fdb.execute("SELECT id, label FROM fwd_engines")}
-        write_permits(root, store, rule=rule, pin=pin, at=clock(), labels=labels)
+        write_permits(root, store, rule=rule, pin=pin, at=clock(), labels=labels, fdb=fdb)
         from .context import write_json
 
-        write_json(root / REPORT, report(store, rule=rule, pin=pin))
+        write_json(root / REPORT, report(store, rule=rule, pin=pin, fdb=fdb))
+        with store:
+            store.execute("INSERT INTO fwd1_runs(started, finished, seconds, lineages, at) VALUES (?,?,?,?,?)",
+                          (float(began), float(clock()), round(judge.spent, 3),
+                           int(store.execute("SELECT COUNT(*) FROM fwd1_lineages WHERE judged=1").fetchone()[0]),
+                           float(clock())))
         return {"start": pin["start"], "registered": registered, **{k: int(v) for k, v in tally.items()},
-                "seconds": round(judge.spent, 3)}
+                "seconds": round(judge.spent, 3), "budget": round(budget, 3)}
     finally:
         if own_runs:
             runs.close()
@@ -1054,9 +1487,11 @@ def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, no
 
 
 def run(ctx: Any) -> dict[str, Any]:
-    """THE JOB (league/ops/registry.py, after `forward_xs`): skipped with its switch off, with the forward record off or
-    absent, with no pin, and inside 09:00-17:30 New York on a session; else `night`. A House failure (a store under a
-    lock, a child that could not start) is a failed receipt: the runner starts it again inside its grace."""
+    """THE JOB (league/ops/registry.py, after `forward_shadow` and after `forward_xs`): skipped with its switch off,
+    with the forward record off or absent, with no pin, inside 09:00-17:30 New York on a session, and with THE
+    DEADLINE too near (the next pre-open less `MARGIN_S`, within `WALL_S` of the start: a run is never at work when
+    the pre-open starts); else `night` with that deadline. A House failure (a store under a lock, a child that could
+    not start) is a failed receipt: the runner starts it again inside its grace."""
     from ..swarm import settings as swarm_settings
     from . import forward_shadow
 
@@ -1069,24 +1504,34 @@ def run(ctx: Any) -> dict[str, Any]:
     rule, why = R.rule()
     if rule is None:
         return {"status": "skipped", "why": f"no verdict is read: {why}"}
-    if forward_shadow.quiet(ctx.now()):
+    now = ctx.now()
+    if forward_shadow.quiet(now):
         return {"status": "skipped", "why": "inside 09:00-17:30 New York time on a session: the night's run does it"}
+    deadline = min(float(now) + WALL_S - MARGIN_S, preopen_deadline(now))
+    if deadline - float(now) <= 10 * MIN_RUN_S:
+        return {"status": "skipped", "why": "too near the next pre-open for a run to finish: the next night's run "
+                                            "does it"}
     if not (root / forward_db.DB).exists():
         return {"status": "skipped", "why": "no forward record yet"}
     try:
-        receipt = night(root, rule=rule, settings=settings, now=ctx.now(), base=getattr(ctx, "base", None),
-                        release=getattr(ctx, "release", None), clock=ctx.now)
+        receipt = night(root, rule=rule, settings=settings, now=now, base=getattr(ctx, "base", None),
+                        release=getattr(ctx, "release", None), clock=ctx.now, deadline=deadline)
     except sqlite3.Error as exc:
         return {"status": "failed", "error": f"a store could not be read or written ({type(exc).__name__})"}
     if int(receipt.get("house") or 0):
         ctx.alert("warning", f"forward_screen: {receipt['house']} checkpoints waited on the House's own failures (a run "
                              "the child did not finish): no program is marked, the next night asks again")
+    if int(receipt.get("stalled") or 0):
+        ctx.alert("warning", f"forward_screen: {receipt['stalled']} lineages STALLED tonight: their next step waited on "
+                             f"the House on {STALL_NIGHTS} of the record's nights (the report's 'stalled' names the "
+                             "cause); they cost no run until the record opens a new engine id, and nothing marks them")
     return receipt
 
 
 __all__ = ["JOB", "DB", "PERMITS", "PERMITS_VERSION", "REPORT", "MODES", "SEATS", "DEFAULTS", "BOUNDS", "VERDICTS",
-           "NOT_JUDGED", "PREFERRED", "SEALED_TAGS", "SEALED_STATE", "ENGINE_TOUCH", "EVENT_KINDS", "TABLES", "SCHEMA",
-           "cfg", "open_store", "event", "lot_sides", "pinned", "representative", "family_sealed", "type_of",
-           "case_of", "cell_of", "register", "OwnFloorRefused", "HouseRuns", "Night", "status_rows", "write_permits", "beside_for",
-           "report", "night",
-           "run"]
+           "NOT_JUDGED", "PREFERRED", "SEALED_TAGS", "SEALED_STATE", "PRECHECK_STATE", "ENGINE_TOUCH", "EVENT_KINDS",
+           "STALL_NIGHTS", "STATUSES", "NIGHT_WINDOW_S", "WALL_S", "MARGIN_S", "PREOPEN_BEFORE_S", "MIN_RUN_S",
+           "TABLES", "SCHEMA", "cfg", "open_store", "event", "lot_sides", "pinned", "representative", "family_sealed",
+           "type_of", "case_of", "cell_of", "register", "OwnFloorRefused", "Late", "HouseRuns", "engine_reading",
+           "preopen_deadline", "night_spent", "Night", "status_rows", "write_permits", "beside_for", "report",
+           "night", "run"]

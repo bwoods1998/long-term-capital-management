@@ -135,15 +135,33 @@ class Fixture(unittest.TestCase):
         return self.pid
 
     def days(self, pid: int, values, *, first: dt.date = dt.date(2026, 10, 13), engine: int | None = None,
-             w: float = 0.5, b: float = 0.0):
+             w: float = 0.5, b: float = 0.0, bars: str = "b" * 16, status: dict | None = None,
+             r15: float = -1e-5):
         names = sessions(first, len(values))
         for day, r in zip(names, values):
             self.fdb.execute("INSERT INTO fwd_days(pid, day, engine, r, w, b, r15, r0, entries, exits, status, at, bars) "
                              "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                             (pid, day, engine or self.engine, float(r), w, b, float(r) - 1e-5, None, 0, 0, "ok", 1.0,
-                              "b" * 16))
+                             (pid, day, engine or self.engine, float(r), w, b, float(r) + r15, None, 0, 0,
+                              (status or {}).get(day, "ok"), 1.0, bars))
         self.fdb.commit()
         return names
+
+    def restated(self, pid: int, first: str, last: str, *, engine: int | None = None, bars: str = "moved"):
+        """E3's own `restated` event of a pid under an engine id (league/ops/forward_shadow.py, A RESTATED RECORD)."""
+        payload = {"why": "a test's", "engine": engine or self.engine, "night": last, "days": 1, "first": first,
+                   "last": last, "moved": 1 if bars == "moved" else 0, "same": 0 if bars == "moved" else 1, "bars": bars}
+        self.fdb.execute("INSERT INTO fwd_events(at, kind, pid, day, payload) VALUES (1.0, 'restated', ?, ?, ?)",
+                         (pid, first, json.dumps(payload)))
+        self.fdb.commit()
+
+    def advance(self, day: str):
+        """The record's newest day moves to `day` (a row of a pid no lineage holds): THE STALL RULE's night."""
+        self.fdb.execute("INSERT OR IGNORE INTO fwd_days(pid, day, engine, r, w, b, r15, r0, entries, exits, status, at, "
+                         "bars) VALUES (9999, ?, ?, 0, 0, 0, 0, NULL, 0, 0, 'ok', 1.0, NULL)", (day, self.engine))
+        self.fdb.commit()
+
+    def permits(self) -> dict:
+        return json.loads((self.root / FS.PERMITS).read_text())["lineages"]
 
     def sides(self, pid: int, names, value: float = 0.0, engine: int | None = None):
         """Sides kept by an earlier night's forward run (the first day's lot entering at `value`)."""
@@ -165,6 +183,12 @@ class Fixture(unittest.TestCase):
     def store(self):
         db = FS.open_store(self.root)
         return db
+
+    def pin_first(self):
+        """The pin first seen running at PIN_AT (the clock starts Friday Oct 16), nothing judged yet."""
+        db = FS.open_store(self.root)
+        FS.pinned(db, self.rule, base=None, release=None, now=PIN_AT)
+        db.close()
 
     def first_night(self):
         """The pin is first seen running at PIN_AT."""
@@ -459,13 +483,48 @@ class ThePanel(Fixture):
         self.assertIsNone(db.execute("SELECT * FROM fwd1_verdicts").fetchone())
         db.close()
 
-    def test_a_span_that_is_not_the_judged_sessions_fails_closed(self):
-        self.run_night(FakeRuns(days=4))
+    def test_a_run_read_on_other_sessions_than_the_judged_ones_waits_on_the_house(self):
+        """A placebo run whose span is not the k judged sessions with no session of the program's own to explain it
+        is the House's (the review's fix: it no longer fails the checkpoint, which a FAIL at 60 would make for good)."""
+        receipt = self.run_night(FakeRuns(days=4))
         db = self.store()
-        check = dict(db.execute("SELECT * FROM fwd1_checks WHERE k=5").fetchone())
-        self.assertEqual(check["passed"], 0)
-        self.assertIn("fails closed", check["why"])
+        self.assertIsNone(db.execute("SELECT * FROM fwd1_checks WHERE k=5").fetchone())
+        self.assertGreaterEqual(receipt["house"], 1)
         db.close()
+
+    def test_a_span_holding_a_session_the_house_left_out_waits(self):
+        """THE PLACEBO SPAN: an audit-marked session inside the span is the House's: no checkpoint, no fail."""
+        self.days(self.pid1, [0.013], first=dt.date.fromisoformat(sessions(START, 7)[6]), b=0.004)
+        self.sides(self.pid1, sessions(START, 7))
+        self.fdb.execute("INSERT INTO fwd_events(at, kind, pid, day, payload) VALUES (1.0, 'audit_mismatch', ?, ?, '{}')",
+                         (self.pid1, self.names[2]))
+        self.fdb.commit()
+        runs = FakeRuns()
+        self.run_night(runs)
+        db = self.store()
+        self.assertIsNone(db.execute("SELECT * FROM fwd1_checks WHERE k=5").fetchone())
+        self.assertEqual(runs.calls["placebo"], 0)                # not run: its span cannot be the judged sessions
+        self.assertIn("left out", db.execute("SELECT payload FROM fwd1_events WHERE kind='house'").fetchone()[0])
+        db.close()
+
+    def test_a_span_holding_a_session_the_program_disqualified_fails_closed(self):
+        """A session of the span that is the program's own (a disqualified row) is its own doing: the leg fails
+        closed, and no placebo run is spent on it."""
+        p2 = self.row("p2", 1, first_day="2026-10-16", panel=True)
+        self.family("p2", structure="panel")
+        names = sessions(START, 7)
+        self.days(p2, [0.012 + 0.001 * (i % 3) for i in range(7)], first=START, b=0.004,
+                  status={names[2]: "disqualified"})
+        self.sides(p2, names)
+        runs = FakeRuns()
+        self.run_night(runs)
+        db = self.store()
+        check = dict(db.execute("SELECT * FROM fwd1_checks WHERE lineage='equity:p2' AND k=5").fetchone())
+        self.assertEqual((check["passed"], check["draws"]), (0, 0))
+        self.assertIn("fails closed", check["why"])
+        self.assertEqual(check["day"], names[5])                  # the 5th COUNTED day: the disqualified one is not
+        db.close()
+        self.assertEqual(runs.calls["placebo"], 1)                # p1's leg only
 
     def test_a_panel_lineage_with_an_xs1_precheck_is_case_xs1(self):
         self.family("p2", structure="panel", state={"elane_xs_precheck": {"version": 1}})
@@ -502,6 +561,341 @@ class TheEngine(Fixture):
         self.assertEqual(dict(db.execute("SELECT engine FROM fwd1_checks WHERE lineage='equity:f1' AND k=10")
                               .fetchone())["engine"], new)
         db.close()
+
+
+class TheEngineChange(Fixture):
+    """An engine change and a pending lineage (the reviews' majors): the rows under a new engine id come later than the
+    id (the panel night hours after E3's, a program the budget left stale a night later), so a judged day missing
+    under it is WAITED for, never a void; a day present under both ids is compared on r, w, b and r15; a day that
+    moved only because the vendor restated the store's history is carried."""
+
+    FLAT = [0.004 if i % 2 else -0.004 for i in range(8)]
+
+    def lineage(self, fid="f1", *, panel=False, b=0.0):
+        self.family(fid, structure="panel" if panel else "etf")
+        pid = self.row(fid, 1, first_day="2026-10-16", panel=panel)
+        names = self.days(pid, self.FLAT, first=START, b=b)
+        self.sides(pid, names)
+        self.first_night()                                         # checkpoint 5 read (and failed) under engine 1
+        db = self.store()
+        self.assertEqual(db.execute("SELECT engine FROM fwd1_checks WHERE k=5").fetchone()[0], self.engine)
+        db.close()
+        return pid
+
+    def verdicts(self):
+        db = self.store()
+        try:
+            return {r["lineage"]: dict(r) for r in db.execute("SELECT * FROM fwd1_verdicts")}
+        finally:
+            db.close()
+
+    def test_a_program_not_yet_written_under_the_new_id_waits_then_carries_on(self):
+        pid = self.lineage()
+        new, _ = forward_db.engine_id(self.fdb, "equity-engine-1+bbbbbbbbbbbb+fwd-1", at=3.0)
+        receipt = self.night()                                     # E3's night has not reached it (its budget)
+        self.assertEqual(self.verdicts(), {})
+        self.assertEqual(receipt.get("engine_wait"), 1)
+        self.assertEqual(self.permits()["equity:f1"]["status"], "pending")
+        self.days(pid, self.FLAT + [0.004] * 5, first=START, engine=new)       # the next night writes it whole
+        self.sides(pid, sessions(START, 13), engine=new)
+        self.night()
+        self.assertEqual(self.verdicts(), {})
+        db = self.store()
+        self.assertEqual(db.execute("SELECT engine FROM fwd1_checks WHERE k=10").fetchone()[0], new)
+        self.assertEqual(json.loads(db.execute("SELECT payload FROM fwd1_events WHERE kind='engine_switched'")
+                                    .fetchone()[0])["touched"], False)
+        db.close()
+
+    def test_a_panel_lineage_between_the_two_nights_is_never_voided(self):
+        pid = self.lineage("p1", panel=True, b=0.001)
+        new, _ = forward_db.engine_id(self.fdb, "equity-engine-1+aaaaaaaaaaaa+fwd-1+xs.bbbbbbbbbbbb", at=3.0)
+        self.night()                                               # after E3's night: no panel row under it yet
+        self.assertEqual(self.verdicts(), {})
+        self.days(pid, self.FLAT + [0.004] * 5, first=START, engine=new, b=0.001)   # the panel night writes them
+        self.sides(pid, sessions(START, 13), engine=new)
+        self.night()                                               # after the panel night
+        self.assertEqual(self.verdicts(), {})
+        db = self.store()
+        self.assertEqual(db.execute("SELECT engine FROM fwd1_checks WHERE k=10").fetchone()[0], new)
+        db.close()
+
+    def test_a_benchmark_that_moved_is_a_touch(self):
+        """b (so the panel's x = r - w b) and r15 count as r and w do: a panel day whose matched-cell benchmark moved
+        under the new id is a touched judged day."""
+        pid = self.lineage("p1", panel=True, b=0.001)
+        new, _ = forward_db.engine_id(self.fdb, "equity-engine-1+aaaaaaaaaaaa+fwd-1+xs.cccccccccccc", at=3.0)
+        self.days(pid, self.FLAT + [0.004] * 5, first=START, engine=new, b=0.002)
+        self.sides(pid, sessions(START, 13), engine=new)
+        self.night()
+        self.assertEqual(self.verdicts()["equity:p1"]["verdict"], "void")
+
+    def test_a_stress_return_that_moved_is_a_touch(self):
+        pid = self.lineage()
+        new, _ = forward_db.engine_id(self.fdb, "equity-engine-1+dddddddddddd+fwd-1", at=3.0)
+        self.days(pid, self.FLAT + [0.004] * 5, first=START, engine=new, r15=-3e-5)    # every r15 moved, r and w not
+        self.sides(pid, sessions(START, 13), engine=new)
+        self.night()
+        self.assertEqual(self.verdicts()["equity:f1"]["verdict"], "void")
+
+    def test_a_restated_history_is_carried_and_an_unexplained_move_is_a_touch(self):
+        p1 = self.lineage("f1")
+        p2 = self.row("f2", 1, first_day="2026-10-16")
+        self.family("f2")
+        n2 = self.days(p2, self.FLAT, first=START)
+        self.sides(p2, n2)
+        p3 = self.row("f3", 1, first_day="2026-10-16")
+        self.family("f3")
+        n3 = self.days(p3, self.FLAT, first=START)
+        self.sides(p3, n3)
+        self.night(now=PIN_AT)                                     # checkpoint 5 of f2 and f3 under engine 1
+        # The vendor restated the history (an ex-day): E3's night under the old id said so for f1 and f3, then the
+        # new id was written whole on today's store, every judged day a little moved and its bars hash too.
+        for pid in (p1, p3):
+            self.restated(pid, START.isoformat(), sessions(START, 8)[-1])
+        new, _ = forward_db.engine_id(self.fdb, "equity-engine-1+eeeeeeeeeeee+fwd-1", at=3.0)
+        moved = [v + 1e-5 for v in self.FLAT] + [0.004] * 5
+        self.days(p1, moved, first=START, engine=new, bars="c" * 16)    # restated, and the record said so: carried
+        self.days(p2, moved, first=START, engine=new, bars="c" * 16)    # moved with no restatement on record: a touch
+        self.days(p3, moved, first=START, engine=new)                   # moved with the same bars: the engine's touch
+        for pid in (p1, p2, p3):
+            self.sides(pid, sessions(START, 13), engine=new)
+        self.night()
+        verdicts = self.verdicts()
+        self.assertNotIn("equity:f1", verdicts)
+        self.assertEqual(verdicts["equity:f2"]["verdict"], "void")
+        self.assertEqual(verdicts["equity:f3"]["verdict"], "void")
+        db = self.store()
+        payload = json.loads(db.execute("SELECT payload FROM fwd1_events WHERE kind='engine_switched' AND "
+                                        "lineage='equity:f1'").fetchone()[0])
+        self.assertEqual((payload["touched"], payload["restated"]), (False, 5))
+        db.close()
+
+    def test_the_wait_is_bounded_by_the_stall_rule_and_a_new_id_asks_again(self):
+        pid = self.lineage()
+        new, _ = forward_db.engine_id(self.fdb, "equity-engine-1+ffffffffffff+fwd-1", at=3.0)
+        later = sessions(START, 30)[10:]
+        for i in range(FS.STALL_NIGHTS):
+            self.advance(later[i])
+            receipt = self.night()
+        self.assertEqual(receipt.get("stalled"), 1)
+        self.assertEqual(self.permits()["equity:f1"]["status"], "stalled")
+        self.assertEqual(self.verdicts(), {})                      # nothing marks it
+        self.advance(later[FS.STALL_NIGHTS])
+        receipt = self.night()
+        self.assertEqual(receipt.get("stalled_skipped"), 1)
+        newer, _ = forward_db.engine_id(self.fdb, "equity-engine-1+999999999999+fwd-1", at=4.0)
+        self.days(pid, self.FLAT + [0.004] * 5, first=START, engine=newer)
+        self.sides(pid, sessions(START, 13), engine=newer)
+        self.night()                                               # a new id: asked again, and carried
+        self.assertEqual(self.permits()["equity:f1"]["status"], "pending")
+        db = self.store()
+        self.assertEqual(db.execute("SELECT engine FROM fwd1_checks WHERE k=10").fetchone()[0], newer)
+        db.close()
+
+
+class TheRestatedSides(Fixture):
+    """A RESTATED DAY'S SIDES (the review's major): after an ex-day the vendor rescales the whole adjusted history and
+    E3 keeps the first-written r, so a program's own forward run never reproduces the stored r of the days before it
+    again. Its sides are still that day's when the run made the same orders that session (its lots in and out as the
+    record counts them) from inputs the restatement moved (the bars hash of the day's decision)."""
+
+    def test_a_restated_day_keeps_its_sides_and_a_different_order_does_not(self):
+        self.family("f1")
+        pid = self.row("f1", 1, first_day="2026-10-16")
+        names = self.days(pid, [0.01 + 0.001 * (i % 3) for i in range(6)], first=START)
+        ran = {d: v * 1.001 for d, v in self.recorded(pid).items()}         # every day moved past TOL
+        bars = {d: "c" * 16 for d in names}                                  # ... by a restated history
+        bars[names[4]] = "b" * 16                                            # this one with the stored inputs
+        entries = {d: 0 for d in names}
+        entries[names[3]] = 1                                                # this one with another order
+        runs = FakeRuns(forward={"r": ran, "sides": {names[0]: 0.5}, "entries": entries,
+                                 "exits": {d: 0 for d in names}, "bars": bars})
+        receipt = self.night(runs, now=PIN_AT)
+        db = self.store()
+        held = {r["day"]: r["sides"] for r in db.execute("SELECT day, sides FROM fwd1_sides")}
+        db.close()
+        self.assertEqual(set(held), {names[0], names[1], names[2], names[5]})
+        self.assertEqual(held[names[0]], 0.5)
+        self.assertEqual(receipt["sides_restated"], 4)
+        self.assertEqual(receipt["no_sides"], 1)                             # days 4 and 5 are not that run's
+
+
+class TheStallRule(Fixture):
+    def test_sides_that_never_come_stall_the_lineage_and_cost_no_run(self):
+        self.pin_first()
+        self.family("f1")
+        pid = self.row("f1", 1, first_day="2026-10-16")
+        self.days(pid, [0.01] * 6, first=START)
+        later = sessions(START, 30)[10:]
+        runs = FakeRuns()                                          # its forward run never finishes
+        for i in range(FS.STALL_NIGHTS - 1):
+            self.advance(later[i])
+            self.night(runs)
+            self.night(runs)                                       # the night's second run counts no night
+        self.assertEqual(runs.calls["forward"], 2 * (FS.STALL_NIGHTS - 1))
+        self.assertEqual(self.permits()["equity:f1"]["status"], "pending")
+        self.advance(later[FS.STALL_NIGHTS - 1])
+        receipt = self.night(runs)
+        self.assertEqual(receipt["stalled"], 1)
+        self.assertEqual(self.permits()["equity:f1"]["status"], "stalled")
+        report = json.loads((self.root / FS.REPORT).read_text())
+        self.assertEqual(report["stalled"][0]["cause"], "sides")
+        calls = runs.calls["forward"]
+        self.night(runs)
+        self.advance(later[FS.STALL_NIGHTS])
+        self.night(runs)
+        self.assertEqual(runs.calls["forward"], calls)            # stalled: no run
+        db = self.store()
+        self.assertIsNone(db.execute("SELECT * FROM fwd1_verdicts").fetchone())     # nothing marks it
+        db.close()
+
+    def test_a_lineage_that_waits_goes_after_one_that_does_not(self):
+        self.pin_first()
+        for fid in ("a1", "z9"):
+            self.family(fid)
+        pa = self.row("a1", 1, first_day="2026-10-16")
+        pz = self.row("z9", 1, first_day="2026-10-16")
+        self.days(pa, [0.01] * 6, first=START)
+        values = [0.004 if i % 2 else -0.004 for i in range(10)]
+        self.days(pz, values[:9], first=START)
+        order, case = [], self
+
+        class Watch(FakeRuns):
+            def forward_sides(self, program, typ, *, settings, fdb=None):
+                order.append(program.key)
+                if program.key.startswith("a1"):
+                    raise RuntimeError("its child never finishes")
+                return {"r": case.recorded(program.pid), "sides": {}}
+
+        self.advance(sessions(START, 12)[10])
+        self.night(Watch())
+        self.assertEqual(order, ["a1@1", "z9@1"])
+        order.clear()
+        self.days(pz, values[9:], first=dt.date.fromisoformat(sessions(START, 10)[9]))
+        self.advance(sessions(START, 12)[11])
+        self.night(Watch())
+        self.assertEqual(order, ["z9@1", "a1@1"])                 # a1 waited a night: it goes after
+
+
+class TheCheckpointsReading(Fixture):
+    def test_a_deferred_checkpoint_is_judged_on_its_first_reading(self):
+        """A would-be pass whose floor waits on the House keeps the reading of the night it reached k counted days:
+        a live-like row that comes a night late never makes a second reading (the review's fix)."""
+        self.family("f1")
+        pid = self.row("f1", 1, first_day="2026-10-16")
+        values = [0.01 + 0.001 * (i % 3) for i in range(6)]
+        names = self.days(pid, values, first=START)
+        self.sides(pid, names, 0.5)
+        FS.night(self.root, rule=self.rule, settings=self.settings, now=PIN_AT, base=None, release=None,
+                 runs=FakeRuns(fail=True), families=self.families, clock=lambda: PIN_AT)
+        db = self.store()
+        self.assertIsNone(db.execute("SELECT * FROM fwd1_checks").fetchone())           # the floor waited
+        db.close()
+        x = [v - 2e-4 * (0.5 if i == 0 else 0.0) for i, v in enumerate(values[:5])]
+        first = R.checkpoint(x, [v - 1e-5 for v in x], 5)                               # that night's reading
+        for day in names[:5]:                                      # a late live-like re-price, far lower
+            self.fdb.execute("INSERT INTO fwd_ll(pid, day, engine, r_ll, at) VALUES (?,?,?,?,?)",
+                             (pid, day, self.engine, -0.02, 5.0))
+        self.fdb.commit()
+        self.night()
+        db = self.store()
+        check = dict(db.execute("SELECT * FROM fwd1_checks WHERE k=5").fetchone())
+        self.assertAlmostEqual(check["t"], first["t"], places=12)
+        self.assertAlmostEqual(check["s"], first["S"], places=12)
+        self.assertEqual((check["ll"], check["passed"]), (0, 1))
+        self.assertEqual(dict(db.execute("SELECT verdict FROM fwd1_verdicts").fetchone())["verdict"], "pass")
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM fwd1_pending WHERE k=5").fetchone()[0], 1)
+        db.close()
+
+
+class TheLiveness(Fixture):
+    def test_a_stopped_representative_is_stopped_not_pending_and_runs_nothing(self):
+        self.pin_first()
+        self.family("f1")
+        pid = self.row("f1", 1, first_day="2026-10-16")
+        self.days(pid, [0.01] * 6, first=START)
+        self.fdb.execute("INSERT INTO fwd_tags(pid, tag, value, at) VALUES (?, 'stopped', 'disqualified:x', 2.0)", (pid,))
+        self.fdb.commit()
+        runs = FakeRuns()
+        receipt = self.night(runs)
+        self.assertEqual((receipt["stopped"], runs.calls["forward"]), (1, 0))
+        self.assertEqual(self.permits()["equity:f1"]["status"], "stopped")
+        self.fdb.execute("INSERT INTO fwd_tags(pid, tag, value, at) VALUES (?, 'resumed', 'x', 3.0)", (pid,))
+        self.fdb.commit()
+        self.night(runs)
+        self.assertEqual(self.permits()["equity:f1"]["status"], "pending")
+        self.assertEqual(runs.calls["forward"], 1)
+
+    def test_a_lineage_of_another_receipt_is_superseded(self):
+        self.family("f1")
+        pid = self.row("f1", 1, first_day="2026-10-16")
+        self.days(pid, [0.01] * 3, first=START)
+        self.first_night()
+        self.assertEqual(self.permits()["equity:f1"]["status"], "pending")
+        self.rule = R.Rule(receipt_sha256="d" * 64, figures=self.rule.figures)
+        self.night()
+        self.assertEqual(self.permits()["equity:f1"]["status"], "superseded")
+
+
+class TheBudgetAndTheDeadline(Fixture):
+    def test_the_nights_two_runs_share_one_budget(self):
+        self.pin_first()
+        self.family("f1")
+        self.family("f2")
+        p1 = self.row("f1", 1, first_day="2026-10-16")
+        p2 = self.row("f2", 1, first_day="2026-10-16")
+        self.days(p1, [0.01] * 6, first=START)
+        self.days(p2, [0.01] * 6, first=START)
+        t = [PIN_AT + 86400 * 20]
+
+        class Slow(FakeRuns):
+            def forward_sides(self, program, typ, *, settings, fdb=None):
+                t[0] += 400.0
+                return super().forward_sides(program, typ, settings=settings, fdb=fdb)
+
+        settings = {"elane": {"fwd1": {"mode": "record", "cpu_seconds_night": 900}, "forward": {"mode": "record"}}}
+        first = FS.night(self.root, rule=self.rule, settings=settings, now=t[0], base=None, release=None, runs=Slow(),
+                         families=self.families, clock=lambda: t[0])
+        self.assertEqual((first["budget"], first["seconds"]), (900.0, 800.0))
+        second = FS.night(self.root, rule=self.rule, settings=settings, now=t[0], base=None, release=None,
+                          runs=Slow(), families=self.families, clock=lambda: t[0])
+        self.assertEqual(second["budget"], 100.0)                  # what the night's first run left
+        t[0] += FS.NIGHT_WINDOW_S + 1
+        third = FS.night(self.root, rule=self.rule, settings=settings, now=t[0], base=None, release=None, runs=Slow(),
+                         families=self.families, clock=lambda: t[0])
+        self.assertEqual(third["budget"], 900.0)                   # the next night's own
+
+    def test_no_run_starts_at_the_deadline(self):
+        self.pin_first()
+        self.family("f1")
+        pid = self.row("f1", 1, first_day="2026-10-16")
+        self.days(pid, [0.01] * 6, first=START)
+        runs = FakeRuns()
+        now = PIN_AT + 86400 * 20
+        receipt = FS.night(self.root, rule=self.rule, settings=self.settings, now=now, base=None, release=None,
+                           runs=runs, families=self.families, clock=lambda: now, deadline=now + FS.MIN_RUN_S)
+        self.assertEqual((runs.calls["forward"], receipt["deferred"]), (0, 1))
+
+    def test_the_deadline_is_the_pre_open_or_the_wall(self):
+        thursday_night = dt.datetime(2026, 10, 15, 22, 40, tzinfo=dt.timezone.utc).timestamp()
+        friday_open = schedule.moments(dt.date(2026, 10, 16)).open_at
+        self.assertEqual(FS.preopen_deadline(thursday_night), friday_open - 3600 - FS.MARGIN_S)
+        preopen = friday_open - 3600 + 60                           # inside Friday's pre-open
+        self.assertLess(FS.preopen_deadline(preopen), preopen)
+        job = registry.by_name()["forward_screen"]
+        self.assertEqual(job.wall, FS.WALL_S)
+        self.assertLessEqual(job.grace, 2 * 3600)                   # after forward_xs it is done before the pre-open
+        ctx = types.SimpleNamespace(root=self.root, now=lambda: friday_open - 3600 - 200, alert=lambda *a: None,
+                                    config={})
+        import league.swarm.settings as ss
+
+        real, real_rule = ss.load, R.rule
+        try:
+            ss.load = lambda root, config=None: self.settings
+            R.rule = lambda policy=None: (self.rule, None)
+            self.assertIn("pre-open", FS.run(ctx)["why"])
+        finally:
+            ss.load, R.rule = real, real_rule
 
 
 class TheJob(Fixture):
