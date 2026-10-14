@@ -1428,9 +1428,11 @@ class TheClockAtValidationAndTheLook(TheLook):
     """THE CLOCK AND QUIET RULE IN VALIDATION AND THE LOOK (step two; the ship check's open item): every run of the
     Validation try (2025 at k 1.0 and 1.5), the Train segments both read, and the look's sealed run go through
     `steady`, and `may_run` is asked before EACH run. A run with a decide timeout is never read; the first steady run
-    is. Timeouts that do not repeat are the House's: nothing spent, owed after a backoff, one alert at the third.
-    Timeouts that repeat as a program's are SLOW: the try is spent, the look spent and failed. The look's seed and
-    draws are the same in every run of the bound. Invented runtimes (the fakes' `clock`: one entry a run, in order)."""
+    is. Timeouts that do not repeat are the House's: nothing spent, owed after a backoff, one alert at the third,
+    AND THE OWE HAS AN END: the third round with the try's sealed run made spends the try, the second with the look's
+    sealed run made spends and fails the look, and an owed try holds its lineage's try. Timeouts that repeat as a
+    program's are SLOW: the try is spent, the look spent and failed. The look's seed and draws are the same in every
+    run of the bound. Invented runtimes (the fakes' `clock`: one entry a run, in order)."""
 
     def clocked(self, slug, clock, **kw):
         return self.family(slug, code=F.good(tag=slug, clock=list(clock)), **kw)
@@ -1448,20 +1450,84 @@ class TheClockAtValidationAndTheLook(TheLook):
         self.assertIsNone(self.kv(fam["id"], "validation"))
 
     def test_three_runs_that_do_not_repeat_are_owed_with_nothing_spent(self):
-        fam = self.clocked("rev-d", [0, 0, 3, 5, 7] * 3)
-        for attempt in range(1, 4):
+        fam = self.clocked("rev-d", [0, 0, 3, 5, 7] * 2)
+        for attempt in range(1, 3):
             out = self.validate(fam)
             self.assertFalse(out["entered"])
             self.assertIn("the House's clock", out["waits"])
             self.assertNotIn(elane.TRY_KEY, self.state(fam), "nothing spent")
             self.assertEqual(elane.lineage_tries(self.store, fam["id"]), [])
             row = self.kv(fam["id"], "validation")
-            self.assertEqual((row["version"], row["count"]), (1, attempt))
+            self.assertEqual((row["version"], row["count"], row["sealed"]), (1, attempt, attempt))
+            self.assertEqual(self.state(fam)[elane.VERDICTS_KEY]["1"]["owed"], elane_xs.OWED, "marked: asked first")
+            self.assertEqual(elane.next_try(self.store, self.store.family(fam["id"]), self.settings), 1)
             self.assertIn("backoff", self.validate(fam)["waits"], "owed after a backoff, not at once")
             self.store.clock.advance(row["next_at"] - self.store.clock() + 1)
-        alerts = [e for e in self.events("swarm.status", "elane_xs_clock")]
-        self.assertEqual(len(alerts), 1, "one alert, at the third")
-        self.assertEqual(alerts[0]["stage"], "validation")
+        self.assertEqual(self.events("swarm.status", "elane_xs_clock"), [], "no alert before the third")
+
+    def test_the_third_round_with_the_sealed_run_made_spends_the_try(self):
+        """THE OWE HAS AN END (the review of step two): a program that sees its own equity in a run could make its
+        decides straddle the limit on a losing path of 2025 and never have its try counted. The third round of the
+        House's clock in which the try's sealed run was made spends the try (a "clock" run, no pre-check), with an
+        alert that says so."""
+        fam = self.clocked("rev-d2", [0, 0, 3, 5, 7] * 3)
+        for attempt in range(1, 4):
+            out = self.validate(fam)
+            self.assertFalse(out["entered"])
+            if attempt < 3:
+                self.assertIn("the House's clock", out["waits"])
+                row = self.kv(fam["id"], "validation")
+                self.store.clock.advance(row["next_at"] - self.store.clock() + 1)
+        held = self.state(fam)[elane.TRY_KEY]
+        self.assertEqual((held["version"], held["entered"], held["precheck"]), (1, False, False))
+        self.assertIn("read none of the try's sealed run in 3 rounds", held["clock"])
+        self.assertEqual([t["version"] for t in elane.lineage_tries(self.store, fam["id"])], [1], "the try is spent")
+        self.assertEqual(self.state(fam)[elane.VALIDATION_KEY]["status"], "clock")
+        self.assertFalse(self.state(fam)[elane.VERDICTS_KEY]["1"]["stale"], "the try's own verdict replaces the mark")
+        self.assertIsNone(self.kv(fam["id"], "validation"))
+        alerts = self.events("swarm.status", "elane_xs_clock")
+        self.assertEqual([(a["stage"], a["spent"]) for a in alerts], [("validation", True)])
+        self.assertIn("SPENT and failed", alerts[0]["text"])
+        self.assertEqual(self.validate(fam).get("refused"), None, "the lineage's own try, read again: no new run")
+
+    def test_a_clock_at_the_train_segments_is_owed_with_no_end_and_spends_nothing(self):
+        """No sealed run is made before the try's 2025 run: a round of the House's clock at the two Train segments
+        reads nothing sealed, so it never counts toward the spend."""
+        fam = self.clocked("rev-d3", [3, 5, 3, 7, 3, 5] * 4)                # three pairs of segments a round
+        for attempt in range(1, 5):
+            out = self.validate(fam)
+            self.assertIn("the House's clock", out["waits"])
+            row = self.kv(fam["id"], "validation")
+            self.assertEqual((row["count"], row["sealed"]), (attempt, 0))
+            self.store.clock.advance(row["next_at"] - self.store.clock() + 1)
+        self.assertNotIn(elane.TRY_KEY, self.state(fam))
+        self.assertNotIn(elane.VERDICTS_KEY, self.state(fam))
+
+    def test_no_other_version_of_the_lineage_takes_the_try_while_one_is_owed(self):
+        """KEYED BY LINEAGE: while v1 owes its try's sealed run, its family's v2 and a family of the same lineage (the
+        same code) wait, with no run made; v1 is the version `next_try` asks; once v1's try is read the lineage's try
+        is v1's. A retired owing family leaves the lineage's try spent."""
+        code = F.good(tag="rev-o", clock=[0, 0, 3, 5, 7])
+        fam = self.family("rev-o", code=code)
+        self.assertIn("the House's clock", self.validate(fam)["waits"])
+        v2 = self.store.add_version(fam["id"], F.good(tag="rev-o2"), {}, author="architect:invented")
+        clone = self.family("mom-o", code=code, agenda="xs_momentum")
+        self.runner.calls.clear()
+        for other, n in ((fam, int(v2["n"])), (clone, 1)):
+            out = self.validate(other, n)
+            self.assertIn("no other version takes the lineage's try", out["waits"])
+            self.assertNotIn("rev-o", out["waits"], "the other family is never named")
+        self.assertEqual(self.runner.calls, [], "no run made")
+        self.assertEqual(elane.next_try(self.store, self.store.family(fam["id"]), self.settings), 1)
+        row = self.kv(fam["id"], "validation")
+        self.store.clock.advance(row["next_at"] - self.store.clock() + 1)
+        self.assertTrue(self.validate(fam)["entered"], "v1's try, read this time")
+        self.assertEqual(self.validate(clone)["refused"], elane.SPENT_TRY)
+        lone = self.family("rev-p", code=F.good(tag="rev-p", clock=[0, 0, 3, 5, 7]))
+        self.assertIn("the House's clock", self.validate(lone)["waits"])
+        twin = self.family("mom-p", code=self.store.version(lone["id"], 1)["code"], agenda="xs_momentum")
+        self.store.retire(lone["id"], "an invented retirement")
+        self.assertEqual(self.validate(twin)["refused"], elane.SPENT_TRY, "a retired owing family: the try is spent")
 
     def test_timeouts_that_repeat_as_a_programs_spend_the_try_as_slow(self):
         fam = self.clocked("rev-e", [0, 0, 4, 4, 4])
@@ -1503,8 +1569,37 @@ class TheClockAtValidationAndTheLook(TheLook):
         state = self.state(fam)
         self.assertEqual((self.store.looks(), state.get("look_inflight"), state["gate_ready"]), ([], None, True))
         self.assertIn("the House's clock", state["gate"])
-        self.assertEqual(self.kv(fam["id"], "look")["count"], 1)
+        self.assertEqual((self.kv(fam["id"], "look")["count"], self.kv(fam["id"], "look")["sealed"]), (1, 1))
+        self.assertEqual(state[elane.LOST_KEY]["count"], 1, "one send of the sealed run")
         self.assertFalse(self.store.looked(run_sha(self.store.version(fam["id"], 1))))
+
+    def test_a_look_the_houses_clock_held_twice_is_spent_and_failed(self):
+        """THE OWE HAS AN END AT THE LOOK (E1's `LOOK_SENDS`): the sealed run was made in each round, so the second
+        round of the House's clock spends the look and FAILS it, with an alert; it is never taken again."""
+        clock = [0, 0, 0, 0] + [0, 0, 0, 3, 5, 7] * 2
+        fam = self.gated("rev-h2", code=F.good(tag="rev-h2", clock=clock))
+        self.assertIsNone(self.look(fam))
+        self.store.clock.advance(self.kv(fam["id"], "look")["next_at"] - self.store.clock() + 1)
+        self.assertIs(self.look(fam), False)
+        looked = self.state(fam)[elane_xs.LOOK_KEY]
+        self.assertEqual((looked["passed"], looked["verdict"]["status"]), (False, "clock"))
+        self.assertIn("sent 2 times and none of it was read", looked["beside"])
+        self.assertEqual(len(self.store.looks()), 1, "spent")
+        self.assertEqual(len([c for c in self.runner.calls if c["window"] == "look"]), 6)
+        alerts = [a for a in self.events("swarm.status", "elane_xs_clock") if a["stage"] == "look"]
+        self.assertEqual([a["spent"] for a in alerts], [True])
+        self.assertIsNone(self.look(fam), "and never taken again")
+
+    def test_a_clock_round_and_a_lost_run_are_two_sends_of_one_look(self):
+        clock = [0, 0, 0, 0] + [0, 0, 0, 3, 5, 7] + [0, 0, 0]
+        fam = self.gated("rev-h3", code=F.good(tag="rev-h3", clock=clock))
+        self.assertIsNone(self.look(fam))
+        self.store.clock.advance(self.kv(fam["id"], "look")["next_at"] - self.store.clock() + 1)
+        from league.equity.runner import RunLost
+
+        with mock.patch.object(self.runner, "look", side_effect=RunLost("the sealed run did not return")):
+            self.assertIs(self.look(fam), False)
+        self.assertEqual(self.state(fam)[elane_xs.LOOK_KEY]["verdict"]["status"], "lost")
 
     def test_a_look_whose_timeouts_repeat_is_spent_and_failed(self):
         fam = self.gated("rev-i", code=F.good(tag="rev-i", clock=[0, 0, 0, 0, 0, 0, 0, 4, 4, 4]))

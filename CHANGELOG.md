@@ -59,6 +59,11 @@ on branches.
   panel rows, the un-re-based shadow beside; one missed buy counts once. A14's bounds, keys and pooling unchanged.
 - **The live-book proof recorded again on main `47ed6872`** (#543's sleeve): every scenario moved by the lot's size
   alone; step one needs the same record once #543 is merged into it.
+- **The House's clock's owe has an end** (the review of step two): a round of the House's clock in which a sealed
+  run was made is counted; the third spends the Validation try (a "clock" run, no pre-check) and the second spends
+  and fails the look (a send of the sealed run, with E1's `LOOK_SENDS`); while a try is owed it is asked first and
+  no other version of its lineage takes the lineage's try. Cost: an unsteady box can spend a good program's try or
+  look.
 - **An exit is never stopped by the equity book's own day count** (the review of step two, its blocker): the 60
   sends and cancels of `order_path.max_orders_day` stop ENTRIES only; an exit meets the House-wide count alone (the
   options book's exits keep their room). Before it, a held basket's re-priced sales used the count up on a fast

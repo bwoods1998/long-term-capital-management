@@ -2227,6 +2227,19 @@ class _Runs:
 GATE_CLOCK_KEY = "elane_xs_gate_clock"
 #: The third House's clock in a row at one stage of one version is one alert (`elane_xs_clock`), as at the Train bar.
 GATE_CLOCK_ALERT = 3
+#: THE OWE HAS AN END (the review of step two: a program can see its own equity in a run, so on a losing path of a
+#: sealed window it could make its decides straddle the wall-clock limit and have its sealed read never count, as
+#: often as it liked). A round of the House's clock in which a SEALED run was made (the try's 2025 run at k 1.0 or
+#: 1.5; the look's run through the holdout) is counted in the row's `sealed`: the Validation try is SPENT at the
+#: `GATE_CLOCK_SPENDS`-th such round (status "clock": no pre-check), and the look counts each such round as a send of
+#: its sealed run beside a run that never returned (E1's `LOOK_SENDS`, `elane.LOST_KEY`): the second spends and fails
+#: it. While a version owes its try's sealed run, NO OTHER VERSION OF ITS LINEAGE TAKES THE TRY (`try_owed`): the owed
+#: version is marked so `elane.next_try` asks it first (`OWED`). THE COST, STATED AS E1 STATES ITS OWN: a box whose
+#: clock is genuinely unsteady can spend a good program's try or look.
+GATE_CLOCK_SPENDS = GATE_CLOCK_ALERT
+#: The verdict an owed try is marked with (`elane.VERDICTS_KEY`, `stale` True, so `elane.next_try` asks the version
+#: first, whatever the family's candidate is now): the try made its sealed run and the House's clock read none of it.
+OWED = "the House's clock"
 
 
 def gate_clock_wait(store: Any, fid: str, n: int, stage: str, now: float) -> str | None:
@@ -2243,10 +2256,20 @@ def gate_clock_wait(store: Any, fid: str, n: int, stage: str, now: float) -> str
             f"backoff (until {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(nxt))}), nothing spent")
 
 
-def gate_clock_fail(owner: Any, fid: str, n: int, stage: str, why: str) -> dict[str, Any]:
-    """A Validation try or a look (`stage`) owed to the House's clock (`ClockUnsteady`): NOTHING SPENT, a backoff that
-    doubles each time (E2's Train pace, `train_every_seconds`, at most `BACKOFF_MAX`), and one `elane_xs_clock` alert
-    at the `GATE_CLOCK_ALERT`-th in a row. Returns the row."""
+def gate_clock_row(store: Any, fid: str, n: int, stage: str) -> dict[str, Any]:
+    """The House's clock row of version `n`'s `stage` ({} when there is none, or it is another version's)."""
+    held = store.get(GATE_CLOCK_KEY)
+    row = ((held or {}).get(str(fid)) or {}).get(stage) if isinstance(held, Mapping) else None
+    return dict(row) if isinstance(row, Mapping) and row.get("version") == n else {}
+
+
+def gate_clock_fail(owner: Any, fid: str, n: int, stage: str, why: str, *, sealed: bool = False,
+                    spent: bool = False) -> dict[str, Any]:
+    """A Validation try or a look (`stage`) the House's clock read nothing of (`ClockUnsteady`): a backoff that doubles
+    each time (E2's Train pace, `train_every_seconds`, at most `BACKOFF_MAX`), and one `elane_xs_clock` alert at the
+    `GATE_CLOCK_ALERT`-th in a row. `sealed`: a sealed run was made in this round (counted in the row's `sealed`;
+    `GATE_CLOCK_SPENDS`). `spent`: the caller spends the stage on this round (the alert says so, at once). Else
+    NOTHING IS SPENT and the stage is owed. Returns the row."""
     from . import elane_train
 
     store = owner.store
@@ -2259,18 +2282,47 @@ def gate_clock_fail(owner: Any, fid: str, n: int, stage: str, why: str) -> dict[
         row = mine.get(stage) if isinstance(mine.get(stage), Mapping) and mine[stage].get("version") == n else {}
         count = int(row.get("count") or 0) + 1
         delay = min(float(c["train_every_seconds"]) * (2 ** min(count - 1, 12)), BACKOFF_MAX)
-        tell = count >= GATE_CLOCK_ALERT and not row.get("alerted")
+        tell = spent or (count >= GATE_CLOCK_ALERT and not row.get("alerted"))
         row = {"version": n, "count": count, "first_at": _num(row.get("first_at")) or now, "next_at": now + delay,
-               "alerted": bool(row.get("alerted")) or tell, "why": str(why)[:240]}
+               "alerted": bool(row.get("alerted")) or tell, "why": str(why)[:240],
+               "sealed": int(row.get("sealed") or 0) + int(bool(sealed))}
         mine[stage] = row
         store.put(GATE_CLOCK_KEY, held)
     if tell:
         store.event("swarm.status", fid, {
-            "action": "elane_xs_clock", "alert": True, "version": n, "stage": stage,
+            "action": "elane_xs_clock", "alert": True, "version": n, "stage": stage, "spent": bool(spent),
             "text": f"a panel {stage} met decide timeouts that did not repeat {count} times running: {str(why)[:160]}; "
-                    f"nothing is spent and the {stage} is owed (the box's clock: check what holds the core while the "
-                    "panel's child runs)"})
+                    + (f"its sealed run was made {row['sealed']} times and none of it was read, so the {stage} is "
+                       "SPENT and failed (the owe has an end; a genuinely unsteady box can spend a good program's "
+                       f"{stage}: check what holds the core while the panel's child runs)" if spent else
+                       f"nothing is spent and the {stage} is owed (the box's clock: check what holds the core while "
+                       "the panel's child runs)")})
     return row
+
+
+def try_owed(store: Any, fid: str, n: int) -> dict[str, Any] | None:
+    """THE LINEAGE'S TRY IS HELD WHILE IT IS OWED (`GATE_CLOCK_SPENDS`): None, or what version `n` of `fid` is told
+    instead of a Validation try because ANOTHER version of its connected lineages made the try's sealed 2025 run and
+    the House's clock read none of it (its `validation` row's `sealed`): {"waits": ...} while that family is alive (its
+    owed try is asked first: `OWED`), {"refused": `elane.SPENT_TRY`} once it is retired (the lineage's sealed window
+    was run; no other version takes a fresh try). Never names the other family (a lineage's members are private)."""
+    from . import elane
+
+    held = store.get(GATE_CLOCK_KEY)
+    if not isinstance(held, Mapping):
+        return None
+    for member in elane._members(store, fid):
+        row = (held.get(str(member)) or {}).get("validation") if isinstance(held.get(str(member)), Mapping) else None
+        if not isinstance(row, Mapping) or int(row.get("sealed") or 0) < 1:
+            continue
+        if str(member) == str(fid) and row.get("version") == n:
+            continue
+        other = store.family(str(member))
+        if other is None or other.get("retired_at"):
+            return {"refused": elane.SPENT_TRY}
+        return {"waits": "another version of this lineage made its try's sealed run and the House's clock read none "
+                         "of it: that try is owed first, and no other version takes the lineage's try meanwhile"}
+    return None
 
 
 def gate_clock_clear(store: Any, fid: str, stage: str) -> None:
@@ -3545,6 +3597,9 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     early = state.get(PRECHECK_KEY) if isinstance(state.get(PRECHECK_KEY), Mapping) else {}
     if early.get("version") == n and early.get("reached") is False:
         return {**out, "refused": EARLY_CAUSES.get(str(early.get("why")), SAME_LINEAGE_XS)}
+    owed = try_owed(store, fid, n)  # another version of the lineage owes its try's sealed run: it comes first
+    if owed is not None:
+        return {**out, **owed}
     why = may_run(store, settings, _now(tournament)) or gate_clock_wait(store, fid, n, "validation", _now(tournament))
     if why is not None:
         return {**out, "waits": why}
@@ -3610,8 +3665,11 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
         return {**out, "refused": SAME_LINEAGE_XS}
     # THE TRY: the 2025 run at k 1.0 and 1.5, each through the clock rule (`steady_runs`: `may_run` before each run
     # of the bound). A program whose timeouts repeat as a program's do is SLOW: its try is spent (a "slow" run, no
-    # pre-check); the House's clock spends nothing.
+    # pre-check). The House's clock spends nothing until its `GATE_CLOCK_SPENDS`-th round with the sealed run made:
+    # until then the try is owed (marked `OWED`, asked first, and no other version of the lineage takes the try:
+    # `try_owed`); that round spends it (a "clock" run, no pre-check).
     slow: str | None = None
+    unread: str | None = None
     try:
         base = steady_runs(tournament, settings, lambda: run_through.validation(code, params, name=fid, k=K_BASE),
                            what="Validation run (k 1.0)")
@@ -3621,7 +3679,13 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     except _Waits as wait:
         return {**out, "waits": str(wait)}
     except ClockUnsteady as exc:
-        return clocked(exc)
+        spends = int(gate_clock_row(store, fid, n, "validation").get("sealed") or 0) + 1 >= GATE_CLOCK_SPENDS
+        row = gate_clock_fail(tournament, fid, n, "validation", str(exc), sealed=True, spent=spends)
+        if not spends:
+            _owe_try(store, fid, n)
+            return {**out, "waits": f"the House's clock: {str(exc)[:200]}"}
+        unread = f"the House's clock read none of the try's sealed run in {row['sealed']} rounds ({str(exc)[:200]})"
+        base = stressed = SimpleNamespace(result={"status": "clock", "reason": unread, "trials": 1})
     except TooSlow as exc:
         slow = str(exc)
         base = stressed = SimpleNamespace(result={"status": "slow", "reason": slow, "trials": 1})
@@ -3682,7 +3746,8 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
                            elane.SIGMA_KEY: sigma, elane.VERDICTS_KEY: verdicts,
                            elane.TRY_KEY: {"version": n, "at": store.now(), "first": first,
                                            "precheck": bool(pre.get("passed")), "entered": entered, "retry_sha": None,
-                                           **({"slow": slow[:300]} if slow else {})},
+                                           **({"slow": slow[:300]} if slow else {}),
+                                           **({"clock": unread[:300]} if unread else {})},
                            PRECHECK_KEY: {"version": n, "at": store.now(), "reached": True,
                                           "passed": bool(pre.get("passed")) and status == "ok"},
                            **({elane.SEAT_KEY: seat} if seat is not None else {})})
@@ -3690,6 +3755,19 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
                                      "structure": STRUCTURE, "screen": SCREEN_NAME, "entered": entered, "first": first,
                                      "checks": checks})
     return {**out, "passed": entered, "entered": entered, "first": first}
+
+
+def _owe_try(store: Any, fid: str, n: int) -> None:
+    """A try whose sealed run the House's clock read none of (`GATE_CLOCK_SPENDS`): version `n`'s verdict is marked
+    owed (`OWED`, `stale` True), so `elane.next_try` asks this version first whatever the family's candidate is now;
+    the try's own verdict replaces the mark when it is read or spent."""
+    from . import elane
+
+    with store.atomic():
+        state = _state(store.family(fid) or {})
+        verdicts = dict(state.get(elane.VERDICTS_KEY) or {}) if isinstance(state.get(elane.VERDICTS_KEY), Mapping) else {}
+        verdicts[str(n)] = {"entered": False, "at": store.now(), "stale": True, "owed": OWED}
+        store.set_state(fid, **{elane.VERDICTS_KEY: verdicts})
 
 
 def _refuse(gate: Any, fid: str, n: int, sha: str, stage: str, why: str) -> None:
@@ -4026,11 +4104,27 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         _wait(gate, fid, n, sha, str(wait))
         return None
     except ClockUnsteady as exc:
-        # THE HOUSE'S CLOCK: no run of the bound was read. Nothing spent, the look owed after a backoff.
-        store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
-        gate_clock_fail(gate, fid, n, "look", str(exc))
-        _wait(gate, fid, n, sha, f"the House's clock: {str(exc)[:160]}")
-        return None
+        # THE HOUSE'S CLOCK: no run of the bound was read, and the sealed run WAS made. It counts as a send of the
+        # sealed run beside one that never returned (`GATE_CLOCK_SPENDS`; E1's `LOOK_SENDS`, one count in
+        # `elane.LOST_KEY`): owed again once, after a backoff; the second time the look is spent and FAILED, so a
+        # program cannot have its sealed read never count.
+        lost = _state(store.family(fid) or {}).get(elane.LOST_KEY)
+        lost = lost if isinstance(lost, Mapping) else {}
+        count = (int(lost.get("count") or 0) if lost.get("sha") == sha else 0) + 1
+        spent = count >= elane.LOOK_SENDS
+        gate_clock_fail(gate, fid, n, "look", str(exc), sealed=True, spent=spent)
+        store.event("swarm.gate", fid, {"action": "look_clock", "version": n, "lane": LANE, "structure": STRUCTURE,
+                                        "count": count, "spent": spent})
+        if not spent:
+            store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True,
+                                        **{elane.LOST_KEY: {"sha": sha, "count": count, "at": store.now(),
+                                                            "clock": True}})
+            _wait(gate, fid, n, sha, f"the House's clock: {str(exc)[:160]}")
+            return None
+        verdict = {"screen": SCREEN_NAME, "passed": False, "status": "clock",
+                   "why": f"the sealed run was sent {count} times and none of it was read (the House's clock, or a "
+                          "run that did not return)"}
+        beside = f"no verdict: {verdict['why']}"
     except TooSlow as exc:
         # THE PROGRAM'S: its decide ran past the limit the same way in every run of the bound. The sealed run was made
         # and none of it can be judged: the look is spent and FAILED, with the measured seconds.
@@ -4143,7 +4237,8 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "UNIVERSE_MANIFEST", "DEFAULTS", "BOUNDS", "CENSUS_NOTE_MAX", "CENSUS_LABEL", "SCREEN_NULLS", "PANEL_AGENDA",
            "INPUTS", "BAR_XS", "FAILS_XS", "PROGRAM_FAILS", "JUDGED_XS", "MAP_LABEL", "K_BASE", "K_STRESS",
            "CLOCK_RUNS", "SLOW_SHARE", "TooSlow", "ClockUnsteady", "clock_of", "steady", "one_store", "slicer", "bar_runs",
-           "GATE_CLOCK_KEY", "GATE_CLOCK_ALERT", "gate_clock_wait", "gate_clock_fail", "gate_clock_clear", "steady_runs",
+           "GATE_CLOCK_KEY", "GATE_CLOCK_ALERT", "GATE_CLOCK_SPENDS", "OWED", "gate_clock_row", "try_owed",
+           "gate_clock_wait", "gate_clock_fail", "gate_clock_clear", "steady_runs",
            "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "LOOK_RULES", "LOOK_RULES_BUILT", "A31_HOLD",
            "look_held", "cfg", "pin", "receipt", "mode",
            "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "panel_seats", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
