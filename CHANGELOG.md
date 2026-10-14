@@ -49,8 +49,9 @@ on branches.
   to the file). FWD1_START = the session after the first close after the release carrying it began running.
 - **The job** `forward_screen` (after `forward_shadow` and `forward_xs`): its own append-only
   `<state>/forward-screen.sqlite`, the permit file of ids and words the swarm reads, the operator's report with the
-  registry's expected zero-edge passes against the observed and each pass's sentence. One guarded call in E3's night
-  (`forward_shadow._attempt`) writes each day's lot sides for the haircut. policy.json `elane.fwd1.mode` "record".
+  registry's expected zero-edge passes against the observed and each pass's sentence. Each day's lot sides for the
+  haircut come from the representative's own forward run in the job's child, kept where it reproduces the record's r:
+  no line of E3's night changes. policy.json `elane.fwd1.mode` "record".
 - **The seat path, BUILT AND OFF** (`league/swarm/elane_forward.py`, FORBIDDEN, in `PENDING_GATEWAY` for the gateway's
   merge-list follow-up): `elane.fwd1.seats` "off". On: a FWD1-judged lineage takes no sealed Validation try
   (`elane.try_open`); an ETF pass becomes a Candidate through the roster's own seat rule, one live forward seat a

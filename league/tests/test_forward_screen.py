@@ -1,5 +1,6 @@
 """The forward screen's job (league/ops/forward_screen.py, FWD1-R): the clock, the lineages, the checkpoints of record,
-one verdict a lineage, the panel's placebo leg, the engine rule, the permit file and the nights' sides hook.
+one verdict a lineage, the panel's placebo leg, the engine rule, the sides read from a program's own run, the permit
+file and the sentence beside a trade.
 
 Every store is made here from invented rows (FAKE: no market data, no real figure); the House's runs are a fake."""
 
@@ -16,8 +17,10 @@ from pathlib import Path
 
 import numpy as np
 
-from league.ops import forward_db, forward_screen as FS, fwd1_rule as R, registry
 from league.equity import schedule
+from league.live.decider import InlineDecider
+from league.ops import forward_db, forward_screen as FS, fwd1_rule as R, registry
+from league.tests import test_forward_shadow as TS
 
 REPO = Path(__file__).resolve().parents[2]
 RECEIPT = REPO / R.RECEIPT_PATH
@@ -58,12 +61,19 @@ def floor_pools(seed: int, n_d: int = 1004, n_c: int = 751, *, panel: bool = Fal
 class FakeRuns:
     """The House's runs, invented: the floors' pools and a placebo block."""
 
-    def __init__(self, placebo_t=None, days=None, fail=False, refuse=False):
+    def __init__(self, placebo_t=None, days=None, fail=False, refuse=False, forward=None):
         self.calls = Counter()
         self.placebo_t = placebo_t
         self.days = days
         self.fail = fail
         self.refuse = refuse
+        self.forward = forward
+
+    def forward_sides(self, program, typ, *, settings, fdb=None):
+        self.calls["forward"] += 1
+        if self.forward is None:
+            raise RuntimeError("no forward run in this test")
+        return self.forward
 
     def etf_pools(self, program):
         self.calls["etf"] += 1
@@ -136,10 +146,17 @@ class Fixture(unittest.TestCase):
         return names
 
     def sides(self, pid: int, names, value: float = 0.0, engine: int | None = None):
-        run = types.SimpleNamespace(program=types.SimpleNamespace(pid=pid), series=types.SimpleNamespace(iso=list(names)),
-                                    result={"lots": [{"lid": 1, "weight": value, "entry_day": names[0], "exit_day": None}]
-                                            if value else []})
-        return FS.on_run(self.root, run, engine=engine or self.engine, now=2.0, settings=self.settings, rule=self.rule)
+        """Sides kept by an earlier night's forward run (the first day's lot entering at `value`)."""
+        db = FS.open_store(self.root)
+        with db:
+            for i, day in enumerate(names):
+                db.execute("INSERT OR IGNORE INTO fwd1_sides(pid, day, engine, sides, at) VALUES (?,?,?,?,?)",
+                           (pid, day, engine or self.engine, value if i == 0 else 0.0, 2.0))
+        db.close()
+
+    def recorded(self, pid: int) -> dict:
+        """The record's r of a pid's rows, as its own forward run would give them."""
+        return {str(r[0]): float(r[1]) for r in self.fdb.execute("SELECT day, r FROM fwd_days WHERE pid=?", (pid,))}
 
     def night(self, runs=None, *, now: float = PIN_AT + 86400 * 20):
         return FS.night(self.root, rule=self.rule, settings=self.settings, now=now, base=None, release=None,
@@ -364,8 +381,34 @@ class TheVerdicts(Fixture):
         self.family("f1")
         pid = self.row("f1", 1, first_day="2026-10-16")
         self.days(pid, [0.01] * 6, first=START)
-        receipt = self.first_night()
-        self.assertEqual(receipt["no_sides"], 1)
+        receipt = self.first_night()                              # the forward run failed: the House's
+        self.assertEqual((receipt["no_sides"], receipt["house"]), (1, 1))
+
+    def test_the_sides_come_from_the_programs_own_run_where_it_reproduces_the_record(self):
+        self.family("f1")
+        pid = self.row("f1", 1, first_day="2026-10-16")
+        names = self.days(pid, [0.01 + 0.001 * (i % 3) for i in range(6)], first=START)
+        ran = self.recorded(pid)
+        moved = {**ran, names[2]: ran[names[2]] + 1e-3}          # one day the run does not reproduce
+        runs = FakeRuns(forward={"r": moved, "sides": {names[0]: 0.5, names[3]: 0.25}})
+        receipt = self.night(runs, now=PIN_AT)
+        self.assertEqual(runs.calls["forward"], 1)
+        self.assertEqual(receipt["no_sides"], 1)                  # the moved day has no sides: no checkpoint
+        db = self.store()
+        held = {r["day"]: r["sides"] for r in db.execute("SELECT day, sides FROM fwd1_sides")}
+        self.assertNotIn(names[2], held)
+        self.assertEqual((held[names[0]], held[names[3]], held[names[1]]), (0.5, 0.25, 0.0))
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM fwd1_checks").fetchone()[0], 0)
+        db.close()
+        runs = FakeRuns(forward={"r": ran, "sides": {names[0]: 0.5, names[2]: 0.5, names[3]: 0.25}})
+        self.night(runs, now=PIN_AT)                              # the next night's run reproduces it
+        db = self.store()
+        check = dict(db.execute("SELECT * FROM fwd1_checks WHERE k=5").fetchone())
+        x = [float(r) for r in [ran[d] for d in names[:5]]]
+        sides = [0.5, 0.0, 0.5, 0.25, 0.0]
+        self.assertAlmostEqual(check["s"], sum(v - 2e-4 * c for v, c in zip(x, sides)), delta=1e-12)
+        self.assertEqual(held[names[0]], 0.5)                     # first write stands
+        db.close()
 
     def test_the_haircut_reads_the_measured_gap(self):
         self.family("f1")
@@ -479,44 +522,12 @@ class TheJob(Fixture):
         self.assertEqual(FS.cfg({"elane": {"fwd1": {"mode": "record", "seats": "on", "cpu_seconds_night": 99999}}}),
                          {"mode": "record", "seats": "on", "cpu_seconds_night": 2400, "run_budget_seconds": 300})
 
-    def test_the_hook_writes_nothing_without_a_pin_or_with_the_switch_off(self):
-        run = types.SimpleNamespace(program=types.SimpleNamespace(pid=1), series=types.SimpleNamespace(iso=["2026-10-16"]),
-                                    result={"lots": []})
-        self.assertEqual(FS.on_run(self.root, run, engine=1, now=1.0, settings={}, rule=self.rule), 0)
-        self.assertFalse((self.root / FS.DB).exists())
-
     def test_sides_from_lots_both_ways(self):
         lots = [{"lid": 1, "weight": 0.25, "entry_day": "2026-10-16", "exit_day": "2026-10-19"},
                 {"lid": 2, "weight": 0.25, "entry_day": "2026-10-19", "exit_day": None}]
         self.assertEqual(FS.lot_sides({"lots": lots}), {"2026-10-16": 0.25, "2026-10-19": 0.5})
-        ordinals = [(dt.date(2026, 10, d) - dt.date(1970, 1, 1)).days for d in (16, 19)]   # E3's int ordinals
-        run = types.SimpleNamespace(program=types.SimpleNamespace(pid=7),
-                                    series=types.SimpleNamespace(iso=None, days=ordinals), result={"lots": lots})
-        self.assertEqual(FS._run_days(run), ["2026-10-16", "2026-10-19"])
-
-    def test_the_shadow_night_calls_the_hook(self):
-        from league.ops import forward_shadow
-
-        program = types.SimpleNamespace(pid=3, key="f@1")
-        run = types.SimpleNamespace(program=program, series=types.SimpleNamespace(days=[], iso=["2026-10-16"]),
-                                    result={"lots": [{"lid": 1, "weight": 0.5, "entry_day": "2026-10-16"}]})
-        fake = types.SimpleNamespace(run_program=lambda p: (run, {}), write=lambda r, s: {"new_days": 1, "restated": 0,
-                                                                                            "checks": 0},
-                                     _commit=lambda: None, _rollback=lambda: None, db=None, clock=lambda: 5.0,
-                                     settings=self.settings, root=self.root, engine=self.engine, _data_failed=None)
-        import league.ops.forward_twins as twins
-        real_twins, real_rule = twins.on_run, FS._pinned_rule
-        try:
-            twins.on_run = lambda *a, **k: 0
-            FS._pinned_rule = lambda: self.rule
-            tally = Counter()
-            forward_shadow.Shadow._attempt(fake, program, tally)
-        finally:
-            twins.on_run, FS._pinned_rule = real_twins, real_rule
-        self.assertEqual(tally["fwd1_sides"], 1)
-        db = self.store()
-        self.assertEqual(dict(db.execute("SELECT * FROM fwd1_sides").fetchone())["sides"], 0.5)
-        db.close()
+        with self.assertRaises(ValueError):
+            FS.lot_sides({"lots": [{"lid": 3, "weight": "x", "entry_day": "2026-10-16"}]})
 
     def test_the_registry_runs_it_after_both_nights(self):
         job = registry.by_name()["forward_screen"]
@@ -555,6 +566,40 @@ class TheJob(Fixture):
                 text = path.read_text(encoding="utf-8")
                 self.assertNotIn(FS.DB, text, str(path))
                 self.assertNotIn(FS.REPORT, text, str(path))
+
+
+class TheHouseRuns(TS.Case):
+    """`HouseRuns` on E1's real engine in an `InlineDecider` over a synthetic store (THE FAKES of E3's shadow tests for
+    its other packages): the sides of a program's own forward run against the record's own night, and its Train-era
+    pools for the own floor."""
+
+    def test_the_sides_of_its_own_run_reproduce_the_record(self):
+        pid = TS.register(self.db, "always@1", TS.ALWAYS, first_close=TS.FWD[2])
+        self.night(TS.FWD[8])                                     # E3's own night writes the record
+        rows = self.rows(pid)
+        self.assertTrue(rows)
+        runs = FS.HouseRuns(self.root, budget_seconds=120, decider=InlineDecider(), clock=self.clock)
+        found = runs.forward_sides(self.program(pid), "ETF", settings=TS.RECORD, fdb=self.db)
+        for row in rows:
+            self.assertAlmostEqual(found["r"][row["day"]], row["r"], delta=forward_db.TOL)
+        entry = rows[0]["day"]                                    # it buys at the open of its first day and holds
+        self.assertGreater(found["sides"][entry], 0.4)
+        self.assertEqual({d for d, v in found["sides"].items() if v}, {entry})
+
+    def test_its_train_era_pools_give_an_own_floor(self):
+        TS.synth.synthetic_store(self.root / TS.STORE_DIR, symbols=TS.SYMBOLS, start=dt.date(2016, 1, 4),
+                                 end=TS.END, seed=7, gate=True, as_of=TS.FWD[8])
+        pid = TS.register(self.db, "always@1", TS.ALWAYS, first_close=TS.FWD[2])
+        runs = FS.HouseRuns(self.root, budget_seconds=300, decider=InlineDecider(), clock=self.clock)
+        pool_d, pool_c = runs.etf_pools(self.program(pid))
+        self.assertGreater(len(pool_d[0]), 900)                  # 2016-19 from its third session
+        self.assertGreater(len(pool_c[0]), 700)                  # 2022-24
+        self.assertTrue(all(len(a) == len(pool_d[0]) for a in pool_d))
+        cells = R.floor_cells("ETF", pool_d, pool_c)
+        self.assertEqual(len(cells), 2)
+        found = R.own_floor_k([[p[:3] for p in c] for c in cells], R.OWN_CAP["N"])
+        self.assertIsNotNone(found["k_own"], found["why"])
+        self.assertIsNotNone(R.drift_kept(cells, R.k_used("ETF", "N", found["k_own"]) or 500))
 
 
 if __name__ == "__main__":

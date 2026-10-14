@@ -77,8 +77,10 @@ skipped inside 09:00-17:30 New York on a session) reads the forward record and t
 `<state>/forward-screen.sqlite` (append-only: the pin, the sides, the lineages, the own floors, the checkpoints of
 record, the verdicts), `<state>/forward-screen-permits.json` (ids and words only: no t, no P&L) and
 `<state>/forward-screen-report.json` (operator-only: counts by type and case, the registry's expected zero-edge passes
-against the observed, and every pass's sentence). The nights' hook (`forward_shadow` `_attempt`, both nights) writes
-each day's sides. Its child seconds: `elane.fwd1.cpu_seconds_night` (900), one run `run_budget_seconds` (300). A
+against the observed, and every pass's sentence). Each day's SIDES (the weights of the shadow's lots in and out,
+which the record does not keep) come from the representative's own forward run in the job's own decider child (E3's
+`Shadow` slice, package J's panel run), kept only for the days whose r that run reproduces; no line of E3's night
+changes. Its child seconds: `elane.fwd1.cpu_seconds_night` (900), one run `run_budget_seconds` (300). A
 failure of the House leaves a checkpoint unwritten and marks nobody; the next night reads the same first k days.
 
 **The sentence beside a forward-passed trade** (`fwd1_rule.beside`: in the verdict row and the report, and beside
@@ -97,8 +99,7 @@ its family is in the Gym band with the judged version under the identity the ver
 seat a mechanism cell. **A panel pass is made eligible only** (`elane_forward.eligible`): no panel seat exists in E4's
 step one, and the panel seat pool is step two's (`feat/equity-e4-step2`, B3), which reads it.
 
-**Switches and rollback.** `elane.fwd1.mode` "off" stops the job and the hook (nothing judged; the forward record goes
-on); `elane.fwd1.seats` "off" stops every effect on the swarm. Without the pin (`elane.screens.forward` absent or not
+**Switches and rollback.** `elane.fwd1.mode` "off" stops the job (nothing judged; the forward record goes on); `elane.fwd1.seats` "off" stops every effect on the swarm. Without the pin (`elane.screens.forward` absent or not
 FWD1) no verdict is read. A seated program keeps its seat under the money rules' own demotion.
 
 **Inspect** (on the box, read-only): `sqlite3 -readonly <state>/forward-screen.sqlite "SELECT lineage, verdict, k, day

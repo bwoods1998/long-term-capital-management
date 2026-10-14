@@ -733,12 +733,14 @@ policy.json `elane.screens.forward`. What it reads and what it leaves as it was:
   (the label a verdict was read under). A panel row's r, w, b and r15 are read as package J writes them (x = r - w b,
   x15 = r15 - w b: section 14). E3's `fwd_checks` (FGS's 20/60/120/250) are never applied to a lineage FWD1 judges.
 - **Its own store.** `<state>/forward-screen.sqlite` (tables `fwd1_*`, append-only by trigger, first write stands):
-  the pin's first sighting (the clock), each day's SIDES (the weights of the shadow's lots in and out; written by the
-  nights' hook below, under the record's own engine id), the lineages, the own floors, the checkpoints of record and
-  one verdict a lineage. No table of `forward.sqlite` is added, written or migrated.
-- **One call in this record's night.** `forward_shadow.Shadow._attempt`, after `forward_twins.on_run`, calls
-  `forward_screen.on_run(root, run, engine=, now=, settings=)` (guarded: its failure is a tally, never a lost shadow
-  day; it writes nothing without a pin or with `elane.fwd1.mode` "off"). The panel night inherits it.
+  the pin's first sighting (the clock), each day's SIDES (the weights of the shadow's lots in and out, under the
+  record's own engine id), the lineages, the own floors, the checkpoints of record and one verdict a lineage. No table
+  of `forward.sqlite` is added, written or migrated.
+- **No line of this record's night changes.** The sides are not in the record: the job reads them from the
+  representative's own forward run in its own decider child (`forward_shadow.Shadow` `_whole`, `slice`, `_child` at k
+  1.0 and `_series`; `forward_xs.panel_shadow(...).run_program`), both built on the record opened READ-ONLY (neither
+  writes before `night`), and keeps a day's sides only where that run's r is the stored row's to `forward_db.TOL`.
+  E3's seal (`test_e3_seal_imports`: E3's modules import only its list) stands as it was.
 - **The D2 route and alpha in the hashed rows stand** (every E3-era row keeps `route` "S2"/"XS1" and `alpha_f` "0.03"):
   FWD1-R judges the days after its own pin at the case budget A33 adopted (15% for a never-looked lineage; D2's 3%
   kept for a panel lineage with an XS1 look), a loosening stated in the receipt's `loosened` with its cost.

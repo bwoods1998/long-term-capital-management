@@ -12,7 +12,7 @@ and the operator's report (`REPORT`). It moves no money, opens no seat and edits
 WITH ITS SWITCHES OFF NOTHING IS JUDGED: the job is a `skipped` receipt while `elane.fwd1.mode` is "off" (the code's
 default; policy.json ships "record"), while `elane.forward.mode` is "off" (no record), with no pin
 (`fwd1_rule.rule()`: NO PIN, NO VERDICT; the forward record keeps recording), and inside 09:00-17:30 New York on a
-session (it may run the decider child). The nights' hook (`on_run`) writes nothing without a pin either.
+session (it may run the decider child).
 
 THE CLOCK (`pinned`, the table `fwd1_pins`): the first time the job runs under a pin, the time the release that carries
 it began running (`funnel.release_start` of the running release; the sighting's own time when the deploy record has
@@ -27,8 +27,11 @@ THE NIGHT (`night`; after `forward_xs`, the later of the record's two nights, in
    that already trades (a live row: it passed a sealed look), a type FWD1-R does not cover (a stock program), a
    representative with no counted day yet is simply pending.
 2. THE CHECKPOINTS (`fwd1_checks`, written once a lineage and checkpoint: the checkpoint of record, never recomputed).
-   The representative's counted days (`forward_db.counted_days`) under ONE engine id from FWD1_START; each day's sides
-   (`fwd1_sides`, the nights' hook); `fwd_ll` (ETF); `fwd_lotgap` for g. At each checkpoint the representative has
+   The representative's counted days (`forward_db.counted_days`) under ONE engine id from FWD1_START; each day's SIDES
+   (`fwd1_sides`: the weights of the shadow's lots in and out that session, which the record does not keep: read from
+   the representative's own forward run in this job's child, E3's `Shadow` slice or package J's panel run, kept only
+   for the days whose r that run reproduces to `forward_db.TOL`, once a day); `fwd_ll` (ETF); `fwd_lotgap` for g. At
+   each checkpoint the representative has
    reached, in order: t_k, S_k, S15_k; below the global bar it fails that checkpoint with no floor read; at or above,
    the own floor (`fwd1_floors`, computed once a representative on its Train-era runs in the job's own decider child)
    gives c_used, and a PANEL lineage at or above it draws its placebo leg (one panel run over its judged sessions, 999
@@ -44,8 +47,10 @@ THE NIGHT (`night`; after `forward_xs`, the later of the record's two nights, in
 5. THE REPORT (`REPORT`, operator-only): per type and case the lineages registered, pending, passed, failed, void and
    not judged, and the registry's expected zero-edge passes against the observed (`fwd1_rule.expected_passes`).
 
-A FAILURE OF THE HOUSE NEVER MARKS A PROGRAM: a run the child could not finish, a store under a lock, a missing sides row
-leave the checkpoint unwritten, and the next night reads the same first k counted days again. The budget
+A FAILURE OF THE HOUSE NEVER MARKS A PROGRAM: a run the child could not finish, a store under a lock, a run that does
+not reproduce the record's day leave the checkpoint unwritten, and the next night reads the same first k counted days
+again. NOTHING OF E3's NIGHT CHANGES: no line of forward_shadow.py, forward_xs.py or forward_db.py is touched (E3's
+seal holds its modules' imports to its list), and the record's store is opened read-only. The budget
 (`elane.fwd1.cpu_seconds_night`) bounds the child's seconds a night; a lineage left over waits a night.
 
 Standard library at import; numpy, league.equity and league.xs inside the functions that run programs.
@@ -185,7 +190,7 @@ def event(store: sqlite3.Connection, kind: str, *, at: float, lineage: str | Non
     return cursor.rowcount == 1
 
 
-# --------------------------------------------------------------------------------------------- the nights' hook: sides
+# ---------------------------------------------------------------------------------------------------------- the sides
 def lot_sides(result: Mapping[str, Any]) -> dict[str, float]:
     """{ISO day: the sum of the weights of the run's lots entering or exiting that session} (a lot entering and one
     exiting the same session both count; the haircut is taken a side). ValueError on a weight that is not finite."""
@@ -200,51 +205,6 @@ def lot_sides(result: Mapping[str, Any]) -> dict[str, float]:
                 day = str(day)[:10]
                 out[day] = out.get(day, 0.0) + abs(float(weight))
     return out
-
-
-def _run_days(run: Any) -> list[str]:
-    """The ISO days of a shadow run's series (E3's `screen.Series` holds int ordinals; the panel's `Series` its iso)."""
-    series = run.series
-    iso = getattr(series, "iso", None)
-    if iso:
-        return [str(d) for d in iso]
-    return [(dt.date(1970, 1, 1) + dt.timedelta(days=int(d))).isoformat() for d in getattr(series, "days", ())]
-
-
-_PIN_CACHE: dict[str, Any] = {}
-
-
-def _pinned_rule() -> Any:
-    """The repository's pin, read once a process (the nights' hook asks it for every program)."""
-    if "rule" not in _PIN_CACHE:
-        _PIN_CACHE["rule"] = R.rule()[0]
-    return _PIN_CACHE["rule"]
-
-
-def on_run(root: str | Path, run: Any, *, engine: int, now: float, settings: Mapping[str, Any] | None,
-           rule: Any = None) -> int:
-    """THE NIGHTS' HOOK (league/ops/forward_shadow.py `_attempt`, E3's night and the panel night alike, after a
-    program's rows are written): each day of the run's series gets its sides under tonight's engine id (first write
-    stands). Nothing without a pin or with `elane.fwd1.mode` "off" (no store is made). How many rows it wrote."""
-    if cfg(settings)["mode"] == "off":
-        return 0
-    if (rule if rule is not None else _pinned_rule()) is None:
-        return 0
-    days = _run_days(run)
-    if not days:
-        return 0
-    sides = lot_sides(run.result)
-    store = open_store(root)
-    try:
-        wrote = 0
-        with store:
-            for day in days:
-                cursor = store.execute("INSERT OR IGNORE INTO fwd1_sides(pid, day, engine, sides, at) VALUES (?,?,?,?,?)",
-                                       (int(run.program.pid), day, int(engine), float(sides.get(day, 0.0)), float(now)))
-                wrote += cursor.rowcount
-        return wrote
-    finally:
-        store.close()
 
 
 # ------------------------------------------------------------------------------------------------------- the clock
@@ -515,6 +475,43 @@ class HouseRuns:
             pools.append(None)
         return pools[0], pools[1]
 
+    def forward_sides(self, program: Any, typ: str, *, settings: Mapping[str, Any] | None,
+                      fdb: sqlite3.Connection | None = None) -> dict[str, Any]:
+        """THE SIDES of the representative's forward days: its own forward run in this job's child, as the record's
+        night runs it (ETF: E3's `Shadow.slice` and its k 1.0 run; PANEL: package J's `run_program`), opened on the
+        forward record READ-ONLY. {"r": {ISO day: the run's r}, "sides": {ISO day: the weights in and out}}: the judge
+        keeps a day's sides only where the run's r is the record's."""
+        from ..equity import config as econfig
+        from . import forward_shadow, forward_xs
+
+        own = fdb is None
+        if own:
+            fdb = forward_db.open_db(self.root, readonly=True)
+            fdb.row_factory = sqlite3.Row
+        try:
+            if typ == "PANEL":
+                night = forward_xs.panel_shadow(self.root, fdb, decider=self._child(), settings=settings,
+                                                clock=self.clock)
+                run, _ = night.run_program(program)
+                days, r = list(run.series.iso), list(run.series.r)
+                result = run.result
+            else:
+                night = forward_shadow.Shadow(self.root, fdb, decider=self._child(), settings=settings, clock=self.clock)
+                whole = night._whole(program)
+                bars = night.slice(whole)
+                if bars is None:
+                    raise ValueError(f"{program.key} has no forward day in the House's store")
+                result = night._child(night.decider, code=whole.code, params=whole.params, name=whole.key, bars=bars,
+                                      k=econfig.K_BASE)
+                series = night._series(whole, result, bars)
+                epoch = dt.date(1970, 1, 1)
+                days = [(epoch + dt.timedelta(days=int(d))).isoformat() for d in series.days]
+                r = [float(v) for v in series.r]
+        finally:
+            if own:
+                fdb.close()
+        return {"r": dict(zip(days, (float(v) for v in r))), "sides": lot_sides(result)}
+
     def panel_placebo(self, program: Any, *, start: dt.date, end: dt.date, seed: int) -> dict[str, Any]:
         """THE PLACEBO LEG's draws: one panel run of the representative over the forward sessions [start, end] (its
         judged sessions, flat at start: the forward days need the gate's capability), with `fwd1_rule.PLACEBO_DRAWS`
@@ -578,8 +575,10 @@ class Night:
     `rule` (`fwd1_rule.Rule`), `pin` (the clock's row), `budget` (child seconds)."""
 
     def __init__(self, store: sqlite3.Connection, fdb: sqlite3.Connection, families: Mapping[str, Mapping[str, Any]], *,
-                 runs: Any, rule: Any, pin: Mapping[str, Any], budget: float, clock: Callable[[], float] = time.time):
+                 runs: Any, rule: Any, pin: Mapping[str, Any], budget: float, clock: Callable[[], float] = time.time,
+                 settings: Mapping[str, Any] | None = None):
         self.store, self.fdb, self.families, self.runs, self.rule = store, fdb, families, runs, rule
+        self.settings = settings
         self.pin = dict(pin)
         self.pin_start = dt.date.fromisoformat(str(pin["start"]))
         self.budget = float(budget)
@@ -621,6 +620,41 @@ class Night:
             "SELECT day, sides FROM fwd1_sides WHERE pid=? AND engine=?", (int(pid), int(engine)))}
         out = [held.get(day) for day in days]
         return None if any(v is None for v in out) else [float(v) for v in out]   # type: ignore[arg-type]
+
+    def read_sides(self, lin: Mapping[str, Any], program: Any, engine: int, rows: Sequence[Mapping[str, Any]]) -> int:
+        """THE SIDES of the representative's counted days not yet kept (the module docstring, 2): its own forward run
+        (`runs.forward_sides`), each day kept (first write stands, under the record's engine id) only where the run's r
+        is the record's to `forward_db.TOL`. How many days it kept; 0 and a `house` event when the run failed or
+        reproduced none of them (the next night asks again)."""
+        lineage, pid = str(lin["lineage"]), int(lin["rep"])
+        try:
+            found = self._timed(lambda: self.runs.forward_sides(program, str(lin["type"]), settings=self.settings,
+                                                                fdb=self.fdb))
+        except Exception as exc:  # noqa: BLE001 - the child's or the data's: nobody is marked
+            self.tally["house"] += 1
+            with self.store:
+                event(self.store, "house", at=self.clock(), lineage=lineage, pid=pid,
+                      payload={"why": "the forward run that reads the sides did not finish", "error": type(exc).__name__})
+            return 0
+        ran, sides = found.get("r") or {}, found.get("sides") or {}
+        kept = 0
+        with self.store:
+            for row in rows:
+                day = str(row["day"])
+                if day not in ran or abs(float(ran[day]) - float(row["r"])) > forward_db.TOL:
+                    continue
+                cursor = self.store.execute(
+                    "INSERT OR IGNORE INTO fwd1_sides(pid, day, engine, sides, at) VALUES (?,?,?,?,?)",
+                    (pid, day, int(engine), float(sides.get(day, 0.0)), self.clock()))
+                kept += cursor.rowcount
+        if not kept:
+            self.tally["house"] += 1
+            with self.store:
+                event(self.store, "house", at=self.clock(), lineage=lineage, pid=pid,
+                      payload={"why": "the forward run reproduced none of the record's days: no sides are read from it",
+                               "days": len(rows)})
+        self.tally["sides_runs"] += 1
+        return kept
 
     def _live_like(self, pid: int, engine: int) -> dict[str, float]:
         return {str(r["day"]): float(r["r_ll"]) for r in self.fdb.execute(
@@ -743,8 +777,16 @@ class Night:
             names = [str(r["day"]) for r in head]
             sides = self._sides(pid, engine, names)
             if sides is None:
-                self.tally["no_sides"] += 1
-                return None                               # the nights' hook writes them: asked again tomorrow
+                if program is None:
+                    program = self._program(pid)
+                if program is None or self._over():
+                    self.tally["deferred"] += 1
+                    return None
+                self.read_sides(lin, program, engine, head)
+                sides = self._sides(pid, engine, names)
+                if sides is None:
+                    self.tally["no_sides"] += 1
+                    return None                           # asked again the next night
             g = R.haircut_bp(typ, self.gaps.get(typ, []))
             ll = self._live_like(pid, engine) if typ == "ETF" else {}
             used_ll = int(any(n in ll for n in names))
@@ -994,7 +1036,8 @@ def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, no
             families = forward_register._families(SwarmStore(root, readonly=True))
         registered = register(store, fdb, families, rule=rule, pin_start=dt.date.fromisoformat(str(pin["start"])),
                               now=now)
-        judge = Night(store, fdb, families, runs=runs, rule=rule, pin=pin, budget=c["cpu_seconds_night"], clock=clock)
+        judge = Night(store, fdb, families, runs=runs, rule=rule, pin=pin, budget=c["cpu_seconds_night"], clock=clock,
+                      settings=settings)
         tally = judge.run()
         labels = {int(r["id"]): str(r["label"]) for r in fdb.execute("SELECT id, label FROM fwd_engines")}
         write_permits(root, store, rule=rule, pin=pin, at=clock(), labels=labels)
@@ -1043,7 +1086,7 @@ def run(ctx: Any) -> dict[str, Any]:
 
 __all__ = ["JOB", "DB", "PERMITS", "PERMITS_VERSION", "REPORT", "MODES", "SEATS", "DEFAULTS", "BOUNDS", "VERDICTS",
            "NOT_JUDGED", "PREFERRED", "SEALED_TAGS", "SEALED_STATE", "ENGINE_TOUCH", "EVENT_KINDS", "TABLES", "SCHEMA",
-           "cfg", "open_store", "event", "lot_sides", "on_run", "pinned", "representative", "family_sealed", "type_of",
+           "cfg", "open_store", "event", "lot_sides", "pinned", "representative", "family_sealed", "type_of",
            "case_of", "cell_of", "register", "OwnFloorRefused", "HouseRuns", "Night", "status_rows", "write_permits", "beside_for",
            "report", "night",
            "run"]
