@@ -2534,6 +2534,14 @@ class EquityScreens:
                 out["fp_why"] = ("no XS1 sentence is recorded at this panel program's look (league/swarm/elane_xs.py "
                                  "records it with the look): none is stated")
             return out
+        held = self.states[family].get("elane_forward")
+        if not beside and isinstance(held, Mapping) and held.get("seated") is True and _int(held.get("version")) == n:
+            # THE FORWARD SCREEN FWD1-R: a program seated on a forward pass took no look; its sentence is its verdict's
+            # (league/ops/forward_screen.py `beside_for`: the operator's, with its t and its shadow P&L)
+            from . import forward_screen
+
+            beside = forward_screen.beside_for(getattr(self.store, "root", None), str(held.get("lineage") or ""))
+            out.update(screen="FWD1-R", beside=beside)
         if not beside:
             out["fp_why"] = ("no screen line is recorded at this version's look (league/swarm/elane.py records it with the "
                              "look): none is stated")

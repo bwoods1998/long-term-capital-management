@@ -58,16 +58,19 @@ def floor_pools(seed: int, n_d: int = 1004, n_c: int = 751, *, panel: bool = Fal
 class FakeRuns:
     """The House's runs, invented: the floors' pools and a placebo block."""
 
-    def __init__(self, placebo_t=None, days=None, fail=False):
+    def __init__(self, placebo_t=None, days=None, fail=False, refuse=False):
         self.calls = Counter()
         self.placebo_t = placebo_t
         self.days = days
         self.fail = fail
+        self.refuse = refuse
 
     def etf_pools(self, program):
         self.calls["etf"] += 1
         if self.fail:
             raise RuntimeError("the child died")
+        if self.refuse:
+            raise FS.OwnFloorRefused("a Train-era run ended ['disqualified', 'ok']: its series is partial")
         return floor_pools(1)
 
     def panel_pools(self, program):
@@ -230,6 +233,16 @@ class TheVerdicts(Fixture):
         self.assertEqual(numbers(doc), [])                       # ids and words only: no figure crosses
         report = json.loads((self.root / FS.REPORT).read_text())
         self.assertEqual(report["registry"]["ETF|N"]["observed"], 1)
+        # the sentence stands beside every trade of the program once it is seated on the pass (the direction report)
+        from league.ops import dlane_report
+
+        seated = {"elane_forward": {"seated": True, "eligible": True, "version": 1, "lineage": "equity:f1"}}
+        fake = types.SimpleNamespace(root=self.root, looks=lambda: [],
+                                     family=lambda fid: {"id": fid, "structure": "etf", "state": seated})
+        line = dlane_report.EquityScreens(fake).of("f1", 1)
+        self.assertEqual(line["screen"], "FWD1-R")
+        self.assertIn("t = ", line["beside"])
+        self.assertIsNone(dlane_report.EquityScreens(fake).of("f1", 2)["beside"])   # another version: none stated
 
     def test_a_fail_at_sixty_and_a_global_bar_read_without_a_floor(self):
         self.family("f1")
@@ -303,6 +316,27 @@ class TheVerdicts(Fixture):
         db = self.store()
         self.assertEqual(dict(db.execute("SELECT verdict FROM fwd1_verdicts").fetchone())["verdict"], "pass")
         db.close()
+
+    def test_no_own_floor_is_ineligible_with_no_verdict(self):
+        self.family("f1")
+        pid = self.row("f1", 1, first_day="2026-10-16")
+        names = self.days(pid, [0.01 + 0.001 * (i % 3) for i in range(12)], first=START)
+        self.sides(pid, names)
+        FS.night(self.root, rule=self.rule, settings=self.settings, now=PIN_AT, base=None, release=None,
+                 runs=FakeRuns(refuse=True), families=self.families, clock=lambda: PIN_AT)
+        db = self.store()
+        self.assertIsNone(db.execute("SELECT * FROM fwd1_verdicts").fetchone())
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM fwd1_checks").fetchone()[0], 0)
+        fl = dict(db.execute("SELECT * FROM fwd1_floors").fetchone())
+        self.assertIsNone(fl["k_own"])
+        self.assertIn("partial", fl["why"])
+        self.assertEqual([r["status"] for r in FS.status_rows(db)], ["ineligible"])
+        db.close()
+        doc = json.loads((self.root / FS.PERMITS).read_text())
+        self.assertEqual(doc["lineages"]["equity:f1"]["status"], "ineligible")
+        runs = FakeRuns()
+        self.night(runs)                                          # never asked again
+        self.assertEqual(runs.calls["etf"], 0)
 
     def test_no_sides_no_checkpoint(self):
         self.family("f1")

@@ -81,7 +81,8 @@ against the observed, and every pass's sentence). The nights' hook (`forward_sha
 each day's sides. Its child seconds: `elane.fwd1.cpu_seconds_night` (900), one run `run_budget_seconds` (300). A
 failure of the House leaves a checkpoint unwritten and marks nobody; the next night reads the same first k days.
 
-**The sentence beside a forward-passed trade** (`fwd1_rule.beside`, in the report and the verdict row): the type and
+**The sentence beside a forward-passed trade** (`fwd1_rule.beside`: in the verdict row and the report, and beside
+every trade of a program seated on a forward pass in the direction report, `dlane_report.EquityScreens`): the type and
 case, the checkpoint and the start, t against c_used (global and own floor), the shadow P&L (PANEL: residual) after
 costs and the haircut, the worst-regime FP and its bound against the budget (case XS1: and the combined 15%), the
 contamination sentence, power against the zero-edge rate IN THE SAME FILL WORLD, the WEAK flag (ETF always; PANEL at

@@ -410,6 +410,11 @@ def register(store: sqlite3.Connection, fdb: sqlite3.Connection, families: Mappi
 
 
 # ------------------------------------------------------------------------------------------------------- the runs
+class OwnFloorRefused(Exception):
+    """The PROGRAM's own reason it has no own floor (a Train-era run its own errors ended: a partial series): the
+    lineage is ineligible for good, stated. Every other failure of the runs is the House's (asked again)."""
+
+
 def _capital(result: Mapping[str, Any], default: Any) -> float:
     """A run's capital as league/swarm/elane.py `_capital` reads it (a number or its text), else `default`."""
     try:
@@ -456,18 +461,14 @@ class HouseRuns:
         from ..equity import config as econfig
         from ..equity import screen as S
         from ..equity.runner import Isolated
-        from ..equity.store import EquityStore, MissingData
+        from ..equity.store import EquityStore
 
         iso = Isolated(self._child(), self.root / "equity-daily", budget_seconds=self.budget_seconds)
         needs = iso._needs(program.code, program.params, program.key)
         store = EquityStore(self.root / "equity-daily")
         pools: list[Any] = []
         for first, last in econfig.TRAIN_ERA_SEGMENTS:
-            try:
-                bars = store.span(needs.symbols, first, last, history=needs.history)
-            except MissingData:
-                pools.append(None)
-                continue
+            bars = store.span(needs.symbols, first, last, history=needs.history)
             runs = [iso._run(program.code, program.params, program.key, bars, k)
                     for k in (econfig.K_BASE, econfig.K_STRESS)]
             statuses = [str(run.result.get("status")) for run in runs]
@@ -475,7 +476,7 @@ class HouseRuns:
                 pools.append(None)
                 continue
             if any(s != "ok" for s in statuses):
-                raise ValueError(f"a Train-era run ended {statuses}: its series is partial")
+                raise OwnFloorRefused(f"a Train-era run ended {statuses}: its series is partial")
             series = []
             for run in runs:
                 result = run.result
@@ -506,7 +507,7 @@ class HouseRuns:
                 pools.append(None)
                 continue
             if status != "ok":
-                raise ValueError(f"a Train-era panel run ended {status!r}: its series is partial")
+                raise OwnFloorRefused(f"a Train-era panel run ended {status!r}: its series is partial")
             found = forward_xs.series(run.result)
             skip = XS.POOL_SKIP
             pools.append(tuple(np.asarray(a, dtype=np.float64)[skip:] for a in (found.x, found.x15, found.w)))
@@ -587,6 +588,7 @@ class Night:
         self.tally: Counter = Counter()
         self.gaps = _lotgaps(fdb)
         self.engine_now = forward_db.engine_now(fdb)
+        self.sealed_pids = _sealed_pids(fdb)
 
     # ------------------------------------------------------------------------------------------------ helpers
     def _timed(self, call: Callable[[], Any]) -> Any:
@@ -647,7 +649,7 @@ class Night:
         began = self.clock()
         try:
             pools = self._timed(lambda: (self.runs.etf_pools(program) if typ == "ETF" else self.runs.panel_pools(program)))
-        except ValueError as exc:            # the program's own partial series: ineligible for good, stated
+        except OwnFloorRefused as exc:       # the program's own partial series: ineligible for good, stated
             pools, why = None, f"no own floor: {str(exc)[:160]}"
         except Exception as exc:  # noqa: BLE001 - the child's or the data's: no row, the next night asks again
             self.tally["house"] += 1
@@ -689,7 +691,7 @@ class Night:
         rows = self.fdb.execute("SELECT pid, family FROM fwd_registry WHERE lineage=? AND reason != 'control'",
                                 (lineage,)).fetchall()
         if case == "N":
-            sealed = bool({int(r["pid"]) for r in rows} & _sealed_pids(self.fdb)) or any(
+            sealed = bool({int(r["pid"]) for r in rows} & self.sealed_pids) or any(
                 family_sealed(self.families.get(str(r["family"]))) for r in rows)
             if sealed:
                 self._void(lin, "a case-N lineage reached a sealed pre-check after FWD1_START: it is judged no further",
@@ -909,6 +911,23 @@ def write_permits(root: str | Path, store: sqlite3.Connection, *, rule: Any, pin
     return write_json(Path(root) / PERMITS, doc)
 
 
+def beside_for(root: str | Path | None, lineage: str) -> str | None:
+    """The sentence of a lineage's forward PASS (its verdict row's), read-only within a second; None when there is none
+    or the store cannot be read (the direction report then states that none is recorded). What stands beside every
+    trade of a program seated on a forward pass (league/ops/dlane_report.py `EquityScreens`)."""
+    if root is None or not lineage or not (Path(root) / DB).exists():
+        return None
+    try:
+        db = open_store(root, readonly=True)
+        try:
+            row = db.execute("SELECT beside FROM fwd1_verdicts WHERE lineage=? AND verdict='pass'", (lineage,)).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+    return None if row is None or not row["beside"] else str(row["beside"])
+
+
 def report(store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any]) -> dict[str, Any]:
     """THE OPERATOR'S REPORT (the module docstring, 5): counts by type and case, the expected zero-edge passes against
     the observed, and every pass's sentence. Operator-only (it holds each pass's t and shadow P&L)."""
@@ -1002,5 +1021,6 @@ def run(ctx: Any) -> dict[str, Any]:
 __all__ = ["JOB", "DB", "PERMITS", "PERMITS_VERSION", "REPORT", "MODES", "SEATS", "DEFAULTS", "BOUNDS", "VERDICTS",
            "NOT_JUDGED", "PREFERRED", "SEALED_TAGS", "SEALED_STATE", "ENGINE_TOUCH", "EVENT_KINDS", "TABLES", "SCHEMA",
            "cfg", "open_store", "event", "lot_sides", "on_run", "pinned", "representative", "family_sealed", "type_of",
-           "case_of", "cell_of", "register", "HouseRuns", "Night", "status_rows", "write_permits", "report", "night",
+           "case_of", "cell_of", "register", "OwnFloorRefused", "HouseRuns", "Night", "status_rows", "write_permits", "beside_for",
+           "report", "night",
            "run"]
