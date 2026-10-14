@@ -99,8 +99,9 @@ its family is in the Gym band with the judged version under the identity the ver
 seat a mechanism cell. **A panel pass is made eligible only** (`elane_forward.eligible`): no panel seat exists in E4's
 step one, and the panel seat pool is step two's (`feat/equity-e4-step2`, B3), which reads it.
 
-**Switches and rollback.** `elane.fwd1.mode` "off" stops the job (nothing judged; the forward record goes on); `elane.fwd1.seats` "off" stops every effect on the swarm. Without the pin (`elane.forward_screen` absent or not
-FWD1) no verdict is read. A seated program keeps its seat under the money rules' own demotion.
+**Switches and rollback.** `elane.fwd1.mode` "off" stops the job (nothing judged; the forward record goes on);
+`elane.fwd1.seats` "off" stops every effect on the swarm. Without the pin (`elane.forward_screen` absent, or a block
+this code does not load) no verdict is read. A seated program keeps its seat under the money rules' own demotion.
 
 **Inspect** (on the box, read-only): `sqlite3 -readonly <state>/forward-screen.sqlite "SELECT lineage, verdict, k, day
 FROM fwd1_verdicts"`, `... "SELECT lineage, k, passed, why FROM fwd1_checks ORDER BY lineage, k"`, and
@@ -109,7 +110,9 @@ FROM fwd1_verdicts"`, `... "SELECT lineage, k, passed, why FROM fwd1_checks ORDE
 **Stated limits.** The panel placebo leg draws on one panel run over the judged sessions started flat at FWD1_START (a
 lot carried in from before a mid-run start is not in its draws, and the run's last session opens no lot); a run read
 on other sessions than the k judged ones fails the leg closed. At c >= 2.06 the leg never bound on the study's twins.
-The fill gap is modelled until 20 live panel lots (and the ETF lots) measure it. ETF lineages with an S2 look have no
+The fill gap is modelled until 20 live panel lots (and the ETF lots) measure it. The sides cost one forward run of
+a representative a checkpoint it reaches (seven at most), and its own floor its Train-era runs once, in the job's own
+child inside `cpu_seconds_night` (one core): a lineage left over waits a night, its checkpoint still the first k days. ETF lineages with an S2 look have no
 forward route. The stand-ins are 2010-19 and 2022-24 history; none is the truth for October 2026 onward.
 
 ## The panel lane (release E4, "breadth", Oct 2026): `feat/equity-e4`, not deployed

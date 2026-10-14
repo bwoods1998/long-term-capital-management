@@ -61,6 +61,12 @@ on branches.
   from 5 sessions at the goal's 15% for never-looked lineages. Cost: most early passes are luck (45% of zero-edge
   panel passes come at checkpoint 5), panel power at +10%/yr by 60 lower than with a first checkpoint at 20, and an
   ETF forward pass says almost nothing about skill.
+- **Earlier releases' registries name the new parts** (each an addition, no rule of theirs moves): the job in
+  `test_ops_int_ops`'s in-pause set; `forward_screen.py` as a reader of the forward record in `test_forward_report`'s
+  list (the record was kept for this judge; what it hands on is held by `test_forward_screen`'s own seal: ids and
+  words cross, no generator-side module imports it, its family-state key is sealed); the seat path beside E4's two
+  in `PENDING_GATEWAY` (`test_ci`, `test_e3_identities`). E3's seal on its own modules' imports stands: no line of
+  E3's night changes. The pin is its own block, `elane.forward_screen`, beside the lanes' three screens.
 - **Stated limits:** the panel placebo leg draws on one panel run over the judged sessions started flat at
   FWD1_START (a span other than the k judged sessions fails the leg closed); the fill gap is modelled until live lots
   measure it; the representative's own floor needs its Train-era runs in the job's own decider child, once.
