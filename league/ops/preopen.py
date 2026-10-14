@@ -263,11 +263,21 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
         rows = guard.read(root / "ledger.sqlite", lambda db: guard.rows(
             db, "SELECT seq, at, payload FROM ledger WHERE kind='ops.deploy' AND payload LIKE '%\"what\":\"backup\"%' "
                 "ORDER BY seq DESC LIMIT 1"))
+        # THE POST-CLOSE CHECKPOINT (release U; league/backup.py `CLOSE_WHAT`): its own rows, shown beside the daily
+        # one's and never a condition of the check (the daily checkpoint is the floor's)
+        closes = guard.read(root / "ledger.sqlite", lambda db: guard.rows(
+            db, "SELECT seq, at, payload FROM ledger WHERE kind='ops.deploy' AND payload LIKE '%\"what\":\"backup_close\"%' "
+                "ORDER BY seq DESC LIMIT 1"))
+        close = None
+        if closes:
+            c = json.loads(closes[0]["payload"])
+            close = {"at": closes[0]["at"], "age_h": round((now - epoch(closes[0]["at"])) / 3600, 2), "ok": c.get("ok"),
+                     "day": c.get("day"), "error": c.get("error")}
         if not rows:
-            return {"latest": None}
+            return {"latest": None, "close": close}
         p = json.loads(rows[0]["payload"])
         return {"latest": {"at": rows[0]["at"], "age_h": round((now - epoch(rows[0]["at"])) / 3600, 2), "ok": p.get("ok"),
-                           "error": p.get("error")}}
+                           "error": p.get("error")}, "close": close}
 
     def panel() -> dict:
         """THE PANEL LANE (release E4): how many of the equity book's panel programs are not retired or still hold a
@@ -525,6 +535,10 @@ def check_backup(h: Mapping[str, Any]) -> Check:
     latest = b.get("latest")
     c.req(bool(latest) and latest.get("ok") is True and latest["age_h"] <= MAX_AGE["backup_ok_h"],
           f"latest House backup {latest['at']} ({latest['age_h']}h ago): ok {latest.get('ok')}" if latest else "no House backup row")
+    close = b.get("close")
+    if close:  # beside, never a condition (release U)
+        c.info(f"latest post-close checkpoint {close['at']} ({close['age_h']}h ago, session {close.get('day')}): "
+               f"ok {close.get('ok')}")
     return c
 
 

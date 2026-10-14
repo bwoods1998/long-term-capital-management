@@ -11,6 +11,18 @@ the ledger, the agents' state and the promoted release.
 The snapshot holds what the box holds, including its three credentials (never a venue key), and
 stays inside the owner's Sail account, like the checkpoints `floor_box.py checkpoint` takes.
 
+A SECOND CHECKPOINT AFTER THE CLOSE (release U, Oct 14, 2026): the daily one falls where the last success left it
+(about 13:28Z, two minutes before the open, in October 2026), so a session's fills, the evening's decisions and the
+night's research live on one disk until the next morning. At 20:12Z Oct 14 an AWS spot interruption of the House box
+left only that morning's checkpoint to fork from. So on every NYSE session day, once the close is `CLOSE_OFFSET_SECONDS`
+behind (16:45 New York: 20:45Z in summer, 21:45Z in winter; 13:45 after an early close) and until the end of that New
+York day, the House takes one more, named "league-YYYY-MM-DD-close" (the session's date), kept as long as the daily one
+(`keep_days`) and by the same rule (Sail drops it at its TTL). Its rows are their own (`what` "backup_close", with the
+session's `day`), so the daily schedule (`due`, `last`, `failures_in_a_row`), its alerts and the pre-open's check read
+the daily rows alone, as before; a daily checkpoint already taken after that close covers the evening, and none is
+taken then. A failed one is tried again on the same backoff within the evening, and is a WARNING (the daily checkpoint
+is still the floor's): `close_notice`.
+
 A failed checkpoint is tried again after a backoff (`RETRY_SECONDS`, doubling to `RETRY_MAX_SECONDS`).
 When Sail is why it failed (`watchdog.service_failed`: a 5xx, a 429, a timeout, a dropped
 connection), the row and every alert about it carry `environment: "sail"`, and the watchdog never
@@ -31,6 +43,7 @@ an id, the backup fails and says why. There is no default name, and the retired 
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import re
 import time
@@ -45,6 +58,11 @@ _BOX_ID = re.compile(r"^sb_[0-9a-fA-F-]{8,64}$")  # `league.sailbox.box_id`'s sh
 #: A box or checkpoint id anywhere in a failure's text (Sail's own answer can quote one): replaced before the text is kept,
 #: because that text reaches the House's public alert.
 _ID_IN_TEXT = re.compile(r"\bsb(?:cp)?_[0-9a-fA-F-]{8,64}")
+#: THE POST-CLOSE CHECKPOINT (the module docstring): its rows' `what`, its name's suffix, and how long after the session's
+#: close it is due (the equity book's closing fills and the panel's 16:20-16:40 decision are behind it by then).
+CLOSE_WHAT = "backup_close"
+CLOSE_SUFFIX = "-close"
+CLOSE_OFFSET_SECONDS = 45 * 60
 
 
 def house_box(config: Mapping[str, Any] | None = None, env: Mapping[str, str] | None = None) -> dict[str, Any]:
@@ -125,10 +143,13 @@ class Backup:
         new release's watch and rolled it back)."""
         row: dict[str, Any] = {"what": "backup", "at_epoch": self.clock(), "ledger_rows": self.ledger.head()[0],
                                "found_by": self.found_by()}
+        return self._checkpoint(row, "league-" + now_iso(self.clock)[:10], closing=closing)
+
+    def _checkpoint(self, row: dict[str, Any], name: str, *, closing: Callable[[], bool] | None) -> dict[str, Any]:
+        """One checkpoint of the House box under `name`, kept `keep_days`, recorded as `row` (private). Never raises."""
         box = None
         try:
             box = self.house_box_id()
-            name = "league-" + now_iso(self.clock)[:10]
             made = self.client.checkpoint(box, name=name, ttl_seconds=self.keep_days * 86400)
             row.update(ok=True, name=name, checkpoint_id=made.get("checkpoint_id"), box=box)
         except Exception as exc:  # noqa: BLE001 - the floor outlives a failed backup; the alert says so
@@ -138,6 +159,92 @@ class Backup:
         self._compare_identity(row, box)
         self.ledger.append("ops.deploy", row, public=False)
         return row
+
+    # ------------------------------------------------------------------------------------- the post-close checkpoint
+    def close_attempts(self) -> list[dict[str, Any]]:
+        """The recent post-close checkpoint rows, oldest first (`ops.deploy` rows with `what` `CLOSE_WHAT`)."""
+        return [e.payload for e in self.ledger.read(kinds="ops.deploy", limit=200, newest=True)
+                if e.payload.get("what") == CLOSE_WHAT]
+
+    def close_window(self, now: float | None = None) -> dict[str, Any] | None:
+        """THE EVENING a post-close checkpoint is due in, at epoch `now` (the clock's when None): {"day" (the session's
+        New York date, ISO), "close" (its close, epoch), "start" (the close plus `CLOSE_OFFSET_SECONDS`), "end" (New
+        York midnight after it)}, or None outside one: a day with no regular session (a weekend, a holiday, a date
+        outside the computed calendar), before the start, or after the end."""
+        from ltcm.data import NEW_YORK, DataError, to_datetime, us_equity_session
+
+        now = self.clock() if now is None else float(now)
+        day = dt.datetime.fromtimestamp(now, dt.timezone.utc).astimezone(NEW_YORK).date()
+        try:
+            session = us_equity_session(day)
+        except DataError:
+            return None
+        if session is None:
+            return None
+        close = to_datetime(session.close_at).timestamp()
+        start = close + CLOSE_OFFSET_SECONDS
+        end = dt.datetime.combine(day + dt.timedelta(days=1), dt.time(0, 0), NEW_YORK).timestamp()
+        if not start <= now < end:
+            return None
+        return {"day": day.isoformat(), "close": close, "start": start, "end": end}
+
+    def close_failures(self, day: str) -> list[dict[str, Any]]:
+        """The failed post-close tries of the session `day` since its last success, oldest first."""
+        out: list[dict[str, Any]] = []
+        for row in reversed(self.close_attempts()):
+            if row.get("day") != day:
+                continue
+            if row.get("ok"):
+                break
+            out.append(row)
+        return list(reversed(out))
+
+    def close_due(self) -> bool:
+        """Whether the post-close checkpoint is due now (the module docstring): inside a session's evening
+        (`close_window`), none of that day taken yet, no daily checkpoint taken since that close, and past the backoff
+        after a failed try of the same evening (`retry_after`)."""
+        window = self.close_window()
+        if window is None:
+            return False
+        day = window["day"]
+        if any(r.get("ok") and r.get("day") == day for r in self.close_attempts()):
+            return False
+        last = self.last()
+        if last is not None and last >= window["close"]:
+            return False  # the daily checkpoint already holds the evening
+        failed = self.close_failures(day)
+        if failed:
+            return self.clock() - float(failed[-1]["at_epoch"]) >= self.retry_after(len(failed))
+        return True
+
+    def run_close(self, *, closing: Callable[[], bool] | None = None) -> dict[str, Any]:
+        """One post-close checkpoint of the House's own box, "league-<the session's date>-close", kept `keep_days` (the
+        daily one's rule). Never raises: a failed one is a row that says why, as the daily's is."""
+        now = self.clock()
+        window = self.close_window(now)
+        day = window["day"] if window is not None else \
+            dt.datetime.fromtimestamp(now, dt.timezone.utc).date().isoformat()
+        row: dict[str, Any] = {"what": CLOSE_WHAT, "day": day, "at_epoch": now, "ledger_rows": self.ledger.head()[0],
+                               "found_by": self.found_by()}
+        return self._checkpoint(row, f"league-{day}{CLOSE_SUFFIX}", closing=closing)
+
+    def close_notice(self, row: Mapping[str, Any], before: list[dict[str, Any]]) -> tuple[str, str, dict[str, Any]] | None:
+        """What the House says about one post-close try `row`, given that evening's failures before it
+        (`close_failures`, read before the try): None for a routine success; an info when one works after failures;
+        a WARNING for every failure (marked `environment: "sail"` when Sail is why), never an error: the daily
+        checkpoint is still the floor's, and the backoff gives an evening at most a handful of tries."""
+        payload: dict[str, Any] = {"day": row.get("day"), "failures": len(before) + (0 if row.get("ok") else 1)}
+        marker = row.get(ENVIRONMENT) or next((r[ENVIRONMENT] for r in reversed(before) if r.get(ENVIRONMENT)), None)
+        if marker:
+            payload[ENVIRONMENT] = marker
+        if row.get("ok"):
+            if not before:
+                return None
+            return ("info", f"The post-close checkpoint of the House box ({row.get('name')}) succeeded after "
+                            f"{len(before)} failed tr{'y' if len(before) == 1 else 'ies'}.", payload)
+        wait = int(self.retry_after(len(before) + 1) // 60)
+        return ("warning", f"The post-close checkpoint of the House box failed ({row.get('error')}); the next try is in "
+                           f"{wait} minutes while the evening lasts. The daily checkpoint is unchanged.", payload)
 
     def found_by(self) -> str:
         """Which identity decides (the row's `found_by`): `config.box_id`, `config.box_name`, `environment` or `none`."""
@@ -185,7 +292,7 @@ class Backup:
         if not pinned or not self.env_box_id or pinned == self.env_box_id:
             return
         seen = any(r.get("identity_disagrees") and r.get("pinned_box") == pinned and r.get("env_box_id") == self.env_box_id
-                   for r in self.attempts())
+                   for r in (*self.attempts(), *self.close_attempts()))  # the post-close rows are backup rows too
         row.update(identity_disagrees=True, pinned_box=pinned, env_box_id=self.env_box_id)
         if not seen:
             row["identity_new"] = True

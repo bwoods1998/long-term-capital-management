@@ -5299,6 +5299,22 @@ class House:
                 level, text, payload = said
                 self.alert(level, text, **payload)
 
+    def _close_backup_due(self) -> bool:
+        """`Backup.close_due` for a backup that has one (a stand-in without it has no post-close checkpoint)."""
+        due = getattr(self.backup, "close_due", None)
+        return bool(due()) if callable(due) else False
+
+    def _run_close_backup(self) -> None:
+        """THE POST-CLOSE CHECKPOINT (release U; league/backup.py, the module docstring): one try, and what the House
+        says about it (`Backup.close_notice`: a warning for a failure, an info when one works after failures, never an
+        error), and the identity warning as the daily one's."""
+        before = self.backup.close_failures(str((self.backup.close_window() or {}).get("day") or ""))
+        row = self.backup.run_close(closing=self._closing.is_set)
+        for said in (self.backup.close_notice(row, before), self.backup.identity_notice(row)):
+            if said is not None:
+                level, text, payload = said
+                self.alert(level, text, **payload)
+
     # -------------------------------------------------------------- expedition
     def _note_stopped(self, reason: str) -> None:
         """Say so when the floor stops buying work, and why, once a stop has lasted three ticks;
@@ -10612,6 +10628,9 @@ class House:
         lap("jev")
         if self.backup is not None and self.backup.due():
             self._background("backup", self._run_backup)
+        elif self.backup is not None and self._close_backup_due():
+            # THE POST-CLOSE CHECKPOINT (release U): the same key, so it never runs beside the daily one
+            self._background("backup", self._run_close_backup)
         # Both are code over the ledger and cost nothing, so they run while the House is paused too.
         if self.pre_audit is not None and self.pre_audit.due():
             self._background("pre-audit", self.pre_audit.run, self)

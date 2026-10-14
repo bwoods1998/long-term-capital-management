@@ -8,11 +8,11 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Release U (Oct 15, 2026): E4 step two with panel seats through FWD1-R only, the SIP gap hand-off: `rel/u`, not deployed
+## Release U (Oct 15, 2026): E4 step two with panel seats through FWD1-R only, the SIP gap hand-off, a post-close checkpoint: `rel/u`, not deployed
 
 Release U is release T (`rel/e4-fwd1`, PR #546: E4 step one with A32, the forward screen FWD1-R, R-SEC), with the SIP
 gap hand-off (`fix/nightly-sip-gap`, PR #545: **The source gap**, in the CHANGELOG) and E4's step two
-(`feat/equity-e4-step2`: **The panel lane**, below) merged in, plus a change of its own. Step two's probe wiring
+(`feat/equity-e4-step2`: **The panel lane**, below) merged in, plus two changes of its own. Step two's probe wiring
 (B1) is not in it (the captain's A34 (4): forward only).
 
 **Panel seats come through FWD1-R only (the captain's A34, 18:42Z Oct 14, 2026, from study XS1-R).** XS1-R's verdict of
@@ -52,6 +52,16 @@ marker). With `elane.fwd1.seats` "off" nothing panel is seated; one seated befor
 under the money rows' own demotion (as an ETF forward seat does), and `elane.panel.mode` under "live" takes it away
 (league/swarm/elane_xs.py `seat_word`: its lots exit at the next open).
 
+**A second Sail checkpoint after the close** (league/backup.py; **Recover**, below). The daily checkpoint falls where
+the last success left it (about 13:28Z in October 2026). On every NYSE session day, from 45 minutes after the close
+(16:45 New York: 20:45Z in summer, 21:45Z in winter; 13:45 after an early close) to New York's midnight, the House
+takes one more, `league-YYYY-MM-DD-close` (the session's date), kept as long as the daily one (seven days, Sail's TTL).
+Its ledger rows are `ops.deploy` rows with `what` "backup_close" and the session's `day`, so the daily schedule, its
+alerts and the pre-open's backup check read the daily rows alone, as before; the pre-open shows the post-close one
+beside, never as a condition. A daily checkpoint already taken after that close covers the evening. A failed try is
+tried again on the daily one's backoff (30 min, 1 h, ...) while the evening lasts, and is a WARNING, marked "sail" when
+Sail is why: never an error, so it never rolls a release back.
+
 **Identities.** The options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move. The money
 digest and the constitution digest move once, by step two's panel row alone: `5b95d73e` -> `de5ed74e` and `4ef472e1` ->
 `111ede85`, so **the standing grant re-ratifies at the House's start**. The xs identity is `2f0083bc`, release T's
@@ -59,7 +69,8 @@ digest and the constitution digest move once, by step two's panel row alone: `5b
 
 **Rollback.** Repoint to release T (main of `6b0c41bb`) or to A32's main `47ed6872`; retire every panel family in the
 store first (E4's own rule: a code rollback past E4 retires the panel families first). Before a panel program is
-seated nothing of the panel trades, so the rollback sells nothing.
+seated nothing of the panel trades, so the rollback sells nothing. The post-close checkpoints left behind expire at
+their TTL; the release before keeps taking the daily one.
 
 ## The forward screen FWD1-R (Oct 2026): `feat/equity-fwd1`, not deployed
 
@@ -6957,8 +6968,13 @@ before.
   real:N is not listed": the row is counted in the page's not-listed line. "could not be read": Profit
   shows a dash ten minutes after the last good reading (a restart keeps the last reading).
 - **Sail's checkpoint API is down.** The House's backup fails as a marked vendor error (one error,
-  then warnings at 30 min, 1 h, 2 h, 4 h, then every 6 h) and never rolls a release back. The images
+  then warnings at 30 min, 1 h, 2 h, 4 h, then every 6 h) and never rolls a release back. The post-close
+  checkpoint (release U) fails as a warning each try, on the same backoff, while the evening lasts. The images
   have two checkpoints each and `images.py` rebuilds them.
+- **The House box is gone (a spot interruption, a dead disk).** Fork the newest named checkpoint of the House box
+  (`floor_box.py fork`, the loop stopped): `league-YYYY-MM-DD-close` (taken after each session's close since release
+  U) or `league-YYYY-MM-DD` (the daily one), whichever is later. Oct 14, 2026: an AWS spot interruption at 20:12Z left
+  only that morning's 13:28Z checkpoint, before release U.
 - **The data box's session was kicked or the backfill stopped.** `box.py status`, then `box.py
   start`: it resumes from its journal. A night's forward pull that failed: `nightly.py run` again.
 - **A structure is left on the real account.** The gateway admits a close of any defined-risk type

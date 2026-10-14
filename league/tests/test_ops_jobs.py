@@ -401,6 +401,20 @@ class Preopen(Base):
         self.assertIn("kill switch true", failed["account"])
         self.assertIn("order_equity_share 0.5", failed["gateway"])
 
+    def test_the_post_close_checkpoint_is_shown_beside_the_daily_one_and_never_a_condition(self):
+        """RELEASE U: the House's second checkpoint, after the close, has its own rows (league/backup.py `CLOSE_WHAT`);
+        the check reads the daily one as before and shows the post-close one beside it, failed or not."""
+        now = at("2026-10-05T12:30:00Z")
+        h = passing_house(now)
+        h["backup"]["close"] = {"at": "2026-10-02T20:45:10Z", "age_h": 63.8, "ok": False, "day": "2026-10-02",
+                                "error": "SailboxError: sailbox api 503"}
+        [check] = [c for c in PO.checks(h, now) if c.name == "backup"]
+        self.assertTrue(check.ok, check.headline())
+        self.assertIn("latest post-close checkpoint 2026-10-02T20:45:10Z (63.8h ago, session 2026-10-02): ok False",
+                      [item["text"] for item in check.row()["items"]])
+        h["backup"]["latest"]["ok"] = False
+        self.assertFalse([c for c in PO.checks(h, now) if c.name == "backup"][0].ok, "the daily one still decides")
+
     def test_a_house_that_cannot_be_read_fails_every_check_and_warns_for_each(self):
         self.now = at("2026-10-05T12:30:00Z")
         ctx = self.ctx("preopen", gateway=FakeGateway({"/v1/health": GatewayError("down")}))
@@ -705,6 +719,24 @@ class PreopenBrake(Base):
                 "status": {"spend_last_hour": {}, "guard": g.last, "braked": not g.allows()}}))
 
         return g, store, reading, beat
+
+    def test_through_collect_the_daily_backup_row_decides_and_the_post_close_one_is_read_beside(self):
+        """RELEASE U: a post-close checkpoint row (league/backup.py `CLOSE_WHAT`) written after the daily one is not
+        the daily one's `latest`; it is read as `close`."""
+        from league.backup import CLOSE_WHAT
+        from league.ledger import Ledger
+
+        ledger = Ledger(self.root / "ledger.sqlite", clock=lambda: self.now - 16 * 3600)
+        ledger.append("ops.deploy", {"what": "backup", "ok": True, "name": "league-2026-10-04"}, public=False)
+        ledger.clock = lambda: self.now - 8 * 3600
+        ledger.append("ops.deploy", {"what": CLOSE_WHAT, "ok": False, "day": "2026-10-04", "error": "x"}, public=False)
+        ledger.close()
+        h = PO.collect(self.root, self.base, self.base / "releases" / "r1", FakeGateway(), now=self.now, config={})
+        self.assertNotIn("backup", h["errors"])
+        latest, close = h["backup"]["latest"], h["backup"]["close"]
+        self.assertEqual((latest["ok"], latest["age_h"]), (True, 16.0))
+        self.assertEqual((close["ok"], close["day"], close["age_h"]), (False, "2026-10-04", 8.0))
+        self.assertTrue(PO.check_backup(h).ok)
 
     def collected(self, **kw):
         """Check 5 on what `collect` reads from the root: (ok, the guard's line)."""

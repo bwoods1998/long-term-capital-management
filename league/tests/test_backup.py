@@ -93,6 +93,160 @@ class BackupTest(unittest.TestCase):
         self.assertFalse(entry.public)
 
 
+def utc(text: str) -> float:
+    """Epoch seconds of an ISO UTC time ("2026-09-10T20:45:00")."""
+    import datetime as dt
+
+    return dt.datetime.fromisoformat(text).replace(tzinfo=dt.timezone.utc).timestamp()
+
+
+class ThePostCloseCheckpoint(unittest.TestCase):
+    """RELEASE U (Oct 14, 2026: an AWS spot interruption of the House box at 20:12Z left only that morning's 13:28Z
+    checkpoint to fork from): on every session day, once the close is 45 minutes behind and until New York's midnight,
+    a second checkpoint "league-<session date>-close", kept as long as the daily one; its own rows, so the daily
+    schedule, its alerts and the pre-open's check read the daily rows alone."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock(utc("2026-09-10T13:28:00"))     # a Thursday, New York on summer time
+        self.ledger = Ledger(Path(self.dir.name) / "l.sqlite", clock=self.clock)
+        self.sail = FakeSail([{"name": "ltcm-house", "status": "running", "sailbox_id": "sb_house"}])
+        self.backup = Backup(self.sail, self.ledger, clock=self.clock, box_name="ltcm-house")
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def at(self, text: str) -> None:
+        self.clock.now = utc(text)
+
+    def test_a_session_day_gets_a_second_checkpoint_after_its_close_and_the_daily_schedule_is_untouched(self):
+        daily = self.backup.run()                          # the morning's, where the daily schedule left it
+        self.assertEqual(daily["name"], "league-2026-09-10")
+        self.assertFalse(self.backup.close_due(), "before the close")
+        self.at("2026-09-10T20:44:59")
+        self.assertFalse(self.backup.close_due(), "16:45 New York is 20:45Z on summer time")
+        self.at("2026-09-10T20:45:00")
+        self.assertTrue(self.backup.close_due())
+        self.assertFalse(self.backup.due(), "the daily one is not due: 24 hours from its own last")
+        row = self.backup.run_close()
+        self.assertEqual((row["ok"], row["what"], row["day"], row["name"]),
+                         (True, "backup_close", "2026-09-10", "league-2026-09-10-close"))
+        self.assertEqual(self.sail.made[-1], ("sb_house", "league-2026-09-10-close", 7 * 86400), "the daily one's TTL")
+        self.assertFalse(self.backup.close_due(), "one an evening")
+        # THE DAILY SCHEDULE READS THE DAILY ROWS ALONE: its last success, its failures, when it is due
+        self.assertEqual(self.backup.last(), daily["at_epoch"])
+        self.assertEqual([r.get("what") for r in self.backup.attempts()], ["backup"])
+        self.assertEqual(self.backup.failures_in_a_row(), [])
+        self.at("2026-09-11T13:27:59")
+        self.assertFalse(self.backup.due())
+        self.at("2026-09-11T13:28:00")
+        self.assertTrue(self.backup.due())
+        self.assertEqual(self.backup.run()["name"], "league-2026-09-11")
+        self.at("2026-09-11T21:00:00")
+        self.assertTrue(self.backup.close_due(), "the next session's evening")
+        self.assertEqual(self.backup.run_close()["name"], "league-2026-09-11-close")
+        self.assertEqual([r["name"] for r in self.backup.close_attempts()],
+                         ["league-2026-09-10-close", "league-2026-09-11-close"])
+
+    def test_it_follows_new_yorks_close_in_winter_and_on_an_early_close(self):
+        self.at("2026-12-10T21:44:59")                     # a Thursday on standard time: the close is 21:00Z
+        self.assertFalse(self.backup.close_due())
+        self.at("2026-12-10T21:45:00")
+        self.assertTrue(self.backup.close_due())
+        self.at("2026-11-27T18:44:59")                     # the day after Thanksgiving closes at 13:00 New York
+        self.assertFalse(self.backup.close_due())
+        self.at("2026-11-27T18:45:00")
+        self.assertTrue(self.backup.close_due())
+        self.assertEqual(self.backup.run_close()["name"], "league-2026-11-27-close")
+
+    def test_no_session_no_checkpoint_and_the_evening_ends_at_new_yorks_midnight(self):
+        for text in ("2026-09-12T21:00:00", "2026-09-13T21:00:00",   # a weekend
+                     "2026-11-26T22:00:00",                          # Thanksgiving
+                     "2026-09-11T03:59:59"):                         # still Sept 10 in New York, but taken below
+            self.at(text)
+            if text.startswith("2026-09-11T03"):
+                self.assertTrue(self.backup.close_due(), "the evening runs to New York's midnight")
+                continue
+            self.assertFalse(self.backup.close_due(), text)
+        self.at("2026-09-11T04:00:00")                      # midnight in New York: Sept 10's evening is over
+        self.assertFalse(self.backup.close_due())
+        self.assertIsNone(self.backup.close_window())
+        self.at("2026-09-11T20:46:00")
+        self.assertEqual(self.backup.close_window()["day"], "2026-09-11")
+
+    def test_a_daily_checkpoint_taken_after_the_close_covers_the_evening(self):
+        self.at("2026-09-10T20:30:00")
+        self.assertTrue(self.backup.run()["ok"])           # the daily one fell after this close
+        self.at("2026-09-10T21:00:00")
+        self.assertFalse(self.backup.close_due())
+        self.at("2026-09-11T21:00:00")
+        self.assertTrue(self.backup.close_due(), "the next evening's daily one is from before its close")
+
+    def test_a_failed_try_backs_off_within_the_evening_and_is_never_an_error(self):
+        self.at("2026-09-10T20:45:00")
+        self.sail.fail = sail_503()                          # module-level helper below (H2's)
+        before = self.backup.close_failures("2026-09-10")
+        row = self.backup.run_close()
+        self.assertEqual((row["ok"], row["what"], row["day"]), (False, "backup_close", "2026-09-10"))
+        level, text, payload = self.backup.close_notice(row, before)
+        self.assertEqual((level, payload["failures"], payload.get("environment")), ("warning", 1, "sail"))
+        self.assertIn("post-close checkpoint", text)
+        self.assertEqual(self.backup.failures_in_a_row(), [], "the daily schedule sees no failure of its own")
+        self.assertTrue(self.backup.due(), "and the daily one is as due as it was (none yet)")
+        self.clock.advance(29 * 60)
+        self.assertFalse(self.backup.close_due())
+        self.clock.advance(60)
+        self.assertTrue(self.backup.close_due(), "30 minutes after the first failure")
+        before = self.backup.close_failures("2026-09-10")
+        self.sail.fail = ValueError("the House's own bug")
+        row = self.backup.run_close()
+        level, _, payload = self.backup.close_notice(row, before)
+        self.assertEqual((level, payload["failures"]), ("warning", 2), "the House's own failure is a warning too")
+        self.clock.advance(3600)
+        self.assertTrue(self.backup.close_due(), "an hour after the second")
+        self.sail.fail = None
+        before = self.backup.close_failures("2026-09-10")
+        row = self.backup.run_close()
+        level, text, payload = self.backup.close_notice(row, before)
+        self.assertEqual((row["ok"], level, payload["failures"]), (True, "info", 2))
+        self.assertIsNone(self.backup.close_notice(row, []), "a routine success says nothing")
+        self.assertFalse(self.backup.close_due())
+
+    def test_the_record_is_private(self):
+        self.at("2026-09-10T20:45:00")
+        self.backup.run_close()
+        self.assertFalse(self.ledger.last("ops.deploy").public)
+
+    def test_the_house_takes_it_on_its_tick_beside_the_daily_one(self):
+        world = AHouseCase(self)
+        house, sail = world.house, world.sail
+        world.clock.now = utc("2026-09-10T13:28:00")
+        house.tick()
+        house.wait(30)
+        self.assertEqual([m[1] for m in sail.made], ["league-2026-09-10"])
+        world.clock.now = utc("2026-09-10T20:46:00")
+        house.tick()
+        house.wait(30)
+        self.assertEqual([m[1] for m in sail.made], ["league-2026-09-10", "league-2026-09-10-close"])
+        house.tick()
+        house.wait(30)
+        self.assertEqual(len(sail.made), 2, "one an evening")
+        sail.fail = RuntimeError("sailbox api 503: unavailable")
+        world.clock.now = utc("2026-09-11T13:28:00")
+        house.tick()                                        # the daily one fails: its own alert, as before
+        house.wait(30)
+        sail.fail = None
+        world.clock.now = utc("2026-09-11T20:46:00")
+        house.tick()                                        # the daily one is due again first (its backoff is over)
+        house.wait(30)
+        house.tick()
+        house.wait(30)
+        self.assertEqual([m[1] for m in sail.made][-1], "league-2026-09-11", "the daily one first; then it holds the "
+                                                                              "evening (taken after the close)")
+        self.assertFalse(house.backup.close_due())
+
+
 class TheHouseBoxByItsPinnedIdentity(unittest.TestCase):
     """Sept 26-27, 2026: the House moved to a box with another name, and every daily backup failed on "0 running boxes are
     named ltcm-floor". Review of #394: the box id in Sail's environment cannot be the whole answer either. The House box

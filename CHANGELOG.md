@@ -30,12 +30,12 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
-### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
+### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, a post-close checkpoint, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
 
 - **What it carries:** release T (`rel/e4-fwd1` `6b0c41bb`, PR #546: E4 step one with A32, FWD1-R, R-SEC), merged with
   the SIP gap hand-off (`fix/nightly-sip-gap` `66f19b56`, PR #545: the entry below) and E4's step two
   (`feat/equity-e4-step2` `ff73ba7a`: the entry below, built on step one `6f99652d` with #543), each merge its own
-  commit, then the change below, its own commit. Step two's probe wiring (B1) is not in it (the captain's
+  commit, then the two changes below, each its own commit. Step two's probe wiring (B1) is not in it (the captain's
   A34 (4): forward only). The recorded fixture `equity_etf_orders.json` is the A32 record made on main `47ed6872`, the
   same blob on both sides.
 - **Panel seats through FWD1-R only (the captain's A34)** (`league/swarm/elane_xs.py` `A34_FORWARD_ONLY`,
@@ -54,6 +54,14 @@ on branches.
   (`elane_xs_fakes.switch_on(..., historical=True)`, the default there); the tests of A34 run the House's value
   (`league/tests/test_panel_forward_seat.py`); the end-to-end panel test now goes birth, Train, the forward record, a
   FWD1-R pass, the pool's seat, the live week.
+- **A second Sail checkpoint after the close** (`league/backup.py` `close_due`, `run_close`, `close_notice`;
+  `league/house.py`; `league/ops/preopen.py`). On every NYSE session day from 45 minutes after the close (16:45 New
+  York: 20:45Z in summer) to New York's midnight: `league-YYYY-MM-DD-close`, the daily one's seven-day TTL. Its own rows
+  (`what` "backup_close", with the session's `day`): the daily schedule, its alerts and the pre-open's check read the
+  daily rows alone; the pre-open shows the post-close one beside. A daily checkpoint after that close covers the
+  evening. A failed try is retried on the daily backoff within the evening and is a warning (marked "sail" when Sail
+  is why), never an error. Why: an AWS spot interruption of the House box at 20:12Z Oct 14 left only the 13:28Z
+  checkpoint to fork from.
 - **Identities** (both Pythons, from clean detached clones): options execution fingerprint `b60410ad`, equity identity
   `78022ca6` (unchanged); money digest `5b95d73e` -> `de5ed74e`, constitution digest `4ef472e1` -> `111ede85` (step
   two's panel row alone); xs identity `2f0083bc` (unchanged).
