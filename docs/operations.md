@@ -1884,7 +1884,11 @@ Money digest `de5ed74e`, full digest `111ede85` (`PINNED_DIGEST`); the rollback,
   it. WHAT THE COUNT STILL COSTS A BASKET: on a day its exits climb the ladder the count can refuse a rotation's new
   buys (review-live: 3 to 20 buys refused on rotation days at 12 names), and each refused entry is an A14
   difference; `elane.panel.max_names` (12) is the captain's lever (fewer names, fewer orders a rotation), a setting
-  with no digest move.
+  with no digest move. AND THE HOUSE-WIDE COUNT CARRIES THE EXITS: in the rehearsal of the fix (the reviewer's
+  harness, invented prices, a twelve-name basket beside ETF lots on an open whose sales each need their third or
+  fourth rung) the equity book's day reached 135 sends and cancels, every exit done that session; those orders
+  count against the House's 250, so on such a day the options book's OPENS have that much less room (its exits keep
+  theirs).
 - **At the deploy**, for the programs the House already holds:
   - **A Candidate waiting for a seat is seated at the first band sync after the House starts on the release**: under
     "first-come" the swarm's reader shows it once `elane.roster` has a free seat (`banded_at`, then id); under the
