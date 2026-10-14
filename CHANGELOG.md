@@ -43,6 +43,10 @@ on branches.
   on a failed leg keeps its seat. Money digest `5b95d73e` -> `de5ed74e`, constitution `4ef472e1` -> `111ede85`
   (the grant re-ratifies at the House's start). league/live/money.py is not edited (it is inside the options
   execution fingerprint): the row is read by league/equity/bands.py `panel_settings`, as the seat rule's block is.
+- **The clock and quiet rule in Validation and the look** (the ship check's open item): every run of the try (2025
+  at k 1.0 and 1.5), the two Train segments and the sealed run goes through `steady`, `may_run` asked before each.
+  The House's clock spends nothing (owed after a backoff; `elane_xs_clock` at the third); timeouts that repeat as a
+  program's spend the try as SLOW and the look as spent and failed. The look's seed and draws are unchanged.
 - **The live-book proof recorded again on main `47ed6872`** (#543's sleeve): every scenario moved by the lot's size
   alone; step one needs the same record once #543 is merged into it.
 

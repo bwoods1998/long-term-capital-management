@@ -1424,6 +1424,98 @@ class TheLooksRefusalsAndWaits(TheLook):
         self.assertIn("15:50", self.state(fam)["gate"])
 
 
+class TheClockAtValidationAndTheLook(TheLook):
+    """THE CLOCK AND QUIET RULE IN VALIDATION AND THE LOOK (step two; the ship check's open item): every run of the
+    Validation try (2025 at k 1.0 and 1.5), the Train segments both read, and the look's sealed run go through
+    `steady`, and `may_run` is asked before EACH run. A run with a decide timeout is never read; the first steady run
+    is. Timeouts that do not repeat are the House's: nothing spent, owed after a backoff, one alert at the third.
+    Timeouts that repeat as a program's are SLOW: the try is spent, the look spent and failed. The look's seed and
+    draws are the same in every run of the bound. Invented runtimes (the fakes' `clock`: one entry a run, in order)."""
+
+    def clocked(self, slug, clock, **kw):
+        return self.family(slug, code=F.good(tag=slug, clock=list(clock)), **kw)
+
+    def kv(self, fid, stage):
+        return ((self.store.get(elane_xs.GATE_CLOCK_KEY) or {}).get(fid) or {}).get(stage)
+
+    def test_timeouts_in_runs_one_and_two_then_run_three_is_read(self):
+        fam = self.clocked("rev-c", [0, 0, 3, 5, 0, 0])            # segments, segments, k 1.0 x3, k 1.5
+        out = self.validate(fam)
+        self.assertTrue(out["entered"], out)
+        self.assertEqual(self.windows(), ["train", "train", "validation", "validation", "validation", "validation"])
+        self.assertEqual([c["k"] for c in self.runner.calls[2:]], [1.0, 1.0, 1.0, 1.5])
+        self.assertEqual(self.state(fam)[elane.TRY_KEY]["version"], 1)
+        self.assertIsNone(self.kv(fam["id"], "validation"))
+
+    def test_three_runs_that_do_not_repeat_are_owed_with_nothing_spent(self):
+        fam = self.clocked("rev-d", [0, 0, 3, 5, 7] * 3)
+        for attempt in range(1, 4):
+            out = self.validate(fam)
+            self.assertFalse(out["entered"])
+            self.assertIn("the House's clock", out["waits"])
+            self.assertNotIn(elane.TRY_KEY, self.state(fam), "nothing spent")
+            self.assertEqual(elane.lineage_tries(self.store, fam["id"]), [])
+            row = self.kv(fam["id"], "validation")
+            self.assertEqual((row["version"], row["count"]), (1, attempt))
+            self.assertIn("backoff", self.validate(fam)["waits"], "owed after a backoff, not at once")
+            self.store.clock.advance(row["next_at"] - self.store.clock() + 1)
+        alerts = [e for e in self.events("swarm.status", "elane_xs_clock")]
+        self.assertEqual(len(alerts), 1, "one alert, at the third")
+        self.assertEqual(alerts[0]["stage"], "validation")
+
+    def test_timeouts_that_repeat_as_a_programs_spend_the_try_as_slow(self):
+        fam = self.clocked("rev-e", [0, 0, 4, 4, 4])
+        out = self.validate(fam)
+        self.assertEqual((out["entered"], out["passed"]), (False, False))
+        held = self.state(fam)[elane.TRY_KEY]
+        self.assertEqual((held["version"], held["entered"]), (1, False))
+        self.assertIn("ran past 1.00 s of wall time in each of 3 runs", held["slow"])
+        self.assertEqual([t["version"] for t in elane.lineage_tries(self.store, fam["id"])], [1], "the try is spent")
+        self.assertEqual(self.state(fam)[elane.VALIDATION_KEY]["status"], "slow")
+
+    def test_no_second_run_starts_inside_a_session_wall(self):
+        fam = self.clocked("rev-f", [0, 0, 3, 0, 0])
+        made = self.runner.validation
+
+        def first_then_the_wall(*args, **kw):
+            run = made(*args, **kw)
+            self.world.quiet = "inside 600 s of the 15:50 ET wall"
+            return run
+
+        with mock.patch.object(self.runner, "validation", first_then_the_wall):
+            out = self.validate(fam)
+        self.assertIn("15:50", out["waits"])
+        self.assertEqual(self.windows(), ["train", "train", "validation"], "the run with a timeout, and no second")
+        self.assertNotIn(elane.TRY_KEY, self.state(fam))
+        self.assertTrue(all(self.world.quiet_sessions), "every run asked the whole session as its wall")
+
+    def test_the_looks_sealed_run_reads_the_first_steady_one_with_the_same_seed(self):
+        fam = self.gated("rev-g", code=F.good(tag="rev-g", clock=[0, 0, 0, 0, 0, 0, 0, 3, 0]))
+        self.assertIs(self.look(fam), True)
+        sealed = [c for c in self.runner.calls if c["window"] == "look"]
+        self.assertEqual(len(sealed), 2)
+        self.assertEqual({(c["seed"], c["placebos"]) for c in sealed}, {(sealed[0]["seed"], 999)}, "one seed, one draw")
+        self.assertEqual(len(self.store.looks()), 1)
+
+    def test_a_look_the_houses_clock_held_is_owed_with_nothing_spent(self):
+        fam = self.gated("rev-h", code=F.good(tag="rev-h", clock=[0, 0, 0, 0, 0, 0, 0, 3, 5, 7]))
+        self.assertIsNone(self.look(fam))
+        state = self.state(fam)
+        self.assertEqual((self.store.looks(), state.get("look_inflight"), state["gate_ready"]), ([], None, True))
+        self.assertIn("the House's clock", state["gate"])
+        self.assertEqual(self.kv(fam["id"], "look")["count"], 1)
+        self.assertFalse(self.store.looked(run_sha(self.store.version(fam["id"], 1))))
+
+    def test_a_look_whose_timeouts_repeat_is_spent_and_failed(self):
+        fam = self.gated("rev-i", code=F.good(tag="rev-i", clock=[0, 0, 0, 0, 0, 0, 0, 4, 4, 4]))
+        self.assertIs(self.look(fam), False)
+        looked = self.state(fam)[elane_xs.LOOK_KEY]
+        self.assertEqual((looked["passed"], looked["verdict"]["status"]), (False, "slow"))
+        self.assertIn(elane_xs.PROGRAM_FAILS["SLOW"], looked["beside"])
+        self.assertEqual(len(self.store.looks()), 1, "spent")
+        self.assertIsNone(self.look(fam), "and never taken again")
+
+
 class TheA31LookHold(TheLook):
     """`elane.panel.look_rule` (the captain's A31: NO XS1 LOOK BEFORE STUDY XS1-R RULES). "hold", the policy's
     default, holds every look, nothing spent, with everything else a look needs in place; "xs1" is XS1 as built; a

@@ -97,6 +97,7 @@ import math
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from ..xs import PANELS, STRUCTURE
@@ -2202,6 +2203,102 @@ def steady(make: Callable[[], Any], *, runs: int = CLOCK_RUNS, what: str = "run"
                         f"{len(seen)} runs of one {what} ({told} calls{took}), and not the same way twice")
 
 
+class _Runs:
+    """A call that answers SEVERAL runs (`Isolated.segments`: the two Train segments) as one run for `steady`: its
+    runtime is theirs summed, so a decide timeout in either is a timeout of the call, which is made again whole."""
+
+    def __init__(self, runs: Sequence[Any]):
+        self.runs = list(runs)
+        clocks = [clock_of(getattr(run, "result", None)) for run in self.runs]
+        seconds = [c["seconds"] for c in clocks]
+        self.result = {"runtime": {"calls": sum(c["calls"] for c in clocks),
+                                   "timeouts": sum(c["timeouts"] for c in clocks),
+                                   "decide_seconds": None if None in seconds else sum(seconds)}}
+
+
+#: THE CLOCK OF VALIDATION AND THE LOOK (the ship check's open item; step two): the swarm store's kv of each panel
+#: family's run of the House's clock at its Validation try or its look ({family: {stage: {version, count, first_at,
+#: next_at, alerted, why}}}). Counts and words only; no generator reads it (it is no family-state key).
+GATE_CLOCK_KEY = "elane_xs_gate_clock"
+#: The third House's clock in a row at one stage of one version is one alert (`elane_xs_clock`), as at the Train bar.
+GATE_CLOCK_ALERT = 3
+
+
+def gate_clock_wait(store: Any, fid: str, n: int, stage: str, now: float) -> str | None:
+    """Why a Validation try or a look (`stage`) of version `n` waits out the backoff of an earlier House's clock, or
+    None."""
+    held = store.get(GATE_CLOCK_KEY)
+    row = ((held or {}).get(str(fid)) or {}).get(stage) if isinstance(held, Mapping) else None
+    if not isinstance(row, Mapping) or row.get("version") != n:
+        return None
+    nxt = _num(row.get("next_at"))
+    if nxt is None or float(now) >= nxt:
+        return None
+    return (f"the House's clock met this {stage} {int(row.get('count') or 0)} time(s) running: it waits out its "
+            f"backoff (until {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(nxt))}), nothing spent")
+
+
+def gate_clock_fail(owner: Any, fid: str, n: int, stage: str, why: str) -> dict[str, Any]:
+    """A Validation try or a look (`stage`) owed to the House's clock (`ClockUnsteady`): NOTHING SPENT, a backoff that
+    doubles each time (E2's Train pace, `train_every_seconds`, at most `BACKOFF_MAX`), and one `elane_xs_clock` alert
+    at the `GATE_CLOCK_ALERT`-th in a row. Returns the row."""
+    from . import elane_train
+
+    store = owner.store
+    now = _now(owner)
+    c = elane_train.cfg(owner.settings)
+    with store.atomic():
+        held = store.get(GATE_CLOCK_KEY)
+        held = {str(k): dict(v) for k, v in held.items() if isinstance(v, Mapping)} if isinstance(held, Mapping) else {}
+        mine = held.setdefault(str(fid), {})
+        row = mine.get(stage) if isinstance(mine.get(stage), Mapping) and mine[stage].get("version") == n else {}
+        count = int(row.get("count") or 0) + 1
+        delay = min(float(c["train_every_seconds"]) * (2 ** min(count - 1, 12)), BACKOFF_MAX)
+        tell = count >= GATE_CLOCK_ALERT and not row.get("alerted")
+        row = {"version": n, "count": count, "first_at": _num(row.get("first_at")) or now, "next_at": now + delay,
+               "alerted": bool(row.get("alerted")) or tell, "why": str(why)[:240]}
+        mine[stage] = row
+        store.put(GATE_CLOCK_KEY, held)
+    if tell:
+        store.event("swarm.status", fid, {
+            "action": "elane_xs_clock", "alert": True, "version": n, "stage": stage,
+            "text": f"a panel {stage} met decide timeouts that did not repeat {count} times running: {str(why)[:160]}; "
+                    f"nothing is spent and the {stage} is owed (the box's clock: check what holds the core while the "
+                    "panel's child runs)"})
+    return row
+
+
+def gate_clock_clear(store: Any, fid: str, stage: str) -> None:
+    """A stage's run was read (or spent): its clock row goes."""
+    with store.atomic():
+        held = store.get(GATE_CLOCK_KEY)
+        if not isinstance(held, Mapping) or not isinstance(held.get(str(fid)), Mapping) \
+                or stage not in held[str(fid)]:
+            return
+        mine = {k: v for k, v in held[str(fid)].items() if k != stage}
+        rest = {k: v for k, v in held.items() if k != str(fid)}
+        store.put(GATE_CLOCK_KEY, {**rest, **({str(fid): mine} if mine else {})})
+
+
+def steady_runs(owner: Any, settings: Mapping[str, Any] | None, make: Callable[[], Any], *, what: str,
+                many: bool = False) -> Any:
+    """THE CLOCK RULE AT VALIDATION AND THE LOOK: `make()` through `steady`, `may_run` asked before EACH run of the
+    bound (a wall or the day's budget between two runs raises `_Waits`: no second run starts inside a session wall),
+    each run's seconds booked (`_timed`). `many`: `make` answers several runs (`_Runs`); the answer is their list.
+    The run read is the first with no decide timeout, chosen before its outcome is read."""
+    store = owner.store
+
+    def one() -> Any:
+        why = may_run(store, settings, _now(owner))
+        if why is not None:
+            raise _Waits(why)
+        run = _timed(store, owner, make)
+        return _Runs(run) if many else run
+
+    run = steady(one, what=what)
+    return run.runs if many else run
+
+
 def one_store(run_through: Any) -> Any:
     """ONE PANEL STORE A JUDGMENT (a context manager; the rehearsal's measurement on the House's box). The panel
     runner opens the store again for every run (`league.xs.runner.Isolated._store`), and each open maps the two bar
@@ -3369,7 +3466,7 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     early = state.get(PRECHECK_KEY) if isinstance(state.get(PRECHECK_KEY), Mapping) else {}
     if early.get("version") == n and early.get("reached") is False:
         return {**out, "refused": EARLY_CAUSES.get(str(early.get("why")), SAME_LINEAGE_XS)}
-    why = may_run(store, settings, _now(tournament))
+    why = may_run(store, settings, _now(tournament)) or gate_clock_wait(store, fid, n, "validation", _now(tournament))
     if why is not None:
         return {**out, "waits": why}
     from ..xs import screen as S
@@ -3378,15 +3475,27 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     code, params = version["code"], dict(version.get("params") or {})
     template = elane.lineage_key(LANE, str(version.get("sha") or ""))
 
+    def clocked(exc: BaseException) -> dict[str, Any]:
+        # THE HOUSE'S CLOCK (`ClockUnsteady`, or a slow segment run: the bar's runs of those years were steady):
+        # nothing is spent, the try is owed after a backoff, and the third in a row is one alert.
+        gate_clock_fail(tournament, fid, n, "validation", str(exc))
+        return {**out, "waits": f"the House's clock: {str(exc)[:200]}"}
+
     def trouble(stage: str, exc: BaseException | str) -> dict[str, Any]:
         name = exc if isinstance(exc, str) else type(exc).__name__
         store.event("swarm.status", fid, {"action": "elane_validation_error", "version": n, "lane": LANE,
                                          "structure": STRUCTURE, "stage": stage, "error": name})
         return {**out, "error": name}
 
-    # DUTY 1: both Train series, from the two whole segments at k 1.0, BEFORE the Validation run.
+    # DUTY 1: both Train series, from the two whole segments at k 1.0, BEFORE the Validation run (through the clock
+    # rule: a segment run with a decide timeout is never read).
     try:
-        segments = _timed(store, tournament, lambda: run_through.segments(code, params, name=fid))
+        segments = steady_runs(tournament, settings, lambda: run_through.segments(code, params, name=fid),
+                               what="pair of Train segments", many=True)
+    except _Waits as wait:
+        return {**out, "waits": str(wait)}
+    except (ClockUnsteady, TooSlow) as exc:
+        return clocked(exc)
     except Exception as exc:  # noqa: BLE001 - no result is no try (nothing is recorded)
         return trouble("train", exc)
     ended = [_status(run) for run in segments]
@@ -3420,15 +3529,26 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
                                          "structure": STRUCTURE, "screen": SCREEN_NAME, "stage": "same lineage",
                                          "_twin": twin})
         return {**out, "refused": SAME_LINEAGE_XS}
-    # THE TRY: the 2025 run at k 1.0 and 1.5.
-    why = may_run(store, settings, _now(tournament))
-    if why is not None:
-        return {**out, "waits": why}
+    # THE TRY: the 2025 run at k 1.0 and 1.5, each through the clock rule (`steady_runs`: `may_run` before each run
+    # of the bound). A program whose timeouts repeat as a program's do is SLOW: its try is spent (a "slow" run, no
+    # pre-check); the House's clock spends nothing.
+    slow: str | None = None
     try:
-        base = _timed(store, tournament, lambda: run_through.validation(code, params, name=fid, k=K_BASE))
-        stressed = _timed(store, tournament, lambda: run_through.validation(code, params, name=fid, k=K_STRESS))
+        base = steady_runs(tournament, settings, lambda: run_through.validation(code, params, name=fid, k=K_BASE),
+                           what="Validation run (k 1.0)")
+        stressed = steady_runs(tournament, settings,
+                               lambda: run_through.validation(code, params, name=fid, k=K_STRESS),
+                               what="Validation run (k 1.5)")
+    except _Waits as wait:
+        return {**out, "waits": str(wait)}
+    except ClockUnsteady as exc:
+        return clocked(exc)
+    except TooSlow as exc:
+        slow = str(exc)
+        base = stressed = SimpleNamespace(result={"status": "slow", "reason": slow, "trials": 1})
     except Exception as exc:  # noqa: BLE001 - no result is no try (nothing is recorded)
         return trouble("validation", exc)
+    gate_clock_clear(store, fid, "validation")
     result = dict(base.result or {})
     status = str(result.get("status") or "unknown")
     summary = result.get("summary") if isinstance(result.get("summary"), Mapping) else {}
@@ -3480,7 +3600,8 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
                                                   "result_sha": result.get("result_sha"), "stale": False},
                            elane.SIGMA_KEY: sigma, elane.VERDICTS_KEY: verdicts,
                            elane.TRY_KEY: {"version": n, "at": store.now(), "first": first,
-                                           "precheck": bool(pre.get("passed")), "entered": entered, "retry_sha": None},
+                                           "precheck": bool(pre.get("passed")), "entered": entered, "retry_sha": None,
+                                           **({"slow": slow[:300]} if slow else {})},
                            PRECHECK_KEY: {"version": n, "at": store.now(), "reached": True,
                                           "passed": bool(pre.get("passed")) and status == "ok"}})
     store.event("swarm.status", fid, {"action": "elane_validation", "version": n, "lane": LANE, "label": "EQUITY",
@@ -3675,7 +3796,7 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "identity",
                                         "error": type(exc).__name__})
         return None
-    busy = may_run(store, settings, _now(gate))
+    busy = may_run(store, settings, _now(gate)) or gate_clock_wait(store, fid, n, "look", _now(gate))
     if busy is not None:
         _wait(gate, fid, n, sha, busy)
         return None
@@ -3683,7 +3804,9 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     code, params = version["code"], dict(version.get("params") or {})
     floors = state.get(FLOOR_KEY) if isinstance(state.get(FLOOR_KEY), Mapping) else {}
     try:
-        runs = _timed(store, gate, lambda: run_through.segments(code, params, name=fid))
+        # (THE CLOCK RULE: no segment run with a decide timeout is read; a wall between two runs waits)
+        runs = steady_runs(gate, settings, lambda: run_through.segments(code, params, name=fid),
+                           what="pair of Train segments", many=True)
         ended = [_status(run) for run in runs]
         cached = floors.get(str(n))
         if any(status != "ok" for status in ended) or not runs:
@@ -3706,6 +3829,13 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
                 raise ValueError("the program floor does not fit the pinned receipt")
             if floor != cached:
                 store.set_state(fid, **{FLOOR_KEY: {**dict(floors), str(n): floor}})
+    except _Waits as wait:
+        _wait(gate, fid, n, sha, str(wait))
+        return None
+    except (ClockUnsteady, TooSlow) as exc:  # the House's clock (the bar's runs of those years were steady)
+        gate_clock_fail(gate, fid, n, "look", str(exc))
+        _wait(gate, fid, n, sha, f"the House's clock: {str(exc)[:160]}")
+        return None
     except Exception as exc:  # noqa: BLE001 - no floor, no look (nothing spent)
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "floor",
                                         "error": type(exc).__name__})
@@ -3730,10 +3860,18 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
                 "in the residual or in the universe excess)")
         return None
     try:
-        recorded = _timed(store, gate, lambda: run_through.validation(code, params, name=fid, k=K_BASE))
+        recorded = steady_runs(gate, settings, lambda: run_through.validation(code, params, name=fid, k=K_BASE),
+                               what="Validation run (k 1.0)")
         if _status(recorded) != "ok":
             raise ValueError(f"the Validation run ended {_status(recorded)}")
         pre = dict(S.precheck(S.series(recorded.result, "x")))
+    except _Waits as wait:
+        _wait(gate, fid, n, sha, str(wait))
+        return None
+    except (ClockUnsteady, TooSlow) as exc:  # the House's clock (its try's runs were steady)
+        gate_clock_fail(gate, fid, n, "look", str(exc))
+        _wait(gate, fid, n, sha, f"the House's clock: {str(exc)[:160]}")
+        return None
     except Exception as exc:  # noqa: BLE001
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "validation",
                                         "error": type(exc).__name__})
@@ -3777,8 +3915,12 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     try:
         capability = mint_equity_gate_capability(Path(root) / STORE_DIR, reason=f"the panel look of {fid} v{n}")
         seed = P.look_seed(pinned.receipt_sha256, code_sha)
-        ran = _timed(store, gate, lambda: run_through.look(code, params, name=fid, gate=capability, k=K_BASE,
-                                                           placebos=int(pinned.placebo_draws), seed=seed))
+        # THE CLOCK RULE (`steady_runs`): the sealed run is made again, with the same seed and draws, while its
+        # runtime shows a decide timeout, `CLOCK_RUNS` times at most, `may_run` asked before each; the first with
+        # none is the one read, chosen before its outcome is read.
+        ran = steady_runs(gate, settings, lambda: run_through.look(code, params, name=fid, gate=capability, k=K_BASE,
+                                                                   placebos=int(pinned.placebo_draws), seed=seed),
+                          what="sealed look")
         ended_look = _status(ran)
         if ended_look in elane.NOT_A_TRY:
             raise RunFailed(f"the look's run ended {ended_look}")  # the House could not run it: no look, owed again
@@ -3796,6 +3938,22 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
             except Exception as exc:  # noqa: BLE001 - the sentence is never stated with a hole in it
                 beside = None
                 unstated = f"{SEAT_UNSTATED}: the receipt's sentence could not be filled ({type(exc).__name__})"
+    except _Waits as wait:
+        # A wall or the day's budget between two runs of the clock rule: nothing read, nothing spent, owed again.
+        store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
+        _wait(gate, fid, n, sha, str(wait))
+        return None
+    except ClockUnsteady as exc:
+        # THE HOUSE'S CLOCK: no run of the bound was read. Nothing spent, the look owed after a backoff.
+        store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
+        gate_clock_fail(gate, fid, n, "look", str(exc))
+        _wait(gate, fid, n, sha, f"the House's clock: {str(exc)[:160]}")
+        return None
+    except TooSlow as exc:
+        # THE PROGRAM'S: its decide ran past the limit the same way in every run of the bound. The sealed run was made
+        # and none of it can be judged: the look is spent and FAILED, with the measured seconds.
+        verdict = {"screen": SCREEN_NAME, "passed": False, "status": "slow", "why": str(exc)[:300]}
+        beside = f"no verdict: {PROGRAM_FAILS['SLOW']} ({str(exc)[:200]})"
     except RunLost as exc:
         # THE SEALED RUN WAS SENT AND DID NOT RETURN (E1's `LOOK_SENDS`): owed again once; the second time the look is
         # spent and FAILED, so no program is shown its holdout a third time.
@@ -3821,6 +3979,7 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "look",
                                         "error": type(exc).__name__})
         return None
+    gate_clock_clear(store, fid, "look")
     passed = bool(verdict.get("passed"))
     # DUTY 3: no sentence, no seat (a pass whose sentence cannot be stated beside its trades is recorded, never
     # seated); then A22 (1).
@@ -3901,6 +4060,7 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "UNIVERSE_MANIFEST", "DEFAULTS", "BOUNDS", "CENSUS_NOTE_MAX", "CENSUS_LABEL", "SCREEN_NULLS", "PANEL_AGENDA",
            "INPUTS", "BAR_XS", "FAILS_XS", "PROGRAM_FAILS", "JUDGED_XS", "MAP_LABEL", "K_BASE", "K_STRESS",
            "CLOCK_RUNS", "SLOW_SHARE", "TooSlow", "ClockUnsteady", "clock_of", "steady", "one_store", "slicer", "bar_runs",
+           "GATE_CLOCK_KEY", "GATE_CLOCK_ALERT", "gate_clock_wait", "gate_clock_fail", "gate_clock_clear", "steady_runs",
            "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "LOOK_RULES", "LOOK_RULES_BUILT", "A31_HOLD",
            "look_held", "cfg", "pin", "receipt", "mode",
            "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "panel_seats", "seatable", "panel_families", "record_of", "versions_of", "passed_version",

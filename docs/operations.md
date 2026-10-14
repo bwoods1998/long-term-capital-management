@@ -141,8 +141,10 @@ copy of the House's state found one blocker, three majors and the minors; each i
   nothing scored, a backoff, one alert (`elane_xs_clock`) at the third. On the forward night such a program gets no
   row and goes on E3's retry list. THE COST: up to three times the CPU of an affected run, inside the lane's day
   budget. NOT DONE HERE: the fix at the root (the child's own CPU time, `league/gym/runtime.py`) is inside the
-  equity identity and needs a release of its own; and Validation and the look do not ask the rule yet, which must
-  be closed before any look (step two).
+  equity identity and needs a release of its own. VALIDATION AND THE LOOK ASK IT TOO since step two (`steady_runs`:
+  every run of the try, the two Train segments and the sealed run, `may_run` before each; the House's clock spends
+  nothing and owes the try or the look after a backoff; repeating timeouts spend the try as SLOW and the look as
+  spent and failed), closed before any look as step one's record said it must be.
 - **`equity_spreads`' CPU row is 900 s** (was 300): the ops client opens a TLS connection a request, about 70 ms of
   CPU a call on the box, and a night of the backfill asks up to 6,000. At 300 s the child would have been killed on
   each of its nine nights. A kept connection would cut that cost; it is a change to the ops client of every job and

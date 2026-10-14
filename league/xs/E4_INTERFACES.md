@@ -550,7 +550,8 @@ not wired: section 14); the universe commit and the money row (a held basket use
 partial rotation is a name short, and live and its twin part there); the receipt at the captain's bar (landed
 since: section 15); the gateway's follow-up for the two protected paths; a name that joined the index after 2024
 is charged the universe's half-spread (sampling its own Train-era days is a spec change for package B); Validation
-and the look ask the quiet rule once for two or three runs (Train asks before each); every budget of the lane on
+and the look ask the quiet rule once for two or three runs (Train asks before each; closed in step two,
+section 19: `elane_xs.steady_runs`); every budget of the lane on
 the box's one core is an estimate until its first receipts are read.
 
 ## 13. Package J as built (Oct 11, 2026; `feat/equity-e4-j`; nothing pushed, nothing deployed)
