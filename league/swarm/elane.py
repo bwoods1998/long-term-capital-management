@@ -37,6 +37,15 @@ SETTINGS (`cfg`; policy.json "elane", swarm.json over it; `DEFAULTS` is the roll
   (A9 D3; league/equity/screen.py `retry_permitted`);
 - `program_loss_usd` -300 (a tightening only: -300 to -25).
 
+R-SEC, SECTOR PROGRAMS ARE FORWARD-ONLY (the captain's decision from the widening review of Oct 14, 2026, under A19,
+A31 and A33): an equity family whose symbols name anything outside the four index ETFs (`econfig.INDEX_ETFS`) takes
+no sealed Validation try (`try_open` False) and no sealed look (`look` holds it before the sealed run: no look spent,
+no refusal row, no retirement for that reason), whatever `elane.fwd1.seats` says and whether or not the forward
+screen's permit file lists its lineage (`forward_only`). Its only path to a seat is a forward pass of FWD1-R (A33's
+ETF case N, bar 2.61, labelled WEAK) under `elane.fwd1.seats` "on" (league/swarm/elane_forward.py). Code, never a
+setting: widening `elane.universe` past the four index ETFs therefore opens no historical look on 2025 for a sector,
+bond or gold fund (a 2026 author remembers those years). Panel families are not affected (A34 governs them).
+
 THE ROUNDS RUN ON THEIR OWN (A3: no Gym box, no model dollar). The swarm's main loop starts the two equity rounds below on
 their own thread every `ROUND_SECONDS` while the lane is on (league/swarm/loop.py `Swarm.equity_rounds`: the
 tournament's step, then the gate's, so a version validated in a round takes its look in the same round). Neither the
@@ -796,12 +805,48 @@ def _retry_open(store: Any, fam: Mapping[str, Any], n: int, tries: Sequence[Mapp
         return False
 
 
+#: R-SEC's words (the module docstring): why a family trading outside the index ETFs takes no sealed try and no look.
+FORWARD_ONLY = ("R-SEC: a program trading a symbol outside the index ETFs (" + ", ".join(econfig.INDEX_ETFS) + ") "
+                "takes no sealed Validation try and no sealed look; its only path to a seat is the forward screen "
+                "FWD1-R (ETF case N, bar 2.61, WEAK) with elane.fwd1.seats on")
+
+
+def forward_only(fam: Mapping[str, Any] | None) -> bool:
+    """R-SEC (the module docstring): whether an equity family's symbols (the store's roots, its spec's `roots` and
+    `symbols`) name anything outside `econfig.INDEX_ETFS`. A panel family is never (A34 governs it). FAIL CLOSED: a
+    family that is not a panel and whose symbols cannot be read, or names none, is forward-only."""
+    from . import elane_xs
+    from .store import loads
+
+    if not isinstance(fam, Mapping):
+        return True
+    spec = fam.get("spec")
+    if isinstance(spec, str):
+        spec = loads(spec, None)
+    spec = spec if isinstance(spec, Mapping) else {}
+    if elane_xs.is_panel(fam) or str(spec.get("structure") or "") == elane_xs.STRUCTURE:
+        return False
+    names: list[str] = []
+    for raw in (fam.get("roots"), spec.get("roots"), spec.get("symbols")):
+        if raw is None:
+            continue
+        if isinstance(raw, str):
+            raw = loads(raw, None)
+        if not isinstance(raw, (list, tuple)):
+            return True
+        names.extend(str(s).strip().upper() for s in raw)
+    return not names or any(s not in econfig.INDEX_ETFS for s in names)
+
+
 def try_open(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any] | None) -> bool:
     """Whether version `n` may take its lineage's Validation try (one a lineage; R3's retry only when permitted). A
-    lineage the FWD1-R forward screen judges takes none while its seats are on (league/swarm/elane_forward.py)."""
+    lineage the FWD1-R forward screen judges takes none while its seats are on (league/swarm/elane_forward.py), and a
+    family trading outside the index ETFs takes none at all (R-SEC, `forward_only`)."""
     try:
         if lane_of(store, fam) is None:
             return False
+        if forward_only(fam):
+            return False  # R-SEC: forward-only, whatever elane.fwd1.seats and the permit file say
         from . import elane_forward
 
         if elane_forward.try_refused(store, fam, settings) is not None:
@@ -1367,6 +1412,13 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     if lane is None or not on(settings):
         return None
     screen = screen_name(lane)
+    if forward_only(fam):
+        # R-SEC, before the sealed run and before any record a look or a refusal would write: no look spent, no
+        # refusal row (a refusal spends the lineage, `lineage_spent`), no bad gate outcome (it would bar the forward
+        # seat, league/swarm/bands.py BAD_OUTCOMES). The family waits; its one record is written once.
+        if (fam.get("state") or {}).get("gate") != f"waiting ({FORWARD_ONLY})":
+            _wait(gate, fid, n, sha, FORWARD_ONLY, screen=screen)
+        return None
     receipt, why = _receipt(settings, lane)
     if receipt is None:
         _wait(gate, fid, n, sha, why or "the share screen refused: no pinned receipt", screen=screen)
@@ -1772,7 +1824,7 @@ def view(fam: Mapping[str, Any], *, lane: str | None) -> dict[str, Any]:
 
 __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_KEY", "TRY_KEY", "DEFAULTS", "cfg", "on",
            "lane_of", "label", "card_errors", "lineage_key", "screen_effective", "screen_name", "SCREENS", "REPO",
-           "try_open", "lineage_spent",
+           "try_open", "lineage_spent", "forward_only", "FORWARD_ONLY",
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
            "ROUND_KEY", "ROUND_SECONDS", "round_order", "seed_ahead", "seed_owed", "seed_wait", "seed_waits_over",

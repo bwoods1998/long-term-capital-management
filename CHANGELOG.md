@@ -30,6 +30,28 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### Release T: E4 step one with A32, the forward screen FWD1-R, sector programs forward-only, on `rel/e4-fwd1` (unreleased; to deploy before 12:55Z Thu Oct 15, 2026 so that FWD1-R's clock starts Fri Oct 16)
+
+- **What it carries:** E4 step one merged with A32 (`feat/equity-e4-a32`, PR #544, which carries PR #543: the Probe
+  sleeve 0.50 x E at six seats), merged with the forward screen FWD1-R (`feat/equity-fwd1` `90fc0c3f`, the entry
+  below), and R-SEC (this entry). The recorded fixtures are E4A32's (recorded on main `47ed6872`).
+- **R-SEC, sector programs forward-only** (`league/swarm/elane.py` `forward_only`, asked by `try_open` and `look`;
+  docs/operations.md, "Sector, bond and gold programs are forward-only"): an equity family whose symbols name anything
+  outside the four index ETFs (`league/equity/config.py` `INDEX_ETFS`) takes no sealed Validation try and no sealed
+  look, whatever `elane.fwd1.seats` says and whether or not the permit file lists its lineage; the look holds it
+  before the sealed run (no look spent, no refusal row, no retirement for that reason). It stays FWD1-R's case N (ETF,
+  bar 2.61, WEAK): its only path to a seat is a forward pass with `elane.fwd1.seats` "on". Panel families are not
+  affected (A34). With it live the captain may widen `elane.universe` to sixteen ETFs (no XLF) by a setting; the
+  route, its cost and its rollback are in docs/operations.md. Tests: `league/tests/test_elane_rsec.py`.
+- **Identities:** the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest
+  `5b95d73e` and the constitution digest `4ef472e1` are E4 step one with A32's (the money and constitution digests
+  are A32's sleeve; nothing of FWD1-R or R-SEC moves an id); the xs identity is `2f0083bc`.
+- **Switches at their defaults:** `elane.panel.mode` "off", `elane.fwd1.seats` "off", FWD1-R's job in mode "record"
+  (verdicts recorded, nothing acts on them).
+- **Rollback:** repoint the House to `47ed6872` (A32 as deployed), with the panel families retired first
+  (`scripts/panel_rollback.py`, E4's entry below) and, if the universe was widened, every family naming a symbol
+  outside the four index ETFs retired first (a release without R-SEC would give them a sealed try).
+
 ### Release FWD1-R, the forward screen: one verdict a lineage on the sessions after its code and the screen were pinned, on `feat/equity-fwd1` (unreleased; cut from `feat/equity-e4-m3` at `6f99652d`; the captain's A33; no identity moves: the options execution fingerprint, the equity identity, the money digest and the constitution digest are `6f99652d`'s; ships with the seat path OFF)
 
 - **What it adds** (docs/operations.md, "The forward screen FWD1-R"): the judge E3 left for a later release. A lineage

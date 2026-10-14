@@ -19,7 +19,10 @@ fixes"), not as the study's headline. Rule: `league/ops/fwd1_rule.py`; job: `lea
 
 **No identity moves.** Nothing under `league/live/`, `league/gym/`, `league/xs/`, no evidence module of
 `league/equity/` and not `league/constitution.py` changes: the options execution fingerprint, the equity identity, the
-money digest and the constitution digest are those of the tree it is cut from (`feat/equity-e4-m3` at `6f99652d`).
+money digest and the constitution digest are those of the tree it is cut from (`feat/equity-e4-m3` at `6f99652d`). It
+ships in RELEASE T (branch `rel/e4-fwd1`): E4 step one merged with A32 (`feat/equity-e4-a32`, PR #544, which carries
+PR #543), this screen, and R-SEC (below); release T's ids are E4 step one with A32's (the money digest `5b95d73e` and
+the constitution digest `4ef472e1` are A32's sleeve, 0.50 x E at six seats).
 
 **The rule** (one verdict a LINEAGE of the forward registry):
 - **Who.** A lineage is judged on its REPRESENTATIVE, fixed before any forward day of it exists: of its rows with the
@@ -121,6 +124,43 @@ pass only when `elane_forward.seat_refused(store, fam, settings)` is None and re
 **Switches and rollback.** `elane.fwd1.mode` "off" stops the job (nothing judged; the forward record goes on);
 `elane.fwd1.seats` "off" stops every effect on the swarm. Without the pin (`elane.forward_screen` absent, or a block
 this code does not load) no verdict is read. A seated program keeps its seat under the money rules' own demotion.
+
+**Sector, bond and gold programs are forward-only (R-SEC, release T).** The captain's decision from the widening
+review of Oct 14, 2026 (A19 and A31 still hold for every historical look; A33's ETF case N is the one route): an equity
+family whose symbols (the store's roots, its spec's `roots` and `symbols`) name anything outside the four index ETFs
+(`league/equity/config.py` `INDEX_ETFS`: SPY, QQQ, IWM, DIA) takes **no sealed Validation try** (`elane.try_open`
+False, so no 2025 pre-check) and **no sealed look** (`elane.look` holds it before the sealed run: no look spent, no
+refusal row, no bad gate outcome, one "waiting" record), **whatever `elane.fwd1.seats` says and whether or not the
+permit file lists its lineage** (`elane.forward_only`, code and not a setting). Nothing retires it for that reason: it
+stays in the Gym band, case N for FWD1-R (ETF case N, bar 2.61, labelled WEAK), and its only path to a seat is a forward
+pass with `elane.fwd1.seats` "on". A family whose symbols cannot be read, or that names none, is held the same way
+(fail closed). An index-only family is unchanged; a panel family is not affected (A34 governs it). Every symbol outside
+the four is held alike, a single stock's included (no stock card is admitted while `elane.structures` is ["etf"]).
+Tests: `league/tests/test_elane_rsec.py` (XLK, TLT and SPY with XLK, with the switch absent, off and on, the permit
+file empty or listing the lineage in every status; an index-only family's try and look unchanged; the forward seat).
+
+**The widening route** (the captain's, after release T is running; with R-SEC live, widening is a setting). Check
+first, each on the box read-only: R-SEC is in the running release (this section's tests green on its head); policy.json
+`elane.fwd1` has mode "record" and `elane.forward_screen` the receipt's 64-hex sha, and `forward-screen.sqlite` has its
+one `fwd1_pins` row;
+`elane.forward.mode` is not "off" and the last `forward_register` receipt is ok; no family yet names XL*, TLT or GLD
+(one that predates the release is retired before the switch); the Sail balance covers the births; no share or option
+order is in flight; outside 12:55-20:05Z. Then on the owner's machine, a dry run and the same line with `--apply`:
+`python3 set_swarm.py 'elane.universe=["SPY","QQQ","IWM","DIA","XLB","XLC","XLE","XLI","XLK","XLP","XLRE","XLU","XLV","XLY","TLT","GLD"]' elane.birth_share=0.5`.
+SPY stays first (the `forward_shadow` canary reads `universe[0]`); the whole list goes in one call (the first sector
+registration locks the sectors controls to it); **XLF stays out** until the House store's 2016-09-19 XLF row is
+corrected. The dry run must print only those two keys moving. `elane.fwd1.seats` "on" is a separate, later step, taken
+before the first checkpoint-5 night (it also makes every listed index lineage forward-only).
+**Its cost, stated:** A19's four-symbol list is loosened for forward-only lineages; the loosening carried is A33's own
+(an ETF forward pass at 2.61 says almost nothing about skill; one live forward seat a mechanism cell bounds the
+near-copies); births spend research dollars on the Sail routes up to `elane.e2.usd_day`.
+**Its rollback:** `python3 set_swarm.py 'elane.universe=["SPY","QQQ","IWM","DIA"]' elane.birth_share=0 --apply`, in
+force at the next loop pass (swarm.json is read every loop); it stops new sector births only. The sector families
+already born still take no sealed try or look (R-SEC); to stop their forward seats, `elane.fwd1.seats=off` (it stops
+every forward seat, index and panel included), then retire them in the House store. A code rollback to a release
+without R-SEC is NOT safe while a sector family is alive: retire every family that names a symbol outside the four
+index ETFs first, or its next 300 s equity round takes the 2025 pre-check and a look, and A33(4) then bars it from
+forward evidence for good.
 
 **Inspect** (on the box, read-only): `sqlite3 -readonly <state>/forward-screen.sqlite "SELECT lineage, verdict, k, day
 FROM fwd1_verdicts"`, `... "SELECT lineage, k, passed, why FROM fwd1_checks ORDER BY lineage, k"`, and
