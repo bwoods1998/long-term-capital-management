@@ -1005,6 +1005,8 @@ digest and the constitution digest move ONCE, in the commit marked MONEY (5b95d7
 | K FOR A BASKET | Train-era close days per 250 sessions of the seen spans' 1.0x runs (sealed `elane_xs_activity`) and the Validation close days of the try's 2025 k 1.0 run, written as `elane.SEAT_KEY` beside an entered try; ranked inside the panel pool only | `elane_xs.ACTIVITY_KEY`, `train_activity`, `seat_record` |
 | THE PANEL TWIN'S RE-BASE | A29 as registered: a differing session counts once, then the twin's book is the live basket; `rebased` and `base_agree` written for panel rows; one `twin_rebased` event a re-base | league/ops/forward_xs.py `panel_seed`, `PanelChain`, `twin`; league/xs/book.py `TwinAccount` |
 | THE CLOSE DATES BESIDE EVERY CHECKPOINT | each Done checkpoint's `close_dates` {closes, dates, date_t, unpriced}, beside, never a rule | league/ops/dlane_report.py `close_dates` |
+| DONE COUNTS A PANEL PROGRAM BY DATE (the review's major) | the Done meter's checkpoints and the per-program 5 read Done's counts: a close each, a panel program's lots of one New York day one count (where the first closed); `closes` are counts, `lots` beside; a tightening until the owner rules otherwise | league/ops/dlane_report.py `done_counts`, `first_counts`, `reading`, `meter` |
+| AN EXIT IS NEVER STOPPED BY THE EQUITY COUNT (the review's blocker) | `order_path.max_orders_day` stops entries only; an exit meets the House-wide count alone | league/equity/live.py `_count_refusal` |
 
 The probe's wiring (section 14) is NOT in this branch: it is the captain's allowance in release E3's seal T1, a patch
 file in the captain's scratch (`e4s2/wiring/`), one for the step-one head and one for this one. The universe commit
