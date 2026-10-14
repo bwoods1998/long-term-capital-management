@@ -215,7 +215,10 @@ JOBS: tuple[Job, ...] = (
     # 09:00-17:30 New York on a session (it may run its own decider child: a representative's own floor on its
     # Train-era runs, a panel representative's placebo leg). It reads the forward record and the swarm store
     # read-only and writes only <state>/forward-screen.sqlite, the permit file and its report, so it runs in a pause
-    # too. Its child seconds are `elane.fwd1.cpu_seconds_night` (900) inside the job's 1,200 of CPU.
+    # too. Its child seconds are `elane.fwd1.cpu_seconds_night` (900) A NIGHT, shared by the night's two runs, inside
+    # each run's 1,200 of CPU. ITS GRACE IS TWO HOURS and no run of its child outlasts THE DEADLINE (the earlier of its
+    # wall and the next pre-open, less 120 s; a start nearer than that is a skipped receipt): started late after
+    # `forward_xs` (which ends by 09:45Z at the latest) it ends by 12:15Z, before the pre-open's 12:30Z in summer.
     Job("forward_screen", "league.ops.forward_screen", (S.after("forward_shadow"), S.after("forward_xs")),
         grace=2 * HOUR, cpu=1200, wall=1800, in_pause=True, owner="FWD1-R forward screen",
         what="the forward screen FWD1-R: one append-only verdict a lineage on its counted forward sessions after the "

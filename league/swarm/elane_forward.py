@@ -36,8 +36,8 @@ WITH IT ON:
    forward seat NOW, or None. A pool that seats a family on a forward pass asks it first and, when it seats one,
    records it (`mark_seated`), so the cell's one live forward seat is counted for both types alike. THE OBLIGATION
    STEP TWO TAKES ON (league/xs/E4_INTERFACES.md; docs/operations.md): the panel pool seats a panel family on a
-   forward pass only when `seat_refused(store, fam, settings)` is None, and calls `mark_seated(store, fid)` in the
-   same transaction as the band move; reading `eligible(state)` alone is not the contract.
+   forward pass only when `seat_refused(store, fam, settings)` is None, and calls `mark_seated(store, fid, settings)`
+   in the same transaction as the band move; reading `eligible(state)` alone is not the contract.
    The verdict's words are kept beside it (`STATE_KEY`["words"]); the operator's sentence with the t and the shadow
    P&L stays in the job's own report.
 
