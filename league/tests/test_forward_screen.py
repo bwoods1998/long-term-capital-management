@@ -963,6 +963,172 @@ class TheJob(Fixture):
                 self.assertNotIn(FS.REPORT, text, str(path))
 
 
+class World:
+    """A state root of INVENTED forward rows for the judge's whole-night tests (seeded draws, no market data): ETF and
+    panel lineages, each with its representative's rows and its sides already kept (no forward run is needed), the
+    House's runs the fake's (`FakeRuns`: invented floors, placebo draws that never bind)."""
+
+    def __init__(self, root: Path):
+        self.root = Path(root)
+        self.fdb = forward_db.open_db(self.root)
+        self.engine, _ = forward_db.engine_id(self.fdb, "equity-engine-1+aaaaaaaaaaaa+fwd-1", at=1.0)
+        self.families: dict[str, dict] = {}
+        self.rule = fake_rule()
+        self.settings = {"elane": {"fwd1": {"mode": "record", "seats": "off", "cpu_seconds_night": 2400},
+                                   "forward": {"mode": "record"}}}
+        self.rows: dict[int, list[tuple[str, float, float, float, float, str]]] = {}
+        db = FS.open_store(self.root)
+        FS.pinned(db, self.rule, base=None, release=None, now=PIN_AT)       # the clock starts Friday Oct 16
+        db.close()
+
+    def close(self):
+        self.fdb.close()
+
+    def lineage(self, pid: int, typ: str, values, *, b=None, sides=None):
+        """One lineage `L<pid>` of type `typ`: its representative's rows (r, w = 0.5, b, r15 = r - 1e-5, status ok)
+        from START, and their sides kept."""
+        fid = f"L{pid:03d}"
+        panel = typ == "PANEL"
+        self.families[fid] = {"id": fid, "structure": "panel" if panel else "etf",
+                              "spec": {"lane": "equity", "agenda": "trend"}, "state": {}, "lineage": None, "band": "gym"}
+        self.fdb.execute(
+            "INSERT INTO fwd_registry(pid, key, family, version, lane, reason, ugroup, lineage, code, params, needs, "
+            "program_sha, run_sha, author, created_at, evidence, first_close, first_day, registered_at, route, "
+            "alpha_f, prev_hash, row_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (pid, f"{fid}@1", fid, 1, "equity", "train_pass", "panel:sp500" if panel else "index", f"equity:{fid}",
+             "PARAMS = {}\n", "{}", json.dumps({"symbols": ["SPY"], "history": 1}), "p" * 64, f"{pid:064d}", "", 1.0,
+             "registry", "2026-10-15", START.isoformat(), 1.0, "XS1" if panel else "S2", "0.03", "0" * 64,
+             f"{pid:063d}h"))
+        names = sessions(START, len(values))
+        b = [0.0] * len(values) if b is None else list(b)
+        sides = [0.0] * len(values) if sides is None else list(sides)
+        self.rows[pid] = [(day, float(r), 0.5, float(bb), float(r) - 1e-5, "ok") for day, r, bb in zip(names, values, b)]
+        db = FS.open_store(self.root)
+        with db:
+            for day, side in zip(names, sides):
+                db.execute("INSERT INTO fwd1_sides(pid, day, engine, sides, at) VALUES (?,?,?,?,?)",
+                           (pid, day, self.engine, float(side), 2.0))
+        db.close()
+        self.fdb.commit()
+
+    def reveal(self, through: str | None = None):
+        """The record's rows through `through` (every row when None)."""
+        for pid, rows in self.rows.items():
+            for day, r, w, b, r15, status in rows:
+                if through is None or day <= through:
+                    self.fdb.execute("INSERT OR IGNORE INTO fwd_days(pid, day, engine, r, w, b, r15, r0, entries, exits, "
+                                     "status, at, bars) VALUES (?,?,?,?,?,?,?,NULL,0,0,?,1.0,?)",
+                                     (pid, day, self.engine, r, w, b, r15, status, "b" * 16))
+        self.fdb.commit()
+
+    def night(self, now: float):
+        return FS.night(self.root, rule=self.rule, settings=self.settings, now=now, base=None, release=None,
+                        runs=FakeRuns(), families=self.families, clock=lambda: now)
+
+    def checks(self) -> dict[str, dict[int, tuple]]:
+        db = FS.open_store(self.root)
+        try:
+            out: dict[str, dict[int, tuple]] = {}
+            for r in db.execute("SELECT * FROM fwd1_checks ORDER BY lineage, k"):
+                out.setdefault(r["lineage"], {})[int(r["k"])] = (r["day"], r["t"], r["s"], r["s15"], r["g_bp"],
+                                                                 r["passed"], r["c_used"], r["count"])
+            return out
+        finally:
+            db.close()
+
+    def verdicts(self) -> dict[str, str]:
+        db = FS.open_store(self.root)
+        try:
+            return {r["lineage"]: r["verdict"] for r in db.execute("SELECT lineage, verdict FROM fwd1_verdicts")}
+        finally:
+            db.close()
+
+
+def invented(world: World, n: int, *, seed: int, edge: float = 0.0, days: int = 70):
+    """`n` lineages, every other one a panel, each a seeded normal series with a daily edge `edge` (a panel's in its
+    residual x = r - w b: its r carries w b beside it), random sides."""
+    for i in range(n):
+        rng = np.random.default_rng([seed, i])
+        typ = "PANEL" if i % 2 == 0 else "ETF"
+        x = rng.normal(edge, 0.006, days)
+        b = rng.normal(0.0003, 0.01, days) if typ == "PANEL" else np.zeros(days)
+        world.lineage(i + 1, typ, (x + 0.5 * b).tolist(), b=b.tolist(),
+                      sides=rng.choice([0.0, 0.25, 0.5], size=days).tolist())
+
+
+def evening(day: str) -> float:
+    return dt.datetime.fromisoformat(day + "T23:30:00+00:00").timestamp()
+
+
+class TheLookAhead(unittest.TestCase):
+    """No checkpoint of record reads a day after its k-th counted day (THE LOOK-AHEAD CANARY), a night reads the same
+    as the nights it stands for (one session a night gives what one night over every row gives), and the judge has
+    power: a planted strong edge reaches a pass, a zero edge mostly fails. Through the job's own `night` on invented
+    rows (the judge is protected: nothing else would catch a later edit that reads `days` for `days[:k]`, or a sign
+    that kills the power)."""
+
+    N = 24
+
+    def world(self) -> World:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        world = World(Path(tmp.name))
+        self.addCleanup(world.close)
+        return world
+
+    def test_the_canary_future_days_never_move_a_checkpoint_of_record(self):
+        base = self.world()
+        invented(base, self.N, seed=5)
+        base.reveal()
+        base.night(evening(sessions(START, 80)[-1]))
+        perturbed = self.world()
+        invented(perturbed, self.N, seed=5)
+        rng = np.random.default_rng(17)
+        cuts = {}
+        for pid, rows in perturbed.rows.items():                 # every day after a cut: +5% a day
+            cut = int(rng.integers(0, len(rows)))
+            cuts[f"equity:L{pid:03d}"] = rows[cut][0]
+            perturbed.rows[pid] = rows[:cut] + [(d, 0.05, 1.0, b, 0.0499, s) for d, _, _, b, _, s in rows[cut:]]
+        perturbed.reveal()
+        perturbed.night(evening(sessions(START, 80)[-1]))
+        a, b = base.checks(), perturbed.checks()
+        compared = 0
+        for lineage, cut in cuts.items():
+            before = {k: v for k, v in a.get(lineage, {}).items() if v[0] < cut}
+            after = {k: v for k, v in b.get(lineage, {}).items() if v[0] < cut}
+            self.assertEqual(before, after, lineage)
+            compared += len(before)
+        self.assertGreater(compared, 10)
+        self.assertGreater(sum(1 for v in perturbed.verdicts().values() if v == "pass"),
+                           sum(1 for v in base.verdicts().values() if v == "pass"),
+                           "and the perturbed days are read after the cut")
+
+    def test_one_session_a_night_reads_what_one_night_over_every_row_reads(self):
+        whole = self.world()
+        invented(whole, self.N, seed=9)
+        whole.reveal()
+        whole.night(evening(sessions(START, 80)[-1]))
+        nightly = self.world()
+        invented(nightly, self.N, seed=9)
+        for day in sessions(START, 72):
+            nightly.reveal(day)
+            nightly.night(evening(day))
+        self.assertEqual(nightly.checks(), whole.checks())
+        self.assertEqual(nightly.verdicts(), whole.verdicts())
+        self.assertTrue(whole.verdicts())
+
+    def test_a_planted_edge_passes_and_a_zero_edge_mostly_fails(self):
+        counts = {}
+        for edge in (0.0, 0.004):                                  # zero, and 40 bp a day
+            world = self.world()
+            invented(world, 30, seed=23, edge=edge)
+            world.reveal()
+            world.night(evening(sessions(START, 80)[-1]))
+            counts[edge] = sum(1 for v in world.verdicts().values() if v == "pass")
+        self.assertLessEqual(counts[0.0], 4, counts)               # the bars hold a zero edge to a few passes
+        self.assertGreaterEqual(counts[0.004], 15, counts)         # a strong edge passes
+
+
 class TheHouseRuns(TS.Case):
     """`HouseRuns` on E1's real engine in an `InlineDecider` over a synthetic store (THE FAKES of E3's shadow tests for
     its other packages): the sides of a program's own forward run against the record's own night, and its Train-era
