@@ -469,6 +469,40 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TheTwinAccountReplaysTheRun(unittest.TestCase):
+    """THE RE-BASED TWIN'S ACCOUNT IS THE RUN'S OWN (the review of step two: league/xs/book.py `TwinAccount` is
+    plumbing outside the xs identity, and it sets what A14's panel intent agreement is compared against after a
+    re-base). Driven session by session with NO re-base (`PanelChain.step`, as the night drives it), it gives exactly
+    the engine's run of the same program, bars and capital: the same picks on the same decision days, the same order
+    keys, the same sessions, the same lots. A later edit that moved the loop's order or the session a pick lands on
+    fails here, with no identity move."""
+
+    def test_un_re_based_it_gives_the_runs_own_picks_keys_days_and_lots(self):
+        from types import SimpleNamespace
+
+        from league.xs import engine as E
+
+        s = Seated(self)
+        run = s.reference
+        chain = X.PanelChain(D.InlineDecider(), run, SimpleNamespace(key=s.key, code=CODE, params={}), symbol=s.symbol)
+        self.addCleanup(chain.close)
+        stepped = {day: chain.step(day) for day in chain.days}
+        picks = {str(p["decided"]): p for p in run.result["picks"]}
+        self.assertTrue(picks and any(p["buys"] for p in picks.values()) and any(p["sells"] for p in picks.values()))
+        self.assertEqual({day: pick for day, pick in stepped.items() if pick is not None}, picks)
+        for day, pick in picks.items():
+            slots = [*(x[1] for x in pick["sells"]), *(x[0] for x in pick["buys"])]
+            names = {int(slot): s.symbol(slot, day) for slot in slots}
+            self.assertEqual(X.keys(stepped[day], names), X.keys(pick, names), day)
+        acct = chain.account.acct
+        first = int(run.slice.bars.first)
+        self.assertEqual(chain.days[first:], [row[0] for row in run.result["daily"]], "the run's own sessions")
+        self.assertEqual(chain.account.j, len(chain.days) - 1)
+        lots = sorted([*acct.closed, *acct.lots.values()], key=lambda lot: lot.lid)
+        self.assertEqual([E._lot_row(acct, lot) for lot in lots], run.result["lots"])
+        self.assertEqual(chain.asked, sum(1 for p in picks.values() if p["called"]), "one ask a called decision")
+
+
 class TheTwinIsReBasedAfterADifference(unittest.TestCase):
     """THE CAPTAIN'S A29 AS REGISTERED, APPLIED TO THE PANEL TWIN (release E4 step two; league/ops/forward_xs.py
     `panel_seed`, `PanelChain`; league/xs/book.py `TwinAccount`): a session whose orders differ is written as
