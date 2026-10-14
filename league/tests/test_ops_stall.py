@@ -926,6 +926,74 @@ class LaneAndNightly(Base):
         self.nightly(day="2026-10-06", stop="updater:x", stop_age=3 * HOUR)
         self.assertIn("automation wrote it", self.run_lane(now=NOW + HOUR)["checks"]["forward"]["owner_step"])
 
+    def retrying(self, *, ready_day, day, since, attempts=12, roots=("SLV",), ready_at=None, completed_at=None):
+        """THE SOURCE GAP (Oct 14, 2026): a nightly record that retries `day` since `since`, short on `roots`."""
+        (self.root / "gym-forward.json").write_text(json.dumps({"day": ready_day,
+                                                                 "ready_at": ready_at or f"{ready_day}T06:14:21+00:00"}))
+        data = self.root / "data"
+        data.mkdir(exist_ok=True)
+        gaps = [{"root": r, "known": 389, "expected": 390, "missing_minutes": [826], "packet_sha256": "a" * 64} for r in roots]
+        (data / "nightly.json").write_text(json.dumps({
+            "day": day, "error": "SIPError: incomplete regular-session SIP bars: " + ", ".join(f"{r} 389/390" for r in roots),
+            "retry_at": 0, "completed_at": completed_at,
+            "retrying": {"day": day, "since": since, "attempts": attempts, "roots": list(roots), "gaps": gaps}}))
+
+    def test_a_day_retried_six_hours_names_the_day_and_the_root(self):
+        self.healthy()
+        # Wed Oct 7 10:20Z: Tuesday's day retried since 06:05Z (4.3 h), the ready file on Monday: late, not yet retrying.
+        self.retrying(ready_day="2026-10-05", day="2026-10-06", since="2026-10-07T06:05:00Z")
+        check = self.run_lane()["checks"]["forward"]
+        self.assertNotIn("retried", check["what"])
+        self.assertEqual((check["numbers"]["retrying_day"], check["numbers"]["retrying_roots"]), ("2026-10-06", "slv"))
+        out = self.run_lane(now=at("2026-10-07T12:10:00Z"))
+        check = out["checks"]["forward"]
+        self.assertTrue(check["stalled"])
+        self.assertIn("the nightly has retried 2026-10-06 for 6.1 h (SLV: SIP 389/390, minute 826 (13:46 ET) missing)",
+                      check["what"])
+        self.assertNotIn("carried an error", check["what"])
+        self.assertEqual(check["numbers"]["retrying_hours"], 6.08)
+        self.assertIsNone(check["owner_step"])                         # the House hands the gap off by itself
+        self.assertIn("handed to the forward gap ledger as source-incomplete", check["doing"])
+        self.assertEqual(out["notice"]["sent"], False)                  # told at 10:20Z (late): the INFO pace holds
+
+    def test_a_day_owed_thirty_six_hours_is_the_owners_step(self):
+        self.healthy()
+        self.retrying(ready_day="2026-10-05", day="2026-10-06", since="2026-10-07T06:05:00Z")
+        # Tuesday's day fell due Wed 06:00Z (02:00 EDT); Thu 18:00Z is 36 h on, and the last completion is older still.
+        out = self.run_lane(now=at("2026-10-08T17:50:00Z"))
+        self.assertIsNone(out["checks"]["forward"]["owner_step"])
+        out = self.run_lane(now=at("2026-10-08T18:00:00Z"))
+        check = out["checks"]["forward"]
+        self.assertIn("no forward day has completed in the 36.0 h since 2026-10-06 fell due", check["what"])
+        self.assertIn("the nightly owes 2026-10-06 (SLV: SIP 389/390", check["owner_step"])
+        self.assertEqual(check["numbers"]["owed_hours"], 36.0)
+        self.assertIn("forward", out["stalled"])
+        self.assertTrue(out["notice"]["sent"])                          # a new owner cause: mailed at once
+        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:owner:forward")
+        self.assertIn("the nightly owes 2026-10-06", self.notify.entry("forward")["owner_step"])
+        # A day completed within the 36 h (an outage caught up day by day) is progress, not the owner's step.
+        self.retrying(ready_day="2026-10-05", day="2026-10-06", since="2026-10-07T06:05:00Z",
+                      completed_at="2026-10-08T12:00:00+00:00")
+        self.assertIsNone(self.run_lane(now=at("2026-10-08T18:30:00Z"))["checks"]["forward"]["owner_step"])
+
+    def test_a_weekend_is_no_owed_day(self):
+        self.healthy()
+        # Friday's day landed Saturday 06:14Z; Monday's fails its first try Tuesday 06:05Z: owed 0.3 h, nothing stands.
+        self.retrying(ready_day="2026-10-02", day="2026-10-05", since="2026-10-06T06:05:00Z",
+                      ready_at="2026-10-03T06:14:21+00:00")
+        check = self.run_lane(now=at("2026-10-06T06:20:00Z"))["checks"]["forward"]
+        self.assertFalse(check["stalled"])
+        self.assertEqual(check["numbers"]["owed_hours"], 0.33)
+
+    def test_a_record_from_before_the_retry_clock_counts_from_the_stalls_own_first_sight(self):
+        self.healthy()
+        self.nightly(day="2026-10-06", error="SIPError: incomplete regular-session SIP bars: SLV 389/390")
+        self.run_lane()                                                # the stall first sees the error at 10:20Z
+        # The new release's first failed try writes `retrying` since its own start; the stall keeps the older sight.
+        self.retrying(ready_day="2026-10-06", day="2026-10-07", since="2026-10-07T15:00:00Z")
+        check = self.run_lane(now=at("2026-10-07T16:20:00Z"))["checks"]["forward"]
+        self.assertIn("the nightly has retried 2026-10-07 for 6.0 h", check["what"])
+
     def test_a_done_checkpoint_is_news_never_a_stall_on_the_daily_page(self):
         from league.ops import dlane_report as R
 
