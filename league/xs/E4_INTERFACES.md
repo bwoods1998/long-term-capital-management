@@ -989,3 +989,25 @@ changed no file it reads.
 basket (the panel's look writes none of K's counts, and the backfill's share runner cannot make them), and whether a
 panel program held on a failed leg counts its seat in the book's plan. The re-base of the panel twin. Section 17's
 open points stand.
+
+## 19. Step two, what could be built before XS1-R rules (Oct 14, 2026; `feat/equity-e4-step2`; nothing pushed, nothing deployed)
+
+Built on step one (`6f99652d`) with main's #543 merged (`47ed6872`: the Probe sleeve 0.50 x E). The options execution
+fingerprint (b60410ad...), the equity identity (78022ca6...) and the xs identity (2f0083bc...) do not move. The money
+digest and the constitution digest move ONCE, in the commit marked MONEY (5b95d73e -> de5ed74e; 4ef472e1 ->
+111ede85). Where an earlier section calls one of these owed, this section says what is true now.
+
+| the piece | as built | where |
+|---|---|---|
+| THE A31 LOOK HOLD | `elane.panel.look_rule` ("hold": the policy's default, and how a value the tree does not implement reads; "xs1": XS1 as built): a look waits, nothing spent, with "A31: no XS1 look before XS1-R rules"; Validation is not held; the status says it as `look` | `elane_xs.LOOK_RULES`, `LOOK_RULES_BUILT`, `A31_HOLD`, `look_held`, `status`; `look` |
+| THE PANEL MONEY ROW AND SEAT POOL | `equity_money.panel` {"seats": 1, "sleeve_share": "0.10"}, bounds 0-2 and 0-0.25, never above the Probe sleeve; a pool of panel seats beside the ETF seats; the panel sleeve in every band; a program held on a failed leg keeps its seat | league/constitution.py; league/equity/bands.py `panel_settings`; league/equity/live.py `_pools`, `_pool_plan`, `_put_plan`, `_panel_seat_count`, `_held_seats`; league/swarm/bands.py `equity_seating(..., panel_seats=)`, `panel_pool_seats`; `elane_xs.panel_seats`; league/equity/INTERFACES.md section 19 |
+| THE CLOCK RULE AT VALIDATION AND THE LOOK | every run of the try, the two Train segments and the sealed run through `steady`, `may_run` before each; the House's clock owes (kv `elane_xs_gate_clock`, a backoff, one alert at the third); SLOW spends the try, fails the look | `elane_xs.steady_runs`, `gate_clock_wait`, `gate_clock_fail`, `gate_clock_clear` |
+| K FOR A BASKET | Train-era close days per 250 sessions of the seen spans' 1.0x runs (sealed `elane_xs_activity`) and the Validation close days of the try's 2025 k 1.0 run, written as `elane.SEAT_KEY` beside an entered try; ranked inside the panel pool only | `elane_xs.ACTIVITY_KEY`, `train_activity`, `seat_record` |
+| THE PANEL TWIN'S RE-BASE | A29 as registered: a differing session counts once, then the twin's book is the live basket; `rebased` and `base_agree` written for panel rows; one `twin_rebased` event a re-base | league/ops/forward_xs.py `panel_seed`, `PanelChain`, `twin`; league/xs/book.py `TwinAccount` |
+| THE CLOSE DATES BESIDE EVERY CHECKPOINT | each Done checkpoint's `close_dates` {closes, dates, date_t, unpriced}, beside, never a rule | league/ops/dlane_report.py `close_dates` |
+
+The probe's wiring (section 14) is NOT in this branch: it is the captain's allowance in release E3's seal T1, a patch
+file in the captain's scratch (`e4s2/wiring/`), one for the step-one head and one for this one. The universe commit
+(R-E4b) is generated later from the House's own `tradable.json` (`scripts/gen_universe.py`); nothing here fakes it.
+Owed under a remedy XS1-R may name (R-c: a stated cut-off table and the look rule "xs1-rc"; R-a, R-b; FWD-1): not
+built.
