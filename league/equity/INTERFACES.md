@@ -1083,7 +1083,10 @@ above and this section differ, this section is the code.
   close entry). In the close window the entries wait for the window's exits to fill, or `CLOSE_EXIT_WAIT_S`, as the
   open window waits `exit_wait_s`; in either window an entry sized to nothing is not final while an exit may still
   fill (`_exits_due`): it is sized again each minute and recorded missed at its cut-off. When an exit is still
-  unfilled after the wait, an entry that is cut but not to nothing goes at the smaller size.
+  unfilled after the wait, an entry that is cut but not to nothing goes at the smaller size. (The book's own kind,
+  a share program: unchanged by release E4, and held to main's orders by `league/tests/test_equity_etf_orders.py`.
+  An instance of the panel kind waits instead while an exit of its own program is working: `_cut_waits`, the panel
+  kind's rule B8, league/xs/E4_INTERFACES.md section 17.)
 - **The gateway's unread readings**: a refusal whose cap is in `RETRY_CAPS` is sent again next minute until the
   window's cut-off; it never ends an entry, never counts toward the three refusals that carry an exit, and widens no
   collar. A `403 {cap}` verdict is unchanged.

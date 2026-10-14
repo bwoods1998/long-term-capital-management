@@ -11,7 +11,9 @@ pre-registered (`FGS_SHA`); and every E3 switch is off in code.
 in league/ci.py) to the spec's tables, and to each other: all three applied, or none of them (the base the packages
 were built on). A release with its jobs registered and its settings missing, or its modules unprotected, fails here.
 The three paths are in the gateway's merge list too (gateway/lib/protected.mjs `MERGE_FORBIDDEN`, the one list of
-gateway/ the release changes: its gateway follow-up, made with it), so nothing waits in `ci.PENDING_GATEWAY`.
+gateway/ the release changes: its gateway follow-up, made with it), so nothing of E3's waits in `ci.PENDING_GATEWAY`.
+What waits there since release E4 was merged over E3 is E4's own two (`E4_PENDING`), until the gateway's next
+follow-up; and E4's six data jobs go after E3's six in the registry, last.
 
 `TheDeclaredReceipts` holds the release's declared receipts (the spec's 7.6: the file league/ops/release_receipts.py
 `DECLARATIONS` names) to the spec's text: two receipts, each a count the funnel's `forward_record` carries, read back
@@ -86,6 +88,11 @@ E3_POLICY = {
 #: follow-up of Oct 11, 2026); E3's three (`E3_SWARM`) joined it with the release.
 E2_PENDING = ("league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
               "league/swarm/elane_seal.py", "league/swarm/elane_review.py")
+#: What waits for the gateway's merge list on a tree that carries release E4 (league/ci.py `PENDING_GATEWAY`): the
+#: panel's swarm lane and the universe generator. Not E3's: named here so that nothing else is let in beside them.
+E4_PENDING = ("league/swarm/elane_xs.py", "scripts/gen_universe.py")
+#: FWD1-R's seat path in the swarm (the captain's A33), waiting beside release E4's two for the gateway's follow-up.
+FWD1_PENDING = ("league/swarm/elane_forward.py",)
 #: The forward screen's shape as the spec's section 4 writes it, and its sha.
 FGS_LITERAL = {
     "version": "fgs-prereg-1", "stat": "t_r over the first n counted days", "n": [20, 60, 120, 250], "then_every": 250,
@@ -289,7 +296,8 @@ class TheWiringIsWhole(unittest.TestCase):
             self.assertFalse(set(E3_JOBS) & set(names))
             self.assertEqual(names[-1], "dlane", "the base: the six rows go after the dlane job")
             return
-        self.assertEqual(names[names.index("dlane") + 1:], list(E3_JOBS), "after dlane, in the spec's order")
+        # A later release's jobs go after them (release E4's six data jobs: "they go last", league/ops/registry.py).
+        self.assertEqual(names[names.index("dlane") + 1:][:len(E3_JOBS)], list(E3_JOBS), "after dlane, in the spec's order")
         jobs = registry.by_name()
         for name, (triggers, grace, cpu, wall, in_pause, paid, retry, owner) in E3_JOBS.items():
             job = jobs[name]
@@ -339,8 +347,13 @@ class TheWiringIsWhole(unittest.TestCase):
     def test_the_three_paths_behind_the_wall(self):
         # Release E2's five left the waiting list with the gateway's follow-up of Oct 11, 2026, and E3's three never
         # wait there: the gateway's merge list gains them with the release. FORBIDDEN names all eight, or the five.
+        # What may wait is release E4's two and, beside them, FWD1-R's seat path, and nothing else (none on a tree
+        # without E4).
         gateway = merge_forbidden()
-        self.assertEqual(ci.PENDING_GATEWAY, (), "nothing waits for the gateway")
+        self.assertIn(ci.PENDING_GATEWAY, ((), E4_PENDING, E4_PENDING + FWD1_PENDING),
+                      "nothing of E2's or E3's waits for the gateway")
+        self.assertFalse(set(ci.PENDING_GATEWAY) & {*E2_PENDING, *E3_SWARM})
+        self.assertEqual(set(ci.FORBIDDEN) - gateway, set(ci.PENDING_GATEWAY), "beyond the gateway's list: what waits")
         for path in E2_PENDING:
             self.assertIn(path, ci.FORBIDDEN)
             self.assertIn(path, gateway)

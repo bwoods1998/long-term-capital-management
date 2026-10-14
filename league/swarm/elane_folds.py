@@ -48,6 +48,13 @@ year inside a span starts the following stretch flat (no lot is carried across i
 runs and 1 hidden run a k. THE LOOSENING, reported: such a family is judged on six seen years, not seven; more
 zero-edge versions pass Train, and the screen's false-positive rate per program is untouched (Train is in-sample).
 
+THE PANEL LANE BESIDE IT (release E4, merged over this release). A panel family (structure "panel") also carries a
+`hidden_year` in its spec, drawn by ITS OWN lane over the panel's six Train years (the panel lane's `assign`: this
+module's hash formula spelled there, its own cell and its own count; that lane imports no memory module) and
+honoured by its own bar and brief. `born` counts no panel family (told by `elane_train.record_key`: its Train record
+is not E2's), so the two rotations never move each other; `hidden_year` reads a panel family's year as it reads any
+spec's, and nothing of this module's spans is applied to a panel family (its runs are the panel lane's).
+
 `league.swarm.elane_train` and `elane_seal` are imported INSIDE FUNCTIONS only (`elane_train` and `elane_births`
 import this module at the top), and so is `league.equity.store`. Standard library only.
 """
@@ -96,14 +103,17 @@ def cell_hash(cell: Sequence[str]) -> int:
 
 
 def born(store: Any, cell: Sequence[str]) -> int:
-    """k_c: the equity families already born in `cell` with a `hidden_year` in their spec (alive or retired)."""
+    """k_c: the equity families already born in `cell` with a `hidden_year` in their spec (alive or retired). NEVER A
+    PANEL FAMILY (release E4's structure "panel", merged over this release): its hidden year is the panel lane's own
+    draw over the panel's six Train years (counted over panel families alone), it names no symbol, and read as E2's
+    facts it would stand in the cell (lane, "other", "none") and move that cell's rotation."""
     from . import elane_seal, elane_train
 
     cell = tuple(str(part) for part in cell)
     count = 0
     for fam in elane_seal.equity_families(store):
-        if hidden_year(fam) is None:
-            continue
+        if hidden_year(fam) is None or elane_train.record_key(fam) != elane_train.STATE_KEY:
+            continue  # no hidden year; or a panel family (its Train record is the panel lane's, never E2's)
         facts = elane_seal.train_facts(fam, elane_train.STATE_KEY)
         count += int(elane_train.cell_of(facts["lane"], facts["agenda"], facts["symbols"]) == cell)
     return count

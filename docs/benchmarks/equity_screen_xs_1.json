@@ -1,0 +1,2415 @@
+{
+ "name": "equity_screen_xs_1",
+ "screen": "XS1",
+ "study": "XSCREEN-1 (xscreen-1011): XS1, the panel screen (daily residual over matched placebo portfolios); pre-registration revision 2 pinned 2026-10-11T03:03:08Z",
+ "house_bar": {
+  "what": "this receipt is XSCREEN-1's receipt REBUILT at the House's bar. It is not the study's registered outcome: the registered rule (DR1) adopted c_XS 1.30, and that receipt (sha256 below) stays the study's result",
+  "c_XS": 1.38,
+  "registered_c_XS": 1.3,
+  "registered_receipt_sha256": "98acbb83ffec165dcd4e831a6d5f123b99a6bc5c4ca3acb114e75782555e52e3",
+  "rule": "the pre-registration's DR5 line, reported beside the decision by the study: the smallest feasible k when every N0-S cell's HOF(k) and UBF(k) are first raised by max(0, b(k)), b(k) its archetype's finite-pool bias in HOF at k in the same set and replicate. The study measured it as 1.38 (this receipt's cost_of_rule.c_XS_with_finite_pool_bias)",
+  "decided": "the captain's decision A23 (2026-10-11): the House runs XS1 at this bar, because a known bias left out of a bar is a loosened rule",
+  "built": "by the study's own code from its saved run: the report (code/xs_report.py) read at k = 138 over the saved jobs (the per-world gate indices of the one real run; no world was simulated again for a calibration, family-wise, bias or power row), and this receipt by code/receipt.py. Only the threshold index differs from the registered receipt's build; `ladder` keeps the registered rule's own row. One assert of xs_report.py (that the decision's k is the registered rule's) was replaced by: the analysis gives the registered k again and gives this k under the bias-raised rule",
+  "arms": "the report-only arms TAIL and STYLE are read at the adopted threshold (the pre-registration's 9.4) and the study saved their reads at its own threshold only, so both were run again at this one by the study's own command (code/xs_arms.py, the pinned panel files, the registered seeds); the same command at the registered threshold gave the study's saved arm results again, field for field. They decide nothing: `style_known_rate`, `style_known_max`, the sentence's style figure, the screen flag and the 'tail' flag read them",
+  "not_changed": "the rule, the stratum, the margin, the placebo bar, the windows, the lineage rule, the limits and the note are the registered receipt's, word for word; the review's notes for a later revision of the receipt are not applied here",
+  "sha256": {
+   "equity_screen_xs_1.json": "98acbb83ffec165dcd4e831a6d5f123b99a6bc5c4ca3acb114e75782555e52e3",
+   "builder_output": "794088174fabc8d9f2a43d4a3445e1dcf86a7245bfa91218396d869e878715e1",
+   "work/rebuild_138/rebuild.py": "b2312a5ae827007822e6d82569e0b6149bc2c1c1572592769fbb29d6f8eacf10",
+   "work/run_c138/decision.json": "88d8bef053f01e553ff6bd9c64b3008863f2647563257921645627f3b12c36b9",
+   "work/run_c138/arm_tail.pkl": "efb50f3d0a75151ef4198d02846703779925fb209959cf9fbffbd28b2a655999",
+   "work/run_c138/arm_style.pkl": "5c19985c8b53841d7b6c33cbc34ca5303b6e758c3a2a769d260ed0069e44a343"
+  }
+ },
+ "rule": "XS1 (panel screen), per program, one holdout look per lineage. Series: the daily RESIDUAL x_t = the program's P&L after its costs on E0 (constant-weight lot accounting) minus the cost-free P&L of each lot's matched cell (sector x beta third x 12-1 momentum third, fixed at the lot's decision date). Pre-check on Validation: (RT_V >= 20 or ID_V >= 120) and sum_V(x) > 1e-12. Look on the holdout (194 sessions): pass = pre-check AND sum_H(x) > 1e-12 AND sum_H(x15) > 1e-12 AND t_H >= c_used AND p_plac <= 0.12, with t_H = mean_H(x) / sd_H(x, ddof 1) x sqrt(194), c_used = max(c_XS, c_p + 0.05), c_p the program's own exact floor, and p_plac = (1 + #{999 matched placebo portfolios with t_H >= the program's}) / 1000.",
+ "contract": {
+  "name": "C-XS-1",
+  "long_only": true,
+  "max_weight": 0.2,
+  "max_sum": 1.0,
+  "max_names": 40,
+  "min_notional_usd": 10,
+  "keep_rule": "a held slot with a positive target is kept (no trade, no resize); a held slot absent from the target is sold whole; a new slot is bought as one lot",
+  "max_buys": 12,
+  "max_sells": 12,
+  "fills": "decide at the close of d; fill in session d + 1 at the declared open or close; a lot is never sold in the session it was bought; max_hold_sessions <= 60",
+  "costs": "half-spread 3 bp on every fill; SEC fee and FINRA TAF on sells, each rounded up to the cent per order; no commission",
+  "E0": 1000,
+  "house_exits": "a held name not in U(d) at a session close is sold at the next open; the same exit law binds every placebo counterpart and cell member",
+  "ctx": "no ticker, no name, no date, no price level, no size or liquidity rank; scale-free per-slot fields, statistical sector and beta"
+ },
+ "fp_cap": 0.12,
+ "owner_wall": 0.15,
+ "c_XS": 1.38,
+ "c_margin": 0.05,
+ "alpha_plac": 0.12,
+ "placebo_draws": 999,
+ "stratum": {
+  "rung": "R0",
+  "definition": "sector = the sector fund (of those with at least 200 valid returns) whose market-residual returns correlate most with the name's over the 252 sessions to d; beta = OLS on the market fund over the same window (at least 200 valid returns); momentum = c(d - 21) / c(d - 252) - 1. Per sector of n names: (beta groups, momentum groups) = (3, 3) when n >= 45, (2, 2) when 20-44, (1, 2) when 10-19, (1, 1) when 5-9; sectors of 4 or fewer names share one pooled cell. Names sorted by (beta, asset id) into beta groups floor(q nb / n), then within a beta group by (momentum, asset id) into floor(q nm / m).",
+  "min_cell": 5,
+  "window": 252,
+  "min_valid": 200,
+  "funds": [
+   "XLB",
+   "XLE",
+   "XLF",
+   "XLI",
+   "XLK",
+   "XLP",
+   "XLU",
+   "XLV",
+   "XLY",
+   "XLRE",
+   "XLC"
+  ],
+  "market": "SPY"
+ },
+ "residual": {
+  "definition": "per lot: cost-free leg returns of every cell member (open entry c/o - 1 at half exposure, held c/c - 1, open exit o/c_prev - 1 at half exposure, close exit c/c_prev - 1); B_t = sum over lots of weight x the mean leg return of the lot's cell members valid that session; x_t = r_t - B_t with r_t the program's P&L after spread and sell fees; x15_t = x_t - 0.5 s_t - f_t; the cell member list is fixed at the decision close (less members failing entry validity) for the lot's life; a member that leaves the eligible set takes the open-exit leg the next session and then drops out of the mean; an invalid own-name leg is neutral",
+  "placebo_law": "each draw gives every lot a counterpart in its cell; decisions in time order; counterparts of lots exiting at the next fill are released; cells in ascending id, lots within a cell by (weight descending, asset id ascending); one uniform key per member, keys of members the draw already holds raised by 2, the k smallest keys become the counterparts in order; the placebo series is cost-free",
+  "seed_rule": "numpy default_rng(int.from_bytes(sha256('XS1|' + receipt sha256 + '|' + program code sha256 + '|placebo').digest()[:16], 'big')); one rng.random((999, members)) call per decision and cell; fixed before the look"
+ },
+ "precheck": {
+  "rt_min": 20,
+  "id_min": 120,
+  "rule": "(RT_V >= 20 or ID_V >= 120) and sum_V(x) > 1e-12; a failed pre-check spends no look and spends the lineage's try"
+ },
+ "look": {
+  "rule": "pre-check AND sum_H(x) > 1e-12 AND sum_H(x15) > 1e-12 AND t_H >= c_used AND p_plac <= 0.12 (placebo count <= 119 of 999); t_H undefined (fails) when sd_H < 1e-12 or not finite",
+  "c_used": "max(c_XS, c_p + 0.05) on the 0.01 grid: k_used = max(k_XS, k_p + 5); k_used > 500 is INELIGIBLE",
+  "stress": "sum_H x15 > 1e-12, x15 = x - 0.5 s - f (1.5 times the half-spread, each sell fee twice)"
+ },
+ "floor": {
+  "method": "exact",
+  "statistic": "t_H of the daily residual x, L = 194",
+  "cells": "(i) both Train-era pools together when both exist with at least 251 sessions each; (ii) each single pool of at least 550 sessions alone",
+  "pools": "the program's own (x, w) on 2016-01-04..2019-12-31 and 2022-01-03..2024-12-31, from its first decision + 2 sessions",
+  "worlds": "every holdout block of 194 consecutive pool sessions, circular inside one pool, weighted by its number of non-overlapping Validation blocks",
+  "null": "N0: x0 = x - w kappa_H, kappa_H = sum_k W_k sum(x) / sum_k W_k sum(w)",
+  "ineligible": "no floor cell; a cell with no tuple weight; a cell with no k in 0..500 holding 12%; zero exposure; a non-finite series; a session outside the spans; k_used > 500",
+  "own_rate": "own_fp = the largest over the floor cells of HO[k_used] / T; IN-SAMPLE (at most 12% by construction), no placebo leg; computed on the House, never committed",
+  "k_cell": "the smallest k in 0..500 with HO[k] x 100 <= 12 x T; k_p = the largest k_cell; c_p = k_p / 100"
+ },
+ "eligibility": {
+  "program": "a panel program under contract C-XS-1 with at least one floor cell and k_used <= 500; no look when INELIGIBLE or when the pre-check fails",
+  "universe": "U(d): index member on d, d + 1, d + 2; accepted series with a valid close on d and d - 1; the eligible class of its company; beta, momentum and sector defined (253 sessions of history)",
+  "entry": "a valid open and close at the fill session and a valid close the session after"
+ },
+ "windows": {
+  "validation": "calendar 2025 (250 sessions)",
+  "holdout": "2026-01-02 .. 2026-10-09: exactly 194 sessions; later sessions are forward days only",
+  "calibrated_L": 194
+ },
+ "lineage": {
+  "holdout_looks": 1,
+  "validation_tries": 1,
+  "same_lineage": "the same template, or a Train daily correlation of 0.7 or more with a program already looked at or already refused at the pre-check, in either series: the residual x or the universe excess u (the residual computed with one cell holding all of U(d))",
+  "series": [
+   "x",
+   "u"
+  ],
+  "no_feedback": "Validation, look, placebo-rank and forward outcomes of panel programs are never fed to a generator",
+  "routes": "a lineage that took an XS1 look can take no S2 look, and the reverse; the forward route F-GS-XS is specified in the pre-registration and not measured here"
+ },
+ "R3_retry_permitted": false,
+ "labels": {
+  "basket": "'basket-led' when the sum over V and H of B_t >= the sum over V and H of x_t, else 'selection-led'",
+  "french": "OLS of x on (Mkt-RF, SMB, HML, Mom, ST_Rev) daily over V and the covered part of H (at least 120 days, else 'unmeasured'); 'style-loaded: <factors with |t| >= 2.0>' or 'no style loading found'; never a gate"
+ },
+ "flags": {
+  "X1": [],
+  "X2": [],
+  "X3": [],
+  "X4": [],
+  "X5": [],
+  "X6": [],
+  "X7": [],
+  "X8": []
+ },
+ "screen_flags": [
+  "style-open"
+ ],
+ "ladder": [
+  {
+   "rung": "R0",
+   "feasible": true,
+   "c_XS": 1.3
+  }
+ ],
+ "fp_zero_edge": {
+  "X1": {
+   "XH|N0-S": [
+    0.0739,
+    0.1276,
+    0.0595,
+    0.102
+   ],
+   "XH|N0-P": [
+    0.0926,
+    0.1095,
+    0.0813,
+    0.097
+   ],
+   "XL|N0-S": [
+    0.0847,
+    0.1182,
+    0.0757,
+    0.1058
+   ],
+   "XL|N0-P": [
+    0.084,
+    0.0966,
+    0.075,
+    0.0865
+   ],
+   "XCL|N0-S": [
+    0.0869,
+    0.1248,
+    0.0783,
+    0.1166
+   ],
+   "XCL|N0-P": [
+    0.0807,
+    0.096,
+    0.0713,
+    0.0851
+   ],
+   "XCH|N0-S": [
+    0.0591,
+    null,
+    0.0474,
+    null
+   ],
+   "XCH|N0-P": [
+    0.1,
+    null,
+    0.0891,
+    null
+   ]
+  },
+  "X2": {
+   "XH|N0-S": [
+    0.0786,
+    0.1236,
+    0.0643,
+    0.1013
+   ],
+   "XH|N0-P": [
+    0.0917,
+    0.1109,
+    0.0809,
+    0.0983
+   ],
+   "XL|N0-S": [
+    0.0716,
+    0.1006,
+    0.06,
+    0.0842
+   ],
+   "XL|N0-P": [
+    0.0886,
+    0.1041,
+    0.0798,
+    0.0944
+   ],
+   "XCL|N0-S": [
+    0.0581,
+    0.0931,
+    0.047,
+    0.0781
+   ],
+   "XCL|N0-P": [
+    0.089,
+    0.1085,
+    0.08,
+    0.0979
+   ],
+   "XCH|N0-S": [
+    0.0482,
+    null,
+    0.0342,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0981,
+    null,
+    0.0861,
+    null
+   ]
+  },
+  "X3": {
+   "XH|N0-S": [
+    0.0547,
+    0.0932,
+    0.0495,
+    0.0841
+   ],
+   "XH|N0-P": [
+    0.0894,
+    0.1104,
+    0.0732,
+    0.0905
+   ],
+   "XL|N0-S": [
+    0.0605,
+    0.0952,
+    0.0555,
+    0.0876
+   ],
+   "XL|N0-P": [
+    0.0852,
+    0.0986,
+    0.0729,
+    0.085
+   ],
+   "XCL|N0-S": [
+    0.0554,
+    0.0899,
+    0.0514,
+    0.0854
+   ],
+   "XCL|N0-P": [
+    0.0864,
+    0.1019,
+    0.0735,
+    0.0876
+   ],
+   "XCH|N0-S": [
+    0.0379,
+    null,
+    0.0329,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0925,
+    null,
+    0.0755,
+    null
+   ]
+  },
+  "X4": {
+   "XH|N0-S": [
+    0.0608,
+    0.1024,
+    0.0523,
+    0.0842
+   ],
+   "XH|N0-P": [
+    0.0815,
+    0.0996,
+    0.0689,
+    0.0839
+   ],
+   "XL|N0-S": [
+    0.0675,
+    0.1002,
+    0.0603,
+    0.0896
+   ],
+   "XL|N0-P": [
+    0.0963,
+    0.1114,
+    0.0854,
+    0.0992
+   ],
+   "XCL|N0-S": [
+    0.0701,
+    0.1102,
+    0.0613,
+    0.0981
+   ],
+   "XCL|N0-P": [
+    0.0954,
+    0.1138,
+    0.0845,
+    0.1013
+   ],
+   "XCH|N0-S": [
+    0.0617,
+    null,
+    0.0492,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0782,
+    null,
+    0.0669,
+    null
+   ]
+  },
+  "X5": {
+   "XH|N0-S": [
+    0.0638,
+    0.1062,
+    0.0533,
+    0.0895
+   ],
+   "XH|N0-P": [
+    0.0729,
+    0.088,
+    0.0624,
+    0.0758
+   ],
+   "XL|N0-S": [
+    0.0562,
+    0.083,
+    0.0501,
+    0.0744
+   ],
+   "XL|N0-P": [
+    0.0765,
+    0.0914,
+    0.0691,
+    0.0839
+   ],
+   "XCL|N0-S": [
+    0.0551,
+    0.0869,
+    0.0484,
+    0.0777
+   ],
+   "XCL|N0-P": [
+    0.0804,
+    0.0972,
+    0.0728,
+    0.0896
+   ],
+   "XCH|N0-S": [
+    0.0296,
+    null,
+    0.0217,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0727,
+    null,
+    0.0618,
+    null
+   ]
+  },
+  "X6": {
+   "XH|N0-S": [
+    0.0544,
+    0.1115,
+    0.0441,
+    0.0865
+   ],
+   "XH|N0-P": [
+    0.0802,
+    0.0953,
+    0.0714,
+    0.0851
+   ],
+   "XL|N0-S": [
+    0.0609,
+    0.0986,
+    0.0549,
+    0.0902
+   ],
+   "XL|N0-P": [
+    0.0647,
+    0.0779,
+    0.0588,
+    0.0709
+   ],
+   "XCL|N0-S": [
+    0.0543,
+    0.0891,
+    0.0472,
+    0.0783
+   ],
+   "XCL|N0-P": [
+    0.0631,
+    0.0763,
+    0.0572,
+    0.0694
+   ],
+   "XCH|N0-S": [
+    0.0445,
+    null,
+    0.0394,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0824,
+    null,
+    0.0733,
+    null
+   ]
+  },
+  "X7": {
+   "XH|N0-S": [
+    0.0606,
+    0.1043,
+    0.0555,
+    0.0928
+   ],
+   "XH|N0-P": [
+    0.095,
+    0.1152,
+    0.0798,
+    0.0981
+   ],
+   "XL|N0-S": [
+    0.07,
+    0.1042,
+    0.0654,
+    0.1014
+   ],
+   "XL|N0-P": [
+    0.0876,
+    0.1051,
+    0.0763,
+    0.0924
+   ],
+   "XCL|N0-S": [
+    0.0688,
+    0.1087,
+    0.0641,
+    0.105
+   ],
+   "XCL|N0-P": [
+    0.086,
+    0.1082,
+    0.0763,
+    0.0977
+   ],
+   "XCH|N0-S": [
+    0.0324,
+    null,
+    0.0266,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0934,
+    null,
+    0.0816,
+    null
+   ]
+  },
+  "X8": {
+   "XH|N0-S": [
+    0.0583,
+    0.1156,
+    0.0483,
+    0.0924
+   ],
+   "XH|N0-P": [
+    0.0943,
+    0.1113,
+    0.0813,
+    0.0964
+   ],
+   "XL|N0-S": [
+    0.0677,
+    0.1015,
+    0.0598,
+    0.0912
+   ],
+   "XL|N0-P": [
+    0.082,
+    0.096,
+    0.0722,
+    0.085
+   ],
+   "XCL|N0-S": [
+    0.0654,
+    0.1058,
+    0.0559,
+    0.0932
+   ],
+   "XCL|N0-P": [
+    0.0811,
+    0.0971,
+    0.0716,
+    0.0872
+   ],
+   "XCH|N0-S": [
+    0.0393,
+    null,
+    0.0306,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0894,
+    null,
+    0.0782,
+    null
+   ]
+  }
+ },
+ "fp_zero_edge_B": {
+  "X1": {
+   "XH|N0-S": [
+    0.0739,
+    0.1311,
+    0.0595,
+    0.1037
+   ],
+   "XH|N0-P": [
+    0.0781,
+    0.0979,
+    0.0701,
+    0.0877
+   ],
+   "XL|N0-S": [
+    0.0847,
+    0.12,
+    0.0757,
+    0.1093
+   ],
+   "XL|N0-P": [
+    0.0775,
+    0.089,
+    0.0712,
+    0.0822
+   ],
+   "XCL|N0-S": [
+    0.0869,
+    0.1247,
+    0.0783,
+    0.1132
+   ],
+   "XCL|N0-P": [
+    0.0761,
+    0.0895,
+    0.07,
+    0.083
+   ],
+   "XCH|N0-S": [
+    0.0591,
+    null,
+    0.0474,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0752,
+    null,
+    0.0676,
+    null
+   ]
+  },
+  "X2": {
+   "XH|N0-S": [
+    0.0786,
+    0.123,
+    0.0643,
+    0.1013
+   ],
+   "XH|N0-P": [
+    0.0845,
+    0.1057,
+    0.0743,
+    0.0927
+   ],
+   "XL|N0-S": [
+    0.0716,
+    0.1019,
+    0.06,
+    0.0881
+   ],
+   "XL|N0-P": [
+    0.0842,
+    0.1006,
+    0.0749,
+    0.0897
+   ],
+   "XCL|N0-S": [
+    0.0581,
+    0.0902,
+    0.047,
+    0.0766
+   ],
+   "XCL|N0-P": [
+    0.0845,
+    0.1038,
+    0.0747,
+    0.0924
+   ],
+   "XCH|N0-S": [
+    0.0482,
+    null,
+    0.0342,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0861,
+    null,
+    0.0746,
+    null
+   ]
+  },
+  "X3": {
+   "XH|N0-S": [
+    0.0546,
+    0.0944,
+    0.0495,
+    0.0851
+   ],
+   "XH|N0-P": [
+    0.0948,
+    0.1125,
+    0.0816,
+    0.0977
+   ],
+   "XL|N0-S": [
+    0.0605,
+    0.0962,
+    0.0555,
+    0.0892
+   ],
+   "XL|N0-P": [
+    0.0782,
+    0.0947,
+    0.0681,
+    0.0833
+   ],
+   "XCL|N0-S": [
+    0.0554,
+    0.0917,
+    0.0514,
+    0.0863
+   ],
+   "XCL|N0-P": [
+    0.079,
+    0.0996,
+    0.069,
+    0.0885
+   ],
+   "XCH|N0-S": [
+    0.0379,
+    null,
+    0.0329,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0919,
+    null,
+    0.0808,
+    null
+   ]
+  },
+  "X4": {
+   "XH|N0-S": [
+    0.0608,
+    0.1064,
+    0.0523,
+    0.0863
+   ],
+   "XH|N0-P": [
+    0.0903,
+    0.1064,
+    0.0737,
+    0.0875
+   ],
+   "XL|N0-S": [
+    0.0678,
+    0.0996,
+    0.0606,
+    0.0902
+   ],
+   "XL|N0-P": [
+    0.0987,
+    0.116,
+    0.0833,
+    0.0998
+   ],
+   "XCL|N0-S": [
+    0.0707,
+    0.1144,
+    0.0619,
+    0.1006
+   ],
+   "XCL|N0-P": [
+    0.1002,
+    0.1208,
+    0.0856,
+    0.1052
+   ],
+   "XCH|N0-S": [
+    0.0617,
+    null,
+    0.0492,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0944,
+    null,
+    0.0783,
+    null
+   ]
+  },
+  "X5": {
+   "XH|N0-S": [
+    0.0625,
+    0.1028,
+    0.0532,
+    0.091
+   ],
+   "XH|N0-P": [
+    0.0798,
+    0.1004,
+    0.0684,
+    0.0864
+   ],
+   "XL|N0-S": [
+    0.056,
+    0.0841,
+    0.05,
+    0.0744
+   ],
+   "XL|N0-P": [
+    0.0757,
+    0.087,
+    0.067,
+    0.0776
+   ],
+   "XCL|N0-S": [
+    0.0545,
+    0.0899,
+    0.0481,
+    0.0773
+   ],
+   "XCL|N0-P": [
+    0.0776,
+    0.0912,
+    0.0687,
+    0.082
+   ],
+   "XCH|N0-S": [
+    0.0289,
+    null,
+    0.0215,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0961,
+    null,
+    0.082,
+    null
+   ]
+  },
+  "X6": {
+   "XH|N0-S": [
+    0.0544,
+    0.1127,
+    0.0441,
+    0.0897
+   ],
+   "XH|N0-P": [
+    0.0709,
+    0.0874,
+    0.0641,
+    0.0796
+   ],
+   "XL|N0-S": [
+    0.0609,
+    0.1015,
+    0.0549,
+    0.0903
+   ],
+   "XL|N0-P": [
+    0.0659,
+    0.0787,
+    0.0602,
+    0.0722
+   ],
+   "XCL|N0-S": [
+    0.0543,
+    0.0903,
+    0.0472,
+    0.0788
+   ],
+   "XCL|N0-P": [
+    0.0642,
+    0.0793,
+    0.0592,
+    0.0731
+   ],
+   "XCH|N0-S": [
+    0.0445,
+    null,
+    0.0394,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0678,
+    null,
+    0.0614,
+    null
+   ]
+  },
+  "X7": {
+   "XH|N0-S": [
+    0.0608,
+    0.1056,
+    0.0556,
+    0.0949
+   ],
+   "XH|N0-P": [
+    0.0926,
+    0.1117,
+    0.081,
+    0.099
+   ],
+   "XL|N0-S": [
+    0.07,
+    0.1029,
+    0.0654,
+    0.0995
+   ],
+   "XL|N0-P": [
+    0.0839,
+    0.0982,
+    0.0751,
+    0.0892
+   ],
+   "XCL|N0-S": [
+    0.069,
+    0.1062,
+    0.0642,
+    0.1027
+   ],
+   "XCL|N0-P": [
+    0.0852,
+    0.1024,
+    0.0761,
+    0.0938
+   ],
+   "XCH|N0-S": [
+    0.0326,
+    null,
+    0.0268,
+    null
+   ],
+   "XCH|N0-P": [
+    0.1015,
+    null,
+    0.0893,
+    null
+   ]
+  },
+  "X8": {
+   "XH|N0-S": [
+    0.0583,
+    0.1194,
+    0.0483,
+    0.0942
+   ],
+   "XH|N0-P": [
+    0.0831,
+    0.1026,
+    0.0735,
+    0.0914
+   ],
+   "XL|N0-S": [
+    0.0677,
+    0.1014,
+    0.0598,
+    0.0914
+   ],
+   "XL|N0-P": [
+    0.079,
+    0.0917,
+    0.0712,
+    0.0832
+   ],
+   "XCL|N0-S": [
+    0.0654,
+    0.1065,
+    0.0559,
+    0.0943
+   ],
+   "XCL|N0-P": [
+    0.0765,
+    0.0914,
+    0.0694,
+    0.0834
+   ],
+   "XCH|N0-S": [
+    0.0393,
+    null,
+    0.0306,
+    null
+   ],
+   "XCH|N0-P": [
+    0.0699,
+    null,
+    0.0629,
+    null
+   ]
+  }
+ },
+ "fp_zero_edge_max": {
+  "rate": 0.1002,
+  "ub": 0.1311,
+  "archetype": "X4",
+  "cell": "XCL|N0-P|B",
+  "ub_archetype": "X1",
+  "ub_cell": "XH|N0-S|B"
+ },
+ "fp_validation_known_max": {
+  "rate": 0.1073,
+  "archetype": "X4",
+  "cell": "XCL|N0-P|B"
+ },
+ "family_wise_zero_edge": {
+  "X1": {
+   "XH": [
+    0.1156,
+    0.1924,
+    0.507
+   ],
+   "XL": [
+    0.1041,
+    0.295,
+    0.5314
+   ],
+   "XCL": [
+    0.149,
+    0.339,
+    0.5488
+   ]
+  },
+  "X2": {
+   "XH": [
+    0.1459,
+    0.2761,
+    0.4342
+   ],
+   "XL": [
+    0.0883,
+    0.255,
+    0.4505
+   ],
+   "XCL": [
+    0.0478,
+    0.1827,
+    0.3458
+   ]
+  },
+  "X3": {
+   "XH": [
+    0.1663,
+    0.1827,
+    0.2515
+   ],
+   "XL": [
+    0.1243,
+    0.2056,
+    0.3023
+   ],
+   "XCL": [
+    0.1133,
+    0.1511,
+    0.2415
+   ]
+  },
+  "X4": {
+   "XH": [
+    0.1602,
+    0.3211,
+    0.3913
+   ],
+   "XL": [
+    0.1693,
+    0.2808,
+    0.4431
+   ],
+   "XCL": [
+    0.1607,
+    0.2468,
+    0.3931
+   ]
+  },
+  "X5": {
+   "XH": [
+    0.1097,
+    0.2897,
+    0.4608
+   ],
+   "XL": [
+    0.0813,
+    0.2103,
+    0.3624
+   ],
+   "XCL": [
+    0.0569,
+    0.164,
+    0.3343
+   ]
+  },
+  "X6": {
+   "XH": [
+    0.0991,
+    0.173,
+    0.352
+   ],
+   "XL": [
+    0.1387,
+    0.1799,
+    0.3548
+   ],
+   "XCL": [
+    0.1213,
+    0.1932,
+    0.2995
+   ]
+  },
+  "X7": {
+   "XH": [
+    0.12,
+    0.2113,
+    0.3872
+   ],
+   "XL": [
+    0.1441,
+    0.2106,
+    0.4145
+   ],
+   "XCL": [
+    0.165,
+    0.2319,
+    0.4175
+   ]
+  },
+  "X8": {
+   "XH": [
+    0.1336,
+    0.326,
+    0.4716
+   ],
+   "XL": [
+    0.2281,
+    0.3834,
+    0.5181
+   ],
+   "XCL": [
+    0.2461,
+    0.3861,
+    0.4889
+   ]
+  }
+ },
+ "family_wise_8_max": 0.5488,
+ "finite_pool_bias": {
+  "X1": {
+   "XH": [
+    0.0204,
+    0.0206
+   ],
+   "XL": [
+    0.0071,
+    0.006
+   ],
+   "XCL": [
+    0.0083,
+    0.0069
+   ]
+  },
+  "X2": {
+   "XH": [
+    0.0247,
+    0.0255
+   ],
+   "XL": [
+    0.0176,
+    0.0162
+   ],
+   "XCL": [
+    0.0217,
+    0.0194
+   ]
+  },
+  "X3": {
+   "XH": [
+    0.009,
+    0.0109
+   ],
+   "XL": [
+    0.0103,
+    0.0106
+   ],
+   "XCL": [
+    0.0134,
+    0.0125
+   ]
+  },
+  "X4": {
+   "XH": [
+    0.0117,
+    0.0133
+   ],
+   "XL": [
+    0.0164,
+    0.0146
+   ],
+   "XCL": [
+    0.0162,
+    0.0139
+   ]
+  },
+  "X5": {
+   "XH": [
+    0.0084,
+    0.0099
+   ],
+   "XL": [
+    0.0051,
+    0.0048
+   ],
+   "XCL": [
+    0.0095,
+    0.0091
+   ]
+  },
+  "X6": {
+   "XH": [
+    0.02,
+    0.0201
+   ],
+   "XL": [
+    0.0037,
+    0.0039
+   ],
+   "XCL": [
+    0.0055,
+    0.0057
+   ]
+  },
+  "X7": {
+   "XH": [
+    0.022,
+    0.0222
+   ],
+   "XL": [
+    0.0088,
+    0.0081
+   ],
+   "XCL": [
+    0.0117,
+    0.0112
+   ]
+  },
+  "X8": {
+   "XH": [
+    0.0222,
+    0.022
+   ],
+   "XL": [
+    0.0046,
+    0.0035
+   ],
+   "XCL": [
+    0.0049,
+    0.0036
+   ]
+  }
+ },
+ "finite_pool_bias_max": 0.0247,
+ "style_known_rate": {
+  "BIG": 0.2359,
+  "HIBETA": 0.2999,
+  "HIMOM": 0.0433,
+  "HIVOL": 0.2984,
+  "SMALL": 0.2256,
+  "LOBETA": 0.125,
+  "LOMOM": 0.1845,
+  "LOVOL": 0.1825
+ },
+ "style_known_max": 0.2999,
+ "power": {
+  "X1": {
+   "XH|N0-S|e02": [
+    0.056,
+    0.1048,
+    0.0708
+   ],
+   "XH|N0-S|e04": [
+    0.11,
+    0.167,
+    0.0942
+   ],
+   "XH|N0-S|e10": [
+    0.4191,
+    0.456,
+    0.1642
+   ],
+   "XH|N0-P|e02": [
+    0.0814,
+    0.1276,
+    0.069
+   ],
+   "XH|N0-P|e04": [
+    0.1399,
+    0.1909,
+    0.0924
+   ],
+   "XH|N0-P|e10": [
+    0.4118,
+    0.4452,
+    0.1624
+   ],
+   "XL|N0-S|e02": [
+    0.0753,
+    0.1296,
+    0.0707
+   ],
+   "XL|N0-S|e04": [
+    0.1393,
+    0.1946,
+    0.0941
+   ],
+   "XL|N0-S|e10": [
+    0.4421,
+    0.4767,
+    0.1642
+   ],
+   "XL|N0-P|e02": [
+    0.0733,
+    0.1202,
+    0.0687
+   ],
+   "XL|N0-P|e04": [
+    0.1298,
+    0.1815,
+    0.0921
+   ],
+   "XL|N0-P|e10": [
+    0.4119,
+    0.4449,
+    0.1621
+   ],
+   "XCL|N0-S|e02": [
+    0.0809,
+    0.1331,
+    0.0707
+   ],
+   "XCL|N0-S|e04": [
+    0.1497,
+    0.206,
+    0.0941
+   ],
+   "XCL|N0-S|e10": [
+    0.463,
+    0.4921,
+    0.1642
+   ],
+   "XCL|N0-P|e02": [
+    0.0702,
+    0.1168,
+    0.0687
+   ],
+   "XCL|N0-P|e04": [
+    0.1278,
+    0.1789,
+    0.0921
+   ],
+   "XCL|N0-P|e10": [
+    0.4142,
+    0.4468,
+    0.1621
+   ],
+   "XCH|N0-S|e02": [
+    0.0312,
+    0.082,
+    0.0708
+   ],
+   "XCH|N0-S|e04": [
+    0.0839,
+    0.131,
+    0.0942
+   ],
+   "XCH|N0-S|e10": [
+    0.4436,
+    0.462,
+    0.1642
+   ],
+   "XCH|N0-P|e02": [
+    0.0891,
+    0.1364,
+    0.069
+   ],
+   "XCH|N0-P|e04": [
+    0.1533,
+    0.2029,
+    0.0924
+   ],
+   "XCH|N0-P|e10": [
+    0.4339,
+    0.4588,
+    0.1624
+   ]
+  },
+  "X2": {
+   "XH|N0-S|e02": [
+    0.0537,
+    0.1074,
+    0.0323
+   ],
+   "XH|N0-S|e04": [
+    0.1153,
+    0.176,
+    0.0557
+   ],
+   "XH|N0-S|e10": [
+    0.4457,
+    0.4724,
+    0.1258
+   ],
+   "XH|N0-P|e02": [
+    0.0912,
+    0.1344,
+    0.0295
+   ],
+   "XH|N0-P|e04": [
+    0.1616,
+    0.207,
+    0.0531
+   ],
+   "XH|N0-P|e10": [
+    0.482,
+    0.5058,
+    0.1239
+   ],
+   "XL|N0-S|e02": [
+    0.0667,
+    0.1116,
+    0.0324
+   ],
+   "XL|N0-S|e04": [
+    0.1318,
+    0.182,
+    0.0557
+   ],
+   "XL|N0-S|e10": [
+    0.4685,
+    0.4986,
+    0.1259
+   ],
+   "XL|N0-P|e02": [
+    0.0852,
+    0.1314,
+    0.0295
+   ],
+   "XL|N0-P|e04": [
+    0.1551,
+    0.203,
+    0.0531
+   ],
+   "XL|N0-P|e10": [
+    0.4809,
+    0.5031,
+    0.1239
+   ],
+   "XCL|N0-S|e02": [
+    0.0594,
+    0.0996,
+    0.0324
+   ],
+   "XCL|N0-S|e04": [
+    0.1292,
+    0.1763,
+    0.0557
+   ],
+   "XCL|N0-S|e10": [
+    0.4816,
+    0.5152,
+    0.1259
+   ],
+   "XCL|N0-P|e02": [
+    0.0879,
+    0.133,
+    0.0295
+   ],
+   "XCL|N0-P|e04": [
+    0.1607,
+    0.2065,
+    0.0531
+   ],
+   "XCL|N0-P|e10": [
+    0.4984,
+    0.5187,
+    0.1239
+   ],
+   "XCH|N0-S|e02": [
+    0.0313,
+    0.0796,
+    0.0323
+   ],
+   "XCH|N0-S|e04": [
+    0.0939,
+    0.1562,
+    0.0557
+   ],
+   "XCH|N0-S|e10": [
+    0.4568,
+    0.473,
+    0.1258
+   ],
+   "XCH|N0-P|e02": [
+    0.1,
+    0.1444,
+    0.0295
+   ],
+   "XCH|N0-P|e04": [
+    0.1749,
+    0.2203,
+    0.0531
+   ],
+   "XCH|N0-P|e10": [
+    0.5128,
+    0.5328,
+    0.1239
+   ]
+  },
+  "X3": {
+   "XH|N0-S|e02": [
+    0.0438,
+    0.0844,
+    0.0325
+   ],
+   "XH|N0-S|e04": [
+    0.1081,
+    0.1538,
+    0.0558
+   ],
+   "XH|N0-S|e10": [
+    0.4735,
+    0.4918,
+    0.1258
+   ],
+   "XH|N0-P|e02": [
+    0.0812,
+    0.1306,
+    0.0314
+   ],
+   "XH|N0-P|e04": [
+    0.1548,
+    0.2076,
+    0.0548
+   ],
+   "XH|N0-P|e10": [
+    0.4901,
+    0.5175,
+    0.125
+   ],
+   "XL|N0-S|e02": [
+    0.0633,
+    0.1048,
+    0.0324
+   ],
+   "XL|N0-S|e04": [
+    0.135,
+    0.1798,
+    0.0557
+   ],
+   "XL|N0-S|e10": [
+    0.507,
+    0.5225,
+    0.1258
+   ],
+   "XL|N0-P|e02": [
+    0.0853,
+    0.1294,
+    0.0313
+   ],
+   "XL|N0-P|e04": [
+    0.1633,
+    0.209,
+    0.0547
+   ],
+   "XL|N0-P|e10": [
+    0.5309,
+    0.5498,
+    0.125
+   ],
+   "XCL|N0-S|e02": [
+    0.0492,
+    0.1029,
+    0.0324
+   ],
+   "XCL|N0-S|e04": [
+    0.1311,
+    0.1893,
+    0.0557
+   ],
+   "XCL|N0-S|e10": [
+    0.5297,
+    0.5447,
+    0.1258
+   ],
+   "XCL|N0-P|e02": [
+    0.0912,
+    0.134,
+    0.0313
+   ],
+   "XCL|N0-P|e04": [
+    0.1718,
+    0.2186,
+    0.0547
+   ],
+   "XCL|N0-P|e10": [
+    0.5576,
+    0.5738,
+    0.125
+   ],
+   "XCH|N0-S|e02": [
+    0.0294,
+    0.0756,
+    0.0325
+   ],
+   "XCH|N0-S|e04": [
+    0.0938,
+    0.1498,
+    0.0558
+   ],
+   "XCH|N0-S|e10": [
+    0.4877,
+    0.4948,
+    0.1258
+   ],
+   "XCH|N0-P|e02": [
+    0.0759,
+    0.1344,
+    0.0314
+   ],
+   "XCH|N0-P|e04": [
+    0.1421,
+    0.2056,
+    0.0548
+   ],
+   "XCH|N0-P|e10": [
+    0.4751,
+    0.4995,
+    0.125
+   ]
+  },
+  "X4": {
+   "XH|N0-S|e02": [
+    0.0756,
+    0.1247,
+    0.0332
+   ],
+   "XH|N0-S|e04": [
+    0.1963,
+    0.2384,
+    0.0566
+   ],
+   "XH|N0-S|e10": [
+    0.684,
+    0.6893,
+    0.1265
+   ],
+   "XH|N0-P|e02": [
+    0.1443,
+    0.1893,
+    0.0307
+   ],
+   "XH|N0-P|e04": [
+    0.3398,
+    0.3816,
+    0.0538
+   ],
+   "XH|N0-P|e10": [
+    0.8657,
+    0.8696,
+    0.1232
+   ],
+   "XL|N0-S|e02": [
+    0.0919,
+    0.1414,
+    0.033
+   ],
+   "XL|N0-S|e04": [
+    0.2265,
+    0.2694,
+    0.0564
+   ],
+   "XL|N0-S|e10": [
+    0.7164,
+    0.726,
+    0.1264
+   ],
+   "XL|N0-P|e02": [
+    0.1823,
+    0.2334,
+    0.0304
+   ],
+   "XL|N0-P|e04": [
+    0.4165,
+    0.4542,
+    0.0535
+   ],
+   "XL|N0-P|e10": [
+    0.9199,
+    0.9212,
+    0.1229
+   ],
+   "XCL|N0-S|e02": [
+    0.1014,
+    0.1482,
+    0.033
+   ],
+   "XCL|N0-S|e04": [
+    0.2453,
+    0.2866,
+    0.0564
+   ],
+   "XCL|N0-S|e10": [
+    0.7366,
+    0.7535,
+    0.1264
+   ],
+   "XCL|N0-P|e02": [
+    0.1885,
+    0.2374,
+    0.0304
+   ],
+   "XCL|N0-P|e04": [
+    0.4312,
+    0.4626,
+    0.0535
+   ],
+   "XCL|N0-P|e10": [
+    0.9251,
+    0.9253,
+    0.1229
+   ],
+   "XCH|N0-S|e02": [
+    0.0652,
+    0.1174,
+    0.0332
+   ],
+   "XCH|N0-S|e04": [
+    0.2098,
+    0.2386,
+    0.0566
+   ],
+   "XCH|N0-S|e10": [
+    0.7083,
+    0.7113,
+    0.1265
+   ],
+   "XCH|N0-P|e02": [
+    0.1385,
+    0.1824,
+    0.0307
+   ],
+   "XCH|N0-P|e04": [
+    0.3338,
+    0.3699,
+    0.0538
+   ],
+   "XCH|N0-P|e10": [
+    0.8297,
+    0.8323,
+    0.1232
+   ]
+  },
+  "X5": {
+   "XH|N0-S|e02": [
+    0.0388,
+    0.0835,
+    0.0319
+   ],
+   "XH|N0-S|e04": [
+    0.0686,
+    0.1187,
+    0.0553
+   ],
+   "XH|N0-S|e10": [
+    0.2612,
+    0.3007,
+    0.1254
+   ],
+   "XH|N0-P|e02": [
+    0.0625,
+    0.1022,
+    0.0328
+   ],
+   "XH|N0-P|e04": [
+    0.1097,
+    0.1553,
+    0.0562
+   ],
+   "XH|N0-P|e10": [
+    0.3469,
+    0.3862,
+    0.1264
+   ],
+   "XL|N0-S|e02": [
+    0.0475,
+    0.0854,
+    0.0319
+   ],
+   "XL|N0-S|e04": [
+    0.0835,
+    0.1264,
+    0.0553
+   ],
+   "XL|N0-S|e10": [
+    0.2831,
+    0.3172,
+    0.1253
+   ],
+   "XL|N0-P|e02": [
+    0.0637,
+    0.1059,
+    0.0329
+   ],
+   "XL|N0-P|e04": [
+    0.11,
+    0.1563,
+    0.0563
+   ],
+   "XL|N0-P|e10": [
+    0.351,
+    0.3838,
+    0.1266
+   ],
+   "XCL|N0-S|e02": [
+    0.0473,
+    0.0849,
+    0.0319
+   ],
+   "XCL|N0-S|e04": [
+    0.0911,
+    0.1304,
+    0.0553
+   ],
+   "XCL|N0-S|e10": [
+    0.3015,
+    0.3304,
+    0.1253
+   ],
+   "XCL|N0-P|e02": [
+    0.0672,
+    0.1122,
+    0.0329
+   ],
+   "XCL|N0-P|e04": [
+    0.1176,
+    0.1653,
+    0.0563
+   ],
+   "XCL|N0-P|e10": [
+    0.3707,
+    0.4023,
+    0.1266
+   ],
+   "XCH|N0-S|e02": [
+    0.0127,
+    0.0381,
+    0.0319
+   ],
+   "XCH|N0-S|e04": [
+    0.0399,
+    0.0727,
+    0.0553
+   ],
+   "XCH|N0-S|e10": [
+    0.2491,
+    0.2705,
+    0.1254
+   ],
+   "XCH|N0-P|e02": [
+    0.0635,
+    0.1023,
+    0.0328
+   ],
+   "XCH|N0-P|e04": [
+    0.11,
+    0.1544,
+    0.0562
+   ],
+   "XCH|N0-P|e10": [
+    0.3484,
+    0.3816,
+    0.1264
+   ]
+  },
+  "X6": {
+   "XH|N0-S|e02": [
+    0.0316,
+    0.0693,
+    0.2515
+   ],
+   "XH|N0-S|e04": [
+    0.0664,
+    0.1127,
+    0.2749
+   ],
+   "XH|N0-S|e10": [
+    0.3347,
+    0.3689,
+    0.3449
+   ],
+   "XH|N0-P|e02": [
+    0.0739,
+    0.1132,
+    0.2439
+   ],
+   "XH|N0-P|e04": [
+    0.124,
+    0.1682,
+    0.2672
+   ],
+   "XH|N0-P|e10": [
+    0.3685,
+    0.4023,
+    0.3373
+   ],
+   "XL|N0-S|e02": [
+    0.0479,
+    0.0876,
+    0.2514
+   ],
+   "XL|N0-S|e04": [
+    0.0897,
+    0.1352,
+    0.2747
+   ],
+   "XL|N0-S|e10": [
+    0.3247,
+    0.357,
+    0.3449
+   ],
+   "XL|N0-P|e02": [
+    0.0584,
+    0.0956,
+    0.242
+   ],
+   "XL|N0-P|e04": [
+    0.1044,
+    0.147,
+    0.2654
+   ],
+   "XL|N0-P|e10": [
+    0.3514,
+    0.3832,
+    0.3355
+   ],
+   "XCL|N0-S|e02": [
+    0.058,
+    0.0863,
+    0.2514
+   ],
+   "XCL|N0-S|e04": [
+    0.103,
+    0.1358,
+    0.2747
+   ],
+   "XCL|N0-S|e10": [
+    0.3314,
+    0.3502,
+    0.3449
+   ],
+   "XCL|N0-P|e02": [
+    0.0591,
+    0.0932,
+    0.242
+   ],
+   "XCL|N0-P|e04": [
+    0.1046,
+    0.145,
+    0.2654
+   ],
+   "XCL|N0-P|e10": [
+    0.3582,
+    0.3858,
+    0.3355
+   ],
+   "XCH|N0-S|e02": [
+    0.0276,
+    0.0554,
+    0.2515
+   ],
+   "XCH|N0-S|e04": [
+    0.0484,
+    0.0815,
+    0.2749
+   ],
+   "XCH|N0-S|e10": [
+    0.308,
+    0.3346,
+    0.3449
+   ],
+   "XCH|N0-P|e02": [
+    0.0791,
+    0.1197,
+    0.2439
+   ],
+   "XCH|N0-P|e04": [
+    0.1344,
+    0.1797,
+    0.2672
+   ],
+   "XCH|N0-P|e10": [
+    0.3946,
+    0.4205,
+    0.3373
+   ]
+  },
+  "X7": {
+   "XH|N0-S|e02": [
+    0.0625,
+    0.1123,
+    0.0333
+   ],
+   "XH|N0-S|e04": [
+    0.1442,
+    0.1938,
+    0.0566
+   ],
+   "XH|N0-S|e10": [
+    0.5028,
+    0.5168,
+    0.1266
+   ],
+   "XH|N0-P|e02": [
+    0.1113,
+    0.1564,
+    0.0334
+   ],
+   "XH|N0-P|e04": [
+    0.2158,
+    0.2631,
+    0.0568
+   ],
+   "XH|N0-P|e10": [
+    0.6474,
+    0.664,
+    0.1269
+   ],
+   "XL|N0-S|e02": [
+    0.074,
+    0.1215,
+    0.0332
+   ],
+   "XL|N0-S|e04": [
+    0.1523,
+    0.1993,
+    0.0566
+   ],
+   "XL|N0-S|e10": [
+    0.5364,
+    0.5498,
+    0.1266
+   ],
+   "XL|N0-P|e02": [
+    0.0992,
+    0.1469,
+    0.033
+   ],
+   "XL|N0-P|e04": [
+    0.2096,
+    0.257,
+    0.0563
+   ],
+   "XL|N0-P|e10": [
+    0.6696,
+    0.6827,
+    0.1262
+   ],
+   "XCL|N0-S|e02": [
+    0.071,
+    0.1278,
+    0.0332
+   ],
+   "XCL|N0-S|e04": [
+    0.1517,
+    0.2137,
+    0.0566
+   ],
+   "XCL|N0-S|e10": [
+    0.5577,
+    0.5731,
+    0.1266
+   ],
+   "XCL|N0-P|e02": [
+    0.1039,
+    0.1482,
+    0.033
+   ],
+   "XCL|N0-P|e04": [
+    0.2186,
+    0.2614,
+    0.0563
+   ],
+   "XCL|N0-P|e10": [
+    0.6925,
+    0.7002,
+    0.1262
+   ],
+   "XCH|N0-S|e02": [
+    0.0506,
+    0.0922,
+    0.0333
+   ],
+   "XCH|N0-S|e04": [
+    0.1411,
+    0.1699,
+    0.0566
+   ],
+   "XCH|N0-S|e10": [
+    0.5323,
+    0.534,
+    0.1266
+   ],
+   "XCH|N0-P|e02": [
+    0.1151,
+    0.1632,
+    0.0334
+   ],
+   "XCH|N0-P|e04": [
+    0.2339,
+    0.276,
+    0.0568
+   ],
+   "XCH|N0-P|e10": [
+    0.6732,
+    0.6786,
+    0.1269
+   ]
+  },
+  "X8": {
+   "XH|N0-S|e02": [
+    0.0632,
+    0.1088,
+    0.0731
+   ],
+   "XH|N0-S|e04": [
+    0.1577,
+    0.2018,
+    0.0964
+   ],
+   "XH|N0-S|e10": [
+    0.6556,
+    0.6597,
+    0.1664
+   ],
+   "XH|N0-P|e02": [
+    0.1042,
+    0.153,
+    0.0714
+   ],
+   "XH|N0-P|e04": [
+    0.2027,
+    0.2516,
+    0.0947
+   ],
+   "XH|N0-P|e10": [
+    0.6284,
+    0.6405,
+    0.1646
+   ],
+   "XL|N0-S|e02": [
+    0.0824,
+    0.1294,
+    0.0718
+   ],
+   "XL|N0-S|e04": [
+    0.1794,
+    0.2295,
+    0.0951
+   ],
+   "XL|N0-S|e10": [
+    0.6731,
+    0.6811,
+    0.1653
+   ],
+   "XL|N0-P|e02": [
+    0.0897,
+    0.137,
+    0.0717
+   ],
+   "XL|N0-P|e04": [
+    0.1873,
+    0.2363,
+    0.095
+   ],
+   "XL|N0-P|e10": [
+    0.6375,
+    0.6502,
+    0.1651
+   ],
+   "XCL|N0-S|e02": [
+    0.0755,
+    0.1242,
+    0.0718
+   ],
+   "XCL|N0-S|e04": [
+    0.1816,
+    0.2296,
+    0.0951
+   ],
+   "XCL|N0-S|e10": [
+    0.6912,
+    0.6974,
+    0.1653
+   ],
+   "XCL|N0-P|e02": [
+    0.0905,
+    0.1357,
+    0.0717
+   ],
+   "XCL|N0-P|e04": [
+    0.1888,
+    0.2365,
+    0.095
+   ],
+   "XCL|N0-P|e10": [
+    0.645,
+    0.656,
+    0.1651
+   ],
+   "XCH|N0-S|e02": [
+    0.0526,
+    0.0902,
+    0.0731
+   ],
+   "XCH|N0-S|e04": [
+    0.1575,
+    0.1861,
+    0.0964
+   ],
+   "XCH|N0-S|e10": [
+    0.6857,
+    0.6859,
+    0.1664
+   ],
+   "XCH|N0-P|e02": [
+    0.1066,
+    0.1482,
+    0.0714
+   ],
+   "XCH|N0-P|e04": [
+    0.2076,
+    0.2464,
+    0.0947
+   ],
+   "XCH|N0-P|e10": [
+    0.6447,
+    0.6541,
+    0.1646
+   ]
+  }
+ },
+ "cost_of_rule": {
+  "c_XS_point_only": 1.24,
+  "power_lost_to_bound": {
+   "holdout_only_e10_min_median_max": [
+    0.0043,
+    0.0298,
+    0.0506
+   ],
+   "holdout_only_e04_min_median_max": [
+    0.0017,
+    0.026,
+    0.0425
+   ],
+   "gate_e10_min_median_max": [
+    0.0031,
+    0.0287,
+    0.0506
+   ]
+  },
+  "c_XS_floors_credited": 1.12,
+  "power_lost_to_floor_free": {
+   "holdout_only_e10_min_median_max": [
+    0.0046,
+    0.0411,
+    0.0687
+   ],
+   "holdout_only_e04_min_median_max": [
+    0.0019,
+    0.0371,
+    0.0569
+   ],
+   "gate_e10_min_median_max": [
+    0.0032,
+    0.0408,
+    0.0687
+   ]
+  },
+  "c_XS_weaker_guard_15_point": 0.0,
+  "c_XS_with_finite_pool_bias": 1.38,
+  "c_XS_with_validation_known_15": 1.3,
+  "momentum_stratum_power_cost": {
+   "what": "arm RB (sector x beta thirds, no momentum third) minus the adopted stratum, in power; a NEGATIVE value means RB has less power, so the momentum third ADDS power; a positive value would be its cost",
+   "c_XS_RB": 1.34,
+   "gate_e10_each_at_its_own_threshold_min_median_max": [
+    -0.1239,
+    -0.0285,
+    0.011
+   ],
+   "holdout_only_e10_each_at_its_own_threshold_min_median_max": [
+    -0.1002,
+    -0.0251,
+    0.0151
+   ],
+   "gate_e04_each_at_its_own_threshold_min_median_max": [
+    -0.0513,
+    -0.0094,
+    0.0114
+   ],
+   "gate_e10_same_threshold_min_median_max": [
+    -0.14,
+    -0.0388,
+    0.0064
+   ],
+   "holdout_only_e10_same_threshold_min_median_max": [
+    -0.1163,
+    -0.0359,
+    0.0135
+   ]
+  },
+  "gain_over_raw": {
+   "gate_e04_XH_min_median_max": [
+    -0.0121,
+    0.0645,
+    0.2096
+   ],
+   "holdout_only_e04_XH_min_median_max": [
+    -0.0246,
+    0.0501,
+    0.1964
+   ],
+   "gate_e10_XH_min_median_max": [
+    0.0943,
+    0.2723,
+    0.4596
+   ],
+   "holdout_only_e10_XH_min_median_max": [
+    0.0794,
+    0.2334,
+    0.4138
+   ],
+   "archetypes_where_XS1_beats_RAW_at_e10_on_XH_of_8": 8
+  }
+ },
+ "study_program_floors": {
+  "X1": {
+   "c_p": 0.76,
+   "c_used": 1.38
+  },
+  "X2": {
+   "c_p": 0.86,
+   "c_used": 1.38
+  },
+  "X3": {
+   "c_p": 1.5,
+   "c_used": 1.55
+  },
+  "X4": {
+   "c_p": 1.03,
+   "c_used": 1.38
+  },
+  "X5": {
+   "c_p": 1.04,
+   "c_used": 1.38
+  },
+  "X6": {
+   "c_p": 1.17,
+   "c_used": 1.38
+  },
+  "X7": {
+   "c_p": 1.15,
+   "c_used": 1.38
+  },
+  "X8": {
+   "c_p": 1.11,
+   "c_used": 1.38
+  }
+ },
+ "beside_calibrated_reading": {
+  "what": "BESIDE the registered decision (the captain's lessons 1 and 3); none of it decides",
+  "pooled_rate_all_calibration_cells": 0.0812,
+  "why": "the registered rule takes the worst of 96 cell-replicates in the point rate and in a one-seed bootstrap bound, so its threshold is partly a property of the rule; the same pipeline on structureless synthetic prices gives the thresholds below",
+  "zero_structure_c_XS": [
+   1.31,
+   1.33,
+   1.4,
+   1.37,
+   1.36,
+   1.45
+  ],
+  "zero_structure_c_XS_point_only": [
+   1.23,
+   1.19,
+   1.25,
+   1.26,
+   1.25,
+   1.26
+  ],
+  "zero_structure_worst_cell_rate_at_c0": [
+   0.1347,
+   0.1312,
+   0.1333,
+   0.1367,
+   0.1331,
+   0.1371
+  ],
+  "zero_structure_verdicts": [
+   "ADOPT",
+   "ADOPT",
+   "ADOPT",
+   "ADOPT",
+   "ADOPT",
+   "ADOPT"
+  ],
+  "bound_over_more_seeds": {
+   "seeds": 20,
+   "c_XS_min_median_max": [
+    1.28,
+    1.29,
+    1.31
+   ],
+   "worst_ub_at_adopted_min_max": [
+    0.1261,
+    0.1324
+   ],
+   "seeds_with_worst_ub_at_or_over_wall": 0
+  }
+ },
+ "limits": [
+  "the screen measures selection inside sector x beta x momentum cells and nothing else: a program whose mechanism is a tilt on those has almost no residual and will rarely pass",
+  "a pass is evidence against 'random same-style picks' after costs; it is not evidence of profit and does not say the program beats the index",
+  "every rate recombines 6 to 12 calendar years (2010-19 and 2023-24); the bound resamples 6 to 12 year clusters and can itself be too narrow",
+  "at +4% a year net residual edge the power is low; '+4% a year' is net of costs and inside the cell mean: the picks' gross edge over their cell-mates is (e + costs) / dilution",
+  "c_XS is one number for every program, set by the worst cell, with no credit for any own floor",
+  "per program, not per mechanism: one zero-edge rule submitted as several variants takes several looks; the family-wise rate is stated, not capped",
+  "a known style is not skill: a no-skill tilt to a style its author knows won the holdout passes more often than the stated rate",
+  "SURVIVOR UNIVERSE: the source has no series for most delisted members (member-sessions without data: 26.5% in 2010-16, 14.0% in 2017-19, 5.6% in 2022-24; acquired names 85-100% missing); missing names are outside the programs' universe and outside the cells alike, so residual tails are thinner than live; the 2010-15 worlds are LOW COVERAGE",
+  "the study's worlds are not the House's: one year differs at each end, another vendor's bars, a third House floor cell; House bars sit at or above and House power at or below these rows",
+  "the planted edge is a constant drift; a real edge is lumpier and passes less often",
+  "the study is not blind: its authors knew the broad path of US stocks 2009-2024 and the census's coverage figures"
+ ],
+ "stated_beside_every_live_trade": "XS1 (panel screen): judged on the daily residual, this program's P&L minus the P&L of random portfolios that hold the same number of names at the same weights from the same sector x beta third x 12-1 momentum third cells on the same days. Bar: holdout t >= {c_used} (screen bar 1.38, own floor {c_p} + 0.05), ahead of 88% of 999 such portfolios, and positive at 1.5 times the spread with sell fees doubled. Measured false-positive rate at zero residual edge, own floor not credited: at most 10.0% in every cell, 95% upper bound 13.1% (cap 12%, owner's wall 15%); given a top-third 2025, up to 10.7%; rates of real-signal cells are understated by about 2.5 points (finite history). On its own Train-era worlds this program's holdout-only rate is {own_fp}% (in-sample: at most 12% by construction). Earlier XS1 looks in this program's mechanism cell: {n_cell}. A zero-edge mechanism given 8 such looks passed at least one in up to 54.9% of worlds. A pass says its picks beat random same-style picks after its costs; it does NOT say it beats the index: its P&L is {basket}, and market, sector, beta and momentum direction are not counted as edge. French factors: {label}. Contamination: 2025 (all of Validation) and part of the 2026 holdout may be known to its author; names and dates are hidden from the program, but sub-industry, size and value are not matched: a no-skill tilt to a style that won the holdout passed up to 30.0% of such worlds. Flags: {flags}.",
+ "note": "rates are fractions on the study's worlds at L = 194: HOF = the floor-free holdout-only gate rate at zero NET residual edge (the calibrated quantity: the pre-check and every program's own floor are NOT credited), UBF = the 97.5th percentile of a two-way (calendar year x program) cluster bootstrap of it, HOG and UB = the same with own floors on (beside). fp_zero_edge lists [HOF, UBF, HOG, UB] per archetype and 'SET|NULL' (XH, XL, XCL calibrate; XCH is report-only and has no bound). Worlds recombine real sessions of 2010-19 and 2023-24 by exact enumeration of every holdout start; N0-S = 16 signal-structured siblings demeaned on their path, N0-P = 200 placebo twins centred on their costs only. Every N0-S rate is UNDERSTATED by the finite-pool bias (path-demeaning forces a pool sum to zero): finite_pool_bias lists it per archetype and set as measured on the twins, and finite_pool_bias_max is its largest value. power lists [full gate, holdout-only, gross pick edge] with own floors on.",
+ "sha256": {
+  "PREREG.md": "c46aec17383f39dbe2a58bc0f52ecbefbee7059c1ac0b4e627b65eaf0b2aec40",
+  "RESULT.md": "49628cd145a479503b357eb650aaeb757a990871284c18c7e1aecb059593ea3a",
+  "decision.json": "d474617af52055ea34d2658c84d85da5c4ff40acbec723954d0e8bab174780a3",
+  "DATA-MANIFEST.sha256": "a1875c878d5c02cd16ef7c499f948dce0a42143ad78f540a59cbbe1419504c55",
+  "DEVIATIONS.log": "03c83ecf2ded86817610555f58a02da59fa339c05f6e5893d2d2b6eeb7b7e032",
+  "code/xs_core.py": "3ae9c8277145c0f6ff17dac76f2922ec32de38c9b77bd5d153fb9b00727272d0",
+  "code/xs_gate.py": "99a3cef1b9072fd4b7130d5eeafae5d5f2247893e143471b4fd02e2db1a51c26",
+  "code/xs_data.py": "e2874c4617d1803decbdf8dda4342dad8a6c09be7b8c60cf00f4b462a65dcd4a",
+  "code/xs_synth.py": "9c59ea8a0ee3831ca42c8ce3d1d5368747b6843e7fb8bf7089f36c0a68d2af56",
+  "code/xs_run.py": "e9fe0b258bc573489c7b2109a98616e933c0387d796cb58db44a4f39b4fba972",
+  "code/xs_analyze.py": "c3bcc2b3a56935f185e4624b4d997b7a70bf0568e97552528cabf417548d877f",
+  "code/xs_arms.py": "48e833eeee430258ee6b5f52afe80607dd9330483c21967aefb8d61f31e58f1b",
+  "code/decide.py": "615b0c0b93e638d7139bcb260f1c23d4fe5ca7c6e0f3beaf5535030814ed5092",
+  "code/xs_report.py": "10860378212ae354194c08858b5e0d0b5064af892cf0a89f0c31f59b5e0cb022",
+  "code/receipt.py": "c809d42342f4fe5356a499d710ae913f56ba36bb9b8437ab590173ea8e420e1a",
+  "code/house_ref_xs.py": "a39645fc8f70674c6b85478f7804f12454de42852249143a4cdc891e335b9c22",
+  "code/conformance_xs1.py": "2d73e1216ee3868d2820ef5e509c98284c1d78dba0ede081f60be202913ad77a",
+  "code/tests.py": "6460c8ef57b734f9a2788825beb000d423e9384c6334d70007a26b12982a3d97",
+  "code/tests_receipt.py": "c2668a8964f1ae053ee5b599d24878b0d92f86548e1c34c80f4c5f4ce7c2ebad",
+  "code/repro_s2.py": "88ec4a0d511954077b536f31c65f5895d5b3fb1f55f39f29a7216c6b23f72638",
+  "code/xs_zero.py": "a29d9228bea219b9927c8adcd9e4f00075f3768e1ce02ccff590bf6a945c15cc"
+ }
+}

@@ -177,11 +177,168 @@
           "A6": []
         },
         "beside": "S2, c_R = 0 (no pooled-t bar), c_H,used = {c_H}; this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%); its holdout-only rate at c_H,used = {honly}% (the bound when 2025 is fully known); drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); a pass under S2 is weaker evidence of edge than under S1+F1; contamination: 2025 (all of Validation) and part of the 2026 holdout can be known to the authoring models, so the FP is a property of the procedure over 2010-19 and 2022-24 history, not a guarantee in this one world"
+      },
+      "equity_xs": {
+        "name": "XS1",
+        "screen": "XS1",
+        "receipt_sha256": "f7ce98b1f35621da258bf0b9d4462ee69f46c41963021df59218833433abbe53",
+        "c_XS": 1.38,
+        "c_margin": 0.05,
+        "alpha_plac": 0.12,
+        "placebo_draws": 999,
+        "rung": "R0",
+        "fp_cap": 0.12,
+        "owner_wall": 0.15,
+        "validation_tries": 1,
+        "holdout_looks": 1,
+        "retry": false,
+        "flags": {
+          "X1": [],
+          "X2": [],
+          "X3": [],
+          "X4": [],
+          "X5": [],
+          "X6": [],
+          "X7": [],
+          "X8": []
+        },
+        "screen_flags": [
+          "style-open"
+        ],
+        "beside": "XS1 (panel screen): judged on the daily residual, this program's P&L minus the P&L of random portfolios that hold the same number of names at the same weights from the same sector x beta third x 12-1 momentum third cells on the same days. Bar: holdout t >= {c_used} (screen bar 1.38, own floor {c_p} + 0.05), ahead of 88% of 999 such portfolios, and positive at 1.5 times the spread with sell fees doubled. Measured false-positive rate at zero residual edge, own floor not credited: at most 10.0% in every cell, 95% upper bound 13.1% (cap 12%, owner's wall 15%); given a top-third 2025, up to 10.7%; rates of real-signal cells are understated by about 2.5 points (finite history). On its own Train-era worlds this program's holdout-only rate is {own_fp}% (in-sample: at most 12% by construction). Earlier XS1 looks in this program's mechanism cell: {n_cell}. A zero-edge mechanism given 8 such looks passed at least one in up to 54.9% of worlds. A pass says its picks beat random same-style picks after its costs; it does NOT say it beats the index: its P&L is {basket}, and market, sector, beta and momentum direction are not counted as edge. French factors: {label}. Contamination: 2025 (all of Validation) and part of the 2026 holdout may be known to its author; names and dates are hidden from the program, but sub-industry, size and value are not matched: a no-skill tilt to a style that won the holdout passed up to 30.0% of such worlds. Flags: {flags}."
       }
     },
     "val_tries": 1,
     "looks_per_lineage": 1,
     "program_loss_usd": -300,
+    "forward_screen": {
+      "name": "FWD1",
+      "screen": "FWD1-R",
+      "receipt_sha256": "e0ef05f9dd24a65a2ea68022f2e8e950b859bd0450fe1245f90a5fa1d269b656",
+      "plan": [
+        5,
+        10,
+        15,
+        20,
+        30,
+        40,
+        60
+      ],
+      "c_G": {
+        "ETF": {
+          "N": 2.61
+        },
+        "PANEL": {
+          "N": 2.06,
+          "XS1": 3.16
+        }
+      },
+      "c_margin": 0.05,
+      "haircut_bp": {
+        "ETF": 2,
+        "PANEL": 3
+      },
+      "haircut_floor_bp": 2,
+      "panel_lots": 20,
+      "own_cap": {
+        "N": 0.12,
+        "XS1": 0.024
+      },
+      "placebo": {
+        "draws": 999,
+        "count_max": 119
+      },
+      "owner_wall": 0.15,
+      "figures": {
+        "ETF|N": {
+          "budget": 0.15,
+          "fp_point": 0.0276,
+          "fp_ub": 0.055,
+          "zero_edge_by_checkpoint": [
+            0.0052,
+            0.008,
+            0.0103,
+            0.0119,
+            0.0141,
+            0.0159,
+            0.0169
+          ],
+          "edge": "+10%",
+          "power": 0.0241,
+          "fp_avg": 0.0142,
+          "haircut_world": "2 bp a side, exact shadow fills",
+          "drift_avg": 0.0429
+        },
+        "PANEL|N": {
+          "budget": 0.15,
+          "fp_point": 0.1183,
+          "fp_ub": 0.1254,
+          "zero_edge_by_checkpoint": [
+            0.0494,
+            0.0676,
+            0.079,
+            0.0873,
+            0.096,
+            0.1029,
+            0.1107
+          ],
+          "edge": "+20%",
+          "power": 0.488,
+          "fp_avg": 0.0899,
+          "haircut_world": "3 bp a side, exact shadow fills"
+        },
+        "PANEL|XS1": {
+          "budget": 0.03,
+          "fp_point": 0.0238,
+          "fp_ub": 0.0258,
+          "zero_edge_by_checkpoint": [
+            0.0146,
+            0.0175,
+            0.0189,
+            0.0198,
+            0.0205,
+            0.021,
+            0.0215
+          ],
+          "edge": "+20%",
+          "power": 0.1664,
+          "fp_avg": 0.0177,
+          "haircut_world": "3 bp a side, exact shadow fills",
+          "look_cap": 0.12,
+          "combined": 0.15
+        }
+      }
+    },
+    "fwd1": {
+      "mode": "record",
+      "seats": "off",
+      "cpu_seconds_night": 900,
+      "run_budget_seconds": 300
+    },
+    "panel": {
+      "mode": "off",
+      "panels": [
+        "sp500"
+      ],
+      "birth_share": 0.5,
+      "max_alive": 12,
+      "max_names": 12,
+      "rebalance": [
+        "weekly",
+        "monthly"
+      ],
+      "train_budget": 4,
+      "placebos_train": 200,
+      "cpu_seconds_day": 14400,
+      "run_budget_seconds": 600,
+      "zero_edge_programs": 100,
+      "coverage_min": 0.97,
+      "spreads_min_share": 0.9,
+      "membership_max_stale_days": 45,
+      "universe_max_age_days": 400,
+      "live_min_tradable_share": 0.95,
+      "census_notes": {}
+    },
     "e2": {
       "births_every_seconds": 7200,
       "births_refill_seconds": 1800,

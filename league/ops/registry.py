@@ -193,6 +193,86 @@ JOBS: tuple[Job, ...] = (
         what="the contamination probe: one model route a week asked what it recalls of the eras programs are judged "
              "on, scored on the House against a permutation by whole period; aggregates only, into "
              "<state>/contamination.json"),
+    # THE PANEL LANE'S HALF OF THE FORWARD RECORD (release E4, package J; league/ops/forward_xs.py): the forward
+    # shadow's own night over the panel store, after `equity_panel` has written the night's store (01:55Z: the panel
+    # store is a session behind when `forward_shadow` runs at 22:35Z, and the lane's twin marker must be through the
+    # store's last session by the next close). Skipped while `elane.forward.mode` or `elane.panel.mode` is "off", and
+    # inside 09:00-17:30 New York on a session. Its decider child is the forward job's own kind of child (its limits
+    # are `forward_shadow`'s), and it spends what that night left of `elane.forward.cpu_seconds_night`. A night
+    # `equity_panel` fails or is skipped does not run it: the store did not move. Started at the latest three hours
+    # after the panel job ended, it is done hours before a pre-open. It writes only <state>/forward.sqlite and the
+    # twin marker, so it runs in a pause too.
+    Job("forward_xs", "league.ops.forward_xs", (S.after("equity_panel"),), grace=3 * HOUR, cpu=2700, wall=3300,
+        in_pause=True, owner="breadth",
+        what="the panel lane's forward night: every registered panel program recomputed whole on its own forward days "
+             "in the forward job's own decider child, the shadow twin of each live panel instance, and the twin "
+             "marker the lane reads before mode live (recorded, never a verdict)"),
+    # THE FORWARD SCREEN (FWD1-R, the captain's A33; league/ops/forward_screen.py, its rule league/ops/fwd1_rule.py):
+    # one append-only verdict a lineage of the forward record, from the sessions after the receipt's pin, after each of
+    # the record's two nights (E3's at 22:35Z, the panel's after 01:55Z; an `after` trigger fires on an "ok" receipt
+    # only, so each night has its own: ETF lineages are read after the first, panel lineages after the second; a
+    # second run of a night writes nothing new). Skipped while `elane.fwd1.mode` is "off", with no pin, and inside
+    # 09:00-17:30 New York on a session (it may run its own decider child: a representative's own floor on its
+    # Train-era runs, a panel representative's placebo leg). It reads the forward record and the swarm store
+    # read-only and writes only <state>/forward-screen.sqlite, the permit file and its report, so it runs in a pause
+    # too. Its child seconds are `elane.fwd1.cpu_seconds_night` (900) A NIGHT, shared by the night's two runs, inside
+    # each run's 1,200 of CPU. ITS GRACE IS TWO HOURS and no run of its child outlasts THE DEADLINE (the earlier of its
+    # wall and the next pre-open, less 120 s; a start nearer than that is a skipped receipt): started late after
+    # `forward_xs` (which ends by 09:45Z at the latest) it ends by 12:15Z, before the pre-open's 12:30Z in summer.
+    Job("forward_screen", "league.ops.forward_screen", (S.after("forward_shadow"), S.after("forward_xs")),
+        grace=2 * HOUR, cpu=1200, wall=1800, in_pause=True, owner="FWD1-R forward screen",
+        what="the forward screen FWD1-R: one append-only verdict a lineage on its counted forward sessions after the "
+             "pin (checkpoints 5-60, its own floor, the panel's placebo leg), the permit file of ids and words the "
+             "swarm's seat path reads (switched off) and the operator's report with the registry's expected "
+             "zero-edge passes"),
+    # THE PANEL LANE's data and measurement jobs (release E4, "breadth"; league/xs/E4_INTERFACES.md). WITH THE LANE'S
+    # SWITCH OFF NONE OF THEM RUNS: each one's first statements are the switch (`league.ops.equity_universe.lane_off`:
+    # `elane.panel.mode` "off" in the box's settings is a `skipped` receipt: no gateway call, no file) and
+    # `league.xs.config.quiet(now, its own wall)`: a start that could still be working at a wall of the session
+    # (09:25-09:45 and 15:50-16:35 ET) is a `skipped` receipt too, and the occurrence is not lost (it runs at its next
+    # daily time). They read the gateway and write their own files under <state>/equity-daily/, so they run in a pause
+    # too. They go last: at a House start every older job that is due at the same instant goes first.
+    # NO AT-START TRIGGER (the review's live-9): at a House start before an open the chain's whole fetch (55 minutes of
+    # wall) held the one ops child past the pre-open's grace. `equity_panel` HAS ITS OWN DAILY TIME (the review's
+    # live-4), fifteen minutes after the universe job's (one child at a time: it starts when that one has ended): its
+    # only trigger was `after("equity_universe")`, so a night the universe job failed fetched no bars, ran no I6, and
+    # raised none of the panel job's own alarms. It now runs every night on the last good universe.
+    # NO DAILY ROW CAN STILL BE WORKING AT A PRE-OPEN (the ship pass's one-core reading; the same fault as live-9, by
+    # the grace instead of the trigger). The box has one core and one ops child: a job started late in its grace
+    # holds every job due behind it. `equity_spreads` had six hours of grace: an occurrence due 06:30Z could start at
+    # 12:30Z (a House back up after a night down starts the oldest due occurrence first) and work until 13:20Z, past
+    # the pre-open's own 40 minutes (due 12:30Z in summer). Its grace is three hours: started by 09:30Z, done by
+    # 10:20Z. A night it misses costs one night of a backfill that goes on from its file. The other two daily rows
+    # end by 05:50Z at the latest (due + grace + wall); the weekly and monthly rows are a weekend's.
+    # `equity_spreads`' CPU IS 900 s, NOT THE PATCH'S 300 (the ship check's reading of the rehearsal on the House's
+    # box): the ops client opens a TLS connection a request (league/ops/context.py: urllib, no kept connection), which
+    # cost about 70 ms of CPU a call there, and a night of the backfill asks up to `equity_spreads.CALLS_RUN` (6,000):
+    # about 420 s. At 300 s the child was killed every night of the nine: a failed receipt, a House warning and two
+    # retries a night (the file is saved every 500 answers, so the backfill still crept on). 900 is twice the
+    # measured need; it works at nice 19 from 06:30Z, far from any session, and its wall is unchanged.
+    Job("equity_universe", "league.ops.equity_universe", (S.daily(1, 40),), grace=3 * HOUR, cpu=120,
+        wall=900, in_pause=True, owner="breadth",
+        what="the point-in-time S&P 500 membership from a pinned public file and the changes table (the gateway's "
+             "reader), the assets and their aids, the audit, into <state>/equity-daily/universe/ (counts only out)"),
+    Job("equity_panel", "league.ops.equity_panel", (S.daily(1, 55),), grace=3 * HOUR, cpu=600, wall=3300,
+        in_pause=True, owner="breadth",
+        what="the panel's daily bars through the venue's asof (never 2020), the store's vintage rule, the coverage "
+             "audit and its verdict, the nightly I6, into <state>/equity-daily/panel/"),
+    Job("equity_spreads", "league.ops.equity_spreads", (S.daily(6, 30),), grace=3 * HOUR, cpu=900, wall=3000,
+        in_pause=True, owner="breadth",
+        what="the panel's half-spreads: quote samples at the instants the book trades, on Train-segment sessions, "
+             "resumable, into <state>/equity-daily/spreads.json"),
+    Job("equity_neff", "league.ops.equity_neff", (S.monthly_first(5, 10, 0),), grace=6 * HOUR, cpu=600, wall=900,
+        in_pause=True, owner="breadth",
+        what="the panel's independent names (N_eff on Train segment 2) into <state>/equity-daily/neff.json"),
+    Job("french", "league.ops.french", (S.monthly_first(5, 11, 0),), grace=6 * HOUR, cpu=60, wall=300,
+        in_pause=True, owner="breadth",
+        what="the French library's daily factors where a route to them exists (none today: a skipped receipt)"),
+    Job("xs_zero_edge", "league.ops.xs_zero_edge",
+        (S.weekly(6, 6, 0), S.weekly(6, 8, 0), S.weekly(6, 10, 0), S.weekly(6, 12, 0)), grace=100 * MINUTE, cpu=2400,
+        wall=3000, in_pause=True, owner="breadth",
+        what="the panel Train bar's zero-edge expected column: seeded random-score programs through the whole bar, "
+             "25 a run, into the swarm store's kv elane_xs_zero_edge"),
 )
 
 

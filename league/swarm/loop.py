@@ -38,7 +38,8 @@ hidden year (`agenda_alert`); the operator's tool `scripts/agenda_install.py` re
 
 THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). At each start, beside the options evaluator's adoption,
 the equity identity's (`evaluator.adopt_equity` with `evaluator.equity_identity()`: equity families only; a failure is
-logged and never stops the start, and `bands.read` then reads no equity band as current). While `elane.mode` is "gate",
+logged and never stops the start, and `bands.read` then reads no equity band as current), and the xs identity's
+(`adopt_xs`, release E4: panel families only, the same way). While `elane.mode` is "gate",
 each main-loop pass births the three captain-seeded programs not yet born (`equity_births`: `elane.birth_seeds`, once
 each, ever). THE EQUITY ROUNDS (`equity_rounds`, on their own thread every `elane.ROUND_SECONDS`): the tournament's
 equity step (Validation, the retirements), then the gate's (the one sealed look), so a version validated in a round
@@ -645,9 +646,22 @@ class Swarm:
         try:
             unmade = dict(self.equity_unmade)
             return {"mode": elane.cfg(self.settings)["mode"], "round_at": self.store.get(elane.ROUND_KEY),
-                    **({"validation_errors": unmade} if unmade else {})}
+                    **({"validation_errors": unmade} if unmade else {}), **self.panel_status()}
         except Exception as exc:  # noqa: BLE001 - the heartbeat never fails on it
             return {"error": f"{type(exc).__name__}"}
+
+    def panel_status(self) -> dict[str, Any]:
+        """THE PANEL LANE in the heartbeat (release E4; the review's spec-6), only while its switch is up: {"panel":
+        {"setting", "mode", "why"}}: the mode as set, the EFFECTIVE mode, and the leg that holds it under the setting
+        (`elane_xs.status`). With the switch off: {} (nothing of E4 is read)."""
+        try:
+            from . import elane_xs
+
+            if elane_xs.cfg(self.settings)["mode"] == "off":
+                return {}
+            return {"panel": elane_xs.status(self.settings, getattr(self.store, "root", None))}
+        except Exception as exc:  # noqa: BLE001 - the heartbeat never fails on it
+            return {"panel": {"error": type(exc).__name__}}
 
     def library_status(self) -> dict[str, Any] | None:
         """THE LIBRARY in the heartbeat: on or off, and today's counted calls against `research.requests_day`."""
@@ -1119,6 +1133,12 @@ class Swarm:
         next round) or `refused` (no Validation was made) is under `validation_errors` {family: the error, or
         "refused: why"}, in the round's log line and, until the next round, in the heartbeat (`equity_status`)."""
         self.store.put(elane.ROUND_KEY, self.clock())
+        try:    # THE PANEL LANE'S OWN ALARMS (release E4: its mode held by a leg, its spreads, its universe, its store)
+            from . import elane_xs
+
+            elane_xs.health(self.store, self.settings, getattr(self.store, "root", None), self.clock())
+        except Exception:  # noqa: BLE001 - an alarm never costs a round
+            pass
         out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
         try:
             step = self.tournament.equity_round()
@@ -1162,6 +1182,23 @@ class Swarm:
             return None
         if adopted.get("adopted"):
             log(f"equity evaluator adopted: {adopted.get('families')} equity families owe fresh evidence")
+        return adopted
+
+    def adopt_xs(self) -> dict[str, Any] | None:
+        """THE XS IDENTITY's adoption at the start (`evaluator.adopt_xs` with `league.xs.identity.xs_identity()`,
+        release E4): panel families only. None on an error (logged, never stopping the start; `bands.read` judges a
+        panel band against the running release's own files whatever was adopted, so nothing of the panel trades on a
+        stale band)."""
+        try:
+            from ..xs.identity import xs_identity
+            from .evaluator import adopt_xs
+
+            adopted = adopt_xs(self.store, xs_identity())
+        except Exception:  # noqa: BLE001 - never keeps the swarm from starting
+            log(f"xs evaluator adoption failed: {traceback.format_exc()[-600:]}")
+            return None
+        if adopted.get("adopted"):
+            log(f"xs evaluator adopted: {adopted.get('families')} panel families owe fresh evidence")
         return adopted
 
     def run(self, *, once: bool = False) -> int:
@@ -1242,6 +1279,7 @@ class Swarm:
         if adopted_evaluator["adopted"]:
             log(f"evaluator adopted: {adopted_evaluator['families']} families owe fresh evidence")
         self.adopt_equity()  # THE EQUITY IDENTITY (release E1): equity families only, beside `adopt`
+        self.adopt_xs()  # THE XS IDENTITY (release E4): panel families only, beside `adopt_equity`
         adopted = self.pool.adopt() if hasattr(self.pool, "adopt") else 0
         self.store.event("swarm.status", None, {"action": "started", "pid": os.getpid(), "release": str(CODE_DIR), "adopted": adopted,
                                                 "families": len(self.store.families(alive=True))})

@@ -37,6 +37,15 @@ SETTINGS (`cfg`; policy.json "elane", swarm.json over it; `DEFAULTS` is the roll
   (A9 D3; league/equity/screen.py `retry_permitted`);
 - `program_loss_usd` -300 (a tightening only: -300 to -25).
 
+R-SEC, SECTOR PROGRAMS ARE FORWARD-ONLY (the captain's decision from the widening review of Oct 14, 2026, under A19,
+A31 and A33): an equity family whose symbols name anything outside the four index ETFs (`econfig.INDEX_ETFS`) takes
+no sealed Validation try (`try_open` False) and no sealed look (`look` holds it before the sealed run: no look spent,
+no refusal row, no retirement for that reason), whatever `elane.fwd1.seats` says and whether or not the forward
+screen's permit file lists its lineage (`forward_only`). Its only path to a seat is a forward pass of FWD1-R (A33's
+ETF case N, bar 2.61, labelled WEAK) under `elane.fwd1.seats` "on" (league/swarm/elane_forward.py). Code, never a
+setting: widening `elane.universe` past the four index ETFs therefore opens no historical look on 2025 for a sector,
+bond or gold fund (a 2026 author remembers those years). Panel families are not affected (A34 governs them).
+
 THE ROUNDS RUN ON THEIR OWN (A3: no Gym box, no model dollar). The swarm's main loop starts the two equity rounds below on
 their own thread every `ROUND_SECONDS` while the lane is on (league/swarm/loop.py `Swarm.equity_rounds`: the
 tournament's step, then the gate's, so a version validated in a round takes its look in the same round). Neither the
@@ -139,9 +148,13 @@ from typing import Any, Mapping, Sequence
 
 from ..equity import BETA, EQUITY, EQUITY_ENGINE_VERSION, LANES
 from ..equity import config as econfig
+from .store import EQUITY_STRUCTURES
 
 MODES = ("off", "gate")
-STRUCTURES = ("etf", "stock")
+#: The equity structures (`store.EQUITY_STRUCTURES`, the one place they are spelled out). RELEASE E4 adds "panel"
+#: (league/swarm/elane_xs.py), whose own switch is `elane.panel.mode`: `elane.structures` stays ["etf"] and a panel
+#: card, family, Validation, look and view are forwarded to that module.
+STRUCTURES = EQUITY_STRUCTURES
 LABELS = {BETA: "MARKET BETA", EQUITY: "EQUITY"}
 #: The plain statement beside every beta figure (the goal's item 2: a BETA lane, labelled as market beta).
 BETA_NOTE = "MARKET BETA: profit from market direction, reported beside the same-risk buy-and-hold; not alpha"
@@ -322,6 +335,9 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
 
     mode = raw.get("mode", DEFAULTS["mode"])
     screens = raw.get("screens") if isinstance(raw.get("screens"), Mapping) else {}
+    from . import elane_xs  # RELEASE E4: the panel's block and its screen's pin pass through, each held by its owner
+
+    panel = elane_xs.cfg(settings)
     return {
         "mode": mode if mode in MODES else "off",
         "universe": words("universe", tuple(econfig.UNIVERSE), upper=True),
@@ -329,7 +345,9 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         "birth_share": number("birth_share", 0.0, 0.5),
         # The roster's bound is its default (== equity_money.probe.max_programs): a setting may only lower it.
         "roster": int(number("roster", 0, float(DEFAULTS["roster"]), count=True)),
-        "screens": {lane: _screen_block(screens.get(lane)) for lane in LANES},
+        "screens": {**{lane: _screen_block(screens.get(lane)) for lane in LANES},
+                    elane_xs.SCREEN_KEY: dict(panel.pop("screen"))},
+        elane_xs.SETTINGS_KEY: panel,
         "val_tries": int(number("val_tries", 1, 1, count=True)),
         "looks_per_lineage": int(number("looks_per_lineage", 1, 1, count=True)),
         # The line's bound is its default (-300): a setting can only raise it toward zero.
@@ -384,6 +402,10 @@ def card_errors(card: Any, structure: Any, symbols: Any, settings: Mapping[str, 
     lane = card_lane(card)
     if lane is None:
         return []
+    if _token(structure) == "panel":  # RELEASE E4: a panel card's box is the panel lane's own
+        from . import elane_xs
+
+        return elane_xs.card_errors(card, settings)
     c = cfg(settings)
     errors: list[str] = []
     if c["mode"] == "off":
@@ -721,8 +743,11 @@ def _members(store: Any, fid: str) -> list[str]:
     lines = store._connected_lineages(row["lineage"])
     if not lines:
         return []
+    from .store import EQUITY_ONLY_SQL  # every equity structure, the panel's too: with a literal here a panel lineage
+
+    # has no members, no try is ever counted for it, and every fork and rebirth of it takes a fresh Validation try.
     return [r["id"] for r in store._all(f"SELECT id FROM families WHERE lineage IN ({','.join('?' * len(lines))}) "
-                                        "AND structure IN ('etf', 'stock')", tuple(lines))]
+                                        f"AND {EQUITY_ONLY_SQL}", tuple(lines))]
 
 
 def lineage_tries(store: Any, fid: str) -> list[dict[str, Any]]:
@@ -780,10 +805,51 @@ def _retry_open(store: Any, fam: Mapping[str, Any], n: int, tries: Sequence[Mapp
         return False
 
 
+#: R-SEC's words (the module docstring): why a family trading outside the index ETFs takes no sealed try and no look.
+FORWARD_ONLY = ("R-SEC: a program trading a symbol outside the index ETFs (" + ", ".join(econfig.INDEX_ETFS) + ") "
+                "takes no sealed Validation try and no sealed look; its only path to a seat is the forward screen "
+                "FWD1-R (ETF case N, bar 2.61, WEAK) with elane.fwd1.seats on")
+
+
+def forward_only(fam: Mapping[str, Any] | None) -> bool:
+    """R-SEC (the module docstring): whether an equity family's symbols (the store's roots, its spec's `roots` and
+    `symbols`) name anything outside `econfig.INDEX_ETFS`. A panel family is never (A34 governs it). FAIL CLOSED: a
+    family that is not a panel and whose symbols cannot be read, or names none, is forward-only."""
+    from . import elane_xs
+    from .store import loads
+
+    if not isinstance(fam, Mapping):
+        return True
+    spec = fam.get("spec")
+    if isinstance(spec, str):
+        spec = loads(spec, None)
+    spec = spec if isinstance(spec, Mapping) else {}
+    if elane_xs.is_panel(fam) or str(spec.get("structure") or "") == elane_xs.STRUCTURE:
+        return False
+    names: list[str] = []
+    for raw in (fam.get("roots"), spec.get("roots"), spec.get("symbols")):
+        if raw is None:
+            continue
+        if isinstance(raw, str):
+            raw = loads(raw, None)
+        if not isinstance(raw, (list, tuple)):
+            return True
+        names.extend(str(s).strip().upper() for s in raw)
+    return not names or any(s not in econfig.INDEX_ETFS for s in names)
+
+
 def try_open(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any] | None) -> bool:
-    """Whether version `n` may take its lineage's Validation try (one a lineage; R3's retry only when permitted)."""
+    """Whether version `n` may take its lineage's Validation try (one a lineage; R3's retry only when permitted). A
+    lineage the FWD1-R forward screen judges takes none while its seats are on (league/swarm/elane_forward.py), and a
+    family trading outside the index ETFs takes none at all (R-SEC, `forward_only`)."""
     try:
         if lane_of(store, fam) is None:
+            return False
+        if forward_only(fam):
+            return False  # R-SEC: forward-only, whatever elane.fwd1.seats and the permit file say
+        from . import elane_forward
+
+        if elane_forward.try_refused(store, fam, settings) is not None:
             return False
         tries = lineage_tries(store, str(fam["id"]))
         k = int(cfg(settings)["val_tries"])
@@ -852,6 +918,10 @@ def lineage_spent(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any
     try:
         if lane_of(store, fam) is None:
             return None
+        from . import elane_xs
+
+        if elane_xs.is_panel(fam):  # RELEASE E4: the panel's own rule (a style-open passer is not spent: A22)
+            return elane_xs.lineage_spent(store, fam, settings)
         c = cfg(settings)
         fid = str(fam["id"])
         if store.lineage_looks(fid, include_inflight=True) >= c["looks_per_lineage"]:
@@ -1033,6 +1103,10 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     return sd), the screen's pre-check (`league.equity.screen.precheck`: S1's and S2's one rule) as its line, the lineage's
     try recorded (`TRY_KEY`). `screen` in its answer, its state and its event is the lane's pinned screen
     (`screen_name`). Returns the tournament's verdict dict."""
+    from . import elane_xs
+
+    if elane_xs.is_panel(fam):  # RELEASE E4: a panel family's Validation is the panel lane's (screen XS1)
+        return elane_xs.validate(tournament, fam, version)
     store, settings = tournament.store, tournament.settings
     fid, n = str(fam["id"]), int(version["n"])
     lane = lane_of(store, fam)
@@ -1205,10 +1279,12 @@ def same_lineage(store: Any, fam: Mapping[str, Any], lane: str, template: str,
 
     from ..equity import screen as S
 
+    from . import elane_xs
+
     mine = dict(zip(train.get("days") or [], train.get("r") or []))
     for other in store.families(lanes=LANES):
-        if str(other["id"]) == str(fam["id"]):
-            continue
+        if str(other["id"]) == str(fam["id"]) or elane_xs.is_panel(other):
+            continue  # RELEASE E4: a panel program is judged on its residual under XS1, with its own lineage rule
         state = other.get("state") or {}
         looked = isinstance(state.get(LOOK_KEY), Mapping)
         if not looked and not (state.get("look_inflight") or {}).get("sha"):
@@ -1326,12 +1402,23 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     seeds' declared order (`seed_wait`, A18): a seed waits, nothing spent, while an earlier seed of its declared
     lineage is alive without a verdict. True passed (the family becomes a Candidate), False failed, None not run (no
     look spent)."""
+    from . import elane_xs
+
+    if elane_xs.is_panel(fam):  # RELEASE E4: a panel family's one look is the panel lane's (screen XS1)
+        return elane_xs.look(gate, fam, version, sha)
     store, settings = gate.store, gate.settings
     fid, n = str(fam["id"]), int(version["n"])
     lane = lane_of(store, fam)
     if lane is None or not on(settings):
         return None
     screen = screen_name(lane)
+    if forward_only(fam):
+        # R-SEC, before the sealed run and before any record a look or a refusal would write: no look spent, no
+        # refusal row (a refusal spends the lineage, `lineage_spent`), no bad gate outcome (it would bar the forward
+        # seat, league/swarm/bands.py BAD_OUTCOMES). The family waits; its one record is written once.
+        if (fam.get("state") or {}).get("gate") != f"waiting ({FORWARD_ONLY})":
+            _wait(gate, fid, n, sha, FORWARD_ONLY, screen=screen)
+        return None
     receipt, why = _receipt(settings, lane)
     if receipt is None:
         _wait(gate, fid, n, sha, why or "the share screen refused: no pinned receipt", screen=screen)
@@ -1711,6 +1798,10 @@ def birth_seeds(store: Any, settings: Mapping[str, Any] | None) -> list[str]:
 def view(fam: Mapping[str, Any], *, lane: str | None) -> dict[str, Any]:
     """The lane's line in a status or report: {lane, label, seeded, screen (the screen that judged its recorded look;
     None before it), try, look, beside} (labels always; figures only where the reader may see them)."""
+    from . import elane_xs
+
+    if elane_xs.is_panel(fam):  # RELEASE E4: the panel's line (screen XS1, its seat, its sentence)
+        return elane_xs.view(fam, lane=lane)
     state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
     spec = fam.get("spec") if isinstance(fam.get("spec"), Mapping) else {}
     held = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else None
@@ -1733,7 +1824,7 @@ def view(fam: Mapping[str, Any], *, lane: str | None) -> dict[str, Any]:
 
 __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_KEY", "TRY_KEY", "DEFAULTS", "cfg", "on",
            "lane_of", "label", "card_errors", "lineage_key", "screen_effective", "screen_name", "SCREENS", "REPO",
-           "try_open", "lineage_spent",
+           "try_open", "lineage_spent", "forward_only", "FORWARD_ONLY",
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
            "ROUND_KEY", "ROUND_SECONDS", "round_order", "seed_ahead", "seed_owed", "seed_wait", "seed_waits_over",

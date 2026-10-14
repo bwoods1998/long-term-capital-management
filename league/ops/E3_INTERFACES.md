@@ -647,3 +647,116 @@ release's tree), and a differing session's own row is that release's row too.
 - **Its tests' live books** (`test_forward_twins.live_path`) are their own decisions' doing: the engine account
   deciding through the program, with a session's entries or exits taken away. A book that holds a lot no decision
   of its own bought (`mirror` with a skipped decide) cannot be followed by a twin set to it, and differs once more.
+
+## 14. Release E4's package J on this record (Oct 11, 2026; additive: no signature, column or event kind changed)
+
+Release E4's panel lane (programs that pick names out of the S&P 500 panel) has its half of the forward record in
+ONE new ops module, `league/ops/forward_xs.py`, which writes this release's own tables through this release's
+modules. What changed HERE, each a few lines (the record: league/swarm/e4_patches/J.md):
+
+- **The import rule (section 1).** E3's ops modules may also import `league.ops.forward_xs`, inside functions (it
+  imports them at its top). That module stands under the same seal: no module of the sealed trees imports or names
+  it, it imports only this section's list and the panel's own modules (league/xs's `store`, `runner`, `program`,
+  `results`, `book`, `config`, `identity`; `league.swarm.elane_xs`), and it opens no swarm store writable.
+  `test_e3_seal_imports` holds all three, and `test_forward_report` that no other ops module but the dlane report
+  names it.
+- **`forward_db`.** `XS_ROUTE` ("XS1") and `PANEL_UGROUP` ("panel:"): `append_registry` admits (`XS_ROUTE`,
+  `E3_ALPHA_F`) on a row whose `ugroup` begins `PANEL_UGROUP`, and on no other; such a row carries no other route.
+- **`forward_register`.** `sync` asks `forward_xs.scored_rows` beside `_scored` (pids still follow the order the
+  programs came to exist) and `forward_xs.live_row` before `_live_row`; `_register` writes the row's own route;
+  `_tags` reads a panel family's look under the panel lane's key; `_stops` reads, for each program, THE NIGHTS OF
+  THE JOB THAT RUNS IT (`fwd_runs.job`). `STRUCTURES` is unchanged: this reader still takes "etf" and "stock".
+- **`forward_shadow`.** `Shadow.JOB` (the night's `fwd_runs.job`: a class attribute), `Shadow._mine(program)` (its
+  queue leaves a panel program out) and one line of `_label` (the label gains "+xs." and 12 hex of the xs
+  fingerprint once the registry holds a panel row; never before). The panel night is `Shadow.night` itself on a
+  subclass (`forward_xs.panel_shadow`): what it overrides is the store it reads, the run, the write, the canary
+  and which programs are its own.
+- **`forward_twins`.** `on_run` writes no live-like row of a panel run; `_one_instance` hands an instance whose
+  registry row is a panel row to `forward_xs.twin` (each night twins its own lane). `fwd_lotgap`, `fwd_part`'s
+  shape and `a14_reading` are unchanged and read a panel instance as any other.
+- **`forward_audit`.** The morning job also writes `forward_xs.audit_marks`.
+- **`forward_report`.** D9's groups gain "xs:train_pass", "xs:train_fail", "xs:look_pass", "xs:look_fail" from the
+  first day a panel row is registered (a panel pid is in no other group); D7's numerator counts structure "panel"
+  runs; `_nights` and the funnel's `stale` read this release's own job; `raised` knows the FX alarms and `section`
+  appends them (`forward_xs.alarms`). `ALARMS`, `SECTION_KEYS` and `FUNNEL_KEYS` are unchanged.
+- **What a registered panel program costs this record, stated.** The engine label moves once when the first panel
+  row is registered and at every later change to an xs evidence module (a new series for every program, as an
+  equity evidence change opens one). A panel row is written a night after an ETF row of the same day, so a day's
+  meters wait for it (section 11's live-3 rule, unchanged, does the waiting: they are written the second morning
+  after the day, never partial for that cause). FW1 would read a registry that
+  held ONLY panel programs as stalled each morning (no row of the last closed day by 09:00): the House's registry
+  holds the seeds and the controls.
+
+## 15. What release E4's patch 18 added to the probe (Oct 11, 2026; additive: no signature, key or column above changed)
+
+Release E4's panel lane holds a look back until the probe has asked three strata of the panel (its A22 (3)). The
+probe gained a seam for them and nothing else of its behaviour moved: `run(ctx)`, THE JOB, hands no plan and is this
+release's probe to the byte (`league/tests/test_contam_probe.py` passes unchanged; the registry row is untouched).
+
+- **Patch 18 moved no import rule of section 1 and no seal test** (section 14's one addition is package J's, for
+  the forward modules; the probe imports none of it: `test_contam_xs.TheWiring`). `contam_probe.py` imports
+  nothing of `league/xs` and no module outside section 1's list. The panel store is opened by a module of release
+  E4, `league/ops/contam_xs.py`, which imports no module of this release (T1's rule for the sealed trees is the
+  report's own for league/ops: `test_forward_report.TheReportShowsOnlyWhatItMay`). The two meet only through
+  parameters: `probe(ctx, panel=maker)` calls `maker(ctx, settings, capability, periods=periods, eras=tuple(ERAS))`.
+- **NOT WIRED.** Nothing in the tree hands `probe` a maker. Doing so from `run` needs `contam_probe.py` to import
+  `league.ops.contam_xs` inside that function, which section 1's list and T1 do not allow. Whether to allow that
+  one import is the captain's ruling (release E4's contract, section 14, and the patch in the captain's scratch).
+- **Names added in `contam_probe`:** `PANEL_STRATA` ("P4", "P5", "P6"), `FACTORS`, `FACTOR_WORDS`, `NAME`,
+  `panel_questions(panel, *, per_cell)`, `probe(ctx, *, panel=None)`; `Probe.__init__` takes `panel=None`; `WORDS`
+  and `WEEKLY` name the panel strata; `periods(stratum, era)` answers for them (the calendar's months and weeks);
+  `_grid` is the one hash rule `grid` and `panel_questions` share; `_owing` is the view `due` is shown while a
+  plan asks (a route whose published result lacks a panel stratum reads as never published: due at once).
+- **A plan** has `names(stratum, era)`, `periods(stratum, era)`, `truths(questions)` and `published(doc)`. The
+  probe builds every question from the names and period names it hands in (a name outside `NAME` or a period
+  outside `periods(stratum, era)` is a ValueError before any route is marked), asks the panel's cells after its
+  own and before the recall, asks the plan for a cell's truths only once the cell's answers are in, and hands it
+  the file's content after a publish and after any other run that had a plan.
+- **The file.** `routes[route].cells` may carry "P4", "P5" and "P6" (the cell shape of section 9); a partial may
+  carry `panel_qset`. `qset` is still the sha of this release's own questions, so its cells never move with the
+  panel's. A partial's panel cells are dropped when the panel's question set moved or no plan is handed in.
+- **The receipt** gains `panel` and, on a publish, `permit`, only with a plan.
+- **The dollars, the keys, the ledger rows, the eras and one route a run are unchanged.** A probe with a plan asks
+  about 70% more questions inside the same `usd_run` and day line, so it is published that many runs later, and
+  CP1's 45 days of a route no probe finished on are reached sooner on a small line (section 10's "left open").
+
+## 16. The forward screen FWD1-R reads this record (the captain's A33, Oct 14, 2026; additive: no signature, column, table or event kind above changed)
+
+E3 records and judges nothing; FWD1-R is the later release section 4 names. Its rule is `league/ops/fwd1_rule.py`, its
+job `league/ops/forward_screen.py` (registered after `forward_shadow` and after `forward_xs`), its receipt
+`docs/benchmarks/forward_screen_fwd1.json` (v2: the study FWD1-1014's own code at the adopted bars) pinned in
+policy.json `elane.forward_screen`. What it reads and what it leaves as it was:
+- **Read-only.** `forward_db.open_db(root, readonly=True)`: `fwd_registry` (the lineages, their rows' `first_day`,
+  `reason`, `run_sha` and `row_hash`), `forward_db.counted_days` (D4's counted days, under ONE engine id a verdict),
+  `fwd_ll` (an ETF day's live-like re-price in place of r), `fwd_lotgap.side_gap_bp` (the measured adverse gap a side
+  that raises the haircut), `fwd_tags` try / try_entered / look_pass / look_fail (a sealed pre-check), `fwd_engines`
+  (the label a verdict was read under). A panel row's r, w, b and r15 are read as package J writes them (x = r - w b,
+  x15 = r15 - w b: section 14). E3's `fwd_checks` (FGS's 20/60/120/250) are never applied to a lineage FWD1 judges.
+- **Its own store.** `<state>/forward-screen.sqlite` (tables `fwd1_*`, append-only by trigger, first write stands):
+  the pin's first sighting (the clock), each day's SIDES (the weights of the shadow's lots in and out, under the
+  record's own engine id), the lineages, the own floors, the checkpoints of record and one verdict a lineage. No table
+  of `forward.sqlite` is added, written or migrated.
+- **No line of this record's night changes.** The sides are not in the record: the job reads them from the
+  representative's own forward run in its own decider child (`forward_shadow.Shadow` `_whole`, `slice`, `_child` at k
+  1.0 and `_series`; `forward_xs.panel_shadow(...).run_program`), both built on the record opened READ-ONLY (neither
+  writes before `night`), and keeps a day's sides only where that run is the stored day: its r is the stored row's to
+  `forward_db.TOL`, or the day was RESTATED (the run's bars hash of the day's decision, computed as this record's
+  night computes it, is not the stored `bars`, and its lots in and out that session are the row's `entries` and
+  `exits`): E3 keeps the first write of a day, and a dividend or a split rescales the whole adjusted history, so no
+  later run reproduces the stored r of a day before an ex-day. E3's seal (`test_e3_seal_imports`: E3's modules import
+  only its list) stands as it was.
+- **What it reads of this record's own rules** (the reviews' fixes, Oct 14): a NEW engine id (`fwd_engines`) is not
+  read for a pending lineage until it holds the representative's rows for every judged day (this record's night
+  writes the ETF rows and package J's panel night the panel rows hours later; a program the budget left stale is
+  written a night later), and a judged day that moved under the new id is carried only when `fwd_days.bars` differs
+  and a `restated` event of the pid under the old id (payload `engine`, `first`, `last`, `bars` "moved") covers it;
+  `fwd_runs.through` names the record's nights (the judge's stall rule counts them); `fwd_tags` stopped / resumed
+  (`forward_db.active`) say a representative is stopped (its lineage is listed "stopped", not pending).
+- **The D2 route and alpha in the hashed rows stand** (every E3-era row keeps `route` "S2"/"XS1" and `alpha_f` "0.03"):
+  FWD1-R judges the days after its own pin at the case budget A33 adopted (15% for a never-looked lineage; D2's 3%
+  kept for a panel lineage with an XS1 look), a loosening stated in the receipt's `loosened` with its cost.
+- **The seal.** The swarm reads only the job's permit file `<state>/forward-screen-permits.json` (ids and words: no t,
+  no P&L), in `league/swarm/elane_forward.py`; no module of league/swarm, league/equity, league/live, league/gym or
+  league/xs imports `fwd1_rule` or `forward_screen` or names their store or report (league/tests/test_forward_screen.py
+  `TheJob.test_the_seal_no_generator_side_module_imports_the_judge`); the family-state key a forward pass writes
+  (`elane_forward`) is in `elane_seal.SEALED_KEYS`.

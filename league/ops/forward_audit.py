@@ -22,6 +22,9 @@ of `<state>/forward.sqlite` (league/ops/forward_db.py).
   that held only a symbol whose bar was right would have lost the day by its rows; E1's review made the mark each
   audited symbol's own verdict, "ok" or "mismatch", and a test here holds the book to that. A note the book writes
   for a volume-only difference names no symbol: its day is read from the rows, which then say "ok".)
+- (RELEASE E4, package J) A LIVE PANEL DECISION whose morning re-read was a mismatch (the book's `eq_rebalances
+  .audit`) marks that day of its program's registry row, once a (pid, day): league/ops/forward_xs.py `audit_marks`.
+  A panel program names no symbol in its NEEDS, so the marks above never reach one.
 - THE CHAIN: `forward_db.verify_chain` -> one `chain_ok` or `chain_broken` event, and for a broken chain a
   `ctx.alert("warning", ...)` (owner step: stop the forward jobs and compare with the backup). The alert's text
   holds ids, counts and dates only.
@@ -146,6 +149,15 @@ def run(ctx: Any) -> dict[str, Any]:
                 ctx.alert("warning", f"forward_audit: the live book's bars audit could not be read "
                                      f"({type(exc).__name__}): no forward day was marked this morning")
             marked = mark(db, bars, now=now)
+            if marks == "ok":   # RELEASE E4 (package J): a live panel decision whose morning re-read was a mismatch
+                from . import forward_xs
+
+                try:
+                    marked += forward_xs.audit_marks(db, root / LIVE_DB, now=now)
+                except sqlite3.Error as exc:
+                    marks = "unread"
+                    ctx.alert("warning", f"forward_audit: the live book's panel decisions could not be read "
+                                         f"({type(exc).__name__}): no panel forward day was marked this morning")
         chain = forward_db.verify_chain(db)
         ok = bool(chain.get("ok"))
         rows, head, first_bad = chain.get("rows"), chain.get("head"), chain.get("first_bad")

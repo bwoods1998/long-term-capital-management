@@ -162,7 +162,9 @@ reads it and checks it against the equity lanes' box (`elane.card_errors`: a str
 only, symbols inside `elane.universe`, the inputs a daily bar carries, never a flat comparison), every reason named. Its
 class may be any of `MECHANISM_CLASSES` or the lanes' `equity_premium` (`elane.CLASSES`); it needs no ablation (its
 comparison is the same-exposure buy-and-hold, the screen's S1-X label). The card stores its `lane`, `structure` and
-`symbols` (inside its canonical JSON and so its sha). ITS CELL IS LANE-SCOPED (A8.12): an equity card's structure family
+`symbols` (inside its canonical JSON and so its sha). A PANEL card (release E4: `structure` "panel", lane "equity";
+league/swarm/elane_xs.py `card_errors`) stores `panel`, `max_names`, `rebalance` and `weekday` in their place and names
+no symbol; its cell is "equity:panel". ITS CELL IS LANE-SCOPED (A8.12): an equity card's structure family
 is "<lane>:<structure>" (`key_of`, `elane.lineage_key`), so no options row shares its cell, and THE GRAVEYARD IS
 LANE-SCOPED: `RebirthIndex` keeps each equity lane's rows apart (`equity_rows`, by `row_lane`), a REFUTED row of an
 equity lane binds only that lane's cards, and no equity row ever binds, or is listed for, an options card (the options
@@ -503,7 +505,16 @@ def validate(raw: Any, structure: Any = None, *, roots: Any = None,
         errors = [e for e in errors if e.split(":", 1)[0] not in fields] + boxed
         card["lane"] = equity_lane
         card["structure"] = _token(given)
-        card["symbols"] = sorted({str(x).strip().upper() for x in symbols}) if isinstance(symbols, (list, tuple)) else []
+        if card["structure"] == "panel":
+            # RELEASE E4 (league/swarm/elane_xs.py `card_errors`, reached through `elane.card_errors`): a panel card
+            # declares its panel, how many names it holds and its rebalance schedule, and NO symbol (a panel program
+            # sees salted slots). They are part of the card, and so of its sha.
+            for name in ("panel", "max_names", "rebalance", "weekday"):
+                if raw.get(name) is not None:
+                    card[name] = raw[name]
+        else:
+            card["symbols"] = (sorted({str(x).strip().upper() for x in symbols})
+                               if isinstance(symbols, (list, tuple)) else [])
     return (card, []) if not errors else (None, errors)
 
 

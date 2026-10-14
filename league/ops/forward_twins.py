@@ -144,6 +144,12 @@ BESIDE IT, never in its rule (A29; the reading's `rebase`, `A14_REBASE_KEYS`): o
 times the twins were re-based and the agreement of the UN-RE-BASED twin runs (`sessions`, `agreed`, `share`), in all
 and an instance (`A14_REBASE_INSTANCE_KEYS`).
 
+RELEASE E4 (package J). An instance whose registry row is a PANEL row is twinned by the panel night, on the panel
+store, from its run's own picks and with weights (league/ops/forward_xs.py `twin`): `_one_instance` hands it over
+once its registry row and run sha are checked, and each night twins its own lane. `on_run` writes no live-like row of
+a panel run (no minute bars exist for 500 names). `fwd_lotgap` and A14's reading are this module's for every lot and
+every instance, a panel one's too: a panel lot's row has its model, slip and twin gap and no timing part.
+
 Standard library and numpy only.
 """
 
@@ -957,8 +963,10 @@ def on_run(db: sqlite3.Connection, run: ShadowRun, *, now: float, settings: Mapp
     """After a program's write: 0 at once when `fill_minutes` is false; else the `fwd_ll` rows of the run's days that
     have none under the run's engine id (D10; `_engine_of`; a `no_minute` event once a (pid, day)); how many were
     written."""
-    if not _on(_cfg(settings), "fill_minutes"):
-        return 0
+    from . import forward_xs
+
+    if not _on(_cfg(settings), "fill_minutes") or forward_xs.is_panel(run.program):
+        return 0    # (a panel run has no live-like row: no minute bars exist for 500 names)
     pid = int(run.program.pid)
     days = _days(run.series.days)
     engine = _engine_of(db, pid, days)
@@ -1153,6 +1161,12 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
             "instance": iid, "why": "the registry's run sha is not the live instance's: no twin"})
         out["mismatched"] += 1
         return
+    from . import forward_xs
+
+    if forward_xs.is_panel(program) or forward_xs.is_panel_night(shadow):
+        # RELEASE E4 (package J): each night twins its own lane. A panel instance's twin is the panel night's, on the
+        # panel store, from its run's own picks (league/ops/forward_xs.py `twin`).
+        return forward_xs.twin(root, db, shadow, inst, book, program, out, now=now, late=late)
     through = _date(shadow.through)
     night = through.isoformat()
     needs = [str(s) for s in (program.needs or {}).get("symbols") or ()]

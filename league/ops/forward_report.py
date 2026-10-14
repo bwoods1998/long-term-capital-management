@@ -145,6 +145,21 @@ still raises RR, CP and MM, and `alarms` still hands them to the dlane report.
 - MM1 (warning): a `swarm.status` "elane_memory" alert in the last 24 h.
 FW8 and MM1 read back to the report before this one when that is longer than 24 h (never past `LOOKBACK_DAYS`): the
 job does not run between a Friday night and a Monday morning, and what happened then is still told once.
+- FX1, FX2, FX3 (warning; RELEASE E4, package J: league/ops/forward_xs.py `alarms`, `ALARMS`): the panel lane's twin
+  marker behind its store, a REBALANCE session of a live panel program whose live and twin orders disagree, and
+  panel programs left stale two panel nights running. They follow two switches (`elane.forward.mode` and
+  `elane.panel.mode`); `ALARMS` here is release E3's own list.
+
+RELEASE E4 (package J), WHAT ELSE READS A PANEL PROGRAM HERE. Its rows are E3's rows (x = r - w * b is its residual
+against its matched cells), so D6 to D8 read it as any lineage. D9 keeps it APART: a panel pid stands in the groups
+"xs:train_pass", "xs:train_fail", "xs:look_pass" and "xs:look_fail" (written from the first day a panel row is
+registered), never in an ETF group, and no RC pair reads them (no panel control exists). The replay multiple's
+numerator counts a panel family's Train runs; its denominator does not hold the panel's independent history (the
+multiple overstates: stated). A NIGHT here (`_nights`: FW2, FW3's start, the funnel's `stale`) is one of this
+release's own job; the panel lane's nights (their own job and their own day: a panel row is final a session after
+an ETF row) are FX3's. So once a panel program is registered a day's meters wait for its panel rows (A DAY'S
+METERS WAIT FOR ITS ROWS, above): they are written at the morning run after the panel night that holds them, the
+second morning after the day, and are not partial for that cause.
 
 Standard library and numpy only (numpy inside the functions that read arrays).
 """
@@ -267,6 +282,10 @@ def raised(alarm: Any, settings: Mapping[str, Any] | None) -> bool:
     group = str(alarm)[:2]
     if group == "FW":
         return _mode(settings) != "off"
+    if group == "FX":   # RELEASE E4 (package J): the panel twin's alarms (league/ops/forward_xs.py `ALARMS`)
+        from . import forward_xs
+
+        return forward_xs.raised(alarm, settings)
     if group == "CP":
         return _probing(settings)
     return str(alarm) in ALARMS
@@ -423,8 +442,9 @@ def sim_program_years(root: str | Path, db: sqlite3.Connection, day: str) -> flo
     simulated = 0.0
     if path.exists():
         marks = ", ".join("?" * len(funnel.NOT_RUN))
-        where = (f"FROM runs r JOIN families f ON f.id=r.family WHERE f.structure IN ('etf', 'stock') AND r.trials>0 "
-                 f"AND r.status NOT IN ({marks})")
+        # (release E4: a panel family's Train runs are replays of the same years: they count)
+        where = (f"FROM runs r JOIN families f ON f.id=r.family WHERE f.structure IN ('etf', 'stock', 'panel') AND "
+                 f"r.trials>0 AND r.status NOT IN ({marks})")
 
         def read(swarm: sqlite3.Connection) -> float:
             try:
@@ -550,19 +570,25 @@ def _group_rows(db: sqlite3.Connection, day: str) -> list[dict[str, Any]]:
     counted = {int(row["pid"]): row for row in _counted(db, forward_db.engine_now(db), day, day)}
     registry = {int(row["pid"]): row for row in _rows(
         db, "SELECT pid, lane, reason, ugroup FROM fwd_registry WHERE first_day<=?", (day,))}
+    from . import forward_xs
+
     groups: dict[str, list[int]] = {name: [] for name in (*GROUP_REASONS, *GROUP_TAGS)}
+    if any(forward_xs.is_panel(row) for row in registry.values()):
+        # RELEASE E4 (package J): a panel pid stands in the panel's own groups ("xs:..."), never in an ETF group: a
+        # residual against matched cells and an ETF excess are not one quantity, and no control group is the panel's.
+        groups.update({name: [] for name in forward_xs.GROUPS})
     for pid, row in registry.items():
         if row["lane"] == "control":
             groups.setdefault(f"control:{row['ugroup']}", [])
             if pid in counted:
                 groups[f"control:{row['ugroup']}"].append(pid)
         elif row["reason"] in GROUP_REASONS and pid in counted:
-            groups[row["reason"]].append(pid)
+            groups.setdefault(forward_xs.group(row, row["reason"]), []).append(pid)
     if close is not None:
         for row in _rows(db, "SELECT pid, tag, min(at) AS at FROM fwd_tags WHERE tag IN (?, ?) GROUP BY pid, tag", GROUP_TAGS):
             pid = int(row["pid"])
             if float(row["at"]) < close and pid in counted and pid in registry and registry[pid]["lane"] != "control":
-                groups[row["tag"]].append(pid)
+                groups[forward_xs.group(registry[pid], row["tag"])].append(pid)
     out = []
     for name in sorted(groups):
         pids = sorted(groups[name])
@@ -795,9 +821,13 @@ def _registry(db: sqlite3.Connection, now: float) -> dict[str, Any]:
 
 
 def _nights(db: sqlite3.Connection) -> list[dict[str, Any]]:
-    """The last two nights (a night is a `through`; its latest `fwd_runs` row), newest first."""
+    """The last two nights (a night is a `through`; its latest `fwd_runs` row), newest first. The panel lane's own
+    nights (release E4: league/ops/forward_xs.py, its own job and its own day) are not among them: FX3 reads those."""
+    from . import forward_xs
+
     out: list[dict[str, Any]] = []
-    for row in _rows(db, "SELECT * FROM fwd_runs WHERE through IS NOT NULL ORDER BY run DESC LIMIT 20"):
+    for row in _rows(db, "SELECT * FROM fwd_runs WHERE through IS NOT NULL AND job!=? ORDER BY run DESC LIMIT 20",
+                     (forward_xs.JOB,)):
         if all(row["through"] != held["through"] for held in out):
             out.append(row)
     return sorted(out, key=lambda row: row["through"], reverse=True)[:2]
@@ -1411,6 +1441,10 @@ def section(root: str | Path, *, now: float, settings: Mapping[str, Any] | None)
                                  ("FW3", lambda: _restated(db)), ("FW4", lambda: _chain(db)),
                                  ("FW5", lambda: _converging(db, root, now)), ("FW6", lambda: _twins_early(db, root)),
                                  ("FW8", lambda: _identity(db, since))))
+                from . import forward_xs
+
+                # RELEASE E4 (package J): the panel twin's alarms (FX1-FX3; each read on its own, never raising)
+                alarms += forward_xs.alarms(db, root, now=now, since=since, settings=settings)
         finally:
             db.close()
     out["memory"] = _part(lambda: _memory(root))
@@ -1458,7 +1492,7 @@ def funnel_rows(root: str | Path, start: float, end: float) -> dict[str, int]:
     everything up to `end`; `stale` is the last night's that ended in the window; `errors` the window's nights'
     errors and the nights that failed at their preflight; `bh` and `by` the latest meter row written before `end`
     whose family holds `METER_MIN` lineages (0 with none: THE METER'S FLOOR, the module docstring)."""
-    from . import funnel
+    from . import forward_xs, funnel
 
     root, a, b = Path(root), float(start), float(end)
     out = _zero()
@@ -1471,7 +1505,8 @@ def funnel_rows(root: str | Path, start: float, end: float) -> dict[str, int]:
 
         def read(db: sqlite3.Connection) -> dict[str, int]:
             registry = "SELECT count(*) FROM fwd_registry WHERE lane{op}'control' AND registered_at<?"
-            night = _rows(db, "SELECT stale FROM fwd_runs WHERE finished>=? AND finished<? ORDER BY run DESC LIMIT 1", (a, b))
+            night = _rows(db, "SELECT stale FROM fwd_runs WHERE finished>=? AND finished<? AND job!=? ORDER BY run DESC "
+                              "LIMIT 1", (a, b, forward_xs.JOB))
             meter = _rows(db, "SELECT bh, by_ FROM fwd_meter WHERE at<? AND m>=? ORDER BY day DESC LIMIT 1", (b, METER_MIN))
             return {"registered": _one(db, registry.format(op="!=") + " AND registered_at>=?", (b, a)),
                     "registered_total": _one(db, registry.format(op="!="), (b,)),

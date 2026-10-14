@@ -111,7 +111,8 @@ class Settings(StoreCase):
         block = layer["elane"]
         self.assertEqual((block["mode"], block["structures"], block["birth_share"], block["roster"], block["val_tries"],
                           block["looks_per_lineage"], block["program_loss_usd"]), ("off", ["etf"], 0.0, SEATS, 1, 1, -300))
-        self.assertEqual(sorted(block["screens"]), sorted(LANES))
+        # RELEASE E4: beside the two lanes' blocks, the panel screen's pin (league/swarm/elane_xs.py `SCREEN_KEY`).
+        self.assertEqual(sorted(block["screens"]), sorted([*LANES, "equity_xs"]))
         self.assertEqual(elane.cfg({"elane": block})["roster"], SEATS)
 
     def test_the_roster_equals_the_constitutions_probe_programs(self):

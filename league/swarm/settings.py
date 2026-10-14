@@ -528,6 +528,11 @@ DEFAULTS: dict[str, Any] = {
     # line; of that line E2's dollars take at most half; league/swarm/elane_yield.py). The layers merge deep,
     # so swarm.json sets one key of the block at a time, and each key is held inside its bound where it is read
     # (elane_births.py, elane_train.py, elane_review.py, elane_yield.py `cfg`: a malformed value is its default).
+    # RELEASE E4 (the panel lane; league/swarm/elane_xs.py `cfg`, which holds every key inside its bound and reads a
+    # block that is no object as its defaults: "off"): the nested `elane.panel` block, whose switch is
+    # `elane.panel.mode` ("off" | "train" | "gate" | "live"; policy.json ships "off" and the code's defaults), and the
+    # panel screen's pin `elane.screens.equity_xs`, read from the repository's policy.json alone (nulls until the
+    # receipt is landed: with nulls every panel look waits). swarm.json sets one key of `elane.panel` at a time.
     "elane": {"mode": "off"},
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this

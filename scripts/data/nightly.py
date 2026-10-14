@@ -37,6 +37,21 @@ the state directory's parent; the daemon's is its ready file's folder), or a cha
 (`settings.chain_refusal`: the chain records were not reset when the image was adopted). `stamp-ready` names the gate
 image in a ready file written before the release that added these fields. Sept 29-30: the chain extended the five-root
 image while `swarm.json` named the 25-root one, and its ready file replaced it.
+
+THE SOURCE GAP (Oct 14, 2026). The night stays strict for a root whose SIP bars may still arrive (scripts/data/sip.py).
+Each failed relay records, with the day (`forward_days[day].sip_watch`), every short root's packet and since when the
+source has served it unchanged; a changed packet restarts that root's clock. Only a small gap is a source gap: bars
+served and at most `SOURCE_GAP_MAX_MINUTES` (5) minutes missing, on at most `SOURCE_GAP_MAX_ROOTS` (2) roots of the
+day; an empty or invalid packet, a wider gap or more short roots is an outage whose bars may come later, so the day
+stays held and the stall alarm's owed-day step goes to the owner. Within the bound, a root whose packet has stood
+unchanged for `SOURCE_SETTLE` (6 h) and past the close of the next session (at most `SOURCE_SETTLE_CAP`, 24 h: a
+Friday's gap waits a day, not the weekend) is handed to the forward gap ledger (`forward_days[day].sip_gaps`): the relay
+ingests the day's complete roots and leaves that root's packet quarantined, the SIP proof names it `source_incomplete`
+(never complete), the day is copied and checkpointed with the root's own canonical file (the vendor's option-implied
+series, labeled with its source in the journal; nothing is filled), and the ready file says so (`sip_coverage.status`
+and the chain's `source_incomplete` list). The controller records how long it has retried a day (`nightly.json`
+`retrying`) for the stall alarm (`league/ops/stall.py` `forward`). Oct 12-14: SLV 389/390 (minute 826 never served) held
+every later day.
 """
 
 from __future__ import annotations
@@ -62,6 +77,18 @@ import storelib as sl  # noqa: E402
 FIRST_FORWARD_DAY = dt.date(2026, 9, 28)
 READY_ET_MINUTES = 105  # 01:45 ET
 QUIET_EXIT = sl.QUIET_EXIT  # a `--nightly-quiet` backfill that the quiet window deferred
+#: THE SOURCE GAP (the module docstring): how long a short root's SIP packet must stand unchanged across retries before it
+#: is handed to the forward gap ledger, and the most it waits for the next session's close.
+SOURCE_SETTLE = 6 * 3600
+SOURCE_SETTLE_CAP = 24 * 3600
+#: Only a small gap is a source gap: a root with bars short by at most this many regular-session minutes (status
+#: "partial"), and at most this many short roots on the day. An empty or invalid packet, a wider gap or more short
+#: roots is an outage (the bars may come later): the day stays held, no hand-off is scheduled, and the stall alarm's
+#: owed-day step goes to the owner (league/ops/stall.py `forward`).
+SOURCE_GAP_MAX_MINUTES = 5
+SOURCE_GAP_MAX_ROOTS = 2
+#: The fields of a SIP receipt the forward gap ledger keeps (no price: coverage, identities and the quarantine path).
+GAP_FIELDS = ("root", "day", "known", "expected", "missing_minutes", "packet_sha256", "source_symbol", "quarantine")
 
 BACKFILL_IDENTITY = r'''
 import os, pathlib
@@ -117,6 +144,38 @@ def due_days(now: dt.datetime, calendar: sl.Calendar, finished: Sequence[str] = 
     """All missing forward sessions already due, oldest first (also recovers an outage)."""
     return [day for day in calendar.days(FIRST_FORWARD_DAY, eastern(now).date() - dt.timedelta(days=1))
             if day.isoformat() not in finished and scheduled_at(day + dt.timedelta(days=1)) <= now]
+
+
+def next_session_close(day: dt.date, calendar: sl.Calendar) -> dt.datetime:
+    """The close (UTC) of the first session after `day`."""
+    after = day + dt.timedelta(days=1)
+    while not calendar.is_trading(after):
+        after += dt.timedelta(days=1)
+    return scheduled_at(after, calendar.hours(after)[1])
+
+
+def small_gap(row: Mapping[str, Any]) -> bool:
+    """THE SOURCE GAP's bound for one short root's SIP receipt: bars served ("partial") and at most
+    `SOURCE_GAP_MAX_MINUTES` regular-session minutes missing."""
+    known, expected = row.get("known"), row.get("expected")
+    return (row.get("status") == "partial" and isinstance(known, int) and isinstance(expected, int)
+            and not isinstance(known, bool) and 0 < expected - known <= SOURCE_GAP_MAX_MINUTES)
+
+
+def source_gap(state: Mapping[str, Any]) -> bool:
+    """Whether the day's short roots (`sip_watch`, with any the ledger holds) are a source gap the House may hand off by
+    itself: each `small_gap`, and at most `SOURCE_GAP_MAX_ROOTS` of them. Anything wider stays strict for the owner."""
+    watch = state.get("sip_watch") or {}
+    roots = set(watch) | set(state.get("sip_gaps") or {})
+    return bool(watch) and len(roots) <= SOURCE_GAP_MAX_ROOTS and all(small_gap(row) for row in watch.values())
+
+
+def handoff_at(day: dt.date, first_seen: dt.datetime, calendar: sl.Calendar) -> dt.datetime:
+    """THE SOURCE GAP: when a root of `day` whose packet the source has served unchanged since `first_seen` may be handed
+    to the forward gap ledger: `SOURCE_SETTLE` after it, and not before the next session's close, but never later than
+    `SOURCE_SETTLE_CAP` after it."""
+    settle = first_seen + dt.timedelta(seconds=SOURCE_SETTLE)
+    return max(settle, min(next_session_close(day, calendar), first_seen + dt.timedelta(seconds=SOURCE_SETTLE_CAP)))
 
 
 class Nightly:
@@ -183,6 +242,93 @@ class Nightly:
         nights = self.images.setdefault("gate", {}).setdefault("forward_days", {})
         return nights.setdefault(day.isoformat(), {})
 
+    def chain_gaps(self, upto: dt.date, base: Any) -> list[dict[str, Any]]:
+        """THE SOURCE GAP: every root-day the forward gap ledger holds on this chain (checkpointed days up to `upto` that
+        name the same gate image), for the ready file: whatever reads the publication sees each one, not only today's."""
+        out = []
+        for day, night in sorted(((self.images.get("gate") or {}).get("forward_days") or {}).items()):
+            if day > upto.isoformat() or not night.get("checkpoint") or night.get("base_checkpoint") != base:
+                continue
+            for root, gap in sorted((night.get("sip_gaps") or {}).items()):
+                out.append({"day": day, "root": root, "status": "source_incomplete", "complete": False,
+                            **{k: gap.get(k) for k in ("known", "expected", "missing_minutes", "packet_sha256",
+                                                       "unchanged_since", "handed_off_at")}})
+        return out
+
+    def watch_gaps(self, day: dt.date, state: dict[str, Any], gaps: Sequence[Mapping[str, Any]]) -> None:
+        """THE SOURCE GAP's retry clock (`sip_watch`, durable with the day): each short root's packet and since when the
+        source has served it unchanged. A changed packet (bars still arriving) restarts its clock and takes it out of the
+        ledger; a root no longer short leaves the watch."""
+        now = self.clock().isoformat()
+        prior, ledger = state.get("sip_watch") or {}, state.get("sip_gaps") or {}
+        watch = {}
+        for row in gaps:
+            root, sha = str(row.get("root")), row.get("packet_sha256")
+            last = prior.get(root) or {}
+            same = bool(sha) and last.get("packet_sha256") == sha
+            watch[root] = {**{k: row.get(k) for k in GAP_FIELDS}, "status": row.get("status"),
+                           "first_seen": last.get("first_seen") if same else now, "last_seen": now,
+                           "attempts": int(last.get("attempts") or 0) + 1 if same else 1}
+            if root in ledger and ledger[root].get("packet_sha256") != sha:
+                ledger.pop(root)
+        state["sip_watch"] = watch
+        if "sip_gaps" in state and not ledger:
+            state.pop("sip_gaps")
+
+    def handoff(self, day: dt.date, state: Mapping[str, Any]) -> dict[str, str]:
+        """The roots this run may hand to the forward gap ledger ({root: the exact packet}): those it already holds,
+        and, when the day's short roots are a `source_gap` (small, few), each watched root whose packet has stood
+        unchanged until `handoff_at`. A wider gap (an outage) hands nothing new: the day stays strict."""
+        now = self.clock()
+        out = {root: gap["packet_sha256"] for root, gap in (state.get("sip_gaps") or {}).items() if gap.get("packet_sha256")}
+        if not source_gap(state):
+            return out
+        for root, row in (state.get("sip_watch") or {}).items():
+            try:
+                first = dt.datetime.fromisoformat(str(row["first_seen"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if row.get("packet_sha256") and now >= handoff_at(day, first, self.calendar):
+                out.setdefault(root, row["packet_sha256"])
+        return out
+
+    def relay_sip(self, day: dt.date, state: dict[str, Any]) -> Any:
+        """The day's SIP relay under THE SOURCE GAP: strict, but for the roots `handoff` names (for their exact packets)."""
+        handed = self.handoff(day, state)
+        try:
+            result = self.relay(day, self.data, source_incomplete=handed) if handed else self.relay(day, self.data)
+        except Exception as error:
+            gaps = getattr(error, "coverage", None)
+            if isinstance(gaps, list) and gaps and all(isinstance(g, Mapping) for g in gaps):
+                self.watch_gaps(day, state, gaps)
+                self.persist()
+                # When the day can go on if every short packet stays as it is (the controller's `retrying`, the stall
+                # alarm's scheduled way out); None for a gap too wide to hand off, so the owed day's step is not held.
+                error.handoff_at = (max(handoff_at(day, dt.datetime.fromisoformat(w["first_seen"]), self.calendar)
+                                        for w in state["sip_watch"].values()).isoformat()
+                                    if source_gap(state) else None)
+            raise
+        result_map = result if isinstance(result, Mapping) else {}
+        short = set(result_map.get("source_incomplete") or [])
+        watch, before = state.pop("sip_watch", None) or {}, state.get("sip_gaps") or {}
+        ledger = {}
+        for row in (result_map.get("coverage") or []) if short else []:
+            root = row.get("root")
+            if root in short:
+                seen, held = watch.get(root) or {}, before.get(root) or {}
+                ledger[root] = {**{k: row.get(k) for k in GAP_FIELDS}, "status": "source_incomplete", "complete": False,
+                                "source_status": row.get("status"),
+                                "unchanged_since": held.get("unchanged_since") or seen.get("first_seen"),
+                                "attempts": seen.get("attempts") or held.get("attempts"),
+                                "handed_off_at": held.get("handed_off_at") or self.clock().isoformat()}
+        if ledger:
+            state["sip_gaps"] = ledger
+            self.log(f"{day}: SIP source-incomplete, handed to the forward gap ledger: "
+                     + ", ".join(f"{r} {g['known']}/{g['expected']}" for r, g in sorted(ledger.items())))
+        else:
+            state.pop("sip_gaps", None)
+        return result
+
     def run(self, day: dt.date | None = None, *, dry_run: bool = False) -> dict[str, Any]:
         now = self.clock()
         day = day or target_day(now, self.calendar)
@@ -201,6 +347,8 @@ class Nightly:
             done = {"day": day.isoformat(), "already": True, 'sip_coverage': {'status': 'legacy_unverified'}, **state}
             if not self.rehearsal and not state.get("base_checkpoint"):
                 done.update(self.proven_identity(state["checkpoint"]))  # a day an earlier release checkpointed
+            if not self.rehearsal:
+                done["source_incomplete"] = self.chain_gaps(day, done.get("base_checkpoint"))
             return done
         if dry_run:
             return {"day": day.isoformat(), "would": ["pull", "copy", "checkpoint"]}
@@ -226,7 +374,7 @@ class Nightly:
                         raise RuntimeError(f"the forward pull (stage {stage}) failed: {out[-800:]}")
                 if self.relay:
                     self.check_lease()
-                    self.relay(day, self.data)
+                    self.relay_sip(day, state)
                 state["pulled"] = self.clock().isoformat()
                 self.persist()
             ok, out = self.data.run(f"backfill.py records --date {day.isoformat()}", timeout=600)
@@ -263,14 +411,25 @@ class Nightly:
             # exact transferred records, never just another view of the mutable source box.
             try:
                 self.check_lease()
-                proof = self.sip_check(day, self.data)
+                ledger = state.get('sip_gaps') or {}
+                proof = (self.sip_check(day, self.data, source_incomplete=sorted(ledger)) if ledger
+                         else self.sip_check(day, self.data))
                 roots = sorted(r for r, present in kinds.items() if 'nbbo' in present and r not in ('XSP', 'SPXW'))
                 pairs = sorted((r['root'], r['sha256']) for r in files if r['kind'] == 'underlying' and r['root'] in roots)
                 digest = hashlib.sha256(json.dumps(pairs, sort_keys=True).encode()).hexdigest()
-                if (proof.get('schema') != sl.SIP_COVERAGE_SCHEMA or proof.get('status') != 'complete'
+                rows = proof.get('source_incomplete') or []
+                short = sorted(str(r.get('root')) for r in rows if isinstance(r, Mapping))
+                # THE SOURCE GAP: short roots only as the ledger holds them, each said, never a complete claim.
+                status_ok = ((proof.get('status') == 'complete' and not rows) or
+                             (proof.get('status') == 'source_incomplete' and bool(short) and len(short) == len(rows)
+                              and len(set(short)) == len(short) and set(short) <= set(ledger)))
+                if (proof.get('schema') != sl.SIP_COVERAGE_SCHEMA or not status_ok
                         or proof.get('day') != str(day) or proof.get('roots') != roots or len(pairs) != len(roots)
                         or proof.get('files_sha256') != digest):
                     raise RuntimeError('forward SIP proof differs from the exact files to be copied')
+                if short:
+                    proof = {**proof, 'source_incomplete': [{**row, **ledger[row['root']], 'canonical_status': row.get('status')}
+                                                            for row in rows]}
                 state['sip_coverage'] = proof
             except Exception:
                 state.pop('pulled', None)
@@ -315,7 +474,10 @@ class Nightly:
         if not self.data.backfill_running():
             self.data.sleep(next_wake(self.clock(), self.calendar).strftime("%Y-%m-%dT%H:%M:%SZ"))
         self.log(f"{day}: {copied} files to the gate; checkpoint {checkpoint}")
-        return {"day": day.isoformat(), **state}
+        result = {"day": day.isoformat(), **state}
+        if not self.rehearsal:
+            result["source_incomplete"] = self.chain_gaps(day, state.get("base_checkpoint"))
+        return result
 
 
 # ------------------------------------------------------------------------------ the real handles
@@ -543,25 +705,35 @@ def real_job(*, rehearsal_gate: str | None = None, api: Any = None,
                                     ttl_seconds=(2 if rehearsal_gate else 365) * 86400, check_lease=check_lease)
         return row["checkpoint_id"]
 
-    def relay(day, handle):
+    def relay(day, handle, source_incomplete=None):
         from sip import relay_day
 
-        return relay_day(day, handle, check_lease=check_lease)
-
-    def sip_check(day, handle):
-        from sip import status_day
-
-        rows = status_day(handle, day)['roots']
-        if any(not r.get('complete') for r in rows):
-            raise RuntimeError('forward SIP coverage is incomplete; no gate copy or checkpoint')
-        return {'schema': sl.SIP_COVERAGE_SCHEMA, 'status': 'complete', 'day': str(day), 'verified_at': bl.now(),
-                'scope': 'stock_underlying_completed_grid', 'roots': [r['root'] for r in rows],
-                'files_sha256': hashlib.sha256(json.dumps([(r['root'], r['file_sha256']) for r in rows],
-                                                         sort_keys=True).encode()).hexdigest()}
+        return relay_day(day, handle, check_lease=check_lease, source_incomplete=source_incomplete)
 
     return Nightly(data=data, gate=gate_handle, images=images, save=lambda d: bl.write_json(bl.IMAGES, d),
                    checkpoint=checkpoint, calendar=calendar, last_backfill_args=last_args, gym_box_ids=gym_ids,
-                   rehearsal=bool(rehearsal_gate), relay=relay, sip_check=sip_check, check_lease=check_lease)
+                   rehearsal=bool(rehearsal_gate), relay=relay, sip_check=sip_proof, check_lease=check_lease)
+
+
+def sip_proof(day: dt.date, handle: Any, source_incomplete: Sequence[str] = ()) -> dict[str, Any]:
+    """The day's SIP proof from the data box's current files (`backfill.py sip-status`): every root complete, or (THE
+    SOURCE GAP) short only where the forward gap ledger names it (`source_incomplete`), each such root said with the
+    canonical file it keeps and that file's source label, under `status` "source_incomplete". Raises otherwise."""
+    import boxlib as bl
+    from sip import status_day
+
+    rows = status_day(handle, day)['roots']
+    short = [r for r in rows if not r.get('complete')]
+    if any(r['root'] not in set(source_incomplete) for r in short):
+        raise RuntimeError('forward SIP coverage is incomplete; no gate copy or checkpoint')
+    proof = {'schema': sl.SIP_COVERAGE_SCHEMA, 'status': 'source_incomplete' if short else 'complete', 'day': str(day),
+             'verified_at': bl.now(), 'scope': 'stock_underlying_completed_grid', 'roots': [r['root'] for r in rows],
+             'files_sha256': hashlib.sha256(json.dumps([(r['root'], r['file_sha256']) for r in rows],
+                                                      sort_keys=True).encode()).hexdigest()}
+    if short:
+        proof['source_incomplete'] = [{'root': r['root'], 'status': r.get('status'), 'file_sha256': r.get('file_sha256'),
+                                       'canonical_source': str(r.get('source') or '')[:120]} for r in short]
+    return proof
 
 
 def run_real(day: dt.date | None = None, *, rehearsal_gate: str | None = None,
@@ -602,7 +774,9 @@ def publish_ready(path: Path, result: Mapping[str, Any], now: dt.datetime) -> di
     gate image the chain extends (`base_checkpoint`) and the roots that image holds a holdout for (`holdout_roots`): the
     swarm takes the checkpoint only when they are the gate `swarm.json` names and cover its roots (THE CHAIN'S RULE,
     league/swarm/settings.py `ready_refusal`). A day finished without them (by a release before they were recorded) is
-    not published (`published` false): the day is complete on the gate, and the next day's publish names its chain."""
+    not published (`published` false): the day is complete on the gate, and the next day's publish names its chain.
+    THE SOURCE GAP: `sip_coverage` is the day's proof (`status` "source_incomplete" with its short roots when the ledger
+    holds one), and `source_incomplete` lists every root-day the ledger holds on this chain, each never complete."""
     import boxlib as bl
 
     if not result.get("checkpoint") or not str(result["checkpoint"]).startswith("sbcp_"):
@@ -614,7 +788,8 @@ def publish_ready(path: Path, result: Mapping[str, Any], now: dt.datetime) -> di
     document = {"schema": 1, "gate_checkpoint": result["checkpoint"], "base_checkpoint": base,
                 "holdout_roots": list(held) if isinstance(held, (list, tuple)) else None, "day": day.isoformat(),
                 "ready_at": now.isoformat(), "roots": list(result.get("roots") or ()),
-                'sip_coverage': result.get('sip_coverage') or {'status': 'legacy_unverified'}}
+                'sip_coverage': result.get('sip_coverage') or {'status': 'legacy_unverified'},
+                'source_incomplete': list(result.get('source_incomplete') or ())}
     if not (isinstance(base, str) and base.startswith("sbcp_")) or not document["holdout_roots"]:
         return {**document, "published": False,
                 "why": "the day's record does not name the gate image it extends and that image's roots"}
@@ -660,6 +835,26 @@ def stamp_ready(ready_file: Path, *, apply: bool = False) -> dict[str, Any]:
         return {"stamped": True, "ready": stamped, "gate_checkpoint": after["gym"].get("gate_checkpoint")}
 
 
+def retrying(prior: Any, day: dt.date, error: BaseException, now: dt.datetime) -> dict[str, Any]:
+    """`nightly.json` `retrying`: the day the controller retries, since when, how many tries, and (when the error is a SIP
+    gap: `SIPError.coverage`) the short roots with their coverage and when the day goes on if their packets stay as they
+    are (`handoff_at`, THE SOURCE GAP), for the stall alarm (`league/ops/stall.py` `forward`). A try that fails another
+    way keeps what the last gap named."""
+    prior = prior if isinstance(prior, Mapping) and prior.get("day") == day.isoformat() else {}
+    out = {"day": day.isoformat(), "since": prior.get("since") or now.isoformat(),
+           "attempts": int(prior.get("attempts") or 0) + 1, "last_error_at": now.isoformat()}
+    gaps = getattr(error, "coverage", None)
+    if isinstance(gaps, list) and gaps and all(isinstance(g, Mapping) for g in gaps):
+        out["roots"] = sorted({str(g.get("root")) for g in gaps})
+        out["gaps"] = [{"root": str(g.get("root")), "known": g.get("known"), "expected": g.get("expected"),
+                        "missing_minutes": list(g.get("missing_minutes") or [])[:12], "packet_sha256": g.get("packet_sha256")}
+                       for g in sorted(gaps, key=lambda g: str(g.get("root")))]
+        out["handoff_at"] = getattr(error, "handoff_at", None)
+    else:
+        out.update({k: prior[k] for k in ("roots", "gaps", "handoff_at") if k in prior})
+    return out
+
+
 class Controller:
     """A durable schedule; a failed night stays pending, and outages are caught up oldest first."""
 
@@ -686,11 +881,16 @@ class Controller:
             ready = publish_ready(self.ready_file, result, self.clock())
         except Exception as error:
             record.update({"error": f"{type(error).__name__}: {str(error)[:500]}",
-                           "retry_at": self.clock().timestamp() + self.retry_seconds, "day": day.isoformat()})
+                           "retry_at": self.clock().timestamp() + self.retry_seconds, "day": day.isoformat(),
+                           "retrying": retrying(record.get("retrying"), day, error, self.clock())})
             bl.write_json(self.state / "nightly.json", record)
             return {"phase": "retry", **record}
         finished[day.isoformat()] = ready["gate_checkpoint"]
-        record.update({"completed": finished, "error": None, "retry_at": 0, "day": day.isoformat()})
+        record.pop("retrying", None)
+        record.update({"completed": finished, "error": None, "retry_at": 0, "day": day.isoformat(),
+                       "completed_at": self.clock().isoformat(),
+                       "source_incomplete": [{"day": g.get("day"), "root": g.get("root")}
+                                             for g in ready.get("source_incomplete") or [] if isinstance(g, Mapping)]})
         if ready.get("published") is False:
             record["unpublished"] = {"day": day.isoformat(), "why": ready.get("why")}
         bl.write_json(self.state / "nightly.json", record)
@@ -807,7 +1007,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.cmd == "status":
         import boxlib as bl
 
-        print(json.dumps({"forward_days": (bl.read_json(bl.IMAGES).get("gate") or {}).get("forward_days", {}),
+        nights = (bl.read_json(bl.IMAGES).get("gate") or {}).get("forward_days", {})
+        print(json.dumps({"forward_days": nights,
+                          "source_incomplete": {d: sorted(n.get("sip_gaps") or {}) for d, n in sorted(nights.items())
+                                                if n.get("sip_gaps")},
+                          "sip_watch": {d: {r: {k: w.get(k) for k in ("known", "expected", "first_seen", "attempts")}
+                                            for r, w in (n.get("sip_watch") or {}).items()}
+                                        for d, n in sorted(nights.items()) if n.get("sip_watch")},
                           "controller": bl.read_json(bl.STATE_DIR / "nightly.json"),
                           "heartbeat": bl.read_json(bl.STATE_DIR / "nightly.heartbeat")}, indent=1))
         return 0

@@ -185,9 +185,18 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
 - THE FORWARD RECORD (release E3; league/ops/forward_report.py): `forward_record` is that job's report as it last wrote
   it (None when absent or stale), and its alarms (FW1-FW8, RR1, RR2, CP1, CP2, MM1: ids, counts and dates only) ride
   this report's `alarms`, so the `dlane` stall cause mails a warning. Read only, and never this report's failure.
+  (Release E4, package J: the panel lane's FX1-FX3 ride with them, by their own two switches.)
 - P(DONE | ZERO EDGE) IS THE OPTIONS RULES' FIGURE (`ZERO_EDGE_EQUITY_NOTE`): it was never measured for share closes,
   and a delta-one lane's is far higher. A report that holds an equity close says so on the figure and in each
   checkpoint's `equity` block; no figure for the equity lanes is stated.
+- THE PANEL LANE (release E4; `panel_section`, `equity.panel`): a panel program's close is an equity close under the
+  label EQUITY (PANEL); beside EVERY live panel trade rides XS1's sentence, the line its program's one look recorded
+  (`EquityScreens.xs1`); beside its closes the distinct close dates and the date-clustered t (A14: one observation a
+  close date), its same-risk buy-and-hold in SPY, its decisions and their morning re-reads, and what reading by date
+  costs; and every recorded style-open passer with why it holds no seat (the captain's A22, `style_open_passers`). Its
+  residual and its twin's agreement on rebalance sessions are the forward record's (release E4's package J,
+  league/ops/forward_xs.py `beside`; `panel_forward` puts them beside the program, `PANEL_OWED` while that record
+  holds none of it yet). None of it is a rule.
 
 Standard library only, except the Probe envelope's figures (`fast_lane.probe_budget` and `real.probe_figures` read
 `league.live.real`, whose Gym legs need numpy, as the House box has): they are an `error` entry where that cannot load.
@@ -238,6 +247,33 @@ ZERO_EDGE_LABEL = "P(Done | zero edge), simulation"
 DONE_FROM = "2026-10-10T04:00:00Z"
 #: An equity close's key: `eq:<lid>` (league/ops/twins.py `equity_key`, the book's export `twin_key`).
 EQUITY_PREFIX = "eq:"
+#: RELEASE E4, THE PANEL LANE: a panel program's lots carry the panel decision's tag (league/xs/book.py `TAG`), its
+#: instance the kind "panel" (`eq_instances.kind`), and every figure of it the label `PANEL_LABEL` (that module's `LABEL`;
+#: a test holds the three equal, so this module imports nothing of league/xs to say them).
+PANEL_TAG = "xs"
+PANEL_KIND = "panel"
+PANEL_LABEL = "EQUITY (PANEL)"
+#: What rides beside a panel program's close dates (the captain's A14; E4-SPEC 10.5).
+PANEL_BY_DATE = (
+    "A panel program is read ONE OBSERVATION A CLOSE DATE: five lots bought on one date and sold on another share one "
+    "market move and one fill minute. Done's meter counts a closed lot as one close; the distinct close dates and the "
+    "date-clustered t ride beside it.")
+#: What is said wherever the forward record holds no figure of a panel program yet (package J: league/ops/forward_xs.py).
+PANEL_OWED = (
+    "not recorded yet: a panel program's residual against its matched cells and its shadow twin (the rebalance sessions "
+    "agreed) are the forward record's, written by its panel night (the job forward_xs, after each night's panel store). "
+    "No figure stands here until that night has written this program's twin; while its twin marker is missing or behind "
+    "no panel program takes a live seat (the lane's mode \"live\" reads as \"gate\").")
+#: What is said of a recorded style-open passer's forward days (the captain's A22 (1): recorded and shadowed, never seated).
+PANEL_SHADOWED = (
+    "shadowed: every scored panel version is registered in the forward record with its code frozen and recomputed on "
+    "its own forward days each panel night (the job forward_xs), this one too; the forward route is its way to a seat.")
+#: THE CAPTAIN'S A22 (1), said beside every recorded style-open passer.
+STYLE_OPEN_RULE = (
+    "A22: a STYLE-OPEN program takes no live seat on an XS1 pass alone. The House reads each panel program's loadings on "
+    "size, beta, 12-1 momentum and volatility from its Train holdings by one fixed rule; a no-skill tilt to a style that "
+    "won the holdout passes XS1 far above the owner's wall, so such a passer is recorded and shadowed, never seated. The "
+    "forward route is its way to a seat.")
 #: PROFIT FROM MARKET DIRECTION, said plainly beside every equity close and checkpoint (the goal of Oct 10, item 4).
 EQUITY_DIRECTION = (
     "Profit from market direction counts and is said plainly: a long ETF or stock lot earns what its symbol did over the "
@@ -706,7 +742,8 @@ def read_book(live_path: str | Path) -> dict[str, list[dict[str, Any]]]:
 
     path = Path(live_path)
     if not path.exists():
-        return {"positions": [], "instances": [], "lots": [], "eq_instances": [], "seat_plan": None}
+        return {"positions": [], "instances": [], "lots": [], "eq_instances": [], "rebalances": [], "spy": [],
+                "seat_plan": None}
 
     def read(db: Any) -> dict[str, list[dict[str, Any]]]:
         tables = set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'"))
@@ -721,11 +758,22 @@ def read_book(live_path: str | Path) -> dict[str, list[dict[str, Any]]]:
                           ) if "eq_lots" in tables else []
         eq_instances = guard.rows(db, "SELECT id, family, version, lane, band, seeded, created_at, retired_at FROM "
                                       "eq_instances") if "eq_instances" in tables else []
+        # RELEASE E4 (the panel lane; a book from before it has neither): each instance's decider kind, the panel
+        # decisions' COUNTS and verdicts (never a target or a symbol of one), and SPY's adjustment=all closes as the
+        # book fetched them (the same-risk buy-and-hold of a panel program).
+        if eq_instances and guard.rows(db, "SELECT 1 FROM pragma_table_info('eq_instances') WHERE name='kind'"):
+            kinds = {r["id"]: r["kind"] for r in guard.rows(db, "SELECT id, kind FROM eq_instances")}
+            eq_instances = [{**r, "kind": kinds.get(r["id"])} for r in eq_instances]
+        rebalances = guard.rows(db, "SELECT instance, decided_day, called, standing, status, audit, n_sells, n_buys, "
+                                    "n_skipped FROM eq_rebalances ORDER BY decided_day, rid"
+                                ) if "eq_rebalances" in tables else []
+        spy = guard.rows(db, "SELECT day, c, sha FROM eq_bars WHERE symbol='SPY' AND adjustment='all' ORDER BY day"
+                         ) if "eq_bars" in tables else []
         # THE SEAT PLAN (release E5-A): the book's own kv, read in the same transaction as its instances.
         plan = guard.ids(db, "SELECT value FROM kv WHERE key='eq_seat'") if "kv" in tables else []
         plan = _loads(plan[0], None) if plan else None
         return {"positions": positions, "instances": instances, "lots": lots, "eq_instances": eq_instances,
-                "seat_plan": dict(plan) if isinstance(plan, Mapping) else None}
+                "rebalances": rebalances, "spy": spy, "seat_plan": dict(plan) if isinstance(plan, Mapping) else None}
 
     return guard.read(path, read)
 
@@ -812,10 +860,12 @@ def equity_closes(lots: Sequence[Mapping[str, Any]], *, since: float, seeded: It
         posted = isinstance(info, Mapping) and info.get("fee_basis") == "broker"
         priced = cash is not None and notional is not None and notional > 0
         lane = str(lot.get("lane") or "") or None
+        panel = _is_panel_lot(lot)
         out.append({"pid": f"{EQUITY_PREFIX}{lid}", "lid": lid, "family": family, "instance": instance,
                     "version": version_of(instance) if version_of(instance) is not None else _int(lot.get("version")),
                     "route": "d2_real" if real else "agent_other", "code": ROUTE_CODES["d2_real"] if real else None,
-                    "house": False, "equity": True, "lane": lane, "label": lane_label(lane), "seeded": family in seeded,
+                    "house": False, "equity": True, "lane": lane, "panel": panel,
+                    "label": PANEL_LABEL if panel else lane_label(lane), "seeded": family in seeded,
                     "closed_at": closed_at, "day": str(lot.get("exit_day") or "") or _ny_day(closed_at),
                     "opened_day": str(lot.get("opened_day") or ""), "opened_at": _num(lot.get("opened_at")),
                     "root": str(lot.get("symbol") or "").upper(), "symbol": str(lot.get("symbol") or "").upper(),
@@ -996,6 +1046,8 @@ def equity_section(book: Mapping[str, Any], every: Sequence[Mapping[str, Any]], 
         "seeded": sorted(seeded), "seeded_note": elane.SEEDED_NOTE,
         "options_probe_room": options_probe_room((unit or {}).get("equity_usd")),
         "seats": equity_seats(root, book, seeded),
+        # RELEASE E4: the panel lane's own lines (None while no panel program exists).
+        "panel": panel_section(book, twins, screens, unit=unit),
     }
 
 
@@ -1056,6 +1108,195 @@ def equity_seats(root: str | Path | None, book: Mapping[str, Any], seeded: Itera
         f"{len(out['seeded_seats'])} of them" + (f": {names}" if names else "") + ". Seeded and bred programs follow the "
         "same seat rule.")
     return out
+
+
+# ------------------------------------------------------------------------------------------------- the panel lane
+def _panel_instances(book: Mapping[str, Any]) -> set[str]:
+    return {str(r.get("id")) for r in book.get("eq_instances") or [] if str(r.get("kind") or "") == PANEL_KIND}
+
+
+def _is_panel_lot(lot: Mapping[str, Any], instances: Iterable[str] = ()) -> bool:
+    """Whether an `eq_lots` row is a panel program's: its instance is of the panel kind, or its buy carried the panel
+    decision's tag (league/xs/book.py `TAG`: a lot keeps its intent's tag)."""
+    return str(lot.get("tag") or "") == PANEL_TAG or str(lot.get("instance") or "") in set(instances)
+
+
+def _look_records(look: Any) -> list[Mapping[str, Any]]:
+    """A family state's recorded look as rows: the record itself, or one a version when it is kept by version."""
+    if not isinstance(look, Mapping):
+        return []
+    if "passed" in look or "seat" in look:
+        return [look]
+    return [{**v, "version": v.get("version", k)} for k, v in look.items() if isinstance(v, Mapping)]
+
+
+def style_open_passers(store: Any) -> list[dict[str, Any]]:
+    """THE CAPTAIN'S A22 (1), reported: every panel program that PASSED its XS1 look and holds no seat because the
+    House reads it style-open (the look's record says `seat` "style-open": league/swarm/elane_xs.py `look`), each with
+    why (`league.xs.style.seat_refusal` of its Train record's style verdict, `elane_xs.style_of`; the look's own word
+    when the rule cannot be read here). Read-only; an unreadable store or lane is an empty list."""
+    try:
+        from ..swarm import elane_xs
+    except Exception:  # noqa: BLE001 - no panel lane in this tree: nobody passed
+        return []
+    out = []
+    try:
+        families = every_family(store)
+    except Exception:  # noqa: BLE001
+        return []
+    for fam in families:
+        if not isinstance(fam, Mapping) or str(fam.get("structure") or "") != PANEL_KIND:
+            continue
+        for rec in _look_records((fam.get("state") or {}).get(elane_xs.LOOK_KEY)):
+            if not rec.get("passed") or rec.get("seat") != elane_xs.SEAT_STYLE:
+                continue
+            why = None
+            try:
+                from ..xs import style
+
+                why = style.seat_refusal(elane_xs.style_of(fam, _int(rec.get("version"))))
+            except Exception:  # noqa: BLE001 - the look's own word stands
+                why = None
+            out.append({"family": str(fam.get("id")), "version": _int(rec.get("version")), "passed": True, "seat": None,
+                        "why": str(why or rec.get("why") or rec.get("seat_why") or "style-open"),
+                        "look_at": rec.get("at"), "shadow": PANEL_SHADOWED})
+    return sorted(out, key=lambda r: (r["family"], r["version"] or 0))
+
+
+def _one_basis(rows: Sequence[Mapping[str, Any]]) -> dict[str, Decimal] | None:
+    """{day: SPY's adjustment=all close} from the book's `eq_bars` rows of ONE fetch (the latest day's series `sha`:
+    two fetches straddling an ex-date are not one series); None when there is none."""
+    rows = [r for r in rows if r.get("day") and r.get("sha")]
+    if not rows:
+        return None
+    sha = max(rows, key=lambda r: str(r["day"]))["sha"]
+    out = {str(r["day"]): _dec(r.get("c")) for r in rows if r["sha"] == sha}
+    return {d: c for d, c in out.items() if c is not None and c > 0} or None
+
+
+def panel_lane(root: Any, settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    """THE PANEL LANE'S OWN STATE in the report (release E4; the review's spec-6), while its switch is up: {"panel_lane":
+    {"setting", "mode", "why", "roster"}}: `elane.panel.mode` as set, the EFFECTIVE mode and the leg that holds it
+    under the setting (`league.swarm.elane_xs.status`: the reason reached no status, so a lane a leg had stopped said
+    so nowhere), and the equity roster with why each seatless Candidate holds no seat (`bands.roster(...,
+    lanes=LANES)`). {} with the switch off (nothing of E4 is read). Never raises."""
+    try:
+        from ..equity import LANES
+        from ..swarm import bands, elane_xs
+
+        if elane_xs.cfg(settings)["mode"] == "off":
+            return {}
+        said = elane_xs.status(settings, root)
+        try:
+            roster = bands.roster(root, lanes=LANES)
+        except Exception:  # noqa: BLE001 - the roster is words beside
+            roster = None
+        return {"panel_lane": {**said, "roster": roster}}
+    except Exception as exc:  # noqa: BLE001 - a report never fails on a status
+        return {"panel_lane": {"error": type(exc).__name__}}
+
+
+def panel_forward(out: dict[str, Any], root: Any) -> None:
+    """WHAT THE FORWARD RECORD SAYS BESIDE A LIVE PANEL PROGRAM (release E4, package J; never a rule): for each program
+    of `out["equity"]["panel"]`, `residual_x` (its shadow twin's residual over the instance's own sessions: the Gym
+    sleeve and the model's costs, said in `of`) and `rebalance_sessions_agreed` (its REBALANCE sessions agreed k of n,
+    with the days that differ), from league/ops/forward_xs.py `beside`; `owed` is then None. A program the forward
+    record holds nothing of keeps `PANEL_OWED`; a record that cannot be read says so in `owed` (never a figure)."""
+    panel = (out.get("equity") or {}).get("panel") if isinstance(out.get("equity"), Mapping) else None
+    programs = panel.get("programs") if isinstance(panel, Mapping) else None
+    if not isinstance(programs, Mapping) or not programs:
+        return
+    try:
+        from . import forward_xs
+
+        found = forward_xs.beside(root)
+    except Exception as exc:  # noqa: BLE001 - unread is said, never a zero
+        for row in programs.values():
+            row["owed"] = f"the forward record could not be read ({type(exc).__name__}): {PANEL_OWED}"
+        return
+    for key, row in programs.items():
+        mine = found.get(key)
+        if not isinstance(mine, Mapping):
+            continue
+        if mine.get("residual") is None and not (mine.get("rebalance") or {}).get("sessions"):
+            continue    # the record names the instance and holds no figure of it yet
+        row.update(residual_x=mine.get("residual"), rebalance_sessions_agreed=mine.get("rebalance"), owed=None)
+
+
+def panel_section(book: Mapping[str, Any], twins: Mapping[str, Mapping[str, Any]], screens: "EquityScreens", *,
+                  unit: Mapping[str, Any] | None = None, constitution: Mapping[str, Any] | None = None
+                  ) -> dict[str, Any] | None:
+    """THE PANEL LANE in the report (release E4; E4-SPEC 10.5 and 10.6, the captain's A14 and A22): None while no
+    panel program has a lot, an instance or a recorded style-open pass. Else, under the label `PANEL_LABEL`:
+    - `programs`: per live or traded panel instance: its lots open and closed, THE DISTINCT CLOSE DATES and THE
+      DATE-CLUSTERED t beside them (A14: `league.xs.book.date_record`, `date_t`: one observation a close date, as the
+      book's band rules read it), its net P&L, the same-risk buy-and-hold IN SPY over its lots' own sessions on one
+      basis (`bh_spy_usd`; None with `bh_why` while the book holds no single SPY series over them), XS1's sentence
+      (`xs1`: the line its look recorded, stated beside EVERY live panel trade), its decisions by status and their
+      morning re-reads by verdict (`audits`: "none" counts the decisions recorded after 08:30, which have none), and
+      10.5's cost sentence (`cost`);
+    - `residual_x` and `rebalance_sessions_agreed`: its residual against its matched cells and its twin's agreement on
+      rebalance sessions are the forward record's: None here, with `PANEL_OWED` said, until `panel_forward` has put
+      that record's own lines beside the program;
+    - `style_open`: every recorded style-open passer and why it holds no seat (`style_open_passers`), under A22's rule.
+    Never a rule: nothing here is read by a band, a seat or the Done meter."""
+    instances = _panel_instances(book)
+    lots = [lot for lot in book.get("lots") or [] if _is_panel_lot(lot, instances)]
+    passers = style_open_passers(screens.store)
+    keys = sorted(instances | {str(lot.get("instance") or "") for lot in lots})
+    if not keys and not passers:
+        return None
+    if constitution is None:
+        from ..constitution import CONSTITUTION as constitution  # noqa: N811
+    em = (constitution or {}).get("equity_money") or {}
+    demotion = em.get("demotion") or {} if isinstance(em, Mapping) else {}
+    share = _dec(((em.get("probe") or {}) if isinstance(em, Mapping) else {}).get("sleeve_share"))
+    e = _dec((unit or {}).get("equity_usd"))
+    sleeve = share * e if share is not None and e is not None else None
+    try:
+        from ..xs import book as xs_book
+    except Exception as exc:  # noqa: BLE001 - a laptop without numpy: the lane's figures are not read, and it is said
+        xs_book, unread = None, f"the panel adapter cannot be imported here ({type(exc).__name__}): figures not read"
+    else:
+        unread = None
+    spy = _one_basis(book.get("spy") or [])
+    by_instance: dict[str, dict[str, dict[str, int]]] = {}
+    for r in book.get("rebalances") or []:
+        slot = by_instance.setdefault(str(r.get("instance")), {"decisions": {}, "audits": {}})
+        status = str(r.get("status") or "none")
+        slot["decisions"][status] = slot["decisions"].get(status, 0) + 1
+        if r.get("status") != "failed":
+            audit = str(r.get("audit") or "none")
+            slot["audits"][audit] = slot["audits"].get(audit, 0) + 1
+    programs = {}
+    for key in keys:
+        mine = [lot for lot in lots if str(lot.get("instance") or "") == key]
+        family = str(mine[0].get("family") if mine else key.split("@", 1)[0])
+        version = version_of(key)
+        row: dict[str, Any] = {
+            "family": family, "version": version, "label": PANEL_LABEL,
+            "open_lots": sum(1 for lot in mine if str(lot.get("status") or "") in ("open", "closing")),
+            "closed_lots": sum(1 for lot in mine if str(lot.get("status") or "") == "closed"),
+            "close_dates": None, "date_t": None, "pnl_usd": None, "bh_spy_usd": None, "bh_why": None,
+            "residual_x": None, "rebalance_sessions_agreed": None, "owed": PANEL_OWED,
+            "xs1": screens.of(family, version),
+            "decisions": dict(sorted((by_instance.get(key) or {}).get("decisions", {}).items())),
+            "audits": dict(sorted((by_instance.get(key) or {}).get("audits", {}).items())), "cost": None}
+        if xs_book is None:
+            row["why"] = unread
+        else:
+            rec = xs_book.date_record(mine, twins, spy)
+            t = xs_book.date_t(rec["returns"])
+            row.update(close_dates=rec["n"], date_t=None if t is None else round(t, 4), pnl_usd=_usd(rec["pnl"]),
+                       bh_spy_usd=_usd(rec["bh_pnl"]) if rec["bh_pnl"] is not None else None,
+                       bh_why=None if rec["bh_pnl"] is not None else
+                       "the book holds no single SPY series over its lots' sessions yet (the band sync reads one once "
+                       "sizing up needs it: 10.5)",
+                       cost=xs_book.cost_sentence(min_dates=demotion.get("min_trades", 10),
+                                                  loss_usd=demotion.get("program_loss_usd", "-300"), sleeve_usd=sleeve))
+        programs[key] = row
+    return {"label": PANEL_LABEL, "rule": PANEL_BY_DATE, "programs": programs, "style_open": passers,
+            "style_open_rule": STYLE_OPEN_RULE, "owed": PANEL_OWED}
 
 
 def equity_yield(store: Any, settings: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -2184,8 +2425,10 @@ def trade_screens(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, 
     screens = screens if screens is not None else EquityScreens(store)
 
     def equity_screen(family: str, version: int | None, lane: Any) -> dict[str, Any]:
-        # AN EQUITY TRADE (release E1, A9 and A11): beside it, the screen's line its program's one look recorded.
-        return {**screens.of(family, version), "lane": lane, "label": lane_label(lane)}
+        # AN EQUITY TRADE (release E1, A9 and A11): beside it, the screen's line its program's one look recorded. A
+        # PANEL TRADE (release E4): XS1's sentence, under the panel's own label.
+        row = screens.of(family, version)
+        return {**row, "lane": lane, "label": PANEL_LABEL if row.get("panel") else lane_label(lane)}
 
     closes_rows = [{"pid": c["pid"], "family": c["family"], "route": c.get("code") or c["route"], "version": c["version"],
                     "closed_at": _iso(c["closed_at"]), "pnl_usd": _usd(c["pnl_usd"]), "fee_basis": c["fee_basis"],
@@ -2229,6 +2472,21 @@ class EquityScreens:
         self.store = store
         self.looks: dict[tuple[str, int], Mapping[str, Any]] | None = None
         self.states: dict[str, Mapping[str, Any]] = {}
+        self.panels: dict[str, Mapping[str, Any] | None] = {}
+
+    def xs1(self, family: str) -> str | None:
+        """RELEASE E4: XS1's sentence of a panel family (the pinned pre-registration's 10.2, filled for the program and
+        recorded with its one look: league/swarm/elane_xs.py `beside_line`), or None when it took no look or the lane
+        cannot be read here."""
+        fam = self.panels.get(family)
+        if fam is None:
+            return None
+        try:
+            from ..swarm import elane_xs
+
+            return elane_xs.beside_line(fam) or None
+        except Exception:  # noqa: BLE001 - none is stated, and the row says so
+            return None
 
     def of(self, family: str, version: Any) -> dict[str, Any]:
         if self.looks is None:
@@ -2245,6 +2503,8 @@ class EquityScreens:
             except Exception:  # noqa: BLE001 - an unreadable family has no recorded look
                 fam = None
             self.states[family] = ((fam or {}).get("state") or {}) if isinstance(fam, Mapping) else {}
+            self.panels[family] = fam if isinstance(fam, Mapping) and str(fam.get("structure") or "") == PANEL_KIND \
+                else None
         from ..swarm import elane
 
         lane_labels = set(elane.LABELS.values())
@@ -2265,6 +2525,23 @@ class EquityScreens:
                # `label` is the lane's.
                "s1x": detail.get("s1x") if detail.get("s1x") is not None else verdict.get("label"),
                "lane_label": detail.get("label") if detail.get("label") in lane_labels else None}
+        if self.panels.get(family) is not None:
+            # A PANEL PROGRAM (release E4): the screen is XS1 and the line is its receipt's sentence, stated beside
+            # EVERY live panel trade (the pre-registration's duty 3), under the panel's own label.
+            beside = beside or self.xs1(family)
+            out.update(screen=out.get("screen") or "XS1", beside=beside, lane_label=PANEL_LABEL, panel=True)
+            if not beside:
+                out["fp_why"] = ("no XS1 sentence is recorded at this panel program's look (league/swarm/elane_xs.py "
+                                 "records it with the look): none is stated")
+            return out
+        held = self.states[family].get("elane_forward")
+        if not beside and isinstance(held, Mapping) and held.get("seated") is True and _int(held.get("version")) == n:
+            # THE FORWARD SCREEN FWD1-R: a program seated on a forward pass took no look; its sentence is its verdict's
+            # (league/ops/forward_screen.py `beside_for`: the operator's, with its t and its shadow P&L)
+            from . import forward_screen
+
+            beside = forward_screen.beside_for(getattr(self.store, "root", None), str(held.get("lineage") or ""))
+            out.update(screen="FWD1-R", beside=beside)
         if not beside:
             out["fp_why"] = ("no screen line is recorded at this version's look (league/swarm/elane.py records it with the "
                              "look): none is stated")
@@ -2914,8 +3191,8 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
             "program_loss": losses,
             "fp_beside_trades": trade_screens(store, lanes, settings, book["positions"], every, since=start,
                                               lots=book.get("lots") or (), screens=screens),
-            "equity": equity_section(book, every, eq_twins, count_from=count_from, unit=unit, seeded=seeded,
-                                     screens=screens, root=root),
+            "equity": {**equity_section(book, every, eq_twins, count_from=count_from, unit=unit, seeded=seeded,
+                                        screens=screens, root=root), **panel_lane(root, settings)},
             "equity_yield": equity_yield(store, settings),
             "direction_net": lane_net,
             "account": account(root, every, activity, previous, now=now),
@@ -2934,6 +3211,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
                                              and a.get("level") in ("info", "warning") and isinstance(a.get("text"), str)]
         except Exception:  # noqa: BLE001 - the report goes on without it
             out.setdefault("forward_record", None)
+        panel_forward(out, root)    # RELEASE E4 (package J): the forward record's lines beside a live panel program
     finally:
         store.close()
     return out

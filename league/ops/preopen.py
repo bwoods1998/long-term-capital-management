@@ -30,7 +30,11 @@ and went stale (GOAL Appendix C 7); here each check asks what the running House 
              its switch, its per-symbol shares) agreeing with the constitution's `equity_money`, by the one comparison
              `league.ci` makes of the release's files (`ci.stock_agreement`; the release's own gateway/ files too when
              it carries them); the account's margin multiplier and its pattern-day-trader flag and day-trade count
-             REPORTED, never a bar (the venue may still flag pattern day traders: the design's fact 7)
+             REPORTED, never a bar (the venue may still flag pattern day traders: the design's fact 7); and THE PANEL
+             LANE (release E4): while the equity book holds a panel program that is not retired, or a lot of one, the
+             lane's own readiness rule holds (`league.swarm.elane_xs.live_ready`: the store fresh by this job's clock,
+             the universe deploy in force, the tradable share, the universe's age, the nightly I6, the twin marker;
+             the leg that fails is named). With no panel program nothing of the panel is read
 
 Read-only (`guard.readonly()`; GET only). Each FAIL is one House warning ("preopen 5 swarm FAIL: ..."); the receipt
 holds every line. The warning is PUBLIC (`ops.alert`) and the runner scrubs only what carries a `$`
@@ -208,9 +212,12 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
         # heartbeat, or the guard's check inside it, written in between is stamped after `now`.
         read_at = float(clock()) if clock is not None else now
         st = hb.get("status") or {}
-        # The options population against its floor: the equity lanes' families are their own (release E2).
-        alive = guard.read(root / "swarm.sqlite", lambda db: guard.ids(db, "SELECT count(*) FROM families WHERE retired_at IS "
-                                                                           "NULL AND structure NOT IN ('etf', 'stock')"))[0]
+        # The options population against its floor: the equity lanes' families are their own (release E2), a panel
+        # family among them (release E4): the store's own guard names every equity structure.
+        from ..swarm.store import OPTIONS_ONLY_SQL
+
+        alive = guard.read(root / "swarm.sqlite", lambda db: guard.ids(
+            db, f"SELECT count(*) FROM families WHERE retired_at IS NULL AND {OPTIONS_ONLY_SQL}"))[0]
         return {"raw_is_object": isinstance(raw, dict), "raw_live": raw.get("live") if isinstance(raw, dict) else None,
                 "defaults_live": dict(SS.DEFAULTS["live"]),
                 "eff_gym": {k: (eff.get("gym") or {}).get(k) for k in ("enabled", "image_checkpoint", "gate_checkpoint")},
@@ -228,9 +235,11 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
         rows = B.read(root)
         # The options lanes' families only, as `B.read(root)` and the options roster above are: an equity family in a live
         # band has its row in the equity lanes' own read (`B.read(root, lanes=LANES)`) and is check 10's (release E2).
+        from ..swarm.store import OPTIONS_ONLY_SQL
+
         live_fams = guard.read(root / "swarm.sqlite", lambda db: guard.rows(
             db, "SELECT id, band FROM families WHERE retired_at IS NULL AND band IN ('candidate','probe','sized') "
-                "AND structure NOT IN ('etf', 'stock') ORDER BY id"))
+                f"AND {OPTIONS_ONLY_SQL} ORDER BY id"))
         acct = (out.get("gateway") or {}).get("account") or {}
         cap = ((out.get("grant") or {}).get("policy") or {}).get("capital_usd")
         E = min(M.D(acct["equity"]), M.D(cap)) if acct.get("equity") is not None and cap is not None else None
@@ -260,6 +269,33 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
         return {"latest": {"at": rows[0]["at"], "age_h": round((now - epoch(rows[0]["at"])) / 3600, 2), "ok": p.get("ok"),
                            "error": p.get("error")}}
 
+    def panel() -> dict:
+        """THE PANEL LANE (release E4): how many of the equity book's panel programs are not retired or still hold a
+        lot (live.sqlite `eq_instances` of kind "panel", read-only) and, ONLY WHEN THERE IS ONE, what the lane's own
+        rule says of it (`elane_xs.live_ready`). A book from before the panel's live path (no table, no `kind`
+        column) holds none. Counts and the failing leg's name: never a symbol."""
+        live = root / "live.sqlite"
+        if not live.exists():
+            return {"instances": 0}
+
+        def read(db: Any) -> list[dict[str, Any]]:
+            if "kind" not in [r["name"] for r in guard.rows(db, "PRAGMA table_info(eq_instances)")]:
+                return []
+            return guard.rows(db, "SELECT i.id, (SELECT count(*) FROM eq_lots l WHERE l.instance = i.id AND l.status IN "
+                                  "('open', 'closing')) AS lots FROM eq_instances i WHERE i.kind = 'panel' AND "
+                                  "(i.retired_at IS NULL OR EXISTS (SELECT 1 FROM eq_lots l WHERE l.instance = i.id AND "
+                                  "l.status IN ('open', 'closing'))) ORDER BY i.id")
+
+        rows = guard.read(live, read)
+        if not rows:
+            return {"instances": 0}
+        from ..swarm import elane_xs
+        from ..swarm import settings as SS
+
+        ready, why = elane_xs.live_ready(root, SS.load(root, config=config), now=now)
+        return {"instances": len(rows), "holding": sum(1 for r in rows if r["lots"]), "ready": ready is True,
+                "why": None if why is None else str(why)[:200]}
+
     def mirror() -> dict:
         cursor = read_json(root / "swarm-mirror.json", None)
         top = guard.read(root / "swarm.sqlite", lambda db: guard.ids(db, "SELECT max(seq) FROM events"))[0]
@@ -268,7 +304,7 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
                 "lag": None if seq is None or top is None else max(0, int(top) - int(seq))}
 
     for name, fn in (("release", release_), ("grant", grant), ("money", money), ("gateway", gateway_), ("swarm", swarm),
-                     ("bands", bands), ("backup", backup), ("mirror", mirror)):
+                     ("bands", bands), ("backup", backup), ("mirror", mirror), ("panel", panel)):
         section(name, fn)
     return out
 
@@ -559,8 +595,10 @@ def check_equity(h: Mapping[str, Any]) -> Check:
     if not isinstance(sb, dict):
         c.req(False, f"the gateway reports no stock route (/v1/health stock_buys): {g.get('health_error') or 'missing'}")
     else:
+        from ..constitution import EQUITY_CLASSES  # the money table's classes (a panel lot's is "stock")
+
         symbols = sb.get("symbols") if isinstance(sb.get("symbols"), dict) else {}
-        universe = {s: k for k in ("etf", "stock") for s in (symbols.get(k) if isinstance(symbols.get(k), list) else [])}
+        universe = {s: k for k in EQUITY_CLASSES for s in (symbols.get(k) if isinstance(symbols.get(k), list) else [])}
         bad = stock_agreement(table, universe=universe, buys_on=sb.get("enabled") is True,
                               shares={"etf": sb.get("etf_equity_share"), "stock": sb.get("stock_equity_share")},
                               source="the deployed gateway")
@@ -570,6 +608,20 @@ def check_equity(h: Mapping[str, Any]) -> Check:
     files = m.get("equity_release_gateway")
     if files is not None:
         c.req(not files, "the release's gateway files agree with equity_money" if not files else "; ".join(files))
+    # THE PANEL LANE (release E4): a live panel program trades only while the lane's own readiness rule holds. The
+    # book and the swarm hold that themselves (opens stop, exits go on); this is the morning's second look at it.
+    panel, unread = h.get("panel"), (h.get("errors") or {}).get("panel")
+    if unread:
+        c.req(False, f"the panel lane could not be read (a live panel program cannot be ruled ready): {unread}")
+    elif isinstance(panel, Mapping) and panel.get("instances"):
+        count = f"{panel['instances']} live panel program(s), {panel.get('holding') or 0} holding a lot"
+        c.req(panel.get("ready") is True,
+              f"{count}: the panel lane is ready (the store's freshness, the universe deploy, the tradable share, the "
+              "universe's age, the nightly I6, the twin marker)" if panel.get("ready") is True
+              else f"{count}, and the panel lane is NOT ready: {panel.get('why') or 'no leg named'} (its opens stop; "
+                   "exits go on)")
+    else:
+        c.info("no live panel program (the panel lane's readiness is not read)")
     if acct:
         c.info(f"margin multiplier {acct.get('multiplier')} (reported, never a bound: E1 trades cash only); "
                f"pattern_day_trader {acct.get('pattern_day_trader')}, daytrade_count {acct.get('daytrade_count')}")

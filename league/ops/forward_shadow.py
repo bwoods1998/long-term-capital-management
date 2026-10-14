@@ -140,6 +140,12 @@ raised (the registry's sync, the audit marks, the controls, the final checkpoint
 and a program that failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms
 read those.
 
+RELEASE E4 (package J). A PANEL program (a registry row whose `ugroup` begins "panel:") is never run here: its
+store, its engine and its day are the panel's. `due` leaves it out (`_mine`); THE PANEL NIGHT runs it
+(league/ops/forward_xs.py: this class's own `night` on a subclass that reads the panel store, after that store is
+written, under its own `JOB` in `fwd_runs`). Both nights write under one engine label, which names the xs evidence
+too once the registry holds a panel row (`_label`); with none it is this release's label, unmoved.
+
 Standard library and numpy only.
 """
 
@@ -393,6 +399,9 @@ class Shadow:
     (league/ops/forward_twins.py): `root`, `db`, `settings`, `cfg` (`forward_db.cfg(settings)`), `clock` and
     `decider` (the child that answers now: THE RETRY's fresh one once it has run)."""
 
+    #: `fwd_runs.job` of this night (the panel lane's own night, league/ops/forward_xs.py, names its own).
+    JOB = JOB
+
     def __init__(self, root: str | Path, db: sqlite3.Connection, *, decider: Any, settings: Mapping[str, Any] | None,
                  clock: Callable[[], float] = time.time, fresh: Callable[[], Any] | None = None):
         self.root = Path(root)
@@ -436,7 +445,10 @@ class Shadow:
     def _label(self) -> str:
         """Tonight's label as `fwd_engines` holds it: `forward_db.fwd_engine()`, or, for A LABEL THAT RETURNS (the
         module docstring), that label with `RETURNED` and the id of the series it follows."""
-        label = forward_db.fwd_engine()
+        from . import forward_xs
+
+        # (release E4, package J: once the registry holds a panel row the label names the xs evidence too)
+        label = forward_xs.engine_label(self.db, forward_db.fwd_engine())
         newest = forward_db.engine_now(self.db)
         if newest is None:
             return label
@@ -536,6 +548,13 @@ class Shadow:
                 out.add(int(pid))
         return out
 
+    def _mine(self, program: Program) -> bool:
+        """Whether this night runs `program`: every registered program but a PANEL program (release E4, package J:
+        its rows are the panel night's, league/ops/forward_xs.py, on the panel store and the "panel" kind)."""
+        from . import forward_xs
+
+        return not forward_xs.is_panel(program)
+
     def due(self) -> list[Program]:
         """The active non-control programs whose last stored day is before `through`: tag "live" first, then reasons
         seed and train_pass, then train_fail, then the suspects; inside a class the programs whose last attempt
@@ -550,7 +569,8 @@ class Shadow:
         behind = self._behind()
         rows = []
         for program in forward_db.programs(self.db, active=True, code=False):    # A LISTING: `_whole` loads the one run
-            if program.lane == "control" or program.reason == "control" or program.first_day > self.through:
+            if program.lane == "control" or program.reason == "control" or program.first_day > self.through \
+                    or not self._mine(program):
                 continue
             stored = last.get(program.pid)
             if stored is not None and stored >= self.night_day:
@@ -1045,7 +1065,7 @@ class Shadow:
             self.db.execute(
                 "INSERT INTO fwd_runs(job, through, engine, started, finished, seconds, programs, sessions, errors, "
                 "stale, budget_hit, head) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (JOB, self.night_day, engine, started, finished, round(self.spent, 3), self._completed(),
+                (self.JOB, self.night_day, engine, started, finished, round(self.spent, 3), self._completed(),
                  int(tally["sessions"]), int(tally["errors"]), int(stale), 1 if stale else 0, head))
         if isinstance(synced, Mapping) and "error" not in synced:
             synced = {**{k: synced.get(k) for k in ("registered", "controls", "tagged", "stopped", "suspect")},

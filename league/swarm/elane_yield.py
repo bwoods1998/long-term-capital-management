@@ -479,7 +479,9 @@ def train_counts(store: Any, train_key: str) -> dict[str, dict[str, int]]:
         key = spec.get(ROUTE_KEY) if isinstance(spec, Mapping) else None
         if not key:
             continue
-        rec = elane_seal.e2_record(fam, train_key)
+        # RELEASE E4: a panel family's Train record is its own key (league/swarm/elane_xs.py `STATE_KEY`), of the same
+        # shape: its Train passes count on its birth route's row as an ETF family's do.
+        rec = elane_seal.e2_record(fam, "elane_xs" if fam.get("structure") == "panel" else train_key)
         row = out.setdefault(str(key), {"families": 0, "train_scored": 0, "train_passes": 0})
         row["families"] += 1
         versions = rec.get("versions") if isinstance(rec.get("versions"), Mapping) else {}
@@ -557,7 +559,8 @@ def report(store: Any, settings: Mapping[str, Any] | None, *, train_key: str) ->
         row = later.setdefault(str(key), {"validation_entries": 0, "looks": 0, "looks_passed": 0, "live": 0})
         tried = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else {}
         row["validation_entries"] += int(bool(tried.get("entered")))
-        look = state.get(LOOK_KEY) if isinstance(state.get(LOOK_KEY), Mapping) else None
+        look_key = "elane_xs_look" if fam.get("structure") == "panel" else LOOK_KEY  # the panel's look (release E4)
+        look = state.get(look_key) if isinstance(state.get(look_key), Mapping) else None
         if look is not None:
             row["looks"] += 1
             verdict = look.get("verdict")

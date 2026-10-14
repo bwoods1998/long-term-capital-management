@@ -281,13 +281,16 @@ class TheEquityLane(unittest.TestCase):
     def test_the_tree_and_the_swarm_lane_are_protected(self):
         # E1's four entries and release E2's five modules (the equity births, Train bar, route rule, seal and review)
         # are in the gateway's merge list since its follow-ups, and release E3's three (the folds, the out-of-fold
-        # effects and the memory tables: secrecy rules and a Train-bar input) since the release itself; nothing waits.
-        self.assertEqual(ci.PENDING_GATEWAY, (), "the gateway's merge list holds E2's five since its follow-up of Oct 11 "
-                                                 "and E3's three with the release")
+        # effects and the memory tables: secrecy rules and a Train-bar input) since the release itself. Release E4's
+        # two (the panel's swarm lane and the universe generator) wait here for the gateway's next follow-up.
+        self.assertEqual(ci.PENDING_GATEWAY, ("league/swarm/elane_xs.py", "scripts/gen_universe.py",
+                                              "league/swarm/elane_forward.py"),
+                         "the gateway's merge list holds E2's five since its follow-up of Oct 11 and E3's three with "
+                         "the release; E4's two and FWD1-R's seat path wait for its next one")
         for entry in ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py",
                       "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
                       "league/swarm/elane_seal.py", "league/swarm/elane_review.py", "league/swarm/elane_folds.py",
-                      "league/swarm/elane_effects.py", "league/swarm/elane_memory.py"):
+                      "league/swarm/elane_effects.py", "league/swarm/elane_memory.py", *ci.PENDING_GATEWAY):
             self.assertIn(entry, ci.FORBIDDEN)
         for path in ("league/equity/sizing.py", "league/equity/live.py", "league/equity/INTERFACES.md",
                      "League/Equity/bands.py", "league/swarm/elane.py", "league/xs/child.py", "league/xs/__init__.py",
@@ -311,6 +314,49 @@ class TheEquityLane(unittest.TestCase):
             self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
                              ["league/equity/sizing.py", "league/swarm/elane.py", "league/swarm/elane_seal.py",
                               "league/swarm/elane_train.py", "league/xs/child.py", "ltcm/broker.py"])
+
+    def test_the_forward_screens_seat_path_is_protected(self):
+        """FWD1-R (the captain's A33): the swarm's seat path (league/swarm/elane_forward.py: which lineages take no
+        sealed try, which forward passes become Candidates) joins the wall; its judge was behind it already."""
+        self.assertIn("league/swarm/elane_forward.py", ci.FORBIDDEN)
+        self.assertIn("league/swarm/elane_forward.py", ci.PENDING_GATEWAY)
+        for path in ("league/swarm/elane_forward.py", "League/Swarm/Elane_Forward.py", "league/ops/fwd1_rule.py",
+                     "league/ops/forward_screen.py", "docs/benchmarks/forward_screen_fwd1.json"):
+            self.assertTrue(ci.guard([path], None), path)
+            for role in ci.ROLE_PATHS:
+                self.assertTrue(ci.guard([path], role), (path, role))
+
+    def test_the_panel_lane_and_the_universe_generator_are_protected(self):
+        """Release E4 (E4-SPEC 2.5, the fixed judges it adds): the panel's evidence and its screen XS1 (league/xs/), its
+        data jobs (league/ops/) and XS1's receipt (docs/benchmarks/) were behind the wall already; its swarm lane
+        (league/swarm/elane_xs.py: the Train bar, the look, lineage, the seat rule of the captain's A22) and the
+        universe generator (scripts/gen_universe.py: the constitution's and the gateway's stock lists) join it. No role
+        may change one and the updater never self-deploys one."""
+        for entry in ("league/swarm/elane_xs.py", "scripts/gen_universe.py"):
+            self.assertIn(entry, ci.FORBIDDEN)
+            self.assertIn(entry, ci.PENDING_GATEWAY)
+        for path in ("league/swarm/elane_xs.py", "League/Swarm/Elane_XS.py", "scripts/gen_universe.py",
+                     "Scripts/Gen_Universe.py",
+                     # behind the wall before E4, and the files the panel lane adds there
+                     "league/xs/screen.py", "league/xs/placebo.py", "league/xs/style.py", "league/xs/book.py",
+                     "league/xs/identity.py", "league/xs/XS.md", "league/ops/equity_universe.py",
+                     "league/ops/equity_panel.py", "league/ops/equity_spreads.py", "league/ops/xs_zero_edge.py",
+                     "league/ops/forward_xs.py", "docs/benchmarks/equity_screen_xs_1.json", "league/constitution.py",
+                     "league/swarm/policy.json", "gateway/lib/caps.mjs"):
+            self.assertTrue(ci.guard([path], None), path)
+            for role in ci.ROLE_PATHS:
+                self.assertTrue(ci.guard([path], role), (path, role))
+        from league.updater import protected_changes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
+            for root, text in ((running, "X = 1\n"), (incoming, "X = 2\n")):
+                for rel in ("league/swarm/elane_xs.py", "scripts/gen_universe.py", "league/swarm/pool.py",
+                            "scripts/economics.py", "league/xs/screen.py"):
+                    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (root / rel).write_text(text)
+            self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
+                             ["league/swarm/elane_xs.py", "league/xs/screen.py", "scripts/gen_universe.py"])
 
     def test_every_file_of_the_decider_childs_sealed_runtime_is_protected(self):
         """What the isolated child may import decides real orders (an options decision, an equity decision, every
@@ -355,20 +401,81 @@ class TheEquityLane(unittest.TestCase):
         gone = self.tree(wrangler={self.SWITCH_LINE: ""})
         self.assertIn("STOCK_BUYS_REAL must be set once", " ".join(gone))
 
+    #: Where the gateway's list begins. The tests below put an entry there and name no stock but BRK.B, which every
+    #: list holds: release E4 generates the stock pairs (scripts/gen_universe.py), and a test that named one of them,
+    #: or a well-known ticker as "not on the list", would be a test of one day's list.
+    LIST_OPENS = "export const STOCK_UNIVERSE = Object.freeze({"
+
     def test_the_universe_changes_with_the_gateways_list(self):
-        refused = self.tree(caps={"COST: 'stock',": "COST: 'stock', NFLX: 'stock',"})
-        self.assertIn("gateway only: NFLX (stock)", " ".join(refused))
+        self.assertEqual(self.caps.count(self.LIST_OPENS), 1)
+        # TQQQ: a leveraged ETF is on neither list, ever (the constitution's `universe` rule).
+        refused = self.tree(caps={self.LIST_OPENS: self.LIST_OPENS + "\n  TQQQ: 'stock',"})
+        self.assertIn("gateway only: TQQQ (stock)", " ".join(refused))
         refused = self.tree(caps={"TLT: 'etf', GLD: 'etf',": "TLT: 'etf',"})
         self.assertIn("constitution only: GLD (etf)", " ".join(refused))
         refused = self.tree(caps={"'BRK.B': 'stock'": "'BRK.B': 'etf'"})
         self.assertIn("gateway only: BRK.B (etf)", " ".join(refused), "a class is part of the list")
         refused = self.tree(constitution={'"TLT", "GLD"],': '"TLT"],'})
         self.assertIn("gateway only: GLD (etf)", " ".join(refused))
-        self.assertIn("STOCK_UNIVERSE has an entry", " ".join(self.tree(caps={"COST: 'stock',": "COST: 'stock', SQQQ,"})))
-        self.assertIn("twice, or not etf or stock", " ".join(self.tree(caps={"COST: 'stock',": "COST: 'stock', SPY: 'etf',"})))
-        self.assertIn("twice, or not etf or stock", " ".join(self.tree(caps={"COST: 'stock',": "COST: 'bond',"})))
+        self.assertIn("STOCK_UNIVERSE has an entry", " ".join(self.tree(caps={self.LIST_OPENS: self.LIST_OPENS + "\n  SQQQ,"})))
+        self.assertIn("twice, or not etf or stock",
+                      " ".join(self.tree(caps={self.LIST_OPENS: self.LIST_OPENS + "\n  SPY: 'etf',"})))
+        self.assertIn("twice, or not etf or stock",
+                      " ".join(self.tree(caps={self.LIST_OPENS: self.LIST_OPENS + "\n  TQQQ: 'bond',"})))
         moved = self.caps.replace("export const STOCK_UNIVERSE", "export const STOCK_LIST")
         self.assertIn("STOCK_UNIVERSE must be declared once", " ".join(self.tree(caps={self.caps: moved})))
+
+    def test_a_difference_names_at_most_ten_tickers_a_side_and_counts_the_rest(self):
+        """Release E4's universe is hundreds of stocks, deployed at the gateway BEFORE the House (a longer list there is
+        inert). Were the two deploys not made between two pre-opens, the pre-open's PUBLIC warning would print every
+        one of them each morning: `stock_agreement` names at most `AGREEMENT_NAMES` a side, in ticker order, and
+        counts the rest. A short difference is named whole, as before. Invented tickers only."""
+        import copy
+
+        from league.constitution import CONSTITUTION
+
+        self.assertEqual(ci.AGREEMENT_NAMES, 10)
+        em = copy.deepcopy(CONSTITUTION["equity_money"])
+        mine = {s: k for k in ("etf", "stock") for s in em["universe"][k]}
+        invented = [f"ZZ{a}{b}" for a in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" for b in "ABCDEFGHIJKLMNOPQRST"]
+        self.assertEqual((len(invented), len(set(invented) & set(mine))), (520, 0))
+        shares = {"etf": "0.5", "stock": "0.2"}
+
+        def agreement(table, universe):
+            return ci.stock_agreement(table, universe=universe, buys_on=True, shares=shares, source="the deployed gateway")
+
+        self.assertEqual(agreement(em, mine), [])
+        # The gateway first (the order of the universe deploy): its list is the longer by 520.
+        [said] = agreement(em, {**mine, **dict.fromkeys(invented, "stock")})
+        self.assertEqual(said, "the deployed gateway: the gateway's STOCK_UNIVERSE and equity_money.universe differ (gateway "
+                               "only: " + ", ".join(f"{s} (stock)" for s in invented[:10]) + " and 510 more (520 in all); "
+                               "constitution only: none): they change together")
+        self.assertLess(len(said), 400)
+        # The House first (never the order, and no wrong order either: its new buys would be refused): the same bound.
+        grown = copy.deepcopy(em)
+        grown["universe"]["stock"] = em["universe"]["stock"] + invented
+        [said] = agreement(grown, mine)
+        self.assertIn("(gateway only: none; constitution only: ZZAA (stock), ZZAB (stock), ", said)
+        self.assertIn("ZZAJ (stock) and 510 more (520 in all)): they change together", said)
+        self.assertNotIn("ZZAK", said)
+        self.assertLess(len(said), 400)
+        # Both sides at once, each bounded on its own; a class that differs is a difference on both sides.
+        [said] = agreement(grown, {**mine, **dict.fromkeys(invented[:300], "etf")})
+        self.assertEqual(said.count(" (etf)"), 10)
+        self.assertEqual(said.count(" (stock)"), 10)
+        self.assertIn("ZZAJ (etf) and 290 more (300 in all); constitution only: ZZAA (stock)", said)
+        self.assertIn("and 510 more (520 in all)): they change together", said)
+        # Ten are named whole; the eleventh is counted.
+        [said] = agreement(em, {**mine, **dict.fromkeys(invented[:10], "stock")})
+        self.assertIn("(gateway only: " + ", ".join(f"{s} (stock)" for s in invented[:10]) + "; constitution only: none)", said)
+        [said] = agreement(em, {**mine, **dict.fromkeys(invented[:11], "stock")})
+        self.assertIn("ZZAJ (stock) and 1 more (11 in all); constitution only: none)", said)
+        # And through the release's own files, as `check_equity` reads them.
+        pairs = " ".join(f"{s}: 'stock'," for s in invented)
+        refused = self.tree(caps={self.LIST_OPENS: self.LIST_OPENS + "\n  " + pairs})
+        self.assertEqual(len(refused), 1)
+        self.assertIn("gateway only: ZZAA (stock), ", refused[0])
+        self.assertIn(" and 510 more (520 in all); constitution only: none)", refused[0])
 
     def test_the_position_shares_stay_within_the_gateways(self):
         self.assertEqual(self.tree(constitution={'"position_share": {"etf": "0.50", "stock": "0.20"}':

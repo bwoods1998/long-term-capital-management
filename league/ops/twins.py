@@ -72,7 +72,11 @@ exit_official, judged_at, ...}: `equity_twin`) carries:
   lot is delta one, so this is its market direction; the lot's net minus it is its excess (MTE).
 A verdict is "priced", "no_bar" (the House holds no official price of the symbol on the entry or the exit day) or
 "unpriceable" (the lot's row cannot be read, or its symbol is outside the universe), and is FINAL once judged
-(`EQUITY_STATUSES`; never asked again). A priced twin is judged once both bars are audited by the morning re-fetch, or
+(`EQUITY_STATUSES`; never asked again). A PANEL LOT (release E4: a name outside E1's universe) is priced at the panel's
+own half-spreads, the open's for a fill at the open and the close's for a fill at the close (panel/hs.npy, read through
+league/ops/equity_spreads.py `panel_half_spread`); a panel store that is there and cannot be read leaves the lot waiting,
+never a final verdict; with no panel store, or no figure for the symbol, the lot stays unpriceable.
+A priced twin is judged once both bars are audited by the morning re-fetch, or
 once the exit day is `EQUITY_SETTLE_SESSIONS` sessions past (then judged on the bars as they are, said in `note`); a
 missing bar is "no_bar" only from then on (until then the lot waits: the bars land at 16:20 ET of the exit day). A bar
 the re-fetch found different (`audit` "mismatch") is a twin `note` (the book raises the alarm). The records are the
@@ -688,12 +692,16 @@ def _round(value: Decimal | float | None, places: int) -> float | None:
 
 
 def equity_twin(lot: Mapping[str, Any], bars: Mapping[str, Mapping[str, Any]], *, k: float = 1.0, settled: bool = True,
-                at: float | None = None) -> dict[str, Any]:
+                at: float | None = None,
+                panel_hs: Callable[[str, str], Sequence[float] | None] | None = None) -> dict[str, Any]:
     """THE EQUITY TWIN of one closed lot (the module docstring), in closed form. `lot`: its `eq_lots` row. `bars`: {ISO day:
     the `eq_bars` raw row of the lot's symbol} ({o, h, l, c, v, audit, sha}; Decimal strings as the book writes them).
     `k`: the half-spread multiple (`config.K_BASE`; `K_STRESS` for the robustness twin). `settled`: the exit day is
     `EQUITY_SETTLE_SESSIONS` sessions past (the round says; a missing bar is then final "no_bar" and an unaudited one is
-    judged as it is). `at`: the judging time (epoch; `judged_at`). Pure. {"key": "eq:<lid>", "status": "priced" |
+    judged as it is). `at`: the judging time (epoch; `judged_at`). `panel_hs` (release E4): asked ONLY for a symbol
+    outside E1's universe, `(symbol, entry day) -> (half-spread at the open, at the close)`, None when the panel has no
+    figure for it (final "unpriceable", as without a reader), LookupError when the panel's figures cannot be read now
+    (the lot waits). Pure. {"key": "eq:<lid>", "status": "priced" |
     "no_bar" | "unpriceable", "final", "live_return", "twin_return", "gap_bp" (a side), "entry_official",
     "exit_official", "judged_at", ...}."""
     from ..equity import config
@@ -737,10 +745,19 @@ def equity_twin(lot: Mapping[str, Any], bars: Mapping[str, Mapping[str, Any]], *
     except ValueError:
         return unpriceable("the lot's entry or exit day cannot be read")
     try:
-        hs = config.half_spread(symbol)
+        hs_entry = hs_exit = config.half_spread(symbol)
     except KeyError:
-        return unpriceable(f"{symbol or 'its symbol'} is not in the universe (no half-spread)")
-    rec["hs_bp"] = round(hs * 1e4, 4)
+        # RELEASE E4: a panel lot. Its half-spread is the panel's, by fill point; none: unpriceable, as before.
+        try:
+            pair = panel_hs(symbol, opened_day) if panel_hs is not None else None
+        except LookupError as exc:
+            return unpriceable(f"the panel's half-spreads cannot be read ({str(exc)[:120]})", final=False)
+        sides = [_num(v) for v in pair] if isinstance(pair, (list, tuple)) and len(pair) == len(FILL_POINTS) else []
+        if not sides or any(v is None or v <= 0 for v in sides):
+            return unpriceable(f"{symbol or 'its symbol'} is not in the universe (no half-spread)")
+        hs_entry, hs_exit = sides[FILL_POINTS.index(entry_at)], sides[FILL_POINTS.index(exit_at)]
+        rec.update(hs_exit_bp=round(hs_exit * 1e4, 4), hs_source="panel")
+    rec["hs_bp"] = round(hs_entry * 1e4, 4)
     # THE SPLIT between entry and exit: the shares sold over the shares bought (the lot's qty when the book keeps it at the
     # sale; else from its proceeds: a factor within 1% of one is no split).
     if qty is not None and qty > 0:
@@ -769,8 +786,8 @@ def equity_twin(lot: Mapping[str, Any], bars: Mapping[str, Mapping[str, Any]], *
                        "(A8.11): " + ", ".join(k_ for k_, v in audits.items() if v == "mismatch"))
     elif unaudited and settled:
         rec["note"] = f"judged on bars the morning re-fetch never audited ({', '.join(unaudited)})"
-    entry_fill = Decimal(str(fill_price(entry_official, "buy", hs, float(k))))
-    exit_fill = Decimal(str(fill_price(exit_official, "sell", hs, float(k))))
+    entry_fill = Decimal(str(fill_price(entry_official, "buy", hs_entry, float(k))))
+    exit_fill = Decimal(str(fill_price(exit_official, "sell", hs_exit, float(k))))
     places = Decimal(1).scaleb(-config.QTY_PLACES)
     shares = (notional / entry_fill).quantize(places, rounding=ROUND_FLOOR)
     if shares <= 0:
@@ -857,6 +874,30 @@ def settled_after(exit_day: Any, now: float) -> bool:
     return len(begun) >= EQUITY_SETTLE_SESSIONS
 
 
+def panel_reader(root: str | Path) -> Callable[[str, str], Sequence[float] | None]:
+    """RELEASE E4: `equity_twin`'s `panel_hs` over the House's panel store (league/ops/equity_spreads.py
+    `panel_half_spread`), built the FIRST time a lot outside E1's universe asks: a book of E1 lots alone never opens the
+    panel store. With no panel store it answers None (the lot is unpriceable, as before E4); with one that cannot be
+    read it raises LookupError (the lot waits for a round that can read it)."""
+    built: list[Any] = []
+
+    def ask(symbol: str, day: str) -> Sequence[float] | None:
+        if not built:
+            try:
+                from . import equity_spreads
+                from .equity_data import STORE_DIR
+
+                built.append(equity_spreads.panel_half_spread(Path(root) / STORE_DIR))
+            except Exception as exc:  # noqa: BLE001 - a panel store that cannot be read: the lot waits, the job goes on
+                built.append(exc if isinstance(exc, LookupError)
+                             else LookupError(f"{type(exc).__name__}: {str(exc)[:120]}"))
+        if isinstance(built[0], LookupError):
+            raise built[0]
+        return None if built[0] is None else built[0](symbol, day)
+
+    return ask
+
+
 def equity_round(root: str | Path, *, now: float, store: Any, k: float = 1.0,
                  book: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Judge every closed equity lot without a final record (`equity_twin`) and keep the final ones in the swarm store's
@@ -864,6 +905,7 @@ def equity_round(root: str | Path, *, now: float, store: Any, k: float = 1.0,
     "notes": [key...]}. A record already final is never judged again."""
     book = book if book is not None else read_equity(Path(root) / LIVE_DB)
     known = equity_records(store)
+    panel_hs = panel_reader(root)
     judged: dict[str, dict[str, Any]] = {}
     pending: dict[str, int] = {}
     for lot in book.get("lots") or []:
@@ -875,7 +917,7 @@ def equity_round(root: str | Path, *, now: float, store: Any, k: float = 1.0,
             continue
         exit_day = lot.get("exit_day") or ny_day(lot.get("closed_at"))
         rec = equity_twin(lot, (book.get("bars") or {}).get(str(lot.get("symbol") or ""), {}), k=k,
-                          settled=settled_after(exit_day, now), at=now)
+                          settled=settled_after(exit_day, now), at=now, panel_hs=panel_hs)
         if rec["final"]:
             judged[key] = rec
         else:
@@ -925,4 +967,4 @@ def run(ctx: Any) -> dict[str, Any]:
 __all__ = ["Twins", "PUPPET", "PUPPET_SHA", "TWINS_KEY", "ATTEMPT_KEY", "GATE_REASON", "FINAL", "plan", "judge", "job_for",
            "read_live", "records", "cfg", "twin_exit", "live_exit", "expiry_close", "sessions", "agent",
            "EQUITY_TWINS_KEY", "EQUITY_STATUSES", "EQUITY_SETTLE_SESSIONS", "EQUITY_BH_BASIS", "equity_key",
-           "equity_twin", "equity_records", "read_equity", "settled_after", "equity_round", "run"]
+           "equity_twin", "equity_records", "read_equity", "settled_after", "equity_round", "run", "panel_reader"]

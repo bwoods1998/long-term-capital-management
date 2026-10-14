@@ -10,7 +10,9 @@ and nightly already push these tools while holding their operation lease.
 The SIP queue covers stock/ETF roots with NBBO files from the fixed Train start through the fixed
 Holdout end. Its identity includes those roots and historical source symbols, session hours, windows,
 dates, source, and coverage schema. XSP/SPXW retain their separate underlying path. The queue does not
-cover pre-Train extensions or forward days.
+cover pre-Train extensions or forward days. A forward day's root that the source never completes is
+handed to the nightly's own forward gap ledger instead, with the same rules (receipts kept, packet
+quarantined, nothing filled, never complete): docs/operations.md, "The source gap" (Oct 14, 2026).
 
 ## Progress and readiness
 

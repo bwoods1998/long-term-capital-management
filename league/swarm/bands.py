@@ -103,6 +103,22 @@ answers [] for a store it could not read (no store, a read that failed within it
 must tell "no equity row" from "could not read", because it retires an instance whose family is gone and a retirement
 sells its lots (A8.5; league/equity/live.py `_sync_instances`).
 
+THE PANEL (release E4; league/swarm/elane_xs.py). A family of structure "panel" is an equity-lane family (every scope
+here reads `store.EQUITY_STRUCTURES`), and its band proof binds to ITS OWN identity: `banded_evaluator` {"engine":
+`league.xs.XS_ENGINE_VERSION`, "xs_sha256": `league.xs.identity.xs_fingerprint()`, "run_sha"}, checked against the
+fingerprint of the RUNNING release's files (`_xs_sha`, `current_xs_evaluator`), never against the store's kv
+`xs_evaluator`. No panel row is returned when that fingerprint cannot be computed (`strict`: `EquityUnreadable` while
+a panel family is in a running band), and `equity_proof_current` judges a proof by the engine it names. A panel
+Candidate is seatable only while the panel lane's effective mode is "live" (`elane_xs.seatable(root)`, handed to
+`equity_seating`); its row's `beside` is XS1's sentence, stated beside every live panel trade. A SEATED PANEL FAMILY
+HAS A ROW ONLY WHILE THE LANE IS LIVE TOO (`_read_equity`): at Probe or Sized with the lane's mode put down, or a leg
+of `elane_xs.live_ready` failed (the nightly I6, the twin marker, the universe, the store's freshness), it has no row,
+so the book opens nothing for it. `equity_seat_withdrawn` is the store's word on its instance: "demoted" ONLY when the
+captain's SWITCH is down (the book retires the instance and its lots exit at the next open by E1's rule); "held" when
+a store-side leg failed (E4-SPEC 17: its opens stop, its exits go on, nothing is retired or sold on it); "unknown"
+when the lane cannot be READ (nothing retired either). Its band in the store is not moved: when the lane is live again
+its row is back and the same instance runs again.
+
 `read(root, family=f)` and `observe(root, family=f)` read one family only (the live path's per-minute admissions). The
 Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once per call (it reads and hashes every file
 of the Gym's code).
@@ -131,7 +147,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from . import DB_NAME, settings
-from .store import EQUITY_LANES, EQUITY_STRUCTURES, OPTIONS_ONLY_SQL, lane_of_spec, loads
+from .store import EQUITY_LANES, EQUITY_ONLY_SQL, EQUITY_STRUCTURES, OPTIONS_ONLY_SQL, lane_of_spec, loads
 
 LIVE_BANDS = ("candidate", "probe", "sized")
 #: The gate's outcomes (`gate_outcome.result` naming the program) that end its execution tuition (`read`) and refuse it
@@ -189,7 +205,7 @@ def _families(db: sqlite3.Connection, family: str | None, *, gym_only: bool = Fa
     """The living families (the Gym band's alone with `gym_only`; one with `family`): the options lanes' by default, the
     equity lanes' alone with `equity` (THE EQUITY LANES: no options reader here ever sees an equity family)."""
     where = "retired_at IS NULL" + (" AND band='gym'" if gym_only else "") + (" AND id=?" if family is not None else "")
-    where += " AND structure IN ('etf', 'stock')" if equity else f" AND {OPTIONS_ONLY_SQL}"
+    where += f" AND {EQUITY_ONLY_SQL}" if equity else f" AND {OPTIONS_ONLY_SQL}"
     return [dict(r) for r in db.execute(f"SELECT id, band, band_since, structure, roots, state, lineage, best_version, "
                                         f"best_train, spec, born_at FROM families WHERE {where} ORDER BY id",
                                         (() if family is None else (str(family),)))]
@@ -295,9 +311,24 @@ def equity_seats(seats: int) -> int:
     return int(seats) if int(seats) > 0 else ROSTER_CLOSED
 
 
-def equity_seating(fams: Sequence[Mapping[str, Any]], seats: int) -> dict[str, list[str]]:
-    """THE EQUITY ROSTER's `seating` over the equity Candidate and Probe families (`seats`: `elane.roster_seats`)."""
-    return seating(fams, equity_seats(seats), seatable=equity_seatable)
+def equity_seating(fams: Sequence[Mapping[str, Any]], seats: int, *,
+                   seatable: Any = equity_seatable) -> dict[str, list[str]]:
+    """THE EQUITY ROSTER's `seating` over the equity Candidate and Probe families (`seats`: `elane.roster_seats`).
+    `seatable` (RELEASE E4): the seat rule by structure; the callers that hold the state root pass
+    `elane_xs.seatable(root)`, under which a PANEL Candidate is seatable only while the panel lane's effective mode is
+    "live" (otherwise it is seatless: no row, so no instance and no order)."""
+    return seating(fams, equity_seats(seats), seatable=seatable)
+
+
+def _equity_seatable(root: str | Path) -> Any:
+    """The equity roster's seat rule for a state root: `elane_xs.seatable(root)` (RELEASE E4), and E1's own rule less the
+    panel when that cannot be built (a panel Candidate is then seatless: fail closed)."""
+    try:
+        from . import elane_xs
+
+        return elane_xs.seatable(root)
+    except Exception:  # noqa: BLE001 - no panel rule: no panel seat
+        return lambda structure: equity_seatable(structure) and str(structure or "") != "panel"
 
 
 #: The EquityBook's kv key of its seat plan in <root>/live.sqlite (league/equity/live.py `SEAT_KEY`; a test holds the two
@@ -332,7 +363,9 @@ def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
     LANES: `LANES`): the equity roster (`elane.roster`) over the equity families, never off; it also carries `rule`
     (the seat rule in force), `plan` (`seat_plan`: the EquityBook's own, or None) and `order`: under "first-come" the
     lists are the queue itself, by pass time; under any other rule the lists are still by pass time and are NOT who
-    is next (the book's plan is, and `order` says so)."""
+    is next (the book's plan is, and `order` says so). It also says WHY each seatless Candidate holds no seat
+    (`seatless_why` {family: words}: for a panel Candidate the leg its lane waits for, `elane_xs.status`: a Candidate
+    listed "seatless" with no word on what it waits for told the operator nothing)."""
     equity = lanes is not None
     if equity:
         from . import elane
@@ -351,7 +384,7 @@ def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
             db.close()
     except (sqlite3.Error, OSError):
         return None
-    seat = equity_seating(fams, seats) if equity else seating(fams, seats)
+    seat = equity_seating(fams, seats, seatable=_equity_seatable(root)) if equity else seating(fams, seats)
     out = {"seats": max(seats, 0), "closed": seats == ROSTER_CLOSED, "probe": seat["probe"],
            "seated": sorted(seat["probe"] + seat["seated"]), "waiting": seat["waiting"], "seatless": seat["seatless"]}
     if equity:
@@ -359,6 +392,7 @@ def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
         out.update(rule=rule, plan=seat_plan(root),
                    order="by pass time: these lists are the queue (first come)" if rule == "first-come" else
                    "by pass time: NOT who is next under this rule; the EquityBook's plan is (`plan`)")
+        out["seatless_why"] = _seatless_why(root, fams, seat["seatless"])
     return out
 
 
@@ -370,6 +404,35 @@ def _seat_rule() -> str:
         return str(seat_settings().rule)
     except Exception:  # noqa: BLE001 - the rollback value: the queue by pass time
         return "first-come"
+
+
+def _seatless_why(root: str | Path, fams: Sequence[Mapping[str, Any]], seatless: Sequence[str]) -> dict[str, str]:
+    """Why each seatless equity Candidate holds no seat, in words (never a rule: `equity_seating` decided). A PANEL
+    Candidate: its lane is not live, with the leg it waits for (`elane_xs.status`); any other: its structure."""
+    if not seatless:
+        return {}
+    by_id = {str(f["id"]): f for f in fams}
+    panel: str | None = None
+    out: dict[str, str] = {}
+    for fid in seatless:
+        fam = by_id.get(str(fid)) or {}
+        state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
+        if _finite(state.get("banded_at")) is None:
+            out[str(fid)] = "its band names no time it was banded at"
+        elif str(fam.get("structure") or "") == "panel":
+            if panel is None:
+                try:
+                    from . import elane_xs
+
+                    said = elane_xs.status(settings.load(root), root)
+                    panel = (f"the panel lane is not live (set \"{said['setting']}\", it reads \"{said['mode']}\"): "
+                             f"{said['why'] or 'elane.panel.mode is set so'}")[:300]
+                except Exception as exc:  # noqa: BLE001 - words only
+                    panel = f"the panel lane could not be read ({type(exc).__name__})"
+            out[str(fid)] = panel
+        else:
+            out[str(fid)] = f"its structure ({str(fam.get('structure') or 'none')[:40]}) takes no equity seat"
+    return out
 
 
 def _roster_seats(root: str | Path) -> int:
@@ -410,7 +473,7 @@ def _banded(db: sqlite3.Connection, *, equity: bool = False) -> list[dict[str, A
     """The alive Candidate and Probe families, their state parsed (the roster's input): the options lanes' (THE PROBE
     ROSTER), or with `equity` the equity lanes' (THE EQUITY ROSTER), never both."""
     out = []
-    scope = "structure IN ('etf', 'stock')" if equity else OPTIONS_ONLY_SQL
+    scope = EQUITY_ONLY_SQL if equity else OPTIONS_ONLY_SQL
     for r in db.execute("SELECT id, band, band_since, structure, state FROM families WHERE retired_at IS NULL AND band IN "
                         f"('candidate', 'probe') AND {scope} ORDER BY id"):
         row = dict(r)
@@ -538,6 +601,44 @@ def _equity_sha() -> str | None:
     return value
 
 
+#: THE XS IDENTITY (release E4) as `read(lanes=...)` checks a PANEL band against it (`league.xs.identity
+#: .xs_fingerprint`, computed from the running release's own files), reused for `BUNDLE_TTL` seconds a process.
+_xs_cache: tuple[float, str] | None = None
+
+
+def _xs_sha() -> str | None:
+    """The current xs fingerprint, or None when it cannot be computed (no panel row is then current). FROM THE RUNNING
+    CODE, never from the store's kv `xs_evaluator` (written only when the swarm loop starts): with the loop stopped
+    after a release that changed an xs evidence module, a kv check would let the book go on opening positions under
+    code no look judged."""
+    global _xs_cache
+    now = time.monotonic()
+    with _bundle_lock:
+        cached = _xs_cache
+    if cached is not None and 0.0 <= now - cached[0] < BUNDLE_TTL:
+        return cached[1]
+    try:
+        from ..xs.identity import xs_fingerprint
+
+        value = str(xs_fingerprint())
+    except Exception:  # noqa: BLE001 - not cached: the next read tries again
+        return None
+    with _bundle_lock:
+        _xs_cache = (now, value)
+    return value
+
+
+def current_xs_evaluator(state: Mapping[str, Any], sha: str, xs_sha: str | None) -> bool:
+    """A PANEL band's proof (`banded_evaluator`, written by `elane_xs.look` when its one look passed and the style rule
+    let it be seated) names the panel engine, the xs identity of the running release and the exact program
+    (`run_sha`)."""
+    from ..xs import XS_ENGINE_VERSION
+
+    proof = state.get("banded_evaluator") if isinstance(state.get("banded_evaluator"), Mapping) else {}
+    return (xs_sha is not None and proof.get("engine") == XS_ENGINE_VERSION
+            and proof.get("xs_sha256") == xs_sha and proof.get("run_sha") == sha)
+
+
 def current_equity_evaluator(state: Mapping[str, Any], sha: str, equity_sha: str | None) -> bool:
     """An equity band's proof (`banded_evaluator`, written by `elane.look` when its one look passed) names the engine,
     the equity identity in force and the exact program (`run_sha`): an equity release that moves the identity sends the
@@ -553,13 +654,53 @@ def equity_proof_current(state: Mapping[str, Any], version: Mapping[str, Any]) -
     """Whether an equity family's band proof (`current_equity_evaluator`) is the CURRENT equity identity for the program
     of `version` (its versions row: `sha`, `params`); None when the identity cannot be computed (no answer either way).
     The EquityBook's reader asks it about a family that has no row (league/equity/families.py `standing`)."""
+    from .gate import run_sha
+
+    sha = run_sha({"sha": version["sha"], "params": version.get("params") or {}})
+    proof = state.get("banded_evaluator") if isinstance(state.get("banded_evaluator"), Mapping) else {}
+    if _panel_proof(proof):
+        # RELEASE E4: a proof naming the panel engine is judged by the xs identity (judged against the equity identity
+        # it would always read "not current", and the book would retire a healthy panel program the first time its
+        # row could not be read). None when that identity cannot be computed: unknown, nothing retired.
+        xs_sha = _xs_sha()
+        return None if xs_sha is None else current_xs_evaluator(state, sha, xs_sha)
     equity_sha = _equity_sha()
     if equity_sha is None:
         return None
-    from .gate import run_sha
+    return current_equity_evaluator(state, sha, equity_sha)
 
-    return current_equity_evaluator(state, run_sha({"sha": version["sha"], "params": version.get("params") or {}}),
-                                    equity_sha)
+
+def equity_seat_withdrawn(root: str | Path, fam: Mapping[str, Any]) -> tuple[str, str] | None:
+    """RELEASE E4: THE STORE'S WORD on the seat of a family in a running band that `read` gave no row for a reason of
+    the LANE's, as league/equity/families.py `standing` answers the book: None for a family that is no panel family and
+    while the panel lane is live (the question is then E1's own: the version, the proof); ("demoted", why) ONLY on the
+    lane's POSITIVE word that the captain's SWITCH is down (`elane_xs.seat_word`: `elane.panel.mode` under "live", or
+    `elane.mode` off): the book retires the instance and its lots exit at the next open; ("held", why) when the
+    switch says "live" and a STORE-SIDE LEG of the lane failed, the leg named (the coverage verdict, the spreads'
+    share, the receipt, a leg of `live_ready`): E4-SPEC 17, ITS OPENS STOP AND ITS EXITS GO ON: the book keeps the
+    instance, sells nothing on it and, having no row, opens nothing; ("unknown", why) when the lane cannot be read,
+    on which the book retires nothing either (A8.5)."""
+    if str((fam or {}).get("structure") or "") != "panel":
+        return None
+    try:
+        from . import elane_xs
+
+        code, why = elane_xs.seat_word(root)
+    except Exception as exc:  # noqa: BLE001 - no evidence either way
+        return "unknown", f"the panel lane could not be read ({type(exc).__name__})"
+    if code == elane_xs.SEAT_LIVE:
+        return None
+    return (code if code in (elane_xs.SEAT_DEMOTED, elane_xs.SEAT_HELD) else "unknown"), str(why)
+
+
+def _panel_proof(proof: Mapping[str, Any]) -> bool:
+    """Whether a band proof names the panel engine (`league.xs.XS_ENGINE_VERSION`): the proof's engine says which
+    identity judges it."""
+    try:
+        from ..xs import XS_ENGINE_VERSION
+    except Exception:  # noqa: BLE001 - no panel package: no panel proof
+        return False
+    return proof.get("engine") == XS_ENGINE_VERSION
 
 
 class EquityUnreadable(RuntimeError):
@@ -592,14 +733,34 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
         return []
     from . import elane
 
+    xs_sha: str | None = None
     try:
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
         db.row_factory = sqlite3.Row
         try:
             fams = [f for f in _families(db, family, equity=True) if f["band"] in LIVE_BANDS]
-            seat = equity_seating(_banded(db, equity=True), elane.roster_seats(root)) \
+            if any(f["structure"] == "panel" for f in fams):
+                # RELEASE E4: a panel family is in a running band. Its proof is judged by the xs identity of THIS
+                # release's files; where that cannot be computed no panel row is current, and the strict reader is told
+                # "could not read" (it retires an instance on "no row").
+                xs_sha = _xs_sha()
+                if xs_sha is None and strict:
+                    raise EquityUnreadable("the xs identity could not be computed while a panel family is in a running "
+                                           "band")
+            seat = equity_seating(_banded(db, equity=True), elane.roster_seats(root), seatable=_equity_seatable(root)) \
                 if any(f["band"] == "candidate" for f in fams) else {"probe": [], "seated": [], "waiting": [], "seatless": []}
+            # (`queued`, THE SEAT RULE: a waiting Candidate has a row too. A SEATLESS one never has, and a panel
+            # Candidate is seatless while the panel lane is not live, so the book's seat plan never sees it.)
             hidden = set(seat["seatless"]) if queued else set(seat["waiting"]) | set(seat["seatless"])
+            if any(f["structure"] == "panel" and f["band"] != "candidate" for f in fams) \
+                    and not _equity_seatable(root)("panel"):
+                # RELEASE E4, THE SEAT OF A SEATED PANEL FAMILY: the seat rule that gives a panel Candidate a row only
+                # while the lane's effective mode is "live" holds for one at Probe or Sized too. Left to the Candidates
+                # alone, a seated panel program went on buying after the lane's mode was put down, the nightly I6
+                # failed or its shadow twin stopped. No row: the book opens nothing for it (league/equity/live.py
+                # `_seat_block`) and asks `equity_seat_withdrawn` before it retires the instance (only a switch put
+                # down retires it: a failed leg holds its opens and nothing else).
+                hidden |= {f["id"] for f in fams if f["structure"] == "panel"}
             versions = {}
             for fam in fams:
                 fam["state"] = loads(fam["state"], {}) or {}
@@ -633,11 +794,13 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
         state, spec = fam["state"], fam["spec"]
         params = loads(v["params"], {}) or {}
         sha = run_sha({"sha": v["sha"], "params": params})
-        if not current_equity_evaluator(state, sha, equity_sha):
+        panel = fam["structure"] == "panel"
+        if not (current_xs_evaluator(state, sha, xs_sha) if panel else current_equity_evaluator(state, sha, equity_sha)):
             continue  # its lots keep their exits (the EquityBook's), but no new entry under an unqualified identity
         lane = lane_of_spec(spec)
         symbols = [str(r).upper() for r in loads(fam["roots"], []) or []]
-        looked = state.get(elane.LOOK_KEY) if isinstance(state.get(elane.LOOK_KEY), Mapping) else {}
+        look_key = "elane_xs_look" if panel else elane.LOOK_KEY  # `elane_xs.LOOK_KEY`: XS1's sentence beside its trades
+        looked = state.get(look_key) if isinstance(state.get(look_key), Mapping) else {}
         # THE SEAT RULE (`queued`): the book's plan decides a Candidate's seat ("queue"), from these two fields.
         extra = {"passed_at": _finite(state.get("banded_at")),
                  "seat_activity": elane.seat_activity(state, int(v["n"]), sha)} if queued else {}
@@ -1014,4 +1177,4 @@ __all__ = ["read", "observe", "incubator", "incubator_refusal", "program_refusal
            "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES",
            "seating", "waiting", "roster", "seat_plan", "SEAT_PLAN_KEY", "equity_seatable", "equity_seats",
            "equity_seating",
-           "current_equity_evaluator", "equity_proof_current", "EquityUnreadable"]
+           "current_equity_evaluator", "equity_proof_current", "equity_seat_withdrawn", "EquityUnreadable"]

@@ -600,9 +600,17 @@ def bar_text() -> str:
 
 
 # ----------------------------------------------------------------------------------------------------------- the record
+def record_key(fam: Mapping[str, Any] | None) -> str:
+    """The family-state key of a family's Train record: E2's own (`STATE_KEY`), or, for a PANEL family (release E4),
+    the panel's (`elane_xs.STATE_KEY`: the same shape, so the queue, the upkeep and the guard below read either)."""
+    from . import elane_xs
+
+    return elane_xs.STATE_KEY if elane_xs.is_panel(fam) else STATE_KEY
+
+
 def record_of(fam: Mapping[str, Any] | None) -> dict[str, Any]:
-    """E2's Train record of a family ({} for a family E2 did not bear)."""
-    return elane_seal.e2_record(fam, STATE_KEY)
+    """E2's Train record of a family ({} for a family E2 did not bear); a panel family's own record (`record_key`)."""
+    return elane_seal.e2_record(fam, record_key(fam))
 
 
 def e2_family(fam: Mapping[str, Any] | None) -> bool:
@@ -649,6 +657,10 @@ def tried(store: Any, fid: str, n: int) -> bool:
 def pass_current(store: Any, fam: Mapping[str, Any] | None) -> bool:
     """THE IDENTITY (the module docstring): the family's pass was judged under the equity identity in force, or its
     version has had its Validation try (E1 owns it from there), or no identity can be read."""
+    from . import elane_xs
+
+    if elane_xs.is_panel(fam):  # RELEASE E4: a panel pass is judged under the xs identity (and its costs' standing)
+        return elane_xs.pass_current(store, fam)
     n = passed_version(fam)
     if n is None:
         return False
@@ -664,6 +676,10 @@ def may_validate(store: Any, fam: Mapping[str, Any] | None, n: Any) -> bool:
     E2 did not bear; for an E2 family, only when `n` is its pass (the first version that passed equity-v1 AND the equity
     review), the review E1's look reads is in its state for that exact program, and the pass is current (`pass_current`).
     E1's `next_try` keeps its own due, stale and retry logic: a Validation gone stale is validated again through here."""
+    from . import elane_xs
+
+    if elane_xs.is_panel(fam):  # RELEASE E4: the panel's guard (its record, its rubric's review, the mode "gate")
+        return elane_xs.may_validate(store, fam, n)
     if not e2_family(fam):
         return True
     fam = fam or {}
@@ -1112,17 +1128,19 @@ def _update(store: Any, fid: str, change: Callable[[dict[str, Any]], None]) -> d
         rec.setdefault("versions", {})
         change(rec)
         rec["last_at"] = store.now()
-        store.set_state(fid, **{STATE_KEY: rec})
+        store.set_state(fid, **{record_key(fam): rec})
     return rec
 
 
 # ----------------------------------------------------------------------------------------------------------- the map
 def train_map(store: Any) -> list[dict[str, Any]]:
     """THE EQUITY TRAIN MAP's rows, one a cell (the module docstring), the cells with a pass first, then by births."""
+    from . import elane_xs
+
     cells: dict[tuple[str, str, str], dict[str, Any]] = {}
     for fam in elane_seal.equity_families(store):
-        if not e2_family(fam):
-            continue
+        if not e2_family(fam) or elane_xs.is_panel(fam):
+            continue  # (RELEASE E4: a panel family is on the panel's own map, `elane_xs.train_map`, never in a cell here)
         facts = elane_seal.train_facts(fam, STATE_KEY)
         rec = facts["record"]
         cell = cell_of(facts["lane"], facts["agenda"], facts["symbols"])
@@ -1153,10 +1171,15 @@ def closed_cells(store: Any, settings: Mapping[str, Any] | None) -> list[tuple[s
 
 
 def train_map_text(store: Any, settings: Mapping[str, Any] | None, *, limit: int = 40) -> str:
-    """THE EQUITY TRAIN MAP for the architect's equity request ("" with no E2 family yet). Train facts only."""
+    """THE EQUITY TRAIN MAP for the architect's equity request ("" with no E2 family yet). Train facts only. RELEASE
+    E4: the PANEL Train map follows it (`elane_xs.request_map_text`: the panel's cells, each with its ZERO-EDGE
+    EXPECTED column; "" with no panel family, and while the panel lane bears nothing)."""
+    from . import elane_xs
+
+    panel = elane_xs.request_map_text(store, settings, limit=limit)
     rows = train_map(store)
     if not rows:
-        return ""
+        return panel
     closed = set(closed_cells(store, settings))
     lines = [f"EQUITY TRAIN MAP (lane / mechanism / universe group; {MAP_LABEL}). Each cell: births, families "
              "Train-scored, passed equity-v1 and the equity review (the best passing pooled daily t at 1.0x), refuted on "
@@ -1168,17 +1191,19 @@ def train_map_text(store: Any, settings: Mapping[str, Any] | None, *, limit: int
                      f"refuted {r['refuted']}, stalled {r['stalled']}{shut}")
     if len(rows) > limit:
         lines.append(f"- ... and {len(rows) - limit} more cells")
-    return "\n".join(lines)
+    return "\n".join(lines) + (f"\n\n{panel}" if panel else "")
 
 
 def refuted_rows(store: Any, *, limit: int = 30) -> list[dict[str, Any]]:
     """E2's equity graveyard: the families it refuted on Train with a version the bar judged (from its record, newest
     first): {id, lane, agenda, symbols, mechanism, codes, versions, why}. The rows that bind the equity cards
     (`closed_cells`); a stalled family is none."""
+    from . import elane_xs
+
     out = []
     for fam in elane_seal.equity_families(store):
-        if not e2_family(fam):
-            continue
+        if not e2_family(fam) or elane_xs.is_panel(fam):
+            continue  # (RELEASE E4: a panel family's refutation binds its own cells: `elane_xs.closed_cells`)
         facts = elane_seal.train_facts(fam, STATE_KEY)
         refuted = facts["record"].get("refuted")
         if facts["record"].get("status") != "refuted" or not isinstance(refuted, Mapping) or not judged(facts["record"]):
@@ -1521,10 +1546,17 @@ class EquityResearcher:
     def queue(self) -> list[dict[str, Any]]:
         """The living E2 families with a step to take (researching, or a pass to re-score under a new equity identity),
         none waiting out a backoff, the least recently worked first, at most `train_per_round`."""
+        from . import elane_xs
+
         rows = []
+        held: Any = False  # RELEASE E4: why no panel family may step now, asked once a round and only when one is met
         for fam in elane_seal.equity_families(self.store, alive=True):
             if not e2_family(fam):
                 continue
+            if elane_xs.is_panel(fam):
+                held = elane_xs.blocked(self) if held is False else held
+                if held is not None:
+                    continue  # the panel lane is closed, or no panel run may start: it takes no place in the round
             rec = record_of(fam)
             status = rec.get("status", "researching")
             if self.waiting(rec):
@@ -1603,6 +1635,10 @@ class EquityResearcher:
     def step(self, fam: Mapping[str, Any]) -> dict[str, Any]:
         """One step of a family (the module docstring): re-score a stale pass; review a bar pass; score its newest
         unscored version; else, with budget left, ask for a program (its first, or a revision); else retire it."""
+        from . import elane_xs
+
+        if elane_xs.is_panel(fam):  # RELEASE E4: a panel family's step is the panel lane's (`may_run` first)
+            return elane_xs.step(self, fam)
         c = cfg(self.settings)
         fid = str(fam["id"])
         rec = record_of(fam)
@@ -1629,8 +1665,10 @@ class EquityResearcher:
     def brief(self, fam: Mapping[str, Any]) -> str:
         """The question's user turn: the family's card, its agenda prior, the bar and its own Train versions (Train
         facts and the review's reasons only: league/swarm/elane_seal.py)."""
-        from . import cards, elane
+        from . import cards, elane, elane_xs
 
+        if elane_xs.is_panel(fam):  # RELEASE E4: the panel's brief (its contract, its bar, `elane_xs.train_facts`)
+            return elane_xs.brief(self, fam)
         c = cfg(self.settings)
         facts = elane_seal.train_facts(fam, STATE_KEY)
         rec = facts["record"]
@@ -1755,6 +1793,11 @@ class EquityResearcher:
     def restart(self, fid: str, code: str, params: Mapping[str, Any], runs: Sequence[Any]) -> dict[str, Any]:
         """THE RESTART CHECK of a version on its uninterrupted 1.0x Train runs (`restart_check` over `state_inputs`),
         through the isolated runner's decider (E1's `Isolated.decider`)."""
+        from . import elane_xs
+
+        if elane_xs.is_panel(self.store.family(fid)):
+            # RELEASE E4: the panel's restart check, by CALL, through the panel kind and the panel's own decider.
+            return elane_xs.restart(self, code, params, name=fid, runs=runs)
         decider = getattr(self.runner(), "decider", None)
         if decider is None:
             raise StateCheckInterrupted("the isolated runner has no decider: the restart check cannot run")
@@ -1834,6 +1877,10 @@ class EquityResearcher:
         (the module docstring, WHAT A VERDICT IS); once Y1-R1 hold, THE RESTART CHECK on the 1.0x runs. A bar pass goes
         to the equity review (`review_step`); `rescore` (a pass judged under another equity identity): passed again it
         stands, else the pass is withdrawn."""
+        from . import elane_xs
+
+        if elane_xs.is_panel(fam):  # RELEASE E4: the panel's Train bar (equity-xs-v1), its runs and its record
+            return elane_xs.score(self, fam, version, rescore=rescore)
         c = cfg(self.settings)
         fid, n = str(fam["id"]), int(version["n"])
         code, params = str(version.get("code") or ""), dict(version.get("params") or {})
@@ -1974,8 +2021,13 @@ class EquityResearcher:
         E2'S DOLLARS ARE READ BEFORE EVERY MODEL CALL (`elane_yield.hold`): before the review, and AGAIN before the audit
         when the review was asked in this same step, for the review's own call may have used up the hour's pace or the
         day's line. A held audit keeps the review's pass and is asked in a later step."""
+        from . import elane_xs
         from .gate import run_sha
 
+        if elane_xs.is_panel(fam):
+            # RELEASE E4 (the captain's A22 (3)): the review of a panel program carries the panel rubric
+            # (`elane_xs.REVIEW_XS`: no embedded return table, no calendar recognition, and the spec's three).
+            return elane_xs.review_step(self, fam, n)
         fid = str(fam["id"])
         rec = record_of(fam)
         pending = dict(rec.get("review") or {}) if isinstance(rec.get("review"), Mapping) else {"version": n}

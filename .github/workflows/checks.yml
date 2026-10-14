@@ -38,13 +38,18 @@ jobs:
         run: npm run check && npm test
   tests:
     runs-on: ubuntu-latest
+    # 75, not 35 (Oct 14, 2026, release E4): the league's tests are 11,705 with the panel lane (10,257 on main, whose
+    # league step took 26-28 minutes a job on Oct 14), and the 35-minute limit cut off BOTH jobs of PR run 38619499123
+    # (#544, 8e5be3c5) in the league step, about four fifths through; the whole step is about 43 minutes by the rate
+    # it ran at (the same suite took 35-37 minutes on the desk). An hourly run longer than an hour is cancelled by the
+    # next one whatever the limit; a push run on main, which attests its head (`league/updater.py`), keeps the margin.
     # 35, not 20 (Sept 30, 2026): the league's tests alone took 8m41s-17m49s a job on Sept 29-30 (most 12-15 minutes),
     # and the 20-minute limit cut off two 3.11 jobs: PR run 36578499862 (Sept 29) and the push run on f082cf5e
     # (36689802805, 08:47:58Z Sept 30, its league step 17m49s in). A run cut off by its own limit attests nothing
     # (`league/updater.py` reads a cancelled run as no verdict), so the limit keeps a wide margin over the slowest job
     # seen, and the tests' scratch lives in memory (the step below).
     # Before that, 20, not 10 (Sept 24, 2026): the 3.14 job hit a 10-minute limit twice in a row on Deploy C' (#274).
-    timeout-minutes: 35
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:

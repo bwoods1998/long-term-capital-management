@@ -8,6 +8,14 @@ by reading the source (an AST walk for the imports, a text scan for the names), 
   league/live/money.py, so a bare name is never searched for.)
 - THE HIDDEN YEAR's two sealed tables are named only by their keepers: `elane_memory.py`, `elane_seal.py` and
   league/ops.
+- RELEASE E4's PACKAGE J (league/ops/forward_xs.py: the panel lane's half of the forward record) STANDS UNDER THE
+  SAME SEAL. FIVE of E3's ops modules hand a panel program to it (`J_DISPATCH`: the registry, the night, the twins,
+  the audit and the report), so those five may import it, inside a function, and nothing else new; E3's other six
+  may not (the contamination probe among them: the allowance is its use, held both ways). It is
+  held as they are: no sealed tree imports it or names it, it imports only what its own list names (E3's list and
+  the panel's modules it runs: league/xs's store, runner, program, results, book, config and identity, and the
+  panel lane's reader `elane_xs`), and it opens no swarm store writable. What it hands the swarm's process is one
+  file of instance ids and days (`league.xs.book.TWINS_FILE`: `test_forward_xs.TheMarkerCarriesNoOutcome`).
 - WHAT E3 MAY REACH. Its ops modules import only the modules the contract lists; the three memory modules import the
   equity lane's `config`, `results`, `screen` and `store` at their top and `elane_train` and `elane_seal` inside
   functions only (`elane_memory` also E1's `runner` and the decider, inside a function: the hidden run's own child);
@@ -35,6 +43,8 @@ SEALED_TREES = ("league/swarm", "league/equity", "league/live", "league/gym")
 #: Release E3's ops modules (league/ops/E3_INTERFACES.md, the ownership map).
 E3_OPS = ("forward_db", "forward_register", "forward_controls", "forward_shadow", "forward_audit", "forward_stats",
           "forward_report", "forward_twins", "fill_minutes", "contam_probe", "release_receipts")
+#: Release E4's ops module on the forward record (package J): under the same seal (the module docstring).
+E4_OPS = ("forward_xs",)
 #: The files and the directory the forward record lives in: named by ops alone.
 NAMES = ("forward.sqlite", "forward-report.json", "equity-fill-minutes", "contamination.json")
 #: The memory modules (league/swarm) and what each may import of the league, at its top and inside its functions.
@@ -57,6 +67,13 @@ OPS_MAY = {
     "league.ops", *(f"league.ops.{name}" for name in ("guard", "context", "schedule", "twins", "funnel", "equity_data",
                                                       *E3_OPS)),
 }
+#: E3's ops modules that hand a PANEL program to package J (each dispatches to `forward_xs` inside a function): the
+#: only ones that may import it. The allowance is its use: a test holds that each of these does, and no other.
+J_DISPATCH = ("forward_register", "forward_shadow", "forward_twins", "forward_audit", "forward_report")
+J_MAY = {f"league.ops.{name}" for name in E4_OPS}
+#: What release E4's forward module may import beside: the panel's own modules it runs and reads.
+XS_MAY = {"league.xs", *(f"league.xs.{name}" for name in ("store", "runner", "program", "results", "book", "config",
+                                                          "identity")), "league.swarm.elane_xs"}
 #: Who may import a memory module: the two swarm modules the spec patches, the memory modules themselves, and ops.
 MEMORY_IMPORTERS = ("league/swarm/elane_train.py", "league/swarm/elane_births.py",
                     *(f"league/swarm/{name}.py" for name in MEMORY))
@@ -121,8 +138,8 @@ def imports(root: Path, path: Path) -> list[tuple[str, bool, int]]:
 def e3_ops_imports(root: Path, tree: str) -> list[str]:
     """Where a source of `tree` imports an E3 ops module, or names one as a dotted module (a string an importer could
     be handed)."""
-    wanted = {f"league.ops.{name}" for name in E3_OPS}
-    dotted = re.compile(r"\bops\.(?:" + "|".join(E3_OPS) + r")\b")
+    wanted = {f"league.ops.{name}" for name in (*E3_OPS, *E4_OPS)}
+    dotted = re.compile(r"\bops\.(?:" + "|".join((*E3_OPS, *E4_OPS)) + r")\b")
     out = []
     for path in sources(root, tree):
         for module, _, line in imports(root, path):
@@ -186,7 +203,7 @@ class TheForwardRecordIsOpsOnly(unittest.TestCase):
         from league.ops import contam_probe, fill_minutes, forward_report
 
         self.assertEqual({forward_db.DB, forward_report.FILE, fill_minutes.DIR, contam_probe.FILE}, set(NAMES))
-        for name in E3_OPS:
+        for name in (*E3_OPS, *E4_OPS):
             self.assertTrue((REPO / "league" / "ops" / f"{name}.py").is_file(), name)
 
     def test_the_sealed_memory_tables_are_named_only_by_their_keepers(self):
@@ -199,7 +216,25 @@ class TheForwardRecordIsOpsOnly(unittest.TestCase):
 
     def test_e3s_ops_modules_import_only_what_the_contract_lists(self):
         for name in E3_OPS:
-            self.assertEqual(outside(REPO, REPO / "league" / "ops" / f"{name}.py", OPS_MAY), [], name)
+            may = OPS_MAY | J_MAY if name in J_DISPATCH else OPS_MAY
+            self.assertEqual(outside(REPO, REPO / "league" / "ops" / f"{name}.py", may), [], name)
+        for name in E4_OPS:     # release E4's forward module: E3's list and the panel's own modules, nothing else
+            self.assertEqual(outside(REPO, REPO / "league" / "ops" / f"{name}.py", OPS_MAY | XS_MAY), [], name)
+
+    def test_package_js_allowance_is_its_use_five_dispatchers_and_each_inside_a_function(self):
+        """The ship check's finding: the allowance was every E3 ops module's (the contamination probe's too) where
+        five use it. Held both ways: each dispatcher does import `forward_xs`, inside a function and never at its
+        top (E3's jobs load without the panel lane's module), and no other E3 ops module imports it."""
+        self.assertTrue(set(J_DISPATCH) < set(E3_OPS))
+        for name in E3_OPS:
+            found = [(inside, line) for module, inside, line in imports(REPO, REPO / "league" / "ops" / f"{name}.py")
+                     if module in J_MAY]
+            if name in J_DISPATCH:
+                self.assertTrue(found, f"{name} is listed as a dispatcher and imports no module of package J")
+                self.assertEqual([line for inside, line in found if not inside], [], f"{name}: at its top")
+            else:
+                self.assertEqual(found, [], f"{name} imports package J and is no dispatcher")
+        self.assertNotIn("contam_probe", J_DISPATCH)
 
     def test_the_memory_modules_import_the_equity_lane_and_the_swarm_inside_functions_only(self):
         for name in MEMORY:
@@ -226,12 +261,12 @@ class TheForwardRecordIsOpsOnly(unittest.TestCase):
             hits += [f"{relative}:{line} imports {module}" for module, _, line in imports(REPO, path) if module in wanted]
         self.assertEqual(hits, [])
         # Ops reads the tables' counts and nothing else of them.
-        for name in E3_OPS:
+        for name in (*E3_OPS, *E4_OPS):
             reached = {module for module, _, _ in imports(REPO, REPO / "league" / "ops" / f"{name}.py")}
             self.assertFalse(reached & {"league.swarm.elane_folds", "league.swarm.elane_effects"}, name)
 
     def test_the_ops_jobs_open_the_swarm_store_read_only(self):
-        for name in E3_OPS:
+        for name in (*E3_OPS, *E4_OPS):
             if name == "contam_probe":          # it books its dollars (league/swarm/elane_yield.py `book`)
                 continue
             self.assertEqual(writable_swarm_opens(REPO, REPO / "league" / "ops" / f"{name}.py"), [], name)
@@ -246,7 +281,7 @@ class TheCheckCatchesWhatItShould(unittest.TestCase):
         self.root = Path(tmp.name)
         for package in ("league", "league/ops", "league/swarm", "league/equity", "league/live"):
             self.write(f"{package}/__init__.py", "")
-        for name in ("forward_db", "forward_twins", "guard", "dlane_report"):
+        for name in ("forward_db", "forward_twins", "forward_xs", "guard", "dlane_report"):
             self.write(f"league/ops/{name}.py", "VALUE = 1\n")
         for name in ("elane_train", "elane_seal", "elane_memory", "store", "loop"):
             self.write(f"league/swarm/{name}.py", "VALUE = 1\n")
@@ -268,6 +303,10 @@ class TheCheckCatchesWhatItShould(unittest.TestCase):
             self.write(f"league/swarm/case{i}.py", line + "\n")
             self.assertTrue(e3_ops_imports(self.root, "league/swarm"), line)
             (self.root / f"league/swarm/case{i}.py").unlink()
+        # Release E4's forward module is under the same seal.
+        self.write("league/swarm/case_xs.py", "def f():\n    from ..ops import forward_xs\n    return forward_xs\n")
+        self.assertTrue(e3_ops_imports(self.root, "league/swarm"), "forward_xs")
+        (self.root / "league/swarm/case_xs.py").unlink()
         # What is no import of one: another ops module, and the bare word (a function of that name lives in league/live).
         self.write("league/swarm/fine.py", "from ..ops import guard\n\n\ndef forward_stats(x):\n    return guard\n")
         self.write("league/live/money.py", "def forward_stats(rows):\n    return len(rows)\n")

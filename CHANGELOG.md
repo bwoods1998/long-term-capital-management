@@ -26,10 +26,446 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261011T202519Z-50def634e716` (main `81963c87`, release E2.4, 20:25Z Oct 11), the
-gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
+The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, releases E5-A and E3.1, 22:51Z
+Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
+on branches.
 
-### Release E5-A: the seat rule of the share lane ("activity-1-free"; the captain's A24 with A30), on `feat/equity-e5a-seat-rule` (unreleased; one owner deploy with release E3.1 below, from `release/e31-e5a`, on top of releases E5-S and E2.4; THE MONEY DIGEST MOVES, the grant re-ratifies; no fingerprint moves)
+### The source gap: a SIP minute the source never serves no longer holds every later forward day, and the stall alarm names the day and the root, on `fix/nightly-sip-gap` (unreleased; an owner deploy: `scripts/data/nightly.py`, `sip.py` and `league/ops/stall.py` are protected files; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the constitution digest `4ef472e1` and the money digest `5b95d73e` are main's; no setting changes)
+
+- **What happened.** The nightly retried 2026-10-12 every five minutes from 06:20Z Oct 13 for two days, with "SIPError:
+  incomplete regular-session SIP bars: SLV 389/390". The source never served SLV's 13:45 ET bar (completion minute
+  826), and every retry got the same packet. The strict relay raised before it ingested any root, so none of the
+  day's 23 stock roots took its SIP file. 2026-10-13 and 2026-10-14 waited behind it ("a failed night stays
+  pending, and outages are caught up oldest first"). The research that reads the nightly's ready file stayed on
+  2026-10-09. The stall alarm's `forward` cause stood, but only in the daily INFO notice, as an error text with no
+  day and no owner step.
+- **The hand-off** (`scripts/data/nightly.py`, THE SOURCE GAP). Each failed relay records, with the day, every short
+  root's packet and since when the source has served it unchanged (`forward_days[day].sip_watch`). A changed packet
+  restarts the clock. A root whose packet has stood unchanged 6 h and past the next session's close (24 h at most)
+  goes to the forward gap ledger (`forward_days[day].sip_gaps`), but only a small gap: bars served with at most 5
+  minutes missing ("partial"), on at most 2 roots of the day. An empty or invalid packet, a wider gap (a gateway
+  answering with no bars, every root cut off at noon) or more short roots is an outage whose bars may come later: the
+  day stays strict, no hand-off is scheduled, and the owner gets the owed day's step at 36 h. The relay (`sip.relay_day(source_incomplete=...)`)
+  then allows that root's gap for that exact packet only. It ingests the complete roots and keeps the short root's
+  packet quarantined. Nothing is filled, and the root keeps the canonical file of the day's pull (the vendor's
+  option-implied series, labeled with its source). The day's proof says `source_incomplete`, never complete, and
+  the nightly refuses a proof that says otherwise. The ready file (still schema 1) carries it in `sip_coverage`, and
+  its `source_incomplete` list names every such root-day on the chain. Then the nightly goes on with the later days.
+  The historical gap queue cannot take forward days, because its plan is digest-pinned to Train-Holdout. The ledger
+  keeps its rules.
+- **The alarm** (`league/ops/stall.py`, `forward`). The controller now writes `nightly.json` `retrying` (day, since,
+  attempts, short roots with their coverage) and `completed_at`. The cause stands once the same day has been retried
+  6 h, naming the day and the root ("the nightly has retried 2026-10-12 for N h (SLV: SIP 389/390, minute 826 (13:46
+  ET) missing)"). It is the owner's step, mailed at once, once the owed day has been due 36 h with no day completed
+  in as long. While the nightly has a hand-off scheduled (`retrying.handoff_at`), the owner step waits until an hour
+  past that time, and never past 72 h owed; so does a record with an error and no `retrying`, which only the release
+  before writes (a stall run between the deploy and the new nightly's first try). While a nightly stop stands, the
+  stop is the step and the owed day's is left out (both together overran the mail's 400-character step). The retry
+  counts from the stall's own first sight of the error only when that sight was of the same day (`stall.json`
+  `nightly_error` keeps its day). A weekend is never an owed day. No new cause, so no gateway deploy.
+- **Tests.** `league/tests/test_data_source_gap.py` is new. It runs a synthetic gateway that never returns the
+  minute, a fake data box with backfill.py's ingest rule, the real relay and the real proof. It covers the clock (6
+  h, the next close, the 24 h cap, a changed packet, a second short root), the bound (every root empty, every root
+  cut off at noon, an invalid packet, 6 minutes short, a small gap beside an outage, three short roots: each held,
+  and the controller's record reaching the stall's owner step at 36 h owed), the hand-off, the proof's refusals, and
+  the controller: a deploy-time catch-up of Monday, then Tuesday and Wednesday. There are also new cases in
+  `test_data_sip.py` (one root, one packet) and `test_ops_stall.py` (6 h retried, 36 h owed, a weekend, a record
+  from before the clock on the same day and on another day, the deploy window's record from the release before, a
+  stop beside an owed day).
+- **On deploy.** The House's first tick retries 2026-10-12 with no recorded clock, so the 6 h starts then. It hands
+  SLV off 6 h after that first tick, because Oct 13's close has passed. 2026-10-13 is pulled right after (about 20
+  minutes: stages 7 and 8, the relay, the copy, the checkpoint), and 2026-10-14 runs at 06:00Z Oct 15. One gateway
+  bars call is made per try.
+
+### Release T: E4 step one with A32, the forward screen FWD1-R, sector programs forward-only, on `rel/e4-fwd1` (unreleased; to deploy before 12:55Z Thu Oct 15, 2026 so that FWD1-R's clock starts Fri Oct 16)
+
+- **What it carries:** E4 step one merged with A32 (`feat/equity-e4-a32`, PR #544, which carries PR #543: the Probe
+  sleeve 0.50 x E at six seats), merged with the forward screen FWD1-R (`feat/equity-fwd1` `90fc0c3f`, the entry
+  below), and R-SEC (this entry). The recorded fixtures are E4A32's (recorded on main `47ed6872`).
+- **R-SEC, sector programs forward-only** (`league/swarm/elane.py` `forward_only`, asked by `try_open` and `look`;
+  docs/operations.md, "Sector, bond and gold programs are forward-only"): an equity family whose symbols name anything
+  outside the four index ETFs (`league/equity/config.py` `INDEX_ETFS`) takes no sealed Validation try and no sealed
+  look, whatever `elane.fwd1.seats` says and whether or not the permit file lists its lineage; the look holds it
+  before the sealed run (no look spent, no refusal row, no retirement for that reason). It stays FWD1-R's case N (ETF,
+  bar 2.61, WEAK): its only path to a seat is a forward pass with `elane.fwd1.seats` "on". Panel families are not
+  affected (A34). With it live the captain may widen `elane.universe` to sixteen ETFs (no XLF) by a setting; the
+  route, its cost and its rollback are in docs/operations.md. Tests: `league/tests/test_elane_rsec.py`.
+- **Identities:** the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest
+  `5b95d73e` and the constitution digest `4ef472e1` are E4 step one with A32's (the money and constitution digests
+  are A32's sleeve; nothing of FWD1-R or R-SEC moves an id); the xs identity is `2f0083bc`.
+- **Switches at their defaults:** `elane.panel.mode` "off", `elane.fwd1.seats` "off", FWD1-R's job in mode "record"
+  (verdicts recorded, nothing acts on them).
+- **Rollback:** repoint the House to `47ed6872` (A32 as deployed), with the panel families retired first
+  (`scripts/panel_rollback.py`, E4's entry below) and, if the universe was widened, every family naming a symbol
+  outside the four index ETFs retired first (a release without R-SEC would give them a sealed try).
+
+### Release FWD1-R, the forward screen: one verdict a lineage on the sessions after its code and the screen were pinned, on `feat/equity-fwd1` (unreleased; cut from `feat/equity-e4-m3` at `6f99652d`; the captain's A33; no identity moves: the options execution fingerprint, the equity identity, the money digest and the constitution digest are `6f99652d`'s; ships with the seat path OFF)
+
+- **What it adds** (docs/operations.md, "The forward screen FWD1-R"): the judge E3 left for a later release. A lineage
+  of the forward registry, judged on a representative fixed before its first forward day, passes at the first of the
+  checkpoints 5, 10, 15, 20, 30, 40, 60 counted forward sessions where its t (haircut daily series, mean / sd x
+  sqrt(k)) reaches c_used = max(c_G, its own floor + 0.05) with both sums above zero (PANEL: and at most 119 of 999
+  matched placebo portfolios at or above it); none by 60 is a fail for good. c_G: PANEL never-looked 2.06, PANEL with
+  an XS1 look 3.16 (D2's 3% beside the look's 12%), ETF never-looked 2.61 (WEAK). No verdict for an ETF lineage with
+  an S1/S2 look. Contamination of the judged sessions is zero by construction.
+- **The receipt v2** (`docs/benchmarks/forward_screen_fwd1.json`, sha `e0ef05f9`): the study FWD1-1014's own code at
+  the adopted bars on its Train-era arrays (it reproduced the study's pinned bars first; at 2.06 every figure equals
+  the study's receipt v1). Worst-regime FP at zero edge (point / 97.5% bound): PANEL N 11.8% / 12.5%, PANEL XS1 2.4% /
+  2.6% (with the look, at most 15%), ETF N 2.8% / 5.5% (no family or regime cell over 15%). Power like for like (the
+  haircut in both): PANEL N +20%/yr 48.8% against 9.0% at zero edge by 60; ETF N +10%/yr 2.4% against 1.4%. Its
+  conformance vectors: `league/tests/fixtures/forward_screen_fwd1_vectors.json`.
+- **The pin starts the clock:** policy.json `elane.forward_screen` (the sha and every printed figure; CI holds both
+  to the file). FWD1_START = the session after the first close after the release carrying it began running.
+- **The job** `forward_screen` (after `forward_shadow` and `forward_xs`): its own append-only
+  `<state>/forward-screen.sqlite`, the permit file of ids and words the swarm reads, the operator's report with the
+  registry's expected zero-edge passes against the observed and each pass's sentence. Each day's lot sides for the
+  haircut come from the representative's own forward run in the job's child, kept where it reproduces the record's r:
+  no line of E3's night changes. policy.json `elane.fwd1.mode` "record".
+- **The seat path, BUILT AND OFF** (`league/swarm/elane_forward.py`, FORBIDDEN, in `PENDING_GATEWAY` for the gateway's
+  merge-list follow-up): `elane.fwd1.seats` "off". On: a FWD1-judged lineage takes no sealed Validation try
+  (`elane.try_open`); an ETF pass becomes a Candidate through the roster's own seat rule, one live forward seat a
+  mechanism cell (`gate.equity_round`); a panel pass is made eligible only (no panel seat in E4 step one: the pool is
+  step two's, `feat/equity-e4-step2` B3). The new family-state key `elane_forward` is sealed from every generator.
+- **The loosening, stated (A33):** E3 pre-registered its forward gate at 20/60/120/250 sessions and 3%; FWD1-R reads
+  from 5 sessions at the goal's 15% for never-looked lineages. Cost: most early passes are luck (45% of zero-edge
+  panel passes come at checkpoint 5), panel power at +10%/yr by 60 lower than with a first checkpoint at 20, and an
+  ETF forward pass says almost nothing about skill.
+- **Earlier releases' registries name the new parts** (each an addition, no rule of theirs moves): the job in
+  `test_ops_int_ops`'s in-pause set; `forward_screen.py` as a reader of the forward record in `test_forward_report`'s
+  list (the record was kept for this judge; what it hands on is held by `test_forward_screen`'s own seal: ids and
+  words cross, no generator-side module imports it, its family-state key is sealed); the seat path beside E4's two
+  in `PENDING_GATEWAY` (`test_ci`, `test_e3_identities`). E3's seal on its own modules' imports stands: no line of
+  E3's night changes. The pin is its own block, `elane.forward_screen`, beside the lanes' three screens.
+- **Stated limits:** the panel placebo leg draws on one panel run over the judged sessions started flat at
+  FWD1_START (a span holding a session of the program's own disqualified run fails the leg closed; one the House left
+  out waits); the fill gap is modelled until live lots measure it; the representative's own floor needs its Train-era
+  runs in the job's own decider child, once.
+- **The two reviews' fixes** (Oct 14; each with a test that fails on the reviewed head `2b8ee898`):
+  - an engine change WAITS for the representative's rows under the new id (the panel night writes them hours after
+    E3's opens the id; a budget-stale program a night later) and never voids a lineage for a row not written yet; a
+    day present under both ids is compared on r, w, b and r15; a move the vendor's restatement explains (both bars
+    hashes known and different, E3's own `restated` event, bars "moved") is carried;
+  - after an ex-day a day's sides are still read: the run's bars hash of the day's decision differs from the stored
+    one and its lots in and out are the record's (2b8ee898 stalled every holder at the next checkpoint for good);
+  - ONE PANEL STORE A JOB RUN (2b8ee898 opened one a call; the third found no room in the ops child's 500 MB), E4's
+    clock rule on the panel Train segments and the placebo leg, a series error of the program's own runs its own;
+  - one live forward seat a mechanism cell for panel passes too: `elane_forward.seat_refused` (the one call a seat
+    pool asks, both types) and `mark_seated` (what it records), and a second panel pass of a cell waits; A34: a
+    panel pass of case XS1 takes no seat, and beside every panel pass its checkpoint's zero-edge rate and why there
+    is no historical look;
+  - THE STALL RULE (five of the record's nights waiting on the House: no run, reported, asked again at a new engine
+    id), a would-be pass's first reading kept for a deferred checkpoint, statuses stopped and superseded, a panel
+    pre-check with `reached` False no sealed pre-check;
+  - one budget a night across the job's two runs, THE DEADLINE (the wall or the next pre-open, less 120 s) on every
+    run, grace 3 h -> 2 h;
+  - tests: the look-ahead canary, one session a night against one night, a planted edge, an ex-day on E1's engine,
+    the panel runs on package J's world, the job's panel calls under the ops child's 500 MB at the production
+    panel's size (`league/tests/fwd1_panel_budget.py`).
+
+### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; then with A32 `47ed6872ce6c232b743cc556f5540892b9132470` (PR #543, the Probe sleeve 0.50 x E at six seats), which deploys FIRST, on `feat/equity-e4-a32`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
+
+- **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
+  day's S&P 500 members by a symmetric cross-sectional rule, see salted slots with no ticker, no date and no price
+  level, and are judged on their daily RESIDUAL against matched placebo portfolios by the screen XS1 (the study
+  XSCREEN-1's receipt, rebuilt at the captain's bar: `docs/benchmarks/equity_screen_xs_1.json`, pinned in
+  policy.json; every threshold read from it at runtime). The data jobs (membership, the panel's bars with their
+  coverage audit, spreads, N_eff), the panel
+  package `league/xs/` with its own evidence identity, the Train bar equity-xs-v1 with its weekly zero-edge column,
+  the one Validation try and the one look, and the live adapter through E1's EquityBook (a rebalance the book can
+  execute, a standing target that retries a missed buy, the bars a decision read kept and audited).
+- **Ships off, and step one stops at "train".** policy.json `elane.panel.mode` "off": no birth, no run, no fetch of
+  the live path, no model question, no data job. The ladder is "train", "gate", "live", each the captain's settings
+  change and each falling back to the one before. STEP ONE is this whole tree deployed with the switch able to reach
+  "train": the data jobs, panel births in the equity pass, the Train bar with its zero-edge column, and the forward
+  shadow of every scored panel version (package J, below), so that information accrues from the first night. Above
+  "train" the tree holds itself back whatever the setting: **no panel look runs until E3's contamination probe has
+  published the panel strata for the route that wrote the program and written the look permit** (the captain's A22;
+  package B's patch to the probe: built and not yet handed to the House's job, below), and **mode "live" reads as
+  "gate"** until the universe deploy is in force and the forward twin's marker is written, and while that marker is
+  behind.
+- **Before any real money on an XS1 pass** (A22): a style-open program takes no live seat on a pass alone (recorded
+  and shadowed, never seated); at most 2 XS1 looks an agenda cell; the equity code review and the contamination probe
+  before a look; a ninth conformance vector beside the study's eight.
+- **The live rules read a panel program by close DATE** (pre-registered before mode "live"; word for word in
+  docs/operations.md): one observation a close date for EDM1, for sizing up and for the twin-gap leg. E1's rules are
+  unchanged as functions and as numbers; the cost, stated: EDM1's statistical leg cannot act before the 10th close
+  date, and until then the -$300 program line, the $400 window and the stops bound a panel program's loss.
+- **R-E4a moves no identity and no digest:** nothing under `league/live/` or `league/gym/` and no evidence module of
+  `league/equity/` changes; the constitution is untouched. The xs identity is adopted for the first time.
+- **R-E4b, THE UNIVERSE (one commit, deployed separately):** `equity_money.universe.stock` grows from E1's 18 names to
+  the panel's tradable union (every symbol that was an index member in the 36 months before the generation day and is
+  tradable and fractionable; sorted; no date), written by `scripts/gen_universe.py` with the same list at the gateway
+  (`gateway/lib/caps.mjs`). `digest()` and `money_digest()` move ONCE (the figures are in that commit's entry: they
+  are the list's) and the standing grant re-ratifies at the House's start. No bound, share, weight, seat or cap
+  changes; `league/equity/config.py` `UNIVERSE` stays E1's 35 and inside it. The gateway deploys first; both deploys
+  go between two pre-opens. Regenerated about once a year.
+- **CI:** `league/swarm/elane_xs.py` and `scripts/gen_universe.py` are FORBIDDEN (`PENDING_GATEWAY` until the
+  gateway's merge list names them: a gateway follow-up; E2's five and E3's three are in that list already, so the
+  two wait alone); the comparison of the gateway's stock list
+  with the constitution's names at most 10 tickers a side and counts the rest; the pre-open's check 5 counts the
+  options population by the store's own guard (a panel family is its own lane's), and its check 10 holds the panel
+  lane ready while a panel program is live.
+- **Integrated Oct 11 (R-E4a; nothing deployed):** eight packages (A data, B costs and counts, C the xs core, D the
+  engine, E the screen and the identity, G the swarm's lane, H the book's panel path, I the universe generator, CI
+  and docs) merged over E1 and E2 with their review fixes (`feat/equity-e2-int` 5ad1f01e), every patch to E1's and
+  E2's files applied, XS1's receipt landed verbatim with its pin (the registered receipt; the captain's A23 has
+  since replaced it: below). E4's own commits move NO id: the options execution
+  fingerprint, the equity identity and the money digest are the E1/E2 head's on every one of them (E1's own fixes
+  moved all three before E4 was merged onto them: the vendor's cents, the Probe sleeve A20). **One fault found and
+  fixed at integration:** a panel program ALREADY SEATED went on buying after the lane's mode was put down, the
+  nightly I6 failed or its shadow twin stopped (the seat rule read Candidates only). Now a seated panel family has a
+  row only while the lane is live, its planned entries are held at the send, and the book retires it on the lane's
+  own word; a switch file caught mid-write retires nobody. The xs rounding bound is E1's own, re-exported.
+- **What step two still needs, plainly** (each holds real money back by design; none of it is in this tree):
+  1. **The universe commit** (R-E4b, above). It needs the House's own `tradable.json`, which the `equity_universe`
+     job writes only once the lane has been at "train": step two cannot be cut before step one has run.
+  2. **The money row for a panel sleeve**: a constitution row and the lines of the book that read it, not built.
+     Without it a panel program takes the Probe sleeve and one of its seats: at the design in force since release
+     E5-S (six seats, 0.25 x E) a five-name basket is five names of $111.45 at about $2,229, $222.90 of open risk
+     where a one-ETF lot is $55.73, so a basket beside five invested ETF programs asks for more than the $400
+     window: whichever buys later is scaled or refused (the basket is scaled to the room and trades whole from
+     flat; once the room is short a partial rotation's new name is refused at the send and the program holds a
+     name fewer than its Gym twin: pinned as built, at A20's design where a basket alone met the window). Decided
+     and deployed with the universe, so the grant re-ratifies once.
+  3. **The gateway patch**, three parts, each a patch file for the owner (no builder edits `gateway/`): the static
+     half of the universe (`gateway/lib/caps.mjs` and its tests made ready for a generated list; it changes no
+     list), the generated list itself (`gen_universe.py --gateway-patch`), and the merge list's follow-up for the
+     lane's two protected paths (`gateway/lib/protected.mjs`; until then they wait in `PENDING_GATEWAY`).
+  4. **The owner's deploy**: the gateway first, then the House, between two pre-opens; `digest()` and
+     `money_digest()` move once and the standing grant re-ratifies at the House's start.
+  5. **A panel program under the seat rule, and its re-based twin** (new with main's releases E5-A and E3.1; "The
+     merge with main `8ab31e32`", below): which rank K a basket has (the panel's look writes none of K's counts, so
+     a panel Candidate would rank behind every program whose counts can be read), whether a panel program held on
+     a failed leg keeps one of the six seats while it has no row, and the re-base of the panel twin (not built).
+     None of it can be reached in step one.
+  And before any LOOK, which moves no money and no digest: the hand-over of the probe's panel plan to the House's
+  job (patch 18 is built and not wired, below; one allowance in E3's seal test, the captain's ruling). Until it is
+  given every panel look waits.
+- **Package J, the forward twin (Oct 11; nothing deployed; the three ids are main's on both Pythons; no identity
+  moves: `league/ops/forward_xs.py` is plumbing).** A scored panel version is registered in E3's forward record
+  (hash-chained with its NEEDS, route "XS1" and alpha 0.03) and recomputed whole on its own forward days each
+  PANEL NIGHT: the new job `forward_xs`, E3's own night on the panel store, after each `equity_panel` (not a ride on
+  `forward_shadow`: the panel store is a session behind at 22:35Z and the lane's twin marker must be through the
+  store's last session by the next close). One run a program a night at 1.0x: the row's stress column holds the
+  pre-registered stress residual of that run, and E3's excess of the row is the residual against the matched
+  cells. Rows lag one session and twins two (the engine opens no lot on a slice's last session and reads
+  membership two sessions ahead: shown on the real engine). The panel night spends what E3's night left of the
+  one budget, and all its runs read one open of the panel store (opened once a run, the ops child's address-space
+  cap was met at the third run: measured at the real panel's size). The twin of a live panel instance runs under
+  the instance's own id as run key and is compared by weights; A14 then reads a basket's sessions as any
+  program's. The marker (`xs-twins.json`: instance ids and days only) is what the lane reads before mode "live".
+  Alarms FX1 (the marker behind), FX2 (a rebalance session that disagrees), FX3 (panel programs stale two nights
+  running); the twin's residual and the rebalance sessions agreed stand beside a live panel program in the
+  direction report. PATCHES TO E3's FILES, each a few lines: `forward_db` (the panel's route in the chain),
+  `forward_register` (the panel's reader beside its own; nights by job), `forward_shadow` (its queue leaves panel
+  programs out; the label; the job's name), `forward_twins`, `forward_audit`, `forward_report` (the panel's own
+  groups; nights by job; the FX rows). E3's import seal admits the new module and holds it as it holds E3's own.
+  COSTS, stated: once a panel program is registered the engine label gains the xs fingerprint (one `engine_moved`,
+  every program's forward history written again under the new label; again at every later change to an xs
+  evidence module) and a day's meters wait for its panel rows (the second morning after the day, where they were
+  written the same evening). NOT BUILT: `fill_minutes` fetches no panel
+  symbol; the forward route's own verdict; panel controls. With `elane.panel.mode` "off" none of it runs or writes.
+- **The probe's panel strata P4-P6 and the look permit (package B's patch 18; Oct 11; BUILT, NOT WIRED; nothing
+  deployed; no id moves).** Release E3's probe can be handed a plan of three more strata
+  (`contam_probe.probe(ctx, panel=contam_xs.plan)`; the plan is the new `league/ops/contam_xs.py`): a member against
+  its sector's fund by month and by week, and the House panel factors by month, asked after E3's own cells while
+  `elane.panel.mode` is not "off", inside the SAME dollars a run (`elane.contam.usd_run`, E2's day line: nothing
+  raised; about 70% more questions, so a route's probe takes that many more Saturdays). Prompts are names and the
+  calendar only and every word is the probe's; truth comes from the panel store through its own windows (2025 and
+  2026 through the sealed "look" window alone; never a period of 2016, 2020 or 2021); the result keeps E3's shape
+  and E3's own cells byte for byte. After each publish the plan writes `<state>/xs-look-permit.json` (two words a
+  cell, no figure), which is what `elane_xs.probed` reads. **The House's job (`contam_probe.run`) hands no plan
+  yet:** two of E3's seal tests leave no import between the probe and the plan's module, neither was changed for
+  it, and the two lines that hand the plan over need one allowance in E3's seal test, the captain's to give (the patch is
+  in the captain's scratch). Until then the House's probe is E3's to the byte and every panel look waits.
+- **The ship pass (Oct 11; nothing deployed; the three ids are main's on both Pythons, the xs identity moves).**
+  MERGED: main's E2.2 and E3 (`7d2d3c84`); E3's six jobs then E4's six in the registry, the forward record's counts
+  beside the asset-years in the funnel. WHAT THE MERGE MADE TRUE: a panel family is born with a hidden year (E3's
+  folds record in the committed policy), and E3's count of a cell's births holds no panel family; a scored panel
+  version was neither registered nor refused by E3's registry (package J registers it: above); three of E3's seal
+  tests failed on the lane and the LANE changed, no seal: it imports no memory module (the fold's switch, hash and genome id
+  are spelled in `elane_xs`, held equal by a test), and the swarm reads a LOOK PERMIT
+  (`<state>/xs-look-permit.json`: two words a stratum and era, written by the probe's job) where it read the
+  contamination probe's own file. FIXED: **the live panel fetch placed no bar** (`rows_to_arrays` refused the Decimal prices the
+  House's venue client hands; every fake venue handed floats, which is why the whole live week passed: the fakes
+  now decode as the client does). **The spreads' share fell with the index's turnover for ever** (it counted
+  today's members; a name that joined after 2024 can never be sampled): it is the share of the Train eras'
+  member-days whose name has its own figure. The coverage probe's five defects from its first run on the House,
+  and a sixth (a refused request was retried and counted an error). BOUNDED FOR THE BOX'S ONE CORE: no panel run
+  works while the market is open (a run's wall is the whole session, 09:25 to 16:35 ET), and the spreads job's
+  grace is three hours (with six it could hold the one ops child past a pre-open). STATED, NOT CHANGED: the send
+  after a window loss (above); every budget of the lane on the box is an estimate until its first receipts.
+- **The receipt at the captain's bar (A23; Oct 11; nothing deployed; the three ids are main's on both Pythons, the
+  xs identity moves and no panel band exists under it).** THE HOUSE RUNS XS1 AT
+  c_XS 1.38, NOT THE REGISTERED 1.30. WHY: 1.38 is the registered rule's own answer once the finite-pool bias the
+  study measured is added to every real-signal cell (the registered receipt's
+  `cost_of_rule.c_XS_with_finite_pool_bias`), and a known bias left out of a bar is a loosened rule. WHAT MOVED:
+  `docs/benchmarks/equity_screen_xs_1.json` is the study's receipt rebuilt at 1.38 by the study's own report and
+  receipt builder from its saved run (sha256 `f7ce98b1...`; the registered receipt `98acbb83...` stays the study's
+  result, and the new file names it under `house_bar`); policy.json's pin of it (`receipt_sha256`, `c_XS`, the
+  sentence); the conformance vectors, computed again at the new bar by the study's vector builder, with their
+  inputs file and the two by-hand vectors; a CI test that holds the vectors' bar to the pin's; two docstrings of
+  `league/xs`. No line that judges, sizes or trades changed, and A22's four rules are as they were. THE COST, from
+  the two receipts' own `power` rows: at a planted net residual edge of +10% a year the full gate's power falls by
+  0.39 to 2.59 points over the eight archetypes' `XH|N0-S|e10` rows (X7 52.87% to 50.28%, X1 44.33% to 41.91%, X8
+  67.58% to 65.56%, X6 33.86% to 33.47%); over the 48 calibration rows the holdout-only power falls by 0.29 to
+  2.64 points (median 1.93). WHAT IT BUYS: the largest zero-edge rate of a calibration cell 10.02%
+  (11.15%), its largest 95% bound 13.11% (14.82%), and no bootstrap seed of twenty at the owner's 15% wall (2 at
+  1.30). STATED: every false-positive, bound, family-wise, bias and power row is read at 1.38 from the
+  simulations the study saved; the two report-only arms (takeovers and collapses; no-skill style tilts) had been
+  saved at the study's bar only and were run again at 1.38 by the study's own command, after the same command at
+  1.30 gave the saved results again; they decide nothing. A receipt at another bar lands the same way
+  (docs/operations.md, **The screen XS1**).
+- **The merge of the three (Oct 11; nothing deployed; the three ids are main's on both Pythons; the xs identity is
+  the one the receipt's words gave).** Package J, patch 18 and the receipt at the captain's bar were built side by
+  side on the ship pass's head and are merged in that order, every line of each kept; main had not moved past
+  `7d2d3c84`. WHAT THE MERGE ITSELF CHANGED: the two contracts, where each package had added a section 13 (in
+  `league/xs/E4_INTERFACES.md` package J keeps 13, patch 18 is 14 and the receipt is 15; in
+  `league/ops/E3_INTERFACES.md` package J keeps 13 and patch 18 is 14); and ONE TEST where two packages met:
+  patch 18's `test_contam_xs.TheWiring` held that E3's import list names nothing of the panel, and package J's
+  seal change put its own module (`league.ops.forward_xs`) on that list for the forward modules. The test now
+  holds that the list names that one module and that the probe imports none of it. The merge edited no seal test.
+  Neither package J nor patch 18 changed a file under `league/xs` but the contract, so the xs identity is the
+  receipt branch's; no panel band exists under it.
+- **The review's fixes (Oct 11; nineteen findings, three lenses; nothing deployed; no id but the xs identity
+  moves, and no panel band exists under it).** LIVE SAFETY: a seated panel program is liquidated only by the
+  captain's switch: a store-side leg that fails with the switch at "live" (the nightly I6, the twin marker, a stale
+  store, the universe, the spreads) holds its opens and nothing else ("held": the spec's "its opens stop, exits go
+  on"; before, one restated bar among 515 columns sold the basket two opens later). The nightly I6 is False on a
+  price that differs and on nothing the live book itself tolerates (a bar served late, a member learnt after the
+  decision and a decision with no kept fetch are counts and a warning). A panel fetch that raises is a decide the
+  House could not make after the grace, never "still being read" for ever; a row the venue serves on no session is
+  dropped and counted as the nightly job does. A rebalance whose bars differ in the morning is void whole (its
+  program's sells with its buys). The lane's readiness reads the store's freshness by the clock, the panel job has
+  its own nightly trigger, and it fits the ops child's memory at the real panel's size (384 MB of 527 where it
+  failed at 25 names ex-dividend). The seating pass never fetches the panel inside a session; a failed decide it
+  counts exits the lots at the next open; a ticker change inside a held lot keeps its column. EVIDENCE: the panel's
+  sleeve is a constant-weight book in the Gym and live alike (the pre-registration's C3 and C8: a 5 x 0.20 target
+  opens five lots of 0.20 after a loss); the style loading is of what a program HELD (dollars times sessions), not
+  what it bought; `range` is the body plus the wicks under a relative dither, so no statistic of it ranks the slots
+  by price; the look's floor is computed from the segments each attempt runs; a live program is told the Gym's tag
+  of a lot. MONEY, PLAINLY: at about $2,229 and the rows in force a five-name basket was NOT tradable as five whole
+  names (four of $222.90 and a fifth cut to $108.40); the decision's budget is now the sleeve scaled so the whole
+  basket fits the account's room (five of $200.00), and a full basket then uses the whole $400 window. SWITCHES:
+  with `elane.panel.mode` "off" no data job runs either, and none starts with the House; `coverage_min` is the
+  lane's own key; the lane's effective mode and the leg that holds it are in the heartbeat and the report, with
+  the alarms that had no detector.
+- **The ship check's fixes (Oct 11; nothing deployed; the three ids are main's `81963c87` on both Pythons; the xs
+  identity is unchanged, 2f0083bc...).** MERGED: main's releases E5-S (six seats at a Probe sleeve of 0.25 x E)
+  and E2.4 (the equity lanes' alarms), every line of both kept; E5-S's design grid is read with E1's universe put
+  back, so its pins hold before the universe deploy and after it; the lane alarms read share programs only (a
+  panel family keeps its own record and its own alarms). **A SHARE PROGRAM'S LIVE PATH IS MAIN'S, ORDER FOR
+  ORDER, at every position of the panel switch:** the spec's decision 27 (B8: a buy cut by a cap waits while an
+  exit of its own program works) was written for every instance, and six ETF programs hold real-money seats under
+  E1's rule; B8 is now the panel kind's alone. Proved by a recorded comparison
+  (`league/tests/test_equity_etf_orders.py`, its harness `league/tests/equity_week.py`, its fixture recorded on
+  main `81963c87`): the lane's first Monday the normal way, every way a buy can miss, the week and its failing
+  weeks, programs that sell and buy in one window, 65 scenarios, and every one again through the real swarm reader
+  with the switch absent, "off" and at "train"; every POST, cancel, fill, alert, intent, order, lot, instance row,
+  record and minute's answer equals main's. Two differences are allowed and held: the column `eq_instances.kind`
+  and the empty table `eq_rebalances` (main's book trades the same weeks on a state that holds them). With B8 as
+  the spec wrote it five scenarios differ. FIXED: **the zero-edge job could not finish one program inside the ops
+  child's 500 MB** (a store opened a run, every run kept whole): a judgment reads one store, keeps results and
+  lets slices go, and the restart check cuts a slice again when it reads it; three judgments at the real panel's
+  size peak about 80 MB under the cap, held by a test under the child's own limit (the real job run whole on the
+  desk: 57 MB under it; not measured on the box), and the swarm's judgments use the same code. **A decide is limited by WALL time and the box stood still for longer:** in the Train judgment,
+  the zero-edge job and the forward night a run whose runtime shows a decide timeout is made again, three times at
+  most, and never read; timeouts in every run that repeat as a program's do are the program's (`SLOW`, with the
+  measured seconds, which its author reads), and those that do not are the House's (nothing scored, a backoff, one
+  alert). The fix at the root is in `league/gym/runtime.py`, inside the equity identity: a release of its own;
+  Validation and the look do not ask the rule yet (before any look). **`equity_spreads`' CPU row** is 900 s (300
+  was under a night of its backfill at the cost a call measured on the box). The data jobs pace their venue calls
+  (0.4 s before each; 30 s then 65 s after a 429). `forward_xs` skips where E3's own job skips (it failed on an
+  evening the House's daily store held no forward day). The look's own reading of the lane's mode has its test,
+  and E3's seal lets five modules import package J's, the five that dispatch to it.
+- **The merge with main `8ab31e32` (Oct 11; main's releases E5-A and E3.1, deployed 22:51Z; nothing of E4
+  deployed; the options execution fingerprint, the equity identity, the money digest and the constitution digest
+  are main's on both Pythons; the xs identity is unchanged, 2f0083bc...).** MERGED, every line of both kept: the
+  seat rule "activity-1-free", the exit wait's end and the re-based twin, under the panel lane. Ten files met. In
+  the live book (`league/equity/live.py`) the share path is main's code path: the seat rule's band sync, the
+  open note, the exit wait's end and the lost order's take-back are untouched, and what E4 changed stays behind
+  an instance's kind. The swarm's reader takes main's `queued` read and E4's panel rules together (a panel
+  Candidate is seatless while its lane is not live, so it has no row for the seat plan either); the roster and the
+  `dlane` report carry both sides' keys; `league/ops/E3_INTERFACES.md` keeps main's section 13 (release E3.1) and
+  E4's two sections are 14 and 15; `league/constitution.py` is main's to the byte. **A SHARE PROGRAM'S LIVE PATH
+  IS MAIN'S, ORDER FOR ORDER, PROVED AGAIN ON THAT MAIN:** the fixture was recorded again on a detached clone of
+  `8ab31e32` (two records equal to the byte), 75 scenarios. The 65 of before: on main itself the weeks in which
+  stage SELL cannot pass now sell at the 09:45 cut-off, and every scenario's keys hold the seat plan and the open
+  note. Ten that the new main makes possible: the seat rule over thirteen sessions (nobody waits and the idle
+  seats are kept; an idle seat yields to the waiting program; two wait and one seat yields a decision day; a
+  session in which the House refused every open is left out of the idle clock; a yielded program returns into a
+  freed seat; no idle clock while the House refuses every buy), and the forward record's nights beside the book
+  over eight sessions (nothing re-based; Monday's buys missed and the twins re-based; a rebuy missed mid-week; the
+  practice sale never witnessed). Every POST, cancel, fill, alert and line of the seat rule, whole, and every
+  intent, order, lot, instance row, key of the book, record, minute's answer, twin row, twin event, night's
+  receipt and A14 reading, by digest, equals main's, through the test double and through the real swarm reader
+  with the switch absent, "off" and at "train". The two differences allowed are the two of before (the column
+  `eq_instances.kind`, the empty table `eq_rebalances`); the forward store has none. A reader that hides the
+  waiting Candidates, an exit that never waits and a twin that is never re-based are each caught by the scenarios
+  recorded for them. **WHAT MAIN'S THREE RULES DO FOR A PANEL PROGRAM** (decided here; `league/swarm/E4.md`
+  section 7; `league/tests/test_equity_panel_on_main.py`): (1) in step one a panel family never enters the seat
+  plan, never counts against the six seats, never holds or yields a seat: the book builds its plan from the
+  reader's rows alone, and the reader gives a panel family none at any setting of the switch (held with a panel
+  family forced into the Candidate, Probe and Sized bands, where step one makes none; under the "first-come"
+  rollback the swarm's roster counts the Probe band as the store holds it, and step one puts no panel family in a
+  band); (2) the exit wait's end covers a basket's exits like any other, the program's sale and the House's exit
+  of a name that left the eligible set alike; the basket's buy of that open waits with its own sales (B8) and the
+  cut-off records it missed, the standing target planning it again; (3) the re-base is NOT BUILT for the panel
+  twin: a panel instance is twinned by the panel night, compared with the twin as registered every session, with
+  NULL in A29's two columns and no re-base event. **ONE FORWARD-STORE MIGRATION:** E4 adds no table and no column
+  to forward.sqlite (`forward_db.SCHEMA` is main's to the byte), so the migration is main's alone; a store built
+  by `8ab31e32` and one built by `8ed4e72e` (with a panel program's registry row and twin rows) both open under
+  the merged tree with no row rewritten, two writers at once included
+  (`league/tests/test_forward_store_two_builds.py`; the same run once on stores each sha's own code built).
+- **The merge with A32 and the independent check's four minors (Oct 14; nothing of E4 deployed; on
+  `feat/equity-e4-a32`; the options execution fingerprint, the equity identity, the money digest and the constitution
+  digest are `47ed6872`'s on both Pythons; the xs identity is unchanged, 2f0083bc...).** MERGED `47ed6872` (PR #543,
+  decision A32: the Probe sleeve 0.50 x E at six seats; money digest `5b95d73e`, constitution digest `4ef472e1`), a
+  clean merge. A32 deploys FIRST and this release after it. **THE SHARE PROGRAMS' FIXTURE WAS RECORDED AGAIN on a
+  clean tree of `47ed6872`** (`RECORDED_ON`): A32 doubles a one-ETF lot (0.125 x E to 0.25 x E), so all 75 scenarios
+  moved, through the test double and through the real reader: in 71 only the sizes, in four a cap now admits fewer
+  sends; no alert and no seat plan moved; this tree equals it at every position of the switch. FIXED (finding 1):
+  **two first opens of a state from before E4 at the same moment** (two Houses, or a second builder, on one state)
+  both found `eq_instances.kind` missing and ran its ALTER; the loser raised "duplicate column name: kind", which the
+  House's `build_book` turns into an unreadable book (real opens refused while shares are held) until a restart. The
+  loser now reads that refusal as done when a second look finds the column (as `forward_db._migrate` since E3.1); any
+  other refusal is raised. `test_equity_book_panel` `TwoFirstOpensAtOnce` races two processes on such a state (forced
+  so both run the ALTER, and left to their own timing); the check's own repro (two House builds on a fresh copy of a
+  main-built state) raised before (20 of 20 races in the check on 3.11; 5 of 5 on 3.11 and 3 of 5 on 3.14 here) and in
+  none of 20 after, on each Python. STATED (finding 2): **a CODE rollback past E4 after the lane has been at "train"
+  retires the panel families first**: a release from before E4 scopes its options readers by "structure NOT IN ('etf',
+  'stock')" and reads every alive panel family as an options family (the tournament gave the class "panel x none" half
+  its allocation). Set `elane.panel.mode` "off", run `scripts/panel_rollback.py --apply` (it lists the alive panel
+  families, retires each by `SwarmStore.retire`, and refuses while the setting is not "off" or a panel family is
+  outside the Gym band; `league/tests/test_panel_rollback.py`), then roll back. STATED (finding 3): **the zero-edge
+  alarm cannot fire on the box yet**: it needs a complete week (programs at `zero_edge_programs`, 100) and a box
+  Sunday finishes about 32 to 40; a rolling rate or the setting at what a Sunday fits is owed before "gate" (step
+  two); no code or policy change. STATED (finding 4): **one test main's releases added was edited for E4's column**:
+  `league/tests/test_equity_seats.py` `FirstCome` pops `eq_instances.kind` from main's recorded first-come sequence
+  and holds it to "equity" before comparing the rest (f96d7a77). It is E4's stated schema addition, not a behaviour
+  change: main's own version of the file fails on this tree for that column only, and the other 435 tests of main's 15
+  modules, in main's own versions, pass on both Pythons (the independent check). **CI's `tests` job limit is 75
+  minutes, not 35** (`.github/workflows/checks.yml`, with `TRUSTED_WORKFLOWS_SHA256` in `league/updater.py`
+  re-pinned in the same commit): with E4 the league's tests are 11,705 (10,257 on main) and their step is about 43
+  minutes on GitHub's runner; the 35-minute limit cut off both jobs of the first run of #544, and a cut-off run
+  attests nothing. A workflow change reaches the box only as the owner's deploy, which E4 is already: until it is
+  deployed, the running release's updater refuses main heads that carry the new workflows (as it refuses E4's
+  protected files).
+- Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
+  the universe deploy and its rollback, the alarms, the code rollback past E4).
+
+### 22:51Z Oct 11, 2026: releases E5-A and E3.1, the seat rule, the exit wait's end and the re-based twin (#542), House `20261011T225041Z-65fa6d3946ea`, main `8ab31e32`; gateway unchanged `9c0651a3`
+
+One owner deploy of both: CI green on the exact head; no order in flight at 22:50:28Z; promoted 22:51:33Z, the
+watchdog clean (rollback `20261011T202519Z-50def634e716`), nightly back and the updater repointed 23:02Z. Verified
+23:02Z: health clean, real money on; execution fingerprint `b60410ad` and gate contract `397b22b772b3` unchanged;
+money `6c0bc42b` -> `11a1dc0c` and constitution `c3c061b0` -> `00c2bf6f` on purpose (the seat rule's block), the
+grant re-ratified at House start.
+
+- Seen on the House after: the seat plan read "activity-1-free" with six seats held and nobody waiting; the three
+  buys planned for Monday's open stood.
+
+### Release E5-A: the seat rule of the share lane ("activity-1-free"; the captain's A24 with A30), on `feat/equity-e5a-seat-rule` (DEPLOYED 22:51Z Oct 11; one owner deploy with release E3.1 below, from `release/e31-e5a`, on top of releases E5-S and E2.4; THE MONEY DIGEST MOVES, the grant re-ratifies; no fingerprint moves)
 
 - **What it is.** Who takes a free seat was first come. It is now the seat rule the captain registered at 13:42Z
   Oct 11, before the first live share close and before any program waited, as amended by A30 at 20:47Z the same
@@ -114,7 +550,7 @@ gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is b
 - **Merged with main** (release E2.4, the equity lanes' alarms, and release E5-S as deployed): no line of either
   is changed here.
 
-### Release E3.1: an exit's wait for the practice proof has an end, and the twin is re-based after a difference, on `feat/equity-e31-exits-twin` (unreleased; one owner deploy with release E5-A above, from `release/e31-e5a`, on main `81963c87`; no identity moves of its own: the options execution fingerprint, the equity identity, the money digest and the constitution digest are main's; no evidence reset)
+### Release E3.1: an exit's wait for the practice proof has an end, and the twin is re-based after a difference, on `feat/equity-e31-exits-twin` (DEPLOYED 22:51Z Oct 11; one owner deploy with release E5-A above, from `release/e31-e5a`, on main `81963c87`; no identity moves of its own: the options execution fingerprint, the equity identity, the money digest and the constitution digest are main's; no evidence reset)
 
 Two rules the captain registered at 20:13Z Oct 11, 2026, from the rehearsal of the first real-money share session,
 **both before the first real share order** (and A29 before any twin row existed). Plumbing only: `league/equity/live.py`

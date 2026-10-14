@@ -10,6 +10,9 @@ link, league/ops/forward_db.py `append_registry`):
   verdict's `pnl_10` is not None): reason "train_pass" or "train_fail". Forward statistics are then survivor-free,
   and "do Train passers beat Train failers on days no author saw" is the only clean test of the bar itself. A version
   that could not be judged (RUN, DQ, LOAD, WINDOW) has no figure and is not registered;
+- (release E4, package J) every PANEL version judged on its own Train bar, by the panel lane's own reader
+  (league/ops/forward_xs.py `scored_rows`: `ugroup` "panel:<panel>", route "XS1" at the same alpha, its NEEDS the
+  panel's); the panel night of that module runs them, never this release's shadow;
 - the captain-seeded programs (`seed_versions`: reason "seed") and every live instance not yet registered
   (`live_instances`: reason "live", from the book row's own code and params);
 - with a base group's first non-control program, that group's skill-free controls (league/ops/forward_controls.py:
@@ -29,10 +32,12 @@ refuses it; a family whose structure is not "etf" or "stock".
 
 TAGS, each run, from the swarm store and the live book: review_pass (the record's `passed_version` is the version),
 review_fail (its fails are ["REVIEW"]), try and try_entered (`elane_try`), look_pass / look_fail (`elane_look`'s
-verdict), live (value: the instance id).
+verdict; a panel family's look under the panel lane's own key), live (value: the instance id).
 
 THE STOP RULES, each run, from the forward store's own rows and events, counting only nights after the pid's latest
-"resumed" tag. A FAILURE NEVER STOPS A PROGRAM.
+"resumed" tag. A FAILURE NEVER STOPS A PROGRAM. A program's nights are those of THE JOB THAT RUNS IT (`fwd_runs.job`: the forward
+shadow's own for an ETF or a stock program, the panel night's for a panel program: each names its night by its own
+store's day).
 - stopped, value "cap:<night>": its STORED days (any status, the newest engine) reach its reason's session cap
   (`stop_after_sessions`: train_pass, seed, live; `stop_fail_after_sessions`: train_fail);
 - stopped, value "disqualified:<night>": a `run_disqualified` event on each of the program's last `DQ_NIGHTS`
@@ -85,7 +90,10 @@ SCORED_KIND = "swarm.elane"
 SCORED_PASS = "scored"
 #: The real route's instance suffix (league/equity/live.py `REAL_SUFFIX`): an instance's registry key is its id less it.
 REAL_SUFFIX = ":r"
-#: An equity family's structures (league/swarm/elane.py `STRUCTURES`).
+#: The structures THIS READER registers: an ETF or a stock program's (E1's and E2's). Release E4's third equity
+#: structure, "panel" (league/swarm/elane.py `STRUCTURES`), is not among them on purpose: a panel version is read by
+#: the panel's own reader (league/ops/forward_xs.py `scored_rows`, which `sync` asks beside this one), and its
+#: nightly shadow and its twin are that module's panel night.
 STRUCTURES = ("etf", "stock")
 #: A control's author and the NEEDS beside its symbols.
 CONTROL_AUTHOR = "house"
@@ -391,8 +399,9 @@ def _register(db: sqlite3.Connection, row: Mapping[str, Any], known: dict[str, i
             "reason": row["reason"], "ugroup": row["ugroup"], "lineage": row["lineage"], "code": row["code"],
             "params": row["params_text"], "needs": results.canonical(row["needs"]), "program_sha": row["sha"],
             "run_sha": row["run_sha"], "author": row["author"], "created_at": created, "evidence": row["evidence"],
-            "first_close": close, "first_day": day, "registered_at": now, "route": forward_db.E3_ROUTE,
-            "alpha_f": forward_db.E3_ALPHA_F})
+            "first_close": close, "first_day": day, "registered_at": now,
+            # (a panel program's row names its own route: league/ops/forward_xs.py)
+            "route": row.get("route", forward_db.E3_ROUTE), "alpha_f": row.get("alpha_f", forward_db.E3_ALPHA_F)})
     except sqlite3.IntegrityError:          # another writer registered the key meanwhile: it stands
         return None
     except ValueError:                      # fail closed: one row the chain refuses never stops the others
@@ -456,6 +465,7 @@ def _tags(db: sqlite3.Connection, families: Mapping[str, Mapping[str, Any]], ins
           out: dict[str, Any], *, now: float) -> None:
     """The facts learned later (the module docstring, TAGS), each written once: `at` is the run that first saw it."""
     from ..swarm import elane, elane_train
+    from . import forward_xs
 
     held = {(int(r["pid"]), str(r["tag"]), str(r["value"])) for r in db.execute(
         "SELECT pid, tag, value FROM fwd_tags WHERE tag NOT IN ('stopped', 'resumed', 'suspect')").fetchall()}
@@ -479,7 +489,7 @@ def _tags(db: sqlite3.Connection, families: Mapping[str, Mapping[str, Any]], ins
             wanted.append((pid, "try", ""))
         if (tried.get("version") == n and tried.get("entered") is True) or own.get("entered") is True:
             wanted.append((pid, "try_entered", ""))
-        looked = _mapping(state.get(elane.LOOK_KEY))
+        looked = _mapping(state.get(forward_xs.look_key(fam) or elane.LOOK_KEY))    # a panel family's look: its own key
         if looked and looked.get("version") == n:
             passed = _mapping(looked.get("verdict")).get("passed") is True
             wanted.append((pid, "look_pass" if passed else "look_fail", ""))
@@ -547,10 +557,15 @@ def _stops(db: sqlite3.Connection, out: dict[str, Any], *, now: float, settings:
         stored = {int(r["pid"]): (int(r["n"]), str(r["last"])) for r in db.execute(
             "SELECT pid, COUNT(*) AS n, MAX(day) AS last FROM fwd_days WHERE engine=? GROUP BY pid", (engine,)).fetchall()}
     # A NIGHT is a shadow run that got past its preflight, named by the store's last day: (through, the most programs
-    # a run of it completed, when its last run ended).
-    nights = [(str(r["through"]), int(r["programs"] or 0), float(r["finished"])) for r in db.execute(
-        "SELECT through, MAX(programs) AS programs, MAX(finished) AS finished FROM fwd_runs WHERE through IS NOT NULL "
-        "GROUP BY through ORDER BY through").fetchall()]
+    # a run of it completed, when its last run ended). EACH LANE READS ITS OWN JOB'S NIGHTS (release E4, package J:
+    # a panel program is run by the panel night, league/ops/forward_xs.py, which names its night by its own day).
+    from . import forward_xs
+
+    nights_of: dict[bool, list[tuple[str, int, float]]] = {False: [], True: []}
+    for r in db.execute("SELECT job=? AS panel, through, MAX(programs) AS programs, MAX(finished) AS finished FROM "
+                        "fwd_runs WHERE through IS NOT NULL GROUP BY job=?, through ORDER BY through",
+                        (forward_xs.JOB, forward_xs.JOB)).fetchall():
+        nights_of[bool(r["panel"])].append((str(r["through"]), int(r["programs"] or 0), float(r["finished"])))
     marks: dict[str, dict[int, dict[str, float]]] = {"run_disqualified": {}, "run_failed": {}}
     for row in db.execute("SELECT kind, pid, day, at, payload FROM fwd_events WHERE kind IN ('run_disqualified', "
                           "'run_failed') AND pid IS NOT NULL").fetchall():
@@ -558,8 +573,10 @@ def _stops(db: sqlite3.Connection, out: dict[str, Any], *, now: float, settings:
         if night is not None:
             marks[str(row["kind"])].setdefault(int(row["pid"]), {})[night] = float(row["at"])
     marked = set(marks["run_disqualified"]) | set(marks["run_failed"])
-    for row in db.execute("SELECT pid, key, reason FROM fwd_registry WHERE reason != 'control' ORDER BY pid").fetchall():
+    for row in db.execute("SELECT pid, key, reason, ugroup FROM fwd_registry WHERE reason != 'control' ORDER BY pid"
+                          ).fetchall():
         pid, since = int(row["pid"]), resumed.get(int(row["pid"]))
+        nights = nights_of[forward_xs.is_panel(dict(row))]
         if pid in stopped:
             continue
         cap = int(c["stop_fail_after_sessions"] if row["reason"] == "train_fail" else c["stop_after_sessions"])
@@ -622,6 +639,7 @@ def sync(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapp
     A swarm store or a live book that cannot be read is a `skipped` entry under its file's name (`SWARM_DB`,
     `LIVE_DB`) and the House's failure, never a version's: the rest goes on."""
     from ..swarm.store import SwarmStore
+    from . import forward_xs
 
     root, now = Path(root), float(now)
     out: dict[str, Any] = {"registered": 0, "controls": 0, "tagged": 0, "stopped": 0, "suspect": 0, "skipped": [],
@@ -639,6 +657,18 @@ def sync(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapp
             cursor = int(cursor) if isinstance(cursor, int) and not isinstance(cursor, bool) and cursor > 0 else 0
             fresh = _scored_events(store, after=cursor)
             rows, refused = _scored(store, families=families, events=_earliest(fresh), known=known, lookup=cursor > 0)
+            # RELEASE E4 (package J): the panel lane's versions, by their own reader (league/ops/forward_xs.py). What
+            # stops that reader is the House's and never costs this release its own rows: said, and read again next run.
+            try:
+                more, also = forward_xs.scored_rows(store, families=families, events=_earliest(fresh), known=known,
+                                                    lookup=cursor > 0)
+            except sqlite3.Error:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                more, also = [], []
+                out["skipped"].append({"key": "panel", "why": f"the panel lane's versions could not be read "
+                                                              f"({type(exc).__name__}): none registered this run"})
+            rows, refused = sorted([*rows, *more], key=forward_xs.oldest_first), [*refused, *also]
             seeds, seeds_refused = _seeds(store, families, known)
             for row in (*rows, *seeds):
                 _register(db, row, known, out, now=now)
@@ -672,7 +702,7 @@ def sync(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapp
             if key in known or not readable:    # its lineage is the swarm's to say: the next run that reads it registers
                 continue
             try:
-                row = _live_row(store, families, instance)
+                row = forward_xs.live_row(store, families, instance) or _live_row(store, families, instance)
             except _Refused as exc:
                 _refuse(db, out, key, exc.cause, now=now)
                 continue

@@ -214,7 +214,9 @@ class TheScreensName(unittest.TestCase):
         # threshold in a prompt would be a target to fit). No sentence that speaks of the screen, Validation or the
         # look holds one of the pinned block's figures, and no text anywhere names one of the receipt's quantities.
         block = policy()["elane"]["screens"]
-        figures = {str(block[lane][key]) for lane in block for key in ("c_H_floor", "c_H_margin", "c_X", "fp_cap", "owner_wall")}
+        # (the two lanes' blocks: the panel screen's pin beside them, release E4, has its own test in test_elane_xs.py)
+        figures = {str(block[lane][key]) for lane in elane.LANES
+                   for key in ("c_H_floor", "c_H_margin", "c_X", "fp_cap", "owner_wall")}
         figures.discard("0.0")
         self.assertEqual(len(figures), 5, figures)
         spoken = 0

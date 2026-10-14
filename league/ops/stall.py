@@ -58,7 +58,18 @@ dead nightly reached a ledger row no mail carries):
 - `forward`: the nightly's ready file (`<state>/gym-forward.json`) does not carry the last session before today once
   the UTC day is `FORWARD_DUE_HOUR` hours in, the nightly's record (`<state>/data/nightly.json`) has carried an error
   `NIGHTLY_ERROR_HOURS` or more, or a nightly stop (`<state>/data/nightly.stop`) has stood `NIGHTLY_STOP_HOURS` or more
-  (that one is the owner's step: the replay twins of the Done meter wait while it stands).
+  (that one is the owner's step: the replay twins of the Done meter wait while it stands). Since THE SOURCE GAP (Oct 14,
+  2026: SLV 389/390 held the nightly on 2026-10-12 for two days, told only in the daily INFO notice as an error text
+  that named no day and no owner step) it names the day the controller retries and its short roots (`nightly.json` `retrying`) once it
+  has retried that day `NIGHTLY_RETRY_HOURS` (6), and it is the owner's step once the day the nightly owes has been due
+  `NIGHTLY_OWED_HOURS` (36) with no day completed in as long: the House hands a small source gap off by itself within a
+  day (at most 5 minutes short on at most 2 roots: scripts/data/nightly.py), so a day owed that long needs a fix the House
+  cannot make (an outage's empty or cut-off bars schedule no hand-off and reach that step). A hand-off the nightly has
+  scheduled (`retrying.handoff_at`: a deploy's first try starts the 6 h again) holds that step back until
+  `HANDOFF_GRACE` (1 h) past it, and never once the day has been owed `NIGHTLY_OWED_CAP_HOURS` (72); so does a record
+  with an error and no `retrying` (the release before wrote it: a deploy's window before the first new try). While a
+  nightly stop stands the stop is the step, not the owed day (the nightly does not run). The retry counts from the
+  stall's own first sight of the error (`stall.json` `nightly_error`, kept with its day) only for that same day.
 
 THE NO-CAPTAIN CAUSES (Oct 10, 2026; the no-captain audit of every hand intervention from Oct 7 to Oct 10: each of these
 was found by the captain reading the log, never by an alarm):
@@ -198,6 +209,14 @@ NIGHTLY_RECORD = Path("data") / "nightly.json"
 FORWARD_DUE_HOUR = 10
 #: A nightly error standing this long is the `forward` cause.
 NIGHTLY_ERROR_HOURS = 6.0
+#: THE SOURCE GAP (Oct 14, 2026): the controller retrying the same day this long is the `forward` cause, naming the day and
+#: its short roots; the day the nightly owes due this long, with no day completed in as long, is the owner's step.
+NIGHTLY_RETRY_HOURS = 6.0
+NIGHTLY_OWED_HOURS = 36.0
+#: A hand-off the nightly has scheduled (`retrying.handoff_at`) holds the owed day's owner step back until this long past
+#: it, and never once the day has been owed `NIGHTLY_OWED_CAP_HOURS`.
+HANDOFF_GRACE = 3600.0
+NIGHTLY_OWED_CAP_HOURS = 72.0
 #: The direction lane's report (league/ops/dlane_report.py, written at the House's start, daily at 01:30Z and 30 minutes
 #: before each open).
 DLANE_REPORT = "dlane-report.json"
@@ -275,11 +294,15 @@ CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_
           "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend",
           "elane_dq", "elane_births", "elane_idle", "elane_refused")
 #: THE EQUITY LANES (release E2): their births (a `swarm.born` whose payload's lane is "beta" or "equity"), their families
-#: (structure "etf" or "stock": league/swarm/store.py `OPTIONS_ONLY_SQL`) and their Train runs on the House are their own:
-#: none masks a stalled options architect, population or Gym here.
+#: (structure "etf", "stock" or, since release E4, "panel": league/swarm/store.py `OPTIONS_ONLY_SQL`, held equal by
+#: league/tests/test_elane_xs.py) and their Train runs on the House are their own: none masks a stalled options
+#: architect, population or Gym here.
 OPTIONS_BIRTHS = "COALESCE(json_extract(payload, '$.lane'), '') NOT IN ('beta', 'equity')"
-OPTIONS_FAMILIES = "structure NOT IN ('etf', 'stock')"
-OPTIONS_RUNS = "family NOT IN (SELECT id FROM families WHERE structure IN ('etf', 'stock'))"
+OPTIONS_FAMILIES = "structure NOT IN ('etf', 'stock', 'panel')"
+OPTIONS_RUNS = "family NOT IN (SELECT id FROM families WHERE structure IN ('etf', 'stock', 'panel'))"
+#: The same structures for a row read in Python (`validation`'s awaiting list), spelled as the store's own
+#: `EQUITY_STRUCTURES` (league/tests/test_e4_integration.py holds the two equal).
+EQUITY_STRUCTURES = ("etf", "stock", "panel")
 #: The causes a pause stops by design: not raised while the floor is paused.
 RESEARCH_CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "underspend")
 #: The causes that are news to the owner, not a stall nor a step WAITING (Oct 10, 2026): a Done checkpoint that holds is
@@ -567,7 +590,7 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
         n = candidate(fam["best_version"], fam["state"])
         if n is None:
             continue
-        equity = str(fam["structure"]) in ("etf", "stock")  # `OPTIONS_FAMILIES`: an equity family is the equity round's
+        equity = str(fam["structure"]) in EQUITY_STRUCTURES  # `OPTIONS_FAMILIES`: an equity family is the equity round's
         bests += 0 if equity else 1
         if fam["validated_version"] is None or int(fam["validated_version"]) != n:
             (equity_awaiting if equity else awaiting).append(str(fam["id"]))
@@ -1016,17 +1039,29 @@ def last_session_before(day: Any) -> str | None:
 
 def forward_facts(root: str | Path) -> dict[str, Any]:
     """What the `forward` cause reads: the nightly's ready file's day and time, its record's error, and its stop file
-    ({ready_day, ready_at, error, record_day, stop_marker, stop_since}); each absent part None."""
+    ({ready_day, ready_at, error, record_day, stop_marker, stop_since}); since THE SOURCE GAP also the day the controller
+    retries ({day, since, attempts, roots, gaps}: `retrying`), when it last completed one (`completed_at`) and how many
+    root-days the ready file's chain carries source-incomplete (`source_incomplete`); each absent part None."""
     root = Path(root)
     ready = read_json(root / FORWARD_READY, None)
     record = read_json(root / NIGHTLY_RECORD, None)
     out: dict[str, Any] = {"ready_day": None, "ready_at": None, "error": None, "record_day": None,
-                           "stop_marker": _marker(root / NIGHTLY_STOP), "stop_since": None}
+                           "stop_marker": _marker(root / NIGHTLY_STOP), "stop_since": None, "retrying": None,
+                           "completed_at": None, "source_incomplete": None}
     if isinstance(ready, Mapping):
         out["ready_day"], out["ready_at"] = ready.get("day"), ready.get("ready_at")
+        if isinstance(ready.get("source_incomplete"), list):
+            out["source_incomplete"] = len(ready["source_incomplete"])
     if isinstance(record, Mapping):
         out["error"] = None if record.get("error") in (None, "") else str(record.get("error"))[:200]
         out["record_day"] = record.get("day")
+        out["completed_at"] = record.get("completed_at")
+        retry = record.get("retrying")
+        if isinstance(retry, Mapping) and retry.get("day") and out["error"] is not None:
+            out["retrying"] = {"day": str(retry["day"]), "since": retry.get("since"), "attempts": retry.get("attempts"),
+                               "handoff_at": retry.get("handoff_at"),
+                               "roots": [str(r) for r in retry.get("roots") or [] if isinstance(r, str)][:8],
+                               "gaps": [g for g in retry.get("gaps") or [] if isinstance(g, Mapping)][:8]}
     if out["stop_marker"] is not None:
         try:
             out["stop_since"] = (root / NIGHTLY_STOP).stat().st_mtime
@@ -1232,7 +1267,7 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
            grant: Mapping[str, Any] | None = None, kill: Mapping[str, Any] | None = None,
            flight: Mapping[str, Any] | None = None, dlane: Mapping[str, Any] | None = None, lane_on: bool | None = None,
            preopen: Mapping[str, Any] | None = None, forward: Mapping[str, Any] | None = None,
-           nightly_error_since: float | None = None, done_told: Any = (),
+           nightly_error_since: float | None = None, nightly_error_day: str | None = None, done_told: Any = (),
            binds: list[Mapping[str, str]] | None = None,
            alert_states: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
     """Every cause's check: {stalled, what, numbers, doing, owner_step, onset (epoch or None)}. Pure."""
@@ -1442,7 +1477,7 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
         "owner_step": KILL_STEP if killed else None, "onset": (kill or {}).get("since")}
     out.update(_lane_checks(now, dlane, lane_on, done_told))
     out["preopen"] = _preopen_check(now, preopen)
-    out["forward"] = _forward_check(now, forward, nightly_error_since)
+    out["forward"] = _forward_check(now, forward, nightly_error_since, nightly_error_day)
     out["swarm_alerts"] = _alerts_check(now, swarm.get("alerts"), alert_states)
     out["underspend"] = _underspend_check(now, swarm, budget, binds)
     if since is not None:  # the pause stops research by design: none of its causes is raised while it stands
@@ -1764,8 +1799,55 @@ def _preopen_check(now: float, preopen: Mapping[str, Any] | None) -> dict[str, A
         "owner_step": None, "onset": due if (broke or failed) else None}
 
 
-def _forward_check(now: float, forward: Mapping[str, Any] | None, error_since: float | None) -> dict[str, Any]:
-    """`forward` (the module docstring), from the nightly's files (`forward_facts`). Pure but for the session calendar."""
+def _short_roots(retry: Mapping[str, Any] | None, most: int = 4) -> str:
+    """The short roots of the day the nightly retries, each with its SIP coverage ("SLV: SIP 389/390, minute 826
+    missing"), at most `most` of them (then how many more), or "" when the record names none."""
+    if not retry:
+        return ""
+    gaps = {str(g.get("root")): g for g in retry.get("gaps") or []}
+    names = list(retry.get("roots") or sorted(gaps))
+    words = []
+    for root in names[:most]:
+        g = gaps.get(root) or {}
+        missing = [m for m in g.get("missing_minutes") or [] if isinstance(m, int)]
+        known, expected = g.get("known"), g.get("expected")
+        text = f"{root}: SIP {known}/{expected}" if isinstance(known, int) and isinstance(expected, int) else root
+        if missing and isinstance(known, int) and isinstance(expected, int) and expected - known <= 3:
+            text += f", minute{'s' if len(missing) > 1 else ''} {', '.join(f'{m} ({m // 60:02d}:{m % 60:02d} ET)' for m in missing)} missing"
+        words.append(text)
+    return "; ".join(words) + (f"; {len(names) - most} more" if len(names) > most else "")
+
+
+def _session_after(day: Any) -> str | None:
+    """The first NYSE session strictly after `day` (an ISO day), None when none in 14 days or no calendar."""
+    import datetime as dt
+
+    try:
+        from ltcm.data import us_equity_session
+
+        d = dt.date.fromisoformat(str(day))
+        return next((d + dt.timedelta(days=n)).isoformat() for n in range(1, 15)
+                    if us_equity_session(d + dt.timedelta(days=n)) is not None)
+    except Exception:  # noqa: BLE001 - no calendar, no day: no owed day
+        return None
+
+
+def _owed_due(day: Any) -> float | None:
+    """When the nightly's day `day` fell due (02:00 America/New_York the morning after it: scripts/data/nightly.py)."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    try:
+        morning = dt.date.fromisoformat(str(day)) + dt.timedelta(days=1)
+    except ValueError:
+        return None
+    return dt.datetime.combine(morning, dt.time(2, 0), ZoneInfo("America/New_York")).timestamp()
+
+
+def _forward_check(now: float, forward: Mapping[str, Any] | None, error_since: float | None,
+                   error_day: str | None = None) -> dict[str, Any]:
+    """`forward` (the module docstring), from the nightly's files (`forward_facts`) and the stall's first sight of the
+    record's error (`error_since`, for the day `error_day`). Pure but for the session calendar."""
     import datetime as dt
 
     f = dict(forward or {})
@@ -1782,33 +1864,88 @@ def _forward_check(now: float, forward: Mapping[str, Any] | None, error_since: f
     stop_since = f.get("stop_since")
     stopped = stop_since is not None and now - float(stop_since) >= NIGHTLY_STOP_HOURS * 3600
     marker = f.get("stop_marker")
+    # THE SOURCE GAP (Oct 14, 2026): the day the controller retries, since when (a record written before the controller
+    # kept `retrying` counts from the first stall run that saw its error, when that sight was of the same day), and the
+    # day the nightly owes.
+    retry = f.get("retrying") if isinstance(f.get("retrying"), Mapping) else None
+    retry_since = S.epoch(retry.get("since")) if retry else None
+    if (retry and error_since is not None and error_day is not None and str(error_day) == str(retry.get("day"))
+            and (retry_since is None or error_since < retry_since)):
+        retry_since = error_since
+    retrying = retry is not None and retry_since is not None and now - retry_since >= NIGHTLY_RETRY_HOURS * 3600
+    owed = retry.get("day") if retry else (_session_after(f["ready_day"]) if late else None)
+    due = _owed_due(owed) if owed else None
+    done_at = max([t for t in (S.epoch(f.get("completed_at")), S.epoch(f.get("ready_at"))) if t is not None], default=None)
+    owed_long = (due is not None and now - due >= NIGHTLY_OWED_HOURS * 3600
+                 and (done_at is None or now - done_at >= NIGHTLY_OWED_HOURS * 3600))
+    # The House's own way out: the hand-off it has scheduled (`retrying.handoff_at`) holds the owner step back until an
+    # hour past it, and never past `NIGHTLY_OWED_CAP_HOURS` owed (a source that keeps changing its packet). A record with
+    # an error and no `retrying` was written by the release before (a deploy's window before this release's first try):
+    # held the same way until the cap, so a stall run between the deploy and that try does not tell the owner a fix is
+    # needed that the release has just made.
+    handoff = S.epoch(retry.get("handoff_at")) if retry else None
+    legacy = retry is None and f.get("error") is not None
+    scheduled = (owed_long and now - due < NIGHTLY_OWED_CAP_HOURS * 3600
+                 and (legacy or (handoff is not None and now < handoff + HANDOFF_GRACE)))
+    roots = _short_roots(retry)
+    # A SIP gap the nightly scheduled no hand-off for is wider than a source gap (an outage): it waits for the bars.
+    wide = bool(retry and retry.get("roots") and handoff is None)
     parts = []
     if late:
         parts.append(f"the nightly's ready file carries {f['ready_day']}, not the last session {expected}")
-    if erring:
-        parts.append(f"the nightly's record has carried an error for {_hours(now - float(error_since))} h "
-                     f"({str(f.get('error'))[:120]})")
+    # The stop before the rest: the gateway clips `what` at 400 characters too, and the stop is what to clear.
     if stopped:
         parts.append(f"a nightly stop ({marker!r}) has stood {_hours(now - float(stop_since))} h")
-    step = None
+    if retrying:
+        parts.append(f"the nightly has retried {retry['day']} for {_hours(now - retry_since)} h"
+                     + (f" ({roots})" if roots else f" ({str(f.get('error'))[:120]})")
+                     + (", too wide a SIP gap for the House to hand off" if wide else ""))
+    elif erring:
+        parts.append(f"the nightly's record has carried an error for {_hours(now - float(error_since))} h "
+                     f"({str(f.get('error'))[:120]})")
+    if owed_long:
+        parts.append(f"no forward day has completed in the {_hours(now - due)} h since {owed} fell due"
+                     + (f"; the House hands {', '.join(retry.get('roots') or []) or 'the short roots'} to the forward gap "
+                        f"ledger at {S.iso(handoff)} if unchanged" if scheduled and not legacy else
+                        "; the owner step waits for this release's first try" if scheduled else ""))
+    steps = []
+    # While a nightly stop stands the nightly does not run: the stop is the step (once it has stood
+    # `NIGHTLY_STOP_HOURS`), never the owed day, whose step would also crowd the stop's out of the mail (the gateway
+    # clips a step at 400 characters).
+    if owed_long and not scheduled and marker is None:
+        steps.append(f"the nightly owes {owed} and has completed no day in {_hours(now - due)} h: read "
+                     "data/nightly.json (error, retrying) and data/images.json forward_days. The House hands off only a "
+                     "small SIP source gap by itself, so this needs a fix it cannot make"
+                     + (f" ({_short_roots(retry, 2)})" if roots else ""))
     if stopped:
         who = "automation wrote it and did not lift it (check deploys.jsonl first)" if str(marker or "").startswith(
             AUTOMATION_MARKERS) else "it is the operator's"
-        step = (f"remove /workspace/state/data/nightly.stop ({who}) once nothing needs the nightly stopped: the nightly "
-                "forward replay, and with it the Done meter's replay twins, waits while it stands")
-    onsets = [t for t, on in ((stop_since, stopped), (error_since, erring)) if on and t is not None]
+        steps.append(f"remove /workspace/state/data/nightly.stop ({who}) once nothing needs the nightly stopped: the nightly "
+                     "forward replay, and with it the Done meter's replay twins, waits while it stands")
+    onsets = [t for t, on in ((stop_since, stopped), (error_since, erring), (retry_since, retrying), (due, owed_long))
+              if on and t is not None]
+    short = ",".join(str(r).lower() for r in (retry or {}).get("roots") or [])[:80]
     return {
-        "stalled": bool(late or erring or stopped),
+        "stalled": bool(late or erring or stopped or retrying or owed_long),
         "what": ("The nightly forward replay is late or stopped: " + "; ".join(parts) + "." if parts else
                  "The nightly forward replay is on time." if f.get("ready_day") else "No nightly ready file on record."),
         "numbers": {"ready_day": f.get("ready_day"), "expected_day": expected,
                     "ready_at": None if S.epoch(f.get("ready_at")) is None else S.iso(S.epoch(f.get("ready_at"))),
                     "nightly_error": f.get("error") is not None, "nightly_stop": marker is not None,
-                    "nightly_stop_since": None if stop_since is None else S.iso(float(stop_since))},
+                    "nightly_stop_since": None if stop_since is None else S.iso(float(stop_since)),
+                    "retrying_day": owed if retry else None, "retrying_roots": short or None,
+                    "retrying_hours": None if retry_since is None else round((now - retry_since) / 3600, 2),
+                    "retrying_attempts": (retry or {}).get("attempts"),
+                    "owed_hours": None if due is None else round(max(0.0, now - due) / 3600, 2),
+                    "handoff_at": None if handoff is None else S.iso(handoff),
+                    "source_incomplete": f.get("source_incomplete")},
         "doing": ("The House's supervisor keeps the nightly daemon alive while no stop stands and it retries a failed night "
-                  "every five minutes. Until the session's replay lands, the Done meter's readings stay provisional "
+                  "every five minutes. A root short by at most 5 minutes (at most 2 roots a day) whose SIP packet the "
+                  "source serves unchanged for 6 h and past the next session's close (24 h at most) is handed to the "
+                  "forward gap ledger as source-incomplete, never complete, and the night goes on; a wider gap waits for "
+                  "its bars. Until the session's replay lands, the Done meter's readings stay provisional "
                   "(DONE-RULE-A1 A1.4) and its replay twins wait."),
-        "owner_step": step, "onset": min(onsets) if onsets else None}
+        "owner_step": "; ".join(steps) or None, "onset": min(onsets) if onsets else None}
 
 
 # ---------------------------------------------------------------------------------------------- the notice
@@ -1953,11 +2090,17 @@ def run(ctx: Any) -> dict[str, Any]:
         errors.append(f"whether a deploy is in flight could not be read ({type(exc).__name__})")
     state = read_json(root / STATE_FILE, {})
     state = state if isinstance(state, dict) else {}
-    # How long the nightly's record has carried an error: from the first run that saw it (kept in stall.json).
+    # How long the nightly's record has carried an error: from the first run that saw it for the day the record names
+    # (kept in stall.json with that day). A record that names another day (one day completed and the next failed between
+    # two runs) starts the count again; a sight kept before the day was (a release before) takes this run's day.
     seen_error = state.get("nightly_error") if isinstance(state.get("nightly_error"), dict) else {}
     nightly_error = None
     if (forward or {}).get("error") is not None:
-        nightly_error = {"since": seen_error.get("since") or S.iso(now)}
+        retry = forward.get("retrying") if isinstance(forward.get("retrying"), Mapping) else {}
+        day = retry.get("day") or forward.get("record_day")
+        day = None if day is None else str(day)
+        same = seen_error.get("day") is None or seen_error.get("day") == day
+        nightly_error = {"since": (seen_error.get("since") if same else None) or S.iso(now), "day": day}
     # The Done checkpoints a SENT notice has told (the review of the weekend fixes, Oct 10, 2026): `done` stands for the
     # rest.
     done_told = sorted({k for k in state.get("done_told") or [] if isinstance(k, str)}
@@ -1967,6 +2110,7 @@ def run(ctx: Any) -> dict[str, Any]:
                    grant=grant, kill=kill_facts(_health(ctx)), flight=flight, dlane=dlane, lane_on=lane_on,
                    preopen=preopen, forward=forward,
                    nightly_error_since=None if nightly_error is None else S.epoch(nightly_error["since"]),
+                   nightly_error_day=None if nightly_error is None else nightly_error.get("day"),
                    done_told=done_told, binds=binds, alert_states=states)
     # THE EQUITY LANES' OWN CAUSES (release E2.4): judged in league/ops/elane_health.py and raised from here on like any
     # other. Their evidence counts from the first start of the RUNNING RELEASE (kept in stall.json: `EH.release_since`).
@@ -2060,7 +2204,7 @@ __all__ = ["run", "checks", "swarm_facts", "owner_deploy", "pause_facts", "grant
            "VALIDATION_HOURS", "BRAKE_WINDOW_HOURS", "BRAKED_HOURS", "RUNWAY_DAYS", "PAUSED_HOURS", "OWNER_EVERY_SECONDS",
            "INFO_EVERY_SECONDS", "WARN_EVERY_SECONDS", "STATE_FILE", "deploy_flight", "dlane_facts", "preopen_facts",
            "forward_facts", "last_session_before", "OWNER_DEPLOY_GRACE", "DEPLOY_FLIGHT_SECONDS", "NIGHTLY_STOP_HOURS",
-           "NIGHTLY_ERROR_HOURS", "FORWARD_DUE_HOUR", "DLANE_STALE_HOURS", "PREOPEN_HOURS", "NEWS_CAUSES", "done_key",
+           "NIGHTLY_ERROR_HOURS", "NIGHTLY_RETRY_HOURS", "NIGHTLY_OWED_HOURS", "HANDOFF_GRACE", "NIGHTLY_OWED_CAP_HOURS", "FORWARD_DUE_HOUR", "DLANE_STALE_HOURS", "PREOPEN_HOURS", "NEWS_CAUSES", "done_key",
            "LANE_OFF_WHAT", "architect_tally", "card_fields", "wanting", "card_refusals", "jam_kind", "lever", "LEVERS",
            "settings_binds", "YIELD_HOURS", "YIELD_PASSES", "YIELD_MAX_BORN", "YIELD_REFUSED_SHARE", "DRY_HOURS", "DRY_PASSES",
            "JAM_HOURS", "JAM_PASSES", "ALERT_HOURS", "ALERT_STEPS", "ALERT_SELF_HEALING", "UNDERSPEND_SHARE",

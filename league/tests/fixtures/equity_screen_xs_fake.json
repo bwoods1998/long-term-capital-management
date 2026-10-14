@@ -1,0 +1,218 @@
+{
+  "name": "equity_screen_xs_fake",
+  "screen": "XS1",
+  "study": "FAKE: an invented XS1 receipt for league/tests/test_xs_screen.py only; not a measurement, never pinned",
+  "rule": "FAKE (the XS1 rule's shape only). Pre-check: (RT_V >= 20 or ID_V >= 120) and sum_V x > 1e-12. Look: sum_H x > 1e-12 and sum_H x15 > 1e-12 and t_H >= c_used and the placebo count <= 119 of 999. c_used = max(c_XS, c_p + c_margin) on the 0.01 grid; c_p by exact enumeration at L = 194.",
+  "contract": {
+    "name": "C-XS-1",
+    "long_only": true,
+    "max_weight": 0.2,
+    "max_sum": 1.0,
+    "max_names": 40,
+    "min_notional_usd": 10,
+    "keep_rule": "FAKE fixture sentence",
+    "max_buys": 12,
+    "max_sells": 12,
+    "fills": "FAKE fixture sentence",
+    "costs": "FAKE fixture sentence",
+    "E0": 1000,
+    "house_exits": "FAKE fixture sentence",
+    "ctx": "FAKE fixture sentence"
+  },
+  "fp_cap": 0.12,
+  "owner_wall": 0.15,
+  "c_XS": 1.1,
+  "c_margin": 0.05,
+  "alpha_plac": 0.12,
+  "placebo_draws": 999,
+  "stratum": {
+    "rung": "R0",
+    "definition": "FAKE fixture sentence",
+    "min_cell": 5,
+    "window": 252,
+    "min_valid": 200,
+    "funds": [
+      "XLB",
+      "XLE",
+      "XLF",
+      "XLI",
+      "XLK",
+      "XLP",
+      "XLU",
+      "XLV",
+      "XLY",
+      "XLRE",
+      "XLC"
+    ],
+    "market": "SPY"
+  },
+  "residual": {
+    "definition": "FAKE fixture sentence",
+    "placebo_law": "FAKE fixture sentence",
+    "seed_rule": "FAKE fixture sentence"
+  },
+  "precheck": {
+    "rt_min": 20,
+    "id_min": 120,
+    "rule": "(RT_V >= 20 or ID_V >= 120) and sum_V(x) > 1e-12"
+  },
+  "look": {
+    "rule": "FAKE fixture sentence",
+    "c_used": "max(c_XS, c_p + c_margin) in grid steps",
+    "stress": "sum_H x15 > 1e-12, x15 = x - 0.5 s - f"
+  },
+  "floor": {
+    "method": "exact",
+    "statistic": "t_H of the daily residual x, L = 194",
+    "cells": "FAKE fixture sentence",
+    "pools": "FAKE fixture sentence",
+    "worlds": "FAKE fixture sentence",
+    "null": "N0: x0 = x - w kappa_H",
+    "ineligible": "FAKE fixture sentence",
+    "own_rate": "FAKE fixture sentence",
+    "k_cell": "the smallest k in 0..500 with HO[k] x 100 <= 12 x T"
+  },
+  "eligibility": {
+    "program": "FAKE fixture sentence",
+    "universe": "FAKE fixture sentence",
+    "entry": "FAKE fixture sentence"
+  },
+  "windows": {
+    "validation": "calendar 2025 (250 sessions)",
+    "holdout": "2026-01-02 .. 2026-10-09: FAKE fixture sentence (exactly 194 sessions)",
+    "calibrated_L": 194
+  },
+  "lineage": {
+    "holdout_looks": 1,
+    "validation_tries": 1,
+    "same_lineage": "FAKE fixture sentence",
+    "series": [
+      "x",
+      "u"
+    ],
+    "no_feedback": "FAKE fixture sentence",
+    "routes": "FAKE fixture sentence"
+  },
+  "R3_retry_permitted": false,
+  "labels": {
+    "basket": "FAKE fixture sentence",
+    "french": "FAKE fixture sentence"
+  },
+  "flags": {
+    "X1": [],
+    "X2": [],
+    "X3": [
+      "FAKE: an invented flag"
+    ],
+    "X4": [],
+    "X5": [],
+    "X6": [],
+    "X7": [],
+    "X8": []
+  },
+  "screen_flags": [
+    "style-open"
+  ],
+  "ladder": [
+    {
+      "rung": "R0",
+      "feasible": true,
+      "c_XS": 1.1
+    }
+  ],
+  "fp_zero_edge": {
+    "X1": {
+      "FAKE|N0-S": [
+        0.1,
+        0.11,
+        0.09,
+        0.1
+      ]
+    }
+  },
+  "fp_zero_edge_B": {
+    "X1": {
+      "FAKE|N0-S": [
+        0.1,
+        0.11,
+        0.09,
+        0.1
+      ]
+    }
+  },
+  "fp_zero_edge_max": {
+    "rate": 0.1,
+    "ub": 0.11,
+    "archetype": "X1",
+    "cell": "FAKE|N0-S|A",
+    "ub_archetype": "X1",
+    "ub_cell": "FAKE|N0-S|A"
+  },
+  "fp_validation_known_max": {
+    "rate": 0.1,
+    "archetype": "X1",
+    "cell": "FAKE|N0-S|A"
+  },
+  "family_wise_zero_edge": {
+    "X1": {
+      "FAKE": [
+        0.1,
+        0.2,
+        0.3
+      ]
+    }
+  },
+  "family_wise_8_max": 0.3,
+  "finite_pool_bias": {
+    "X1": {
+      "FAKE": [
+        0.01,
+        0.01
+      ]
+    }
+  },
+  "finite_pool_bias_max": 0.01,
+  "style_known_rate": {
+    "BIG": 0.2,
+    "HIBETA": 0.2,
+    "HIMOM": 0.2,
+    "HIVOL": 0.2,
+    "SMALL": 0.2,
+    "LOBETA": 0.2,
+    "LOMOM": 0.2,
+    "LOVOL": 0.2
+  },
+  "style_known_max": 0.2,
+  "power": {
+    "X1": {
+      "FAKE|N0-S|e10": [
+        0.3,
+        0.31,
+        0.1
+      ]
+    }
+  },
+  "cost_of_rule": {
+    "c_XS_point_only": 1.0
+  },
+  "study_program_floors": {
+    "X1": {
+      "c_p": 0.8,
+      "c_used": 1.1
+    }
+  },
+  "beside_calibrated_reading": {
+    "what": "FAKE fixture sentence"
+  },
+  "limits": [
+    "FAKE fixture sentence"
+  ],
+  "stated_beside_every_live_trade": "XS1 (FAKE fixture sentence): bar holdout t >= {c_used} (own floor {c_p} + 0.05); on its own Train-era worlds this program's holdout-only rate is {own_fp}% (in-sample); earlier XS1 looks in this program's mechanism cell: {n_cell}; its P&L is {basket}; French factors: {label}; flags: {flags}.",
+  "note": "FAKE: an invented XS1 receipt for league/tests/test_xs_screen.py only; not a measurement, never pinned",
+  "sha256": {
+    "PREREG.md": "0000000000000000000000000000000000000000000000000000000000000000",
+    "RESULT.md": "0000000000000000000000000000000000000000000000000000000000000000",
+    "decision.json": "0000000000000000000000000000000000000000000000000000000000000000",
+    "code/house_ref_xs.py": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

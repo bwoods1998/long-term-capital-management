@@ -2326,10 +2326,35 @@ class TheReportShowsOnlyWhatItMay(Fixture):
 
     def test_the_forward_rows_reach_only_the_report_file_and_the_done_meters_reading(self):
         # By source: outside the E3 ops modules, only the dlane report (its `forward_record` section and A14), the
-        # funnel (integers) and the stall job (the receipts) may name a module of the forward record.
-        allowed = {"dlane_report.py", "funnel.py", "stall.py", *(f"{name}.py" for name in E3_OPS)}
+        # funnel (integers) and the stall job (the receipts) may name a module of the forward record. Release E4's
+        # package J (league/ops/forward_xs.py: the panel lane's half of that record) is one of its modules: it may
+        # name them, and no other ops module but the dlane report (the lines beside a panel program) may name it.
+        # THE FORWARD SCREEN FWD1-R (the captain's A33) is the later release this record was kept for: its job
+        # (league/ops/forward_screen.py) reads the record read-only to judge it, and what it hands on is held by its
+        # own seal (league/tests/test_forward_screen.py: the permit file carries ids and words only, no generator-side
+        # module imports it, the family-state key it leads to is sealed from every generator).
+        allowed = {"dlane_report.py", "funnel.py", "stall.py", "forward_xs.py", "forward_screen.py",
+                   *(f"{name}.py" for name in E3_OPS)}
         names = ("forward_report", "forward_twins", "forward_db", "forward_shadow", "forward_register", "forward_audit",
-                 "forward_controls", "fill_minutes", "release_receipts", "contam_probe")
+                 "forward_controls", "fill_minutes", "release_receipts", "contam_probe", "forward_xs")
+        # PACKAGE J's OWN MODULE IS NARROWER THAN THAT LIST (the ship check's finding): of the modules above, only the
+        # five of E3 that dispatch to it and the dlane report import `forward_xs`; the funnel, the stall job and E3's
+        # other six do not (league/tests/test_e3_seal_imports.py holds E3's side of it, both ways).
+        j_importers = {"dlane_report.py", "forward_register.py", "forward_shadow.py", "forward_twins.py",
+                       "forward_audit.py", "forward_report.py",
+                       "forward_screen.py"}    # FWD1-R: a panel lineage's own forward run, to read its sides
+        seen = set()
+        for path in sorted((REPO / "league" / "ops").glob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.ImportFrom):
+                    imported = {alias.name for alias in node.names} | {(node.module or "").split(".")[-1]}
+                elif isinstance(node, ast.Import):
+                    imported = {alias.name.split(".")[-1] for alias in node.names}
+                else:
+                    continue
+                if "forward_xs" in imported:
+                    seen.add(path.name)
+        self.assertEqual(seen, j_importers)
         for path in sorted((REPO / "league" / "ops").glob("*.py")):
             if path.name in allowed:
                 continue

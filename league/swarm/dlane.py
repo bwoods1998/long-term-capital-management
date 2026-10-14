@@ -614,8 +614,11 @@ def declared_lane(store: Any, fam: Mapping[str, Any] | None) -> str:
     spec = fam.get("spec")
     if isinstance(spec, Mapping) and spec.get("lane") in LANES:
         return str(spec["lane"])
-    if isinstance(spec, Mapping) and spec.get("lane") is not None and str(fam.get("structure") or "") in ("etf", "stock"):
-        return ALPHA  # LANE SCOPING (A8.12): an equity-lane family is never a direction family (its card is not read)
+    if isinstance(spec, Mapping) and spec.get("lane") is not None:
+        from .store import EQUITY_STRUCTURES  # every equity structure, the panel's too (release E4)
+
+        if str(fam.get("structure") or "") in EQUITY_STRUCTURES:
+            return ALPHA  # LANE SCOPING (A8.12): an equity-lane family is never a direction family (its card is not read)
     fid = str(fam.get("id") or "")
     if not fid or store is None:
         return ALPHA
