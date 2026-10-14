@@ -26,7 +26,10 @@ built, not handed to the House's job; the receipt at the captain's bar, A23), th
 MAIN AS IT RUNS merged under all of it: `8ab31e32`, deployed 22:51Z Oct 11, with releases E5-S and E2.4 (six seats
 at a Probe sleeve of 0.25 x E, the equity lanes' alarms), E5-A (the seat rule "activity-1-free") and E3.1 (an exit's
 wait for the practice proof has an end; the twin is re-based after a difference). The records are
-`league/xs/E4_INTERFACES.md` sections 10 to 18.
+`league/xs/E4_INTERFACES.md` sections 10 to 18. **Merged with A32 (Oct 14, 2026):** the tree also holds `47ed6872`
+(PR #543, decision A32: the Probe sleeve 0.50 x E at six seats, money digest `5b95d73e`, constitution digest
+`4ef472e1`), which deploys FIRST; this release keeps the options execution fingerprint, the equity identity and
+both digests as A32 leaves them, and moves only the xs identity.
 - **A SHARE PROGRAM'S LIVE PATH IS MAIN'S, ORDER FOR ORDER, at every position of the lane's switch** (the captain's
   ruling at the ship check: six ETF programs hold real-money seats). The live equity book carries the panel kind
   (`league/equity/live.py`, package H), and one of its rules was written for every instance: the spec's decision
@@ -40,11 +43,12 @@ wait for the practice proof has an end; the twin is re-based after a difference)
   beside the book (the real registry, shadow and twins: nothing re-based, a missed buy and the twin re-based, the
   practice sale never witnessed and the exits at the 09:45 cut-off); and every one of them again through the real
   swarm reader with the panel switch absent, "off" and at "train" (a panel family in Train research in the store).
-  The fixture was recorded on main `8ab31e32`, the running release; every POST, cancel, fill, alert, line of the
-  seat rule, intent, order, lot, instance row, key of the book, record, minute's answer, twin row, twin event and
-  A14 reading of this tree equals it. With B8 as the spec wrote it five scenarios differ, and a tree that lost the
-  seat rule's read, the exit wait or the re-base differs in the scenarios recorded for each: the test holds that it
-  would see them.
+  The fixture was recorded on main `8ab31e32` and again on `47ed6872` (A32, the release this one deploys over: it
+  doubles a one-ETF lot, so every scenario's sizes moved, and in four a cap admits fewer sends); every POST, cancel,
+  fill, alert, line of the seat rule, intent, order, lot, instance row, key of the book, record, minute's answer,
+  twin row, twin event and A14 reading of this tree equals it. With B8 as the spec wrote it five scenarios differ,
+  and a tree that lost the seat rule's read, the exit wait or the re-base differs in the scenarios recorded for
+  each: the test holds that it would see them.
 - **What main's three new rules do for a panel program** (decided at the merge; `league/swarm/E4.md` section 7;
   `league/tests/test_equity_panel_on_main.py`). THE SEAT RULE: in step one a panel family never enters the seat
   plan, never counts against the six seats and never holds or yields a seat: the book builds its plan from the
@@ -67,7 +71,10 @@ wait for the practice proof has an end; the twin is re-based after a difference)
   with its weekly zero-edge column, and the forward shadow of every scored panel version (the job `forward_xs`), so
   that information accrues from the first night. It moves no identity a judge binds to and no money rule: the
   options execution fingerprint, the equity identity and the money digest are main's on both Pythons; only the xs
-  identity moves, and no panel band exists under it.
+  identity moves, and no panel band exists under it. **A CODE ROLLBACK PAST THIS RELEASE, once the lane has been at
+  "train", takes one step first** (**Rollback past E4**, below): `elane.panel.mode` "off", then every alive panel
+  family retired (`scripts/panel_rollback.py --apply`). A release from before E4 knows no panel structure and reads
+  every alive panel family as an options family.
 - **Above "train" the tree holds itself back, whatever the setting.** At "gate" Validation is scored and both Train
   series are kept, and every look waits: the receipt is pinned, but no look permit exists, because the House's
   probe job is handed no plan. "live" reads as "gate": no universe deploy is in force (`live_from`), so no panel
@@ -731,6 +738,26 @@ step at a time, and each step is the rollback of the one above it):
 A panel lot is an equity lot: **Roll back: flatten first** (the next section) is the rule for a House rollback while
 one is open.
 
+**Rollback past E4 (a CODE rollback to a release from before this one, such as main `8ab31e32`), after the lane has
+been at "train".** The switches above stop the lane inside this release; a release from before it does not know the
+lane at all. Its `league/swarm/store.py` scopes every options reader by `OPTIONS_ONLY_SQL` = "structure NOT IN ('etf',
+'stock')", so an alive panel family reads there as an OPTIONS family: measured on main `8ab31e32`'s real swarm loop
+over a store with three panel families in the Gym band, the tournament gave the class "panel x none" half its
+allocation and the options population (the architect's count, the idle pass) counted the three; the options lane's
+research and births then share their room with families its code cannot run. It costs no money row (a Gym family
+holds no seat). So, in order, while this release still runs:
+1. `elane.panel.mode=off` (`python3 set_swarm.py elane.panel.mode=off --apply` on the owner's machine): no panel
+   birth after the next loop pass.
+2. On the box, from this release: `/workspace/.venv/bin/python /workspace/current/scripts/panel_rollback.py --state
+   /workspace/state` lists the alive panel families and their bands (read-only); with `--apply` it retires each
+   (`SwarmStore.retire`, one `swarm.retired` event each, in one transaction). It refuses, writing nothing, while the
+   setting is not "off" or while a panel family is outside the Gym band (that is **Roll back: flatten first**'s; in
+   step one every panel family is in the Gym band). A second run lists none.
+3. Only then the code rollback (`python3 scripts/floor_box.py rollback`). The retired rows stay (append-only); this
+   release deployed again later reads them as retired panel families. The live book's `eq_instances.kind` and
+   `eq_rebalances`, and the forward record's panel rows, need nothing (the step-one paragraph above; **The forward
+   twin**'s Rollback).
+
 **What moves what.** A change to an evidence module of `league/xs/` moves the **xs identity**
 (`league/xs/identity.py` `xs_fingerprint`): every live PANEL band goes back to the Gym for fresh qualification (no
 new try, no new look) and no ETF family is touched. A change to an evidence module of `league/equity/` moves both
@@ -800,8 +827,12 @@ weekly refetch, and 6,000 a night for about nine nights while the spreads table 
 slower on the box than on the build machine; a scored version was timed on a synthetic panel of the real one's
 size): a scored panel version is four to five minutes of the core in a dozen runs, its longest run under a minute
 against a run budget of ten, the evidence child about 280 MB; the zero-edge job, which stops itself inside its own
-budget, will finish about 32 to 40 programs a Sunday, not the 100 `zero_edge_programs` names; the spreads job's CPU
-is the tightest row against its limit. Read each off the first receipts.
+budget, will finish about 32 to 40 programs a Sunday, not the 100 `zero_edge_programs` names. **So at
+`elane.panel.zero_edge_programs` 100 a box Sunday never completes a week, and the zero-edge alarm (a COMPLETE week's
+pass rate above 5%: `league/ops/xs_zero_edge.py` needs the week's programs at `zero_edge_programs`) cannot fire on
+the box until that is fixed** (a rolling rate over the kept weeks, or the setting at what a Sunday fits): owed before
+"gate" (step two). In step one no look runs, so nothing waits on it. The spreads job's CPU is the tightest row
+against its limit. Read each off the first receipts.
 
 **Verify after R-E4a** (read-only): policy.json on the box has the `elane.panel` block with `mode` "off" and
 `elane.screens.equity_xs` holding the receipt's sha256; before the switch the swarm log has no panel line,
