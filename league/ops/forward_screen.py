@@ -966,11 +966,12 @@ class Night:
                                 and int(exits[day]) == int(row["exits"]))
                     if not restated:
                         continue
-                    self.tally["sides_restated"] += 1
                 cursor = self.store.execute(
                     "INSERT OR IGNORE INTO fwd1_sides(pid, day, engine, sides, at) VALUES (?,?,?,?,?)",
                     (pid, day, int(engine), float(sides.get(day, 0.0)), self.clock()))
                 kept += cursor.rowcount
+                if cursor.rowcount and abs(float(ran[day]) - float(row["r"])) > forward_db.TOL:
+                    self.tally["sides_restated"] += 1          # a restated day's sides kept tonight
         if not kept:
             self.tally["house"] += 1
             with self.store:
