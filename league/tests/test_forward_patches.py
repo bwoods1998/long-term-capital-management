@@ -449,6 +449,31 @@ def integrated(name: str) -> types.ModuleType:
     return copy
 
 
+#: THE LINES OF THESE EDITS A LATER RELEASE REWROTE, each with the release that did: `TheEditsApply` does not ask the
+#: applied file for them (the later release's own tests hold what replaced them). Release E4's step two computes the
+#: close-date figures A14 reports beside every Done reading (league/ops/dlane_report.py `close_dates`), so the words
+#: that said they were not computed yet are gone; and it reads each checkpoint over the closes of Done's first K
+#: COUNTS (`done_counts`, `first_counts`: a panel program's lots of one date are one count), so the meter's two lines
+#: that read `counted[:k]` read `upto` (league/tests/test_dlane_report_a14.py `DoneCountsAPanelProgramByDate`).
+SUPERSEDED: dict[str, dict[str, str]] = {"dlane_report": {
+    "  close is read as before; a frozen final reading is carried as it was. The close-date figures are not computed yet":
+        "release E4 step two (close_dates)",
+    "  the reading is not final; a frozen final reading is carried as it was. The close-date figures are not computed yet":
+        "release E4 step two (close_dates)",
+    "  and no forward rule moves a seat (`PREREGISTERED[\"status\"]` says so in the report).":
+        "release E4 step two (close_dates)",
+    "  and no forward rule moves a seat (`PREREGISTERED[\"status\"]` says so in the report). A reading with no equity close":
+        "release E4 step two (close_dates)",
+    "  is read by the pinned rule's own measure, as before.": "release E4 step two (close_dates)",
+    "              \"either way, and the intents); the close-date figures are not computed yet and no forward rule moves a \"":
+        "release E4 step two (close_dates)",
+    "              \"seat\",": "release E4 step two (close_dates)",
+    "        a14 = a14_of(store, counted[:k])": "release E4 step two (done_counts)",
+    "        at = reading(counted[:k], store, nightly_cache=cache, lanes=lanes, twins=twins, a14=a14)":
+        "release E4 step two (done_counts)",
+}}
+
+
 def added(old: str, new: str) -> list[str]:
     """The lines an edit adds or rewrites (those of its replacement that its anchor does not hold)."""
     kept = set(old.splitlines())
@@ -465,7 +490,8 @@ class TheEditsApply(unittest.TestCase):
             lines = set(text.splitlines())
             for old, new in edits(name):
                 if applied(name):
-                    missing = [line for line in added(old, new) if line not in lines]
+                    missing = [line for line in added(old, new) if line not in lines
+                               and line not in SUPERSEDED.get(name, {})]
                     self.assertEqual(missing, [], f"league/ops/{name}.py carries only some of package C's edits")
                 else:
                     self.assertEqual(text.count(old), 1, f"league/ops/{name}.py: {old[:80]!r}")
@@ -544,10 +570,11 @@ class TheConstantsOfTheDlaneReport(unittest.TestCase):
     def test_the_status_says_what_is_computed_and_what_is_not(self):
         pre = self.R.PREREGISTERED
         self.assertEqual(pre["status"], "consistency is computed since release E3 (each checkpoint's `a14`: the size of "
-                                        "the mean fill gap either way, and the intents); the close-date figures are not "
-                                        "computed yet and no forward rule moves a seat")
+                                        "the mean fill gap either way, and the intents); the close-date figures are "
+                                        "computed since release E4's step two (each checkpoint's `close_dates`, beside "
+                                        "and never a rule); no forward rule moves a seat")
         self.assertIn("computed since release E3", pre["status"])
-        self.assertIn("not computed yet", pre["status"], "still true of the close-date figures")
+        self.assertNotIn("not computed yet", pre["status"], "the close-date figures are computed since E4's step two")
 
     def test_the_three_pinned_sentences_are_not_edited(self):
         base = importlib.import_module("league.ops.dlane_report")

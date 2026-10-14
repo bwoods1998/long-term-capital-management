@@ -168,9 +168,12 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   its counted sessions, beside the pinned rule's own measure (CONSISTENT WITH REPLAY, above). The meter hands each
   checkpoint's reading its A14 (`reading(..., a14=)`); a reading handed none (the running figures, never a Done
   reading) keeps the fill-gap half and is still NOT READ. Unmeasured, unreadable or misshapen, A14 does not hold and
-  the reading is not final; a frozen final reading is carried as it was. The close-date figures are not computed yet
-  and no forward rule moves a seat (`PREREGISTERED["status"]` says so in the report). A reading with no equity close
-  is read by the pinned rule's own measure, as before.
+  the reading is not final; a frozen final reading is carried as it was. THE CLOSE-DATE FIGURES ARE COMPUTED SINCE
+  RELEASE E4's STEP TWO (`close_dates`; each checkpoint's `close_dates`, beside and never a rule): the distinct close
+  dates among the checkpoint's counted closes, all programs, and the date-clustered t of their P&L (the closes of one
+  date summed: eight lots of a basket sold at one open are ONE date). No rule reads them, and no forward rule moves a
+  seat (`PREREGISTERED["status"]` says so in the report). A reading with no equity close is read by the pinned rule's
+  own measure, as before.
 - THE SEATS (release E5-A; the captain's A24, `SEAT_RULE`, registered Oct 11, 2026, before the first live share close
   and before any program waited for a seat, and amended by A30, `A30_SEAT_AMENDMENT`, before it went live; it
   replaced A14's forward seat sentence, which was written and never active): `equity.seats` is the EquityBook's own
@@ -354,8 +357,8 @@ PREREGISTERED = {
                  "it before it went live (`equity.seats.preregistered`), under which an idle seated program may yield "
                  "its seat whatever its closes; it reads no P&L of the forward record.",
     "status": "consistency is computed since release E3 (each checkpoint's `a14`: the size of the mean fill gap "
-              "either way, and the intents); the close-date figures are not computed yet and no forward rule moves a "
-              "seat",
+              "either way, and the intents); the close-date figures are computed since release E4's step two (each "
+              "checkpoint's `close_dates`, beside and never a rule); no forward rule moves a seat",
 }
 #: P(DONE | ZERO EDGE) BESIDE EQUITY CLOSES: the figure the report carries is the options Probe rules' simulation. No
 #: figure for the share lanes is stated (none is committed); this sentence rides on the figure and in each checkpoint's
@@ -381,6 +384,19 @@ EQUITY_PROBE_BARE = (
     "THE LOSS BUDGET IS SHARED (A8.6): the equity lane's open Probe risk counts in the same window and total as the "
     "options Probe lane, which has only the window's rest and no room under the invested cap once the equity lane is "
     "invested to it: effectively off.")
+#: THE PANEL SEATS (release E4 step two; the constitution's `equity_money.panel`): what a panel program holds and what
+#: it costs, said beside the panel pool's plan in every report that has one. `equity_panel_note` fills the figures.
+EQUITY_PANEL_SENTENCE = (
+    "THE PANEL SEATS (equity_money.panel): a panel program holds one of {seats} panel seat(s) of its own, never one of "
+    "the {etf_seats} ETF seats, at a sleeve of {sleeve} x E; its whole basket of stocks is {risk} x E of open risk at "
+    "the stock weight ({weight}), in the same ${window} window, first come (no slice of it is kept for the panel). "
+    "Outside that room a basket bought from flat or rotated whole is scaled to the room and a partial rotation's new "
+    "name is refused at the send. ITS COST: one more program on real money at once, and a basket's lots closed at one "
+    "open are one market move, so Done counts a panel program's lots closed on one date as ONE close (for the 30th "
+    "close, every later checkpoint and its program's 5; the lots and the distinct close dates stand beside).")
+#: The same statement for a constitution with no panel row: no figure.
+EQUITY_PANEL_BARE = ("THE PANEL SEATS (equity_money.panel): the constitution has no panel row, so no panel program "
+                     "holds a seat or a sleeve.")
 #: PT1 (THE PROBE TOTAL AT $800, Oct 10, 2026): PREREG-T measured the $800 total and the -$300 program loss line at this
 #: roster alone (at no roster the operator's grid found the $800 total almost all cost), and L-D's $400 total and -$200
 #: line are the rules it measured them against.
@@ -955,6 +971,30 @@ def equity_probe_note(constitution: Mapping[str, Any] | None = None) -> str:
 EQUITY_PROBE_NOTE = equity_probe_note()
 
 
+def equity_panel_note(constitution: Mapping[str, Any] | None = None) -> str:
+    """`EQUITY_PANEL_SENTENCE` with the figures of `constitution`'s rows (None: the one in force): the panel seats and
+    sleeve (`equity_money.panel`), the ETF seats (`probe.max_programs`), a whole basket's open risk at the stock weight
+    and the options table's window. `EQUITY_PANEL_BARE` when a row cannot be read."""
+    if constitution is None:
+        from ..constitution import CONSTITUTION as constitution  # noqa: N811
+    em = (constitution or {}).get("equity_money") or {}
+    em = em if isinstance(em, Mapping) else {}
+    panel = em.get("panel") if isinstance(em.get("panel"), Mapping) else {}
+    probe = em.get("probe") if isinstance(em.get("probe"), Mapping) else {}
+    seats, sleeve = _int(panel.get("seats")), _dec(panel.get("sleeve_share"))
+    etf_seats, weight = _int(probe.get("max_programs")), _dec((em.get("open_risk_weight") or {}).get("stock"))
+    window = _dec((((constitution or {}).get("options_money") or {}).get("probe") or {}).get("loss_budget_usd"))
+    if None in (seats, sleeve, etf_seats, weight, window):
+        return EQUITY_PANEL_BARE
+    return EQUITY_PANEL_SENTENCE.format(seats=seats, etf_seats=etf_seats, sleeve=_share_text(sleeve),
+                                        risk=_share_text(sleeve * weight), weight=_share_text(weight),
+                                        window=f"{window:f}")
+
+
+#: The panel statement at the constitution in force.
+EQUITY_PANEL_NOTE = equity_panel_note()
+
+
 def options_probe_room(equity_usd: Any, constitution: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """A8.6 (`equity_probe_note`) in figures: the equity lane's open risk when it holds all it may, at the ETF weight
     `open_risk_weight.etf`, and what that leaves of the options Probe lane's window
@@ -1101,6 +1141,23 @@ def equity_seats(root: str | Path | None, book: Mapping[str, Any], seeded: Itera
             out["seats"] = out["seats"] if out["seats"] is not None else _int(roster.get("seats"))
     out["holders"] = sorted(holders, key=lambda h: (str(h.get("since") or ""), str(h.get("family"))))
     out["seeded_seats"] = sorted(str(h["family"]) for h in holders if h.get("seeded"))
+    pool = plan.get("panel") if isinstance(plan, Mapping) else None
+    if isinstance(pool, Mapping):
+        # THE PANEL POOL (release E4 step two): the book's own plan of the panel seats, with its statement. Rank
+        # positions only, as the ETF pool's; `held_seats`: panel programs holding a seat while a leg of their lane
+        # fails (opens stopped, exits on, nobody seated into it).
+        out["panel"] = {
+            "statement": EQUITY_PANEL_NOTE, "rule": pool.get("rule"), "seats": _int(pool.get("seats")),
+            "as_of": pool.get("day"),
+            "holders": sorted(({"family": str(h.get("family")), "version": _int(h.get("version")),
+                                "band": h.get("band"), "since": h.get("since"),
+                                "seated_sessions": _int(h.get("seated_sessions")), "idle": bool(h.get("idle"))}
+                               for h in pool.get("holders") or [] if isinstance(h, Mapping)),
+                              key=lambda h: (str(h["since"] or ""), h["family"])),
+            "waiting": [{"family": str(w.get("family")), "rank": _int(w.get("rank"))}
+                        for w in pool.get("waiting") or [] if isinstance(w, Mapping)]
+            if isinstance(pool.get("waiting"), list) else None,
+            "held_seats": sorted(str(f) for f in pool.get("held_seats") or [])}
     held, of = len(holders), out["seats"]
     names = ", ".join(out["seeded_seats"])
     out["seeded_statement"] = (
@@ -1559,6 +1616,38 @@ def replay_twins(counted: Sequence[Mapping[str, Any]], twins: Mapping[str, Mappi
                      "(league/ops/twins.py); live minus twin per dollar of each one's maximum loss, the book's cash"}
 
 
+def _close_day(c: Mapping[str, Any]) -> str:
+    """A close's New York day: its `day`, else the day of its `closed_at`."""
+    return str(c.get("day") or "") or _ny_day(_num(c.get("closed_at")))
+
+
+def done_counts(counted: Sequence[Mapping[str, Any]]) -> list[int]:
+    """DONE COUNTS A PANEL PROGRAM'S CLOSES BY DATE (release E4 step two; the review of step two found a basket's lots
+    counted one close each, so one rotation of a 0.10 x E basket added 8 to 12 closes of one date and one market move,
+    worth cents, pulled the 30th close and every later checkpoint earlier and could meet a second program's "at least
+    5" alone). For each close of `counted` (in close order) the number of the Done count it is part of, from 1: every
+    close is one count, as before, EXCEPT A PANEL PROGRAM'S (`panel`): its lots closed on one New York day are ONE
+    count, placed where the first of them closed. The checkpoints (the 30th count, then every 10th) and the per-program
+    5 read these counts; the lots stand beside (`lots`). A TIGHTENING (fewer counts, never more), until the owner rules
+    otherwise; an ETF or options close is counted exactly as before."""
+    seen: dict[tuple[str, ...], int] = {}
+    out: list[int] = []
+    for c in counted:
+        key = ("panel", str(c.get("family") or ""), _close_day(c)) if c.get("panel") else ("close", str(c.get("pid")))
+        if key not in seen:
+            seen[key] = len(seen) + 1
+        out.append(seen[key])
+    return out
+
+
+def first_counts(counted: Sequence[Mapping[str, Any]], k: int,
+                 counts: Sequence[int] | None = None) -> list[Mapping[str, Any]]:
+    """The closes of Done's first `k` counts (`done_counts`), in close order: a panel count's later lots of its day go
+    with it. With no panel close it is `counted[:k]`."""
+    counts = done_counts(counted) if counts is None else counts
+    return [c for c, n in zip(counted, counts) if n <= k]
+
+
 def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: dict[str, list] | None = None,
             done: Mapping[str, Any] | None = None, lanes: Lanes | None = None,
             twins: Mapping[str, Mapping[str, Any]] | None = None,
@@ -1571,6 +1660,10 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
 
     rule = dict(done or dlane.DONE)
     cache = nightly_cache if nightly_cache is not None else {}
+    # THE DONE COUNT (release E4 step two, `done_counts`): `closes`, the reading's and each program's, are Done's
+    # counts (a close each, a panel program's lots of one date one), with `lots` beside them where the two differ;
+    # `by_route` counts lots.
+    n_counts = max(done_counts(counted), default=0)
     by_program: dict[str, list[Mapping[str, Any]]] = {}
     for c in counted:
         by_program.setdefault(c["family"], []).append(c)
@@ -1588,9 +1681,10 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
         known = [c["pnl_usd"] for c in rows if c.get("pnl_usd") is not None]
         # An equity program's lane is its lots' (the book's own row), whatever the swarm store still holds.
         lane = rows[0].get("lane") if rows[0].get("equity") else lanes.of(fid) if lanes is not None else rows[0].get("lane")
-        row = {"family": fid, "lane": lane, "closes": len(rows), "routes": routes,
+        counts = max(done_counts(rows), default=0)
+        row = {"family": fid, "lane": lane, "closes": counts, "routes": routes,
                "net_usd": _usd(sum(known, Decimal(0))) if len(known) == len(rows) else None,
-               "replay": gap, "bh": _bh_sum(rows)}
+               "replay": gap, "bh": _bh_sum(rows), **({"lots": len(rows)} if counts != len(rows) else {})}
         if lane == dlane.DIRECTION:
             row["label"] = dlane.LABEL
         elif rows[0].get("equity"):
@@ -1611,8 +1705,8 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
     matched_total = sum(int(p["replay"]["matched"]) for p in programs)
     net_known = unpriced == 0
     whys = []
-    if len(counted) < int(rule["min_closes"]):
-        whys.append(f"{len(counted)} closes of the {int(rule['min_closes'])} needed")
+    if n_counts < int(rule["min_closes"]):
+        whys.append(f"{n_counts} closes of the {int(rule['min_closes'])} needed")
     if not per_program_ok:
         whys.append(f"{len(enough)} programs with {int(rule['min_closes_per_program'])}+ closes of the "
                     f"{int(rule['min_programs'])} needed")
@@ -1626,7 +1720,7 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
                     "(DONE-RULE-A1 A1.1)")
     if inconsistent:
         whys.append(f"live fills inconsistent with replay: {', '.join(inconsistent[:8])}")
-    item3 = len(counted) >= int(rule["min_closes"]) and per_program_ok and net_known and net > 0
+    item3 = n_counts >= int(rule["min_closes"]) and per_program_ok and net_known and net > 0
     item4 = measured_ok and not inconsistent
     # A14 (pre-registered before the first equity close): a reading that holds an equity close reads "consistent with
     # replay" by A14's own measure, never by the gap above alone (a long lot's maximum loss is its notional, so the
@@ -1648,7 +1742,8 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
             slot["unpriced"] += 1
         else:
             slot["net"] += c["pnl_usd"]
-    return {"closes": len(counted), "programs": len(programs), "programs_with_min_closes": len(enough),
+    return {"closes": n_counts, **({"lots": len(counted)} if n_counts != len(counted) else {}),
+            "programs": len(programs), "programs_with_min_closes": len(enough),
             "net_usd": _usd(net) if net_known else None, "net_known": net_known, "unpriced": unpriced,
             "estimate_closes": sum(1 for c in counted if c.get("priced") and c.get("fee_basis") == "estimate"),
             "per_program_ok": per_program_ok, "consistent_ok": item4, "measured_programs": len(measured),
@@ -1849,6 +1944,32 @@ def research_window(counted: Sequence[Mapping[str, Any]], k: int, previous_k: in
     return first, last
 
 
+def close_dates(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """A14's FIGURES BESIDE A DONE READING (`A14_BESIDE_DONE`; release E4 step two), over exactly `counted` (a
+    checkpoint's counted closes, every program and lane): {"closes", "dates" (the distinct close dates: a close's New
+    York `day`), "date_t" (the date-clustered t of their P&L: each date's priced closes summed in dollars, then mean /
+    sd (ddof 1) x sqrt(n) over the dates; None under two dates or with no spread), "unpriced" (closes with no P&L yet:
+    their dates count, their dollars do not), "note"}. THE HONESTY LINE FOR LOT-SPLITTING: a basket's eight lots sold at
+    one open are eight closes and ONE date. Beside, never a rule: no item of a reading, no hold and no alarm reads it."""
+    by_day: dict[str, Decimal] = {}
+    unpriced = 0
+    for c in counted:
+        day = str(c.get("day") or "") or _ny_day(_num(c.get("closed_at")))
+        by_day.setdefault(day, Decimal(0))
+        if c.get("pnl_usd") is None:
+            unpriced += 1
+        else:
+            by_day[day] += Decimal(str(c["pnl_usd"]))
+    values = [float(v) for _, v in sorted(by_day.items())]
+    t = None
+    if len(values) >= 2:
+        mean = math.fsum(values) / len(values)
+        sd = math.sqrt(math.fsum((v - mean) ** 2 for v in values) / (len(values) - 1))
+        t = round(mean / sd * math.sqrt(len(values)), 4) if sd > 1e-12 else None
+    return {"closes": len(counted), "dates": len(by_day), "date_t": t, "unpriced": unpriced,
+            "note": "beside, never a rule: the closes of one date are one market move (A14)"}
+
+
 def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store: Any, *,
           nightly_cache: dict[str, list] | None = None, lanes: Lanes | None = None,
           previous: Mapping[str, Any] | None = None, research: Any = None,
@@ -1880,23 +2001,35 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
     checkpoints = []
     k = int(rule["first_checkpoint"])
     prev_k = None
-    while k <= len(counted):
+    # THE CHECKPOINTS READ DONE'S COUNTS (`done_counts`: a panel program's lots of one date are one count): the K-th
+    # count's checkpoint reads the closes of the first K counts (`first_counts`), and its moment is the last of them
+    # (`ends`, one a count). With no panel close every count is a close and all of it is as before.
+    counts = done_counts(counted)
+    last_of: dict[int, int] = {}
+    for i, n in enumerate(counts):
+        last_of[n] = i
+    ends: list[Mapping[str, Any]] = []
+    at_most = -1
+    for n in range(1, max(counts, default=0) + 1):
+        at_most = max(at_most, last_of[n])       # the last close, in close order, of the first n counts
+        ends.append(counted[at_most])
+    while k <= len(ends):
         if k in frozen:
             checkpoints.append({**frozen[k], "frozen": True})
             prev_k, k = k, k + int(rule["checkpoint_every"])
             continue
-        a14 = a14_of(store, counted[:k])
-        at = reading(counted[:k], store, nightly_cache=cache, lanes=lanes, twins=twins, a14=a14)
+        upto = first_counts(counted, k, counts)
+        a14 = a14_of(store, upto)
+        at = reading(upto, store, nightly_cache=cache, lanes=lanes, twins=twins, a14=a14)
         a14 = at.get("a14") or a14  # with an equity close: that reading, the rows' own fill-gap half beside it
-        first_day, last_day = research_window(counted, k, prev_k)
+        first_day, last_day = research_window(ends, k, prev_k)
         r247 = {"holds": False, "first_day": first_day, "last_day": last_day, "why": "research 24/7 was not read"}
         if callable(research):
             try:
                 r247 = research(first_day, last_day)
             except Exception as exc:  # noqa: BLE001 - unread is not held: the checkpoint does not hold, the report goes on
                 r247 = {**r247, "why": f"research 24/7 could not be read ({type(exc).__name__}: {str(exc)[:120]})"}
-        fin = finality(counted[:k], replay_days=replay_days, fees_as_of=fees_as_of, twins=twins,
-                       twins_on=twins_on)
+        fin = finality(upto, replay_days=replay_days, fees_as_of=fees_as_of, twins=twins, twins_on=twins_on)
         day_ended = now is None or now >= _epoch(f"{last_day}T00:00:00Z") + 86400.0
         if not day_ended:
             fin = {**fin, "final": False, "why": "; ".join(w for w in (fin["why"], f"the research window's last day "
@@ -1911,13 +2044,15 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
         programs = [{"family": p["family"], "lane": p["lane"], "closes": p["closes"], "matched": p["replay"]["matched"],
                      "gap": p["replay"]["gap"], "consistent": p["replay"]["consistent"], "net_usd": p["net_usd"],
                      **({"label": p["label"]} if p.get("label") else {})} for p in at["by_program"]]
-        checkpoints.append({"at_close": k, "closed_at": _iso(counted[k - 1]["closed_at"]),
+        checkpoints.append({"at_close": k, "closed_at": _iso(ends[k - 1]["closed_at"]),
                             "holds": at["holds"] and item7 and a14["holds"], "why": "; ".join(whys) or None,
                             "items": {**at["items"], "4": at["items"]["4"] and a14["holds"], "7": item7},
                             "final": fin["final"], "final_why": fin["why"],
-                            "closes": at["closes"], "programs": at["programs"],
+                            "closes": at["closes"], **({"lots": at["lots"]} if "lots" in at else {}),
+                            "programs": at["programs"],
                             "programs_with_min_closes": at["programs_with_min_closes"], "net_usd": at["net_usd"],
                             "consistent_ok": at["consistent_ok"] and a14["holds"], "a14": a14,
+                            "close_dates": close_dates(upto),
                             "measured_programs": at["measured_programs"],
                             "replay_coverage": at["replay_coverage"], "by_program": programs,
                             "research_247": r247, "by_route": at["by_route"], "bh": at["bh"],
@@ -3391,6 +3526,7 @@ def lane_off(ctx: Any, root: Path, settings: Mapping[str, Any] | None) -> dict[s
 
 
 __all__ = ["run", "report", "FILE", "CONTAMINATION", "PREREGISTERED", "A14_CONSISTENCY", "A14_BESIDE_DONE",
+           "close_dates",
            "A14_SEAT_RULE", "A24_SEAT_RULE", "A24_SEAT_COSTS", "A30_SEAT_AMENDMENT", "SEAT_RULE", "equity_seats", "A14_GAP_BP", "A14_AGREEMENT", "a14_consistency", "ZERO_EDGE_EQUITY_NOTE", "LOOSENED",
            "TIGHTENED", "closes", "meter", "reading", "replay_gap",
            "replay_twins", "twin_records",

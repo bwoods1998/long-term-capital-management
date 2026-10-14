@@ -240,7 +240,8 @@ class WhatRidesBeside(EquityFixture):
         for words in ("written and inactive", "fewer than 5 real closes", "never unseated", "except by EDM1"):
             self.assertIn(words, R.A14_SEAT_RULE)
         for words in ("computed since release E3", "the size of the mean fill gap either way", "the intents",
-                      "the close-date figures are not computed yet", "no forward rule moves a seat"):
+                      "the close-date figures are computed since release E4's step two", "never a rule",
+                      "no forward rule moves a seat"):
             self.assertIn(words, pre["status"])
         page = re.sub(r"\s+", " ", (Path(R.__file__).resolve().parents[2] / "docs" / "operations.md").read_text())
         for sentence in (R.A14_CONSISTENCY, R.A14_BESIDE_DONE, R.A14_SEAT_RULE):

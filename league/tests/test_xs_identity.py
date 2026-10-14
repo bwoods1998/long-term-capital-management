@@ -548,6 +548,7 @@ class Adoption(StoreCase):
             "elane_xs_train_u": {"days": [1, 2, 3], "u": [0.02, -0.01, 0.01]},
             "elane_xs_precheck": {"version": 1, "passed": True}, "elane_xs_placebo": {"1": {"rank": 0.97}},
             "elane_xs_halves": {"1": {"h0": 0.1, "h1": 0.2}}, "elane_xs_oof": {"1": {"status": "ok"}},
+            "elane_xs_activity": {"1": {"close_days": 40, "sessions": 1000}},
             "elane_xs": {"1": {"n": 1, "verdict": "pass", "style": {"open": False}}}}
         self.store.add_family({**SPEC, "id": "opt"}, origin="test")
         self.store.add_family(ETF_SPEC, origin="seed")

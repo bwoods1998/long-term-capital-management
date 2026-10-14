@@ -76,6 +76,8 @@ SEALED_KEYS = frozenset({
     # THE FORWARD SCREEN (FWD1-R; league/swarm/elane_forward.py `STATE_KEY`, a test holds the two equal): a forward
     # pass made eligible for a seat says how the forward sessions went.
     "elane_forward",
+    # (step two: K's Train-era half of a passing panel version, `elane_xs.ACTIVITY_KEY`)
+    "elane_xs_activity",
 })
 #: The family columns no generator reads of an equity family.
 SEALED_COLUMNS = frozenset({"band", "band_since", "retired_at", "retire_reason", "validated_version", "best_validation",

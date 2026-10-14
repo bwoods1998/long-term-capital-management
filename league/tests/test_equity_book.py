@@ -1012,6 +1012,32 @@ class Windows(BookTest):
         self.assertEqual(len(h2.venue.sent), 1)                             # the House-wide count had room for one
         self.assertIn("House's day order count", h2.intents(symbol="QQQ")[0].why)
 
+    def test_an_exit_is_never_stopped_by_the_equity_count(self):
+        """A28: an exit must never be blocked. Four held lots exit at the open with the equity count at 3: every sale
+        goes (each is counted, so the day's entry waits), and the House-wide count alone can hold an exit back."""
+        h = self.harness(table=equity_table(max_orders_day=3))
+        inst = h.instance()
+        lots = [h.lot(inst, s, "0.5", "590") for s in ("SPY", "QQQ", "IWM", "DIA")]
+        for lot in lots:
+            h.intent(inst, "sell", lid=lot.lid)
+        buy = h.intent(inst, "buy", symbol="AAPL", share="0.2")
+        h.tick(9, 31)
+        self.assertEqual(sorted(b["symbol"] for b in h.venue.sent if b["side"] == "sell"), ["DIA", "IWM", "QQQ", "SPY"])
+        self.assertEqual({h.book._lot(lot.lid).status for lot in lots}, {"closed"})
+        self.assertEqual(L.orders_today(h.state.rows, "2026-10-12"), 4, "the sales are counted")
+        h.tick(9, 33)
+        self.assertNotIn("buy", [b["side"] for b in h.venue.sent])
+        self.assertIn("the equity day's order count: 4 of 3 sent", h.get_intent(buy.iid).why)
+        h2 = Harness(self.root / "house")
+        self.addCleanup(h2.state.close)
+        inst2 = h2.instance()
+        held = h2.lot(inst2, "SPY", "0.5", "590")
+        sale = h2.intent(inst2, "sell", lid=held.lid)
+        h2.options.count = int(h2.table.max_orders_day)
+        h2.tick(9, 31)
+        self.assertEqual(h2.venue.sent, [], "the House-wide count still holds an exit back")
+        self.assertIn("House's day order count", h2.get_intent(sale.iid).why)
+
 
 # ------------------------------------------------------------------------------------------------- reconciliation
 class Reconciliation(BookTest):

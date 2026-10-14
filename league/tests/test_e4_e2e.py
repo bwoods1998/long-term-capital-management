@@ -109,7 +109,10 @@ E = D("2229")
 PANEL = {"edge_year": 1.0, "signal": "reversal", "n_assets": 60}
 FAKE_RECEIPT = Path(__file__).resolve().parent / "fixtures" / "equity_screen_xs_fake.json"
 #: What the captain's set_swarm.py would write on the House for the lane to trade: every switch of the path.
-SWITCHES = {"elane": {"mode": "gate", "birth_share": 0.25, "panel": {"mode": "live"}}, "dlane": {"mode": "gate"}}
+#: The captain's switches on the box. `look_rule` "xs1": XS1 as built, the value the captain sets once study XS1-R
+#: rules "as built" (the policy ships "hold": the captain's A31; `test_elane_xs.TheA31LookHold`).
+SWITCHES = {"elane": {"mode": "gate", "birth_share": 0.25, "panel": {"mode": "live", "look_rule": "xs1"}},
+            "dlane": {"mode": "gate"}}
 ROUTE = "sail:pro_asap"
 
 #: The architect's program: each week the five names that fell most over the last five sessions, at equal weights.
@@ -628,11 +631,14 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
                          (WEEK[0].isoformat(), "open", 1, 5, 0, 5, 0, "planned"))
         # THE WHOLE BASKET IS SCALED TO THE ROOM (the review's spec-2): the decision's budget is the smaller of the
         # sleeve and what a FULL basket fits in the $400 window, $400 / 0.40 = $1,000, and every name is a fifth of
-        # THAT. At the design in force since release E5-S (six seats, a sleeve of 0.25 x E = $557.25) the sleeve is
-        # the smaller: a full basket is 0.40 x $557.25 = $222.90 of open risk, inside the window. At A20's design (a
-        # sleeve of 0.50 x E = $1,114.50, $445.80 of open risk) the window was, and the budget was the $1,000
-        # (league/tests/test_equity_book_panel.py `TheWholeBasketIsScaledToTheRoom` holds that case on its own table).
-        sleeve = table.equity.probe_sleeve_share * E
+        # THAT. SINCE STEP TWO THE SLEEVE IS THE PANEL ROW'S (`equity_money.panel.sleeve_share`, 0.10 x E = $222.90
+        # at $2,229: $89.16 of open risk), never the Probe sleeve, so the sleeve is the smaller. (Before it a panel
+        # program took the Probe sleeve; at A20's 0.50 x E, $445.80 of open risk, the window was the smaller and the
+        # budget the $1,000: league/tests/test_equity_book_panel.py `TheWholeBasketIsScaledToTheRoom` holds that case
+        # on its own table.)
+        from league.equity.bands import panel_settings
+
+        sleeve = panel_settings().sleeve_share * E
         window = table.probe_loss_budget
         budget = min(sleeve, window / table.equity.open_risk_weight["stock"]).quantize(D("0.01"), rounding=ROUND_DOWN)
         self.assertEqual(D(first["budget"]), budget)
@@ -651,8 +657,8 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         # ---------------------------------------------------------------------------- 7. a live week
         # Monday's open: five limit buys through E1's order path, sized by money's own rules. FIVE WHOLE LOTS, each a
         # fifth of the decision's budget, and none is cut: together they are the budget's open risk at a stock's 0.40
-        # (the whole sleeve's, $222.90, at the design in force; the whole $400 window at A20's, where before the fix
-        # four lots of $222.90 were bought and the fifth cut to $108.40 by the budget).
+        # (the whole panel sleeve's, $89.16 of a $222.90 sleeve; the whole $400 window at A20's Probe sleeve, where
+        # before the fix four lots of $222.90 were bought and the fifth cut to $108.40 by the budget).
         market.extend(WEEK[0], lambda symbol: 0.001)
         tick(WEEK[0], 8, 31)
         self.assertEqual((rebalance(FRIDAY)["audit"], venue.sent), ("ok", []))
@@ -775,8 +781,11 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
 
         report = DR.report(self.root, settings=self.settings, now=now)
         done = report["done"]
-        self.assertEqual((done["all"]["running"]["closes"], done["all"]["running"]["programs"],
-                          done["all"]["running"]["replay_coverage"]), (5, 1, {"matched": 5, "closes": 5, "share": 1.0}))
+        # Done counts a panel program's lots closed on one date as ONE close (release E4 step two, `done_counts`): the
+        # basket's five lots sold at one open are one count, the five lots beside it.
+        self.assertEqual((done["all"]["running"]["closes"], done["all"]["running"]["lots"],
+                          done["all"]["running"]["programs"], done["all"]["running"]["replay_coverage"]),
+                         (1, 5, 1, {"matched": 5, "closes": 5, "share": 1.0}))
         sentence = self.store.family(SLUG)["state"][elane_xs.LOOK_KEY]["beside"]
         rows = {c["pid"]: c for c in done["all"]["closes"]}
         for lot in closed:

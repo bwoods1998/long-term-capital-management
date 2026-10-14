@@ -1235,7 +1235,7 @@ the equity lots: $400 - 0.20 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 16 sends of such a lot: 3 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.50 x E and
 0.50 x E.
-Money digest `5b95d73e`, full digest `4ef472e1` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8c226cf1` / `def9f80f`.
+Money digest `de5ed74e`, full digest `111ede85` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `46b933a9` / `d9cf3149`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of
@@ -1413,3 +1413,44 @@ idle rule.
   league/tests/equity_seat_sequence.py and fixtures/equity_seat_first_come.json (the week recorded on release
   E5-S); the changed pins in test_constitution, test_equity_money, test_live_long_single, test_equity_design,
   test_equity_families and test_equity_book.
+
+## 19. The panel sleeve and the panel seats (release E4 step two, Oct 14, 2026; money, swarm and book; CHANGES 7.1, 8.3, 8.4, 10, as built)
+
+A panel program (structure "panel": release E4's basket of index members) never takes, holds or yields one of the
+`probe` seats above, and never sizes from the Probe sleeve. Until the pre-registered study EQDONE-5 rules, one seat
+at 0.10 x E.
+
+- **7.1** (CHANGES; money): `equity_money.panel` = {`seats`: 1, `sleeve_share`: "0.10"}, added below the table's
+  literal (as the seat rule's block: `set_design` rewrites the `probe` row by its exact line).
+  `EQUITY_MONEY_BOUNDS`: `panel.seats` ("0", "2"), a whole count (`_EQUITY_COUNTS`), and `panel.sleeve_share` ("0",
+  "0.25"); `equity_money_problems` refuses a `panel.sleeve_share` above `probe.sleeve_share`. The money digest and
+  `PINNED_DIGEST` moved once with it, and every pair of section 17's grid with them (league/tests/equity_design.py
+  `DIGESTS`; `DIGESTS_E5A` keeps the pins before the row, `without_panel`). `EquityTable` (league/live/money.py,
+  inside the options execution fingerprint) is NOT edited and carries nothing of the row.
+- **The reader** (league/equity/bands.py): `panel_settings(constitution=None) -> PanelSettings(seats,
+  sleeve_share)`; a row that is absent, outside its bounds or above the Probe sleeve is `PANEL_FALLBACK` (0 seats,
+  no sleeve: fail closed).
+- **8.3, 8.4** (CHANGES; book, league/equity/live.py): `_sleeve_share(inst)` is `panel_settings().sleeve_share` for
+  an instance of another kind than the book's own, in every band. THE TWO POOLS: `_pools(rows)` splits a band
+  sync's rows by kind (`POOL_ETF`: the book's own kind; `POOL_PANEL`: any other), and `_seat_bands` and the
+  "first-come" branch run once a pool, over that pool's rows, its seats (`_pool_seats`: `_seat_count` for the ETF
+  pool, `_panel_seat_count` for the panel's, the lower of the row and `families.panel_seats()`) and its plan
+  (`_pool_plan`, `_put_plan`: the ETF pool's is `eq_seat` itself, to the key; the panel pool's is its key
+  `SEAT_PANEL` "panel", written only once a panel row was ever seen). `_held_seats(pool, rows)`: the panel pool's
+  alive instances with no row in the read keep their seats (the plan's `held_seats`). A seat record of the panel
+  pool carries `pool` "panel"; an ETF one is main's. The day's line of the panel pool is `out["panel_seats"]`.
+- **The swarm** (league/swarm/bands.py): `equity_seating(fams, seats, *, seatable, panel_seats=0)` seats a pool at
+  a time; `panel_pool_seats(root)` is the lower of the row and `elane_xs.panel_seats(root)` (`elane.panel.seats`,
+  0 to 2, default 2: it may only lower the row); `roster` adds `panel_seats`. league/equity/families.py:
+  `EquityFamilies.panel_seats()`, `MemoryEquityFamilies(panel_seats=None)`.
+- **10** (CHANGES; ops, league/ops/dlane_report.py): `equity_panel_note(constitution=None)` (`EQUITY_PANEL_SENTENCE`,
+  `EQUITY_PANEL_BARE`, `EQUITY_PANEL_NOTE`); `equity_seats` adds `panel` {statement, rule, seats, as_of, holders,
+  waiting, held_seats} when the book's plan holds the panel pool's.
+- **Costs**: one more program on real money at once; a basket's lots closed at one open are one market move, so
+  Done counts a panel program's lots closed on one date as one close (league/ops/dlane_report.py `done_counts`, the
+  lots beside); the window is one and first come.
+- **Rollback**: `panel.seats` 0, one owner deploy, one money-digest move (nobody is unseated; no lot is sold).
+- **Tests**: league/tests/test_equity_panel_seats.py (the row, a basket sized from it, the ETF programs' orders and
+  seats order for order beside a panel Candidate, Probe and Sized program, the pool, the held seat, the swarm's
+  reader, the report); the changed pins in test_equity_money, test_equity_design and test_constitution;
+  test_equity_book_panel reads its own table's Probe sleeve as the panel row (its module docstring).

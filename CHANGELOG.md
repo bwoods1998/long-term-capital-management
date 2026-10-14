@@ -115,6 +115,55 @@ on branches.
     the panel runs on package J's world, the job's panel calls under the ops child's 500 MB at the production
     panel's size (`league/tests/fwd1_panel_budget.py`).
 
+### Release E4 step two: what a panel look and a panel seat need that can be built before XS1-R rules, on `feat/equity-e4-step2` (unreleased; on step one `6f99652d` with #543 merged, `47ed6872`: the Probe sleeve 0.50 x E; THE MONEY DIGEST MOVES ONCE, in its marked commit; no fingerprint moves)
+
+- **The A31 look hold.** `elane.panel.look_rule` (policy.json "hold"): no XS1 look before study XS1-R rules. A
+  look waits, nothing spent, even with its receipt, permit, review and room present, and says "A31: no XS1 look
+  before XS1-R rules"; "xs1" is XS1 as built; a value the tree does not implement holds; Validation is not held.
+  The heartbeat's `equity.panel.look` and the direction report's `panel_lane.look` say why.
+- **The panel money row and the panel seat pool** (`equity_money.panel` {"seats": 1, "sleeve_share": "0.10"};
+  bounds 0-2 and 0-0.25, never above the Probe sleeve). A panel program holds a seat of a pool of its own and a
+  sleeve of its own: the six ETF seats, their plan, the idle test and K are untouched, and the ETF programs'
+  orders are the same order for order with a panel Candidate, Probe and Sized program in the book. A program held
+  on a failed leg keeps its seat. Money digest `5b95d73e` -> `de5ed74e`, constitution `4ef472e1` -> `111ede85`
+  (the grant re-ratifies at the House's start). league/live/money.py is not edited (it is inside the options
+  execution fingerprint): the row is read by league/equity/bands.py `panel_settings`, as the seat rule's block is.
+- **The clock and quiet rule in Validation and the look** (the ship check's open item): every run of the try (2025
+  at k 1.0 and 1.5), the two Train segments and the sealed run goes through `steady`, `may_run` asked before each.
+  The House's clock spends nothing (owed after a backoff; `elane_xs_clock` at the third); timeouts that repeat as a
+  program's spend the try as SLOW and the look as spent and failed. The look's seed and draws are unchanged.
+- **K for a basket**: the seat rule's rank of a panel program, from its own runs (Train-era close days per 250
+  sessions of the seen spans' 1.0x runs, kept sealed by the bar; the Validation close days of the try's 2025 k 1.0
+  run), written as `elane_seat` beside an entered try and ranked inside the panel pool only. Never printed.
+- **The close dates beside every checkpoint** (A14_BESIDE_DONE, "not computed yet" until now): each Done
+  checkpoint carries `close_dates` {closes, dates, date_t, unpriced} over its counted closes, all programs, the
+  closes of one date summed (a basket's eight lots sold at one open are one date). Beside, never a rule.
+- **The panel twin's re-base (A29 as registered)**, before any panel twin row exists: after a differing decision
+  session the twin's book is the live basket as it stood (`forward_xs.panel_seed`, `PanelChain`; the Gym engine's
+  account driven from ops in `league.xs.book.TwinAccount`; engine.py not edited); A29's two columns written for
+  panel rows, the un-re-based shadow beside; one missed buy counts once. A14's bounds, keys and pooling unchanged.
+- **The live-book proof recorded again on main `47ed6872`** (#543's sleeve): every scenario moved by the lot's size
+  alone; step one needs the same record once #543 is merged into it.
+- **The House's clock's owe has an end** (the review of step two): a round of the House's clock in which a sealed
+  run was made is counted; the third spends the Validation try (a "clock" run, no pre-check) and the second spends
+  and fails the look (a send of the sealed run, with E1's `LOOK_SENDS`); while a try is owed it is asked first and
+  no other version of its lineage takes the lineage's try. Cost: an unsteady box can spend a good program's try or
+  look.
+- **Done counts a panel program's lots of one date as one close** (the review of step two, its major; a tightening
+  until the owner rules otherwise): the 30th close, every later checkpoint and the "at least 5 each from 2
+  programs" read Done's counts (`done_counts`; an ETF or options close is one count as before), with the lots
+  beside. One rotation of a basket no longer adds 8 to 12 closes of one market move. The direction report's panel
+  sentence says so.
+- **The re-based panel twin's account is the run's own, tested** (`TheTwinAccountReplaysTheRun`: un-re-based, it
+  gives the engine's picks, keys, sessions and lots exactly). **The panel seat pool's book side is tested** where
+  four mutants survived (the swarm's `elane.panel.seats`, the held seat with no panel row, the ETF plan's write,
+  the real reader failing closed).
+- **No private figure in the panel docs**: rule arithmetic at E = $2,000, the tally's hole named with no figure.
+- **An exit is never stopped by the equity book's own day count** (the review of step two, its blocker): the 60
+  sends and cancels of `order_path.max_orders_day` stop ENTRIES only; an exit meets the House-wide count alone (the
+  options book's exits keep their room). Before it, a held basket's re-priced sales used the count up on a fast
+  open and the ETF lots' sales were carried to the next session. No id moves (league/equity/live.py is plumbing).
+
 ### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; then with A32 `47ed6872ce6c232b743cc556f5540892b9132470` (PR #543, the Probe sleeve 0.50 x E at six seats), which deploys FIRST, on `feat/equity-e4-a32`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 
 - **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
@@ -824,7 +873,7 @@ the equity lots: $400 - 0.20 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 16 sends of such a lot: 3 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.50 x E and
 0.50 x E.
-Money digest `5b95d73e`, full digest `4ef472e1` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8c226cf1` / `def9f80f`.
+Money digest `de5ed74e`, full digest `111ede85` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `46b933a9` / `d9cf3149`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

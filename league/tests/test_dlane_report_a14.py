@@ -410,3 +410,119 @@ class TheJobCarriesThem(A14Fixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DoneCountsAPanelProgramByDate(A14Fixture):
+    """DONE COUNTS A PANEL PROGRAM'S CLOSES BY DATE (release E4 step two; the review of step two, its major): a panel
+    program's lots closed on one New York day are ONE of Done's counts, for the 30th close, every later checkpoint
+    and its program's 5; the lots stand beside. An ETF close is one count as ever. Every close invented."""
+
+    def panel_lots(self, family: str, day: str, n: int = 8, *, cash: str = "0.02") -> list[int]:
+        from league.tests.test_equity_twins import lot, put_lot
+
+        lids = []
+        for i in range(n):
+            self.lid += 1
+            row = lot(self.lid, family=family, lane="equity", symbol=f"N{i:03d}", klass="stock", notional="25.00",
+                      cash=cash, opened_day="2026-10-12", exit_day=day, closed_at=ny(day, 9, 35) + i,
+                      info=json.dumps({"fee_basis": "broker"}))
+            row["tag"] = R.PANEL_TAG
+            put_lot(self.live, row)
+            self.twin(self.lid, live_r=0.001, twin_r=0.001, notional=25.0, bh=0.01)
+            lids.append(self.lid)
+        return lids
+
+    def etf_closes(self, family: str, n: int, *, day: str = "2026-10-14") -> None:
+        for i in range(n):
+            self.twin(self.eq_close(family, cash="2.00", posted=True, closed_at=ny(day, 15, 56) + i),
+                      live_r=0.02, twin_r=0.021, bh=1.5)
+
+    def test_the_counts_by_hand(self):
+        rows = [{"pid": "eq:1", "family": "a", "day": "d1"}, {"pid": "eq:2", "family": "x", "day": "d1", "panel": True},
+                {"pid": "eq:3", "family": "x", "day": "d1", "panel": True}, {"pid": "eq:4", "family": "a", "day": "d1"},
+                {"pid": "eq:5", "family": "x", "day": "d1", "panel": True}, {"pid": "eq:6", "family": "x", "day": "d2",
+                                                                              "panel": True},
+                {"pid": "eq:7", "family": "y", "day": "d1", "panel": True}, {"pid": "o:8", "family": "a", "day": "d1"}]
+        self.assertEqual(R.done_counts(rows), [1, 2, 2, 3, 2, 4, 5, 6])
+        self.assertEqual([c["pid"] for c in R.first_counts(rows, 2)], ["eq:1", "eq:2", "eq:3", "eq:5"],
+                         "the second count's later lot of its day goes with it")
+        plain = [r for r in rows if not r.get("panel")]
+        self.assertEqual(R.done_counts(plain), [1, 2, 3])
+        self.assertEqual(R.first_counts(plain, 2), plain[:2], "with no panel close: the first k closes")
+
+    def test_a_basket_rotation_is_one_close_and_no_checkpoint_comes_early(self):
+        self.eq_family("p-a")
+        self.eq_family("p-b", lane="equity")
+        self.eq_family("xs-a", lane="equity")
+        for i in range(25):
+            self.twin(self.eq_close("p-a" if i % 2 == 0 else "p-b", cash="2.00", posted=True,
+                                    closed_at=ny("2026-10-14", 15, 56) + i), live_r=0.02, twin_r=0.021, bh=1.5)
+        self.panel_lots("xs-a", "2026-10-15")
+        self.steady()
+        meter = self.report()["done"]["all"]
+        self.assertEqual(len(meter["closes"]), 33, "every lot is listed")
+        self.assertEqual((meter["running"]["closes"], meter["running"]["lots"]), (26, 33))
+        program = next(p for p in meter["running"]["by_program"] if p["family"] == "xs-a")
+        self.assertEqual((program["closes"], program["lots"]), (1, 8))
+        self.assertEqual((meter["checkpoints"], meter["next_checkpoint"]), ([], 30), "26 counts: no checkpoint yet")
+
+    def test_one_rotation_date_does_not_meet_a_second_programs_five(self):
+        self.eq_family("p-a")
+        self.eq_family("xs-a", lane="equity")
+        self.panel_lots("xs-a", "2026-10-13")
+        self.etf_closes("p-a", 30)
+        self.steady()
+        meter = self.report()["done"]["all"]
+        cp = meter["checkpoints"][0]
+        self.assertEqual((cp["at_close"], cp["closes"], cp["lots"]), (30, 30, 37), "the basket's date and 29 ETF closes")
+        self.assertEqual((cp["programs_with_min_closes"], cp["items"]["3"]), (1, False))
+        self.assertIn("1 programs with 5+ closes of the 2 needed", cp["why"])
+        self.assertEqual(cp["close_dates"]["closes"], 37, "the close dates beside read the lots")
+        self.assertEqual(cp["closed_at"], R._iso(R._epoch("2026-10-14T19:56:28Z") or 0), "the 29th ETF close")
+
+    def test_five_rebalance_dates_are_a_programs_five(self):
+        self.eq_family("p-a")
+        self.eq_family("xs-a", lane="equity")
+        for day in ("2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16"):
+            self.panel_lots("xs-a", day)
+        self.etf_closes("p-a", 25, day="2026-10-16")
+        self.steady()
+        cp = self.report()["done"]["all"]["latest"]
+        self.assertEqual((cp["at_close"], cp["closes"], cp["lots"], cp["programs_with_min_closes"]), (30, 30, 65, 2))
+        self.assertTrue(cp["items"]["3"])
+        program = next(p for p in cp["by_program"] if p["family"] == "xs-a")
+        self.assertEqual(program["closes"], 5)
+
+
+class TheCloseDatesBesideEveryCheckpoint(A14Fixture):
+    """A14_BESIDE_DONE (release E4 step two; `close_dates`): each checkpoint carries the distinct close dates among
+    its counted closes, all programs, and the date-clustered t of their P&L, beside and never a rule. Eight lots of a
+    basket sold at one open are eight closes and ONE date. Every close invented."""
+
+    def test_thirty_closes_of_one_date_read_one_date_and_no_t(self):
+        self.thirty()
+        cp = self.latest()
+        self.assertEqual({k: cp["close_dates"][k] for k in ("closes", "dates", "date_t", "unpriced")},
+                         {"closes": 30, "dates": 1, "date_t": None, "unpriced": 0})
+        self.assertEqual((cp["holds"], cp["items"]), (True, {"3": True, "4": True, "7": True}), "no rule reads it")
+
+    def test_the_figures_by_hand(self):
+        def close(day, pnl):
+            return {"day": day, "pnl_usd": None if pnl is None else R.Decimal(pnl), "closed_at": 0.0}
+
+        rows = [close("2026-10-14", "2.00")] * 8 + [close("2026-10-15", "-1.00"), close("2026-10-16", "3.00"),
+                                                    close("2026-10-16", None)]
+        got = R.close_dates(rows)
+        sums = [16.0, -1.0, 3.0]
+        mean = sum(sums) / 3
+        sd = (sum((v - mean) ** 2 for v in sums) / 2) ** 0.5
+        self.assertEqual((got["closes"], got["dates"], got["unpriced"]), (11, 3, 1))
+        self.assertAlmostEqual(got["date_t"], round(mean / sd * 3 ** 0.5, 4))
+        self.assertEqual(R.close_dates([])["dates"], 0)
+        self.assertIsNone(R.close_dates([close("2026-10-14", "1.00"), close("2026-10-15", "1.00")])["date_t"],
+                          "no spread: no t")
+
+    def test_the_preregistration_says_the_figures_are_computed(self):
+        self.assertIn("close-date figures are computed since release E4's step two", R.PREREGISTERED["status"])
+        self.assertNotIn("not computed yet", R.PREREGISTERED["status"])
+        self.assertEqual(R.PREREGISTERED["beside_done"], R.A14_BESIDE_DONE, "the registered sentence is unchanged")

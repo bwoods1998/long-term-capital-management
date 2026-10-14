@@ -1066,8 +1066,9 @@ CONSTITUTION: dict[str, Any] = {
     #   `failed_decides_exit` sessions of failed decides its lots exit at the next open. Pre-registered program rules,
     #   identical in the Gym.
     # - `order_path`: marketable limit day orders whose collar starts at `entry_collar_bp` and widens to `max_collar_bp`
-    #   (basis points, by class); at most `max_orders_day` equity orders a day (A8.3: the gateway's day order count is
-    #   shared with the options book); and the schedule's offsets in seconds (`league/equity/schedule.py`): the open
+    #   (basis points, by class); `max_orders_day` equity orders a day, sends and cancels, before an ENTRY is refused
+    #   (an exit is never stopped by it, only by the House-wide count; A8.3: the gateway's day order count is shared
+    #   with the options book); and the schedule's offsets in seconds (`league/equity/schedule.py`): the open
     #   window (09:25 pre-open, 09:30:30 sends, entries until 09:45, exits until 15:55), THE CLOSE WINDOW (A2: 15:55:00
     #   sends, re-priced every 30 s until 15:59:30, then missed), the 16:20 bars, the 16:30 decisions and the 08:30 audit.
     "equity_money": {
@@ -1138,6 +1139,37 @@ CONSTITUTION: dict[str, Any] = {
 # digest like every other (`EQUITY_MONEY_BOUNDS`, `EQUITY_MONEY_CHOICES`). Its reader is league/equity/bands.py
 # `seat_settings` (league/live/money.py's `EquityTable` reads its rows by name and does not read this one).
 CONSTITUTION["equity_money"]["probe"]["seat"] = {"rule": "activity-1-free", "k_floor": "0.25", "idle_sessions": 10}
+
+# ---- THE PANEL SLEEVE AND THE PANEL SEATS (`equity_money.panel`; release E4 step two, Oct 14, 2026; Claude's build
+# under goal item 4, from the step-two plan's money design; until the pre-registered study EQDONE-5 rules, the row
+# ships at 1 seat and 0.10). A PANEL program (structure "panel": a basket of index members, league/xs) never takes,
+# holds or yields one of the `probe` seats above, and never sizes from the `probe` sleeve:
+# - `seats`: the panel programs that may hold a seat at once, a POOL OF THEIR OWN beside `probe.max_programs` (0 to 2;
+#   0 stops new panel seats). The seat rule (`probe.seat`) ranks the waiting panel programs inside this pool only, by
+#   the same K; the ETF seats, their plan, the idle test and K are untouched. Every leg of the panel lane is
+#   lane-wide, so while one fails no panel row exists and nobody is seated into the pool: a program held on a failed
+#   leg keeps its seat and resumes. The swarm's `elane.panel.seats` may only lower it.
+# - `sleeve_share`: a panel program's sleeve as a share of E (0 to 0.25, and never above `probe.sleeve_share`: a table
+#   with the Probe sleeve under the panel sleeve is refused, so a Probe sleeve set to 0 needs `sleeve_share` 0 with
+#   it, or `seats` 0). At 0.10 x E its whole basket fits beside three HELD one-ETF lots at 0.50 x E with no loss in
+#   the window while 3 x 0.25 x E x 0.20 + 0.10 x E x 0.40 = 0.19 x E is at most $400 (E up to $2,105; $380 of it at
+#   E = $2,000). A name of an eight-name basket is 0.0125 x E, so a basket scaled under 800 / E of its sleeve (40% at
+#   E = $2,000) has names under the $10 order minimum, which are refused, not cut. Outside that room a basket bought
+#   from flat or rotated whole is scaled to the room the HELD lots leave (league/equity/live.py `_panel_budget`; the
+#   other programs' buys planned for the same open are not seen, and they are worked first), and a partial
+#   rotation's new name is refused at the send.
+# THE WINDOW STAYS ONE, FIRST COME (A8.6 as registered): no slice of the $400 is reserved for the panel, and every
+# owner line binds a panel lot through `size_entry` as it binds an ETF lot (a stock at most 0.20 x E, 1.00 x E
+# invested, the cash reserve, the shared loss budget at 0.40 of a stock's mark). ITS COST, PLAINLY: one more program
+# on real money at once (XS1's zero-edge pass rate at the House's bar is at most 10.02% a cell); a basket's lots
+# closed at one open are one market move, so Done counts a panel program's lots closed on one date as one close
+# (the direction report's `done_counts`; it states the lots and the distinct close dates beside every checkpoint).
+# Rollback: `seats` 0 (one money-digest
+# move; nobody holding a panel seat is unseated by it, and no lot is sold). The `probe` row stays one line (release
+# E5-S's `set_design` rewrites that exact line), so this block is added here, as the seat rule's is. Its reader is
+# league/equity/bands.py `panel_settings` (league/live/money.py's `EquityTable`, inside the options execution
+# fingerprint, reads its rows by name and does not read this one).
+CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 
 
 def digest(constitution: dict[str, Any] | None = None) -> str:
@@ -1356,6 +1388,11 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # 10 seated sessions (A24 set 10 where the design said 20): a longer clock only makes a yield rarer.
     "probe.seat.k_floor": ("0.25", "0.25"),
     "probe.seat.idle_sessions": ("10", "60"),
+    # THE PANEL ROW (release E4 step two; the comment under the table): at most two panel programs seated at once in a
+    # pool of their own (0 stops new panel seats), each at a sleeve of at most 0.25 x E, and never above the Probe's
+    # (`equity_money_problems`' order rule). Two baskets at 0.10 x E are 0.08 x E of open risk beside the ETF lane's.
+    "panel.seats": ("0", "2"),
+    "panel.sleeve_share": ("0", "0.25"),
     # The pre-registered sizing-up rule (the design's section 5): at least 20 closes, an 80% bound, quarter Kelly, half
     # of E at most (the loose end of the Probe sleeve's own bound, and a Sized sleeve is never below the Probe's: the
     # constitution's `sized` comment), five Probe sessions. THE STEP IS PARKED at the count's tight end (the row in
@@ -1419,7 +1456,8 @@ EQUITY_ORDER_OFFSETS = ("preopen_before_open_s", "open_send_after_open_s", "exit
                         "open_reprice_s", "close_reprice_s", "bars_after_close_s", "decide_after_close_s",
                         "audit_before_open_s")
 #: Rows read as whole counts: the counts, the collars and the offsets.
-_EQUITY_COUNTS = ("probe.max_programs", "probe.seat.idle_sessions", "sized.min_trades", "sized.min_probe_sessions",
+_EQUITY_COUNTS = ("probe.max_programs", "probe.seat.idle_sessions", "panel.seats", "sized.min_trades",
+                  "sized.min_probe_sessions",
                   "demotion.min_trades",
                   "demotion.twin_min_closes", "holds.min_hold_sessions", "holds.default_max_hold_sessions",
                   "holds.max_hold_sessions", "holds.failed_decides_exit", "order_path.entry_collar_bp.etf",
@@ -1493,6 +1531,10 @@ def equity_money_problems(constitution: dict[str, Any] | None = None) -> list[st
         if first in values and second in values and not values[first] < values[second]:
             problems.append(f"equity_money.{first} ({values[first]}) must be under {second} ({values[second]}): {why}")
 
+    panel, probe = "panel.sleeve_share", "probe.sleeve_share"
+    if panel in values and probe in values and values[panel] > values[probe]:
+        problems.append(f"equity_money.{panel} ({values[panel]}) is above {probe} ({values[probe]}): a panel program's "
+                        "sleeve is never larger than a Probe's")
     hold, cap = "holds.default_max_hold_sessions", "holds.max_hold_sessions"
     if hold in values and cap in values and values[hold] > values[cap]:
         problems.append(f"equity_money.{hold} ({values[hold]}) is above {cap} ({values[cap]}): the default hold is inside "
@@ -1530,4 +1572,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '4ef472e1cfac4124388dc06d95b5152ea2b9b129504ec69814ca7dfcab0af52d'
+PINNED_DIGEST = '111ede85f9b401c9af74f0f1967f9390c37ccd35a47f6fb048257db3c691ce6f'

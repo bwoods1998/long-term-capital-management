@@ -97,6 +97,7 @@ import math
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from ..xs import PANELS, STRUCTURE
@@ -120,7 +121,12 @@ PLACEBO_KEY = "elane_xs_placebo"
 HALVES_KEY = "elane_xs_halves"
 OOF_KEY = "elane_xs_oof"
 LOOK_KEY = "elane_xs_look"
-SEALED = (FLOOR_KEY, TRAIN_X_KEY, TRAIN_U_KEY, PRECHECK_KEY, PLACEBO_KEY, HALVES_KEY, OOF_KEY, LOOK_KEY)
+#: K FOR A BASKET, its Train-era half (step two; the seat rule's rank inside the panel pool): {version: {"close_days",
+#: "sessions"}} of a passing version's seen spans' full-universe k 1.0 runs, kept by `score` and read by `validate`,
+#: which writes the seat rule's record (`elane.SEAT_KEY`) beside the try. Sealed: K is never printed, never read by a
+#: generator.
+ACTIVITY_KEY = "elane_xs_activity"
+SEALED = (FLOOR_KEY, TRAIN_X_KEY, TRAIN_U_KEY, PRECHECK_KEY, PLACEBO_KEY, HALVES_KEY, OOF_KEY, LOOK_KEY, ACTIVITY_KEY)
 #: Store kv keys: the day's child seconds of panel Train {utc_day: seconds}; the zero-edge job's weeks; the alerts.
 CPU_KEY = "elane_xs_cpu"
 ZERO_KEY = "elane_xs_zero_edge"
@@ -173,16 +179,27 @@ DEFAULTS: dict[str, Any] = {
     "rebalance": ["weekly", "monthly"], "train_budget": 4, "placebos_train": 200, "cpu_seconds_day": 14400,
     "run_budget_seconds": 600, "zero_edge_programs": 100, "coverage_min": 0.97, "spreads_min_share": 0.90,
     "membership_max_stale_days": 45, "universe_max_age_days": 400, "live_min_tradable_share": 0.95,
-    "census_notes": {},
+    "census_notes": {}, "look_rule": "hold", "seats": 2,
 }
 BOUNDS: dict[str, tuple[float, float]] = {
     "birth_share": (0.0, 1.0), "max_alive": (0, 100), "max_names": (5, 40), "train_budget": (1, 4),
     "placebos_train": (200, 1000), "cpu_seconds_day": (0, 36000), "run_budget_seconds": (60, 600),
     "zero_edge_programs": (20, 400), "coverage_min": (0.97, 1.0), "spreads_min_share": (0.5, 1.0),
     "membership_max_stale_days": (7, 120), "universe_max_age_days": (30, 500),
-    "live_min_tradable_share": (0.90, 1.0),
+    "live_min_tradable_share": (0.90, 1.0), "seats": (0, 2),
 }
 CENSUS_NOTE_MAX = 200
+#: THE A31 LOOK HOLD (`elane.panel.look_rule`; the captain's A31: NO XS1 LOOK BEFORE STUDY XS1-R RULES). A look runs
+#: only while the value names a rule this tree implements (`LOOK_RULES_BUILT`): "xs1" is XS1 as built, the look of
+#: `look`. "hold", the policy's default, holds every look (it waits, nothing spent) with `A31_HOLD`, whatever else is
+#: in place (the receipt, the permit, the review, the cell's room); so does any value this tree does not know (read
+#: as "hold"). Validation is not held: a try is the lineage's whatever the ruling, and its pre-check is unchanged
+#: under "as built" and R-c. A ruling that names a remedy is built as a NEW value beside "xs1" (R-c: "xs1-rc"), so
+#: a look opens only under code that implements the ruling. A TIGHTENING: it decouples Validation and the probe's
+#: wiring from the ruling, and stops an accidental look (a spent look is spent).
+LOOK_RULES = ("hold", "xs1")
+LOOK_RULES_BUILT = ("xs1",)
+A31_HOLD = "A31: no XS1 look before XS1-R rules"
 #: The label every census note is shown under (E4-SPEC 8.2): the captain's reading of a cell, never evidence.
 CENSUS_LABEL = "in-sample 2010-24, best of 7; not evidence"
 #: `elane.screens.equity_xs` as policy.json ships it: `league.xs.screen.PIN_KEYS` in order, EVERY value a null (a
@@ -389,6 +406,8 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
 
     words("panels", PANELS)
     words("rebalance", _rebalances())
+    if raw.get("look_rule") in LOOK_RULES:
+        out["look_rule"] = raw["look_rule"]  # anything else reads as "hold" (A31)
     notes = raw.get("census_notes")
     if isinstance(notes, Mapping):
         out["census_notes"] = {str(k): " ".join(str(v).split())[:CENSUS_NOTE_MAX] for k, v in notes.items()
@@ -397,6 +416,24 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     block = screens.get(SCREEN_KEY) if isinstance(screens, Mapping) else None
     out["screen"] = dict(block) if isinstance(block, Mapping) else {}
     return out
+
+
+def look_held(settings: Mapping[str, Any] | None) -> str | None:
+    """Why `elane.panel.look_rule` holds every panel look (A31), or None when it names a rule this tree implements
+    (`LOOK_RULES_BUILT`). An unknown or malformed value holds, and says so. Never raises (a rule that cannot be read
+    holds)."""
+    try:
+        lane = settings.get("elane") if isinstance(settings, Mapping) else None
+        raw = lane.get(SETTINGS_KEY) if isinstance(lane, Mapping) else None
+        raw = raw.get("look_rule", DEFAULTS["look_rule"]) if isinstance(raw, Mapping) else DEFAULTS["look_rule"]
+        rule = cfg(settings)["look_rule"]
+    except Exception:  # noqa: BLE001
+        return A31_HOLD
+    if rule in LOOK_RULES_BUILT:
+        return None
+    if raw != rule:
+        return f"{A31_HOLD} (elane.panel.look_rule {str(raw)[:40]!r} names no rule this tree implements)"
+    return A31_HOLD
 
 
 def _rebalances() -> tuple[str, ...]:
@@ -536,7 +573,8 @@ def status(settings: Mapping[str, Any] | None, root: str | Path | None = None, *
            ) -> dict[str, Any]:
     """THE LANE'S MODE AS A REPORT SAYS IT (the swarm's heartbeat `equity.panel`, the dlane report's panel section):
     {"setting": `elane.panel.mode` as set, "mode": the effective mode, "why": the leg that holds the effective mode
-    under the setting, or None}. The reason was computed by `_mode_why` and reached no status, heartbeat or alert:
+    under the setting, or None, "look": why every look waits by `elane.panel.look_rule` (`look_held`, A31), or
+    None}. The reason was computed by `_mode_why` and reached no status, heartbeat or alert:
     a captain who set "gate" with the spreads' share under its bound read "train" nowhere, and no line said why.
     Never raises (a status never fails its reader)."""
     try:
@@ -548,7 +586,8 @@ def status(settings: Mapping[str, Any] | None, root: str | Path | None = None, *
         found, why = _mode_why(settings, root, legs=legs)
     except Exception as exc:  # noqa: BLE001 - what `mode` reads as "off"
         found, why = "off", f"the lane's settings or files could not be read ({type(exc).__name__})"
-    return {"setting": setting, "mode": found, "why": None if why is None else str(why)[:300]}
+    return {"setting": setting, "mode": found, "why": None if why is None else str(why)[:300],
+            "look": look_held(settings)}
 
 
 #: `health`'s alarms (each a `swarm.status` alert, once a UTC day; the days are kept in the kv `ALERTS_KEY`).
@@ -820,6 +859,18 @@ def _cached_mode(root: str | Path) -> str:
     with _cache_lock:
         _mode_cache[key] = (now, value)
     return value
+
+
+def panel_seats(root: str | Path) -> int:
+    """THE PANEL POOL's seats as the swarm says them: `elane.panel.seats` of the state root's own settings (0 to 2,
+    the bound of the constitution's `equity_money.panel.seats`; the default, 2, leaves the row's count). It may only
+    LOWER the row (the book and the swarm's reader seat at most the smaller of the two:
+    league/equity/live.py `_panel_seat_count`, league/swarm/bands.py `panel_pool_seats`). Fails closed: settings that
+    cannot be read seat no panel program."""
+    try:
+        return int(cfg(_settings_of(root, None))["seats"])
+    except Exception:  # noqa: BLE001 - fail closed
+        return 0
 
 
 def seatable(root: str | Path) -> Callable[[Any], bool]:
@@ -2157,6 +2208,154 @@ def steady(make: Callable[[], Any], *, runs: int = CLOCK_RUNS, what: str = "run"
                         f"{len(seen)} runs of one {what} ({told} calls{took}), and not the same way twice")
 
 
+class _Runs:
+    """A call that answers SEVERAL runs (`Isolated.segments`: the two Train segments) as one run for `steady`: its
+    runtime is theirs summed, so a decide timeout in either is a timeout of the call, which is made again whole."""
+
+    def __init__(self, runs: Sequence[Any]):
+        self.runs = list(runs)
+        clocks = [clock_of(getattr(run, "result", None)) for run in self.runs]
+        seconds = [c["seconds"] for c in clocks]
+        self.result = {"runtime": {"calls": sum(c["calls"] for c in clocks),
+                                   "timeouts": sum(c["timeouts"] for c in clocks),
+                                   "decide_seconds": None if None in seconds else sum(seconds)}}
+
+
+#: THE CLOCK OF VALIDATION AND THE LOOK (the ship check's open item; step two): the swarm store's kv of each panel
+#: family's run of the House's clock at its Validation try or its look ({family: {stage: {version, count, first_at,
+#: next_at, alerted, why}}}). Counts and words only; no generator reads it (it is no family-state key).
+GATE_CLOCK_KEY = "elane_xs_gate_clock"
+#: The third House's clock in a row at one stage of one version is one alert (`elane_xs_clock`), as at the Train bar.
+GATE_CLOCK_ALERT = 3
+#: THE OWE HAS AN END (the review of step two: a program can see its own equity in a run, so on a losing path of a
+#: sealed window it could make its decides straddle the wall-clock limit and have its sealed read never count, as
+#: often as it liked). A round of the House's clock in which a SEALED run was made (the try's 2025 run at k 1.0 or
+#: 1.5; the look's run through the holdout) is counted in the row's `sealed`: the Validation try is SPENT at the
+#: `GATE_CLOCK_SPENDS`-th such round (status "clock": no pre-check), and the look counts each such round as a send of
+#: its sealed run beside a run that never returned (E1's `LOOK_SENDS`, `elane.LOST_KEY`): the second spends and fails
+#: it. While a version owes its try's sealed run, NO OTHER VERSION OF ITS LINEAGE TAKES THE TRY (`try_owed`): the owed
+#: version is marked so `elane.next_try` asks it first (`OWED`). THE COST, STATED AS E1 STATES ITS OWN: a box whose
+#: clock is genuinely unsteady can spend a good program's try or look.
+GATE_CLOCK_SPENDS = GATE_CLOCK_ALERT
+#: The verdict an owed try is marked with (`elane.VERDICTS_KEY`, `stale` True, so `elane.next_try` asks the version
+#: first, whatever the family's candidate is now): the try made its sealed run and the House's clock read none of it.
+OWED = "the House's clock"
+
+
+def gate_clock_wait(store: Any, fid: str, n: int, stage: str, now: float) -> str | None:
+    """Why a Validation try or a look (`stage`) of version `n` waits out the backoff of an earlier House's clock, or
+    None."""
+    held = store.get(GATE_CLOCK_KEY)
+    row = ((held or {}).get(str(fid)) or {}).get(stage) if isinstance(held, Mapping) else None
+    if not isinstance(row, Mapping) or row.get("version") != n:
+        return None
+    nxt = _num(row.get("next_at"))
+    if nxt is None or float(now) >= nxt:
+        return None
+    return (f"the House's clock met this {stage} {int(row.get('count') or 0)} time(s) running: it waits out its "
+            f"backoff (until {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(nxt))}), nothing spent")
+
+
+def gate_clock_row(store: Any, fid: str, n: int, stage: str) -> dict[str, Any]:
+    """The House's clock row of version `n`'s `stage` ({} when there is none, or it is another version's)."""
+    held = store.get(GATE_CLOCK_KEY)
+    row = ((held or {}).get(str(fid)) or {}).get(stage) if isinstance(held, Mapping) else None
+    return dict(row) if isinstance(row, Mapping) and row.get("version") == n else {}
+
+
+def gate_clock_fail(owner: Any, fid: str, n: int, stage: str, why: str, *, sealed: bool = False,
+                    spent: bool = False) -> dict[str, Any]:
+    """A Validation try or a look (`stage`) the House's clock read nothing of (`ClockUnsteady`): a backoff that doubles
+    each time (E2's Train pace, `train_every_seconds`, at most `BACKOFF_MAX`), and one `elane_xs_clock` alert at the
+    `GATE_CLOCK_ALERT`-th in a row. `sealed`: a sealed run was made in this round (counted in the row's `sealed`;
+    `GATE_CLOCK_SPENDS`). `spent`: the caller spends the stage on this round (the alert says so, at once). Else
+    NOTHING IS SPENT and the stage is owed. Returns the row."""
+    from . import elane_train
+
+    store = owner.store
+    now = _now(owner)
+    c = elane_train.cfg(owner.settings)
+    with store.atomic():
+        held = store.get(GATE_CLOCK_KEY)
+        held = {str(k): dict(v) for k, v in held.items() if isinstance(v, Mapping)} if isinstance(held, Mapping) else {}
+        mine = held.setdefault(str(fid), {})
+        row = mine.get(stage) if isinstance(mine.get(stage), Mapping) and mine[stage].get("version") == n else {}
+        count = int(row.get("count") or 0) + 1
+        delay = min(float(c["train_every_seconds"]) * (2 ** min(count - 1, 12)), BACKOFF_MAX)
+        tell = spent or (count >= GATE_CLOCK_ALERT and not row.get("alerted"))
+        row = {"version": n, "count": count, "first_at": _num(row.get("first_at")) or now, "next_at": now + delay,
+               "alerted": bool(row.get("alerted")) or tell, "why": str(why)[:240],
+               "sealed": int(row.get("sealed") or 0) + int(bool(sealed))}
+        mine[stage] = row
+        store.put(GATE_CLOCK_KEY, held)
+    if tell:
+        store.event("swarm.status", fid, {
+            "action": "elane_xs_clock", "alert": True, "version": n, "stage": stage, "spent": bool(spent),
+            "text": f"a panel {stage} met decide timeouts that did not repeat {count} times running: {str(why)[:160]}; "
+                    + (f"its sealed run was made {row['sealed']} times and none of it was read, so the {stage} is "
+                       "SPENT and failed (the owe has an end; a genuinely unsteady box can spend a good program's "
+                       f"{stage}: check what holds the core while the panel's child runs)" if spent else
+                       f"nothing is spent and the {stage} is owed (the box's clock: check what holds the core while "
+                       "the panel's child runs)")})
+    return row
+
+
+def try_owed(store: Any, fid: str, n: int) -> dict[str, Any] | None:
+    """THE LINEAGE'S TRY IS HELD WHILE IT IS OWED (`GATE_CLOCK_SPENDS`): None, or what version `n` of `fid` is told
+    instead of a Validation try because ANOTHER version of its connected lineages made the try's sealed 2025 run and
+    the House's clock read none of it (its `validation` row's `sealed`): {"waits": ...} while that family is alive (its
+    owed try is asked first: `OWED`), {"refused": `elane.SPENT_TRY`} once it is retired (the lineage's sealed window
+    was run; no other version takes a fresh try). Never names the other family (a lineage's members are private)."""
+    from . import elane
+
+    held = store.get(GATE_CLOCK_KEY)
+    if not isinstance(held, Mapping):
+        return None
+    for member in elane._members(store, fid):
+        row = (held.get(str(member)) or {}).get("validation") if isinstance(held.get(str(member)), Mapping) else None
+        if not isinstance(row, Mapping) or int(row.get("sealed") or 0) < 1:
+            continue
+        if str(member) == str(fid) and row.get("version") == n:
+            continue
+        other = store.family(str(member))
+        if other is None or other.get("retired_at"):
+            return {"refused": elane.SPENT_TRY}
+        return {"waits": "another version of this lineage made its try's sealed run and the House's clock read none "
+                         "of it: that try is owed first, and no other version takes the lineage's try meanwhile"}
+    return None
+
+
+def gate_clock_clear(store: Any, fid: str, stage: str) -> None:
+    """A stage's run was read (or spent): its clock row goes."""
+    with store.atomic():
+        held = store.get(GATE_CLOCK_KEY)
+        if not isinstance(held, Mapping) or not isinstance(held.get(str(fid)), Mapping) \
+                or stage not in held[str(fid)]:
+            return
+        mine = {k: v for k, v in held[str(fid)].items() if k != stage}
+        rest = {k: v for k, v in held.items() if k != str(fid)}
+        store.put(GATE_CLOCK_KEY, {**rest, **({str(fid): mine} if mine else {})})
+
+
+def steady_runs(owner: Any, settings: Mapping[str, Any] | None, make: Callable[[], Any], *, what: str,
+                many: bool = False) -> Any:
+    """THE CLOCK RULE AT VALIDATION AND THE LOOK: `make()` through `steady`, `may_run` asked before EACH run of the
+    bound (a wall or the day's budget between two runs raises `_Waits`: no second run starts inside a session wall),
+    each run's seconds booked (`_timed`). `many`: `make` answers several runs (`_Runs`); the answer is their list.
+    The run read is the first with no decide timeout, chosen before its outcome is read."""
+    store = owner.store
+
+    def one() -> Any:
+        why = may_run(store, settings, _now(owner))
+        if why is not None:
+            raise _Waits(why)
+        run = _timed(store, owner, make)
+        return _Runs(run) if many else run
+
+    run = steady(one, what=what)
+    return run.runs if many else run
+
+
 def one_store(run_through: Any) -> Any:
     """ONE PANEL STORE A JUDGMENT (a context manager; the rehearsal's measurement on the House's box). The panel
     runner opens the store again for every run (`league.xs.runner.Isolated._store`), and each open maps the two bar
@@ -2517,6 +2716,13 @@ def _judged(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any],
             r["review"] = {"version": n, "unclear": {}, "at": at}  # THE REVIEW, before the pass is the try
     rec = _update(store, fid, put)
     _seal(store, fid, n, sealed)
+    if entry["passed"]:
+        try:  # K's Train-era half, from the seen spans' full-universe k 1.0 runs just read (sealed: never printed)
+            counted = train_activity(parts.get("base") or [])
+            held = _state(store.family(fid) or {}).get(ACTIVITY_KEY)
+            store.set_state(fid, **{ACTIVITY_KEY: {**(dict(held) if isinstance(held, Mapping) else {}), str(n): counted}})
+        except Exception:  # noqa: BLE001 - a count beside the verdict, never its condition
+            pass
     if fresh:
         try:  # E3's scored event, E2's own kind: the forward registry's time evidence of a panel version
             store.event("swarm.elane", fid, {"pass": "scored", "version": n, "sha": str(version.get("sha") or ""),
@@ -2537,6 +2743,73 @@ def _judged(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any],
     if len(versions_of(rec)) >= c["train_budget"]:
         out["retired"] = finish(researcher, store.family(fid) or fam, "its Train budget is spent with no version passing")
     return out
+
+
+def train_activity(results: Sequence[Mapping[str, Any]], *, spans: Sequence[tuple[dt.date, dt.date]] | None = None
+                   ) -> dict[str, int]:
+    """K'S TRAIN-ERA COUNTS of a basket (A24's rule, as `league.equity.bands.close_days` reads it for a share program):
+    over the runs' lots, the close days (a day whose closed lots' entry weights of the run's capital, which is the
+    sleeve, sum to at least the seat rule's `k_floor`, read as `k_floor` - 0.0005) and the sessions. `spans`: only the
+    lots and sessions inside them are read (the seen spans of whole-segment runs). Whole numbers; a lot's size and its
+    exit day are all it reads: no price, no return, no P&L. ValueError for a run that did not end "ok"."""
+    from ..equity import bands as equity_bands
+
+    floor = equity_bands.seat_settings().k_floor
+
+    def inside(day: Any) -> bool:
+        d = _day(day)
+        return spans is None or (d is not None and any(a <= d <= b for a, b in spans))
+
+    days = sessions = 0
+    for result in results:
+        status = str(result.get("status") or "")
+        if status == "no_data":
+            continue
+        if status != "ok":
+            raise ValueError(f"a Train-era run ended {status!r}")
+        days += equity_bands.close_days([lot for lot in result.get("lots") or [] if inside(lot.get("exit_day"))],
+                                        floor=floor)
+        daily = result.get("daily")
+        sessions += (sum(1 for row in daily if row and inside(row[0])) if isinstance(daily, (list, tuple))
+                     else equity_bands.run_sessions(result))
+    return {"close_days": int(days), "sessions": int(sessions)}
+
+
+def seat_record(fam: Mapping[str, Any], version: Mapping[str, Any], validation: Mapping[str, Any],
+                segments: Sequence[Any], *, at: Any, run_id: Any) -> dict[str, Any] | None:
+    """THE SEAT RULE'S RECORD OF A PANEL PROGRAM (`elane.SEAT_KEY`; step two), written by `validate` beside the try:
+    the Validation count from the 2025 k 1.0 run the try itself made (the gate's sealed path), the Train-era count
+    `score` kept (`ACTIVITY_KEY`; for a version passed before it was kept, the two Train segments' runs the try
+    made, read inside the seen spans alone). Four whole numbers, ranked inside the panel pool only. None when they
+    cannot be counted (the program then ranks after every program whose counts can be read, by pass time)."""
+    from ..equity import bands as equity_bands
+
+    n = int(version["n"])
+    sha = None
+    try:
+        from . import elane
+
+        sha = elane._run_sha(version)
+        if str(validation.get("status") or "") != "ok" or not sha:
+            return None
+        floor = equity_bands.seat_settings().k_floor
+        v = {"close_days": equity_bands.close_days(validation.get("lots") or [], floor=floor),
+             "sessions": equity_bands.run_sessions(validation)}
+        kept = _state(fam).get(ACTIVITY_KEY)
+        train = dict(kept[str(n)]) if isinstance(kept, Mapping) and isinstance(kept.get(str(n)), Mapping) else None
+        source = "panel"
+        if train is None:
+            train = train_activity([dict(getattr(run, "result", run) or {}) for run in segments],
+                                   spans=seen_spans(hidden_year_of(fam)))
+            source = "panel (Train segments, seen spans)"
+        if any(isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in (*v.values(), *train.values())) \
+                or train["sessions"] < 1:
+            return None
+    except Exception:  # noqa: BLE001 - beside the try, never its condition
+        return None
+    return {"version": n, "run_sha": str(sha), "floor": str(floor), "validation": v,
+            "train": {"close_days": int(train["close_days"]), "sessions": int(train["sessions"])}, "at": at,
+            "source": source, "validation_run": run_id}
 
 
 def _seal(store: Any, fid: str, n: int, sealed: Mapping[str, Any]) -> None:
@@ -3324,7 +3597,10 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     early = state.get(PRECHECK_KEY) if isinstance(state.get(PRECHECK_KEY), Mapping) else {}
     if early.get("version") == n and early.get("reached") is False:
         return {**out, "refused": EARLY_CAUSES.get(str(early.get("why")), SAME_LINEAGE_XS)}
-    why = may_run(store, settings, _now(tournament))
+    owed = try_owed(store, fid, n)  # another version of the lineage owes its try's sealed run: it comes first
+    if owed is not None:
+        return {**out, **owed}
+    why = may_run(store, settings, _now(tournament)) or gate_clock_wait(store, fid, n, "validation", _now(tournament))
     if why is not None:
         return {**out, "waits": why}
     from ..xs import screen as S
@@ -3333,15 +3609,27 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     code, params = version["code"], dict(version.get("params") or {})
     template = elane.lineage_key(LANE, str(version.get("sha") or ""))
 
+    def clocked(exc: BaseException) -> dict[str, Any]:
+        # THE HOUSE'S CLOCK (`ClockUnsteady`, or a slow segment run: the bar's runs of those years were steady):
+        # nothing is spent, the try is owed after a backoff, and the third in a row is one alert.
+        gate_clock_fail(tournament, fid, n, "validation", str(exc))
+        return {**out, "waits": f"the House's clock: {str(exc)[:200]}"}
+
     def trouble(stage: str, exc: BaseException | str) -> dict[str, Any]:
         name = exc if isinstance(exc, str) else type(exc).__name__
         store.event("swarm.status", fid, {"action": "elane_validation_error", "version": n, "lane": LANE,
                                          "structure": STRUCTURE, "stage": stage, "error": name})
         return {**out, "error": name}
 
-    # DUTY 1: both Train series, from the two whole segments at k 1.0, BEFORE the Validation run.
+    # DUTY 1: both Train series, from the two whole segments at k 1.0, BEFORE the Validation run (through the clock
+    # rule: a segment run with a decide timeout is never read).
     try:
-        segments = _timed(store, tournament, lambda: run_through.segments(code, params, name=fid))
+        segments = steady_runs(tournament, settings, lambda: run_through.segments(code, params, name=fid),
+                               what="pair of Train segments", many=True)
+    except _Waits as wait:
+        return {**out, "waits": str(wait)}
+    except (ClockUnsteady, TooSlow) as exc:
+        return clocked(exc)
     except Exception as exc:  # noqa: BLE001 - no result is no try (nothing is recorded)
         return trouble("train", exc)
     ended = [_status(run) for run in segments]
@@ -3375,15 +3663,35 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
                                          "structure": STRUCTURE, "screen": SCREEN_NAME, "stage": "same lineage",
                                          "_twin": twin})
         return {**out, "refused": SAME_LINEAGE_XS}
-    # THE TRY: the 2025 run at k 1.0 and 1.5.
-    why = may_run(store, settings, _now(tournament))
-    if why is not None:
-        return {**out, "waits": why}
+    # THE TRY: the 2025 run at k 1.0 and 1.5, each through the clock rule (`steady_runs`: `may_run` before each run
+    # of the bound). A program whose timeouts repeat as a program's do is SLOW: its try is spent (a "slow" run, no
+    # pre-check). The House's clock spends nothing until its `GATE_CLOCK_SPENDS`-th round with the sealed run made:
+    # until then the try is owed (marked `OWED`, asked first, and no other version of the lineage takes the try:
+    # `try_owed`); that round spends it (a "clock" run, no pre-check).
+    slow: str | None = None
+    unread: str | None = None
     try:
-        base = _timed(store, tournament, lambda: run_through.validation(code, params, name=fid, k=K_BASE))
-        stressed = _timed(store, tournament, lambda: run_through.validation(code, params, name=fid, k=K_STRESS))
+        base = steady_runs(tournament, settings, lambda: run_through.validation(code, params, name=fid, k=K_BASE),
+                           what="Validation run (k 1.0)")
+        stressed = steady_runs(tournament, settings,
+                               lambda: run_through.validation(code, params, name=fid, k=K_STRESS),
+                               what="Validation run (k 1.5)")
+    except _Waits as wait:
+        return {**out, "waits": str(wait)}
+    except ClockUnsteady as exc:
+        spends = int(gate_clock_row(store, fid, n, "validation").get("sealed") or 0) + 1 >= GATE_CLOCK_SPENDS
+        row = gate_clock_fail(tournament, fid, n, "validation", str(exc), sealed=True, spent=spends)
+        if not spends:
+            _owe_try(store, fid, n)
+            return {**out, "waits": f"the House's clock: {str(exc)[:200]}"}
+        unread = f"the House's clock read none of the try's sealed run in {row['sealed']} rounds ({str(exc)[:200]})"
+        base = stressed = SimpleNamespace(result={"status": "clock", "reason": unread, "trials": 1})
+    except TooSlow as exc:
+        slow = str(exc)
+        base = stressed = SimpleNamespace(result={"status": "slow", "reason": slow, "trials": 1})
     except Exception as exc:  # noqa: BLE001 - no result is no try (nothing is recorded)
         return trouble("validation", exc)
+    gate_clock_clear(store, fid, "validation")
     result = dict(base.result or {})
     status = str(result.get("status") or "unknown")
     summary = result.get("summary") if isinstance(result.get("summary"), Mapping) else {}
@@ -3423,6 +3731,8 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     checks = {str(key): bool(value) for key, value in (pre.get("checks") or {}).items()}
     verdicts = dict(state.get(elane.VERDICTS_KEY) or {}) if isinstance(state.get(elane.VERDICTS_KEY), Mapping) else {}
     verdicts[str(n)] = {"entered": entered, "at": store.now(), "stale": False}
+    seat = seat_record(store.family(fid) or fam, version, result, segments, at=store.now(), run_id=row.get("run_id")) \
+        if entered else None
     with store.atomic():
         current = store.family(fid)
         if current is None or current.get("retired_at"):
@@ -3435,13 +3745,29 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
                                                   "result_sha": result.get("result_sha"), "stale": False},
                            elane.SIGMA_KEY: sigma, elane.VERDICTS_KEY: verdicts,
                            elane.TRY_KEY: {"version": n, "at": store.now(), "first": first,
-                                           "precheck": bool(pre.get("passed")), "entered": entered, "retry_sha": None},
+                                           "precheck": bool(pre.get("passed")), "entered": entered, "retry_sha": None,
+                                           **({"slow": slow[:300]} if slow else {}),
+                                           **({"clock": unread[:300]} if unread else {})},
                            PRECHECK_KEY: {"version": n, "at": store.now(), "reached": True,
-                                          "passed": bool(pre.get("passed")) and status == "ok"}})
+                                          "passed": bool(pre.get("passed")) and status == "ok"},
+                           **({elane.SEAT_KEY: seat} if seat is not None else {})})
     store.event("swarm.status", fid, {"action": "elane_validation", "version": n, "lane": LANE, "label": "EQUITY",
                                      "structure": STRUCTURE, "screen": SCREEN_NAME, "entered": entered, "first": first,
                                      "checks": checks})
     return {**out, "passed": entered, "entered": entered, "first": first}
+
+
+def _owe_try(store: Any, fid: str, n: int) -> None:
+    """A try whose sealed run the House's clock read none of (`GATE_CLOCK_SPENDS`): version `n`'s verdict is marked
+    owed (`OWED`, `stale` True), so `elane.next_try` asks this version first whatever the family's candidate is now;
+    the try's own verdict replaces the mark when it is read or spent."""
+    from . import elane
+
+    with store.atomic():
+        state = _state(store.family(fid) or {})
+        verdicts = dict(state.get(elane.VERDICTS_KEY) or {}) if isinstance(state.get(elane.VERDICTS_KEY), Mapping) else {}
+        verdicts[str(n)] = {"entered": False, "at": store.now(), "stale": True, "owed": OWED}
+        store.set_state(fid, **{elane.VERDICTS_KEY: verdicts})
 
 
 def _refuse(gate: Any, fid: str, n: int, sha: str, stage: str, why: str) -> None:
@@ -3590,6 +3916,10 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     held = state.get(elane.TRY_KEY) if isinstance(state.get(elane.TRY_KEY), Mapping) else {}
     if held.get("version") != n or held.get("entered") is not True or state.get("validation_version") != n:
         return None  # not this version's entry: the tournament owes its Validation first
+    rule = look_held(settings)
+    if rule is not None:
+        _wait(gate, fid, n, sha, rule)  # A31: no XS1 look before XS1-R rules (nothing spent)
+        return None
     cell = family_cell(fam)
     full = look_room(store, cell)
     if full is not None:
@@ -3626,7 +3956,7 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "identity",
                                         "error": type(exc).__name__})
         return None
-    busy = may_run(store, settings, _now(gate))
+    busy = may_run(store, settings, _now(gate)) or gate_clock_wait(store, fid, n, "look", _now(gate))
     if busy is not None:
         _wait(gate, fid, n, sha, busy)
         return None
@@ -3634,7 +3964,9 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     code, params = version["code"], dict(version.get("params") or {})
     floors = state.get(FLOOR_KEY) if isinstance(state.get(FLOOR_KEY), Mapping) else {}
     try:
-        runs = _timed(store, gate, lambda: run_through.segments(code, params, name=fid))
+        # (THE CLOCK RULE: no segment run with a decide timeout is read; a wall between two runs waits)
+        runs = steady_runs(gate, settings, lambda: run_through.segments(code, params, name=fid),
+                           what="pair of Train segments", many=True)
         ended = [_status(run) for run in runs]
         cached = floors.get(str(n))
         if any(status != "ok" for status in ended) or not runs:
@@ -3657,6 +3989,13 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
                 raise ValueError("the program floor does not fit the pinned receipt")
             if floor != cached:
                 store.set_state(fid, **{FLOOR_KEY: {**dict(floors), str(n): floor}})
+    except _Waits as wait:
+        _wait(gate, fid, n, sha, str(wait))
+        return None
+    except (ClockUnsteady, TooSlow) as exc:  # the House's clock (the bar's runs of those years were steady)
+        gate_clock_fail(gate, fid, n, "look", str(exc))
+        _wait(gate, fid, n, sha, f"the House's clock: {str(exc)[:160]}")
+        return None
     except Exception as exc:  # noqa: BLE001 - no floor, no look (nothing spent)
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "floor",
                                         "error": type(exc).__name__})
@@ -3681,10 +4020,18 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
                 "in the residual or in the universe excess)")
         return None
     try:
-        recorded = _timed(store, gate, lambda: run_through.validation(code, params, name=fid, k=K_BASE))
+        recorded = steady_runs(gate, settings, lambda: run_through.validation(code, params, name=fid, k=K_BASE),
+                               what="Validation run (k 1.0)")
         if _status(recorded) != "ok":
             raise ValueError(f"the Validation run ended {_status(recorded)}")
         pre = dict(S.precheck(S.series(recorded.result, "x")))
+    except _Waits as wait:
+        _wait(gate, fid, n, sha, str(wait))
+        return None
+    except (ClockUnsteady, TooSlow) as exc:  # the House's clock (its try's runs were steady)
+        gate_clock_fail(gate, fid, n, "look", str(exc))
+        _wait(gate, fid, n, sha, f"the House's clock: {str(exc)[:160]}")
+        return None
     except Exception as exc:  # noqa: BLE001
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "validation",
                                         "error": type(exc).__name__})
@@ -3728,8 +4075,12 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     try:
         capability = mint_equity_gate_capability(Path(root) / STORE_DIR, reason=f"the panel look of {fid} v{n}")
         seed = P.look_seed(pinned.receipt_sha256, code_sha)
-        ran = _timed(store, gate, lambda: run_through.look(code, params, name=fid, gate=capability, k=K_BASE,
-                                                           placebos=int(pinned.placebo_draws), seed=seed))
+        # THE CLOCK RULE (`steady_runs`): the sealed run is made again, with the same seed and draws, while its
+        # runtime shows a decide timeout, `CLOCK_RUNS` times at most, `may_run` asked before each; the first with
+        # none is the one read, chosen before its outcome is read.
+        ran = steady_runs(gate, settings, lambda: run_through.look(code, params, name=fid, gate=capability, k=K_BASE,
+                                                                   placebos=int(pinned.placebo_draws), seed=seed),
+                          what="sealed look")
         ended_look = _status(ran)
         if ended_look in elane.NOT_A_TRY:
             raise RunFailed(f"the look's run ended {ended_look}")  # the House could not run it: no look, owed again
@@ -3747,6 +4098,38 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
             except Exception as exc:  # noqa: BLE001 - the sentence is never stated with a hole in it
                 beside = None
                 unstated = f"{SEAT_UNSTATED}: the receipt's sentence could not be filled ({type(exc).__name__})"
+    except _Waits as wait:
+        # A wall or the day's budget between two runs of the clock rule: nothing read, nothing spent, owed again.
+        store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
+        _wait(gate, fid, n, sha, str(wait))
+        return None
+    except ClockUnsteady as exc:
+        # THE HOUSE'S CLOCK: no run of the bound was read, and the sealed run WAS made. It counts as a send of the
+        # sealed run beside one that never returned (`GATE_CLOCK_SPENDS`; E1's `LOOK_SENDS`, one count in
+        # `elane.LOST_KEY`): owed again once, after a backoff; the second time the look is spent and FAILED, so a
+        # program cannot have its sealed read never count.
+        lost = _state(store.family(fid) or {}).get(elane.LOST_KEY)
+        lost = lost if isinstance(lost, Mapping) else {}
+        count = (int(lost.get("count") or 0) if lost.get("sha") == sha else 0) + 1
+        spent = count >= elane.LOOK_SENDS
+        gate_clock_fail(gate, fid, n, "look", str(exc), sealed=True, spent=spent)
+        store.event("swarm.gate", fid, {"action": "look_clock", "version": n, "lane": LANE, "structure": STRUCTURE,
+                                        "count": count, "spent": spent})
+        if not spent:
+            store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True,
+                                        **{elane.LOST_KEY: {"sha": sha, "count": count, "at": store.now(),
+                                                            "clock": True}})
+            _wait(gate, fid, n, sha, f"the House's clock: {str(exc)[:160]}")
+            return None
+        verdict = {"screen": SCREEN_NAME, "passed": False, "status": "clock",
+                   "why": f"the sealed run was sent {count} times and none of it was read (the House's clock, or a "
+                          "run that did not return)"}
+        beside = f"no verdict: {verdict['why']}"
+    except TooSlow as exc:
+        # THE PROGRAM'S: its decide ran past the limit the same way in every run of the bound. The sealed run was made
+        # and none of it can be judged: the look is spent and FAILED, with the measured seconds.
+        verdict = {"screen": SCREEN_NAME, "passed": False, "status": "slow", "why": str(exc)[:300]}
+        beside = f"no verdict: {PROGRAM_FAILS['SLOW']} ({str(exc)[:200]})"
     except RunLost as exc:
         # THE SEALED RUN WAS SENT AND DID NOT RETURN (E1's `LOOK_SENDS`): owed again once; the second time the look is
         # spent and FAILED, so no program is shown its holdout a third time.
@@ -3772,6 +4155,7 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "look",
                                         "error": type(exc).__name__})
         return None
+    gate_clock_clear(store, fid, "look")
     passed = bool(verdict.get("passed"))
     # DUTY 3: no sentence, no seat (a pass whose sentence cannot be stated beside its trades is recorded, never
     # seated); then A22 (1).
@@ -3846,14 +4230,18 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "TRAIN_U_KEY", "PRECHECK_KEY", "PLACEBO_KEY", "HALVES_KEY", "OOF_KEY", "LOOK_KEY", "SEALED", "CPU_KEY",
            "ZERO_KEY", "ALERTS_KEY", "TRAIN_OK_KEY", "STYLE_FIELD", "SEAT_CANDIDATE", "SEAT_STYLE", "SEAT_UNSTATED",
            "MAX_CELL_LOOKS",
+           "ACTIVITY_KEY", "train_activity", "seat_record",
            "PROBE_FILE", "PROBE_VERSION", "PROBE_STRATA", "FOLD_RECORD", "FOLD_HASH_PREFIX", "FOLD_GID0",
            "fold_recording", "fold_hash", "REVIEW_XS", "REVIEW_OBJECTIVE", "REVIEW_SYSTEM", "RESEARCHER_SYSTEM",
            "SETTINGS_KEY", "SCREEN_KEY", "SCREEN_NAME", "DECIDER_LOG", "STORE_DIR", "PANEL_MANIFEST",
            "UNIVERSE_MANIFEST", "DEFAULTS", "BOUNDS", "CENSUS_NOTE_MAX", "CENSUS_LABEL", "SCREEN_NULLS", "PANEL_AGENDA",
            "INPUTS", "BAR_XS", "FAILS_XS", "PROGRAM_FAILS", "JUDGED_XS", "MAP_LABEL", "K_BASE", "K_STRESS",
            "CLOCK_RUNS", "SLOW_SHARE", "TooSlow", "ClockUnsteady", "clock_of", "steady", "one_store", "slicer", "bar_runs",
-           "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "cfg", "pin", "receipt", "mode",
-           "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
+           "GATE_CLOCK_KEY", "GATE_CLOCK_ALERT", "GATE_CLOCK_SPENDS", "OWED", "gate_clock_row", "try_owed",
+           "gate_clock_wait", "gate_clock_fail", "gate_clock_clear", "steady_runs",
+           "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "LOOK_RULES", "LOOK_RULES_BUILT", "A31_HOLD",
+           "look_held", "cfg", "pin", "receipt", "mode",
+           "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "panel_seats", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
            "judged", "identity", "hidden_year_of", "card_errors", "cell_of", "family_cell", "cell_text",
            "closed_cells", "cell_looks", "forward_verdicts", "look_room", "probe_reading", "probed", "style_of",
            "assign", "run_spans", "seen_spans", "hidden_span", "agenda_text", "contract_text", "bar_text",

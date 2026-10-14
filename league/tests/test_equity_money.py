@@ -150,8 +150,10 @@ class TheBounds(unittest.TestCase):
         self.assertTrue(problems(cash_reserve_usd="NaN"))
         for path in ("position_share__etf", "position_share__stock", "invested_share"):
             self.assertIn(f"equity_money.{path.replace('__', '.')} = '0' is outside (0, ", " ".join(problems(**{path: "0"})))
-        # Tightenings are accepted, a zero among them where zero stops the route.
-        for rows in ({"probe__sleeve_share": "0"}, {"probe__max_programs": 0}, {"order_path__max_orders_day": 0},
+        # Tightenings are accepted, a zero among them where zero stops the route. (A Probe sleeve of zero takes the
+        # panel's with it: a panel program's sleeve is never above a Probe's, `TheRowsThatKeepAnOrder`.)
+        for rows in ({"probe__sleeve_share": "0", "panel__sleeve_share": "0"}, {"probe__max_programs": 0},
+                     {"panel__seats": 0}, {"panel__sleeve_share": "0"}, {"order_path__max_orders_day": 0},
                      {"position_share__etf": "0.10"}, {"invested_share": "0.50"}, {"cash_reserve_usd": "200"},
                      {"open_risk_weight__etf": "1.00"}, {"demotion__program_loss_usd": "-25"}, {"demotion__z": "0"},
                      {"sized__min_trades": 1000}, {"sized__kelly_fraction": "0.125"}, {"holds__failed_decides_exit": 1}):
@@ -175,6 +177,21 @@ class TheBounds(unittest.TestCase):
         self.assertTrue(any("equity_money.universe.stock is a list of tickers" in p for p in
                             problems(universe={"etf": [], "stock": "AAPL"})))
         self.assertEqual(problems(universe={"etf": ["SPY", "BRK.B"], "stock": []}), [])
+
+    def test_the_panel_row_is_inside_its_bounds_and_under_the_probe_sleeve(self):
+        """THE PANEL ROW (release E4 step two): at most two seats of its own, a whole count; a sleeve of at most 0.25 x
+        E and never above the Probe's."""
+        self.assertEqual(problems(), [])
+        self.assertIn("equity_money.panel.seats = 3 is outside [0, 2]", problems(panel__seats=3))
+        self.assertIn("equity_money.panel.seats = 1.0 is not a whole count", problems(panel__seats=1.0))
+        self.assertIn("equity_money.panel.sleeve_share = '0.26' is outside [0, 0.25]", problems(panel__sleeve_share="0.26"))
+        self.assertIn("equity_money.panel.sleeve_share = '-0.01' is outside [0, 0.25]",
+                      problems(panel__sleeve_share="-0.01"))
+        self.assertIn("equity_money.panel.sleeve_share (0.10) is above probe.sleeve_share (0.05): a panel program's "
+                      "sleeve is never larger than a Probe's", problems(probe__sleeve_share="0.05"))
+        self.assertEqual(problems(probe__sleeve_share="0.10"), [], "equal is allowed")
+        self.assertEqual(problems(panel__seats=2, panel__sleeve_share="0.25"), [], "the loose ends")
+        self.assertIn("equity_money.panel.seats is missing", problems(panel__seats=None))
 
     def test_the_rows_that_keep_an_order(self):
         self.assertIn("equity_money.holds.default_max_hold_sessions (30) is above holds.max_hold_sessions (20): the "

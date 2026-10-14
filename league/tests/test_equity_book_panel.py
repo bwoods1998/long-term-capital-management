@@ -13,7 +13,14 @@ may exist in a tree that lacks them.
 Other packages are stubbed AT THEIR INTERFACE: package C's universe, ids and ctx constructors are test_xs_book's doubles;
 package D's decider child (the "panel" kind's "decide": the KEEP rule, the standing target's buys, the ineligible lots) is
 `Child` below, written from the contract's words (league/xs/E4_INTERFACES.md, league/xs/engine.py's docstring). Every
-price is invented."""
+price is invented.
+
+THE SLEEVE THESE TESTS SIZE A BASKET FROM. They were written when a panel program took the Probe sleeve, and they pin
+the basket's mechanics (the room, the scaling, the cut buy, the rotation) in the dollars of the Probe sleeve of their
+own table (`PanelCase` reads the panel row as that sleeve: `the_tables_sleeve`). Since release E4's step two a panel
+program's sleeve is the constitution's own row, `equity_money.panel.sleeve_share` (league/equity/bands.py
+`panel_settings`), at most 0.25 x E and never above the Probe's: that row's sizing, its pool of seats and the ETF
+programs' orders beside it are held by league/tests/test_equity_panel_seats.py."""
 
 import datetime as dt
 import hashlib
@@ -280,8 +287,16 @@ class PanelCase(unittest.TestCase):
         patch = XB.fixtures()
         patch.__enter__()
         self.addCleanup(patch.__exit__, None, None, None)
+        row = mock.patch.object(L.B, "panel_settings", self.the_tables_sleeve)
+        row.start()
+        self.addCleanup(row.stop)
         self.h = Harness(self.root)
         self.addCleanup(self.h.state.close)
+
+    def the_tables_sleeve(self, constitution=None):
+        """The panel row these tests read (the module docstring): one panel seat at the Probe sleeve of the harness's
+        own table, read when it is asked (a test may build its harness again at another sleeve)."""
+        return L.B.PanelSettings(1, D(str(self.h.table.equity.probe_sleeve_share)))
 
     def basket(self, symbols=("N000", "N001", "N002", "N003", "N004"), **kw):
         return [self.h.seed(s, **kw) for s in symbols]

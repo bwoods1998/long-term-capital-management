@@ -362,6 +362,22 @@ class ScoreCase(unittest.TestCase):
 
 
 class TheJudgment(ScoreCase):
+    def test_a_passing_version_keeps_ks_train_era_count_sealed(self):
+        """K FOR A BASKET (step two): a pass keeps the seen spans' full-universe k 1.0 runs' close days and sessions
+        under the sealed `ACTIVITY_KEY`; a failing version keeps none."""
+        from league.swarm import elane_seal
+
+        fam = self.family(hidden=2018)
+        self.assertTrue(self.score(fam)["passed"])
+        kept = self.store.family(fam["id"])["state"][elane_xs.ACTIVITY_KEY]
+        base = [c for c in self.world.runner.calls[:12] if c["k"] == 1.0 and c["half"] is None]
+        self.assertEqual(set(kept), {"1"})
+        self.assertEqual(kept["1"]["sessions"], sum(len(F._days(c["start"], c["end"])) for c in base))
+        self.assertIn(elane_xs.ACTIVITY_KEY, elane_seal.SEALED_KEYS)
+        flat = self.family("rev-f", code=F.flat())
+        self.assertFalse(self.score(flat)["passed"])
+        self.assertNotIn(elane_xs.ACTIVITY_KEY, self.store.family(flat["id"])["state"])
+
     def test_a_version_runs_four_runs_a_seen_span_and_the_hidden_year_only_after_its_verdict(self):
         fam = self.family(hidden=2018)
         out = self.score(fam)

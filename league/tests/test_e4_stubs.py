@@ -306,7 +306,7 @@ class TheConstants(unittest.TestCase):
         self.assertEqual(elane_xs.MODES, ("off", "train", "gate", "live"))
         self.assertEqual(elane_xs.DEFAULTS["mode"], "off")
         self.assertEqual(elane_xs.STRUCTURE, "panel")
-        self.assertEqual(len(set(elane_xs.SEALED)), 8)
+        self.assertEqual(len(set(elane_xs.SEALED)), 9)
         self.assertIn(elane_xs.TRAIN_X_KEY, elane_xs.SEALED)
         self.assertIn(elane_xs.TRAIN_U_KEY, elane_xs.SEALED, "the House keeps BOTH Train series (the lineage rule)")
         self.assertIn(elane_xs.PRECHECK_KEY, elane_xs.SEALED)

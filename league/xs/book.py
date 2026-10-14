@@ -978,10 +978,147 @@ def cost_sentence(*, min_dates: Any, loss_usd: Any, sleeve_usd: Any = None) -> s
             "and the kill switch.")
 
 
+# ----------------------------------------------------------------------------- the panel twin, re-basable (A29)
+class TwinAccount:
+    """THE PANEL TWIN RE-BASED ON THE LIVE BASKET (the captain's A29 as registered, applied to the panel twin before any
+    panel twin row exists: release E4 step two; league/ops/forward_xs.py `PanelChain` drives it). The Gym engine's
+    own account (league/xs/engine.py `_Account`: its fills at the official prices, its sizing on the constant-weight
+    book, its fees, corporate actions, vanish rule, House exits, KEEP rule and standing target, nothing re-implemented
+    here) over a twin run's own bars, capital and half-spread multiple, driven session by session from the parent as
+    `engine.run` drives it. NO PROGRAM TEXT RUNS HERE: the account's runner is this object, and each called decision's
+    `Inputs` are built again from the account (`ctx.inputs_from_panel` with the account's own book, as `_Account.close`
+    builds them) and handed to `ask(inputs)`, which answers the decider child's "decide" row for that one called job
+    (league/xs/child.py). `league.xs.engine` is imported here, inside the functions, so the forward record reads it
+    through this module: plumbing, outside the xs identity, and engine.py is not edited (the xs identity does not move).
+    - `advance(j)`: the engine's loop through the close of session index `j` ({ISO day: pick} of the closes run).
+    - `rebase(seed, at=j)`: the account set to the LIVE BASKET as it stood after the close of `j` (`seed`:
+      `league.ops.forward_xs.panel_seed`, in slots and dollars of THIS account's capital): a fresh account in which
+      each seeded lot is bought by the engine in its own entry session at its fill point, carried to that close
+      through the engine's sessions (corporate actions, marks; no decide, no exit rule), then the live decision's
+      buys, sells and House exits as the account's own orders for the next session, its standing target as the
+      account's, and the engine's maximum-hold rule on the seeded lots. Only the BOOK changes: this runner, so the
+      program's one loaded instance and its memory, is the same. -> {"held", "unheld"} (a lot the Gym cannot hold as
+      the live book does is not held: the next session then differs and counts)."""
+
+    def __init__(self, bars: Any, *, needs: Any, params: Mapping[str, Any], capital: Any, k: float,
+                 ask: Callable[[Any], Mapping[str, Any]]):
+        from . import engine as E
+
+        self.bars, self.needs, self.params = bars, needs, dict(params or {})
+        self.capital, self.k, self._ask = Decimal(str(capital)), float(k), ask
+        self.last_failed = False
+        self.acct = self._account()
+        self.first, self.n = int(bars.first), int(self.acct.n)
+        self.j: int | None = None       # the last session index whose close was run
+        self._at: int | None = None
+        self._E = E
+
+    def _account(self) -> Any:
+        from types import SimpleNamespace
+
+        from . import engine as E
+
+        program = SimpleNamespace(needs=self.needs, params=self.params, start=lambda **limits: self)
+        return E._Account(program, self.bars, E.EngineConfig(capital=self.capital, k=self.k))
+
+    def _book(self, acct: Any, j: int) -> dict[str, Any]:
+        """The book a close at `j` hands `ctx.inputs_from_panel`, exactly as `_Account.close` forms it."""
+        room = acct._room()
+        return {"positions": acct._positions(j), "closed": acct._closed_rows(j), "rejects": list(acct.rejects),
+                "cash": float(room), "equity": float(room + acct._value()), "budget": float(acct.capital)}
+
+    def _inputs(self, acct: Any, j: int) -> Any:
+        return X.inputs_from_panel(self.bars, j, needs=self.needs, params=self.params, **self._book(acct, j))
+
+    # ------------------------------------------------------------------------------------- the engine's runner
+    def decide(self, ctx: Any) -> dict[str, Any]:
+        """THE ENGINE'S CALL (`_Account.close` on a decision day): the child's answer for the inputs of this close."""
+        row = self._ask(self._inputs(self.acct, int(self._at)))
+        self.last_failed = bool(row.get("failed"))
+        target = row.get("target")
+        if row.get("hold") or not isinstance(target, Mapping):
+            return {"hold": True}
+        return {"target": {int(slot): float(w) for slot, w in target.items()}, "at": str(row.get("at") or "open")}
+
+    # ------------------------------------------------------------------------------------------- the sessions
+    def advance(self, j: int) -> dict[str, Any]:
+        """`engine.run`'s loop from the session after the last one run through the close of `j`."""
+        acct, picks = self.acct, {}
+        start = self.first - 1 if self.j is None else self.j + 1
+        for t in range(max(start, 0), min(int(j), self.n - 1) + 1):
+            if t >= self.first:
+                acct.session(t)
+                acct.mark_close(t)
+            if t < self.n - 1:
+                self._at = t
+                acct.close(t)
+                if acct.pick is not None:
+                    picks[acct.iso[t]] = acct.pick
+            self.j = t
+        return picks
+
+    def rebase(self, seed: Mapping[str, Any], *, at: int) -> dict[str, int]:
+        E = self._E
+        if self.j is None or int(self.j) != int(at):
+            raise ValueError(f"the twin is re-based after session {at} while it stands at {self.j}")
+        acct = self._account()
+        info = {"held": 0, "unheld": 0}
+        entries: dict[int, list[Mapping[str, Any]]] = {}
+        for lot in seed.get("lots") or ():
+            j = lot.get("entry_index")
+            if not isinstance(j, int) or not self.first <= j <= at or lot.get("slot") is None \
+                    or lot.get("at") not in (E.OPEN, E.CLOSE) or not (lot.get("usd") or 0) > 0:
+                info["unheld"] += 1
+                continue
+            entries.setdefault(j, []).append(lot)
+        mine: dict[Any, int] = {}       # the live lot's id -> the account's
+        for t in range(min(entries), at + 1) if entries else ():
+            wanted = entries.get(t, [])
+            if wanted:
+                # (the cells of the decision behind these entries: the close before them, as the engine reads them)
+                acct.derived, acct.decided = X.derive(self._inputs(acct, t - 1)), t - 1
+                acct.pending = [{"buy_id": int(lot["slot"]), "usd": float(lot["usd"]), "at": lot["at"]}
+                                for lot in wanted]
+            before = set(acct.lots)
+            acct.session(t)
+            acct.mark_close(t)
+            for lid in sorted(set(acct.lots) - before):
+                held = acct.lots[lid]
+                lot = next((x for x in wanted if int(x["slot"]) == held.slot and x["lid"] not in mine), None)
+                if lot is not None:
+                    mine[lot["lid"]] = lid
+        info["held"] = sum(1 for lid in mine.values() if lid in acct.lots)
+        info["unheld"] += sum(len(v) for v in entries.values()) - info["held"]
+        # (2) WHAT THE LIVE BOOK HAD PLANNED for the next session, as the account's own orders.
+        acct.rejects, acct.closed_since, acct.fails = [], [], 0
+        acct.derived, acct.decided = X.derive(self._inputs(acct, at)), at
+        acct.pending = [{"sell": mine[sell["lid"]], "at": sell["at"]} for sell in seed.get("sells") or ()
+                        if sell.get("lid") in mine and mine[sell["lid"]] in acct.lots]
+        acct.pending += [{"buy_id": int(buy["slot"]), "usd": float(buy["usd"]), "at": buy["at"]}
+                         for buy in seed.get("buys") or () if buy.get("slot") is not None and (buy.get("usd") or 0) > 0]
+        acct.house = {}
+        for leave in seed.get("exits") or ():
+            lid = mine.get(leave.get("lid"))
+            if lid in acct.lots:
+                acct.house[lid] = (E.MAX_HOLD, "") if leave.get("reason") == "max_hold" else \
+                    (E.HOUSE, E.INELIGIBLE if leave.get("reason") == E.INELIGIBLE else "")
+        for lot in acct.lots.values():
+            if E._e1.max_hold_due(at - lot.entry_index, self.needs.max_hold_sessions) and lot.lid not in acct.house:
+                acct.house[lot.lid] = (E.MAX_HOLD, "")
+        standing = seed.get("standing")
+        acct.standing = {"target": {int(k): float(w) for k, w in standing["target"].items()},
+                         "at": str(standing.get("at") or E.OPEN)} if isinstance(standing, Mapping) \
+            and standing.get("target") else None
+        acct.exited = {acct.lots[lid].slot for lid in acct.house if lid in acct.lots}
+        acct.pick = None
+        self.acct = acct
+        return info
+
+
 __all__ = ["KIND", "MAX_INTENTS", "FETCH_CHUNK", "FETCH_TICK_S", "KEEP_SESSIONS", "LIVE_BARS_DIR", "MISSING_MAX",
            "HOLD_DAY_FAILS_EXIT", "TAG", "INELIGIBLE", "TWINS_FILE", "TWINS_VERSION", "REBALANCE_STATUS", "AUDIT_STATUS",
            "LABEL", "SCHEMA", "REBALANCE_COLUMNS", "INSTANCE_KIND_COLUMN", "INSTANCE_KIND_DDL", "ColumnsRefused",
            "Columns", "Fetched", "slots", "sessions_through", "columns", "union", "view", "called", "needs_of", "fetch",
            "complete", "bars_sha", "keep", "kept", "same", "eligible", "inputs", "committed", "sleeve_room", "last_called", "standing", "intents",
            "skipped", "target_pairs", "marks", "rebalance_row", "event", "spy_closes", "spy_span", "date_record",
-           "date_t", "cost_sentence"]
+           "date_t", "cost_sentence", "TwinAccount"]

@@ -523,8 +523,18 @@ class TheEquityLane(unittest.TestCase):
             refused = self.tree(constitution={self.probe_row: self.row_at(seats, past)})
             self.assertEqual(refused, [f"league/constitution.py: equity_money.probe.sleeve_share = '{past}' is outside "
                                        "[0, 0.50]"], past)
-        for inside in (*SLEEVES, "0.49", "0"):
+        for inside in (*SLEEVES, "0.49"):
             self.assertEqual(self.tree(constitution={self.probe_row: self.row_at(seats, inside)}), [], inside)
+        # The stop of new Probe lots (0) needs the panel's sleeve at 0 with it (step two's order rule: a panel
+        # program's sleeve is never above a Probe's): nothing moves the panel row by itself, and alone it is refused by
+        # name.
+        panel = 'CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}'
+        self.assertEqual(self.constitution.count(panel), 1)
+        self.assertEqual(self.tree(constitution={self.probe_row: self.row_at(seats, "0"),
+                                                 panel: panel.replace('"0.10"', '"0"')}), [])
+        self.assertEqual(self.tree(constitution={self.probe_row: self.row_at(seats, "0")}),
+                         ["league/constitution.py: equity_money.panel.sleeve_share (0.10) is above probe.sleeve_share "
+                          "(0): a panel program's sleeve is never larger than a Probe's"])
 
     def test_the_seats_are_held_to_their_bound(self):
         """THE SEATS' BOUND (release E5-S, Oct 11, 2026: six): the tree as it stands is inside it; one seat past it is

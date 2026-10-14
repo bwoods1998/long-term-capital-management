@@ -312,17 +312,18 @@ class TheLaneSaysWhereItStands(_Root):
 
         self.family("rev-cand", band="candidate")
         beat = Swarm.panel_status(SimpleNamespace(settings=self.settings, store=self.store))
-        self.assertEqual(beat, {"panel": {"setting": "live", "mode": "live", "why": None}})
+        # (A31: the policy's look rule "hold" holds every look until XS1-R rules, and the heartbeat says so beside)
+        self.assertEqual(beat, {"panel": {"setting": "live", "mode": "live", "why": None, "look": elane_xs.A31_HOLD}})
         self.assertEqual(bands.roster(self.root, lanes=LANES)["seatless"], [])
         self.manifest(i6={"day": FRIDAY.isoformat(), "equal": False, "source": "fetch", "live": {}})
         leg = "the last nightly I6 did not hold (the live ctx is not proved equal to the Gym's)"
         beat = Swarm.panel_status(SimpleNamespace(settings=self.settings, store=self.store))
-        self.assertEqual(beat, {"panel": {"setting": "live", "mode": "gate", "why": leg}})
+        self.assertEqual(beat, {"panel": {"setting": "live", "mode": "gate", "why": leg, "look": elane_xs.A31_HOLD}})
         roster = bands.roster(self.root, lanes=LANES)
         self.assertEqual(roster["seatless"], ["rev-cand"])
         self.assertEqual(roster["seatless_why"], {"rev-cand": f'the panel lane is not live (set "live", it reads "gate"): {leg}'})
         lane = dlane_report.panel_lane(self.root, self.settings)["panel_lane"]
-        self.assertEqual((lane["setting"], lane["mode"], lane["why"]), ("live", "gate", leg))
+        self.assertEqual((lane["setting"], lane["mode"], lane["why"], lane["look"]), ("live", "gate", leg, elane_xs.A31_HOLD))
         self.assertEqual(lane["roster"]["seatless_why"], roster["seatless_why"])
         # The captain's own step down reads so too; and with the switch off nothing of the lane is read or said.
         self.switch({"elane": {"mode": "gate", "birth_share": 0.25, "panel": {"mode": "gate"}}})

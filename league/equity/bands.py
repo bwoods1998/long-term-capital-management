@@ -294,6 +294,42 @@ def seat_settings(constitution: Mapping[str, Any] | None = None) -> SeatSettings
         return SEAT_FALLBACK
 
 
+# --------------------------------------------------------------------------------------------- the panel's own row
+@dataclass(frozen=True)
+class PanelSettings:
+    """`equity_money.panel` as the book reads it (release E4 step two; the constitution's comment under the table):
+    `seats` (the panel programs that may hold a seat at once, a pool of their own beside `probe.max_programs`) and
+    `sleeve_share` (a panel program's sleeve as a share of E)."""
+
+    seats: int
+    sleeve_share: Decimal
+
+
+#: What a table with no readable panel row is read as: NO PANEL SEAT and no panel sleeve (fail closed: a panel program
+#: opens nothing on a row nobody can read). The constitution's own check, `equity_money_problems`, refuses such a
+#: table before any of this runs.
+PANEL_FALLBACK = PanelSettings(0, Decimal(0))
+
+
+def panel_settings(constitution: Mapping[str, Any] | None = None) -> PanelSettings:
+    """(swarm and book) THE PANEL ROW, `equity_money.panel` of `constitution` (None: the one in force), read here so
+    that league/live/money.py (inside the options execution fingerprint) never has to learn it, as `seat_settings`
+    reads the seat rule's block. `PANEL_FALLBACK` when the row is absent, a value cannot be read, the seats are no
+    whole count of 0 to 2, or the sleeve is outside 0 to 0.25 x E or above `probe.sleeve_share`."""
+    if constitution is None:
+        from ..constitution import CONSTITUTION as constitution  # noqa: N811
+    try:
+        row = constitution["equity_money"]["panel"]
+        seats, share = row["seats"], Decimal(str(row["sleeve_share"]))
+        probe = Decimal(str(constitution["equity_money"]["probe"]["sleeve_share"]))
+        if isinstance(seats, bool) or not isinstance(seats, int) or not 0 <= seats <= 2 or not share.is_finite() \
+                or not Decimal(0) <= share <= Decimal("0.25") or share > probe:
+            return PANEL_FALLBACK
+        return PanelSettings(int(seats), share)
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        return PANEL_FALLBACK
+
+
 def close_days(lots: Iterable[Mapping[str, Any]], *, floor: Decimal) -> int:
     """(swarm) K's count over ONE run's lots (league/equity/engine.py's `lots` rows): the number of days on which the
     lots that closed (`exit_day`; a lot still open at the run's end has none and counts nowhere) have entry weights
@@ -486,4 +522,4 @@ def band_for_row(row: Mapping[str, Any]) -> tuple[str, str]:
 __all__ = ["EquityRecord", "sized_up", "sized_sleeve_share", "edm1", "next_band", "band_for_row", "FIRST_COME",
            "ACTIVITY_FREE", "SEAT_RULES", "K_TOLERANCE", "K_PER_SESSIONS", "SeatSettings", "SEAT_FALLBACK",
            "seat_settings", "close_days", "run_sessions", "seat_counts", "seat_k", "SeatFacts", "seat_key", "seat_order",
-           "seat_idle", "seat_yielder", "seat_plan"]
+           "seat_idle", "seat_yielder", "seat_plan", "PanelSettings", "PANEL_FALLBACK", "panel_settings"]

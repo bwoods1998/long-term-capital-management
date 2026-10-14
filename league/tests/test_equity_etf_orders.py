@@ -10,8 +10,9 @@ THE PROOF IS A RECORDED COMPARISON. league/tests/equity_week.py runs the REAL bo
 decider kind over a fake venue and invented prices: the first Monday of the lane the normal way, every way the
 rehearsal of that Monday found a buy can miss, the week and its failing weeks, and programs that sell and buy in one
 window (where B8 held a cut buy back: the five scenarios that differed on the tree before the ruling). Its recorder
-ran them on main 8ab31e32dc77a730d6d3397c222f530294dec632, the release the six programs trade their first session
-under (releases E5-A and E3.1, deployed 22:51Z Oct 11, 2026), and the fixture keeps what the book did: every POST,
+ran them on main 47ed6872ce6c232b743cc556f5540892b9132470: main 8ab31e32 (releases E5-A and E3.1, deployed 22:51Z
+Oct 11, 2026) with PR #543, the Probe sleeve at 0.50 x E (the captain's A32, new lots from Thursday Oct 15, 2026),
+the release the six programs trade under from then; and the fixture keeps what the book did: every POST,
 cancel, fill and alert and the seat rule's every line whole, and a digest of every intent, order, lot and instance
 row, of the book's keys (the seat plan, the open note and the unproven-sale note among them), of every record and
 of every minute's answer, and of the forward record's twin rows, events, nights and readings.
