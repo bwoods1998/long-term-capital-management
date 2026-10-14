@@ -12,12 +12,14 @@ The path (league/xs/E4_INTERFACES.md's packages, in order):
    REAL decider child PROCESS (the decider's "panel" kind; C's store, ctx and program: the program sees salted slots,
    never a ticker), 200 matched placebos a run, the restart check, the style reading (the captain's A22 (1)), then the
    equity review and its audit under the panel rubric on two models (A22 (3));
-4. Validation: `elane.validate` forwards to `elane_xs.validate`: E's pre-check on the residual, both Train series
-   kept (the pre-registration's duty of the House);
-5. the one sealed look: `elane.look` forwards to `elane_xs.look` under the screen XS1 with a FAKE receipt pinned (E's
-   fixture, landed as the real one lands: the file and its pin): E's exact floor, the look run with 999 matched
-   placebos under E1's capability, `screen.verdict` and the receipt's sentence; the family becomes a Candidate proven
-   on the xs identity (E's `adopt_xs` proof, G's `bands.current_xs_evaluator`);
+4. THE CAPTAIN'S A34 (release U): no sealed Validation try and no XS1 look for a panel program, under the captain's
+   switches as the box would hold them ("gate" and above, `look_rule` "xs1"): `elane.try_open` is False, the
+   tournament has no try for it, `elane.look` holds before any run, nothing spent and nothing retired;
+5. the forward pass: a FWD1-R pass of case N, written in the forward screen's place (its permit file and its verdict's
+   sentence: league/ops/forward_screen.py writes both, league/tests/test_forward_screen.py holds the job), made eligible
+   by `elane_forward.step` in the gate's equity round and seated by the PANEL POOL (`elane_xs.forward_seats`, the same
+   round) only once the lane is live: a Candidate of the pool proven on the xs identity in force (G's
+   `bands.current_xs_evaluator`), its forward seat recorded in the transaction that moves its band;
 6. the seat: the lane's effective mode is "live" only with the universe deploy in force, the I6 held and the twin
    marker written; the EquityBook reads the swarm's panel row, seats the Candidate at Probe and makes it an instance of
    kind "panel" (H's patch 12);
@@ -25,12 +27,18 @@ The path (league/xs/E4_INTERFACES.md's packages, in order):
    Monday's open (five limit buys), four hold days (no program code runs), Friday's rotation decision, and the next
    Monday's open (five sales, then five buys), every morning's audit of the bars a decision read;
 8. the readers: B's replay twin of every closed lot at the panel's own half-spread, the Done meter and H's panel lines
-   in the direction report, XS1's sentence beside every live panel trade;
+   in the direction report, FWD1-R's sentence (with A34's two) beside every live panel trade;
 9. the way back: what stops the lane overnight holds the morning's entries; the lane's mode put down one step
    retires the seated program on the lane's own word, and its lots leave at the next open; a switch file that cannot
    be read retires nobody.
 
-WHAT THE TEST WRITES IN ANOTHER PACKAGE'S PLACE, and only that: the contamination probe's permit with the panel strata
+`ThePanelLaneEndToEnd.test_the_historical_route_as_built_seats_nobody_under_a34` keeps the route A34 retired on the
+same real code, as a record: Validation and the one sealed look under XS1 (E's pre-check, E's exact floor, the look
+run with 999 matched placebos under E1's capability, `screen.verdict`, the receipt's sentence), opened for that test
+alone (`elane_xs.A34_FORWARD_ONLY` False); the Candidate the look makes holds no seat once A34 is the House's again.
+
+WHAT THE TEST WRITES IN ANOTHER PACKAGE'S PLACE, and only that: the FWD1-R permit file and its pass's verdict row (the
+forward screen's job writes both, league/ops/forward_screen.py; no forward night is run here), the contamination probe's permit with the panel strata
 (package B's patch 18: its writer is league/ops/contam_xs.py, the plan the probe can be handed; no model is asked
 here, and league/tests/test_contam_xs.py holds the probe with it), and the twin marker (package J's panel night writes
 it, league/ops/forward_xs.py; no forward night runs in this test, so it is written here with that module's own writer:
@@ -76,9 +84,12 @@ if HAVE:
     from league.live.state import LiveState
     from league.ops import dlane_report as DR
     from league.ops import equity_panel as EP
+    from league.ops import forward_screen as FS
+    from league.ops import fwd1_rule as R1
     from league.ops import forward_db, forward_register, forward_xs
     from league.ops import twins as TW
     from league.swarm import bands, elane, elane_folds, elane_xs
+    from league.swarm import elane_forward as EF
     from league.swarm import settings as settings_mod
     from league.swarm.architect import Architect
     from league.swarm.elane_train import EquityResearcher
@@ -109,10 +120,13 @@ E = D("2229")
 PANEL = {"edge_year": 1.0, "signal": "reversal", "n_assets": 60}
 FAKE_RECEIPT = Path(__file__).resolve().parent / "fixtures" / "equity_screen_xs_fake.json"
 #: What the captain's set_swarm.py would write on the House for the lane to trade: every switch of the path.
-#: The captain's switches on the box. `look_rule` "xs1": XS1 as built, the value the captain sets once study XS1-R
-#: rules "as built" (the policy ships "hold": the captain's A31; `test_elane_xs.TheA31LookHold`).
-SWITCHES = {"elane": {"mode": "gate", "birth_share": 0.25, "panel": {"mode": "live", "look_rule": "xs1"}},
+#: The captain's switches on the box. `look_rule` "xs1": XS1 as built, which A34 holds like every other value (the
+#: policy ships "hold"); `elane.fwd1.seats` "on": the forward screen's seat path, the panel's one way to a seat.
+SWITCHES = {"elane": {"mode": "gate", "birth_share": 0.25, "panel": {"mode": "live", "look_rule": "xs1"},
+                      "fwd1": {"mode": "record", "seats": "on"}},
             "dlane": {"mode": "gate"}}
+#: The FWD1-R pass (invented figures: no forward night runs here): checkpoint 5 of the record's forward sessions.
+FORWARD = {"k": 5, "start": "2026-10-16", "t": 2.5, "c_used": 2.06, "g_bp": 3.0, "pnl": 12.0}
 ROUTE = "sail:pro_asap"
 
 #: The architect's program: each week the five names that fell most over the last five sessions, at equal weights.
@@ -533,7 +547,114 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertTrue(bands.equity_proof_current(fam["state"], version))
         return fam
 
+    def held_by_a34(self) -> None:
+        """4. THE CAPTAIN'S A34: under the captain's switches (the lane "live", `look_rule` "xs1") a panel program takes
+        no sealed Validation try and no look; nothing is run, spent or retired."""
+        self.assertIs(elane_xs.A34_FORWARD_ONLY, True, "the House's value")
+        fam, version = self.store.family(SLUG), self.store.version(SLUG, 1)
+        self.assertFalse(elane.try_open(self.store, fam, 1, self.settings))
+        self.assertIsNone(elane.next_try(self.store, fam, self.settings), "the tournament has no try for it")
+        tournament = Tournament(self.store, None, self.settings, clock=self.clock)
+        tournament.xs_runner = self.runner
+        self.assertEqual(elane.validate(tournament, fam, version)["refused"], elane_xs.A34_HOLD)
+        gate = Gate(self.store, None, None, self.settings, clock=self.clock)
+        gate.xs_runner = self.runner
+        self.assertIsNone(elane.look(gate, fam, version, run_sha(version)))
+        self.assertEqual(elane_xs.look_held(self.settings), elane_xs.A34_HOLD)
+        state = self.store.family(SLUG)["state"]
+        self.assertEqual((self.store.looks(), elane.lineage_tries(self.store, SLUG)), ([], []), "nothing spent")
+        self.assertNotIn(elane_xs.PRECHECK_KEY, state)
+        self.assertIsNone(elane_xs.lineage_spent(self.store, self.store.family(SLUG), self.settings))
+        self.assertEqual(self.store.family(SLUG)["band"], "gym")
+
+    def forward_passed(self) -> str:
+        """5. A FWD1-R PASS of case N, in the forward screen's place (its permit file and its verdict's sentence, as
+        league/ops/forward_screen.py writes them; invented figures, the rule's own words), made eligible by the gate's
+        equity round; with the lane not yet live the panel pool leaves it waiting in the Gym band. The lineage."""
+        from league.ops import forward_db, forward_xs
+
+        policy = json.loads((self.repo / "policy.json").read_text(encoding="utf-8"))
+        rule, why = R1.rule(policy)
+        self.assertIsNone(why)
+        fam, version = self.store.family(SLUG), self.store.version(SLUG, 1)
+        lineage = EF.lineage_of(self.store, fam)
+        db = forward_db.open_db(self.root)
+        self.addCleanup(db.close)
+        label = forward_xs.engine_label(db, forward_db.fwd_engine())
+        self.assertIn("+xs.", label, "the registry holds a panel row: the label names the xs identity")
+        pid = int(db.execute("SELECT pid FROM fwd_registry").fetchone()[0])
+        figures = dict(typ="PANEL", case="N", k=FORWARD["k"], start=FORWARD["start"], c_used_value=FORWARD["c_used"],
+                       k_own=None, observed=1, judged=1, expected=0.11)
+        self.words = R1.words(rule, **figures)
+        beside = R1.beside(rule, t=FORWARD["t"], g_bp=FORWARD["g_bp"], pnl=FORWARD["pnl"], drift=None, **figures)
+        fs = FS.open_store(self.root)
+        try:
+            fs.execute("INSERT INTO fwd1_verdicts(lineage, pid, verdict, k, day, c_used, why, beside, words, at) "
+                       "VALUES (?,?,?,?,?,?,?,?,?,?)", (lineage, pid, "pass", FORWARD["k"], "2026-10-09",
+                                                       FORWARD["c_used"], None, beside, self.words, self.clock()))
+            fs.commit()
+        finally:
+            fs.close()
+        row = {"status": "pass", "type": "PANEL", "case": "N", "cell": elane_xs.cell_text(elane_xs.family_cell(fam)),
+               "family": SLUG, "version": 1, "run_sha": run_sha(version), "k": FORWARD["k"], "weak": True,
+               "engine": label, "words": self.words}
+        (self.root / FS.PERMITS).write_text(json.dumps({"version": EF.PERMITS_VERSION, "screen": R1.SCREEN,
+                                                        "receipt": rule.receipt_sha256, "start": FORWARD["start"],
+                                                        "at": "2026-10-11T11:00:00Z", "lineages": {lineage: row}}),
+                                            encoding="utf-8")
+        out = self.gate_round()
+        self.assertEqual(out["forward"]["eligible"], [SLUG], out)
+        self.assertIn("not live", out["forward_panel"]["waits"][SLUG], out)
+        held = self.store.family(SLUG)["state"][EF.STATE_KEY]
+        self.assertEqual((held["eligible"], held["seated"], held["case"]), (True, False, "N"))
+        self.assertEqual(self.store.family(SLUG)["band"], "gym")
+        return lineage
+
+    def gate_round(self) -> dict:
+        """The gate's equity round as the swarm's loop runs it (league/swarm/gate.py `equity_round`)."""
+        gate = Gate(self.store, None, None, self.settings, clock=self.clock)
+        gate.xs_runner = self.runner
+        out: dict = {"held": [], "looked": []}
+        gate.equity_round(out)
+        return out
+
+    def seated_by_the_pool(self) -> dict:
+        """6. The lane is live: the next equity round's panel pool seats the pass (a Candidate proven on the xs
+        identity in force, the forward seat recorded with the band move)."""
+        out = self.gate_round()
+        self.assertEqual(out["forward_panel"], {"seated": [SLUG], "waits": {}}, out)
+        fam, version = self.store.family(SLUG), self.store.version(SLUG, 1)
+        sha = run_sha(version)
+        self.assertEqual(fam["band"], "candidate")
+        self.assertEqual(fam["state"]["banded_evaluator"], {"engine": xidentity.xs_identity()["engine"],
+                                                            "xs_sha256": xidentity.xs_fingerprint(), "run_sha": sha})
+        self.assertTrue(bands.equity_proof_current(fam["state"], version))
+        self.assertTrue(elane_xs.forward_seated(fam))
+        self.assertEqual(self.gate_round().get("forward_panel"), {"seated": [], "waits": {}}, "once")
+        return fam
+
     # --------------------------------------------------------------------------------------------------- the test
+    def test_the_historical_route_as_built_seats_nobody_under_a34(self):
+        """THE RECORD OF THE ROUTE A34 RETIRED, on the same real code: Validation and the one sealed look under XS1
+        (opened for this test alone), whose Candidate holds no seat, no row and no instance once A34 is the House's
+        again, live lane and all."""
+        self.manifest(i6=EP.i6_check(self.store_root, Gateway(self.market()), FRIDAY))
+        self.probe_file()
+        self.born()
+        self.trained()
+        with mock.patch.object(elane_xs, "A34_FORWARD_ONLY", False):
+            self.validated()
+            self.looked()
+        self.twin_marker(FRIDAY)
+        self.assertEqual(elane_xs.mode(self.settings, self.root), "live")
+        roster = bands.roster(self.root, lanes=LANES)
+        self.assertIn(SLUG, roster["seatless"])
+        self.assertEqual(roster["seatless_why"][SLUG], elane_xs.A34_SEATLESS)
+        self.assertEqual([r for r in bands.read(self.root, lanes=LANES, queued=True) if r["family"] == SLUG], [])
+        self.assertEqual(self.gate_round().get("forward_panel"), {"seated": [], "waits": {}},
+                         "no forward pass: the pool has nothing to seat")
+        self.assertEqual(self.store.family(SLUG)["band"], "candidate", "its band is the look's; it holds no seat")
+
     def test_a_bred_panel_program_from_birth_to_the_done_meter(self):
         market = self.market()
         gateway = Gateway(market)
@@ -552,8 +673,8 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.born()
         self.trained()
         self.the_forward_record_registers_it()
-        self.validated()
-        self.looked()
+        self.held_by_a34()
+        lineage = self.forward_passed()
         # NO NAME REACHED THE EVIDENCE CHILD, and none is in what the swarm keeps of the program's runs.
         ops = [m[2] for m in self.child.messages if m[0] == "kind" and m[1] == "panel"]
         self.assertTrue({"needs", "run"} <= set(ops), ops)
@@ -607,16 +728,18 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
             [row] = state.rows("SELECT * FROM eq_rebalances WHERE decided_day=?", (day.isoformat(),))
             return row
 
-        # WITHOUT THE TWIN MARKER a Candidate holds no seat: mode "live" reads as "gate" (no panel night wrote one).
+        # WITHOUT THE TWIN MARKER no forward pass takes a seat: mode "live" reads as "gate" (no panel night wrote one),
+        # so the pool leaves the eligible pass in the Gym band and the book has no panel row.
         tick(SUNDAY, 12, 30)
-        self.assertEqual((self.store.family(SLUG)["band"], state.rows("SELECT id FROM eq_instances")), ("candidate", []))
+        self.assertEqual((self.store.family(SLUG)["band"], state.rows("SELECT id FROM eq_instances")), ("gym", []))
         self.assertEqual(market.bar_calls, [], "and with no panel instance the book fetched nothing")
         self.twin_marker(FRIDAY)
         self.assertEqual((elane_xs.mode(self.settings, self.root), elane_xs.live_ready(self.root, self.settings)),
                          ("live", (True, None)))
+        self.seated_by_the_pool()
         [row] = [r for r in bands.read(self.root, lanes=LANES) if r["family"] == SLUG]
         self.assertEqual((row["structure"], row["lane"], row["band"], row["symbols"]), ("panel", "equity", "candidate", []))
-        self.assertEqual(row["beside"], self.store.family(SLUG)["state"][elane_xs.LOOK_KEY]["beside"])
+        self.assertEqual(row["beside"], self.words, "the forward pass's words beside its row (it took no look)")
 
         # Friday's close, decided on the Sunday deploy: the band decision seats the Candidate at Probe, the instance is
         # of kind "panel", and its first rebalance buys five names at Monday's open.
@@ -786,21 +909,22 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertEqual((done["all"]["running"]["closes"], done["all"]["running"]["lots"],
                           done["all"]["running"]["programs"], done["all"]["running"]["replay_coverage"]),
                          (1, 5, 1, {"matched": 5, "closes": 5, "share": 1.0}))
-        sentence = self.store.family(SLUG)["state"][elane_xs.LOOK_KEY]["beside"]
+        sentence = FS.beside_for(self.root, lineage)
+        self.assertIn(R1.A34_MEMORY, sentence, "A34 (5): why there is no historical look")
         rows = {c["pid"]: c for c in done["all"]["closes"]}
         for lot in closed:
             row = rows[f"eq:{lot.lid}"]
             self.assertEqual((row["lane"], row["label"], row["seeded"]), ("equity", xbook.LABEL, False))
             self.assertEqual(D(str(row["pnl_usd"])), lot.cash.quantize(D("0.01")))
-            # THE HOUSE'S DUTY: XS1's sentence, as its receipt fixes it, beside EVERY live panel trade.
-            self.assertEqual((row["fp"]["screen"], row["fp"]["beside"], row["fp"]["passed"]), ("XS1", sentence, True))
+            # THE HOUSE'S DUTY: the forward pass's sentence, with A34's two, beside EVERY live panel trade.
+            self.assertEqual((row["fp"]["screen"], row["fp"]["beside"], row["fp"]["panel"]), ("FWD1-R", sentence, True))
         panel = report["equity"]["panel"]["programs"][inst]
         self.assertEqual((panel["label"], panel["closed_lots"], panel["open_lots"], panel["close_dates"]),
                          (xbook.LABEL, 5, 5, 1), panel)
         self.assertEqual(D(str(panel["pnl_usd"])), sum((lot.cash for lot in closed), D(0)).quantize(D("0.01")))
         self.assertIsNone(panel["date_t"], "five lots closed on one date are ONE observation: no t of one date")
         self.assertEqual((panel["decisions"], panel["audits"]), ({"planned": 2, "hold": 5}, {"ok": 7}))
-        self.assertEqual(panel["xs1"]["beside"], sentence)
+        self.assertEqual((panel["xs1"]["screen"], panel["xs1"]["beside"]), ("FWD1-R", sentence))
         self.assertIsNone(panel["residual_x"], "the forward record's (package J): it holds no twin row of this "
                                                "instance (no panel night ran here), and none is invented")
         self.assertEqual(panel["owed"], DR.PANEL_OWED)

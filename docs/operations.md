@@ -8,6 +8,59 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release U (Oct 15, 2026): E4 step two with panel seats through FWD1-R only, the SIP gap hand-off: `rel/u`, not deployed
+
+Release U is release T (`rel/e4-fwd1`, PR #546: E4 step one with A32, the forward screen FWD1-R, R-SEC), with the SIP
+gap hand-off (`fix/nightly-sip-gap`, PR #545: **The source gap**, in the CHANGELOG) and E4's step two
+(`feat/equity-e4-step2`: **The panel lane**, below) merged in, plus a change of its own. Step two's probe wiring
+(B1) is not in it (the captain's A34 (4): forward only).
+
+**Panel seats come through FWD1-R only (the captain's A34, 18:42Z Oct 14, 2026, from study XS1-R).** XS1-R's verdict of
+record is D3: no historical XS1 look, forward only (a memory-holding author passes XS1 as built at 10-99%). So the
+House holds the panel's whole historical route in code, never in a setting (`league/swarm/elane_xs.py`
+`A34_FORWARD_ONLY`, as R-SEC holds the sector programs'):
+- **no sealed Validation try** for a panel family (`elane.try_open` False): a sealed pre-check would make its lineage
+  one that reached one, which is never FWD1-R's case N, the one case A34 seats. Nothing is spent and nothing retires
+  on it;
+- **no XS1 look** whatever `elane.panel.look_rule` says ("hold", "xs1" or anything else): the look waits with "A34: no
+  historical XS1 look and no sealed Validation try for a panel program ...", in its gate state, in the heartbeat's
+  `equity.panel.look` and in the direction report's `panel_lane.look`;
+- **a panel seat exists only on a FWD1-R forward pass seated through the panel pool** (`elane_xs.forward_seats`, once
+  an equity round right after `elane_forward.step`, league/swarm/gate.py `equity_round`). `elane_forward.step` makes a
+  case-N panel pass eligible (one a mechanism cell). The pool then makes it a Candidate of the panel pool, proven on
+  the xs identity in force, when it is in the Gym band and not held, the lane is live, the pool has a free seat (the
+  lower of `equity_money.panel.seats`, 1, and `elane.panel.seats`, less the panel families at Probe and the panel
+  Candidates holding a forward seat), `elane_forward.seat_refused` is None (case N, the permit file still listing the
+  pass of that version and run sha, ONE LIVE FORWARD SEAT A MECHANISM CELL over both types), and the verdict's engine
+  label names the equity and xs identities in force. `elane_forward.mark_seated` is written in the transaction that
+  moves the band: both or neither. The roster gives it its row (the verdict's words stand beside it), and the
+  EquityBook seats it at Probe and sizes it by the panel row (0.10 x E). A family once seated on its pass is never
+  seated again by this path;
+- **any other panel Candidate is seatless** (league/swarm/bands.py `equity_seating`): one a historical look made, or
+  a band written by hand, takes no row, no instance and no order, and the roster's `seatless_why` says A34;
+- beside every trade of a panel program seated on a forward pass, the direction report states FWD1-R's sentence for
+  it, which for a panel pass carries A34's two sentences (the zero-edge rate at its checkpoint; why there is no
+  historical look).
+
+**Switches and defaults.** Every one ships off, so release U trades nothing new on its own: `elane.panel.mode` "off",
+`elane.panel.look_rule` "hold" (A34 holds every value anyway), `elane.panel.seats` 2 (it may only lower the row),
+`elane.fwd1.mode` "record" (the job judges; it seats nothing) and
+`elane.fwd1.seats` "off", and the money row `equity_money.panel` {"seats": 1, "sleeve_share": "0.10"}. No panel
+program is seated until a FWD1-R panel pass exists (at the earliest about Fri Oct 23: five forward sessions after the
+pin, A34) AND `elane.fwd1.seats` is "on" AND the panel lane is live (mode "live", the universe deploy, the I6, the twin
+marker). With `elane.fwd1.seats` "off" nothing panel is seated; one seated before the switch went down keeps its seat
+under the money rows' own demotion (as an ETF forward seat does), and `elane.panel.mode` under "live" takes it away
+(league/swarm/elane_xs.py `seat_word`: its lots exit at the next open).
+
+**Identities.** The options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move. The money
+digest and the constitution digest move once, by step two's panel row alone: `5b95d73e` -> `de5ed74e` and `4ef472e1` ->
+`111ede85`, so **the standing grant re-ratifies at the House's start**. The xs identity is `2f0083bc`, release T's
+(step two does not move it).
+
+**Rollback.** Repoint to release T (main of `6b0c41bb`) or to A32's main `47ed6872`; retire every panel family in the
+store first (E4's own rule: a code rollback past E4 retires the panel families first). Before a panel program is
+seated nothing of the panel trades, so the rollback sells nothing.
+
 ## The forward screen FWD1-R (Oct 2026): `feat/equity-fwd1`, not deployed
 
 E3 records every equity program's forward days and judges nothing. **FWD1-R judges them**: a program may take a seat on
@@ -120,6 +173,7 @@ panel seat exists in E4's step one, and the panel seat pool is step two's (`feat
 obligation that pool takes on** (league/xs/E4_INTERFACES.md section 8, item 25): it seats a panel family on a forward
 pass only when `elane_forward.seat_refused(store, fam, settings)` is None and records it with
 `elane_forward.mark_seated` in the same transaction as the band move; `eligible(state)` alone is not the contract.
+**Built in release U** (`elane_xs.forward_seats`; **Release U**, above): the panel pool's one way to a seat.
 
 **Switches and rollback.** `elane.fwd1.mode` "off" stops the job (nothing judged; the forward record goes on);
 `elane.fwd1.seats` "off" stops every effect on the swarm. Without the pin (`elane.forward_screen` absent, or a block
@@ -451,7 +505,10 @@ says "A31: no XS1 look before XS1-R rules" in its gate state, in the heartbeat's
 direction report's `panel_lane.look`. "xs1" is XS1 as built; any value the tree does not implement holds. Validation
 is NOT held: mode "gate" spends each lineage's one try whatever the ruling, so the look runs the night the captain
 sets the value the ruling names. A ruling that names a remedy is built as a new value beside "xs1" (R-c: "xs1-rc"),
-so a look opens only under code that implements it. A TIGHTENING (a spent look is spent). So the order to a first live panel trade is: step
+so a look opens only under code that implements it. A TIGHTENING (a spent look is spent). **XS1-R ruled (the captain's
+A34, Oct 14): no historical look, forward only.** Since release U every value holds, "xs1" included, and Validation
+is held too (`elane_xs.A34_FORWARD_ONLY`; **Release U**, above): a panel program's one path to a seat is a FWD1-R
+forward pass seated through the panel pool. So the order to a first live panel trade is: step
 one (this tree, the lane at "train"), the spreads backfill (about nine nights), the probe's wiring and its Saturdays
 for the route, the universe deploy with the money row, one panel night with the instance's twin, a free seat and
 room in the loss window.

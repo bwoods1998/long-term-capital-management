@@ -340,7 +340,8 @@ Each is a place the two texts had to be reconciled at Step 0; the stub says whic
     the pass of that version and run sha, and AT MOST ONE LIVE FORWARD SEAT A MECHANISM CELL counted over both types),
     and records the seat with `elane_forward.mark_seated(store, fid, settings)` in the transaction that moves its
     band. Reading `elane_forward.eligible(state)` alone is not the contract (the cap would fail: the review's F5). As
-    built, `elane_forward.step` already makes at most one panel pass of a cell eligible at a time.
+    built, `elane_forward.step` already makes at most one panel pass of a cell eligible at a time. **BUILT in release
+    U** (section 20): `league.swarm.elane_xs.forward_seats`.
 
 ## 9. Tests
 
@@ -1021,3 +1022,17 @@ file in the captain's scratch (`e4s2/wiring/`), one for the step-one head and on
 (R-E4b) is generated later from the House's own `tradable.json` (`scripts/gen_universe.py`); nothing here fakes it.
 Owed under a remedy XS1-R may name (R-c: a stated cut-off table and the look rule "xs1-rc"; R-a, R-b; FWD-1): not
 built.
+
+## 20. Release U: panel seats through FWD1-R only, under the captain's A34 (Oct 14, 2026; `rel/u`; not deployed)
+
+Release U is release T (`rel/e4-fwd1` `6b0c41bb`) with the SIP gap hand-off (`66f19b56`) and step two (`ff73ba7a`,
+section 19) merged in. Step two's probe wiring (section 14) is not in it: A34 (4) drops it. The options execution
+fingerprint (b60410ad...), the equity identity (78022ca6...) and the xs identity (2f0083bc...) do not move; the money
+and constitution digests are step two's (de5ed74e..., 111ede85...).
+
+| the piece | as built | where |
+|---|---|---|
+| THE HISTORICAL ROUTE HELD (A34 (1)) | `A34_FORWARD_ONLY` True, code and never a setting: a panel family takes no sealed Validation try (a pre-check would make its lineage one that reached one, never case N) and every look holds whatever `elane.panel.look_rule` says (`A34_HOLD`); nothing spent, nothing retired. The tests of the try and the look as built open them for one test (league/tests/elane_xs_fakes.py `switch_on`, `historical`) | `elane_xs.A34_FORWARD_ONLY`, `A34_HOLD`, `look_held`; league/swarm/elane.py `try_open` |
+| THE PANEL POOL'S SEAT ON A FORWARD PASS (item 25, A34 (2)) | once an equity round after `elane_forward.step`: an eligible, unseated case-N panel pass in the Gym band, the lane live, a free seat of the pool, `seat_refused` None and the verdict's engine label naming the identities in force: `mark_seated` and the Candidate band (the xs proof) in one transaction | `elane_xs.forward_seats`, `_forward_proof`; league/swarm/gate.py `equity_round` |
+| NO SEAT WITHOUT A FORWARD PASS (A34 (1)) | a panel Candidate that holds no forward seat (`forward_seated`) is seatless: no row, no instance, no order; `seatless_why` says `A34_SEATLESS` | `elane_xs.forward_seated`, `seat_refused_a34`; league/swarm/bands.py `equity_seating`, `_a34_seatless` |
+| THE SENTENCE BESIDE A FORWARD-SEATED PANEL TRADE (A34 (5)) | the row's `beside` is the verdict's words; the direction report states FWD1-R's sentence (with A34's two sentences for a panel pass) under the panel's label | league/swarm/bands.py `_read_equity`; league/ops/dlane_report.py `EquityScreens.of` |

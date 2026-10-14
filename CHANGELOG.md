@@ -30,6 +30,39 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
+
+- **What it carries:** release T (`rel/e4-fwd1` `6b0c41bb`, PR #546: E4 step one with A32, FWD1-R, R-SEC), merged with
+  the SIP gap hand-off (`fix/nightly-sip-gap` `66f19b56`, PR #545: the entry below) and E4's step two
+  (`feat/equity-e4-step2` `ff73ba7a`: the entry below, built on step one `6f99652d` with #543), each merge its own
+  commit, then the change below, its own commit. Step two's probe wiring (B1) is not in it (the captain's
+  A34 (4): forward only). The recorded fixture `equity_etf_orders.json` is the A32 record made on main `47ed6872`, the
+  same blob on both sides.
+- **Panel seats through FWD1-R only (the captain's A34)** (`league/swarm/elane_xs.py` `A34_FORWARD_ONLY`,
+  `forward_seats`, `forward_seated`; `league/swarm/bands.py` `equity_seating`; `league/swarm/elane.py` `try_open`;
+  `league/swarm/gate.py` `equity_round`; docs/operations.md, "Release U"). XS1-R ruled D3: no historical XS1 look, forward
+  only. In code, never a setting: a panel family takes no sealed Validation try (a pre-check would make its lineage one
+  that reached one, never FWD1-R's case N) and no look under any `elane.panel.look_rule`, nothing spent and nothing
+  retired. The panel pool seats a panel family only on a FWD1-R case-N pass that `elane_forward.step` made eligible:
+  once an equity round right after the seat path, into a free seat of the pool (the lower of `equity_money.panel.seats`
+  and `elane.panel.seats`, less the panel families at Probe and the forward-seated panel Candidates), while the lane is
+  live, when `elane_forward.seat_refused` is None (one live forward seat a mechanism cell over both types) and the
+  verdict's engine label names the identities in force; `elane_forward.mark_seated` and the band move are one
+  transaction. Any other panel Candidate (one a historical look made) is seatless. With `elane.fwd1.seats` off nothing
+  panel is seated. Beside a forward-seated panel trade: the verdict's words in the row, FWD1-R's sentence (with A34's
+  two) in the direction report. The tests of the try and the look as built stay, opened for one test by the fakes
+  (`elane_xs_fakes.switch_on(..., historical=True)`, the default there); the tests of A34 run the House's value
+  (`league/tests/test_panel_forward_seat.py`); the end-to-end panel test now goes birth, Train, the forward record, a
+  FWD1-R pass, the pool's seat, the live week.
+- **Identities** (both Pythons, from clean detached clones): options execution fingerprint `b60410ad`, equity identity
+  `78022ca6` (unchanged); money digest `5b95d73e` -> `de5ed74e`, constitution digest `4ef472e1` -> `111ede85` (step
+  two's panel row alone); xs identity `2f0083bc` (unchanged).
+- **Switches as shipped:** `elane.panel.mode` "off", `elane.panel.look_rule` "hold", `elane.fwd1.seats` "off",
+  `equity_money.panel` {"seats": 1, "sleeve_share": "0.10"}: nothing panel is seated until a FWD1-R panel pass exists
+  (about Fri Oct 23 at the earliest), the switch is on and the lane is live.
+- **On deploy:** the grant re-ratifies at the House's start (the money digest moved). Rollback: repoint to release T's
+  main `6b0c41bb` or A32's `47ed6872`, panel families retired first.
+
 ### Release T: E4 step one with A32, the forward screen FWD1-R, sector programs forward-only, on `rel/e4-fwd1` (unreleased; to deploy before 12:55Z Thu Oct 15, 2026 so that FWD1-R's clock starts Fri Oct 16)
 
 - **What it carries:** E4 step one merged with A32 (`feat/equity-e4-a32`, PR #544, which carries PR #543: the Probe

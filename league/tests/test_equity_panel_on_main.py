@@ -105,7 +105,13 @@ class APanelFamilyNeverReachesTheSeatPlan(unittest.TestCase):
                 # The roster's report says where the panel Candidate stands and why: seatless, never waiting.
                 roster = bands.roster(root, lanes=LANES)
                 self.assertEqual(roster["seatless"], ["xs-forced-candidate"])
-                self.assertIn("the panel lane is not live", roster["seatless_why"]["xs-forced-candidate"])
+                # (the captain's A34, release U: a panel Candidate that holds no FWD1-R forward seat holds no seat at
+                # all, at any setting; under the route as built the reason is the lane's leg)
+                self.assertEqual(roster["seatless_why"]["xs-forced-candidate"], elane_xs.A34_SEATLESS)
+                with mock.patch.object(elane_xs, "A34_FORWARD_ONLY", False):
+                    built = bands.roster(root, lanes=LANES)
+                self.assertEqual(built["seatless"], ["xs-forced-candidate"])
+                self.assertIn("the panel lane is not live", built["seatless_why"]["xs-forced-candidate"])
                 self.assertEqual(roster["waiting"], ["bred-e-wait"])
 
     def test_the_plan_the_six_seats_the_yield_and_the_orders_are_mains_with_panel_families_in_every_band(self):

@@ -508,23 +508,35 @@ class TheReportSaysThePanelPool(unittest.TestCase):
 class TheSwarmsReaderSeatsByPool(unittest.TestCase):
     """league/swarm/bands.py `equity_seating`: the ETF pool's answer is main's whatever the panel families' bands."""
 
-    def fam(self, fid, band, structure="etf", at=1.0):
-        return {"id": fid, "band": band, "structure": structure, "band_since": None, "state": {"banded_at": at}}
+    def fam(self, fid, band, structure="etf", at=1.0, forward=True):
+        """A roster input. A PANEL family holds its band on a FWD1-R forward pass seated through the panel pool
+        (`forward`; the captain's A34, release U: the only panel seat), unless `forward` is False (a band a historical
+        look made, or one written by hand)."""
+        state = {"banded_at": at}
+        if structure == "panel" and forward:
+            state.update(banded_version=1, elane_forward={"eligible": True, "seated": True, "type": "PANEL", "case": "N",
+                                                          "version": 1, "cell": f"cell-{fid}"})
+        return {"id": fid, "band": band, "structure": structure, "band_since": None, "state": state}
 
     def test_a_panel_probe_costs_no_etf_seat_and_the_panel_pool_has_its_own(self):
-        from league.swarm import bands
+        from league.swarm import bands, elane_xs
 
         etf = [self.fam(f"e{i}", "probe") for i in range(5)] + [self.fam("e-wait", "candidate", at=2.0)]
         panel = [self.fam("p-probe", "probe", "panel"), self.fam("p-a", "candidate", "panel", at=3.0),
-                 self.fam("p-b", "candidate", "panel", at=4.0)]
+                 self.fam("p-b", "candidate", "panel", at=4.0),
+                 self.fam("p-look", "candidate", "panel", at=2.5, forward=False)]   # first in the queue, if it could
         alone = bands.equity_seating(etf, 6, seatable=lambda s: True)
         both = bands.equity_seating(etf + panel, 6, seatable=lambda s: True, panel_seats=2)
         self.assertEqual(alone["seated"], ["e-wait"])
         self.assertEqual(both["seated"], ["e-wait", "p-a"])
         self.assertEqual(both["waiting"], ["p-b"])
+        self.assertEqual(both["seatless"], ["p-look"], "A34: a panel Candidate with no forward seat holds none")
         self.assertEqual(both["probe"], sorted([f"e{i}" for i in range(5)] + ["p-probe"]))
         closed = bands.equity_seating(etf + panel, 6, seatable=lambda s: True, panel_seats=0)
         self.assertEqual((closed["seated"], closed["waiting"]), (["e-wait"], ["p-a", "p-b"]), "0: no new panel seat")
+        with mock.patch.object(elane_xs, "A34_FORWARD_ONLY", False):   # the route as built: the look's Candidate queues
+            built = bands.equity_seating(etf + panel, 6, seatable=lambda s: True, panel_seats=2)
+        self.assertEqual((built["seated"], built["waiting"]), (["e-wait", "p-look"], ["p-a", "p-b"]))
 
     def test_the_swarms_setting_may_only_lower_the_row(self):
         from league.swarm import bands, elane_xs

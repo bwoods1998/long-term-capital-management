@@ -1356,6 +1356,19 @@ class Gate:
         except Exception as exc:  # noqa: BLE001 - the seat path is asked again next round
             self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
                                                   "text": "the forward screen's seat path could not be read"})
+        # THE PANEL POOL'S SEAT ON A FORWARD PASS (the captain's A34, release U; league/swarm/elane_xs.py
+        # `forward_seats`): right after the seat path made a panel pass eligible, the pool seats it into a free seat,
+        # asking `elane_forward.seat_refused` and recording `elane_forward.mark_seated` with the band move; {} with
+        # `elane.fwd1.seats` off
+        try:
+            from . import elane_xs
+
+            panel = elane_xs.forward_seats(self)
+            if panel:
+                out["forward_panel"] = panel
+        except Exception as exc:  # noqa: BLE001 - the pool is asked again next round
+            self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
+                                                  "text": "the panel pool's forward seats could not be read"})
 
     def _equity_look(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
         """One family's turn in the equity round (`equity_round`): a look in flight from a dead process owed again, then

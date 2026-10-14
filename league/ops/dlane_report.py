@@ -2660,6 +2660,21 @@ class EquityScreens:
                # `label` is the lane's.
                "s1x": detail.get("s1x") if detail.get("s1x") is not None else verdict.get("label"),
                "lane_label": detail.get("label") if detail.get("label") in lane_labels else None}
+        held = self.states[family].get("elane_forward")
+        forward = not beside and isinstance(held, Mapping) and held.get("seated") is True and _int(held.get("version")) == n
+        if self.panels.get(family) is not None and forward:
+            # A PANEL PROGRAM SEATED ON A FWD1-R FORWARD PASS (the captain's A34, release U: the one panel seat): it
+            # took no look; its line is its verdict's, which for a panel pass carries A34's two sentences (the
+            # zero-edge rate at its checkpoint, and why there is no historical look: league/ops/fwd1_rule.py
+            # `A34_MEMORY`), under the panel's own label.
+            from . import forward_screen
+
+            beside = forward_screen.beside_for(getattr(self.store, "root", None), str(held.get("lineage") or ""))
+            out.update(screen="FWD1-R", beside=beside, lane_label=PANEL_LABEL, panel=True)
+            if not beside:
+                out["fp_why"] = ("no FWD1-R sentence is recorded for this panel program's forward pass "
+                                 "(league/ops/forward_screen.py records it with the verdict): none is stated")
+            return out
         if self.panels.get(family) is not None:
             # A PANEL PROGRAM (release E4): the screen is XS1 and the line is its receipt's sentence, stated beside
             # EVERY live panel trade (the pre-registration's duty 3), under the panel's own label.
@@ -2669,8 +2684,7 @@ class EquityScreens:
                 out["fp_why"] = ("no XS1 sentence is recorded at this panel program's look (league/swarm/elane_xs.py "
                                  "records it with the look): none is stated")
             return out
-        held = self.states[family].get("elane_forward")
-        if not beside and isinstance(held, Mapping) and held.get("seated") is True and _int(held.get("version")) == n:
+        if forward:
             # THE FORWARD SCREEN FWD1-R: a program seated on a forward pass took no look; its sentence is its verdict's
             # (league/ops/forward_screen.py `beside_for`: the operator's, with its t and its shadow P&L)
             from . import forward_screen

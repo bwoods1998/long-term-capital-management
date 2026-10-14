@@ -15,7 +15,12 @@ What is faked, each to the contract's own shape (league/xs/E4_INTERFACES.md):
   integers, the sentence, the lineage rule in either series), `league.xs.identity`, `league.xs.config.quiet`,
   `league.xs.runner.state_stream`, `league.xs.store.Universe`;
 - the panel manifest, the twin marker and the probe's file, written as JSON under a temporary state root.
-`switch_on(case)` installs them for the life of a test. `PATCHED` says whether package G's patches to E1's and E2's
+`switch_on(case)` installs them for the life of a test. It also OPENS THE HISTORICAL ROUTE AS BUILT
+(`elane_xs.A34_FORWARD_ONLY` False for the life of the test, `historical=False` keeps the House's value): under the
+captain's A34 (release U) no panel program takes a sealed Validation try, an XS1 look or a seat from one on the House,
+and no setting reopens them; the tests of that code (the try, the look, their clocks, rations and records) are kept as
+the record of it, and the tests of A34 itself (league/tests/test_panel_forward_seat.py) run the House's value.
+`PATCHED` says whether package G's patches to E1's and E2's
 files are applied (the integrated tree): where they are not, `switch_on` also gives the store the panel structure as
 patch 1 does, so `elane_xs`'s own functions are tested on either tree; a test that holds a PATCHED file's behaviour
 (the ration's members, the band reader, the dispatches) is skipped until then and says which patch it holds.
@@ -720,10 +725,12 @@ def _members(store: Any, fid: str) -> list[str]:
                                         f"AND structure IN ({marks})", (*lines, *store_mod.EQUITY_STRUCTURES))]
 
 
-def switch_on(case: Any, world: World | None = None) -> World:
-    """Install the fakes for the life of `case` (the module docstring) and return the test's `World`."""
+def switch_on(case: Any, world: World | None = None, *, historical: bool = True) -> World:
+    """Install the fakes for the life of `case` (the module docstring) and return the test's `World`. `historical`: the
+    panel's historical route as built (Validation's try and the look under XS1), which A34 holds on the House, is open
+    for this test (`elane_xs.A34_FORWARD_ONLY` False); False keeps the House's value."""
     world = world or World()
-    patches = [
+    patches = [*([mock.patch.object(elane_xs, "A34_FORWARD_ONLY", False)] if historical else []),
         mock.patch.object(xconfig, "quiet", world.ask_quiet),
         mock.patch.object(xresults, "pooled", pooled), mock.patch.object(xresults, "view", view),
         mock.patch.object(xplacebo, "stat", stat), mock.patch.object(xplacebo, "look_seed", look_seed),

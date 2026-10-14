@@ -83,6 +83,22 @@ THE CAPTAIN'S A22 (from the study's review; binding): BEFORE ANY REAL MONEY ON A
 4. The screen reproduces the study's conformance vectors and one more for the second segment's floor cell alone
    (package E's; `league.xs.screen`).
 
+THE CAPTAIN'S A34 (18:42Z Oct 14, 2026, from study XS1-R; release U): NO HISTORICAL XS1 LOOK AND NO SEAT FROM ONE, FOR
+ANY PANEL PROGRAM; FORWARD ONLY. A memory-holding author passes XS1 as built at 10-99%, so the House holds the whole
+historical route of the panel (`A34_FORWARD_ONLY`, code and never a setting, as R-SEC's `elane.forward_only` is for
+the sector programs): a panel family takes NO sealed Validation try (`elane.try_open`: a sealed pre-check would make its
+lineage one that reached one, never FWD1-R's case N, the one case A34 seats), NO XS1 look (`look_held` holds every
+value of `elane.panel.look_rule`, "xs1" included, with `A34_HOLD`), nothing spent and nothing retired; and A PANEL
+SEAT EXISTS ONLY ON A FWD1-R FORWARD PASS seated through the panel pool (`forward_seats`, once an equity round after
+league/swarm/elane_forward.py `step`): the pool asks `elane_forward.seat_refused` (the switch `elane.fwd1.seats`, case
+N only, the permit file, the run sha, ONE LIVE FORWARD SEAT A MECHANISM CELL) and records the seat with
+`elane_forward.mark_seated` in the transaction that moves the band, only into a free seat of the pool
+(league/swarm/bands.py `panel_pool_seats`) and only while the lane is live (`seatable`). A panel Candidate that holds no
+forward seat (`forward_seated`: one a look made, or a band written by hand) is SEATLESS (league/swarm/bands.py
+`equity_seating`, `A34_SEATLESS`): no row, no instance, no order. With `elane.fwd1.seats` off nothing panel is seated.
+The historical route's code stays as built and its tests stand as the record of it (league/tests/elane_xs_fakes.py
+`switch_on` opens it for the life of one test, never a setting).
+
 Imports nothing of league.live at import time (the panel's own decider is built in `runner`). league.xs is imported
 inside the functions that need it, as E1's `elane` imports league.equity; this module reads the panel manifest and the
 twin marker as JSON (`_manifest`, `_twins`: no numpy), so the live process's band reader (`seatable`) pays a file read.
@@ -200,6 +216,16 @@ CENSUS_NOTE_MAX = 200
 LOOK_RULES = ("hold", "xs1")
 LOOK_RULES_BUILT = ("xs1",)
 A31_HOLD = "A31: no XS1 look before XS1-R rules"
+#: THE CAPTAIN'S A34 (the module docstring): XS1-R ruled D3, no historical look, forward only. While True (the House's
+#: one value: code, never a setting) every panel look holds with `A34_HOLD` whatever `elane.panel.look_rule` says, a
+#: panel family takes no sealed Validation try (league/swarm/elane.py `try_open`), and a panel Candidate without a
+#: forward seat holds none (league/swarm/bands.py `equity_seating`). A remedy that ever reopens a historical route is
+#: new code with its own ruling, never this flag set False on the box.
+A34_FORWARD_ONLY = True
+A34_HOLD = ("A34: no historical XS1 look and no sealed Validation try for a panel program (XS1-R: forward only); its "
+            "only path to a seat is a FWD1-R forward pass, case N")
+A34_SEATLESS = ("A34: a panel program holds a seat only on a FWD1-R forward pass (case N) seated through the panel "
+                "pool; this Candidate holds none")
 #: The label every census note is shown under (E4-SPEC 8.2): the captain's reading of a cell, never evidence.
 CENSUS_LABEL = "in-sample 2010-24, best of 7; not evidence"
 #: `elane.screens.equity_xs` as policy.json ships it: `league.xs.screen.PIN_KEYS` in order, EVERY value a null (a
@@ -419,9 +445,12 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def look_held(settings: Mapping[str, Any] | None) -> str | None:
-    """Why `elane.panel.look_rule` holds every panel look (A31), or None when it names a rule this tree implements
+    """Why every panel look holds: `A34_HOLD` while `A34_FORWARD_ONLY` (the House's value: every `look_rule`, "xs1"
+    included); else why `elane.panel.look_rule` holds it (A31), or None when it names a rule this tree implements
     (`LOOK_RULES_BUILT`). An unknown or malformed value holds, and says so. Never raises (a rule that cannot be read
     holds)."""
+    if A34_FORWARD_ONLY is not False:
+        return A34_HOLD
     try:
         lane = settings.get("elane") if isinstance(settings, Mapping) else None
         raw = lane.get(SETTINGS_KEY) if isinstance(lane, Mapping) else None
@@ -886,6 +915,149 @@ def seatable(root: str | Path) -> Callable[[Any], bool]:
         return word in EQUITY_STRUCTURES
 
     return rule
+
+
+# ----------------------------------------------------------------------- A34: the panel pool's seat on a forward pass
+def forward_seated(fam: Mapping[str, Any] | None) -> bool:
+    """Whether a panel family holds its band on a FWD1-R forward pass seated through the panel pool (`forward_seats`):
+    its state's forward pass (league/swarm/elane_forward.py `STATE_KEY`) eligible, of type PANEL and a case A34 seats,
+    recorded seated (`mark_seated`), and of the version the band proof names (`banded_version`). Under A34 only such a
+    panel Candidate holds a seat (league/swarm/bands.py `equity_seating`). Never raises."""
+    try:
+        from . import elane_forward as EF
+
+        state = _state(fam)
+        held = state.get(EF.STATE_KEY)
+        if not EF.eligible(state) or not isinstance(held, Mapping) or held.get("seated") is not True:
+            return False
+        if held.get("type") != "PANEL" or held.get("case") not in EF.PANEL_CASES:
+            return False
+        banded = state.get("banded_version")
+        return banded is not None and int(banded) == int(held.get("version"))
+    except Exception:  # noqa: BLE001 - a record that cannot be read holds no seat
+        return False
+
+
+def seat_refused_a34(fam: Mapping[str, Any] | None) -> str | None:
+    """Why A34 leaves this panel family seatless (`A34_SEATLESS`), or None: a panel Candidate that holds no forward
+    seat (`forward_seated`) while `A34_FORWARD_ONLY`. A family that is no panel family, or not a Candidate, is never
+    refused here (a Probe or Sized panel family was seated from a Candidate)."""
+    if A34_FORWARD_ONLY is False or not is_panel(fam) or (fam or {}).get("band") != "candidate":
+        return None
+    return None if forward_seated(fam) else A34_SEATLESS
+
+
+def _forward_proof(row: Mapping[str, Any], sha: str) -> dict[str, Any] | None:
+    """The band proof of a panel forward pass (`look`'s own shape: {"engine": XS_ENGINE_VERSION, "xs_sha256", "run_sha"},
+    which league/swarm/bands.py `current_xs_evaluator` judges), or None when the identities in force are not those the
+    verdict was read under: the permit's `engine` is the forward record's label (the panel night's, in league/ops: the
+    equity engine, the first 12 hex of the equity identity, the series, then "xs." and the first 12 of the xs identity
+    once the registry holds a panel row; a label that returned carries "~" and an id). A panel pass whose label names no
+    xs identity is refused (fail closed)."""
+    from ..equity import EQUITY_ENGINE_VERSION
+    from ..xs import XS_ENGINE_VERSION
+    from ..xs.identity import xs_fingerprint
+    from .evaluator import equity_fingerprint
+
+    xs = str(xs_fingerprint())
+    parts = str(row.get("engine") or "").split("~", 1)[0].split("+")
+    if parts[:2] != [EQUITY_ENGINE_VERSION, equity_fingerprint()[:12]] or f"xs.{xs[:12]}" not in parts[2:]:
+        return None
+    return {"engine": XS_ENGINE_VERSION, "xs_sha256": xs, "run_sha": sha}
+
+
+class _NotSeated(Exception):
+    """Inside `forward_seats`' transaction: the record or the band would not move, so nothing is written."""
+
+
+def forward_seats(gate: Any) -> dict[str, Any]:
+    """THE PANEL POOL'S SEAT ON A FORWARD PASS (the captain's A34; B11's contract: league/swarm/elane_forward.py, its
+    docstring's 3, and league/xs/E4_INTERFACES.md section 8 item 25), once an equity round right after
+    `elane_forward.step` (league/swarm/gate.py `equity_round`): {"seated": [family], "waits": {family: why}}; {} with
+    `elane.fwd1.seats` off (NOTHING PANEL IS SEATED). A panel family whose forward pass `elane_forward.step` made eligible
+    and that no pool has seated yet becomes a CANDIDATE OF THE PANEL POOL, proven on the xs identity in force (the band
+    proof `look` writes), when all of these hold: it is in the Gym band and not held by the operator; the lane is live
+    (`seatable`: a seat that cannot trade is no seat; it waits eligible); the pool has a FREE seat (league/swarm/bands.py
+    `panel_pool_seats`, the lower of `equity_money.panel.seats` and `elane.panel.seats`, less the panel families at
+    Probe and the panel Candidates holding a forward seat); `elane_forward.seat_refused` is None (case N, the permit
+    file still listing the pass of that version and run sha, ONE LIVE FORWARD SEAT A MECHANISM CELL over both types);
+    and the verdict's engine label names the identities in force (`_forward_proof`). `elane_forward.mark_seated` is
+    called IN THE TRANSACTION THAT MOVES THE BAND: either both are written or neither. A family once seated on its pass
+    is never seated again by this path (a demotion by the money rows is the money rows'). The roster then gives it its
+    row (`equity_seating`), the EquityBook seats it at Probe and sizes it by the panel row. One family's trouble never
+    stops the others."""
+    from . import bands
+    from . import elane_forward as EF
+
+    store, settings = gate.store, gate.settings
+    if not EF.seats_on(settings):
+        return {}
+    out: dict[str, Any] = {"seated": [], "waits": {}}
+    fams = panel_families(store, alive=True)
+
+    def waiting(fam: Mapping[str, Any]) -> bool:
+        held = _state(fam).get(EF.STATE_KEY)
+        return EF.eligible(_state(fam)) and isinstance(held, Mapping) and held.get("seated") is not True
+
+    asking = sorted((f for f in fams if waiting(f)),
+                    key=lambda f: (_num((_state(f).get(EF.STATE_KEY) or {}).get("at")) or 0.0, str(f["id"])))
+    if not asking:
+        return out
+    root = store.root
+    seats = bands.panel_pool_seats(root)
+    held = {str(f["id"]) for f in fams if f.get("band") == "probe" or (f.get("band") == "candidate" and forward_seated(f))}
+    live = seatable(root)(STRUCTURE)
+    for fam in asking:
+        fid = str(fam["id"])
+        try:
+            fam = store.family(fid) or fam
+            state = _state(fam)
+            if fam.get("retired_at"):
+                continue
+            if fam.get("band") != "gym" or state.get("gate_hold"):
+                out["waits"][fid] = f"in the {fam.get('band')} band" if fam.get("band") != "gym" else \
+                    "held by the operator"
+                continue
+            if not live:
+                out["waits"][fid] = "the panel lane is not live: a forward pass waits eligible for the pool's seat"
+                continue
+            if len(held) >= seats:
+                out["waits"][fid] = (f"the panel pool has no free seat ({len(held)} of {seats} held: "
+                                     "equity_money.panel.seats, elane.panel.seats)")
+                continue
+            why = EF.seat_refused(store, fam, settings)
+            if why is not None:
+                out["waits"][fid] = why
+                continue
+            pass_ = state[EF.STATE_KEY]
+            row = (EF.permits(root) or {}).get(str(pass_.get("lineage") or "")) or {}
+            version = store.version(fid, pass_.get("version"))
+            from .gate import run_sha
+
+            sha = run_sha(version)
+            proof = _forward_proof(row, sha)
+            if proof is None:
+                out["waits"][fid] = "the equity or xs identity moved after the verdict was read"
+                continue
+            n = int(version["n"])
+            try:
+                with store.atomic():
+                    if not EF.mark_seated(store, fid, settings):
+                        raise _NotSeated("the forward seat could not be recorded")
+                    store.set_state(fid, banded_version=n, banded_sha=version.get("sha"), banded_at=gate.clock(),
+                                    banded_evaluator=proof)
+                    if store.set_band(fid, "candidate", reason=f"passed the FWD1-R forward screen (PANEL, case "
+                                                               f"{pass_.get('case')}): the panel pool's seat (A34)") \
+                            is None:
+                        raise _NotSeated("the band did not move")
+            except _NotSeated as exc:
+                out["waits"][fid] = str(exc)
+                continue
+            held.add(fid)
+            out["seated"].append(fid)
+        except Exception as exc:  # noqa: BLE001 - the next round asks again; the one transaction wrote nothing
+            out["waits"][fid] = f"could not be read ({type(exc).__name__})"
+    return out
 
 
 # ----------------------------------------------------------------------------------------------- families and records
@@ -3589,6 +3761,8 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
         return {**out, "refused": "not a panel family"}
     if MODES.index(mode(settings, store.root)) < MODES.index("gate"):
         return {**out, "refused": "the panel lane's gate is closed (elane.panel.mode, the pinned receipt, the spreads)"}
+    if A34_FORWARD_ONLY is not False:
+        return {**out, "refused": A34_HOLD}  # the captain's A34: no sealed try for a panel program (`elane.try_open`)
     if not elane.try_open(store, fam, n, settings):
         return {**out, "refused": elane.SPENT_TRY}
     if not version.get("code"):
@@ -4240,6 +4414,7 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "GATE_CLOCK_KEY", "GATE_CLOCK_ALERT", "GATE_CLOCK_SPENDS", "OWED", "gate_clock_row", "try_owed",
            "gate_clock_wait", "gate_clock_fail", "gate_clock_clear", "steady_runs",
            "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "LOOK_RULES", "LOOK_RULES_BUILT", "A31_HOLD",
+           "A34_FORWARD_ONLY", "A34_HOLD", "A34_SEATLESS", "forward_seated", "seat_refused_a34", "forward_seats",
            "look_held", "cfg", "pin", "receipt", "mode",
            "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "panel_seats", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
            "judged", "identity", "hidden_year_of", "card_errors", "cell_of", "family_cell", "cell_text",

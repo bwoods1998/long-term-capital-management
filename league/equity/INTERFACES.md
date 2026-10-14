@@ -1442,7 +1442,10 @@ at 0.10 x E.
 - **The swarm** (league/swarm/bands.py): `equity_seating(fams, seats, *, seatable, panel_seats=0)` seats a pool at
   a time; `panel_pool_seats(root)` is the lower of the row and `elane_xs.panel_seats(root)` (`elane.panel.seats`,
   0 to 2, default 2: it may only lower the row); `roster` adds `panel_seats`. league/equity/families.py:
-  `EquityFamilies.panel_seats()`, `MemoryEquityFamilies(panel_seats=None)`.
+  `EquityFamilies.panel_seats()`, `MemoryEquityFamilies(panel_seats=None)`. RELEASE U (the captain's A34): a panel
+  Candidate holds a seat of the pool ONLY when the swarm seated it on a FWD1-R forward pass
+  (league/swarm/elane_xs.py `forward_seats`, `forward_seated`); `equity_seating` leaves any other seatless, so the book
+  never sees a row of one.
 - **10** (CHANGES; ops, league/ops/dlane_report.py): `equity_panel_note(constitution=None)` (`EQUITY_PANEL_SENTENCE`,
   `EQUITY_PANEL_BARE`, `EQUITY_PANEL_NOTE`); `equity_seats` adds `panel` {statement, rule, seats, as_of, holders,
   waiting, held_seats} when the book's plan holds the panel pool's.

@@ -46,6 +46,11 @@ ETF case N, bar 2.61, labelled WEAK) under `elane.fwd1.seats` "on" (league/swarm
 setting: widening `elane.universe` past the four index ETFs therefore opens no historical look on 2025 for a sector,
 bond or gold fund (a 2026 author remembers those years). Panel families are not affected (A34 governs them).
 
+A34, PANEL PROGRAMS ARE FORWARD-ONLY (the captain's ruling on study XS1-R, 18:42Z Oct 14, 2026; release U): a panel
+family takes no sealed Validation try either (`try_open` False while league/swarm/elane_xs.py `A34_FORWARD_ONLY`),
+and its look holds (`elane_xs.look_held`); its only path to a seat is a FWD1-R forward pass of case N seated through
+the panel pool (`elane_xs.forward_seats`). Code, never a setting, as R-SEC.
+
 THE ROUNDS RUN ON THEIR OWN (A3: no Gym box, no model dollar). The swarm's main loop starts the two equity rounds below on
 their own thread every `ROUND_SECONDS` while the lane is on (league/swarm/loop.py `Swarm.equity_rounds`: the
 tournament's step, then the gate's, so a version validated in a round takes its look in the same round). Neither the
@@ -840,13 +845,19 @@ def forward_only(fam: Mapping[str, Any] | None) -> bool:
 
 def try_open(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any] | None) -> bool:
     """Whether version `n` may take its lineage's Validation try (one a lineage; R3's retry only when permitted). A
-    lineage the FWD1-R forward screen judges takes none while its seats are on (league/swarm/elane_forward.py), and a
-    family trading outside the index ETFs takes none at all (R-SEC, `forward_only`)."""
+    lineage the FWD1-R forward screen judges takes none while its seats are on (league/swarm/elane_forward.py), a
+    family trading outside the index ETFs takes none at all (R-SEC, `forward_only`), and neither does a PANEL family
+    (the captain's A34, league/swarm/elane_xs.py `A34_FORWARD_ONLY`: a sealed pre-check would make its lineage one that
+    reached one, never FWD1-R's case N; nothing is spent and nothing retires on it)."""
     try:
         if lane_of(store, fam) is None:
             return False
         if forward_only(fam):
             return False  # R-SEC: forward-only, whatever elane.fwd1.seats and the permit file say
+        from . import elane_xs
+
+        if elane_xs.is_panel(fam) and elane_xs.A34_FORWARD_ONLY is not False:
+            return False  # A34: a panel program is forward-only, whatever elane.panel.mode and look_rule say
         from . import elane_forward
 
         if elane_forward.try_refused(store, fam, settings) is not None:

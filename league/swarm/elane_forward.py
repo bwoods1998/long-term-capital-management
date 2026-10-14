@@ -28,6 +28,9 @@ WITH IT ON:
      of a cell, not to the luckiest of many);
    - a PANEL lineage: ELIGIBLE ONLY. No panel seat exists in E4's step one; the panel seat pool is step two's
      (branch feat/equity-e4-step2, B3). This module records the eligibility (`STATE_KEY`) and moves no panel band.
+     RELEASE U wires the pool (league/swarm/elane_xs.py `forward_seats`, asked right after `step` in the same round):
+     it asks `seat_refused` and calls `mark_seated` in the transaction that moves the band, into a free seat of the
+     panel pool only; under A34 it is the one way a panel program takes a seat.
      ONLY CASE N (the captain's A34, 18:42Z Oct 14: "a panel program's only path to money is FWD1-R case N"): a
      panel pass of case XS1 is recorded by the job and never made eligible here. AT MOST ONE A MECHANISM CELL here
      too: a panel pass waits while another family of its cell holds the cell's forward eligibility or seat

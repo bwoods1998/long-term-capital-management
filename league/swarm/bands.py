@@ -110,7 +110,10 @@ fingerprint of the RUNNING release's files (`_xs_sha`, `current_xs_evaluator`), 
 `xs_evaluator`. No panel row is returned when that fingerprint cannot be computed (`strict`: `EquityUnreadable` while
 a panel family is in a running band), and `equity_proof_current` judges a proof by the engine it names. A panel
 Candidate is seatable only while the panel lane's effective mode is "live" (`elane_xs.seatable(root)`, handed to
-`equity_seating`); its row's `beside` is XS1's sentence, stated beside every live panel trade. A SEATED PANEL FAMILY
+`equity_seating`); its row's `beside` is XS1's sentence, stated beside every live panel trade, or for a program seated
+on a FWD1-R forward pass its verdict's words (league/swarm/elane_forward.py `STATE_KEY`). UNDER THE CAPTAIN'S A34
+(release U) THAT IS THE ONE PANEL SEAT: a panel Candidate holds a seat only when the panel pool seated it on a forward
+pass (`elane_xs.forward_seated`, `elane_xs.forward_seats`); any other panel Candidate is seatless. A SEATED PANEL FAMILY
 HAS A ROW ONLY WHILE THE LANE IS LIVE TOO (`_read_equity`): at Probe or Sized with the lane's mode put down, or a leg
 of `elane_xs.live_ready` failed (the nightly I6, the twin marker, the universe, the store's freshness), it has no row,
 so the book opens nothing for it. `equity_seat_withdrawn` is the store's word on its instance: "demoted" ONLY when the
@@ -319,15 +322,42 @@ def equity_seating(fams: Sequence[Mapping[str, Any]], seats: int, *, seatable: A
     0: no new panel seat). A panel family never takes, holds or yields an ETF seat, so the ETF pool's answer is main's
     whatever the panel families' bands. `seatable` (RELEASE E4): the seat rule by structure; the callers that hold
     the state root pass `elane_xs.seatable(root)`, under which a PANEL Candidate is seatable only while the panel
-    lane's effective mode is "live" (otherwise it is seatless: no row, so no instance and no order)."""
+    lane's effective mode is "live" (otherwise it is seatless: no row, so no instance and no order). THE CAPTAIN'S A34
+    (release U): a panel Candidate holds a seat ONLY on a FWD1-R forward pass seated through the panel pool
+    (`elane_xs.forward_seated`); any other panel Candidate (one a historical look made, a band written by hand) is
+    seatless whatever the pool's room (`_a34_seatless`, failing closed)."""
     etf = [f for f in fams if str(f.get("structure") or "") != "panel"]
     panel = [f for f in fams if str(f.get("structure") or "") == "panel"]
     out = seating(etf, equity_seats(seats), seatable=seatable)
     if panel:
-        theirs = seating(panel, equity_seats(panel_seats), seatable=seatable)
+        refused = _a34_seatless(panel)
+        theirs = seating([f for f in panel if str(f["id"]) not in refused], equity_seats(panel_seats),
+                         seatable=seatable)
+        theirs["seatless"] = sorted(theirs["seatless"] + sorted(refused))
         out = {key: sorted(out[key] + theirs[key]) if key in ("probe", "waiting", "seatless") else out[key] + theirs[key]
                for key in out}
     return out
+
+
+def _a34_words() -> str:
+    """`elane_xs.A34_SEATLESS`, or the same rule in words when the panel lane's module cannot be read."""
+    try:
+        from . import elane_xs
+
+        return elane_xs.A34_SEATLESS
+    except Exception:  # noqa: BLE001 - words only
+        return "A34: a panel program holds a seat only on a FWD1-R forward pass (case N)"
+
+
+def _a34_seatless(panel: Sequence[Mapping[str, Any]]) -> set[str]:
+    """The panel Candidates A34 leaves seatless (`elane_xs.seat_refused_a34`): every one that holds no forward seat.
+    When the panel lane's module cannot be read, every panel Candidate (fail closed)."""
+    try:
+        from . import elane_xs
+
+        return {str(f["id"]) for f in panel if elane_xs.seat_refused_a34(f) is not None}
+    except Exception:  # noqa: BLE001 - no rule read: no panel Candidate seated
+        return {str(f["id"]) for f in panel if f.get("band") == "candidate"}
 
 
 def panel_pool_seats(root: str | Path) -> int:
@@ -443,6 +473,8 @@ def _seatless_why(root: str | Path, fams: Sequence[Mapping[str, Any]], seatless:
         state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
         if _finite(state.get("banded_at")) is None:
             out[str(fid)] = "its band names no time it was banded at"
+        elif str(fam.get("structure") or "") == "panel" and str(fid) in _a34_seatless([fam]):
+            out[str(fid)] = _a34_words()
         elif str(fam.get("structure") or "") == "panel":
             if panel is None:
                 try:
@@ -826,6 +858,13 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
         symbols = [str(r).upper() for r in loads(fam["roots"], []) or []]
         look_key = "elane_xs_look" if panel else elane.LOOK_KEY  # `elane_xs.LOOK_KEY`: XS1's sentence beside its trades
         looked = state.get(look_key) if isinstance(state.get(look_key), Mapping) else {}
+        if panel and not looked.get("beside"):
+            # A34 (release U): a panel program seated on a FWD1-R forward pass took no look; the verdict's words
+            # (league/swarm/elane_forward.py `STATE_KEY`, ids and words only) stand beside its trades
+            from .elane_forward import STATE_KEY as FORWARD_KEY
+
+            held = state.get(FORWARD_KEY) if isinstance(state.get(FORWARD_KEY), Mapping) else {}
+            looked = {"beside": held.get("words")} if held.get("seated") is True else looked
         # THE SEAT RULE (`queued`): the book's plan decides a Candidate's seat ("queue"), from these two fields.
         extra = {"passed_at": _finite(state.get("banded_at")),
                  "seat_activity": elane.seat_activity(state, int(v["n"]), sha)} if queued else {}
