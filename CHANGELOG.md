@@ -30,6 +30,40 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### Release FWD1-R, the forward screen: one verdict a lineage on the sessions after its code and the screen were pinned, on `feat/equity-fwd1` (unreleased; cut from `feat/equity-e4-m3` at `6f99652d`; the captain's A33; no identity moves: the options execution fingerprint, the equity identity, the money digest and the constitution digest are `6f99652d`'s; ships with the seat path OFF)
+
+- **What it adds** (docs/operations.md, "The forward screen FWD1-R"): the judge E3 left for a later release. A lineage
+  of the forward registry, judged on a representative fixed before its first forward day, passes at the first of the
+  checkpoints 5, 10, 15, 20, 30, 40, 60 counted forward sessions where its t (haircut daily series, mean / sd x
+  sqrt(k)) reaches c_used = max(c_G, its own floor + 0.05) with both sums above zero (PANEL: and at most 119 of 999
+  matched placebo portfolios at or above it); none by 60 is a fail for good. c_G: PANEL never-looked 2.06, PANEL with
+  an XS1 look 3.16 (D2's 3% beside the look's 12%), ETF never-looked 2.61 (WEAK). No verdict for an ETF lineage with
+  an S1/S2 look. Contamination of the judged sessions is zero by construction.
+- **The receipt v2** (`docs/benchmarks/forward_screen_fwd1.json`, sha `e0ef05f9`): the study FWD1-1014's own code at
+  the adopted bars on its Train-era arrays (it reproduced the study's pinned bars first; at 2.06 every figure equals
+  the study's receipt v1). Worst-regime FP at zero edge (point / 97.5% bound): PANEL N 11.8% / 12.5%, PANEL XS1 2.4% /
+  2.6% (with the look, at most 15%), ETF N 2.8% / 5.5% (no family or regime cell over 15%). Power like for like (the
+  haircut in both): PANEL N +20%/yr 48.8% against 9.0% at zero edge by 60; ETF N +10%/yr 2.4% against 1.4%. Its
+  conformance vectors: `league/tests/fixtures/forward_screen_fwd1_vectors.json`.
+- **The pin starts the clock:** policy.json `elane.screens.forward` (the sha and every printed figure; CI holds both
+  to the file). FWD1_START = the session after the first close after the release carrying it began running.
+- **The job** `forward_screen` (after `forward_shadow` and `forward_xs`): its own append-only
+  `<state>/forward-screen.sqlite`, the permit file of ids and words the swarm reads, the operator's report with the
+  registry's expected zero-edge passes against the observed and each pass's sentence. One guarded call in E3's night
+  (`forward_shadow._attempt`) writes each day's lot sides for the haircut. policy.json `elane.fwd1.mode` "record".
+- **The seat path, BUILT AND OFF** (`league/swarm/elane_forward.py`, FORBIDDEN, in `PENDING_GATEWAY` for the gateway's
+  merge-list follow-up): `elane.fwd1.seats` "off". On: a FWD1-judged lineage takes no sealed Validation try
+  (`elane.try_open`); an ETF pass becomes a Candidate through the roster's own seat rule, one live forward seat a
+  mechanism cell (`gate.equity_round`); a panel pass is made eligible only (no panel seat in E4 step one: the pool is
+  step two's, `feat/equity-e4-step2` B3). The new family-state key `elane_forward` is sealed from every generator.
+- **The loosening, stated (A33):** E3 pre-registered its forward gate at 20/60/120/250 sessions and 3%; FWD1-R reads
+  from 5 sessions at the goal's 15% for never-looked lineages. Cost: most early passes are luck (45% of zero-edge
+  panel passes come at checkpoint 5), panel power at +10%/yr by 60 lower than with a first checkpoint at 20, and an
+  ETF forward pass says almost nothing about skill.
+- **Stated limits:** the panel placebo leg draws on one panel run over the judged sessions started flat at
+  FWD1_START (a span other than the k judged sessions fails the leg closed); the fill gap is modelled until live lots
+  measure it; the representative's own floor needs its Train-era runs in the job's own decider child, once.
+
 ### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 
 - **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
