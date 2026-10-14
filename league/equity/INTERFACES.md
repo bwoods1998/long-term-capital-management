@@ -1219,20 +1219,20 @@ code, test or document names the pair in force outside the places that step writ
 section differ, this section is the code.
 
 <!-- equity-design:begin -->
-THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
-(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.125 x E.
-A lot in every seat asks for 0.75 x E of ETFs; the lane holds at most 0.75 x E of them, 0.15 x E of
-open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 4 whole lots fit; the
-next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 6 of
+THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.50 x E
+(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.25 x E.
+A lot in every seat asks for 1.50 x E of ETFs; the lane holds at most 1.00 x E of them, 0.20 x E of
+open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 2 whole lots fit; the
+next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 3 of
 6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,666.
-Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
+4 of 6 in the $400 window alone; the window alone holds all 6 up to E = $1,333.
+Whole sleeves (programs that hold several ETFs) ask for 3.00 x E; the lane holds at most 1.00 x E,
 0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
-the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
-equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
-collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
+the equity lots: $400 - 0.20 x E against the one-ETF lots above. The gateway's day line (4x
+equity of buys a day, a cancelled one too) admits 16 sends of such a lot: 3 entries can each climb the
+collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.50 x E and
 0.50 x E.
-Money digest `11a1dc0c`, full digest `00c2bf6f` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8c226cf1` / `def9f80f`.
+Money digest `5b95d73e`, full digest `4ef472e1` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8c226cf1` / `def9f80f`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of
