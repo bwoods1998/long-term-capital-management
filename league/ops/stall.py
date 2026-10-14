@@ -63,7 +63,9 @@ dead nightly reached a ledger row no mail carries):
   that named no day and no owner step) it names the day the controller retries and its short roots (`nightly.json` `retrying`) once it
   has retried that day `NIGHTLY_RETRY_HOURS` (6), and it is the owner's step once the day the nightly owes has been due
   `NIGHTLY_OWED_HOURS` (36) with no day completed in as long: the House hands a source gap off by itself within a day
-  (scripts/data/nightly.py), so a day owed that long needs a fix the House cannot make.
+  (scripts/data/nightly.py), so a day owed that long needs a fix the House cannot make. A hand-off the nightly has
+  scheduled (`retrying.handoff_at`: a deploy's first try starts the 6 h again) holds that step back until
+  `HANDOFF_GRACE` (1 h) past it, and never once the day has been owed `NIGHTLY_OWED_CAP_HOURS` (72).
 
 THE NO-CAPTAIN CAUSES (Oct 10, 2026; the no-captain audit of every hand intervention from Oct 7 to Oct 10: each of these
 was found by the captain reading the log, never by an alarm):
@@ -207,6 +209,10 @@ NIGHTLY_ERROR_HOURS = 6.0
 #: its short roots; the day the nightly owes due this long, with no day completed in as long, is the owner's step.
 NIGHTLY_RETRY_HOURS = 6.0
 NIGHTLY_OWED_HOURS = 36.0
+#: A hand-off the nightly has scheduled (`retrying.handoff_at`) holds the owed day's owner step back until this long past
+#: it, and never once the day has been owed `NIGHTLY_OWED_CAP_HOURS`.
+HANDOFF_GRACE = 3600.0
+NIGHTLY_OWED_CAP_HOURS = 72.0
 #: The direction lane's report (league/ops/dlane_report.py, written at the House's start, daily at 01:30Z and 30 minutes
 #: before each open).
 DLANE_REPORT = "dlane-report.json"
@@ -1045,6 +1051,7 @@ def forward_facts(root: str | Path) -> dict[str, Any]:
         retry = record.get("retrying")
         if isinstance(retry, Mapping) and retry.get("day") and out["error"] is not None:
             out["retrying"] = {"day": str(retry["day"]), "since": retry.get("since"), "attempts": retry.get("attempts"),
+                               "handoff_at": retry.get("handoff_at"),
                                "roots": [str(r) for r in retry.get("roots") or [] if isinstance(r, str)][:8],
                                "gaps": [g for g in retry.get("gaps") or [] if isinstance(g, Mapping)][:8]}
     if out["stop_marker"] is not None:
@@ -1858,6 +1865,11 @@ def _forward_check(now: float, forward: Mapping[str, Any] | None, error_since: f
     done_at = max([t for t in (S.epoch(f.get("completed_at")), S.epoch(f.get("ready_at"))) if t is not None], default=None)
     owed_long = (due is not None and now - due >= NIGHTLY_OWED_HOURS * 3600
                  and (done_at is None or now - done_at >= NIGHTLY_OWED_HOURS * 3600))
+    # The House's own way out: the hand-off it has scheduled (`retrying.handoff_at`) holds the owner step back until an
+    # hour past it, and never past `NIGHTLY_OWED_CAP_HOURS` owed (a source that keeps changing its packet).
+    handoff = S.epoch(retry.get("handoff_at")) if retry else None
+    scheduled = (owed_long and handoff is not None and now < handoff + HANDOFF_GRACE
+                 and now - due < NIGHTLY_OWED_CAP_HOURS * 3600)
     roots = _short_roots(retry)
     parts = []
     if late:
@@ -1869,11 +1881,13 @@ def _forward_check(now: float, forward: Mapping[str, Any] | None, error_since: f
         parts.append(f"the nightly's record has carried an error for {_hours(now - float(error_since))} h "
                      f"({str(f.get('error'))[:120]})")
     if owed_long:
-        parts.append(f"no forward day has completed in the {_hours(now - due)} h since {owed} fell due")
+        parts.append(f"no forward day has completed in the {_hours(now - due)} h since {owed} fell due"
+                     + (f"; the House hands {', '.join(retry.get('roots') or []) or 'the short roots'} to the forward gap "
+                        f"ledger at {S.iso(handoff)} if their SIP packets stay unchanged" if scheduled else ""))
     if stopped:
         parts.append(f"a nightly stop ({marker!r}) has stood {_hours(now - float(stop_since))} h")
     steps = []
-    if owed_long:
+    if owed_long and not scheduled:
         steps.append(f"the nightly owes {owed}{f' ({roots})' if roots else ''} and has completed no day in "
                      f"{_hours(now - due)} h: read data/nightly.json (error, retrying) and data/images.json forward_days. "
                      "The House hands a SIP source gap off by itself within a day, so this needs a fix it cannot make")
@@ -1897,6 +1911,7 @@ def _forward_check(now: float, forward: Mapping[str, Any] | None, error_since: f
                     "retrying_hours": None if retry_since is None else round((now - retry_since) / 3600, 2),
                     "retrying_attempts": (retry or {}).get("attempts"),
                     "owed_hours": None if due is None else round(max(0.0, now - due) / 3600, 2),
+                    "handoff_at": None if handoff is None else S.iso(handoff),
                     "source_incomplete": f.get("source_incomplete")},
         "doing": ("The House's supervisor keeps the nightly daemon alive while no stop stands and it retries a failed night "
                   "every five minutes. A root whose SIP packet the source serves unchanged for 6 h and past the next "
@@ -2155,7 +2170,7 @@ __all__ = ["run", "checks", "swarm_facts", "owner_deploy", "pause_facts", "grant
            "VALIDATION_HOURS", "BRAKE_WINDOW_HOURS", "BRAKED_HOURS", "RUNWAY_DAYS", "PAUSED_HOURS", "OWNER_EVERY_SECONDS",
            "INFO_EVERY_SECONDS", "WARN_EVERY_SECONDS", "STATE_FILE", "deploy_flight", "dlane_facts", "preopen_facts",
            "forward_facts", "last_session_before", "OWNER_DEPLOY_GRACE", "DEPLOY_FLIGHT_SECONDS", "NIGHTLY_STOP_HOURS",
-           "NIGHTLY_ERROR_HOURS", "NIGHTLY_RETRY_HOURS", "NIGHTLY_OWED_HOURS", "FORWARD_DUE_HOUR", "DLANE_STALE_HOURS", "PREOPEN_HOURS", "NEWS_CAUSES", "done_key",
+           "NIGHTLY_ERROR_HOURS", "NIGHTLY_RETRY_HOURS", "NIGHTLY_OWED_HOURS", "HANDOFF_GRACE", "NIGHTLY_OWED_CAP_HOURS", "FORWARD_DUE_HOUR", "DLANE_STALE_HOURS", "PREOPEN_HOURS", "NEWS_CAUSES", "done_key",
            "LANE_OFF_WHAT", "architect_tally", "card_fields", "wanting", "card_refusals", "jam_kind", "lever", "LEVERS",
            "settings_binds", "YIELD_HOURS", "YIELD_PASSES", "YIELD_MAX_BORN", "YIELD_REFUSED_SHARE", "DRY_HOURS", "DRY_PASSES",
            "JAM_HOURS", "JAM_PASSES", "ALERT_HOURS", "ALERT_STEPS", "ALERT_SELF_HEALING", "UNDERSPEND_SHARE",

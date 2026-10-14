@@ -53,7 +53,8 @@ gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is b
   attempts, short roots with their coverage) and `completed_at`. The cause stands once the same day has been retried
   6 h, naming the day and the root ("the nightly has retried 2026-10-12 for N h (SLV: SIP 389/390, minute 826 (13:46
   ET) missing)"). It is the owner's step, mailed at once, once the owed day has been due 36 h with no day completed
-  in as long. A weekend is never an owed day. No new cause, so no gateway deploy.
+  in as long. While the nightly has a hand-off scheduled (`retrying.handoff_at`), the owner step waits until an hour
+  past that time, and never past 72 h owed. A weekend is never an owed day. No new cause, so no gateway deploy.
 - **Tests.** `league/tests/test_data_source_gap.py` is new. It runs a synthetic gateway that never returns the
   minute, a fake data box with backfill.py's ingest rule, the real relay and the real proof. It covers the clock (6
   h, the next close, the 24 h cap, a changed packet, a second short root), the hand-off, the proof's refusals, and

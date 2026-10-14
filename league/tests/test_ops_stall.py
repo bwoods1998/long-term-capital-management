@@ -926,7 +926,8 @@ class LaneAndNightly(Base):
         self.nightly(day="2026-10-06", stop="updater:x", stop_age=3 * HOUR)
         self.assertIn("automation wrote it", self.run_lane(now=NOW + HOUR)["checks"]["forward"]["owner_step"])
 
-    def retrying(self, *, ready_day, day, since, attempts=12, roots=("SLV",), ready_at=None, completed_at=None):
+    def retrying(self, *, ready_day, day, since, attempts=12, roots=("SLV",), ready_at=None, completed_at=None,
+                 handoff_at=None):
         """THE SOURCE GAP (Oct 14, 2026): a nightly record that retries `day` since `since`, short on `roots`."""
         (self.root / "gym-forward.json").write_text(json.dumps({"day": ready_day,
                                                                  "ready_at": ready_at or f"{ready_day}T06:14:21+00:00"}))
@@ -936,7 +937,8 @@ class LaneAndNightly(Base):
         (data / "nightly.json").write_text(json.dumps({
             "day": day, "error": "SIPError: incomplete regular-session SIP bars: " + ", ".join(f"{r} 389/390" for r in roots),
             "retry_at": 0, "completed_at": completed_at,
-            "retrying": {"day": day, "since": since, "attempts": attempts, "roots": list(roots), "gaps": gaps}}))
+            "retrying": {"day": day, "since": since, "attempts": attempts, "roots": list(roots), "gaps": gaps,
+                         "handoff_at": handoff_at}}))
 
     def test_a_day_retried_six_hours_names_the_day_and_the_root(self):
         self.healthy()
@@ -975,6 +977,24 @@ class LaneAndNightly(Base):
         self.retrying(ready_day="2026-10-05", day="2026-10-06", since="2026-10-07T06:05:00Z",
                       completed_at="2026-10-08T12:00:00+00:00")
         self.assertIsNone(self.run_lane(now=at("2026-10-08T18:30:00Z"))["checks"]["forward"]["owner_step"])
+
+    def test_a_scheduled_hand_off_holds_the_owners_step_back_until_an_hour_past_it(self):
+        self.healthy()
+        # A deploy at 21:00Z Thursday restarts the 6 h: the day owed 39 h goes on at 03:00Z if SLV's packet stays.
+        self.retrying(ready_day="2026-10-05", day="2026-10-06", since="2026-10-08T21:00:00+00:00",
+                      handoff_at="2026-10-09T03:00:00+00:00")
+        check = self.run_lane(now=at("2026-10-08T21:20:00Z"))["checks"]["forward"]
+        self.assertTrue(check["stalled"])
+        self.assertIsNone(check["owner_step"])
+        self.assertIn("the House hands SLV to the forward gap ledger at 2026-10-09T03:00:00Z", check["what"])
+        self.assertEqual(check["numbers"]["handoff_at"], "2026-10-09T03:00:00Z")
+        self.assertIsNone(self.run_lane(now=at("2026-10-09T03:50:00Z"))["checks"]["forward"]["owner_step"])
+        self.assertIn("the nightly owes 2026-10-06", self.run_lane(now=at("2026-10-09T04:00:00Z"))["checks"]["forward"]["owner_step"])
+        # A source that keeps moving the hand-off on: 72 h owed is the owner's step whatever is scheduled.
+        self.retrying(ready_day="2026-10-05", day="2026-10-06", since="2026-10-09T05:00:00+00:00",
+                      handoff_at="2026-10-10T11:00:00+00:00")
+        self.assertIsNone(self.run_lane(now=at("2026-10-10T05:50:00Z"))["checks"]["forward"]["owner_step"])
+        self.assertIsNotNone(self.run_lane(now=at("2026-10-10T06:00:00Z"))["checks"]["forward"]["owner_step"])
 
     def test_a_weekend_is_no_owed_day(self):
         self.healthy()

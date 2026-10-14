@@ -218,6 +218,7 @@ class HandOff(unittest.TestCase):
         with self.assertRaisesRegex(sp.SIPError, "SLV 389/390") as caught:
             nightly.run(MONDAY)
         self.assertEqual([g["root"] for g in caught.exception.coverage], ["SLV"])
+        self.assertEqual(caught.exception.handoff_at, "2026-10-13T20:00:00+00:00")
         night = nightly.state(MONDAY)
         watch = night["sip_watch"]["SLV"]
         self.assertEqual((watch["known"], watch["expected"], watch["missing_minutes"]), (389, 390, [NEVER + 1]))
@@ -401,6 +402,7 @@ class TheLaterDays(unittest.TestCase):
             self.assertEqual(record["retrying"]["roots"], ["SLV"])
             self.assertEqual(record["retrying"]["gaps"][0]["missing_minutes"], [NEVER + 1])
             self.assertEqual(record["retrying"]["since"], "2026-10-14T21:00:00+00:00")
+            self.assertEqual(record["retrying"]["handoff_at"], "2026-10-15T03:00:00+00:00")   # the alarm's way out
             while clock.at < at("2026-10-15T02:55:00Z"):              # six hours unchanged from the first try here
                 clock.advance(minutes=5)
                 self.assertEqual(controller.tick()["phase"], "retry")

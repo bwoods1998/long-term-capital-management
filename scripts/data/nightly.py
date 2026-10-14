@@ -273,6 +273,10 @@ class Nightly:
             if isinstance(gaps, list) and gaps and all(isinstance(g, Mapping) for g in gaps):
                 self.watch_gaps(day, state, gaps)
                 self.persist()
+                # When the day can go on if every short packet stays as it is (the controller's `retrying`, the stall
+                # alarm's scheduled way out).
+                error.handoff_at = max(handoff_at(day, dt.datetime.fromisoformat(w["first_seen"]), self.calendar)
+                                       for w in state["sip_watch"].values()).isoformat()
             raise
         result_map = result if isinstance(result, Mapping) else {}
         short = set(result_map.get("source_incomplete") or [])
@@ -803,8 +807,9 @@ def stamp_ready(ready_file: Path, *, apply: bool = False) -> dict[str, Any]:
 
 def retrying(prior: Any, day: dt.date, error: BaseException, now: dt.datetime) -> dict[str, Any]:
     """`nightly.json` `retrying`: the day the controller retries, since when, how many tries, and (when the error is a SIP
-    gap: `SIPError.coverage`) the short roots with their coverage, for the stall alarm (`league/ops/stall.py` `forward`).
-    A try that fails another way keeps the roots the last gap named."""
+    gap: `SIPError.coverage`) the short roots with their coverage and when the day goes on if their packets stay as they
+    are (`handoff_at`, THE SOURCE GAP), for the stall alarm (`league/ops/stall.py` `forward`). A try that fails another
+    way keeps what the last gap named."""
     prior = prior if isinstance(prior, Mapping) and prior.get("day") == day.isoformat() else {}
     out = {"day": day.isoformat(), "since": prior.get("since") or now.isoformat(),
            "attempts": int(prior.get("attempts") or 0) + 1, "last_error_at": now.isoformat()}
@@ -814,8 +819,9 @@ def retrying(prior: Any, day: dt.date, error: BaseException, now: dt.datetime) -
         out["gaps"] = [{"root": str(g.get("root")), "known": g.get("known"), "expected": g.get("expected"),
                         "missing_minutes": list(g.get("missing_minutes") or [])[:12], "packet_sha256": g.get("packet_sha256")}
                        for g in sorted(gaps, key=lambda g: str(g.get("root")))]
+        out["handoff_at"] = getattr(error, "handoff_at", None)
     else:
-        out.update({k: prior[k] for k in ("roots", "gaps") if k in prior})
+        out.update({k: prior[k] for k in ("roots", "gaps", "handoff_at") if k in prior})
     return out
 
 
