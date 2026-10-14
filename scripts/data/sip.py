@@ -6,6 +6,15 @@ that is a bar-completion grid, not a publication/as-of receipt. Historical volum
 remains unavailable to strategies. Requests use raw prices; index underlyings keep
 the ThetaData/parity path. Nightly is strict; only the historical gap queue may
 advance past incomplete roots, without claiming completion.
+
+THE SOURCE GAP (Oct 14, 2026). The nightly stays strict for a root whose bars may still arrive.
+A root whose packet the source has served UNCHANGED (the same `packet_sha256`) across the
+nightly's retries for `nightly.SOURCE_SETTLE` (6 h, and the next session's close or 24 h) is
+handed to the nightly's forward gap ledger (`source_incomplete` here): its gap is allowed for
+that exact packet only, its packet stays quarantined, nothing of it is ingested or filled, and
+the day is recorded and published as `source_incomplete`, never complete. Any other gap, or a
+handed root whose packet changed, still fails the night. (Oct 12-14: SLV 389/390, one minute
+the source never served, held every later forward day for two days.)
 """
 from __future__ import annotations
 
@@ -18,7 +27,7 @@ import os
 from pathlib import Path
 import re
 import sys
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -37,7 +46,11 @@ INDEX_ROOTS = frozenset({'XSP', 'SPXW'})
 
 
 class SIPError(RuntimeError):
-    pass
+    """`coverage`: the incomplete roots' receipts when the error is a gap (the nightly's retry clock reads them)."""
+
+    def __init__(self, message: str, *, coverage: list[dict] | None = None):
+        super().__init__(message)
+        self.coverage = coverage
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -146,8 +159,12 @@ def packet_digest(packet: dict) -> str:
 def relay_day(day: dt.date, data: Any, *, gateway: Any = None, calendar: Any = None,
               source_root: Callable[[str, dt.date], str] | None = None, allow_gaps: bool = False,
               roots: list[str] | None = None, verified: dict | None = None,
-              check_lease: Callable[[], None] = lambda: None) -> dict[str, Any]:
-    """Complete root packets only. `allow_gaps` is for the durable historical queue, never nightly."""
+              check_lease: Callable[[], None] = lambda: None,
+              source_incomplete: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """Complete root packets only. `allow_gaps` is for the durable historical queue, never nightly.
+    `source_incomplete` ({root: packet_sha256}) is the nightly's hand-off (THE SOURCE GAP): a gap is
+    allowed only for a root named there whose packet is that exact packet again; it stays quarantined
+    and is returned not complete (`source_incomplete` true). Every other gap raises."""
     if calendar is None or source_root is None:
         if calendar is None:
             calendar = sl.Calendar.from_json(json.loads(data.download('/data/work/calendar.json'))['exceptions'])
@@ -195,8 +212,14 @@ def relay_day(day: dt.date, data: Any, *, gateway: Any = None, calendar: Any = N
             receipt['quarantine'] = path
         receipts.append(receipt)
     gaps = [row for row in receipts if not row['complete']]
-    if gaps and not allow_gaps:
-        raise SIPError('incomplete regular-session SIP bars: ' + ', '.join(f"{r['root']} {r['known']}/{r['expected']}" for r in gaps))
+    handed = dict(source_incomplete or {})
+    for row in gaps:
+        if handed.get(row['root']) is not None and handed[row['root']] == row['packet_sha256']:
+            row['source_incomplete'] = True
+    held = [row for row in gaps if not row.get('source_incomplete')]
+    if held and not allow_gaps:
+        raise SIPError('incomplete regular-session SIP bars: ' + ', '.join(f"{r['root']} {r['known']}/{r['expected']}" for r in held),
+                       coverage=[dict(r) for r in gaps])
     if packets:
         path = f'/data/work/sip-{day.isoformat()}.json'
         check_lease()
@@ -212,8 +235,11 @@ def relay_day(day: dt.date, data: Any, *, gateway: Any = None, calendar: Any = N
                 if not found.get('complete') or found.get('packet_sha256') != receipt['packet_sha256']:
                     raise SIPError('SIP complete grid and packet hash were not confirmed by the data box')
                 receipt.update(found)
-    return {'day': str(day), 'roots': needed, 'rows': sum(len(p['rows']) for p in packets),
-            'complete': not gaps, 'coverage': receipts}
+    out = {'day': str(day), 'roots': needed, 'rows': sum(len(p['rows']) for p in packets),
+           'complete': not gaps, 'coverage': receipts}
+    if any(row.get('source_incomplete') for row in gaps):
+        out['source_incomplete'] = sorted(row['root'] for row in gaps if row.get('source_incomplete'))
+    return out
 
 
 def main(argv=None) -> int:
