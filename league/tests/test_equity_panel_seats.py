@@ -15,7 +15,11 @@ never above the Probe's). What is held here:
   "first-come" (and the run with no panel row is main's own record: league/tests/test_equity_etf_orders.py). The
   mutant that drops the kind partition is caught.
 - A PANEL PROGRAM NEVER TAKES OR YIELDS AN ETF SEAT; a second panel Candidate waits for the pool's one seat; a panel
-  program HELD ON A FAILED LEG keeps its seat and nobody is seated into it, before or after the leg recovers.
+  program HELD ON A FAILED LEG keeps its seat and nobody is seated into it, before or after the leg recovers, also
+  when the read shows no panel row at all (the real reader's case); THE SWARM'S `elane.panel.seats` 0 closes the pool
+  on the book's side, and a reader that cannot say it seats nobody new.
+- A HELD BASKET NEVER STOPS AN EXIT: the equity book's day count stops entries only (the review's blocker: twelve
+  basket lots and three ETF lots whose sales each need their third collar rung are all sold in the session).
 
 Every program, price and figure is invented."""
 
@@ -379,6 +383,88 @@ class ThePanelPool(unittest.TestCase):
         self.assertEqual(([h["family"] for h in plan["holders"]], [w["family"] for w in plan["waiting"]]),
                          (["xs-held"], ["xs-next"]))
         self.assertNotIn("held_seats", plan)
+
+    def test_the_swarms_setting_closes_the_pool_on_the_books_side(self):
+        """`elane.panel.seats` 0 as the reader answers it (`families.panel_seats()`): a waiting panel Candidate takes
+        no seat, under the seat rule in force and under the rollback "first-come"; when the swarm opens the pool again
+        it is seated at the next sync. (The review's SEAT-2: a book that ignored the setting seated it.)"""
+        from league.tests.equity_design import seat_rule
+
+        for rule in ("activity-1-free", "first-come"):
+            with self.subTest(rule=rule), seat_rule(rule):
+                house = self.house(("candidate",), ids=("xs-a",))
+                house.families.panel_roster = 0
+                self.assertEqual(house.book._panel_seat_count(), 0)
+                self.decide(house)
+                self.assertIsNone(house.book._instance("xs-a@1:r"), "no instance: no seat")
+                self.assertNotIn("xs-a", self.seated(house))
+                self.assertEqual(house.book.seats()[L.SEAT_PANEL]["seats"], 0)
+                house.families.panel_roster = None                         # the swarm's word is gone: the row's 1
+                house.tick(self.W.MONDAY, 8, 31)
+                self.decide(house, self.W.MONDAY)
+                self.assertIn("xs-a", self.seated(house))
+
+    def test_a_held_program_keeps_its_seat_when_the_read_shows_no_panel_row_at_all(self):
+        """THE REAL READER'S CASE: while a leg of the panel lane fails, the read shows NO panel row (every leg is the
+        lane's), so the panel pool runs on its plan alone (`_pools`' plan clause): the held program's seat is said
+        held, and when the leg recovers the plan says so. (The review's SEAT-5: a pool dropped once its rows were gone
+        never said the held seat.)"""
+        house = self.house(("probe",), ids=("xs-held",))
+        self.decide(house)
+        self.assertIsNotNone(house.book._instance("xs-held@1:r"))
+        house.families.held["xs-held"] = "the panel lane is not ready: the nightly I6 did not hold"
+        self.assertEqual([r for r in house.families.read() if r.get("structure") == "panel"], [], "no panel row")
+        house.tick(self.W.MONDAY, 8, 31)
+        self.decide(house, self.W.MONDAY)
+        self.assertIsNone(house.book._instance("xs-held@1:r").retired_at)
+        plan = house.book.seats()[L.SEAT_PANEL]
+        self.assertEqual((plan["held_seats"], plan["holders"]), (["xs-held"], []))
+        house.families.held.clear()
+        day = self.W.sessions_from(self.W.MONDAY, 2)[1]
+        house.tick(day, 8, 31)
+        self.decide(house, day)
+        plan = house.book.seats()[L.SEAT_PANEL]
+        self.assertEqual([h["family"] for h in plan["holders"]], ["xs-held"])
+        self.assertNotIn("held_seats", plan)
+
+    def test_the_etf_pools_write_keeps_the_panel_pools_plan(self):
+        """`_put_plan`: the ETF pool's plan is `SEAT_KEY` itself and the panel pool's stays inside it as it stands; the
+        panel pool's write touches nothing of the ETF pool's. (The review's SEAT-7.)"""
+        house = self.house(("probe",), ids=("xs-a",))
+        self.decide(house)
+        before = house.book.seats()
+        panel = before[L.SEAT_PANEL]
+        house.book._put_plan(L.POOL_ETF, {**{k: v for k, v in before.items() if k != L.SEAT_PANEL}, "day": "x"})
+        after = house.book.seats()
+        self.assertEqual((after[L.SEAT_PANEL], after["day"]), (panel, "x"))
+        house.book._put_plan(L.POOL_PANEL, {**panel, "day": "y", L.SEAT_PANEL: "never nested"})
+        again = house.book.seats()
+        self.assertEqual({k: v for k, v in again.items() if k != L.SEAT_PANEL},
+                         {k: v for k, v in after.items() if k != L.SEAT_PANEL})
+        self.assertEqual((again[L.SEAT_PANEL]["day"], L.SEAT_PANEL in again[L.SEAT_PANEL]), ("y", False))
+
+
+class TheRealReadersPanelSeats(unittest.TestCase):
+    """league/equity/families.py `EquityFamilies.panel_seats`: the swarm's `elane.panel.seats`, and 0 when it cannot be
+    read (fail closed: no new panel seat). (The review's SEAT-8: a reader that failed open seated past the setting.)"""
+
+    def test_a_read_that_raises_is_no_panel_seat(self):
+        from league.equity.families import EquityFamilies
+        from league.swarm import elane_xs
+
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as tmp:
+            reader = EquityFamilies(tmp)
+            self.assertEqual(reader.panel_seats(), elane_xs.panel_seats(Path(tmp)))
+            with mock.patch.object(elane_xs, "panel_seats", side_effect=RuntimeError("swarm.json could not be read")):
+                self.assertEqual(reader.panel_seats(), 0)
+            with mock.patch.object(elane_xs, "panel_seats", return_value=-3):
+                self.assertEqual(reader.panel_seats(), 0)
+            book = L.EquityBook.__new__(L.EquityBook)
+            book.families = reader
+            with mock.patch.object(elane_xs, "panel_seats", side_effect=RuntimeError("swarm.json could not be read")):
+                self.assertEqual(book._panel_seat_count(), 0, "the book seats nobody new on it")
+            book.families = mock.Mock(panel_seats=mock.Mock(side_effect=RuntimeError("no word")))
+            self.assertEqual(book._panel_seat_count(), 0, "a reader that raises: no seat")
 
 
 class TheReportSaysThePanelPool(unittest.TestCase):
