@@ -144,6 +144,63 @@ class APanelInstanceIsSizedFromTheRow(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")
+class AHeldBasketNeverStopsAnExit(unittest.TestCase):
+    """THE REVIEW'S BLOCKER (review-live, step two): the equity book's day count (A8.3, 60 sends and cancels) once
+    stopped exits. A held twelve-name basket (0.10 x E at an invented E of $2,000: twelve lots of $16.66) and three
+    one-ETF lots exit at one open on which every sale needs its THIRD collar rung (the bid falls 60 bp after each of
+    its first two sends): fifteen lots, a send and a cancel a rung each, climb the ladder together, 75 orders. Every
+    exit is done in the session, the three ETF sales among them (A28: an exit must never be blocked); before the fix
+    the count ran out at the third rung and eight sales were carried to Tuesday, the three ETF lots' among them."""
+
+    NAMES12 = tuple(f"N0{i:02d}" for i in range(10, 22))
+
+    def setUp(self):
+        P = _book_panel()
+        self.P = P
+        self.tmp = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR"))
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        P.XB.Universe.make(self.root / P.STORE_DIR, P.NAMES)
+        self.addCleanup(P.XB.UNIVERSES.pop, str(self.root / P.STORE_DIR), None)
+        patch = P.XB.fixtures()
+        patch.__enter__()
+        self.addCleanup(patch.__exit__, None, None, None)
+        self.h = P.Harness(self.root, E="2000", probe_sleeve_share=D("0.50"))
+        self.addCleanup(self.h.state.close)
+
+    def test_every_exit_of_a_fast_open_is_done_in_the_session(self):
+        P, h = self.P, self.h
+        baskets = [h.seed(s, "16.66") for s in self.NAMES12]
+        etf = []
+        for i, sym in enumerate(("SPY", "QQQ", "IWM")):
+            inst = h.instance(f"lot-{i}-{sym.lower()}")
+            etf.append(h.lot(inst, sym, "0.8", str(sum(h.market.quote(sym)) / 2), opened=P.FRIDAY))
+        for lot in baskets:
+            h.intent(h.inst, "sell", lid=lot.lid, tag="xs")
+        for lot in etf:
+            h.intent(h.book._instance(lot.instance), "house_exit", lid=lot.lid, tag="max_hold")
+        drops: dict[str, int] = {}
+
+        def falls(body):
+            if body["side"] != "sell" or drops.get(body["symbol"], 0) >= 2:
+                return
+            drops[body["symbol"]] = drops.get(body["symbol"], 0) + 1
+            bid, ask = h.market.quote(body["symbol"])
+            h.market.quotes[body["symbol"]] = (bid * D("0.994"), ask * D("0.994"))
+
+        h.venue.on_submit = falls
+        h.run(P.MONDAY, (9, 31), (9, 32), (9, 33), (9, 34), (9, 35))
+        day = P.MONDAY.isoformat()
+        self.assertGreater(L.orders_today(h.state.rows, day), 60, "the exits went past the equity count")
+        self.assertEqual({h.book._lot(lot.lid).status for lot in etf}, {"closed"}, "every ETF exit is done")
+        self.assertEqual({h.book._lot(lot.lid).status for lot in baskets}, {"closed"}, "and every basket exit")
+        self.assertEqual([i for i in h.intents() if i.kind != "buy" and i.status != "done"], [])
+        self.assertEqual(sorted(b["symbol"] for b in h.venue.sent if b["side"] == "sell"),
+                         sorted([*self.NAMES12, "SPY", "QQQ", "IWM"] * 3), "each sale filled at its third rung")
+        self.assertFalse([e for e in h.events if e[0] == "equity.carried"], "nothing carried to Tuesday")
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
 class TheEtfProgramsTradeAsBeforeWithPanelProgramsInTheBook(unittest.TestCase):
     """THE ETF POOL IS MAIN'S, ORDER FOR ORDER (the module docstring). `etf_part` keeps of a snapshot what an ETF
     program did and was told; it is held equal between a run with no panel row and a run whose reader also gives the

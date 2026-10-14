@@ -1066,8 +1066,9 @@ CONSTITUTION: dict[str, Any] = {
     #   `failed_decides_exit` sessions of failed decides its lots exit at the next open. Pre-registered program rules,
     #   identical in the Gym.
     # - `order_path`: marketable limit day orders whose collar starts at `entry_collar_bp` and widens to `max_collar_bp`
-    #   (basis points, by class); at most `max_orders_day` equity orders a day (A8.3: the gateway's day order count is
-    #   shared with the options book); and the schedule's offsets in seconds (`league/equity/schedule.py`): the open
+    #   (basis points, by class); `max_orders_day` equity orders a day, sends and cancels, before an ENTRY is refused
+    #   (an exit is never stopped by it, only by the House-wide count; A8.3: the gateway's day order count is shared
+    #   with the options book); and the schedule's offsets in seconds (`league/equity/schedule.py`): the open
     #   window (09:25 pre-open, 09:30:30 sends, entries until 09:45, exits until 15:55), THE CLOSE WINDOW (A2: 15:55:00
     #   sends, re-priced every 30 s until 15:59:30, then missed), the 16:20 bars, the 16:30 decisions and the 08:30 audit.
     "equity_money": {

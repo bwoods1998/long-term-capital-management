@@ -20,9 +20,11 @@ across BOTH books (wash-trade protection: the options book's `busy()` symbols, t
 this book's, e.g. the House's assignment-share closes, and the equity book's). CANCEL THEN RESEND (A8.4): a
 replacement goes only once the old order is terminal (filled, canceled, expired, rejected), sized target minus filled;
 the old order's remaining quantity stays in exposure until then. A cancel is followed by one lookup of the order, so a
-replacement can go in the same minute. ONE DAY ORDER COUNT (A8.3): at most `order_path.max_orders_day` (60) equity
-orders a day (cancels counted, as the options book counts its own), entries leaving room for every open lot's exit and
-one cancel of it, and none while the House-wide count would leave less than the options book's `exit_reserve()`.
+replacement can go in the same minute. ONE DAY ORDER COUNT (A8.3): the equity book's orders of a day (sends and
+cancels, as the options book counts its own, exits' included) are counted against `order_path.max_orders_day` (60): an
+ENTRY goes only while one more order leaves room for every open lot's exit and one cancel of it; AN EXIT IS NEVER
+STOPPED BY THAT COUNT (A28: an exit must never be blocked); and no order of either kind goes while the House-wide count
+would leave less than the options book's `exit_reserve()`.
 
 THE HOUSE'S MINUTE (the clock every window runs on): `tick(now)` is handed the minute's start, three seconds past the
 wall minute, and runs AFTER the whole options minute, so its sends go later by however long that took (up to most of a
@@ -1522,14 +1524,22 @@ class EquityBook:
         return None
 
     def _count_refusal(self, day: str, *, exit_: bool) -> str | None:
-        """THE ONE DAY ORDER COUNT (A8.3): None when one more order (and its cancel) fits."""
+        """THE ONE DAY ORDER COUNT (A8.3): None when one more order (and its cancel) fits. AN ENTRY must fit the
+        equity book's own count (`order_path.max_orders_day`) with room left for every open lot's exit and one cancel
+        of it. AN EXIT IS NEVER STOPPED BY THE EQUITY BOOK'S OWN COUNT (A28: an exit must never be blocked): it meets
+        the House-wide count alone, which keeps the options book's exits their room (`exit_reserve`) under the
+        gateway's day lines. (Under the equity count an exit was stopped once a held basket's re-priced sales had used
+        it up: each sale that climbs the collar ladder costs a send and a cancel a rung, and every lot climbs at once,
+        so at 8 to 12 basket lots and a fast open the ETF lots' sales stopped below the rung that fills and were
+        carried to the next session; the review of step two, review-live, measured it.) The equity count still bounds
+        the book's NEW risk: entries stop once the day's sends and cancels, exits' included, leave too little room."""
         et = self._et()
         cap = int(getattr(et, "max_orders_day", 60) if et is not None else 60)
         mine = orders_today(self.state.rows, day)
-        reserve = 0 if exit_ else 2 * len(self._lots())
-        if mine + 1 + reserve > cap:
-            return (f"the equity day's order count: {mine} of {cap} sent" +
-                    ("" if exit_ else f", {reserve} kept for exiting the lots held"))
+        if not exit_:
+            reserve = 2 * len(self._lots())
+            if mine + 1 + reserve > cap:
+                return f"the equity day's order count: {mine} of {cap} sent, {reserve} kept for exiting the lots held"
         if self.options_book is not None:
             try:
                 house = int(self.options_book.count_today(day)) + mine

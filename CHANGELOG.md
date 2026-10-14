@@ -59,6 +59,10 @@ on branches.
   panel rows, the un-re-based shadow beside; one missed buy counts once. A14's bounds, keys and pooling unchanged.
 - **The live-book proof recorded again on main `47ed6872`** (#543's sleeve): every scenario moved by the lot's size
   alone; step one needs the same record once #543 is merged into it.
+- **An exit is never stopped by the equity book's own day count** (the review of step two, its blocker): the 60
+  sends and cancels of `order_path.max_orders_day` stop ENTRIES only; an exit meets the House-wide count alone (the
+  options book's exits keep their room). Before it, a held basket's re-priced sales used the count up on a fast
+  open and the ETF lots' sales were carried to the next session. No id moves (league/equity/live.py is plumbing).
 
 ### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 

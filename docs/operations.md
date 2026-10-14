@@ -1856,7 +1856,13 @@ Money digest `de5ed74e`, full digest `111ede85` (`PINNED_DIGEST`); the rollback,
   and buy at the close use 2 x N orders on a day every order fills at its first send, and up to 18 x N on a day
   every order climbs its whole ladder (five sends and four cancels each), so with more than three seats a day in
   which most orders are re-priced can run out of the count. Entries then wait and are recorded missed at their
-  cut-off; an exit is refused by the count only at 60, and is carried to the next session. Nothing is sold for it.
+  cut-off. AN EXIT IS NEVER STOPPED BY THE EQUITY COUNT (release E4 step two; A28: an exit must never be blocked):
+  its sends and cancels are counted, so they stop entries, but an exit meets only the House-wide count, which keeps
+  the options book's exits their room under the gateway's day lines; only that count can carry an exit to the next
+  session. (Under the equity count a held basket stopped exits: each re-priced sale costs a send and a cancel a rung
+  and every lot climbs at once, so 8 to 12 basket lots on a fast open used the 60 before the ETF lots' sales reached
+  the rung that fills, and those sales were carried; review-live measured it on the real book.) Nothing is sold for
+  it.
 - **At the deploy**, for the programs the House already holds:
   - **A Candidate waiting for a seat is seated at the first band sync after the House starts on the release**: under
     "first-come" the swarm's reader shows it once `elane.roster` has a free seat (`banded_at`, then id); under the
@@ -2000,8 +2006,9 @@ by the same offsets from the 13:00 close):
   cut-off: rule B8 of the panel kind, `EquityBook._cut_waits`.) Collars 10 bp (ETF) / 25 bp (stock) widening to
   50 / 100; an order refused before the venue
   widens no collar. A replacement goes only once the old order is terminal (A8.4), and one buy intent is one lot
-  whatever a re-price finds. The book caps itself at 60 orders a day and never sends while the House-wide day count
-  would leave less than the options book's exit reserve (A8.3).
+  whatever a re-price finds. The book's ENTRIES stop at 60 orders a day (sends and cancels, exits' included, with
+  room kept for every open lot's exit), an exit is never stopped by that count, and nothing is sent while the
+  House-wide day count would leave less than the options book's exit reserve (A8.3).
 - **The send times are effective, not nominal**: 09:30:30 and 15:55:00 are the earliest moments, never the send
   times. The House's minute starts 3 s past the wall minute and the equity book runs after the options minute, so the
   open window's first send is the 09:31 minute's (09:31:03 plus the options minute) and the close window's the 15:55
