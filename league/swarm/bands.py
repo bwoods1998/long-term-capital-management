@@ -311,13 +311,36 @@ def equity_seats(seats: int) -> int:
     return int(seats) if int(seats) > 0 else ROSTER_CLOSED
 
 
-def equity_seating(fams: Sequence[Mapping[str, Any]], seats: int, *,
-                   seatable: Any = equity_seatable) -> dict[str, list[str]]:
-    """THE EQUITY ROSTER's `seating` over the equity Candidate and Probe families (`seats`: `elane.roster_seats`).
-    `seatable` (RELEASE E4): the seat rule by structure; the callers that hold the state root pass
-    `elane_xs.seatable(root)`, under which a PANEL Candidate is seatable only while the panel lane's effective mode is
-    "live" (otherwise it is seatless: no row, so no instance and no order)."""
-    return seating(fams, equity_seats(seats), seatable=seatable)
+def equity_seating(fams: Sequence[Mapping[str, Any]], seats: int, *, seatable: Any = equity_seatable,
+                   panel_seats: int = 0) -> dict[str, list[str]]:
+    """THE EQUITY ROSTER's `seating` over the equity Candidate and Probe families, A POOL AT A TIME (release E4 step
+    two; the constitution's `equity_money.panel`): the ETF pool, every family that is not a panel family, over
+    `seats` (`elane.roster_seats`), and the PANEL POOL, the panel families, over `panel_seats` (`panel_pool_seats`;
+    0: no new panel seat). A panel family never takes, holds or yields an ETF seat, so the ETF pool's answer is main's
+    whatever the panel families' bands. `seatable` (RELEASE E4): the seat rule by structure; the callers that hold
+    the state root pass `elane_xs.seatable(root)`, under which a PANEL Candidate is seatable only while the panel
+    lane's effective mode is "live" (otherwise it is seatless: no row, so no instance and no order)."""
+    etf = [f for f in fams if str(f.get("structure") or "") != "panel"]
+    panel = [f for f in fams if str(f.get("structure") or "") == "panel"]
+    out = seating(etf, equity_seats(seats), seatable=seatable)
+    if panel:
+        theirs = seating(panel, equity_seats(panel_seats), seatable=seatable)
+        out = {key: sorted(out[key] + theirs[key]) if key in ("probe", "waiting", "seatless") else out[key] + theirs[key]
+               for key in out}
+    return out
+
+
+def panel_pool_seats(root: str | Path) -> int:
+    """THE PANEL POOL's seats for a state root: the lower of the constitution's `equity_money.panel.seats`
+    (league/equity/bands.py `panel_settings`) and the swarm's `elane.panel.seats` (`elane_xs.panel_seats`, which may
+    only lower it). 0 when either cannot be read: no new panel seat."""
+    try:
+        from ..equity.bands import panel_settings
+        from . import elane_xs
+
+        return max(0, min(int(panel_settings().seats), int(elane_xs.panel_seats(root))))
+    except Exception:  # noqa: BLE001 - fail closed
+        return 0
 
 
 def _equity_seatable(root: str | Path) -> Any:
@@ -384,12 +407,13 @@ def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
             db.close()
     except (sqlite3.Error, OSError):
         return None
-    seat = equity_seating(fams, seats, seatable=_equity_seatable(root)) if equity else seating(fams, seats)
+    seat = equity_seating(fams, seats, seatable=_equity_seatable(root), panel_seats=panel_pool_seats(root)) \
+        if equity else seating(fams, seats)
     out = {"seats": max(seats, 0), "closed": seats == ROSTER_CLOSED, "probe": seat["probe"],
            "seated": sorted(seat["probe"] + seat["seated"]), "waiting": seat["waiting"], "seatless": seat["seatless"]}
     if equity:
         rule = _seat_rule()
-        out.update(rule=rule, plan=seat_plan(root),
+        out.update(rule=rule, plan=seat_plan(root), panel_seats=panel_pool_seats(root),
                    order="by pass time: these lists are the queue (first come)" if rule == "first-come" else
                    "by pass time: NOT who is next under this rule; the EquityBook's plan is (`plan`)")
         out["seatless_why"] = _seatless_why(root, fams, seat["seatless"])
@@ -747,7 +771,8 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
                 if xs_sha is None and strict:
                     raise EquityUnreadable("the xs identity could not be computed while a panel family is in a running "
                                            "band")
-            seat = equity_seating(_banded(db, equity=True), elane.roster_seats(root), seatable=_equity_seatable(root)) \
+            seat = equity_seating(_banded(db, equity=True), elane.roster_seats(root), seatable=_equity_seatable(root),
+                                  panel_seats=panel_pool_seats(root)) \
                 if any(f["band"] == "candidate" for f in fams) else {"probe": [], "seated": [], "waiting": [], "seatless": []}
             # (`queued`, THE SEAT RULE: a waiting Candidate has a row too. A SEATLESS one never has, and a panel
             # Candidate is seatless while the panel lane is not live, so the book's seat plan never sees it.)

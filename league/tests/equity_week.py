@@ -1184,9 +1184,23 @@ def close_and_decide(house: House, day: dt.date) -> None:
         house.tick(day, hh, mm)
 
 
-def run(name: str, *, reader: str = "memory", panel: str = "", forced: tuple[str, ...] = ()) -> dict[str, Any]:
+def panel_rows(bands: tuple[str, ...]) -> list[dict]:
+    """RELEASE E4 STEP TWO: one PANEL program's row in each of these bands, as the swarm's reader gives it once the
+    panel lane reads "live" (structure "panel"; passed, with K's counts above every ETF program's, so a panel program
+    that could rank in the ETF pool would take its seat first). The test double of the reader gives them to the book;
+    the book's panel pool is the only one they may enter (league/tests/test_equity_panel_seats.py)."""
+    rows = []
+    for band in bands:
+        row = family_row(f"xs-row-{band}", PANEL, lane="equity", symbols=(), band=band, k=(900, 4000))
+        rows.append({**row, "structure": "panel"})
+    return rows
+
+
+def run(name: str, *, reader: str = "memory", panel: str = "", forced: tuple[str, ...] = (),
+        panels: tuple[str, ...] = ()) -> dict[str, Any]:
     """Scenario `name` on the tree this module was imported from: `snapshot` of what it left. `forced`: the real
-    reader's store also holds a panel family in each of these bands (`store_families`)."""
+    reader's store also holds a panel family in each of these bands (`store_families`). `panels` (the test double of
+    the reader): it also gives the book a panel program's row in each of these bands (`panel_rows`)."""
     spec = SCENARIOS[name]
     root = Path(tempfile.mkdtemp(prefix="equity-week-"))
     programs = six_programs(a_first=spec.get("a_first", True), roll=spec.get("roll", ""), rotate=spec.get("rotate", ""))
@@ -1195,6 +1209,7 @@ def run(name: str, *, reader: str = "memory", panel: str = "", forced: tuple[str
     for row in programs:
         if row["family"] in spec.get("candidates", ()):
             row["band"] = "candidate"
+    programs = programs + panel_rows(panels)
     house = House(root, programs, cash=spec.get("cash", "2229"), lag=spec.get("lag", 8.0), reader=reader, panel=panel,
                   forced=forced)
     try:

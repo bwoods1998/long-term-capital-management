@@ -111,6 +111,16 @@ class EquityFamilies:
         except Exception:  # noqa: BLE001 - fail closed: no new seat
             return 0
 
+    def panel_seats(self) -> int:
+        """THE PANEL POOL's seats as the swarm sets them (`elane.panel.seats`, league/swarm/elane_xs.py `panel_seats`,
+        failing closed to 0). The book never seats past the lower of this and `equity_money.panel.seats`."""
+        try:
+            from ..swarm import elane_xs
+
+            return max(0, int(elane_xs.panel_seats(self.root)))
+        except Exception:  # noqa: BLE001 - fail closed: no new seat
+            return 0
+
     def read(self, family: str | None = None) -> list[dict]:
         """The equity-lane rows (the module docstring); [] with `last_error` set when the store cannot be read (no
         store, not within a second, no equity identity)."""
@@ -243,11 +253,14 @@ class MemoryEquityFamilies:
     "retired"). `held` {family: why}: families whose LANE holds their opens on a failed leg (release E4): `read` leaves
     them out and `standing` says `HELD`."""
 
-    def __init__(self, rows: Iterable[Mapping[str, Any]] = (), *, seats: int | None = None):
+    def __init__(self, rows: Iterable[Mapping[str, Any]] = (), *, seats: int | None = None,
+                 panel_seats: int | None = None):
         self.held: dict[str, str] = {}
         self.rows = {str(r["family"]): dict(r) for r in rows}
         #: The swarm's roster as `EquityFamilies.seats` answers it; None: no word of it (the table's count alone).
         self.roster = seats
+        #: The swarm's panel seats as `EquityFamilies.panel_seats` answers them; None: no word (the row's count alone).
+        self.panel_roster = panel_seats
         self.forward: dict[str, dict[str, dict]] = {}
         self.moves: list[tuple[str, str, str]] = []
         self.twin_rows: dict[str, dict] = {}
@@ -320,6 +333,9 @@ class MemoryEquityFamilies:
 
     def seats(self) -> int | None:
         return self.roster
+
+    def panel_seats(self) -> int | None:
+        return self.panel_roster
 
 
 __all__ = ["TWINS_KEY", "BOOK_BANDS", "RUNNING_BANDS", "GONE", "CONFIRM_FIELDS", "validation_r_sd", "EquityFamilies",

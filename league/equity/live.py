@@ -316,6 +316,13 @@ FEES_LATE_SESSIONS = 5
 #: by (its `why["budget"]`), which is how a buy cut under the minimum order says that the budget cut it (a test holds
 #: them).
 SEAT_KEY = "eq_seat"
+#: THE TWO POOLS OF SEATS (release E4 step two; `equity_money.panel`, league/equity/bands.py `panel_settings`): the
+#: ETF pool (`probe.max_programs`, the book's own kind: what main's seat rule always meant) and the PANEL pool
+#: (`panel.seats`, every instance of another kind). Each pool's rule runs over its own rows only, so a panel program
+#: never takes, holds or yields an ETF seat. The ETF pool's plan is `SEAT_KEY` as before, to the key; the panel
+#: pool's is kept under the key `SEAT_PANEL` inside it, written only once a panel row was ever seen.
+POOL_ETF, POOL_PANEL = "etf", "panel"
+SEAT_PANEL = "panel"
 YIELDED = "yielded"
 BUDGET_WORDS = "the shared loss budget has"
 #: THE OPEN NOTE (the captain's A30 (2); `EquityBook._open_note`, `_refused_days`): the kv in which the book keeps, a
@@ -2144,8 +2151,13 @@ class EquityBook:
         return Z.size_entry(x)
 
     def _sleeve_share(self, inst: Instance) -> Decimal:
-        """The program's share of E: the Probe sleeve, or a Sized program's (money's `sized_sleeve_share`)."""
+        """The program's share of E: the Probe sleeve, or a Sized program's (money's `sized_sleeve_share`). A PANEL
+        program's (an instance of another kind than the book's own) is the panel row's (`equity_money.panel
+        .sleeve_share`, league/equity/bands.py `panel_settings`) in every band: it never sizes from the Probe sleeve
+        and is never sized up (the step is parked, A21; a row that cannot be read is no sleeve: it opens nothing)."""
         et = self._et()
+        if inst.kind != EQUITY_KIND:
+            return Decimal(str(B.panel_settings().sleeve_share))
         probe = Decimal(str(et.probe_sleeve_share))
         if inst.band != "sized":
             return probe
@@ -2406,49 +2418,57 @@ class EquityBook:
         #: {instance key: the session a seat taken in this sync counts from, when it is not the next one}, filled by
         #: `_seat_bands`.
         counts_from: dict[str, str] = {}
+        pools = self._pools(rows)
         if et is not None and et.enabled and not rule.first_come:
-            # THE SEAT RULE in force (the module docstring): the book ranks the waiting programs itself. Its own trouble
-            # (a row or a day it cannot read) moves no further seat and NEVER stops the day's decision: the programs
-            # the book holds decide as they are, and the error is recorded each time.
-            try:
-                self._seat_bands(rows, et, rule, sticky, since, day, now, out, late=late, counts_from=counts_from)
-            except Exception as exc:  # noqa: BLE001
-                self._error("seats", exc, out)
-        elif et is not None and et.enabled:
-            # "first-come" (the rollback): release E5-S's band sync, to the line.
-            live_n = sum(1 for r in rows if r.get("band") in LIVE_BANDS)
-            for row in rows:
-                if row.get("band") not in ("candidate",) + LIVE_BANDS:
-                    continue
-                if late and row.get("band") != "candidate":
-                    continue
-                key = instance_key(row["family"], int(row["version"]))
+            # THE SEAT RULE in force (the module docstring): the book ranks the waiting programs itself, A POOL AT A
+            # TIME (`_pools`: the ETF pool's rows, then the panel pool's). Its own trouble (a row or a day it cannot
+            # read) moves no further seat and NEVER stops the day's decision: the programs the book holds decide as
+            # they are, and the error is recorded each time.
+            for pool, part in pools:
                 try:
-                    record = self._record_of(row["family"], int(row["version"]), row, refetch=not late)
-                    band, why = B.next_band(row, record, et, seat_free=live_n < int(et.probe_max_programs)
-                                            or row.get("band") in LIVE_BANDS, sticky=sticky.get(key))
-                except Exception as exc:  # noqa: BLE001 - no move on a rule that cannot be read
-                    self._error(f"band {row['family']}", exc, out)
-                    continue
-                if band == row.get("band"):
-                    continue
-                if not self.families.confirm_band(row, band, why):
-                    out.setdefault("bands", []).append(f"{row['family']}: the row changed; no move")
-                    continue
-                self.record("equity.band", {"family": row["family"], "version": row["version"], "from": row["band"],
-                                            "to": band, "why": why[:300]}, agent=row["family"])
-                if band == "candidate" and row.get("band") in LIVE_BANDS:
-                    sticky[key] = why[:300]
-                    live_n -= 1
-                elif row.get("band") == "candidate" and band in LIVE_BANDS:
-                    live_n += 1
-                row["band"] = band
-                since[key] = {"band": band, "day": day}
+                    self._seat_bands(part, et, rule, sticky, since, day, now, out, late=late, counts_from=counts_from,
+                                     pool=pool)
+                except Exception as exc:  # noqa: BLE001
+                    self._error("seats" if pool == POOL_ETF else "panel seats", exc, out)
+        elif et is not None and et.enabled:
+            # "first-come" (the rollback): release E5-S's band sync, to the line, a pool at a time: the ETF pool's
+            # count is `probe.max_programs` as it was, the panel pool's `_panel_seat_count`.
+            for pool, part in pools:
+                cap = int(et.probe_max_programs) if pool == POOL_ETF else self._panel_seat_count()
+                live_n = sum(1 for r in part if r.get("band") in LIVE_BANDS) + len(self._held_seats(pool, part))
+                for row in part:
+                    if row.get("band") not in ("candidate",) + LIVE_BANDS:
+                        continue
+                    if late and row.get("band") != "candidate":
+                        continue
+                    key = instance_key(row["family"], int(row["version"]))
+                    try:
+                        record = self._record_of(row["family"], int(row["version"]), row, refetch=not late)
+                        band, why = B.next_band(row, record, et, seat_free=live_n < cap
+                                                or row.get("band") in LIVE_BANDS, sticky=sticky.get(key))
+                    except Exception as exc:  # noqa: BLE001 - no move on a rule that cannot be read
+                        self._error(f"band {row['family']}", exc, out)
+                        continue
+                    if band == row.get("band"):
+                        continue
+                    if not self.families.confirm_band(row, band, why):
+                        out.setdefault("bands", []).append(f"{row['family']}: the row changed; no move")
+                        continue
+                    self.record("equity.band", {"family": row["family"], "version": row["version"],
+                                                "from": row["band"], "to": band, "why": why[:300]}, agent=row["family"])
+                    if band == "candidate" and row.get("band") in LIVE_BANDS:
+                        sticky[key] = why[:300]
+                        live_n -= 1
+                    elif row.get("band") == "candidate" and band in LIVE_BANDS:
+                        live_n += 1
+                    row["band"] = band
+                    since[key] = {"band": band, "day": day}
         if et is not None and rule.first_come:
-            try:
-                self._seat_note_first_come(rows, et, since, day)
-            except Exception as exc:  # noqa: BLE001 - a note for the health page: never the band sync's end
-                self._error("seats", exc, out)
+            for pool, part in pools:
+                try:
+                    self._seat_note_first_come(part, et, since, day, pool=pool)
+                except Exception as exc:  # noqa: BLE001 - a note for the health page: never the band sync's end
+                    self._error("seats" if pool == POOL_ETF else "panel seats", exc, out)
         if not late or dumps(sticky) != before[0]:
             self.state.put("eq_sticky", sticky)
         holds = self._holds()
@@ -2560,6 +2580,82 @@ class EquityBook:
             return 0
         return table if roster is None else max(0, min(table, int(roster)))
 
+    def _panel_seat_count(self) -> int:
+        """The PANEL POOL's seats: `equity_money.panel.seats` (league/equity/bands.py `panel_settings`; a row that
+        cannot be read seats nobody), or fewer when the swarm says fewer (`families.panel_seats()`:
+        `elane.panel.seats`, which may only lower the row, failing closed to 0; a reader that has no word of it, None,
+        leaves the row's count)."""
+        table = int(B.panel_settings().seats)
+        read = getattr(self.families, "panel_seats", None)
+        if read is None:
+            return table
+        try:
+            said = read()
+        except Exception:  # noqa: BLE001 - fail closed: no new seat
+            return 0
+        return table if said is None else max(0, min(table, int(said)))
+
+    def _held_seats(self, pool: str, rows: Sequence[Mapping[str, Any]]) -> list[str]:
+        """THE SEAT OF A PANEL PROGRAM HELD ON A FAILED LEG (release E4 step two): the panel pool's alive instances
+        whose family has no row in this read (its lane holds its opens: `families.HELD`, or a read that showed it
+        nothing). Each keeps its seat, so nobody is seated into it, before or after the leg recovers (every leg of the
+        panel lane is the lane's: while one fails no panel row exists at all, and when it recovers the holder's row is
+        back). The ETF pool counts its rows alone, as main's rule did: []."""
+        if pool == POOL_ETF:
+            return []
+        shown = {str(r["family"]) for r in rows}
+        return sorted({i.family for i in self._instances(alive=True) if i.kind != EQUITY_KIND and i.family not in shown})
+
+    def _pool_of_key(self, key: str) -> str:
+        """The pool of an instance key: the panel pool's when its instance is of another kind than the book's own,
+        else the ETF pool's; a family the band sync's rows hold of the panel's kind is the panel pool's (an instance
+        the book never made, of no such row, is read as an ETF program's, as main read every one)."""
+        if str(key).split("@", 1)[0] in getattr(self, "_panel_families", ()):
+            return POOL_PANEL
+        try:
+            inst = self._instance(key)
+        except Exception:  # noqa: BLE001 - a row that cannot be read is main's
+            return POOL_ETF
+        return POOL_ETF if inst is None or inst.kind == EQUITY_KIND else POOL_PANEL
+
+    def _pool_seats(self, et: Any, pool: str) -> int:
+        """A pool's seats: the ETF pool's `_seat_count`, the panel pool's `_panel_seat_count`."""
+        return self._seat_count(et) if pool == POOL_ETF else self._panel_seat_count()
+
+    def _pools(self, rows: list[dict]) -> list[tuple[str, list[dict]]]:
+        """THE TWO POOLS of a band sync's rows (`POOL_ETF`, `POOL_PANEL`): a row of the book's own kind (an ETF
+        program) is the ETF pool's, a row of any other kind (a panel program) the panel pool's. The same dicts in the
+        reader's order, so a move the rule makes in a pool is the sync's own. The panel pool is left out while it has
+        no row and no plan was ever written for it: a book of ETF programs alone runs main's rule, to the line."""
+        etf = [r for r in rows if K.kind_of(r.get("structure")) == EQUITY_KIND]
+        panel = [r for r in rows if K.kind_of(r.get("structure")) != EQUITY_KIND]
+        self._panel_families = {str(r["family"]) for r in panel}
+        out = [(POOL_ETF, etf)]
+        if panel or self._pool_plan(POOL_PANEL) is not None:
+            out.append((POOL_PANEL, panel))
+        return out
+
+    def _pool_plan(self, pool: str) -> dict[str, Any] | None:
+        """A pool's plan as the last sync wrote it: the ETF pool's is `SEAT_KEY` itself, the panel pool's
+        `SEAT_KEY`'s `SEAT_PANEL`. None when there is none."""
+        plan = self.state.get(SEAT_KEY)
+        if pool != POOL_ETF:
+            plan = plan.get(SEAT_PANEL) if isinstance(plan, Mapping) else None
+        return dict(plan) if isinstance(plan, Mapping) else None
+
+    def _put_plan(self, pool: str, plan: Mapping[str, Any]) -> None:
+        """Write a pool's plan: the ETF pool's is `SEAT_KEY` itself (the panel pool's kept inside it as it stands),
+        the panel pool's goes under `SEAT_PANEL` and touches nothing of the ETF pool's."""
+        held = self.state.get(SEAT_KEY)
+        held = dict(held) if isinstance(held, Mapping) else {}
+        if pool == POOL_ETF:
+            plan = {k: v for k, v in plan.items() if k != SEAT_PANEL}
+            if isinstance(held.get(SEAT_PANEL), Mapping):
+                plan[SEAT_PANEL] = held[SEAT_PANEL]
+            self.state.put(SEAT_KEY, plan)
+        else:
+            self.state.put(SEAT_KEY, {**held, SEAT_PANEL: {k: v for k, v in plan.items() if k != SEAT_PANEL}})
+
     def _flat(self, key: str) -> bool:
         """FLAT, structurally: the instance has no lot open or closing, NO ORDER THAT MAY STILL FILL, and no intent
         planned or sent. Read from the book's own rows, every time it is asked.
@@ -2626,7 +2722,7 @@ class EquityBook:
                        quiet_sessions=None if last is None else _counted(last, day, refused)[0], flat=self._flat(key))
 
     def _seat_bands(self, rows: list[dict], et: Any, rule: B.SeatSettings, sticky: dict, since: dict, day: str,
-                    now: float, out: dict, *, late: bool, counts_from: dict | None = None) -> None:
+                    now: float, out: dict, *, late: bool, counts_from: dict | None = None, pool: str = POOL_ETF) -> None:
         """THE SEAT RULE "activity-1-free" AT A BAND SYNC (A24; the module docstring), on rows that hold every passed
         Candidate. In order: (1) the holders judged as before the rule (EDM1, sticky; the sizing-up step); (2) EDM1
         over the waiting programs that have a real record; (3) the plan (`bands.seat_plan`: the idle test, and who
@@ -2644,8 +2740,12 @@ class EquityBook:
         session after it (`eq_band_since`'s `seat`, kept beside the mark's own `day`, which stays the decision day
         every other reader of the mark knows), so the idle test never names a program before it sat through
         `idle_sessions` whole sessions. A STALE FLAG: a program whose band is live holds a seat, however it came by
-        it (a rollback seats by pass time), and its idle flag is dropped."""
-        memory = dict(self.state.get(SEAT_KEY, {}) or {})
+        it (a rollback seats by pass time), and its idle flag is dropped.
+
+        ONE POOL (`pool`; release E4 step two): `rows` are that pool's alone (`_pools`), its seats are the pool's
+        (`_pool_seats`) and its plan and memory are the pool's (`_pool_plan`, `_put_plan`): the ETF pool's are
+        main's, to the key, and a panel program never takes, holds or yields an ETF seat."""
+        memory = {k: v for k, v in (self._pool_plan(pool) or {}).items() if k != SEAT_PANEL}
         flags = {str(k): v for k, v in (memory.get("idle") or {}).items()} if isinstance(memory.get("idle"), Mapping) else {}
         for row in rows:
             if row.get("band") in LIVE_BANDS:
@@ -2699,12 +2799,13 @@ class EquityBook:
                     flags.pop(str(row["family"]), None)
                     self.record("equity.seat", {"action": "waiting_demoted", "family": row["family"],
                                                 "version": row["version"], "day": day, "rule": rule.rule,
-                                                "why": sticky[key]}, agent=row["family"])
+                                                "why": sticky[key], **_pooled(pool)}, agent=row["family"])
                     self.alert("warning", f"equity: {key} waited for a seat and is demoted ({sticky[key][:200]}): it "
                                           "takes no seat again under this version")
         holders = [r for r in rows if r.get("band") in LIVE_BANDS]
         waiting = [r for r in rows if r.get("band") == "candidate" and r.get("holdout_passed") and key_of(r) not in sticky]
-        seats = self._seat_count(et)
+        held = self._held_seats(pool, rows)
+        seats = max(0, self._pool_seats(et, pool) - len(held))
         facts = {str(r["family"]): self._seat_facts(r, since, flags, day, refused) for r in holders + waiting}
 
         def plan_now(yielded: bool) -> dict[str, Any]:
@@ -2718,7 +2819,7 @@ class EquityBook:
             why = (f"it yields its idle seat: flat, and no buy of its own reached the venue or was cut or refused by "
                    f"the loss budget in its last {rule.idle_sessions} seated sessions (seated {goes.seated_sessions}); "
                    f"{plan['for']} waits unflagged (seat rule {rule.rule})")
-            if self._yield(row, why, str(plan["for"]), rule, since, memory, flags, day, now, out):
+            if self._yield(row, why, str(plan["for"]), rule, since, memory, flags, day, now, out, pool=pool):
                 holders.remove(row)
                 waiting.append(row)
                 facts[goes.family] = self._seat_facts(row, since, flags, day, refused)
@@ -2753,7 +2854,7 @@ class EquityBook:
                         "why": ("it returns into a free seat by rank, with no new look" if returned else
                                 "a free seat goes to the best-ranked waiting program") + f" (seat rule {rule.rule})"}
                 self.record("equity.seat", {**last, "version": row["version"], "seeded": bool(row.get("seeded")),
-                                            "rule": rule.rule}, agent=f.family)
+                                            "rule": rule.rule, **_pooled(pool)}, agent=f.family)
                 continue
             if band not in LIVE_BANDS and record_edm1(why):
                 # EDM1 named a waiting program at its seating (its twins were priced since the last sync): sticky, so
@@ -2764,8 +2865,8 @@ class EquityBook:
                 passed.pop(f.family, None)
                 waiting.remove(row)
                 self.record("equity.seat", {"action": "waiting_demoted", "family": f.family, "version": row["version"],
-                                            "day": day, "rank": position, "rule": rule.rule, "why": sticky[key]},
-                            agent=f.family)
+                                            "day": day, "rank": position, "rule": rule.rule, "why": sticky[key],
+                                            **_pooled(pool)}, agent=f.family)
                 self.alert("warning", f"equity: {key} waited for a seat and is demoted ({sticky[key][:200]}): it "
                                       "takes no seat again under this version")
                 continue
@@ -2774,15 +2875,20 @@ class EquityBook:
                 self.record("equity.seat", {"action": "passed_over", "family": f.family, "version": row["version"],
                                             "day": day, "rank": position, "rule": rule.rule,
                                             "why": f"its seating did not take ({why[:200]}): the seat goes to the next "
-                                                   "waiting program"}, agent=f.family)
+                                                   "waiting program", **_pooled(pool)}, agent=f.family)
         memory.update(idle=flags, passed={k: v for k, v in passed.items() if v == day}, last=last)
         # What the plan SHOWS as idle is the test itself on each holder, in the seating pass too (which never acts on
         # it): a seated program that is idle and keeps its seat because nobody unflagged waits is said so.
         idle = [f for f in (str(r["family"]) for r in holders) if B.seat_idle(facts[f], rule)]
-        self._seat_note(memory, rule, seats, day, holders, waiting, facts, idle, sticky, out, late=late, refused=refused)
+        if held:
+            memory["held_seats"] = held
+        else:
+            memory.pop("held_seats", None)
+        self._seat_note(memory, rule, seats + len(held), day, holders, waiting, facts, idle, sticky, out, late=late,
+                        refused=refused, pool=pool)
 
     def _yield(self, row: dict, why: str, taker: str, rule: B.SeatSettings, since: dict, memory: dict, flags: dict,
-               day: str, now: float, out: dict) -> bool:
+               day: str, now: float, out: dict, *, pool: str = POOL_ETF) -> bool:
         """ONE IDLE SEAT YIELDS (THE SEAT RULE). Everything in ONE state transaction that first finds the instance
         FLAT again (`_flat`: no lot, no order that may still fill, no intent to execute): the instance is retired
         with the reason "yielded", the program is flagged idle, the plan's memory and the seat mark are written, and
@@ -2818,7 +2924,7 @@ class EquityBook:
                 if inst is not None and inst.retired_at is None:
                     inst.retired_at, inst.why, inst.band = now, f"{YIELDED}: {why}"[:400], "candidate"
                     self._save_instance(inst)
-                self.state.put(SEAT_KEY, {**memory, "idle": {**flags, family: flag}, "yield_day": day, "last": last})
+                self._put_plan(pool, {**memory, "idle": {**flags, family: flag}, "yield_day": day, "last": last})
                 self.state.put("eq_band_since", {**since, key: mark})
                 moved = bool(self.families.confirm_band(row, "candidate", why))
                 if not moved:
@@ -2841,8 +2947,8 @@ class EquityBook:
         self.record("equity.instance", {"instance": key, "retired": True, "why": f"{YIELDED}: {why}"[:400],
                                         "seat": YIELDED}, agent=family)
         self.record("equity.seat", {"action": "yielded", "family": family, "version": row["version"], "day": day,
-                                    "for": taker, "seeded": bool(row.get("seeded")), "rule": rule.rule, "why": why},
-                    agent=family)
+                                    "for": taker, "seeded": bool(row.get("seeded")), "rule": rule.rule, "why": why,
+                                    **_pooled(pool)}, agent=family)
         self.alert("warning", f"equity: {key} yields its idle seat to the waiting programs ({taker} is next by rank): it "
                               f"holds no lot, so nothing is sold; it waits flagged idle and returns only into a free "
                               f"seat ({why[:200]})")
@@ -2865,7 +2971,8 @@ class EquityBook:
 
     def _seat_note(self, memory: dict, rule: B.SeatSettings, seats: int, day: str, holders: Sequence[Mapping[str, Any]],
                    waiting: Sequence[Mapping[str, Any]], facts: Mapping[str, B.SeatFacts], idle: Sequence[str],
-                   sticky: Mapping[str, Any], out: dict, *, late: bool, refused: Mapping[str, Any] | None = None) -> None:
+                   sticky: Mapping[str, Any], out: dict, *, late: bool, refused: Mapping[str, Any] | None = None,
+                   pool: str = POOL_ETF) -> None:
         """THE PLAN as the sync leaves it, written to `SEAT_KEY` when it changed: who holds each seat (since when, how
         many sessions that count, how many left out because the House refused every open, flat, quiet, idle, seeded),
         who waits and in what order (a rank POSITION, never K), who is flagged idle, the sessions left out of the
@@ -2887,12 +2994,24 @@ class EquityBook:
         plan = {**memory, "rule": rule.rule, "seats": seats, "idle_sessions": int(rule.idle_sessions),
                 "holders": sorted((held(r) for r in holders), key=lambda h: (h["since"], h["family"])), "waiting": queue,
                 "sticky": sorted(str(k).split("@", 1)[0] for k in sticky), "order": "the book's plan (equity_money.probe.seat)"}
+        if any(self._pool_of_key(str(k)) != POOL_ETF for k in sticky):
+            # (each pool's plan names its own sticky versions: a panel version's instance is of the panel's kind)
+            plan["sticky"] = sorted(str(k).split("@", 1)[0] for k in sticky if self._pool_of_key(str(k)) == pool)
+        if pool != POOL_ETF:
+            plan["order"] = "the book's plan of the panel seats (equity_money.panel; ranked by equity_money.probe.seat)"
         oldest = min((h["since"] for h in plan["holders"]), default=day)
         plan["left_out"] = [{"day": d, "why": _reason_head(refused[d])} for d in sorted(refused) if oldest < d <= day][-30:]
-        was = self.state.get(SEAT_KEY)
-        if not isinstance(was, Mapping) or {k: v for k, v in was.items() if k != "day"} != \
+        was = self._pool_plan(pool)
+        if not isinstance(was, Mapping) or {k: v for k, v in was.items() if k not in ("day", SEAT_PANEL)} != \
                 {k: v for k, v in plan.items() if k != "day"} or not late:
-            self.state.put(SEAT_KEY, {**plan, "day": day})
+            self._put_plan(pool, {**plan, "day": day})
+        if pool != POOL_ETF:
+            if not late:
+                seated = "; ".join(f"{h['family']} seated {h['seated_sessions']} sessions" for h in plan["holders"])
+                line = ", ".join(f"{w['family']} ({w['rank']})" for w in queue)
+                out["panel_seats"] = (f"panel seats ({rule.rule}, {len(plan['holders'])} of {seats}): "
+                                      f"{seated or 'nobody seated'}; waiting: {line or 'nobody'}")
+            return
         if not late:
             seated = "; ".join(f"{h['family']}{' (seeded)' if h['seeded'] else ''} seated {h['seated_sessions']} sessions"
                                + (f" ({h['left_out']} more left out: the House refused every open)" if h["left_out"] else "")
@@ -2900,15 +3019,16 @@ class EquityBook:
             line = ", ".join(f"{w['family']} ({w['rank']}{', idle-flagged' if w['flagged'] else ''})" for w in queue)
             out["seats"] = f"equity seats ({rule.rule}, {len(plan['holders'])} of {seats}): {seated}; waiting: {line or 'nobody'}"
 
-    def _seat_note_first_come(self, rows: Sequence[Mapping[str, Any]], et: Any, since: Mapping[str, Any], day: str) -> None:
+    def _seat_note_first_come(self, rows: Sequence[Mapping[str, Any]], et: Any, since: Mapping[str, Any], day: str, *,
+                              pool: str = POOL_ETF) -> None:
         """Under "first-come" the plan says only who holds a seat: the swarm's roster orders the waiting, by pass time
-        (`league.swarm.bands.roster(root, lanes=LANES)`), and the book ranks nobody."""
+        (`league.swarm.bands.roster(root, lanes=LANES)`), and the book ranks nobody. A pool's plan, of its own rows
+        (`_pools`)."""
         holders = sorted(({"family": str(r["family"]), "version": int(r["version"]), "band": str(r["band"]),
                            "seeded": bool(r.get("seeded")),
                            "since": str((since.get(instance_key(r["family"], int(r["version"]))) or {}).get("day") or "")}
                           for r in rows if r.get("band") in LIVE_BANDS), key=lambda h: (h["since"], h["family"]))
-        was = self.state.get(SEAT_KEY)
-        was = dict(was) if isinstance(was, Mapping) else {}
+        was = self._pool_plan(pool) or {}
         kept = {k: v for k, v in was.items() if k in ("idle", "last", "yield_day")}
         if isinstance(kept.get("idle"), Mapping) and kept["idle"]:
             # A STALE FLAG: a program that yielded under the rule and is seated again here (first come, by pass time)
@@ -2916,10 +3036,10 @@ class EquityBook:
             seated = {h["family"] for h in holders}
             kept["idle"] = {k: v for k, v in kept["idle"].items() if str(k) not in seated}
         plan = {**kept, "rule": B.FIRST_COME,
-                "seats": int(et.probe_max_programs), "holders": holders, "waiting": None,
-                "order": "by pass time: the swarm's roster (first come)"}
-        if {k: v for k, v in was.items() if k != "day"} != plan:
-            self.state.put(SEAT_KEY, {**plan, "day": day})
+                "seats": int(et.probe_max_programs) if pool == POOL_ETF else self._panel_seat_count(),
+                "holders": holders, "waiting": None, "order": "by pass time: the swarm's roster (first come)"}
+        if {k: v for k, v in was.items() if k not in ("day", SEAT_PANEL)} != plan:
+            self._put_plan(pool, {**plan, "day": day})
 
     def _standing(self, inst: Instance) -> tuple[str, str]:
         """The swarm store's own word on an instance whose family has no row in a good read (`families.standing`):
@@ -4511,6 +4631,11 @@ def _refused(windows: Any) -> str:
         if isinstance(entry, Mapping) and not entry.get("clear"):
             return f"{name} window: {str(entry.get('why') or 'refused')[:200]}"
     return ""
+
+
+def _pooled(pool: str) -> dict[str, str]:
+    """What a seat record of the panel pool carries beside an ETF one's (an ETF pool's record is main's, to the key)."""
+    return {} if pool == POOL_ETF else {"pool": pool}
 
 
 def _reason_head(why: Any) -> str:

@@ -381,6 +381,19 @@ EQUITY_PROBE_BARE = (
     "THE LOSS BUDGET IS SHARED (A8.6): the equity lane's open Probe risk counts in the same window and total as the "
     "options Probe lane, which has only the window's rest and no room under the invested cap once the equity lane is "
     "invested to it: effectively off.")
+#: THE PANEL SEATS (release E4 step two; the constitution's `equity_money.panel`): what a panel program holds and what
+#: it costs, said beside the panel pool's plan in every report that has one. `equity_panel_note` fills the figures.
+EQUITY_PANEL_SENTENCE = (
+    "THE PANEL SEATS (equity_money.panel): a panel program holds one of {seats} panel seat(s) of its own, never one of "
+    "the {etf_seats} ETF seats, at a sleeve of {sleeve} x E; its whole basket of stocks is {risk} x E of open risk at "
+    "the stock weight ({weight}), in the same ${window} window, first come (no slice of it is kept for the panel). "
+    "Outside that room a basket bought from flat or rotated whole is scaled to the room and a partial rotation's new "
+    "name is refused at the send. ITS COST: one more program on real money at once, and a basket's lots closed at one "
+    "open are one market move (they add to Done's count and to its reads, not to its information: the distinct close "
+    "dates stand beside every checkpoint).")
+#: The same statement for a constitution with no panel row: no figure.
+EQUITY_PANEL_BARE = ("THE PANEL SEATS (equity_money.panel): the constitution has no panel row, so no panel program "
+                     "holds a seat or a sleeve.")
 #: PT1 (THE PROBE TOTAL AT $800, Oct 10, 2026): PREREG-T measured the $800 total and the -$300 program loss line at this
 #: roster alone (at no roster the operator's grid found the $800 total almost all cost), and L-D's $400 total and -$200
 #: line are the rules it measured them against.
@@ -955,6 +968,30 @@ def equity_probe_note(constitution: Mapping[str, Any] | None = None) -> str:
 EQUITY_PROBE_NOTE = equity_probe_note()
 
 
+def equity_panel_note(constitution: Mapping[str, Any] | None = None) -> str:
+    """`EQUITY_PANEL_SENTENCE` with the figures of `constitution`'s rows (None: the one in force): the panel seats and
+    sleeve (`equity_money.panel`), the ETF seats (`probe.max_programs`), a whole basket's open risk at the stock weight
+    and the options table's window. `EQUITY_PANEL_BARE` when a row cannot be read."""
+    if constitution is None:
+        from ..constitution import CONSTITUTION as constitution  # noqa: N811
+    em = (constitution or {}).get("equity_money") or {}
+    em = em if isinstance(em, Mapping) else {}
+    panel = em.get("panel") if isinstance(em.get("panel"), Mapping) else {}
+    probe = em.get("probe") if isinstance(em.get("probe"), Mapping) else {}
+    seats, sleeve = _int(panel.get("seats")), _dec(panel.get("sleeve_share"))
+    etf_seats, weight = _int(probe.get("max_programs")), _dec((em.get("open_risk_weight") or {}).get("stock"))
+    window = _dec((((constitution or {}).get("options_money") or {}).get("probe") or {}).get("loss_budget_usd"))
+    if None in (seats, sleeve, etf_seats, weight, window):
+        return EQUITY_PANEL_BARE
+    return EQUITY_PANEL_SENTENCE.format(seats=seats, etf_seats=etf_seats, sleeve=_share_text(sleeve),
+                                        risk=_share_text(sleeve * weight), weight=_share_text(weight),
+                                        window=f"{window:f}")
+
+
+#: The panel statement at the constitution in force.
+EQUITY_PANEL_NOTE = equity_panel_note()
+
+
 def options_probe_room(equity_usd: Any, constitution: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """A8.6 (`equity_probe_note`) in figures: the equity lane's open risk when it holds all it may, at the ETF weight
     `open_risk_weight.etf`, and what that leaves of the options Probe lane's window
@@ -1101,6 +1138,23 @@ def equity_seats(root: str | Path | None, book: Mapping[str, Any], seeded: Itera
             out["seats"] = out["seats"] if out["seats"] is not None else _int(roster.get("seats"))
     out["holders"] = sorted(holders, key=lambda h: (str(h.get("since") or ""), str(h.get("family"))))
     out["seeded_seats"] = sorted(str(h["family"]) for h in holders if h.get("seeded"))
+    pool = plan.get("panel") if isinstance(plan, Mapping) else None
+    if isinstance(pool, Mapping):
+        # THE PANEL POOL (release E4 step two): the book's own plan of the panel seats, with its statement. Rank
+        # positions only, as the ETF pool's; `held_seats`: panel programs holding a seat while a leg of their lane
+        # fails (opens stopped, exits on, nobody seated into it).
+        out["panel"] = {
+            "statement": EQUITY_PANEL_NOTE, "rule": pool.get("rule"), "seats": _int(pool.get("seats")),
+            "as_of": pool.get("day"),
+            "holders": sorted(({"family": str(h.get("family")), "version": _int(h.get("version")),
+                                "band": h.get("band"), "since": h.get("since"),
+                                "seated_sessions": _int(h.get("seated_sessions")), "idle": bool(h.get("idle"))}
+                               for h in pool.get("holders") or [] if isinstance(h, Mapping)),
+                              key=lambda h: (str(h["since"] or ""), h["family"])),
+            "waiting": [{"family": str(w.get("family")), "rank": _int(w.get("rank"))}
+                        for w in pool.get("waiting") or [] if isinstance(w, Mapping)]
+            if isinstance(pool.get("waiting"), list) else None,
+            "held_seats": sorted(str(f) for f in pool.get("held_seats") or [])}
     held, of = len(holders), out["seats"]
     names = ", ".join(out["seeded_seats"])
     out["seeded_statement"] = (

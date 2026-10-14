@@ -234,7 +234,8 @@
       "universe_max_age_days": 400,
       "live_min_tradable_share": 0.95,
       "census_notes": {},
-      "look_rule": "hold"
+      "look_rule": "hold",
+      "seats": 2
     },
     "e2": {
       "births_every_seconds": 7200,

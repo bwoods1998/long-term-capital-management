@@ -173,14 +173,14 @@ DEFAULTS: dict[str, Any] = {
     "rebalance": ["weekly", "monthly"], "train_budget": 4, "placebos_train": 200, "cpu_seconds_day": 14400,
     "run_budget_seconds": 600, "zero_edge_programs": 100, "coverage_min": 0.97, "spreads_min_share": 0.90,
     "membership_max_stale_days": 45, "universe_max_age_days": 400, "live_min_tradable_share": 0.95,
-    "census_notes": {}, "look_rule": "hold",
+    "census_notes": {}, "look_rule": "hold", "seats": 2,
 }
 BOUNDS: dict[str, tuple[float, float]] = {
     "birth_share": (0.0, 1.0), "max_alive": (0, 100), "max_names": (5, 40), "train_budget": (1, 4),
     "placebos_train": (200, 1000), "cpu_seconds_day": (0, 36000), "run_budget_seconds": (60, 600),
     "zero_edge_programs": (20, 400), "coverage_min": (0.97, 1.0), "spreads_min_share": (0.5, 1.0),
     "membership_max_stale_days": (7, 120), "universe_max_age_days": (30, 500),
-    "live_min_tradable_share": (0.90, 1.0),
+    "live_min_tradable_share": (0.90, 1.0), "seats": (0, 2),
 }
 CENSUS_NOTE_MAX = 200
 #: THE A31 LOOK HOLD (`elane.panel.look_rule`; the captain's A31: NO XS1 LOOK BEFORE STUDY XS1-R RULES). A look runs
@@ -853,6 +853,18 @@ def _cached_mode(root: str | Path) -> str:
     with _cache_lock:
         _mode_cache[key] = (now, value)
     return value
+
+
+def panel_seats(root: str | Path) -> int:
+    """THE PANEL POOL's seats as the swarm says them: `elane.panel.seats` of the state root's own settings (0 to 2,
+    the bound of the constitution's `equity_money.panel.seats`; the default, 2, leaves the row's count). It may only
+    LOWER the row (the book and the swarm's reader seat at most the smaller of the two:
+    league/equity/live.py `_panel_seat_count`, league/swarm/bands.py `panel_pool_seats`). Fails closed: settings that
+    cannot be read seat no panel program."""
+    try:
+        return int(cfg(_settings_of(root, None))["seats"])
+    except Exception:  # noqa: BLE001 - fail closed
+        return 0
 
 
 def seatable(root: str | Path) -> Callable[[Any], bool]:
@@ -3891,7 +3903,7 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "CLOCK_RUNS", "SLOW_SHARE", "TooSlow", "ClockUnsteady", "clock_of", "steady", "one_store", "slicer", "bar_runs",
            "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "LOOK_RULES", "LOOK_RULES_BUILT", "A31_HOLD",
            "look_held", "cfg", "pin", "receipt", "mode",
-           "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
+           "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "panel_seats", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
            "judged", "identity", "hidden_year_of", "card_errors", "cell_of", "family_cell", "cell_text",
            "closed_cells", "cell_looks", "forward_verdicts", "look_room", "probe_reading", "probed", "style_of",
            "assign", "run_spans", "seen_spans", "hidden_span", "agenda_text", "contract_text", "bar_text",

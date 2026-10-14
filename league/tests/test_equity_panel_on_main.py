@@ -15,7 +15,9 @@ league/swarm/E4.md ("The merge with main's releases E5-A and E3.1") and held her
    them, queued or not, at every setting, and that the book's plan, its six seats, its yield and its orders are main's
    own record to the row. The swarm's side of the rule, the backfill of K's two counts (league/swarm/elane.py
    `seat_backfill`), reads the Candidate, Probe and Sized bands: it passes a panel family in Train research by and
-   writes a share program's counts as on main.
+   writes a share program's counts as on main. (STEP TWO gives the panel its own pool of seats,
+   `equity_money.panel`: a panel family that does reach the plan enters that pool alone, never the six:
+   league/tests/test_equity_panel_seats.py.)
 2. AN EXIT'S WAIT FOR THE PRACTICE PROOF HAS AN END (A28; `_work_exit`). It covers a panel basket's exits like any
    other: `_work_exit` asks nothing of an instance's kind. A rotation's sale and the House's exit of a name that left
    the eligible set wait for the SELL stage inside the open window and go at the entry cut-off, with the one alert a
@@ -137,10 +139,10 @@ class APanelFamilyNeverReachesTheSeatPlan(unittest.TestCase):
         band both Candidates still take their seats, as on main: the book counts the rows it is given.
 
         THE ROLLBACK, stated: under "first-come" it is the swarm's roster that counts, and it counts the families
-        the store holds in the Probe band (a panel family there holds a seat: step two's design, where it has
-        lots). So a forced panel Probe family would cost an ETF Candidate its seat under the rollback. Step one
-        puts no panel family in any band (no panel look runs under "gate"), which is what keeps the six seats the
-        ETF programs' own there too; it is held below on the store as the lane makes it at "train"."""
+        the store holds in the Probe band A POOL AT A TIME (step two: league/swarm/bands.py `equity_seating`). A
+        panel family in the Probe band holds the panel pool's seat, never one of the six, so a forced panel Probe
+        family costs no ETF Candidate its seat under the rollback either. Step one puts no panel family in any band
+        (no panel look runs under "gate"); what "train" makes is held below on the store."""
         from league.swarm.store import SwarmStore
         from league.tests.equity_design import seat_rule
 
@@ -154,7 +156,8 @@ class APanelFamilyNeverReachesTheSeatPlan(unittest.TestCase):
             forced = W.run(name, reader="store", panel="train", forced=("probe",))
         seated = lambda s: sorted(r["family"] for r in s["instances"] if r["retired_at"] is None)  # noqa: E731
         self.assertEqual(len(seated(plain)), 6, "the rollback on the store as step one makes it: six ETF seats")
-        self.assertEqual(len(seated(forced)), 5, "a panel family in the Probe band holds a roster seat there")
+        self.assertEqual(len([f for f in seated(forced) if not f.startswith("xs-")]), 6,
+                         "a panel family in the Probe band holds the panel pool's seat, never an ETF one")
         # What "train" makes: a panel family in Train research, band "gym". None in a band the roster reads.
         root, clock, families = self.store("train")
         store = SwarmStore(root, clock=clock)
@@ -219,8 +222,12 @@ class APanelFamilyNeverReachesTheSeatPlan(unittest.TestCase):
 
         sync = inspect.getsource(L.EquityBook._sync_instances)
         self.assertIn("rows = [dict(r) for r in self.families.read() if str(r.get(\"lane\") or \"\") in _pkg.LANES]", sync)
-        self.assertIn("self._seat_bands(rows, et, rule, sticky, since, day, now, out, late=late, counts_from=counts_from)",
+        self.assertIn("pools = self._pools(rows)", sync)
+        self.assertIn("self._seat_bands(part, et, rule, sticky, since, day, now, out, late=late, counts_from=counts_from,",
                       sync)
+        # (STEP TWO: a pool at a time; the ETF pool is the rows of the book's own kind, `_pools`)
+        pools = inspect.getsource(L.EquityBook._pools)
+        self.assertIn("etf = [r for r in rows if K.kind_of(r.get(\"structure\")) == EQUITY_KIND]", pools)
         seat = inspect.getsource(L.EquityBook._seat_bands)
         self.assertIn("holders = [r for r in rows if r.get(\"band\") in LIVE_BANDS]", seat)
         self.assertIn("waiting = [r for r in rows if r.get(\"band\") == \"candidate\" and r.get(\"holdout_passed\") "

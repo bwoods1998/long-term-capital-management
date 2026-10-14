@@ -30,6 +30,22 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### Release E4 step two: what a panel look and a panel seat need that can be built before XS1-R rules, on `feat/equity-e4-step2` (unreleased; on step one `6f99652d` with #543 merged, `47ed6872`: the Probe sleeve 0.50 x E; THE MONEY DIGEST MOVES ONCE, in its marked commit; no fingerprint moves)
+
+- **The A31 look hold.** `elane.panel.look_rule` (policy.json "hold"): no XS1 look before study XS1-R rules. A
+  look waits, nothing spent, even with its receipt, permit, review and room present, and says "A31: no XS1 look
+  before XS1-R rules"; "xs1" is XS1 as built; a value the tree does not implement holds; Validation is not held.
+  The heartbeat's `equity.panel.look` and the direction report's `panel_lane.look` say why.
+- **The panel money row and the panel seat pool** (`equity_money.panel` {"seats": 1, "sleeve_share": "0.10"};
+  bounds 0-2 and 0-0.25, never above the Probe sleeve). A panel program holds a seat of a pool of its own and a
+  sleeve of its own: the six ETF seats, their plan, the idle test and K are untouched, and the ETF programs'
+  orders are the same order for order with a panel Candidate, Probe and Sized program in the book. A program held
+  on a failed leg keeps its seat. Money digest `5b95d73e` -> `de5ed74e`, constitution `4ef472e1` -> `111ede85`
+  (the grant re-ratifies at the House's start). league/live/money.py is not edited (it is inside the options
+  execution fingerprint): the row is read by league/equity/bands.py `panel_settings`, as the seat rule's block is.
+- **The live-book proof recorded again on main `47ed6872`** (#543's sleeve): every scenario moved by the lot's size
+  alone; step one needs the same record once #543 is merged into it.
+
 ### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 
 - **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
@@ -658,7 +674,7 @@ the equity lots: $400 - 0.20 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 16 sends of such a lot: 3 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.50 x E and
 0.50 x E.
-Money digest `5b95d73e`, full digest `4ef472e1` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8c226cf1` / `def9f80f`.
+Money digest `de5ed74e`, full digest `111ede85` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `46b933a9` / `d9cf3149`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over
