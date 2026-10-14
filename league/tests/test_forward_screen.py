@@ -527,6 +527,25 @@ class ThePanel(Fixture):
         db.close()
         self.assertEqual(runs.calls["placebo"], 1)                # p1's leg only
 
+    def test_a_refusal_before_any_validation_read_is_no_sealed_precheck(self):
+        """elane_xs writes its pre-check record with `reached` False when it refuses a version before any Validation
+        read (a Train segment its own errors ended, the same lineage as a twin): no sealed data was read, so the
+        lineage is case N at its first sighting and a pending case-N lineage is not voided by one."""
+        self.family("p3", structure="panel", state={"elane_xs_precheck": {"version": 1, "reached": False,
+                                                                          "why": "same lineage", "twin": "p9"}})
+        self.row("p3", 1, panel=True)
+        self.run_night(FakeRuns())
+        self.families["p1"]["state"]["elane_xs_precheck"] = {"version": 2, "reached": False, "why": "train run"}
+        self.run_night(FakeRuns())
+        db = self.store()
+        rows = {r["lineage"]: dict(r) for r in db.execute("SELECT * FROM fwd1_lineages")}
+        self.assertEqual((rows["equity:p3"]["case_"], rows["equity:p3"]["judged"]), ("N", 1))
+        verdicts = {r["lineage"]: r["verdict"] for r in db.execute("SELECT lineage, verdict FROM fwd1_verdicts")}
+        self.assertNotEqual(verdicts.get("equity:p1"), "void")
+        db.close()
+        self.assertTrue(FS.family_sealed({"state": {"elane_xs_precheck": {"version": 1, "reached": True}}}))
+        self.assertTrue(FS.family_sealed({"state": {"elane_xs_precheck": {"version": 1}}}))    # unsaid: sealed
+
     def test_a_panel_lineage_with_an_xs1_precheck_is_case_xs1(self):
         self.family("p2", structure="panel", state={"elane_xs_precheck": {"version": 1}})
         self.row("p2", 1, panel=True)

@@ -27,8 +27,17 @@ WITH IT ON:
      this path in the same cell is a Candidate, at Probe or Sized and alive (the review's F5: the seat goes to one copy
      of a cell, not to the luckiest of many);
    - a PANEL lineage: ELIGIBLE ONLY. No panel seat exists in E4's step one; the panel seat pool is step two's
-     (branch feat/equity-e4-step2, B3), which reads `eligible(state)` for a panel family. This module records the
-     eligibility (`STATE_KEY`) and moves no panel band.
+     (branch feat/equity-e4-step2, B3). This module records the eligibility (`STATE_KEY`) and moves no panel band.
+     ONLY CASE N (the captain's A34, 18:42Z Oct 14: "a panel program's only path to money is FWD1-R case N"): a
+     panel pass of case XS1 is recorded by the job and never made eligible here. AT MOST ONE A MECHANISM CELL here
+     too: a panel pass waits while another family of its cell holds the cell's forward eligibility or seat
+     (`one_a_cell`), so even a pool that read `eligible(state)` alone could seat no second copy of a cell.
+3. THE ONE CALL A SEAT POOL ASKS (`seat_refused`, for both types; the review's major): why a family may not take a
+   forward seat NOW, or None. A pool that seats a family on a forward pass asks it first and, when it seats one,
+   records it (`mark_seated`), so the cell's one live forward seat is counted for both types alike. THE OBLIGATION
+   STEP TWO TAKES ON (league/xs/E4_INTERFACES.md; docs/operations.md): the panel pool seats a panel family on a
+   forward pass only when `seat_refused(store, fam, settings)` is None, and calls `mark_seated(store, fid)` in the
+   same transaction as the band move; reading `eligible(state)` alone is not the contract.
    The verdict's words are kept beside it (`STATE_KEY`["words"]); the operator's sentence with the t and the shadow
    P&L stays in the job's own report.
 
@@ -54,6 +63,9 @@ JUDGED = ("pending", "pass", "fail")
 LIVE_BANDS = ("candidate", "probe", "sized")
 REFUSED = "the FWD1-R forward screen judges this lineage: it takes no sealed look (FWD1-R, A33)"
 UNREADABLE = "the FWD1-R permit file cannot be read while forward seats are on: no sealed try (fail closed)"
+#: The cases a PANEL pass may take a seat on (the captain's A34: case N only).
+PANEL_CASES = ("N",)
+A34 = "A34: a panel program's only path to money is FWD1-R case N (this pass is case {case}): recorded, no seat"
 
 
 def seats_on(settings: Mapping[str, Any] | None) -> bool:
@@ -106,24 +118,76 @@ def try_refused(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] 
 
 
 def eligible(state: Mapping[str, Any] | None) -> bool:
-    """Whether a family's state holds a forward pass made eligible here (a panel family: what step two's seat pool
-    reads; an ETF family: it was made a Candidate by this path)."""
+    """Whether a family's state holds a forward pass made eligible here (an ETF family: it was made a Candidate by this
+    path; a panel family: it may be seated by the pool, which asks `seat_refused` first: this flag alone is not the
+    contract)."""
     held = state.get(STATE_KEY) if isinstance(state, Mapping) else None
     return isinstance(held, Mapping) and held.get("eligible") is True
 
 
 def one_a_cell(store: Any, cell: str, *, but: str) -> str | None:
-    """THE CELL'S ONE LIVE FORWARD SEAT: the family (other than `but`) made a Candidate by this path in `cell` that is
-    still alive in a live band, or None."""
+    """THE CELL'S ONE LIVE FORWARD SEAT: the family (other than `but`), of either type, alive, whose forward pass in
+    `cell` holds it: one seated on its pass (made a Candidate here, or recorded by a pool's `mark_seated`) that is still
+    in a live band, or one made eligible here and not yet seated (a panel pass waiting for the pool's seat); None when
+    the cell is free. A seated family that left the live bands (demoted, exited) frees it, as a retired one does."""
     from . import elane
 
     for fam in store.families(alive=True, lanes=elane.LANES):
-        if str(fam["id"]) == str(but) or fam.get("band") not in LIVE_BANDS:
+        if str(fam["id"]) == str(but) or fam.get("retired_at"):
             continue
         held = (fam.get("state") or {}).get(STATE_KEY)
-        if isinstance(held, Mapping) and held.get("seated") is True and held.get("cell") == cell:
-            return str(fam["id"])
+        if not isinstance(held, Mapping) or held.get("cell") != cell or held.get("eligible") is not True:
+            continue
+        if held.get("seated") is True and fam.get("band") not in LIVE_BANDS:
+            continue
+        return str(fam["id"])
     return None
+
+
+def seat_refused(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[str, Any] | None) -> str | None:
+    """THE ONE CALL A SEAT POOL ASKS (the module docstring, 3), for an ETF and a panel family alike: why `fam` may not
+    take a seat on its forward pass now, or None. Refused: the seat switch off; no eligible forward pass in its state;
+    a panel pass of a case other than N (A34); the permit file unreadable, or no longer listing its lineage as a pass
+    of this version and run sha; the version's run sha not the judged one; another family holding the mechanism
+    cell's one live forward seat (`one_a_cell`)."""
+    if not seats_on(settings):
+        return "the forward seats are off (elane.fwd1.seats)"
+    if not isinstance(fam, Mapping) or fam.get("retired_at"):
+        return "no such family alive"
+    held = (fam.get("state") or {}).get(STATE_KEY)
+    if not eligible(fam.get("state")) or not isinstance(held, Mapping):
+        return "no forward pass is eligible in its state"
+    if held.get("type") == "PANEL" and held.get("case") not in PANEL_CASES:
+        return A34.format(case=held.get("case"))
+    rows = permits(store.root)
+    if rows is None:
+        return UNREADABLE
+    row = rows.get(str(held.get("lineage") or ""))
+    if row is None or row.get("status") != "pass" or str(row.get("family") or "") != str(fam["id"]) or \
+            row.get("run_sha") != held.get("run_sha"):
+        return "the permit file does not list this family's forward pass"
+    from .gate import run_sha
+
+    version = store.version(fam["id"], held.get("version"))
+    if version is None or run_sha(version) != held.get("run_sha"):
+        return "the version's run sha is not the judged one"
+    other = one_a_cell(store, str(held.get("cell") or ""), but=str(fam["id"]))
+    if other is not None:
+        return f"one live forward seat a mechanism cell: {other} holds {held.get('cell')}'s"
+    return None
+
+
+def mark_seated(store: Any, fid: str, settings: Mapping[str, Any] | None) -> bool:
+    """A SEAT POOL'S RECORD (the module docstring, 3): the family `fid` was seated on its forward pass (a panel pool
+    calls it in the transaction that moves its band). Written only when `seat_refused` is None; whether it was."""
+    fam = store.family(fid)
+    if seat_refused(store, fam, settings) is not None:
+        return False
+    held = dict((fam.get("state") or {}).get(STATE_KEY) or {})
+    store.set_state(fid, **{STATE_KEY: {**held, "seated": True}})
+    store.event("swarm.gate", fid, {"action": "forward_seat", "version": held.get("version"), "screen": "FWD1-R",
+                                    "case": held.get("case"), "cell": held.get("cell"), "lane": held.get("type")})
+    return True
 
 
 def _proof(row: Mapping[str, Any], sha: str) -> dict[str, Any] | None:
@@ -178,7 +242,15 @@ def step(gate: Any) -> dict[str, Any]:
                     "type": row.get("type"), "case": row.get("case"), "k": row.get("k"), "weak": row.get("weak"),
                     "words": row.get("words"), "at": gate.clock() if hasattr(gate, "clock") else time.time()}
             if row.get("type") == "PANEL":
-                # ELIGIBLE ONLY: the panel seat pool is E4 step two's (B3); no panel band moves here.
+                # ELIGIBLE ONLY: the panel seat pool is E4 step two's (B3); no panel band moves here. Case N only
+                # (A34), and one a mechanism cell (a second copy of a cell waits while the first holds it).
+                if row.get("case") not in PANEL_CASES:
+                    out["waits"][fid] = A34.format(case=row.get("case"))
+                    continue
+                other = one_a_cell(store, cell, but=fid)
+                if other is not None:
+                    out["waits"][fid] = f"one live forward seat a mechanism cell: {other} holds {cell}'s"
+                    continue
                 store.set_state(fid, **{STATE_KEY: {**held, "seated": False}})
                 store.event("swarm.gate", fid, {"action": "forward_eligible", "version": held["version"],
                                                 "lane": row.get("type"), "screen": "FWD1-R"})
@@ -209,4 +281,5 @@ def step(gate: Any) -> dict[str, Any]:
 
 
 __all__ = ["PERMITS", "PERMITS_VERSION", "STATE_KEY", "SEATS", "JUDGED", "LIVE_BANDS", "REFUSED", "UNREADABLE",
-           "seats_on", "permits", "lineage_of", "try_refused", "eligible", "one_a_cell", "step"]
+           "PANEL_CASES", "A34", "seats_on", "permits", "lineage_of", "try_refused", "eligible", "one_a_cell",
+           "seat_refused", "mark_seated", "step"]

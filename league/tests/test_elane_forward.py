@@ -174,6 +174,51 @@ class TheSeat(Base):
         self.assertFalse(fam["state"][EF.STATE_KEY]["seated"])
         self.assertEqual(self.store.bands, [])
 
+    def test_two_panel_passes_in_one_cell_one_seat(self):
+        """AT MOST ONE LIVE FORWARD SEAT A MECHANISM CELL for panel passes too (the review's major): the second pass of
+        a cell is not made eligible while the first holds the cell, and the one call a pool asks refuses it."""
+        cell = "equity / momentum / panel:sp500"
+        p1 = self.store.add("p1", structure="panel")
+        p2 = self.store.add("p2", structure="panel")
+        self.permit({"equity:p1": self.passed("p1", typ="PANEL", cell=cell),
+                     "equity:p2": self.passed("p2", typ="PANEL", cell=cell)})
+        out = EF.step(self.gate())
+        self.assertEqual(out["eligible"], ["p1"])
+        self.assertIn("one live forward seat a mechanism cell: p1", out["waits"]["p2"])
+        self.assertFalse(EF.eligible(p2["state"]))
+        self.assertIsNone(EF.seat_refused(self.store, p1, ON))         # the pool may seat p1 ...
+        self.assertIsNotNone(EF.seat_refused(self.store, p2, ON))      # ... and never p2
+        self.assertTrue(EF.mark_seated(self.store, "p1", ON))          # the pool seats p1 and records it
+        self.store.set_band("p1", "probe", reason="the panel pool's seat (a test's)")
+        self.assertTrue(p1["state"][EF.STATE_KEY]["seated"])
+        self.assertIn("one live forward seat a mechanism cell: p1", EF.step(self.gate())["waits"]["p2"])
+        self.store.set_band("p1", "gym", reason="demoted by the money rows (a test's)")   # the seat is free again
+        self.assertEqual(EF.step(self.gate())["eligible"], ["p2"])
+        self.assertIsNone(EF.seat_refused(self.store, p2, ON))
+        self.assertIsNotNone(EF.seat_refused(self.store, p2, OFF))     # the switch off: nothing seats
+
+    def test_a_panel_pass_of_case_xs1_takes_no_seat(self):
+        """A34: a panel program's only path to money is FWD1-R case N."""
+        fam = self.store.add("p1", structure="panel")
+        self.permit({"equity:p1": {**self.passed("p1", typ="PANEL"), "case": "XS1"}})
+        out = EF.step(self.gate())
+        self.assertEqual(out["eligible"], [])
+        self.assertIn("A34", out["waits"]["p1"])
+        self.assertFalse(EF.eligible(fam["state"]))
+        fam["state"][EF.STATE_KEY] = {"eligible": True, "type": "PANEL", "case": "XS1", "lineage": "equity:p1"}
+        self.assertIn("A34", EF.seat_refused(self.store, fam, ON))     # however its state was written
+
+    def test_the_one_call_holds_for_an_etf_pass_and_reads_the_permit_file(self):
+        fam = self.store.add("f1")
+        self.permit({"equity:f1": self.passed("f1")})
+        EF.step(self.gate())
+        self.assertIsNone(EF.seat_refused(self.store, fam, ON))
+        self.permit({"equity:f1": {"status": "pending"}})               # the file no longer lists its pass
+        self.assertIn("permit file", EF.seat_refused(self.store, fam, ON))
+        (self.root / EF.PERMITS).write_text("{not json")
+        self.assertEqual(EF.seat_refused(self.store, fam, ON), EF.UNREADABLE)
+        self.assertFalse(EF.mark_seated(self.store, "f1", ON))
+
     def test_it_waits_on_what_it_cannot_prove(self):
         self.store.add("f1")
         row = self.passed("f1")

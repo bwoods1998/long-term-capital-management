@@ -537,6 +537,23 @@ def _c(x: Any) -> str:
     return "n/a" if x is None else f"{float(x):.2f}"
 
 
+#: THE CAPTAIN'S A34 (18:42Z Oct 14, from XS1-R), point 5: beside every panel trade, the measured zero-edge rate at
+#: its checkpoint, and why there is no historical look (a memory-holding author passes a historical XS1 look 10-99%).
+A34_MEMORY = ("No historical look: a historical XS1 look would pass a memory-holding author 10-99% of the time "
+              "(XS1-R, the captain's A34), so a panel program's only evidence is its forward sessions.")
+
+
+def _panel_a34(rule_: Rule, typ: str, case: str, k: int) -> str:
+    """A34 point 5's two sentences for a PANEL pass ("" for ETF): the receipt's zero-edge share passing by checkpoint
+    `k` (the forward length is the sentence's own), and the memory-holder sentence."""
+    if typ != "PANEL":
+        return ""
+    curve = rule_.figure(typ, case)["zero_edge_by_checkpoint"]
+    rate = curve[PLAN.index(int(k))] if int(k) in PLAN else None
+    return (f"Measured zero-edge pass rate by checkpoint {k}: {_pct(rate)}% (a program with no edge passes by this "
+            f"checkpoint that often). {A34_MEMORY} ")
+
+
 def words(rule_: Rule, *, typ: str, case: str, k: int, start: Any, c_used_value: float, k_own: int | None,
           observed: int, judged: int, expected: float | None) -> str:
     """The sentence of a forward pass IN IDS AND WORDS (the permit file's: no figure of P&L and no t, only the rule's
@@ -552,7 +569,8 @@ def words(rule_: Rule, *, typ: str, case: str, k: int, start: Any, c_used_value:
             f"{_c(C_G[typ][case])}, own floor {_c(None if k_own is None else k_own / 100)} + 0.05). Measured "
             f"false-positive rate at zero edge in the worst Train-era volatility regime: {_pct(fig['fp_point'])}% (97.5% "
             f"bound {_pct(fig['fp_ub'])}%; forward budget {_pct(fig['budget'])}%){look}; owner's wall 15%. "
-            f"Contamination is zero by construction for the judged sessions. {weak_text}Registry: {observed} forward "
+            f"Contamination is zero by construction for the judged sessions. {weak_text}"
+            f"{_panel_a34(rule_, typ, case, k)}Registry: {observed} forward "
             f"passes of {judged} {typ} case {case} lineages judged so far, against "
             f"{'n/a' if expected is None else f'{expected:.2f}'} expected at zero edge. Failures stay on record.")
 
@@ -586,7 +604,8 @@ def beside(rule_: Rule, *, typ: str, case: str, k: int, start: Any, t: float, c_
             f"construction for the judged sessions. Skill: a pass inside 60 sessions is weak evidence. At a true edge "
             f"of {fig['edge']} a year a program like this passes about {_pct(fig['power'])}% of the time against "
             f"{_pct(fig['fp_avg'])}% at zero edge in the same fill world, so most forward passers have no edge. "
-            f"{weak_text}{etf}Registry: {observed} forward passes of {judged} {typ} case {case} lineages judged so "
+            f"{weak_text}{etf}{_panel_a34(rule_, typ, case, k)}Registry: {observed} forward passes of {judged} {typ} "
+            f"case {case} lineages judged so "
             f"far, against {'n/a' if expected is None else f'{expected:.2f}'} expected at zero edge. Failures stay on "
             f"record.")
 
@@ -596,4 +615,5 @@ __all__ = ["NAME", "SCREEN", "PIN_BLOCK", "RECEIPT_PATH", "PLAN", "KMAX", "K_MAX
            "PLACEBO_COUNT_MAX", "OWNER_WALL", "XS1_LOOK_CAP", "XS1_FORWARD_BUDGET", "PANEL_WEAK_K", "PIN_KEYS",
            "FIGURE_KEYS", "Rule", "pin", "load", "rule", "start_after", "forward_start", "grid_index", "k_used",
            "c_used", "haircut_bp", "series", "t_stat", "checkpoint", "legs_pass", "placebo_count", "placebo_holds",
-           "placebo_seed", "own_floor_k", "drift_kept", "floor_cells", "expected_passes", "weak", "words", "beside"]
+           "placebo_seed", "own_floor_k", "drift_kept", "floor_cells", "expected_passes", "weak", "A34_MEMORY",
+           "words", "beside"]

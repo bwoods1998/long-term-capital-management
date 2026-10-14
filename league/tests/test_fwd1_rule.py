@@ -334,5 +334,24 @@ class TheSentences(unittest.TestCase):
                                                           observed=0, judged=1, expected=0.05))
 
 
+    def test_a_panel_pass_states_a34s_two_sentences(self):
+        """The captain's A34 point 5: beside every panel trade the forward length, the measured zero-edge rate at that
+        checkpoint (the receipt's), and that a historical look would pass a memory-holder 10-99% (why there is none)."""
+        curve = self.rule.figure("PANEL", "N")["zero_edge_by_checkpoint"]
+        for k in (5, 20):
+            common = dict(typ="PANEL", case="N", k=k, start="2026-10-16", c_used_value=2.06, k_own=150, observed=0,
+                          judged=4, expected=0.2)
+            rate = f"{100.0 * float(curve[R.PLAN.index(k)]):.1f}%"
+            for text in (R.words(self.rule, **common),
+                         R.beside(self.rule, t=3.0, g_bp=3, pnl=0.01, drift=None, **common)):
+                with self.subTest(k=k):
+                    self.assertIn(f"checkpoint {k} of 5-60 counted forward sessions since 2026-10-16", text)
+                    self.assertIn(f"Measured zero-edge pass rate by checkpoint {k}: {rate}", text)
+                    self.assertIn("memory-holding author 10-99%", text)
+        etf = R.words(self.rule, typ="ETF", case="N", k=10, start="x", c_used_value=2.61, k_own=200, observed=0,
+                      judged=1, expected=0.1)
+        self.assertNotIn("memory-holding", etf)
+
+
 if __name__ == "__main__":
     unittest.main()
