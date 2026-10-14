@@ -58,8 +58,8 @@ from league.tests import equity_week as W
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "equity_etf_orders.json"
 #: The release the fixture was recorded on: main, with releases E5-A (the seat rule) and E3.1 (the exit wait's end,
-#: the re-based twin) deployed.
-RECORDED_ON = "8ab31e32dc77a730d6d3397c222f530294dec632"
+#: the re-based twin) deployed, and decision A32 (the Probe sleeve 0.50 x E at six seats, 47ed6872, PR #543).
+RECORDED_ON = "47ed6872ce6c232b743cc556f5540892b9132470"
 
 
 def differences(name: str, want: dict, got: dict) -> str:
