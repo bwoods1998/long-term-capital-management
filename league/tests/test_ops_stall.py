@@ -967,7 +967,9 @@ class LaneAndNightly(Base):
         out = self.run_lane(now=at("2026-10-08T18:00:00Z"))
         check = out["checks"]["forward"]
         self.assertIn("no forward day has completed in the 36.0 h since 2026-10-06 fell due", check["what"])
-        self.assertIn("the nightly owes 2026-10-06 (SLV: SIP 389/390", check["owner_step"])
+        self.assertIn("the nightly owes 2026-10-06 and has completed no day in 36.0 h", check["owner_step"])
+        self.assertTrue(check["owner_step"].endswith("(SLV: SIP 389/390, minute 826 (13:46 ET) missing)"))
+        self.assertIn("too wide a SIP gap for the House to hand off", check["what"])    # no hand-off was scheduled
         self.assertEqual(check["numbers"]["owed_hours"], 36.0)
         self.assertIn("forward", out["stalled"])
         self.assertTrue(out["notice"]["sent"])                          # a new owner cause: mailed at once
@@ -1005,14 +1007,89 @@ class LaneAndNightly(Base):
         self.assertFalse(check["stalled"])
         self.assertEqual(check["numbers"]["owed_hours"], 0.33)
 
+    def legacy(self, *, ready_day, day, error="SIPError: incomplete regular-session SIP bars: SLV 389/390"):
+        """A nightly record the release before this one wrote: an error on `day`, no `retrying`."""
+        (self.root / "gym-forward.json").write_text(json.dumps({"day": ready_day, "ready_at": f"{ready_day}T06:14:21+00:00"}))
+        data = self.root / "data"
+        data.mkdir(exist_ok=True)
+        (data / "nightly.json").write_text(json.dumps({"day": day, "error": error, "retry_at": 0}))
+
     def test_a_record_from_before_the_retry_clock_counts_from_the_stalls_own_first_sight(self):
         self.healthy()
-        self.nightly(day="2026-10-06", error="SIPError: incomplete regular-session SIP bars: SLV 389/390")
+        self.legacy(ready_day="2026-10-05", day="2026-10-06")
         self.run_lane()                                                # the stall first sees the error at 10:20Z
-        # The new release's first failed try writes `retrying` since its own start; the stall keeps the older sight.
-        self.retrying(ready_day="2026-10-06", day="2026-10-07", since="2026-10-07T15:00:00Z")
+        kept = json.loads((self.root / ST.STATE_FILE).read_text())["nightly_error"]
+        self.assertEqual(kept, {"since": "2026-10-07T10:20:00Z", "day": "2026-10-06"})
+        # The new release's first failed try of the same day writes `retrying` since its own start; the stall keeps the
+        # older sight.
+        self.retrying(ready_day="2026-10-05", day="2026-10-06", since="2026-10-07T15:00:00Z")
         check = self.run_lane(now=at("2026-10-07T16:20:00Z"))["checks"]["forward"]
-        self.assertIn("the nightly has retried 2026-10-07 for 6.0 h", check["what"])
+        self.assertIn("the nightly has retried 2026-10-06 for 6.0 h", check["what"])
+
+    def test_a_sight_of_another_days_error_never_counts_for_the_day_retried(self):
+        self.healthy()
+        self.retrying(ready_day="2026-10-05", day="2026-10-06", since="2026-10-07T06:05:00Z")
+        self.run_lane()                                                # 2026-10-06's error, first seen at 10:20Z
+        # Between two runs 2026-10-06 completed and 2026-10-07 failed its first try: its clock is its own.
+        self.retrying(ready_day="2026-10-06", day="2026-10-07", since="2026-10-08T06:05:00Z",
+                      completed_at="2026-10-08T06:01:00+00:00")
+        out = self.run_lane(now=at("2026-10-08T06:20:00Z"))
+        check = out["checks"]["forward"]
+        self.assertNotIn("retried", check["what"])
+        self.assertNotIn("carried an error", check["what"])
+        self.assertEqual(check["numbers"]["retrying_hours"], 0.25)
+        kept = json.loads((self.root / ST.STATE_FILE).read_text())["nightly_error"]
+        self.assertEqual(kept, {"since": "2026-10-08T06:20:00Z", "day": "2026-10-07"})
+        # The pure check alone: a sight of another day is never the retry's start.
+        record = ST.forward_facts(self.root)
+        check = ST._forward_check(at("2026-10-08T06:20:00Z"), record, at("2026-10-07T10:20:00Z"), "2026-10-06")
+        self.assertEqual(check["numbers"]["retrying_hours"], 0.25)
+
+    def test_the_release_befores_record_holds_the_owed_step_until_the_cap(self):
+        self.healthy()
+        # The deploy window: this release's stall reads the record the release before wrote (an error, no `retrying`),
+        # with 2026-10-06 owed 36 h already. Its step waits for the new nightly's first try, at most until 72 h owed.
+        self.legacy(ready_day="2026-10-05", day="2026-10-06")
+        self.run_lane(now=at("2026-10-07T12:20:00Z"))                 # the stall's first sight
+        out = self.run_lane(now=at("2026-10-08T21:50:00Z"))
+        check = out["checks"]["forward"]
+        self.assertTrue(check["stalled"])
+        self.assertIsNone(check["owner_step"])
+        self.assertIn("the owner step waits for this release's first try", check["what"])
+        self.assertEqual(check["numbers"]["owed_hours"], 39.83)
+        self.assertFalse(any(str(c.get("notice_id", "")).startswith("stall:owner:") for c in self.notify.calls))
+        # The first new try: a hand-off scheduled 6 h on holds the step until an hour past it.
+        self.retrying(ready_day="2026-10-05", day="2026-10-06", since="2026-10-08T22:00:00+00:00",
+                      handoff_at="2026-10-09T04:00:00+00:00")
+        self.assertIsNone(self.run_lane(now=at("2026-10-08T22:20:00Z"))["checks"]["forward"]["owner_step"])
+        self.assertIn("the nightly owes 2026-10-06", self.run_lane(now=at("2026-10-09T05:00:00Z"))["checks"]["forward"]["owner_step"])
+        # A nightly that never tries again (the record stays the release before's): the owner's step at 72 h owed.
+        self.legacy(ready_day="2026-10-05", day="2026-10-06")
+        self.assertIsNone(self.run_lane(now=at("2026-10-10T05:50:00Z"))["checks"]["forward"]["owner_step"])
+        self.assertIn("the nightly owes 2026-10-06", self.run_lane(now=at("2026-10-10T06:00:00Z"))["checks"]["forward"]["owner_step"])
+
+    def test_a_standing_stop_is_the_step_never_the_owed_day(self):
+        self.healthy()
+        self.retrying(ready_day="2026-10-05", day="2026-10-06", since="2026-10-07T06:05:00Z", roots=("SLV", "SPY"))
+        stop = self.root / "data" / "nightly.stop"
+        stop.write_text("updater:20261008T150000Z")
+        os.utime(stop, (at("2026-10-08T17:30:00Z"),) * 2)
+        # Owed 36 h with a stop younger than two hours: no step yet (a deploy may be in flight), never the owed day's.
+        check = self.run_lane(now=at("2026-10-08T18:00:00Z"))["checks"]["forward"]
+        self.assertIn("no forward day has completed in the 36.0 h", check["what"])
+        self.assertIsNone(check["owner_step"])
+        # The stop has stood two hours: its step alone, whole within the mail's 400 characters.
+        check = self.run_lane(now=at("2026-10-08T19:30:00Z"))["checks"]["forward"]
+        step = check["owner_step"]
+        self.assertTrue(step.startswith("remove /workspace/state/data/nightly.stop (automation wrote it"))
+        self.assertNotIn("the nightly owes", step)
+        self.assertLessEqual(len(step), 400)
+        self.assertLess(check["what"].index("a nightly stop"), check["what"].index("no forward day has completed"))
+        # The stop lifted, the day still owed: now the owed day is the step.
+        stop.unlink()
+        step = self.run_lane(now=at("2026-10-08T20:00:00Z"))["checks"]["forward"]["owner_step"]
+        self.assertIn("the nightly owes 2026-10-06 and has completed no day", step)
+        self.assertLessEqual(len(step), 400)
 
     def test_a_done_checkpoint_is_news_never_a_stall_on_the_daily_page(self):
         from league.ops import dlane_report as R

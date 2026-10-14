@@ -59,6 +59,29 @@ class NeverGateway:
         return out
 
 
+class Outage(NeverGateway):
+    """A source that serves the same bars on every try: `missing` {symbol: the bar starts (ET minutes) it never serves, or
+    "all": the route's 200 with no bars}, and one invalid bar for each symbol in `bad`."""
+
+    def __init__(self, missing=None, bad=()):
+        super().__init__(short=())
+        self.missing, self.bad = dict(missing or {}), set(bad)
+
+    def fetch(self, symbols, day, hours):
+        self.calls.append((day, tuple(symbols)))
+        out = {}
+        for symbol in symbols:
+            gone = self.missing.get(symbol, ())
+            out[symbol] = [] if gone == "all" else [bar(day, m) for m in range(*hours) if m not in gone]
+            if symbol in self.bad:
+                out[symbol] = [bar(day, hours[0], close=-1.0)]
+        return out
+
+
+#: Every bar from 12:00 ET to the close: a source cut off at noon serves 150 of the 390.
+AFTERNOON = frozenset(range(12 * 60, 16 * 60))
+
+
 class DataBox:
     """A data box as the nightly sees it: NBBO and the vendor's option-implied underlying per root and pulled day, the
     journal's records, `sip-status` from the canonical files, and `ingest-underlying` that replaces a stock root's file
@@ -381,6 +404,107 @@ class HandOff(unittest.TestCase):
                     nightly.run(MONDAY)
                 self.assertEqual((made, gate.uploads), ([], {}))
                 self.assertNotIn("sip_coverage", nightly.state(MONDAY))
+
+
+class TheBound(unittest.TestCase):
+    """THE SOURCE GAP's bound (the review of PR #545): only bars served with at most 5 minutes missing, on at most 2
+    roots of the day, are a source gap. A vendor or gateway outage that serves the same empty, invalid or cut-off bars
+    for a whole session is held for the owner however long it stands, and schedules no hand-off."""
+
+    TRIES = ("2026-10-13T06:05:00Z", "2026-10-13T12:10:00Z", "2026-10-13T20:01:00Z", "2026-10-14T06:05:00Z",
+             "2026-10-16T06:05:00Z")
+
+    def held(self, gateway, *, data=None):
+        clock = Clock(at(self.TRIES[0]))
+        nightly, data, gate, gateway, made = job(clock, gateway=gateway, data=data)
+        for when in self.TRIES:
+            clock.at = at(when)
+            with self.assertRaises(sp.SIPError) as caught:
+                nightly.run(MONDAY)
+            self.assertIsNone(caught.exception.handoff_at)
+        state = nightly.state(MONDAY)
+        self.assertNotIn("sip_gaps", state)
+        self.assertNotIn("pulled", state)
+        self.assertEqual((made, gate.uploads), ([], {}))
+        self.assertEqual({w["attempts"] for w in state["sip_watch"].values()}, {len(self.TRIES)})   # stable all along
+        self.assertTrue(all(r["source"] == THETA for r in data.records.values() if r["kind"] == "underlying"))
+        return state["sip_watch"]
+
+    def handed(self, gateway, *, data=None):
+        clock = Clock(at(self.TRIES[0]))
+        nightly, data, gate, gateway, made = job(clock, gateway=gateway, data=data)
+        with self.assertRaises(sp.SIPError) as caught:
+            nightly.run(MONDAY)
+        self.assertEqual(caught.exception.handoff_at, "2026-10-13T20:00:00+00:00")
+        clock.at = at("2026-10-13T20:01:00Z")
+        result = nightly.run(MONDAY)
+        self.assertEqual((made, result["sip_coverage"]["status"]), (["sbcp_0001"], "source_incomplete"))
+        return result["sip_gaps"]
+
+    def test_no_bars_on_every_root_is_an_outage_held_for_the_owner(self):
+        watch = self.held(Outage(missing={"SLV": "all", "SPY": "all"}))
+        self.assertEqual({r: (w["status"], w["known"]) for r, w in watch.items()}, {"SLV": ("empty", 0), "SPY": ("empty", 0)})
+
+    def test_every_root_cut_off_at_noon_is_an_outage_held_for_the_owner(self):
+        watch = self.held(Outage(missing={"SLV": AFTERNOON, "SPY": AFTERNOON}))
+        self.assertEqual({r: (w["status"], w["known"], w["expected"]) for r, w in watch.items()},
+                         {"SLV": ("partial", 150, 390), "SPY": ("partial", 150, 390)})
+
+    def test_one_root_without_bars_is_held_too(self):
+        self.assertEqual(self.held(Outage(missing={"SLV": "all"}))["SLV"]["status"], "empty")
+
+    def test_an_invalid_packet_is_held(self):
+        self.assertEqual(self.held(Outage(bad={"SLV"}))["SLV"]["status"], "error")
+
+    def test_six_minutes_short_is_held_and_five_is_a_source_gap(self):
+        self.assertEqual(self.held(Outage(missing={"SLV": set(range(15 * 60 + 54, 16 * 60))}))["SLV"]["known"], 384)
+        gap = self.handed(Outage(missing={"SLV": set(range(15 * 60 + 55, 16 * 60))}))["SLV"]
+        self.assertEqual((gap["known"], gap["source_status"], len(gap["missing_minutes"])), (385, "partial", 5))
+
+    def test_a_small_gap_beside_an_outage_is_held(self):
+        watch = self.held(Outage(missing={"SLV": {NEVER}, "SPY": "all"}))
+        self.assertEqual({r: w["status"] for r, w in watch.items()}, {"SLV": "partial", "SPY": "empty"})
+
+    def test_three_short_roots_are_held_and_two_are_a_source_gap(self):
+        class Box(DataBox):
+            ROOTS = ("QQQ", "SLV", "SPY", "XSP")
+
+        self.assertEqual(sorted(self.held(Outage(missing={"QQQ": {NEVER}, "SLV": {NEVER}, "SPY": {NEVER}}), data=Box())),
+                         ["QQQ", "SLV", "SPY"])
+        gaps = self.handed(Outage(missing={"QQQ": {NEVER}, "SLV": {NEVER}}), data=Box())
+        self.assertEqual({r: g["known"] for r, g in gaps.items()}, {"QQQ": 389, "SLV": 389})
+
+    def test_a_held_outage_is_the_owners_step_at_thirty_six_hours_owed(self):
+        """The controller's record over the job, read by the stall alarm: no hand-off is scheduled, so nothing holds the
+        owed day's step back (2026-10-12 fell due 06:00Z Oct 13; 36 h on is 18:00Z Oct 14)."""
+        from league.ops import stall as ST
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data").mkdir()
+            clock = Clock(at("2026-10-13T06:00:00Z"))
+            nightly, *_, made = job(clock, gateway=Outage(missing={"SLV": "all", "SPY": "all"}))
+            done_before = {d.isoformat(): "sbcp_old" for d in calendar().days(nt.FIRST_FORWARD_DAY, dt.date(2026, 10, 9))}
+            (root / "data" / "nightly.json").write_text(json.dumps({"completed": done_before, "retry_at": 0}))
+            (root / ST.FORWARD_READY).write_text(json.dumps({"day": "2026-10-09", "ready_at": "2026-10-10T06:14:00+00:00"}))
+            controller = nt.Controller(root / "data", root / ST.FORWARD_READY, calendar(), run=nightly.run, clock=clock)
+            first_sight = None
+            while clock.at <= at("2026-10-14T18:00:00Z"):
+                self.assertEqual(controller.tick()["phase"], "retry")
+                record = json.loads((root / "data" / "nightly.json").read_text())["retrying"]
+                self.assertEqual((record["day"], record["roots"], record["handoff_at"]), ("2026-10-12", ["SLV", "SPY"], None))
+                first_sight = first_sight or clock.at.timestamp()
+                facts = ST.forward_facts(root)
+                check = ST._forward_check(clock.at.timestamp(), facts, first_sight, "2026-10-12")
+                if clock.at < at("2026-10-14T18:00:00Z"):
+                    self.assertIsNone(check["owner_step"], clock.at)
+                clock.advance(minutes=30)
+            self.assertIn("too wide a SIP gap for the House to hand off", check["what"])
+            self.assertIn("the nightly owes 2026-10-12 and has completed no day in 36.0 h", check["owner_step"])
+            self.assertTrue(check["owner_step"].endswith("(SLV: SIP 0/390; SPY: SIP 0/390)"))
+            self.assertIsNone(check["numbers"]["handoff_at"])
+            self.assertEqual(made, [])
+            self.assertFalse(json.loads((root / ST.FORWARD_READY).read_text())["day"] > "2026-10-09")
 
 
 class TheLaterDays(unittest.TestCase):

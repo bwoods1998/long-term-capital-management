@@ -40,14 +40,18 @@ image while `swarm.json` named the 25-root one, and its ready file replaced it.
 
 THE SOURCE GAP (Oct 14, 2026). The night stays strict for a root whose SIP bars may still arrive (scripts/data/sip.py).
 Each failed relay records, with the day (`forward_days[day].sip_watch`), every short root's packet and since when the
-source has served it unchanged; a changed packet restarts that root's clock. A root whose packet has stood unchanged for
-`SOURCE_SETTLE` (6 h) and past the close of the next session (at most `SOURCE_SETTLE_CAP`, 24 h: a Friday's gap waits a
-day, not the weekend) is handed to the forward gap ledger (`forward_days[day].sip_gaps`): the relay ingests the day's
-complete roots and leaves that root's packet quarantined, the SIP proof names it `source_incomplete` (never complete),
-the day is copied and checkpointed with the root's own canonical file (the vendor's option-implied series, labeled with
-its source in the journal; nothing is filled), and the ready file says so (`sip_coverage.status` and the chain's
-`source_incomplete` list). The controller records how long it has retried a day (`nightly.json` `retrying`) for the
-stall alarm (`league/ops/stall.py` `forward`). Oct 12-14: SLV 389/390 (minute 826 never served) held every later day.
+source has served it unchanged; a changed packet restarts that root's clock. Only a small gap is a source gap: bars
+served and at most `SOURCE_GAP_MAX_MINUTES` (5) minutes missing, on at most `SOURCE_GAP_MAX_ROOTS` (2) roots of the
+day; an empty or invalid packet, a wider gap or more short roots is an outage whose bars may come later, so the day
+stays held and the stall alarm's owed-day step goes to the owner. Within the bound, a root whose packet has stood
+unchanged for `SOURCE_SETTLE` (6 h) and past the close of the next session (at most `SOURCE_SETTLE_CAP`, 24 h: a
+Friday's gap waits a day, not the weekend) is handed to the forward gap ledger (`forward_days[day].sip_gaps`): the relay
+ingests the day's complete roots and leaves that root's packet quarantined, the SIP proof names it `source_incomplete`
+(never complete), the day is copied and checkpointed with the root's own canonical file (the vendor's option-implied
+series, labeled with its source in the journal; nothing is filled), and the ready file says so (`sip_coverage.status`
+and the chain's `source_incomplete` list). The controller records how long it has retried a day (`nightly.json`
+`retrying`) for the stall alarm (`league/ops/stall.py` `forward`). Oct 12-14: SLV 389/390 (minute 826 never served) held
+every later day.
 """
 
 from __future__ import annotations
@@ -77,6 +81,12 @@ QUIET_EXIT = sl.QUIET_EXIT  # a `--nightly-quiet` backfill that the quiet window
 #: is handed to the forward gap ledger, and the most it waits for the next session's close.
 SOURCE_SETTLE = 6 * 3600
 SOURCE_SETTLE_CAP = 24 * 3600
+#: Only a small gap is a source gap: a root with bars short by at most this many regular-session minutes (status
+#: "partial"), and at most this many short roots on the day. An empty or invalid packet, a wider gap or more short
+#: roots is an outage (the bars may come later): the day stays held, no hand-off is scheduled, and the stall alarm's
+#: owed-day step goes to the owner (league/ops/stall.py `forward`).
+SOURCE_GAP_MAX_MINUTES = 5
+SOURCE_GAP_MAX_ROOTS = 2
 #: The fields of a SIP receipt the forward gap ledger keeps (no price: coverage, identities and the quarantine path).
 GAP_FIELDS = ("root", "day", "known", "expected", "missing_minutes", "packet_sha256", "source_symbol", "quarantine")
 
@@ -142,6 +152,22 @@ def next_session_close(day: dt.date, calendar: sl.Calendar) -> dt.datetime:
     while not calendar.is_trading(after):
         after += dt.timedelta(days=1)
     return scheduled_at(after, calendar.hours(after)[1])
+
+
+def small_gap(row: Mapping[str, Any]) -> bool:
+    """THE SOURCE GAP's bound for one short root's SIP receipt: bars served ("partial") and at most
+    `SOURCE_GAP_MAX_MINUTES` regular-session minutes missing."""
+    known, expected = row.get("known"), row.get("expected")
+    return (row.get("status") == "partial" and isinstance(known, int) and isinstance(expected, int)
+            and not isinstance(known, bool) and 0 < expected - known <= SOURCE_GAP_MAX_MINUTES)
+
+
+def source_gap(state: Mapping[str, Any]) -> bool:
+    """Whether the day's short roots (`sip_watch`, with any the ledger holds) are a source gap the House may hand off by
+    itself: each `small_gap`, and at most `SOURCE_GAP_MAX_ROOTS` of them. Anything wider stays strict for the owner."""
+    watch = state.get("sip_watch") or {}
+    roots = set(watch) | set(state.get("sip_gaps") or {})
+    return bool(watch) and len(roots) <= SOURCE_GAP_MAX_ROOTS and all(small_gap(row) for row in watch.values())
 
 
 def handoff_at(day: dt.date, first_seen: dt.datetime, calendar: sl.Calendar) -> dt.datetime:
@@ -250,10 +276,13 @@ class Nightly:
             state.pop("sip_gaps")
 
     def handoff(self, day: dt.date, state: Mapping[str, Any]) -> dict[str, str]:
-        """The roots this run may hand to the forward gap ledger ({root: the exact packet}): those it already holds, and
-        each watched root whose packet has stood unchanged until `handoff_at`."""
+        """The roots this run may hand to the forward gap ledger ({root: the exact packet}): those it already holds,
+        and, when the day's short roots are a `source_gap` (small, few), each watched root whose packet has stood
+        unchanged until `handoff_at`. A wider gap (an outage) hands nothing new: the day stays strict."""
         now = self.clock()
         out = {root: gap["packet_sha256"] for root, gap in (state.get("sip_gaps") or {}).items() if gap.get("packet_sha256")}
+        if not source_gap(state):
+            return out
         for root, row in (state.get("sip_watch") or {}).items():
             try:
                 first = dt.datetime.fromisoformat(str(row["first_seen"]))
@@ -274,9 +303,10 @@ class Nightly:
                 self.watch_gaps(day, state, gaps)
                 self.persist()
                 # When the day can go on if every short packet stays as it is (the controller's `retrying`, the stall
-                # alarm's scheduled way out).
-                error.handoff_at = max(handoff_at(day, dt.datetime.fromisoformat(w["first_seen"]), self.calendar)
-                                       for w in state["sip_watch"].values()).isoformat()
+                # alarm's scheduled way out); None for a gap too wide to hand off, so the owed day's step is not held.
+                error.handoff_at = (max(handoff_at(day, dt.datetime.fromisoformat(w["first_seen"]), self.calendar)
+                                        for w in state["sip_watch"].values()).isoformat()
+                                    if source_gap(state) else None)
             raise
         result_map = result if isinstance(result, Mapping) else {}
         short = set(result_map.get("source_incomplete") or [])
