@@ -1345,6 +1345,17 @@ class Gate:
         written = elane.seat_backfill(self)
         if written:
             out["seat_counts"] = written
+        # THE FORWARD SCREEN'S SEAT PATH (FWD1-R; league/swarm/elane_forward.py `step`): switched off unless
+        # `elane.fwd1.seats` is "on"; a forward pass then becomes a Candidate through the roster's own seat rule
+        try:
+            from . import elane_forward
+
+            forward = elane_forward.step(self)
+            if forward:
+                out["forward"] = forward
+        except Exception as exc:  # noqa: BLE001 - the seat path is asked again next round
+            self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
+                                                  "text": "the forward screen's seat path could not be read"})
 
     def _equity_look(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
         """One family's turn in the equity round (`equity_round`): a look in flight from a dead process owed again, then

@@ -860,6 +860,8 @@ def status_rows(store: sqlite3.Connection) -> list[dict[str, Any]]:
     verdicts = {str(r["lineage"]): dict(r) for r in store.execute("SELECT * FROM fwd1_verdicts")}
     last = {str(r["lineage"]): int(r["k"]) for r in store.execute(
         "SELECT lineage, MAX(k) AS k FROM fwd1_checks GROUP BY lineage")}
+    engines = {(str(r["lineage"]), int(r["k"])): int(r["engine"]) for r in store.execute(
+        "SELECT lineage, k, engine FROM fwd1_checks WHERE passed=1")}
     floors = {int(r["pid"]): dict(r) for r in store.execute("SELECT * FROM fwd1_floors")}
     out = []
     for lin in store.execute("SELECT * FROM fwd1_lineages ORDER BY lineage"):
@@ -873,16 +875,20 @@ def status_rows(store: sqlite3.Connection) -> list[dict[str, Any]]:
             fl = floors.get(int(lin["rep"]))
             status = "ineligible" if fl is not None and R.k_used(str(lin["type"]), str(lin["case_"]), fl["k_own"]) is None \
                 else "pending"
-        out.append({**lin, "status": status, "k": (v or {}).get("k") or last.get(str(lin["lineage"])),
-                    "words": (v or {}).get("words"), "beside": (v or {}).get("beside")})
+        k = (v or {}).get("k") or last.get(str(lin["lineage"]))
+        out.append({**lin, "status": status, "k": k, "words": (v or {}).get("words"),
+                    "beside": (v or {}).get("beside"),
+                    "engine": engines.get((str(lin["lineage"]), int(k))) if status == "pass" and k is not None else None})
     return out
 
 
-def write_permits(root: str | Path, store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any], at: float) -> Path:
+def write_permits(root: str | Path, store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any], at: float,
+                  labels: Mapping[int, str] | None = None) -> Path:
     """THE PERMIT FILE (the module docstring, 4), atomically, 0600: {"version", "receipt", "start", "at", "lineages":
-    {lineage: {"status", "type", "case", "cell", "family", "version", "run_sha", "k", "weak", "words"}}}. Every
-    FWD1-judged lineage is listed (its status), so the swarm knows which take no sealed try; a pass names its program.
-    No t, no P&L and no figure of a program crosses."""
+    {lineage: {"status", "type", "case", "cell", "family", "version", "run_sha", "k", "weak", "engine", "words"}}}.
+    Every FWD1-judged lineage is listed (its status), so the swarm knows which take no sealed try; a pass names its
+    program and the forward record's engine label its verdict was read under (`labels`: {engine id: label}). No t, no
+    P&L and no figure of a program crosses."""
     from .context import write_json
 
     lineages: dict[str, Any] = {}
@@ -895,6 +901,7 @@ def write_permits(root: str | Path, store: sqlite3.Connection, *, rule: Any, pin
             "family": row["family"], "version": row["version"], "run_sha": row["run_sha"] if passed else None,
             "k": int(row["k"]) if passed and row["k"] is not None else None,
             "weak": R.weak(str(row["type"]), int(row["k"])) if passed and row["k"] is not None else None,
+            "engine": (labels or {}).get(row["engine"]) if passed and row["engine"] is not None else None,
             "words": row["words"] if passed else None}
     doc = {"version": PERMITS_VERSION, "screen": R.SCREEN, "receipt": rule.receipt_sha256, "start": pin["start"],
            "at": dt.datetime.fromtimestamp(float(at), dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -924,12 +931,11 @@ def report(store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any]) -> d
 
 # --------------------------------------------------------------------------------------------------------- the job
 def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, now: float, base: str | Path | None,
-          release: str | Path | None, runs: Any = None, clock: Callable[[], float] = time.time) -> dict[str, Any]:
+          release: str | Path | None, runs: Any = None, families: Mapping[str, Mapping[str, Any]] | None = None,
+          clock: Callable[[], float] = time.time) -> dict[str, Any]:
     """One night over the state root (the module docstring): the clock's row, the lineages' first sightings, the
-    judge, the permit file and the report. The receipt (counts only)."""
-    from ..swarm.store import SwarmStore
-    from . import forward_register
-
+    judge, the permit file and the report. The receipt (counts only). `families` (tests): the equity families by id,
+    in place of the swarm store's (read-only)."""
     root = Path(root)
     c = cfg(settings)
     store = open_store(root)
@@ -939,13 +945,17 @@ def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, no
     runs = runs if runs is not None else HouseRuns(root, budget_seconds=c["run_budget_seconds"], clock=clock)
     try:
         pin = pinned(store, rule, base=base, release=release, now=now)
-        swarm = SwarmStore(root, readonly=True)
-        families = forward_register._families(swarm)
+        if families is None:
+            from ..swarm.store import SwarmStore
+            from . import forward_register
+
+            families = forward_register._families(SwarmStore(root, readonly=True))
         registered = register(store, fdb, families, rule=rule, pin_start=dt.date.fromisoformat(str(pin["start"])),
                               now=now)
         judge = Night(store, fdb, families, runs=runs, rule=rule, pin=pin, budget=c["cpu_seconds_night"], clock=clock)
         tally = judge.run()
-        write_permits(root, store, rule=rule, pin=pin, at=clock())
+        labels = {int(r["id"]): str(r["label"]) for r in fdb.execute("SELECT id, label FROM fwd_engines")}
+        write_permits(root, store, rule=rule, pin=pin, at=clock(), labels=labels)
         from .context import write_json
 
         write_json(root / REPORT, report(store, rule=rule, pin=pin))

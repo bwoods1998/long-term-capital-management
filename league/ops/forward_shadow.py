@@ -976,6 +976,15 @@ class Shadow:
         except Exception:  # noqa: BLE001 - a twins failure never loses a shadow day
             self._rollback()
             tally["twins_errors"] += 1
+        try:
+            # THE FORWARD SCREEN's sides (FWD1-R; league/ops/forward_screen.py `on_run`): each day's lot weights in and
+            # out, for its haircut, in its own store (nothing without a pin)
+            from . import forward_screen
+
+            tally["fwd1_sides"] += int(forward_screen.on_run(self.root, run, engine=self.engine, now=self.clock(),
+                                                             settings=self.settings) or 0)
+        except Exception:  # noqa: BLE001 - the screen's own store never costs a shadow day
+            tally["fwd1_errors"] += 1
         return None
 
     def night(self) -> dict[str, Any]:

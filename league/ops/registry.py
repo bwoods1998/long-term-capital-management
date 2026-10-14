@@ -207,6 +207,21 @@ JOBS: tuple[Job, ...] = (
         what="the panel lane's forward night: every registered panel program recomputed whole on its own forward days "
              "in the forward job's own decider child, the shadow twin of each live panel instance, and the twin "
              "marker the lane reads before mode live (recorded, never a verdict)"),
+    # THE FORWARD SCREEN (FWD1-R, the captain's A33; league/ops/forward_screen.py, its rule league/ops/fwd1_rule.py):
+    # one append-only verdict a lineage of the forward record, from the sessions after the receipt's pin, after each of
+    # the record's two nights (E3's at 22:35Z, the panel's after 01:55Z; an `after` trigger fires on an "ok" receipt
+    # only, so each night has its own: ETF lineages are read after the first, panel lineages after the second; a
+    # second run of a night writes nothing new). Skipped while `elane.fwd1.mode` is "off", with no pin, and inside
+    # 09:00-17:30 New York on a session (it may run its own decider child: a representative's own floor on its
+    # Train-era runs, a panel representative's placebo leg). It reads the forward record and the swarm store
+    # read-only and writes only <state>/forward-screen.sqlite, the permit file and its report, so it runs in a pause
+    # too. Its child seconds are `elane.fwd1.cpu_seconds_night` (900) inside the job's 1,200 of CPU.
+    Job("forward_screen", "league.ops.forward_screen", (S.after("forward_shadow"), S.after("forward_xs")),
+        grace=3 * HOUR, cpu=1200, wall=1800, in_pause=True, owner="FWD1-R forward screen",
+        what="the forward screen FWD1-R: one append-only verdict a lineage on its counted forward sessions after the "
+             "pin (checkpoints 5-60, its own floor, the panel's placebo leg), the permit file of ids and words the "
+             "swarm's seat path reads (switched off) and the operator's report with the registry's expected "
+             "zero-edge passes"),
     # THE PANEL LANE's data and measurement jobs (release E4, "breadth"; league/xs/E4_INTERFACES.md). WITH THE LANE'S
     # SWITCH OFF NONE OF THEM RUNS: each one's first statements are the switch (`league.ops.equity_universe.lane_off`:
     # `elane.panel.mode` "off" in the box's settings is a `skipped` receipt: no gateway call, no file) and
