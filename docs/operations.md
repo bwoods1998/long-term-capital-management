@@ -638,6 +638,21 @@ Read with the amendments in force, which the text above predates:
   The rows of the tables below are the Probe sleeve's, which a panel program took before step two. Rollback:
   `panel.seats` 0 (one money-digest move; nobody is unseated, no lot is sold). Held by
   `league/tests/test_equity_panel_seats.py`.
+- **Done counts a panel program's closes by date** (release E4 step two; the review of step two, its major; A
+  TIGHTENING until the owner rules otherwise, and the spec's "a closed lot is one close" above is replaced by it).
+  Done's 30 closes, every later checkpoint (each 10th) and the "at least 5 each from at least 2 programs" read
+  DONE'S COUNTS (league/ops/dlane_report.py `done_counts`): every ETF or options close is one count as before, and
+  a PANEL program's lots closed on one New York day are ONE count, placed where the first of them closed (the
+  checkpoint of the K-th count reads the closes of the first K counts, `first_counts`). The reading's and each
+  program's `closes` are these counts and `lots` stands beside where they differ; `close_dates` (A14_BESIDE_DONE)
+  stands beside as before. WHY: one rotation of a 0.10 x E basket is 8 to 12 lots of one date and one market move,
+  worth cents; counted a close each it pulled the 30th close and every later checkpoint earlier (Done read more
+  often, with no added information) and could meet a second program's 5 on one date alone. COST, STATED: a panel
+  program adds one count a rebalance date, so it takes 5 rebalance dates (5 weeks for a weekly program) to be one
+  of the 2 programs, and its lots add nothing to the 30 beyond their dates. An ETF-only Done is read exactly as
+  before (held by league/tests/test_dlane_report_a14.py `DoneCountsAPanelProgramByDate`). The owner may rule
+  otherwise (a lot each, or panel closes counted apart); the captain records the ruling and its cost in
+  CAPTAIN-AMENDMENTS before any panel seat opens.
 - **The Probe sleeve** is the constitution's `equity_money.probe.sleeve_share` x E. The text's "$557 sleeve" is
   0.25 x E at about $2,229, which IS the design in force since release E5-S (six seats at 0.25 x E; **The seats and
   the sleeve**, below); between E1's deploy and E5-S it was the captain's A20, three seats at 0.50 x E, and
@@ -1866,7 +1881,10 @@ Money digest `de5ed74e`, full digest `111ede85` (`PINNED_DIGEST`); the rollback,
   session. (Under the equity count a held basket stopped exits: each re-priced sale costs a send and a cancel a rung
   and every lot climbs at once, so 8 to 12 basket lots on a fast open used the 60 before the ETF lots' sales reached
   the rung that fills, and those sales were carried; review-live measured it on the real book.) Nothing is sold for
-  it.
+  it. WHAT THE COUNT STILL COSTS A BASKET: on a day its exits climb the ladder the count can refuse a rotation's new
+  buys (review-live: 3 to 20 buys refused on rotation days at 12 names), and each refused entry is an A14
+  difference; `elane.panel.max_names` (12) is the captain's lever (fewer names, fewer orders a rotation), a setting
+  with no digest move.
 - **At the deploy**, for the programs the House already holds:
   - **A Candidate waiting for a seat is seated at the first band sync after the House starts on the release**: under
     "first-come" the swarm's reader shows it once `elane.roster` has a free seat (`banded_at`, then id); under the

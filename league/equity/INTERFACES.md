@@ -1446,8 +1446,9 @@ at 0.10 x E.
 - **10** (CHANGES; ops, league/ops/dlane_report.py): `equity_panel_note(constitution=None)` (`EQUITY_PANEL_SENTENCE`,
   `EQUITY_PANEL_BARE`, `EQUITY_PANEL_NOTE`); `equity_seats` adds `panel` {statement, rule, seats, as_of, holders,
   waiting, held_seats} when the book's plan holds the panel pool's.
-- **Costs**: one more program on real money at once; a basket's lots closed at one open are one market move (they
-  add to Done's count and reads, not its information); the window is one and first come.
+- **Costs**: one more program on real money at once; a basket's lots closed at one open are one market move, so
+  Done counts a panel program's lots closed on one date as one close (league/ops/dlane_report.py `done_counts`, the
+  lots beside); the window is one and first come.
 - **Rollback**: `panel.seats` 0, one owner deploy, one money-digest move (nobody is unseated; no lot is sold).
 - **Tests**: league/tests/test_equity_panel_seats.py (the row, a basket sized from it, the ETF programs' orders and
   seats order for order beside a panel Candidate, Probe and Sized program, the pool, the held seat, the swarm's

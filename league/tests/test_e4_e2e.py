@@ -781,8 +781,11 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
 
         report = DR.report(self.root, settings=self.settings, now=now)
         done = report["done"]
-        self.assertEqual((done["all"]["running"]["closes"], done["all"]["running"]["programs"],
-                          done["all"]["running"]["replay_coverage"]), (5, 1, {"matched": 5, "closes": 5, "share": 1.0}))
+        # Done counts a panel program's lots closed on one date as ONE close (release E4 step two, `done_counts`): the
+        # basket's five lots sold at one open are one count, the five lots beside it.
+        self.assertEqual((done["all"]["running"]["closes"], done["all"]["running"]["lots"],
+                          done["all"]["running"]["programs"], done["all"]["running"]["replay_coverage"]),
+                         (1, 5, 1, {"matched": 5, "closes": 5, "share": 1.0}))
         sentence = self.store.family(SLUG)["state"][elane_xs.LOOK_KEY]["beside"]
         rows = {c["pid"]: c for c in done["all"]["closes"]}
         for lot in closed:

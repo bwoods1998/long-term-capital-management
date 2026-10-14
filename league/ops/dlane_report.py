@@ -392,8 +392,8 @@ EQUITY_PANEL_SENTENCE = (
     "the stock weight ({weight}), in the same ${window} window, first come (no slice of it is kept for the panel). "
     "Outside that room a basket bought from flat or rotated whole is scaled to the room and a partial rotation's new "
     "name is refused at the send. ITS COST: one more program on real money at once, and a basket's lots closed at one "
-    "open are one market move (they add to Done's count and to its reads, not to its information: the distinct close "
-    "dates stand beside every checkpoint).")
+    "open are one market move, so Done counts a panel program's lots closed on one date as ONE close (for the 30th "
+    "close, every later checkpoint and its program's 5; the lots and the distinct close dates stand beside).")
 #: The same statement for a constitution with no panel row: no figure.
 EQUITY_PANEL_BARE = ("THE PANEL SEATS (equity_money.panel): the constitution has no panel row, so no panel program "
                      "holds a seat or a sleeve.")
@@ -1616,6 +1616,38 @@ def replay_twins(counted: Sequence[Mapping[str, Any]], twins: Mapping[str, Mappi
                      "(league/ops/twins.py); live minus twin per dollar of each one's maximum loss, the book's cash"}
 
 
+def _close_day(c: Mapping[str, Any]) -> str:
+    """A close's New York day: its `day`, else the day of its `closed_at`."""
+    return str(c.get("day") or "") or _ny_day(_num(c.get("closed_at")))
+
+
+def done_counts(counted: Sequence[Mapping[str, Any]]) -> list[int]:
+    """DONE COUNTS A PANEL PROGRAM'S CLOSES BY DATE (release E4 step two; the review of step two found a basket's lots
+    counted one close each, so one rotation of a 0.10 x E basket added 8 to 12 closes of one date and one market move,
+    worth cents, pulled the 30th close and every later checkpoint earlier and could meet a second program's "at least
+    5" alone). For each close of `counted` (in close order) the number of the Done count it is part of, from 1: every
+    close is one count, as before, EXCEPT A PANEL PROGRAM'S (`panel`): its lots closed on one New York day are ONE
+    count, placed where the first of them closed. The checkpoints (the 30th count, then every 10th) and the per-program
+    5 read these counts; the lots stand beside (`lots`). A TIGHTENING (fewer counts, never more), until the owner rules
+    otherwise; an ETF or options close is counted exactly as before."""
+    seen: dict[tuple[str, ...], int] = {}
+    out: list[int] = []
+    for c in counted:
+        key = ("panel", str(c.get("family") or ""), _close_day(c)) if c.get("panel") else ("close", str(c.get("pid")))
+        if key not in seen:
+            seen[key] = len(seen) + 1
+        out.append(seen[key])
+    return out
+
+
+def first_counts(counted: Sequence[Mapping[str, Any]], k: int,
+                 counts: Sequence[int] | None = None) -> list[Mapping[str, Any]]:
+    """The closes of Done's first `k` counts (`done_counts`), in close order: a panel count's later lots of its day go
+    with it. With no panel close it is `counted[:k]`."""
+    counts = done_counts(counted) if counts is None else counts
+    return [c for c, n in zip(counted, counts) if n <= k]
+
+
 def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: dict[str, list] | None = None,
             done: Mapping[str, Any] | None = None, lanes: Lanes | None = None,
             twins: Mapping[str, Mapping[str, Any]] | None = None,
@@ -1628,6 +1660,10 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
 
     rule = dict(done or dlane.DONE)
     cache = nightly_cache if nightly_cache is not None else {}
+    # THE DONE COUNT (release E4 step two, `done_counts`): `closes`, the reading's and each program's, are Done's
+    # counts (a close each, a panel program's lots of one date one), with `lots` beside them where the two differ;
+    # `by_route` counts lots.
+    n_counts = max(done_counts(counted), default=0)
     by_program: dict[str, list[Mapping[str, Any]]] = {}
     for c in counted:
         by_program.setdefault(c["family"], []).append(c)
@@ -1645,9 +1681,10 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
         known = [c["pnl_usd"] for c in rows if c.get("pnl_usd") is not None]
         # An equity program's lane is its lots' (the book's own row), whatever the swarm store still holds.
         lane = rows[0].get("lane") if rows[0].get("equity") else lanes.of(fid) if lanes is not None else rows[0].get("lane")
-        row = {"family": fid, "lane": lane, "closes": len(rows), "routes": routes,
+        counts = max(done_counts(rows), default=0)
+        row = {"family": fid, "lane": lane, "closes": counts, "routes": routes,
                "net_usd": _usd(sum(known, Decimal(0))) if len(known) == len(rows) else None,
-               "replay": gap, "bh": _bh_sum(rows)}
+               "replay": gap, "bh": _bh_sum(rows), **({"lots": len(rows)} if counts != len(rows) else {})}
         if lane == dlane.DIRECTION:
             row["label"] = dlane.LABEL
         elif rows[0].get("equity"):
@@ -1668,8 +1705,8 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
     matched_total = sum(int(p["replay"]["matched"]) for p in programs)
     net_known = unpriced == 0
     whys = []
-    if len(counted) < int(rule["min_closes"]):
-        whys.append(f"{len(counted)} closes of the {int(rule['min_closes'])} needed")
+    if n_counts < int(rule["min_closes"]):
+        whys.append(f"{n_counts} closes of the {int(rule['min_closes'])} needed")
     if not per_program_ok:
         whys.append(f"{len(enough)} programs with {int(rule['min_closes_per_program'])}+ closes of the "
                     f"{int(rule['min_programs'])} needed")
@@ -1683,7 +1720,7 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
                     "(DONE-RULE-A1 A1.1)")
     if inconsistent:
         whys.append(f"live fills inconsistent with replay: {', '.join(inconsistent[:8])}")
-    item3 = len(counted) >= int(rule["min_closes"]) and per_program_ok and net_known and net > 0
+    item3 = n_counts >= int(rule["min_closes"]) and per_program_ok and net_known and net > 0
     item4 = measured_ok and not inconsistent
     # A14 (pre-registered before the first equity close): a reading that holds an equity close reads "consistent with
     # replay" by A14's own measure, never by the gap above alone (a long lot's maximum loss is its notional, so the
@@ -1705,7 +1742,8 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
             slot["unpriced"] += 1
         else:
             slot["net"] += c["pnl_usd"]
-    return {"closes": len(counted), "programs": len(programs), "programs_with_min_closes": len(enough),
+    return {"closes": n_counts, **({"lots": len(counted)} if n_counts != len(counted) else {}),
+            "programs": len(programs), "programs_with_min_closes": len(enough),
             "net_usd": _usd(net) if net_known else None, "net_known": net_known, "unpriced": unpriced,
             "estimate_closes": sum(1 for c in counted if c.get("priced") and c.get("fee_basis") == "estimate"),
             "per_program_ok": per_program_ok, "consistent_ok": item4, "measured_programs": len(measured),
@@ -1963,23 +2001,35 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
     checkpoints = []
     k = int(rule["first_checkpoint"])
     prev_k = None
-    while k <= len(counted):
+    # THE CHECKPOINTS READ DONE'S COUNTS (`done_counts`: a panel program's lots of one date are one count): the K-th
+    # count's checkpoint reads the closes of the first K counts (`first_counts`), and its moment is the last of them
+    # (`ends`, one a count). With no panel close every count is a close and all of it is as before.
+    counts = done_counts(counted)
+    last_of: dict[int, int] = {}
+    for i, n in enumerate(counts):
+        last_of[n] = i
+    ends: list[Mapping[str, Any]] = []
+    at_most = -1
+    for n in range(1, max(counts, default=0) + 1):
+        at_most = max(at_most, last_of[n])       # the last close, in close order, of the first n counts
+        ends.append(counted[at_most])
+    while k <= len(ends):
         if k in frozen:
             checkpoints.append({**frozen[k], "frozen": True})
             prev_k, k = k, k + int(rule["checkpoint_every"])
             continue
-        a14 = a14_of(store, counted[:k])
-        at = reading(counted[:k], store, nightly_cache=cache, lanes=lanes, twins=twins, a14=a14)
+        upto = first_counts(counted, k, counts)
+        a14 = a14_of(store, upto)
+        at = reading(upto, store, nightly_cache=cache, lanes=lanes, twins=twins, a14=a14)
         a14 = at.get("a14") or a14  # with an equity close: that reading, the rows' own fill-gap half beside it
-        first_day, last_day = research_window(counted, k, prev_k)
+        first_day, last_day = research_window(ends, k, prev_k)
         r247 = {"holds": False, "first_day": first_day, "last_day": last_day, "why": "research 24/7 was not read"}
         if callable(research):
             try:
                 r247 = research(first_day, last_day)
             except Exception as exc:  # noqa: BLE001 - unread is not held: the checkpoint does not hold, the report goes on
                 r247 = {**r247, "why": f"research 24/7 could not be read ({type(exc).__name__}: {str(exc)[:120]})"}
-        fin = finality(counted[:k], replay_days=replay_days, fees_as_of=fees_as_of, twins=twins,
-                       twins_on=twins_on)
+        fin = finality(upto, replay_days=replay_days, fees_as_of=fees_as_of, twins=twins, twins_on=twins_on)
         day_ended = now is None or now >= _epoch(f"{last_day}T00:00:00Z") + 86400.0
         if not day_ended:
             fin = {**fin, "final": False, "why": "; ".join(w for w in (fin["why"], f"the research window's last day "
@@ -1994,14 +2044,15 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
         programs = [{"family": p["family"], "lane": p["lane"], "closes": p["closes"], "matched": p["replay"]["matched"],
                      "gap": p["replay"]["gap"], "consistent": p["replay"]["consistent"], "net_usd": p["net_usd"],
                      **({"label": p["label"]} if p.get("label") else {})} for p in at["by_program"]]
-        checkpoints.append({"at_close": k, "closed_at": _iso(counted[k - 1]["closed_at"]),
+        checkpoints.append({"at_close": k, "closed_at": _iso(ends[k - 1]["closed_at"]),
                             "holds": at["holds"] and item7 and a14["holds"], "why": "; ".join(whys) or None,
                             "items": {**at["items"], "4": at["items"]["4"] and a14["holds"], "7": item7},
                             "final": fin["final"], "final_why": fin["why"],
-                            "closes": at["closes"], "programs": at["programs"],
+                            "closes": at["closes"], **({"lots": at["lots"]} if "lots" in at else {}),
+                            "programs": at["programs"],
                             "programs_with_min_closes": at["programs_with_min_closes"], "net_usd": at["net_usd"],
                             "consistent_ok": at["consistent_ok"] and a14["holds"], "a14": a14,
-                            "close_dates": close_dates(counted[:k]),
+                            "close_dates": close_dates(upto),
                             "measured_programs": at["measured_programs"],
                             "replay_coverage": at["replay_coverage"], "by_program": programs,
                             "research_247": r247, "by_route": at["by_route"], "bh": at["bh"],

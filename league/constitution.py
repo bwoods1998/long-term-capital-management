@@ -1162,8 +1162,9 @@ CONSTITUTION["equity_money"]["probe"]["seat"] = {"rule": "activity-1-free", "k_f
 # owner line binds a panel lot through `size_entry` as it binds an ETF lot (a stock at most 0.20 x E, 1.00 x E
 # invested, the cash reserve, the shared loss budget at 0.40 of a stock's mark). ITS COST, PLAINLY: one more program
 # on real money at once (XS1's zero-edge pass rate at the House's bar is at most 10.02% a cell); a basket's lots
-# closed at one open are one market move, so they add to Done's count and to its reads, not to its information (the
-# direction report states the distinct close dates beside every checkpoint). Rollback: `seats` 0 (one money-digest
+# closed at one open are one market move, so Done counts a panel program's lots closed on one date as one close
+# (the direction report's `done_counts`; it states the lots and the distinct close dates beside every checkpoint).
+# Rollback: `seats` 0 (one money-digest
 # move; nobody holding a panel seat is unseated by it, and no lot is sold). The `probe` row stays one line (release
 # E5-S's `set_design` rewrites that exact line), so this block is added here, as the seat rule's is. Its reader is
 # league/equity/bands.py `panel_settings` (league/live/money.py's `EquityTable`, inside the options execution

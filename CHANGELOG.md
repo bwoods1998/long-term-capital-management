@@ -64,6 +64,16 @@ on branches.
   and fails the look (a send of the sealed run, with E1's `LOOK_SENDS`); while a try is owed it is asked first and
   no other version of its lineage takes the lineage's try. Cost: an unsteady box can spend a good program's try or
   look.
+- **Done counts a panel program's lots of one date as one close** (the review of step two, its major; a tightening
+  until the owner rules otherwise): the 30th close, every later checkpoint and the "at least 5 each from 2
+  programs" read Done's counts (`done_counts`; an ETF or options close is one count as before), with the lots
+  beside. One rotation of a basket no longer adds 8 to 12 closes of one market move. The direction report's panel
+  sentence says so.
+- **The re-based panel twin's account is the run's own, tested** (`TheTwinAccountReplaysTheRun`: un-re-based, it
+  gives the engine's picks, keys, sessions and lots exactly). **The panel seat pool's book side is tested** where
+  four mutants survived (the swarm's `elane.panel.seats`, the held seat with no panel row, the ETF plan's write,
+  the real reader failing closed).
+- **No private figure in the panel docs**: rule arithmetic at E = $2,000, the tally's hole named with no figure.
 - **An exit is never stopped by the equity book's own day count** (the review of step two, its blocker): the 60
   sends and cancels of `order_path.max_orders_day` stop ENTRIES only; an exit meets the House-wide count alone (the
   options book's exits keep their room). Before it, a held basket's re-priced sales used the count up on a fast

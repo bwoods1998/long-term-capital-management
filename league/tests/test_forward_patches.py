@@ -452,7 +452,9 @@ def integrated(name: str) -> types.ModuleType:
 #: THE LINES OF THESE EDITS A LATER RELEASE REWROTE, each with the release that did: `TheEditsApply` does not ask the
 #: applied file for them (the later release's own tests hold what replaced them). Release E4's step two computes the
 #: close-date figures A14 reports beside every Done reading (league/ops/dlane_report.py `close_dates`), so the words
-#: that said they were not computed yet are gone.
+#: that said they were not computed yet are gone; and it reads each checkpoint over the closes of Done's first K
+#: COUNTS (`done_counts`, `first_counts`: a panel program's lots of one date are one count), so the meter's two lines
+#: that read `counted[:k]` read `upto` (league/tests/test_dlane_report_a14.py `DoneCountsAPanelProgramByDate`).
 SUPERSEDED: dict[str, dict[str, str]] = {"dlane_report": {
     "  close is read as before; a frozen final reading is carried as it was. The close-date figures are not computed yet":
         "release E4 step two (close_dates)",
@@ -466,6 +468,9 @@ SUPERSEDED: dict[str, dict[str, str]] = {"dlane_report": {
     "              \"either way, and the intents); the close-date figures are not computed yet and no forward rule moves a \"":
         "release E4 step two (close_dates)",
     "              \"seat\",": "release E4 step two (close_dates)",
+    "        a14 = a14_of(store, counted[:k])": "release E4 step two (done_counts)",
+    "        at = reading(counted[:k], store, nightly_cache=cache, lanes=lanes, twins=twins, a14=a14)":
+        "release E4 step two (done_counts)",
 }}
 
 
