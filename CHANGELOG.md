@@ -53,6 +53,10 @@ on branches.
 - **The close dates beside every checkpoint** (A14_BESIDE_DONE, "not computed yet" until now): each Done
   checkpoint carries `close_dates` {closes, dates, date_t, unpriced} over its counted closes, all programs, the
   closes of one date summed (a basket's eight lots sold at one open are one date). Beside, never a rule.
+- **The panel twin's re-base (A29 as registered)**, before any panel twin row exists: after a differing decision
+  session the twin's book is the live basket as it stood (`forward_xs.panel_seed`, `PanelChain`; the Gym engine's
+  account driven from ops in `league.xs.book.TwinAccount`; engine.py not edited); A29's two columns written for
+  panel rows, the un-re-based shadow beside; one missed buy counts once. A14's bounds, keys and pooling unchanged.
 - **The live-book proof recorded again on main `47ed6872`** (#543's sleeve): every scenario moved by the lot's size
   alone; step one needs the same record once #543 is merged into it.
 

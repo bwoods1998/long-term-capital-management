@@ -21,6 +21,7 @@ import datetime as dt
 import json
 import sqlite3
 import unittest
+from unittest import mock
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
@@ -129,6 +130,47 @@ class Seated:
     def sessions(self, last: int) -> list[str]:
         """The decision sessions from the instance's first through session `last`."""
         return [d.isoformat() for d in self.days[self.days.index(self.first):last + 1]]
+
+    def targets(self) -> None:
+        """Every called decision's target as the live book records it (`eq_rebalances.targets`: [[symbol, weight]])."""
+        for day, pick in self.picks.items():
+            if pick["called"] and pick["targets"]:
+                pairs = [[self.symbol(slot, day), w] for slot, w in pick["targets"]]
+                self.db.execute("UPDATE eq_rebalances SET targets=? WHERE decided_day=?", (json.dumps(pairs), day))
+
+    def missed(self, *, sold: bool = True) -> tuple[str, str, dict]:
+        """A BUY MISSED AT THE SEND (the decision made it on both sides), which the live standing target plans again
+        at the next close (a hold day) and fills the session after: the live lot opens one session after the twin's.
+        `sold`: of a name the program sells again inside the twins' nights. -> (the decision day, the re-plan day,
+        the lot)."""
+        index = {d.isoformat(): i for i, d in enumerate(self.days)}
+        for day in self.sessions(10):
+            pick = self.picks.get(day)
+            if not pick or not pick["called"] or not pick["buys"]:
+                continue
+            nxt = self.days[index[day] + 1].isoformat()
+            if nxt in self.picks:
+                continue
+            for slot, usd in pick["buys"]:
+                lot = next((lot for lot in self.lots if lot["id"] == slot and lot["entry_day"] == nxt), None)
+                if lot is None or (sold and not (lot.get("exit_day") and lot.get("reason") == "program"
+                                                 and lot["exit_day"] <= self.days[13].isoformat())):
+                    continue
+                weight = Decimal(str(usd)) / Decimal(str(pick["budget"]))
+                self.rebalance(nxt, called=0, ctx_sha=None, standing=1)
+                self.buy(nxt, self.symbol(slot, day), (weight * SLEEVE).quantize(CENT, rounding=ROUND_DOWN))
+                self.lot(lot, opened=self.days[index[day] + 2].isoformat())
+                return day, nxt, lot
+        raise AssertionError("no buy of the reference run fits the scenario")
+
+    def reweighted(self) -> str:
+        """A live decision whose first buy is half again its twin's weight (the two sides read one ctx and decided
+        otherwise): the lot exists on both sides, the session differs. -> the day."""
+        day = next(d for d in self.sessions(12) if d in self.picks and self.picks[d]["called"] and self.picks[d]["buys"])
+        iid, usd = self.db.execute("SELECT iid, usd FROM eq_intents WHERE decided_day=? AND kind='buy' ORDER BY iid "
+                                   "LIMIT 1", (day,)).fetchone()
+        self.db.execute("UPDATE eq_intents SET usd=? WHERE iid=?", (str((Decimal(usd) * Decimal("1.5")).quantize(CENT)), iid))
+        return day
 
 
 class TheTwinReproducesTheLiveBook(unittest.TestCase):
@@ -372,9 +414,7 @@ class TheA14ReadingOfABasket(unittest.TestCase):
 
     def test_a_session_that_disagrees_counts_against_the_basket_as_it_does_against_any_program(self):
         s = Seated(self)
-        day = next(d for d in s.sessions(12) if d in s.picks and s.picks[d]["buys"])
-        s.db.execute("DELETE FROM eq_intents WHERE decided_day=? AND kind='buy' AND iid=(SELECT MIN(iid) FROM eq_intents "
-                     "WHERE decided_day=? AND kind='buy')", (day, day))
+        s.reweighted()
         s.night(15)
         closes = self.closes(s, s.days[13].isoformat())
         s.h.swarm.put(twins.EQUITY_TWINS_KEY, {c["pid"]: {"final": True, "status": "priced", "gap_bp": 2.0} for c in closes})
@@ -389,9 +429,7 @@ class TheLinesBesideAPanelProgram(unittest.TestCase):
     def test_the_twins_residual_and_its_rebalance_sessions_agreed(self):
         s = Seated(self)
         self.assertEqual(X.beside(s.h.root), {}, "nothing recorded yet")
-        day = [d for d in s.sessions(12) if d in s.picks and s.picks[d]["called"]][1]
-        s.db.execute("DELETE FROM eq_intents WHERE decided_day=? AND kind='buy' AND iid=(SELECT MIN(iid) FROM eq_intents "
-                     "WHERE decided_day=? AND kind='buy')", (day, day))
+        day = s.reweighted()
         s.night(14)
         found = X.beside(s.h.root)
         self.assertEqual(list(found), [s.iid])
@@ -429,3 +467,127 @@ class TheLinesBesideAPanelProgram(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheTwinIsReBasedAfterADifference(unittest.TestCase):
+    """THE CAPTAIN'S A29 AS REGISTERED, APPLIED TO THE PANEL TWIN (release E4 step two; league/ops/forward_xs.py
+    `panel_seed`, `PanelChain`; league/xs/book.py `TwinAccount`): a session whose orders differ is written as
+    differing; then the twin's book is set to the live basket as it stood after it, and the sessions after it are
+    compared from the same state. Every row carries the comparison with the un-re-based twin run beside
+    (`base_agree`) and the re-bases behind its twin (`rebased`). Every book and figure invented."""
+
+    def test_one_missed_buy_differs_once_and_then_agrees(self):
+        s = Seated(self)
+        s.targets()
+        decided, replanned, lot = s.missed()
+        s.night(15)
+        rows = {r["day"]: r for r in s.rows()}
+        self.assertEqual(rows[decided]["agree"], 1, "the buy was decided on both sides")
+        self.assertEqual([d for d, r in rows.items() if r["agree"] == 0], [replanned], "ONE difference: the re-plan")
+        self.assertEqual((rows[replanned]["rebased"], rows[replanned]["base_agree"]), (0, 0))
+        after = [d for d in rows if d > replanned]
+        self.assertTrue(after and all(rows[d]["agree"] == 1 and rows[d]["rebased"] == 1 for d in after))
+        [event] = s.h.events("twin_rebased")
+        self.assertEqual((event["day"], event["payload"]["instance"]), (replanned, s.iid))
+        self.assertEqual(event["payload"]["planned"]["buys"], 1, "the live re-plan is the twin's own order")
+        self.assertEqual(event["payload"]["unheld"], 0)
+        self.assertEqual(s.h.events("twin_interrupted"), [])
+
+    def test_the_un_re_based_shadow_differs_onward_and_is_reported(self):
+        s = Seated(self)
+        s.targets()
+        decided, replanned, lot = s.missed(sold=True)
+        s.night(15)
+        rows = {r["day"]: r for r in s.rows()}
+        index = {d.isoformat(): i for i, d in enumerate(s.days)}
+        late = s.days[index[decided] + 2].isoformat()            # the live lot's own entry, a session after the twin's
+        sale = f"S|{s.symbol(lot['id'], lot['entry_day'])}|"
+        sold = next(d for d in rows if d > replanned and f"{sale}open|{late}" in rows[d]["live_keys"])
+        self.assertEqual((rows[sold]["agree"], rows[sold]["base_agree"]), (1, 0),
+                         "the sale of the lot bought a session late: the re-based twin holds it as live does")
+        closes = [{"equity": True, "pid": twins.equity_key(x["lid"]), "instance": s.iid, "day": x["exit_day"],
+                   "opened_day": x["entry_day"]} for x in s.lots if x.get("exit_day") and x["exit_day"] <= s.days[13].isoformat()]
+        s.h.swarm.put(twins.EQUITY_TWINS_KEY, {c["pid"]: {"final": True, "status": "priced", "gap_bp": 2.0} for c in closes})
+        reading = forward_twins.a14_reading(s.h.root, closes)
+        [beside] = reading["rebase"]["by_instance"]
+        self.assertEqual(beside["rebases"], 1)
+        self.assertLess(beside["agreed"], reading["by_instance"][0]["agreed"], "the shadow says it beside, never hidden")
+        self.assertEqual(reading["intents"]["disagreed"], 1, "the miss counts ONCE in A14's own reading")
+
+    def test_a_refused_partial_rotation_differs_on_each_re_plan_and_then_agrees(self):
+        s = Seated(self)
+        s.targets()
+        first = next(d for d in s.sessions(12) if d in s.picks and s.picks[d]["buys"])
+        index = [d.isoformat() for d in s.days].index(first)
+        slot = s.picks[first]["buys"][0][0]
+        name = s.symbol(slot, first)
+        lot = next(x for x in s.lots if x["id"] == slot and x["entry_day"] == s.days[index + 1].isoformat())
+        late = [s.days[index + 1].isoformat(), s.days[index + 2].isoformat()]
+        for day in late:
+            s.rebalance(day, called=0, ctx_sha=None, standing=1)
+            s.buy(day, name, (Decimal("0.166") * SLEEVE).quantize(CENT))
+        s.lot(lot, opened=s.days[index + 3].isoformat())
+        s.night(index + 6)
+        rows = {r["day"]: r for r in s.rows()}
+        self.assertEqual([rows[d]["agree"] for d in late], [0, 0], "each re-plan the send refused again counts")
+        self.assertEqual([rows[d]["rebased"] for d in late], [0, 1], "the second is compared with the re-based twin")
+        after = [d.isoformat() for d in s.days[index + 3:index + 5]]
+        self.assertTrue(all(rows[d]["agree"] == 1 and rows[d]["rebased"] == 2 for d in after))
+        self.assertEqual(sorted(e["day"] for e in s.h.events("twin_rebased")), late)
+
+    def test_an_unreadable_session_re_bases_nothing(self):
+        s = Seated(self)
+        day = next(d for d in s.sessions(12) if d in s.picks and s.picks[d]["called"])
+        s.db.execute("UPDATE eq_rebalances SET audit='mismatch' WHERE decided_day=?", (day,))
+        s.night(14)
+        rows = s.rows()
+        self.assertEqual(s.h.events("twin_rebased"), [])
+        self.assertEqual({(r["rebased"], r["base_agree"]) for r in rows if r["agree"] is not None}, {(0, 1)})
+        self.assertEqual([r["base_agree"] for r in rows if r["why"] == "audit"], [None])
+
+    def test_a_night_that_cannot_ask_the_re_based_twin_writes_what_it_compared_and_says_so(self):
+        s = Seated(self)
+        s.targets()
+        decided, replanned, lot = s.missed()
+        with mock.patch.object(X.PanelChain, "_ask", side_effect=forward_twins.TwinInterrupted("an invented restart")):
+            receipt = s.night(15)
+        rows = {r["day"]: r for r in s.rows()}
+        self.assertEqual(max(rows), replanned, "the rows through the difference are written; none compared after it")
+        self.assertEqual(receipt["twins"]["finish"]["interrupted"], 1)
+        self.assertTrue(any("re-based twin" in e["payload"]["why"] for e in s.h.events("twin_interrupted")))
+        s.night(16)
+        rows = {r["day"]: r for r in s.rows()}
+        self.assertTrue(all(rows[d]["agree"] == 1 for d in rows if d > replanned), "the next night re-bases from the row")
+        self.assertEqual([e["day"] for e in s.h.events("twin_rebased")], [replanned])
+
+
+class A14OverAMixedCheckpoint(unittest.TestCase):
+    """A14's bounds, keys and pooling do not move: one checkpoint pooling an ETF instance's sessions and a panel
+    instance's, each re-based once, reads every session once, in one share (invented rows)."""
+
+    def test_the_pooled_reading(self):
+        s = Seated(self)
+        s.targets()
+        s.missed()
+        s.night(15)
+        db = s.h.db
+        panel = [dict(r) for r in db.execute("SELECT * FROM fwd_twins WHERE instance=? ORDER BY day", (s.iid,))]
+        etf, pid = "seed-a@1:r", int(panel[0]["pid"])
+        with db:
+            for i, r in enumerate(panel):
+                db.execute("INSERT INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, why, at, cause, "
+                           "rebased, base_agree) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                           (etf, r["day"], pid, "[]", "[]", 0 if i == 3 else 1, None, 1.0, "program" if i == 3 else None,
+                            0 if i <= 3 else 1, 0 if i >= 3 else 1))
+        closes = [{"equity": True, "pid": twins.equity_key(x["lid"]), "instance": s.iid, "day": x["exit_day"],
+                   "opened_day": x["entry_day"]} for x in s.lots if x.get("exit_day") and x["exit_day"] <= s.days[13].isoformat()]
+        closes += [{"equity": True, "pid": "eq:9001", "instance": etf, "day": closes[-1]["day"],
+                    "opened_day": panel[0]["day"]}]
+        s.h.swarm.put(twins.EQUITY_TWINS_KEY, {c["pid"]: {"final": True, "status": "priced", "gap_bp": 2.0} for c in closes})
+        reading = forward_twins.a14_reading(s.h.root, closes)
+        mine = {row["instance"]: row for row in reading["by_instance"]}
+        self.assertEqual(set(mine), {s.iid, etf})
+        self.assertEqual(reading["intents"]["sessions"], mine[s.iid]["sessions"] + mine[etf]["sessions"])
+        self.assertEqual(reading["intents"]["disagreed"], 2, "one counted difference each")
+        self.assertEqual(reading["intents"]["bound"], 0.95, "the bound as registered")
+        self.assertEqual({row["instance"]: row["rebases"] for row in reading["rebase"]["by_instance"]}, {s.iid: 1, etf: 1})

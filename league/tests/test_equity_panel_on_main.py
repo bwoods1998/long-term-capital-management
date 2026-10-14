@@ -24,12 +24,11 @@ league/swarm/E4.md ("The merge with main's releases E5-A and E3.1") and held her
    session. What is the panel kind's own is stated beside it: the basket's buy of that open is sized against the lots
    not yet sold (B8), so it waits with them and the cut-off records it missed; the standing target plans it again at
    the next close (`TheExitWaitsEndCoversAPanelBasket`).
-3. THE TWIN IS RE-BASED AFTER A DIFFERENCE (A29; league/ops/forward_twins.py). NOT BUILT FOR THE PANEL TWIN. A panel
-   instance's twin is the panel night's (league/ops/forward_xs.py `twin`), handed over before E3.1's re-base is
-   reached: every session is compared with the twin AS REGISTERED, a differing session counts each time, no
-   `twin_rebased` event is written, and its rows carry neither of A29's columns (NULL: read as "never re-based",
-   its un-re-based answer being its own). `ThePanelTwinIsTheRegisteredOne` holds exactly that, so the day a re-base is
-   built for the panel twin this test is the one to change.
+3. THE TWIN IS RE-BASED AFTER A DIFFERENCE (A29; league/ops/forward_twins.py). STEP TWO APPLIES IT, AS REGISTERED,
+   TO THE PANEL TWIN, on the panel night's own code (league/ops/forward_xs.py `PanelChain` over league/xs/book.py
+   `TwinAccount`, the Gym engine's account driven from ops): a differing session counts once, a `twin_rebased`
+   event is written, and the rows carry A29's two columns. E3.1's code is still never handed a panel instance.
+   `ThePanelTwinIsReBasedByItsOwnNight` holds it; league/tests/test_forward_xs_twin.py holds the re-base itself.
 
 Every program, price, panel and figure here is invented."""
 
@@ -315,16 +314,16 @@ except Exception:  # noqa: BLE001 - no numpy
 
 
 @unittest.skipUnless(HAVE and XT is not None, "numpy not installed")
-class ThePanelTwinIsTheRegisteredOne(unittest.TestCase):
-    """A29's re-base is E3.1's, for the twins E3's night makes. The panel night's twin is not re-based."""
+class ThePanelTwinIsReBasedByItsOwnNight(unittest.TestCase):
+    """A29's re-base is E3.1's for the twins E3's night makes; STEP TWO applies it, as registered, to the panel
+    night's own twin (league/ops/forward_xs.py `PanelChain`, over league/xs/book.py `TwinAccount`): E3.1's code is
+    never handed a panel instance, and the panel twin's rows carry A29's two columns."""
 
-    def test_a_differing_session_counts_and_nothing_is_re_based(self):
-        from league.ops import forward_db, forward_twins
+    def test_a_differing_session_counts_once_and_the_twin_is_re_based(self):
+        from league.ops import forward_db, forward_report, forward_twins
 
         s = XT.Seated(self)
-        day = next(d for d in s.sessions(12) if d in s.picks and s.picks[d]["buys"])
-        s.db.execute("DELETE FROM eq_intents WHERE decided_day=? AND kind='buy' AND iid=(SELECT MIN(iid) FROM eq_intents "
-                     "WHERE decided_day=? AND kind='buy')", (day, day))
+        day = s.reweighted()
 
         def never(*args, **kw):
             raise AssertionError("a panel instance's twin was handed to E3.1's re-base")
@@ -334,40 +333,32 @@ class ThePanelTwinIsTheRegisteredOne(unittest.TestCase):
         rows = s.rows()
         self.assertGreater(len(rows), 8)
         self.assertEqual([r["day"] for r in rows if r["agree"] == 0], [day], "the differing session, as registered")
-        self.assertTrue(forward_db.has_column(s.h.db, "fwd_twins", "rebased"), "the store holds A29's columns")
-        self.assertEqual({(r["rebased"], r["base_agree"]) for r in rows}, {(None, None)},
-                         "a panel row carries neither: its twin is the registered one")
-        self.assertEqual(forward_db.events(s.h.db, "twin_rebased"), [])
-        # The reading beside (A29's `rebase`) reads such a row as never re-based: its un-re-based answer is its own.
+        self.assertEqual([e["day"] for e in forward_db.events(s.h.db, "twin_rebased")], [day])
+        self.assertTrue(all(r["rebased"] == (1 if r["day"] > day else 0) for r in rows))
+        self.assertTrue(all(r["base_agree"] is not None for r in rows if r["agree"] is not None))
         closes = [{"equity": True, "pid": f"eq:{lot['lid']}", "instance": s.iid, "day": lot["exit_day"],
                    "opened_day": lot["entry_day"]} for lot in s.lots
                   if lot.get("exit_day") and lot["exit_day"] <= s.days[13].isoformat()]
         reading = forward_twins.a14_reading(s.h.root, closes)
         [beside] = reading["rebase"]["by_instance"]
-        [mine] = reading["by_instance"]
-        self.assertEqual(beside["rebases"], 0)
-        self.assertEqual((beside["sessions"], beside["agreed"]), (mine["sessions"], mine["agreed"]))
+        self.assertEqual(beside["rebases"], 1)
         self.assertEqual(reading["intents"]["disagreed"], 1)
-        # ... and so does the forward report's line beside its twins (`fills.rebase`).
-        from league.ops import forward_report
-
         seen = forward_report._rebase([dict(r) for r in rows], {s.pid})
-        self.assertEqual((seen["rebases"], seen["sessions"], seen["agreed"]),
-                         (0, sum(1 for r in rows if r["agree"] is not None), sum(1 for r in rows if r["agree"] == 1)))
+        self.assertEqual(seen["rebases"], 1)
 
-    def test_the_hand_over_comes_before_the_re_base(self):
+    def test_the_hand_over_comes_before_e3_1s_re_base(self):
         """Where it is decided: `_one_instance` hands a panel instance to the panel night before the first line of
-        A29's loop, and the panel night's INSERT names the registered columns only."""
+        A29's loop for E3's twins; the panel night re-bases with its own chain and writes A29's two columns."""
         import inspect
 
         from league.ops import forward_twins, forward_xs
 
         source = inspect.getsource(forward_twins._one_instance)
         self.assertLess(source.index("return forward_xs.twin("), source.index("RebasedTwin("))
-        twin = inspect.getsource(forward_xs)
+        twin = inspect.getsource(forward_xs.twin)
         self.assertNotIn("RebasedTwin", twin)
-        self.assertNotIn("twin_rebased", twin)
-        self.assertNotIn("base_agree", twin)
+        self.assertIn("PanelChain(", twin)
+        self.assertIn("rebased, base_agree) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", twin)
 
 
 if __name__ == "__main__":

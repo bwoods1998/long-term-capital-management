@@ -54,8 +54,17 @@ wait for the practice proof has an end; the twin is re-based after a difference)
   basket's exits like any other: its sales and the House's exit of a name that left the eligible set wait for the
   practice sale inside the open window and go at the 09:45 cut-off with the one alert. A basket's BUY of that open
   waits with its own sales (B8) and the cut-off records it missed; the standing target plans it again at the next
-  close. THE TWIN'S RE-BASE IS NOT BUILT FOR THE PANEL TWIN: a panel instance is compared every session with its
-  twin as registered, each differing session counted, with no re-base event; its rows read as never re-based.
+  close. THE TWIN'S RE-BASE (A29, as registered) IS APPLIED TO THE PANEL TWIN SINCE STEP TWO, on the panel night's
+  own code (league/ops/forward_xs.py `panel_seed`, `PanelChain`; league/xs/book.py `TwinAccount`): a session whose
+  orders differ is written as differing; then the twin's book is set to the live basket as it stood after it (each
+  live lot bought by the Gym engine in its own entry session at its fill point for its weight of its decision's
+  budget; the live decision's buys, sells, House exits and standing target carried) and the sessions after it are
+  compared from the same state. One `twin_rebased` event a re-base; every row carries A29's `rebased` and the
+  un-re-based twin run's `base_agree` beside. One missed buy counts once; without it one panel miss could fail the
+  pooled 95% for every program. The program is loaded once in the night's decider child and asked every decision in
+  order (the un-re-based run's through the difference, then the re-based account's): no program text runs in the
+  ops process, and a child that restarts is an interruption (the rows compared before it stand). COST, stated: the
+  night asks a re-based instance's decides twice (the child's run and the chain).
 - **What the deploy changes for a book that holds no panel program, and nothing else:** the live state gains the
   column `eq_instances.kind` ("equity" on every share program's row) and the empty table `eq_rebalances`, both made
   when the book starts; main's book reads neither and trades the same weeks on a state that holds them (checked:
