@@ -204,6 +204,7 @@ class TheVerdicts(Fixture):
         self.assertEqual((v["verdict"], v["k"], v["pid"]), ("pass", 5, pid))
         self.assertIn("WEAK SCREEN", v["beside"])
         self.assertIn("t = ", v["beside"])
+        self.assertIn("Registry: 1 forward passes of 1 ETF case N lineages judged so far", v["beside"])
         self.assertNotIn("t = ", v["words"])
         fl = dict(db.execute("SELECT * FROM fwd1_floors").fetchone())
         self.assertIsNotNone(fl["k_own"])
@@ -337,6 +338,27 @@ class TheVerdicts(Fixture):
         runs = FakeRuns()
         self.night(runs)                                          # never asked again
         self.assertEqual(runs.calls["etf"], 0)
+
+    def test_a_passed_checkpoint_left_without_its_verdict_gets_it(self):
+        """A store written by a build that wrote the checkpoint and the verdict apart: the verdict follows."""
+        self.family("f1")
+        pid = self.row("f1", 1, first_day="2026-10-16")
+        names = self.days(pid, [0.01] * 6, first=START)
+        self.first_night()                                   # registers it (no sides yet: no checkpoint)
+        db = self.store()
+        with db:
+            db.execute("INSERT INTO fwd1_floors(pid, case_, k_own, cells, drift, why, seconds, at) VALUES "
+                       "(?, 'N', 150, '{}', 0.1, NULL, 0, 1)", (pid,))
+            db.execute("INSERT INTO fwd1_checks(lineage, k, pid, engine, day, t, s, s15, g_bp, ll, count, draws, c_used, "
+                       "passed, why, at) VALUES ('equity:f1', 5, ?, ?, ?, 9.0, 0.05, 0.05, 2, 0, NULL, NULL, 2.61, 1, "
+                       "NULL, 1)", (pid, self.engine, names[4]))
+        db.close()
+        self.night()
+        db = self.store()
+        v = dict(db.execute("SELECT * FROM fwd1_verdicts").fetchone())
+        self.assertEqual((v["verdict"], v["k"]), ("pass", 5))
+        self.assertIn("t = 9.00", v["beside"])
+        db.close()
 
     def test_no_sides_no_checkpoint(self):
         self.family("f1")

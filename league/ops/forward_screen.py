@@ -725,8 +725,17 @@ class Night:
         program = None
         for k in R.PLAN:
             if k in checks:
-                if checks[k]["passed"]:
-                    return None                           # a pass already written (its verdict row follows it)
+                held = checks[k]
+                if held["passed"]:
+                    # A checkpoint of record that passed is written with its verdict in one transaction; one found
+                    # alone (a store written by an earlier build) gets its verdict from its own row now.
+                    self._write(None, self._pass_row(lin, k=k, day=str(held["day"]), t=float(held["t"]),
+                                                     c_value=float(held["c_used"]), g=float(held["g_bp"]),
+                                                     pnl=float(held["s"]), floor_row=self._floor(pid) or {}))
+                    return "pass"
+                if k == R.PLAN[-1]:
+                    self._write(None, self._fail_row(lin, k=k, day=str(held["day"]), c_value=held["c_used"]))
+                    return "fail"
                 continue
             if len(days) < k:
                 return None                               # the checkpoint of record is read when it is reached
@@ -789,64 +798,78 @@ class Night:
                             why = f"the placebo leg: {count} of {draws} draws at or above t"
                 else:
                     passed = True
-            with self.store:
-                self.store.execute(
-                    "INSERT OR IGNORE INTO fwd1_checks(lineage, k, pid, engine, day, t, s, s15, g_bp, ll, count, draws, "
-                    "c_used, passed, why, at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (lineage, k, pid, engine, names[-1], point["t"], point["S"], point["S15"], float(g), used_ll, count,
-                     draws, c_value, 1 if passed else 0, why, self.clock()))
-            self.tally["checks"] += 1
+            check = (lineage, k, pid, engine, names[-1], point["t"], point["S"], point["S15"], float(g), used_ll, count,
+                     draws, c_value, 1 if passed else 0, why, self.clock())
+            verdict = None
             if passed:
-                self._pass(lin, k=k, day=names[-1], t=float(point["t"]), c_value=float(c_value), g=g,
-                           pnl=point["S"], floor_row=floor_row)
-                return "pass"
-            if k == R.PLAN[-1]:
-                with self.store:
-                    self.store.execute(
-                        "INSERT OR IGNORE INTO fwd1_verdicts(lineage, pid, verdict, k, day, c_used, why, beside, words, at) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                        (lineage, pid, "fail", k, names[-1], c_value, "no checkpoint of 5-60 passed: failed for good",
-                         None, None, self.clock()))
-                self.tally["fail"] += 1
-                return "fail"
+                verdict = self._pass_row(lin, k=k, day=names[-1], t=float(point["t"]), c_value=float(c_value), g=g,
+                                         pnl=point["S"], floor_row=floor_row)
+            elif k == R.PLAN[-1]:
+                verdict = self._fail_row(lin, k=k, day=names[-1], c_value=c_value)
+            self._write(check, verdict)                  # the checkpoint of record and its verdict: one transaction
+            self.tally["checks"] += 1
+            if verdict is not None:
+                return str(verdict[2])
         return None
 
-    def registry_counts(self, typ: str, case: str) -> tuple[int, int, float | None]:
+    def _write(self, check: Sequence[Any] | None, verdict: Sequence[Any] | None) -> None:
+        """A checkpoint of record and the verdict it makes (either may be None), in ONE transaction: first write
+        stands for both."""
+        with self.store:
+            if check is not None:
+                self.store.execute(
+                    "INSERT OR IGNORE INTO fwd1_checks(lineage, k, pid, engine, day, t, s, s15, g_bp, ll, count, draws, "
+                    "c_used, passed, why, at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", tuple(check))
+            if verdict is not None:
+                cursor = self.store.execute(
+                    "INSERT OR IGNORE INTO fwd1_verdicts(lineage, pid, verdict, k, day, c_used, why, beside, words, at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)", tuple(verdict))
+                if cursor.rowcount:
+                    self.tally[str(verdict[2])] += 1
+
+    def _fail_row(self, lin: Mapping[str, Any], *, k: int, day: str, c_value: Any) -> tuple[Any, ...]:
+        return (str(lin["lineage"]), int(lin["rep"]), "fail", k, day, c_value,
+                "no checkpoint of 5-60 passed: failed for good", None, None, self.clock())
+
+    def registry_counts(self, typ: str, case: str, *, also: tuple[str, int] | None = None
+                        ) -> tuple[int, int, float | None]:
         """(the PASS verdicts, the lineages judged so far, the expected zero-edge passes) of one type and case: the
-        lineages with a checkpoint of record, each at the last one read."""
+        lineages with a checkpoint of record, each at the last one read; `also` (lineage, k): one more read (the
+        checkpoint being written), counted at k, and its PASS among the passes."""
         rows = self.store.execute(
             "SELECT l.lineage AS lineage, MAX(c.k) AS k FROM fwd1_lineages l JOIN fwd1_checks c ON c.lineage = l.lineage "
             "WHERE l.type=? AND l.case_=? AND l.judged=1 GROUP BY l.lineage", (typ, case)).fetchall()
-        read = [(typ, case, int(r["k"])) for r in rows]
-        expected = R.expected_passes(self.rule, read).get(f"{typ}|{case}") if read else 0.0
+        last = {str(r["lineage"]): int(r["k"]) for r in rows}
         passes = int(self.store.execute(
             "SELECT COUNT(*) FROM fwd1_verdicts v JOIN fwd1_lineages l ON l.lineage = v.lineage WHERE v.verdict='pass' "
             "AND l.type=? AND l.case_=?", (typ, case)).fetchone()[0])
+        if also is not None:
+            last[str(also[0])] = max(int(also[1]), last.get(str(also[0]), 0))
+            passes += 0 if self._verdict(str(also[0])) is not None else 1
+        read = [(typ, case, k) for k in last.values()]
+        expected = R.expected_passes(self.rule, read).get(f"{typ}|{case}") if read else 0.0
         return passes, len(read), expected
 
-    def _pass(self, lin: Mapping[str, Any], *, k: int, day: str, t: float, c_value: float, g: float, pnl: float,
-              floor_row: Mapping[str, Any]) -> None:
+    def _pass_row(self, lin: Mapping[str, Any], *, k: int, day: str, t: float, c_value: float, g: float, pnl: float,
+                  floor_row: Mapping[str, Any]) -> tuple[Any, ...]:
+        """The PASS verdict's row: its sentence (operator-only) and its words (the permit's), the registry's counts
+        read as they stand with this pass among them."""
         typ, case = str(lin["type"]), str(lin["case_"])
-        observed, judged, expected = self.registry_counts(typ, case)
-        observed += 1
+        observed, judged, expected = self.registry_counts(typ, case, also=(str(lin["lineage"]), k))
         common = dict(typ=typ, case=case, k=k, start=lin["start"], c_used_value=c_value, k_own=floor_row["k_own"],
                       observed=observed, judged=judged, expected=expected)
         text = R.beside(self.rule, t=t, g_bp=g, pnl=pnl, drift=floor_row.get("drift"), **common)
         said = R.words(self.rule, **common)
-        with self.store:
-            self.store.execute(
-                "INSERT OR IGNORE INTO fwd1_verdicts(lineage, pid, verdict, k, day, c_used, why, beside, words, at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (str(lin["lineage"]), int(lin["rep"]), "pass", k, day, c_value, f"passed at checkpoint {k}", text, said,
-                 self.clock()))
-        self.tally["pass"] += 1
+        return (str(lin["lineage"]), int(lin["rep"]), "pass", k, day, c_value, f"passed at checkpoint {k}", text, said,
+                self.clock())
 
     # ---------------------------------------------------------------------------------------------- the night
     def run(self) -> dict[str, Any]:
-        """Every judged lineage without a verdict, those nearest their next checkpoint first."""
+        """Every judged lineage without a verdict registered under THIS receipt (a lineage registered under another
+        pin is judged no further by this one: a receipt judges only the days after its own pin), in lineage order."""
         lineages = [dict(r) for r in self.store.execute(
-            "SELECT * FROM fwd1_lineages WHERE judged=1 AND lineage NOT IN (SELECT lineage FROM fwd1_verdicts) "
-            "ORDER BY lineage")]
+            "SELECT * FROM fwd1_lineages WHERE judged=1 AND receipt=? AND lineage NOT IN (SELECT lineage FROM "
+            "fwd1_verdicts) ORDER BY lineage", (self.rule.receipt_sha256,))]
         for lin in lineages:
             try:
                 self.judge(lin)

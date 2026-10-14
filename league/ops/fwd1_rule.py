@@ -225,7 +225,7 @@ def grid_index(t: float | None) -> int:
     fwdcore.grid_index for one value). +inf is K_MAX."""
     if t is None or (isinstance(t, float) and math.isnan(t)) or float(t) < 0.0:
         return -1
-    if math.isinf(float(t)):
+    if math.isinf(float(t)) or float(t) >= K_MAX / 100.0:
         return K_MAX
     k = int(math.floor(float(t) * 100.0))
     while k + 1 <= K_MAX and (k + 1) / 100.0 <= float(t):
