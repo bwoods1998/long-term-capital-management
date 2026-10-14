@@ -312,7 +312,13 @@ on branches.
   `league/tests/test_equity_seats.py` `FirstCome` pops `eq_instances.kind` from main's recorded first-come sequence
   and holds it to "equity" before comparing the rest (f96d7a77). It is E4's stated schema addition, not a behaviour
   change: main's own version of the file fails on this tree for that column only, and the other 435 tests of main's 15
-  modules, in main's own versions, pass on both Pythons (the independent check).
+  modules, in main's own versions, pass on both Pythons (the independent check). **CI's `tests` job limit is 75
+  minutes, not 35** (`.github/workflows/checks.yml`, with `TRUSTED_WORKFLOWS_SHA256` in `league/updater.py`
+  re-pinned in the same commit): with E4 the league's tests are 11,705 (10,257 on main) and their step is about 43
+  minutes on GitHub's runner; the 35-minute limit cut off both jobs of the first run of #544, and a cut-off run
+  attests nothing. A workflow change reaches the box only as the owner's deploy, which E4 is already: until it is
+  deployed, the running release's updater refuses main heads that carry the new workflows (as it refuses E4's
+  protected files).
 - Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
   the universe deploy and its rollback, the alarms, the code rollback past E4).
 

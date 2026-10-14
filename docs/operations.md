@@ -5162,7 +5162,9 @@ checkout's `.data` (the box record and the admin token): never `ln -sfn` over it
 - **A workflow change re-pins the updater in the same commit.** A change to `.github/workflows/` needs
   `TRUSTED_WORKFLOWS_SHA256` in `league/updater.py` re-pinned in the same commit (a test checks it). With the in-box
   updater on (from A1), the running release refuses main heads that carry the new workflows until an owner deploy
-  carries the new pin: every later head waits behind it. CI's `tests` job has a 35-minute limit (Release A; it was 20).
+  carries the new pin: every later head waits behind it. CI's `tests` job has a 75-minute limit (release E4: its
+  league step is about 43 minutes on GitHub's runner, and the 35-minute limit of Release A cut off both jobs of #544;
+  it was 20 before Release A).
   The hourly run has its own concurrency group, so it never cancels a push run. `league/updater.py` reads a cancelled
   run as no verdict, so a cancelled run is not green.
 
