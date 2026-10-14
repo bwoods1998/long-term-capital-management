@@ -239,11 +239,13 @@ class ThePanelPool(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR"))
         self.addCleanup(self.tmp.cleanup)
 
-    def house(self, panels: tuple[str, ...], *, ids: tuple[str, ...] = ()):
+    def house(self, panels: tuple[str, ...], *, ids: tuple[str, ...] = (), k: tuple = ()):
         W = self.W
         rows = W.ranked_programs(0) + W.panel_rows(panels)
-        for row, fid in zip([r for r in rows if r["structure"] == "panel"], ids):
+        for i, (row, fid) in enumerate(zip([r for r in rows if r["structure"] == "panel"], ids)):
             row["family"] = fid
+            if i < len(k):
+                row["seat_activity"] = W.activity(*k[i])
         house = W.House(Path(self.tmp.name) / f"h{len(os.listdir(self.tmp.name))}", rows)
         self.addCleanup(house.close)
         W.invented_week(house.market, through=W.FORTNIGHT_END)
@@ -266,6 +268,16 @@ class ThePanelPool(unittest.TestCase):
         self.assertEqual([w["family"] for w in plan[L.SEAT_PANEL]["waiting"]], ["xs-b"])
         self.assertEqual(len(plan["holders"]), 6, "the six ETF seats as they were")
         self.assertNotIn("xs-", json.dumps({k: v for k, v in plan.items() if k != L.SEAT_PANEL}))
+
+    def test_the_panel_pool_ranks_by_k_inside_itself(self):
+        """K FOR A BASKET ranks the waiting panel programs inside the panel pool only: the higher K takes the one seat
+        though its id sorts later (both passed at the same time); the ETF programs' plan is untouched."""
+        house = self.house(("candidate", "candidate"), ids=("xs-a", "xs-b"), k=((5, 40), (60, 400)))
+        self.decide(house)
+        plan = house.book.seats()
+        self.assertEqual(([h["family"] for h in plan[L.SEAT_PANEL]["holders"]],
+                          [w["family"] for w in plan[L.SEAT_PANEL]["waiting"]]), (["xs-b"], ["xs-a"]))
+        self.assertEqual(len(plan["holders"]), 6)
 
     def test_a_panel_program_never_takes_or_yields_an_etf_seat(self):
         """The fortnight in which an idle ETF seat yields to the waiting ETF program: with a panel Candidate of the

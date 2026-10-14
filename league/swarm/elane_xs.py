@@ -121,7 +121,12 @@ PLACEBO_KEY = "elane_xs_placebo"
 HALVES_KEY = "elane_xs_halves"
 OOF_KEY = "elane_xs_oof"
 LOOK_KEY = "elane_xs_look"
-SEALED = (FLOOR_KEY, TRAIN_X_KEY, TRAIN_U_KEY, PRECHECK_KEY, PLACEBO_KEY, HALVES_KEY, OOF_KEY, LOOK_KEY)
+#: K FOR A BASKET, its Train-era half (step two; the seat rule's rank inside the panel pool): {version: {"close_days",
+#: "sessions"}} of a passing version's seen spans' full-universe k 1.0 runs, kept by `score` and read by `validate`,
+#: which writes the seat rule's record (`elane.SEAT_KEY`) beside the try. Sealed: K is never printed, never read by a
+#: generator.
+ACTIVITY_KEY = "elane_xs_activity"
+SEALED = (FLOOR_KEY, TRAIN_X_KEY, TRAIN_U_KEY, PRECHECK_KEY, PLACEBO_KEY, HALVES_KEY, OOF_KEY, LOOK_KEY, ACTIVITY_KEY)
 #: Store kv keys: the day's child seconds of panel Train {utc_day: seconds}; the zero-edge job's weeks; the alerts.
 CPU_KEY = "elane_xs_cpu"
 ZERO_KEY = "elane_xs_zero_edge"
@@ -2659,6 +2664,13 @@ def _judged(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any],
             r["review"] = {"version": n, "unclear": {}, "at": at}  # THE REVIEW, before the pass is the try
     rec = _update(store, fid, put)
     _seal(store, fid, n, sealed)
+    if entry["passed"]:
+        try:  # K's Train-era half, from the seen spans' full-universe k 1.0 runs just read (sealed: never printed)
+            counted = train_activity(parts.get("base") or [])
+            held = _state(store.family(fid) or {}).get(ACTIVITY_KEY)
+            store.set_state(fid, **{ACTIVITY_KEY: {**(dict(held) if isinstance(held, Mapping) else {}), str(n): counted}})
+        except Exception:  # noqa: BLE001 - a count beside the verdict, never its condition
+            pass
     if fresh:
         try:  # E3's scored event, E2's own kind: the forward registry's time evidence of a panel version
             store.event("swarm.elane", fid, {"pass": "scored", "version": n, "sha": str(version.get("sha") or ""),
@@ -2679,6 +2691,73 @@ def _judged(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any],
     if len(versions_of(rec)) >= c["train_budget"]:
         out["retired"] = finish(researcher, store.family(fid) or fam, "its Train budget is spent with no version passing")
     return out
+
+
+def train_activity(results: Sequence[Mapping[str, Any]], *, spans: Sequence[tuple[dt.date, dt.date]] | None = None
+                   ) -> dict[str, int]:
+    """K'S TRAIN-ERA COUNTS of a basket (A24's rule, as `league.equity.bands.close_days` reads it for a share program):
+    over the runs' lots, the close days (a day whose closed lots' entry weights of the run's capital, which is the
+    sleeve, sum to at least the seat rule's `k_floor`, read as `k_floor` - 0.0005) and the sessions. `spans`: only the
+    lots and sessions inside them are read (the seen spans of whole-segment runs). Whole numbers; a lot's size and its
+    exit day are all it reads: no price, no return, no P&L. ValueError for a run that did not end "ok"."""
+    from ..equity import bands as equity_bands
+
+    floor = equity_bands.seat_settings().k_floor
+
+    def inside(day: Any) -> bool:
+        d = _day(day)
+        return spans is None or (d is not None and any(a <= d <= b for a, b in spans))
+
+    days = sessions = 0
+    for result in results:
+        status = str(result.get("status") or "")
+        if status == "no_data":
+            continue
+        if status != "ok":
+            raise ValueError(f"a Train-era run ended {status!r}")
+        days += equity_bands.close_days([lot for lot in result.get("lots") or [] if inside(lot.get("exit_day"))],
+                                        floor=floor)
+        daily = result.get("daily")
+        sessions += (sum(1 for row in daily if row and inside(row[0])) if isinstance(daily, (list, tuple))
+                     else equity_bands.run_sessions(result))
+    return {"close_days": int(days), "sessions": int(sessions)}
+
+
+def seat_record(fam: Mapping[str, Any], version: Mapping[str, Any], validation: Mapping[str, Any],
+                segments: Sequence[Any], *, at: Any, run_id: Any) -> dict[str, Any] | None:
+    """THE SEAT RULE'S RECORD OF A PANEL PROGRAM (`elane.SEAT_KEY`; step two), written by `validate` beside the try:
+    the Validation count from the 2025 k 1.0 run the try itself made (the gate's sealed path), the Train-era count
+    `score` kept (`ACTIVITY_KEY`; for a version passed before it was kept, the two Train segments' runs the try
+    made, read inside the seen spans alone). Four whole numbers, ranked inside the panel pool only. None when they
+    cannot be counted (the program then ranks after every program whose counts can be read, by pass time)."""
+    from ..equity import bands as equity_bands
+
+    n = int(version["n"])
+    sha = None
+    try:
+        from . import elane
+
+        sha = elane._run_sha(version)
+        if str(validation.get("status") or "") != "ok" or not sha:
+            return None
+        floor = equity_bands.seat_settings().k_floor
+        v = {"close_days": equity_bands.close_days(validation.get("lots") or [], floor=floor),
+             "sessions": equity_bands.run_sessions(validation)}
+        kept = _state(fam).get(ACTIVITY_KEY)
+        train = dict(kept[str(n)]) if isinstance(kept, Mapping) and isinstance(kept.get(str(n)), Mapping) else None
+        source = "panel"
+        if train is None:
+            train = train_activity([dict(getattr(run, "result", run) or {}) for run in segments],
+                                   spans=seen_spans(hidden_year_of(fam)))
+            source = "panel (Train segments, seen spans)"
+        if any(isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in (*v.values(), *train.values())) \
+                or train["sessions"] < 1:
+            return None
+    except Exception:  # noqa: BLE001 - beside the try, never its condition
+        return None
+    return {"version": n, "run_sha": str(sha), "floor": str(floor), "validation": v,
+            "train": {"close_days": int(train["close_days"]), "sessions": int(train["sessions"])}, "at": at,
+            "source": source, "validation_run": run_id}
 
 
 def _seal(store: Any, fid: str, n: int, sealed: Mapping[str, Any]) -> None:
@@ -3588,6 +3667,8 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     checks = {str(key): bool(value) for key, value in (pre.get("checks") or {}).items()}
     verdicts = dict(state.get(elane.VERDICTS_KEY) or {}) if isinstance(state.get(elane.VERDICTS_KEY), Mapping) else {}
     verdicts[str(n)] = {"entered": entered, "at": store.now(), "stale": False}
+    seat = seat_record(store.family(fid) or fam, version, result, segments, at=store.now(), run_id=row.get("run_id")) \
+        if entered else None
     with store.atomic():
         current = store.family(fid)
         if current is None or current.get("retired_at"):
@@ -3603,7 +3684,8 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
                                            "precheck": bool(pre.get("passed")), "entered": entered, "retry_sha": None,
                                            **({"slow": slow[:300]} if slow else {})},
                            PRECHECK_KEY: {"version": n, "at": store.now(), "reached": True,
-                                          "passed": bool(pre.get("passed")) and status == "ok"}})
+                                          "passed": bool(pre.get("passed")) and status == "ok"},
+                           **({elane.SEAT_KEY: seat} if seat is not None else {})})
     store.event("swarm.status", fid, {"action": "elane_validation", "version": n, "lane": LANE, "label": "EQUITY",
                                      "structure": STRUCTURE, "screen": SCREEN_NAME, "entered": entered, "first": first,
                                      "checks": checks})
@@ -4054,6 +4136,7 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "TRAIN_U_KEY", "PRECHECK_KEY", "PLACEBO_KEY", "HALVES_KEY", "OOF_KEY", "LOOK_KEY", "SEALED", "CPU_KEY",
            "ZERO_KEY", "ALERTS_KEY", "TRAIN_OK_KEY", "STYLE_FIELD", "SEAT_CANDIDATE", "SEAT_STYLE", "SEAT_UNSTATED",
            "MAX_CELL_LOOKS",
+           "ACTIVITY_KEY", "train_activity", "seat_record",
            "PROBE_FILE", "PROBE_VERSION", "PROBE_STRATA", "FOLD_RECORD", "FOLD_HASH_PREFIX", "FOLD_GID0",
            "fold_recording", "fold_hash", "REVIEW_XS", "REVIEW_OBJECTIVE", "REVIEW_SYSTEM", "RESEARCHER_SYSTEM",
            "SETTINGS_KEY", "SCREEN_KEY", "SCREEN_NAME", "DECIDER_LOG", "STORE_DIR", "PANEL_MANIFEST",

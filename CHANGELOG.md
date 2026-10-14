@@ -47,6 +47,9 @@ on branches.
   at k 1.0 and 1.5), the two Train segments and the sealed run goes through `steady`, `may_run` asked before each.
   The House's clock spends nothing (owed after a backoff; `elane_xs_clock` at the third); timeouts that repeat as a
   program's spend the try as SLOW and the look as spent and failed. The look's seed and draws are unchanged.
+- **K for a basket**: the seat rule's rank of a panel program, from its own runs (Train-era close days per 250
+  sessions of the seen spans' 1.0x runs, kept sealed by the bar; the Validation close days of the try's 2025 k 1.0
+  run), written as `elane_seat` beside an entered try and ranked inside the panel pool only. Never printed.
 - **The live-book proof recorded again on main `47ed6872`** (#543's sleeve): every scenario moved by the lot's size
   alone; step one needs the same record once #543 is merged into it.
 

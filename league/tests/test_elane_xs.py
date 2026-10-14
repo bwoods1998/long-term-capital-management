@@ -83,7 +83,7 @@ class Settings(unittest.TestCase):
         self.assertEqual(set(elane_xs.SCREEN_NULLS.values()), {None})
         self.assertEqual(elane_xs.SCREEN_NAME, xscreen.SCREEN)
         self.assertEqual(elane_xs.STRUCTURE, "panel")
-        self.assertEqual(len(set(elane_xs.SEALED)), 8)
+        self.assertEqual(len(set(elane_xs.SEALED)), 9)
 
     def test_the_pin_is_the_repositorys_policy_and_never_the_boxs_settings(self):
         policy = {"elane": {"screens": {"equity_xs": {"receipt_sha256": "a" * 64}}}}
@@ -1514,6 +1514,78 @@ class TheClockAtValidationAndTheLook(TheLook):
         self.assertIn(elane_xs.PROGRAM_FAILS["SLOW"], looked["beside"])
         self.assertEqual(len(self.store.looks()), 1, "spent")
         self.assertIsNone(self.look(fam), "and never taken again")
+
+
+class KForABasket(GateCase):
+    """K FOR A BASKET (step two; the seat rule's rank inside the panel pool, A24's counts): Train-era close days per
+    250 sessions from the seen spans' full-universe 1.0x runs (`score` keeps them, sealed), and the Validation count
+    from the 2025 k 1.0 run the try itself made; a day counts when the lots closed that day sum to at least 0.25 of
+    the sleeve (read 0.2495). Written as `elane.SEAT_KEY` beside the try. Never printed. Every figure invented."""
+
+    @staticmethod
+    def made(lots, days, status="ok"):
+        return {"status": status, "lots": lots, "daily": [[d] for d in days]}
+
+    def test_the_counts_on_an_invented_fixture(self):
+        eight = [{"exit_day": "2017-03-01", "weight": 0.125} for _ in range(8)]          # one date: a whole basket
+        two = [{"exit_day": "2017-03-08", "weight": 0.125}, {"exit_day": "2017-03-08", "weight": 0.12475}]
+        one = [{"exit_day": "2017-03-15", "weight": 0.2}]                                  # under a quarter
+        held = [{"exit_day": None, "weight": 0.5}]                                         # still open: no date
+        days = [f"2017-03-{d:02d}" for d in range(1, 21)]
+        self.assertEqual(elane_xs.train_activity([self.made(eight + two + one + held, days)]),
+                         {"close_days": 2, "sessions": 20}, "8 lots one date, 0.24975 at the floor, 0.20 under it")
+        later = self.made([{"exit_day": "2023-05-02", "weight": 0.3}], ["2023-05-01", "2023-05-02"])
+        self.assertEqual(elane_xs.train_activity([self.made(eight, days), later]), {"close_days": 2, "sessions": 22})
+        spans = ((dt.date(2023, 1, 3), dt.date(2023, 12, 29)),)
+        self.assertEqual(elane_xs.train_activity([self.made(eight, days), later], spans=spans),
+                         {"close_days": 1, "sessions": 2}, "inside the seen spans alone")
+        self.assertEqual(elane_xs.train_activity([self.made([], [], status="no_data")]), {"close_days": 0, "sessions": 0})
+        with self.assertRaises(ValueError):
+            elane_xs.train_activity([self.made([], days, status="disqualified")])
+
+    def test_the_try_writes_the_seat_record_and_k_ranks_it(self):
+        from league.equity import bands as equity_bands
+
+        fam = self.family()
+        n = 1
+        self.store.set_state(fam["id"], **{elane_xs.ACTIVITY_KEY: {str(n): {"close_days": 160, "sessions": 1000}}})
+        lots = [{"exit_day": f"2025-0{m}-1{d}", "weight": 0.125} for m in range(1, 7) for d in range(5) for _ in range(4)]
+        made = self.runner.validation
+
+        def with_lots(*args, **kw):
+            run = made(*args, **kw)
+            run.result["lots"] = lots if kw.get("k") == 1.0 else []
+            return run
+
+        with mock.patch.object(self.runner, "validation", with_lots):
+            out = self.validate(fam)
+        self.assertTrue(out["entered"], out)
+        seat = self.state(fam)[elane.SEAT_KEY]
+        version = self.store.version(fam["id"], n)
+        self.assertEqual((seat["version"], seat["run_sha"], seat["floor"], seat["source"]),
+                         (n, run_sha(version), "0.25", "panel"))
+        self.assertEqual(seat["train"], {"close_days": 160, "sessions": 1000})
+        self.assertEqual(seat["validation"]["close_days"], 30, "30 dates of four eighths each")
+        k = equity_bands.seat_k(elane.seat_activity(self.state(fam), n, run_sha(version)))
+        self.assertEqual(k, 30, "the smaller of 30 and 160 per 1000 x 250 = 40")
+        text = json.dumps([e["payload"] for e in self.store.events_after(0, limit=5000)])
+        self.assertNotIn("close_days", text, "K is never in a public event")
+        self.assertIn(elane_xs.ACTIVITY_KEY, elane_seal.SEALED_KEYS)
+        self.assertIn(elane.SEAT_KEY, elane_seal.SEALED_KEYS)
+
+    def test_a_version_scored_before_the_count_was_kept_is_read_from_the_try_s_segments(self):
+        fam = self.family(hidden=2018)
+        self.assertTrue(self.validate(fam)["entered"])
+        seat = self.state(fam)[elane.SEAT_KEY]
+        self.assertEqual(seat["source"], "panel (Train segments, seen spans)")
+        seen = sum(len(F._days(a, b)) for a, b in elane_xs.seen_spans(2018))
+        self.assertGreater(seat["train"]["sessions"], 0)
+        self.assertLessEqual(seat["train"]["sessions"], seen, "the hidden year's sessions are not read")
+
+    def test_no_seat_record_for_a_try_that_did_not_enter(self):
+        fam = self.family(code=F.good(tag="rev-n", edge_in={"validation": -0.002}))
+        self.assertFalse(self.validate(fam)["entered"])
+        self.assertNotIn(elane.SEAT_KEY, self.state(fam))
 
 
 class TheA31LookHold(TheLook):
