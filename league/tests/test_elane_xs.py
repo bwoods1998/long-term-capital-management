@@ -120,10 +120,12 @@ class TheEffectiveMode(unittest.TestCase):
         wanted = F.settings("gate")
         self.assertEqual(elane_xs.status(wanted, self.root),
                          {"setting": "gate", "mode": "train",
-                          "why": "the spreads' share is under elane.panel.spreads_min_share"})
+                          "why": "the spreads' share is under elane.panel.spreads_min_share", "look": None})
         F.ready(self.root)
-        self.assertEqual(elane_xs.status(F.settings("live"), self.root), {"setting": "live", "mode": "live", "why": None})
-        self.assertEqual(elane_xs.status(F.settings("gate"), self.root), {"setting": "gate", "mode": "gate", "why": None})
+        self.assertEqual(elane_xs.status(F.settings("live"), self.root), {"setting": "live", "mode": "live", "why": None,
+                                                                               "look": None})
+        self.assertEqual(elane_xs.status(F.settings("gate"), self.root), {"setting": "gate", "mode": "gate", "why": None,
+                                                                               "look": None})
         self.assertEqual(elane_xs.status(None, self.root)["mode"], "off", "it never raises")
         F.ready(self.root, i6={"equal": False})
         said = elane_xs.status(F.settings("live"), self.root)
@@ -1420,6 +1422,77 @@ class TheLooksRefusalsAndWaits(TheLook):
         self.assertIsNone(self.look(fam))
         self.assertEqual((self.runner.calls, self.store.looks()), ([], []))
         self.assertIn("15:50", self.state(fam)["gate"])
+
+
+class TheA31LookHold(TheLook):
+    """`elane.panel.look_rule` (the captain's A31: NO XS1 LOOK BEFORE STUDY XS1-R RULES). "hold", the policy's
+    default, holds every look, nothing spent, with everything else a look needs in place; "xs1" is XS1 as built; a
+    value this tree does not implement holds. Validation is never held."""
+
+    def under(self, rule):
+        settings = F.settings("gate", look_rule=rule)
+        if rule is None:
+            del settings["elane"]["panel"]["look_rule"]
+        self.owner = F.owner(self.store, self.world, settings)
+        return settings
+
+    def test_the_policy_holds_every_look_with_the_receipt_the_permit_the_review_and_room_in_place(self):
+        fam = self.gated()
+        for rule in (None, "hold"):
+            self.under(rule)
+            self.assertIsNone(self.look(fam))
+            self.assertEqual(self.state(fam)["gate"], f"waiting ({elane_xs.A31_HOLD})")
+            self.assertEqual((self.runner.calls, self.store.looks()), ([], []), "no run was made and no look spent")
+            self.assertTrue(self.state(fam)["gate_ready"], "the look is owed, not spent")
+            self.assertIsNone(elane_xs.look_room(self.store, CELL), "the cell has room")
+            self.assertIsNone(elane_xs.probed(self.store.root, fam), "the permit holds the route")
+        waits = [e for e in self.events("swarm.gate", "equity_look_waits") if e["why"] == elane_xs.A31_HOLD]
+        self.assertEqual(len(waits), 1, "the wait is said once for its reason")
+        self.under("xs1")
+        self.assertIs(self.look(fam), True, "XS1 as built: the same look runs")
+        self.assertEqual(len(self.store.looks()), 1)
+
+    def test_a_value_the_tree_does_not_implement_holds_and_says_so(self):
+        fam = self.gated()
+        for raw in ("xs1-rc", "XS1", 7, None, ["xs1"]):
+            settings = self.under("hold")
+            settings["elane"]["panel"]["look_rule"] = raw
+            self.assertEqual(elane_xs.cfg(settings)["look_rule"], "hold", raw)
+            self.assertIsNone(self.look(fam))
+            self.assertTrue(self.state(fam)["gate"].startswith(f"waiting ({elane_xs.A31_HOLD}"), raw)
+            self.assertIn("names no rule this tree implements", elane_xs.look_held(settings))
+        self.assertEqual((self.runner.calls, self.store.looks()), ([], []))
+        self.assertEqual((elane_xs.look_held(None), elane_xs.look_held({"elane": 3})), (elane_xs.A31_HOLD,) * 2)
+        self.assertEqual(elane_xs.LOOK_RULES_BUILT, ("xs1",), "a remedy's value is added only by the code that builds it")
+
+    def test_validation_is_not_held(self):
+        self.under("hold")
+        fam = self.family()
+        out = self.validate(fam)
+        self.assertTrue(out["entered"], out)
+        self.assertEqual(self.windows(), ["train", "train", "validation", "validation"])
+        self.assertEqual(self.state(fam)[elane.TRY_KEY]["version"], 1, "the lineage's try is taken")
+        self.assertIsNone(self.look(fam))
+        self.assertEqual(self.store.looks(), [])
+
+    def test_the_heartbeat_and_the_report_say_why(self):
+        from league.ops import dlane_report
+        from league.swarm.loop import Swarm
+        from types import SimpleNamespace
+
+        for rule, said in (("hold", elane_xs.A31_HOLD), ("xs1", None)):
+            settings = F.settings("gate", look_rule=rule)
+            self.assertEqual(elane_xs.status(settings, self.store.root),
+                             {"setting": "gate", "mode": "gate", "why": None, "look": said})
+            beat = Swarm.panel_status(SimpleNamespace(settings=settings, store=self.store))
+            self.assertEqual(beat["panel"]["look"], said)
+            self.assertEqual(dlane_report.panel_lane(self.store.root, settings)["panel_lane"]["look"], said)
+
+    def test_the_policy_ships_hold_and_the_default_is_hold(self):
+        policy = json.loads((REPO / "league" / "swarm" / "policy.json").read_text())
+        self.assertEqual(policy["elane"]["panel"]["look_rule"], "hold")
+        self.assertEqual((elane_xs.DEFAULTS["look_rule"], elane_xs.cfg(None)["look_rule"]), ("hold", "hold"))
+        self.assertEqual(elane_xs.LOOK_RULES, ("hold", "xs1"))
 
 
 @unittest.skipUnless(F.PATCHED, F.HOLDS.format(n=4))

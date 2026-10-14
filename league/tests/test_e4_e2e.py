@@ -109,7 +109,10 @@ E = D("2229")
 PANEL = {"edge_year": 1.0, "signal": "reversal", "n_assets": 60}
 FAKE_RECEIPT = Path(__file__).resolve().parent / "fixtures" / "equity_screen_xs_fake.json"
 #: What the captain's set_swarm.py would write on the House for the lane to trade: every switch of the path.
-SWITCHES = {"elane": {"mode": "gate", "birth_share": 0.25, "panel": {"mode": "live"}}, "dlane": {"mode": "gate"}}
+#: The captain's switches on the box. `look_rule` "xs1": XS1 as built, the value the captain sets once study XS1-R
+#: rules "as built" (the policy ships "hold": the captain's A31; `test_elane_xs.TheA31LookHold`).
+SWITCHES = {"elane": {"mode": "gate", "birth_share": 0.25, "panel": {"mode": "live", "look_rule": "xs1"}},
+            "dlane": {"mode": "gate"}}
 ROUTE = "sail:pro_asap"
 
 #: The architect's program: each week the five names that fell most over the last five sessions, at equal weights.

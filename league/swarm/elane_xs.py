@@ -173,7 +173,7 @@ DEFAULTS: dict[str, Any] = {
     "rebalance": ["weekly", "monthly"], "train_budget": 4, "placebos_train": 200, "cpu_seconds_day": 14400,
     "run_budget_seconds": 600, "zero_edge_programs": 100, "coverage_min": 0.97, "spreads_min_share": 0.90,
     "membership_max_stale_days": 45, "universe_max_age_days": 400, "live_min_tradable_share": 0.95,
-    "census_notes": {},
+    "census_notes": {}, "look_rule": "hold",
 }
 BOUNDS: dict[str, tuple[float, float]] = {
     "birth_share": (0.0, 1.0), "max_alive": (0, 100), "max_names": (5, 40), "train_budget": (1, 4),
@@ -183,6 +183,17 @@ BOUNDS: dict[str, tuple[float, float]] = {
     "live_min_tradable_share": (0.90, 1.0),
 }
 CENSUS_NOTE_MAX = 200
+#: THE A31 LOOK HOLD (`elane.panel.look_rule`; the captain's A31: NO XS1 LOOK BEFORE STUDY XS1-R RULES). A look runs
+#: only while the value names a rule this tree implements (`LOOK_RULES_BUILT`): "xs1" is XS1 as built, the look of
+#: `look`. "hold", the policy's default, holds every look (it waits, nothing spent) with `A31_HOLD`, whatever else is
+#: in place (the receipt, the permit, the review, the cell's room); so does any value this tree does not know (read
+#: as "hold"). Validation is not held: a try is the lineage's whatever the ruling, and its pre-check is unchanged
+#: under "as built" and R-c. A ruling that names a remedy is built as a NEW value beside "xs1" (R-c: "xs1-rc"), so
+#: a look opens only under code that implements the ruling. A TIGHTENING: it decouples Validation and the probe's
+#: wiring from the ruling, and stops an accidental look (a spent look is spent).
+LOOK_RULES = ("hold", "xs1")
+LOOK_RULES_BUILT = ("xs1",)
+A31_HOLD = "A31: no XS1 look before XS1-R rules"
 #: The label every census note is shown under (E4-SPEC 8.2): the captain's reading of a cell, never evidence.
 CENSUS_LABEL = "in-sample 2010-24, best of 7; not evidence"
 #: `elane.screens.equity_xs` as policy.json ships it: `league.xs.screen.PIN_KEYS` in order, EVERY value a null (a
@@ -389,6 +400,8 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
 
     words("panels", PANELS)
     words("rebalance", _rebalances())
+    if raw.get("look_rule") in LOOK_RULES:
+        out["look_rule"] = raw["look_rule"]  # anything else reads as "hold" (A31)
     notes = raw.get("census_notes")
     if isinstance(notes, Mapping):
         out["census_notes"] = {str(k): " ".join(str(v).split())[:CENSUS_NOTE_MAX] for k, v in notes.items()
@@ -397,6 +410,24 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     block = screens.get(SCREEN_KEY) if isinstance(screens, Mapping) else None
     out["screen"] = dict(block) if isinstance(block, Mapping) else {}
     return out
+
+
+def look_held(settings: Mapping[str, Any] | None) -> str | None:
+    """Why `elane.panel.look_rule` holds every panel look (A31), or None when it names a rule this tree implements
+    (`LOOK_RULES_BUILT`). An unknown or malformed value holds, and says so. Never raises (a rule that cannot be read
+    holds)."""
+    try:
+        lane = settings.get("elane") if isinstance(settings, Mapping) else None
+        raw = lane.get(SETTINGS_KEY) if isinstance(lane, Mapping) else None
+        raw = raw.get("look_rule", DEFAULTS["look_rule"]) if isinstance(raw, Mapping) else DEFAULTS["look_rule"]
+        rule = cfg(settings)["look_rule"]
+    except Exception:  # noqa: BLE001
+        return A31_HOLD
+    if rule in LOOK_RULES_BUILT:
+        return None
+    if raw != rule:
+        return f"{A31_HOLD} (elane.panel.look_rule {str(raw)[:40]!r} names no rule this tree implements)"
+    return A31_HOLD
 
 
 def _rebalances() -> tuple[str, ...]:
@@ -536,7 +567,8 @@ def status(settings: Mapping[str, Any] | None, root: str | Path | None = None, *
            ) -> dict[str, Any]:
     """THE LANE'S MODE AS A REPORT SAYS IT (the swarm's heartbeat `equity.panel`, the dlane report's panel section):
     {"setting": `elane.panel.mode` as set, "mode": the effective mode, "why": the leg that holds the effective mode
-    under the setting, or None}. The reason was computed by `_mode_why` and reached no status, heartbeat or alert:
+    under the setting, or None, "look": why every look waits by `elane.panel.look_rule` (`look_held`, A31), or
+    None}. The reason was computed by `_mode_why` and reached no status, heartbeat or alert:
     a captain who set "gate" with the spreads' share under its bound read "train" nowhere, and no line said why.
     Never raises (a status never fails its reader)."""
     try:
@@ -548,7 +580,8 @@ def status(settings: Mapping[str, Any] | None, root: str | Path | None = None, *
         found, why = _mode_why(settings, root, legs=legs)
     except Exception as exc:  # noqa: BLE001 - what `mode` reads as "off"
         found, why = "off", f"the lane's settings or files could not be read ({type(exc).__name__})"
-    return {"setting": setting, "mode": found, "why": None if why is None else str(why)[:300]}
+    return {"setting": setting, "mode": found, "why": None if why is None else str(why)[:300],
+            "look": look_held(settings)}
 
 
 #: `health`'s alarms (each a `swarm.status` alert, once a UTC day; the days are kept in the kv `ALERTS_KEY`).
@@ -3590,6 +3623,10 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     held = state.get(elane.TRY_KEY) if isinstance(state.get(elane.TRY_KEY), Mapping) else {}
     if held.get("version") != n or held.get("entered") is not True or state.get("validation_version") != n:
         return None  # not this version's entry: the tournament owes its Validation first
+    rule = look_held(settings)
+    if rule is not None:
+        _wait(gate, fid, n, sha, rule)  # A31: no XS1 look before XS1-R rules (nothing spent)
+        return None
     cell = family_cell(fam)
     full = look_room(store, cell)
     if full is not None:
@@ -3852,7 +3889,8 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "UNIVERSE_MANIFEST", "DEFAULTS", "BOUNDS", "CENSUS_NOTE_MAX", "CENSUS_LABEL", "SCREEN_NULLS", "PANEL_AGENDA",
            "INPUTS", "BAR_XS", "FAILS_XS", "PROGRAM_FAILS", "JUDGED_XS", "MAP_LABEL", "K_BASE", "K_STRESS",
            "CLOCK_RUNS", "SLOW_SHARE", "TooSlow", "ClockUnsteady", "clock_of", "steady", "one_store", "slicer", "bar_runs",
-           "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "cfg", "pin", "receipt", "mode",
+           "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "LOOK_RULES", "LOOK_RULES_BUILT", "A31_HOLD",
+           "look_held", "cfg", "pin", "receipt", "mode",
            "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
            "judged", "identity", "hidden_year_of", "card_errors", "cell_of", "family_cell", "cell_text",
            "closed_cells", "cell_looks", "forward_verdicts", "look_room", "probe_reading", "probed", "style_of",

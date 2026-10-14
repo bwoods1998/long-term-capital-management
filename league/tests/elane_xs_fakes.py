@@ -79,9 +79,10 @@ def pin_block(**over: Any) -> dict[str, Any]:
 
 def settings(mode: str = "gate", *, lane: str = "gate", e2: Mapping[str, Any] | None = None,
              **panel: Any) -> dict[str, Any]:
-    """The swarm's settings with the equity lanes on (`lane`) and `elane.panel` at `mode` with `panel` keys."""
+    """The swarm's settings with the equity lanes on (`lane`) and `elane.panel` at `mode` with `panel` keys. The look
+    rule is "xs1" (XS1 as built) unless `look_rule` is handed (the policy ships "hold": the captain's A31)."""
     return {"elane": {"mode": lane, "universe": ["SPY", "QQQ", "IWM", "DIA"], "structures": ["etf"], "birth_share": 0.25,
-                      "roster": 3, "e2": dict(e2 or {}), "panel": {"mode": mode, **panel}},
+                      "roster": 3, "e2": dict(e2 or {}), "panel": {"mode": mode, "look_rule": "xs1", **panel}},
             "population": {"start": 48, "ceiling": 96}, "architect": {}, "gym": {}}
 
 

@@ -248,7 +248,7 @@ to the one before:
 | "gate" | the one Validation try and the one look under XS1 | XS1's receipt pinned (no receipt, no look); the spreads table covering at least `spreads_min_share` of the Train eras' member-days (below it a Train pass is "provisional costs" and the mode reads "train") |
 | "live" | a passer may take one of E1's roster seats | `live_ready`: THE PANEL STORE FRESH BY THE CLOCK (its last session is the last closed session or the one before: one missed night is tolerated at the next morning's sends, a second holds every open), the universe deploy in force, today's tradable share of eligible names at least `live_min_tradable_share`, the committed universe younger than `universe_max_age_days`, the last nightly I6 equal, AND the forward twin's marker (`xs-twins.json`, itself no older than the session before the last closed one). Any one missing: the mode reads "gate" |
 
-**Three things hold real money back, by design.** (1) **The twin marker.** Until the panel night of the forward
+**Four things hold real money back, by design.** (1) **The twin marker.** Until the panel night of the forward
 record (package J: `league/ops/forward_xs.py`, the job `forward_xs`; "The forward twin", below) has written
 `xs-twins.json` through the panel store's last session, and whenever that marker is behind, **mode "live" reads as
 "gate"**: no panel program opens a position the forward record is not shadowing. (2) **No panel look runs until
@@ -256,7 +256,14 @@ release E3's contamination probe has published the panel strata for the route th
 the look permit** (the captain's A22 (3), below; package B's patch to the probe is built and not yet handed to the
 House's job: **The probe's panel strata**, above): mode "gate" scores Validation and keeps both Train series, and a
 look waits on its route's permit. (3) **The universe deploy** (step two): until it is in force `live_ready` is false
-and mode "live" reads as "gate", so no panel program holds a seat. So the order to a first live panel trade is: step
+and mode "live" reads as "gate", so no panel program holds a seat. (4) **THE A31 LOOK HOLD**, `elane.panel.look_rule`
+(policy.json "hold"; swarm.json over it): no XS1 look before study XS1-R rules (the captain's A31). Under "hold" a
+look waits, nothing spent, even with its receipt, its route's permit, its review and its cell's room in place, and
+says "A31: no XS1 look before XS1-R rules" in its gate state, in the heartbeat's `equity.panel.look` and in the
+direction report's `panel_lane.look`. "xs1" is XS1 as built; any value the tree does not implement holds. Validation
+is NOT held: mode "gate" spends each lineage's one try whatever the ruling, so the look runs the night the captain
+sets the value the ruling names. A ruling that names a remedy is built as a new value beside "xs1" (R-c: "xs1-rc"),
+so a look opens only under code that implements it. A TIGHTENING (a spent look is spent). So the order to a first live panel trade is: step
 one (this tree, the lane at "train"), the spreads backfill (about nine nights), the probe's wiring and its Saturdays
 for the route, the universe deploy with the money row, one panel night with the instance's twin, a free seat and
 room in the loss window.
