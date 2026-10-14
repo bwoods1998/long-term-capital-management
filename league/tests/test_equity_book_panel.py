@@ -21,6 +21,8 @@ import inspect
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 from decimal import ROUND_DOWN, Decimal as D
@@ -35,6 +37,7 @@ from league.equity import live as L
 from league.equity import schedule as S
 from league.equity import store as ES
 from league.equity.store import STORE_DIR
+from league.live.state import LiveState
 from league.tests import test_equity_book as T
 from league.tests import test_xs_book as XB
 from league.xs import book as adapter
@@ -328,6 +331,124 @@ class ThePatchIsWhole(unittest.TestCase):
         self.assertNotIn("league.xs", "".join(line for line in Path(L.__file__).read_text().splitlines()
                                                if line.lstrip().startswith(("import ", "from "))))
 
+
+def old_state(root: Path) -> None:
+    """`<root>/live.sqlite` as a House before release E4 left it (the state's own tables, WAL, and the equity tables
+    without `eq_instances.kind`), with one instance row of E1's."""
+    state = LiveState(root / "live.sqlite")
+    try:
+        for statement in L.SCHEMA.split(";"):
+            if statement.strip():
+                state.execute(statement)
+        state.execute("INSERT INTO eq_instances (id, family, version, lane, run_sha, code, params, band, max_hold, "
+                      "created_at) VALUES ('seed@1:r', 'seed', 1, 'beta', 'r', 'c', '{}', 'probe', 20, 1.0)")
+        assert L.INSTANCE_KIND not in {r["name"] for r in state.rows("PRAGMA table_info(eq_instances)")}
+    finally:
+        state.close()
+
+
+#: One FIRST OPEN of the state at argv[1] by a process of its own: the book as the House builds it (its schema, then
+#: the kind column's ALTER), started once every process of the race is ready (argv[2]: the folder of their marks,
+#: argv[3]: this one's name, argv[4]: how many). argv[5] "forced": each holds its first look at the column until every
+#: process has looked, so every one finds the column missing and runs the ALTER (the race is certain, not a chance).
+#: It prints what its first look saw, the old row's kind and how many `kind` columns the table has.
+FIRST_OPEN = r"""
+import sys, time
+from pathlib import Path
+from league.equity import live as L
+from league.tests import test_equity_book as T
+root, marks, me, n, forced = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], int(sys.argv[4]), sys.argv[5]
+
+
+def wait(prefix):
+    end = time.time() + 60
+    while len([m for m in marks.iterdir() if m.name.startswith(prefix)]) < n:
+        if time.time() > end:
+            raise SystemExit(f"{me}: the others never reached {prefix}")
+        time.sleep(0.002)
+
+
+looks = []
+if forced == "forced":
+    look = L.EquityBook._has_instance_kind
+
+    def held(self):
+        seen = look(self)
+        if not looks:
+            looks.append(seen)
+            (marks / f"looked-{me}").touch()
+            wait("looked-")
+        return seen
+
+    L.EquityBook._has_instance_kind = held
+(marks / f"ready-{me}").touch()
+wait("ready-")
+h = T.Harness(root)
+columns = [r["name"] for r in h.state.rows("PRAGMA table_info(eq_instances)")]
+print(looks, h.book._instance("seed@1:r").kind, columns.count("kind"))
+h.state.close()
+"""
+
+
+class TwoFirstOpensAtOnce(unittest.TestCase):
+    """Two builders of the book open a state from before release E4 at the same moment (two Houses, or a second
+    builder, on one state): each looks, finds `eq_instances.kind` missing and runs the ALTER; the one that loses reads
+    the column as there and goes on. Before this the loser's open raised "duplicate column name: kind" (the
+    independent check of E4's tree: 20 of 20 such races), which the House's `build_book` turns into an unreadable book
+    (real opens refused while shares are held) until a restart. As league/ops/forward_db.py `_migrate` since E3.1."""
+
+    def race(self, forced: str, n: int = 2) -> list[str]:
+        repo = Path(L.__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as tmp:
+            root, marks = Path(tmp) / "house", Path(tmp) / "marks"
+            root.mkdir()
+            marks.mkdir()
+            old_state(root)
+            env = {**os.environ, "PYTHONPATH": str(repo), "PYTHONDONTWRITEBYTECODE": "1"}
+            procs = [subprocess.Popen([sys.executable, "-B", "-c", FIRST_OPEN, str(root), str(marks), f"p{i}", str(n),
+                                       forced], cwd=repo, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      text=True) for i in range(n)]
+            outs = [p.communicate(timeout=120) for p in procs]
+            for p, (_, err) in zip(procs, outs):
+                self.assertEqual(p.returncode, 0, f"a first open raised:\n{err[-2000:]}")
+            db = sqlite3.connect(str(root / "live.sqlite"))
+            try:
+                self.assertEqual([tuple(r) for r in db.execute("SELECT id, kind FROM eq_instances")],
+                                 [("seed@1:r", "equity")])
+            finally:
+                db.close()
+            return [out.strip() for out, _ in outs]
+
+    def test_two_first_opens_that_both_look_before_either_alters_both_open(self):
+        for _ in range(3):
+            self.assertEqual(self.race("forced"), ["[False] equity 1"] * 2, "each found it missing, and each opened")
+
+    def test_two_first_opens_started_together_both_open(self):
+        for _ in range(3):
+            self.assertEqual(self.race("together"), ["[] equity 1"] * 2)
+
+    def refused(self, why: str) -> None:
+        """A first open whose ALTER is refused with `why`, the column still missing after it: the open raises."""
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as tmp:
+            old_state(Path(tmp))
+            state = LiveState(Path(tmp) / "live.sqlite")
+            self.addCleanup(state.close)
+            real = state.execute
+
+            def execute(sql, params=()):
+                if sql == L.INSTANCE_KIND_DDL:
+                    raise sqlite3.OperationalError(why)
+                return real(sql, params)
+
+            with mock.patch.object(state, "execute", execute):
+                with self.assertRaisesRegex(sqlite3.OperationalError, why):
+                    L.EquityBook(state, None, None, None, None, decider=None)
+
+    def test_another_refusal_of_the_alter_is_raised(self):
+        self.refused("database is locked")
+
+    def test_a_duplicate_column_refusal_with_no_column_after_it_is_raised(self):
+        self.refused("duplicate column name: kind")
 
 class NoPanelNoWork(PanelCase):
     """With no instance of the panel kind nothing of the panel runs: no fetch, no file, no row."""

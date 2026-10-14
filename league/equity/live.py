@@ -139,6 +139,7 @@ import hashlib
 import json
 import math
 import re
+import sqlite3
 import time
 import traceback
 from dataclasses import dataclass, field, replace
@@ -288,8 +289,9 @@ DECIDE_MAX_ERRORS = 25
 #: RELEASE E4. The book's own decider kind (league/equity/child.py); an instance of another kind is asked through its
 #: parent-side adapter (`kinds.BOOKS`).
 EQUITY_KIND = "equity"
-#: `eq_instances.kind`, added to a state from before release E4 by this statement, guarded by PRAGMA table_info
-#: (league/xs/book.py `INSTANCE_KIND_DDL` says the same words; a test holds the two equal).
+#: `eq_instances.kind`, added to a state from before release E4 by this statement, guarded by PRAGMA table_info and
+#: by reading another first open's "duplicate column name" as done (league/xs/book.py `INSTANCE_KIND_DDL` says the same
+#: words; a test holds the two equal).
 INSTANCE_KIND = "kind"
 INSTANCE_KIND_DDL = "ALTER TABLE eq_instances ADD COLUMN kind TEXT NOT NULL DEFAULT 'equity'"
 #: A panel decide first ready this many seconds after `decide_at` is said (a warning: 16:40 ET).
@@ -788,8 +790,15 @@ class EquityBook:
                     self.state.execute(statement)
             # B1 (release E4): an instance's decider kind. A state from before it gains the column; every row reads
             # "equity".
-            if INSTANCE_KIND not in {str(r["name"]) for r in self.state.rows("PRAGMA table_info(eq_instances)")}:
-                self.state.execute(INSTANCE_KIND_DDL)
+            if not self._has_instance_kind():
+                try:
+                    self.state.execute(INSTANCE_KIND_DDL)
+                except sqlite3.OperationalError as exc:
+                    # Another process's first open of the same state added it between the look and the ALTER (two
+                    # builders of the book at once): the column is there, which is all this asks (as
+                    # league/ops/forward_db.py `_migrate` since release E3.1). Anything else is raised.
+                    if "duplicate column name" not in str(exc).lower() or not self._has_instance_kind():
+                        raise
         #: RELEASE E4: the parent-side adapters by kind (`_adapter`: None for one that cannot be imported), and the
         #: panel's own memory in this process: the day's columns and fetch (`_panel_bars`), the morning's re-read
         #: (`_panel_audit`).
@@ -821,6 +830,10 @@ class EquityBook:
         self._streak = {"bad": int(recon.get("bad") or 0), "good": int(recon.get("good") or 0)}
 
     # ------------------------------------------------------------------ plumbing
+    def _has_instance_kind(self) -> bool:
+        """Whether the state's `eq_instances` holds the column `kind` (PRAGMA table_info, read afresh each call)."""
+        return INSTANCE_KIND in {str(r["name"]) for r in self.state.rows("PRAGMA table_info(eq_instances)")}
+
     def record(self, kind: str, payload: Mapping[str, Any], agent: str | None = None) -> None:
         if self._record is None:
             try:
