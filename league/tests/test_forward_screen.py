@@ -156,9 +156,10 @@ class Fixture(unittest.TestCase):
         self.fdb.commit()
 
     def advance(self, day: str):
-        """The record's newest day moves to `day` (a row of a pid no lineage holds): THE STALL RULE's night."""
-        self.fdb.execute("INSERT OR IGNORE INTO fwd_days(pid, day, engine, r, w, b, r15, r0, entries, exits, status, at, "
-                         "bars) VALUES (9999, ?, ?, 0, 0, 0, 0, NULL, 0, 0, 'ok', 1.0, NULL)", (day, self.engine))
+        """A night of the record through `day` (its `fwd_runs` row): THE STALL RULE's night."""
+        self.fdb.execute("INSERT INTO fwd_runs(job, through, engine, started, finished, seconds, programs, sessions, "
+                         "errors, stale, budget_hit, head) VALUES ('forward_shadow', ?, ?, 1.0, 1.0, 0.0, 1, 1, 0, 0, 0, "
+                         "NULL)", (day, self.engine))
         self.fdb.commit()
 
     def permits(self) -> dict:

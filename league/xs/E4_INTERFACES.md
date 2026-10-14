@@ -333,6 +333,14 @@ Each is a place the two texts had to be reconciled at Step 0; the stub says whic
 24. **A target that names a held slot which has left `ctx.ids` is malformed** (E4-SPEC D10: every id is in
     `ctx.ids`): XS.md tells the author to leave such a slot out (the House sells it at the next open). The engine
     counts it as the program's error, never as a failed decide.
+25. **A panel seat on a FORWARD pass (FWD1-R, the captain's A33 and A34; `feat/equity-fwd1`, Oct 14, 2026)** is the
+    panel pool's (step two, B3) and is not built on any branch yet. THE OBLIGATION, binding on whoever wires it: the
+    pool seats a panel family on its forward pass only when `league.swarm.elane_forward.seat_refused(store, fam,
+    settings)` is None (the seat switch `elane.fwd1.seats`, a case-N pass only (A34), the permit file still listing
+    the pass of that version and run sha, and AT MOST ONE LIVE FORWARD SEAT A MECHANISM CELL counted over both types),
+    and records the seat with `elane_forward.mark_seated(store, fid, settings)` in the transaction that moves its
+    band. Reading `elane_forward.eligible(state)` alone is not the contract (the cap would fail: the review's F5). As
+    built, `elane_forward.step` already makes at most one panel pass of a cell eligible at a time.
 
 ## 9. Tests
 

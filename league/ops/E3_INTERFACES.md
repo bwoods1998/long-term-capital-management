@@ -739,8 +739,19 @@ policy.json `elane.forward_screen`. What it reads and what it leaves as it was:
 - **No line of this record's night changes.** The sides are not in the record: the job reads them from the
   representative's own forward run in its own decider child (`forward_shadow.Shadow` `_whole`, `slice`, `_child` at k
   1.0 and `_series`; `forward_xs.panel_shadow(...).run_program`), both built on the record opened READ-ONLY (neither
-  writes before `night`), and keeps a day's sides only where that run's r is the stored row's to `forward_db.TOL`.
-  E3's seal (`test_e3_seal_imports`: E3's modules import only its list) stands as it was.
+  writes before `night`), and keeps a day's sides only where that run is the stored day: its r is the stored row's to
+  `forward_db.TOL`, or the day was RESTATED (the run's bars hash of the day's decision, computed as this record's
+  night computes it, is not the stored `bars`, and its lots in and out that session are the row's `entries` and
+  `exits`): E3 keeps the first write of a day, and a dividend or a split rescales the whole adjusted history, so no
+  later run reproduces the stored r of a day before an ex-day. E3's seal (`test_e3_seal_imports`: E3's modules import
+  only its list) stands as it was.
+- **What it reads of this record's own rules** (the reviews' fixes, Oct 14): a NEW engine id (`fwd_engines`) is not
+  read for a pending lineage until it holds the representative's rows for every judged day (this record's night
+  writes the ETF rows and package J's panel night the panel rows hours later; a program the budget left stale is
+  written a night later), and a judged day that moved under the new id is carried only when `fwd_days.bars` differs
+  and a `restated` event of the pid under the old id (payload `engine`, `first`, `last`, `bars` "moved") covers it;
+  `fwd_runs.through` names the record's nights (the judge's stall rule counts them); `fwd_tags` stopped / resumed
+  (`forward_db.active`) say a representative is stopped (its lineage is listed "stopped", not pending).
 - **The D2 route and alpha in the hashed rows stand** (every E3-era row keeps `route` "S2"/"XS1" and `alpha_f` "0.03"):
   FWD1-R judges the days after its own pin at the case budget A33 adopted (15% for a never-looked lineage; D2's 3%
   kept for a panel lineage with an XS1 look), a loosening stated in the receipt's `loosened` with its cost.

@@ -68,8 +68,30 @@ on branches.
   in `PENDING_GATEWAY` (`test_ci`, `test_e3_identities`). E3's seal on its own modules' imports stands: no line of
   E3's night changes. The pin is its own block, `elane.forward_screen`, beside the lanes' three screens.
 - **Stated limits:** the panel placebo leg draws on one panel run over the judged sessions started flat at
-  FWD1_START (a span other than the k judged sessions fails the leg closed); the fill gap is modelled until live lots
-  measure it; the representative's own floor needs its Train-era runs in the job's own decider child, once.
+  FWD1_START (a span holding a session of the program's own disqualified run fails the leg closed; one the House left
+  out waits); the fill gap is modelled until live lots measure it; the representative's own floor needs its Train-era
+  runs in the job's own decider child, once.
+- **The two reviews' fixes** (Oct 14; each with a test that fails on the reviewed head `2b8ee898`):
+  - an engine change WAITS for the representative's rows under the new id (the panel night writes them hours after
+    E3's opens the id; a budget-stale program a night later) and never voids a lineage for a row not written yet; a
+    day present under both ids is compared on r, w, b and r15; a move the vendor's restatement explains (both bars
+    hashes known and different, E3's own `restated` event, bars "moved") is carried;
+  - after an ex-day a day's sides are still read: the run's bars hash of the day's decision differs from the stored
+    one and its lots in and out are the record's (2b8ee898 stalled every holder at the next checkpoint for good);
+  - ONE PANEL STORE A JOB RUN (2b8ee898 opened one a call; the third found no room in the ops child's 500 MB), E4's
+    clock rule on the panel Train segments and the placebo leg, a series error of the program's own runs its own;
+  - one live forward seat a mechanism cell for panel passes too: `elane_forward.seat_refused` (the one call a seat
+    pool asks, both types) and `mark_seated` (what it records), and a second panel pass of a cell waits; A34: a
+    panel pass of case XS1 takes no seat, and beside every panel pass its checkpoint's zero-edge rate and why there
+    is no historical look;
+  - THE STALL RULE (five of the record's nights waiting on the House: no run, reported, asked again at a new engine
+    id), a would-be pass's first reading kept for a deferred checkpoint, statuses stopped and superseded, a panel
+    pre-check with `reached` False no sealed pre-check;
+  - one budget a night across the job's two runs, THE DEADLINE (the wall or the next pre-open, less 120 s) on every
+    run, grace 3 h -> 2 h;
+  - tests: the look-ahead canary, one session a night against one night, a planted edge, an ex-day on E1's engine,
+    the panel runs on package J's world, the job's panel calls under the ops child's 500 MB at the production
+    panel's size (`league/tests/fwd1_panel_budget.py`).
 
 ### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 

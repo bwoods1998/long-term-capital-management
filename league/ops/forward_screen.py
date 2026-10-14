@@ -19,39 +19,68 @@ it began running (`funnel.release_start` of the running release; the sighting's 
 none) is written once a receipt sha, with FWD1_START = `fwd1_rule.start_after(pinned_at)`. Nothing before it is ever
 judged, and a lineage registered earlier enters mid-run from it.
 
-THE NIGHT (`night`; after `forward_xs`, the later of the record's two nights, in the registry):
+THE NIGHT (`night`; after each of the record's two nights, E3's and the panel's, in the registry):
 1. THE LINEAGES (`fwd1_lineages`, written once a lineage, first write stands). Every lineage of the registry but the
    controls, at its first sighting: its representative (`representative`), type, case (`case_of`: the sealed facts of
-   every family and pid of the lineage), FWD1_START and its mechanism cell (lane / agenda / universe group). Not judged,
-   with the reason: an ETF lineage that reached a sealed pre-check (no forward verdict for an S1/S2 look), a lineage
-   that already trades (a live row: it passed a sealed look), a type FWD1-R does not cover (a stock program), a
-   representative with no counted day yet is simply pending.
+   every family and pid of the lineage; a panel pre-check record counts only when it says `reached`), FWD1_START and
+   its mechanism cell (lane / agenda / universe group). Not judged, with the reason: an ETF lineage that reached a
+   sealed pre-check (no forward verdict for an S1/S2 look), a lineage that already trades (a live row: it passed a
+   sealed look), a type FWD1-R does not cover (a stock program); a representative with no counted day yet is simply
+   pending.
 2. THE CHECKPOINTS (`fwd1_checks`, written once a lineage and checkpoint: the checkpoint of record, never recomputed).
    The representative's counted days (`forward_db.counted_days`) under ONE engine id from FWD1_START; each day's SIDES
    (`fwd1_sides`: the weights of the shadow's lots in and out that session, which the record does not keep: read from
-   the representative's own forward run in this job's child, E3's `Shadow` slice or package J's panel run, kept only
-   for the days whose r that run reproduces to `forward_db.TOL`, once a day); `fwd_ll` (ETF); `fwd_lotgap` for g. At
-   each checkpoint the representative has
-   reached, in order: t_k, S_k, S15_k; below the global bar it fails that checkpoint with no floor read; at or above,
-   the own floor (`fwd1_floors`, computed once a representative on its Train-era runs in the job's own decider child)
-   gives c_used, and a PANEL lineage at or above it draws its placebo leg (one panel run over its judged sessions, 999
-   draws under the FWD1 seed). The first checkpoint that passes is the PASS; none by 60 is the FAIL.
-3. THE VERDICT (`fwd1_verdicts`, one a lineage, for good): "pass", "fail" or "void" (a case-N lineage that reached a
+   the representative's own forward run in this job's child, E3's `Shadow` slice or package J's panel run, over every
+   counted day it has, once a day) kept where that run IS the record's day: its r reproduces the stored one to
+   `forward_db.TOL`, or THE DAY WAS RESTATED (the vendor rescales the whole adjusted history at a dividend or a split,
+   E3 keeps the first write, so no later run reproduces the stored r of a day before an ex-day: the run made the same
+   orders that session, its lots in and out as the record counts them, from inputs the restatement moved, its bars
+   hash of the day's decision not the stored one); `fwd_ll` (ETF); `fwd_lotgap` for g. At each checkpoint the
+   representative has reached, in order: t_k, S_k, S15_k (THE CHECKPOINT'S READING: a would-be pass's is kept in
+   `fwd1_pending` on the night it is first read, and a checkpoint that waits on its floor or its placebo leg is judged
+   on it, never on a second read of inputs that changed since); below the global bar it fails that checkpoint with no
+   floor read; at or above, the own floor (`fwd1_floors`, computed once a representative on its Train-era runs in the
+   job's own decider child) gives c_used, and a PANEL lineage at or above it draws its placebo leg (one panel run over
+   its judged sessions, 999 draws under the FWD1 seed; THE PLACEBO SPAN: a session of the span that is not counted
+   fails the leg closed only when it is the program's own, a disqualified row; one the House left out waits). The
+   first checkpoint that passes is the PASS; none by 60 is the FAIL.
+3. AN ENGINE CHANGE (`engine_reading`): a pending lineage whose checkpoints were read under an older id is read on,
+   under the newest, only once the newest holds its rows for every judged day; until then it WAITS (E3's night opens
+   a new id and writes the ETF rows, the panel night writes the panel rows hours later, a program the budget left
+   stale is written a night later: never a void for a row not written yet). Then each judged day is compared on r,
+   w, b and r15 (`ENGINE_TOUCH`): one that moved only because the vendor restated the store's history (both bars
+   hashes known and different, and the record's own `restated` event of the pid under the old id, bars "moved",
+   covering the day) is carried with the rest, with an `engine_switched` event naming the pid; any other move, or a
+   judged day not counted under the new id, is a touch.
+4. THE VERDICT (`fwd1_verdicts`, one a lineage, for good): "pass", "fail" or "void" (a case-N lineage that reached a
    sealed pre-check after FWD1_START; an engine change that touched a pending representative's judged days: one engine
-   id a verdict, `ENGINE_TOUCH`). A pass keeps its sentence (`fwd1_rule.beside`, operator-only: it holds the t and the
-   shadow P&L) and its words (`fwd1_rule.words`: ids and words, the permit's). Nothing judges a lineage after it.
-4. THE PERMIT FILE (`write_permits`, `PERMITS`): every lineage FWD1 judges with its status and, for a pass, its family,
-   version, run sha, cell and words. IDS AND WORDS ONLY: no t, no P&L, no figure of a program. The swarm reads it for
-   two things only (league/swarm/elane_forward.py): a FWD1-judged lineage takes no sealed Validation try while the
-   seat switch is on, and a pass may take a seat, one live forward seat a mechanism cell, while it is on.
-5. THE REPORT (`REPORT`, operator-only): per type and case the lineages registered, pending, passed, failed, void and
-   not judged, and the registry's expected zero-edge passes against the observed (`fwd1_rule.expected_passes`).
+   id a verdict). A pass keeps its sentence (`fwd1_rule.beside`, operator-only: it holds the t and the shadow P&L) and
+   its words (`fwd1_rule.words`: ids and words, the permit's). Nothing judges a lineage after it.
+5. THE PERMIT FILE (`write_permits`, `PERMITS`): every lineage FWD1 judges with its status (`STATUSES`) and, for a
+   pass, its family, version, run sha, cell and words. IDS AND WORDS ONLY: no t, no P&L, no figure of a program. The
+   swarm reads it for two things only (league/swarm/elane_forward.py): a lineage pending, passed or failed takes no
+   sealed Validation try while the seat switch is on, and a pass may take a seat, one live forward seat a mechanism
+   cell, while it is on. A lineage stopped (its representative stopped in the record), stalled (THE STALL RULE) or
+   superseded (registered under another receipt) is listed as such and keeps its sealed path, as a void or an
+   ineligible one does.
+6. THE REPORT (`REPORT`, operator-only): per type and case the lineages by status, the registry's expected zero-edge
+   passes against the observed (`fwd1_rule.expected_passes`), each pass's sentence and each stalled lineage's cause.
 
 A FAILURE OF THE HOUSE NEVER MARKS A PROGRAM: a run the child could not finish, a store under a lock, a run that does
-not reproduce the record's day leave the checkpoint unwritten, and the next night reads the same first k counted days
-again. NOTHING OF E3's NIGHT CHANGES: no line of forward_shadow.py, forward_xs.py or forward_db.py is touched (E3's
-seal holds its modules' imports to its list), and the record's store is opened read-only. The budget
-(`elane.fwd1.cpu_seconds_night`) bounds the child's seconds a night; a lineage left over waits a night.
+not reproduce the record's day, rows not yet written under a new engine id, a placebo span the House left a session
+out of: the checkpoint is left unwritten, and the next night reads the same first k counted days again. THE STALL RULE
+(`STALL_NIGHTS`) bounds it: a lineage whose next step waited on the House on that many of the record's nights under
+one engine id is STALLED (`stalled`): it costs no run and is reported, nothing marks it, and a new engine id (a whole
+recompute) asks it again; a lineage that waited goes after those that did not, so it never takes the night's budget
+from them. NOTHING OF E3's NIGHT CHANGES: no line of forward_shadow.py, forward_xs.py or forward_db.py is touched (E3's
+seal holds its modules' imports to its list), and the record's store is opened read-only.
+
+THE ONE CORE (`HouseRuns`, `night`, `run`): ONE OPEN OF THE PANEL STORE A JOB RUN (one panel night reused by every
+panel run: the ops child's address space is capped 500 MB above its start, and each open maps the two bar arrays);
+E4's CLOCK RULE (`elane_xs.steady`) on every panel run; ONE BUDGET A NIGHT (`elane.fwd1.cpu_seconds_night` of child
+seconds shared by the night's two runs: `fwd1_runs`, `night_spent`); THE DEADLINE (the earlier of the job's wall and
+the next pre-open, less `MARGIN_S`: no run is started, and none is given seconds, past it; a start too near the
+pre-open is a skipped receipt). A lineage left over waits a night.
 
 Standard library at import; numpy, league.equity and league.xs inside the functions that run programs.
 """
@@ -109,8 +138,8 @@ APPEND_ONLY_ERROR = "forward-screen.sqlite is append-only"
 #: own forward run, its rows under a new engine id have not come, a placebo span holds a session the House left out)
 #: on this many of the forward record's nights under one engine id is STALLED: it costs no run and is reported, and
 #: nothing marks it, until the record opens a new engine id (a whole recompute on the store as it then is), when it is
-#: asked again. A night is a day of the record (`MAX(fwd_days.day)`): a weekend or a night the record did not move
-#: counts none.
+#: asked again. A night is a night of the record (`MAX(fwd_runs.through)`, E3's and the panel's): a weekend, or a
+#: second run of the job on one night, counts none.
 STALL_NIGHTS = 5
 #: The statuses a lineage the job judges can stand at besides its verdict (`status_rows`): "pending" (asked each
 #: night), "ineligible" (no own floor, stated), "stopped" (its representative is stopped in the forward record: no row
@@ -827,8 +856,8 @@ class Night:
         self.gaps = _lotgaps(fdb)
         self.engine_now = forward_db.engine_now(fdb)
         self.sealed_pids = _sealed_pids(fdb)
-        row = fdb.execute("SELECT MAX(day) FROM fwd_days").fetchone()
-        #: THE STALL RULE's night: the record's newest day.
+        row = fdb.execute("SELECT MAX(through) FROM fwd_runs").fetchone()
+        #: THE STALL RULE's night: the record's newest night (`fwd_runs.through`, one row a night of either job).
         self.record_day = None if row is None or row[0] is None else str(row[0])
 
     # ------------------------------------------------------------------------------------------------ helpers
