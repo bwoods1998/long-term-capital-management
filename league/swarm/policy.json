@@ -211,6 +211,110 @@
     "val_tries": 1,
     "looks_per_lineage": 1,
     "program_loss_usd": -300,
+    "forward_screen": {
+      "name": "FWD1",
+      "screen": "FWD1-R",
+      "receipt_sha256": "e0ef05f9dd24a65a2ea68022f2e8e950b859bd0450fe1245f90a5fa1d269b656",
+      "plan": [
+        5,
+        10,
+        15,
+        20,
+        30,
+        40,
+        60
+      ],
+      "c_G": {
+        "ETF": {
+          "N": 2.61
+        },
+        "PANEL": {
+          "N": 2.06,
+          "XS1": 3.16
+        }
+      },
+      "c_margin": 0.05,
+      "haircut_bp": {
+        "ETF": 2,
+        "PANEL": 3
+      },
+      "haircut_floor_bp": 2,
+      "panel_lots": 20,
+      "own_cap": {
+        "N": 0.12,
+        "XS1": 0.024
+      },
+      "placebo": {
+        "draws": 999,
+        "count_max": 119
+      },
+      "owner_wall": 0.15,
+      "figures": {
+        "ETF|N": {
+          "budget": 0.15,
+          "fp_point": 0.0276,
+          "fp_ub": 0.055,
+          "zero_edge_by_checkpoint": [
+            0.0052,
+            0.008,
+            0.0103,
+            0.0119,
+            0.0141,
+            0.0159,
+            0.0169
+          ],
+          "edge": "+10%",
+          "power": 0.0241,
+          "fp_avg": 0.0142,
+          "haircut_world": "2 bp a side, exact shadow fills",
+          "drift_avg": 0.0429
+        },
+        "PANEL|N": {
+          "budget": 0.15,
+          "fp_point": 0.1183,
+          "fp_ub": 0.1254,
+          "zero_edge_by_checkpoint": [
+            0.0494,
+            0.0676,
+            0.079,
+            0.0873,
+            0.096,
+            0.1029,
+            0.1107
+          ],
+          "edge": "+20%",
+          "power": 0.488,
+          "fp_avg": 0.0899,
+          "haircut_world": "3 bp a side, exact shadow fills"
+        },
+        "PANEL|XS1": {
+          "budget": 0.03,
+          "fp_point": 0.0238,
+          "fp_ub": 0.0258,
+          "zero_edge_by_checkpoint": [
+            0.0146,
+            0.0175,
+            0.0189,
+            0.0198,
+            0.0205,
+            0.021,
+            0.0215
+          ],
+          "edge": "+20%",
+          "power": 0.1664,
+          "fp_avg": 0.0177,
+          "haircut_world": "3 bp a side, exact shadow fills",
+          "look_cap": 0.12,
+          "combined": 0.15
+        }
+      }
+    },
+    "fwd1": {
+      "mode": "record",
+      "seats": "off",
+      "cpu_seconds_night": 900,
+      "run_budget_seconds": 300
+    },
     "panel": {
       "mode": "off",
       "panels": [

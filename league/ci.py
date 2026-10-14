@@ -197,6 +197,11 @@ FORBIDDEN: tuple[str, ...] = (
 #: refuses them once its own follow-up adds them to MERGE_FORBIDDEN (gateway/ ships separately, as it did for E1 and
 #: E2), and that follow-up moves them into the list above.
 PENDING_GATEWAY: tuple[str, ...] = ("league/swarm/elane_xs.py", "scripts/gen_universe.py")
+#: THE FORWARD SCREEN FWD1-R (Oct 14, 2026): its seat path in the swarm (league/swarm/elane_forward.py: which lineages
+#: take no sealed try and which forward passes become Candidates, one a mechanism cell, behind `elane.fwd1.seats`), a
+#: money mover like bands.py. Its judge is behind the wall already (league/ops/, docs/benchmarks/, policy.json). It
+#: waits here for the gateway's merge-list follow-up, as release E4's two do.
+PENDING_GATEWAY += ("league/swarm/elane_forward.py",)
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

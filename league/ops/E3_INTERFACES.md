@@ -719,3 +719,44 @@ release's probe to the byte (`league/tests/test_contam_probe.py` passes unchange
 - **The dollars, the keys, the ledger rows, the eras and one route a run are unchanged.** A probe with a plan asks
   about 70% more questions inside the same `usd_run` and day line, so it is published that many runs later, and
   CP1's 45 days of a route no probe finished on are reached sooner on a small line (section 10's "left open").
+
+## 16. The forward screen FWD1-R reads this record (the captain's A33, Oct 14, 2026; additive: no signature, column, table or event kind above changed)
+
+E3 records and judges nothing; FWD1-R is the later release section 4 names. Its rule is `league/ops/fwd1_rule.py`, its
+job `league/ops/forward_screen.py` (registered after `forward_shadow` and after `forward_xs`), its receipt
+`docs/benchmarks/forward_screen_fwd1.json` (v2: the study FWD1-1014's own code at the adopted bars) pinned in
+policy.json `elane.forward_screen`. What it reads and what it leaves as it was:
+- **Read-only.** `forward_db.open_db(root, readonly=True)`: `fwd_registry` (the lineages, their rows' `first_day`,
+  `reason`, `run_sha` and `row_hash`), `forward_db.counted_days` (D4's counted days, under ONE engine id a verdict),
+  `fwd_ll` (an ETF day's live-like re-price in place of r), `fwd_lotgap.side_gap_bp` (the measured adverse gap a side
+  that raises the haircut), `fwd_tags` try / try_entered / look_pass / look_fail (a sealed pre-check), `fwd_engines`
+  (the label a verdict was read under). A panel row's r, w, b and r15 are read as package J writes them (x = r - w b,
+  x15 = r15 - w b: section 14). E3's `fwd_checks` (FGS's 20/60/120/250) are never applied to a lineage FWD1 judges.
+- **Its own store.** `<state>/forward-screen.sqlite` (tables `fwd1_*`, append-only by trigger, first write stands):
+  the pin's first sighting (the clock), each day's SIDES (the weights of the shadow's lots in and out, under the
+  record's own engine id), the lineages, the own floors, the checkpoints of record and one verdict a lineage. No table
+  of `forward.sqlite` is added, written or migrated.
+- **No line of this record's night changes.** The sides are not in the record: the job reads them from the
+  representative's own forward run in its own decider child (`forward_shadow.Shadow` `_whole`, `slice`, `_child` at k
+  1.0 and `_series`; `forward_xs.panel_shadow(...).run_program`), both built on the record opened READ-ONLY (neither
+  writes before `night`), and keeps a day's sides only where that run is the stored day: its r is the stored row's to
+  `forward_db.TOL`, or the day was RESTATED (the run's bars hash of the day's decision, computed as this record's
+  night computes it, is not the stored `bars`, and its lots in and out that session are the row's `entries` and
+  `exits`): E3 keeps the first write of a day, and a dividend or a split rescales the whole adjusted history, so no
+  later run reproduces the stored r of a day before an ex-day. E3's seal (`test_e3_seal_imports`: E3's modules import
+  only its list) stands as it was.
+- **What it reads of this record's own rules** (the reviews' fixes, Oct 14): a NEW engine id (`fwd_engines`) is not
+  read for a pending lineage until it holds the representative's rows for every judged day (this record's night
+  writes the ETF rows and package J's panel night the panel rows hours later; a program the budget left stale is
+  written a night later), and a judged day that moved under the new id is carried only when `fwd_days.bars` differs
+  and a `restated` event of the pid under the old id (payload `engine`, `first`, `last`, `bars` "moved") covers it;
+  `fwd_runs.through` names the record's nights (the judge's stall rule counts them); `fwd_tags` stopped / resumed
+  (`forward_db.active`) say a representative is stopped (its lineage is listed "stopped", not pending).
+- **The D2 route and alpha in the hashed rows stand** (every E3-era row keeps `route` "S2"/"XS1" and `alpha_f` "0.03"):
+  FWD1-R judges the days after its own pin at the case budget A33 adopted (15% for a never-looked lineage; D2's 3%
+  kept for a panel lineage with an XS1 look), a loosening stated in the receipt's `loosened` with its cost.
+- **The seal.** The swarm reads only the job's permit file `<state>/forward-screen-permits.json` (ids and words: no t,
+  no P&L), in `league/swarm/elane_forward.py`; no module of league/swarm, league/equity, league/live, league/gym or
+  league/xs imports `fwd1_rule` or `forward_screen` or names their store or report (league/tests/test_forward_screen.py
+  `TheJob.test_the_seal_no_generator_side_module_imports_the_judge`); the family-state key a forward pass writes
+  (`elane_forward`) is in `elane_seal.SEALED_KEYS`.

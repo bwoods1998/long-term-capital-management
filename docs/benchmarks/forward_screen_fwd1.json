@@ -1,0 +1,1758 @@
+{
+ "name": "forward_screen_fwd1",
+ "version": 2,
+ "screen": "FWD1-R",
+ "study": "FWD1-1014 forward screen on the E3 forward record, pre-registered Oct 14, 2026 (PREREG 7383626c, amendments A1, A2); this receipt is v2: the study's own code at the bars the captain adopted (A33, from the review's FWD1-R), not the study's decided bars (its receipt v1 is kept in the record)",
+ "adopted_by": "captain A33 (17:01Z Oct 14, 2026): FWD1-R exactly as the review wrote it",
+ "receipt_v1_sha256": "e0273b33ff126a259466217c311e9b7f01e629e1ffda2a5d432f41456037662c",
+ "rule": "Per LINEAGE of the forward registry, judged on its representative (fixed before any forward day: of the rows with the lineage's earliest first_day, the lowest pid with reason train_pass, seed or live, else the lowest pid), on its counted forward sessions (fwd_days status ok, no audit_mismatch, ONE engine id) from FWD1_START = max(its first_day, the first session after the release carrying this receipt's pin began running): at checkpoints 5, 10, 15, 20, 30, 40, 60 the t of the haircut daily series over the first k sessions, mean / sd(ddof 1) x sqrt(k), sums by math.fsum; ETF: r (the live-like re-price r_ll where fwd_ll holds one) and r15; PANEL: the residual x = r - w b and x15 = r15 - w b; each day less g x sides (g: ETF 2 bp a side, raised to the measured mean adverse gap a side of the closed live lots (fwd_lotgap), rounded up; PANEL 3 bp until 20 live panel lots are measured, then the larger of 2 bp and their measured gap, rounded up). PASS at the first checkpoint with t >= c_used AND fsum(x) > 1e-12 AND fsum(x15) > 1e-12 (PANEL: AND at most 119 of 999 matched placebo portfolios, XS1's law, at or above t); FAIL for good if none by 60; one verdict a lineage. c_used = max(c_G, c_own + 0.05) on the 0.01 grid (ineligible above 5.00); c_own the exact own floor (cap 0.12 case N, 0.024 case XS1) on the program's Train-era 60-session windows. Cases: N (no version ever reached a sealed pre-check; it takes none afterwards), XS1 (a panel lineage that reached XS1's: bar 3.16, E3's D2 3% beside the look's 12%); no verdict for an ETF lineage with an S1/S2 look. At most one live forward seat a mechanism cell; FGS never also applied; nothing judges a lineage after its FWD1 fail.",
+ "plan": [
+  5,
+  10,
+  15,
+  20,
+  30,
+  40,
+  60
+ ],
+ "c_G": {
+  "ETF": {
+   "N": 2.61
+  },
+  "PANEL": {
+   "N": 2.06,
+   "XS1": 3.16
+  }
+ },
+ "c_margin": 0.05,
+ "haircut_bp": {
+  "ETF": 2,
+  "PANEL": 3
+ },
+ "haircut_floor_bp": 2,
+ "panel_lots": 20,
+ "own_cap": {
+  "N": 0.12,
+  "XS1": 0.024
+ },
+ "placebo": {
+  "draws": 999,
+  "count_max": 119,
+  "law": "XS1 (HOUSE-RULE-XS1 section 5; league/xs/placebo.py)",
+  "seed": "int.from_bytes(sha256(\"FWD1|\" + receipt sha256 + \"|\" + the representative's registry row_hash + \"|placebo\").digest()[:16], \"big\")"
+ },
+ "owner_wall": 0.15,
+ "cases": {
+  "N": "never reached a sealed pre-check (S1, S2 or XS1 Validation try, pre-check or look): forward budget 15%, own-floor cap 12%",
+  "XS1": "a panel lineage that reached XS1's pre-check: forward budget 3% (E3's D2 kept), own-floor cap 2.4%; with the look's 12% a program, 15%",
+  "S2": "an ETF lineage that reached a sealed pre-check: NOT JUDGED (FWD1-R F3: no budget left that would make it useful)"
+ },
+ "fp_zero_edge": {
+  "ETF": {
+   "N": {
+    "budget": 0.15,
+    "point_cap": 0.12,
+    "earlier_look_cap": 0.0,
+    "worst_regime_point": 0.0276,
+    "worst_regime_point_cell": "OUT|rv20|calm",
+    "worst_regime_ub": 0.055,
+    "worst_regime_ub_cell": "IN|rv60|storm",
+    "combined_bound": 0.055,
+    "average_by_checkpoint": [
+     0.0052,
+     0.008,
+     0.0103,
+     0.0119,
+     0.0141,
+     0.0159,
+     0.0169
+    ],
+    "by_regime_by60": {
+     "rv60_0": 0.0144,
+     "rv60_1": 0.013,
+     "rv60_2": 0.0237,
+     "rv20_0": 0.027,
+     "rv20_1": 0.0129,
+     "rv20_2": 0.0105,
+     "P0": 0.0162,
+     "P1": 0.0175
+    },
+    "by_decile_by60": {
+     "dec_0": 0.0167,
+     "dec_1": 0.0136,
+     "dec_2": 0.0141,
+     "dec_3": 0.0126,
+     "dec_4": 0.0085,
+     "dec_5": 0.0167,
+     "dec_6": 0.0168,
+     "dec_7": 0.0435,
+     "dec_8": 0.0176,
+     "dec_9": 0.0104
+    },
+    "per_population_by60": {
+     "OVN-1": 0.0303,
+     "OVN-50": 0.0146,
+     "LVR-21C": 0.0076,
+     "ALW": 0.0437,
+     "CTRL": 0.0215,
+     "SEC-21": 0.0131,
+     "OVN-20": 0.0026,
+     "REV-1": 0.0212,
+     "REV-3": 0.0221,
+     "REV-5": 0.0259,
+     "RNG-10": 0.0218,
+     "RNG-5C": 0.0081,
+     "LVR-5": 0.0279,
+     "LVR-21": 0.0141
+    },
+    "signal_structured_by60": 0.0337,
+    "signal_structured_per_program_by60": {
+     "A1": 0.0343,
+     "A1s": 0.0483,
+     "A2": 0.037,
+     "A2s": 0.033,
+     "A3": 0.0217,
+     "A3s": 0.0318,
+     "A4": 0.0042,
+     "A4s": 0.0026,
+     "A5": 0.0471,
+     "A5s": 0.0359,
+     "A6": 0.0657,
+     "A6s": 0.045
+    }
+   }
+  },
+  "PANEL": {
+   "N": {
+    "budget": 0.15,
+    "point_cap": 0.12,
+    "earlier_look_cap": 0.0,
+    "worst_regime_point": 0.1183,
+    "worst_regime_point_cell": "IN|rv60|storm",
+    "worst_regime_ub": 0.1254,
+    "worst_regime_ub_cell": "IN|rv60|storm",
+    "combined_bound": 0.1254,
+    "average_by_checkpoint": [
+     0.0494,
+     0.0676,
+     0.079,
+     0.0873,
+     0.096,
+     0.1029,
+     0.1107
+    ],
+    "by_regime_by60": {
+     "rv60_0": 0.108,
+     "rv60_1": 0.1111,
+     "rv60_2": 0.114,
+     "rv20_0": 0.11,
+     "rv20_1": 0.1107,
+     "rv20_2": 0.1118,
+     "P0": 0.1074,
+     "P1": 0.1142
+    },
+    "by_decile_by60": {
+     "dec_0": 0.1121,
+     "dec_1": 0.1071,
+     "dec_2": 0.1065,
+     "dec_3": 0.1076,
+     "dec_4": 0.1117,
+     "dec_5": 0.1104,
+     "dec_6": 0.115,
+     "dec_7": 0.1175,
+     "dec_8": 0.1146,
+     "dec_9": 0.1055
+    },
+    "per_population_by60": {
+     "X1": 0.1103,
+     "X2": 0.1099,
+     "X3": 0.1107,
+     "X4": 0.1119,
+     "X5": 0.1083,
+     "X6": 0.1127,
+     "X7": 0.1129,
+     "X8": 0.1089
+    },
+    "signal_structured_by60": 0.0922,
+    "signal_structured_per_program_by60": {
+     "X1": 0.0903,
+     "X2": 0.0894,
+     "X3": 0.0918,
+     "X4": 0.0943,
+     "X5": 0.0886,
+     "X6": 0.0988,
+     "X7": 0.096,
+     "X8": 0.0884
+    }
+   },
+   "XS1": {
+    "budget": 0.03,
+    "point_cap": 0.024,
+    "earlier_look_cap": 0.12,
+    "worst_regime_point": 0.0238,
+    "worst_regime_point_cell": "IN|rv20|storm",
+    "worst_regime_ub": 0.0258,
+    "worst_regime_ub_cell": "IN|rv20|storm",
+    "combined_bound": 0.1458,
+    "average_by_checkpoint": [
+     0.0146,
+     0.0175,
+     0.0189,
+     0.0198,
+     0.0205,
+     0.021,
+     0.0215
+    ],
+    "by_regime_by60": {
+     "rv60_0": 0.0208,
+     "rv60_1": 0.0216,
+     "rv60_2": 0.0225,
+     "rv20_0": 0.021,
+     "rv20_1": 0.0214,
+     "rv20_2": 0.0225,
+     "P0": 0.0207,
+     "P1": 0.0223
+    },
+    "by_decile_by60": {
+     "dec_0": 0.022,
+     "dec_1": 0.0208,
+     "dec_2": 0.0201,
+     "dec_3": 0.0203,
+     "dec_4": 0.0218,
+     "dec_5": 0.0213,
+     "dec_6": 0.0229,
+     "dec_7": 0.0232,
+     "dec_8": 0.0226,
+     "dec_9": 0.0207
+    },
+    "per_population_by60": {
+     "X1": 0.0212,
+     "X2": 0.0215,
+     "X3": 0.0217,
+     "X4": 0.022,
+     "X5": 0.0208,
+     "X6": 0.0218,
+     "X7": 0.022,
+     "X8": 0.0212
+    },
+    "signal_structured_by60": 0.0168,
+    "signal_structured_per_program_by60": {
+     "X1": 0.0162,
+     "X2": 0.0149,
+     "X3": 0.0161,
+     "X4": 0.0169,
+     "X5": 0.0193,
+     "X6": 0.0187,
+     "X7": 0.0171,
+     "X8": 0.0153
+    }
+   }
+  }
+ },
+ "per_family_over_wall_at_rule": {
+  "ETF": {
+   "N": []
+  },
+  "PANEL": {
+   "N": [],
+   "XS1": []
+  }
+ },
+ "gates": {
+  "ETF": {
+   "N": {
+    "G1": {
+     "ok": true,
+     "reproduced": {
+      "c": 2.05,
+      "k": 205,
+      "study_case": "N"
+     },
+     "a0_per_population_c": 3.05
+    },
+    "G2": {
+     "ok": true,
+     "remedy": null,
+     "per_period": [
+      {
+       "period": 0,
+       "point": 0.028710693693158176,
+       "ub": 0.04672026098100897,
+       "worlds": 16823
+      },
+      {
+       "period": 1,
+       "point": 0.038185255198487714,
+       "ub": 0.06028998796492636,
+       "worlds": 18515
+      }
+     ],
+     "worst_single_program_cell": {
+      "fp": 0.1493975903614458,
+      "period": 0,
+      "pop": "A6",
+      "regdef": "rv20",
+      "regime": 0,
+      "worlds": 415
+     }
+    },
+    "G3": {
+     "ok": true,
+     "remedy": null,
+     "fill_worst_pooled_ub": 0.0648,
+     "haircut_worst_pooled_ub": null
+    }
+   }
+  },
+  "PANEL": {
+   "N": {
+    "G1": {
+     "ok": true,
+     "reproduced": {
+      "c": 2.06,
+      "k": 206,
+      "study_case": "N"
+     },
+     "a0_per_population_c": 2.08
+    },
+    "G2": {
+     "ok": true,
+     "remedy": null,
+     "per_period": [
+      {
+       "period": 0,
+       "point": 0.09202670429874077,
+       "ub": 0.10051546391752578,
+       "worlds": 36848
+      },
+      {
+       "period": 1,
+       "point": 0.09240622140896615,
+       "ub": 0.10033472571855376,
+       "worlds": 34976
+      }
+     ],
+     "worst_single_program_cell": {
+      "fp": 0.12905844155844157,
+      "period": 0,
+      "pop": "X7",
+      "regdef": "rv60",
+      "regime": 0,
+      "worlds": 1232
+     }
+    },
+    "G3": {
+     "ok": true,
+     "remedy": "R-HAIRCUT",
+     "fill_worst_pooled_ub": 0.1546,
+     "haircut_worst_pooled_ub": 0.1264
+    }
+   },
+   "XS1": {
+    "G1": {
+     "ok": true,
+     "reproduced": {
+      "c": 3.16,
+      "k": 316,
+      "study_case": "D2"
+     },
+     "a0_per_population_c": 3.22
+    },
+    "G2": {
+     "ok": true,
+     "remedy": null,
+     "per_period": [
+      {
+       "period": 0,
+       "point": 0.01726009552757273,
+       "ub": 0.01986221240088392,
+       "worlds": 36848
+      },
+      {
+       "period": 1,
+       "point": 0.016382662397072277,
+       "ub": 0.018815310555359867,
+       "worlds": 34976
+      }
+     ],
+     "worst_single_program_cell": {
+      "fp": 0.025162337662337664,
+      "period": 0,
+      "pop": "X3",
+      "regdef": "rv60",
+      "regime": 0,
+      "worlds": 1232
+     }
+    },
+    "G3": {
+     "ok": true,
+     "remedy": "R-HAIRCUT",
+     "fill_worst_pooled_ub": 0.0318,
+     "haircut_worst_pooled_ub": 0.026
+    }
+   }
+  }
+ },
+ "power_like_for_like": {
+  "ETF": {
+   "N": {
+    "g2": {
+     "zero_edge": [
+      0.0048,
+      0.0072,
+      0.0091,
+      0.0104,
+      0.0121,
+      0.0136,
+      0.0142
+     ],
+     "E02": {
+      "by_checkpoint": [
+       0.005,
+       0.0077,
+       0.0098,
+       0.0113,
+       0.0133,
+       0.015,
+       0.0158
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.0412,
+       1.0633,
+       1.076,
+       1.0842,
+       1.0981,
+       1.1037,
+       1.1109
+      ],
+      "signal_structured_by60": 0.0359
+     },
+     "E05": {
+      "by_checkpoint": [
+       0.0053,
+       0.0084,
+       0.0109,
+       0.0128,
+       0.0153,
+       0.0174,
+       0.0185
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.1082,
+       1.1618,
+       1.1933,
+       1.2206,
+       1.2603,
+       1.277,
+       1.2991
+      ],
+      "signal_structured_by60": 0.0401
+     },
+     "E10": {
+      "by_checkpoint": [
+       0.0059,
+       0.0098,
+       0.013,
+       0.0157,
+       0.0193,
+       0.0222,
+       0.0241
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.2303,
+       1.3523,
+       1.4317,
+       1.5,
+       1.5954,
+       1.634,
+       1.6949
+      ],
+      "signal_structured_by60": 0.0478
+     },
+     "signal_structured_zero_edge_by60": 0.0327
+    },
+    "no_haircut": {
+     "zero_edge": [
+      0.0052,
+      0.008,
+      0.0103,
+      0.0119,
+      0.0141,
+      0.0159,
+      0.0169
+     ],
+     "E02": [
+      0.0054,
+      0.0085,
+      0.011,
+      0.0129,
+      0.0154,
+      0.0175,
+      0.0188
+     ],
+     "E05": [
+      0.0058,
+      0.0093,
+      0.0122,
+      0.0145,
+      0.0176,
+      0.0202,
+      0.0218
+     ],
+     "E10": [
+      0.0064,
+      0.0108,
+      0.0146,
+      0.0178,
+      0.0222,
+      0.0257,
+      0.0283
+     ]
+    }
+   }
+  },
+  "PANEL": {
+   "N": {
+    "g2": {
+     "zero_edge": [
+      0.045,
+      0.0609,
+      0.0704,
+      0.0773,
+      0.0842,
+      0.0895,
+      0.0954
+     ],
+     "E05": {
+      "by_checkpoint": [
+       0.0588,
+       0.083,
+       0.0991,
+       0.1116,
+       0.1262,
+       0.1388,
+       0.155
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.3078,
+       1.3632,
+       1.4068,
+       1.4436,
+       1.4989,
+       1.5501,
+       1.626
+      ]
+     },
+     "E10": {
+      "by_checkpoint": [
+       0.076,
+       0.1117,
+       0.1376,
+       0.1587,
+       0.1864,
+       0.2117,
+       0.2482
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.6901,
+       1.8344,
+       1.9527,
+       2.0537,
+       2.2148,
+       2.3646,
+       2.6034
+      ]
+     },
+     "E20": {
+      "by_checkpoint": [
+       0.1215,
+       0.1908,
+       0.2456,
+       0.2926,
+       0.3599,
+       0.4206,
+       0.5104
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       2.7007,
+       3.1353,
+       3.4866,
+       3.7852,
+       4.276,
+       4.698,
+       5.3532
+      ]
+     }
+    },
+    "g3": {
+     "zero_edge": [
+      0.0431,
+      0.0581,
+      0.0671,
+      0.0734,
+      0.0797,
+      0.0846,
+      0.0899
+     ],
+     "E05": {
+      "by_checkpoint": [
+       0.0565,
+       0.0794,
+       0.0945,
+       0.1062,
+       0.1197,
+       0.1313,
+       0.1462
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.3102,
+       1.3663,
+       1.4094,
+       1.4459,
+       1.501,
+       1.5517,
+       1.6267
+      ]
+     },
+     "E10": {
+      "by_checkpoint": [
+       0.0731,
+       0.107,
+       0.1314,
+       0.1513,
+       0.1772,
+       0.2007,
+       0.2347
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.6952,
+       1.8407,
+       1.9593,
+       2.0608,
+       2.2222,
+       2.3723,
+       2.6111
+      ],
+      "signal_structured_by60": 0.2015
+     },
+     "E20": {
+      "by_checkpoint": [
+       0.1173,
+       0.1837,
+       0.2359,
+       0.2807,
+       0.3447,
+       0.4025,
+       0.488
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       2.7199,
+       3.1604,
+       3.5176,
+       3.8231,
+       4.3232,
+       4.7565,
+       5.4289
+      ],
+      "signal_structured_by60": 0.4336
+     },
+     "signal_structured_zero_edge_by60": 0.0749
+    },
+    "no_haircut": {
+     "zero_edge": [
+      0.0494,
+      0.0676,
+      0.079,
+      0.0873,
+      0.096,
+      0.1029,
+      0.1107
+     ],
+     "E05": [
+      0.0643,
+      0.0918,
+      0.1106,
+      0.1255,
+      0.1433,
+      0.159,
+      0.1797
+     ],
+     "E10": [
+      0.0826,
+      0.1228,
+      0.1525,
+      0.1771,
+      0.2099,
+      0.2401,
+      0.2846
+     ],
+     "E20": [
+      0.1308,
+      0.2072,
+      0.268,
+      0.3202,
+      0.3956,
+      0.4634,
+      0.5634
+     ]
+    }
+   },
+   "XS1": {
+    "g2": {
+     "zero_edge": [
+      0.0132,
+      0.0157,
+      0.0168,
+      0.0175,
+      0.018,
+      0.0183,
+      0.0187
+     ],
+     "E05": {
+      "by_checkpoint": [
+       0.0177,
+       0.022,
+       0.0242,
+       0.0258,
+       0.0273,
+       0.0287,
+       0.0303
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.3474,
+       1.4023,
+       1.4432,
+       1.4769,
+       1.5203,
+       1.5625,
+       1.623
+      ]
+     },
+     "E10": {
+      "by_checkpoint": [
+       0.0237,
+       0.0307,
+       0.0351,
+       0.0387,
+       0.0429,
+       0.0472,
+       0.054
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.8031,
+       1.9625,
+       2.0936,
+       2.2144,
+       2.3885,
+       2.5742,
+       2.89
+      ]
+     },
+     "E20": {
+      "by_checkpoint": [
+       0.041,
+       0.0588,
+       0.0732,
+       0.0867,
+       0.1083,
+       0.1322,
+       0.1767
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       3.1201,
+       3.7528,
+       4.3581,
+       4.9673,
+       6.0236,
+       7.2095,
+       9.4563
+      ]
+     }
+    },
+    "g3": {
+     "zero_edge": [
+      0.0126,
+      0.0149,
+      0.016,
+      0.0166,
+      0.0171,
+      0.0174,
+      0.0177
+     ],
+     "E05": {
+      "by_checkpoint": [
+       0.017,
+       0.021,
+       0.0231,
+       0.0245,
+       0.0259,
+       0.0271,
+       0.0286
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.3506,
+       1.4047,
+       1.4441,
+       1.4765,
+       1.5185,
+       1.5585,
+       1.6154
+      ]
+     },
+     "E10": {
+      "by_checkpoint": [
+       0.0228,
+       0.0294,
+       0.0335,
+       0.0367,
+       0.0407,
+       0.0445,
+       0.0507
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       1.81,
+       1.9678,
+       2.0961,
+       2.2136,
+       2.3825,
+       2.5614,
+       2.8647
+      ],
+      "signal_structured_by60": 0.0379
+     },
+     "E20": {
+      "by_checkpoint": [
+       0.0395,
+       0.0563,
+       0.0698,
+       0.0825,
+       0.1027,
+       0.125,
+       0.1664
+      ],
+      "likelihood_ratio_by_checkpoint": [
+       3.1394,
+       3.7706,
+       4.3702,
+       4.9734,
+       6.0167,
+       7.1876,
+       9.4077
+      ],
+      "signal_structured_by60": 0.1326
+     },
+     "signal_structured_zero_edge_by60": 0.0142
+    },
+    "no_haircut": {
+     "zero_edge": [
+      0.0146,
+      0.0175,
+      0.0189,
+      0.0198,
+      0.0205,
+      0.021,
+      0.0215
+     ],
+     "E05": [
+      0.0195,
+      0.0245,
+      0.0273,
+      0.0292,
+      0.0313,
+      0.0331,
+      0.0354
+     ],
+     "E10": [
+      0.026,
+      0.0341,
+      0.0394,
+      0.0438,
+      0.0492,
+      0.0547,
+      0.0636
+     ],
+     "E20": [
+      0.0447,
+      0.0648,
+      0.0815,
+      0.0973,
+      0.123,
+      0.1517,
+      0.2053
+     ]
+    }
+   }
+  }
+ },
+ "power_note": "cumulative pass share by checkpoint 5..60 at the rule; edges per invested dollar a year injected into the zero-edge series (ETF over N0R, PANEL the residual); the edge and the zero edge in ONE fill world: the shadow's fills as recorded with the rule's haircut taken from both (g2: 2 bp, g3: 3 bp); no_haircut beside; calibration populations floor-free, pooled over periods and regimes",
+ "drift_kept_ETF": {
+  "N": {
+   "by60": 0.0429,
+   "by_regime_by60": {
+    "rv60_0": 0.0637,
+    "rv60_1": 0.0394,
+    "rv60_2": 0.0246,
+    "rv20_0": 0.0714,
+    "rv20_1": 0.0378,
+    "rv20_2": 0.0185,
+    "P0": 0.0409,
+    "P1": 0.0447
+   },
+   "strict_N0G_by60": 0.0178
+  }
+ },
+ "fills": {
+  "ETF": {
+   "N": {
+    "F0s10": {
+     "by60": 0.0178,
+     "worst_regime_by60": 0.0283
+    },
+    "F1s10": {
+     "by60": 0.02,
+     "worst_regime_by60": 0.0317
+    },
+    "F2s10": {
+     "by60": 0.0229,
+     "worst_regime_by60": 0.0363
+    },
+    "F5s10": {
+     "by60": 0.0376,
+     "worst_regime_by60": 0.0593
+    },
+    "F10s10": {
+     "by60": 0.084,
+     "worst_regime_by60": 0.1264
+    },
+    "F15s10": {
+     "by60": 0.137,
+     "worst_regime_by60": 0.1919
+    },
+    "F2s0": {
+     "by60": 0.022,
+     "worst_regime_by60": 0.0353
+    },
+    "F2s20": {
+     "by60": 0.0233,
+     "worst_regime_by60": 0.0361
+    },
+    "F2s10HC": {
+     "by60": 0.0178,
+     "worst_regime_by60": 0.0283
+    },
+    "F5s10HC": {
+     "by60": 0.0266,
+     "worst_regime_by60": 0.0421
+    },
+    "F10s10HC": {
+     "by60": 0.063,
+     "worst_regime_by60": 0.0973
+    },
+    "F15s10HC": {
+     "by60": 0.1164,
+     "worst_regime_by60": 0.1676
+    }
+   }
+  },
+  "PANEL": {
+   "N": {
+    "F0s10": {
+     "by60": 0.1109,
+     "worst_regime_by60": 0.1144
+    },
+    "F1s10": {
+     "by60": 0.1224,
+     "worst_regime_by60": 0.1258
+    },
+    "F2s10": {
+     "by60": 0.1371,
+     "worst_regime_by60": 0.14
+    },
+    "F3s10": {
+     "by60": 0.1556,
+     "worst_regime_by60": 0.1581
+    },
+    "F5s10": {
+     "by60": 0.1979,
+     "worst_regime_by60": 0.2007
+    },
+    "F6s10": {
+     "by60": 0.2181,
+     "worst_regime_by60": 0.2209
+    },
+    "F10s10": {
+     "by60": 0.2717,
+     "worst_regime_by60": 0.2733
+    },
+    "F2s0": {
+     "by60": 0.1371,
+     "worst_regime_by60": 0.1404
+    },
+    "F2s20": {
+     "by60": 0.1367,
+     "worst_regime_by60": 0.1406
+    },
+    "F2s10HC": {
+     "by60": 0.1108,
+     "worst_regime_by60": 0.1144
+    },
+    "F3s10HC": {
+     "by60": 0.1223,
+     "worst_regime_by60": 0.1257
+    },
+    "F5s10HC": {
+     "by60": 0.1555,
+     "worst_regime_by60": 0.1584
+    },
+    "F6s10HC": {
+     "by60": 0.1762,
+     "worst_regime_by60": 0.1788
+    },
+    "F10s10HC": {
+     "by60": 0.2503,
+     "worst_regime_by60": 0.2519
+    },
+    "F2s10HC3": {
+     "by60": 0.1021,
+     "worst_regime_by60": 0.1056
+    },
+    "F3s10HC3": {
+     "by60": 0.111,
+     "worst_regime_by60": 0.1145
+    },
+    "F5s10HC3": {
+     "by60": 0.1371,
+     "worst_regime_by60": 0.1403
+    }
+   },
+   "XS1": {
+    "F0s10": {
+     "by60": 0.0216,
+     "worst_regime_by60": 0.0226
+    },
+    "F1s10": {
+     "by60": 0.0238,
+     "worst_regime_by60": 0.0247
+    },
+    "F2s10": {
+     "by60": 0.0271,
+     "worst_regime_by60": 0.028
+    },
+    "F3s10": {
+     "by60": 0.0325,
+     "worst_regime_by60": 0.0333
+    },
+    "F5s10": {
+     "by60": 0.0522,
+     "worst_regime_by60": 0.0543
+    },
+    "F6s10": {
+     "by60": 0.0673,
+     "worst_regime_by60": 0.0708
+    },
+    "F10s10": {
+     "by60": 0.1323,
+     "worst_regime_by60": 0.1358
+    },
+    "F2s0": {
+     "by60": 0.0271,
+     "worst_regime_by60": 0.0281
+    },
+    "F2s20": {
+     "by60": 0.0271,
+     "worst_regime_by60": 0.0282
+    },
+    "F2s10HC": {
+     "by60": 0.0216,
+     "worst_regime_by60": 0.0226
+    },
+    "F3s10HC": {
+     "by60": 0.0238,
+     "worst_regime_by60": 0.0247
+    },
+    "F5s10HC": {
+     "by60": 0.0324,
+     "worst_regime_by60": 0.0334
+    },
+    "F6s10HC": {
+     "by60": 0.0405,
+     "worst_regime_by60": 0.0416
+    },
+    "F10s10HC": {
+     "by60": 0.1023,
+     "worst_regime_by60": 0.1071
+    },
+    "F2s10HC3": {
+     "by60": 0.02,
+     "worst_regime_by60": 0.021
+    },
+    "F3s10HC3": {
+     "by60": 0.0216,
+     "worst_regime_by60": 0.0225
+    },
+    "F5s10HC3": {
+     "by60": 0.0271,
+     "worst_regime_by60": 0.0281
+    }
+   }
+  }
+ },
+ "fills_note": "zero REAL edge, the shadow optimistic by mu bp a side with sigma bp noise (F<mu>s<sigma>; HC: the 2 bp haircut taken; HC3: the 3 bp)",
+ "registry": {
+  "ETF": {
+   "N": {
+    "shares": {
+     "p50": [
+      0.0,
+      0.0,
+      0.001288659793814433,
+      0.001288659793814433,
+      0.002577319587628866,
+      0.003865979381443299,
+      0.005154639175257732
+     ],
+     "p90": [
+      0.01288659793814433,
+      0.024484536082474227,
+      0.029896907216495197,
+      0.03479381443298969,
+      0.03865979381443299,
+      0.04252577319587629,
+      0.04252577319587629
+     ],
+     "p95": [
+      0.03350515463917526,
+      0.04639175257731959,
+      0.05670103092783505,
+      0.06056701030927835,
+      0.07216494845360824,
+      0.07474226804123711,
+      0.07731958762886598
+     ],
+     "p99": [
+      0.08778350515463904,
+      0.11984536082474227,
+      0.13159793814432977,
+      0.14737113402061813,
+      0.1691237113402059,
+      0.2190721649484536,
+      0.22293814432989692
+     ],
+     "mean": [
+      0.005197191230605502,
+      0.007994780281210801,
+      0.010251707922692255,
+      0.011922084683596484,
+      0.014060534053325533,
+      0.015905290805752686,
+      0.016910687407595645
+     ],
+     "windows": 3089
+    },
+    "draws": {
+     "10": {
+      "mean": [
+       0.05503399158303658,
+       0.07413402395597281,
+       0.09355778569116219,
+       0.11460019423761736,
+       0.1447070249271609,
+       0.1544189057947556,
+       0.16769180964713498
+      ],
+      "p95": [
+       0.0,
+       1.0,
+       1.0,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ],
+      "p_at_least_one": [
+       0.04014244091939139,
+       0.058271285205568145,
+       0.07219164778245386,
+       0.08643573972159276,
+       0.10780187763030107,
+       0.10909679507931369,
+       0.11880867594690839
+      ]
+     },
+     "25": {
+      "mean": [
+       0.13693752023308514,
+       0.21269019100032374,
+       0.2648106183230819,
+       0.2916801553900939,
+       0.34671414697313047,
+       0.40012949174490126,
+       0.3930074457753318
+      ],
+      "p95": [
+       1.0,
+       1.0,
+       2.0,
+       2.0,
+       2.0,
+       2.0,
+       2.0
+      ],
+      "p_at_least_one": [
+       0.08190352865004856,
+       0.11783748786014892,
+       0.15021042408546456,
+       0.16315959857559081,
+       0.18290708967303335,
+       0.2016833926837164,
+       0.20718679184202007
+      ]
+     },
+     "50": {
+      "mean": [
+       0.2596309485270314,
+       0.39786338620912914,
+       0.5037228876659113,
+       0.6102298478471997,
+       0.7138232437682098,
+       0.7837487860148915,
+       0.8601489155066364
+      ],
+      "p95": [
+       2.0,
+       2.0,
+       3.0,
+       4.0,
+       4.0,
+       4.0,
+       4.0
+      ],
+      "p_at_least_one": [
+       0.11103917125283264,
+       0.17157656199417287,
+       0.21107154418905794,
+       0.23858853998057625,
+       0.2797021689867271,
+       0.28876659112981545,
+       0.3272903852379411
+      ]
+     },
+     "100": {
+      "mean": [
+       0.5140822272580123,
+       0.8157979928779541,
+       0.9889932016833927,
+       1.2178698607963743,
+       1.391388798964066,
+       1.5461314341210748,
+       1.6633214632567175
+      ],
+      "p95": [
+       3.0,
+       5.0,
+       6.0,
+       7.0,
+       7.0,
+       8.0,
+       8.0
+      ],
+      "p_at_least_one": [
+       0.14567821301392037,
+       0.22434444804143736,
+       0.2819682745224992,
+       0.32599546778892846,
+       0.37034639041761086,
+       0.382971835545484,
+       0.4325024279702169
+      ]
+     }
+    },
+    "checkpoints": [
+     5,
+     10,
+     15,
+     20,
+     30,
+     40,
+     60
+    ]
+   }
+  },
+  "PANEL": {
+   "N": {
+    "shares": {
+     "p50": [
+      0.04890625,
+      0.0674375,
+      0.0790625,
+      0.0875,
+      0.0965625,
+      0.1036875,
+      0.11125
+     ],
+     "p90": [
+      0.06175,
+      0.083125,
+      0.09578125,
+      0.1046875,
+      0.114375,
+      0.1215625,
+      0.13015625
+     ],
+     "p95": [
+      0.06678125,
+      0.0878125,
+      0.1003125,
+      0.1103125,
+      0.119765625,
+      0.127359375,
+      0.13553125
+     ],
+     "p99": [
+      0.07525624999999994,
+      0.09913125,
+      0.11389374999999999,
+      0.12331874999999994,
+      0.13189374999999998,
+      0.13879687499999996,
+      0.14592812499999996
+     ],
+     "mean": [
+      0.04939257465996457,
+      0.06765734033116487,
+      0.0790901278829094,
+      0.08747501478415143,
+      0.09619929036073345,
+      0.10320474201655838,
+      0.1110257429036073
+     ],
+     "windows": 1691
+    },
+    "draws": {
+     "10": {
+      "mean": [
+       0.5097575399172087,
+       0.6481371969248965,
+       0.8143110585452396,
+       0.8710821998817267,
+       0.9532820816085157,
+       1.0112359550561798,
+       1.114133648728563
+      ],
+      "p95": [
+       2.0,
+       2.0,
+       2.0,
+       3.0,
+       3.0,
+       3.0,
+       3.0
+      ],
+      "p_at_least_one": [
+       0.40035481963335307,
+       0.4807806031933767,
+       0.5884092253104671,
+       0.576581904198699,
+       0.6345357776463632,
+       0.6558249556475458,
+       0.6853932584269663
+      ]
+     },
+     "25": {
+      "mean": [
+       1.2448255470136014,
+       1.6481371969248966,
+       1.9745712596096985,
+       2.211117681845062,
+       2.3956238911886456,
+       2.548196333530455,
+       2.7622708456534597
+      ],
+      "p95": [
+       3.0,
+       4.0,
+       5.0,
+       5.0,
+       5.0,
+       5.0,
+       6.0
+      ],
+      "p_at_least_one": [
+       0.6871673565937315,
+       0.8143110585452396,
+       0.8586635127143702,
+       0.8823181549379066,
+       0.9101123595505618,
+       0.9213483146067416,
+       0.9396806623299823
+      ]
+     },
+     "50": {
+      "mean": [
+       2.483737433471319,
+       3.4594914251921938,
+       3.918982850384388,
+       4.36073329390893,
+       4.7267888823181545,
+       5.149024246008279,
+       5.460082791247783
+      ],
+      "p95": [
+       5.0,
+       7.0,
+       7.0,
+       8.0,
+       8.0,
+       9.0,
+       9.0
+      ],
+      "p_at_least_one": [
+       0.9006505026611472,
+       0.9580130100532229,
+       0.986989946777055,
+       0.9905381431105854,
+       0.986989946777055,
+       0.9958604376108812,
+       0.994086339444116
+      ]
+     },
+     "100": {
+      "mean": [
+       4.894145476049674,
+       6.765227675931402,
+       7.907746895328208,
+       8.699586043761087,
+       9.677705499704317,
+       10.369603784742756,
+       11.125369603784742
+      ],
+      "p95": [
+       9.0,
+       12.0,
+       13.0,
+       14.0,
+       15.0,
+       16.0,
+       17.0
+      ],
+      "p_at_least_one": [
+       0.9863985807214666,
+       0.9994086339444116,
+       1.0,
+       1.0,
+       0.9994086339444116,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "checkpoints": [
+     5,
+     10,
+     15,
+     20,
+     30,
+     40,
+     60
+    ]
+   },
+   "XS1": {
+    "shares": {
+     "p50": [
+      0.0140625,
+      0.0171875,
+      0.0184375,
+      0.019375,
+      0.0201875,
+      0.020625,
+      0.02125
+     ],
+     "p90": [
+      0.0196875,
+      0.02328125,
+      0.025,
+      0.02609375,
+      0.026875,
+      0.0275,
+      0.028125
+     ],
+     "p95": [
+      0.021421875,
+      0.0253125,
+      0.027015625,
+      0.028125,
+      0.02884375,
+      0.0296875,
+      0.03
+     ],
+     "p99": [
+      0.025681249999999947,
+      0.030568749999999995,
+      0.03346874999999997,
+      0.03410937499999996,
+      0.03563124999999999,
+      0.03613749999999999,
+      0.0366875
+     ],
+     "mean": [
+      0.014481538290952098,
+      0.017442212448255476,
+      0.018847630839739764,
+      0.019742404642223543,
+      0.02046849127735067,
+      0.020997024689532823,
+      0.021527461561206388
+     ],
+     "windows": 1691
+    },
+    "draws": {
+     "10": {
+      "mean": [
+       0.1348314606741573,
+       0.17622708456534594,
+       0.19455943228858663,
+       0.19692489651094028,
+       0.22057953873447664,
+       0.19396806623299823,
+       0.21939680662329983
+      ],
+      "p95": [
+       1.0,
+       1.0,
+       1.0,
+       1.0,
+       1.0,
+       1.0,
+       1.0
+      ],
+      "p_at_least_one": [
+       0.12714370195150798,
+       0.16321703134240095,
+       0.17622708456534594,
+       0.1797752808988764,
+       0.19751626256652868,
+       0.1809580130100532,
+       0.19751626256652868
+      ]
+     },
+     "25": {
+      "mean": [
+       0.36901241868716733,
+       0.43169722057953874,
+       0.4979302188054406,
+       0.5121230041395624,
+       0.5050266114725015,
+       0.5292726197516262,
+       0.5416913069189828
+      ],
+      "p95": [
+       2.0,
+       2.0,
+       2.0,
+       2.0,
+       2.0,
+       2.0,
+       2.0
+      ],
+      "p_at_least_one": [
+       0.31105854523950327,
+       0.34890597279716146,
+       0.3908929627439385,
+       0.4039030159668835,
+       0.39976345357776466,
+       0.39976345357776466,
+       0.4145476049674749
+      ]
+     },
+     "50": {
+      "mean": [
+       0.6948551153163809,
+       0.9166173861620343,
+       0.9988172678888232,
+       0.9863985807214666,
+       0.9875813128326434,
+       1.004139562389119,
+       1.0555884092253105
+      ],
+      "p95": [
+       2.0,
+       3.0,
+       3.0,
+       3.0,
+       3.0,
+       3.0,
+       3.0
+      ],
+      "p_at_least_one": [
+       0.4991129509166174,
+       0.5836782968657599,
+       0.6197516262566529,
+       0.6085156712004731,
+       0.6280307510348906,
+       0.63571850975754,
+       0.6451803666469544
+      ]
+     },
+     "100": {
+      "mean": [
+       1.4257835600236546,
+       1.716735659373152,
+       1.8107628622117091,
+       1.9296274393849793,
+       2.060910703725606,
+       2.10408042578356,
+       2.158486102897694
+      ],
+      "p95": [
+       4.0,
+       4.0,
+       4.0,
+       4.0,
+       5.0,
+       5.0,
+       5.0
+      ],
+      "p_at_least_one": [
+       0.7380248373743347,
+       0.8095801301005322,
+       0.8018923713778829,
+       0.8503843879361325,
+       0.8574807806031933,
+       0.8693081017149615,
+       0.8781785925487877
+      ]
+     }
+    },
+    "checkpoints": [
+     5,
+     10,
+     15,
+     20,
+     30,
+     40,
+     60
+    ]
+   }
+  }
+ },
+ "weak_screen": {
+  "ETF": "always (a pass is about as likely without edge as with it)",
+  "PANEL": "at checkpoint 10 or earlier (45% of zero-edge panel passes come at checkpoint 5)"
+ },
+ "figures": {
+  "ETF|N": {
+   "budget": 0.15,
+   "fp_point": 0.0276,
+   "fp_ub": 0.055,
+   "zero_edge_by_checkpoint": [
+    0.0052,
+    0.008,
+    0.0103,
+    0.0119,
+    0.0141,
+    0.0159,
+    0.0169
+   ],
+   "edge": "+10%",
+   "power": 0.0241,
+   "fp_avg": 0.0142,
+   "haircut_world": "2 bp a side, exact shadow fills",
+   "drift_avg": 0.0429
+  },
+  "PANEL|N": {
+   "budget": 0.15,
+   "fp_point": 0.1183,
+   "fp_ub": 0.1254,
+   "zero_edge_by_checkpoint": [
+    0.0494,
+    0.0676,
+    0.079,
+    0.0873,
+    0.096,
+    0.1029,
+    0.1107
+   ],
+   "edge": "+20%",
+   "power": 0.488,
+   "fp_avg": 0.0899,
+   "haircut_world": "3 bp a side, exact shadow fills"
+  },
+  "PANEL|XS1": {
+   "budget": 0.03,
+   "fp_point": 0.0238,
+   "fp_ub": 0.0258,
+   "zero_edge_by_checkpoint": [
+    0.0146,
+    0.0175,
+    0.0189,
+    0.0198,
+    0.0205,
+    0.021,
+    0.0215
+   ],
+   "edge": "+20%",
+   "power": 0.1664,
+   "fp_avg": 0.0177,
+   "haircut_world": "3 bp a side, exact shadow fills",
+   "look_cap": 0.12,
+   "combined": 0.15
+  }
+ },
+ "stated_beside_every_live_trade": "FWD1-R forward screen ({type}, case {case}): passed at checkpoint {k} of 5-60 counted forward sessions since {start} (after the code was frozen and the screen pinned); t = {t} >= bar {c_used} (global {c_G}, own floor {c_own} + 0.05); shadow P&L (PANEL: residual) over the judged sessions after costs and a {g} bp-a-side fill haircut {pnl}. Measured false-positive rate at zero edge in the worst Train-era volatility regime of matching length: {fp_point}% (97.5% bound {fp_ub}%; forward budget {B}%){look_clause}; owner's wall 15%. Memory: ... contamination is zero by construction for the judged sessions. Skill: a pass inside 60 sessions is weak evidence. At a true edge of {edge} a year a program like this passes about {power}% of the time against {fp_avg}% at zero edge in the same fill world, so most forward passers have no edge. {weak_clause}{etf_clause: this program's OWN drift-kept rate}Registry: {observed} forward passes of {judged} {type} case {case} lineages judged so far, against {expected} expected at zero edge. Failures stay on record.",
+ "loosened": [
+  {
+   "rule": "E3's pre-registered forward gate FGS (checkpoints 20, 60, 120, 250 at alpha_f 0.03 on every E3-era row)",
+   "now": "FWD1-R from checkpoint 5 for never-looked lineages at the goal's own 15% wall (case N); D2's 3% kept for a lineage with an XS1 look",
+   "cost": "most early passes are luck: 45% of zero-edge panel passes come at checkpoint 5 (likelihood ratio about 1.55 there); panel power at +10%/yr by 60 lower than with a first checkpoint at 20 (receipt v1: 24.8% against 29.5%); an ETF forward pass says almost nothing about skill"
+  },
+  {
+   "rule": "the pre-registered per-population calibration (A0)",
+   "now": "A1 pooled cells (the study's amendment)",
+   "cost": "single families could read over their budget in one regime; at the adopted bars none does (per_family_over_wall_at_rule)"
+  },
+  {
+   "rule": "G2 per-regime bound",
+   "now": "A2 per-regime point, per-period bound",
+   "cost": "see gates.*.G2.worst_single_program_cell"
+  },
+  {
+   "rule": "shadow fills as recorded",
+   "now": "the haircut (ETF 2 bp, PANEL 3 bp, raised to the measured gap)",
+   "cost": "power, most for high-turnover programs"
+  },
+  {
+   "rule": "sessions before the pin",
+   "now": "never judged",
+   "cost": "the days between a program's first forward day and the pin"
+  }
+ ],
+ "limits": [
+  "the fill gap is modelled (2 bp bias, 10 bp noise), not measured, until the House measures it on its live lots (fwd_lotgap)",
+  "stand-ins: random-timing twins of the House ETF archetypes, sscreen2's 12 programs, XS1's 8 panel archetypes and their matched placebo draws, 2010-2019 and 2022-2024; none is the truth for October 2026 onward",
+  "panel windows start every 5th session; panel and signal windows are cut mid-run; ETF twins start flat",
+  "at c >= 2.06 the placebo leg never binds on the twins (the review's F9): its pass rates are the t leg's",
+  "G3 was measured with the 2 bp haircut; the panel's 3 bp is stricter (fills: F*s10HC3)"
+ ],
+ "note": "rates are shares of zero-edge worlds (program x contiguous 60-session window); bounds are the 97.5th percentile of a two-way cluster bootstrap (calendar quarter x program, 2,000 resamples); every figure from the study's code on Train-era data (2010-2019, 2022-2024)",
+ "sha256": {
+  "study:PREREG.md": "7383626c7beb6f8fa8f5f7a6bbb599dea0e39cab33f1036a34985f5bf6210e5f",
+  "study:PREREG-A1.md": "624f99527489c213f89e1d8aacdc075c2fab7d99168893a3125b9f8b83dc4790",
+  "study:PREREG-A2.md": "4141f1c8daae7d47f52008078ab09324e3d0ee4b3e35f089f07821bf9fd87cbb",
+  "study:REVIEW.md": "b27c89b108ab96ad90a5088792e898e31e8f63df10582af72fd7b97051221b6a",
+  "study:work/D/decision.json": "5bfdb6edddd554aa4d88b2217b276c1bf60ac8b1e0eb742c5ebdb905e72b8697",
+  "study:forward_screen_fwd1.json": "e0273b33ff126a259466217c311e9b7f01e629e1ffda2a5d432f41456037662c",
+  "v2:work/D/decision_v2.json": "29cf4c8fdda270b9d384d90ff6bb5a1059b4d6ff8aa416e5c1dc082dcadcd691",
+  "v2:results/summary.json": "2466d56fa52c89f491be549a00417fd7385fb4519697d46bbf404e1da8ea8a97",
+  "v2:logs/CHANGES.log": "ca5a03e0a720a0ea012bf2972cfdd5efa22a3d72e27a22273cfb87fa0b532db2",
+  "v2:code/decide_v2.py": "e5c84de9c83d34091dd01c5b6ea217316fdcc0e88a1f5f49da9f949d75bd6f43",
+  "v2:code/report.py": "79d9cad1519b718a172dfd63ac752b84f343142f80757cc6247430ff29d365f6",
+  "v2:code/summarize.py": "5f68b8a0d26f39dfea857a4048cd670cc0c7940fc83ca8bc3297c4f253230fda",
+  "v2:code/fwdcore.py": "e85eb4eb0c352afc5ed43dd95c2c27bf44672a0fde96533753c602763a7e1a73",
+  "v2:code/build.py": "ee101631adf3bd98c113ba56f40c0b54b91ec20b57e5c091f5922c4e53243478",
+  "v2:code/decide.py": "6f4219ffddfc1bbde42952314baf7b100712b558ce1477224317bbc7dde6a839",
+  "v2:code/worlds.py": "cd0a1592afdfd5e4361e873224c13ee037d863d67965fd1b92dbc4a76e6cf4a4",
+  "v2:code/etf_twins.py": "ca14e6f4efbc690e9318b03459cfad36632a2ffedc03b68784021768d09ff4da",
+  "v2:code/make_receipt_v2.py": "21febd41284df123d8e1cb9ed6c286cbbc1c22a9bd66fcd2f78e74f3167d8fa8",
+  "v2:code/conformance_v2.py": "d5a27dd95e73039054e1ab2d00b14fd2fc0d4621da21b2266c618a08825d0ab6"
+ }
+}

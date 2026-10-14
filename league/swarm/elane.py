@@ -797,9 +797,14 @@ def _retry_open(store: Any, fam: Mapping[str, Any], n: int, tries: Sequence[Mapp
 
 
 def try_open(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any] | None) -> bool:
-    """Whether version `n` may take its lineage's Validation try (one a lineage; R3's retry only when permitted)."""
+    """Whether version `n` may take its lineage's Validation try (one a lineage; R3's retry only when permitted). A
+    lineage the FWD1-R forward screen judges takes none while its seats are on (league/swarm/elane_forward.py)."""
     try:
         if lane_of(store, fam) is None:
+            return False
+        from . import elane_forward
+
+        if elane_forward.try_refused(store, fam, settings) is not None:
             return False
         tries = lineage_tries(store, str(fam["id"]))
         k = int(cfg(settings)["val_tries"])

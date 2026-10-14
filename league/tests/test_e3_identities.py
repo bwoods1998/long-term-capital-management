@@ -91,6 +91,8 @@ E2_PENDING = ("league/swarm/elane_births.py", "league/swarm/elane_train.py", "le
 #: What waits for the gateway's merge list on a tree that carries release E4 (league/ci.py `PENDING_GATEWAY`): the
 #: panel's swarm lane and the universe generator. Not E3's: named here so that nothing else is let in beside them.
 E4_PENDING = ("league/swarm/elane_xs.py", "scripts/gen_universe.py")
+#: FWD1-R's seat path in the swarm (the captain's A33), waiting beside release E4's two for the gateway's follow-up.
+FWD1_PENDING = ("league/swarm/elane_forward.py",)
 #: The forward screen's shape as the spec's section 4 writes it, and its sha.
 FGS_LITERAL = {
     "version": "fgs-prereg-1", "stat": "t_r over the first n counted days", "n": [20, 60, 120, 250], "then_every": 250,
@@ -345,9 +347,11 @@ class TheWiringIsWhole(unittest.TestCase):
     def test_the_three_paths_behind_the_wall(self):
         # Release E2's five left the waiting list with the gateway's follow-up of Oct 11, 2026, and E3's three never
         # wait there: the gateway's merge list gains them with the release. FORBIDDEN names all eight, or the five.
-        # What may wait is release E4's two and nothing else (none on a tree without E4).
+        # What may wait is release E4's two and, beside them, FWD1-R's seat path, and nothing else (none on a tree
+        # without E4).
         gateway = merge_forbidden()
-        self.assertIn(ci.PENDING_GATEWAY, ((), E4_PENDING), "nothing of E2's or E3's waits for the gateway")
+        self.assertIn(ci.PENDING_GATEWAY, ((), E4_PENDING, E4_PENDING + FWD1_PENDING),
+                      "nothing of E2's or E3's waits for the gateway")
         self.assertFalse(set(ci.PENDING_GATEWAY) & {*E2_PENDING, *E3_SWARM})
         self.assertEqual(set(ci.FORBIDDEN) - gateway, set(ci.PENDING_GATEWAY), "beyond the gateway's list: what waits")
         for path in E2_PENDING:

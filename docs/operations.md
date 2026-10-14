@@ -8,6 +8,133 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The forward screen FWD1-R (Oct 2026): `feat/equity-fwd1`, not deployed
+
+E3 records every equity program's forward days and judges nothing. **FWD1-R judges them**: a program may take a seat on
+sessions that came after its code and the screen were frozen, so the judged sessions' contamination is zero by
+construction (no model can have memorized days that had not happened). The captain adopted it as its review wrote it
+(A33, 17:01Z Oct 14, 2026, from the study FWD1-1014: PREREG `7383626c`, RESULT, HOUSE-RULE-FWD1 and REVIEW "adopt with
+fixes"), not as the study's headline. Rule: `league/ops/fwd1_rule.py`; job: `league/ops/forward_screen.py`; receipt:
+`docs/benchmarks/forward_screen_fwd1.json` (v2); seat path: `league/swarm/elane_forward.py`.
+
+**No identity moves.** Nothing under `league/live/`, `league/gym/`, `league/xs/`, no evidence module of
+`league/equity/` and not `league/constitution.py` changes: the options execution fingerprint, the equity identity, the
+money digest and the constitution digest are those of the tree it is cut from (`feat/equity-e4-m3` at `6f99652d`).
+
+**The rule** (one verdict a LINEAGE of the forward registry):
+- **Who.** A lineage is judged on its REPRESENTATIVE, fixed before any forward day of it exists: of its rows with the
+  lineage's earliest `first_day`, the lowest pid whose reason is train_pass, seed or live, else the lowest pid. Every
+  version stays in the denominator. CASE at FWD1_START: **N** when no version ever reached a sealed pre-check (an S1,
+  S2 or XS1 Validation try, its pre-check or a look: the forward record's tags and the family's state); a PANEL
+  lineage that reached XS1's is case **XS1**; an ETF lineage that reached one is NOT judged (no forward verdict for an
+  S1/S2 look); a lineage that already trades (a live row) needs none; a stock program is not covered.
+- **Days.** The representative's counted days (status "ok", no `audit_mismatch`) under ONE engine id, from FWD1_START =
+  max(its first_day, the first session after the release carrying the pin began running).
+- **Series.** ETF: r and r15, the live-like re-price r_ll in place of r where `fwd_ll` holds one (and r15 + (r_ll - r)
+  for r15); PANEL: the residual x = r - w b and x15 = r15 - w b. Each day less g x sides (the weights of the shadow's
+  lots in and out that session). g: ETF 2 bp a side, raised to the measured mean adverse gap a side of the closed live
+  ETF lots (`fwd_lotgap.side_gap_bp`), rounded up; PANEL 3 bp until 20 live panel lots are measured, then the larger of
+  2 bp and their measured gap, rounded up. A checkpoint row keeps the g it read.
+- **Statistic.** At k = 5, 10, 15, 20, 30, 40, 60: t_k = mean / sd (ddof 1) x sqrt(k) by math.fsum; a pass needs t_k >=
+  c_used, fsum(x) > 1e-12 and fsum(x15) > 1e-12, and for a PANEL lineage the placebo leg: at most 119 of 999 matched
+  placebo portfolios (XS1's law, seeded by the receipt's sha and the representative's row hash) at or above t_k. PASS
+  at the first checkpoint that passes; FAIL for good at 60; nothing judges a lineage after its verdict.
+- **Bar.** c_used = max(c_G, c_own + 0.05) on the 0.01 grid (ineligible above 5.00): c_G PANEL N **2.06**, PANEL XS1
+  **3.16** (E3's D2 3% kept beside the look's 12% a program), ETF N **2.61** (WEAK). c_own is the study's exact own
+  floor (cap 0.12 case N, 0.024 case XS1) on the program's Train-era 60-session windows: its runs at k 1.0 and 1.5 over
+  2016-19 and 2022-24 (ETF; S2's cells) or XS1's two Train segments (PANEL; XS1's cells), from the pools' third
+  session (the House's `POOL_SKIP`), computed once a representative and only when a checkpoint's t reaches c_G.
+- **Limits.** At most ONE live forward seat a mechanism cell (lane / agenda / universe group) at a time, ETF and panel
+  alike; FGS (E3's 20/60/120/250 at 3%) is never also applied; one engine id a verdict: after an engine change a
+  pending lineage WAITS until the new id holds its representative's rows for every judged day (E3's night writes the
+  ETF rows, the panel night the panel rows hours later, a program the budget left stale a night later), then a judged
+  day whose r, w, b or r15 moved voids it, unless it moved only because the vendor restated the store's history (both
+  bars hashes known and different, and E3's own `restated` event, bars "moved", covering the day); one that leaves
+  them as they were is carried, with an event naming the pid; a case-N lineage that reaches a sealed pre-check after
+  its start is void (a panel pre-check refused before any Validation read, `reached` False, is none). A34: a panel
+  lineage's only route to a seat is case N; a case-XS1 pass is recorded and takes no seat.
+
+**What the receipt measured at these bars** (the study's own code on its pass-A arrays, Train-era data only: the
+script reproduced the study's pinned bars 2.05, 2.06 and 3.16 first; at 2.06 every figure equals receipt v1's):
+
+| type and case | worst-regime FP at zero edge: point / 97.5% bound | pass by 60 at zero edge, haircut world | power by 60, same world |
+|---|---|---|---|
+| PANEL N, 2.06 | 11.8% / 12.5% (IN, 60-day storm) | 9.0% at 3 bp (11.1% with no haircut) | +20%/yr 48.8% (ratio 5.4); +10%/yr 23.5% |
+| PANEL XS1, 3.16 | 2.4% / 2.6% (with the look's 12%: at most 15%) | 1.8% at 3 bp | +20%/yr 16.6%; +10%/yr 5.1% |
+| ETF N, 2.61 (WEAK) | 2.8% / 5.5% (no single family or regime cell over 15%; the worst S2-archetype cell 14.9%) | 1.4% at 2 bp | +10%/yr 2.4% (ratio 1.7) |
+
+The receipt also carries the pass rates by checkpoint, by regime and decile, the fills table (with the panel's 3 bp),
+the drift-kept rate of the ETF twins, the registry's expected zero-edge passes for 10 to 100 lineages, and the
+loosenings with their costs. **The loosening, stated (A33):** E3 pre-registered its forward gate at 20/60/120/250
+sessions and 3%; FWD1-R reads from 5 sessions at the goal's own 15% for never-looked lineages. Most early passes are
+luck (45% of zero-edge panel passes come at checkpoint 5); an ETF forward pass says almost nothing about skill.
+
+**The pin starts the clock.** policy.json `elane.forward_screen` holds the receipt's sha256 and every figure the
+House prints (CI: `league/tests/test_fwd1_rule.py` `ThePin` holds the sha to the file and each figure to the
+receipt's; the loader refuses a pin whose plan, bars, margin, haircut, caps or placebo law is not the code's). The job
+writes the time the release carrying the pin began running (the deploy record's `promoted` verdict of the running
+release, else its first sighting) once a sha, and FWD1_START is the session after the first close after it: deployed
+before Thursday Oct 15's close, the first judged session is Friday Oct 16. Days before it are never judged; a lineage
+registered earlier enters mid-run. **Whoever pins it must not read `fwd_days` first** (the review's F8).
+
+**The job** `forward_screen` (league/ops/registry.py, after `forward_shadow` and after `forward_xs`; in a pause too;
+skipped inside 09:00-17:30 New York on a session) reads the forward record and the swarm store read-only and writes
+`<state>/forward-screen.sqlite` (append-only: the pin, the sides, the lineages, the own floors, the checkpoints of
+record, the verdicts), `<state>/forward-screen-permits.json` (ids and words only: no t, no P&L) and
+`<state>/forward-screen-report.json` (operator-only: counts by type and case and status, the registry's expected
+zero-edge passes against the observed, every pass's sentence and each stalled lineage's cause). Each day's SIDES (the
+weights of the shadow's lots in and out, which the record does not keep) come from the representative's own forward
+run in the job's own decider child (E3's `Shadow` slice, package J's panel run), kept for the days that run
+reproduces, or that were RESTATED (after an ex-day E3 keeps the first-written r and no run reproduces it again: the
+run's bars hash of the day's decision differs from the stored one and its lots in and out that session are the
+record's); no line of E3's night changes. A would-be pass's reading (t, sums, haircut, live-like flag) is kept on the
+night it is first read, and a checkpoint that waits on its floor or its placebo leg is judged on it. ONE PANEL STORE A
+JOB RUN (every panel run reads one panel night's store: the ops child's 500 MB above its start holds the two maps once,
+measured at the production panel's size), E4's clock rule (`elane_xs.steady`) on every panel run. Its child seconds:
+`elane.fwd1.cpu_seconds_night` (900) A NIGHT, shared by the night's two runs, one run `run_budget_seconds` (300) and
+never past THE DEADLINE (the earlier of its 1,800 s wall and the next pre-open, less 120 s; its grace 2 h, so the run
+after `forward_xs` is done before the pre-open). A failure of the House leaves a checkpoint unwritten and marks
+nobody; the next night reads the same first k days. THE STALL RULE: a lineage whose next step waited on the House on
+five of the record's nights under one engine id is "stalled": no run, reported, nothing marked, asked again at a new
+engine id; a lineage that waited goes after those that did not. Statuses in the permit file: pending, pass, fail,
+void, ineligible, stopped (its representative stopped in the record), stalled, superseded (another receipt's).
+
+**The sentence beside a forward-passed trade** (`fwd1_rule.beside`: in the verdict row and the report, and beside
+every trade of a program seated on a forward pass in the direction report, `dlane_report.EquityScreens`): the type and
+case, the checkpoint and the start, t against c_used (global and own floor), the shadow P&L (PANEL: residual) after
+costs and the haircut, the worst-regime FP and its bound against the budget (case XS1: and the combined 15%), the
+contamination sentence, power against the zero-edge rate IN THE SAME FILL WORLD, the WEAK flag (ETF always; PANEL at
+checkpoint 10 or earlier), for ETF the program's OWN drift-kept rate from its own floor windows, and the registry's
+forward passes against the expected number at zero edge.
+
+**The seat path, built and OFF.** `elane.fwd1.seats` "off" (policy.json and the code). Turned "on" (swarm.json:
+`"elane": {"fwd1": {"seats": "on"}}`): a lineage the permit file lists pending, pass or fail takes no sealed
+Validation try (`elane.try_open`), and an unreadable permit file refuses every equity try; an ETF pass becomes a
+Candidate THROUGH THE ROSTER (the seat rule in force decides its seat; the Probe money rows size and demote it) when
+its family is in the Gym band with the judged version under the identity the verdict was read under, one live forward
+seat a mechanism cell. **A panel pass is made eligible only**, case N only (A34) and one a mechanism cell at a time: no
+panel seat exists in E4's step one, and the panel seat pool is step two's (`feat/equity-e4-step2`, B3). **The
+obligation that pool takes on** (league/xs/E4_INTERFACES.md section 8, item 25): it seats a panel family on a forward
+pass only when `elane_forward.seat_refused(store, fam, settings)` is None and records it with
+`elane_forward.mark_seated` in the same transaction as the band move; `eligible(state)` alone is not the contract.
+
+**Switches and rollback.** `elane.fwd1.mode` "off" stops the job (nothing judged; the forward record goes on);
+`elane.fwd1.seats` "off" stops every effect on the swarm. Without the pin (`elane.forward_screen` absent, or a block
+this code does not load) no verdict is read. A seated program keeps its seat under the money rules' own demotion.
+
+**Inspect** (on the box, read-only): `sqlite3 -readonly <state>/forward-screen.sqlite "SELECT lineage, verdict, k, day
+FROM fwd1_verdicts"`, `... "SELECT lineage, k, passed, why FROM fwd1_checks ORDER BY lineage, k"`, and
+`<state>/forward-screen-report.json`.
+
+**Stated limits.** The panel placebo leg draws on one panel run over the judged sessions started flat at FWD1_START (a
+lot carried in from before a mid-run start is not in its draws, and the run's last session opens no lot); a span that
+holds a session of the program's own disqualified run fails the leg closed, one the House left out waits. At c >= 2.06
+the leg never bound on the study's twins.
+The fill gap is modelled until 20 live panel lots (and the ETF lots) measure it. The sides cost one forward run of
+a representative a checkpoint it reaches (seven at most), and its own floor its Train-era runs once, in the job's own
+child inside `cpu_seconds_night` (one core): a lineage left over waits a night, its checkpoint still the first k days. ETF lineages with an S2 look have no
+forward route. The stand-ins are 2010-19 and 2022-24 history; none is the truth for October 2026 onward.
+
 ## The panel lane (release E4, "breadth", Oct 2026): `feat/equity-e4`, not deployed
 
 E1 gave the equity lanes a live path and E2 made the swarm breed share programs for it, on four index ETFs. E4 opens

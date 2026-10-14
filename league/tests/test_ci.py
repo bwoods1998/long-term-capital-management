@@ -283,9 +283,10 @@ class TheEquityLane(unittest.TestCase):
         # are in the gateway's merge list since its follow-ups, and release E3's three (the folds, the out-of-fold
         # effects and the memory tables: secrecy rules and a Train-bar input) since the release itself. Release E4's
         # two (the panel's swarm lane and the universe generator) wait here for the gateway's next follow-up.
-        self.assertEqual(ci.PENDING_GATEWAY, ("league/swarm/elane_xs.py", "scripts/gen_universe.py"),
+        self.assertEqual(ci.PENDING_GATEWAY, ("league/swarm/elane_xs.py", "scripts/gen_universe.py",
+                                              "league/swarm/elane_forward.py"),
                          "the gateway's merge list holds E2's five since its follow-up of Oct 11 and E3's three with "
-                         "the release; E4's two wait for its next one")
+                         "the release; E4's two and FWD1-R's seat path wait for its next one")
         for entry in ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py",
                       "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
                       "league/swarm/elane_seal.py", "league/swarm/elane_review.py", "league/swarm/elane_folds.py",
@@ -313,6 +314,17 @@ class TheEquityLane(unittest.TestCase):
             self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
                              ["league/equity/sizing.py", "league/swarm/elane.py", "league/swarm/elane_seal.py",
                               "league/swarm/elane_train.py", "league/xs/child.py", "ltcm/broker.py"])
+
+    def test_the_forward_screens_seat_path_is_protected(self):
+        """FWD1-R (the captain's A33): the swarm's seat path (league/swarm/elane_forward.py: which lineages take no
+        sealed try, which forward passes become Candidates) joins the wall; its judge was behind it already."""
+        self.assertIn("league/swarm/elane_forward.py", ci.FORBIDDEN)
+        self.assertIn("league/swarm/elane_forward.py", ci.PENDING_GATEWAY)
+        for path in ("league/swarm/elane_forward.py", "League/Swarm/Elane_Forward.py", "league/ops/fwd1_rule.py",
+                     "league/ops/forward_screen.py", "docs/benchmarks/forward_screen_fwd1.json"):
+            self.assertTrue(ci.guard([path], None), path)
+            for role in ci.ROLE_PATHS:
+                self.assertTrue(ci.guard([path], role), (path, role))
 
     def test_the_panel_lane_and_the_universe_generator_are_protected(self):
         """Release E4 (E4-SPEC 2.5, the fixed judges it adds): the panel's evidence and its screen XS1 (league/xs/), its
