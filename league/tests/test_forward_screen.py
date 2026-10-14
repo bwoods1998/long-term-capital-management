@@ -12,6 +12,7 @@ import sqlite3
 import tempfile
 import types
 import unittest
+from unittest import mock
 from collections import Counter
 from pathlib import Path
 
@@ -994,6 +995,192 @@ class TheHouseRuns(TS.Case):
         found = R.own_floor_k([[p[:3] for p in c] for c in cells], R.OWN_CAP["N"])
         self.assertIsNotNone(found["k_own"], found["why"])
         self.assertIsNotNone(R.drift_kept(cells, R.k_used("ETF", "N", found["k_own"]) or 500))
+
+
+    def test_a_train_era_series_its_own_runs_do_not_give_is_the_programs_own(self):
+        """A ValueError of `screen.series` over the program's own Train-era runs is as deterministic as the runs: the
+        program's own (OwnFloorRefused, ineligible, stated), never the House's asked again each night."""
+        TS.synth.synthetic_store(self.root / TS.STORE_DIR, symbols=TS.SYMBOLS, start=dt.date(2016, 1, 4),
+                                 end=TS.END, seed=7, gate=True, as_of=TS.FWD[8])
+        pid = TS.register(self.db, "always@1", TS.ALWAYS, first_close=TS.FWD[2])
+        runs = FS.HouseRuns(self.root, budget_seconds=300, decider=InlineDecider(), clock=self.clock)
+        from league.equity import screen
+
+        def unreadable(*args, **kwargs):
+            raise ValueError("a held symbol with no price that session")
+
+        with mock.patch.object(screen, "series", unreadable):
+            with self.assertRaises(FS.OwnFloorRefused):
+                runs.etf_pools(self.program(pid))
+
+
+class TheExDay(TS.Case):
+    """THE EX-DAY (the House review's major), in E3's own test world: the real E1 engine in an `InlineDecider` over a
+    synthetic store rounded to cents as the vendor's is, E3's own night writing the record each evening, the job's
+    night after it. A SPY dividend inside a checkpoint window rescales the whole adjusted history, E3 keeps the
+    first-written r of every day, and the representative's own run never reproduces those r again: its sides are
+    still read (the days were restated), and every checkpoint of record is written. The global bar is out of reach
+    (no floor run): only whether each checkpoint is written is read."""
+
+    def nights(self, dividends, count):
+        TS.register(self.db, "always@1", TS.ALWAYS, first_close=TS.BEFORE)
+        families = {"always": {"id": "always", "structure": "etf", "spec": {"lane": "equity", "agenda": "trend"},
+                               "state": {}, "lineage": None, "band": "gym"}}
+        store = FS.open_store(self.root)
+        self.addCleanup(store.close)
+        rule = fake_rule()
+        pin = {"start": TS.FWD[0].isoformat(), "release": "", "pinned_at": 0.0}
+        tallies = []
+        with mock.patch.dict(R.C_G, {"ETF": {"N": 99.0}, "PANEL": {"N": 99.0, "XS1": 99.0}}):
+            for through in TS.FWD[:count]:
+                TS.write_night(self.root, through, dividends=dividends)
+                TS.cents(self.root)
+                self.shadow(through, write=False).night()
+                FS.register(store, self.db, families, rule=rule, pin_start=TS.FWD[0], now=self.clock())
+                runs = FS.HouseRuns(self.root, budget_seconds=120, decider=InlineDecider(), clock=self.clock)
+                tallies.append(FS.Night(store, self.db, families, runs=runs, rule=rule, pin=pin, budget=900,
+                                        clock=self.clock, settings=TS.RECORD).run())
+        return [int(r[0]) for r in store.execute("SELECT k FROM fwd1_checks ORDER BY k")], tallies
+
+    def test_every_checkpoint_is_written_across_an_ex_day(self):
+        ks, tallies = self.nights({"SPY": [(TS.FWD[7], 1.5)]}, 16)
+        self.assertEqual(ks, [5, 10, 15])
+        self.assertGreater(sum(t.get("sides_restated", 0) for t in tallies), 0)   # the restated days kept their sides
+        self.assertEqual(sum(t.get("no_sides", 0) for t in tallies), 0)
+        self.assertEqual(self.events("restated")[0]["payload"]["bars"], "moved")    # E3 said so too
+
+
+class ThePanelHouseRuns(unittest.TestCase):
+    """`HouseRuns`' panel paths in package J's own world (league/tests/test_forward_xs.py `House`: the real panel
+    runner and engine in an `InlineDecider` over a synthetic panel of 40 invented names; E4's panel night writes the
+    record): ONE OPEN OF THE PANEL STORE A JOB RUN, the sides of the representative's own run against the record, and
+    THE CLOCK RULE on its Train segments and its placebo leg."""
+
+    def setUp(self):
+        from league.tests import test_forward_xs as TX
+
+        self.TX = TX
+        self.h, self.key, self.pid = TX.registered(self)
+        self.h.night(10)                               # the panel night writes the record
+        self.program = forward_db.program(self.h.db, self.key)
+
+    def runs(self, decider=None):
+        return FS.HouseRuns(self.h.root, budget_seconds=300, decider=decider or InlineDecider(), clock=self.h.clock,
+                            fdb=self.h.db, settings=self.h.settings)
+
+    def test_one_panel_store_a_job_run_and_the_sides_are_the_records(self):
+        from league.xs import store as xstore
+
+        rows = self.h.rows(self.pid)
+        self.assertGreaterEqual(len(rows), 5)
+        opened = []
+        real = xstore.PanelStore.__init__
+
+        def counting(store, *args, **kwargs):
+            opened.append(1)
+            return real(store, *args, **kwargs)
+
+        runs = self.runs()
+        with mock.patch.object(xstore.PanelStore, "__init__", counting):
+            for _ in range(3):
+                found = runs.forward_sides(self.program, "PANEL", settings=self.h.settings, fdb=self.h.db)
+            block = runs.panel_placebo(self.program, start=dt.date.fromisoformat(rows[0]["day"]),
+                                       end=dt.date.fromisoformat(rows[-1]["day"]), seed=7)
+        self.assertEqual(len(opened), 1, "every panel run of the job read the one store")
+        for row in rows:
+            day = row["day"]
+            self.assertAlmostEqual(found["r"][day], row["r"], delta=forward_db.TOL)
+            self.assertEqual((found["bars"][day], found["entries"][day], found["exits"][day]),
+                             (row["bars"], row["entries"], row["exits"]))
+        self.assertEqual((block["days"], block["n"]), (len(rows), R.PLACEBO_DRAWS))
+        runs.close()
+        self.assertIsNone(runs._night)
+
+    def test_the_train_segments_one_at_a_time_through_the_clock_rule(self):
+        from league.swarm import elane_xs
+
+        plain = self.runs().panel_pools(self.program)
+        clocked = self.TX.TheHousesClockAtNight.clocked(self.key, [2, 0, 0])
+        pools = self.runs(clocked()).panel_pools(self.program)
+        self.assertEqual(clocked.made, [2, 0, 0], "the first segment's run lost decides to the clock: made again")
+        for a, b in zip(plain, pools):
+            self.assertEqual(a is None, b is None)
+            if a is not None:
+                for x, y in zip(a, b):
+                    self.assertEqual(list(x), list(y))
+        slow = self.TX.TheHousesClockAtNight.clocked(self.key, [3, 3, 3])
+        with self.assertRaises(FS.OwnFloorRefused):                        # the same each run: the program's
+            self.runs(slow()).panel_pools(self.program)
+        unsteady = self.TX.TheHousesClockAtNight.clocked(self.key, [1, 2, 1])
+        with self.assertRaises(elane_xs.ClockUnsteady):                    # not the same twice: the House's
+            self.runs(unsteady()).panel_pools(self.program)
+
+    def test_the_placebo_leg_through_the_clock_rule(self):
+        rows = self.h.rows(self.pid)
+        clocked = self.TX.TheHousesClockAtNight.clocked(self.key, [2, 0])
+        block = self.runs(clocked()).panel_placebo(self.program, start=dt.date.fromisoformat(rows[0]["day"]),
+                                                   end=dt.date.fromisoformat(rows[-1]["day"]), seed=7)
+        self.assertEqual(clocked.made, [2, 0])
+        self.assertEqual(block["days"], len(rows))
+
+
+class TheJobFitsItsMemory(unittest.TestCase):
+    """The House review's major, AT THE REAL PANEL'S SIZE (2,501 sessions by 767 columns, through mid-December 2026)
+    UNDER THE OPS CHILD'S OWN LIMIT (`league.ops.__main__.limit`: the address space is capped 500 MB above the child's
+    start, before the job's first import). As it was, every panel call of the job opened its own copy of the panel
+    store (two bar arrays mapped again, freed only by a full collection): the third open found no room. Now one
+    `HouseRuns` (one a job run) reads ONE panel store for every forward run, placebo leg and Train segment. The world
+    is league/tests/fwd1_panel_budget.py's: the real store, panel night, runner and decider (the House's side and its
+    child's loop), the engine canned; the calls run in a child of this test."""
+
+    EXTRA_MB = 500          # the registry row's default: `league.ops.runner` starts the child with it
+    CALLS = 6               # six forward runs and six placebo legs of one night's panel lineages, and one own floor
+    #: Of the cap, the job's calls leave at least this much unused (measured on the desk: about 118 MB on 3.11 with
+    #: the engine canned); the bound has room for another machine's libraries. What it holds is that a call no longer
+    #: adds to the peak, which is the store's two maps, one Train slice, its pickle and its frame.
+    HEADROOM_MB = 30
+
+    def measure(self, mode):
+        import os
+        import subprocess
+        import sys
+
+        from league.ops import runner
+        from league.tests import fwd1_panel_budget as B
+
+        self.assertEqual(runner.EXTRA_MB, self.EXTRA_MB, "the address space the runner gives every job's child")
+        if not hasattr(self, "state"):
+            tmp = tempfile.TemporaryDirectory()
+            self.addCleanup(tmp.cleanup)
+            self.state = Path(tmp.name) / "state"
+            built = B.build(self.state)
+            self.assertGreaterEqual(built["sessions"], 2455, "the production panel's sessions")
+            self.assertGreaterEqual(built["columns"], 700, "and its columns")
+        env = {**os.environ, "PYTHONPATH": str(REPO), "PYTHONDONTWRITEBYTECODE": "1", "OPENBLAS_NUM_THREADS": "1",
+               "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}    # (as `league.ops.runner` starts its child)
+        done = subprocess.run([sys.executable, "-c", B.BOOT, str(self.state), str(self.EXTRA_MB), mode,
+                               str(self.CALLS)], cwd=REPO, env=env, capture_output=True, text=True,
+                              timeout=registry.by_name()["forward_screen"].wall)
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+        return json.loads(done.stdout.strip().splitlines()[-1])
+
+    def test_the_panel_calls_fit_with_room_to_spare_and_the_job_as_it_was_does_not(self):
+        import os
+
+        if os.geteuid() == 0:  # pragma: no cover
+            self.skipTest("as root the decider starts its child from its own runtime copy: the canned child is not in it")
+        out = self.measure("job")
+        self.assertIsNone(out["error"], out)
+        self.assertEqual(out["opens"], 1, "one panel store for every call of the job run")
+        kinds = [a[0] for a in out["answers"]]
+        self.assertEqual(kinds, ["sides", "placebo"] * self.CALLS + ["pools"], out["answers"])
+        self.assertTrue(all(n > 700 for n in out["answers"][-1][1]), "both Train segments' pools")
+        self.assertGreater(out["cap_mb"], 0, "the limit was set before the job's imports")
+        self.assertLessEqual(out["vm_peak_mb"], out["cap_mb"] - self.HEADROOM_MB,
+                             f"the peak of the job's panel calls leaves {self.HEADROOM_MB} MB of the cap: {out}")
+        was = self.measure("as_it_was")
+        self.assertTrue(was["error"] is not None or any(a[0] == "error" for a in was["answers"]),
+                        f"a store a call does not fit: the measurement sees what it is for ({was})")
 
 
 if __name__ == "__main__":
