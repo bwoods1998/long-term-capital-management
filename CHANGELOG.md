@@ -30,7 +30,7 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
-### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
+### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; then with A32 `47ed6872ce6c232b743cc556f5540892b9132470` (PR #543, the Probe sleeve 0.50 x E at six seats), which deploys FIRST, on `feat/equity-e4-a32`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 
 - **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
   day's S&P 500 members by a symmetric cross-sectional rule, see salted slots with no ticker, no date and no price
@@ -285,8 +285,36 @@ on branches.
   by `8ab31e32` and one built by `8ed4e72e` (with a panel program's registry row and twin rows) both open under
   the merged tree with no row rewritten, two writers at once included
   (`league/tests/test_forward_store_two_builds.py`; the same run once on stores each sha's own code built).
+- **The merge with A32 and the independent check's four minors (Oct 14; nothing of E4 deployed; on
+  `feat/equity-e4-a32`; the options execution fingerprint, the equity identity, the money digest and the constitution
+  digest are `47ed6872`'s on both Pythons; the xs identity is unchanged, 2f0083bc...).** MERGED `47ed6872` (PR #543,
+  decision A32: the Probe sleeve 0.50 x E at six seats; money digest `5b95d73e`, constitution digest `4ef472e1`), a
+  clean merge. A32 deploys FIRST and this release after it. **THE SHARE PROGRAMS' FIXTURE WAS RECORDED AGAIN on a
+  clean tree of `47ed6872`** (`RECORDED_ON`): A32 doubles a one-ETF lot (0.125 x E to 0.25 x E), so all 75 scenarios
+  moved, through the test double and through the real reader: in 71 only the sizes, in four a cap now admits fewer
+  sends; no alert and no seat plan moved; this tree equals it at every position of the switch. FIXED (finding 1):
+  **two first opens of a state from before E4 at the same moment** (two Houses, or a second builder, on one state)
+  both found `eq_instances.kind` missing and ran its ALTER; the loser raised "duplicate column name: kind", which the
+  House's `build_book` turns into an unreadable book (real opens refused while shares are held) until a restart. The
+  loser now reads that refusal as done when a second look finds the column (as `forward_db._migrate` since E3.1); any
+  other refusal is raised. `test_equity_book_panel` `TwoFirstOpensAtOnce` races two processes on such a state (forced
+  so both run the ALTER, and left to their own timing); the check's own repro (two House builds on a fresh copy of a
+  main-built state) raised before (20 of 20 races in the check on 3.11; 5 of 5 on 3.11 and 3 of 5 on 3.14 here) and in
+  none of 20 after, on each Python. STATED (finding 2): **a CODE rollback past E4 after the lane has been at "train"
+  retires the panel families first**: a release from before E4 scopes its options readers by "structure NOT IN ('etf',
+  'stock')" and reads every alive panel family as an options family (the tournament gave the class "panel x none" half
+  its allocation). Set `elane.panel.mode` "off", run `scripts/panel_rollback.py --apply` (it lists the alive panel
+  families, retires each by `SwarmStore.retire`, and refuses while the setting is not "off" or a panel family is
+  outside the Gym band; `league/tests/test_panel_rollback.py`), then roll back. STATED (finding 3): **the zero-edge
+  alarm cannot fire on the box yet**: it needs a complete week (programs at `zero_edge_programs`, 100) and a box
+  Sunday finishes about 32 to 40; a rolling rate or the setting at what a Sunday fits is owed before "gate" (step
+  two); no code or policy change. STATED (finding 4): **one test main's releases added was edited for E4's column**:
+  `league/tests/test_equity_seats.py` `FirstCome` pops `eq_instances.kind` from main's recorded first-come sequence
+  and holds it to "equity" before comparing the rest (f96d7a77). It is E4's stated schema addition, not a behaviour
+  change: main's own version of the file fails on this tree for that column only, and the other 435 tests of main's 15
+  modules, in main's own versions, pass on both Pythons (the independent check).
 - Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
-  the universe deploy and its rollback, the alarms).
+  the universe deploy and its rollback, the alarms, the code rollback past E4).
 
 ### 22:51Z Oct 11, 2026: releases E5-A and E3.1, the seat rule, the exit wait's end and the re-based twin (#542), House `20261011T225041Z-65fa6d3946ea`, main `8ab31e32`; gateway unchanged `9c0651a3`
 
