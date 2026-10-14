@@ -50,6 +50,9 @@ on branches.
 - **K for a basket**: the seat rule's rank of a panel program, from its own runs (Train-era close days per 250
   sessions of the seen spans' 1.0x runs, kept sealed by the bar; the Validation close days of the try's 2025 k 1.0
   run), written as `elane_seat` beside an entered try and ranked inside the panel pool only. Never printed.
+- **The close dates beside every checkpoint** (A14_BESIDE_DONE, "not computed yet" until now): each Done
+  checkpoint carries `close_dates` {closes, dates, date_t, unpriced} over its counted closes, all programs, the
+  closes of one date summed (a basket's eight lots sold at one open are one date). Beside, never a rule.
 - **The live-book proof recorded again on main `47ed6872`** (#543's sleeve): every scenario moved by the lot's size
   alone; step one needs the same record once #543 is merged into it.
 

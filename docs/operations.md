@@ -2118,8 +2118,10 @@ mean `gap_bp` of the counted equity closes with a final priced twin; the intents
 forward record's twins (the live and the shadow intents, session by session); unmeasured, A14 does not hold and the
 reading says why. **The intents half is computed against a twin that is re-based after each differing session (the
 captain's A29, registered before the first real share order: **The forward record**, "The twin is re-based after a
-difference"); the three sentences below and both bounds are as registered.** The close-date figures are not computed
-yet and no forward rule moves a seat. A reading with no
+difference"); the three sentences below and both bounds are as registered.** The close-date figures are computed
+since release E4's step two (each checkpoint's `close_dates`: the distinct close dates among its counted closes, all
+programs, and the date-clustered t of their P&L, the closes of one date summed; eight lots of a basket sold at one
+open are one date), beside and never a rule; no forward rule moves a seat. A reading with no
 equity close is read by the pinned rule's own measure, as before. The Done rule itself is unchanged.
 - Done's "live fills consistent with their replay" is read at each Done checkpoint, over its counted closes: the mean
   fill gap against the official-price model is at most 15 bp a side AND the live and the shadow intents agree on at

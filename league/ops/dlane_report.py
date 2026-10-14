@@ -168,9 +168,12 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   its counted sessions, beside the pinned rule's own measure (CONSISTENT WITH REPLAY, above). The meter hands each
   checkpoint's reading its A14 (`reading(..., a14=)`); a reading handed none (the running figures, never a Done
   reading) keeps the fill-gap half and is still NOT READ. Unmeasured, unreadable or misshapen, A14 does not hold and
-  the reading is not final; a frozen final reading is carried as it was. The close-date figures are not computed yet
-  and no forward rule moves a seat (`PREREGISTERED["status"]` says so in the report). A reading with no equity close
-  is read by the pinned rule's own measure, as before.
+  the reading is not final; a frozen final reading is carried as it was. THE CLOSE-DATE FIGURES ARE COMPUTED SINCE
+  RELEASE E4's STEP TWO (`close_dates`; each checkpoint's `close_dates`, beside and never a rule): the distinct close
+  dates among the checkpoint's counted closes, all programs, and the date-clustered t of their P&L (the closes of one
+  date summed: eight lots of a basket sold at one open are ONE date). No rule reads them, and no forward rule moves a
+  seat (`PREREGISTERED["status"]` says so in the report). A reading with no equity close is read by the pinned rule's
+  own measure, as before.
 - THE SEATS (release E5-A; the captain's A24, `SEAT_RULE`, registered Oct 11, 2026, before the first live share close
   and before any program waited for a seat, and amended by A30, `A30_SEAT_AMENDMENT`, before it went live; it
   replaced A14's forward seat sentence, which was written and never active): `equity.seats` is the EquityBook's own
@@ -354,8 +357,8 @@ PREREGISTERED = {
                  "it before it went live (`equity.seats.preregistered`), under which an idle seated program may yield "
                  "its seat whatever its closes; it reads no P&L of the forward record.",
     "status": "consistency is computed since release E3 (each checkpoint's `a14`: the size of the mean fill gap "
-              "either way, and the intents); the close-date figures are not computed yet and no forward rule moves a "
-              "seat",
+              "either way, and the intents); the close-date figures are computed since release E4's step two (each "
+              "checkpoint's `close_dates`, beside and never a rule); no forward rule moves a seat",
 }
 #: P(DONE | ZERO EDGE) BESIDE EQUITY CLOSES: the figure the report carries is the options Probe rules' simulation. No
 #: figure for the share lanes is stated (none is committed); this sentence rides on the figure and in each checkpoint's
@@ -1903,6 +1906,32 @@ def research_window(counted: Sequence[Mapping[str, Any]], k: int, previous_k: in
     return first, last
 
 
+def close_dates(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """A14's FIGURES BESIDE A DONE READING (`A14_BESIDE_DONE`; release E4 step two), over exactly `counted` (a
+    checkpoint's counted closes, every program and lane): {"closes", "dates" (the distinct close dates: a close's New
+    York `day`), "date_t" (the date-clustered t of their P&L: each date's priced closes summed in dollars, then mean /
+    sd (ddof 1) x sqrt(n) over the dates; None under two dates or with no spread), "unpriced" (closes with no P&L yet:
+    their dates count, their dollars do not), "note"}. THE HONESTY LINE FOR LOT-SPLITTING: a basket's eight lots sold at
+    one open are eight closes and ONE date. Beside, never a rule: no item of a reading, no hold and no alarm reads it."""
+    by_day: dict[str, Decimal] = {}
+    unpriced = 0
+    for c in counted:
+        day = str(c.get("day") or "") or _ny_day(_num(c.get("closed_at")))
+        by_day.setdefault(day, Decimal(0))
+        if c.get("pnl_usd") is None:
+            unpriced += 1
+        else:
+            by_day[day] += Decimal(str(c["pnl_usd"]))
+    values = [float(v) for _, v in sorted(by_day.items())]
+    t = None
+    if len(values) >= 2:
+        mean = math.fsum(values) / len(values)
+        sd = math.sqrt(math.fsum((v - mean) ** 2 for v in values) / (len(values) - 1))
+        t = round(mean / sd * math.sqrt(len(values)), 4) if sd > 1e-12 else None
+    return {"closes": len(counted), "dates": len(by_day), "date_t": t, "unpriced": unpriced,
+            "note": "beside, never a rule: the closes of one date are one market move (A14)"}
+
+
 def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store: Any, *,
           nightly_cache: dict[str, list] | None = None, lanes: Lanes | None = None,
           previous: Mapping[str, Any] | None = None, research: Any = None,
@@ -1972,6 +2001,7 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
                             "closes": at["closes"], "programs": at["programs"],
                             "programs_with_min_closes": at["programs_with_min_closes"], "net_usd": at["net_usd"],
                             "consistent_ok": at["consistent_ok"] and a14["holds"], "a14": a14,
+                            "close_dates": close_dates(counted[:k]),
                             "measured_programs": at["measured_programs"],
                             "replay_coverage": at["replay_coverage"], "by_program": programs,
                             "research_247": r247, "by_route": at["by_route"], "bh": at["bh"],
@@ -3437,6 +3467,7 @@ def lane_off(ctx: Any, root: Path, settings: Mapping[str, Any] | None) -> dict[s
 
 
 __all__ = ["run", "report", "FILE", "CONTAMINATION", "PREREGISTERED", "A14_CONSISTENCY", "A14_BESIDE_DONE",
+           "close_dates",
            "A14_SEAT_RULE", "A24_SEAT_RULE", "A24_SEAT_COSTS", "A30_SEAT_AMENDMENT", "SEAT_RULE", "equity_seats", "A14_GAP_BP", "A14_AGREEMENT", "a14_consistency", "ZERO_EDGE_EQUITY_NOTE", "LOOSENED",
            "TIGHTENED", "closes", "meter", "reading", "replay_gap",
            "replay_twins", "twin_records",

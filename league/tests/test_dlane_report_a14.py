@@ -410,3 +410,37 @@ class TheJobCarriesThem(A14Fixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheCloseDatesBesideEveryCheckpoint(A14Fixture):
+    """A14_BESIDE_DONE (release E4 step two; `close_dates`): each checkpoint carries the distinct close dates among
+    its counted closes, all programs, and the date-clustered t of their P&L, beside and never a rule. Eight lots of a
+    basket sold at one open are eight closes and ONE date. Every close invented."""
+
+    def test_thirty_closes_of_one_date_read_one_date_and_no_t(self):
+        self.thirty()
+        cp = self.latest()
+        self.assertEqual({k: cp["close_dates"][k] for k in ("closes", "dates", "date_t", "unpriced")},
+                         {"closes": 30, "dates": 1, "date_t": None, "unpriced": 0})
+        self.assertEqual((cp["holds"], cp["items"]), (True, {"3": True, "4": True, "7": True}), "no rule reads it")
+
+    def test_the_figures_by_hand(self):
+        def close(day, pnl):
+            return {"day": day, "pnl_usd": None if pnl is None else R.Decimal(pnl), "closed_at": 0.0}
+
+        rows = [close("2026-10-14", "2.00")] * 8 + [close("2026-10-15", "-1.00"), close("2026-10-16", "3.00"),
+                                                    close("2026-10-16", None)]
+        got = R.close_dates(rows)
+        sums = [16.0, -1.0, 3.0]
+        mean = sum(sums) / 3
+        sd = (sum((v - mean) ** 2 for v in sums) / 2) ** 0.5
+        self.assertEqual((got["closes"], got["dates"], got["unpriced"]), (11, 3, 1))
+        self.assertAlmostEqual(got["date_t"], round(mean / sd * 3 ** 0.5, 4))
+        self.assertEqual(R.close_dates([])["dates"], 0)
+        self.assertIsNone(R.close_dates([close("2026-10-14", "1.00"), close("2026-10-15", "1.00")])["date_t"],
+                          "no spread: no t")
+
+    def test_the_preregistration_says_the_figures_are_computed(self):
+        self.assertIn("close-date figures are computed since release E4's step two", R.PREREGISTERED["status"])
+        self.assertNotIn("not computed yet", R.PREREGISTERED["status"])
+        self.assertEqual(R.PREREGISTERED["beside_done"], R.A14_BESIDE_DONE, "the registered sentence is unchanged")
