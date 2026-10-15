@@ -139,8 +139,10 @@ program's run completed), the controls left without rows by anything but the dat
 raised (the registry's sync, the audit marks, the controls, the final checkpoints, the twins). Since the rehearsal of
 Oct 15, 2026 also the twins' `finish.failed`: an instance's twin that raised, or a lot's row that could not be made,
 is counted there and leaves no event. An interrupted or a deferred twin alone is not in it: it heals the next
-night, and league/ops/forward_report.py's FW9 tells a row still missing. The data's failures and a program that
-failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms read those.
+night, and league/ops/forward_report.py's FW9 tells a row still missing after that night (its one night of grace).
+The panel night (league/ops/forward_xs.py) raises its warning from this function too. The data's failures and a
+program that failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms read
+those.
 
 RELEASE E4 (package J). A PANEL program (a registry row whose `ugroup` begins "panel:") is never run here: its
 store, its engine and its day are the panel's. `due` leaves it out (`_mine`); THE PANEL NIGHT runs it
@@ -328,7 +330,7 @@ def house_failures(receipt: Mapping[str, Any]) -> list[str]:
             out.append(f"the twins' re-price of {whole(twins.get('errors')) - steps} runs raised")
         # An instance's twin that raised, or a lot row that could not be made, is counted in `finish.failed` and
         # leaves no event (an interrupted, deferred, mismatched or unregistered one has its own, or heals the next
-        # night: league/ops/forward_report.py FW9 reads the rows they leave out).
+        # night: league/ops/forward_report.py FW9 tells a row they leave out that the next night does not write).
         finish = twins.get("finish")
         failed = whole(finish.get("failed")) if isinstance(finish, Mapping) else 0
         if failed:

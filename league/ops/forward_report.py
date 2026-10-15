@@ -135,17 +135,25 @@ still raises RR, CP and MM, and `alarms` still hands them to the dlane report.
 - FW9 (warning; the rehearsal of Oct 15, 2026): THE ETF LANE'S TWINS FROM THE FIRST SESSION, as FX1 and FX2 are the
   panel lane's. FW6 reads an instance's agreement from 20 sessions, and the first Done checkpoint comes sooner; a
   missing row it never read. So:
-  (a) A LIVING ETF INSTANCE WITH A SESSION THAT HAS NO `fwd_twins` ROW (`_twin_gaps`). The sessions read run from its
+  (a) AN ETF INSTANCE WITH A SESSION THAT HAS NO `fwd_twins` ROW (`_twin_gaps`). The sessions read run from its
   first row (its first decision session, `forward_twins.d_first`, while it has none) through the session before the
-  last E3 night's `through`: that night writes the row of that session. The sessions of a retirement it came back
-  from (its `twin_retired` day to its next `twin_revived` day) are left out. One row an instance. The text counts
-  the sessions, names the first missing one, and names the latest twin event of it (interrupted, run sha mismatch,
-  unregistered). It catches every cause: a twin run interrupted, deferred, refused for its run sha or its key, one
-  that raised, a re-based twin that raised. A14 counts each such session as not agreed, and no Done checkpoint is
-  final while one is missing. A panel instance is FX1's. An instance with no registry row is read here: no twin is
-  made for it in either lane. Silent while `elane.forward.twins` is false (no row is made).
-  (b) EACH `fwd_twins` ROW OF AN ETF INSTANCE WITH `agree` 0 (`_twin_disagreed`), told once with its cause (the rows
-  written since the report before, as FX2), from the first session. A disagreement is data: the text says so.
+  one the last E3 night wrote. The night of `through` writes the row of the session before `through`; a twin
+  interrupted or deferred that night writes it the next night. So a row is told once the night after has not written
+  it either: ONE NIGHT OF GRACE (the review of Oct 15, 2026). The sessions of a retirement it came back from (its
+  `twin_retired` day to its next `twin_revived` day) are left out. A RETIRED instance is read too, while A14 counts or
+  will count one of its lots (one still open, or closed since the Done count began): a retirement's House exit is a
+  counted close, and A14 reads that instance's rows through the session before it. It is read through the last session
+  forward_twins writes for it (`forward_twins._last_needed`: the session before its last lot closed, or the one before
+  its retirement; every session while a lot is open). The sessions of that retirement are read: the twin writes them
+  as "retired" rows. One row an instance. The text counts the sessions, names the first missing one, and names the
+  latest twin event of it (interrupted, run sha mismatch, unregistered). It catches every cause: a twin run
+  interrupted or deferred two nights running, refused for its run sha or its key, one that raised, a re-based twin
+  that raised. A14 counts each such session as not agreed for a checkpoint that reads this instance, and such a
+  checkpoint is not final. A panel instance is FX1's. An instance with no registry row is read here: no twin is made
+  for it in either lane. Silent while `elane.forward.twins` is false (no row is made).
+  (b) EACH `fwd_twins` ROW OF AN ETF INSTANCE WITH `agree` 0 (`_twin_disagreed`), told with its cause in the reports
+  of the 24 hours after its row is written (the rows written since the report before, and at least the last 24 h, as
+  FX2), from the first session. A disagreement is data: the text says so.
 - RR1 (warning): a declared release receipt unread 24 h after its window closed; RR2 (info): a receipt read "flat"
   or "wrong_way" (listed for `RR2_DAYS` days, never reverted).
 - CP1 (info): a route unprobed for 45 days, or a readable 2025 or 2026H1 cell newly "recalled"; CP2 (warning): a route
@@ -240,6 +248,10 @@ FW6_SESSIONS = 20
 FW7_LATE_S = 2400
 #: FW9: the twin events that say why an instance's twin row was not made; a missing row's text names the latest.
 FW9_EVENTS = ("twin_interrupted", "twin_sha_mismatch", "twin_unregistered")
+#: FW9: where the Done meters start counting closes (league/ops/dlane_report.py `done_from`: DONE_FROM, 00:00 New York
+#: on Oct 10, 2026; a test holds the two equal, since this module may not import that one). A retired instance with no
+#: lot open, or closed since, is one A14 never reads.
+FW9_COUNTED_FROM = "2026-10-10T04:00:00Z"
 #: CP1: a route with no completed probe for this many days; the eras whose recalled cells it names; CP2: idle attempts.
 CP1_DAYS = 45
 CP1_ERAS = ("2025", "2026H1")
@@ -1274,8 +1286,8 @@ def _payload(text: Any) -> Mapping[str, Any]:
 
 
 def _retired_spans(db: sqlite3.Connection, pid: int | None, instance: str) -> list[tuple[str, str | None]]:
-    """FW9: the instance's retirements it came back from, as [(its `twin_retired` day, the first `twin_revived` day on
-    or after it | None)], oldest first (league/ops/forward_twins.py `_epochs`). A span with no revival yet runs on."""
+    """FW9: the instance's retirements on record, as [(its `twin_retired` day, the first `twin_revived` day on or after
+    it | None)], oldest first (league/ops/forward_twins.py `_epochs`). A span with no revival yet runs on."""
     if pid is None:
         return []
     marks: dict[str, set[str]] = {"twin_retired": set(), "twin_revived": set()}
@@ -1297,39 +1309,70 @@ def _last_twin_event(db: sqlite3.Connection, instance: str) -> tuple[str, str] |
     return None
 
 
-def _living_instances(root: Path) -> list[dict[str, Any]]:
-    """The live book's living equity instances (`eq_instances` with no `retired_at`): {"id", "created_at"}. [] with no
-    book or no such table; an unreadable book raises (the alarm says it could not be read)."""
+def _book_instances(root: Path) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    """FW9: the live book's equity instances (`eq_instances`: {"id", "created_at", "retired_at"}, living and retired)
+    and each one's lots (`eq_lots`: {"status", "exit_day", "closed_at"}; no price, size or cash is read). ([], {}) with
+    no book or no such table; an unreadable book raises (the alarm says it could not be read)."""
     from . import funnel
 
     path = root / funnel.LIVE_DB
     if not path.exists():
-        return []
+        return [], {}
 
-    def read(db: sqlite3.Connection) -> list[dict[str, Any]]:
-        if "eq_instances" not in set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'")):
-            return []
-        return _rows(db, "SELECT id, created_at FROM eq_instances WHERE retired_at IS NULL ORDER BY id")
+    def read(db: sqlite3.Connection) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+        tables = set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'"))
+        if "eq_instances" not in tables:
+            return [], {}
+        lots: dict[str, list[dict[str, Any]]] = {}
+        if "eq_lots" in tables:
+            for lot in _rows(db, "SELECT instance, status, exit_day, closed_at FROM eq_lots ORDER BY lid"):
+                lots.setdefault(str(lot["instance"]), []).append(lot)
+        return _rows(db, "SELECT id, created_at, retired_at FROM eq_instances ORDER BY id"), lots
 
     return guard.read(path, read)
 
 
+def _counted_lot(lot: Mapping[str, Any], counted_from: float) -> bool:
+    """FW9: whether the Done meters count a lot's close, or will (league/ops/dlane_report.py `equity_closes`): it is
+    not closed yet, or it closed at or after the count's start. A close time that cannot be read is counted."""
+    if str(lot.get("status") or "") != "closed":
+        return True
+    try:
+        return float(lot["closed_at"]) >= counted_from
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
 def _twin_gaps(db: sqlite3.Connection, root: Path, settings: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    """FW9 (a): a living ETF instance with a session that has no `fwd_twins` row, from its first row (its first
-    decision session while it has none) through the session before the last E3 night's `through`. The sessions of a
-    retirement it came back from are left out. A panel instance is FX1's. One with no registry row is read here: no
-    twin is made for it in either lane. Silent while `elane.forward.twins` is false (no row is made)."""
+    """FW9 (a): an ETF instance with a session that has no `fwd_twins` row, from its first row (its first decision
+    session while it has none) through the session before the one the last E3 night wrote (ONE NIGHT OF GRACE: a twin
+    interrupted or deferred one night writes that row the next). The sessions of a retirement it came back from are
+    left out. A RETIRED instance is read while A14 counts or will count one of its lots (one open, or closed since the
+    Done count began), through the last session forward_twins writes for it (`_last_needed`: the session before its
+    last lot closed, or the one before its retirement); the sessions of that retirement are read, because the twin
+    writes them as "retired" rows. A panel instance is FX1's. One with no registry row is read here: no twin is made
+    for it in either lane. Silent while `elane.forward.twins` is false (no row is made)."""
     from ..equity import schedule as ES
     from . import forward_twins, forward_xs
 
-    living = _living_instances(root) if _cfg(settings).get("twins") is True else []
-    nights = _nights(db) if living else []
+    instances, lots = _book_instances(root) if _cfg(settings).get("twins") is True else ([], {})
+    nights = _nights(db) if instances else []
     if not nights:
         return []
-    last = ES.previous_session(dt.date.fromisoformat(str(nights[0]["through"])[:10])).isoformat()
+    # The night of `through` writes the row of the session before it; a row of that session missing tonight is the
+    # next night's to write. So a row is told once the night after the one that owed it has not written it either.
+    last = ES.previous_session(ES.previous_session(dt.date.fromisoformat(str(nights[0]["through"])[:10])))
+    counted_from = float(S.epoch(FW9_COUNTED_FROM))
     out = []
-    for inst in living:
+    for inst in instances:
         iid = str(inst["id"])
+        mine = lots.get(iid, [])
+        try:
+            retired = forward_twins.d_retired(inst)
+        except (KeyError, TypeError, ValueError):
+            retired = None
+        if retired is not None and not any(_counted_lot(lot, counted_from) for lot in mine):
+            continue    # A14 never reads it: no lot of it is counted, and none ever will be
         found = _rows(db, "SELECT pid, ugroup FROM fwd_registry WHERE key=?", (forward_twins.registry_key(iid),))
         if found and forward_xs.is_panel(found[0]):
             continue
@@ -1342,14 +1385,29 @@ def _twin_gaps(db: sqlite3.Connection, root: Path, settings: Mapping[str, Any] |
                                    "cannot be checked", f"instance {iid} missing"))
             continue
         spans = _retired_spans(db, pid, iid)
-        days = [day for day in forward_days(first, last)
+        end = last
+        if retired is not None:
+            # forward_twins' own range for the run the book retired (`_one_instance`): through `_last_needed` of the
+            # run's retirement (its first one on record with no revival, else the book's), every session while a lot
+            # of it is open. Its retirement's sessions are written as "retired" rows, so they are read.
+            running = [dt.date.fromisoformat(gone) for gone, back in spans if back is None]
+            try:
+                stop = forward_twins._last_needed(mine, min([retired, *running]))
+            except (KeyError, TypeError, ValueError):
+                stop = None
+            end = last if stop is None else min(last, stop)
+            spans = [(gone, back) for gone, back in spans if back is not None]
+        days = [day for day in forward_days(first, end)
                 if not any(gone <= day and (back is None or day < back) for gone, back in spans)]
         missing = [day for day in days if day not in have]
         if not missing:
             continue
-        text = (f"its shadow twin has no row for {len(missing)} of its {len(days)} sessions from {first} to {last} "
-                f"(the first: {missing[0]}). A14 counts each as not agreed, and no Done checkpoint is final while one "
-                "is missing")
+        text = (f"its shadow twin has no row for {len(missing)} of its {len(days)} sessions from {first} to "
+                f"{end.isoformat()} (the first: {missing[0]}). A14 counts each as not agreed for a checkpoint that "
+                "reads this instance, and such a checkpoint is not final")
+        if retired is not None:
+            text += (f". It is retired from {retired.isoformat()}, and A14 still reads its rows through the session "
+                     "before its last lot closed")
         if pid is None:
             text += ". Its key is not in the forward registry, so no twin is made"
         hint = _last_twin_event(db, iid)
@@ -1360,8 +1418,9 @@ def _twin_gaps(db: sqlite3.Connection, root: Path, settings: Mapping[str, Any] |
 
 
 def _twin_disagreed(db: sqlite3.Connection, since: float) -> list[dict[str, Any]]:
-    """FW9 (b): each `fwd_twins` row of an ETF instance with `agree` 0 written since `since`, told once with its
-    cause, from the first session (FW6's share waits for 20). A panel row is FX2's."""
+    """FW9 (b): each `fwd_twins` row of an ETF instance with `agree` 0 written since `since`, told with its cause in
+    the reports of the 24 hours after it is written (as FX2), from the first session (FW6's share waits for 20). A
+    panel row is FX2's."""
     out = []
     for row in _rows(db, "SELECT t.instance, t.day, t.cause FROM fwd_twins t LEFT JOIN fwd_registry r ON r.pid=t.pid "
                          "WHERE t.agree=0 AND t.at>=? AND (r.ugroup IS NULL OR r.ugroup NOT LIKE ?) "

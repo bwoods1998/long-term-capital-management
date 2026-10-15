@@ -43,9 +43,10 @@ Since Oct 10, 2026 (the readiness audit's M6: the direction lane's alarms, K5, a
 dead nightly reached a ledger row no mail carries):
 - `dlane`: the direction lane's report (`<state>/dlane-report.json`, the `dlane` job) carries a warning-level alarm
   (A1-A7, PL1 the program loss line, PT1 the $800 Probe total off roster 5, K5; since Oct 15, 2026 DC1, a Done
-  checkpoint that is final and does not hold or is 2 UTC days short of final), or it is older than
-  `DLANE_STALE_HOURS` while the lane is on. K5 holding (the lane reads shadow until it is cleared) or disarmed
-  (`dlane.k5_clear` left true) is the owner's step; no other alarm is (DC1 is a House warning only);
+  checkpoint that is final and does not hold, or is still not final at the pre-open of the 2nd session after its last
+  close), or it is older than `DLANE_STALE_HOURS` while the lane is on. K5 holding (the lane reads shadow until it is
+  cleared) or disarmed (`dlane.k5_clear` left true) is the owner's step; no other alarm is (DC1 is a House warning
+  only). The mail names the first 4 warnings, K5 and DC1 before the rest (`MAIL_FIRST`);
 - `done`: a FINAL Done checkpoint that holds (the report's `done.<meter>.checkpoints`, final and holding: frozen from
   report to report) that no SENT notice has told yet (`stall.json` `done_told`, which a notice carrying the cause adds
   to once the gateway says it sent it). News the owner hears at once (an owner line), never an owner step WAITING: the
@@ -1708,6 +1709,10 @@ DONE_STEP = ("Done holds at a FINAL checkpoint ({named}): read the claim in dlan
              "P(Done | zero edge), the same-risk buy-and-hold and Net after costs); the plan to scale follows from it")
 
 
+#: The direction lane's warnings the `dlane` cause's mail names first (`_lane_checks`), in this order.
+MAIL_FIRST = ("K5", "DC1")
+
+
 def done_key(meter: Any, at_close: Any) -> str:
     """A Done checkpoint's key in stall.json's `done_told` ("done_all:30")."""
     return f"{meter}:{at_close}"
@@ -1738,7 +1743,11 @@ def _lane_checks(now: float, dlane: Mapping[str, Any] | None, lane_on: bool | No
     step = None
     if k5_alarm is not None:
         step = K5_DISARMED_STEP if k5_alarm.get("disarmed") or (k5.get("cleared") and not k5.get("tripped")) else K5_STEP
-    texts = "; ".join(f"{a.get('id')}: {str(a.get('text') or '')[:160]}" for a in warnings[:4])
+    # The mail carries the first 4 warnings: K5 (the owner's step) and DC1 (a Done checkpoint that does not hold, or is
+    # not final) go first, so no 4 standing warnings before them hide them (the review of Oct 15, 2026).
+    rank = {name: i for i, name in enumerate(MAIL_FIRST)}
+    first = sorted(warnings, key=lambda a: rank.get(a.get("id"), len(rank)))
+    texts = "; ".join(f"{a.get('id')}: {str(a.get('text') or '')[:160]}" for a in first[:4])
     if off:
         what = LANE_OFF_WHAT
     elif report:
@@ -1751,7 +1760,7 @@ def _lane_checks(now: float, dlane: Mapping[str, Any] | None, lane_on: bool | No
     dlane_out = {
         "stalled": bool(warnings) or stale,
         "what": what,
-        "numbers": {"alarms": ",".join(str(a.get("id")).lower() for a in warnings)[:80] or "none",
+        "numbers": {"alarms": ",".join(str(a.get("id")).lower() for a in first)[:80] or "none",
                     "report_at": None if at is None else S.iso(at),
                     "report_age_hours": None if age is None else round(age / 3600.0, 1),
                     "k5": "off" if off else "tripped" if k5.get("tripped") else "disarmed" if k5.get("cleared") else "armed",

@@ -37,6 +37,7 @@ import numpy as np
 from league.equity import config
 from league.equity import schedule as ES
 from league.ops import forward_db
+from league.ops import dlane_report, forward_twins
 from league.ops import forward_report as R
 from league.ops import forward_stats as FS
 from league.ops import guard
@@ -1746,9 +1747,10 @@ class EachForwardAlarm(Fixture):
 
 
 class FW9TheETFTwinsFromTheFirstSession(Fixture):
-    """FW9 (the rehearsal of Oct 15, 2026): (a) a living ETF instance with a session that has no twin row, from its
-    first row through the session before the last night's `through`, a retirement it came back from left out; (b)
-    each disagreement, told once with its cause, from the first session."""
+    """FW9 (the rehearsal of Oct 15, 2026): (a) an ETF instance with a session that has no twin row, from its first row
+    through the session before the one the last night wrote (one night of grace), a retirement it came back from left
+    out, a retired instance read while A14 counts one of its lots; (b) each disagreement with its cause, from the
+    first session."""
 
     def setUp(self):
         super().setUp()
@@ -1779,6 +1781,26 @@ class FW9TheETFTwinsFromTheFirstSession(Fixture):
                             "VALUES(?, ?, ?, '[]', '[]', ?, ?, ?)",
                             (instance, day, pid or self.pid_a, agree, self.now - 3600 if at is None else at, cause))
 
+    def lot(self, lid: int, *, opened: str, exit_day: str | None = None, closed_at: float | None = None,
+            instance: str = "a@1:r") -> None:
+        """An `eq_lots` row of the instance (league/equity/live.py SCHEMA; its money invented): closed at `exit_day`'s
+        open when it has one, else open."""
+        status = "closed" if exit_day else "open"
+        if exit_day and closed_at is None:
+            closed_at = ny(exit_day, 9, 31)
+        self.live.db.execute(
+            "INSERT INTO eq_lots(lid, instance, family, version, lane, symbol, class, qty, opened_qty, entry_px, "
+            "entry_notional, entry_at, opened_at, opened_day, status, exit_at, exit_day, closed_at) "
+            "VALUES(?, ?, ?, 1, 'beta', 'SPY', 'etf', '1', '1', '1', '1', 'open', ?, ?, ?, ?, ?, ?)",
+            (lid, instance, instance.split("@")[0], ny(opened, 9, 31), opened, status, "open" if exit_day else None,
+             exit_day, closed_at))
+        self.live.db.commit()
+
+    def retire(self, day: str, instance: str = "a@1:r") -> None:
+        """The book retires the instance in `day`'s decide step (its first session with no live decision)."""
+        self.live.db.execute("UPDATE eq_instances SET retired_at=? WHERE id=?", (close(day) + 3600, instance))
+        self.live.db.commit()
+
     def fw9(self, settings=RECORD) -> list[dict]:
         rows = [a for a in self.section(settings)["alarms"] if a["id"] == "FW9"]
         for row in rows:
@@ -1789,15 +1811,16 @@ class FW9TheETFTwinsFromTheFirstSession(Fixture):
     def test_a_missing_row_between_the_first_row_and_the_session_before_the_night(self):
         for day in (DAYS[0], DAYS[1], DAYS[3], DAYS[4]):
             self.twin(day)
-        self.night(DAYS[5])                      # that night writes the rows of DAYS[4]; DAYS[5]'s come the next
+        self.night(DAYS[6])                      # DAYS[4]'s row was DAYS[5]'s night's; DAYS[6]'s night tried again
         (alarm,) = self.fw9()
         self.assertEqual(alarm["text"], f"FW9 instance a@1:r missing: its shadow twin has no row for 1 of its 5 sessions "
                                         f"from {DAYS[0]} to {DAYS[4]} (the first: {DAYS[2]}). A14 counts each as not "
-                                        "agreed, and no Done checkpoint is final while one is missing")
+                                        "agreed for a checkpoint that reads this instance, and such a checkpoint is not "
+                                        "final")
         self.twin(DAYS[2])
-        self.assertEqual(self.fw9(), [], "every session through the one before the night has its row")
+        self.assertEqual(self.fw9(), [], "every session through the one before the night's own has its row")
 
-    def test_the_night_that_owes_the_row_is_the_last_e3_night(self):
+    def test_one_night_of_grace_on_the_last_e3_night(self):
         for day in DAYS[:5]:
             self.twin(day)
         self.night(DAYS[5])
@@ -1805,12 +1828,20 @@ class FW9TheETFTwinsFromTheFirstSession(Fixture):
         with self.db:                            # the panel lane's night is not E3's: it owes no ETF row
             self.db.execute("INSERT INTO fwd_runs(job, through, engine, started, finished, seconds, programs, sessions, "
                             "errors, stale, budget_hit, head) VALUES('forward_xs', ?, ?, 1.0, 2.0, 1.0, 0, 0, 0, 0, 0, "
-                            "'h')", (DAYS[6], self.engine))
+                            "'h')", (DAYS[7], self.engine))
         self.assertEqual(self.fw9(), [])
-        self.night(DAYS[6])                      # E3's night that wrote no row of DAYS[5] for it
+        self.night(DAYS[6])                      # E3's night that wrote no row of DAYS[5]: the next night writes it
+        self.event("twin_interrupted", pid=self.pid_a, day=DAYS[6], at=ny(DAYS[6], 18, 40),
+                   payload={"instance": "a@1:r", "why": "the decider child failed a twin's decide (DeciderError)"})
+        self.assertEqual(self.fw9(), [], "an interrupted or deferred twin alone is not told: it heals the next night")
+        self.night(DAYS[7])                      # it did not heal
         (alarm,) = self.fw9()
         self.assertIn(f"no row for 1 of its 6 sessions from {DAYS[0]} to {DAYS[5]} (the first: {DAYS[5]})",
                       alarm["text"])
+        self.assertTrue(alarm["text"].endswith(f". Its latest twin event: twin_interrupted of {DAYS[6]}"))
+        self.twin(DAYS[5])
+        self.twin(DAYS[6])
+        self.assertEqual(self.fw9(), [], "healed")
 
     def test_the_sessions_are_read_from_its_first_row(self):
         for day in (DAYS[3], DAYS[4]):           # created at DAYS[0], rows from DAYS[3]: read from its first row
@@ -1822,6 +1853,8 @@ class FW9TheETFTwinsFromTheFirstSession(Fixture):
         self.night(DAYS[0])
         self.assertEqual(self.fw9(), [], "its first row is due the night after the next session")
         self.night(DAYS[1])
+        self.assertEqual(self.fw9(), [], "the night it is due, with one night of grace")
+        self.night(DAYS[2])
         (alarm,) = self.fw9()
         self.assertIn(f"no row for 1 of its 1 sessions from {DAYS[0]} to {DAYS[0]}", alarm["text"])
 
@@ -1840,7 +1873,7 @@ class FW9TheETFTwinsFromTheFirstSession(Fixture):
         for day in DAYS[:3]:
             self.twin(day)
         self.event("twin_unregistered", at=ny(DAYS[1], 18, 40), payload={"instance": "z@1:r"})
-        self.night(DAYS[3])
+        self.night(DAYS[4])
         (alarm,) = self.fw9()
         self.assertTrue(alarm["text"].startswith("FW9 instance z@1:r missing: its shadow twin has no row for 3 of its 3"))
         self.assertIn(". Its key is not in the forward registry, so no twin is made. Its latest twin event: "
@@ -1861,19 +1894,59 @@ class FW9TheETFTwinsFromTheFirstSession(Fixture):
             self.twin(day)
         self.event("twin_retired", pid=self.pid_a, day=DAYS[3], payload={"instance": "a@1:r"})
         self.event("twin_revived", pid=self.pid_a, day=DAYS[5], payload={"instance": "a@1:r"})
-        self.night(DAYS[9])
+        self.night(DAYS[10])
         (alarm,) = self.fw9()
         self.assertIn(f"no row for 1 of its 7 sessions from {DAYS[0]} to {DAYS[8]} (the first: {DAYS[5]})", alarm["text"])
 
-    def test_a_retired_instance_and_a_panel_instance_are_not_read(self):
-        self.live.db.execute("UPDATE eq_instances SET retired_at=? WHERE id='a@1:r'", (close(DAYS[2]),))
-        self.live.db.commit()
+    def test_the_done_count_start_is_the_dlane_reports(self):
+        self.assertEqual(S.epoch(R.FW9_COUNTED_FROM), dlane_report.done_from())
+
+    def test_a_retired_instance_a14_never_reads_and_a_panel_instance_are_not_read(self):
+        self.retire(DAYS[2])
         panel = self.register("p@1", ugroup="panel:sp500", first_day=DAYS[0])
         self.book_with("p@1:r", created=close(DAYS[0]) + 3600)
-        self.night(DAYS[5])
-        self.assertEqual(self.fw9(), [], "the retired one is FW6's and A14's; the panel one is FX1's")
+        self.night(DAYS[6])
+        self.assertEqual(self.fw9(), [], "retired with no lot: A14 never reads it; the panel one is FX1's")
+        self.lot(1, opened=DAYS[0], exit_day=DAYS[1], closed_at=dlane_report.done_from() - 60)
+        self.assertEqual(self.fw9(), [], "its one lot closed before the Done count began: never counted")
         self.twin(DAYS[0], instance="p@1:r", pid=panel)     # with a row: still FX1's, never FW9's
         self.assertEqual(self.fw9(), [])
+
+    def test_a_retired_instances_rows_are_read_through_its_last_lots_exit(self):
+        # Retired in DAYS[4]'s decide step; its lot exits at DAYS[5]'s open (the House's exit: a counted close). A14
+        # reads its rows through DAYS[4], the session before that exit; forward_twins writes them on the nights after
+        # the retirement (DAYS[4]'s as a "retired" row).
+        self.lot(1, opened=DAYS[1], exit_day=DAYS[5])
+        self.retire(DAYS[4])
+        self.event("twin_retired", pid=self.pid_a, day=DAYS[4], payload={"instance": "a@1:r"})   # its own retirement
+        for day in DAYS[:3]:
+            self.twin(day)
+        self.night(DAYS[6])
+        counted = [{"equity": True, "pid": "eq:1", "instance": "a@1:r", "day": DAYS[5], "opened_day": DAYS[1]}]
+        reading = forward_twins.a14_reading(self.root, counted)
+        self.assertEqual((reading["intents"]["missing"], reading["final"]), (2, False))
+        (alarm,) = self.fw9()
+        self.assertEqual(alarm["text"], f"FW9 instance a@1:r missing: its shadow twin has no row for 2 of its 5 sessions "
+                                        f"from {DAYS[0]} to {DAYS[4]} (the first: {DAYS[3]}). A14 counts each as not "
+                                        "agreed for a checkpoint that reads this instance, and such a checkpoint is not "
+                                        f"final. It is retired from {DAYS[4]}, and A14 still reads its rows through "
+                                        "the session before its last lot closed")
+        self.twin(DAYS[3])
+        self.twin(DAYS[4], None)                 # the retired session's own row: unreadable, "retired"
+        self.assertEqual(self.fw9(), [])
+        self.night(DAYS[9])
+        self.assertEqual(self.fw9(), [], "no row is owed after the session before its last lot closed")
+
+    def test_a_retired_instance_with_a_lot_still_open_is_read_through_the_night(self):
+        self.lot(1, opened=DAYS[1])
+        self.retire(DAYS[2])
+        for day in DAYS[:4]:
+            self.twin(day)
+        self.night(DAYS[6])
+        (alarm,) = self.fw9()
+        self.assertIn(f"no row for 1 of its 5 sessions from {DAYS[0]} to {DAYS[4]} (the first: {DAYS[4]})",
+                      alarm["text"])
+        self.assertIn(f"It is retired from {DAYS[2]}", alarm["text"])
 
     def test_silent_while_the_twins_are_off_and_while_the_forward_mode_is(self):
         self.night(DAYS[5])

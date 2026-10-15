@@ -207,7 +207,7 @@ Every existing name the spec calls was checked against 5a6906ff. Signatures matc
     left without rows by anything but the data, and each step that raised (the sync, the audit marks, the controls,
     the final checkpoints, the twins). Since the rehearsal of Oct 15, 2026 also the twins' `finish.failed` (an
     instance's twin that raised, or a lot's row not made): it leaves no event. Not an interrupted or a deferred twin
-    alone: FW9 tells a twin row still missing.
+    alone: FW9 tells a twin row still missing after the next night.
     A `restated` event is one a program and cause (section 3): FW3 counts restatements, and their days are the
     payloads' `days`; `"bars": "moved"` is the routine ex-day one, `"same"` the one worth a warning.
 
