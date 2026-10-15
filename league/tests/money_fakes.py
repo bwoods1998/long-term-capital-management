@@ -20,7 +20,7 @@ from league.constitution import CONSTITUTION
 
 #: The rows release L-D moved or added, at the values that run fast lane v2's rules (the CON-only rollback).
 FAST_LANE_V2 = {"loss_basis": "gross", "max_open": 3, "demotion": "dm0", "loss_total_usd": "400",
-                "loss_window_sessions": 2000}
+                "loss_window_sessions": 2000, "open_per_family": 3}
 
 
 def constitution(**probe: Any) -> dict:

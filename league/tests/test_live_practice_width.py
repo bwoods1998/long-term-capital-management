@@ -451,6 +451,15 @@ def decide(ctx):
 '''
 
 
+
+def caps_at(open_per_family):
+    """The practice caps (`shadow._probe_caps`) with the Probe's open count set: the tests of the count's arithmetic were
+    written at 3, the row's rollback (one open structure a Probe family since Oct 15, 2026). The caps are cached a
+    process, so the function is patched, never the constitution."""
+    share_floor, _, family = S._probe_caps()
+    return share_floor, int(open_per_family), family
+
+
 def opener(name, **params):
     return dict(validated(name, params={"qty": 1, "width": 1.0, **params}), code=OPENER)
 
@@ -473,7 +482,21 @@ class PracticeCaps(PracticeCase):
         finally:
             db.close()
 
+    def test_a_practice_account_holds_one_structure_at_the_row_in_force(self):
+        """`options_money.probe.open_per_family` 1 since Oct 15, 2026: the practice book follows the row's count."""
+        self.build(observed=[opener("one")])
+        self.run_to(9, 45)
+        acc = self.live.shadow.accounts["one@1:o"]
+        self.assertEqual(len(acc.positions), 1)
+        self.assertEqual(acc.counts["opens"], 1, "a refused open was never an order")
+        reasons = self.rejected("one")
+        self.assertTrue(reasons and all(r.startswith("practice cap: 1 structures open or working") for r in reasons), reasons)
+
     def test_a_practice_account_holds_at_most_three_structures(self):
+        """At the row's rollback (3, before Oct 15, 2026)."""
+        opf = mock.patch.object(S, "_probe_caps", return_value=caps_at(3))
+        opf.start()
+        self.addCleanup(opf.stop)
         self.build(observed=[opener("many")])
         self.run_to(9, 45)
         acc = self.live.shadow.accounts["many@1:o"]
@@ -494,6 +517,9 @@ class PracticeCaps(PracticeCase):
             db.close()
 
     def test_an_open_over_the_probes_share_of_capital_is_sized_down_as_a_probes(self):
+        opf = mock.patch.object(S, "_probe_caps", return_value=caps_at(3))    # the count it was written at
+        opf.start()
+        self.addCleanup(opf.stop)
         self.build(observed=[opener("big", qty=40)])                        # about $2,000 of maximum loss
         self.run_to(9, 36)
         acc = self.live.shadow.accounts["big@1:o"]
@@ -585,6 +611,10 @@ class CapArithmetic(unittest.TestCase):
         self.assertTrue(why.startswith("practice cap: one structure risks 101.00"), why)
 
     def test_structures_held_and_working_count_once_each(self):
+        """At the row's rollback, three a family (`open_per_family` 1 since Oct 15, 2026: the last assertion)."""
+        opf = mock.patch.object(S, "_probe_caps", return_value=caps_at(3))
+        opf.start()
+        self.addCleanup(opf.stop)
         acc = self.account()
         acc.positions = {1: self.position(1, 1.0), 2: self.position(2, 1.0)}
         acc.orders = {5: self.working(5, 1.0, pid=2)}                        # the rest of a partly filled open: held
@@ -592,8 +622,16 @@ class CapArithmetic(unittest.TestCase):
         acc.orders[6] = self.working(6, 1.0)                                 # a third structure, working
         self.assertEqual(acc._practice_cap([self.working(9, 1.0)]),
                          ({}, "practice cap: 3 structures open or working, the most a Probe holds is 3"))
+        opf.stop()
+        acc.positions, acc.orders = {1: self.position(1, 1.0)}, {}
+        self.assertEqual(acc._practice_cap([self.working(9, 1.0)]),
+                         ({}, "practice cap: 1 structures open or working, the most a Probe holds is 1"))
+        opf.start()
 
     def test_the_familys_maximum_loss_at_risk(self):
+        opf = mock.patch.object(S, "_probe_caps", return_value=caps_at(3))    # two held: the count's 3
+        opf.start()
+        self.addCleanup(opf.stop)
         acc = self.account()
         acc.positions = {1: self.position(1, 7.0)}                           # 700 held from before the caps
         acc.orders = {5: self.working(5, 6.0)}                               # 600 working

@@ -138,8 +138,9 @@ class TheRows(unittest.TestCase):
         self.assertEqual(OPTIONS_MONEY_CHOICES, {"probe.loss_basis": ("gross", "net"), "probe.demotion": ("dm0", "dm1")})
         self.assertEqual(M.LOSS_BASES, OPTIONS_MONEY_CHOICES["probe.loss_basis"])
         self.assertEqual(M.DEMOTION_RULES, OPTIONS_MONEY_CHOICES["probe.demotion"])
+        # (`open_per_family` 3: fast lane v2's count, restated since one open structure a Probe family, Oct 15, 2026)
         self.assertEqual(FAST_LANE_V2, {"loss_basis": "gross", "max_open": 3, "demotion": "dm0", "loss_total_usd": "400",
-                                        "loss_window_sessions": 2000})
+                                        "loss_window_sessions": 2000, "open_per_family": 3})
         self.assertEqual(options_money_problems(), [])
         self.assertEqual(options_money_problems(constitution(**FAST_LANE_V2)), [], "the CON-only rollback is in bounds")
         t = M.Table.from_constitution()
@@ -182,7 +183,8 @@ class TheRows(unittest.TestCase):
         # Release E1's `equity_money` (the equity lane) moved it again (league/tests/test_constitution.py): these are the
         # digests of the constitution without that block, as L-D and the $800 total had it.
         def pre_e1(**probe):
-            c = constitution(**probe)
+            # (and before one open structure a Probe family, Oct 15, 2026: `open_per_family` 3 in every release here)
+            c = constitution(**{"open_per_family": 3, **probe})
             del c["equity_money"]
             return c
 

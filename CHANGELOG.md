@@ -30,6 +30,28 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### One open structure a Probe family (`options_money.probe.open_per_family` 3 -> 1), on `feat/options-opf1` (unreleased; an owner deploy outside 12:55-20:05Z; THE MONEY DIGEST MOVES ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
+
+- **The row** (`league/constitution.py`, the comment above `options_money`): `probe.open_per_family` 3 -> 1, inside
+  its bound (1 to 5), a tightening. A Probe options family holds one open structure at a time; its next open waits
+  until that one has closed. Nothing else moves: the 10% cap, `family_share` 0.15, `max_open` 8, the $400 window, the
+  $800 total, DM1, the kill switch and the stops.
+- **Why.** The one options program at Probe buys a short-dated call on every session its gate is on and holds each to
+  expiry; at 3 it can hold three, each taking room in the $400 window the six share programs size their lots against.
+  A pre-registered study on the House's own engine and sizing (3,048 historical paths from the live state, A32's six,
+  no new share program arriving) read the program as coded against one structure at a time: P(Done) by Dec 7 +3.2
+  points (SE 1.1) with its calls priced from the paths, +2.3 (SE 1.1) with their mean set to a 10% loss; fewer refused
+  share entries (19.6 -> 15.8 a path) and fewer checkpoints failing the consistency clause (7.1% -> 4.6% of paths).
+- **Its cost.** About 0.6 fewer options closes a path in 12 weeks; a Probe options program trades a smaller book than
+  its replay holds (a refused open is no close, so no twin moves); the practice book (`league/live/shadow.py`) scales
+  to one structure a family too. No program is stopped and no position is sold.
+- **Identities.** Money digest `de5ed74e` -> `cd579e5d`, constitution `111ede85` -> `1e14c7f7` (`PINNED_DIGEST`); the
+  equity design blocks restate them. `league/tests/equity_design.py` keeps the older pins as `DIGESTS_E4S2`
+  (`before_opf1`: the row set back to 3) and every older table's helper sets the row back too;
+  `league/tests/test_options_one_open.py` holds the row, `plan_open` with it, and the digests.
+- **Rollback**, one owner deploy: `open_per_family` 3 (re-pin `PINNED_DIGEST`, rewrite the design blocks); the money
+  digest moves back and the grant re-ratifies.
+
 ### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, a post-close checkpoint, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
 
 - **What it carries:** release T (`rel/e4-fwd1` `6b0c41bb`, PR #546: E4 step one with A32, FWD1-R, R-SEC), merged with
@@ -914,7 +936,7 @@ the equity lots: $400 - 0.20 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 16 sends of such a lot: 3 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.50 x E and
 0.50 x E.
-Money digest `de5ed74e`, full digest `111ede85` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `46b933a9` / `d9cf3149`.
+Money digest `cd579e5d`, full digest `1e14c7f7` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

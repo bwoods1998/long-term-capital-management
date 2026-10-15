@@ -45,8 +45,8 @@ class TheTable(unittest.TestCase):
         self.assertEqual(t.credit_types, ("credit_vertical", "iron_condor", "iron_butterfly"))
         # THE FAST LANE (Oct 7, 2026; the owner's goal item 4): one structure within 10% of E, no floor, a $400 Probe loss
         # budget; since release L-D (Oct 9, 2026) at most 8 Probe positions at once (3 before), the budget read NET and
-        # DM1's demotion.
-        self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.10"), 3, D("0.15"), D("0")))
+        # DM1's demotion; since Oct 15, 2026 one open structure a Probe family (3 before: THRU-1015).
+        self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.10"), 1, D("0.15"), D("0")))
         self.assertEqual((t.probe_contracts, t.probe_max_open, t.probe_loss_budget), (1, 8, D("400")))
         self.assertEqual((t.probe_loss_basis, t.probe_demotion), ("net", "dm1"))
         self.assertEqual((t.sized_min_trades, t.sized_confidence, t.kelly_fraction), (20, 0.8, 0.25))
@@ -288,9 +288,17 @@ class Sizing(unittest.TestCase):
         self.assertEqual(self.plan(40.00, equity="1288.40").qty, 1)
         self.assertEqual(self.plan(130.00, equity="1288.40").qty, 0, "over $128.84")
 
-    def test_three_open_structures_a_probe_family(self):
-        self.assertEqual(self.plan(50, family_open=2).qty, 1)
-        self.assertIn("the most a Probe family holds is 3", self.plan(50, family_open=3).reason)
+    def test_one_open_structure_a_probe_family(self):
+        """`open_per_family` 1 since Oct 15, 2026 (3 before: its rollback, read here too)."""
+        self.assertEqual(self.plan(50, family_open=0).qty, 1)
+        self.assertIn("the most a Probe family holds is 1", self.plan(50, family_open=1).reason)
+        c = copy.deepcopy(CONSTITUTION)
+        c["options_money"]["probe"]["open_per_family"] = 3
+        t3 = M.Table.from_constitution(c)
+        at3 = lambda n: M.plan_open(t3, band="probe", tuition=False, equity=D("5481.65"), unit=D("50"), fwd=None,
+                                    exposure=M.Exposure(family_open=n))
+        self.assertEqual(at3(2).qty, 1)
+        self.assertIn("the most a Probe family holds is 3", at3(3).reason)
 
     def test_the_family_total(self):
         # 15% of 5,481.65 = 822.2475; 770 open leaves 52.24: one $50 structure fits, then none.
@@ -311,7 +319,8 @@ class Sizing(unittest.TestCase):
 
     def test_a_sized_family_whose_kelly_is_under_the_probes_cap_keeps_the_probes_limits(self):
         """C3 (the review of #362), kept by the fast lane (its review, Oct 7, 2026): a Kelly stake under the Probe's cap, or
-        one that buys no whole structure, is sized under the Probe's limits: one structure, three open, 15% the family."""
+        one that buys no whole structure, is sized under the Probe's limits: one structure, `open_per_family` open (one
+        since Oct 15, 2026; three before), 15% the family."""
         weak = fwd([0.44, -0.28] * 10)                 # mean 0.08, sd 0.37: LCB barely positive, quarter-Kelly about $105
         self.assertTrue(M.sized_ok(self.t, weak))
         kelly = M.kelly_cap(self.t, D("5481.65"), weak)
@@ -321,9 +330,9 @@ class Sizing(unittest.TestCase):
         self.assertEqual(M.structure_cap(self.t, "probe", D("5481.65"), weak), M.probe_cap(self.t, D("5481.65")))
         self.assertEqual(self.plan(200, band="sized", fwd_=weak).qty, 1, "never smaller than a Probe: one structure")
         self.assertEqual(self.plan(10, band="sized", fwd_=weak).qty, 1, "a Probe-sized stake: the Probe's one structure")
-        # Sized at a Probe-sized stake never gets the Sized family limits: three open, 15%.
-        self.assertIn("the most a Probe family holds is 3", self.plan(10, band="sized", fwd_=weak, family_open=3).reason)
-        self.assertIn("the most a Probe family holds is 3", self.plan(200, band="sized", fwd_=weak, family_open=3).reason)
+        # Sized at a Probe-sized stake never gets the Sized family limits: the Probe's open count, 15%.
+        self.assertIn("the most a Probe family holds is 1", self.plan(10, band="sized", fwd_=weak, family_open=1).reason)
+        self.assertIn("the most a Probe family holds is 1", self.plan(200, band="sized", fwd_=weak, family_open=1).reason)
         self.assertEqual(self.plan(10, band="sized", fwd_=weak, family_loss="815").qty, 0)   # 15% is 822.25
         # It is not a Probe family's open: never marked for the Probe loss budget.
         self.assertFalse(self.plan(10, band="sized", fwd_=weak).probe)
@@ -335,12 +344,13 @@ class Sizing(unittest.TestCase):
 
     def test_the_fast_lane_reviews_c3_example(self):
         """The review's worked example (Oct 7, 2026): at E $1,288.40 a weak record's Kelly ($21) buys structures of $10 but
-        is under the Probe's cap, so the Probe's three-open limit refuses a sixth open (the unit trigger alone sent two)."""
+        is under the Probe's cap, so the Probe's open-structure limit (three then; one since Oct 15, 2026) refuses a sixth
+        open (the unit trigger alone sent two)."""
         weak = fwd([0.44, -0.28] * 10)
         self.assertLess(M.kelly_cap(self.t, D("1288.40"), weak), D("30"))
         plan = self.plan(10, band="sized", equity="1288.40", fwd_=weak, family_open=5, family_loss="250")
         self.assertEqual(plan.qty, 0)
-        self.assertIn("the most a Probe family holds is 3", plan.reason)
+        self.assertIn("the most a Probe family holds is 1", plan.reason)
 
     def test_the_book_and_the_gateways_caps(self):
         self.assertIn("the book's open maximum loss", self.plan(50, book_loss="4933.49").reason)   # 90% = 4933.485

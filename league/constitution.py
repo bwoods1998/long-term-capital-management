@@ -908,11 +908,27 @@ CONSTITUTION: dict[str, Any] = {
     # in league/swarm/dlane.py's `DEFAULTS` (the line's bound is its default), and `dlane.ZERO_EDGE` back to
     # `ZERO_EDGES[0.024]`. The money digest moves back and the standing grant re-ratifies at the House's start; no
     # fingerprint move, no evidence reset.
+    #
+    # ONE OPEN STRUCTURE A PROBE FAMILY (Oct 15, 2026; the captain's decision from the pre-registered study THRU-1015,
+    # parts B and C, private): `probe.open_per_family` 3 -> 1, inside its bound (1 to 5), a TIGHTENING. Why: the one
+    # options program at Probe buys one short-dated call on every session its gate is on and holds each to expiry, so
+    # at 3 it can hold three at once, and every one of them takes room in the $400 window the six share programs size
+    # their lots against. Measured on the House's own engine and sizing over 3,048 historical paths from the live
+    # state (A32's six at 0.50 x E, no new share program arriving), the program as coded against the same program one
+    # structure at a time: P(Done) by Dec 7 +3.2 points (SE 1.1) with its calls priced from the paths, +2.3 (SE 1.1)
+    # with their mean set to a 10% loss (zero edge); by Nov 6 +1.5 / +1.2, by Jan 6 +3.7 / +3.0. The share programs'
+    # refused entries a path 19.6 -> 15.8 (18.4 -> 14.5), sessions with a window pause at an open 94% -> 90%, the
+    # consistency clause's failures (A14) 7.1% -> 4.6% of paths (5.0% -> 3.4%). Its cost, stated: about 0.6 fewer
+    # options closes a path in 12 weeks (5.4 -> 4.8), a Probe options program trades a smaller book than its own
+    # replay holds (a refused open is no close, so no twin moves), and the practice book (league/live/shadow.py) scales
+    # to one structure a family too. No program is stopped, no position is sold. Rollback, one owner deploy:
+    # `open_per_family` 3 here (re-pin `PINNED_DIGEST`); the money digest moves back and the standing grant re-ratifies
+    # at the House's start; no fingerprint move, no evidence reset.
     "options_money": {
         "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_min_equity_usd": "2000",
-        "probe": {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 3, "family_share": "0.15", "floor_usd": "0",
+        "probe": {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 1, "family_share": "0.15", "floor_usd": "0",
                   "max_open": 8, "loss_budget_usd": "400", "loss_window_sessions": 20, "loss_total_usd": "800",
                   "loss_basis": "net", "demotion": "dm1"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
@@ -1572,4 +1588,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '111ede85f9b401c9af74f0f1967f9390c37ccd35a47f6fb048257db3c691ce6f'
+PINNED_DIGEST = '1e14c7f7b46b2e9619acc1df96601724ad758edfdcbacb840a8fbb878f654653'
