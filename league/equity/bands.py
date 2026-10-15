@@ -377,6 +377,13 @@ class ScaledSettings:
         return self.pin_sha256 is None
 
     @property
+    def lines_live(self) -> bool:
+        """The Scaled lines bind as a budget of their own: Blake's yes is in force AND the band is not dark. A band made
+        dark again (the rollback, `pin_sha256` "") with Scaled lots still open counts them in the Probe budget like
+        Probe lots (league/equity/live.py `probe_figures`): nothing escapes both budgets."""
+        return self.lines_in_force and not self.dark
+
+    @property
     def top(self) -> int:
         """The highest rung a program may be at under this table: R5 with the Scaled lines in force, else R1."""
         return TOP_RUNG if self.lines_in_force else 1

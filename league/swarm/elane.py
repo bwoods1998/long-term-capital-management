@@ -1049,7 +1049,7 @@ def scaled_trades(store: Any, fid: str) -> dict[str, float]:
     from ..equity import bands as eb
 
     rules = eb.scaled_settings()
-    if not (rules.lines_in_force and rules.family_line_probe_only):
+    if not (rules.lines_live and rules.family_line_probe_only):
         return {}
     path = Path(getattr(store, "root", "") or "") / "live.sqlite"
     if not str(getattr(store, "root", "") or "") or not path.exists():

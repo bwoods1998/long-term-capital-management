@@ -402,6 +402,9 @@ class Scaled(T.BookTest):
             self.assertEqual(room.open_risk, D("0.20") * lot.value, "it counts in the Scaled lines")
         self.assertEqual(L.probe_figures(h.state.rows, weights=weights).open_risk, D("0.20") * lot.value,
                          "without the lines in force it counts in the Probe room (fail closed)")
+        with band("", lines=True):
+            self.assertEqual(L.probe_figures(h.state.rows, weights=weights).open_risk, D("0.20") * lot.value,
+                             "the band made dark again with the lines still in force: the Probe room holds it")
 
     def test_a_scaled_working_buy_and_a_scaled_close(self):
         sha = pin(self.root, {KEY_A: 2})

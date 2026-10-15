@@ -659,8 +659,9 @@ def probe_figures(rows: Callable[..., list], *, weights: Mapping[str, Decimal],
     lots share its one slot). A LOST buy is not counted: had it filled, its shares would be unattributed at the next
     reading (the reconciliation freezes, and the House sells an unattributed long after two readings).
 
-    THE SCALED MARK (C3 (A45) of the scaling plan): while Blake's Scaled lines are in force (`scaled_lines`; None: the
-    constitution in force, league/equity/bands.py `scaled_settings`) a Scaled-marked lot's open risk and a Scaled buy's
+    THE SCALED MARK (C3 (A45) of the scaling plan): while Blake's Scaled lines are in force and the band is not dark
+    (`scaled_lines`; None: the constitution in force, league/equity/bands.py `ScaledSettings.lines_live`) a Scaled-marked
+    lot's open risk and a Scaled buy's
     are left out (they count in the Scaled lines: `EquityBook._scaled_room`), so Scaled open risk leaves the Probe room
     of both lanes (this function is the one path by which equity open risk reaches either; their closes, `probe` 0, were
     never among the Probe closes); while they are not, a Scaled-marked lot or buy counts here as a Probe one, close and
@@ -668,7 +669,7 @@ def probe_figures(rows: Callable[..., list], *, weights: Mapping[str, Decimal],
     slot either way."""
     if not _has_table(rows, "eq_lots"):
         return ProbeFigures(0, (), ZERO)
-    in_force = B.scaled_settings().lines_in_force if scaled_lines is None else bool(scaled_lines)
+    in_force = B.scaled_settings().lines_live if scaled_lines is None else bool(scaled_lines)
     programs: set[str] = set()
     closes: list[tuple[float, str | None, Decimal]] = []
     risk = ZERO
@@ -2806,6 +2807,9 @@ class EquityBook:
                 changed = True
                 self.record("equity.scale", {"event": "program_line", "program": key, "why": hit[:200]})
                 self.alert("warning", f"equity: {key} {hit[:200]}")
+        if changed:                                     # the room below reads the memory as kept
+            self._scale_keep(mem)
+            changed = False
         if E is not None and E > 0:
             sleeves = self._scaled_sleeves(st, pin, E, mem)
             if sleeves > D(mem.get("peak_usd"), ZERO):
