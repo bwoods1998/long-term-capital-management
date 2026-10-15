@@ -4692,6 +4692,32 @@ def refused_days(held: Any) -> dict[str, str]:
             if _refused(windows) and _DAY.fullmatch(str(day))}
 
 
+def shut_days(held: Any) -> dict[str, str]:
+    """THE SESSIONS IN WHICH THE HOUSE LET NO OPEN GO AT ALL (C1, A45: the span buy-and-hold's blocked sessions), read
+    from the open note's value: {day: why}, a session whose note names at least one entry window and EVERY window it
+    names was refused (never clear). Narrower than `refused_days` (the idle clock's), which reads ONE refused window as
+    enough: on a session whose open window was refused and whose close window was clear a program could still open
+    (at the close), so the House did not block it from opening. A window entry that is not a mapping shows nothing
+    refused: such a session is not one. {} for a note that is not a mapping."""
+    if not isinstance(held, Mapping):
+        return {}
+    out = {}
+    for day, windows in held.items():
+        if not _DAY.fullmatch(str(day)) or not isinstance(windows, Mapping) or not windows:
+            continue
+        if all(isinstance(entry, Mapping) and not entry.get("clear") for entry in windows.values()):
+            out[str(day)] = _refused(windows)
+    return out
+
+
+def _finite(value: Decimal) -> bool:
+    """Whether a Decimal figure is a float's too (a JSON reader's: 1e400 is finite here and infinite there)."""
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
+
+
 def _lot_field(lot: Any, name: str) -> Any:
     """A lot's field, from a `Lot` or from an `eq_lots`-shaped mapping alike (the report reads rows, the book Lots)."""
     return lot.get(name) if isinstance(lot, Mapping) else getattr(lot, name, None)
@@ -4718,8 +4744,8 @@ def _one_series(rows: Mapping[str, Any], days: Collection[str]) -> tuple[dict[st
     for day in days:
         close, sha = rows[day]
         close = A.dec(close)
-        if close is None or close <= 0:
-            return None, None, f"the {SPAN_BASIS} close of {day} is not a positive price"
+        if close is None or close <= 0 or not _finite(close):
+            return None, None, f"the {SPAN_BASIS} close of {day} is not a positive finite price"
         closes[day] = close
         shas.add(str(sha or ""))
     if len(shas) != 1 or "" in shas:
@@ -4747,8 +4773,9 @@ def span_bh(lots: Sequence[Any], closes: Mapping[str, Mapping[str, Any]], blocke
     {priced, why, usd (Decimal, the sum over symbols), symbols: {symbol: {before, last, sessions, sessions_used,
     segments [[first, last] session of each], closes {day: Decimal} at every segment boundary (`before` and `last`
     among them), exposure (Decimal), usd (Decimal), sha}}}. FAIL CLOSED: a lot without a symbol, a day or a positive
-    notional, a calendar that cannot place a day, or a close missing or off one basis is `priced` False with `why`
-    and no figure, never a guess."""
+    notional, a calendar that cannot place a day, a close missing, off one basis or not a finite price, or a figure
+    a float cannot hold (the report writes floats: 1e400 would be Infinity there) is `priced` False with `why` and no
+    figure, never a guess."""
     out: dict[str, Any] = {"priced": False, "why": None, "usd": None, "symbols": {}}
     blocked = {str(day)[:10] for day in blocked or ()}
     total = ZERO
@@ -4799,10 +4826,16 @@ def span_bh(lots: Sequence[Any], closes: Mapping[str, Mapping[str, Any]], blocke
         usd = ZERO
         for start, end in bounds:
             usd += exposure * (series[end] / series[start] - 1)
+        if not (_finite(exposure) and _finite(usd)):
+            out["why"] = f"{symbol}: the figure is out of a float's range (a close or a notional is not a price's)"
+            return out
         total += usd
         out["symbols"][symbol] = {"before": before, "last": last, "sessions": max(1, len(days)),
                                   "sessions_used": len(keep), "segments": [[seg[0], seg[-1]] for seg in segments],
                                   "closes": dict(sorted(series.items())), "exposure": exposure, "usd": usd, "sha": sha}
+    if not _finite(total):
+        out["why"] = "the figure is out of a float's range"
+        return out
     out.update(priced=True, usd=total)
     return out
 
@@ -4842,6 +4875,9 @@ def b10_bh(lots: Sequence[Any], spy: Mapping[str, Any]) -> dict[str, Any]:
     total = ZERO
     for notional, start, end in legs:
         total += notional * (series[end] / series[start] - 1)
+    if not _finite(total):
+        out["why"] = f"{B10_SYMBOL}: the figure is out of a float's range (a close or a notional is not a price's)"
+        return out
     out.update(priced=True, usd=total, closes=dict(sorted(series.items())), sha=sha)
     return out
 

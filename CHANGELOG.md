@@ -45,21 +45,32 @@ updater is on. What is built and not deployed is on branches.
   splits there. With no such session it is `_bh_pnl` to the Decimal. A panel program's is B10 (`b10_bh`,
   `date_record`'s rule, SPY over each lot's own sessions). Every close is the book's adjustment=all `eq_bars` row,
   read only when one fetch wrote every close a symbol needs.
-- **The blocked sessions** are the book's open note (`eq_open_note`, `refused_days`, now the one reader of it,
-  `EquityBook._refused_days` included): A30 (2)'s sessions in which the House refused every real equity open. That
-  covers the kill switch, the stops, the House's pause, the grant and the freezes. The program's own entry days are
-  left out. The House records no session-level trace of a program's own seat loss or of the shared loss window's
-  refusals, so `blocked` cannot hold them, and `blocked_from` says so in every entry.
-- **Fail closed:** a close missing or off one basis, an unreadable open note, or the seat rule "first-come" (no note
-  is kept then) gives `priced` false with `why`, never a figure.
+- **The blocked sessions** are the sessions in which the House let no open go at all: the book's open note
+  (`eq_open_note`, A30 (2)) with every entry window it names refused (`shut_days`). That covers the kill switch, the
+  stops, the House's pause, the grant and the freezes. A session refused in one window and clear in the other is not
+  blocked: a program could still open. (The idle clock's `refused_days`, now a module function the book's
+  `_refused_days` calls, reads one window as enough.) Every entry day of the version's lots in the book is left out
+  too. Neither half depends on K, so one ledger list per version serves every checkpoint. The House records no
+  session-level trace of a program's own seat loss or of the shared loss window's refusals, so `blocked` cannot hold
+  them, and `blocked_from` says so in every entry.
+- **Fail closed:** a close missing, off one basis or not a finite price, a figure a float cannot hold, an unreadable
+  open note, the seat rule "first-come" (no note is kept then), or a read of the book that raises gives `priced`
+  false with `why`, never a figure. The reader never raises. The book's closes are read for SPY and the symbols of
+  programs that are not panels.
 - **Frozen with the checkpoint:** a final checkpoint is carried whole, so the field is never recomputed. A checkpoint
   frozen before this release carries none.
-- **The captain's ledger must carry each entry's `blocked`:** the script reads blocked sessions from its ledger
-  only, and its cents check fails closed when the ledger's ranges differ from the entry's (docs/operations.md, **The
-  span buy-and-hold beside each checkpoint**).
-- Tests: `league/tests/test_dlane_report_span_bh.py` (18). It covers one and two symbols, a blocked run, a panel, a
-  missing close, the field frozen, and every other Done key unchanged. It also runs the script's own checks, copied,
-  and the pinned script itself where `LTCM_SCALING_SCRIPT` names it.
+- **The captain copies each priced entry's `blocked` into the ledger before each receipt:** the script reads blocked
+  sessions from its ledger only, and its cents check fails closed when the ledger's sessions differ from the entry's
+  (docs/operations.md, **The span buy-and-hold beside each checkpoint**).
+- **A `priced: false` entry blocks the script's `--closes` fallback at that look,** so the captain checks the
+  not-yet-final checkpoint in the 01:30Z report and fixes its `why` before the pre-open run makes it final.
+- **The review's fixes** (on top): F1, the blocked sessions above (before them a session refused in one window, less
+  the counted lots' entry days only, could be blocked at K=30 and not at K=40, so no single ledger passed both); F6,
+  no Infinity; F7, every read inside the reader's guard; F8, no panel basket's closes read.
+- Tests: `league/tests/test_dlane_report_span_bh.py` (26). It covers one and two symbols, a blocked run, a panel, a
+  missing close, the field frozen, the same blocked list at K=30 and K=40, no Infinity, a reader that never raises,
+  and every other Done key unchanged. It also runs the script's own checks, copied, and the pinned script itself
+  where `LTCM_SCALING_SCRIPT` names it.
 
 ### Release 1015f: release 1015e plus three fixes, on `rel/1015f` (unreleased; one House deploy and one gateway deploy
 from one commit, outside 12:55-20:05Z on a trading day; no identity moves: the options execution fingerprint

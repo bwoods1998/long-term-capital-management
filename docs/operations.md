@@ -2593,24 +2593,33 @@ reading and never part of it: no Done rule, count, checkpoint trigger, rule sha 
   those closes. Nothing is split (`blocked` is empty).
 - **The closes** are the book's own (`eq_bars`, adjustment=all), read only when one fetch wrote every close a symbol
   needs (the same series sha, `_bh_pnl`'s rule). The report fetches nothing.
-- **The blocked sessions** (`blocked`, both ends counted) come from the book's open note (live.sqlite kv
-  `eq_open_note`, `refused_days`: A30 (2)'s sessions in which the House refused every real equity open in an entry
-  window it looked in). That covers the kill switch, the daily and drawdown stops, the House's pause, the grant, a
-  reconciliation freeze, `equity_money` off and the stock proof. The program's own entry days are left out of it: a
-  session it opened in did not block it. **What the House does not record by session, so `blocked` cannot hold it:**
-  a program's own seat lost (the book keeps only its last band mark; band moves are events), the shared loss window's
-  refusals (a buy refused or cut for budget is recorded per intent, and only when one was asked), and a session the
-  House did not run in. `blocked_from` says this in every entry.
-- **Fail closed:** a close missing or off one basis, a lot without a notional, an unreadable open note, or the seat
-  rule "first-come" (the House keeps no note then) gives `priced` false with `why` and no figure. The plan's script
-  then fails that program closed at that look. It does not fall back to its closes file for an entry that is there.
+- **The blocked sessions** (`blocked`, both ends counted) are the sessions in which the House let no open go at all:
+  the book's open note (live.sqlite kv `eq_open_note`, A30 (2)'s note; `shut_days`) with EVERY entry window it names
+  for the session refused. That covers the kill switch, the daily and drawdown stops, the House's pause, the grant, a
+  reconciliation freeze, `equity_money` off and the stock proof. A session refused at the open and clear at the close
+  is NOT blocked: a program could still open at the close. (The idle clock's `refused_days` reads one refused window
+  as enough; the span does not.) Every entry day of the version's lots in the book is left out too, open or closed,
+  counted or not: a session it opened in did not block it. Neither half depends on K, so a version's blocked sessions
+  are the same at every checkpoint, and each entry lists the ones inside its own span. **What the House does not
+  record by session, so `blocked` cannot hold it:** a program's own seat lost (the book keeps only its last band mark;
+  band moves are events), the shared loss window's refusals (a buy refused or cut for budget is recorded per intent,
+  and only when one was asked), and a session the House did not run in. `blocked_from` says this in every entry.
+- **Fail closed:** a close missing, off one basis or not a finite price, a figure a float cannot hold (never
+  Infinity in the JSON), a lot without a notional, an unreadable open note, the seat rule "first-come" (the House
+  keeps no note then), or any read of the book that raises gives `priced` false with `why` and no figure. The reader
+  never raises into the meter. The book's closes are read for SPY and for the symbols of closed lots of programs that
+  are not panels (B10 reads SPY alone).
+- **A `priced: false` entry blocks the script's `--closes` fallback at that look:** the script fails that program
+  closed there, with no second source. So the captain reads the checkpoint while it is not yet final, in the 01:30Z
+  report, and fixes what its `why` names before the pre-open run makes it final and the next report freezes it.
 - **Frozen with the checkpoint:** the field is written with its checkpoint and carried whole once that checkpoint is
   final. It is never recomputed, so a later fetch that re-adjusts a close cannot move it. A checkpoint frozen by a
   report from before C1 carries no field.
-- **THE CAPTAIN'S LEDGER MUST CARRY `blocked`:** the plan's script takes the blocked sessions from its ledger, never
-  from this field, and rebuilds the figure with them. A program whose entry lists blocked sessions passes the
-  script's cents check only when the ledger holds the same ranges for it (`{"program": "eq|<family>|v<N>", "from",
-  "to", "why"}`). A ledger range the entry does not hold fails it too.
+- **THE CAPTAIN COPIES EACH PRICED ENTRY'S `blocked` INTO THE LEDGER BEFORE EACH RECEIPT:** the plan's script takes
+  the blocked sessions from its ledger only, never from this field, and rebuilds the figure with them. A program whose
+  entry lists blocked sessions passes the script's cents check only when the ledger holds the same sessions for it
+  (`{"program": "eq|<family>|v<N>", "from", "to", "why"}`). One list per version serves every checkpoint (the union of
+  its entries' `blocked`). A ledger range the House did not block fails the check too.
 - Held by `league/tests/test_dlane_report_span_bh.py`. It runs the script's own checks, copied, on these reports, and
   the script itself where `LTCM_SCALING_SCRIPT` names the pinned file.
 

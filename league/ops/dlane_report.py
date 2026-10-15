@@ -210,11 +210,13 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   usd, sha, ...}}, spy {closes, usd} for a panel}. A single-name program's is the House's own `_bh_pnl` rule
   (league/equity/live.py `span_bh`) with the plan's one change: the sessions the House blocked it from opening, while
   it held nothing in the symbol, are taken out of the span, which splits there; with none it is `_bh_pnl` exactly. The
-  blocked sessions are the House's open note's (`SPAN_BLOCKED`, which says what it does not hold). A panel program's is
-  B10 (`b10_bh`). Every close is the book's own (`eq_bars`, adjustment=all, one fetch). Unreadable is `priced` False
-  with `why`, never a figure. It is written with its checkpoint and FROZEN WITH IT (a final checkpoint is carried
-  whole, so the field is never recomputed: an adjustment=all close a later dividend moves cannot move it). No Done
-  rule, count, checkpoint or rule sha reads it or changes with it.
+  blocked sessions are those in which the House let no open go at all (its open note, every entry window refused),
+  less every entry day of the version's lots, so a version's are the same at every checkpoint (`SPAN_BLOCKED` says
+  what the note does not hold). A panel program's is B10 (`b10_bh`). Every close is the book's own (`eq_bars`,
+  adjustment=all, one fetch). Unreadable is `priced` False with `why`, never a figure. It is written with its
+  checkpoint and FROZEN WITH IT (a final checkpoint is carried whole, so the field is never recomputed: an
+  adjustment=all close a later dividend moves cannot move it). No Done rule, count, checkpoint or rule sha reads it or
+  changes with it.
 
 Standard library only, except the Probe envelope's figures (`fast_lane.probe_budget` and `real.probe_figures` read
 `league.live.real`, whose Gym legs need numpy, as the House box has): they are an `error` entry where that cannot load.
@@ -289,15 +291,17 @@ PANEL_LABEL = "EQUITY (PANEL)"
 OPEN_NOTE_KEY = "eq_open_note"
 SPAN_BASIS = "adjustment=all"
 #: Where a share program's `span_bh.blocked` comes from, and what that source does not hold (said in every entry). The
-#: open note (league/equity/live.py `refused_days`, A30 (2)) holds the sessions in which the House refused every real
-#: equity open in an entry window it looked in: its real-money block (the kill switch, the daily and drawdown stops, the
-#: House's pause, the grant, a reconciliation freeze), equity_money off, the stock proof. Kept by session in NO House
-#: record, so never in `blocked`: the program's own seat lost (the book keeps its last band mark only; band moves are
-#: events), the shared loss window's refusals (a buy refused or cut for budget is recorded per intent, and only when
-#: one was asked), and a session the House did not run in.
-SPAN_BLOCKED = ("the House's open note (eq_open_note: A30 (2)'s sessions in which it refused every open), less this "
-                "version's entry days; a seat lost and the loss window's refusals are kept by session nowhere, so "
-                "never listed")
+#: open note (league/equity/live.py `shut_days`, of A30 (2)'s note) gives the sessions in which EVERY entry window the
+#: House looked in refused every real equity open: its real-money block (the kill switch, the daily and drawdown stops,
+#: the House's pause, the grant, a reconciliation freeze), equity_money off, the stock proof. A session refused in one
+#: window and clear in the other is not one (a program could still open in the other: the idle clock's `refused_days`
+#: reads it as refused; this does not). Less every entry day of the version's lots in the book. Kept by session in NO
+#: House record, so never in `blocked`: the program's own seat lost (the book keeps its last band mark only; band moves
+#: are events), the shared loss window's refusals (a buy refused or cut for budget is recorded per intent, and only
+#: when one was asked), and a session the House did not run in.
+SPAN_BLOCKED = ("the House's open note (eq_open_note): the sessions in which every entry window refused every open, "
+                "less every entry day of this version's lots; a seat lost and the loss window's refusals are kept by "
+                "session nowhere, so never listed")
 #: What a panel program's entry says instead: B10 holds each lot over its own sessions, so nothing is split.
 SPAN_B10 = "B10 holds each lot in SPY over its own sessions: there is no span to split"
 #: What rides beside a panel program's close dates (the captain's A14; E4-SPEC 10.5).
@@ -798,7 +802,8 @@ def read_book(live_path: str | Path) -> dict[str, list[dict[str, Any]]]:
     """The live book's positions and instances, and (release E1) the EquityBook's lots and instances (`lots`,
     `eq_instances`; empty for a book from before E1), and (release E5-A) its seat plan (`seat_plan`: the kv `eq_seat`,
     None before its first band sync), and (C1, A45) the span buy-and-hold's inputs (`bars`: the adjustment=all rows of
-    `eq_bars` of every symbol a closed lot holds, each with its series sha; `open_note`: the kv `OPEN_NOTE_KEY`, {}
+    `eq_bars` of SPY and of every symbol a closed lot of no panel program holds, each with its series sha;
+    `open_note`: the kv `OPEN_NOTE_KEY`, {}
     when the book has written none, None when it cannot be read), read-only in one transaction; an absent book is an
     empty one: nothing traded."""
     from . import guard
@@ -835,9 +840,15 @@ def read_book(live_path: str | Path) -> dict[str, list[dict[str, Any]]]:
         # THE SEAT PLAN (release E5-A): the book's own kv, read in the same transaction as its instances.
         plan = guard.ids(db, "SELECT value FROM kv WHERE key='eq_seat'") if "kv" in tables else []
         plan = _loads(plan[0], None) if plan else None
-        # C1 (A45; `span_bh`): the closes of the span buy-and-hold as the book fetched them, and its open note.
-        bars = guard.rows(db, "SELECT day, symbol, c, sha FROM eq_bars WHERE adjustment='all' AND symbol IN (SELECT "
-                              "DISTINCT symbol FROM eq_lots WHERE status='closed') ORDER BY symbol, day"
+        # C1 (A45; `span_bh`): the closes of the span buy-and-hold as the book fetched them, and its open note: the
+        # symbols of the closed lots that are no panel program's (B10 reads SPY alone, never a basket's names), and SPY.
+        kinded = "eq_instances" in tables and bool(guard.rows(
+            db, "SELECT 1 FROM pragma_table_info('eq_instances') WHERE name='kind'"))
+        bars = guard.rows(db, "SELECT day, symbol, c, sha FROM eq_bars WHERE adjustment='all' AND (symbol=? OR "
+                              "symbol IN (SELECT DISTINCT symbol FROM eq_lots WHERE status='closed' AND "
+                              "COALESCE(tag, '')<>?"
+                              + (" AND instance NOT IN (SELECT id FROM eq_instances WHERE kind=?)" if kinded else "")
+                              + ")) ORDER BY symbol, day", ("SPY", PANEL_TAG, PANEL_KIND)[:3 if kinded else 2]
                           ) if "eq_bars" in tables and "eq_lots" in tables else []
         note = guard.ids(db, "SELECT value FROM kv WHERE key=?", (OPEN_NOTE_KEY,)) if "kv" in tables else []
         note = _loads(note[0], None) if note else {}
@@ -2041,41 +2052,49 @@ def span_bh(counted: Sequence[Mapping[str, Any]], book: Mapping[str, Any], *,
             constitution: Mapping[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
     """C1 (A45; THE SCALING PLAN's 2.4, its benchmark): EACH SHARE PROGRAM'S SPAN BUY-AND-HOLD over exactly the equity
     closes of `counted` (a checkpoint's first K counts), from the book's own store (`book`: `read_book`'s `bars`,
-    `spy` and `open_note`): {family: [one entry a version, oldest first]}, where an entry is {version, usd, priced,
-    why, basis "adjustment=all", blocked [[from, to], ...], symbols {SYM: {before, last, sessions, sessions_used,
-    segments, close_before, close_last, closes {day: close} at every segment boundary, exposure_usd, usd, sha}}, spy
-    {closes {day: close}, usd, sha} | None, lots, blocked_from}.
+    `spy`, `open_note` and `lots`): {family: [one entry a version, oldest first]}, where an entry is {version, usd,
+    priced, why, basis "adjustment=all", blocked [[from, to], ...], symbols {SYM: {before, last, sessions,
+    sessions_used, segments, close_before, close_last, closes {day: close} at every segment boundary, exposure_usd,
+    usd, sha}}, spy {closes {day: close}, usd, sha} | None, lots, blocked_from}.
 
     - A SINGLE-NAME PROGRAM: the House's own `_bh_pnl` rule (league/equity/live.py `span_bh`: per symbol, the mean
       exposure from the close before the first entry to the close of the last exit, at adjustment=all closes of ONE
       fetch), with the plan's ONE CHANGE: a session in `blocked` on which the program held nothing in the symbol is
-      taken out of the span, which splits there. With no such session it is `_bh_pnl` exactly. `blocked` is the
-      House's sessions in which it refused every open (`SPAN_BLOCKED` says which, and what it does not hold), inside
-      the program's span, less its own entry days (a session it opened in did not block it); it is listed whole, and
-      the split takes out only the sessions held empty.
+      taken out of the span, which splits there. With no such session it is `_bh_pnl` exactly.
+    - `blocked`: THE SESSIONS IN WHICH THE HOUSE LET NO OPEN GO AT ALL (`shut_days`: every entry window the open note
+      names for the session refused; `SPAN_BLOCKED` says what it does not hold), less EVERY ENTRY DAY OF THE VERSION'S
+      LOTS IN THE BOOK (open or closed, counted or not: a session it opened in did not block it), inside the span of
+      the counted closes. Neither half depends on K, so a version's blocked sessions are the same at every checkpoint:
+      each entry lists the ones inside its own span, and one ledger list (or the House's own list) agrees with every
+      checkpoint. It is listed whole; the split takes out only the sessions held empty.
     - A PANEL PROGRAM (EQUITY (PANEL)): B10, the House's own panel benchmark (`b10_bh`: per lot, entry notional x SPY's
       move from the close before its entry to its exit day's close); `symbols` is empty and nothing is split.
     A close with no version gives no entry (the plan's script reads an entry with no version as any version's).
-    FAIL CLOSED: an unreadable input (the bar store's close missing or off one basis, a lot without a notional, the
-    open note unreadable, the seat rule "first-come", under which the House keeps no note) is `priced` False with
-    `why`, never a guessed figure. Beside the reading, never a rule: no item, hold, count or alarm reads it. Never
-    raises."""
-    groups: dict[str, dict[int, list[Mapping[str, Any]]]] = {}
-    for c in counted:
-        version = c.get("version")
-        if c.get("equity") and isinstance(version, int) and not isinstance(version, bool):
-            groups.setdefault(str(c["family"]), {}).setdefault(version, []).append(c)
+    FAIL CLOSED: an unreadable input (the bar store's close missing, off one basis or not a finite price, a figure a
+    float cannot hold, a lot without a notional, the open note unreadable, the seat rule "first-come", under which
+    the House keeps no note, or any read of the book that raises) is `priced` False with `why`, never a guessed
+    figure. Beside the reading, never a rule: no item, hold, count or alarm reads it. Never raises: closes that cannot
+    even be grouped by program give no entry ({})."""
+    try:
+        groups: dict[str, dict[int, list[Mapping[str, Any]]]] = {}
+        for c in counted:
+            version = c.get("version")
+            if c.get("equity") and isinstance(version, int) and not isinstance(version, bool):
+                groups.setdefault(str(c["family"]), {}).setdefault(version, []).append(c)
+    except Exception:  # noqa: BLE001 - closes that name no program give no entry: the plan's script fails it closed
+        return {}
     if not groups:
         return {}
     unread = blocked_why = None
-    refused: set[str] = set()
+    shut: set[str] = set()
+    entry_days: dict[tuple[str, Any], set[str]] = {}
+    bars: dict[str, dict[str, tuple]] = {}
+    spy: dict[str, tuple] = {}
     try:
         from ..equity import bands as EB
         from ..equity import live as EL
         from ..equity import schedule as ES
-    except Exception as exc:  # noqa: BLE001 - no rule, no figure: every entry says so
-        unread = f"the equity book's span rule cannot be imported here ({type(exc).__name__})"
-    else:
+
         note = book.get("open_note")
         if not isinstance(note, Mapping):
             blocked_why = "the House's open note (eq_open_note) cannot be read: the sessions it blocked are unknown"
@@ -2083,11 +2102,16 @@ def span_bh(counted: Sequence[Mapping[str, Any]], book: Mapping[str, Any], *,
             blocked_why = ("the seat rule in force is first-come: the House keeps no open note, so the sessions it "
                            "blocked are unknown")
         else:
-            refused = set(EL.refused_days(note))
-    bars: dict[str, dict[str, tuple]] = {}
-    for r in book.get("bars") or []:
-        bars.setdefault(str(r.get("symbol")), {})[str(r.get("day"))] = (r.get("c"), r.get("sha"))
-    spy = {str(r.get("day")): (r.get("c"), r.get("sha")) for r in book.get("spy") or []} or bars.get("SPY") or {}
+            shut = set(EL.shut_days(note))
+        for r in book.get("bars") or []:
+            bars.setdefault(str(r.get("symbol")), {})[str(r.get("day"))] = (r.get("c"), r.get("sha"))
+        spy = {str(r.get("day")): (r.get("c"), r.get("sha")) for r in book.get("spy") or []} or bars.get("SPY") or {}
+        for lot in book.get("lots") or []:
+            version = version_of(lot.get("instance"))
+            key = (str(lot.get("family") or ""), version if version is not None else _int(lot.get("version")))
+            entry_days.setdefault(key, set()).add(str(lot.get("opened_day") or "")[:10])
+    except Exception as exc:  # noqa: BLE001 - the inputs not read: every entry says so, none has a figure
+        unread = f"the span's rule or inputs could not be read ({type(exc).__name__}: {str(exc)[:120]})"
     out: dict[str, list[dict[str, Any]]] = {}
     for family, versions in sorted(groups.items()):
         for version, rows in sorted(versions.items()):
@@ -2098,10 +2122,10 @@ def span_bh(counted: Sequence[Mapping[str, Any]], book: Mapping[str, Any], *,
             out.setdefault(family, []).append(entry)
             if unread:
                 continue
-            lots = [{"symbol": c.get("symbol"), "opened_day": c.get("opened_day"), "exit_day": c.get("day"),
-                     "entry_notional": c.get("notional"), "closed_at": c.get("closed_at"), "lid": c.get("lid")}
-                    for c in rows]
             try:
+                lots = [{"symbol": c.get("symbol"), "opened_day": c.get("opened_day"), "exit_day": c.get("day"),
+                         "entry_notional": c.get("notional"), "closed_at": c.get("closed_at"), "lid": c.get("lid")}
+                        for c in rows]
                 if panel:
                     got = EL.b10_bh(lots, spy)
                     if not got["priced"]:
@@ -2110,29 +2134,45 @@ def span_bh(counted: Sequence[Mapping[str, Any]], book: Mapping[str, Any], *,
                     entry.update(priced=True, usd=_usd(got["usd"]),
                                  spy={"closes": {d: float(v) for d, v in got["closes"].items()},
                                       "usd": _usd(got["usd"]), "sha": got["sha"]})
-                    continue
-                if blocked_why:
+                elif blocked_why:
                     entry["why"] = blocked_why
                     continue
-                opened = {str(c.get("opened_day") or "")[:10] for c in rows}
-                start = ES.previous_session(min(opened)).isoformat()
-                end = max(str(c.get("day") or "")[:10] for c in rows)
-                blocked = sorted(d for d in refused - opened if start < d <= end and ES.is_session(d))
-                entry["blocked"] = _session_ranges(blocked)
-                got = EL.span_bh(lots, bars, blocked)
-                if not got["priced"]:
-                    entry["why"] = f"span buy-and-hold unpriced: {got['why']}"
-                    continue
-                entry.update(priced=True, usd=_usd(got["usd"]), symbols={
-                    s: {"before": x["before"], "last": x["last"], "sessions": x["sessions"],
-                        "sessions_used": x["sessions_used"], "segments": x["segments"],
-                        "close_before": float(x["closes"][x["before"]]), "close_last": float(x["closes"][x["last"]]),
-                        "closes": {d: float(v) for d, v in x["closes"].items()}, "exposure_usd": _usd(x["exposure"]),
-                        "usd": _usd(x["usd"]), "sha": x["sha"]} for s, x in got["symbols"].items()})
+                else:
+                    own = {str(c.get("opened_day") or "")[:10] for c in rows}
+                    start = ES.previous_session(min(own)).isoformat()
+                    end = max(str(c.get("day") or "")[:10] for c in rows)
+                    opened = own | entry_days.get((family, version), set())
+                    blocked = sorted(d for d in shut - opened if start < d <= end and ES.is_session(d))
+                    entry["blocked"] = _session_ranges(blocked)
+                    got = EL.span_bh(lots, bars, blocked)
+                    if not got["priced"]:
+                        entry["why"] = f"span buy-and-hold unpriced: {got['why']}"
+                        continue
+                    entry.update(priced=True, usd=_usd(got["usd"]), symbols={
+                        s: {"before": x["before"], "last": x["last"], "sessions": x["sessions"],
+                            "sessions_used": x["sessions_used"], "segments": x["segments"],
+                            "close_before": float(x["closes"][x["before"]]),
+                            "close_last": float(x["closes"][x["last"]]),
+                            "closes": {d: float(v) for d, v in x["closes"].items()},
+                            "exposure_usd": _usd(x["exposure"]), "usd": _usd(x["usd"]), "sha": x["sha"]}
+                        for s, x in got["symbols"].items()})
+                if not _all_finite(entry):
+                    entry.update(priced=False, usd=None, symbols={}, spy=None,
+                                 why="a figure is out of a float's range: no figure")
             except Exception as exc:  # noqa: BLE001 - unread is said, never a figure
                 entry.update(priced=False, usd=None, symbols={}, spy=None,
                              why=f"the span could not be read ({type(exc).__name__}: {str(exc)[:120]})")
     return out
+
+
+def _all_finite(entry: Mapping[str, Any]) -> bool:
+    """Whether every figure of a span entry is a finite float (JSON has no Infinity; the plan's script reads none)."""
+    figures = [entry.get("usd")]
+    for x in (entry.get("symbols") or {}).values():
+        figures += [x["close_before"], x["close_last"], x["exposure_usd"], x["usd"], *x["closes"].values()]
+    if isinstance(entry.get("spy"), Mapping):
+        figures += [entry["spy"]["usd"], *entry["spy"]["closes"].values()]
+    return all(isinstance(v, float) and math.isfinite(v) for v in figures)
 
 
 def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store: Any, *,

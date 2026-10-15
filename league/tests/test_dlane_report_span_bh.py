@@ -17,6 +17,7 @@ Every price, notional, close and day is invented."""
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import importlib.util
@@ -41,8 +42,13 @@ from league.tests.test_equity_twins import add_tables, lot, put_lot
 #: Invented adjustment=all closes, one fetch each.
 SPY = {"2026-10-08": "600.00", "2026-10-09": "601.00", "2026-10-12": "603.00", "2026-10-13": "602.00",
        "2026-10-14": "609.00", "2026-10-15": "607.00", "2026-10-16": "606.00", "2026-10-19": "610.00"}
-QQQ = {"2026-10-12": "500.00", "2026-10-13": "505.00", "2026-10-14": "503.00", "2026-10-15": "508.00",
-       "2026-10-16": "511.00", "2026-10-19": "509.00"}
+QQQ = {"2026-10-09": "498.00", "2026-10-12": "500.00", "2026-10-13": "505.00", "2026-10-14": "503.00",
+       "2026-10-15": "508.00", "2026-10-16": "511.00", "2026-10-19": "509.00"}
+#: F1's open note: Oct 14 refused in its open window and clear in its close window (a program could still open, and
+#: `p-a` did), Oct 15 refused in every window (no program could open).
+NOTE_F1 = {"2026-10-14": {"open": {"clear": False, "why": "the House is paused"}, "close": {"clear": True}},
+           "2026-10-15": {"open": {"clear": False, "why": "the House is paused"},
+                          "close": {"clear": False, "why": "the House is paused"}}}
 #: The plan's script, pinned (its sha256): `TheScriptItself` runs it only when it is this one.
 SCRIPT_SHA256 = "367a784d5d22d1501e6d320dd96a038a416aadaffc8bfef2972a90ba3555ede7"
 
@@ -167,17 +173,82 @@ class TheRule(unittest.TestCase):
             self.assertIsNone(got["usd"])
             self.assertIn(words, got["why"])
 
+    def test_a_close_or_a_figure_a_float_cannot_hold_is_priced_false(self):
+        """F6 of the review: a Decimal holds 1e400, a float (the report's JSON) does not: never Infinity."""
+        lots = [leg("SPY", "2026-10-12", "2026-10-13")]
+        huge = {**series(SPY), "2026-10-13": ("1e400", "fetch-1")}
+        apart = {**series(SPY), "2026-10-09": ("1e-200", "fetch-1"), "2026-10-13": ("1e200", "fetch-1")}
+        for got, words in ((L.span_bh(lots, {"SPY": huge}), "finite"),
+                           (L.span_bh(lots, {"SPY": apart}), "float's range"),
+                           (L.span_bh([leg("SPY", "2026-10-12", "2026-10-13", "1e400")], {"SPY": series(SPY)}),
+                            "float's range"),
+                           (L.b10_bh(lots, huge), "finite"),
+                           (L.b10_bh(lots, apart), "float's range")):
+            self.assertEqual((got["priced"], got["usd"]), (False, None))
+            self.assertIn(words, got["why"])
+
     def test_the_open_note_is_read_by_one_rule(self):
         note = {"2026-10-13": {"open": {"clear": False, "why": "the House is paused"}, "close": {"clear": True}},
                 "2026-10-14": {"open": {"clear": True}, "close": {"clear": True}},
                 "2026-10-15": {"close": {"clear": False, "why": "the gateway's kill switch is engaged"}},
+                "2026-10-16": {"open": {"clear": False, "why": "the House is paused"},
+                               "close": {"clear": False, "why": "the House is paused"}},
+                "2026-10-19": {"open": {"clear": False}, "close": "not a window"},
                 "not a day": {"open": {"clear": False}}}
         self.assertEqual(L.refused_days(note), {"2026-10-13": "open window: the House is paused",
-                                                "2026-10-15": "close window: the gateway's kill switch is engaged"})
+                                                "2026-10-15": "close window: the gateway's kill switch is engaged",
+                                                "2026-10-16": "open window: the House is paused",
+                                                "2026-10-19": "open window: refused"})
         self.assertEqual(L.refused_days(None), {})
         me = types.SimpleNamespace(state=types.SimpleNamespace(get=lambda key, default=None: note))
         self.assertEqual(L.EquityBook._refused_days(me), L.refused_days(note), "the book's reader is the same rule")
+        # C1's blocked sessions: EVERY window the note names refused. Oct 13's close was clear: a program could open.
+        self.assertEqual(sorted(L.shut_days(note)), ["2026-10-15", "2026-10-16"])
+        self.assertEqual((L.shut_days(None), L.shut_days({"2026-10-20": {}})), ({}, {}))
         self.assertEqual((R.OPEN_NOTE_KEY, R.SPAN_BASIS), (L.OPEN_NOTE_KEY, L.SPAN_BASIS))
+
+    def test_the_entry_days_left_out_are_every_entry_day_of_the_versions_lots_in_the_book(self):
+        """F1's second half: not only the counted lots' entry days, so a lot that closes after the K-th count cannot
+        make a session blocked at K and not at a later checkpoint."""
+        def closed(lid, opened, exit_day, version=1):
+            return {"equity": True, "family": "p", "version": version, "symbol": "SPY", "opened_day": opened,
+                    "day": exit_day, "notional": D("100"), "closed_at": float(lid), "lid": lid, "panel": False}
+
+        def row(lid, opened, version=1, status="closed"):
+            return {"lid": lid, "instance": f"p@{version}:r", "family": "p", "version": version, "symbol": "SPY",
+                    "opened_day": opened, "status": status}
+
+        counted = [closed(1, "2026-10-12", "2026-10-13"), closed(2, "2026-10-16", "2026-10-19")]
+        book = {"bars": [{"day": d, "symbol": "SPY", "c": c, "sha": "f"} for d, c in SPY.items()], "spy": [],
+                "open_note": {d: NOTE_F1["2026-10-15"] for d in ("2026-10-14", "2026-10-15")}}
+        bare = R.span_bh(counted, {**book, "lots": []})["p"][0]["blocked"]
+        self.assertEqual(bare, [["2026-10-14", "2026-10-15"]])
+        # A lot of this version opened on Oct 14 (still open, or closed after these counts) leaves Oct 14 out; another
+        # version's lot does not.
+        for lots, want in (([row(3, "2026-10-14", status="open")], [["2026-10-15", "2026-10-15"]]),
+                           ([row(3, "2026-10-14", version=2)], bare)):
+            self.assertEqual(R.span_bh(counted, {**book, "lots": lots})["p"][0]["blocked"], want)
+
+    def test_the_reports_reader_never_raises_and_names_what_it_could_not_read(self):
+        """F7 of the review: every read of the book is inside the reader's guard; nothing reaches the meter."""
+        from league.equity import bands as EB
+
+        counted = [{"equity": True, "family": "p", "version": 1, "symbol": "SPY", "opened_day": "2026-10-12",
+                    "day": "2026-10-13", "notional": D("100"), "closed_at": 1.0, "lid": 1, "panel": False}]
+        good = {"bars": [{"day": d, "symbol": "SPY", "c": c, "sha": "f"} for d, c in SPY.items()], "spy": [],
+                "open_note": {}, "lots": []}
+        self.assertTrue(R.span_bh(counted, good)["p"][0]["priced"])
+        for name, book, patcher in (("bars not rows", {**good, "bars": [1, 2]}, None),
+                                    ("lots not rows", {**good, "lots": ["x"]}, None),
+                                    ("the seat rule raises", good,
+                                     mock.patch.object(EB, "seat_settings", side_effect=RuntimeError("boom"))),
+                                    ("the note's reader raises", good,
+                                     mock.patch.object(L, "shut_days", side_effect=KeyError("x")))):
+            with patcher or contextlib.nullcontext():
+                entry, = R.span_bh(counted, book)["p"]
+            self.assertEqual((entry["priced"], entry["usd"]), (False, None), name)
+            self.assertIn("could not be read", entry["why"], name)
+        self.assertEqual(R.span_bh([None, 3], good), {}, "closes that name no program: no entry")
 
 
 # ================================================================================================== in the report
@@ -234,6 +305,22 @@ class SpanFixture(A14Fixture):
     def build(self) -> None:
         self.one()
         self.two()
+        self.steady()
+
+    def forty(self) -> None:
+        """Forty counts (F1 of the review): `p-a` (SPY) closes 10 lots Oct 12-13 and, from the 30th count, 10 lots Oct
+        16-19; the lot it opened on Oct 14 (the House refused that session's open window, its close window was clear)
+        closes 40th, after them all. `p-b` (QQQ) closes 19 lots Oct 12-13. Oct 15 is refused in every window."""
+        self.eq_family("p-a")
+        self.eq_family("p-b", lane="equity")
+        for i in range(10):
+            self.lot_of("p-a", "SPY", "2026-10-12", "2026-10-13", notional="100", lane="beta", i=i)
+        for i in range(19):
+            self.lot_of("p-b", "QQQ", "2026-10-12", "2026-10-13", notional="50", lane="equity", i=20 + i)
+        for i in range(10):
+            self.lot_of("p-a", "SPY", "2026-10-16", "2026-10-19", notional="100", lane="beta", i=50 + i)
+        self.lot_of("p-a", "SPY", "2026-10-14", "2026-10-19", notional="100", lane="beta", i=999)
+        self.live.put(R.OPEN_NOTE_KEY, NOTE_F1)
         self.steady()
 
     def checkpoint(self, out: dict) -> dict:
@@ -378,6 +465,51 @@ class TheCheckpointCarriesIt(SpanFixture):
             self.assertEqual(strip, was["checkpoints"], "span_bh is the one key added")
             self.assertTrue(any("span_bh" in p for cp in got["checkpoints"] for p in cp["by_program"]))
         self.assertEqual(out["done"]["without_seeded"]["all"]["holds"], bare["done"]["without_seeded"]["all"]["holds"])
+
+
+    def test_a_versions_blocked_list_is_the_same_at_every_checkpoint(self):
+        """F1 of the review: the House's `refused_days` reads ONE refused window as a refused session, and C1 left out
+        only the counted lots' entry days, so Oct 14 (refused at the open, clear at the close, and `p-a` opened a lot
+        at it that closes after the 30th count) was blocked at K=30 and not at K=40: no one ledger could pass both.
+        Now a session is blocked only when every window was refused, less every entry day of the version's lots in
+        the book."""
+        self.forty()
+        out = self.report()
+        cps = {cp["at_close"]: cp for cp in out["done"]["all"]["checkpoints"]}
+        self.assertEqual(sorted(cps), [30, 40])
+        a30, = self.spans(cps[30])["p-a"]
+        a40, = self.spans(cps[40])["p-a"]
+        self.assertTrue(a30["priced"] and a40["priced"], (a30["why"], a40["why"]))
+        self.assertIn("2026-10-14", L.refused_days(NOTE_F1), "the idle clock's reading: refused")
+        self.assertEqual(a30["blocked"], [["2026-10-15", "2026-10-15"]])
+        self.assertEqual(a40["blocked"], a30["blocked"], "the same list at K=30 and K=40")
+        # Oct 15 is held empty at K=30, so the span splits there; at K=40 the Oct 14 lot holds it, so nothing splits.
+        self.assertEqual(a30["symbols"]["SPY"]["segments"],
+                         [["2026-10-12", "2026-10-14"], ["2026-10-16", "2026-10-19"]])
+        self.assertEqual(a40["symbols"]["SPY"]["segments"], [["2026-10-12", "2026-10-19"]])
+        self.assertEqual([e["blocked"] for e in self.spans(cps[30])["p-b"] + self.spans(cps[40])["p-b"]], [[], []])
+
+    def test_no_figure_a_float_cannot_hold_reaches_the_report(self):
+        """F6 of the review: a close of 1e400 is a Decimal and Infinity in JSON; it gives priced False and a why."""
+        self.build()
+        self.bars("SPY", {"2026-10-19": "1e400"})
+        out = self.report()
+        one, = self.spans(self.checkpoint(out))["p-one"]
+        self.assertEqual((one["priced"], one["usd"], one["symbols"]), (False, None, {}))
+        self.assertIn("finite", one["why"])
+        json.dumps(out, allow_nan=False)                     # raises on an Infinity anywhere in the report
+
+    def test_the_book_is_read_for_spy_and_the_symbols_of_programs_that_are_no_panels(self):
+        """F8 of the review: B10 reads SPY alone, so a basket's names' closes are not read."""
+        self.one()
+        self.two(10)
+        self.panel()
+        self.bars("AAPL", {d: "230.00" for d in SPY}, sha="fetch-3")
+        self.bars("MSFT", {d: "420.00" for d in SPY}, sha="fetch-4")
+        self.bars("IWM", {d: "220.00" for d in SPY}, sha="fetch-5")      # no closed lot holds it
+        book = R.read_book(self.root / R.LIVE_DB)
+        self.assertEqual(sorted({r["symbol"] for r in book["bars"]}), ["QQQ", "SPY"])
+        self.assertEqual({r["sha"] for r in book["bars"] if r["symbol"] == "SPY"}, {"fetch-1"})
 
 
 # ================================================================================================== the consumer
@@ -533,16 +665,34 @@ def blocked_sessions(blocked: list, key: str) -> frozenset:
     return frozenset(out)
 
 
-def script_check(report: dict, family: str, version: int, ledger_blocked: list | None = None) -> tuple:
-    """The script's path for one share program at the latest checkpoint: (span check ok, why). Its lots are joined as
-    `_lots_of` joins them (`done.all.closes` with `equity.closes` by pid), its window the checkpoint's."""
+def numbered(rows: list, eqmap: dict) -> list:
+    """The script's `numbered` (Done's counts: a panel program's lots of one NY day are one count), as copied above."""
+    seen, out = {}, []
+    for r in rows:
+        if r.get("label") == "EQUITY (PANEL)":
+            key = ("panel", str(r.get("family")), str((eqmap.get(str(r.get("pid"))) or {}).get("day"))[:10])
+        else:
+            key = ("close", str(r.get("pid")))
+        if key not in seen:
+            seen[key] = len(seen) + 1
+        out.append(seen[key])
+    return out
+
+
+def script_check(report: dict, family: str, version: int, ledger_blocked: list | None = None,
+                 at: int | None = None) -> tuple:
+    """The script's path for one share program at the checkpoint of `at` counts (the latest when None): (span check
+    ok, why). Its lots are joined as `_lots_of` joins them (`done.all.closes` with `equity.closes` by pid), over that
+    checkpoint's window (the closes of its first K counts)."""
     rep = json.loads(json.dumps(report))                      # the file the script reads: JSON, nothing else
-    cp = rep["done"]["all"]["checkpoints"][-1]
+    cps = rep["done"]["all"]["checkpoints"]
+    cp = cps[-1] if at is None else next(c for c in cps if c["at_close"] == at)
     eqmap = {str(e["pid"]): e for e in rep["equity"]["closes"]}
+    rows = rep["done"]["all"]["closes"]
     lots = []
-    for r in rep["done"]["all"]["closes"]:
+    for r, n in zip(rows, numbered(rows, eqmap)):
         e = eqmap.get(str(r["pid"]))
-        if r["family"] != family or not e or e.get("version") != version:
+        if n > cp["at_close"] or r["family"] != family or not e or e.get("version") != version:
             continue
         lots.append({"pid": r["pid"], "sym": str(e["symbol"]), "N": _num(e["notional_usd"]), "o": _d(e["opened_day"]),
                      "x": _d(e["day"]), "panel": r.get("label") == "EQUITY (PANEL)"})
@@ -582,6 +732,20 @@ class TheScriptsChecks(SpanFixture):
         self.assertEqual(script_check(out, "p-one", 1, ledger), (True, None))
         self.assertEqual(script_check(out, "p-one", 1), (False, "span_bh usd does not match the rebuilt benchmark"))
         self.assertEqual(script_check(out, "p-two", 1, ledger), (True, None), "another program's block is not its")
+
+    def test_one_ledger_passes_every_checkpoint_of_a_version(self):
+        self.forty()
+        out = self.report()
+        blocked = {tuple(r) for cp in out["done"]["all"]["checkpoints"] for e in self.spans(cp)["p-a"]
+                   for r in e["blocked"]}
+        ledger = [{"program": "eq|p-a|v1", "from": a, "to": z, "why": "House blocked (C1)"} for a, z in sorted(blocked)]
+        self.assertEqual(ledger[0]["from"], "2026-10-15")
+        for k in (30, 40):
+            self.assertEqual(script_check(out, "p-a", 1, ledger, at=k), (True, None), k)
+            self.assertEqual(script_check(out, "p-b", 1, ledger, at=k), (True, None), k)
+        # A ledger on the idle clock's reading (one refused window enough) would hold Oct 14 too: it fails closed.
+        old = ledger + [{"program": "eq|p-a|v1", "from": "2026-10-14", "to": "2026-10-14", "why": "one window"}]
+        self.assertEqual([script_check(out, "p-a", 1, old, at=k)[0] for k in (30, 40)], [False, False])
 
     def test_a_tampered_or_unpriced_field_fails_the_scripts_checks(self):
         self.build()
@@ -628,6 +792,23 @@ class TheScriptItself(SpanFixture):
         rows = self.run_script(self.report())
         for family in ("p-one", "p-two", "xs-p"):
             self.assertEqual((rows[family]["span_source"], rows[family]["span_check_ok"]), ("report", True), family)
+
+    def test_one_ledger_passes_every_checkpoint_in_the_script_itself(self):
+        self.forty()
+        out = json.loads(json.dumps(self.report()))
+        blocked = {tuple(r) for cp in out["done"]["all"]["checkpoints"] for p in cp["by_program"]
+                   if p["family"] == "p-a" for e in p["span_bh"] for r in e["blocked"]}
+        lv = self.script.ledger_view({"blocked": [{"program": "eq|p-a|v1", "from": a, "to": z, "why": "C1"}
+                                                  for a, z in sorted(blocked)]})
+        rows = out["done"]["all"]["closes"]
+        eqmap = {str(e["pid"]): e for e in out["equity"]["closes"]}
+        nums = self.script.numbered(rows, eqmap)
+        for cp in self.script.gate(out):
+            stats, _, _ = self.script.stats_at(cp, rows, nums, eqmap, None, None,
+                                               lambda key: self.script.blocked_sessions(lv, key))
+            for key in ("eq|p-a|v1", "eq|p-b|v1"):
+                self.assertEqual((stats[key]["span_source"], stats[key]["span_check_ok"]), ("report", True),
+                                 (cp["at_close"], key, stats[key].get("why")))
 
     def test_a_split_holds_with_the_ledgers_blocked_sessions_and_fails_closed_without(self):
         self.build()
