@@ -30,6 +30,22 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### EQDONE-7's design, 12 seats at 0.33 x E, on `feat/equity-eqd7-design` (PRE-BUILT, deployed only on its trigger; THE MONEY DIGEST MOVES, `de5ed74e` -> `eb1af61e`, and the grant re-ratifies)
+
+- **What it is:** `set_design 12 0.33` on release U (main `aec0c8a5`): `equity_money.probe.max_programs` 12 and
+  `probe.sleeve_share` "0.33" (new lots only), `elane.roster` 12 (policy.json and `league/swarm/elane.py` DEFAULTS),
+  `PINNED_DIGEST` `6d7fc6d4`, the design blocks of the four documents; the seats' bound in `EQUITY_MONEY_BOUNDS`
+  ("0", "6") -> ("0", "12") with its stated cost beside it; the pair added to the design grid
+  (`league/tests/equity_design.py` `EQDONE7`, its three pinned digest pairs, the designs table's row). No code path
+  moves: `size_entry` holds every entry to the same owner lines and the same shared loss budget.
+- **Why, and when it is deployed:** the pre-registered study EQDONE-7 (seats 6, 8, 10, 12 x sleeve 0.50, 0.33, 0.25,
+  each switched at once or TRIGGERED, with the passer supply modelled from the House's own record and FWD1-R's receipt)
+  picked 12 x 0.33 TRIGGERED at the first new passer: the pair in force stays until a new passer (a family that passed
+  its screen and has never held a seat) waits for a seat after a band sync; this release is deployed that night. Seats
+  only decide who may open; with no passer waiting the extra seats are empty and the smaller sleeve would only shrink
+  the six's lots, which is why it waits.
+- **The rollback:** `set_design 6 0.50` (new lots only), or the release before.
+
 ### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, a post-close checkpoint, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
 
 - **What it carries:** release T (`rel/e4-fwd1` `6b0c41bb`, PR #546: E4 step one with A32, FWD1-R, R-SEC), merged with
@@ -901,20 +917,20 @@ contract `397b22b772b3` unchanged; no evidence reset.
 - **The pair in force**, in rule arithmetic of the two numbers:
 
 <!-- equity-design:begin -->
-THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.50 x E
-(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.25 x E.
-A lot in every seat asks for 1.50 x E of ETFs; the lane holds at most 1.00 x E of them, 0.20 x E of
-open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 2 whole lots fit; the
-next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 3 of
-6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-4 of 6 in the $400 window alone; the window alone holds all 6 up to E = $1,333.
-Whole sleeves (programs that hold several ETFs) ask for 3.00 x E; the lane holds at most 1.00 x E,
+THE DESIGN IN FORCE: 12 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.33 x E
+(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.165 x E.
+A lot in every seat asks for 1.98 x E of ETFs; the lane holds at most 1.00 x E of them, 0.20 x E of
+open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 3 whole lots fit; the
+next program's lot of it is 0.005 x E. At E = $2,000, the account all cash and nothing realized: 5 of
+12 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
+6 of 12 in the $400 window alone; the window alone holds all 12 up to E = $1,010.
+Whole sleeves (programs that hold several ETFs) ask for 3.96 x E; the lane holds at most 1.00 x E,
 0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
 the equity lots: $400 - 0.20 x E against the one-ETF lots above. The gateway's day line (4x
-equity of buys a day, a cancelled one too) admits 16 sends of such a lot: 3 entries can each climb the
-collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.50 x E and
+equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
+collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
 0.50 x E.
-Money digest `de5ed74e`, full digest `111ede85` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `46b933a9` / `d9cf3149`.
+Money digest `eb1af61e`, full digest `6d7fc6d4` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `46b933a9` / `d9cf3149`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

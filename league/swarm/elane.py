@@ -254,7 +254,7 @@ DEFAULTS: dict[str, Any] = {
     "universe": ["SPY", "QQQ", "IWM", "DIA"],
     "structures": ["etf"],
     "birth_share": 0.0,
-    "roster": 6,
+    "roster": 12,
     "screens": {BETA: {"name": "S1", "receipt_sha256": None, "c_R": None, "c_X": None, "fp_cap": None,
                        "owner_wall": None, "retry": False, "r4": {}, "beside": None},
                 EQUITY: {"name": "S1", "receipt_sha256": None, "c_R": None, "c_X": None, "fp_cap": None,

@@ -12,7 +12,7 @@ this file, and never by calling the code under test:
   league/tests/test_equity_design.py holds each to `walk` and to the House's own `size_entry` (`Lane`).
 - `Lane`: an equity lane sized by the REAL `size_entry` on the facts `EquityBook._size` states to it.
 - `CANDIDATES`, `REFERENCE`, `DIGESTS`: the pre-registered study EQDONE-3's grid (seats 3, 4, 5, 6 x sleeve 0.50, 0.33,
-  0.25), A20's design (three seats at 0.50: what E1 deployed, and the rollback) and each candidate's pinned digests.
+  0.25) and the pair the pre-registered study EQDONE-7 picked (`EQDONE7`: 12 seats x 0.33), A20's design (three seats at 0.50: what E1 deployed, and the rollback) and each candidate's pinned digests.
 - `design`, `reference`: the constitution patched to a candidate for a test's body, so a pin of A20's own figures
   (a digest, a dollar size) is read at A20's design whatever pair is in force.
 - THE SEAT RULE'S BLOCK (release E5-A; `equity_money.probe.seat`) and THE PANEL ROW (release E4 step two;
@@ -47,7 +47,11 @@ ZERO = D(0)
 #: THE GRID of the pre-registered study EQDONE-3: every pair `set_design` may be asked for.
 SEATS = (3, 4, 5, 6)
 SLEEVES = ("0.50", "0.33", "0.25")
-CANDIDATES = tuple((seats, sleeve) for seats in SEATS for sleeve in SLEEVES)
+#: THE PAIR EQDONE-7 PICKED (Oct 15, 2026; a pre-registered study of the seats and the sleeve with the passer supply
+#: modelled from the House's record): 12 seats at a Probe sleeve of 0.33 x E, deployed only once a new passer waits for
+#: a seat (until then the pair in force stays). Its digests are pinned below as every grid pair's are.
+EQDONE7 = ((12, "0.33"),)
+CANDIDATES = tuple((seats, sleeve) for seats in SEATS for sleeve in SLEEVES) + EQDONE7
 #: A20's design (Oct 11, 2026): what release E1 deployed, and the rollback (`set_design 3 0.50`).
 REFERENCE = (3, "0.50")
 #: Each candidate's (money digest, full digest) BEFORE THE SEAT RULE'S BLOCK (release E5-S, e36c7e39), kept: a pair with
@@ -78,6 +82,8 @@ DIGESTS_E5S: dict[tuple[int, str], tuple[str, str]] = {
                   "735e375e170edbb6c459ba30fdd42233ace6fb648f033b7023efd2cc1f5dedcb"),
     (6, "0.25"): ("6c0bc42b8715f5ff7131dfc95c4312ac05d3453ef23e4c4a31bd8cbb195cb8eb",
                   "c3c061b0e320135486a53aedcd375eefb6b8773c9550eaf8f3244453305153b8"),
+    (12, "0.33"): ("2650107ad6e42f957dd1a88020b0ecf2e47fad423afc62fa9fd118c44ea6662d",
+                   "95f13b59bd8d125dfbe2605efcfdea334d0f761373791c293097987993693bc7"),
 }
 #: Each candidate's (money digest, full digest) WITH THE SEAT RULE'S BLOCK AND WITHOUT THE PANEL ROW (release E5-A: the
 #: rule "activity-1-free", the floor a quarter of the sleeve, ten idle sessions), kept: a pair with
@@ -108,6 +114,8 @@ DIGESTS_E5A: dict[tuple[int, str], tuple[str, str]] = {
                   "d61bfc89c7bb76a112399c179959522d6f942b128db8ebeebfa7392bef0c28c5"),
     (6, "0.25"): ("11a1dc0cbe194f8609dd07340d5599725c87ecebf271b9a5016ab49c0a14156c",
                   "00c2bf6f2c57125e2b66e84730ab3a25c97e163438dc8e1085486d03ae69f4c9"),
+    (12, "0.33"): ("3227a77ca22adb40be1b3d91107fc90b6bc294c4d6016966e819030db1e00bc5",
+                   "4ef65a66f764e3f4b8d4b8cc206e1d063ba0e1e61d2933aa4bc6d8bff96d3d0d"),
 }
 #: Each candidate's (money digest, full digest), pinned, WITH THE SEAT RULE'S BLOCK AND THE PANEL ROW AS THEY STAND
 #: (release E4 step two: `equity_money.panel`, one seat of its own at a sleeve of 0.10 x E): the grant re-ratifies on
@@ -139,6 +147,8 @@ DIGESTS: dict[tuple[int, str], tuple[str, str]] = {
                   "bf25c4dda6f6a08044a3f1c080fd0b95dec4d17b10b02a42568d57297e945001"),
     (6, "0.25"): ("405bf98e4411d437b87902db37781da9c5d7ba7018ef4bcb6a2adb8a81820d72",
                   "92369b0a5d678f5712e0a9b8b1b2b84b7a7a58d334913a6aa7b0d10b623ede8b"),
+    (12, "0.33"): ("eb1af61e731c63c5b49bb18a9cb88858b0ff9730513b3f87d63d289d5586cd06",
+                   "6d7fc6d45f8f5831b49c694467303a63b4ec9ceb7f513ab4a65b6915ea855ed5"),
 }
 #: A share is floored to this many places of a share (league/equity/config.py `QTY_PLACES`, read here as a figure).
 QTY = D("0.000001")

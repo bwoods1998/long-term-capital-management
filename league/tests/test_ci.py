@@ -537,17 +537,17 @@ class TheEquityLane(unittest.TestCase):
                           "(0): a panel program's sleeve is never larger than a Probe's"])
 
     def test_the_seats_are_held_to_their_bound(self):
-        """THE SEATS' BOUND (release E5-S, Oct 11, 2026: six): the tree as it stands is inside it; one seat past it is
-        refused by CI, by name; every count of the pre-registered grid, and 0 (no new seat), pass, at every sleeve of
-        the grid: the two numbers are any pair inside their bounds."""
+        """THE SEATS' BOUND (release E5-S, Oct 11, 2026: six; EQDONE-7, Oct 15: twelve): the tree as it stands is inside
+        it; one seat past it is refused by CI, by name; every count of the pre-registered grid, and 0 (no new seat),
+        pass, at every sleeve of the grid: the two numbers are any pair inside their bounds."""
         from league.tests.equity_design import CANDIDATES, in_force
 
         seats, sleeve = in_force()
-        self.assertEqual(self.constitution.count('"probe.max_programs": ("0", "6"),'), 1)
-        for past in (7, 12):
+        self.assertEqual(self.constitution.count('"probe.max_programs": ("0", "12"),'), 1)
+        for past in (13, 20):
             refused = self.tree(constitution={self.probe_row: self.row_at(past, sleeve)})
             self.assertEqual(refused, [f"league/constitution.py: equity_money.probe.max_programs = {past} is outside "
-                                       "[0, 6]"], past)
+                                       "[0, 12]"], past)
         refused = self.tree(constitution={self.probe_row: self.row_at("4.5", sleeve)})
         self.assertEqual(refused, ["league/constitution.py: equity_money.probe.max_programs = 4.5 is not a whole count"])
         for count, share in (*CANDIDATES, (0, sleeve)):

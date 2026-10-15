@@ -265,7 +265,7 @@ class ConstitutionTest(unittest.TestCase):
         loose = {"position_share.etf": ("0.50", "0.5001"), "position_share.stock": ("0.20", "0.2001"),
                  "invested_share": ("1.00", "1.01"), "cash_reserve_usd": ("50", "49.99"),
                  "open_risk_weight.etf": ("0.20", "0.19"), "open_risk_weight.stock": ("0.40", "0.39"),
-                 "probe.sleeve_share": ("0.50", "0.51"), "probe.max_programs": (6, 7), "probe.min_order_usd": ("10", "9.99"),
+                 "probe.sleeve_share": ("0.50", "0.51"), "probe.max_programs": (12, 13), "probe.min_order_usd": ("10", "9.99"),
                  "sized.min_trades": (20, 19), "sized.confidence": ("0.80", "0.79"), "sized.kelly_fraction": ("0.25", "0.26"),
                  "sized.sleeve_share": ("0.50", "0.51"), "sized.min_probe_sessions": (5, 4),
                  "demotion.min_trades": (10, 11), "demotion.z": ("1.645", "1.65"),
@@ -282,7 +282,7 @@ class ConstitutionTest(unittest.TestCase):
         from decimal import Decimal
 
         self.assertEqual(EQUITY_MONEY_BOUNDS["probe.sleeve_share"], ("0", "0.50"))
-        self.assertEqual(EQUITY_MONEY_BOUNDS["probe.max_programs"], ("0", "6"))
+        self.assertEqual(EQUITY_MONEY_BOUNDS["probe.max_programs"], ("0", "12"))
         row = CONSTITUTION["equity_money"]["probe"]
         self.assertLessEqual(Decimal(row["sleeve_share"]), Decimal(EQUITY_MONEY_BOUNDS["probe.sleeve_share"][1]))
         self.assertLessEqual(row["max_programs"], int(EQUITY_MONEY_BOUNDS["probe.max_programs"][1]))
