@@ -30,6 +30,33 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### Reliability: the gateway watchdog asks an interrupted box back and tells the owner where to ask; the account reading knows the equity book's own shares, on `fix/reliability-1015` (unreleased; from main `aec0c8a5`, release U; TWO deploys: the gateway by the owner's wrangler deploy, and the House by an owner deploy, `league/ops/economics.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the constitution digest `111ede85` and the money digest `de5ed74e` are main's; no setting changes)
+
+- **The watchdog and an interrupted box** (`gateway/lib/watchdog.mjs`, `sail.mjs`, `email.mjs`, `gate.mjs`). Oct 14,
+  2026: an AWS spot interruption left the House `interrupted_restorable` from 20:12:46Z to 03:26:54Z Oct 15; the
+  watchdog listed the status as stopped but not resumable, so it never asked Sail for the box and mailed "the desks
+  are not running" every six hours. Now an interrupted box above the reserve is asked back with Sail's resume (which
+  restores it from its last completed checkpoint on the same id) once a 15-minute window on a key of its own, at
+  most 48 times an interruption, never forked and not restarted in the pass that brings it back; after 3 calls that
+  did not bring it back, 45 minutes, or Sail's `terminal_unavailable`, the owner gets ONE message for the
+  interruption (`box_interrupted`, at most one an hour across interruptions) naming Sail's community Slack, as Sail's
+  "Getting Help" page does, with the exact text to post (box id, app, name, status and Sail's reason, since when,
+  `last_checkpointed_at`, `checkpoint_generation`, the calls tried) and the warning not to fork. Every fact keeps
+  its own shape and Sail's sentence is cut to plain words with token-shaped runs redacted. The six-hourly "not
+  running" stays quiet for a box being asked back; under the reserve it is the credit's case as before;
+  `interrupted_unsafe_to_retry` is never resumed. `/v1/health` shows the episode at `watchdog.restore`. Seven new
+  watchdog tests; `npm run check`, `npm test` 463/463.
+- **The equity book's own shares** (`league/account_activity.py`, `league/ops/economics.py`). The account reading
+  predated release E1 and read every share fill on the account as an assignment's: from the first real share buy
+  (Oct 13) every reading said "shares an assignment or an exercise left are still held", so the site's Profit, the
+  budget's p30 (`budget.json` errors; earned 0, which lifts no research) and the close economics' `reconciled` were
+  unknown while the lane held a lot, and every budget run raised a House warning. `read_book` now also reads the
+  equity book's orders and open lots; a share fill on one of its orders is left out; `shares_held` counts only shares
+  beyond its open lots, so a real assignment beside held lots still waits for its own shares. Replayed read-only on
+  the live record: the block clears and every dollar field of the reading is unchanged. Three new tests.
+- **Rollback:** the gateway, `npx --no-install wrangler@4.129.1 rollback <the previous version id>`; the House, repoint
+  to `aec0c8a5` (nothing is migrated; the reading is recomputed every five minutes).
+
 ### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, a post-close checkpoint, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
 
 - **What it carries:** release T (`rel/e4-fwd1` `6b0c41bb`, PR #546: E4 step one with A32, FWD1-R, R-SEC), merged with
