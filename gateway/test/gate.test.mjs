@@ -25,7 +25,7 @@ test('an order inside every cap is reserved and counted', () => {
   assert.equal(status.kill_switch, false);
   assert.deepEqual(status.watchdog, {
     last_check_at: null, last_action: null, last_action_at: null,
-    last_restart_at: null, published_at: null, age_seconds: null,
+    last_restart_at: null, published_at: null, age_seconds: null, restore: null,
   });
   assert.equal(status.caps_exhausted, false);
   assert.deepEqual(status.alerts, {});

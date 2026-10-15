@@ -119,7 +119,7 @@ test('health reports the caps, the counters, the kill switch and the watchdog', 
   assert.equal(body.max_loss.order_cap_usd, null);
   assert.equal(body.max_loss.opens_admitted, false);
   assert.deepEqual(Object.keys(body.watchdog).sort(),
-    ['age_seconds', 'last_action', 'last_action_at', 'last_check_at', 'last_restart_at', 'published_at']);
+    ['age_seconds', 'last_action', 'last_action_at', 'last_check_at', 'last_restart_at', 'published_at', 'restore']);
   assert.ok('sail' in body && 'alerts' in body);
   // The research library's block (Sept 29, 2026): read from the Gate's own row, no call to arXiv.
   assert.deepEqual(Object.keys(body.library).sort(), ['backoff_until', 'backoff_why', 'by_host', 'by_role', 'cap', 'day', 'in_flight',

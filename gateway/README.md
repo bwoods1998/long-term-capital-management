@@ -408,6 +408,24 @@ and `net_flows`); the "stopped for lack of credit" mail keys on Sail's balance a
 checkpoint route answers 404 (after a site reset, before the House's first checkpoint) it touches
 nothing. It never chooses a release: that is the in-box watchdog ([deploy/README.md](../deploy/README.md)).
 
+A box the provider took away with its checkpoint kept (`interrupted_restorable`; Oct 14, 2026, an AWS
+spot interruption left the House down seven hours while every resume hung and this watchdog only
+mailed "not running") is asked back with Sail's resume, which restores it from its last completed
+checkpoint on the same id: one call a `RESTORE_COOLDOWN_SECONDS` (900) window on a key of its own,
+each bounded by the Sail client's 45 s timeout, at most `RESTORE_MAX_TRIES` (48) an interruption, never
+a fork (a fork is a second House on the same account if the first one comes back), and no restart in
+the pass that brings it back (a warm restore keeps the House running; the restart cooldown then gives
+it thirty minutes before the stale-checkpoint path would signal it). After `RESTORE_MAIL_TRIES` (3)
+calls that did not bring it back, or `RESTORE_MAIL_MINUTES` (45) since it was first seen, or at once
+when Sail answers `terminal_unavailable`, the owner gets ONE message for the interruption (`box_interrupted`,
+at most one an hour across interruptions): Sail's community Slack, as Sail's "Getting Help" page names
+it, and the exact text to post (the box id, its app and name, the status and Sail's reason, when it
+changed, `last_checkpointed_at` and `checkpoint_generation`, the calls tried). Each fact is kept only
+in its own shape and Sail's sentence is cut to plain words with any token-shaped run redacted, so
+nothing secret can reach the mail. The six-hourly "not running" stays quiet for an interrupted box
+the watchdog is asking back. `interrupted_unsafe_to_retry` is never resumed. `/v1/health` shows the
+interruption under `watchdog.restore`.
+
 ## Secrets
 
 The owner places them from `gateway/`, each on a hidden prompt; nothing in this repository reads or

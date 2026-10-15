@@ -13,6 +13,13 @@ export const STOPPED = ['paused', 'sleeping', 'terminated', 'terminating', 'fail
   'interrupted_restorable', 'interrupted_unsafe_to_retry'];
 /** ...and the two that can be brought back without human hands. */
 export const RESUMABLE = ['paused', 'sleeping'];
+/**
+ * A box the provider took away (an AWS spot interruption, Oct 14, 2026) with its checkpoint kept: Sail restores it from
+ * its last completed checkpoint on the same id, and `POST /resume` is the call that asks. The watchdog asks, bounded and
+ * cooled down, and then tells the owner the one place a human can help (`lib/watchdog.mjs`). Never a fork: a fork is a
+ * second box, and a queued resume could bring the first one back beside it (two Houses on one account).
+ */
+export const RESTORABLE = ['interrupted_restorable'];
 
 const TIMEOUT = 45000;
 
@@ -79,21 +86,60 @@ export async function usageSummary({ apiKey, fetcher, range = '24h' }) {
   }
 }
 
-/** The box's current status, one of the lifecycle values Sail publishes. */
+const ID = /^[A-Za-z0-9_-]{1,80}$/;
+const NAME = /^[A-Za-z0-9._-]{1,64}$/;
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+const only = (value, shape) => (typeof value === 'string' && shape.test(value) ? value : null);
+
+/**
+ * The provider's own sentence about a box (`error_message`), made safe to mail and to paste into a public channel: one
+ * line of plain words and punctuation, at most 160 characters, and any run of 24 or more letters, digits, `_` or `-` (a
+ * token's shape) replaced by `[redacted]`. Null when nothing is left.
+ */
+export function plainSentence(value, maximum = 160) {
+  if (typeof value !== 'string') return null;
+  const text = value
+    .replace(/[^A-Za-z0-9 .,:;()'\/_-]+/g, ' ')
+    .replace(/[A-Za-z0-9_-]{24,}/g, '[redacted]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maximum)
+    .trim();
+  return text || null;
+}
+
+/**
+ * The box's current status, one of the lifecycle values Sail publishes, and what a person asking Sail for help names
+ * (Sail's "Getting Help": the box id, its app, what happened and when): its name and app, the provider's error sentence,
+ * when the status last changed and the last completed checkpoint. Each is kept only in its own shape (an id, a name, an
+ * ISO time, an integer, a plain sentence), never as the provider's raw text.
+ */
 export async function boxStatus({ apiKey, boxId, fetcher }) {
   try {
     const result = await call(`${SAILBOX_API}/v1/sailboxes/${encodeURIComponent(boxId)}`, { apiKey, fetcher });
     if (result.error) return result;
     const body = JSON.parse(result.text);
-    return { status: String(body.status || 'unknown') };
+    return {
+      status: String(body.status || 'unknown'),
+      name: only(body.name, NAME),
+      app_id: only(body.app_id, ID),
+      app_name: only(body.app_name, NAME),
+      error_message: plainSentence(body.error_message),
+      updated_at: only(body.updated_at, STAMP),
+      last_checkpointed_at: only(body.last_checkpointed_at, STAMP),
+      checkpoint_generation: Number.isSafeInteger(body.checkpoint_generation) && body.checkpoint_generation >= 0
+        ? body.checkpoint_generation : null,
+    };
   } catch (error) {
     return { error: code(error) };
   }
 }
 
 /**
- * Bring a paused or sleeping box back. The call answers 200 either way, so the outcome is in
- * `resume_state`: `running` and `already_running` both mean it is ready.
+ * Bring a paused or sleeping box back, or ask Sail to restore an interrupted one from its checkpoint. The call answers
+ * 200 either way, so the outcome is in `resume_state`: `running` and `already_running` both mean it is ready, and
+ * `terminal_unavailable` that it can never come back. A call that does not answer inside the timeout is `timeout`
+ * (Oct 14, 2026: every resume of the interrupted House hung for seven hours).
  */
 export async function resumeBox({ apiKey, boxId, fetcher, idempotencyKey }) {
   try {

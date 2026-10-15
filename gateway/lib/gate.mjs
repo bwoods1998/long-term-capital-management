@@ -1471,6 +1471,8 @@ export function createGate({ store, env = {}, now = Date.now }) {
           last_restart_at: watch.last_restart_at ?? null,
           published_at: watch.published_at ?? null,
           age_seconds: watch.age_seconds ?? null,
+          // An interrupted box's episode (lib/watchdog.mjs): when it was first seen, the restore calls, the one mail.
+          restore: watch.restore ?? null,
         },
         sail: {
           balance_usd: sail.balance_usd ?? null,
