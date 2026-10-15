@@ -1549,8 +1549,25 @@ def contract_text() -> str:
         return CONTRACT_FALLBACK
 
 
+#: THE ROUTE AFTER A PANEL'S TRAIN PASS, as the bar's last sentence says it (L2's follow-up, Oct 15, 2026): under A34
+#: (`A34_FORWARD_ONLY`) a panel program takes no sealed try and no look, so the bar and the panel block of the equity
+#: request say the forward screen; with the historical route open (a test's world), the words as built.
+ROUTE_A34 = ("The first version that passes the bar and the review ends the family's Train research. Under A34 a "
+             "panel program takes no sealed Validation try and no look under the screen XS1: its only route to money is "
+             "the forward screen FWD1-R. No outcome is ever shown to anyone who writes programs.")
+ROUTE_HISTORICAL = ("The first version that passes the bar and the review is the lineage's ONE Validation try, then ONE "
+                    "sealed look under the screen XS1; their outcomes are sealed and never shown to anyone who writes "
+                    "programs.")
+
+
+def route_words() -> str:
+    """The bar's last sentence: `ROUTE_A34` while `A34_FORWARD_ONLY` (the House's value), else `ROUTE_HISTORICAL`."""
+    return ROUTE_HISTORICAL if A34_FORWARD_ONLY is False else ROUTE_A34
+
+
 def bar_text() -> str:
-    """The Train bar in words (`BAR_XS`, `FAILS_XS`), with what it loosens stated (five seen years, not six)."""
+    """The Train bar in words (`BAR_XS`, `FAILS_XS`), with what it loosens stated (five seen years, not six), and the
+    route after a pass (`route_words`)."""
     first, gap = BAR_XS["state_resets"]
     return (f"THE PANEL TRAIN BAR ({OBJECTIVE}), on the House's panel Train years 2017-19 and 2022-24 (2016 and 2021 are "
             "look-back only; one Train year may be held out from you and is never named or shown). A version is run "
@@ -1572,9 +1589,7 @@ def bar_text() -> str:
             "ctx gives again. THE LOOSENING, stated: this bar reads six Train years, five of them seen (the ETF bar "
             "reads seven and six). Beside, never a bar: the raw P&L's t, turnover, the cost share, and whether the "
             "names you held lean on size, beta, momentum or volatility (a program that leans on a style can pass the "
-            "screen and still take no live seat). The first version that passes the bar and the review is the "
-            "lineage's ONE Validation try, then ONE sealed look under the screen XS1; their outcomes are sealed and "
-            "never shown to anyone who writes programs.")
+            "screen and still take no live seat). " + route_words())
 
 
 def researching(store: Any) -> int:
@@ -1640,8 +1655,10 @@ def request_text(store: Any, settings: Mapping[str, Any] | None, births: int) ->
         f"{c['max_names']} names out of the day's S&P 500 members by a symmetric cross-sectional rule. A panel program "
         "sees salted slots: no ticker, no date, no price level, no size. It is judged on its daily RESIDUAL against "
         "matched placebo portfolios (the same number of names at the same weights from the same sector, beta and "
-        "momentum cells on the same days), by the bar below on Train and then by the screen XS1; market, sector, beta "
-        "and momentum direction are not counted as edge, so a rule that only tilts to a style earns nothing here.",
+        "momentum cells on the same days), by the bar below on Train and then "
+        + ("by the screen XS1" if A34_FORWARD_ONLY is False else "by the forward screen FWD1-R alone (A34: no XS1 look)")
+        + "; market, sector, beta and momentum direction are not counted as edge, so a rule that only tilts to a style "
+        "earns nothing here.",
         PANEL_PROPOSAL.replace("MAX_NAMES", str(c["max_names"])),
         f"PANEL QUOTA: of this pass's births, {want} may be panel families (elane.panel.birth_share "
         f"{c['birth_share']:.0%} of the equity lanes' births over the window; panel families in Train research: "
@@ -4414,7 +4431,8 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "GATE_CLOCK_KEY", "GATE_CLOCK_ALERT", "GATE_CLOCK_SPENDS", "OWED", "gate_clock_row", "try_owed",
            "gate_clock_wait", "gate_clock_fail", "gate_clock_clear", "steady_runs",
            "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "LOOK_RULES", "LOOK_RULES_BUILT", "A31_HOLD",
-           "A34_FORWARD_ONLY", "A34_HOLD", "A34_SEATLESS", "forward_seated", "seat_refused_a34", "forward_seats",
+           "A34_FORWARD_ONLY", "A34_HOLD", "A34_SEATLESS", "ROUTE_A34", "ROUTE_HISTORICAL", "route_words",
+           "forward_seated", "seat_refused_a34", "forward_seats",
            "look_held", "cfg", "pin", "receipt", "mode",
            "live_ready", "status", "health", "HEALTH", "seat_word", "seat_standing", "is_panel", "panel_seats", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
            "judged", "identity", "hidden_year_of", "card_errors", "cell_of", "family_cell", "cell_text",
