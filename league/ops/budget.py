@@ -104,6 +104,11 @@ UNKNOWN IS NEVER MONEY. An unreadable balance, fixed cost or reserve gives its m
 earns nothing; so does an unreadable promotion record once the stop could apply (the sessions are then counted from
 `EDGE_START`, or from the last Probe a look earned when the swarm's record shows one).
 
+THE WAIT FOR THE GUARD'S NEXT READING (L4, Oct 15, 2026; `_read_waiting`). A job run whose first read finds no fresh
+guard reading (a House just started after a long outage, before the guard's first check) waits up to
+`GUARD_WAIT_SECONDS` for the guard's next good reading, then reads every input again at a new instant. It never invents
+a balance: with no reading by then, Sail is still unreadable, and the gateway's Sail reading is still the card line only.
+
 THE OUTPUT, `<state>/budget.json` (private): the inputs, each meter's research $/day, the knob values, the direction
 against the last file (cut, raise or same), each meter's reserve in force, its day's figure, what the run that set it
 added back (`added_back_usd`; 0 on a later run) and what this run's own reading would have set, its runway at its
@@ -242,6 +247,13 @@ FIXED_WINDOW_DAYS = 7
 NEED_WINDOW_DAYS = 7
 #: The Sail guard's balance reading older than this is no reading.
 BALANCE_FRESH_SECONDS = 6 * 3600
+#: THE WAIT FOR THE GUARD'S NEXT READING (L4, Oct 15, 2026; `_read_waiting`). A `budget` run that finds no fresh guard
+#: reading waits at most this long from its start for the guard's next good one, looking at the guard's kv every
+#: `GUARD_POLL_SECONDS`, then reads every input again at a new instant. The job's wall is 600 s (league/ops/registry.py):
+#: the first read, the wait and the second read end well inside it (a test holds the room the wall leaves). Not a rule
+#: constant: it decides when the run reads, never what a reading gives.
+GUARD_WAIT_SECONDS = 270
+GUARD_POLL_SECONDS = 20
 #: The ladder's own promotion reason carries this and its receipt's id (league/live/ladder.py: "the forward ladder
 #: promoted it (practice receipt N)"); a move to probe without it is not a ladder promotion, and one with it is one only
 #: as that receipt's, settled (`_swarm_reads`).
@@ -1240,6 +1252,23 @@ def _guard_reading(guard: Any, now: float) -> tuple[float | None, float | None, 
     return None, None, "the Sail guard has no fresh reading"
 
 
+def _guard_kv(root: Path) -> Any:
+    """The Sail guard's kv record alone, read-only, or None when there is none or it cannot be read: what the wait for
+    the guard's next reading looks at (`_read_waiting`). Never an input: the inputs are read again after it."""
+    path = root / "swarm.sqlite"
+    if not path.exists():
+        return None
+    try:
+        conn = _read_only(path)
+        try:
+            row = conn.execute("SELECT value FROM kv WHERE key='guard'").fetchone()
+        finally:
+            conn.close()
+        return json.loads(row["value"]) if row else None
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+
+
 def _booked_today(rows: Any, kinds: tuple[str, ...], now: float, until: float) -> float:
     """The dollars of `kinds` in the day's spend rows (`_swarm_reads`' `today`: (kind, epoch, usd)) from 00:00 UTC of
     `now`'s day to `until`, never under 0 (a release of a hold booked the day before lowers no day's spend under 0)."""
@@ -1338,6 +1367,22 @@ def _now(ctx: Any) -> float:
 
         now = clock() if callable(clock) else time.time()
     return float(now)
+
+
+def _clock(ctx: Any) -> Callable[[], float] | None:
+    """The job's live clock, the one `_now` reads, or None when `ctx` fixes the job's instant (`now` a number): a run at
+    a fixed instant has no later instant to read at, so it never waits (`_read_waiting`)."""
+    now = _get(ctx, "now")
+    if callable(now):
+        return lambda: float(now())
+    if now is not None:
+        return None
+    clock = _get(ctx, "clock")
+    if callable(clock):
+        return lambda: float(clock())
+    import time
+
+    return time.time
 
 
 def gather(root: Path, now: float, *, config: Mapping[str, Any], settings: Mapping[str, Any], sail: Any = None,
@@ -1563,6 +1608,66 @@ def _job_inputs(ctx: Any, root: Path, now: float, config: Mapping[str, Any], err
     return gather(root, now, config=config, settings=_settings(root, config), sail=sail, health=health, errors=errors)
 
 
+def _read_waiting(ctx: Any, root: Path, config: Mapping[str, Any]) -> tuple[float, dict[str, Any], list[str],
+                                                                               dict[str, Any] | None]:
+    """The `budget` job's instant, its inputs (`_job_inputs`), their errors and its wait (None when it did not wait).
+
+    THE WAIT FOR THE GUARD'S NEXT READING (L4, Oct 15, 2026). A run that starts just after the House does reads the
+    guard's kv before the guard's first check: after an outage of 6 h or more that reading is stale, and the run wrote
+    Sail "unreadable" (Oct 15: 03:27:22Z against the guard's reading at 03:27:25Z). Every `budget` receipt of a UTC day
+    must read the ceiling for that day to count. So when the first read finds no fresh guard reading (`_guard_reading`),
+    the run looks at the guard's kv every `GUARD_POLL_SECONDS`, at most `GUARD_WAIT_SECONDS` from its start. Once the
+    guard has a good reading, the run takes a NEW instant, after that reading, and reads EVERY input again at it (the
+    guard's kv, its `metered_today`, the day's spend, the box spend, the gateway): `_guard_reading` refuses a reading
+    newer than the instant it is read at, and the day's meter moves with each reading. Only the guard's own reading ends
+    the wait: the gateway's Sail reading stays the card line, never research. With no reading by the end, the run goes on
+    as before: Sail "unreadable" at the run's start, and one more error, first in the list, says how long it waited after
+    its first read (or, when the first read alone used the whole wait, that it never looked). The sleeps asked add up to
+    at most `GUARD_WAIT_SECONDS` too, so a clock that does not move cannot stretch the wait. A fresh reading at the start
+    is no wait at all. A run at a fixed instant (`now` a number: no clock) never waits. Only the job's own run waits: the
+    refresh's full-job path does not (`refresh`)."""
+    now = _now(ctx)
+    errors: list[str] = []
+    inputs = _job_inputs(ctx, root, now, config, errors)
+    clock = _clock(ctx)
+    if clock is None or _finite(inputs["meters"]["sail"].get("balance_usd")) is not None:
+        return now, inputs, errors, None
+    sleep = _get(ctx, "sleep")
+    if not callable(sleep):
+        import time
+
+        sleep = time.sleep
+    first = clock()  # the first read ends here: the wait is counted from it
+    deadline, polls, slept = now + GUARD_WAIT_SECONDS, 0, 0.0
+    # Two bounds besides the clock's: the time asked of the sleeper (a clock that never moves, with the real sleeper,
+    # still sleeps at most GUARD_WAIT_SECONDS) and the number of looks.
+    while polls < math.ceil(GUARD_WAIT_SECONDS / GUARD_POLL_SECONDS):
+        left = min(deadline - clock(), GUARD_WAIT_SECONDS - slept)
+        if left <= 0:
+            break
+        step = min(float(GUARD_POLL_SECONDS), left)
+        sleep(step)
+        slept, polls = slept + step, polls + 1
+        if _guard_reading(_guard_kv(root), clock())[0] is None:
+            continue
+        again = clock()  # the new instant, after the guard's reading
+        fresh: list[str] = []
+        read = _job_inputs(ctx, root, again, config, fresh)
+        if _finite(read["meters"]["sail"].get("balance_usd")) is not None:
+            return again, read, fresh, {"first_read_seconds": round(first - now, 1),
+                                        "waited_seconds": round(again - first, 1), "polls": polls, "read": True}
+        # No reading at the second read (the guard wrote a newer one after the new instant): look again.
+    took, waited = round(first - now, 1), round(clock() - first, 1)
+    # First in the list, so the House alert (cut at 900 characters) carries it before the errors it explains.
+    if polls:
+        errors.insert(0, f"waited {waited:.0f} s ({polls} look{'s' if polls != 1 else ''}) for the Sail guard's next reading: "
+                         "none came")
+    else:
+        errors.insert(0, f"no look for the Sail guard's next reading: the first read took {took:.0f} s of the "
+                         f"{GUARD_WAIT_SECONDS} s")
+    return now, inputs, errors, {"first_read_seconds": took, "waited_seconds": waited, "polls": polls, "read": False}
+
+
 def _previous(root: Path) -> dict[str, Any] | None:
     """The last budget.json, parsed, or None."""
     try:
@@ -1577,13 +1682,25 @@ def run(ctx: Any) -> dict[str, Any]:
     state root; or `state_root`, or `house.root`), and optionally `now` or `clock`, `config` (league/config.json),
     `sail` (a `SailboxClient`), `gateway_health` (a callable returning `/v1/health`'s JSON) and `notify` (a callable
     posting one notice's facts to `/v1/notify`); each one absent is built from the House's own config and environment.
-    Writes `<root>/budget.json` and returns the receipt."""
-    root, now, config = _root(ctx), _now(ctx), _config(ctx)
-    errors: list[str] = []
-    inputs = _job_inputs(ctx, root, now, config, errors)
+    Writes `<root>/budget.json` and returns the receipt. With no fresh guard reading it first waits for the guard's next
+    one (`_read_waiting`, at most `GUARD_WAIT_SECONDS`; `ctx` may give `sleep`, else `time.sleep`)."""
+    return _run(ctx, wait=True)
+
+
+def _run(ctx: Any, *, wait: bool) -> dict[str, Any]:
+    """The job (`run`); `wait` False is the refresh's full-job path, which reads once at its own instant, as before."""
+    root, config = _root(ctx), _config(ctx)
+    waited = None
+    if wait:
+        now, inputs, errors, waited = _read_waiting(ctx, root, config)
+    else:
+        now, errors = _now(ctx), []
+        inputs = _job_inputs(ctx, root, now, config, errors)
     notify = _get(ctx, "notify") or _notifier(config)
     previous = _previous(root)
     doc = compute(inputs, now=now, previous=previous)
+    if waited is not None:
+        doc["guard_wait"] = dict(waited)
     doc["errors"] = list(errors)
     _write_json(root / BUDGET_FILE, doc)
     notices = send_notices(doc, root, now, notify, errors)
@@ -1594,11 +1711,14 @@ def run(ctx: Any) -> dict[str, Any]:
         # Fail-closed is quiet by design (no research, no notice): a House warning says so (a stale guard, a paused
         # swarm, an unread gateway, a p30 from the fallback read or unknown, a notice not sent).
         _alert(ctx, "budget: " + "; ".join(errors))
-    return {"state": doc["state"], "direction": doc["direction"], "research_usd_day": doc["research_usd_day"],
-            "earned_usd_day": doc["earned_usd_day"],
-            "meters": {m: {k: doc["meters"][m].get(k) for k in ("research_usd_day", "would_set_usd_day", "limited_by",
-                                                               "runway_days", "card_date", "direction")} for m in METERS},
-            "notices": notices, "errors": errors, "warning": bool(errors)}
+    out = {"state": doc["state"], "direction": doc["direction"], "research_usd_day": doc["research_usd_day"],
+           "earned_usd_day": doc["earned_usd_day"],
+           "meters": {m: {k: doc["meters"][m].get(k) for k in ("research_usd_day", "would_set_usd_day", "limited_by",
+                                                              "runway_days", "card_date", "direction")} for m in METERS},
+           "notices": notices, "errors": errors, "warning": bool(errors)}
+    if waited is not None:
+        out["guard_wait"] = dict(waited)
+    return out
 
 
 # ---------------------------------------------------------------------------------------------- the refresh
@@ -1668,7 +1788,7 @@ def refresh(ctx: Any) -> dict[str, Any]:
     previous = _previous(root)
     unusable = refresh_unusable(previous, now)
     if unusable is not None:
-        out = run(ctx)
+        out = _run(ctx, wait=False)  # the refresh never waits for the guard (the job's own run does)
         out.update(written=True, refresh=f"the full job: {unusable}")
         return out
     errors: list[str] = []

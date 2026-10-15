@@ -5135,7 +5135,7 @@ occurrences past its grace has a receipt was not in the old registry.
 | Job | When (UTC) | Grace | What | In a maintenance pause |
 |---|---|---|---|---|
 | `grant` | at each House start, and hourly at :05 | 70 min | the standing grant (below) | skipped |
-| `budget` | after `economics` finishes ok, and daily 00:30 | 3 h | the budget rule and funding notices (below) | runs |
+| `budget` | after `economics` finishes ok, and daily 00:30 | 3 h | the budget rule and funding notices (below); with no fresh Sail guard reading it first waits up to 270 s for the guard's next one (not deployed) | runs |
 | `budget_refresh` | at each House start, and hourly at :35 (the no-captain automations, Oct 10) | 70 min | the budget rule read again: written only when it raises a meter (the top-up raise) or sets a day's first figure; the full `budget` job when `budget.json` is unusable; never lowers a figure, never writes a meter it could not read, sends no notice | runs |
 | `hygiene` | daily 02:00 (never within 30 minutes of a session) | 3 h | end practice cohorts barred from the incubator (a retired family's cohort only when `ops.json` `hygiene.end_retired_cohorts` is true); mark `failed` pool rows `terminated` when Sail lists the box terminal or gone; the tournament's idle rule, never below `population.floor`; report stale live instances | skipped |
 | `clock` | daily 11:00 | 2 h | Alpaca's `/v2/clock` and `/v2/calendar` against the House's calendar for the next 10 sessions; a mismatch is a warning; writes `<state>/calendar.json` | runs |
@@ -5433,6 +5433,20 @@ earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lif
   cuts no research.
 - **Unknown is never money:** an unreadable balance, fixed cost or reserve gives its meter no research; an unreadable
   `p30` earns nothing; a rule that cannot run at all is no research on either meter.
+- **The wait for the guard's next reading** (L4, on `fix/budget-guard-wait`, not deployed). A `budget` run that finds
+  no fresh Sail guard reading waits for the guard's next one. It looks at the guard's record every 20 s, for at most
+  270 s from its start, inside the job's 600 s wall. When a reading comes, the run takes a new time after it and reads
+  every input again at that time. With no reading by then, Sail stays `unreadable`, as before. The warning then starts
+  by saying how long the run waited after its first read. When the first read alone took the whole 270 s, it says the
+  run never looked. The sleeps add up to at most 270 s. A fresh reading at the start means no wait. Only the guard's
+  own reading ends the wait: the gateway's Sail reading is still the card line only. `budget_refresh` does not wait,
+  also when it runs the full job. Why: on Oct 15 the owed 00:30Z run came 28 s after the box came back and 3 s before
+  the guard's first reading, and one `unreadable` receipt fails the day for Research247. In a swarm pause of more than
+  6 h the guard has no fresh reading, so each `budget` run waits the full 270 s, and the next job waits behind it. The
+  wait covers the guard's first one or two checks after a start (it checks every 180 s). It does not cover a swarm
+  that takes more than about 4 minutes to reach its loop: that run still writes `unreadable`. `budget.json` and the
+  receipt say `guard_wait` (the first read's seconds, the seconds waited after it, looks, whether it read) when the
+  run found no fresh reading.
 - **Output:** `<state>/budget.json` (private): the inputs, each meter's research $/day and the day's figure, the knobs,
   the direction against the last file (`cut`, `raise`, `same`), each meter's runway at the rate the rule holds it to,
   its days of research left at the ceiling and its card date (when those days fall to 5: the day the taper starts),
