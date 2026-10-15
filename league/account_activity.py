@@ -32,6 +32,14 @@ exact to the cent:
   broker fill on a contract a position of the book still holds that the book has not matched (a liquidation, after
   `SETTLE_SECONDS`). Also alerted.
 
+THE EQUITY BOOK'S OWN SHARES (release E1, Oct 2026; found Oct 15: from the first real share buy on Oct 13 every
+reading said "shares an assignment or an exercise left are still held", so Profit, the budget's p30 and the close
+economics were unknown for as long as the equity lane held a lot). The equity book (`league/equity/live.py`, the same
+`live.sqlite`) trades shares on this account and prices its lots from its own fills; they are not Profit here and never
+an assignment's shares. A share FILL on one of its orders (`eq_orders`: the venue's order id, or the client id the
+broker's order list names) is left out, and "still held" means shares beyond what its open lots hold (`shares_held`'s
+`own`). Its dividends and fee rows are read as before.
+
 Positions opened before the reset are not Profit, and nor is anything of theirs: an order is the reset's when its
 position is (`read_book`), whenever it was placed, and a fill or fee on an order of an older position is left out.
 
@@ -155,10 +163,11 @@ def read_book(root: str | Path, start_at: Any = None) -> dict[str, Any]:
     when it was placed since), every order, fill and position (`every_order`, `fills`, `every_position`: to know an
     older position's order when its fills come, and whose contracts the book held), the consumed external fills, and
     `orders_from`: the earliest placing of an order that still changed after `start_at` (the broker's order list is
-    read from there, so a leg's id always finds its order). An absent book is an empty one (nothing traded); an
-    unreadable one raises."""
+    read from there, so a leg's id always finds its order), and THE EQUITY BOOK's own (`equity`: `equity_book`). An
+    absent book is an empty one (nothing traded); an unreadable one raises."""
     path = Path(root) / "live.sqlite"
-    empty = {"orders": [], "fills": [], "positions": [], "external": [], "every_order": [], "every_position": [], "orders_from": None}
+    empty = {"orders": [], "fills": [], "positions": [], "external": [], "every_order": [], "every_position": [], "orders_from": None,
+             "equity": equity_book(None, set())}
     if not path.exists():
         return empty
     since = epoch(start_at)
@@ -168,6 +177,7 @@ def read_book(root: str | Path, start_at: Any = None) -> dict[str, Any]:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         read = lambda table: [dict(row) for row in db.execute(f"SELECT * FROM {table}")] if table in tables else []  # noqa: E731
         every_order, fills, every_position, external = read("orders"), read("fills"), read("positions"), read("external_fill_usage")
+        equity = equity_book(db, tables)
         db.rollback()
     positions, orders = every_position, every_order
     if since is not None:
@@ -180,7 +190,34 @@ def read_book(root: str | Path, start_at: Any = None) -> dict[str, Any]:
         orders = [o for o in every_order if reset_s(o)]
     changed = [float(o.get("placed_at") or 0) for o in every_order if since is None or float(o.get("updated_at") or 0) >= since]
     return {"orders": orders, "fills": fills, "positions": positions, "external": [str(r.get("id") or "") for r in external],
-            "every_order": every_order, "every_position": every_position, "orders_from": (min(changed) - 60) if changed else None}
+            "every_order": every_order, "every_position": every_position, "orders_from": (min(changed) - 60) if changed else None,
+            "equity": equity}
+
+
+def equity_book(db: Any, tables: set[str]) -> dict[str, Any]:
+    """The equity book's own, from the same read transaction: its orders' venue ids and client ids (`venue_ids`,
+    `client_ids`, every order whatever its status: a fill may post after the order finished) and what its open lots hold
+    a symbol (`held`, {SYMBOL: quantity as a string}, lots not closed). Empty with no equity tables (a book from before
+    release E1)."""
+    out: dict[str, Any] = {"venue_ids": [], "client_ids": [], "held": {}}
+    if db is None:
+        return out
+    if "eq_orders" in tables:
+        for row in db.execute("SELECT venue_id, client_id FROM eq_orders"):
+            if row[0]:
+                out["venue_ids"].append(str(row[0]))
+            if row[1]:
+                out["client_ids"].append(str(row[1]))
+    if "eq_lots" in tables:
+        held: dict[str, Decimal] = {}
+        for row in db.execute("SELECT symbol, qty FROM eq_lots WHERE status != 'closed'"):
+            qty = dec(row[1])
+            if qty is None:
+                raise Unreadable("an open equity lot without a quantity")
+            symbol = str(row[0] or "").upper()
+            held[symbol] = held.get(symbol, ZERO) + qty
+        out["held"] = {symbol: format(qty, "f") for symbol, qty in sorted(held.items()) if qty != 0}
+    return out
 
 
 # ------------------------------------------------------------------------------------------ the rule
@@ -216,8 +253,9 @@ def classify(activities: Iterable[Mapping[str, Any]], venue_orders: Iterable[Map
     """{fees_usd, crypto_usd, interest_usd, misc_usd, unreconciled_usd, fees_by_pid, blocking, problems} (the module
     docstring): the dollars as Decimals exact to the cent (`fees_by_pid` keyed by the position's id as a string),
     `blocking` and `problems` lists of sentences for the alerts. `shares_held` says whether the account holds any
-    shares now (None when it cannot tell); it is asked only after an assignment, an exercise or a share fill. Pure but
-    for it. Raises `Unreadable` on an activity it cannot put a number on."""
+    shares now beyond the equity book's own lots (None when it cannot tell); it is asked only after an assignment, an
+    exercise or a share fill that is not the equity book's (`book["equity"]`, `read_book`). Pure but for it. Raises
+    `Unreadable` on an activity it cannot put a number on."""
     problems: list[str] = []
     blocking: list[str] = []
     parts = {part: ZERO for part in OTHER_PARTS}
@@ -238,6 +276,12 @@ def classify(activities: Iterable[Mapping[str, Any]], venue_orders: Iterable[Map
             parent[str(leg["id"])] = oid
         units = legs or [order]
         filled_legs[oid] = [str(unit["id"]) for unit in units if (dec(unit.get("filled_qty")) or ZERO) > 0]
+
+    # THE EQUITY BOOK'S ORDERS (the module docstring): by the venue's id, or by the client id the broker's list names.
+    equity = book.get("equity") if isinstance(book.get("equity"), Mapping) else {}
+    equity_clients = {str(c) for c in equity.get("client_ids") or [] if c}
+    equity_orders = {str(v) for v in equity.get("venue_ids") or [] if v}
+    equity_orders |= {oid for oid, cid in client.items() if parent.get(oid) == oid and cid and cid in equity_clients}
 
     orders = list(book.get("orders") or [])
     every_order = list(book.get("every_order") or orders)
@@ -292,6 +336,8 @@ def classify(activities: Iterable[Mapping[str, Any]], venue_orders: Iterable[Map
             if qty is None or price is None:
                 raise Unreadable(f"fill {activity_id} without a quantity or a price")
             if not is_option(symbol):
+                if parent.get(order_id, order_id) in equity_orders:
+                    continue  # the equity book's own share trade: its lots price it (the module docstring)
                 shares_cash += _signed_cash(activity.get("side"), qty, price, 1)  # an assignment's or an exercise's shares
                 share_fills.append(activity_id)
                 continue
@@ -536,16 +582,30 @@ def orders_after(broker: Any, after: str) -> list[dict[str, Any]]:
     raise Unreadable(f"the order list runs past {MAX_PAGES} pages")
 
 
-def shares_held(broker: Any) -> bool | None:
-    """Whether the account holds any shares now (`GET /v2/positions`), None when it cannot tell."""
+def shares_held(broker: Any, own: Mapping[str, Any] | None = None) -> bool | None:
+    """Whether the account holds any shares now (`GET /v2/positions`) beyond what the equity book's open lots hold
+    (`own`, {symbol: quantity}: `read_book`'s `equity.held`; a symbol whose account quantity differs from it either way
+    is held), None when it cannot tell."""
     try:
         rows = broker._call("GET", "/v2/positions", what="positions ledger shares")
     except Exception:  # noqa: BLE001 - unknown, never "none held"
         return None
     if not isinstance(rows, list):
         return None
-    return any(isinstance(row, dict) and str(row.get("asset_class")) == "us_equity" and (dec(row.get("qty")) or ZERO) != 0
-               for row in rows)
+    left: dict[str, Decimal] = {}
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("asset_class")) == "us_equity":
+            qty = dec(row.get("qty"))
+            if qty is None:
+                return None
+            symbol = str(row.get("symbol") or "").upper()
+            left[symbol] = left.get(symbol, ZERO) + qty
+    for symbol, qty in (own or {}).items():
+        mine = dec(qty)
+        if mine is None:
+            return None
+        left[str(symbol).upper()] = left.get(str(symbol).upper(), ZERO) - mine
+    return any(qty != 0 for qty in left.values())
 
 
 #: A reading's dollar fields, as saved across a restart (`ActivityLedger.saved`).
@@ -589,8 +649,9 @@ class ActivityLedger:
         self._activities.update((str(a["id"]), a) for a in activities)
         self._orders.update((o["id"], o) for o in orders)
         ordered = sorted(self._activities.values(), key=lambda a: str(a.get("id")))
+        own = (book.get("equity") or {}).get("held")
         return {"as_of": iso(now), **classify(ordered, list(self._orders.values()), book, now=now,
-                                              shares_held=lambda: shares_held(self.broker))}
+                                              shares_held=lambda: shares_held(self.broker, own))}
 
     def _refresh(self) -> None:
         try:

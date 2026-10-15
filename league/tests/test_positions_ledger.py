@@ -1035,5 +1035,125 @@ class ReviewOf408Test(Case):
         self.assertNotIn("/v2/positions", [path for path, _ in broker.calls])
 
 
+
+class EquityBookTest(Case):
+    """THE EQUITY BOOK'S OWN SHARES (release E1; found Oct 15, 2026 on the House: from the first real share buy on Oct 13
+    every reading said "shares an assignment or an exercise left are still held (8 activities)", the eight being the
+    equity lane's own fills, so Profit, the budget's p30 and the close economics were unknown while it held a lot)."""
+
+    def equity_tables(self):
+        from league.equity.live import SCHEMA
+
+        for statement in SCHEMA.split(";"):
+            if statement.strip():
+                self.account.db.execute(statement)
+
+    def equity_order(self, *, venue_id, client_id, symbol="SPY", qty="1.5", side="buy", at=T0):
+        self.account.db.execute(
+            "INSERT INTO eq_orders(client_id, venue_id, instance, family, side, symbol, class, at, qty, limit_px, collar_bp, "
+            "status, placed_at, day, filled_qty, updated_at) VALUES (?,?,?,?,?,?,'etf','open',?,'600',10,'filled',?,?,?,?)",
+            (client_id, venue_id, "seed-overnight-qqq@1:r", "seed-overnight-qqq", side, symbol, qty, at, iso(at)[:10], qty, at))
+
+    def equity_lot(self, *, symbol="SPY", qty="1.5", status="open"):
+        self.account.db.execute(
+            "INSERT INTO eq_lots(instance, family, version, lane, symbol, class, qty, opened_qty, entry_px, entry_notional, "
+            "entry_at, opened_at, opened_day, status) VALUES ('seed-overnight-qqq@1:r','seed-overnight-qqq',1,'beta',?,"
+            "'etf',?,?,'600','900','open',?,?,?)", (symbol, qty, qty, T0, iso(T0)[:10], status))
+
+    def test_the_equity_books_share_fills_are_not_an_assignments_and_profit_stays_known(self):
+        a = self.account
+        pid = a.position("orb-4", "long_call", "SPY", [("C", 600, 1, 1)], at=T0)
+        a.order(pid, "open", [(1, [1.00])], at=T0)
+        a.order(pid, "close", [(1, [1.20])], at=T0 + 60)
+        # The equity lane's buys: one its book knows by the venue's id, one only by its client id (an answer lost).
+        a.activity("FILL", transaction_time=iso(T0 + 120), symbol="SPY", side="buy", qty="1.5", price="600", order_id="eqv-1")
+        a.orders.append({"id": "eqv-2", "client_order_id": "eq-cid-2", "filled_qty": "2", "submitted_at": iso(T0 + 170), "legs": []})
+        a.activity("FILL", transaction_time=iso(T0 + 180), symbol="QQQ", side="buy", qty="2", price="500", order_id="eqv-2")
+        before = self.reading(shares=True)
+        self.assertTrue(any("shares an assignment or an exercise left are still held" in r for r in before["blocking"]),
+                        "a book with no equity tables reads them as an assignment's, as the House did from Oct 13")
+        self.assertIsNone(self.table(before)["trading"]["pnl_usd"])
+        self.equity_tables()
+        self.equity_order(venue_id="eqv-1", client_id="eq-cid-1", at=T0 + 115)
+        self.equity_order(venue_id=None, client_id="eq-cid-2", symbol="QQQ", qty="2", at=T0 + 170)
+        self.equity_lot()
+        self.equity_lot(symbol="QQQ", qty="2")
+        reading = self.reading(shares=True)
+        self.assertEqual((reading["blocking"], reading["problems"], reading["unreconciled_usd"]), ([], [], D("0.00")))
+        body = self.table(reading)
+        self.assertEqual(body["trading"]["pnl_usd"], self.table(self.reading_without_shares())["trading"]["pnl_usd"],
+                         "Profit as if the equity lane had never traded: its lots are its own book's")
+        self.assert_adds_up(body)
+        # The reader end to end: the account holds exactly the lots, so nothing is held beyond them.
+        broker = Broker(a.activities, a.orders, [{"asset_class": "us_equity", "symbol": "SPY", "qty": "1.5"},
+                                                 {"asset_class": "us_equity", "symbol": "QQQ", "qty": "2"}])
+        read = ActivityLedger(broker, RESET_AT, self.dir, clock=lambda: NOW, threaded=False).read()
+        self.assertEqual(read["blocking"], [])
+        self.assertEqual(read_book(self.dir, RESET_AT)["equity"]["held"], {"QQQ": "2", "SPY": "1.5"})
+
+    def reading_without_shares(self):
+        kept = [x for x in self.account.activities if x.get("order_id") not in ("eqv-1", "eqv-2")]
+        saved, self.account.activities = self.account.activities, kept
+        try:
+            return self.reading(shares=False)
+        finally:
+            self.account.activities = saved
+
+    def test_an_exercise_beside_the_equity_books_lots_reads_held_beyond_them(self):
+        from league.account_activity import shares_held
+
+        a = self.account
+        self.equity_tables()
+        self.equity_order(venue_id="eqv-1", client_id="eq-cid-1", at=T0 - 60)
+        self.equity_lot(qty="1.5")
+        a.activity("FILL", transaction_time=iso(T0 - 50), symbol="SPY", side="buy", qty="1.5", price="600", order_id="eqv-1")
+        pid = a.position("orb-4", "long_call", "SPY", [("C", 600, 1, 1)], at=T0)
+        a.order(pid, "open", [(1, [1.00])], at=T0)
+        [symbol] = self.symbols(pid)
+        exercised = a.activity("OPEXC", symbol=symbol, qty="1", net_amount="0", transaction_time=iso(T0 + 3000))["id"]
+        shares = a.activity("FILL", transaction_time=iso(T0 + 3000), symbol="SPY", side="buy", qty="100", price="600",
+                            order_id="exercise-1")["id"]
+        a.db.execute("UPDATE positions SET qty=0, status='closed', cash=cash+200, closed_at=?, info=? WHERE pid=?",
+                     (T0 + 3010, json.dumps({"order": 1, "gone": {symbol: 1}, "broken": "exercised"}), pid))
+        own = read_book(self.dir, RESET_AT)["equity"]["held"]
+        both = Broker(a.activities, a.orders, [{"asset_class": "us_equity", "symbol": "SPY", "qty": "101.5"}])
+        self.assertIs(shares_held(both, own), True, "the exercise's 100 beside the lot's 1.5")
+        reading = ActivityLedger(both, RESET_AT, self.dir, clock=lambda: NOW, threaded=False).read()
+        self.assertTrue(any("shares an assignment or an exercise left are still held" in r for r in reading["blocking"]))
+        self.assertIn(f"(activities {exercised}, {shares})", reading["blocking"][0], "the exercise and its shares named")
+        self.assertNotIn(a.activities[0]["id"], reading["blocking"][0], "never the equity lane's own fill")
+        # The House sells the exercise's shares: the account holds only the lot, so the exercise is reconciled.
+        a.activity("FILL", transaction_time=iso(T0 + 3060), symbol="SPY", side="sell", qty="100", price="602.10", order_id="lv-shares-1")
+        lot_only = Broker(a.activities, a.orders, [{"asset_class": "us_equity", "symbol": "SPY", "qty": "1.5"}])
+        reading = ActivityLedger(lot_only, RESET_AT, self.dir, clock=lambda: NOW, threaded=False).read()
+        self.assertEqual((reading["blocking"], reading["unreconciled_usd"]), ([], D("10.00")))
+
+    def test_the_share_check_counts_only_what_the_equity_books_lots_do_not_hold(self):
+        from league.account_activity import shares_held
+
+        lots = {"SPY": "1.5", "QQQ": "2"}
+        held = lambda *rows: Broker([], [], [{"asset_class": "us_equity", **row} for row in rows])  # noqa: E731
+        self.assertIs(shares_held(held({"symbol": "SPY", "qty": "1.5"}, {"symbol": "QQQ", "qty": "2"}), lots), False)
+        self.assertIs(shares_held(held({"symbol": "spy", "qty": "1.5"}, {"symbol": "QQQ", "qty": "2"}), lots), False)
+        self.assertIs(shares_held(held({"symbol": "SPY", "qty": "1.5"}), lots), True, "a lot the account does not show")
+        self.assertIs(shares_held(held({"symbol": "SPY", "qty": "1.5"}, {"symbol": "QQQ", "qty": "2"}, {"symbol": "IWM", "qty": "1"}), lots), True)
+        self.assertIs(shares_held(held({"symbol": "SPY", "qty": "n/a"}), lots), None, "unknown, never none held")
+        self.assertIs(shares_held(held(), {"SPY": "x"}), None)
+        self.assertIs(shares_held(held(), None), False)
+        self.assertIs(shares_held(held({"symbol": "SPY", "qty": "100"})), True, "with no lots: as before")
+        # A book from before release E1 has no equity tables: nothing of it, nothing held by it.
+        self.assertEqual(read_book(self.dir, RESET_AT)["equity"], {"venue_ids": [], "client_ids": [], "held": {}})
+        empty = tempfile.mkdtemp(prefix="positions-none-")
+        try:
+            self.assertEqual(read_book(empty, RESET_AT)["equity"], {"venue_ids": [], "client_ids": [], "held": {}})
+        finally:
+            shutil.rmtree(empty, ignore_errors=True)
+        # A closed lot holds nothing.
+        self.equity_tables()
+        self.equity_lot(qty="3", status="closed")
+        self.equity_lot(symbol="DIA", qty="0.25")
+        self.assertEqual(read_book(self.dir, RESET_AT)["equity"]["held"], {"DIA": "0.25"})
+
+
 if __name__ == "__main__":
     unittest.main()
