@@ -43,6 +43,40 @@ main's; no setting changes)
 - L2, the equity pass says the route by symbols (entry below).
 - L4, the budget job waits for the Sail guard's next reading after a start (entry below).
 
+### The budget job's wait covers the Claude meter too, on `fix/budget-claude-wait` (unreleased; cut from main `e136c251`, FW9's head; an owner deploy: `league/ops/budget.py` is protected; ship it only inside the single pre-freeze owner release, by Oct 22, never alone in the freeze; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting)
+
+- **What it is** (the pre-mortem's item7-claude): L4's wait for the Sail guard's next reading (entry below) now
+  covers the Claude meter. A `budget` run whose read gives no Claude balance (the gateway's `/v1/health` read timed
+  out or failed, or gave no `claude` block) reads every input again every 20 s at a new time, inside the same wait:
+  at most 270 s from its start, with the same bounds on the sleeps and the looks. It goes on from the first read that
+  gives every meter it waits for. While Sail is unread too, it reads again only once the guard has a good reading, as
+  L4 does. With no Claude balance by the end, Claude is `unreadable` exactly as before, and the warning starts
+  "waited N s (K looks) for the gateway's Claude balance: none came". With Sail late too it names both, and which
+  came: when the guard's reading came and the Claude balance did not, the run goes on from the read that gave Sail,
+  so it is never worse than L4 alone. No balance is invented, and no meter is marked `ceiling` that its read did not
+  give. `guard_wait` adds `waited_for` (the meters unread at the first read) and `unread` (the ones still unread at
+  the end); `read` is true only when every meter waited for read. A run with no gateway to read does not wait for
+  Claude.
+- **Why:** the Claude balance was one `/v1/health` read (20 s timeout) with no retry. A run right after a restart that
+  missed it wrote Claude `unreadable`, and that receipt fails Done item 7's clause "every budget receipt reads
+  limited_by 'ceiling' on every meter" for the UTC day. The risk is small: the pre-mortem's verify counted 0 health
+  failures in about 516 reads since Oct 7, well under 1% over the window.
+- **What does not change:** a run that reads both meters at once does not wait, so the normal 00:30Z run takes as long
+  as before. The rule, its constants, the ceiling, the guard, the split, the Done reader and `budget_refresh` (which
+  never waits) are unchanged, and so are the Sail-only wait's texts and figures. In a gateway outage each `budget` run
+  waits the full 270 s, reading the box spend again at each look (two Sail spend calls, at most 14 looks), and the
+  next job waits behind it.
+- **Verified:** `league/tests/test_ops_budget.py` `GuardWait`, 4 new tests (14 in all) with an injected clock and
+  sleeper: a Claude balance missing at the first read and readable at +40 s reads the meter at the new time, with
+  every input read again at each look; a Claude balance missing throughout fails closed with the same meters as a run
+  that did not wait, the run's own time, and the first error naming the wait (and a 280 s first read never looks);
+  Sail and Claude both late (the guard at +40 s, the gateway at +60 s) read both at +60 s with no gateway read before
+  the guard's reading; with the guard at +40 s and the gateway never, the run goes on from the +40 s read (Sail at the
+  ceiling, Claude `unreadable`); with neither ever, both are `unreadable` at the run's own time; no gateway, no wait. The L4 tests' records carry the two new keys. The
+  budget tests (103) and their importers, 15 modules and 610 tests, on Python 3.11 and 3.14; the whole suite on 3.14 (12,067 tests);
+  `league.ci --no-tests`; the four ids on both.
+- **Rollback:** the release before. Nothing is migrated, and nothing reads `guard_wait`.
+
 ### FW9, the twins' failures in the House warning, and DC1: the alarms that see the first Done checkpoint coming, on `fix/fw9-alarms` (unreleased; cut from `caa10eba`, the head of `rel/1015f`, PR #559; an owner deploy: `league/ops/` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no bound, screen, false-positive rate, money rule or setting changes)
 
 - **Why** (the Oct 15 rehearsal of the 30th close's checkpoint): a failure there could be seen first at the

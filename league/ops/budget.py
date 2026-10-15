@@ -108,6 +108,9 @@ THE WAIT FOR THE GUARD'S NEXT READING (L4, Oct 15, 2026; `_read_waiting`). A job
 guard reading (a House just started after a long outage, before the guard's first check) waits up to
 `GUARD_WAIT_SECONDS` for the guard's next good reading, then reads every input again at a new instant. It never invents
 a balance: with no reading by then, Sail is still unreadable, and the gateway's Sail reading is still the card line only.
+THE CLAUDE METER IN THE SAME WAIT (Oct 15, 2026; the pre-mortem's item7-claude): a run whose read gives no Claude
+balance (the gateway's /v1/health is one read) reads every input again every `GUARD_POLL_SECONDS` inside the same wait,
+while it has a gateway to read; with no balance by then, Claude is still unreadable.
 
 THE OUTPUT, `<state>/budget.json` (private): the inputs, each meter's research $/day, the knob values, the direction
 against the last file (cut, raise or same), each meter's reserve in force, its day's figure, what the run that set it
@@ -251,7 +254,8 @@ BALANCE_FRESH_SECONDS = 6 * 3600
 #: reading waits at most this long from its start for the guard's next good one, looking at the guard's kv every
 #: `GUARD_POLL_SECONDS`, then reads every input again at a new instant. The job's wall is 600 s (league/ops/registry.py):
 #: the first read, the wait and the second read end well inside it (a test holds the room the wall leaves). Not a rule
-#: constant: it decides when the run reads, never what a reading gives.
+#: constant: it decides when the run reads, never what a reading gives. A run whose read gives no Claude balance reads
+#: every input again every `GUARD_POLL_SECONDS` inside the same wait (the pre-mortem's item7-claude).
 GUARD_WAIT_SECONDS = 270
 GUARD_POLL_SECONDS = 20
 #: The ladder's own promotion reason carries this and its receipt's id (league/live/ladder.py: "the forward ladder
@@ -1604,8 +1608,24 @@ def _job_inputs(ctx: Any, root: Path, now: float, config: Mapping[str, Any], err
             sail = SailboxClient()
         except Exception as exc:  # noqa: BLE001 - the configured burn stands in
             errors.append(f"no Sail client ({type(exc).__name__})")
-    health = _get(ctx, "gateway_health") or _health_reader(config)
-    return gather(root, now, config=config, settings=_settings(root, config), sail=sail, health=health, errors=errors)
+    return gather(root, now, config=config, settings=_settings(root, config), sail=sail, health=_health(ctx, config),
+                  errors=errors)
+
+
+def _health(ctx: Any, config: Mapping[str, Any]) -> Callable[[], Any] | None:
+    """The job's gateway health reader: the context's `gateway_health`, else one from the House's config and
+    environment; None when there is no gateway to read."""
+    return _get(ctx, "gateway_health") or _health_reader(config)
+
+
+#: What the wait waits for, a meter at a time (`_read_waiting`), and what its record says came.
+_WAITED_FOR = {"sail": "the Sail guard's next reading", "claude": "the gateway's Claude balance"}
+_CAME = {"sail": "the Sail guard's reading", "claude": "the Claude balance"}
+
+
+def _unread(inputs: Mapping[str, Any], meters: tuple[str, ...]) -> list[str]:
+    """The `meters` (in `METERS` order) whose balance the inputs give no number for."""
+    return [m for m in meters if _finite(inputs["meters"][m].get("balance_usd")) is None]
 
 
 def _read_waiting(ctx: Any, root: Path, config: Mapping[str, Any]) -> tuple[float, dict[str, Any], list[str],
@@ -1624,21 +1644,35 @@ def _read_waiting(ctx: Any, root: Path, config: Mapping[str, Any]) -> tuple[floa
     as before: Sail "unreadable" at the run's start, and one more error, first in the list, says how long it waited after
     its first read (or, when the first read alone used the whole wait, that it never looked). The sleeps asked add up to
     at most `GUARD_WAIT_SECONDS` too, so a clock that does not move cannot stretch the wait. A fresh reading at the start
-    is no wait at all. A run at a fixed instant (`now` a number: no clock) never waits. Only the job's own run waits: the
-    refresh's full-job path does not (`refresh`)."""
-    now = _now(ctx)
+    (with a Claude balance) is no wait at all. A run at a fixed instant (`now` a number: no clock) never waits. Only the
+    job's own run waits: the refresh's full-job path does not (`refresh`).
+
+    THE CLAUDE METER IN THE SAME WAIT (Oct 15, 2026; the pre-mortem's item7-claude). Claude's balance is one read of the
+    gateway's /v1/health (`gather`, 20 s), and a run that missed it wrote Claude "unreadable", which fails the day as
+    Sail's does. So a read that gives no Claude balance waits too, while the job has a gateway to read (`_health`), in
+    the same wait and to the same bounds: at each look it reads EVERY input again at a new instant (while Sail is unread
+    as well, only once the guard has a good reading: a read before it could not give Sail). The run goes on from the
+    first read that gives every meter waited for. With none by the end it goes on from the first read that gave more of
+    them than the reads before it (the guard's reading came, Claude's balance did not: Sail reads), else from its own
+    first read, as before. A meter still unread is "unreadable", and the first error names what the run waited for and
+    what came. No balance is ever invented. The record (`guard_wait`) names the meters waited for (`waited_for`) and the
+    ones still unread at the end (`unread`); `read` is True only when every meter waited for read."""
+    start = now = _now(ctx)
     errors: list[str] = []
     inputs = _job_inputs(ctx, root, now, config, errors)
     clock = _clock(ctx)
-    if clock is None or _finite(inputs["meters"]["sail"].get("balance_usd")) is not None:
+    waits = METERS if _health(ctx, config) is not None else ("sail",)  # Claude's balance only comes from a gateway
+    missing = _unread(inputs, waits)
+    if clock is None or not missing:
         return now, inputs, errors, None
+    waited_for = list(missing)
     sleep = _get(ctx, "sleep")
     if not callable(sleep):
         import time
 
         sleep = time.sleep
     first = clock()  # the first read ends here: the wait is counted from it
-    deadline, polls, slept = now + GUARD_WAIT_SECONDS, 0, 0.0
+    deadline, polls, slept = start + GUARD_WAIT_SECONDS, 0, 0.0
     # Two bounds besides the clock's: the time asked of the sleeper (a clock that never moves, with the real sleeper,
     # still sleeps at most GUARD_WAIT_SECONDS) and the number of looks.
     while polls < math.ceil(GUARD_WAIT_SECONDS / GUARD_POLL_SECONDS):
@@ -1648,24 +1682,32 @@ def _read_waiting(ctx: Any, root: Path, config: Mapping[str, Any]) -> tuple[floa
         step = min(float(GUARD_POLL_SECONDS), left)
         sleep(step)
         slept, polls = slept + step, polls + 1
-        if _guard_reading(_guard_kv(root), clock())[0] is None:
-            continue
-        again = clock()  # the new instant, after the guard's reading
+        if "sail" in missing and _guard_reading(_guard_kv(root), clock())[0] is None:
+            continue  # no guard reading yet: a read now could not give Sail
+        again = clock()  # the new instant (after the guard's reading, while Sail waits)
         fresh: list[str] = []
         read = _job_inputs(ctx, root, again, config, fresh)
-        if _finite(read["meters"]["sail"].get("balance_usd")) is not None:
-            return again, read, fresh, {"first_read_seconds": round(first - now, 1),
-                                        "waited_seconds": round(again - first, 1), "polls": polls, "read": True}
-        # No reading at the second read (the guard wrote a newer one after the new instant): look again.
-    took, waited = round(first - now, 1), round(clock() - first, 1)
+        unread = _unread(read, waits)
+        if not unread:
+            return again, read, fresh, {"first_read_seconds": round(first - start, 1),
+                                        "waited_seconds": round(again - first, 1), "polls": polls, "read": True,
+                                        "waited_for": waited_for, "unread": []}
+        if len(unread) < len(missing):
+            now, inputs, errors, missing = again, read, fresh, unread  # it reads a meter the reads before did not
+        # Otherwise no more than before (the guard wrote a newer reading after the new instant, or the gateway still
+        # gives no Claude balance): look again.
+    took, waited = round(first - start, 1), round(clock() - first, 1)
+    what = " and ".join(_WAITED_FOR[m] for m in waited_for)
     # First in the list, so the House alert (cut at 900 characters) carries it before the errors it explains.
     if polls:
-        errors.insert(0, f"waited {waited:.0f} s ({polls} look{'s' if polls != 1 else ''}) for the Sail guard's next reading: "
-                         "none came")
+        came = [m for m in waited_for if m not in missing]
+        outcome = "none came" if not came else ", ".join([f"{_CAME[m]} came" for m in came] +
+                                                         [f"{_CAME[m]} did not" for m in missing])
+        errors.insert(0, f"waited {waited:.0f} s ({polls} look{'s' if polls != 1 else ''}) for {what}: {outcome}")
     else:
-        errors.insert(0, f"no look for the Sail guard's next reading: the first read took {took:.0f} s of the "
-                         f"{GUARD_WAIT_SECONDS} s")
-    return now, inputs, errors, {"first_read_seconds": took, "waited_seconds": waited, "polls": polls, "read": False}
+        errors.insert(0, f"no look for {what}: the first read took {took:.0f} s of the {GUARD_WAIT_SECONDS} s")
+    return now, inputs, errors, {"first_read_seconds": took, "waited_seconds": waited, "polls": polls, "read": False,
+                                 "waited_for": waited_for, "unread": list(missing)}
 
 
 def _previous(root: Path) -> dict[str, Any] | None:
@@ -1683,7 +1725,8 @@ def run(ctx: Any) -> dict[str, Any]:
     `sail` (a `SailboxClient`), `gateway_health` (a callable returning `/v1/health`'s JSON) and `notify` (a callable
     posting one notice's facts to `/v1/notify`); each one absent is built from the House's own config and environment.
     Writes `<root>/budget.json` and returns the receipt. With no fresh guard reading it first waits for the guard's next
-    one (`_read_waiting`, at most `GUARD_WAIT_SECONDS`; `ctx` may give `sleep`, else `time.sleep`)."""
+    one, and with no Claude balance for the gateway's (`_read_waiting`, at most `GUARD_WAIT_SECONDS`; `ctx` may give
+    `sleep`, else `time.sleep`)."""
     return _run(ctx, wait=True)
 
 
