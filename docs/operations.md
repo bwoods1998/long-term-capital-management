@@ -28,12 +28,12 @@ setting changes: the grant holds as it is.
   the close economics' `reconciled` were unknown while the lane held a lot. It now reads the equity book's orders and
   open lots: a share fill on one of its orders is left out, and `shares_held` counts only shares beyond its open
   lots, so a real assignment beside held lots still waits for its own shares.
-- **The watchdog asks an interrupted box back** (#549 and its follow-up, the gateway; [gateway/README.md](../gateway/README.md),
-  the watchdog). A box Sail lists `interrupted_restorable` above the reserve is asked back with Sail's resume once a
-  15-minute window, at most 48 times an interruption, never forked; after 3 calls or 45 minutes (at once on Sail's
-  `terminal_unavailable`) the owner gets ONE message naming Sail's community Slack with the words to post. The
-  six-hourly "the desks are not running" is quiet while the watchdog asks, and goes again once the 48 calls are used
-  up and the box is still down. `/v1/health` shows the episode at `watchdog.restore`.
+- **The watchdog asks an interrupted box back** (#549 and its follow-up, the gateway;
+  [gateway/README.md](../gateway/README.md), the watchdog). A box Sail lists `interrupted_restorable` above the reserve
+  is asked back with Sail's resume once a 15-minute window, at most 48 times an interruption, never forked; after 3
+  calls or 45 minutes (at once on Sail's `terminal_unavailable`) the owner gets ONE message naming Sail's community
+  Slack with the words to post. The six-hourly "the desks are not running" is quiet while the watchdog asks, and goes
+  again once the 48 calls are used up and the box is still down. `/v1/health` shows the episode at `watchdog.restore`.
 - **Verify after it** (read-only, ten minutes on): the ids above; `budget.json` `errors` empty (the account reading's
   block gone); the next equity births pass's request carrying EQUITY BIRTH CELLS; the next `dlane` report carrying
   `lane_yield`; the gateway deploy's printed version id (the rollback's target is the one it replaced).

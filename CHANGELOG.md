@@ -40,14 +40,14 @@ updater is on. What is built and not deployed is on branches.
   (`f62ca5b6`), tree for tree. Then two commits of its own, below.
 - **The watchdog after its tries** (`gateway/lib/watchdog.mjs`; #549's follow-up). #549 counted `restore_exhausted`
   among the actions of a box being asked back, so once its 48 calls (twelve hours) were used up the six-hourly "the
-  desks are not running" stayed quiet, and the one `box_interrupted` message had gone at the start: an interruption
-  past twelve hours sent no mail after its first. Now nothing asking is not "being asked back": the six-hourly mail goes
-  again while the box stays down, its "Last failure" naming the calls tried ("Sail's resume was asked 48 times since
-  ... and did not bring it back"). Unchanged: 48 calls at most, never a fork, no restart, one `box_interrupted` message
-  an interruption, and `restore_unavailable` (Sail said it can never resume) is told once by that message. One new
-  test (a resume that hangs, a pass every five minutes for nineteen hours: the message at minute 30, "not running" at
-  minutes 710 and 1070, 48 calls); the bounded-calls test now expects the not-running mail after its tries.
-  `npm run check`, `npm test` 464/464; gateway/README.md says it.
+  desks are not running" stayed quiet, and the one `box_interrupted` message had gone in its first hour: an
+  interruption past twelve hours sent no mail after that one. Now an episode whose calls are used up is no longer one
+  being asked back: the six-hourly mail goes again while the box stays down, its "Last failure" naming the calls tried
+  ("Sail's resume was asked 48 times since ... and did not bring it back"). Unchanged: 48 calls at most, never a
+  fork, no restart, one `box_interrupted` message an interruption, and `restore_unavailable` (Sail said it can never
+  resume) is told once by that message. One new test (a resume that hangs, a pass every five minutes for nineteen
+  hours: the message at minute 30, "not running" at minutes 710 and 1070, 48 calls); the bounded-calls test now
+  expects the not-running mail after its tries. `npm run check`, `npm test` 464/464; gateway/README.md says it.
 - **The docs pass.** This file records A32 (20:06Z Oct 14), release U (03:28Z Oct 15), #550 (06:17Z) and #557
   (08:00Z) as deployed, and its running-release line names #557's release; docs/operations.md's release U, FWD1-R and
   panel lane sections say deployed, its money-rules row names the digest in force, and **Release 1015e** heads it.
@@ -132,9 +132,9 @@ One owner deploy of the two entries below, new lots only: CI green on the exact 
 no order in flight at 07:59:25Z and no hand-chain job mid-run; the nightly stop written BEFORE the push (07:59:35Z);
 promoted 08:00:09Z (rollback `20261015T061716Z-262ec61bb251`); nightly back and the harness observer's base repointed
 08:10Z. Verified 08:10Z: health clean, real money on, no real-money block; execution fingerprint `b60410ad` and gate
-contract `397b22b772b3` unchanged (the equity identity `78022ca6`, computed on the tree, does not move); money `de5ed74e` -> `cfcc94b1` and constitution
-`111ede85` -> `60796aed` on purpose (the pair; `cd579e5d` / `1e14c7f7`, the row below alone, was never live); the
-grant job at 08:05:41Z: status ok, nothing to do.
+contract `397b22b772b3` unchanged (the equity identity `78022ca6`, computed on the tree, does not move); money
+`de5ed74e` -> `cfcc94b1` and constitution `111ede85` -> `60796aed` on purpose (the pair; `cd579e5d` / `1e14c7f7`, the
+row below alone, was never live); the grant job at 08:05:41Z: status ok, nothing to do.
 
 - Its pre-stated revert (A37): `set_design 6 0.50` in one owner deploy, new lots only, after 5 consecutive sessions
   with no options family at Probe, or when the options family at Probe is demoted or retired and no other is there.
