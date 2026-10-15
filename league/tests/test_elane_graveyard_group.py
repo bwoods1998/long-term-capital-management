@@ -188,7 +188,8 @@ class TheGolden(GroupGraves):
         for slug, card, structure in self.options_cards():
             self.assertIsNone(cards.universe_group(card, structure), slug)
             self.assertEqual(cards.graveyard_key(card, structure), cards.key_of(card, structure), slug)
-            self.assertEqual(cards.budget_cell(cards.key_of(card, structure)), cards.cell_of(cards.key_of(card, structure)))
+            key = cards.key_of(card, structure)
+            self.assertEqual(cards.budget_cells(key, cards.universe_group(card, structure)), [cards.cell_of(key)], slug)
             self.assertNotIn("universe group", cards.key_text(cards.key_of(card, structure)), slug)
         index = cards.RebirthIndex(self.store, self.with_e(dlane=GATE))
         self.assertFalse(any("group" in r["key"] for r in index.rows), "no options row's key gains a group")
@@ -353,6 +354,103 @@ class TheGroupRule(GroupGraves):
         self.assertTrue(got["ok"] and got["rebirth"] and "dropped" not in got, "its own group's claim is checked as before")
 
 
+CLAIM = {"different": "conditions entries on abnormal turnover confirming institutional accumulation, which the refuted "
+                      "family never measured",
+         "evidence": "share_volume: turnover above its yearly median preceded the continuation on Train"}
+WIDER = {"inputs": ["share_volume", "underlying_price"]}
+CELL = ("trend_momentum", "equity:etf", "days_11_plus")
+
+
+class TheRebirthBudget(GroupGraves):
+    """A rebirth is charged to EVERY SINGLE GROUP ITS CARD TRADES (`budget_cells`), never to the claimed row's label: a
+    card that names one extra symbol of another group reaches no other budget, and a mixed label is no budget of its own
+    (the adversarial review of 92c6f5be: with the budget charged to the row's label, an XLE+SPY card claiming an index
+    row, or an XLE card claiming a QQQ+XLV row, was born with the sectors budget spent; release U refused both)."""
+
+    def trend(self, symbols, **over) -> dict:
+        _, lane, cls, holding, inputs, *_ = TREND
+        return self.valid(ecard(lane, cls, holding, over.pop("inputs", inputs), symbols, **over))
+
+    def born_rebirth(self, fid, symbols, row) -> dict:
+        """A rebirth of `row` on `symbols`, born a minute after the last (its card stored, as the architect stores it)."""
+        self.clock.t += 60
+        card = self.trend(symbols, **WIDER, rebirth={"row": row, **CLAIM})
+        fam = self.store.add_family({"id": fid, "mechanism": "Hold on rising turnover.", "structure": "etf",
+                                     "roots": list(symbols), "symbols": list(symbols), "lane": "equity",
+                                     "card_sha": cards.card_sha(card)}, origin="architect")
+        cards.put(self.store, fam["id"], card, "etf")
+        return card
+
+    def sector_row(self) -> str:
+        return self.equity_grave("trend-xlk", self.trend(["XLK"]), mechanism="Hold XLK while it closes above its "
+                                                                              "200-session average.")
+
+    def index(self, per_cell=1):
+        return cards.RebirthIndex(self.store, self.with_e(dlane=GATE, architect={"max_rebirths_per_cell": per_cell}))
+
+    def check(self, index, symbols, row):
+        return index.check(self.trend(symbols, **WIDER, rebirth={"row": row, **CLAIM}), "etf", TREND[8], None,
+                           roots=symbols)
+
+    def test_widening_a_card_reaches_no_other_groups_budget(self):
+        dead = self.sector_row()
+        self.born_rebirth("trend-xlv-reborn", ["XLV"], dead)  # the sectors budget (1) is spent
+        index = self.index()
+        self.assertEqual(index.cell_births, {(*CELL, "sectors"): 1})
+        got = self.check(index, ["XLE"], dead)
+        self.assertFalse(got["ok"])
+        self.assertIn("the cell trend_momentum / equity:etf / days_11_plus / sectors has had 1 rebirth(s)", got["reason"])
+        got = self.check(index, ["XLE", "SPY"], self.index_rows["trend"])
+        self.assertFalse(got["ok"], "adding SPY moves no rebirth onto the index budget")
+        self.assertEqual(got["matched"], [self.index_rows["trend"], dead])
+        self.assertIn("the cell trend_momentum / equity:etf / days_11_plus / sectors has had 1 rebirth(s)", got["reason"])
+        got = self.check(index, ["SPY"], self.index_rows["trend"])
+        self.assertTrue(got["ok"] and got["rebirth"], "the index budget is the index cards' own, unspent")
+
+    def test_a_mixed_row_is_no_second_budget(self):
+        dead = self.sector_row()
+        mixed = self.equity_grave("trend-mixed", self.trend(["QQQ", "XLV"]), mechanism="Hold QQQ and XLV while each "
+                                                                                        "closes above its average.")
+        self.born_rebirth("trend-xlv-reborn", ["XLV"], dead)
+        index = self.index()
+        got = self.check(index, ["XLE"], mixed)
+        self.assertFalse(got["ok"], "a mixed row's label is no budget of its own")
+        self.assertEqual(got["matched"], [dead, mixed])
+        self.assertIn("the cell trend_momentum / equity:etf / days_11_plus / sectors has had 1 rebirth(s)", got["reason"])
+        got = self.check(index, ["SPY"], mixed)
+        self.assertTrue(got["ok"] and got["rebirth"], "an index card's claim on it spends the index budget")
+
+    def test_a_mixed_rebirth_spends_every_group_it_trades(self):
+        self.born_rebirth("trend-wide-reborn", ["XLE", "SPY"], self.index_rows["trend"])
+        index = self.index(per_cell=3)
+        self.assertEqual(index.cell_births, {(*CELL, "index"): 1, (*CELL, "sectors"): 1}, "counted in both at start")
+        wide = self.trend(["XLK", "QQQ"], **WIDER, rebirth={"row": self.index_rows["trend"], **CLAIM})
+        got = index.check(wide, "etf", TREND[8], None, roots=["XLK", "QQQ"])
+        self.assertTrue(got["ok"] and got["rebirth"], got)
+        index.note_birth(wide, "etf")
+        self.assertEqual(index.cell_births, {(*CELL, "index"): 2, (*CELL, "sectors"): 2}, "and in both within a pass")
+        self.assertNotIn((*CELL, "index+sectors"), index.cell_births)
+
+    def test_a_card_without_a_group_is_charged_to_its_rows_groups(self):
+        """FAIL CLOSED: a card whose symbols cannot be read (no group, bound by every row of its cell) spends the budget of
+        every group the row it claims traded."""
+        dead = self.sector_row()
+        mixed = self.equity_grave("trend-mixed", self.trend(["QQQ", "XLV"]), mechanism="Hold QQQ and XLV while each "
+                                                                                        "closes above its average.")
+        self.born_rebirth("trend-xlv-reborn", ["XLV"], dead)
+        with mock.patch.object(cards, "universe_group", lambda *a, **k: None):
+            index = self.index()
+            self.assertEqual(index.cell_births, {(*CELL, "sectors"): 1}, "the claimed row's group")
+            got = self.check(index, ["XLE"], mixed)
+            self.assertFalse(got["ok"])
+            self.assertIn("days_11_plus / sectors has had 1 rebirth(s)", got["reason"])
+        self.assertEqual(cards.budget_cells({**cards.key_of(self.trend(["XLK"]), "etf"), "group": "index+sectors"}),
+                         [(*CELL, "index"), (*CELL, "sectors")])
+        self.assertEqual(cards.budget_cells({**cards.key_of(self.trend(["XLK"]), "etf"), "group": "index+sectors"},
+                                            "defensive"), [(*CELL, "defensive")], "the card's groups, not the row's")
+        self.assertEqual(cards.budget_cells(cards.key_of(self.trend(["XLK"]), "etf")), [CELL], "no group at all")
+
+
 class TheReaders(unittest.TestCase):
     """No judge reads the graveyard's key: FWD1-R's one-seat-a-mechanism-cell rule, the screens, the Train bar and the
     sealed data read their own cells, unchanged."""
@@ -369,7 +467,7 @@ class TheReaders(unittest.TestCase):
         from pathlib import Path
 
         repo = Path(__file__).resolve().parents[2]
-        names = ("graveyard_key", "universe_group", "groups_meet", "budget_cell", "row_group", "cards.symbols_group")
+        names = ("graveyard_key", "universe_group", "groups_meet", "budget_cells", "row_group", "cards.symbols_group")
         for rel in ("league/swarm/elane_forward.py", "league/ops/forward_screen.py", "league/ops/forward_register.py",
                     "league/swarm/elane_train.py", "league/swarm/elane_seal.py", "league/swarm/elane.py",
                     "league/swarm/mechanism.py", "league/swarm/researcher.py", "league/swarm/tournament.py"):

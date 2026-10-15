@@ -37,22 +37,30 @@ on branches.
   its cell (trend_momentum / equity:etf / days_11_plus / underlying_price) holds 1 graveyard row(s) killed by a
   mechanism verdict, the newest trend-spy (REFUTED) ..."): the equity cell had no universe group.
 - **The change** (`league/swarm/cards.py` THE EQUITY GRAVEYARD'S UNIVERSE GROUP: `universe_group`, `row_group`,
-  `groups_meet`, `graveyard_key`, `budget_cell`, `RebirthIndex.matched`; `league/swarm/elane_births.py`'s graveyard
-  header and closed refusal words; docs/operations.md, **The equity graveyard's universe group**). For equity cards and
-  rows only, the graveyard cell gains the universe group (`elane_train.symbols_group`: index, sectors, defensive,
-  stocks, or a mix), and a row binds an equity card only when their groups meet (share one): an index row binds no
-  sector, bond or gold card, a mixed row binds a card of each group it traded, a mixed card is bound by the rows of each
-  of its groups (one extra symbol escapes nothing). Unreadable symbols have no group and meet every group (fail
-  closed). Each group of an equity cell has its own rebirth budget; a claim a free card makes on a row only the group
-  kept from binding it (a sector card naming an index row) is dropped, so it spends no budget. `key_of`, `matches`, `cell_of`, the stored keys,
-  every options card's reading, panel cards, FWD1-R's mechanism cell, the screens, the sealed data, the money rules and
-  the Train bar are unchanged.
-- **Its cost:** more equity lineages tried, each forward-only under R-SEC; FWD1-R ETF case N's per-program
-  false-positive rate is unchanged; the lucky forward passes grow with the lineages (about 1.4% of each added zero-edge
-  lineage by checkpoint 60), capped by one live forward seat a mechanism cell.
-- **Tests:** `league/tests/test_elane_graveyard_group.py` (19): options readings and index verdicts pinned to release
+  `groups_meet`, `graveyard_key`, `budget_cells`, `RebirthIndex.matched` and its claim and birth counts;
+  `league/swarm/elane_births.py`'s graveyard header and closed refusal words; docs/operations.md, **The equity
+  graveyard's universe group**). For equity cards and rows only, the graveyard cell gains the universe group
+  (`elane_train.symbols_group`: index, sectors, defensive, stocks, or a mix), and a row binds an equity card only when
+  their groups meet (share one): an index row binds no sector, bond or gold card, a mixed row binds a card of each group
+  it traded, a mixed card is bound by the rows of each of its groups (one extra symbol escapes no row; a mix without an
+  index symbol is free of the index rows). Unreadable symbols have no group and meet every group (fail closed). Each
+  single group of an equity cell has its own rebirth budget, and a rebirth spends the budget of every group its card
+  trades (it needs room in each), never the claimed row's label: one extra symbol reaches no other budget and a mixed
+  label is never a budget of its own; a claim a free card makes on a row only the group kept from binding it (a sector
+  card naming an index row) is dropped, so it spends no budget. `key_of`, `matches`, `cell_of`, the stored keys, every
+  options card's reading, panel cards, FWD1-R's mechanism cell, the screens, the sealed data, the money rules and the
+  Train bar are unchanged.
+- **Its cost:** more equity lineages tried (an idea refuted on the index may be born on the sectors, on TLT and GLD, and
+  in a mix without an index symbol; the rebirths a window allows grow by one `max_rebirths_per_cell` for each single
+  group, never for a mixed label), each forward-only under R-SEC; FWD1-R ETF case N's per-program false-positive rate is
+  unchanged; the lucky forward passes grow with the lineages (about 1.4% of each added zero-edge lineage by checkpoint
+  60), capped by one live forward seat a mechanism cell.
+- **Tests:** `league/tests/test_elane_graveyard_group.py` (23): options readings and index verdicts pinned to release
   U's output on a fixture store; the six sector cards free and born; an index card of the same idea refused; the group
-  rule, fail closed, the budget by group, the dropped claim, FWD1-R's cell.
+  rule, fail closed, the budget by group, the dropped claim, FWD1-R's cell; the rebirth budget charged to every group a
+  card trades (the adversarial review's two escapes, an XLE+SPY card on an index row and an XLE card on a QQQ+XLV row
+  with the sectors budget spent, refused as release U refused them; a mixed rebirth counted in each group; a card
+  without a group charged to its row's groups).
 
 ### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, a post-close checkpoint, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
 
