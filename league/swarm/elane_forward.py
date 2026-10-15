@@ -24,12 +24,16 @@ WITH IT ON:
    Train is registered and sighted before its v2 passes (hours later, most index Train passes coming on v2 or later),
    and the listing would push it from S2 to FWD1-R's WEAK screen on a timing race, not on evidence. Before that close
    no forward day of the lineage can be counted (the forward night runs after the close), so it has seen nothing
-   forward; the void leaves it one look. Only a row listed "pending", case "N", type "ETF" (`UNTRIED`), with its
-   FWD1_START ("start", an ISO date of a session) and a family that is not forward-only (`elane.forward_only` False:
-   R-SEC refuses every other ETF family first, in `try_open`, and this asks again so the exemption cannot outlive
-   R-SEC) and not a panel. FAIL CLOSED: no "start" (a file of the earlier job), a date that is not one, a day that is
-   no session or that the calendar cannot answer, a clock or a family that cannot be read: refused as above. A pass
-   or a fail is never exempt; nor is a lineage at or after that close.
+   forward; the void leaves it one look. Only a row listed "pending", case "N", type "ETF" (`UNTRIED`), asked for THE
+   ROW'S OWN FAMILY (the representative's: the judge's void reads the families of the lineage's registry rows, so a
+   sibling family of the lineage the registry has not taken yet is refused), with its FWD1_START ("start", an ISO
+   date of a session) STRICTLY AFTER the file's top-level "start" (the pin's first judged session: only then is the
+   start the lineage's own first forward day; the pin in force starts 2026-10-16 and A39 turns the seats on Oct 21,
+   so this costs nothing now), and a family that is not forward-only (`elane.forward_only` False: R-SEC refuses every
+   other ETF family first, in `try_open`, and this asks again so the exemption cannot outlive R-SEC) and not a panel.
+   FAIL CLOSED: no "start" (a file of the earlier job) or no pin start, a date that is not one, a day that is no
+   session or that the calendar cannot answer, a clock or a family that cannot be read: refused as above. A pass or a
+   fail is never exempt; nor is a lineage at or after that close.
 2. THE SEAT (`step`, called once a round by league/swarm/gate.py `equity_round`): a lineage the file lists "pass"
    becomes eligible THROUGH THE LANE'S OWN SEAT MACHINERY, never around it:
    - an ETF lineage: its family, alive in the Gym band and holding the permitted version (the run sha the job judged)
@@ -78,7 +82,8 @@ SEATS = ("off", "on")
 #: The statuses whose lineage takes no sealed Validation try while the switch is on.
 JUDGED = ("pending", "pass", "fail")
 #: L5 (A48): the one permit row whose lineage keeps its S2 try until the close of its FWD1_START session (`untried`):
-#: an index-only (R-SEC) ETF lineage of case N that FWD1 has not judged yet. Every key must match; nothing else is.
+#: an index-only (R-SEC) ETF lineage of case N that FWD1 has not judged yet. Every key must match; nothing else is
+#: (and only for the row's own family, with a start after the pin's).
 UNTRIED = {"status": "pending", "case": "N", "type": "ETF"}
 #: The bands a forward seat counts as live in (`one_a_cell`).
 LIVE_BANDS = ("candidate", "probe", "sized")
@@ -96,19 +101,38 @@ def seats_on(settings: Mapping[str, Any] | None) -> bool:
     return isinstance(raw, Mapping) and raw.get("seats") == "on"
 
 
-def permits(root: str | Path) -> dict[str, Any] | None:
-    """The permit file's lineages {lineage: row}, {} when there is no file yet (no lineage judged), None when it exists
-    and cannot be read or is not the job's shape."""
+def permit_file(root: str | Path) -> tuple[dict[str, Any], Any] | None:
+    """ONE PARSE of the permit file: ({lineage: row}, its top-level "start", the pin's first judged session, as the
+    file holds it); ({}, None) when there is no file yet (no lineage judged), None when it exists and cannot be read or
+    is not the job's shape."""
     path = Path(root) / PERMITS
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return {}
+        return {}, None
     except (OSError, ValueError):
         return None
     if not isinstance(doc, Mapping) or doc.get("version") != PERMITS_VERSION or not isinstance(doc.get("lineages"), Mapping):
         return None
-    return {str(k): dict(v) for k, v in doc["lineages"].items() if isinstance(v, Mapping)}
+    return {str(k): dict(v) for k, v in doc["lineages"].items() if isinstance(v, Mapping)}, doc.get("start")
+
+
+def permits(root: str | Path) -> dict[str, Any] | None:
+    """The permit file's lineages {lineage: row}, {} when there is no file yet (no lineage judged), None when it exists
+    and cannot be read or is not the job's shape (`permit_file`'s first half)."""
+    read = permit_file(root)
+    return None if read is None else read[0]
+
+
+def _day(value: Any) -> dt.date | None:
+    """An ISO date in the job's own form ("YYYY-MM-DD"), else None (a looser form the parser takes is doubt)."""
+    if not isinstance(value, str):
+        return None
+    try:
+        day = dt.date.fromisoformat(value)
+    except ValueError:
+        return None
+    return day if day.isoformat() == value else None
 
 
 def lineage_of(store: Any, fam: Mapping[str, Any]) -> str | None:
@@ -122,22 +146,32 @@ def lineage_of(store: Any, fam: Mapping[str, Any]) -> str | None:
     return elane.lineage_key(lane, str(fam.get("lineage") or fam["id"]))
 
 
-def untried(store: Any, fam: Mapping[str, Any], row: Mapping[str, Any] | None, *, now: float | None = None) -> bool:
-    """L5 (A48; the module docstring, 1): whether the lineage of permit `row` keeps its S2 try all the same: the row is
-    `UNTRIED` (pending, case N, ETF), `fam` is index-only (`elane.forward_only` False) and no panel, and `now` (the
-    store's clock when it has one, else the wall's) is before the close of the row's FWD1_START session ("start":
-    league/equity/schedule.py `moments(day).close_at`; before it no forward day of the lineage can be counted). FAIL
-    CLOSED: False for anything that cannot be read (no "start", a date that is not one, no session, a calendar that
-    raises or does not cover the day, a clock that is not finite)."""
+def untried(store: Any, fam: Mapping[str, Any], row: Mapping[str, Any] | None, *, pin_start: Any = None,
+            now: float | None = None) -> bool:
+    """L5 (A48; the module docstring, 1): whether the lineage of permit `row` keeps its S2 try all the same. Every one
+    must hold:
+    - the row is `UNTRIED` (pending, case N, ETF);
+    - `fam` IS THE ROW'S FAMILY (the representative's, which has a registry row of the lineage: the judge's void reads
+      the families of the lineage's registry rows, so a sibling family of the lineage the registry has not taken yet
+      could look unseen; it is refused);
+    - `fam` is index-only (`elane.forward_only` False) and no panel;
+    - the row's "start" is STRICTLY AFTER `pin_start` (the file's top-level "start", the pin's first judged session):
+      FWD1_START = max(first_day, the pin's start), and only a start after the pin's is the lineage's own first
+      forward day; a lineage registered before the pin has forward days in the record already. The pin in force starts
+      2026-10-16 and A39 turns the seats on Oct 21, after the close of any start this refuses for it, so this costs
+      nothing now; it bites at a re-pin;
+    - `now` (the store's clock when it has one, else the wall's) is before the close of that start's session
+      (league/equity/schedule.py `moments(day).close_at`; before it no forward day of the lineage can be counted).
+    FAIL CLOSED: False for anything that cannot be read (no "start" or no pin start, a date that is not one in the
+    job's own form, no session, a calendar that raises or does not cover the day, a clock that is not finite)."""
     try:
         if not isinstance(row, Mapping) or any(row.get(key) != value for key, value in UNTRIED.items()):
             return False
-        start = row.get("start")
-        if not isinstance(start, str):
-            return False
-        day = dt.date.fromisoformat(start)
-        if day.isoformat() != start:
-            return False                          # only the job's own form (a looser form the parser takes is doubt)
+        if not isinstance(fam, Mapping) or not fam.get("id") or str(row.get("family") or "") != str(fam["id"]):
+            return False                          # a sibling of the lineage: the judge's void may not see it (F1)
+        day, pin = _day(row.get("start")), _day(pin_start)
+        if day is None or pin is None or not day > pin:
+            return False                          # no own first forward day after the pin's start (F2)
         from . import elane, elane_xs
 
         if elane.forward_only(fam) is not False or elane_xs.is_panel(fam):
@@ -159,19 +193,21 @@ def untried(store: Any, fam: Mapping[str, Any], row: Mapping[str, Any] | None, *
 def try_refused(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None, *,
                 now: float | None = None) -> str | None:
     """Why this family's lineage takes no sealed Validation try (the module docstring, 1), or None. A lineage listed
-    "pending", "pass" or "fail" is refused unless `untried` holds for it at `now` (L5, A48: an index-only case-N
-    lineage before the close of its FWD1_START session; the store's clock when `now` is None)."""
+    "pending", "pass" or "fail" is refused unless `untried` holds for it at `now` (L5, A48: the representative's own
+    index-only family of a case-N lineage whose start is after the pin's, before the close of its FWD1_START session;
+    the store's clock when `now` is None). The file is read once (`permit_file`)."""
     if not seats_on(settings):
         return None
     lineage = lineage_of(store, fam)
     if lineage is None:
         return None
-    rows = permits(store.root)
-    if rows is None:
+    read = permit_file(store.root)
+    if read is None:
         return UNREADABLE
+    rows, pin_start = read
     row = rows.get(lineage)
     if row is not None and row.get("status") in JUDGED:
-        return None if untried(store, fam, row, now=now) else REFUSED
+        return None if untried(store, fam, row, pin_start=pin_start, now=now) else REFUSED
     return None
 
 
@@ -339,5 +375,5 @@ def step(gate: Any) -> dict[str, Any]:
 
 
 __all__ = ["PERMITS", "PERMITS_VERSION", "STATE_KEY", "SEATS", "JUDGED", "UNTRIED", "LIVE_BANDS", "REFUSED",
-           "UNREADABLE", "PANEL_CASES", "A34", "seats_on", "permits", "lineage_of", "untried", "try_refused",
-           "eligible", "one_a_cell", "seat_refused", "mark_seated", "step"]
+           "UNREADABLE", "PANEL_CASES", "A34", "seats_on", "permit_file", "permits", "lineage_of", "untried",
+           "try_refused", "eligible", "one_a_cell", "seat_refused", "mark_seated", "step"]

@@ -845,8 +845,11 @@ def forward_only(fam: Mapping[str, Any] | None) -> bool:
 
 def try_open(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any] | None) -> bool:
     """Whether version `n` may take its lineage's Validation try (one a lineage; R3's retry only when permitted). A
-    lineage the FWD1-R forward screen judges takes none while its seats are on (league/swarm/elane_forward.py), a
-    family trading outside the index ETFs takes none at all (R-SEC, `forward_only`), and neither does a PANEL family
+    lineage the FWD1-R forward screen judges takes none while its seats are on (league/swarm/elane_forward.py
+    `try_refused`), but L5 (A48): an index-only case-N lineage listed pending keeps its S2 try, for the
+    representative's own family, until the close of its FWD1_START session when that start is after the pin's
+    (`elane_forward.untried`); the judge then voids it (A33 (4)). A family trading outside the index ETFs takes none
+    at all (R-SEC, `forward_only`, asked before the forward screen's file), and neither does a PANEL family
     (the captain's A34, league/swarm/elane_xs.py `A34_FORWARD_ONLY`: a sealed pre-check would make its lineage one that
     reached one, never FWD1-R's case N; nothing is spent and nothing retires on it)."""
     try:

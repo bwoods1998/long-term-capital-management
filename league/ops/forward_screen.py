@@ -81,10 +81,12 @@ THE NIGHT (`night`; after each of the record's two nights, E3's and the panel's,
    switch is on, and a pass may take a seat, one live forward seat a mechanism cell, while it is on. L5 (A48): an
    index-only case-N lineage keeps its S2 try until the close of its FWD1_START session; the judge then voids it
    (A33 (4), 4 above: a case-N lineage that reached a sealed pre-check after FWD1_START). A loosening of A39's stated
-   cost "while on, a lineage FWD1 lists takes no sealed S2 try"; a row without "start" (a file of the earlier job) is
-   refused as before (`elane_forward.untried`: fail closed). A lineage stopped (its representative stopped in the
-   record), stalled (THE STALL RULE) or superseded (registered under another receipt) is listed as such and keeps its
-   sealed path, as a void or an ineligible one does.
+   cost "while on, a lineage FWD1 lists takes no sealed S2 try". The swarm grants it only to the row's own family
+   (the representative's, whose registry rows the void reads) and only for a row "start" after the file's top-level
+   "start" (the pin's: an earlier first_day has forward days already); a row without "start" (a file of the earlier
+   job) is refused as before (`elane_forward.untried`: fail closed). A lineage stopped (its representative stopped in
+   the record), stalled (THE STALL RULE) or superseded (registered under another receipt) is listed as such and keeps
+   its sealed path, as a void or an ineligible one does.
 6. THE REPORT (`REPORT`, operator-only): per type and case the lineages by status, the registry's expected zero-edge
    passes against the observed (`fwd1_rule.expected_passes`), each pass's sentence and each stalled lineage's cause.
 
