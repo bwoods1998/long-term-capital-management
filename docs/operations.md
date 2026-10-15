@@ -8,7 +8,26 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Release 1015e (Oct 15, 2026): the equity birth cells, research dollars by lane, the watchdog on an interrupted box, the equity book's own shares: `rel/1015e`, not deployed
+## Release 1016a (Oct 16, 2026): L5 and C1: `rel/1016a`, not deployed
+
+Release 1016a is main `e136c251` (#560, the running release `20261015T204317Z-ad3c7f9653cc`) with L5 (#561, the
+captain's A48) and C1 (the scaling plan's benchmark field, A45) merged. **One House deploy** (owner deploy: `league/ops/`
+is protected and `league/swarm/elane_forward.py` is FORBIDDEN), never 12:55-20:05Z on a trading day; no gateway change.
+**No identity moves** (fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`, constitution `60796aed`) and no
+setting changes.
+
+- **L5**: with `elane.fwd1.seats` on, an index-only case-N lineage the permit file lists pending keeps its sealed S2
+  try until the close of its FWD1_START session (the permit rows now carry `start`), and the judge then voids its
+  forward look (**The seat path** below). It must land before A39 (20:05Z Wed Oct 21).
+- **C1**: each checkpoint's `by_program` rows carry `span_bh` (**The span buy-and-hold beside each checkpoint** below). Done's reading
+  is unchanged. It must land before the deploy freeze (Oct 27).
+- **Verify after it** (read-only, ten minutes on): the ids above; the next forward_screen run's permit file carrying
+  `start` on every row; the next `dlane` report carrying `span_bh` on any checkpoint frozen after it (none is frozen
+  before the 30th count).
+- **Rollback:** the House, `python3 scripts/floor_box.py rollback` to `20261015T204317Z-ad3c7f9653cc` (main
+  `e136c251`). Nothing is migrated.
+
+## Release 1015e (Oct 15, 2026): the equity birth cells, research dollars by lane, the watchdog on an interrupted box, the equity book's own shares: `rel/1015e`, deployed 20:43Z Oct 15 inside #560 (House `20261015T204317Z-ad3c7f9653cc`, main `e136c251`; gateway `a6026308`)
 
 Release 1015e is main `0b978378` (#557, the running release `20261015T075939Z-89d93d40bfda`) with three pull requests
 merged, #552, #551 and #549, a follow-up to #549's watchdog and a docs pass. **Two deploys from one commit:** the House
@@ -2595,6 +2614,57 @@ posted: the book reads the account's `FEE` activities (the REG and TAF rows with
 "OPT TAF", "ORF" rows are never an equity lot's) and posts each exit day's rows to that day's equity sales pro rata by
 proceeds (`eq_lots.info.fee_basis` "broker", the estimate kept beside); a day without a fee row five sessions on is told
 to the owner once a lot. The funnel (`league/ops/funnel.py`) counts the equity lanes apart (`equity`).
+
+**The span buy-and-hold beside each checkpoint** (C1, A45: the scaling plan's benchmark, its section 2.4; on
+`feat/span-bh-c1`, in release 1016a, not deployed). Each Done checkpoint's `by_program` row of a share program carries `span_bh`
+(league/ops/dlane_report.py `span_bh`), one entry a program version among the checkpoint's first K counts:
+`{version, usd, priced, why, basis: "adjustment=all", blocked: [[from, to], ...], symbols: {SYM: {before, last,
+sessions, sessions_used, segments, close_before, close_last, closes, exposure_usd, usd, sha}}, spy, lots,
+blocked_from}`. The plan's script reads it, checks it and rebuilds its figure. Nothing else reads it. It is beside the
+reading and never part of it: no Done rule, count, checkpoint trigger, rule sha or alarm reads it or moves with it.
+- **A single-name program** gets the House's own `_bh_pnl` rule (league/equity/live.py `span_bh`), per symbol. The
+  span runs from the close before the first entry (`before`) to the close of the last exit (`last`). Its `sessions`
+  are the calendar's count in (before, last]. The mean exposure is the lots' entry notional x sessions held, over the
+  span's sessions. The figure is the mean exposure x (the adjustment=all close at `last` / the one at `before` - 1),
+  and a program's `usd` is the sum over its symbols. The plan's ONE CHANGE:
+  a session the House blocked the program from opening, while it held nothing in that symbol, is taken out of the
+  span. The span splits there. The mean exposure is then over the sessions left (`sessions_used`), and the figure sums
+  it times each segment's return (`segments`; `closes` holds every segment's two ends). With no such session it is
+  `_bh_pnl` exactly, to the Decimal.
+- **A panel program** gets B10, the House's own panel benchmark (`b10_bh`, `date_record`'s rule): per lot, entry
+  notional x SPY's move from the close of the session before its entry to its exit day's close. `spy.closes` holds
+  those closes. Nothing is split (`blocked` is empty).
+- **The closes** are the book's own (`eq_bars`, adjustment=all), read only when one fetch wrote every close a symbol
+  needs (the same series sha, `_bh_pnl`'s rule). The report fetches nothing.
+- **The blocked sessions** (`blocked`, both ends counted) are the sessions in which the House let no open go at all:
+  the book's open note (live.sqlite kv `eq_open_note`, A30 (2)'s note; `shut_days`) with EVERY entry window it names
+  for the session refused. That covers the kill switch, the daily and drawdown stops, the House's pause, the grant, a
+  reconciliation freeze, `equity_money` off and the stock proof. A session refused at the open and clear at the close
+  is NOT blocked: a program could still open at the close. (The idle clock's `refused_days` reads one refused window
+  as enough; the span does not.) Every entry day of the version's lots in the book is left out too, open or closed,
+  counted or not: a session it opened in did not block it. Neither half depends on K, so a version's blocked sessions
+  are the same at every checkpoint, and each entry lists the ones inside its own span. **What the House does not
+  record by session, so `blocked` cannot hold it:** a program's own seat lost (the book keeps only its last band mark;
+  band moves are events), the shared loss window's refusals (a buy refused or cut for budget is recorded per intent,
+  and only when one was asked), and a session the House did not run in. `blocked_from` says this in every entry.
+- **Fail closed:** a close missing, off one basis or not a finite price, a figure a float cannot hold (never
+  Infinity in the JSON), a lot without a notional, an unreadable open note, the seat rule "first-come" (the House
+  keeps no note then), or any read of the book that raises gives `priced` false with `why` and no figure. The reader
+  never raises into the meter. The book's closes are read for SPY and for the symbols of closed lots of programs that
+  are not panels (B10 reads SPY alone).
+- **A `priced: false` entry blocks the script's `--closes` fallback at that look:** the script fails that program
+  closed there, with no second source. So the captain reads the checkpoint while it is not yet final, in the 01:30Z
+  report, and fixes what its `why` names before the pre-open run makes it final and the next report freezes it.
+- **Frozen with the checkpoint:** the field is written with its checkpoint and carried whole once that checkpoint is
+  final. It is never recomputed, so a later fetch that re-adjusts a close cannot move it. A checkpoint frozen by a
+  report from before C1 carries no field.
+- **THE CAPTAIN COPIES EACH PRICED ENTRY'S `blocked` INTO THE LEDGER BEFORE EACH RECEIPT:** the plan's script takes
+  the blocked sessions from its ledger only, never from this field, and rebuilds the figure with them. A program whose
+  entry lists blocked sessions passes the script's cents check only when the ledger holds the same sessions for it
+  (`{"program": "eq|<family>|v<N>", "from", "to", "why"}`). One list per version serves every checkpoint (the union of
+  its entries' `blocked`). A ledger range the House did not block fails the check too.
+- Held by `league/tests/test_dlane_report_span_bh.py`. It runs the script's own checks, copied, on these reports, and
+  the script itself where `LTCM_SCALING_SCRIPT` names the pinned file.
 
 **Pre-registered before the first equity close** (the captain's A14, Oct 10, 2026; the same three sentences ride in
 every `dlane` report as `done.preregistered`). Consistency is computed since release E3 (each checkpoint's `a14`: the

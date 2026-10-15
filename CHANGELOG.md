@@ -26,9 +26,19 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261015T075939Z-89d93d40bfda` (main `0b978378`, PR #557: one open options structure a
-Probe family and the Probe sleeve 0.33 x E, 08:00Z Oct 15), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's
-updater is on. What is built and not deployed is on branches.
+The running House release is `20261015T204317Z-ad3c7f9653cc` (main `e136c251`, PR #560: release 1015f and FW9,
+20:43Z Oct 15), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
+is on branches.
+
+### Release 1016a: L5 and C1, on `rel/1016a` (unreleased; one House deploy, outside 12:55-20:05Z on a trading day; no
+gateway change; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the
+money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
+
+- L5 (A48), an index-only case-N lineage keeps its S2 try until its first forward session closes (entry below; PR #561).
+  It must land before A39 turns `elane.fwd1.seats` on (20:05Z Wed Oct 21).
+- C1 (A45), span_bh in each checkpoint's by_program (entry below). It must land before the deploy freeze (Oct 27).
+- **Rollback:** the release before, main `e136c251` (nothing is migrated: the permit file's "start" and the report's
+  `span_bh` are recomputed or absent).
 
 ### L5: an index-only case-N lineage keeps its S2 try until its first forward day closes, on `fix/fwd1-index-untried` (unreleased; cut from `e136c251`, PR #560's head; the captain's A48; an owner deploy: `league/ops/` is protected and `league/swarm/elane_forward.py` is FORBIDDEN; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting; no pin, receipt, digest or bar moves; `forward_screen.register` and the rule module `fwd1_rule.py` are unchanged)
 
@@ -103,7 +113,58 @@ updater is on. What is built and not deployed is on branches.
 - **Rollback:** the release before. Its job writes no "start" and its swarm reader ignores one, so every listed
   pending lineage is refused again; nothing is migrated.
 
-### Release 1015f: release 1015e plus three fixes, on `rel/1015f` (unreleased; one House deploy and one gateway deploy
+### C1 (A45): span_bh in each checkpoint's by_program, the scaling plan's benchmark, on `feat/span-bh-c1` (unreleased; cut from `e136c251`, the head of `fix/fw9-alarms`; an owner deploy: `league/ops/` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no Done rule, count, checkpoint trigger, rule sha, bound, money rule or setting changes)
+
+- **Why** (the scaling plan's 2.4): the plan's script tests a share program against the same-risk buy-and-hold over
+  its span. Until now it needed a hand-made closes file. Now the report gives the closes and the figure, from the
+  House's own store, and the script checks them before it uses them.
+- **`span_bh`** (`league/ops/dlane_report.py`; each Done checkpoint's `by_program` row of a share program): one entry
+  a program version among the checkpoint's first K counts: {version, usd, priced, why, basis "adjustment=all",
+  blocked [[from, to]], symbols {SYM: {before, last, sessions, sessions_used, segments, close_before, close_last,
+  closes at every segment boundary, exposure_usd, usd, sha}}, spy, lots, blocked_from}. The meter hands each
+  checkpoint's counted closes to it. The running figures carry none.
+- **The rule** (`league/equity/live.py` `span_bh`): the House's own `_bh_pnl`, with the plan's one change. A session
+  the House blocked the program from opening, while it held nothing in the symbol, is taken out of the span, which
+  splits there. With no such session it is `_bh_pnl` to the Decimal. A panel program's is B10 (`b10_bh`,
+  `date_record`'s rule, SPY over each lot's own sessions). Every close is the book's adjustment=all `eq_bars` row,
+  read only when one fetch wrote every close a symbol needs.
+- **The blocked sessions** are the sessions in which the House let no open go at all: the book's open note
+  (`eq_open_note`, A30 (2)) with every entry window it names refused (`shut_days`). That covers the kill switch, the
+  stops, the House's pause, the grant and the freezes. A session refused in one window and clear in the other is not
+  blocked: a program could still open. (The idle clock's `refused_days`, now a module function the book's
+  `_refused_days` calls, reads one window as enough.) Every entry day of the version's lots in the book is left out
+  too. Neither half depends on K, so one ledger list per version serves every checkpoint. The House records no
+  session-level trace of a program's own seat loss or of the shared loss window's refusals, so `blocked` cannot hold
+  them, and `blocked_from` says so in every entry.
+- **Fail closed:** a close missing, off one basis or not a finite price, a figure a float cannot hold, an unreadable
+  open note, the seat rule "first-come" (no note is kept then), or a read of the book that raises gives `priced`
+  false with `why`, never a figure. The reader never raises. The book's closes are read for SPY and the symbols of
+  programs that are not panels.
+- **Frozen with the checkpoint:** a final checkpoint is carried whole, so the field is never recomputed. A checkpoint
+  frozen before this release carries none.
+- **The captain copies each priced entry's `blocked` into the ledger before each receipt:** the script reads blocked
+  sessions from its ledger only, and its cents check fails closed when the ledger's sessions differ from the entry's
+  (docs/operations.md, **The span buy-and-hold beside each checkpoint**).
+- **A `priced: false` entry blocks the script's `--closes` fallback at that look,** so the captain checks the
+  not-yet-final checkpoint in the 01:30Z report and fixes its `why` before the pre-open run makes it final.
+- **The review's fixes** (on top): F1, the blocked sessions above (before them a session refused in one window, less
+  the counted lots' entry days only, could be blocked at K=30 and not at K=40, so no single ledger passed both); F6,
+  no Infinity; F7, every read inside the reader's guard; F8, no panel basket's closes read.
+- Tests: `league/tests/test_dlane_report_span_bh.py` (26). It covers one and two symbols, a blocked run, a panel, a
+  missing close, the field frozen, the same blocked list at K=30 and K=40, no Infinity, a reader that never raises,
+  and every other Done key unchanged. It also runs the script's own checks, copied, and the pinned script itself
+  where `LTCM_SCALING_SCRIPT` names it.
+
+### 20:43Z Oct 15, 2026: release 1015f and FW9 (#560, carrying #559 and #558), House `20261015T204317Z-ad3c7f9653cc`, main `e136c251`; gateway `a6026308`
+
+One owner deploy (`ship_house.sh`): CI green on the exact head; a fast-forward of `0b978378`; no order in flight and no
+hand-chain job mid-run at 20:43:13Z; the nightly stop written BEFORE the push; promoted 20:44:12Z (rollback
+`20261015T075939Z-89d93d40bfda`); nightly back and the harness observer's base repointed 20:54Z. Verified 20:54Z: health
+clean, real money on, no real-money block; fingerprint `b60410ad`, money `cfcc94b1`, constitution `60796aed` and gate
+contract `397b22b772b3` unchanged. Then the gateway from the same commit: 464 of 464 tests, version `a6026308`
+(rollback `9c0651a3`). After it the account reading blocks nothing (the equity book's own share fills are known).
+
+### Release 1015f: release 1015e plus three fixes, on `rel/1015f` (DEPLOYED 20:43Z Oct 15 in #560; one House deploy and one gateway deploy
 from one commit, outside 12:55-20:05Z on a trading day; no identity moves: the options execution fingerprint
 `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are
 main's; no setting changes)
@@ -116,7 +177,7 @@ main's; no setting changes)
 - L2, the equity pass says the route by symbols (entry below).
 - L4, the budget job waits for the Sail guard's next reading after a start (entry below).
 
-### FW9, the twins' failures in the House warning, and DC1: the alarms that see the first Done checkpoint coming, on `fix/fw9-alarms` (unreleased; cut from `caa10eba`, the head of `rel/1015f`, PR #559; an owner deploy: `league/ops/` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no bound, screen, false-positive rate, money rule or setting changes)
+### FW9, the twins' failures in the House warning, and DC1: the alarms that see the first Done checkpoint coming, on `fix/fw9-alarms` (DEPLOYED 20:43Z Oct 15 in #560; cut from `caa10eba`, the head of `rel/1015f`, PR #559; an owner deploy: `league/ops/` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no bound, screen, false-positive rate, money rule or setting changes)
 
 - **Why** (the Oct 15 rehearsal of the 30th close's checkpoint): a failure there could be seen first at the
   checkpoint itself. FW6 reads an instance's twin agreement from 20 sessions, and an instance has about 17 by Nov 2.
@@ -182,7 +243,7 @@ main's; no setting changes)
   close.
 - **Rollback:** the House release before it. Nothing is migrated.
 
-### The budget job waits for the Sail guard's next reading after a start, on `fix/budget-guard-wait` (unreleased; cut from `efc9fa00`, PR #558's head; an owner deploy: `league/ops/budget.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting)
+### The budget job waits for the Sail guard's next reading after a start, on `fix/budget-guard-wait` (DEPLOYED 20:43Z Oct 15 in #560; cut from `efc9fa00`, PR #558's head; an owner deploy: `league/ops/budget.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting)
 
 - **What it is** (the captain's L4): when a `budget` run finds no fresh Sail guard reading, it now waits for the
   guard's next good one. It looks at the guard's record every 20 s, for at most 270 s from its start, inside the
@@ -213,7 +274,7 @@ main's; no setting changes)
   and 593 tests, on Python 3.11 and 3.14; the four ids on both.
 - **Rollback:** the release before. Nothing is migrated, and nothing reads `guard_wait`.
 
-### Release 1015e: births cells, research spend by yield, the watchdog on interrupted boxes, docs, on `rel/1015e` (unreleased; TWO deploys from one commit: the House by an owner deploy, never 12:55-20:05Z on a trading day (`league/swarm/elane_births.py`, `league/ops/` and `league/ops/economics.py` are protected), then the gateway by the owner's wrangler deploy; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
+### Release 1015e: births cells, research spend by yield, the watchdog on interrupted boxes, docs, on `rel/1015e` (DEPLOYED 20:43Z Oct 15 in #560; TWO deploys from one commit: the House by an owner deploy, never 12:55-20:05Z on a trading day (`league/swarm/elane_births.py`, `league/ops/` and `league/ops/economics.py` are protected), then the gateway by the owner's wrangler deploy; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
 
 - **What it carries**, on main `0b978378` (#557, the running release): the equity birth cells (PR #552,
   `feat/elane-birth-cells` `0bccff2c`), research dollars by measured yield (PR #551, `feat/ops-lane-yield` `692956f3`)
@@ -248,7 +309,7 @@ main's; no setting changes)
   `9c0651a3`). Nothing is migrated: the account reading is recomputed every five minutes, `lane_yield` is read by
   nothing, and a request without the birth cells is the request before.
 
-### The equity pass says the route by symbols and asks for index-only families, on `feat/elane-route-text` (unreleased; L2, cut from the evening bundle's head `efc9fa00`, which carries #552; an owner deploy: `league/swarm/elane_births.py`, `elane_train.py` and `elane_xs.py` are protected; no identity moves; no setting)
+### The equity pass says the route by symbols and asks for index-only families, on `feat/elane-route-text` (DEPLOYED 20:43Z Oct 15 in #560; L2, cut from the evening bundle's head `efc9fa00`, which carries #552; an owner deploy: `league/swarm/elane_births.py`, `elane_train.py` and `elane_xs.py` are protected; no identity moves; no setting)
 
 - **What it is** (`league/swarm/elane_births.py`). The equity architect's system prompt and THE LANES/EQUITY block
   said every program is judged the same way: one Validation try, one sealed look, then real money at Probe size.
@@ -303,7 +364,7 @@ main's; no setting changes)
   constitution `60796aed`.
 - **Rollback:** the release before; the request is words only.
 
-### FWD1-R's representative before any forward day: a lineage sighted on a failed version is judged on the version the rule picks, on `fix/fwd1-repick` (unreleased; in release 1015e; cut from `rel/1015e` `efc9fa00`; an owner deploy: `league/ops/` is protected; no identity moves; no setting; the pin and its receipt are unchanged)
+### FWD1-R's representative before any forward day: a lineage sighted on a failed version is judged on the version the rule picks, on `fix/fwd1-repick` (DEPLOYED 20:43Z Oct 15 in #560; in release 1015e; cut from `rel/1015e` `efc9fa00`; an owner deploy: `league/ops/` is protected; no identity moves; no setting; the pin and its receipt are unchanged)
 
 - **The defect.** The forward screen wrote a lineage's row once, at its first sighting, and never chose again. The
   receipt's rule says the representative is fixed before any forward day exists, not at first sighting. The 08:06Z
@@ -351,7 +412,7 @@ main's; no setting changes)
   the old one). The release before puts its unconditional UPDATE trigger back on its first open, and never updates
   a row.
 
-### The equity birth cells: the equity pass's request shows where the graveyard binds, on `feat/elane-birth-cells` (unreleased; in release 1015e, merged on main `8ef19fc1` with the yield check's resolution of `league/swarm/elane_births.py` (`f62ca5b6`), tree for tree; cut from main `aec0c8a5`, release U; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
+### The equity birth cells: the equity pass's request shows where the graveyard binds, on `feat/elane-birth-cells` (DEPLOYED 20:43Z Oct 15 in #560; in release 1015e, merged on main `8ef19fc1` with the yield check's resolution of `league/swarm/elane_births.py` (`f62ca5b6`), tree for tree; cut from main `aec0c8a5`, release U; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
 
 - **What it is:** `elane_births.cells_text`, a block of the equity pass's request after THE EQUITY GRAVEYARD: one line a
   bound cell (mechanism_class / lane:structure / holding, and the universe group where the graveyard's key carries
@@ -371,7 +432,7 @@ main's; no setting changes)
   rows, 2,663 characters.
 - **Rollback:** the release before.
 
-### Research dollars by measured yield: the `dlane` report's `lane_yield` section, on `feat/ops-lane-yield` (unreleased; in release 1015e; cut from main `aec0c8a5`, release U; an owner deploy: `league/ops/` is protected; no identity moves: no evidence, money, swarm or equity module changes; no setting)
+### Research dollars by measured yield: the `dlane` report's `lane_yield` section, on `feat/ops-lane-yield` (DEPLOYED 20:43Z Oct 15 in #560; in release 1015e; cut from main `aec0c8a5`, release U; an owner deploy: `league/ops/` is protected; no identity moves: no evidence, money, swarm or equity module changes; no setting)
 
 - **What it is:** a read-only section of the operator's `dlane` report (`league/ops/lane_yield.py`, called once at the
   end of `report`, inside its own try: an error is `{"error": ...}`, never a failed report). For the report's windows
@@ -391,7 +452,7 @@ main's; no setting changes)
   windows.
 - **Rollback:** the release before; nothing reads the section.
 
-### Reliability: the gateway watchdog asks an interrupted box back and tells the owner where to ask; the account reading knows the equity book's own shares, on `fix/reliability-1015` (unreleased; in release 1015e, with the watchdog's follow-up said in its entry; from main `aec0c8a5`, release U; TWO deploys: the gateway by the owner's wrangler deploy, and the House by an owner deploy, `league/ops/economics.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the constitution digest `111ede85` and the money digest `de5ed74e` are main's; no setting changes)
+### Reliability: the gateway watchdog asks an interrupted box back and tells the owner where to ask; the account reading knows the equity book's own shares, on `fix/reliability-1015` (DEPLOYED 20:43Z Oct 15 in #560; in release 1015e, with the watchdog's follow-up said in its entry; from main `aec0c8a5`, release U; TWO deploys: the gateway by the owner's wrangler deploy, and the House by an owner deploy, `league/ops/economics.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the constitution digest `111ede85` and the money digest `de5ed74e` are main's; no setting changes)
 
 - **The watchdog and an interrupted box** (`gateway/lib/watchdog.mjs`, `sail.mjs`, `email.mjs`, `gate.mjs`). Oct 14,
   2026: an AWS spot interruption left the House `interrupted_restorable` from 20:12:46Z to 03:26:54Z Oct 15; the
