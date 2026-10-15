@@ -144,6 +144,11 @@ class ThePureRules(unittest.TestCase):
                                                                     line_highest=D("-461")))
         self.assertIn("cumulative", B.program_lines(rung=2, since_change=D("0"), line_now=D("-256.25"),
                                                     cumulative=D("-461"), line_highest=D("-461")))
+        # A row tightened to nothing: its line is 0, hit by the first loss, never by no loss (the review).
+        self.assertIsNone(B.program_lines(rung=2, since_change=D("0"), line_now=D("0"), cumulative=D("0"),
+                                          line_highest=D("0")))
+        self.assertIsNotNone(B.program_lines(rung=2, since_change=D("-0.01"), line_now=D("0"), cumulative=D("-0.01"),
+                                             line_highest=D("0")))
 
     def test_the_window_is_the_probe_windows_worst_net_stretch(self):
         from league.live import real as R
@@ -293,10 +298,91 @@ class Scaled(T.BookTest):
             h.families.scale = {"rung": 5, "programs": {}}
             self.assertIs(h.book._scale_for(inst, D("20000")), L.SCALE_PROBE,
                           "THE RATCHET: the setting put back raises nothing under the same pin")
-            self.assertEqual(h.state.get(L.SCALE_KEY)["ratchet"], {"sha256": sha, "rungs": {KEY_A: 0}})
+            self.assertEqual(h.state.get(L.SCALE_KEY)["ratchet"], {"sha256": sha, "rungs": {KEY_A: 0}, "caps": {KEY_A: 5}})
         sha2 = pin(self.root, {KEY_A: 3}, rungs_at="later")             # a new pin (Blake's deploy): a raise again
         with band(sha2, lines=True):
             self.assertEqual(h.book._scale_for(inst, D("20000")).rung, 3)
+
+    def test_the_ratchet_learns_lowerings_only(self):
+        """The review of C3: a cap already there when a pin is first read holds while it is there and is not learned; the
+        lines switched on later raise nothing; an unreadable setting sizes at Probe that minute and teaches nothing; a
+        lowering while the program holds no seat sticks too."""
+        sha = pin(self.root, {KEY_A: 2, KEY_B: 2})
+        h = self.harness()
+        a = h.instance("fam-a")
+        h.families.scale = {"rung": 5, "programs": {KEY_A: 1}}
+        with band(sha, lines=True):
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 1, "the cap holds while it is there")
+            h.families.scale = {"rung": 5, "programs": {}}
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 2, "a cap from before the pin is not learned")
+            h.families.scale_setting = mock.Mock(side_effect=OSError("unreadable"))
+            self.assertIs(h.book._scale_for(a, D(E)), L.SCALE_PROBE, "unreadable: Probe this minute")
+            del h.families.scale_setting
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 2, "and nothing learned from it")
+            h.book._scale_now()                                        # fam-b, seatless, read at R2
+            h.families.scale = {"rung": 5, "programs": {KEY_B: 0}}       # lowered while it holds no seat: learned
+            h.book._scale_now()
+            h.families.scale = {"rung": 5, "programs": {}}
+            h.book._scale_now()
+            b = h.instance("fam-b")
+            self.assertIs(h.book._scale_for(b, D(E)), L.SCALE_PROBE, "a lowering while off its seat sticks")
+        sha2 = pin(self.root, {KEY_A: 2}, rungs_at="r2")
+        with band(sha2):
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 1, "read without the lines: R1")
+        with band(sha2, lines=True):
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 1, "the lines switched on later raise nothing")
+        sha3 = pin(self.root, {KEY_A: 2}, rungs_at="r3")
+        with band(sha3, lines=True):
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 2, "only a new pin")
+
+    def test_a_memory_that_cannot_be_read_fails_closed_and_is_never_written_over(self):
+        sha = pin(self.root, {KEY_A: 1})
+        h = self.harness()
+        a = h.instance("fam-a")
+        h.state.execute("INSERT INTO kv(key, value) VALUES(?, ?)", (L.SCALE_KEY, "{not json"))
+        with band(sha):
+            self.assertIs(h.book._scale_for(a, D(E)), L.SCALE_PROBE)
+            h.book._scale_now()
+            h.book._scale_now()
+            self.assertEqual(self.size(h, a).sleeve_equity, D("0.25") * D(E_P), "Probe: no rung")
+            self.assertEqual(h.state.rows("SELECT value FROM kv WHERE key=?", (L.SCALE_KEY,))[0]["value"], "{not json")
+            self.assertEqual(h.book.scaled()["state"], "memory")
+            self.assertEqual(len(h.standing()), 1)
+        from league.ops.preopen import check_equity
+        from league.tests.test_equity_money import ThePreopenEquityCheck
+
+        house = ThePreopenEquityCheck("test_each_fault_fails").house()
+        with band(sha):
+            house["release"]["live"]["equity"] = {"frozen": "", "scaled": h.book.scaled()}
+        self.assertFalse(check_equity(house).ok)
+
+    def test_d3_at_the_sizing_itself(self):
+        sha = pin(self.root, {KEY_A: 1})
+        h = self.harness()
+        a = h.instance("fam-a")
+        with band(sha):
+            h.book._scale_now()
+            self.closed_lot(h, a, "-300.01", rung=1, closed_at=h.clock() + 1)   # an exit of this very minute
+            self.assertIs(h.book._scale_for(a, D(E)), L.SCALE_PROBE, "sent back before its entry, not next minute")
+            self.assertIn(KEY_A, h.state.get(L.SCALE_KEY)["out"])
+
+    def test_a_rung_change_during_an_entry_sends_no_more_shares_under_other_marks(self):
+        sha = pin(self.root, {KEY_A: 2})
+        h = self.harness()
+        a = h.instance("fam-a")
+        with band(sha, lines=True):
+            it = h.intent(a, "buy", symbol="SPY", share="0.5")
+            h.venue.fill = "partial"
+            h.tick(9, 31)
+            h.tick(9, 32)
+            self.assertGreater(sum((o.filled_qty for o in h.orders()), D(0)), 0)
+            h.families.scale = {"rung": 1, "programs": {}}
+            for mm in range(33, 46):
+                h.tick(9, mm)
+        buys = [o for o in h.orders() if o.side == "buy"]
+        self.assertTrue(all(o.scaled and o.answer.get("rung") == 2 for o in buys), "no buy under another mark")
+        self.assertEqual(h.get_intent(it.iid).status, "done")
+        self.assertIn("rung changed during the entry", h.get_intent(it.iid).why)
 
     def test_the_sleeve_never_goes_above_half_of_e_and_never_through_c2s_pool(self):
         sha = pin(self.root, {KEY_A: 5})
@@ -510,7 +596,8 @@ class Scaled(T.BookTest):
             mem = h.state.get(L.SCALE_KEY)
             self.assertEqual(mem["ladder_for"], "cd" * 32)
             self.assertEqual(h.book._scale_for(a, D(E)).rung, 2, "its total starts again: the old closes are not its")
-            self.assertEqual(h.book._scaled_room(T.MONDAY.isoformat(), D(E)).total, D(0))
+            room = h.book._scaled_room(T.MONDAY.isoformat(), D(E))
+            self.assertEqual((room.total, room.window), (D(0), D(0)), "the window too: the old version's closes are not its")
 
 
 class TheFamilyLine(unittest.TestCase):
@@ -601,7 +688,10 @@ class TheSetting(unittest.TestCase):
         self.write({"elane": {"scale": {"rung": 1}}})
         self.assertEqual(EquityFamilies(self.root).scale_setting(), {"rung": 1, "programs": {}})
         with mock.patch.object(self.elane, "scale_setting", side_effect=RuntimeError("x")):
-            self.assertEqual(EquityFamilies(self.root).scale_setting(), {"rung": 0, "programs": {}})
+            self.assertEqual(EquityFamilies(self.root).scale_setting(), {"rung": 0, "programs": {}, "unread": True})
+        with mock.patch("league.swarm.settings.read_policy", side_effect=OSError("x")):
+            self.assertEqual(self.elane.scale_setting(self.root / "nowhere"), self.elane.SCALE_CLOSED,
+                             "a policy that cannot be read: closed, never the default (the review)")
 
 
 class TheIdentities(unittest.TestCase):

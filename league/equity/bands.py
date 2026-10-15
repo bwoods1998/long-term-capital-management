@@ -450,14 +450,15 @@ def program_lines(*, rung: int, since_change: Decimal, line_now: Decimal | None,
     """(money) D3, THE TWO PROGRAM LINES of a program at a rung: why it returns to Probe for good, or None. `since_change`:
     the realized net of its rung lots closed since its last rung change; `cumulative`: since it first reached R1 (both
     dollars, fees and dividends in); `line_now`: its rung's `program_line`; `line_highest`: the line of the highest rung it
-    reached (the cumulative line never resets, so losses cannot pile up across rung changes). Either one at or below its
-    line is D3. Never a figure in the words (the receipt and the private record carry the figures)."""
+    reached (the cumulative line never resets, so losses cannot pile up across rung changes). Either one, a LOSS at or
+    below its line, is D3 (a line of zero, a row tightened to nothing, is hit by the first loss, never by no loss). Never a
+    figure in the words (the receipt and the private record carry the figures)."""
     if not isinstance(rung, int) or rung < 1:
         return None
-    if line_now is not None and Decimal(since_change) <= line_now:
+    if line_now is not None and Decimal(since_change) < 0 and Decimal(since_change) <= line_now:
         return (f"D3: its realized net since its last rung change reached the program line of R{rung} "
                 "(R1: the Probe line; from R2: -10% of its sleeve): back to Probe, for good")
-    if line_highest is not None and Decimal(cumulative) <= line_highest:
+    if line_highest is not None and Decimal(cumulative) < 0 and Decimal(cumulative) <= line_highest:
         return ("D3: its realized net since it first reached R1 reached the program line of the highest rung it reached "
                 "(the cumulative line): back to Probe, for good")
     return None

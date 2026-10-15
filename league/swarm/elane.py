@@ -39,10 +39,11 @@ SETTINGS (`cfg`; policy.json "elane", swarm.json over it; `DEFAULTS` is the roll
 - `scale` (C3 (A45) of the scaling plan, the Scaled band): {"rung": the ladder's cap for every program, "programs":
   {"eq|<family>|v<N>": one program's cap}}, each a whole number 0 to 5 (default 5 and none: the pin alone). The House
   sizes a program at the LOWER of the private pin's rung and this, so a setting may only lower a rung, never raise one
-  (a raise is Blake's deploy of a new pin; the House keeps the lowest rung this held a program to under a pin, so
-  putting it back raises nothing until a new pin); 0 is Probe, `{"rung": 0}` is "stop the ladder". It is how the captain
-  applies a receipt's step-down the same day (plan 4.3). Read by the House through `scale_setting` (league/equity/
-  families.py), failing closed: unreadable is the last good value, else every rung 0.
+  (a raise is Blake's deploy of a new pin; a lowering seen after a pin was read sticks for that pin, so putting it back
+  raises nothing until a new pin: league/equity/live.py `_setting_rung`); 0 is Probe, `{"rung": 0}` is "stop the
+  ladder". It is how the captain applies a receipt's step-down the same day (plan 4.3). Read by the House through
+  `scale_setting` (league/equity/families.py), failing closed: unreadable is the last good value, else every rung 0,
+  marked `unread` (the House sizes at Probe and learns nothing from it).
 
 THE FAMILY LINE AND THE SCALED MARK (C3): `loss_line` reads the family's real forward rows, every version, as before; with
 Blake's Scaled lines in force AND their separable third part (`equity_money.scaled.lines.in_force` and
@@ -1117,8 +1118,8 @@ def _policy_scale() -> dict[str, Any]:
         from . import settings as settings_mod
 
         layer, _ = settings_mod.read_policy()
-    except Exception:  # noqa: BLE001
-        layer = {}
+    except Exception:  # noqa: BLE001 - fail closed, never to the default (the review of C3)
+        return copy.deepcopy(SCALE_CLOSED)
     block = (layer.get("elane") if isinstance(layer, Mapping) else None) or {}
     if not isinstance(block, Mapping) or "scale" not in block:
         return copy.deepcopy(DEFAULTS["scale"])
@@ -1129,9 +1130,10 @@ def _policy_scale() -> dict[str, Any]:
 #: `roster_seats` when swarm.json's `elane` cannot be read and this process never read a good value: no new seat.
 ROSTER_CLOSED = -1
 _roster_good: dict[str, int] = {}
-#: C3: `scale_setting` when swarm.json's `elane.scale` cannot be read and this process never read a good one: every
-#: rung 0 (Probe), and the last good value read of each file.
-SCALE_CLOSED: dict[str, Any] = {"rung": 0, "programs": {}}
+#: C3: `scale_setting` when swarm.json's `elane.scale` cannot be read and this process never read a good one (or the
+#: repository's policy cannot be read): every rung 0 (Probe), marked `unread` so the House learns nothing from it (its
+#: ratchet keeps only a setting that was read); and the last good value read of each file.
+SCALE_CLOSED: dict[str, Any] = {"rung": 0, "programs": {}, "unread": True}
 _scale_good: dict[str, dict[str, Any]] = {}
 _roster_lock = threading.Lock()
 

@@ -47,16 +47,18 @@ updater is on. What is built and not deployed is on branches.
   plan's sha256; the House reads a rung ONLY from a pin whose bytes are the row's sha256. A live share program in the
   Probe band is then sized at min(its rung's multiple x THAT PIN'S E_P, 0.50 x E), never through C2's frozen pool, its
   rung the lower of the pin's and the swarm's tighten-only setting `elane.scale` (league/swarm/elane.py
-  `scale_setting`, read through league/equity/families.py; "stop the ladder" is `{"rung": 0}`; a lowering sticks for
-  that pin, so only a new pin raises a rung again), at most R1 while the lines are not in force. An R1 buy and lot carry the PROBE mark (inside the $400 / $800, EDM1's -$300, the family
-  line); from the yes an R2-and-up buy carries the SCALED mark (`eq_orders.probe` 2; its lot `probe` 0 and `info`
+  `scale_setting`, read through league/equity/families.py; "stop the ladder" is `{"rung": 0}`; a lowering after the
+  pin was read sticks for that pin, so only a new pin raises a rung again), at most R1 while the lines are not in
+  force. An R1 buy and lot carry the PROBE mark (inside the $400 / $800, EDM1's -$300, the family line); from the yes an R2-and-up buy carries the SCALED mark (`eq_orders.probe` 2; its lot `probe` 0 and `info`
   {"rung", "scaled"}), is sized to the Scaled room, and its open risk leaves the Probe room (`probe_figures`, the one
   path into either lane's); its close is outside the Probe window, the total and EDM1's line. Without the lines a
   Scaled-marked lot counts as a Probe one (none exists before them). The House's own step-downs: D3 (the program line
   since the last rung change, -$300 at R1 and -10% of the sleeve from R2, and the cumulative line since R1 at the
   highest rung's: back to Probe for good), D5 (the Scaled window: Scaled opens pause, said once), D6 (the Scaled
   total: every program back to Probe, the ladder closed for the pin's plan version). Every other step-down is the
-  captain's same-day setting. A pin that does not match its row opens no new Scaled lot: a program last read at a rung
+  captain's same-day setting (D3 is judged at each entry's sizing too). A rung that changes during an entry sends no
+  more shares under other marks. A memory that cannot be read sizes every program at Probe and is never written over.
+  A pin that does not match its row opens no new Scaled lot: a program last read at a rung
   waits, the rest trade at Probe, one standing error alert, health `scaled`, the pre-open check fails
   (league/ops/preopen.py). Memory in the private live.sqlite (`eq_scale`); a private ledger kind `equity.scale`
   (league/ledger.py). No figure in any alert, record or health.

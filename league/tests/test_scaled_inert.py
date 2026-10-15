@@ -13,7 +13,7 @@ league/tests/fixtures/scaled_inert_c2.json; here it runs on this tree and must g
   (the book then says the mismatch: its memory, a record and one standing alert, and nothing else);
 - the same with Blake's Scaled lines and their family-line part in force (no Scaled lot exists, so nothing moves);
 - with the row the pin's own and the swarm's setting at "stop the ladder" (`elane.scale.rung` 0): every sizing, line
-  and reading (the book keeps the stop as its ratchet for that pin, and says the pin matched, once).
+  and reading (the book keeps the pin's rungs and the caps as its ratchet, and says the pin matched, once).
 The pin's E_P and every figure are invented. Standard library only."""
 
 from __future__ import annotations
@@ -106,8 +106,10 @@ class Inert(unittest.TestCase):
             got = self.run_scenario(configure=stop)
         self.assert_same(got, TRADING + ("alerts",))
         self.assertEqual(sorted(set(got["kv_keys"]) - set(golden()["kv_keys"])), ["eq_scale"])
+        # The ratchet holds the pin's rungs as first read (R1: the lines are not in force) and the setting's caps; a stop
+        # set before the pin was read is not learned, one set after it would stick.
         self.assertEqual(json.loads(got["kv"]["eq_scale"]), {"ratchet": {"sha256": sha, "rungs": {
-            "eq|fam-a|v1": 0, "eq|fam-b|v1": 0}}}, "the stop sticks for this pin: only a new pin raises a rung again")
+            "eq|fam-a|v1": 1, "eq|fam-b|v1": 1}, "caps": {"eq|fam-a|v1": 0, "eq|fam-b|v1": 0}}})
         self.assertEqual({k: v for k, v in got["kv"].items() if k != "eq_scale"}, golden()["kv"])
         self.assertEqual([e[1]["state"] for e in got["events"] if e[0] == "equity.scale"], ["matched"])
 

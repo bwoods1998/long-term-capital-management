@@ -35,11 +35,13 @@ row, after Done's first checkpoint receipt; every raise after it is another such
   must carry the plan's sha256); C2's E_P reading is untouched by them. A rung is read ONLY from a pin whose bytes are
   the row's sha256. A program's rung is the LOWER of the pin's and the swarm's setting `elane.scale` (`swarm.json`:
   `{"rung": n, "programs": {"eq|<family>|v<N>": n}}`, each 0 to 5, default 5 and none; a setting may only lower;
-  unreadable is the last good value, else every rung 0). "Stop the ladder" is `elane.scale.rung` 0, the same evening.
-  A LOWERING STICKS FOR THAT PIN (the ratchet: the House keeps the lowest rung the setting held each program to under
-  the pin's sha256), so putting the setting back raises nothing: only a new pin, Blake's deploy, raises a rung again
-  (plan 4.2: every raise is his deploy of a new pin). A step-down's new pin may name the lowered rung, after which the
-  setting can be cleared.
+  unreadable is the last good value, else every rung 0, and an unreadable setting sizes at Probe that minute). "Stop
+  the ladder" is `elane.scale.rung` 0, the same evening. A LOWERING STICKS FOR THAT PIN (the ratchet, kept per pin
+  sha256: the rung the pin was first read at, at most R1 without the lines, lowered by every lowering of the setting
+  seen after it, for a seated program or not), so putting the setting back raises nothing, nor does switching the lines
+  on later: only a new pin, Blake's deploy, raises a rung again (plan 4.2). A cap already in `swarm.json` when a new pin
+  is first read holds while it is there and is not learned (that pin is Blake's rung); an unreadable setting teaches
+  nothing.
 - **Sizing at a rung** (league/equity/live.py `EquityBook._scale_for`): a live share program in the Probe band (never a
   panel, a Sized program or an options family) sizes at min(its rung's multiple x THE MATCHING PIN'S E_P, 0.50 x E),
   never through C2's frozen pool (`_sleeve_equity`). The account's walls bind as before through `size_entry`: an ETF
@@ -58,7 +60,7 @@ row, after Done's first checkpoint receipt; every raise after it is another such
   highest rung it reached): that program back to Probe, for good. D5, the Scaled window reached: Scaled opens pause
   (no Scaled entry fits the room), said once; the down-one-rung is the captain's setting. D6, the Scaled total reached:
   every program back to Probe and the ladder closed for the pin's plan version (a pin with a new plan sha reopens it,
-  its total counted again from that minute and from no sleeve).
+  its window and total counted again from that minute and from no sleeve).
   Every other step-down (D1, D2, D4, D7, D8) is the captain's same-day `elane.scale`, from the receipt. Nothing is ever
   sold or placed by a rung: lots exit by their own rules.
 - **A pin that does not match its row** (none there, unreadable, another file, rungs that cannot be read): NO NEW SCALED
@@ -67,6 +69,11 @@ row, after Done's first checkpoint receipt; every raise after it is another such
   `state` "mismatch", and the pre-open check FAILS (league/ops/preopen.py). The plan's section 9 says "no new equity
   lot"; the build opens none of the Scaled pool and keeps Probe trading (a deviation, said: it keeps Done's pace and
   the consistency clause, and Probe sizing never depended on the rungs).
+- **Fail closed** (the review of Oct 15): a memory (`eq_scale`) that cannot be read sizes every program at Probe, is
+  never written over, and is one standing error alert (health `scaled.state` "memory"; the pre-open check fails); D3 is
+  judged at each entry's sizing too, so a close of that very minute sends the program back before its entry; a rung that
+  changes during an entry (the setting, a program line) sends no more shares under other marks (one intent, one lot,
+  one mark); a line of zero (a row tightened to nothing) is hit by the first loss, never by no loss.
 - **What is kept** (private live.sqlite, kv `eq_scale`): each program's rung as last read, its last change, when it first
   reached R1, its highest rung, the programs sent back, the ladder's closure, the largest Scaled sleeves reached
   (dollars: the total's base), and since when the pin has not matched. Records `equity.scale` (private ledger kind).

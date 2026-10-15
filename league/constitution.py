@@ -1226,10 +1226,11 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 # - `rungs`: each rung's sleeve as a multiple of E_P (the plan's table 3.2: R1 0.50, R2 1.25, R3 2.25, R4 4.00, R5
 #   6.75), never above `max_sleeve_share` x E (0.50, the top of the Sized sleeve's own bound): a program's sleeve is
 #   min(its rung's multiple x E_P, `max_sleeve_share` x E), where its rung is the LOWER of the pin's and the swarm's
-#   setting `elane.scale` (a setting may only lower it, and a lowering sticks for that pin: only a new pin raises a
-#   rung again; "stop the ladder" is `elane.scale.rung` 0). Every wall of the
-#   account binds as before through `size_entry`: an ETF at most 0.50 x E across all programs, 1.00 x E invested, the
-#   cash reserve. A share program only (no panel, no options program), in the Probe band only.
+#   setting `elane.scale` (a setting may only lower it, and a lowering after the pin was read sticks for that pin, as
+#   does R1 for a pin read before the lines: only a new pin raises a rung again; "stop the ladder" is
+#   `elane.scale.rung` 0). Every wall of the account binds as before through `size_entry`: an ETF at most 0.50 x E
+#   across all programs, 1.00 x E invested, the cash reserve. A share program only (no panel, no options program), in
+#   the Probe band only.
 # - R1 IS INSIDE THE LINES IN FORCE: its lots carry the PROBE mark, so they count in the shared $400 window and $800
 #   total (open risk and closes), EDM1's -$300 line and the swarm's -$300 family line read them, as every Probe lot.
 #   R1 IS A LOOSENING, SAID SO (plan 3.2): one program gets A32's 0.50 sleeve back against A37's 0.33 x E for every
@@ -1259,8 +1260,8 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   top of the ladder the worst loss before every line stops is about a third of the account); the program line from
 #   -$300 to -10% of the sleeve (since a change and cumulatively, at R5 well past -$300); the -$300 family line stops
 #   reading Scaled lots; Scaled open risk leaves the Probe room. Without his yes nothing goes past R1.
-# - Step-downs never wait for Blake (plan 4.3): the House's own (D3, D5, D6) above; every other one (D1, D2, D4, D7, D8)
-#   is the captain's same-day lowering of `elane.scale`, from the checkpoint receipt. A newer version of a family is
+# - Step-downs never wait for Blake (plan 4.3): the House's own (D3, D5's pause, D6) above; every other one (D1, D2, D4,
+#   D5's down-one-rung, D7, D8) is the captain's same-day lowering of `elane.scale`, from the checkpoint receipt. A newer version of a family is
 #   at Probe at once (the pin names a program by family and version). Nothing is ever sold or placed by a rung.
 # Bounds: each multiple at most the plan's (a row may only tighten), never decreasing from R1 to R5; the shares at most
 # the plan's; the window at least 20 sessions. A table with no `scaled` block at all is dark too (a table from before

@@ -130,8 +130,8 @@ class EquityFamilies:
             from ..swarm import elane
 
             return elane.scale_setting(self.root)
-        except Exception:  # noqa: BLE001 - fail closed: every program at Probe
-            return {"rung": 0, "programs": {}}
+        except Exception:  # noqa: BLE001 - fail closed: every program at Probe, and nothing learned from it
+            return {"rung": 0, "programs": {}, "unread": True}
 
     def read(self, family: str | None = None) -> list[dict]:
         """The equity-lane rows (the module docstring); [] with `last_error` set when the store cannot be read (no
