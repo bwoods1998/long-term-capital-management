@@ -50,13 +50,18 @@ main's; no setting changes)
   out or failed, or gave no `claude` block) reads every input again every 20 s at a new time, inside the same wait:
   at most 270 s from its start, with the same bounds on the sleeps and the looks. It goes on from the first read that
   gives every meter it waits for. While Sail is unread too, it reads again only once the guard has a good reading, as
-  L4 does. With no Claude balance by the end, Claude is `unreadable` exactly as before, and the warning starts
-  "waited N s (K looks) for the gateway's Claude balance: none came". With Sail late too it names both, and which
-  came: when the guard's reading came and the Claude balance did not, the run goes on from the read that gave Sail,
-  so it is never worse than L4 alone. No balance is invented, and no meter is marked `ceiling` that its read did not
-  give. `guard_wait` adds `waited_for` (the meters unread at the first read) and `unread` (the ones still unread at
-  the end); `read` is true only when every meter waited for read. A run with no gateway to read does not wait for
-  Claude.
+  L4 does. With no such read by the end it goes on from the read that ranks highest (the earliest of those that rank
+  alike), else from its first read: a read ranks by how many of the meters waited for (those the first read did not
+  give) it gives, then by how many meters it gives, and a later read is taken only when it ranks strictly higher. So
+  a read that gives the guard's reading but loses a Claude balance the first read had is taken over the first read,
+  as L4 alone took it (Sail at the ceiling, Claude `unreadable`), and the run keeps looking for Claude to the end of
+  the wait: never worse than L4 alone. With no Claude balance by the end, Claude is `unreadable` exactly as before,
+  and the warning starts "waited N s (K looks) for the gateway's Claude balance: none came". With Sail late too it
+  names both, and for each meter what came at any read, e.g. "the Sail guard's reading came; the Claude balance, read
+  at the first read, did not come again". No balance is invented, and no meter is marked `ceiling` that its read did
+  not give. `guard_wait` adds `waited_for` (the meters unread at the first read) and `unread` (the ones the read the
+  run goes on from does not give); `read` is true only when that read gives every meter. A run with no gateway to
+  read does not wait for Claude.
 - **Why:** the Claude balance was one `/v1/health` read (20 s timeout) with no retry. A run right after a restart that
   missed it wrote Claude `unreadable`, and that receipt fails Done item 7's clause "every budget receipt reads
   limited_by 'ceiling' on every meter" for the UTC day. The risk is small: the pre-mortem's verify counted 0 health
@@ -66,15 +71,23 @@ main's; no setting changes)
   never waits) are unchanged, and so are the Sail-only wait's texts and figures. In a gateway outage each `budget` run
   waits the full 270 s, reading the box spend again at each look (two Sail spend calls, at most 14 looks), and the
   next job waits behind it.
-- **Verified:** `league/tests/test_ops_budget.py` `GuardWait`, 4 new tests (14 in all) with an injected clock and
-  sleeper: a Claude balance missing at the first read and readable at +40 s reads the meter at the new time, with
-  every input read again at each look; a Claude balance missing throughout fails closed with the same meters as a run
-  that did not wait, the run's own time, and the first error naming the wait (and a 280 s first read never looks);
-  Sail and Claude both late (the guard at +40 s, the gateway at +60 s) read both at +60 s with no gateway read before
-  the guard's reading; with the guard at +40 s and the gateway never, the run goes on from the +40 s read (Sail at the
-  ceiling, Claude `unreadable`); with neither ever, both are `unreadable` at the run's own time; no gateway, no wait. The L4 tests' records carry the two new keys. The
-  budget tests (103) and their importers, 15 modules and 610 tests, on Python 3.11 and 3.14; the whole suite on 3.14 (12,067 tests);
-  `league.ci --no-tests`; the four ids on both.
+- **Verified:** `league/tests/test_ops_budget.py` `GuardWait`, 7 new tests (17 in all) with an injected clock and
+  sleeper: a Claude balance missing at the first read and readable at +40 s reads the meter at the new time, with every
+  input read again at each look; a Claude balance missing throughout fails closed with the same meters as a run that did
+  not wait, the run's own time, and the first error naming the wait (and a 280 s first read never looks); Sail and
+  Claude both late (the guard at +40 s, the gateway at +60 s) read both at +60 s with no gateway read before the guard's
+  reading; with the guard at +40 s and the gateway never, the run goes on from the +40 s read (Sail at the ceiling,
+  Claude `unreadable`); with neither ever, both are `unreadable` at the run's own time; no gateway, no wait. From the
+  review: the gateway answering at the first read only, with the guard at +40 s (the review's Probe A: the run goes on
+  from the +40 s read and keeps looking for Claude to the end; it fails on the first cut `cf2201ad`, which went on from
+  the first read and wrote that the guard's reading never came), and with the gateway back at +100 s (both read there);
+  the mirror, the Claude balance back at +20 s and the guard's reading stale from +10 s (the +20 s read is taken); and
+  later reads that rank alike with the one held (not taken; the first error says at which looks the Claude balance
+  came). The L4 tests' records carry the two new keys. The review's 13 mutations of the wait are each killed (one
+  adapted to the rewritten adopt line). The budget tests (106) on Python 3.11 and 3.14; their importers, 34 modules and
+  1,078 tests (every test module the grep for `ops.budget` or `from league.ops import budget` names, and the users of
+  `budget_refresh` and `unbound_budget`), on 3.14; the whole suite on 3.14 (12,070 tests); `league.ci --no-tests`; the
+  four ids on both.
 - **Rollback:** the release before. Nothing is migrated, and nothing reads `guard_wait`.
 
 ### FW9, the twins' failures in the House warning, and DC1: the alarms that see the first Done checkpoint coming, on `fix/fw9-alarms` (unreleased; cut from `caa10eba`, the head of `rel/1015f`, PR #559; an owner deploy: `league/ops/` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no bound, screen, false-positive rate, money rule or setting changes)

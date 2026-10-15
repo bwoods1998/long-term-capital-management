@@ -2386,7 +2386,7 @@ class GuardWait(unittest.TestCase):
         self.assertEqual(receipt["guard_wait"], {"first_read_seconds": 0.0, "waited_seconds": 270.0, "polls": 14,
                                                  "read": False, "waited_for": ["sail", "claude"], "unread": ["claude"]})
         self.assertEqual(receipt["errors"][0], "waited 270 s (14 looks) for the Sail guard's next reading and the "
-                                               "gateway's Claude balance: the Sail guard's reading came, the Claude "
+                                               "gateway's Claude balance: the Sail guard's reading came; the Claude "
                                                "balance did not")
         self.assertFalse(any("Sail's balance" in e for e in receipt["errors"]), receipt["errors"])
         # Neither ever reads: the run's own first read, both unreadable, and only the guard's kv looked at.
@@ -2400,6 +2400,116 @@ class GuardWait(unittest.TestCase):
         self.assertEqual(receipt["guard_wait"]["unread"], ["sail", "claude"])
         self.assertEqual(receipt["errors"][0], "waited 270 s (14 looks) for the Sail guard's next reading and the "
                                                "gateway's Claude balance: none came")
+
+    def lost_after_first(self, back=None):
+        """A gateway that answers at the first read (the run's start), then times out until `back` (or for good)."""
+        self.health_reads = []
+
+        def read():
+            self.health_reads.append(self.clock())
+            if self.clock() > NOW and (back is None or self.clock() < back):
+                raise TimeoutError("timed out")
+            return self.health
+        return read
+
+    def test_a_later_read_that_gives_sail_and_loses_claude_is_taken(self):
+        """The review's Probe A: a stale guard, a /v1/health that answers at the first read and times out from then on,
+        the guard's reading at +40. The +40 read gives the meter waited for (Sail) and loses Claude: it ranks above the
+        first read, so the run goes on from it, as L4 alone did (Sail at the ceiling, Claude `unreadable`), and keeps
+        looking for Claude to the end of the wait. Before, the run threw that read away and wrote that the guard's
+        reading never came."""
+        self.reading(600.0, NOW - 7.2 * 3600)
+        on_sleep = (lambda t: t >= NOW + 40 and not self.guard_reads_at and
+                    (self.guard_reads_at.append(t), self.guard_reads(555.0, t)))
+        self.guard_reads_at: list[float] = []
+        receipt = B.run(self.live(health=self.lost_after_first(), on_sleep=on_sleep))
+        doc = self.doc()
+        self.assertEqual(self.clock() - NOW, B.GUARD_WAIT_SECONDS, "it kept looking for Claude")
+        self.assertEqual(self.health_reads, [NOW, *(NOW + t for t in range(40, 261, 20)), NOW + 270],
+                         "no read at +20 (the guard had not read), then one at each look")
+        self.assertEqual(doc["at"], NOW + 40, "the read that gave Sail")
+        meters = doc["inputs"]["meters"]
+        self.assertEqual((meters["sail"]["balance_usd"], meters["claude"]["balance_usd"]), (555.0, None))
+        self.assertEqual((receipt["meters"]["sail"]["limited_by"], receipt["meters"]["claude"]["limited_by"]),
+                         ("ceiling", "unreadable"), "never worse than L4 alone")
+        self.assertGreater(receipt["meters"]["sail"]["research_usd_day"], 0.0)
+        self.assertEqual(receipt["meters"]["claude"]["research_usd_day"], 0.0)
+        self.assertEqual(receipt["guard_wait"], {"first_read_seconds": 0.0, "waited_seconds": 270.0, "polls": 14,
+                                                 "read": False, "waited_for": ["sail"], "unread": ["claude"]})
+        self.assertEqual(receipt["errors"][0], "waited 270 s (14 looks) for the Sail guard's next reading: the Sail "
+                                               "guard's reading came; the Claude balance, read at the first read, did "
+                                               "not come again")
+        self.assertIn("the gateway's /v1/health could not be read (TimeoutError)", receipt["errors"][1:],
+                      "then the errors of the read it goes on from")
+        self.assertFalse(any("Sail's balance" in e for e in receipt["errors"]), receipt["errors"])
+        # The gateway back at +100: the run goes on from the +100 read, which gives both.
+        self.clock.t = NOW
+        self.reading(600.0, NOW - 7.2 * 3600)
+        (self.root / B.BUDGET_FILE).unlink()
+        self.guard_reads_at = []
+        receipt = B.run(self.live(health=self.lost_after_first(back=NOW + 100), on_sleep=on_sleep))
+        self.assertEqual((self.health_reads, self.doc()["at"]), ([NOW, NOW + 40, NOW + 60, NOW + 80, NOW + 100],
+                                                                 NOW + 100))
+        self.assertEqual((receipt["meters"]["sail"]["limited_by"], receipt["meters"]["claude"]["limited_by"]),
+                         ("ceiling", "ceiling"))
+        self.assertEqual(receipt["guard_wait"], {"first_read_seconds": 0.0, "waited_seconds": 100.0, "polls": 5,
+                                                 "read": True, "waited_for": ["sail"], "unread": []})
+        self.assertFalse([e for e in receipt["errors"] if e.startswith("waited")], receipt["errors"])
+
+    def test_a_later_read_that_gives_claude_and_loses_sail_is_taken(self):
+        """The mirror (the review's Probe B): the guard's reading fresh at the start and stale 10 s later, the gateway
+        down at the first read and back at +20. The +20 read gives the meter waited for (Claude) and loses Sail: it
+        ranks above the first read. From then on the run looks only at the guard's kv for Sail, and none comes."""
+        self.reading(600.0, NOW - B.BALANCE_FRESH_SECONDS + 10)
+        receipt = B.run(self.live(health=self.gateway(ok_from=NOW + 20)))
+        doc = self.doc()
+        self.assertEqual(self.health_reads, [NOW, NOW + 20], "no read after +20: the guard has no good reading")
+        self.assertEqual(self.clock() - NOW, B.GUARD_WAIT_SECONDS)
+        self.assertEqual(doc["at"], NOW + 20)
+        self.assertEqual((receipt["meters"]["sail"]["limited_by"], receipt["meters"]["claude"]["limited_by"]),
+                         ("unreadable", "ceiling"))
+        self.assertIsNone(doc["inputs"]["meters"]["sail"]["balance_usd"], "no balance is invented")
+        self.assertEqual(receipt["guard_wait"], {"first_read_seconds": 0.0, "waited_seconds": 270.0, "polls": 14,
+                                                 "read": False, "waited_for": ["claude"], "unread": ["sail"]})
+        self.assertEqual(receipt["errors"][0], "waited 270 s (14 looks) for the gateway's Claude balance: the Claude "
+                                               "balance came; the Sail guard's reading, read at the first read, did "
+                                               "not come again")
+
+    def test_a_later_read_that_ranks_alike_is_not_taken(self):
+        """Both late: the guard reads at +40 (the gateway still down), then from +100 the gateway answers but the
+        guard's newest reading is stamped an hour ahead of the run's clock (refused). Those reads give Claude and lose
+        Sail: they rank alike with the +40 read held (one meter waited for, one in all), so the run keeps the +40 read,
+        and the first error says where the Claude balance came."""
+        self.reading(600.0, NOW - 7.2 * 3600)
+
+        def on_sleep(t):
+            if t >= NOW + 40 and not self.guard_reads_at:
+                self.guard_reads_at.append(t)
+                self.guard_reads(555.0, t)
+            elif t >= NOW + 100 and len(self.guard_reads_at) == 1:
+                self.guard_reads_at.append(t)
+                self.guard_reads(556.0, t + 3600)
+        self.guard_reads_at: list[float] = []
+        receipt = B.run(self.live(health=self.gateway(ok_from=NOW + 100), on_sleep=on_sleep))
+        doc = self.doc()
+        self.assertEqual(self.health_reads, [NOW, *(NOW + t for t in range(40, 261, 20)), NOW + 270])
+        self.assertEqual(doc["at"], NOW + 40, "the earliest of the reads that rank alike")
+        meters = doc["inputs"]["meters"]
+        self.assertEqual((meters["sail"]["balance_usd"], meters["claude"]["balance_usd"]), (555.0, None))
+        self.assertEqual(receipt["guard_wait"], {"first_read_seconds": 0.0, "waited_seconds": 270.0, "polls": 14,
+                                                 "read": False, "waited_for": ["sail", "claude"], "unread": ["claude"]})
+        self.assertEqual(receipt["errors"][0], "waited 270 s (14 looks) for the Sail guard's next reading and the "
+                                               "gateway's Claude balance: the Sail guard's reading came; the Claude "
+                                               "balance came only at looks 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, without "
+                                               "the Sail guard's reading")
+        # The texts of one meter (`_came`), from the reads that gave each (0 the first read, k look k).
+        self.assertEqual(B._came("claude", {"sail": [2], "claude": [0, 1]}, ["claude"]),
+                         "the Claude balance came only at the first read and look 1, without the Sail guard's reading")
+        self.assertEqual(B._came("claude", {"sail": [1, 2], "claude": [0]}, ["claude"]),
+                         "the Claude balance, read at the first read, did not come again")
+        self.assertEqual(B._came("claude", {"sail": [], "claude": []}, ["sail", "claude"]),
+                         "the Claude balance did not")
+        self.assertEqual(B._came("sail", {"sail": [3], "claude": [0]}, ["claude"]), "the Sail guard's reading came")
 
     def test_no_gateway_to_read_is_no_claude_wait(self):
         """With no gateway (no `gateway_health` and none in the config) a later read cannot give Claude: no wait, Claude

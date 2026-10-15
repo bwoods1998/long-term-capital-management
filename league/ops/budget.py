@@ -1628,6 +1628,25 @@ def _unread(inputs: Mapping[str, Any], meters: tuple[str, ...]) -> list[str]:
     return [m for m in meters if _finite(inputs["meters"][m].get("balance_usd")) is None]
 
 
+def _came(meter: str, came_at: Mapping[str, list[int]], missing: list[str]) -> str:
+    """What the wait's first error says of one meter (`_read_waiting`), from every read that gave it (`came_at`: 0 the
+    first read, k look k): it came (the read the run goes on from gives it), it did not (no read gave it), or, when
+    only reads the run did not go on from gave it, which ones, and which meters of the read it goes on from they did
+    not give (`missing`: the meters that read does not give)."""
+    if meter not in missing:
+        return f"{_CAME[meter]} came"
+    at = came_at[meter]
+    if not at:
+        return f"{_CAME[meter]} did not"
+    if at == [0]:
+        return f"{_CAME[meter]}, read at the first read, did not come again"
+    looks = [str(k) for k in at if k]
+    where = ["the first read"] * (at[0] == 0) + [f"look{'s' if len(looks) > 1 else ''} {', '.join(looks)}"]
+    without = [_CAME[o] for o in came_at if o not in missing and not set(at) & set(came_at[o])]
+    tail = f", without {' or '.join(without)}" if without else ""
+    return f"{_CAME[meter]} came only at {' and '.join(where)}{tail}"
+
+
 def _read_waiting(ctx: Any, root: Path, config: Mapping[str, Any]) -> tuple[float, dict[str, Any], list[str],
                                                                                dict[str, Any] | None]:
     """The `budget` job's instant, its inputs (`_job_inputs`), their errors and its wait (None when it did not wait).
@@ -1652,11 +1671,16 @@ def _read_waiting(ctx: Any, root: Path, config: Mapping[str, Any]) -> tuple[floa
     Sail's does. So a read that gives no Claude balance waits too, while the job has a gateway to read (`_health`), in
     the same wait and to the same bounds: at each look it reads EVERY input again at a new instant (while Sail is unread
     as well, only once the guard has a good reading: a read before it could not give Sail). The run goes on from the
-    first read that gives every meter waited for. With none by the end it goes on from the first read that gave more of
-    them than the reads before it (the guard's reading came, Claude's balance did not: Sail reads), else from its own
-    first read, as before. A meter still unread is "unreadable", and the first error names what the run waited for and
-    what came. No balance is ever invented. The record (`guard_wait`) names the meters waited for (`waited_for`) and the
-    ones still unread at the end (`unread`); `read` is True only when every meter waited for read."""
+    first read that gives every meter it waits for. With none by the end it goes on from the read that ranks highest,
+    the earliest of those that rank alike, else from its own first read, as before. A read ranks by how many of the
+    meters waited for (`waited_for`: those the first read did not give) it gives, then by how many of all the meters it
+    waits for; a later read is taken only when it ranks strictly higher than the one held. So a read that gives the
+    guard's reading but loses the Claude balance the first read had is taken over the first read (never worse than L4
+    alone: Sail reads), and the run keeps looking for Claude while the wait lasts. A meter still unread is
+    "unreadable", and the first error names what the run waited for and, for each meter, what came at ANY read (e.g.
+    "the Sail guard's reading came; the Claude balance, read at the first read, did not come again"). No balance is
+    ever invented. The record (`guard_wait`) names the meters waited for (`waited_for`) and the ones the read the run
+    goes on from does not give (`unread`); `read` is True only when that read gives every meter (`unread` empty)."""
     start = now = _now(ctx)
     errors: list[str] = []
     inputs = _job_inputs(ctx, root, now, config, errors)
@@ -1666,6 +1690,13 @@ def _read_waiting(ctx: Any, root: Path, config: Mapping[str, Any]) -> tuple[floa
     if clock is None or not missing:
         return now, inputs, errors, None
     waited_for = list(missing)
+
+    def rank(unread: list[str]) -> tuple[int, int]:
+        """A read's rank: how many of the meters waited for it gives, then how many of all the meters waited on."""
+        return sum(m not in unread for m in waited_for), len(waits) - len(unread)
+
+    held = rank(missing)
+    came_at = {m: [] if m in missing else [0] for m in waits}  # the reads that gave each meter: 0 the first, k look k
     sleep = _get(ctx, "sleep")
     if not callable(sleep):
         import time
@@ -1692,17 +1723,21 @@ def _read_waiting(ctx: Any, root: Path, config: Mapping[str, Any]) -> tuple[floa
             return again, read, fresh, {"first_read_seconds": round(first - start, 1),
                                         "waited_seconds": round(again - first, 1), "polls": polls, "read": True,
                                         "waited_for": waited_for, "unread": []}
-        if len(unread) < len(missing):
-            now, inputs, errors, missing = again, read, fresh, unread  # it reads a meter the reads before did not
-        # Otherwise no more than before (the guard wrote a newer reading after the new instant, or the gateway still
-        # gives no Claude balance): look again.
+        for m in waits:
+            if m not in unread:
+                came_at[m].append(polls)
+        if rank(unread) > held:
+            held = rank(unread)
+            now, inputs, errors, missing = again, read, fresh, unread  # it reads more of what the run waits for
+        # Otherwise no more than the read held (the guard wrote a newer reading after the new instant, the gateway
+        # still gives no Claude balance, or this read lost a meter the one held gives): look again.
     took, waited = round(first - start, 1), round(clock() - first, 1)
     what = " and ".join(_WAITED_FOR[m] for m in waited_for)
     # First in the list, so the House alert (cut at 900 characters) carries it before the errors it explains.
     if polls:
         came = [m for m in waited_for if m not in missing]
-        outcome = "none came" if not came else ", ".join([f"{_CAME[m]} came" for m in came] +
-                                                         [f"{_CAME[m]} did not" for m in missing])
+        told = waited_for + [m for m in missing if m not in waited_for]  # what it waited for, then what it lost
+        outcome = "none came" if not came else "; ".join(_came(m, came_at, missing) for m in told)
         errors.insert(0, f"waited {waited:.0f} s ({polls} look{'s' if polls != 1 else ''}) for {what}: {outcome}")
     else:
         errors.insert(0, f"no look for {what}: the first read took {took:.0f} s of the {GUARD_WAIT_SECONDS} s")
