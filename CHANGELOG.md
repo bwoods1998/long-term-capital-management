@@ -81,6 +81,26 @@ on branches.
   with the sectors budget spent, refused as release U refused them; a mixed rebirth counted in each group; a card
   without a group charged to its row's groups).
 
+### Research dollars by measured yield: the `dlane` report's `lane_yield` section, on `feat/ops-lane-yield` (unreleased; cut from main `aec0c8a5`, release U; an owner deploy: `league/ops/` is protected; no identity moves: no evidence, money, swarm or equity module changes; no setting)
+
+- **What it is:** a read-only section of the operator's `dlane` report (`league/ops/lane_yield.py`, called once at the
+  end of `report`, inside its own try: an error is `{"error": ...}`, never a failed report). For the report's windows
+  (24 h and 7 days) each research group (the options lanes `alpha` and `direction`, the share programs of the BETA and
+  EQUITY lanes, the stock `panel`) gets its booked dollars (`spend` rows, as `costs` reads them, by request key or
+  family; by route), the shared pools named with the rule that divides them (the Gym's boxes by options Gym
+  evaluations, the options architect and strategist by options births, E2's births passes by equity births; the
+  harness never), the funnel's own counts of the same window plus the forward record's registrations and new
+  lineages, and each count per dollar and the dollars per count.
+- **Why:** the goal's items 2, 3 and 8 ("choose by measured yield per dollar", the daily funnel within the research
+  line, "evolve generators by measured yield per dollar; report compounding metrics"): until now a captain had to read
+  the spend table by hand to compare what a research dollar of each lane bought.
+- **What it is not:** it moves no money, edits no setting and gates nothing; no generator, screen or route choice
+  reads it (league/swarm imports no ops module); `elane_yield.choose` still reads Train facts alone (A9 D3).
+- **Verified:** `league/tests/test_lane_yield.py` (14 tests) on both Pythons, the full suites; a read-only dry run on
+  the House's own records (04:15Z Oct 15, the module loaded in memory under `guard.readonly()`): 0.42 s for both
+  windows.
+- **Rollback:** the release before; nothing reads the section.
+
 ### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, a post-close checkpoint, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
 
 - **What it carries:** release T (`rel/e4-fwd1` `6b0c41bb`, PR #546: E4 step one with A32, FWD1-R, R-SEC), merged with

@@ -3361,6 +3361,13 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
         except Exception:  # noqa: BLE001 - the report goes on without it
             out.setdefault("forward_record", None)
         panel_forward(out, root)    # RELEASE E4 (package J): the forward record's lines beside a live panel program
+        # RESEARCH DOLLARS BY MEASURED YIELD (Oct 15, 2026; league/ops/lane_yield.py): each research group's booked
+        # dollars against what they bought, over the funnel's own windows; operator-only, never the report's failure.
+        try:
+            from . import lane_yield
+            out["lane_yield"] = lane_yield.section(store, lanes.of, out["funnel"], root=root, now=now, windows=WINDOWS)
+        except Exception as exc:  # noqa: BLE001 - the report goes on without it
+            out["lane_yield"] = {"error": type(exc).__name__}
     finally:
         store.close()
     return out
