@@ -14,43 +14,64 @@ C2 is the scaling plan's precondition for any deposit or ceiling release, built 
 the options row alone first. Every part is a tightening and changes no size at today's E.
 
 **Part B, the Probe pool frozen at E_P** (`league/equity/live.py`: `PROBE_PIN_FILE`, `read_probe_pin`,
-`EquityBook._sleeve_equity`; plumbing, outside the options fingerprint and the equity identity):
+`EquityBook._pin_now`, `_sleeve_equity`; plumbing, outside the options fingerprint and the equity identity; the
+review of Oct 15 made the pin's reading survive a restart and a lost file):
 
 - **What it does.** E_P is the sizing E on the day C2 is deployed, in dollars, in a PRIVATE pin file on the House's
   state root, `/workspace/state/scale-pin.json` (a JSON object whose `probe_e_usd` is E_P; the owner's step writes it
-  once C2 is live, from the grant's capital as ratified on C2's money digest, and before any deposit or ceiling release;
-  from C3 on it also carries the plan's sha256 and the rungs, which this part does not read). It is never committed,
-  never in a test and never in a published file. Once it exists, every program's sleeve sizes on min(E, E_P): the Probe
-  sleeve (`probe.sleeve_share` x E), the panel's (`panel.sleeve_share` x E) and a Sized one's (the step is parked), at
-  the send (`_size`), at a share program's decide (`_inputs`) and at a panel's budget (`_panel_budget`). A deposit then
-  never grows the Probe pool; an E below E_P sizes on E. What scales with E stays on E: an ETF's or a stock's share of E
-  and the invested cap (the goal's walls); the shared loss budget is dollars and is untouched.
-- **No pin, no freeze.** With no file there every sleeve sizes on E, field for field as before C2, and nothing new is
-  recorded or alerted: part B deploys dark and changes no size until the pin is written.
-- **A pin that cannot be read fails closed, never to E.** Any read error, a link to nothing, more than 64 KiB, not a
-  JSON object, `probe_e_usd` missing, a bool, or not a finite number above zero is UNREADABLE (only a file that is not
-  there is absent), and so is a pin gone after this process read one. Then every sleeve sizes on min(E, the last E_P
-  this process read), and with none read the send sizes NOTHING (the entry waits, as for any figure it cannot read, and
-  is missed at its cut-off). The last good E_P is held in memory only, so after a restart an unreadable pin sizes
-  nothing until it is fixed, and a pin removed on purpose is followed (E) from the House's next start. The decide's own
-  view (ctx.budget and its caps) reads E in that last case, so no program is handed a budget of nothing; what it plans
-  opens nothing; and every open is refused House-wide (`_open_block`), so the seat rule's open note leaves those
-  sessions out of every seat's idle clock. Each change of state is recorded (`equity.probe_pin`, a private ledger kind
-  registered in league/ledger.py) and an unreadable pin is an error alert once a state; neither carries a figure.
-  `health.json` shows it at the equity book's `probe_pin` (`state` absent, read or unreadable, and `why`).
+  once C2 is live, from the grant's capital ratified around C2's money digest, and before any deposit or ceiling
+  release; from C3 on it also carries the plan's sha256 and the rungs, which this part does not read). It is never
+  committed, never in a test and never in a published file. Once it is read, every program's sleeve sizes on min(E,
+  E_P): the Probe sleeve (`probe.sleeve_share` x E), the panel's (`panel.sleeve_share` x E) and a Sized one's (the step
+  is parked), at the send (`_size`), at a share program's decide (`_inputs`) and at a panel's budget (`_panel_budget`).
+  A deposit then never grows the Probe pool; an E below E_P sizes on E. What scales with E stays on E: an ETF's or a
+  stock's share of E and the invested cap (the goal's walls); the shared loss budget is dollars and is untouched. The
+  book reads the pin every minute (`tick`'s first step) and at each sizing.
+- **THE FILE'S NAME IS NOT THE PLAN'S.** The scaling plan (section 9) gives the pin another name, one that carries the
+  plan's target figure, which this public repository does not carry; so the House reads `scale-pin.json`
+  (`PROBE_PIN_FILE`), a deviation from the plan, said here. The plan's script reads E_P from the private ledger, not
+  from the pin, so nothing else reads the name; C3 and the captain's pin step use `scale-pin.json`.
+- **No pin, and none ever read on this box, no freeze.** With no file there and no marker (below) every sleeve sizes on
+  E, field for field as before C2, and nothing is recorded, alerted or written: part B deploys dark and changes no size
+  until the pin is written.
+- **What is kept.** A pin read is kept in the House's private live.sqlite (it holds the lots' and the cash's figures
+  already; it is never a published file): E_P under the kv `eq_probe_pin_good`, and a marker with no figure under
+  `eq_probe_pin` (the pin's sha256, when it was first read, and since when it has been unreadable, if it is). Health,
+  the records and the alerts carry neither the figure nor the sha (a pin's bytes are guessable).
+- **A pin that cannot be read fails closed, never to E.** Unreadable: not a regular file (a link, even to a good pin, a
+  link to nothing, a directory, a FIFO, a device: never followed and never waited on), any read error, more than 64 KiB,
+  not a JSON object, `probe_e_usd` missing, a bool, or not a finite number above zero; and a pin GONE once one was read
+  on this box (the marker says so: a lost pin never turns the freeze off). Then every sleeve sizes on min(E, the last
+  E_P read on this box), across restarts. Only when no E_P was ever read on this box does the send size NOTHING (the
+  entry waits, as for any figure it cannot read, and is missed at its cut-off), and then every open is refused
+  House-wide (`_open_block`), so the seat rule's open note leaves those sessions out of every seat's idle clock; the
+  decide's own view (ctx.budget and its caps) reads E in that case, so no program is handed a budget of nothing, and
+  what it plans opens nothing. A refused open still costs the consistency clause (A14 reads intents whether they
+  filled), so that case is the one to fix first.
+- **How it is told.** ONE error alert a process, written as a standing condition: an `ops.alert` row whose `began_at` is
+  the first minute this box found the pin unreadable (kept in the marker across restarts), written through the book's
+  record hook because the alert hook (league/live/step.py, inside the options fingerprint) carries no payload. The watch
+  after a promotion counts one that began under the release before as inherited (league/watchdog.py `inherited_before`),
+  so a bad pin does not roll every release back; one that began under the new release is its failure. Health shows
+  `probe_pin` (`state` absent, read or unreadable, `why`, `since`, `held`), and the pre-open check FAILS on an
+  unreadable pin (league/ops/preopen.py `check_equity`), so the stall mail says it before the open. Each change of state
+  is a record (`equity.probe_pin`, a private ledger kind registered in league/ledger.py); its repair is a warning. No
+  figure is in any of them.
 - **What it does not freeze.** The options Probe structure (`options_money.probe.max_loss_share` x E) is read in
   `league/live/money.py`, inside the options execution fingerprint, so part B does not touch it: the plan holds it at
   today's dollars by each step's row, deployed before each deposit, which part A's tight end 0.005 allows.
 - **Identities.** None moves: money `4cd610a5` and constitution `18636b3f` are part A's, fingerprint `b60410ad`, equity
   `78022ca6`. The grant holds as part A left it.
 - **Deploy**: an owner deploy after part A (or with it), never 12:55-20:05Z on a trading day. Verify: the ids above;
-  `health.json` equity `probe_pin.state` "absent" (no pin yet) and no `equity.probe_pin` record; the next session's
-  share sizes as the session before's at the same E.
-- **Proof**: `league/tests/test_equity_probe_pin.py` (no pin is E field for field; a pin below E freezes every sleeve,
-  the walls on E; a pin above E sizes on E; the panel and a Sized sleeve follow; unreadable with none read sizes
-  nothing; unreadable after a read holds the smaller of E and the last E_P; a pin gone counts as unreadable until the
-  next start; the book writes no figure).
-- **Rollback**: remove the pin and restart the House (sizes on E), or deploy the release before part B. No digest moves.
+  `health.json` equity `probe_pin.state` "absent" (no pin yet) and no `equity.probe_pin` record; the pre-open check's
+  equity line tells "no Probe pin, and none was ever read on this box".
+- **Proof**: `league/tests/test_equity_probe_pin.py` (no pin is E field for field and writes nothing; a pin below E
+  freezes every sleeve, the walls on E; a pin above E sizes on E; the panel and a Sized sleeve follow; a regular file
+  only, a FIFO never hangs; unreadable with none ever read sizes nothing and refuses House-wide; unreadable at a restart
+  sizes on the kept E_P; a lost pin after a read stays frozen; the standing alert is inherited by the watch; the
+  pre-open check fails on it; the figure is kept in one private key and said nowhere).
+- **Rollback**: deploy the release before part B. To end the freeze without one, replace the pin (never remove it: a
+  removed pin is read as unreadable once one was read on this box). No digest moves.
 
 **Part A, the options row:**
 

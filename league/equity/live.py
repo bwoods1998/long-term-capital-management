@@ -349,46 +349,62 @@ OPEN_NOTE_KEY = "eq_open_note"
 #: clear is dropped the day after: only a refusal is ever read.
 OPEN_NOTE_KEEP_DAYS = 400
 #: THE PROBE POOL FROZEN AT E_P (C2 (A45) of the scaling plan, its Probe row; owner: book). E_P is the sizing E on the
-#: day C2 is deployed, in dollars. It lives in a PRIVATE pin file on the House's state root (`PROBE_PIN_FILE`: a JSON
-#: object whose `PROBE_PIN_FIELD` is E_P, a number or a decimal string; the owner's step writes it once C2 is live,
-#: from the grant's capital as ratified on C2's money digest, and from C3 on it also carries the plan's sha256 and the
-#: programs' rungs, which this book does not read), never in this repository, a test or a published file. `EquityBook._sleeve_equity` is the one reader, at the three places the book reads E for a sleeve
-#: (the send's sizing `_size`, a share program's decide `_inputs`, a panel's `_panel_budget`):
-#: - NO PIN (no file there, or a book with no state root): every sleeve sizes on E, exactly as before C2. C2 deploys
-#:   dark: it changes no size until the pin is written.
+#: day C2 is deployed, in dollars. It lives in a PRIVATE pin file on the House's state root (`PROBE_PIN_FILE`, named so
+#: on purpose: the plan's own name for it carries the plan's target figure, which this public repository does not; a
+#: JSON object whose `PROBE_PIN_FIELD` is E_P, a number or a decimal string; the owner's step writes it once C2 is
+#: live, from the grant's capital ratified around C2's money digest, and from C3 on it also carries the plan's sha256
+#: and the programs' rungs, which this book does not read), never in this repository, a test or a published file.
+#: `EquityBook._pin_now` is the one reader (every minute, `tick`'s first step, and at each sizing), and
+#: `_sleeve_equity` applies it at the three places the book reads E for a sleeve (the send's sizing `_size`, a share
+#: program's decide `_inputs`, a panel's `_panel_budget`):
+#: - NO PIN, AND NONE EVER READ ON THIS BOX (no file there and no `PROBE_PIN_MARK_KEY`; or a book with no state
+#:   root): every sleeve sizes on E, exactly as before C2, and nothing is recorded. C2 deploys dark.
 #: - A PIN READ: every program's sleeve (the Probe sleeve, the panel's `panel.sleeve_share`, a Sized one's) sizes on
 #:   min(E, E_P), so a deposit never grows the Probe pool, and an E below E_P sizes on E. What scales with E stays on
 #:   E: an instrument's share of E and the invested cap (`size_entry`'s `E`), the goal's walls; the shared loss budget
-#:   is in dollars and is not touched.
-#: - A PIN THAT CANNOT BE READ (any read error, a link to nothing, more than `PROBE_PIN_MAX_BYTES`, not a JSON object,
-#:   E_P missing, a bool, not a finite number above zero), or a pin gone after this process read one: FAIL CLOSED to
-#:   min(E, the last E_P this process read); with none read, the send sizes NOTHING (it waits, as for any figure it
-#:   cannot read, and is missed at its cut-off). Never E: an unreadable pin never sizes a sleeve larger than the pin
-#:   could. The last good E_P is kept in memory only (no dollar figure is written by this book), so after a restart
-#:   an unreadable pin sizes nothing until it is fixed, and a pin removed on purpose is followed (E) from the House's
-#:   next start. The decide's own view (ctx.budget, its caps) reads E in that last case, so no program is handed a
-#:   budget of nothing (a ratio over it would fail its decide); what it plans opens nothing. That case is also a
-#:   House-wide refusal of every open (`_open_block`: `PIN_REFUSAL`), so the seat rule's open note leaves its sessions
-#:   out of the idle clock. Each change of state is recorded (`equity.probe_pin`) and an unreadable pin is an error
-#:   alert, once a state; no figure is in either.
+#:   is in dollars and is not touched. The read is KEPT in the House's private live.sqlite (which holds the lots' and
+#:   the cash's figures already, and is never a published file): E_P under `PROBE_PIN_GOOD_KEY`, and a marker with no
+#:   figure under `PROBE_PIN_MARK_KEY` (the pin's sha256, when that pin was first read, and since when it has been
+#:   unreadable, if it is).
+#: - A PIN THAT CANNOT BE READ: not a regular file (a link, a link to nothing, a directory, a FIFO, a device: it is
+#:   never followed or waited on), any read error, more than `PROBE_PIN_MAX_BYTES`, not a JSON object, E_P missing, a
+#:   bool, not a finite number above zero; AND a pin gone once one was read on this box (the marker says so: a lost
+#:   pin never turns the freeze off). FAIL CLOSED to min(E, the last E_P ever read on this box), across restarts; only
+#:   when none was ever read here does the send size NOTHING (it waits, as for any figure it cannot read, and is missed
+#:   at its cut-off), and every open is then refused House-wide (`_open_block`: `PIN_REFUSAL`, so the seat rule's open
+#:   note leaves the session out of the idle clock). Never E: an unreadable pin never sizes a sleeve larger than the
+#:   last pin did. The decide's own view (ctx.budget, its caps) reads E in that last case, so no program is handed a
+#:   budget of nothing (a ratio over it would fail its decide); what it plans opens nothing. It is told as ONE error
+#:   alert a process, written as a standing condition (`began_at`: the first minute this box found it unreadable, kept
+#:   in the marker), so the watch after a promotion counts it as inherited, never as the new release's failure, unless
+#:   it began under that release (league/watchdog.py, `inherited_before`); health shows it (`probe_pin`), and the
+#:   pre-open check FAILS on it (league/ops/preopen.py `check_equity`), so the stall mail says it before the open.
+#:   Every change of state is recorded (`equity.probe_pin`, private). No figure is in an alert, a record or health.
+#: - TO END THE FREEZE: replace the pin (never remove it), or deploy a release without this reader.
 PROBE_PIN_FILE = "scale-pin.json"
 PROBE_PIN_FIELD = "probe_e_usd"
 PROBE_PIN_MAX_BYTES = 65536
-#: Why every real equity open is refused while the pin cannot be read and no E_P was read before it: `_open_block`'s
-#: answer (a House-wide refusal, so THE OPEN NOTE leaves the session out of every seat's idle clock) and the send's.
-PIN_REFUSAL = "the Probe pin cannot be read and no E_P was read before it: no entry is sized (fail closed)"
+#: live.sqlite's kv keys (private): the last good E_P ever read on this box ({"e_p", "at"}: a figure), and the marker
+#: ({"sha256", "read_at", "unreadable_since", "why"}: no figure).
+PROBE_PIN_GOOD_KEY = "eq_probe_pin_good"
+PROBE_PIN_MARK_KEY = "eq_probe_pin"
+#: Why every real equity open is refused while the pin cannot be read and no E_P was ever read on this box:
+#: `_open_block`'s answer (a House-wide refusal, so THE OPEN NOTE leaves the session out of every seat's idle clock)
+#: and the send's.
+PIN_REFUSAL = "the Probe pin cannot be read and no E_P was ever read on this box: no entry is sized (fail closed)"
 _SLUG = re.compile(r"[^a-z0-9-]+")
 _DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 @dataclass(frozen=True)
 class ProbePin:
-    """`read_probe_pin`'s answer: `state` "absent" | "read" | "unreadable", `e_p` (dollars) when read, and `why` (never a
-    figure)."""
+    """`read_probe_pin`'s answer: `state` "absent" | "read" | "unreadable", `e_p` (dollars) and `sha256` (of its bytes)
+    when read, and `why` (never a figure)."""
 
     state: str
     e_p: Decimal | None = None
     why: str = ""
+    sha256: str = ""
 
 
 def _no_constant(name: str) -> Any:
@@ -396,18 +412,35 @@ def _no_constant(name: str) -> Any:
 
 
 def read_probe_pin(root: str | Path | None) -> ProbePin:
-    """THE PROBE PIN, `PROBE_PIN_FILE` under `root` (the constants' comment): absent, read (E_P), or unreadable. Only a
-    file that is not there is absent; every other failure to read it, and every content that is not a finite E_P above
-    zero, is unreadable."""
+    """THE PROBE PIN, `PROBE_PIN_FILE` under `root` (the constants' comment), as the file says it: absent, read (E_P),
+    or unreadable. Only a name that is not there is absent. It reads a REGULAR FILE only: the name is looked at without
+    following it (`lstat`), opened with no follow and no wait (`O_NOFOLLOW`, `O_NONBLOCK`) and looked at again once
+    open, so a link, a directory, a FIFO or a device is unreadable and never hangs the House's minute. Every failure to
+    read it, and every content that is not a finite E_P above zero, is unreadable. (Whether a pin was read on this box
+    before is the book's, `EquityBook._pin_now`.)"""
+    import stat
+
     if root is None:
         return ProbePin("absent", why="the book has no state root")
     path = Path(root) / PROBE_PIN_FILE
     try:
-        with path.open("rb") as fh:
-            raw = fh.read(PROBE_PIN_MAX_BYTES + 1)
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return ProbePin("unreadable", why="the pin is not a regular file (a link, a directory, a FIFO or a device)")
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return ProbePin("unreadable", why="the pin is not a regular file")
+            chunks, size = [], 0
+            while size <= PROBE_PIN_MAX_BYTES:
+                chunk = os.read(fd, PROBE_PIN_MAX_BYTES + 1 - size)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+            raw = b"".join(chunks)
+        finally:
+            os.close(fd)
     except FileNotFoundError:
-        if os.path.lexists(path):
-            return ProbePin("unreadable", why="the pin is a link to nothing")
         return ProbePin("absent", why="no pin")
     except OSError as exc:
         return ProbePin("unreadable", why=f"the pin could not be read ({type(exc).__name__})")
@@ -428,7 +461,7 @@ def read_probe_pin(root: str | Path | None) -> ProbePin:
         return ProbePin("unreadable", why=f"the pin's {PROBE_PIN_FIELD} is not a number")
     if not e_p.is_finite() or e_p <= 0:
         return ProbePin("unreadable", why=f"the pin's {PROBE_PIN_FIELD} is not a finite number above zero")
-    return ProbePin("read", e_p)
+    return ProbePin("read", e_p, sha256=hashlib.sha256(raw).hexdigest())
 
 
 def D(value: Any, default: Decimal | None = None) -> Decimal:
@@ -919,9 +952,10 @@ class EquityBook:
         self._minute_open: Sequence[Mapping[str, Any]] | None = None
         recon = self.state.get("eq_recon", {}) or {}
         self._streak = {"bad": int(recon.get("bad") or 0), "good": int(recon.get("good") or 0)}
-        #: THE PROBE POOL FROZEN AT E_P (`PROBE_PIN_FILE`): the last E_P this process read (memory only, never written)
-        #: and the pin's state last recorded (`_pin_said`).
-        self._pin_good: Decimal | None = None
+        #: THE PROBE POOL FROZEN AT E_P (`PROBE_PIN_FILE`): the last good E_P ever read on this box and the marker, as
+        #: live.sqlite keeps them (`PROBE_PIN_GOOD_KEY`, `PROBE_PIN_MARK_KEY`), and the pin's state last said this
+        #: process (`_pin_said`).
+        self._pin_good, self._pin_mark = self._pin_kept()
         self._pin_state: str | None = None
 
     # ------------------------------------------------------------------ plumbing
@@ -1146,13 +1180,14 @@ class EquityBook:
                 "recon": {k: v for k, v in (self.state.get("eq_recon", {}) or {}).items() if k != "problems"},
                 "freeze": self.state.get("eq_freeze"), "seats": self.seats(), "probe_pin": self.probe_pin()}
 
-    def probe_pin(self) -> dict[str, str]:
-        """THE PROBE PIN's state as `_sleeve_equity` reads it now, for health (never a figure): {"state": "absent" |
-        "read" | "unreadable", "why"}. A pin gone after this process read one is "unreadable"."""
-        pin = read_probe_pin(self.root)
-        if pin.state == "absent" and self._pin_good is not None:
-            return {"state": "unreadable", "why": "the pin is gone after this process read one"}
-        return {"state": pin.state, "why": pin.why}
+    def probe_pin(self) -> dict[str, Any]:
+        """THE PROBE PIN's state as `_pin_now` reads it, for health and the pre-open check (never a figure, never a
+        sha): {"state": "absent" | "read" | "unreadable", "why", "since" (when this box first found it unreadable),
+        "held" (an E_P was read on this box: an unreadable pin sizes on it)}. Read only: nothing is written."""
+        state, _, why = self._pin_judge(read_probe_pin(self.root))
+        mark = self._pin_mark or {}
+        return {"state": state, "why": why, "since": mark.get("unreadable_since") if state == "unreadable" else None,
+                "held": self._pin_good is not None}
 
     def seats(self) -> dict[str, Any] | None:
         """THE SEAT PLAN as the last band sync wrote it (`SEAT_KEY`; THE SEAT RULE, the module docstring): {rule, seats,
@@ -1245,6 +1280,9 @@ class EquityBook:
             today = S.ny_day(now)
             m = S.moments(today, self._offsets())
             steps: list[tuple[str, Callable[[], Any]]] = [
+                # THE PROBE PIN (C2): read every minute, so a pin that turns unreadable is found and said within the
+                # minute, its `began_at` the minute it began, whatever the windows do.
+                ("pin", lambda: self._pin_now()),
                 ("owner", lambda: self._owner(now, out)),
                 ("orders", lambda: self._sync_orders(now, out)),
                 ("activities", lambda: self._activities(now, m, out)),
@@ -2291,26 +2329,88 @@ class EquityBook:
 
     def _sleeve_equity(self, E: Decimal, *, view: bool = False) -> Decimal | None:
         """THE PROBE POOL FROZEN AT E_P (`PROBE_PIN_FILE`'s comment): the E every program's sleeve sizes on. E with no
-        pin; min(E, E_P) with one read; with one that cannot be read, or gone after one was read, min(E, the last E_P
-        this process read), and None when none was read (the send sizes nothing), or E for the decide's view (`view`),
-        which opens nothing. Never above E, and never above an E_P once one was read."""
-        pin = read_probe_pin(self.root)
-        if pin.state == "read" and pin.e_p is not None:
-            self._pin_good = pin.e_p
-            self._pin_said("read", "")
-            return min(E, pin.e_p)
-        if pin.state == "absent" and self._pin_good is None:
-            self._pin_said("absent", pin.why)
+        pin and none ever read on this box; min(E, E_P) with one read; with one that cannot be read, or one gone once
+        one was read here, min(E, the last E_P ever read on this box), and None when none ever was (the send sizes
+        nothing), or E for the decide's view (`view`), which opens nothing. Never above E, and never above the last
+        E_P once one was read."""
+        state, e_p, _ = self._pin_now()
+        if state == "absent":
             return E
-        why = pin.why if pin.state == "unreadable" else "the pin is gone after this process read one"
-        self._pin_said("unreadable", why)
-        if self._pin_good is not None:
-            return min(E, self._pin_good)
+        if e_p is not None:
+            return min(E, e_p)
         return E if view else None
 
+    def _pin_judge(self, pin: ProbePin) -> tuple[str, Decimal | None, str]:
+        """(state, the E_P a sleeve sizes on or None, why) of a reading, with what this box kept (pure: nothing is
+        written). A pin absent once one was read on this box (the marker, or a kept E_P) is unreadable."""
+        if pin.state == "read" and pin.e_p is not None:
+            return "read", pin.e_p, ""
+        ever = self._pin_good is not None or bool((self._pin_mark or {}).get("sha256"))
+        if pin.state == "absent" and not ever:
+            return "absent", None, pin.why
+        why = pin.why if pin.state == "unreadable" else "the pin is gone, and one was read on this box (the marker)"
+        return "unreadable", self._pin_good, why
+
+    def _pin_now(self) -> tuple[str, Decimal | None, str]:
+        """Read the pin, keep what changed in live.sqlite (`_pin_keep`), and say a change of state (`_pin_said`):
+        `_pin_judge`'s answer."""
+        pin = read_probe_pin(self.root)
+        state, e_p, why = self._pin_judge(pin)
+        try:
+            self._pin_keep(state, pin, why)
+        except Exception as exc:  # noqa: BLE001 - a kv write that failed keeps the memory; the next minute tries again
+            why = f"{why} (live.sqlite could not keep it: {type(exc).__name__})".strip()
+        self._pin_said(state, why)
+        return state, e_p, why
+
+    def _pin_kept(self) -> tuple[Decimal | None, dict[str, Any] | None]:
+        """What live.sqlite keeps of the pin: (the last good E_P, the marker). A kept E_P that cannot be read is none
+        (so, with the marker, an unreadable pin then sizes nothing: fail closed)."""
+        try:
+            good = self.state.get(PROBE_PIN_GOOD_KEY)
+            mark = self.state.get(PROBE_PIN_MARK_KEY)
+        except Exception:  # noqa: BLE001
+            return None, {"sha256": "unread", "unreadable_since": None, "why": "live.sqlite could not be read"}
+        e_p = None
+        if isinstance(good, Mapping) and isinstance(good.get("e_p"), str):
+            try:
+                value = Decimal(good["e_p"])
+                e_p = value if value.is_finite() and value > 0 else None
+            except ArithmeticError:
+                e_p = None
+        return e_p, (dict(mark) if isinstance(mark, Mapping) else None)
+
+    def _pin_keep(self, state: str, pin: ProbePin, why: str) -> None:
+        """Keep the reading in live.sqlite, only what changed: a pin read, its E_P (`PROBE_PIN_GOOD_KEY`) and the
+        marker (its sha256, when it was first read, no longer unreadable); an unreadable pin, the marker's
+        `unreadable_since` (its first minute, kept across restarts: the alert's `began_at`). No pin and none ever read
+        writes nothing."""
+        now = dt.datetime.fromtimestamp(self.clock(), dt.timezone.utc).isoformat(timespec="seconds")
+        mark = dict(self._pin_mark or {})
+        if state == "read" and pin.e_p is not None:
+            if self._pin_good != pin.e_p:
+                self.state.put(PROBE_PIN_GOOD_KEY, {"e_p": str(pin.e_p), "at": now})
+                self._pin_good = pin.e_p
+            if mark.get("sha256") != pin.sha256 or mark.get("unreadable_since"):
+                mark = {"sha256": pin.sha256, "read_at": now if mark.get("sha256") != pin.sha256 else mark.get("read_at"),
+                        "unreadable_since": None, "why": ""}
+                self.state.put(PROBE_PIN_MARK_KEY, mark)
+                self._pin_mark = mark
+        elif state == "unreadable" and not mark.get("unreadable_since"):
+            mark.update(unreadable_since=now, why=why[:200])
+            mark.setdefault("sha256", None)
+            self.state.put(PROBE_PIN_MARK_KEY, mark)
+            self._pin_mark = mark
+        elif state == "absent" and mark.get("unreadable_since"):
+            # an unreadable pin that was never read here, now gone: today's state again
+            self.state.put(PROBE_PIN_MARK_KEY, {**mark, "unreadable_since": None, "why": ""})
+            self._pin_mark = {**mark, "unreadable_since": None, "why": ""}
+
     def _pin_said(self, state: str, why: str) -> None:
-        """Record a change of the pin's state (`equity.probe_pin`, never a figure); an unreadable pin is an error alert
-        and its repair a warning, once a change. No pin from the start is today's state: nothing is said of it."""
+        """Say a change of the pin's state, once a process: a record (`equity.probe_pin`, private, never a figure); an
+        unreadable pin ONE error alert a process written as a standing condition (`_standing_alert`, `began_at` the
+        marker's `unreadable_since`), its repair a warning. No pin and none ever read is today's state: nothing is
+        said of it."""
         if state == self._pin_state:
             return
         before, self._pin_state = self._pin_state, state
@@ -2318,13 +2418,30 @@ class EquityBook:
             return
         self.record("equity.probe_pin", {"state": state, "was": before, "why": why[:200]})
         if state == "unreadable":
-            self.alert("error", f"equity: the Probe pin ({PROBE_PIN_FILE}) cannot be read ({why[:160]}): every sleeve "
-                                "sizes on the smaller of E and the last E_P this process read, and no entry is sized "
-                                "when none was read (fail closed)")
+            held = self._pin_good is not None
+            self._standing_alert("error", f"equity: the Probe pin ({PROBE_PIN_FILE}) cannot be read ({why[:160]}): "
+                                 + ("every sleeve sizes on the smaller of E and the last E_P read on this box"
+                                    if held else "no E_P was ever read on this box, so no entry is sized (fail closed)")
+                                 + "; replace the pin", began_at=(self._pin_mark or {}).get("unreadable_since"))
         elif before == "unreadable":
             self.alert("warning", f"equity: the Probe pin ({PROBE_PIN_FILE}) is {state} again: "
                                   + ("every sleeve sizes on the smaller of E and E_P" if state == "read" else
                                      "every sleeve sizes on E"))
+
+    def _standing_alert(self, level: str, text: str, *, began_at: str | None) -> None:
+        """An alert of a CONDITION THAT LASTS, as league/book.py writes its standing freeze alerts: an `ops.alert`
+        row whose `began_at` is when the condition began, so the watch after a promotion counts one that began under
+        the release before as inherited (league/watchdog.py, `inherited_before`), never as the new release's failure.
+        The book's `alert` hook (league/live/step.py `OptionsLive.alert`, inside the options fingerprint) carries no
+        payload, so the row goes through the record hook (the House's ledger, the same `ops.alert` kind the House's
+        own `alert` appends); with no record hook it is the `alert` it always was."""
+        if self._record is None:
+            self.alert(level, text)
+            return
+        payload: dict[str, Any] = {"level": level, "text": text[:1000]}
+        if began_at:
+            payload["began_at"] = began_at
+        self.record("ops.alert", payload)
 
     def _options_open_loss(self, day: str) -> Decimal:
         """The options book's open maximum loss (held and working opens): part of the invested cap (A1)."""

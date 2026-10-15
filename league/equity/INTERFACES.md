@@ -405,12 +405,14 @@ activity types the venue refused), `eq_preopen_activities`. The book reads the h
   - `tick(now, *, account_row, positions, open_orders, real_block, killed) -> dict` (never raises);
   - `frozen` (str), `expected_shares() -> {sym: Decimal}`, `busy() -> set[str]`, `health() -> dict`,
     `flatten(why) -> int` (the rollback's first step: every open lot queued to exit through the normal path);
-    `reconcile(positions, now=None) -> [problems]` (one reading; book, additive); `probe_pin() -> {state, why}`
-    (`health()["probe_pin"]`, never a figure).
+    `reconcile(positions, now=None) -> [problems]` (one reading; book, additive); `probe_pin() -> {state, why,
+    since, held}` (`health()["probe_pin"]`, read by the pre-open check; never a figure).
 - THE PROBE POOL FROZEN AT E_P (C2 (A45) of the scaling plan; book, additive): `read_probe_pin(root) -> ProbePin`
-  (`state` "absent" | "read" | "unreadable", `e_p`, `why`) reads the private pin `PROBE_PIN_FILE` under `root`; the
-  book sizes every sleeve on min(E, E_P) once it is read, on E while it is absent, and fails closed when it cannot be
-  read (league/equity/live.py, the constants' comment). `size_entry`'s `E` stays the sizing equity.
+  (`state` "absent" | "read" | "unreadable", `e_p`, `why`, `sha256`) reads the private pin `PROBE_PIN_FILE` under
+  `root`, a regular file only; the book keeps a read in live.sqlite (`PROBE_PIN_GOOD_KEY`, `PROBE_PIN_MARK_KEY`),
+  sizes every sleeve on min(E, E_P) once one is read, on E while none was ever read on the box, and on the last E_P
+  read when the pin cannot be read or is gone (league/equity/live.py, the constants' comment). `size_entry`'s `E`
+  stays the sizing equity.
 - Calls it makes: `league.equity.sizing.size_entry` (money), `league.live.money.available_cash` (money) with
   `working_buys_worst` = its own and `reserved` = the options book's `reserved()` (its working opens' maximum loss with
   fees and buffer: at least their worst cost, so no option buy is counted twice), `table.equity` (money's `EquityTable`),

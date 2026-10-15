@@ -34,7 +34,8 @@ and went stale (GOAL Appendix C 7); here each check asks what the running House 
              LANE (release E4): while the equity book holds a panel program that is not retired, or a lot of one, the
              lane's own readiness rule holds (`league.swarm.elane_xs.live_ready`: the store fresh by this job's clock,
              the universe deploy in force, the tradable share, the universe's age, the nightly I6, the twin marker;
-             the leg that fails is named). With no panel program nothing of the panel is read
+             the leg that fails is named). With no panel program nothing of the panel is read; and THE PROBE PIN (C2
+             (A45) of the scaling plan): the equity book's `probe_pin` unreadable FAILS (no figure is read or shown)
 
 Read-only (`guard.readonly()`; GET only). Each FAIL is one House warning ("preopen 5 swarm FAIL: ..."); the receipt
 holds every line. The warning is PUBLIC (`ops.alert`) and the runner scrubs only what carries a `$`
@@ -605,6 +606,23 @@ def check_equity(h: Mapping[str, Any]) -> Check:
         c.req(False, "the equity book reports no freeze state while equity_money.enabled is true")
     else:
         c.info("the equity book reports no freeze state (equity_money.enabled false: no equity open goes)")
+    # THE PROBE PIN (C2 (A45) of the scaling plan; league/equity/live.py `probe_pin`, never a figure): unreadable
+    # FAILS, before the open, so the stall mail says it; absent (none ever read on this box) is C2 dark, told.
+    pin = book.get("probe_pin") if isinstance(book, dict) else None
+    if isinstance(pin, Mapping):
+        state = pin.get("state")
+        if state == "read":
+            c.req(True, "the Probe pin is read: every sleeve sizes on the smaller of E and E_P")
+        elif state == "absent":
+            c.info("no Probe pin, and none was ever read on this box: every sleeve sizes on E (C2 dark)")
+        else:
+            c.req(False, f"the Probe pin cannot be read (since {pin.get('since') or 'unknown'}: "
+                         f"{str(pin.get('why') or 'no reason given')[:160]}): every sleeve holds at the smaller of E and "
+                         "the last E_P read on this box" + ("" if pin.get("held") else
+                                                            ", and none was ever read, so no equity entry is sized")
+                         + "; replace the pin")
+    elif isinstance(book, dict):
+        c.info("the equity book reports no Probe pin state (a release before C2)")
     sb = g.get("stock_buys")
     if not isinstance(sb, dict):
         c.req(False, f"the gateway reports no stock route (/v1/health stock_buys): {g.get('health_error') or 'missing'}")

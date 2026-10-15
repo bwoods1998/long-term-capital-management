@@ -32,18 +32,23 @@ updater is on. What is built and not deployed is on branches.
 
 ### C2 (A45) of the scaling plan: the options sizing-up step parked, and the Probe pool frozen at E_P, on `feat/scale-c2` (unreleased; two owner deploys, part A then part B, or both at once, outside 12:55-20:05Z on a trading day; part A MOVES THE MONEY DIGEST ONCE and the grant re-ratifies; part B moves no identity; no fingerprint moves, no evidence reset)
 
-- **Part B, the Probe pool frozen at E_P** (`league/equity/live.py`, plumbing outside both fingerprints). Once the
-  private pin `/workspace/state/scale-pin.json` holds E_P (`probe_e_usd`, the sizing E on C2's deploy day: the owner's
-  step writes it once C2 is live, from the grant's capital as ratified on C2's money digest, before any deposit or
-  ceiling release; never in the repository), every program's sleeve, the Probe's, the panel's and a Sized one's, sizes
-  on min(E, E_P) at the send, at a share program's decide and at a panel's budget; the account's walls (an instrument's
-  share of E, the invested cap) stay on E. NO PIN, NO FREEZE: until it is written the House sizes on E exactly as
-  before, so part B deploys dark. A pin that cannot be read (or is gone after one was read) fails closed to min(E, the
-  last E_P this process read), and sizes nothing with none read, never E; told once a state as an error alert with no
-  figure, recorded as the private ledger kind `equity.probe_pin` (league/ledger.py), and shown at health's equity
-  `probe_pin`. The options Probe structure is read in `league/live/money.py` and is not part B's: each step's row holds
-  it, as the plan says. Proof: `test_equity_probe_pin`. Rollback: remove the pin and restart, or the release before part
-  B.
+- **Part B, the Probe pool frozen at E_P** (`league/equity/live.py`, plumbing outside both fingerprints;
+  `league/ops/preopen.py`; one private ledger kind in `league/ledger.py`). Once the private pin
+  `/workspace/state/scale-pin.json` is read (`probe_e_usd`, the sizing E on C2's deploy day: the owner's step writes it
+  once C2 is live, from the grant's capital ratified around C2's money digest, before any deposit or ceiling release;
+  never in the repository), every program's sleeve, the Probe's, the panel's and a Sized one's, sizes on min(E, E_P) at
+  the send, at a share program's decide and at a panel's budget; the account's walls (an instrument's share of E, the
+  invested cap) stay on E. THE NAME IS NOT THE PLAN'S (a deviation, said): the plan's name for the pin carries its
+  target figure, which this public repository does not carry, so the House reads `scale-pin.json` (the plan's script
+  reads E_P from the private ledger, never the pin). NO PIN, AND NONE EVER READ ON THIS BOX, NO FREEZE: the House sizes
+  on E exactly as before and writes nothing, so part B deploys dark. A pin read is kept in the private live.sqlite (E_P,
+  and a marker with its sha256 and times, no figure), so a pin that cannot be read (not a regular file, never followed
+  or waited on; unreadable content) or one lost once one was read sizes on the last E_P read on this box, across
+  restarts, never on E; only with none ever read does it size nothing and refuse every open House-wide. It is ONE
+  standing error alert a process (`began_at` its first minute, kept), which the watch after a promotion inherits; health
+  shows `probe_pin`; the pre-open check fails on it. No figure in any of them. The options Probe structure is read in
+  `league/live/money.py` and is not part B's: each step's row holds it, as the plan says. Proof:
+  `test_equity_probe_pin`. Rollback: the release before part B (replace a pin, never remove it).
 
 Part A, the options row:
 
