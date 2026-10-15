@@ -30,6 +30,51 @@ The running House release is `20261015T075939Z-89d93d40bfda` (main `0b978378`, P
 Probe family and the Probe sleeve 0.33 x E, 08:00Z Oct 15), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's
 updater is on. What is built and not deployed is on branches.
 
+### L5: an index-only case-N lineage keeps its S2 try until its first forward day closes, on `fix/fwd1-index-untried` (unreleased; cut from `e136c251`, PR #560's head; the captain's A48; an owner deploy: `league/ops/` is protected and `league/swarm/elane_forward.py` is FORBIDDEN; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting; no pin, receipt, digest or bar moves; `forward_screen.register` and the rule module `fwd1_rule.py` are unchanged)
+
+- **What it is** (the captain's L5, option B): L5 (A48): an index-only case-N lineage keeps its S2 try until the
+  close of its FWD1_START session; the judge then voids it (A33 (4)). A loosening of A39's stated cost "while on, a
+  lineage FWD1 lists takes no sealed S2 try". It acts only with `elane.fwd1.seats` on (A39, from Oct 21); with the
+  seats off nothing changes.
+- **Why:** with the seats on, `try_refused` refuses the S2 try of every lineage the permit file lists pending. An
+  index family whose v1 fails Train is registered (hourly at :25) and sighted by a forward-screen run as case N, so it
+  is listed pending. Its v2 usually passes Train hours later (most index Train passes come on v2 or later), and could
+  then no longer take its S2 try: it was left to FWD1-R's WEAK screen. That is a timing race, not evidence.
+- **The permit file** (`league/ops/forward_screen.py` `write_permits`): every row now carries its lineage's
+  FWD1_START (`"start"`, the `fwd1_lineages` row's ISO date; `status_rows` already carried it). A date is no figure:
+  the file is still ids and words only. `PERMITS_VERSION` stays 1 (an added key).
+- **The swarm** (`league/swarm/elane_forward.py` `untried`, asked by `try_refused`): a lineage listed "pending" whose
+  row is case "N" and type "ETF" is not refused while the store's clock is before the close of its start session
+  (`league/equity/schedule.py` `moments(start).close_at`). Before that close no forward day of it can be counted (the
+  forward night runs after the close), so it has seen nothing forward. The family must not be forward-only
+  (`elane.forward_only` is asked again inside the exemption, so it cannot outlive R-SEC) and not a panel. Fail
+  closed, refused as before: a row without "start" (a file of the earlier job), a date that is not one in the job's
+  own form, a start that is no session or that the calendar cannot answer, a calendar that raises, a clock that
+  cannot be read, case XS1 or type PANEL, status pass or fail, a time at or after the close. `try_refused` takes an
+  optional `now`; `elane.try_open` passes none (the store's clock).
+- **One look** (no change to the judge): once the family records its pre-check (`elane_try`) or the registry tags
+  it, the judge's next night writes "void" ("a case-N lineage reached a sealed pre-check after FWD1_START: it is
+  judged no further"), before any checkpoint is read. The file then lists it "void", which `JUDGED` does not
+  include, so it keeps its sealed path. A lineage not tried by that close stays pending and refused, as A39 built it.
+- **What does not change:** who FWD1 sights and how (`register`, `repick`), the rule module, the pin, its receipt,
+  every bar, screen and false-positive figure; R-SEC (a sector, bond or gold family is refused by `try_open` before
+  this is asked) and A34 (a panel family likewise); `seat_refused`, `step` and the panel pool.
+- **Verified:** `league/tests/test_elane_forward.py` `TheIndexLineageBeforeItsFirstForwardDay` (exempt before the
+  close; refused at and after it; the store's clock, the wall's without one, a clock that cannot be read; no
+  "start" and seven malformed ones; a Saturday start and a year the calendar does not cover; a calendar that raises
+  or answers None; case XS1 and None, type PANEL and None, status pass and fail; forward-only families and a mocked
+  R-SEC; a panel family; the seats off; an unreadable file). `league/tests/test_forward_screen.py`
+  `TheIndexLineageUntried`: every permit row carries its start; THE WHOLE PATH on one store (a v1 failed Train,
+  sighted pending with start tomorrow; its try open before Fri Oct 16's close and shut at it; the try recorded; the
+  judge's next night writes "void" with no checkpoint; the file lists it void and it keeps its sealed path); a
+  lineage untried by the close stays pending and refused. `league/tests/test_elane_rsec.py`: `try_open` and
+  `next_try` on the real store's clock, and a sector family under the same row still refused. The three files,
+  103 tests, on Python 3.11 and 3.14; the 22 modules that import or exercise the seat path, the judge or the
+  try (`test_ci`, the E3 and E4 suites, the forward record, report, register and rule, the lane's seals and
+  gates), 753 tests, on 3.14. The four identities do not move on either.
+- **Rollback:** the release before. Its job writes no "start" and its swarm reader ignores one, so every listed
+  pending lineage is refused again; nothing is migrated.
+
 ### Release 1015f: release 1015e plus three fixes, on `rel/1015f` (unreleased; one House deploy and one gateway deploy
 from one commit, outside 12:55-20:05Z on a trading day; no identity moves: the options execution fingerprint
 `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are

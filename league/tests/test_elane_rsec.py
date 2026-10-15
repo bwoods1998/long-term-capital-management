@@ -124,6 +124,35 @@ class TheSealedTry(Case):
         self.assertFalse(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_ON), "FWD1's own rule, as built")
         self.assertTrue(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_OFF))
 
+    def test_l5_an_index_lineage_listed_pending_keeps_its_try_until_its_start_closes(self):
+        """L5 (A48): with the seats on, an index-only case-N lineage the file lists pending keeps its S2 try
+        (`try_open`, `next_try`, on the store's clock) until the close of its FWD1_START session, and loses it from
+        that close; a sector family under the very same row stays forward-only (R-SEC is asked first, and again)."""
+        import datetime as dt
+
+        from league.equity import schedule
+
+        close = schedule.moments(dt.date(2026, 10, 16)).close_at
+        self.born("idx", symbols=("SPY", "QQQ"))
+        for fid, symbols in OUTSIDE.items():
+            self.born(fid, symbols=symbols)
+        row = {"status": "pending", "type": "ETF", "case": "N", "start": "2026-10-16"}
+        self.permit({EF.lineage_of(self.store, self.store.family(fid)): {**row, "family": fid}
+                     for fid in ("idx", *OUTSIDE)})
+        self.clock.t = close - 3600.0
+        self.assertTrue(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_ON))
+        self.assertEqual(elane.next_try(self.store, self.store.family("idx"), SEATS_ON), 1)
+        for fid in OUTSIDE:
+            with self.subTest(family=fid):
+                self.assertFalse(elane.try_open(self.store, self.store.family(fid), 1, SEATS_ON))
+        self.clock.t = close
+        self.assertFalse(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_ON))
+        self.assertIsNone(elane.next_try(self.store, self.store.family("idx"), SEATS_ON))
+        self.assertTrue(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_OFF))
+        self.clock.t = close - 3600.0
+        self.permit({EF.lineage_of(self.store, self.store.family("idx")): {"status": "pending"}})
+        self.assertFalse(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_ON), "no start: as built")
+
     def test_the_tournament_round_asks_nothing_and_retires_nothing(self):
         for fid, symbols in OUTSIDE.items():
             self.born(fid, symbols=symbols)

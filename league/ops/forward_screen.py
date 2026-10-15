@@ -74,13 +74,17 @@ THE NIGHT (`night`; after each of the record's two nights, E3's and the panel's,
    sealed pre-check after FWD1_START; an engine change that touched a pending representative's judged days: one engine
    id a verdict). A pass keeps its sentence (`fwd1_rule.beside`, operator-only: it holds the t and the shadow P&L) and
    its words (`fwd1_rule.words`: ids and words, the permit's). Nothing judges a lineage after it.
-5. THE PERMIT FILE (`write_permits`, `PERMITS`): every lineage FWD1 judges with its status (`STATUSES`) and, for a
-   pass, its family, version, run sha, cell and words. IDS AND WORDS ONLY: no t, no P&L, no figure of a program. The
-   swarm reads it for two things only (league/swarm/elane_forward.py): a lineage pending, passed or failed takes no
-   sealed Validation try while the seat switch is on, and a pass may take a seat, one live forward seat a mechanism
-   cell, while it is on. A lineage stopped (its representative stopped in the record), stalled (THE STALL RULE) or
-   superseded (registered under another receipt) is listed as such and keeps its sealed path, as a void or an
-   ineligible one does.
+5. THE PERMIT FILE (`write_permits`, `PERMITS`): every lineage FWD1 judges with its status (`STATUSES`), its
+   FWD1_START ("start", an ISO date: L5, A48) and, for a pass, its family, version, run sha, cell and words. IDS AND
+   WORDS ONLY: no t, no P&L, no figure of a program (a date is none). The swarm reads it for two things only
+   (league/swarm/elane_forward.py): a lineage pending, passed or failed takes no sealed Validation try while the seat
+   switch is on, and a pass may take a seat, one live forward seat a mechanism cell, while it is on. L5 (A48): an
+   index-only case-N lineage keeps its S2 try until the close of its FWD1_START session; the judge then voids it
+   (A33 (4), 4 above: a case-N lineage that reached a sealed pre-check after FWD1_START). A loosening of A39's stated
+   cost "while on, a lineage FWD1 lists takes no sealed S2 try"; a row without "start" (a file of the earlier job) is
+   refused as before (`elane_forward.untried`: fail closed). A lineage stopped (its representative stopped in the
+   record), stalled (THE STALL RULE) or superseded (registered under another receipt) is listed as such and keeps its
+   sealed path, as a void or an ineligible one does.
 6. THE REPORT (`REPORT`, operator-only): per type and case the lineages by status, the registry's expected zero-edge
    passes against the observed (`fwd1_rule.expected_passes`), each pass's sentence and each stalled lineage's cause.
 
@@ -121,7 +125,8 @@ from . import fwd1_rule as R
 JOB = "forward_screen"
 DB = "forward-screen.sqlite"
 #: The permit file (ids and words only) the swarm reads: league/swarm/elane_forward.py `PERMITS` (a test holds the two
-#: equal), and the operator's report.
+#: equal), and the operator's report. Its version stays 1 with each row's added "start" (L5, A48): the swarm reads a
+#: row without it as before (refused while listed pending, pass or fail).
 PERMITS = "forward-screen-permits.json"
 PERMITS_VERSION = 1
 REPORT = "forward-screen-report.json"
@@ -1609,11 +1614,13 @@ def status_rows(store: sqlite3.Connection, *, fdb: sqlite3.Connection | None = N
 
 def write_permits(root: str | Path, store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any], at: float,
                   labels: Mapping[int, str] | None = None, fdb: sqlite3.Connection | None = None) -> Path:
-    """THE PERMIT FILE (the module docstring, 4), atomically, 0600: {"version", "receipt", "start", "at", "lineages":
-    {lineage: {"status", "type", "case", "cell", "family", "version", "run_sha", "k", "weak", "engine", "words"}}}.
-    Every FWD1-judged lineage is listed (its status, `STATUSES`), so the swarm knows which take no sealed try; a pass
+    """THE PERMIT FILE (the module docstring, 5), atomically, 0600: {"version", "receipt", "start", "at", "lineages":
+    {lineage: {"status", "type", "case", "cell", "family", "version", "start", "run_sha", "k", "weak", "engine",
+    "words"}}}. Every FWD1-judged lineage is listed (its status, `STATUSES`), so the swarm knows which take no sealed
+    try; each row carries its lineage's FWD1_START ("start", the `fwd1_lineages` row's ISO date; L5, A48: the swarm
+    keeps an index-only case-N lineage's S2 try until that session's close, and refuses a row without it); a pass
     names its program and the forward record's engine label its verdict was read under (`labels`: {engine id:
-    label}). No t, no P&L and no figure of a program crosses."""
+    label}). No t, no P&L and no figure of a program crosses. `PERMITS_VERSION` stays 1: "start" is an added key."""
     from .context import write_json
 
     lineages: dict[str, Any] = {}
@@ -1623,7 +1630,9 @@ def write_permits(root: str | Path, store: sqlite3.Connection, *, rule: Any, pin
         passed = row["status"] == "pass"
         lineages[str(row["lineage"])] = {
             "status": row["status"], "type": row["type"], "case": row["case_"], "cell": row["cell"],
-            "family": row["family"], "version": row["version"], "run_sha": row["run_sha"] if passed else None,
+            "family": row["family"], "version": row["version"],
+            "start": str(row["start"]) if row.get("start") else None,
+            "run_sha": row["run_sha"] if passed else None,
             "k": int(row["k"]) if passed and row["k"] is not None else None,
             "weak": R.weak(str(row["type"]), int(row["k"])) if passed and row["k"] is not None else None,
             "engine": (labels or {}).get(row["engine"]) if passed and row["engine"] is not None else None,

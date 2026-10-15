@@ -3,9 +3,9 @@
 Owner: the FWD1-R build. The judge is an ops job (league/ops/forward_screen.py, rule league/ops/fwd1_rule.py); this
 module never imports it and never opens a forward store (release E3's seal T1): it reads ONE file the job writes under
 the state root, the permit file (`PERMITS`: lineage ids, a status word, a family id, a version, a run sha, a cell, a
-checkpoint count and the verdict's words; no t, no P&L and no figure of a program), as the panel lane reads the twin
-marker. No generator reads anything of it: the family-state key it writes (`STATE_KEY`) is sealed
-(league/swarm/elane_seal.py `SEALED_KEYS`).
+checkpoint count, the lineage's FWD1_START date and the verdict's words; no t, no P&L and no figure of a program), as
+the panel lane reads the twin marker. No generator reads anything of it: the family-state key it writes (`STATE_KEY`)
+is sealed (league/swarm/elane_seal.py `SEALED_KEYS`).
 
 THE SWITCH: `elane.fwd1.seats`, "off" (the code's default and policy.json's) or "on". WITH IT OFF NOTHING HERE ACTS:
 `try_refused` refuses nothing and `step` moves nothing; the job still records its verdicts.
@@ -17,6 +17,19 @@ WITH IT ON:
    nothing judges a lineage after its FWD1 fail). A lineage FWD1 does not judge, or one it voided or found ineligible,
    keeps its sealed path. The file unreadable while the switch is on: every try of an equity family whose lineage
    cannot be read is refused (fail closed: the wall holds only if a judged lineage never looks).
+   L5 (A48), AN INDEX LINEAGE KEEPS ITS S2 TRY UNTIL ITS FIRST FORWARD DAY CLOSES (`untried`): an index-only case-N
+   lineage keeps its S2 try until the close of its FWD1_START session; the judge then voids it (A33 (4): a case-N
+   lineage that reached a sealed pre-check after FWD1_START, league/ops/forward_screen.py `judge`). A loosening of
+   A39's stated cost "while on, a lineage FWD1 lists takes no sealed S2 try". Why: an index family's v1 that failed
+   Train is registered and sighted before its v2 passes (hours later, most index Train passes coming on v2 or later),
+   and the listing would push it from S2 to FWD1-R's WEAK screen on a timing race, not on evidence. Before that close
+   no forward day of the lineage can be counted (the forward night runs after the close), so it has seen nothing
+   forward; the void leaves it one look. Only a row listed "pending", case "N", type "ETF" (`UNTRIED`), with its
+   FWD1_START ("start", an ISO date of a session) and a family that is not forward-only (`elane.forward_only` False:
+   R-SEC refuses every other ETF family first, in `try_open`, and this asks again so the exemption cannot outlive
+   R-SEC) and not a panel. FAIL CLOSED: no "start" (a file of the earlier job), a date that is not one, a day that is
+   no session or that the calendar cannot answer, a clock or a family that cannot be read: refused as above. A pass
+   or a fail is never exempt; nor is a lineage at or after that close.
 2. THE SEAT (`step`, called once a round by league/swarm/gate.py `equity_round`): a lineage the file lists "pass"
    becomes eligible THROUGH THE LANE'S OWN SEAT MACHINERY, never around it:
    - an ETF lineage: its family, alive in the Gym band and holding the permitted version (the run sha the job judged)
@@ -49,7 +62,9 @@ Standard library only.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
+import math
 import time
 from pathlib import Path
 from typing import Any, Mapping
@@ -62,6 +77,9 @@ STATE_KEY = "elane_forward"
 SEATS = ("off", "on")
 #: The statuses whose lineage takes no sealed Validation try while the switch is on.
 JUDGED = ("pending", "pass", "fail")
+#: L5 (A48): the one permit row whose lineage keeps its S2 try until the close of its FWD1_START session (`untried`):
+#: an index-only (R-SEC) ETF lineage of case N that FWD1 has not judged yet. Every key must match; nothing else is.
+UNTRIED = {"status": "pending", "case": "N", "type": "ETF"}
 #: The bands a forward seat counts as live in (`one_a_cell`).
 LIVE_BANDS = ("candidate", "probe", "sized")
 REFUSED = "the FWD1-R forward screen judges this lineage: it takes no sealed look (FWD1-R, A33)"
@@ -104,8 +122,45 @@ def lineage_of(store: Any, fam: Mapping[str, Any]) -> str | None:
     return elane.lineage_key(lane, str(fam.get("lineage") or fam["id"]))
 
 
-def try_refused(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
-    """Why this family's lineage takes no sealed Validation try (the module docstring, 1), or None."""
+def untried(store: Any, fam: Mapping[str, Any], row: Mapping[str, Any] | None, *, now: float | None = None) -> bool:
+    """L5 (A48; the module docstring, 1): whether the lineage of permit `row` keeps its S2 try all the same: the row is
+    `UNTRIED` (pending, case N, ETF), `fam` is index-only (`elane.forward_only` False) and no panel, and `now` (the
+    store's clock when it has one, else the wall's) is before the close of the row's FWD1_START session ("start":
+    league/equity/schedule.py `moments(day).close_at`; before it no forward day of the lineage can be counted). FAIL
+    CLOSED: False for anything that cannot be read (no "start", a date that is not one, no session, a calendar that
+    raises or does not cover the day, a clock that is not finite)."""
+    try:
+        if not isinstance(row, Mapping) or any(row.get(key) != value for key, value in UNTRIED.items()):
+            return False
+        start = row.get("start")
+        if not isinstance(start, str):
+            return False
+        day = dt.date.fromisoformat(start)
+        if day.isoformat() != start:
+            return False                          # only the job's own form (a looser form the parser takes is doubt)
+        from . import elane, elane_xs
+
+        if elane.forward_only(fam) is not False or elane_xs.is_panel(fam):
+            return False                          # R-SEC (and A34) refuse it first; the exemption never outlives them
+        from ..equity import schedule
+
+        moments = schedule.moments(day)
+        if moments is None:
+            return False                          # not a session, or a day the calendar does not cover
+        if now is None:
+            clock = getattr(store, "clock", None)
+            now = clock() if callable(clock) else time.time()
+        t = float(now)
+        return math.isfinite(t) and t < float(moments.close_at)
+    except Exception:  # noqa: BLE001 - a doubt keeps the refusal
+        return False
+
+
+def try_refused(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None, *,
+                now: float | None = None) -> str | None:
+    """Why this family's lineage takes no sealed Validation try (the module docstring, 1), or None. A lineage listed
+    "pending", "pass" or "fail" is refused unless `untried` holds for it at `now` (L5, A48: an index-only case-N
+    lineage before the close of its FWD1_START session; the store's clock when `now` is None)."""
     if not seats_on(settings):
         return None
     lineage = lineage_of(store, fam)
@@ -116,7 +171,7 @@ def try_refused(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] 
         return UNREADABLE
     row = rows.get(lineage)
     if row is not None and row.get("status") in JUDGED:
-        return REFUSED
+        return None if untried(store, fam, row, now=now) else REFUSED
     return None
 
 
@@ -283,6 +338,6 @@ def step(gate: Any) -> dict[str, Any]:
     return out
 
 
-__all__ = ["PERMITS", "PERMITS_VERSION", "STATE_KEY", "SEATS", "JUDGED", "LIVE_BANDS", "REFUSED", "UNREADABLE",
-           "PANEL_CASES", "A34", "seats_on", "permits", "lineage_of", "try_refused", "eligible", "one_a_cell",
-           "seat_refused", "mark_seated", "step"]
+__all__ = ["PERMITS", "PERMITS_VERSION", "STATE_KEY", "SEATS", "JUDGED", "UNTRIED", "LIVE_BANDS", "REFUSED",
+           "UNREADABLE", "PANEL_CASES", "A34", "seats_on", "permits", "lineage_of", "untried", "try_refused",
+           "eligible", "one_a_cell", "seat_refused", "mark_seated", "step"]
