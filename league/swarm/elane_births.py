@@ -12,7 +12,9 @@ equity architect's system prompt with the program contract (league/equity/EQUITY
 LANES/EQUITY block (`lanes_text`: the two lanes' meaning and labels, the universe, the contract in brief, the Train bar,
 the ration), THE AGENDA (league/swarm/elane_train.py `AGENDA`: the mechanisms with their published priors; earnings
 drift named and refused until earnings data exist), THE EQUITY QUOTA's lines, THE EQUITY TRAIN MAP (in-sample, the
-swarm's own Train runs), the equity graveyard that binds (E2's Train refutations and the CLOSED cells), the lineages
+swarm's own Train runs), the equity graveyard that binds (E2's Train refutations and the CLOSED cells) and THE EQUITY
+BIRTH CELLS (`cells_text`, Oct 15, 2026: each cell a refuted row binds, with the rows in it and the inputs each read, as
+the options architect's F1 BIRTH CELLS; a graveyard refusal is said with its cell in the next request), the lineages
 whose one try is taken (seeded programs and Train passes, outcomes sealed), the equity families' Train facts, the card
 vocabulary and the last pass's refusals in closed words (`last_text`: each by its class and the proposal's place in
 the answer, never a string the model wrote). Its route is chosen by measured yield per dollar
@@ -49,6 +51,7 @@ Standard library only.
 from __future__ import annotations
 
 import math
+import re
 import time
 from typing import Any, Mapping, Sequence
 
@@ -389,6 +392,99 @@ def graveyard_text(store: Any, settings: Mapping[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
+#: THE EQUITY BIRTH CELLS (Oct 15, 2026; the options architect's BIRTH CELLS of F1, Oct 3, 2026, for the equity pass): the
+#: cells E2's Train refutations bind, each with the rows in it and the inputs each read. WHY: on Sun Oct 11, 2026 the
+#: equity pass proposed 124 families in 25 passes and the graveyard refused 56 of them (46 in a bound cell with no claim,
+#: 10 with a claim that named a row of another cell or cited nothing checkable), and its last four passes of the day bore
+#: 1, 0, 0 and 0 families; the first pass after the universe widened (03:43Z Oct 15) proposed six and the graveyard
+#: refused all six. The request showed each refuted row's id, symbols and mechanism (`graveyard_text`), never the cell its
+#: card binds (mechanism_class / lane:structure / holding, by overlapping inputs: league/swarm/cards.py `matches`), so the
+#: model could neither keep out of a bound cell nor name a row of its own cell: the failure the options architect's F1
+#: block fixed ("13 of the day's 15 refusals were claimless proposals in cells the architect was never shown"). Words and
+#: ids only, from the rows the admission binds with (`EquityPass.rebirth_index`: E2's own Train refutations, the rows
+#: `graveyard_text` lists already): no Validation, look or live figure (A9 D3). THE BINDING IS UNCHANGED: every card is
+#: still checked by `cards.RebirthIndex.check`, which reads the card's declared cell AND the cell its own mechanism text
+#: reads as. A key that carries a universe group (where the graveyard reads one) is shown with it.
+CELLS_HEADER = ("EQUITY BIRTH CELLS (mechanism_class / lane:structure / holding, and a universe group where a line names "
+                "one: every cell a row of THE EQUITY GRAVEYARD binds now. A card of that lane in a listed cell that reads "
+                "any input a row there read is born only with a valid \"rebirth\" naming one of THOSE rows, with an input "
+                "that row did not read among the card's inputs and evidence naming that input; a row marked \"backs no "
+                "more\" can be named by no further rebirth. A cell not listed holds no row: a card there needs no rebirth, "
+                "unless its own mechanism text reads as another class whose cell is listed. Declare the class and holding "
+                "your program has: the card describes the program)")
+#: The most rows a cell's line names (the newest), and the most characters the block runs to (past it the cells with
+#: fewest rows are left out, and the block says how many).
+CELLS_ROWS_SHOWN = 6
+CELLS_CHARS = 8000
+
+
+def cells_text(index: Any) -> str:
+    """THE EQUITY BIRTH CELLS (above): one line a bound cell, most rows first. "" with no row, and with no index (None:
+    `architect.card_rebirth` "off", nothing binds; False: the binding could not be read, and the admission then refuses
+    every birth and says so)."""
+    if index is None or index is False:
+        return ""
+    rows = [r for r in (getattr(index, "equity_rows", None) or []) if isinstance(r, Mapping) and r.get("row")]
+    if not rows:
+        return ""
+    per_row = getattr(index, "per_row", None)
+    backed = getattr(index, "backed", None)
+    backed = backed if isinstance(backed, Mapping) else {}
+    cells: dict[tuple[str, ...], list[Mapping[str, Any]]] = {}
+    for r in rows:
+        key = r.get("key") if isinstance(r.get("key"), Mapping) else {}
+        cell = tuple(str(key.get(k) or "?") for k in ("class", "family", "holding"))
+        if key.get("group"):
+            cell += (str(key["group"]),)
+        cells.setdefault(cell, []).append(r)
+    lines = [CELLS_HEADER + ":"]
+    for cell, members in sorted(cells.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        label = " / ".join(cell[:3]) + (f" / universe group {cell[3]}" if len(cell) > 3 else "")
+        named = []
+        for r in members[-CELLS_ROWS_SHOWN:]:
+            inputs = "+".join(str(i) for i in (r.get("inputs") or [])) or "inputs unknown"
+            full = isinstance(per_row, int) and int(backed.get(r["row"], 0) or 0) >= per_row
+            named.append(f"{r['row']} read {inputs}" + (" (backs no more)" if full else ""))
+        older = len(members) - len(named)
+        lines.append(f"- {label}: {len(members)} row{'' if len(members) == 1 else 's'}: " + "; ".join(named)
+                     + (f"; and {older} older" if older > 0 else ""))
+    text = "\n".join(lines)
+    if len(text) <= CELLS_CHARS:
+        return text
+    kept, size = [lines[0]], len(lines[0])
+    for line in lines[1:]:
+        if size + 1 + len(line) > CELLS_CHARS - 100:
+            break
+        kept.append(line)
+        size += 1 + len(line)
+    left = len(lines) - len(kept)
+    return "\n".join(kept + [f"- ({left} more bound cell{'' if left == 1 else 's'}, with fewer rows, not listed: a "
+                             "refusal names its cell)"])
+
+
+def _closed_cell(card: Mapping[str, Any] | None, structure: Any, lane: str) -> dict[str, Any]:
+    """A graveyard refusal's closed facts: the card's own cell (mechanism_class / lane:structure / holding) when each
+    part is a word of the vocabulary (`vocabulary_text`'s classes, `EQUITY_HOLDING`, the lane and structure the
+    admission checked), else nothing: the next request names the cell in the House's words, never the model's."""
+    from . import cards, elane
+
+    if not isinstance(card, Mapping):
+        return {}
+    try:
+        key = cards.key_of(card, structure)
+    except Exception:  # noqa: BLE001 - a key that cannot be read is said by its class alone
+        return {}
+    classes = set(EQUITY_OPTION_CLASSES) | set(dict(getattr(elane, "CLASSES", None) or EQUITY_CLASSES_FALLBACK))
+    parts = (key.get("class"), key.get("family"), key.get("holding"))
+    try:
+        family = elane.lineage_key(lane, cards.structure_family(structure))
+    except Exception:  # noqa: BLE001 - a family that cannot be read is not said
+        return {}
+    if parts[0] in classes and parts[1] == family and parts[2] in EQUITY_HOLDING:
+        return {"cell": " / ".join(str(p) for p in parts)}
+    return {}
+
+
 def seeded_ids(store: Any) -> set[str]:
     """The captain-seeded equity families (E1's kv `elane.SEEDS_KEY`: {seed id: family id})."""
     from . import elane
@@ -513,12 +609,16 @@ REFUSAL_SAID: dict[str, str] = {
     "tried_lineage": ("it continues a lineage that has its one Validation try (LINEAGES WITH THEIR TRY; the outcome is "
                       "sealed): propose a different idea"),
     "card": "its card failed the card checks{fields}",
-    "graveyard": ("a refuted row of THE EQUITY GRAVEYARD binds its cell: a card there needs a valid \"rebirth\" naming "
-                  "the row, with an input the dead row did not read"),
+    "graveyard": ("a refuted row of THE EQUITY GRAVEYARD binds its cell{cell}: a card there needs a valid \"rebirth\" "
+                  "naming one of that cell's rows (EQUITY BIRTH CELLS), with an input the dead row did not read; or "
+                  "propose in a cell no row binds"),
     "quota": "the pass's births were born before it: it was one proposal more than the pass asked for",
     "store": "the store did not take the birth (a fault of the House's, not of the proposal)",
 }
 OTHER_SAID = "refused for a reason the House keeps and this request does not repeat"
+#: The shape of a graveyard refusal's closed cell (`_closed_cell`): three vocabulary words, "class / lane:structure /
+#: holding". `refusal_said` says a kept cell only in this shape.
+CELL_SHAPE = re.compile(r"[a-z_]{3,32} / (?:beta|equity):(?:etf|stock) / days_(?:1_3|4_10|11_plus)")
 #: The fields a card's problem may name (league/swarm/cards.py `validate`, league/swarm/elane.py `card_errors`: each
 #: problem begins "<field>: "). A closed list: a field outside it is counted, never named.
 CARD_FIELDS = ("card", "lane", "structure", "symbols", "hypothesis", "mechanism_class", "inputs", "holding", "cost",
@@ -563,7 +663,9 @@ def refusal_said(item: Mapping[str, Any], settings: Mapping[str, Any] | None) ->
               if isinstance(item.get("fields"), list) else [])
     more = item.get("other_fields") if type(item.get("other_fields")) is int and item.get("other_fields") > 0 else 0
     named = ((": " + ", ".join(fields)) if fields else "") + (f" (and {more} more)" if more and fields else "")
-    return REFUSAL_SAID[cls].format(
+    # A graveyard refusal's cell (`_closed_cell`: vocabulary words only, re-checked here as the line's shape).
+    cell = item.get("cell") if isinstance(item.get("cell"), str) and CELL_SHAPE.fullmatch(item["cell"]) else None
+    return REFUSAL_SAID[cls].format(cell=f" ({cell})" if cell else "",
         structures=" or ".join(allowed) or "none", max_symbols=eqconfig.MAX_SYMBOLS,
         universe=", ".join(dict.fromkeys(s for symbols in allowed.values() for s in symbols)) or "none is open",
         agenda=", ".join(k for k, row in AGENDA.items() if row["available"]), foreign=foreign, fields=named)
@@ -623,6 +725,7 @@ class EquityPass:
                  # map, with its ZERO-EDGE EXPECTED column, follows the equity one (`elane_train.train_map_text`).
                  elane_xs.request_text(self.store, self.settings, want),
                  elane_train.train_map_text(self.store, self.settings), graveyard_text(self.store, self.settings),
+                 cells_text(self.rebirth_index()),   # THE EQUITY BIRTH CELLS (Oct 15, 2026): where the graveyard binds
                  tried_text(self.store), families_text(self.store, self.settings), vocabulary_text(self.settings),
                  last_text(self.store, self.settings)]
         return SYSTEM + elane_train.contract_text(), "\n\n".join(p for p in parts if p)
@@ -831,7 +934,7 @@ class EquityPass:
                     verdict = {"ok": False, "reason": f"the graveyard's binding could not be read ({type(exc).__name__})"}
                 if not verdict.get("ok"):
                     self.refuse(slug, "graveyard: " + str(verdict.get("reason") or "a refuted row binds its cell")[:500],
-                                "graveyard")
+                                "graveyard", **_closed_cell(checked, structure, lane))
                     continue
                 if verdict.get("dropped"):
                     checked = {k: v for k, v in checked.items() if k != "rebirth"}

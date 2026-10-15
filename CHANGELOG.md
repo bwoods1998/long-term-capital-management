@@ -30,6 +30,26 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### The equity birth cells: the equity pass's request shows where the graveyard binds, on `feat/elane-birth-cells` (unreleased; cut from main `aec0c8a5`, release U; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
+
+- **What it is:** `elane_births.cells_text`, a block of the equity pass's request after THE EQUITY GRAVEYARD: one line a
+  bound cell (mechanism_class / lane:structure / holding, and the universe group where the graveyard's key carries
+  one), most rows first, naming its newest rows and the inputs each read (the inputs the binding matches: the card's
+  and those its mechanism words name), a row that has backed its rebirths marked "backs no more". A graveyard refusal
+  keeps its card's cell as a closed fact (`_closed_cell`: vocabulary words only, re-checked by shape when said), and
+  the next request says "a refuted row of THE EQUITY GRAVEYARD binds its cell (<cell>)".
+- **Why:** the options architect has listed its BIRTH CELLS since F1 (Oct 3: "13 of the day's 15 refusals were
+  claimless proposals in cells the architect was never shown"); the equity pass never did. On Oct 11 the graveyard
+  refused most of the equity pass's refusals for cells the model was never shown, its last passes of the day bore
+  nothing, and the first pass after the universe widened (03:43Z Oct 15) had all six proposals refused so.
+- **What is unchanged:** the binding (`cards.RebirthIndex.check`, the declared cell and the cell the mechanism text
+  reads as), the rebirth tests and budgets, the rows (E2's own Train refutations only: A9 D3), the closed-words rule of
+  the refusal feedback, every options request.
+- **Verified:** `league/tests/test_elane_birth_cells.py` (12 tests) on both Pythons, the E2 births, health, switch and
+  seal suites, the full suites; a read-only dry run on the House's graveyard (04:25Z Oct 15): 14 bound cells from 20
+  rows, 2,663 characters.
+- **Rollback:** the release before.
+
 ### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, a post-close checkpoint, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
 
 - **What it carries:** release T (`rel/e4-fwd1` `6b0c41bb`, PR #546: E4 step one with A32, FWD1-R, R-SEC), merged with
