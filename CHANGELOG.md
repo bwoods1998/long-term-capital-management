@@ -30,6 +30,31 @@ The running House release is `20261015T075939Z-89d93d40bfda` (main `0b978378`, P
 Probe family and the Probe sleeve 0.33 x E, 08:00Z Oct 15), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's
 updater is on. What is built and not deployed is on branches.
 
+### The budget job waits for the Sail guard's next reading after a start, on `fix/budget-guard-wait` (unreleased; cut from `efc9fa00`, PR #558's head; an owner deploy: `league/ops/budget.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting)
+
+- **What it is** (the captain's L4): when a `budget` run finds no fresh Sail guard reading, it now waits for the
+  guard's next good one. It looks at the guard's record every 20 s, for at most 270 s from its start, inside the
+  job's 600 s wall. When the reading comes, the run takes a new time after it and reads every input again at that
+  time: the guard's record, its meter of the day, the day's spend, the box spend and the gateway. With no reading by
+  then, Sail is `unreadable` as before, and the warning adds "waited 270 s for the Sail guard's next reading: none
+  came". `budget.json` and the receipt carry `guard_wait` (seconds waited, looks, whether it read) when the run
+  waited.
+- **Why:** on Oct 15 the owed 00:30Z run started at 03:27:22Z, 28 s after the box came back from a 7.2 h outage. It
+  read the guard's stale record and wrote Sail `unreadable`. The guard's first reading came 3 s later. Research247
+  fails a UTC day when any `budget` receipt of it does not read the ceiling.
+- **What does not change:** a fresh reading at the start means no wait, so the normal 00:30Z run takes as long as
+  before. Only the guard's own reading ends the wait; the gateway's Sail reading is still the card line only. The
+  rule, its constants, the ceiling, the guard, the split and the Done reader are unchanged. `budget_refresh` does not
+  wait, also when it runs the full job. A run handed a fixed time (`now` a number) does not wait. In a swarm pause the
+  guard does not read, so each `budget` run waits the full 270 s, and the next job waits behind it.
+- **Verified:** `league/tests/test_ops_budget.py` `GuardWait`, 7 tests with an injected clock and sleeper (nothing
+  sleeps): a stale guard then a reading during the wait reads the meter at a new time; a reading stamped ahead of
+  the clock waits for it; no reading stays `unreadable` after 270 s; a fresh reading is no wait; slow reads and a
+  frozen clock stay inside the wall; a fixed time and the refresh never wait; the House's own context waits on its
+  clock with `time.sleep`. The budget tests and their importers, 682 tests, on Python 3.11 and 3.14; the four ids on
+  both.
+- **Rollback:** the release before. Nothing is migrated, and nothing reads `guard_wait`.
+
 ### Release 1015e: births cells, research spend by yield, the watchdog on interrupted boxes, docs, on `rel/1015e` (unreleased; TWO deploys from one commit: the House by an owner deploy, never 12:55-20:05Z on a trading day (`league/swarm/elane_births.py`, `league/ops/` and `league/ops/economics.py` are protected), then the gateway by the owner's wrangler deploy; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
 
 - **What it carries**, on main `0b978378` (#557, the running release): the equity birth cells (PR #552,

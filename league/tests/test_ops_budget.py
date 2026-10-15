@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import json
+import math
 import tempfile
 import types
 import unittest
@@ -2067,6 +2068,171 @@ class TwoDayLead(unittest.TestCase):
         row = B.compute(given, now=NOW)["meters"]["sail"]
         self.assertNotIn("out_in_days", row)
         self.assertEqual(B.short(B.compute(given, now=NOW)), ["sail"])
+
+
+class GuardWait(unittest.TestCase):
+    """THE WAIT FOR THE GUARD'S NEXT READING (L4, `_read_waiting`): a `budget` run that finds no fresh guard reading
+    waits, inside the job's wall, for the guard's next good one, then reads every input again at a new instant. The
+    clock and the sleeper are the test's: nothing here really sleeps."""
+
+    setUp, book, notify, doc, reading = Job.setUp, Job.book, Job.notify, Job.doc, Job.reading
+
+    def live(self, *, on_sleep=None, step=True, **kw):
+        """The job's context with a live clock (`now` a callable) and a sleeper that moves it; `on_sleep(t)` runs after
+        each sleep at the clock's new time (the guard's check, in the tests that want one)."""
+        self.sleeps: list[float] = []
+
+        def sleep(seconds):
+            self.sleeps.append(seconds)
+            if step:
+                self.clock.advance(seconds)
+            if on_sleep is not None:
+                on_sleep(self.clock())
+        return {**Job.ctx(self, **kw), "now": self.clock, "sleep": sleep}
+
+    def guard_reads(self, balance, at_, *, metered=None):
+        """What the Sail guard's check writes, in its order: the day's meter, then the guard's record."""
+        store = SwarmStore(self.root, clock=self.clock)
+        if metered is not None:
+            store.put("metered_today", {"day": B._day(at_).isoformat(), "spent": metered})
+        store.put("guard", {"braked": False, "last": {"balance": balance, "at": at_},
+                            "last_good": {"balance": balance, "at": at_}})
+        store.close()
+
+    def test_a_fresh_reading_at_the_start_is_no_wait_at_all(self):
+        # The normal 00:30Z run: setUp's guard read two minutes ago.
+        receipt = B.run(self.live())
+        self.assertEqual(self.sleeps, [], "no sleep, no slower run")
+        self.assertNotIn("guard_wait", receipt)
+        self.assertNotIn("guard_wait", self.doc())
+        self.assertEqual(self.doc()["at"], NOW)
+        self.assertEqual(receipt["meters"]["sail"]["limited_by"], "ceiling")
+
+    def test_a_stale_guard_then_its_next_reading_during_the_wait_reads_the_meter(self):
+        """Oct 15: the owed run 28 s after the box came back, the guard's first reading 3 s after the run. The run now
+        waits for it and reads everything again at an instant after it."""
+        self.reading(600.0, NOW - 7.2 * 3600)
+        self.health["sail"] = {"balance_usd": 40.0, "checked_at": B._iso(NOW - 600)}  # the gateway's: never research
+        store = SwarmStore(self.root, clock=self.clock)
+        store.put("metered_today", {"day": "2026-10-19", "spent": 9.0})  # yesterday's meter: nothing added back
+        store.close()
+        before = B._swarm_reads(self.root, NOW, [])
+        self.assertEqual(B._guard_reading(before["guard"], NOW)[0], None)
+
+        def guard(t):
+            if t >= NOW + 40 and not self.read_at:
+                self.read_at.append(t)
+                spend = SwarmStore(self.root, clock=self.clock)
+                spend.add_spend("sail_model", 0.5)  # the day's spend moves too
+                spend.close()
+                self.guard_reads(555.0, t, metered=2.0)
+        self.read_at: list[float] = []
+        receipt = B.run(self.live(on_sleep=guard))
+        doc = self.doc()
+        sail = doc["inputs"]["meters"]["sail"]
+        self.assertEqual(self.read_at, [NOW + 40])
+        self.assertEqual((sail["balance_usd"], sail["balance_source"]),
+                         (555.0, f"the Sail guard's last good reading at {B._iso(NOW + 40)}"))
+        self.assertEqual(receipt["meters"]["sail"]["limited_by"], "ceiling")
+        self.assertGreater(receipt["meters"]["sail"]["research_usd_day"], 0.0)
+        self.assertEqual(doc["at"], NOW + 40, "a new instant, after the guard's reading")
+        self.assertEqual(sail["paid_today_usd"], 2.0, "the day's meter and spend read again at the new instant: "
+                                                     "min(2.0, 0.5 booked + 1.5 fixed)")
+        self.assertIsNone(sail["notice_balance_usd"], "the guard read: the gateway's reading is not needed")
+        self.assertEqual(receipt["guard_wait"], {"waited_seconds": 40.0, "polls": 2, "read": True})
+        self.assertEqual(doc["guard_wait"], receipt["guard_wait"])
+        self.assertTrue(all(15 <= s <= 30 for s in self.sleeps), self.sleeps)
+        self.assertFalse(any("Sail's balance" in e for e in receipt["errors"]), receipt["errors"])
+        self.assertFalse(any("Sail" in text for _, text in self.alerts), self.alerts)
+
+    def test_a_reading_newer_than_the_look_waits_for_the_clock(self):
+        """`_guard_reading` refuses a reading newer than its instant: the run takes its instant after the reading."""
+        self.reading(600.0, NOW - 7 * 3600)
+        self.guard_reads(555.0, NOW + 25)  # stamped ahead of the run's clock
+        receipt = B.run(self.live())
+        self.assertEqual(self.sleeps, [20.0, 20.0], "not seen at +20 (newer than the look), seen at +40")
+        self.assertEqual(self.doc()["at"], NOW + 40)
+        self.assertEqual(receipt["meters"]["sail"]["limited_by"], "ceiling")
+
+    def test_no_reading_stays_unreadable_after_the_bounded_wait(self):
+        self.reading(600.0, NOW - 7 * 3600)
+        self.health["sail"] = {"balance_usd": 40.0, "checked_at": B._iso(NOW - 600)}
+        receipt = B.run(self.live())
+        doc = self.doc()
+        self.assertEqual(sum(self.sleeps), B.GUARD_WAIT_SECONDS)
+        self.assertEqual(self.clock() - NOW, B.GUARD_WAIT_SECONDS, "at most the wait, from the run's start")
+        self.assertTrue(all(s <= B.GUARD_POLL_SECONDS for s in self.sleeps))
+        self.assertEqual(receipt["meters"]["sail"]["limited_by"], "unreadable", "exactly as before the wait")
+        self.assertEqual(receipt["meters"]["sail"]["research_usd_day"], 0.0)
+        self.assertEqual(doc["inputs"]["meters"]["sail"]["balance_source"], "the Sail guard has no fresh reading")
+        self.assertEqual(doc["inputs"]["meters"]["sail"]["notice_balance_usd"], 40.0, "the card line only")
+        self.assertEqual(doc["at"], NOW, "the run's own instant, as before")
+        self.assertEqual(receipt["guard_wait"], {"waited_seconds": 270.0, "polls": 14, "read": False})
+        self.assertIn("waited 270 s for the Sail guard's next reading: none came", receipt["errors"])
+        self.assertIn("state", receipt, "the run ends ok")
+        self.assertEqual(len(self.alerts), 1)
+
+    def test_the_wait_respects_the_jobs_wall(self):
+        """Slow reads (each gateway read 60 s) and a clock that does not move on its own: the wait still ends from the
+        run's start, the run inside the job's 600 s wall."""
+        self.reading(600.0, NOW - 7 * 3600)
+
+        def slow():
+            self.clock.advance(60)
+            return self.health
+        receipt = B.run(self.live(health=slow))
+        self.assertEqual(sum(self.sleeps), B.GUARD_WAIT_SECONDS - 60, "the first read's 60 s count against the wait")
+        self.assertLessEqual(self.clock() - NOW, 600)
+        self.assertEqual(receipt["meters"]["sail"]["limited_by"], "unreadable")
+        # A reading in the last look: one more read, still inside the wall.
+        self.clock.t = NOW
+        self.reading(600.0, NOW - 7 * 3600)
+        receipt = B.run(self.live(health=slow, on_sleep=lambda t: t >= NOW + 270 and self.guard_reads(555.0, t)))
+        self.assertEqual(receipt["meters"]["sail"]["limited_by"], "ceiling")
+        self.assertLessEqual(self.clock() - NOW, 600)
+        self.assertEqual((self.doc()["at"], self.sleeps[-1]), (NOW + 270, 10.0), "the last look, cut to the wait")
+        # A clock that never moves (a sleeper that does not advance it): the number of looks ends the wait.
+        self.clock.t = NOW
+        self.reading(600.0, NOW - 7 * 3600)
+        receipt = B.run(self.live(step=False))
+        self.assertEqual(len(self.sleeps), math.ceil(B.GUARD_WAIT_SECONDS / B.GUARD_POLL_SECONDS))
+        self.assertEqual(receipt["meters"]["sail"]["limited_by"], "unreadable")
+
+    def test_a_run_at_a_fixed_instant_and_the_refresh_never_wait(self):
+        self.reading(600.0, NOW - 7 * 3600)
+        ctx = self.live()
+        receipt = B.run({**ctx, "now": NOW})
+        self.assertEqual((self.sleeps, receipt["meters"]["sail"]["limited_by"]), ([], "unreadable"))
+        self.assertNotIn("guard_wait", receipt)
+        # The refresh's full-job path (no usable budget.json) reads once, as before.
+        (self.root / B.BUDGET_FILE).unlink()
+        from league.ops import budget_refresh
+
+        out = budget_refresh.run(self.live())
+        self.assertEqual((self.sleeps, out["meters"]["sail"]["limited_by"]), ([], "unreadable"))
+        self.assertNotIn("guard_wait", out)
+        self.assertTrue(out["written"])
+
+    def test_the_houses_own_context_waits_on_its_clock_with_time_sleep(self):
+        """The ops child's context (league/ops/context.py): `now()` is its clock and it gives no sleeper."""
+        from league.ops.context import Context
+
+        self.reading(600.0, NOW - 7 * 3600)
+        ctx = Context("budget", root=self.root, due_at=NOW, config={"backup": {"box_id": "sb_house"}}, clock=self.clock,
+                      sail=self.sail, settings_value={})
+        ctx.gateway_health = lambda: self.health
+        ctx.notify = self.notify
+        slept: list[float] = []
+
+        def sleep(seconds):
+            slept.append(seconds)
+            self.clock.advance(seconds)
+            if len(slept) == 3:
+                self.guard_reads(555.0, self.clock())
+        with mock.patch("time.sleep", sleep):
+            receipt = B.run(ctx)
+        self.assertEqual((slept, receipt["meters"]["sail"]["limited_by"]), ([20.0] * 3, "ceiling"))
+        self.assertEqual(self.doc()["at"], NOW + 60)
 
 
 if __name__ == "__main__":
