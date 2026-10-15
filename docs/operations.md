@@ -1648,6 +1648,13 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   failure is an alert, sent once (`elane_train_state`).
 - **Nothing after Train reaches a generator** (A9 D3): no Validation or look outcome, no band, no retirement after the
   look. The equity generators read Train facts only, and no options generator reads an equity graveyard row.
+- **The equity birth cells** (Oct 15, 2026; `elane_births.cells_text`): the equity pass's request lists every cell a
+  refuted row of the equity graveyard binds (mechanism_class / lane:structure / holding, with a universe group where
+  the graveyard keys one), each with its rows and the inputs each read, as the options architect's BIRTH CELLS have
+  since F1 (Oct 3); a graveyard refusal is said in the next request with its cell, in the vocabulary's words only. The
+  binding is unchanged (`cards.RebirthIndex.check` reads the card's declared cell and the cell its mechanism text reads
+  as). Why: the request showed the refuted rows but never the cells they bind, so on Oct 11 most refusals were cards in
+  cells the model was never shown.
 
 **The budget: E2's own pace, inside the House's Sail day.** E2's MODEL dollars (births, Train research and the equity
 review together) are Sail research dollars inside the swarm's research budget and under THE GATE'S RESERVE like any
