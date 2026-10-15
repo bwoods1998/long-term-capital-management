@@ -34,7 +34,7 @@ A20 = X.table_at(*X.REFERENCE)
 ZERO = D(0)
 WEIGHT = EQ.open_risk_weight["etf"]
 #: Six ETFs of the universe: a seat each, at the grid's most seats.
-ETFS = ("SPY", "QQQ", "IWM", "DIA", "XLK", "XLF")
+ETFS = ("SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLB", "XLC", "XLE", "XLI", "XLP", "XLRE")  # one a seat, up to 12
 #: Every pair the tests walk: the grid's twelve, and the pair in force (one of them: `TheTableInForce`).
 PAIRS = tuple(dict.fromkeys((*X.CANDIDATES, X.in_force())))
 
@@ -58,7 +58,7 @@ class TheTableInForce(unittest.TestCase):
         self.assertIn((seats, sleeve), X.CANDIDATES)
         self.assertEqual((EQ.probe_sleeve_share, EQ.probe_max_programs), (D(sleeve), seats))
         self.assertEqual(EQUITY_MONEY_BOUNDS["probe.sleeve_share"], ("0", "0.50"))
-        self.assertEqual(EQUITY_MONEY_BOUNDS["probe.max_programs"], ("0", "6"))
+        self.assertEqual(EQUITY_MONEY_BOUNDS["probe.max_programs"], ("0", "12"))
         self.assertEqual((EQ.position_share["etf"], EQ.invested_share, EQ.cash_reserve, WEIGHT, EQ.min_order_usd),
                          (D("0.50"), D("1.00"), D("50"), D("0.20"), D("10")))
         self.assertEqual((TABLE.probe_loss_budget, TABLE.probe_loss_window, TABLE.probe_loss_total), (D("400"), 20, D("800")))

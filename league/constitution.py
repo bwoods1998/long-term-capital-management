@@ -1005,18 +1005,18 @@ CONSTITUTION: dict[str, Any] = {
     #   7e41909a was the table before that block); the standing grant re-ratifies at the House's start; no
     #   fingerprint move, no evidence reset.
     # <equity-design>
-    #   THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.50 x E
-    #   (`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.25 x E.
-    #   A lot in every seat asks for 1.50 x E of ETFs; the lane holds at most 1.00 x E of them, 0.20 x E of
-    #   open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 2 whole lots fit; the
-    #   next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 3 of
-    #   6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-    #   4 of 6 in the $400 window alone; the window alone holds all 6 up to E = $1,333.
-    #   Whole sleeves (programs that hold several ETFs) ask for 3.00 x E; the lane holds at most 1.00 x E,
+    #   THE DESIGN IN FORCE: 12 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.33 x E
+    #   (`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.165 x E.
+    #   A lot in every seat asks for 1.98 x E of ETFs; the lane holds at most 1.00 x E of them, 0.20 x E of
+    #   open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 3 whole lots fit; the
+    #   next program's lot of it is 0.005 x E. At E = $2,000, the account all cash and nothing realized: 5 of
+    #   12 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
+    #   6 of 12 in the $400 window alone; the window alone holds all 12 up to E = $1,010.
+    #   Whole sleeves (programs that hold several ETFs) ask for 3.96 x E; the lane holds at most 1.00 x E,
     #   0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
     #   the equity lots: $400 - 0.20 x E against the one-ETF lots above. The gateway's day line (4x
-    #   equity of buys a day, a cancelled one too) admits 16 sends of such a lot: 3 entries can each climb the
-    #   collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.50 x E and
+    #   equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
+    #   collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
     #   0.50 x E.
     # </equity-design>
     #   THE PROBE SLEEVE AT 0.50 (A20, Oct 11, 2026; Claude's decision under goal item 4, from the pre-registered study
@@ -1081,7 +1081,7 @@ CONSTITUTION: dict[str, Any] = {
         "invested_share": "1.00",
         "cash_reserve_usd": "50",
         "open_risk_weight": {"etf": "0.20", "stock": "0.40"},
-        "probe": {"sleeve_share": "0.50", "max_programs": 6, "min_order_usd": "10"},
+        "probe": {"sleeve_share": "0.33", "max_programs": 12, "min_order_usd": "10"},
         "sized": {"min_trades": 1000, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
                   "beat_bh": True, "min_probe_sessions": 5},
         "demotion": {"rule": "edm1", "min_trades": 10, "z": "1.645", "program_loss_usd": "-300", "twin_gap_bp": "15",
@@ -1380,7 +1380,12 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # decides who may OPEN, and `size_entry` holds every entry of every seated program to `position_share`,
     # `invested_share`, the cash reserve and the shared loss budget whatever the count. The swarm's `elane.roster`
     # equals the row in force (league/tests/test_elane.py) and a setting may only lower it.
-    "probe.max_programs": ("0", "6"),
+    # EQDONE-7 (Oct 15, 2026; Claude's decision under goal item 4, a pre-registered study's pick): at most TWELVE, a
+    # second loosening of this one bound, so that the pair (12, 0.33) can be set. Its stated cost: up to twice as many
+    # programs on real money at once (with no skill, all of them the screens' false positives), more refused entries
+    # (each a session that differs from replay), and closes on fewer distinct dates (weaker evidence at a checkpoint).
+    # Every owner line is unchanged: `size_entry` holds each entry to the same caps and the same shared loss budget.
+    "probe.max_programs": ("0", "12"),
     "probe.min_order_usd": ("10", "100"),
     # THE SEAT RULE's constants (A24, Oct 11, 2026; release E5-A; the comment under the table). The floor of a close
     # day is ONE value, a quarter of the sleeve: K is fixed per program when its look is recorded, so a moved floor
@@ -1572,4 +1577,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '111ede85f9b401c9af74f0f1967f9390c37ccd35a47f6fb048257db3c691ce6f'
+PINNED_DIGEST = '6d7fc6d45f8f5831b49c694467303a63b4ec9ceb7f513ab4a65b6915ea855ed5'

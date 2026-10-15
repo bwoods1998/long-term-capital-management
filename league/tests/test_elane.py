@@ -91,7 +91,7 @@ class Settings(StoreCase):
         self.assertTrue(elane.on(ON))
 
     def test_each_value_is_held_inside_its_bound(self):
-        c = elane.cfg({"elane": {"mode": "gate", "roster": 9, "val_tries": 4, "looks_per_lineage": 2,
+        c = elane.cfg({"elane": {"mode": "gate", "roster": SEATS + 3, "val_tries": 4, "looks_per_lineage": 2,
                                  "program_loss_usd": -1000, "universe": ["spy", "XYZ", "qqq"], "structures": ["etf", "bond"],
                                  "birth_share": 0.9}})
         self.assertEqual((c["roster"], c["val_tries"], c["looks_per_lineage"], c["program_loss_usd"]),

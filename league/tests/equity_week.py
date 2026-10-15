@@ -62,6 +62,10 @@ from league.live.venue import Submitted  # noqa: E402
 
 NY = ZoneInfo("America/New_York")
 FRIDAY, MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY2 = (dt.date(2026, 10, d) for d in (9, 12, 13, 14, 15, 16))
+#: THE SCENARIOS' BOOK HAS SIX SEATS whatever pair is in force (EQDONE-7, Oct 15, 2026): the seat rule's fortnights seat
+#: six programs and make the rest wait, so the swarm's roster says six (it may only lower the table's count:
+#: `EquityBook._seat_count`). On a tree whose pair has six seats this is the table's own count and changes nothing.
+SCENARIO_SEATS = 6
 #: The fortnight's last session (thirteen sessions from Monday Oct 12) and the twin scenarios' (eight).
 FORTNIGHT_END, TWIN_END = dt.date(2026, 10, 28), dt.date(2026, 10, 21)
 #: The synthetic store a "twin" scenario's market and replay twins read (league/equity/synth.py; invented, seeded).
@@ -565,7 +569,7 @@ def store_families(root: Path, programs: list[dict], clock: Clock, panel: str, *
     from league.swarm.gate import run_sha
     from league.swarm.store import SwarmStore
 
-    layer: dict[str, Any] = {"elane": {"mode": "gate"}}
+    layer: dict[str, Any] = {"elane": {"mode": "gate", "roster": SCENARIO_SEATS}}
     if panel:
         layer["elane"]["panel"] = {"mode": panel}
     (root / "swarm.json").write_text(json.dumps(layer), encoding="utf-8")
@@ -638,7 +642,7 @@ class House:
         self.state = self.new_state()
         self.table = M.Table.from_constitution()
         self.families = (store_families(self.root, programs, self.clock, panel, forced=forced) if reader == "store"
-                         else MemoryEquityFamilies(programs))
+                         else MemoryEquityFamilies(programs, seats=SCENARIO_SEATS))
         self.decider = InlineDecider()
         self.events: list[tuple[float, str, dict]] = []
         self.alerts: list[tuple[float, str, str]] = []

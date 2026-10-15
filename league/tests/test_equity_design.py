@@ -1,5 +1,6 @@
 """THE SEATS AND THE SLEEVE AS TWO NUMBERS (release E5-S, Oct 11, 2026): the tree is right at EVERY pair of the
-pre-registered grid (seats 3, 4, 5, 6 x sleeve 0.50, 0.33, 0.25), whichever pair `set_design` has put in force.
+pre-registered grid (seats 3, 4, 5, 6 x sleeve 0.50, 0.33, 0.25) and at EQDONE-7's pair (12 x 0.33), whichever pair
+`set_design` has put in force.
 
 - `TheGrid`: the designs table, one row a pair, at a stated E of $2,229 with the account all cash and nothing else
   held: a one-ETF lot in dollars; every seat's lot in its own ETF, sized one after another, with nothing realized and
@@ -46,7 +47,7 @@ from league.tests.swarm_fakes import Clock as SwarmClock
 REAL_SIZE, REAL_AVAILABLE, REAL_NEXT_BAND, REAL_SIZED_SHARE = Z.size_entry, M.available_cash, B.next_band, B.sized_sleeve_share
 SUNDAY, FRIDAY, MONDAY, TUESDAY, WEDNESDAY = dt.date(2026, 10, 11), T.FRIDAY, T.MONDAY, T.TUESDAY, T.WEDNESDAY
 ZERO = D(0)
-ETFS = ("SPY", "QQQ", "IWM", "DIA", "XLK", "XLF")
+ETFS = ("SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLB", "XLC", "XLE", "XLI", "XLP", "XLRE")  # one a seat, up to 12
 #: A stated equity and a stated realized loss (rule arithmetic at stated figures, as the tree's other tests do).
 E = D("2229")
 LOSS = D("43.05")
@@ -73,6 +74,10 @@ ROWS: dict[tuple[int, str], tuple] = {
     (6, "0.33"): ("367.785", (5, ("budget", "161.075")), "400", (4, ("budget", "313.61")), "356.95",
                   (3, ("instrument", "11.145"))),
     (6, "0.25"): ("278.625", (6, None), "334.35", (6, None), "334.35", (4, ("instrument", "0"))),
+    # EQDONE-7's pair: the window binds at the same lot as six seats at 0.33 (five whole lots, the sixth cut), so the
+    # extra seats add programs, not dollars at risk: seats 7 to 12 open nothing until the window has room.
+    (12, "0.33"): ("367.785", (5, ("budget", "161.075")), "400", (4, ("budget", "313.61")), "356.95",
+                   (3, ("instrument", "11.145"))),
 }
 
 
@@ -88,7 +93,7 @@ def expand(seats: int, lot: D, fit: tuple) -> list[tuple[D, str]]:
 class TheGrid(unittest.TestCase):
     def test_the_table_names_every_pair_and_the_pair_in_force_is_one_of_them(self):
         self.assertEqual(set(ROWS), set(X.CANDIDATES))
-        self.assertEqual(len(X.CANDIDATES), 12)
+        self.assertEqual(len(X.CANDIDATES), 13, "EQDONE-3's twelve and EQDONE-7's one")
         self.assertIn(X.in_force(), ROWS)
         self.assertEqual(X.REFERENCE, (3, "0.50"), "A20's design: the rollback")
         self.assertEqual(set(X.DIGESTS), set(X.CANDIDATES))
@@ -190,6 +195,10 @@ class RealMoney(T.BookTest):
         h = T.Harness(root or self.fresh(), cash=str(E), E=str(E), table=X.table_at(seats, sleeve).equity, **kw)
         self.addCleanup(h.state.close)
         h.market.quotes.update({"XLK": (D("249.90"), D("250.10")), "XLF": (D("49.99"), D("50.01"))})
+        # EQDONE-7's pair seats twelve, one ETF each: the six symbols past the first six, quoted as sector ETFs trade.
+        h.market.quotes.update({"XLB": (D("89.99"), D("90.01")), "XLC": (D("109.98"), D("110.02")),
+                                "XLE": (D("94.99"), D("95.01")), "XLI": (D("139.98"), D("140.02")),
+                                "XLP": (D("79.99"), D("80.01")), "XLRE": (D("41.99"), D("42.01"))})
         return h
 
     def redeploy(self, h: T.Harness, seats: int, sleeve: str) -> None:
@@ -419,7 +428,7 @@ class TheDeploy(RealMoney):
         elane._roster_good.clear()
         self.addCleanup(elane._roster_good.clear)
         self.assertEqual(elane.roster_seats(self.root), 3, "a swarm.json that still says 3 keeps three seats")
-        (self.root / "swarm.json").write_text(json.dumps({"elane": {"roster": 9}}))
+        (self.root / "swarm.json").write_text(json.dumps({"elane": {"roster": seats + 3}}))
         self.assertEqual(elane.roster_seats(self.root), seats, "and one above the table's seats is the table's")
 
     # ---------------------------------------------------------------- (b) a planned buy is sized at its send

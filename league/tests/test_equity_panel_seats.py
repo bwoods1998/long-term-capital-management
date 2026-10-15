@@ -473,9 +473,11 @@ class TheReportSaysThePanelPool(unittest.TestCase):
 
     def test_the_statement_at_the_rows_in_force(self):
         from league.ops import dlane_report as R
+        from league.tests import equity_design as X
 
         note = R.equity_panel_note()
-        for words in ("one of 1 panel seat(s) of its own, never one of the 6 ETF seats, at a sleeve of 0.10 x E",
+        seats = X.in_force()[0]                         # the ETF pool's seats in force (6 at A32, 12 at EQDONE-7's pair)
+        for words in (f"one of 1 panel seat(s) of its own, never one of the {seats} ETF seats, at a sleeve of 0.10 x E",
                       "0.04 x E of open risk at the stock weight (0.40), in the same $400 window, first come",
                       "one market move"):
             self.assertIn(words, note)
