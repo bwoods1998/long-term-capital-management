@@ -32,7 +32,7 @@ exact to the cent:
   broker fill on a contract a position of the book still holds that the book has not matched (a liquidation, after
   `SETTLE_SECONDS`). Also alerted.
 
-THE EQUITY BOOK'S OWN SHARES (release E1, Oct 2026; found Oct 15: from the first real share buy on Oct 13 every
+THE EQUITY BOOK'S OWN SHARES (release E1, Oct 2026; found Oct 15: from the first real share buy at 13:32Z Oct 12 every
 reading said "shares an assignment or an exercise left are still held", so Profit, the budget's p30 and the close
 economics were unknown for as long as the equity lane held a lot). The equity book (`league/equity/live.py`, the same
 `live.sqlite`) trades shares on this account and prices its lots from its own fills; they are not Profit here and never

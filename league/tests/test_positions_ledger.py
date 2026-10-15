@@ -1037,7 +1037,7 @@ class ReviewOf408Test(Case):
 
 
 class EquityBookTest(Case):
-    """THE EQUITY BOOK'S OWN SHARES (release E1; found Oct 15, 2026 on the House: from the first real share buy on Oct 13
+    """THE EQUITY BOOK'S OWN SHARES (release E1; found Oct 15, 2026 on the House: from the first real share buy on Oct 12
     every reading said "shares an assignment or an exercise left are still held (8 activities)", the eight being the
     equity lane's own fills, so Profit, the budget's p30 and the close economics were unknown while it held a lot)."""
 
@@ -1071,7 +1071,7 @@ class EquityBookTest(Case):
         a.activity("FILL", transaction_time=iso(T0 + 180), symbol="QQQ", side="buy", qty="2", price="500", order_id="eqv-2")
         before = self.reading(shares=True)
         self.assertTrue(any("shares an assignment or an exercise left are still held" in r for r in before["blocking"]),
-                        "a book with no equity tables reads them as an assignment's, as the House did from Oct 13")
+                        "a book with no equity tables reads them as an assignment's, as the House did from Oct 12")
         self.assertIsNone(self.table(before)["trading"]["pnl_usd"])
         self.equity_tables()
         self.equity_order(venue_id="eqv-1", client_id="eq-cid-1", at=T0 + 115)

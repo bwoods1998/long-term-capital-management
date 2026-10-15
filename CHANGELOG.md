@@ -48,7 +48,7 @@ on branches.
   watchdog tests; `npm run check`, `npm test` 463/463.
 - **The equity book's own shares** (`league/account_activity.py`, `league/ops/economics.py`). The account reading
   predated release E1 and read every share fill on the account as an assignment's: from the first real share buy
-  (Oct 13) every reading said "shares an assignment or an exercise left are still held", so the site's Profit, the
+  (13:32Z Oct 12) every reading said "shares an assignment or an exercise left are still held", so the site's Profit, the
   budget's p30 (`budget.json` errors; earned 0, which lifts no research) and the close economics' `reconciled` were
   unknown while the lane held a lot, and every budget run raised a House warning. `read_book` now also reads the
   equity book's orders and open lots; a share fill on one of its orders is left out; `shares_held` counts only shares
