@@ -30,6 +30,25 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### The Probe sleeve 0.33 x E at six seats beside one open options structure a family (`set_design 6 0.33`), on `feat/equity-sleeve-033` above `feat/options-opf1` (DRAFT for the captain's decision; unreleased; an owner deploy; THE MONEY DIGEST MOVES ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
+
+- **The rows** (`set_design 6 0.33`): `equity_money.probe.sleeve_share` "0.50" -> "0.33", inside its bound, new lots
+  only; the seats stay 6. The design blocks restate the figures.
+- **Why, and what the pre-registered rule said.** With the options program trading as its code does (one short-dated
+  call a gate-on session, held to expiry, one open structure a family by the parent change), the $400 window is shared
+  by the six share programs' lots and its calls. Measured on the House's own engine and sizing over 3,048 historical
+  paths from the live state: P(Done) by Dec 7 +4.9 points (SE 0.8) with the calls priced from the paths, +3.9 (SE 1.0)
+  at zero edge; by Nov 6 +5.9 / +4.3; refused share entries 15.8 -> 8.0 a path; a window pause at an open on 90% ->
+  64% of paths; the consistency clause failing on 4.6% -> 1.5% of paths. THE RULE PINNED BEFORE THE RUN SAYS A32 STAYS:
+  0.33's 5% tail of the 12-week tally is $2.73 past its $50 proviso in one of the two pricings. Shipping this
+  overrides that proviso: a loosened rule, said so.
+- **Its cost.** The tail (the 5% worst 12-week tally about $50 deeper); smaller share lots (about $190 against $250),
+  so each close carries less market direction; the options program opens more (5.0 -> 5.8 a path in 12 weeks); the
+  sleeve is set a third time (A27 allowed it once more after Monday's option close; A32 used that).
+- **Recorded fixture.** `league/tests/fixtures/equity_etf_orders.json` re-recorded on this tree (`e7cd68d1`) by
+  `league/tests/equity_week.py`: the six share programs' week at the 0.33 sleeve, order for order; `RECORDED_ON` moves.
+- **Rollback**, one owner deploy: `set_design 6 0.50` (new lots only).
+
 ### One open structure a Probe family (`options_money.probe.open_per_family` 3 -> 1), on `feat/options-opf1` (unreleased; an owner deploy outside 12:55-20:05Z; THE MONEY DIGEST MOVES ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
 
 - **The row** (`league/constitution.py`, the comment above `options_money`): `probe.open_per_family` 3 -> 1, inside
