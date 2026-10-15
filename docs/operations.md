@@ -207,7 +207,8 @@ after `forward_xs` is done before the pre-open). A failure of the House leaves a
 nobody; the next night reads the same first k days. THE STALL RULE: a lineage whose next step waited on the House on
 five of the record's nights under one engine id is "stalled": no run, reported, nothing marked, asked again at a new
 engine id; a lineage that waited goes after those that did not. Statuses in the permit file: pending, pass, fail,
-void, ineligible, stopped (its representative stopped in the record), stalled, superseded (another receipt's).
+void, ineligible, stopped (its representative stopped in the record), stalled, superseded (another receipt's). Each
+row also carries its lineage's FWD1_START (`"start"`, an ISO date: L5, A48).
 
 **The sentence beside a forward-passed trade** (`fwd1_rule.beside`: in the verdict row and the report, and beside
 every trade of a program seated on a forward pass in the direction report, `dlane_report.EquityScreens`): the type and
@@ -219,7 +220,29 @@ forward passes against the expected number at zero edge.
 
 **The seat path, built and OFF.** `elane.fwd1.seats` "off" (policy.json and the code). Turned "on" (swarm.json:
 `"elane": {"fwd1": {"seats": "on"}}`): a lineage the permit file lists pending, pass or fail takes no sealed
-Validation try (`elane.try_open`), and an unreadable permit file refuses every equity try; an ETF pass becomes a
+Validation try (`elane.try_open` asks `elane_forward.try_refused`), and an unreadable permit file refuses every equity
+try. **L5 (A48): an index-only case-N lineage keeps its S2 try until the close of its FWD1_START session; the judge
+then voids it (A33 (4)). A loosening of A39's stated cost "while on, a lineage FWD1 lists takes no sealed S2 try".**
+Each permit row carries its lineage's FWD1_START (`"start"`, an ISO date; the file's version stays 1). The exemption
+(`elane_forward.untried`) holds only for a row listed pending, case N, type ETF; asked by THE ROW'S OWN FAMILY (the
+representative's: the judge's void reads the families of the lineage's registry rows, so a sibling family of the
+lineage is refused); with the row's start STRICTLY AFTER the file's top-level "start" (the pin's first judged
+session: FWD1_START is max(first_day, the pin's start), and a lineage registered before the pin has forward days in
+the record already; the pin in force starts Oct 16 and the seats go on Oct 21, so this costs nothing now); of a family
+that is not forward-only (`elane.forward_only` False, asked again inside it) and not a panel; while the store's clock
+is before that session's close (`league/equity/schedule.py` `moments(start).close_at`; the forward night that counts
+a day runs after it, so the lineage has seen nothing forward). Why: an index family whose v1 failed Train is
+registered and sighted before its v2 passes, hours later, and the listing pushed it from S2 to FWD1-R's WEAK screen on
+a timing race. One look: once its family records the pre-check (`elane_try`) or the registry tags it, the judge's next
+night writes "void" ("a case-N lineage reached a sealed pre-check after FWD1_START"), the file lists it void, and it
+keeps its sealed path. **Expected, not a fault:** in that very timing (v1 sighted, v2 passing Train with the same
+first_day and taking its exempt try before the next night), the night's `repick` writes a `kept` event and the job
+raises its `repick_kept` warning before the void. Fail closed: a row without "start" (a file of the earlier job), a
+file without its top-level start, a date that is not one, a start that is no session or that the calendar cannot
+answer, a clock that cannot be read, another case or type, another family of the lineage, a pass or a fail: refused
+as before. Tests: `league/tests/test_elane_forward.py` `TheIndexLineageBeforeItsFirstForwardDay`,
+`test_forward_screen.py` `TheIndexLineageUntried` (the whole path to the void), `test_elane_rsec.py` (`try_open` on
+the store's clock; a sector family under the same row stays forward-only). An ETF pass becomes a
 Candidate THROUGH THE ROSTER (the seat rule in force decides its seat; the Probe money rows size and demote it) when
 its family is in the Gym band with the judged version under the identity the verdict was read under, one live forward
 seat a mechanism cell. **A panel pass is made eligible only**, case N only (A34) and one a mechanism cell at a time: no
@@ -258,7 +281,8 @@ order is in flight; outside 12:55-20:05Z. Then on the owner's machine, a dry run
 SPY stays first (the `forward_shadow` canary reads `universe[0]`); the whole list goes in one call (the first sector
 registration locks the sectors controls to it); **XLF stays out** until the House store's 2016-09-19 XLF row is
 corrected. The dry run must print only those two keys moving. `elane.fwd1.seats` "on" is a separate, later step, taken
-before the first checkpoint-5 night (it also makes every listed index lineage forward-only).
+before the first checkpoint-5 night (it also makes every listed index lineage forward-only, but an untried case-N one
+before the close of its FWD1_START session: L5, A48, **The seat path**, above).
 **Its cost, stated:** A19's four-symbol list is loosened for forward-only lineages; the loosening carried is A33's own
 (an ETF forward pass at 2.61 says almost nothing about skill; one live forward seat a mechanism cell bounds the
 near-copies); births spend research dollars on the Sail routes up to `elane.e2.usd_day`.

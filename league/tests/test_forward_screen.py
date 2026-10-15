@@ -265,6 +265,7 @@ class TheVerdicts(Fixture):
         doc = json.loads((self.root / FS.PERMITS).read_text())
         row = doc["lineages"]["equity:f1"]
         self.assertEqual((row["status"], row["family"], row["version"], row["k"], row["weak"]), ("pass", "f1", 1, 5, True))
+        self.assertEqual(row["start"], "2026-10-16")                # its FWD1_START (L5, A48): a date, no figure
         self.assertEqual(row["run_sha"], f"{pid:064d}")
         self.assertEqual(row["engine"], "equity-engine-1+aaaaaaaaaaaa+fwd-1")
 
@@ -917,6 +918,136 @@ class TheBudgetAndTheDeadline(Fixture):
             self.assertIn("pre-open", FS.run(ctx)["why"])
         finally:
             ss.load, R.rule = real, real_rule
+
+
+class TheIndexLineageUntried(Fixture):
+    """L5 (A48): every permit row carries its lineage's FWD1_START ("start"); the swarm keeps an index-only case-N
+    lineage's S2 try, while the file lists it pending, for the representative's own family and a start after the
+    pin's, until the close of that session (league/swarm/elane_forward.py `untried`); once its family records the
+    sealed pre-check the judge's next night voids it (A33 (4): `judge`'s "a case-N lineage reached a sealed pre-check
+    after FWD1_START"), the file lists it "void" (not `JUDGED`) and it keeps its sealed path. One look: the S2 one,
+    never a forward verdict beside it. The swarm store is a stand-in (its root and its clock: all `try_refused` reads
+    of it)."""
+
+    ON = {"elane": {"fwd1": {"mode": "record", "seats": "on"}}}
+
+    def index(self, fid: str) -> dict:
+        fam = self.family(fid)
+        fam["spec"]["symbols"] = ["SPY", "QQQ"]                    # index-only: R-SEC lets its try through
+        return fam
+
+    def test_every_permit_row_carries_its_start(self):
+        for fid, first_day in (("f1", "2026-10-16"), ("f2", "2026-10-13"), ("f3", "2026-10-19")):
+            self.index(fid)
+            self.row(fid, 1, first_day=first_day)
+        self.first_night()
+        db = self.store()
+        starts = {str(r["lineage"]): str(r["start"]) for r in db.execute("SELECT lineage, start FROM fwd1_lineages")}
+        db.close()
+        # FWD1_START = max(first_day, the pin's first judged session Oct 16)
+        self.assertEqual(starts, {"equity:f1": "2026-10-16", "equity:f2": "2026-10-16", "equity:f3": "2026-10-19"})
+        doc = json.loads((self.root / FS.PERMITS).read_text())
+        self.assertEqual(doc["version"], FS.PERMITS_VERSION)
+        self.assertEqual(FS.PERMITS_VERSION, 1)                     # an added key: the version stays
+        self.assertEqual({k: v["start"] for k, v in doc["lineages"].items()}, starts)
+        self.assertEqual({v["status"] for v in doc["lineages"].values()}, {"pending"})
+        for row in doc["lineages"].values():
+            self.assertEqual(dt.date.fromisoformat(row["start"]).isoformat(), row["start"])
+            self.assertTrue(schedule.is_session(row["start"]))
+
+    def test_the_whole_path_an_untried_index_lineage_takes_its_try_and_is_voided(self):
+        from league.swarm import elane_forward as EF
+
+        fam = self.index("f1")
+        v1 = self.row("f1", 1, first_day="2026-10-19", reason="train_fail")   # its v1 failed Train, after the pin
+        self.first_night()                                          # Thu Oct 15 14:00Z: sighted pending, start Mon
+        row = self.permits()["equity:f1"]
+        self.assertEqual((row["status"], row["case"], row["type"], row["start"], row["family"]),
+                         ("pending", "N", "ETF", "2026-10-19", "f1"))
+        self.assertEqual(json.loads((self.root / FS.PERMITS).read_text())["start"], START.isoformat())   # the pin's
+        close = schedule.moments(dt.date(2026, 10, 19)).close_at
+        swarm = types.SimpleNamespace(root=self.root, clock=lambda: PIN_AT + 3 * 3600.0)
+        # its v2 passes Train hours later: the S2 try is open while Mon Oct 19's session has not closed ...
+        self.assertTrue(EF.untried(swarm, fam, row, pin_start=START.isoformat()))
+        self.assertIsNone(EF.try_refused(swarm, fam, self.ON))
+        self.assertIsNone(EF.try_refused(swarm, fam, self.ON, now=close - 1.0))
+        # ... and shut from that close (as A39 built it), until FWD1 has judged it; a sibling family never had it
+        self.assertEqual(EF.try_refused(swarm, fam, self.ON, now=close), EF.REFUSED)
+        sibling = self.index("f1b")
+        sibling["lineage"] = "f1"
+        self.assertEqual(EF.try_refused(swarm, sibling, self.ON), EF.REFUSED)
+        # v2 registered (train_pass, the same first_day) and its S2 try taken before the close (elane.validate's record)
+        self.row("f1", 2, first_day="2026-10-19")
+        fam["state"]["elane_try"] = {"version": 2, "first": True, "precheck": True, "entered": True, "retry_sha": None}
+        self.days(v1, [0.0], first=dt.date(2026, 10, 19))           # the record's night of Oct 19 runs after the close
+        evening = close + 2.5 * 3600.0
+        receipt = self.night(now=evening)
+        db = self.store()
+        verdict = dict(db.execute("SELECT * FROM fwd1_verdicts WHERE lineage='equity:f1'").fetchone())
+        checks = db.execute("SELECT COUNT(*) FROM fwd1_checks").fetchone()[0]
+        voids = [dict(r) for r in db.execute("SELECT * FROM fwd1_events WHERE kind='void'")]
+        db.close()
+        self.assertEqual(verdict["verdict"], "void")
+        self.assertEqual(receipt.get("checks", 0), 0)
+        self.assertEqual(checks, 0)                                 # judged no further: no checkpoint read
+        self.assertEqual(len(voids), 1)
+        self.assertIn("reached a sealed pre-check after FWD1_START", voids[0]["payload"])
+        listed = self.permits()["equity:f1"]
+        self.assertEqual((listed["status"], listed["start"]), ("void", "2026-10-19"))
+        self.assertNotIn("void", EF.JUDGED)
+        self.assertIsNone(EF.try_refused(swarm, fam, self.ON, now=evening))   # its sealed path stands
+        self.assertIsNone(EF.try_refused(swarm, fam, self.ON, now=evening + 86400.0 * 30))
+        self.night(now=evening + 86400.0)                           # nothing judges it again
+        self.assertEqual(self.permits()["equity:f1"]["status"], "void")
+
+    def test_the_motivating_timing_writes_a_kept_event_before_the_void(self):
+        """v1 sighted, v2 passes Train with the same first_day and takes its exempt try before the next night: that
+        night's `repick` reads v2 as better but sealed (another case), keeps v1 with a `kept` event and the job warns
+        (`repick_kept`), then the judge voids the lineage. Expected, not a fault."""
+        fam = self.index("f1")
+        self.row("f1", 1, first_day="2026-10-19", reason="train_fail")
+        self.first_night()
+        self.row("f1", 2, first_day="2026-10-19")
+        fam["state"]["elane_try"] = {"version": 2, "first": True, "precheck": True, "entered": True, "retry_sha": None}
+        thu_night = schedule.moments(dt.date(2026, 10, 15)).close_at + 3 * 3600.0
+        receipt = self.night(now=thu_night)
+        db = self.store()
+        kinds = [str(r["kind"]) for r in db.execute("SELECT kind FROM fwd1_events WHERE kind IN ('kept', 'void') "
+                                                     "ORDER BY seq")]
+        verdict = db.execute("SELECT verdict FROM fwd1_verdicts WHERE lineage='equity:f1'").fetchone()[0]
+        db.close()
+        self.assertEqual(kinds, ["kept", "void"])
+        self.assertEqual(receipt.get("repick_kept"), 1)
+        self.assertEqual(verdict, "void")
+
+    def test_a_lineage_registered_before_the_pin_is_refused(self):
+        """FWD1_START = the pin's start when the lineage's first_day is earlier: its forward days are in the record
+        already, so no exemption (the file's top-level start is not before the row's)."""
+        from league.swarm import elane_forward as EF
+
+        fam = self.index("f2")
+        pid = self.row("f2", 1, first_day="2026-10-13")
+        self.days(pid, [0.001, -0.002], first=dt.date(2026, 10, 13))
+        self.first_night()
+        row = self.permits()["equity:f2"]
+        self.assertEqual((row["status"], row["start"]), ("pending", "2026-10-16"))
+        swarm = types.SimpleNamespace(root=self.root, clock=lambda: PIN_AT + 3600.0)
+        self.assertEqual(EF.try_refused(swarm, fam, self.ON), EF.REFUSED)
+
+    def test_a_pending_lineage_untried_by_the_close_stays_judged_and_refused(self):
+        from league.swarm import elane_forward as EF
+
+        fam = self.index("f1")
+        pid = self.row("f1", 1, first_day="2026-10-19")
+        self.first_night()
+        close = schedule.moments(dt.date(2026, 10, 19)).close_at
+        swarm = types.SimpleNamespace(root=self.root, clock=lambda: close - 3600.0)
+        self.assertIsNone(EF.try_refused(swarm, fam, self.ON))       # open before the close ...
+        names = self.days(pid, [0.0, 0.0], first=dt.date(2026, 10, 19))
+        self.night(now=schedule.moments(dt.date.fromisoformat(names[-1])).close_at + 9000.0)
+        self.assertEqual(self.permits()["equity:f1"]["status"], "pending")
+        swarm = types.SimpleNamespace(root=self.root, clock=lambda: close + 9000.0)
+        self.assertEqual(EF.try_refused(swarm, fam, self.ON), EF.REFUSED)    # ... FWD1 judges it: no S2 look now
 
 
 class TheJob(Fixture):

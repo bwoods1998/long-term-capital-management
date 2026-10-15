@@ -124,6 +124,41 @@ class TheSealedTry(Case):
         self.assertFalse(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_ON), "FWD1's own rule, as built")
         self.assertTrue(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_OFF))
 
+    def test_l5_an_index_lineage_listed_pending_keeps_its_try_until_its_start_closes(self):
+        """L5 (A48): with the seats on, an index-only case-N lineage the file lists pending keeps its S2 try
+        (`try_open`, `next_try`, on the store's clock) until the close of its FWD1_START session (Mon Oct 19, after
+        the pin's start Fri Oct 16 that `permit` writes), and loses it from that close; a sector family under the very
+        same row stays forward-only (R-SEC is asked first, and again)."""
+        import datetime as dt
+
+        from league.equity import schedule
+
+        close = schedule.moments(dt.date(2026, 10, 19)).close_at
+        self.born("idx", symbols=("SPY", "QQQ"))
+        for fid, symbols in OUTSIDE.items():
+            self.born(fid, symbols=symbols)
+        row = {"status": "pending", "type": "ETF", "case": "N", "start": "2026-10-19"}
+        self.permit({EF.lineage_of(self.store, self.store.family(fid)): {**row, "family": fid}
+                     for fid in ("idx", *OUTSIDE)})
+        self.clock.t = close - 3600.0
+        self.assertTrue(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_ON))
+        self.assertEqual(elane.next_try(self.store, self.store.family("idx"), SEATS_ON), 1)
+        for fid in OUTSIDE:
+            with self.subTest(family=fid):
+                self.assertFalse(elane.try_open(self.store, self.store.family(fid), 1, SEATS_ON))
+        self.clock.t = close
+        self.assertFalse(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_ON))
+        self.assertIsNone(elane.next_try(self.store, self.store.family("idx"), SEATS_ON))
+        self.assertTrue(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_OFF))
+        self.clock.t = close - 3600.0
+        lineage = EF.lineage_of(self.store, self.store.family("idx"))
+        self.permit({lineage: {"status": "pending"}})
+        self.assertFalse(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_ON), "no start: as built")
+        self.permit({lineage: {**row, "family": "idx", "start": "2026-10-16"}})
+        self.assertFalse(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_ON), "the pin's start: no")
+        self.permit({lineage: {**row, "family": "another"}})
+        self.assertFalse(elane.try_open(self.store, self.store.family("idx"), 1, SEATS_ON), "not the row's family")
+
     def test_the_tournament_round_asks_nothing_and_retires_nothing(self):
         for fid, symbols in OUTSIDE.items():
             self.born(fid, symbols=symbols)

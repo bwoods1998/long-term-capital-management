@@ -1,18 +1,21 @@
 """The forward screen's seat path, the swarm's half (league/swarm/elane_forward.py): BUILT AND OFF. With the switch
-off nothing acts; on, a FWD1-judged lineage takes no sealed Validation try, an ETF pass becomes a Candidate through the
-roster's own machinery (one live forward seat a mechanism cell), and a panel pass is made eligible only (its seat pool
-is E4 step two's). The store is a fake; every row is invented."""
+off nothing acts; on, a FWD1-judged lineage takes no sealed Validation try (but an index-only case-N lineage before the
+close of its FWD1_START session: L5, A48), an ETF pass becomes a Candidate through the roster's own machinery (one live
+forward seat a mechanism cell), and a panel pass is made eligible only (its seat pool is E4 step two's). The store is a
+fake; every row is invented."""
 
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import json
 import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from league.equity import EQUITY_ENGINE_VERSION
+from league.equity import EQUITY_ENGINE_VERSION, schedule
 from league.swarm import elane, elane_forward as EF
 from league.swarm.evaluator import equity_fingerprint
 from league.swarm.gate import run_sha
@@ -30,9 +33,10 @@ class FakeStore:
         self.bands: list[tuple] = []
 
     def add(self, fid: str, *, structure: str = "etf", band: str = "gym", lineage: str | None = None, state=None,
-            retired: bool = False) -> dict:
+            retired: bool = False, symbols: list[str] | None = None) -> dict:
+        spec = {"lane": "equity", "agenda": "trend", **({"symbols": list(symbols)} if symbols is not None else {})}
         self.fams[fid] = {"id": fid, "structure": structure, "band": band, "retired_at": "x" if retired else None,
-                          "spec": {"lane": "equity", "agenda": "trend"}, "lineage": lineage, "state": dict(state or {})}
+                          "spec": spec, "lineage": lineage, "state": dict(state or {})}
         self.versions[(fid, 1)] = {"n": 1, "sha": f"{fid}-sha", "params": {}, "code": "PARAMS = {}\n"}
         return self.fams[fid]
 
@@ -131,6 +135,183 @@ class TheSealedTry(Base):
         self.assertEqual(EF.try_refused(self.store, fam, ON), EF.UNREADABLE)
         (self.root / EF.PERMITS).unlink()
         self.assertIsNone(EF.try_refused(self.store, fam, ON))     # no file yet: nothing judged
+
+
+#: L5's invented FWD1_START: Monday Oct 19, 2026, a full session (its close 16:00 New York, 20:00Z), the first forward
+#: day of a lineage registered after the pin; the pin's first judged session (the file's top-level "start") is Friday
+#: Oct 16, as `Base.permit` writes it.
+START = "2026-10-19"
+PIN_START = "2026-10-16"
+CLOSE = schedule.moments(dt.date(2026, 10, 19)).close_at
+#: The permit file's top-level "start" left out (`TheIndexLineageBeforeItsFirstForwardDay.permit`).
+ABSENT = object()
+
+
+class TheIndexLineageBeforeItsFirstForwardDay(Base):
+    """L5 (A48): an index-only case-N lineage the file lists pending keeps its S2 try, for the row's own family and a
+    start after the pin's, until the close of its FWD1_START session (the judge then voids it:
+    league/tests/test_forward_screen.py `TheIndexLineageUntried`); any doubt keeps the refusal (fail closed)."""
+
+    def permit(self, rows: dict, *, pin=PIN_START):
+        doc = {"version": EF.PERMITS_VERSION, "screen": "FWD1-R", "receipt": "c" * 64, "start": pin, "at": "x",
+               "lineages": rows}
+        if pin is ABSENT:
+            del doc["start"]
+        (self.root / EF.PERMITS).write_text(json.dumps(doc))
+
+    def row(self, **over):
+        return {"status": "pending", "type": "ETF", "case": "N", "cell": "equity / trend / index", "family": "f1",
+                "version": 1, "start": START, "run_sha": None, "k": None, "weak": None, "engine": None, "words": None,
+                **over}
+
+    def index(self, fid: str = "f1", **kw) -> dict:
+        return self.store.add(fid, symbols=["SPY", "QQQ"], **kw)
+
+    def test_the_close_is_new_yorks_four_oclock(self):
+        self.assertEqual(CLOSE, dt.datetime(2026, 10, 19, 20, 0, tzinfo=dt.timezone.utc).timestamp())
+
+    def test_exempt_before_the_close_of_its_start(self):
+        fam = self.index()
+        self.permit({"equity:f1": self.row()})
+        for now in (CLOSE - 86400.0 * 4, CLOSE - 3600.0, CLOSE - 1.0):
+            with self.subTest(now=now):
+                self.assertTrue(EF.untried(self.store, fam, self.row(), pin_start=PIN_START, now=now))
+                self.assertIsNone(EF.try_refused(self.store, fam, ON, now=now))
+        self.assertFalse(EF.untried(self.store, fam, self.row(), now=CLOSE - 3600.0))   # no pin start given
+        self.assertEqual(EF.permit_file(self.root), ({"equity:f1": self.row()}, PIN_START))   # one parse, both halves
+        self.assertEqual(EF.permits(self.root), {"equity:f1": self.row()})                   # its shape kept
+
+    def test_refused_at_and_after_the_close(self):
+        fam = self.index()
+        self.permit({"equity:f1": self.row()})
+        for now in (CLOSE, CLOSE + 1.0, CLOSE + 86400.0 * 3):
+            with self.subTest(now=now):
+                self.assertEqual(EF.try_refused(self.store, fam, ON, now=now), EF.REFUSED)
+
+    def test_refused_unless_its_start_is_after_the_pins(self):
+        """FWD1_START = max(first_day, the pin's start): only a start after the pin's is the lineage's own first
+        forward day (one registered before the pin has forward days in the record already)."""
+        fam = self.index()
+        own_close = schedule.moments(dt.date(2026, 10, 16)).close_at
+        for start in ("2026-10-16", "2026-10-15"):                  # at the pin's start, and before it
+            self.permit({"equity:f1": self.row(start=start)})
+            with self.subTest(start=start):
+                self.assertEqual(EF.try_refused(self.store, fam, ON, now=own_close - 86400.0 * 2), EF.REFUSED)
+        for pin in (ABSENT, None, "", "20261016", "2026-10-16T00:00:00", 20261016, "2026-10-20"):
+            self.permit({"equity:f1": self.row()}, pin=pin)
+            with self.subTest(pin="absent" if pin is ABSENT else pin):
+                self.assertEqual(EF.try_refused(self.store, fam, ON, now=CLOSE - 3600.0), EF.REFUSED)
+        self.permit({"equity:f1": self.row()}, pin="2026-10-15")      # a start after the pin's: exempt
+        self.assertIsNone(EF.try_refused(self.store, fam, ON, now=CLOSE - 3600.0))
+
+    def test_refused_for_a_sibling_family_of_the_lineage(self):
+        """The judge's void reads the families of the lineage's registry rows: the exemption is the representative's
+        own family (the row's), never a sibling the registry may not have taken yet."""
+        rep = self.index()
+        sibling = self.index("f1b", lineage="f1")
+        self.assertEqual(EF.lineage_of(self.store, sibling), "equity:f1")
+        self.permit({"equity:f1": self.row()})
+        early = CLOSE - 3600.0
+        self.assertIsNone(EF.try_refused(self.store, rep, ON, now=early))
+        self.assertEqual(EF.try_refused(self.store, sibling, ON, now=early), EF.REFUSED)
+        for family in (None, "", "f1b "):
+            self.permit({"equity:f1": self.row(family=family)})
+            with self.subTest(family=family):
+                self.assertEqual(EF.try_refused(self.store, rep, ON, now=early), EF.REFUSED)
+        self.assertFalse(EF.untried(self.store, {**rep, "id": None}, self.row(family=None), pin_start=PIN_START,
+                                    now=early))
+
+    def test_the_stores_clock_when_no_time_is_given(self):
+        fam = self.index()
+        self.permit({"equity:f1": self.row()})
+        self.store.clock = lambda: CLOSE - 60.0
+        self.assertIsNone(EF.try_refused(self.store, fam, ON))
+        self.store.clock = lambda: CLOSE
+        self.assertEqual(EF.try_refused(self.store, fam, ON), EF.REFUSED)
+        for bad in (lambda: float("nan"), lambda: "soon"):
+            self.store.clock = bad
+            self.assertEqual(EF.try_refused(self.store, fam, ON), EF.REFUSED)    # a clock that cannot be read
+        del self.store.clock
+        with mock.patch.object(EF.time, "time", return_value=CLOSE - 60.0):
+            self.assertIsNone(EF.try_refused(self.store, fam, ON))              # no store clock: the wall's
+        self.assertEqual(EF.try_refused(self.store, fam, ON, now=float("inf")), EF.REFUSED)
+
+    def test_refused_with_no_start_or_one_that_cannot_be_read(self):
+        fam = self.index()
+        early = CLOSE - 3600.0
+        row = self.row()
+        del row["start"]                                   # a file of the earlier job: refused as before
+        for bad in (row, self.row(start=None), self.row(start=""), self.row(start="2026-19-10"),
+                    self.row(start="20261019"), self.row(start="2026-10-19T00:00:00"), self.row(start=20261019),
+                    self.row(start=["2026-10-19"])):
+            self.permit({"equity:f1": bad})
+            with self.subTest(start=bad.get("start", "absent")):
+                self.assertEqual(EF.try_refused(self.store, fam, ON, now=early), EF.REFUSED)
+
+    def test_refused_when_the_start_is_no_session_or_the_calendar_cannot_answer(self):
+        fam = self.index()
+        self.assertIsNone(schedule.moments(dt.date(2026, 10, 17)))      # a Saturday
+        self.assertIsNone(schedule.moments(dt.date(2200, 1, 2)))        # past the computed calendar's years
+        for start in ("2026-10-17", "2200-01-02"):
+            self.permit({"equity:f1": self.row(start=start)})
+            with self.subTest(start=start):
+                self.assertEqual(EF.try_refused(self.store, fam, ON, now=CLOSE - 86400.0 * 4), EF.REFUSED)
+        self.permit({"equity:f1": self.row()})
+        with mock.patch.object(schedule, "moments", side_effect=RuntimeError("the calendar")):
+            self.assertEqual(EF.try_refused(self.store, fam, ON, now=CLOSE - 3600.0), EF.REFUSED)
+        with mock.patch.object(schedule, "moments", return_value=None):
+            self.assertEqual(EF.try_refused(self.store, fam, ON, now=CLOSE - 3600.0), EF.REFUSED)
+
+    def test_refused_for_another_case_or_type_and_for_a_verdict(self):
+        fam = self.index()
+        early = CLOSE - 3600.0
+        for over in ({"case": "XS1"}, {"case": None}, {"type": "PANEL"}, {"type": None}, {"status": "pass"},
+                     {"status": "fail"}):
+            self.permit({"equity:f1": self.row(**over)})
+            with self.subTest(**{k: str(v) for k, v in over.items()}):
+                self.assertEqual(EF.try_refused(self.store, fam, ON, now=early), EF.REFUSED)
+        for status in ("void", "ineligible", "stopped", "stalled", "superseded"):
+            self.permit({"equity:f1": self.row(status=status)})
+            self.assertIsNone(EF.try_refused(self.store, fam, ON, now=CLOSE + 86400.0))   # its sealed path, as before
+
+    def test_refused_when_forward_only_or_a_panel(self):
+        early = CLOSE - 3600.0
+        for fid, symbols in (("xlk", ["XLK"]), ("spy-xlk", ["SPY", "XLK"]), ("none", [])):
+            fam = self.store.add(fid, symbols=symbols)
+            self.permit({f"equity:{fid}": self.row(family=fid)})
+            with self.subTest(family=fid):
+                self.assertTrue(elane.forward_only(fam))
+                self.assertEqual(EF.try_refused(self.store, fam, ON, now=early), EF.REFUSED)
+        fam = self.store.add("unread")                     # no symbols at all: forward-only (fail closed)
+        self.permit({"equity:unread": self.row(family="unread")})
+        self.assertEqual(EF.try_refused(self.store, fam, ON, now=early), EF.REFUSED)
+        fam = self.index("idx")
+        self.permit({"equity:idx": self.row(family="idx")})
+        with mock.patch.object(elane, "forward_only", return_value=True):          # R-SEC asked inside the exemption
+            self.assertEqual(EF.try_refused(self.store, fam, ON, now=early), EF.REFUSED)
+        with mock.patch.object(elane, "forward_only", side_effect=RuntimeError("unread")):
+            self.assertEqual(EF.try_refused(self.store, fam, ON, now=early), EF.REFUSED)
+        self.assertIsNone(EF.try_refused(self.store, fam, ON, now=early))
+        panel = self.store.add("p1", structure="panel", symbols=["SPY"])
+        self.permit({"equity:p1": self.row(family="p1")})
+        self.assertEqual(EF.try_refused(self.store, panel, ON, now=early), EF.REFUSED)
+
+    def test_seats_off_unchanged(self):
+        fam = self.index()
+        for row in (self.row(), self.row(status="pass"), self.row(start=None)):
+            self.permit({"equity:f1": row})
+            for now in (CLOSE - 3600.0, CLOSE + 3600.0):
+                self.assertIsNone(EF.try_refused(self.store, fam, OFF, now=now))
+                self.assertIsNone(EF.try_refused(self.store, fam, {}, now=now))
+
+    def test_an_unreadable_file_still_fails_closed(self):
+        fam = self.index()
+        (self.root / EF.PERMITS).write_text("{not json")
+        self.assertEqual(EF.try_refused(self.store, fam, ON, now=CLOSE - 3600.0), EF.UNREADABLE)
+        self.assertIsNone(EF.permit_file(self.root))
+        (self.root / EF.PERMITS).unlink()
+        self.assertEqual(EF.permit_file(self.root), ({}, None))
+        self.assertIsNone(EF.try_refused(self.store, fam, ON, now=CLOSE - 3600.0))   # no file yet: nothing judged
 
 
 class TheSeat(Base):
