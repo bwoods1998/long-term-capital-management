@@ -120,7 +120,9 @@ THE REST OF THE REPORT:
 - `alarms`: A1-A9, PL1 (the program loss line), PT1 (the $800 total off roster 5) and K5 (HARNESS section 5, as amended
   by the plan and the operator's decisions; K5 also while `dlane.k5_clear` disarms it), each a House alert through
   `ctx.alert` (warning, or info for A8 and A9), never an action on money. The `stall` job reads the warnings and A8 from this file and mails them (its
-  `dlane` and `done` causes).
+  `dlane` and `done` causes). Since the rehearsal of Oct 15, 2026 also DC1 (`dc1_alarms`, a warning): a meter's latest
+  checkpoint is final and does not hold, or has not been final for 2 UTC days. Before it, a checkpoint that did not
+  hold was told to no one. Its text has no dollar figure, no net and no program row; it is no owner step.
 
 THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 6d and amendment A8):
 - DONE IS COUNTED FROM OCT 10, 2026 (the goal: "counted from Oct 10, 2026 (earlier closes reported beside, not
@@ -208,6 +210,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import statistics
 import time
 from datetime import datetime, timedelta
@@ -244,6 +247,12 @@ A6_BIRTHS = 50
 A6_HOURS = 48.0
 #: A9: every live direction program has opened nothing for this many sessions.
 A9_SESSIONS = 10
+#: DC1 (the rehearsal of Oct 15, 2026; `dc1_alarms`): a meter's latest checkpoint not final this many UTC days after
+#: the UTC day of its last counted close; and the item names its text gives (DONE-RULE's items a checkpoint reads).
+DC1_PROVISIONAL_DAYS = 2
+DC1_ITEMS = {"3": "item 3 (the bar)", "4": "item 4 (consistent with replay)", "7": "item 7 (research 24/7)"}
+#: What no DC1 text may hold: a dollar sign, or a decimal figure (a clause of `final_why` holding one is left out).
+_DC1_FIGURE = re.compile(r"\$|\d[.,]\d")
 #: The label of the zero-edge figure (decision 8).
 ZERO_EDGE_LABEL = "P(Done | zero edge), simulation"
 #: THE GOAL OF OCT 10, 2026: Done is counted from Oct 10, 2026, 00:00 New York; every earlier close is reported beside.
@@ -2955,8 +2964,8 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
            all_closes: Sequence[Mapping[str, Any]], envelope: Mapping[str, Any], done: Mapping[str, Any],
            k5: Mapping[str, Any], unit: Mapping[str, Any], previous: Mapping[str, Any] | None, *, now: float,
            today: str, losses: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
-    """A1-A9, PL1 and K5 (HARNESS section 5 as amended; the module docstring): [{id, level, text, ...}]. Each names counts
-    and family ids, never a hidden-year figure."""
+    """A1-A9, DC1, PL1 and K5 (HARNESS section 5 as amended; the module docstring): [{id, level, text, ...}]. Each
+    names counts and family ids, never a hidden-year figure."""
     from ..live import money as M
     from ..swarm import dlane
 
@@ -3113,6 +3122,8 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
                                     f"{cp['at_close']} ({held} of DONE-RULE + A1: the bar, consistency measured on "
                                     f"{cp.get('measured_programs')} programs, research 24/7; read beside the same-risk "
                                     "buy-and-hold, P(Done | zero edge) and Net after costs; it stops nothing)"})
+    # DC1: a meter's latest checkpoint is final and does not hold, or has not been final for 2 UTC days (a warning).
+    out += dc1_alarms(done, now=now)
     # A9: every live direction program opened nothing for 10 sessions.
     since_day = _sessions_back(today, A9_SESSIONS)
     live_programs = {i["family"] for i in book.get("instances") or []
@@ -3155,6 +3166,51 @@ def pl1_alarms(losses: Mapping[str, Any] | None) -> list[dict[str, Any]]:
                      f"(${line or 0:,.2f}, dlane.program_loss_usd; DONE-RULE-A1 A1.3): "
                      + ", ".join(f"{p['family']} ${p['probe_net_usd']:,.2f}" for p in due[:6])
                      + ". The dlane job retires them swarm-side; their real positions exit by the House's rules"}]
+
+
+def dc1_alarms(done: Mapping[str, Any] | None, *, now: float) -> list[dict[str, Any]]:
+    """DC1 (the rehearsal of Oct 15, 2026): A DONE CHECKPOINT THAT IS REACHED AND DOES NOT HOLD IS TOLD. Only a final
+    holding one was told before (A8 and the stall's `done` cause). Read on each meter's LATEST checkpoint (`done.all`
+    and `done.screen`; a later checkpoint takes the place of an earlier one) while it stands:
+    - it is final and does not hold (frozen: it stands until the next checkpoint is reached); or
+    - it is not final `DC1_PROVISIONAL_DAYS` or more UTC days after the UTC day of its last counted close (holding or
+      not: a session row that never lands keeps it from final for good).
+    A House warning, never an owner step: the stall job's `dlane` cause names no step for it, so it never fails an
+    item-7 day. ITS TEXT HOLDS NO DOLLAR FIGURE, NO NET, NO PROGRAM ROW AND NO BUY-AND-HOLD: the checkpoint's close
+    count, final, holds, the items that do not hold, and `final_why` (a clause of it with a figure is left out)."""
+    out: list[dict[str, Any]] = []
+    for meter_name in ("all", "screen"):
+        meter = (done or {}).get(meter_name)
+        checkpoints = meter.get("checkpoints") if isinstance(meter, Mapping) else None
+        cp = checkpoints[-1] if isinstance(checkpoints, list) and checkpoints else None
+        if not isinstance(cp, Mapping) or cp.get("at_close") is None:
+            continue
+        final, holds = cp.get("final") is True, cp.get("holds") is True
+        reached = str(cp.get("closed_at") or "")[:10]
+        try:
+            days = (datetime.fromisoformat(time.strftime("%Y-%m-%d", time.gmtime(float(now)))).date()
+                    - datetime.fromisoformat(reached).date()).days
+        except (TypeError, ValueError):
+            days = None     # a checkpoint with no readable close day: told as soon as it is not final
+        if (final and holds) or (not final and days is not None and days < DC1_PROVISIONAL_DAYS):
+            continue
+        items = cp.get("items") if isinstance(cp.get("items"), Mapping) else {}
+        missed = [DC1_ITEMS[k] for k in sorted(DC1_ITEMS) if items.get(k) is not True]
+        why = [part for part in str(cp.get("final_why") or "").split("; ") if part]
+        kept = [part for part in why if not _DC1_FIGURE.search(part)]
+        if len(kept) < len(why):
+            kept.append(f"{len(why) - len(kept)} clauses with a figure left out")
+        head = f"DC1: done_{meter_name} checkpoint at close {int(cp['at_close'])}"
+        text = (f"{head} is final and does not hold" if final else
+                f"{head} is not final {days} UTC days after its last close" if days is not None else
+                f"{head} is not final")
+        text += f" (final {str(final).lower()}, holds {str(holds).lower()}). Not held: {', '.join(missed) or 'none'}"
+        if not final:
+            text += f". Not final because: {'; '.join(kept) or 'no reason given'}"
+        text += ". A House warning: nothing is paused or stopped"
+        out.append({"id": "DC1", "level": "warning", "meter": f"done_{meter_name}", "at_close": int(cp["at_close"]),
+                    "final": final, "holds": holds, "not_held": missed, "text": text})
+    return out
 
 
 def pt1_alarms(roster: Mapping[str, Any] | None, settings: Mapping[str, Any] | None) -> list[dict[str, Any]]:
@@ -3554,4 +3610,5 @@ __all__ = ["run", "report", "FILE", "CONTAMINATION", "PREREGISTERED", "A14_CONSI
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
            "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP", "finality",
            "research_window", "Research247", "operator_edits", "program_losses", "dm1_reach", "net_after_costs",
-           "zero_edge", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS", "pl1_alarms", "pt1_alarms", "lane_off"]
+           "zero_edge", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS", "pl1_alarms", "pt1_alarms",
+           "dc1_alarms", "DC1_PROVISIONAL_DAYS", "lane_off"]

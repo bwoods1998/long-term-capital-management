@@ -42,9 +42,10 @@ a STALL by its cause:
 Since Oct 10, 2026 (the readiness audit's M6: the direction lane's alarms, K5, a Done checkpoint, a pre-open FAIL and a
 dead nightly reached a ledger row no mail carries):
 - `dlane`: the direction lane's report (`<state>/dlane-report.json`, the `dlane` job) carries a warning-level alarm
-  (A1-A7, PL1 the program loss line, PT1 the $800 Probe total off roster 5, K5), or it is older than
+  (A1-A7, PL1 the program loss line, PT1 the $800 Probe total off roster 5, K5; since Oct 15, 2026 DC1, a Done
+  checkpoint that is final and does not hold or is 2 UTC days short of final), or it is older than
   `DLANE_STALE_HOURS` while the lane is on. K5 holding (the lane reads shadow until it is cleared) or disarmed
-  (`dlane.k5_clear` left true) is the owner's step;
+  (`dlane.k5_clear` left true) is the owner's step; no other alarm is (DC1 is a House warning only);
 - `done`: a FINAL Done checkpoint that holds (the report's `done.<meter>.checkpoints`, final and holding: frozen from
   report to report) that no SENT notice has told yet (`stall.json` `done_told`, which a notice carrying the cause adds
   to once the gateway says it sent it). News the owner hears at once (an owner line), never an owner step WAITING: the

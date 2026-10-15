@@ -176,7 +176,7 @@ JOBS: tuple[Job, ...] = (
     Job("forward_report", "league.ops.forward_report", (S.after("forward_shadow"), S.session_open(-35)),
         grace=3 * HOUR, cpu=300, wall=600, in_pause=True, owner="E3 forward record",
         what="the forward record's meters (clean evidence-years, the replay multiple, the BH/BY meter, the group "
-             "means) and its report with alarms FW1-FW8, into <state>/forward-report.json (operator-only)"),
+             "means) and its report with alarms FW1-FW9, into <state>/forward-report.json (operator-only)"),
     # The morning marks, 25 minutes before each open (after the book's re-fetch of the last decision's bars at open -
     # 60 and the twins at open - 40): a day whose bars the audit found different leaves the counted days; then the
     # registry's chain is read whole.

@@ -824,7 +824,13 @@ class TheWholeNight(unittest.TestCase):
     def test_nothing_e3_writes_lies_under_the_release_and_every_alert_is_counts_and_dates(self):
         w = self.w
         self.assertEqual([p for p in w.release.rglob("*")], [], "nothing E3 writes lies under the release directory")
-        self.assertEqual(w.alerts, [], "a healthy House raises no alert from an E3 job")
+        # A healthy House raises no alert from an E3 job but one: the odd session's disagreement (binding fact 1) is
+        # data, and FW9 tells it once, with its cause, the night its row is written (the rehearsal of Oct 15, 2026).
+        iid = w.instances["carries@1"]
+        self.assertEqual(w.alerts, [("forward_report", "warning", f"forward: FW9 instance {iid} {w.odd}: its live and "
+                                     f"twin intents disagree on {w.odd} (cause: bars). A14 counts it once as not "
+                                     "agreed, and the twin is re-based after it (A29)")])
+        self.assertTrue(forward_report.text_ok(w.alerts[0][2]))
         # A report read days after the jobs stopped says so (FW1), in ids, counts and dates only.
         later = at(w.fwd[NIGHTS + 3], 12)
         stale = forward_report.alarms(w.root, now=later, settings=w.settings)

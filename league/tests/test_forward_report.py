@@ -1741,7 +1741,171 @@ class EachForwardAlarm(Fixture):
         self.now = ny(DAYS[13], 12)
         self.event("identity_moved", at=self.now - 60)
         self.assertEqual(self.ids(OFF), [])
-        self.assertEqual(sorted(set(self.ids())), ["FW1", "FW2", "FW3", "FW4", "FW7", "FW8"])
+        # FW9 too: the book's living instance has no twin row (its first decision cannot even be placed: told).
+        self.assertEqual(sorted(set(self.ids())), ["FW1", "FW2", "FW3", "FW4", "FW7", "FW8", "FW9"])
+
+
+class FW9TheETFTwinsFromTheFirstSession(Fixture):
+    """FW9 (the rehearsal of Oct 15, 2026): (a) a living ETF instance with a session that has no twin row, from its
+    first row through the session before the last night's `through`, a retirement it came back from left out; (b)
+    each disagreement, told once with its cause, from the first session."""
+
+    def setUp(self):
+        super().setUp()
+        self.pid_a = self.register("a@1", first_day=DAYS[0])
+        self.live = self.book_with("a@1:r", created=close(DAYS[0]) + 3600)    # its first decision: DAYS[0]
+        self.now = ny(DAYS[9], 20)
+
+    def book_with(self, iid: str, *, created: float, retired: float | None = None):
+        from league.live.state import LiveState
+        from league.tests.test_equity_twins import add_tables
+
+        live = getattr(self, "live", None)
+        if live is None:
+            live = LiveState(self.root / "live.sqlite")
+            self.addCleanup(live.close)
+            add_tables(live)
+        family = iid.split("@")[0]
+        live.db.execute("INSERT OR REPLACE INTO eq_instances(id, family, version, lane, run_sha, code, params, band, "
+                        "max_hold, created_at, retired_at) VALUES(?, ?, 1, 'beta', 'run', 'c', '{}', 'probe', 20, ?, ?)",
+                        (iid, family, created, retired))
+        live.db.commit()
+        return live
+
+    def twin(self, day: str, agree: int | None = 1, *, instance: str = "a@1:r", pid: int | None = None,
+             cause: str | None = None, at: float | None = None) -> None:
+        with self.db:
+            self.db.execute("INSERT INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, at, cause) "
+                            "VALUES(?, ?, ?, '[]', '[]', ?, ?, ?)",
+                            (instance, day, pid or self.pid_a, agree, self.now - 3600 if at is None else at, cause))
+
+    def fw9(self, settings=RECORD) -> list[dict]:
+        rows = [a for a in self.section(settings)["alarms"] if a["id"] == "FW9"]
+        for row in rows:
+            self.assertEqual(row["level"], "warning")
+            self.assertTrue(R.text_ok(row["text"]), "ids, counts and dates only: no figure")
+        return rows
+
+    def test_a_missing_row_between_the_first_row_and_the_session_before_the_night(self):
+        for day in (DAYS[0], DAYS[1], DAYS[3], DAYS[4]):
+            self.twin(day)
+        self.night(DAYS[5])                      # that night writes the rows of DAYS[4]; DAYS[5]'s come the next
+        (alarm,) = self.fw9()
+        self.assertEqual(alarm["text"], f"FW9 instance a@1:r missing: its shadow twin has no row for 1 of its 5 sessions "
+                                        f"from {DAYS[0]} to {DAYS[4]} (the first: {DAYS[2]}). A14 counts each as not "
+                                        "agreed, and no Done checkpoint is final while one is missing")
+        self.twin(DAYS[2])
+        self.assertEqual(self.fw9(), [], "every session through the one before the night has its row")
+
+    def test_the_night_that_owes_the_row_is_the_last_e3_night(self):
+        for day in DAYS[:5]:
+            self.twin(day)
+        self.night(DAYS[5])
+        self.assertEqual(self.fw9(), [])
+        with self.db:                            # the panel lane's night is not E3's: it owes no ETF row
+            self.db.execute("INSERT INTO fwd_runs(job, through, engine, started, finished, seconds, programs, sessions, "
+                            "errors, stale, budget_hit, head) VALUES('forward_xs', ?, ?, 1.0, 2.0, 1.0, 0, 0, 0, 0, 0, "
+                            "'h')", (DAYS[6], self.engine))
+        self.assertEqual(self.fw9(), [])
+        self.night(DAYS[6])                      # E3's night that wrote no row of DAYS[5] for it
+        (alarm,) = self.fw9()
+        self.assertIn(f"no row for 1 of its 6 sessions from {DAYS[0]} to {DAYS[5]} (the first: {DAYS[5]})",
+                      alarm["text"])
+
+    def test_the_sessions_are_read_from_its_first_row(self):
+        for day in (DAYS[3], DAYS[4]):           # created at DAYS[0], rows from DAYS[3]: read from its first row
+            self.twin(day)
+        self.night(DAYS[5])
+        self.assertEqual(self.fw9(), [])
+
+    def test_an_instance_with_no_row_is_read_from_its_first_decision_session(self):
+        self.night(DAYS[0])
+        self.assertEqual(self.fw9(), [], "its first row is due the night after the next session")
+        self.night(DAYS[1])
+        (alarm,) = self.fw9()
+        self.assertIn(f"no row for 1 of its 1 sessions from {DAYS[0]} to {DAYS[0]}", alarm["text"])
+
+    def test_the_latest_twin_event_is_named(self):
+        self.night(DAYS[3])
+        self.event("twin_sha_mismatch", pid=self.pid_a, at=ny(DAYS[1], 18, 40), payload={"instance": "a@1:r"})
+        self.event("twin_interrupted", pid=self.pid_a, day=DAYS[3], at=ny(DAYS[3], 18, 40),
+                   payload={"instance": "a@1:r", "why": "the decider child failed"})
+        self.event("twin_interrupted", pid=self.pid_a, day=DAYS[3], at=ny(DAYS[3], 18, 41),
+                   payload={"instance": "b@1:r"})
+        (alarm,) = self.fw9()
+        self.assertTrue(alarm["text"].endswith(f". Its latest twin event: twin_interrupted of {DAYS[3]}"), alarm["text"])
+
+    def test_an_instance_with_no_registry_row_is_told(self):
+        self.book_with("z@1:r", created=close(DAYS[0]) + 3600)
+        for day in DAYS[:3]:
+            self.twin(day)
+        self.event("twin_unregistered", at=ny(DAYS[1], 18, 40), payload={"instance": "z@1:r"})
+        self.night(DAYS[3])
+        (alarm,) = self.fw9()
+        self.assertTrue(alarm["text"].startswith("FW9 instance z@1:r missing: its shadow twin has no row for 3 of its 3"))
+        self.assertIn(". Its key is not in the forward registry, so no twin is made. Its latest twin event: "
+                      f"twin_unregistered of {DAYS[1]}", alarm["text"])
+
+    def test_a_retired_span_it_came_back_from_is_left_out(self):
+        for day in DAYS[:3] + DAYS[6:9]:
+            self.twin(day)
+        self.event("twin_retired", pid=self.pid_a, day=DAYS[3], payload={"instance": "a@1:r"})
+        self.event("twin_retired", pid=self.pid_a, day=DAYS[1], payload={"instance": "b@1:r"})  # another instance's
+        self.night(DAYS[9])
+        self.assertEqual(self.fw9(), [], "no revival on record yet: the span runs on")
+        self.event("twin_revived", pid=self.pid_a, day=DAYS[6], payload={"instance": "a@1:r"})
+        self.assertEqual(self.fw9(), [], "DAYS[3] to DAYS[5] are the retirement's")
+
+    def test_the_session_it_came_back_at_is_its_own(self):
+        for day in DAYS[:3] + DAYS[6:9]:
+            self.twin(day)
+        self.event("twin_retired", pid=self.pid_a, day=DAYS[3], payload={"instance": "a@1:r"})
+        self.event("twin_revived", pid=self.pid_a, day=DAYS[5], payload={"instance": "a@1:r"})
+        self.night(DAYS[9])
+        (alarm,) = self.fw9()
+        self.assertIn(f"no row for 1 of its 7 sessions from {DAYS[0]} to {DAYS[8]} (the first: {DAYS[5]})", alarm["text"])
+
+    def test_a_retired_instance_and_a_panel_instance_are_not_read(self):
+        self.live.db.execute("UPDATE eq_instances SET retired_at=? WHERE id='a@1:r'", (close(DAYS[2]),))
+        self.live.db.commit()
+        panel = self.register("p@1", ugroup="panel:sp500", first_day=DAYS[0])
+        self.book_with("p@1:r", created=close(DAYS[0]) + 3600)
+        self.night(DAYS[5])
+        self.assertEqual(self.fw9(), [], "the retired one is FW6's and A14's; the panel one is FX1's")
+        self.twin(DAYS[0], instance="p@1:r", pid=panel)     # with a row: still FX1's, never FW9's
+        self.assertEqual(self.fw9(), [])
+
+    def test_silent_while_the_twins_are_off_and_while_the_forward_mode_is(self):
+        self.night(DAYS[5])
+        self.assertEqual(len(self.fw9()), 1)
+        with mock.patch.object(forward_db, "cfg", lambda settings: {**FakeA.cfg(settings), "twins": False}):
+            self.assertEqual(self.fw9(), [], "no row is made: none is owed")
+        self.assertEqual(self.fw9(OFF), [])
+
+    def test_each_disagreement_is_told_once_with_its_cause_from_the_first_session(self):
+        self.night(DAYS[3])
+        self.twin(DAYS[0], 1)
+        self.twin(DAYS[1], 0, cause="bars")
+        self.twin(DAYS[2], 0, cause=None)        # a row with no cause reads "unknown"
+        panel = self.register("p@1", ugroup="panel:sp500", first_day=DAYS[0])
+        self.twin(DAYS[1], 0, instance="p@1:r", pid=panel, cause="program")    # FX2's
+        rows = [a for a in self.fw9() if "disagree" in a["text"]]
+        self.assertEqual([a["text"] for a in rows], [
+            f"FW9 instance a@1:r {DAYS[1]}: its live and twin intents disagree on {DAYS[1]} (cause: bars). A14 counts "
+            "it once as not agreed, and the twin is re-based after it (A29)",
+            f"FW9 instance a@1:r {DAYS[2]}: its live and twin intents disagree on {DAYS[2]} (cause: unknown). A14 counts "
+            "it once as not agreed, and the twin is re-based after it (A29)"])
+        self.assertNotIn("FW6", self.ids(), "FW6's share waits for 20 sessions; FW9 tells the first")
+        # Told once: the rows written before the report before (and more than a day ago) are not told again.
+        write_json(self.root / R.FILE, {"at": S.iso(self.now - 600), "mode": "record", "alarms": []})
+        self.now += 2 * 86400
+        self.assertEqual([a for a in self.fw9() if "disagree" in a["text"]], [])
+
+    def test_the_dlane_reader_hands_fw9_on(self):
+        self.night(DAYS[5])
+        write_json(self.root / R.FILE, self.section())
+        self.assertIn("FW9", [a["id"] for a in R.alarms(self.root, now=self.now, settings=RECORD)])
+        self.assertEqual(R.alarms(self.root, now=self.now, settings=OFF), [], "FW9 follows the forward mode")
 
 
 class TheOtherAlarms(Fixture):

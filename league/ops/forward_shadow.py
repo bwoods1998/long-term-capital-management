@@ -136,9 +136,11 @@ THE HOUSE'S OWN FAILURES ARE SAID ONCE A NIGHT (`house_failures`; the job raises
 them). What a night leaves no event for would else be read by nobody: `house` (in `errors`: the programs left without
 rows by a write the forward store refused, by a retry with no fresh child, or by failing twice on a night no other
 program's run completed), the controls left without rows by anything but the data, and each step of the night that
-raised (the registry's sync, the audit marks, the controls, the final checkpoints, the twins). The data's failures
-and a program that failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms
-read those.
+raised (the registry's sync, the audit marks, the controls, the final checkpoints, the twins). Since the rehearsal of
+Oct 15, 2026 also the twins' `finish.failed`: an instance's twin that raised, or a lot's row that could not be made,
+is counted there and leaves no event. An interrupted or a deferred twin alone is not in it: it heals the next
+night, and league/ops/forward_report.py's FW9 tells a row still missing. The data's failures and a program that
+failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms read those.
 
 RELEASE E4 (package J). A PANEL program (a registry row whose `ugroup` begins "panel:") is never run here: its
 store, its engine and its day are the panel's. `due` leaves it out (`_mine`); THE PANEL NIGHT runs it
@@ -324,6 +326,15 @@ def house_failures(receipt: Mapping[str, Any]) -> list[str]:
         steps = sum(1 for part in ("begin", "finish") if raised(twins.get(part)) is not None)
         if whole(twins.get("errors")) > steps:
             out.append(f"the twins' re-price of {whole(twins.get('errors')) - steps} runs raised")
+        # An instance's twin that raised, or a lot row that could not be made, is counted in `finish.failed` and
+        # leaves no event (an interrupted, deferred, mismatched or unregistered one has its own, or heals the next
+        # night: league/ops/forward_report.py FW9 reads the rows they leave out).
+        finish = twins.get("finish")
+        failed = whole(finish.get("failed")) if isinstance(finish, Mapping) else 0
+        if failed:
+            names = sorted({str(e).rsplit(": ", 1)[-1][:40] for e in finish.get("errors") or () if isinstance(e, str)})
+            out.append(f"{failed} of the twins' instances or lot rows failed in finish"
+                       + (f" ({', '.join(names[:4])})" if names else ""))
     return out
 
 

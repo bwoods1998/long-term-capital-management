@@ -2110,6 +2110,37 @@ class TheJob(Case):
         self.assertEqual(forward_shadow.house_failures({**clean, "register": {"error": "OperationalError"}}),
                          ["the registry's sync raised OperationalError"])
 
+    def test_a_twin_that_failed_in_finish_is_the_houses_own_failure(self):
+        # The rehearsal of Oct 15, 2026: an instance's twin that raised in `finish` is counted in `failed` and listed in
+        # `errors`, and leaves no event. It is one warning of the night now.
+        clean = {"through": "2026-10-14", "house": 0, "controls": {"errors": 0, "data_failed": 0},
+                 "twins": {"begin": {"days": 1, "rows": 80}, "rows": 7, "errors": 0,
+                           "finish": {key: 0 for key in forward_twins.FINISH_KEYS}}}
+        self.assertEqual(forward_shadow.house_failures(clean), [])
+        failed = {**clean["twins"]["finish"], "instances": 6, "failed": 2,
+                  "errors": ["seed-overnight-qqq@3:r: KeyError", "range-contraction@1:r: KeyError", "lots: ValueError"]}
+        self.assertEqual(forward_shadow.house_failures({**clean, "twins": {**clean["twins"], "finish": failed}}),
+                         ["2 of the twins' instances or lot rows failed in finish (KeyError, ValueError)"])
+        unmade = {**clean["twins"]["finish"], "failed": 1}           # a lot's row that could not be made: no error
+        self.assertEqual(forward_shadow.house_failures({**clean, "twins": {**clean["twins"], "finish": unmade}}),
+                         ["1 of the twins' instances or lot rows failed in finish"])
+        # Interrupted, deferred, mismatched or unregistered alone is not: each has its event, or heals the next night
+        # (league/ops/forward_report.py FW9 tells a row still missing).
+        for key in ("interrupted", "deferred", "mismatched", "unregistered"):
+            alone = {**clean["twins"]["finish"], key: 3}
+            self.assertEqual(forward_shadow.house_failures({**clean, "twins": {**clean["twins"], "finish": alone}}), [],
+                             key)
+        # A `finish` that raised whole is said once, as before (no `failed` key then).
+        self.assertEqual(forward_shadow.house_failures(
+            {**clean, "twins": {**clean["twins"], "finish": {"error": "KeyError"}, "errors": 1}}),
+            ["the twins' own runs raised KeyError"])
+
+    def test_the_job_warns_once_for_a_twin_that_failed(self):
+        receipt = {"through": "2026-10-14", "house": 0, "twins": {"finish": {"instances": 1, "failed": 1,
+                                                                             "errors": ["a@1:r: RuntimeError"]}}}
+        self.assertEqual(len(forward_shadow.house_failures(receipt)), 1)
+        self.assertNotRegex(forward_shadow.house_failures(receipt)[0], r"\d[.,]\d|\$", "counts and class names only")
+
     def test_the_jobs_child_is_its_own_decider_with_its_own_log(self):
         child = self.real_decider(self.root)
         self.addCleanup(child.close)

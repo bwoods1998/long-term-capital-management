@@ -43,6 +43,48 @@ main's; no setting changes)
 - L2, the equity pass says the route by symbols (entry below).
 - L4, the budget job waits for the Sail guard's next reading after a start (entry below).
 
+### FW9, the twins' failures in the House warning, and DC1: the alarms that see the first Done checkpoint coming, on `fix/fw9-alarms` (unreleased; cut from `caa10eba`, the head of `rel/1015f`, PR #559; an owner deploy: `league/ops/` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no bound, screen, false-positive rate, money rule or setting changes)
+
+- **Why** (the Oct 15 rehearsal of the 30th close's checkpoint): a failure there could be seen first at the
+  checkpoint itself. FW6 reads an instance's twin agreement from 20 sessions, and an instance has about 17 by Nov 2.
+  A missing twin row showed nowhere. A twin that raised in the night's `finish` was counted, and told no one. And
+  a checkpoint that was final and did not hold, or stuck short of final, was told to no one: only a final holding
+  one raised A8.
+- **FW9** (`league/ops/forward_report.py`, a warning; the ETF lane, as FX1 and FX2 are the panel lane's):
+  - (a) A living ETF instance has a session with no `fwd_twins` row. The sessions run from its first row (its
+    first decision session while it has none) to the session before the last E3 night's `through`. The sessions of
+    a retirement it came back from are left out. One warning an instance. The text counts the sessions and names
+    the first missing one and the latest twin event (interrupted, run sha mismatch, unregistered). This catches
+    every cause: interrupted, deferred, mismatched, unregistered, failed, or a re-based twin that raised. A panel
+    instance is FX1's. An instance with no registry row is told here too. Silent while `elane.forward.twins` is
+    false.
+  - (b) Each twin row whose intents disagree, told once with its cause (the rows written since the report before,
+    as FX2 does), from the first session.
+  - `FW6_SESSIONS` stays 20: FW6 is a share test, and a share of 1 of 3 is noise.
+- **The twins' failures in the House warning** (`league/ops/forward_shadow.py` `house_failures`): the night's one
+  warning also names `twins.finish.failed` when it is above 0, with the error class names. That is an instance's
+  twin that raised, or a lot's row not made, and it leaves no event. An interrupted or deferred twin alone is not in
+  it: it heals the next night, and FW9 tells a row still missing.
+- **DC1** (`league/ops/dlane_report.py` `dc1_alarms`, a warning): a Done meter's latest checkpoint (`done.all` or
+  `done.screen`) is final and does not hold, or is not final 2 or more UTC days after the UTC day of its last
+  counted close. A final failing one stands until the next checkpoint. The text gives the close count, final, holds,
+  the items that do not hold and `final_why`. It has no dollar figure, no net, no program row and no buy-and-hold, and
+  a `final_why` clause with a figure is left out. The stall job's `dlane` cause names no owner step for it, so it
+  never fails an item-7 day. A final holding checkpoint stays A8's.
+- **Tests:** FW9 in `league/tests/test_forward_report.py` (a missing row, from the first row, an instance with no
+  row, the panel night, a retired span left out, a revival day, a panel or retired instance, the switches, each
+  disagreement once); the House warning in `league/tests/test_forward_shadow.py`; DC1 in
+  `league/tests/test_dlane_report_dc1.py` (final and not holding, a losing checkpoint, frozen, the latest only,
+  provisional at 1 and 2 UTC days, no dollar text, no owner step in the stall). `test_e3_end_to_end` now expects the
+  one FW9 of its designed disagreement. The whole suite passes on Python 3.11 and 3.14 (12,054 tests in 434
+  modules).
+- **On the box now** (a read-only dry read of the three rules at about 16:50Z Oct 15): all silent. The six living
+  instances have every twin row, Oct 9 to Oct 13. No row disagrees. No night since Oct 12 has `finish.failed` above
+  0. No checkpoint is reached yet.
+- **Verify after the deploy:** the first `forward_report` after the night has no FW9 (the Oct 14 rows written and
+  agreeing), or it names the instance and the session. The `dlane` report carries no DC1 before the 30th close.
+- **Rollback:** the House release before it. Nothing is migrated.
+
 ### The budget job waits for the Sail guard's next reading after a start, on `fix/budget-guard-wait` (unreleased; cut from `efc9fa00`, PR #558's head; an owner deploy: `league/ops/budget.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting)
 
 - **What it is** (the captain's L4): when a `budget` run finds no fresh Sail guard reading, it now waits for the
