@@ -44,11 +44,14 @@ on branches.
   share entries (19.6 -> 15.8 a path) and fewer checkpoints failing the consistency clause (7.1% -> 4.6% of paths).
 - **Its cost.** About 0.6 fewer options closes a path in 12 weeks; a Probe options program trades a smaller book than
   its replay holds (a refused open is no close, so no twin moves); the practice book (`league/live/shadow.py`) scales
-  to one structure a family too. No program is stopped and no position is sold.
+  to one structure a family too; a two-sided `long_single` family at Probe (none is at Probe today) holds one leg at a
+  time, its put waiting until its call has closed. Two a family was measured too and is no better than three (the
+  family share and the window already stop the third call). No program is stopped and no position is sold.
 - **Identities.** Money digest `de5ed74e` -> `cd579e5d`, constitution `111ede85` -> `1e14c7f7` (`PINNED_DIGEST`); the
   equity design blocks restate them. `league/tests/equity_design.py` keeps the older pins as `DIGESTS_E4S2`
   (`before_opf1`: the row set back to 3) and every older table's helper sets the row back too;
-  `league/tests/test_options_one_open.py` holds the row, `plan_open` with it, and the digests.
+  `league/tests/test_options_one_open.py` holds the row, `plan_open` with it, and the digests; the long_single and
+  practice tests of two or three open structures run at the rollback's 3, and one more shows the put waiting at 1.
 - **Rollback**, one owner deploy: `open_per_family` 3 (re-pin `PINNED_DIGEST`, rewrite the design blocks); the money
   digest moves back and the grant re-ratifies.
 
