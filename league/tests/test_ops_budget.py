@@ -2139,7 +2139,8 @@ class GuardWait(unittest.TestCase):
         self.assertEqual(sail["paid_today_usd"], 2.0, "the day's meter and spend read again at the new instant: "
                                                      "min(2.0, 0.5 booked + 1.5 fixed)")
         self.assertIsNone(sail["notice_balance_usd"], "the guard read: the gateway's reading is not needed")
-        self.assertEqual(receipt["guard_wait"], {"waited_seconds": 40.0, "polls": 2, "read": True})
+        self.assertEqual(receipt["guard_wait"], {"first_read_seconds": 0.0, "waited_seconds": 40.0, "polls": 2,
+                                                 "read": True})
         self.assertEqual(doc["guard_wait"], receipt["guard_wait"])
         self.assertTrue(all(15 <= s <= 30 for s in self.sleeps), self.sleeps)
         self.assertFalse(any("Sail's balance" in e for e in receipt["errors"]), receipt["errors"])
@@ -2167,10 +2168,13 @@ class GuardWait(unittest.TestCase):
         self.assertEqual(doc["inputs"]["meters"]["sail"]["balance_source"], "the Sail guard has no fresh reading")
         self.assertEqual(doc["inputs"]["meters"]["sail"]["notice_balance_usd"], 40.0, "the card line only")
         self.assertEqual(doc["at"], NOW, "the run's own instant, as before")
-        self.assertEqual(receipt["guard_wait"], {"waited_seconds": 270.0, "polls": 14, "read": False})
-        self.assertIn("waited 270 s for the Sail guard's next reading: none came", receipt["errors"])
+        self.assertEqual(receipt["guard_wait"], {"first_read_seconds": 0.0, "waited_seconds": 270.0, "polls": 14,
+                                                 "read": False})
+        self.assertEqual(receipt["errors"][0], "waited 270 s (14 looks) for the Sail guard's next reading: none came",
+                         "first, so the House alert's 900 characters carry it")
         self.assertIn("state", receipt, "the run ends ok")
         self.assertEqual(len(self.alerts), 1)
+        self.assertTrue(self.alerts[0][1].startswith("budget: waited 270 s (14 looks)"), self.alerts)
 
     def test_the_wait_respects_the_jobs_wall(self):
         """Slow reads (each gateway read 60 s) and a clock that does not move on its own: the wait still ends from the
@@ -2184,6 +2188,9 @@ class GuardWait(unittest.TestCase):
         self.assertEqual(sum(self.sleeps), B.GUARD_WAIT_SECONDS - 60, "the first read's 60 s count against the wait")
         self.assertLessEqual(self.clock() - NOW, 600)
         self.assertEqual(receipt["meters"]["sail"]["limited_by"], "unreadable")
+        self.assertEqual((receipt["guard_wait"]["first_read_seconds"], receipt["guard_wait"]["waited_seconds"]),
+                         (60.0, 210.0), "the wait is counted after the first read")
+        self.assertEqual(receipt["errors"][0], "waited 210 s (11 looks) for the Sail guard's next reading: none came")
         # A reading in the last look: one more read, still inside the wall.
         self.clock.t = NOW
         self.reading(600.0, NOW - 7 * 3600)
@@ -2196,7 +2203,44 @@ class GuardWait(unittest.TestCase):
         self.reading(600.0, NOW - 7 * 3600)
         receipt = B.run(self.live(step=False))
         self.assertEqual(len(self.sleeps), math.ceil(B.GUARD_WAIT_SECONDS / B.GUARD_POLL_SECONDS))
+        self.assertEqual(sum(self.sleeps), B.GUARD_WAIT_SECONDS, "the sleeps asked add up to the wait, no more")
         self.assertEqual(receipt["meters"]["sail"]["limited_by"], "unreadable")
+
+    def test_a_clock_that_does_not_move_with_the_real_sleeper_sleeps_at_most_the_wait(self):
+        """`now` a callable that stays put and no `sleep` in ctx: `time.sleep` is asked for 270 s in all, not 14 x 20."""
+        self.reading(600.0, NOW - 7 * 3600)
+        slept: list[float] = []
+        with mock.patch("time.sleep", slept.append):
+            receipt = B.run({**Job.ctx(self), "now": lambda: NOW})
+        self.assertEqual(sum(slept), B.GUARD_WAIT_SECONDS)
+        self.assertTrue(all(s <= B.GUARD_POLL_SECONDS for s in slept), slept)
+        self.assertEqual(receipt["meters"]["sail"]["limited_by"], "unreadable")
+
+    def test_a_first_read_that_uses_the_whole_wait_says_it_never_looked(self):
+        """The first read alone takes 280 s: no sleep and no look, and the record says so, not that the run waited."""
+        self.reading(600.0, NOW - 7 * 3600)
+
+        def slow():
+            self.clock.advance(280)
+            return self.health
+        receipt = B.run(self.live(health=slow))
+        self.assertEqual(self.sleeps, [])
+        self.assertEqual(receipt["guard_wait"], {"first_read_seconds": 280.0, "waited_seconds": 0.0, "polls": 0,
+                                                 "read": False})
+        self.assertEqual(receipt["errors"][0], "no look for the Sail guard's next reading: the first read took 280 s of "
+                                               "the 270 s")
+        self.assertFalse(any(e.startswith("waited") for e in receipt["errors"]), receipt["errors"])
+        self.assertEqual(receipt["meters"]["sail"]["limited_by"], "unreadable")
+
+    def test_the_wait_leaves_room_in_the_jobs_wall(self):
+        """The wall (league/ops/registry.py) less the wait must hold a slow second read: the box spend and the gateway
+        at their worst (about 2 x 60 s of Sail calls, 20 s of health) and two notices (15 s each), with room to spare.
+        Lowering the wall or raising the wait past this fails here."""
+        from league.ops import registry
+
+        room = registry.by_name()["budget"].wall - B.GUARD_WAIT_SECONDS
+        self.assertGreaterEqual(room, 2 * 60 + 20 + 2 * 15)
+        self.assertGreaterEqual(room, 300, "a margin past the worst second read")
 
     def test_a_run_at_a_fixed_instant_and_the_refresh_never_wait(self):
         self.reading(600.0, NOW - 7 * 3600)

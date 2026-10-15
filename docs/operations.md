@@ -5436,13 +5436,17 @@ earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lif
 - **The wait for the guard's next reading** (L4, on `fix/budget-guard-wait`, not deployed). A `budget` run that finds
   no fresh Sail guard reading waits for the guard's next one. It looks at the guard's record every 20 s, for at most
   270 s from its start, inside the job's 600 s wall. When a reading comes, the run takes a new time after it and reads
-  every input again at that time. With no reading by then, Sail stays `unreadable`, as before, and the warning says
-  the run waited. A fresh reading at the start means no wait. Only the guard's own reading ends the wait: the
-  gateway's Sail reading is still the card line only. `budget_refresh` does not wait, also when it runs the full job.
-  Why: on Oct 15 the owed 00:30Z run came 28 s after the box came back and 3 s before the guard's first reading, and
-  one `unreadable` receipt fails the day for Research247. In a swarm pause the guard does not read, so each `budget`
-  run then waits the full 270 s, and the next job waits behind it. `budget.json` and the receipt say `guard_wait`
-  (seconds, looks, whether it read) when the run waited.
+  every input again at that time. With no reading by then, Sail stays `unreadable`, as before. The warning then starts
+  by saying how long the run waited after its first read. When the first read alone took the whole 270 s, it says the
+  run never looked. The sleeps add up to at most 270 s. A fresh reading at the start means no wait. Only the guard's
+  own reading ends the wait: the gateway's Sail reading is still the card line only. `budget_refresh` does not wait,
+  also when it runs the full job. Why: on Oct 15 the owed 00:30Z run came 28 s after the box came back and 3 s before
+  the guard's first reading, and one `unreadable` receipt fails the day for Research247. In a swarm pause of more than
+  6 h the guard has no fresh reading, so each `budget` run waits the full 270 s, and the next job waits behind it. The
+  wait covers the guard's first one or two checks after a start (it checks every 180 s). It does not cover a swarm
+  that takes more than about 4 minutes to reach its loop: that run still writes `unreadable`. `budget.json` and the
+  receipt say `guard_wait` (the first read's seconds, the seconds waited after it, looks, whether it read) when the
+  run found no fresh reading.
 - **Output:** `<state>/budget.json` (private): the inputs, each meter's research $/day and the day's figure, the knobs,
   the direction against the last file (`cut`, `raise`, `same`), each meter's runway at the rate the rule holds it to,
   its days of research left at the ceiling and its card date (when those days fall to 5: the day the taper starts),

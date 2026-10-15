@@ -250,8 +250,8 @@ BALANCE_FRESH_SECONDS = 6 * 3600
 #: THE WAIT FOR THE GUARD'S NEXT READING (L4, Oct 15, 2026; `_read_waiting`). A `budget` run that finds no fresh guard
 #: reading waits at most this long from its start for the guard's next good one, looking at the guard's kv every
 #: `GUARD_POLL_SECONDS`, then reads every input again at a new instant. The job's wall is 600 s (league/ops/registry.py):
-#: the first read, the wait and the second read end well inside it. Not a rule constant: it decides when the run
-#: reads, never what a reading gives.
+#: the first read, the wait and the second read end well inside it (a test holds the room the wall leaves). Not a rule
+#: constant: it decides when the run reads, never what a reading gives.
 GUARD_WAIT_SECONDS = 270
 GUARD_POLL_SECONDS = 20
 #: The ladder's own promotion reason carries this and its receipt's id (league/live/ladder.py: "the forward ladder
@@ -1621,8 +1621,10 @@ def _read_waiting(ctx: Any, root: Path, config: Mapping[str, Any]) -> tuple[floa
     guard's kv, its `metered_today`, the day's spend, the box spend, the gateway): `_guard_reading` refuses a reading
     newer than the instant it is read at, and the day's meter moves with each reading. Only the guard's own reading ends
     the wait: the gateway's Sail reading stays the card line, never research. With no reading by the end, the run goes on
-    as before: Sail "unreadable" at the run's start, one more error to say it waited. A fresh reading at the start is no
-    wait at all. A run at a fixed instant (`now` a number: no clock) never waits. Only the job's own run waits: the
+    as before: Sail "unreadable" at the run's start, and one more error, first in the list, says how long it waited after
+    its first read (or, when the first read alone used the whole wait, that it never looked). The sleeps asked add up to
+    at most `GUARD_WAIT_SECONDS` too, so a clock that does not move cannot stretch the wait. A fresh reading at the start
+    is no wait at all. A run at a fixed instant (`now` a number: no clock) never waits. Only the job's own run waits: the
     refresh's full-job path does not (`refresh`)."""
     now = _now(ctx)
     errors: list[str] = []
@@ -1635,25 +1637,35 @@ def _read_waiting(ctx: Any, root: Path, config: Mapping[str, Any]) -> tuple[floa
         import time
 
         sleep = time.sleep
-    deadline, polls = now + GUARD_WAIT_SECONDS, 0
-    # A cap on the looks too: a clock that never moves still ends the wait.
+    first = clock()  # the first read ends here: the wait is counted from it
+    deadline, polls, slept = now + GUARD_WAIT_SECONDS, 0, 0.0
+    # Two bounds besides the clock's: the time asked of the sleeper (a clock that never moves, with the real sleeper,
+    # still sleeps at most GUARD_WAIT_SECONDS) and the number of looks.
     while polls < math.ceil(GUARD_WAIT_SECONDS / GUARD_POLL_SECONDS):
-        left = deadline - clock()
+        left = min(deadline - clock(), GUARD_WAIT_SECONDS - slept)
         if left <= 0:
             break
-        sleep(min(float(GUARD_POLL_SECONDS), left))
-        polls += 1
+        step = min(float(GUARD_POLL_SECONDS), left)
+        sleep(step)
+        slept, polls = slept + step, polls + 1
         if _guard_reading(_guard_kv(root), clock())[0] is None:
             continue
         again = clock()  # the new instant, after the guard's reading
         fresh: list[str] = []
         read = _job_inputs(ctx, root, again, config, fresh)
         if _finite(read["meters"]["sail"].get("balance_usd")) is not None:
-            return again, read, fresh, {"waited_seconds": round(again - now, 1), "polls": polls, "read": True}
+            return again, read, fresh, {"first_read_seconds": round(first - now, 1),
+                                        "waited_seconds": round(again - first, 1), "polls": polls, "read": True}
         # No reading at the second read (the guard wrote a newer one after the new instant): look again.
-    waited = round(clock() - now, 1)
-    errors.append(f"waited {waited:.0f} s for the Sail guard's next reading: none came")
-    return now, inputs, errors, {"waited_seconds": waited, "polls": polls, "read": False}
+    took, waited = round(first - now, 1), round(clock() - first, 1)
+    # First in the list, so the House alert (cut at 900 characters) carries it before the errors it explains.
+    if polls:
+        errors.insert(0, f"waited {waited:.0f} s ({polls} look{'s' if polls != 1 else ''}) for the Sail guard's next reading: "
+                         "none came")
+    else:
+        errors.insert(0, f"no look for the Sail guard's next reading: the first read took {took:.0f} s of the "
+                         f"{GUARD_WAIT_SECONDS} s")
+    return now, inputs, errors, {"first_read_seconds": took, "waited_seconds": waited, "polls": polls, "read": False}
 
 
 def _previous(root: Path) -> dict[str, Any] | None:
