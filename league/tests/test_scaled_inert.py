@@ -86,6 +86,16 @@ class Inert(unittest.TestCase):
             got = self.run_scenario()
         self.assert_same(got, TRADING)
 
+    def test_the_diff_sees_a_live_rung(self):
+        """The scenario is not blind: with the pin's own row and nothing stopping the ladder (both programs the pin
+        names at R1, the lines not in force) the sizings, the orders and lots and the Probe budget all move."""
+        sha = hashlib.sha256(SC.pin_body()).hexdigest()
+        with mock.patch.dict(CONSTITUTION["equity_money"]["scaled"], {"pin_sha256": sha}):
+            got = self.run_scenario()
+        moved = [key for key in TRADING if got[key] != golden()[key]]
+        for key in ("sized_at_send", "sized_now", "decide_views", "orders", "lots", "probe_figures", "budget_room"):
+            self.assertIn(key, moved)
+
     def test_the_pins_own_row_with_the_ladder_stopped_is_c2s_too(self):
         sha = hashlib.sha256(SC.pin_body()).hexdigest()
 
