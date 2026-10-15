@@ -8,10 +8,51 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## C2 (A45) of the scaling plan (Oct 15, 2026): the options sizing-up step parked: `feat/scale-c2`, not deployed
+## C2 (A45) of the scaling plan (Oct 15, 2026): the options sizing-up step parked, and the Probe pool frozen at E_P: `feat/scale-c2`, not deployed
 
 C2 is the scaling plan's precondition for any deposit or ceiling release, built in two commits so the owner can deploy
 the options row alone first. Every part is a tightening and changes no size at today's E.
+
+**Part B, the Probe pool frozen at E_P** (`league/equity/live.py`: `PROBE_PIN_FILE`, `read_probe_pin`,
+`EquityBook._sleeve_equity`; plumbing, outside the options fingerprint and the equity identity):
+
+- **What it does.** E_P is the sizing E on the day C2 is deployed, in dollars, in a PRIVATE pin file on the House's
+  state root, `/workspace/state/scale-pin.json` (a JSON object whose `probe_e_usd` is E_P; the owner's step writes it
+  once C2 is live, from the grant's capital as ratified on C2's money digest, and before any deposit or ceiling release;
+  from C3 on it also carries the plan's sha256 and the rungs, which this part does not read). It is never committed,
+  never in a test and never in a published file. Once it exists, every program's sleeve sizes on min(E, E_P): the Probe
+  sleeve (`probe.sleeve_share` x E), the panel's (`panel.sleeve_share` x E) and a Sized one's (the step is parked), at
+  the send (`_size`), at a share program's decide (`_inputs`) and at a panel's budget (`_panel_budget`). A deposit then
+  never grows the Probe pool; an E below E_P sizes on E. What scales with E stays on E: an ETF's or a stock's share of E
+  and the invested cap (the goal's walls); the shared loss budget is dollars and is untouched.
+- **No pin, no freeze.** With no file there every sleeve sizes on E, field for field as before C2, and nothing new is
+  recorded or alerted: part B deploys dark and changes no size until the pin is written.
+- **A pin that cannot be read fails closed, never to E.** Any read error, a link to nothing, more than 64 KiB, not a
+  JSON object, `probe_e_usd` missing, a bool, or not a finite number above zero is UNREADABLE (only a file that is not
+  there is absent), and so is a pin gone after this process read one. Then every sleeve sizes on min(E, the last E_P
+  this process read), and with none read the send sizes NOTHING (the entry waits, as for any figure it cannot read, and
+  is missed at its cut-off). The last good E_P is held in memory only, so after a restart an unreadable pin sizes
+  nothing until it is fixed, and a pin removed on purpose is followed (E) from the House's next start. The decide's own
+  view (ctx.budget and its caps) reads E in that last case, so no program is handed a budget of nothing; what it plans
+  opens nothing; and every open is refused House-wide (`_open_block`), so the seat rule's open note leaves those
+  sessions out of every seat's idle clock. Each change of state is recorded (`equity.probe_pin`, a private ledger kind
+  registered in league/ledger.py) and an unreadable pin is an error alert once a state; neither carries a figure.
+  `health.json` shows it at the equity book's `probe_pin` (`state` absent, read or unreadable, and `why`).
+- **What it does not freeze.** The options Probe structure (`options_money.probe.max_loss_share` x E) is read in
+  `league/live/money.py`, inside the options execution fingerprint, so part B does not touch it: the plan holds it at
+  today's dollars by each step's row, deployed before each deposit, which part A's tight end 0.005 allows.
+- **Identities.** None moves: money `4cd610a5` and constitution `18636b3f` are part A's, fingerprint `b60410ad`, equity
+  `78022ca6`. The grant holds as part A left it.
+- **Deploy**: an owner deploy after part A (or with it), never 12:55-20:05Z on a trading day. Verify: the ids above;
+  `health.json` equity `probe_pin.state` "absent" (no pin yet) and no `equity.probe_pin` record; the next session's
+  share sizes as the session before's at the same E.
+- **Proof**: `league/tests/test_equity_probe_pin.py` (no pin is E field for field; a pin below E freezes every sleeve,
+  the walls on E; a pin above E sizes on E; the panel and a Sized sleeve follow; unreadable with none read sizes
+  nothing; unreadable after a read holds the smaller of E and the last E_P; a pin gone counts as unreadable until the
+  next start; the book writes no figure).
+- **Rollback**: remove the pin and restart the House (sizes on E), or deploy the release before part B. No digest moves.
+
+**Part A, the options row:**
 
 - **The options row** (`league/constitution.py`, the comment above `options_money`): `options_money.sized.min_trades`
   20 -> 1000, inside its bound (20 to 1000) at its tight end, as `equity_money.sized.min_trades` was parked on Oct 11.

@@ -186,6 +186,7 @@ KINDS: dict[str, bool] = {
     "equity.flatten": False,    # every open lot queued to exit (the rollback's first step)
     "equity.fees_posted": False,  # the broker's REG and TAF fees posted to closed lots
     "equity.alert": False,      # something the equity book could not explain
+    "equity.probe_pin": False,  # C2 (A45): the Probe pin's state changed (absent, read, unreadable), never its figure
     # The options swarm (Sept 26, 2026; league/swarm/): its own append-only events, mirrored here by the House's swarm
     # step (`league/swarm/hook.py`), idempotent by id `swarm:<seq>`. Never the House's own agent.* or eval.* kinds: its
     # roster and evaluator read those. Public: the site's tape reads a family's birth, retirement, band move and notes

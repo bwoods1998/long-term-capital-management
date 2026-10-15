@@ -76,7 +76,9 @@ then its own gates: `equity_money.enabled`, the stock paper proof's BUY stage pa
 (`paper_proof_stock_buy`, `paper_proof_stock_sell`: A8.7 as staged by A10.1), its own freeze,
 the program's band, the shared loss budget's room (the lower of the window's and the total's, from
 `league.live.real.probe_figures`, which unions the equity rows through the hook), applied to every equity open, Probe
-or Sized (A5: "sizing always fits the remaining loss budget").
+or Sized (A5: "sizing always fits the remaining loss budget"). THE PROBE POOL FROZEN AT E_P (C2 (A45) of the scaling
+plan; `PROBE_PIN_FILE`): every program's sleeve sizes on the smaller of E and E_P, a private pin's dollars, once that
+pin exists, and on E while it does not; a pin that cannot be read fails closed, never to E (`_sleeve_equity`).
 
 ATTRIBUTION: lots are per instance; the venue nets per symbol. A sale is FIFO within the instance's own lots, never
 another program's. DIVIDENDS and SPLITS and the other corporate actions (A8.10): league/equity/actions.py.
@@ -140,6 +142,7 @@ import datetime as dt
 import hashlib
 import json
 import math
+import os
 import re
 import sqlite3
 import time
@@ -345,8 +348,87 @@ OPEN_NOTE_KEY = "eq_open_note"
 #: to a seat with fewer than `idle_sessions` counted sessions in all that time). A session every window of which was
 #: clear is dropped the day after: only a refusal is ever read.
 OPEN_NOTE_KEEP_DAYS = 400
+#: THE PROBE POOL FROZEN AT E_P (C2 (A45) of the scaling plan, its Probe row; owner: book). E_P is the sizing E on the
+#: day C2 is deployed, in dollars. It lives in a PRIVATE pin file on the House's state root (`PROBE_PIN_FILE`: a JSON
+#: object whose `PROBE_PIN_FIELD` is E_P, a number or a decimal string; the owner's step writes it once C2 is live,
+#: from the grant's capital as ratified on C2's money digest, and from C3 on it also carries the plan's sha256 and the
+#: programs' rungs, which this book does not read), never in this repository, a test or a published file. `EquityBook._sleeve_equity` is the one reader, at the three places the book reads E for a sleeve
+#: (the send's sizing `_size`, a share program's decide `_inputs`, a panel's `_panel_budget`):
+#: - NO PIN (no file there, or a book with no state root): every sleeve sizes on E, exactly as before C2. C2 deploys
+#:   dark: it changes no size until the pin is written.
+#: - A PIN READ: every program's sleeve (the Probe sleeve, the panel's `panel.sleeve_share`, a Sized one's) sizes on
+#:   min(E, E_P), so a deposit never grows the Probe pool, and an E below E_P sizes on E. What scales with E stays on
+#:   E: an instrument's share of E and the invested cap (`size_entry`'s `E`), the goal's walls; the shared loss budget
+#:   is in dollars and is not touched.
+#: - A PIN THAT CANNOT BE READ (any read error, a link to nothing, more than `PROBE_PIN_MAX_BYTES`, not a JSON object,
+#:   E_P missing, a bool, not a finite number above zero), or a pin gone after this process read one: FAIL CLOSED to
+#:   min(E, the last E_P this process read); with none read, the send sizes NOTHING (it waits, as for any figure it
+#:   cannot read, and is missed at its cut-off). Never E: an unreadable pin never sizes a sleeve larger than the pin
+#:   could. The last good E_P is kept in memory only (no dollar figure is written by this book), so after a restart
+#:   an unreadable pin sizes nothing until it is fixed, and a pin removed on purpose is followed (E) from the House's
+#:   next start. The decide's own view (ctx.budget, its caps) reads E in that last case, so no program is handed a
+#:   budget of nothing (a ratio over it would fail its decide); what it plans opens nothing. That case is also a
+#:   House-wide refusal of every open (`_open_block`: `PIN_REFUSAL`), so the seat rule's open note leaves its sessions
+#:   out of the idle clock. Each change of state is recorded (`equity.probe_pin`) and an unreadable pin is an error
+#:   alert, once a state; no figure is in either.
+PROBE_PIN_FILE = "scale-pin.json"
+PROBE_PIN_FIELD = "probe_e_usd"
+PROBE_PIN_MAX_BYTES = 65536
+#: Why every real equity open is refused while the pin cannot be read and no E_P was read before it: `_open_block`'s
+#: answer (a House-wide refusal, so THE OPEN NOTE leaves the session out of every seat's idle clock) and the send's.
+PIN_REFUSAL = "the Probe pin cannot be read and no E_P was read before it: no entry is sized (fail closed)"
 _SLUG = re.compile(r"[^a-z0-9-]+")
 _DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+@dataclass(frozen=True)
+class ProbePin:
+    """`read_probe_pin`'s answer: `state` "absent" | "read" | "unreadable", `e_p` (dollars) when read, and `why` (never a
+    figure)."""
+
+    state: str
+    e_p: Decimal | None = None
+    why: str = ""
+
+
+def _no_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not a number")
+
+
+def read_probe_pin(root: str | Path | None) -> ProbePin:
+    """THE PROBE PIN, `PROBE_PIN_FILE` under `root` (the constants' comment): absent, read (E_P), or unreadable. Only a
+    file that is not there is absent; every other failure to read it, and every content that is not a finite E_P above
+    zero, is unreadable."""
+    if root is None:
+        return ProbePin("absent", why="the book has no state root")
+    path = Path(root) / PROBE_PIN_FILE
+    try:
+        with path.open("rb") as fh:
+            raw = fh.read(PROBE_PIN_MAX_BYTES + 1)
+    except FileNotFoundError:
+        if os.path.lexists(path):
+            return ProbePin("unreadable", why="the pin is a link to nothing")
+        return ProbePin("absent", why="no pin")
+    except OSError as exc:
+        return ProbePin("unreadable", why=f"the pin could not be read ({type(exc).__name__})")
+    if len(raw) > PROBE_PIN_MAX_BYTES:
+        return ProbePin("unreadable", why=f"the pin is over {PROBE_PIN_MAX_BYTES} bytes")
+    try:
+        data = json.loads(raw.decode("utf-8"), parse_constant=_no_constant)
+    except (UnicodeDecodeError, ValueError) as exc:
+        return ProbePin("unreadable", why=f"the pin is not JSON ({type(exc).__name__})")
+    if not isinstance(data, dict):
+        return ProbePin("unreadable", why="the pin is not a JSON object")
+    value = data.get(PROBE_PIN_FIELD)
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return ProbePin("unreadable", why=f"the pin's {PROBE_PIN_FIELD} is missing or not a number")
+    try:
+        e_p = Decimal(str(value).strip())
+    except ArithmeticError:
+        return ProbePin("unreadable", why=f"the pin's {PROBE_PIN_FIELD} is not a number")
+    if not e_p.is_finite() or e_p <= 0:
+        return ProbePin("unreadable", why=f"the pin's {PROBE_PIN_FIELD} is not a finite number above zero")
+    return ProbePin("read", e_p)
 
 
 def D(value: Any, default: Decimal | None = None) -> Decimal:
@@ -837,6 +919,10 @@ class EquityBook:
         self._minute_open: Sequence[Mapping[str, Any]] | None = None
         recon = self.state.get("eq_recon", {}) or {}
         self._streak = {"bad": int(recon.get("bad") or 0), "good": int(recon.get("good") or 0)}
+        #: THE PROBE POOL FROZEN AT E_P (`PROBE_PIN_FILE`): the last E_P this process read (memory only, never written)
+        #: and the pin's state last recorded (`_pin_said`).
+        self._pin_good: Decimal | None = None
+        self._pin_state: str | None = None
 
     # ------------------------------------------------------------------ plumbing
     def _has_instance_kind(self) -> bool:
@@ -1058,7 +1144,15 @@ class EquityBook:
                              for i in self._instances() if i.retired_at is None or held.get(i.id)],
                 "last_decide": self.state.get("eq_decide"), "last_bars": (self.state.get("eq_decision") or {}).get("day"),
                 "recon": {k: v for k, v in (self.state.get("eq_recon", {}) or {}).items() if k != "problems"},
-                "freeze": self.state.get("eq_freeze"), "seats": self.seats()}
+                "freeze": self.state.get("eq_freeze"), "seats": self.seats(), "probe_pin": self.probe_pin()}
+
+    def probe_pin(self) -> dict[str, str]:
+        """THE PROBE PIN's state as `_sleeve_equity` reads it now, for health (never a figure): {"state": "absent" |
+        "read" | "unreadable", "why"}. A pin gone after this process read one is "unreadable"."""
+        pin = read_probe_pin(self.root)
+        if pin.state == "absent" and self._pin_good is not None:
+            return {"state": "unreadable", "why": "the pin is gone after this process read one"}
+        return {"state": pin.state, "why": pin.why}
 
     def seats(self) -> dict[str, Any] | None:
         """THE SEAT PLAN as the last band sync wrote it (`SEAT_KEY`; THE SEAT RULE, the module docstring): {rule, seats,
@@ -1596,6 +1690,8 @@ class EquityBook:
         frozen = self.frozen
         if frozen:
             return f"equity reconciliation: {frozen}"
+        if self._sleeve_equity(Decimal(1)) is None:
+            return PIN_REFUSAL
         if inst is None or not inst.live:
             return "the program is not at Probe or Sized"
         if inst.kind != EQUITY_KIND:
@@ -2115,6 +2211,10 @@ class EquityBook:
         if E is None or E <= 0:
             wait("no sizing equity (the grant or the account)")
             return None
+        pool = self._sleeve_equity(E)
+        if pool is None:
+            wait(PIN_REFUSAL)
+            return None
         account = self._read_account()
         positions = self._read_positions()
         if account is None or positions is None:
@@ -2162,7 +2262,7 @@ class EquityBook:
             own_value = book.committed(own_lots, working=[o.remaining * o.limit_px for o in own_buys])
             own_symbol = book.committed(own_lots, symbol=symbol,
                                         working=[o.remaining * o.limit_px for o in own_buys if o.symbol == symbol])
-        sleeve = self._sleeve_share(inst) * E
+        sleeve = self._sleeve_share(inst) * pool
         x = Z.SizingInputs(symbol=symbol, klass=klass, share=intent.share if usd is None else None,
                            usd=intent.usd if usd is None else usd, limit_price=limit, E=E, sleeve_equity=sleeve,
                            sleeve_free_cash=max(ZERO, sleeve - own_value), sleeve_symbol_value=own_symbol,
@@ -2188,6 +2288,43 @@ class EquityBook:
             return Decimal(str(B.sized_sleeve_share(self._record_of(inst.family, inst.version, None), et)))
         except Exception:  # noqa: BLE001 - never larger than a Probe's when it cannot be read
             return probe
+
+    def _sleeve_equity(self, E: Decimal, *, view: bool = False) -> Decimal | None:
+        """THE PROBE POOL FROZEN AT E_P (`PROBE_PIN_FILE`'s comment): the E every program's sleeve sizes on. E with no
+        pin; min(E, E_P) with one read; with one that cannot be read, or gone after one was read, min(E, the last E_P
+        this process read), and None when none was read (the send sizes nothing), or E for the decide's view (`view`),
+        which opens nothing. Never above E, and never above an E_P once one was read."""
+        pin = read_probe_pin(self.root)
+        if pin.state == "read" and pin.e_p is not None:
+            self._pin_good = pin.e_p
+            self._pin_said("read", "")
+            return min(E, pin.e_p)
+        if pin.state == "absent" and self._pin_good is None:
+            self._pin_said("absent", pin.why)
+            return E
+        why = pin.why if pin.state == "unreadable" else "the pin is gone after this process read one"
+        self._pin_said("unreadable", why)
+        if self._pin_good is not None:
+            return min(E, self._pin_good)
+        return E if view else None
+
+    def _pin_said(self, state: str, why: str) -> None:
+        """Record a change of the pin's state (`equity.probe_pin`, never a figure); an unreadable pin is an error alert
+        and its repair a warning, once a change. No pin from the start is today's state: nothing is said of it."""
+        if state == self._pin_state:
+            return
+        before, self._pin_state = self._pin_state, state
+        if before is None and state == "absent":
+            return
+        self.record("equity.probe_pin", {"state": state, "was": before, "why": why[:200]})
+        if state == "unreadable":
+            self.alert("error", f"equity: the Probe pin ({PROBE_PIN_FILE}) cannot be read ({why[:160]}): every sleeve "
+                                "sizes on the smaller of E and the last E_P this process read, and no entry is sized "
+                                "when none was read (fail closed)")
+        elif before == "unreadable":
+            self.alert("warning", f"equity: the Probe pin ({PROBE_PIN_FILE}) is {state} again: "
+                                  + ("every sleeve sizes on the smaller of E and E_P" if state == "read" else
+                                     "every sleeve sizes on E"))
 
     def _options_open_loss(self, day: str) -> Decimal:
         """The options book's open maximum loss (held and working opens): part of the invested cap (A1)."""
@@ -3348,7 +3485,9 @@ class EquityBook:
                                            "AND kind IN ('buy', 'sell')", (inst.id, day))]
         E = self.sizing_equity() or ZERO
         et = self._et()
-        budget = self._sleeve_share(inst) * E if et is not None else ZERO
+        # The sleeve on the frozen pool (`_sleeve_equity`), the instrument's wall on E, as the send sizes them.
+        pool = self._sleeve_equity(E, view=True) or ZERO
+        budget = self._sleeve_share(inst) * pool if et is not None else ZERO
         own_value = sum((lot.value for lot in lots), ZERO)
         cash = max(ZERO, budget - own_value)
         caps = {}
@@ -3739,7 +3878,9 @@ class EquityBook:
         and the owner's decision, open."""
         et = self._et()
         E = self.sizing_equity() or ZERO
-        sleeve = self._sleeve_share(inst) * E if et is not None else ZERO
+        # The sleeve on the frozen pool (`_sleeve_equity`); the invested cap below stays on E, as the send's.
+        pool = self._sleeve_equity(E, view=True) or ZERO
+        sleeve = self._sleeve_share(inst) * pool if et is not None else ZERO
         if et is None or sleeve <= 0:
             return sleeve, sleeve
         own = sum((lot.value for lot in lots), ZERO)

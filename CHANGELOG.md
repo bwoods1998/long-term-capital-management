@@ -30,7 +30,22 @@ The running House release is `20261015T075939Z-89d93d40bfda` (main `0b978378`, P
 Probe family and the Probe sleeve 0.33 x E, 08:00Z Oct 15), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's
 updater is on. What is built and not deployed is on branches.
 
-### C2 (A45) of the scaling plan: the options sizing-up step parked, on `feat/scale-c2` (unreleased; an owner deploy outside 12:55-20:05Z on a trading day; THE MONEY DIGEST MOVES ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
+### C2 (A45) of the scaling plan: the options sizing-up step parked, and the Probe pool frozen at E_P, on `feat/scale-c2` (unreleased; two owner deploys, part A then part B, or both at once, outside 12:55-20:05Z on a trading day; part A MOVES THE MONEY DIGEST ONCE and the grant re-ratifies; part B moves no identity; no fingerprint moves, no evidence reset)
+
+- **Part B, the Probe pool frozen at E_P** (`league/equity/live.py`, plumbing outside both fingerprints). Once the
+  private pin `/workspace/state/scale-pin.json` holds E_P (`probe_e_usd`, the sizing E on C2's deploy day: the owner's
+  step writes it once C2 is live, from the grant's capital as ratified on C2's money digest, before any deposit or
+  ceiling release; never in the repository), every program's sleeve, the Probe's, the panel's and a Sized one's, sizes
+  on min(E, E_P) at the send, at a share program's decide and at a panel's budget; the account's walls (an instrument's
+  share of E, the invested cap) stay on E. NO PIN, NO FREEZE: until it is written the House sizes on E exactly as
+  before, so part B deploys dark. A pin that cannot be read (or is gone after one was read) fails closed to min(E, the
+  last E_P this process read), and sizes nothing with none read, never E; told once a state as an error alert with no
+  figure, recorded as the private ledger kind `equity.probe_pin` (league/ledger.py), and shown at health's equity
+  `probe_pin`. The options Probe structure is read in `league/live/money.py` and is not part B's: each step's row holds
+  it, as the plan says. Proof: `test_equity_probe_pin`. Rollback: remove the pin and restart, or the release before part
+  B.
+
+Part A, the options row:
 
 - **The options row** (`league/constitution.py`, the comment above `options_money`): `options_money.sized.min_trades`
   20 -> 1000, inside its bound (20 to 1000) at its tight end, a tightening, as the equity table's was on Oct 11. Sized
