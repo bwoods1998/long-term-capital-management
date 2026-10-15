@@ -1688,6 +1688,23 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   binding is unchanged (`cards.RebirthIndex.check` reads the card's declared cell and the cell its mechanism text reads
   as). Why: the request showed the refuted rows but never the cells they bind, so on Oct 11 most refusals were cards in
   cells the model was never shown.
+- **The route by symbols** (Oct 15, 2026, L2; `elane_births.SYSTEM` and `route_text`). The architect's system prompt
+  and lanes block used to say every program gets one Validation try, one sealed look, then real money. Under R-SEC
+  that is true only of index-only programs. Now both say the route by symbols. A program on SPY, QQQ, IWM or DIA alone
+  takes its lineage's one Validation try and one sealed look by S2, then waits for a Probe seat. A program naming any
+  other symbol never takes a sealed try or look. Its only route to money is FWD1-R, on the sessions after it is
+  registered: the first verdict comes after 5 forward sessions and is labelled WEAK. A panel program likewise (A34).
+  The index set is R-SEC's own (`elane.forward_only` on `INDEX_ETFS`), never a copied list. Rules only: no count, no
+  seat yield, no look outcome (A26, A9 D3). THE RATION now says "spent" where it said "looked at".
+- **The index-only ask** (Oct 15, 2026, L2; `EquityQuota.index_ask`). The quota lines ask that at least 1, and up to
+  half (rounded down) of the pass's share-program places, be index-only families in cells no row binds (cells the
+  EQUITY BIRTH CELLS block does not list). That is 1 of 3 places at want 3 and 1 to 3 of 6 at want 6. Panel places are
+  not counted. It is a soft ask: no place is reserved, and the admission and the quota are unchanged. The ask names
+  the block in lower case, so "EQUITY BIRTH CELLS" in a request still means the block is there. Why: after the universe
+  widened (03:43Z Oct 15) no pass bore an index family, and every equity birth of the day was forward-only. Watch:
+  index births a pass over 24 h, index Train passes and S2 looks, and the seat plan's waiting list on Oct 21-23.
+- **Owed:** deriving a card's holding bucket from its program's NEEDS `max_hold_sessions` (in `cards.validate`). It
+  was proposed beside L2 and dropped: the verifier found the check mislabelled.
 
 **The budget: E2's own pace, inside the House's Sail day.** E2's MODEL dollars (births, Train research and the equity
 review together) are Sail research dollars inside the swarm's research budget and under THE GATE'S RESERVE like any

@@ -59,6 +59,37 @@ updater is on. What is built and not deployed is on branches.
   `9c0651a3`). Nothing is migrated: the account reading is recomputed every five minutes, `lane_yield` is read by
   nothing, and a request without the birth cells is the request before.
 
+### The equity pass says the route by symbols and asks for index-only families, on `feat/elane-route-text` (unreleased; L2, cut from the evening bundle's head `efc9fa00`, which carries #552; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
+
+- **What it is** (`league/swarm/elane_births.py`). The equity architect's system prompt and THE LANES/EQUITY block
+  said every program is judged the same way: one Validation try, one sealed look, then real money at Probe size.
+  Under R-SEC that holds only for index-only programs. Now they say the route by symbols, rules only. A program on
+  SPY, QQQ, IWM or DIA alone takes its lineage's one Validation try (2025) and one sealed holdout look (2026), then
+  waits for a Probe seat. Any other symbol (a sector ETF, TLT, GLD) never takes a sealed try. Its only route to money
+  is FWD1-R on the sessions after its registration: the first verdict after 5 forward sessions, labelled WEAK. Panel
+  programs likewise (A34). The index set is R-SEC's own (`elane.forward_only` on `INDEX_ETFS`), not a copied list.
+  THE RATION and the LINEAGES WITH THEIR TRY header say "spent" where they said "looked at" or "has its one
+  Validation try" (A26).
+- **The index-only ask** (`EquityQuota.index_ask`, in the quota lines). At least 1, and up to half (rounded down) of
+  the pass's share-program places, should be index-only families in cells no row binds (cells the EQUITY BIRTH CELLS
+  block does not list). At want 3 that is 1 of 3, so it cannot take every place; at want 6, 1 to 3. It is a soft ask:
+  no place is reserved, and no admission or quota code reads it. It names the block in lower case, so the block's
+  name in a request still means the block is there (release 1015e's check).
+- **Why:** after the universe widened (03:43Z Oct 15), 0 of 22 equity passes bore an index family, 17 index
+  proposals were refused at the graveyard, and every birth of the day was forward-only. Index programs are the only
+  ones S2 can seat in time for the reversal seat's decision on Oct 23.
+- **Dropped, owed:** the optional tightening that derives a card's holding bucket from its NEEDS `max_hold_sessions`
+  (`cards.validate`). The verifier found it mislabelled, so it is not in this change.
+- **Not changed:** the refusal words a continuation refusal carries ("has its one Validation try", read by
+  `league/ops/elane_health.py`), the panel block's own words (`elane_xs.request_text`), the review's rubric.
+- **Verified:** `league/tests/test_elane_route_text.py` (16 tests: the route words present, no outcome word, the
+  index set is R-SEC's, the soft ask at want 1 to 20, no place reserved) and the modules that import the births
+  module, with their neighbours (every `test_elane*`, `test_e3_*`, `test_e4*`, `test_forward*`, `test_ci`, the
+  architect, loop, stall, allocation, hook and settings tests, `test_equity_seats_seal`): 1,714 tests OK on Python
+  3.11 and 3.14; `league.ci --no-tests` passed on 3.14. The full suites are the bundle's, on its exact head. Ids
+  unchanged on both: fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`, constitution `60796aed`.
+- **Rollback:** the release before; the request is words only.
+
 ### The equity birth cells: the equity pass's request shows where the graveyard binds, on `feat/elane-birth-cells` (unreleased; in release 1015e, merged on main `8ef19fc1` with the yield check's resolution of `league/swarm/elane_births.py` (`f62ca5b6`), tree for tree; cut from main `aec0c8a5`, release U; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
 
 - **What it is:** `elane_births.cells_text`, a block of the equity pass's request after THE EQUITY GRAVEYARD: one line a

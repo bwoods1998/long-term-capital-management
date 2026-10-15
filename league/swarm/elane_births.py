@@ -9,16 +9,16 @@ LANES block), for share programs:
 THE EQUITY PASS (`EquityPass`; league/swarm/architect.py `Architect.equity_pass`, its own round in the loop). Its own
 request, apart from the options architect's (whose words, graveyard and births stay byte for byte as they were): the
 equity architect's system prompt with the program contract (league/equity/EQUITY.md), and a request holding the
-LANES/EQUITY block (`lanes_text`: the two lanes' meaning and labels, the universe, the contract in brief, the Train bar,
-the ration), THE AGENDA (league/swarm/elane_train.py `AGENDA`: the mechanisms with their published priors; earnings
-drift named and refused until earnings data exist), THE EQUITY QUOTA's lines, THE EQUITY TRAIN MAP (in-sample, the
-swarm's own Train runs), the equity graveyard that binds (E2's Train refutations and the CLOSED cells) and THE EQUITY
-BIRTH CELLS (`cells_text`, Oct 15, 2026: each cell a refuted row binds, with the rows in it and the inputs each read, as
-the options architect's F1 BIRTH CELLS; a graveyard refusal is said with its cell in the next request), the lineages
-whose one try is taken (seeded programs and Train passes, outcomes sealed), the equity families' Train facts, the card
-vocabulary and the last pass's refusals in closed words (`last_text`: each by its class and the proposal's place in
-the answer, never a string the model wrote). Its route is chosen by measured yield per dollar
-(league/swarm/elane_yield.py `choose`), and its answer is booked to the route that gave it.
+LANES/EQUITY block (`lanes_text`: the two lanes' meaning and labels, the universe, the contract in brief, THE ROUTE BY
+SYMBOLS, the ration, the Train bar), THE AGENDA (league/swarm/elane_train.py `AGENDA`: the mechanisms with their
+published priors; earnings drift named and refused until earnings data exist), THE EQUITY QUOTA's lines, THE EQUITY
+TRAIN MAP (in-sample, the swarm's own Train runs), the equity graveyard that binds (E2's Train refutations and the
+CLOSED cells) and THE EQUITY BIRTH CELLS (`cells_text`, Oct 15, 2026: each cell a refuted row binds, with the rows in it
+and the inputs each read, as the options architect's F1 BIRTH CELLS; a graveyard refusal is said with its cell in the
+next request), the lineages whose one try is taken (seeded programs and Train passes, outcomes sealed), the equity
+families' Train facts, the card vocabulary and the last pass's refusals in closed words (`last_text`: each by its class
+and the proposal's place in the answer, never a string the model wrote). Its route is chosen by measured yield per
+dollar (league/swarm/elane_yield.py `choose`), and its answer is booked to the route that gave it.
 
 THE EQUITY QUOTA (`EquityQuota`; `elane.birth_share`, the owner's switch). The equity lanes' share of the swarm's births
 is `birth_share` (b) of the window's (`window_hours`, 24) births across all lanes: the pass asks for the births that
@@ -28,6 +28,16 @@ in Train research. The equity lanes have their own population (E1's `SwarmStore.
 options count), so an options population at its ceiling stops no equity birth: the pass then asks `min_per_pass`.
 The options request is unchanged; its births are not reduced (the design's "taken out of the alpha share first" is
 read as the share above, since the equity births take no options place: ELANE_E2.md says why).
+
+THE ROUTE BY SYMBOLS AND THE INDEX-ONLY ASK (L2, Oct 15, 2026; rules only, no count, no seat yield, no word of a look's
+outcome: A26, A9 D3). The system prompt and the LANES/EQUITY block (`route_text`) say the route R-SEC gives each
+program by its symbols (league/swarm/elane.py `forward_only`, on league/equity/config.py `INDEX_ETFS`): an index-only
+program takes its lineage's one Validation try and one sealed look by S2, then waits for a Probe seat; a program naming
+any other symbol takes no sealed try and no look, and its only route is the forward screen FWD1-R (its first verdict
+after 5 forward sessions, WEAK); a panel program likewise (A34). They said every program is judged the same way, and
+all 38 equity births of Oct 15 were forward-only. THE EQUITY QUOTA's lines then ask, softly, for at least 1 and up to
+half (rounded down, never under 1) of the pass's share-program places to be index-only families in cells no row binds
+(`EquityQuota.index_ask`): no place is reserved and no admission or quota code reads it.
 
 THE ADMISSION (`EquityPass.admit`). A proposal is born as an equity family when: its lane is "beta" or "equity"; its
 structure is in `elane.structures` (a beta card's is "etf"); its symbols (1-20) are in `elane.universe` and of its
@@ -209,6 +219,9 @@ class EquityQuota:
         self.by_structure = True
         self.panel = elane_xs.quota(store, settings, self.want) if self.on else 0
         self.born_panel = 0
+        # THE INDEX-ONLY ASK (L2, Oct 15, 2026): the open symbols that keep the sealed route (R-SEC's own rule,
+        # `route_symbols`). Words only: no admission, no place and no count below reads it.
+        self.index_open = route_symbols(settings)[0] if self.on else []
 
     def why_not(self, lane: str, structure: str | None = None) -> str | None:
         """Why one more equity birth (of `structure`: "panel" for a panel family) may not be born in this pass, or
@@ -248,32 +261,70 @@ class EquityQuota:
             out["panel"] = {"want": self.panel, "born": self.born_panel}  # RELEASE E4
         return out
 
+    def index_ask(self) -> tuple[int, int]:
+        """THE INDEX-ONLY ASK (L2, Oct 15, 2026): (at least, up to) how many of the pass's share-program places (its
+        `want` less its `panel` places) the request asks to be index-only families in cells no row binds: at least 1,
+        up to half of the places rounded down, never under 1 (so 1 of 1, 1 of 2, 1 of 3, 1 to 3 of 6). (0, 0) while
+        off, with no share-program place, or with no index ETF open. A SOFT ask: no place is reserved and the admission
+        and the quota never read it (THE EQUITY QUOTA is unchanged); a place it asks for is not taken from a family of
+        any other open symbol."""
+        places = max(0, self.want - self.panel)
+        if not self.on or places <= 0 or not self.index_open:
+            return (0, 0)
+        return (1, max(1, places // 2))
+
     def text(self) -> str:
-        """The request's quota lines ("" while off)."""
+        """The request's quota lines ("" while off), with THE INDEX-ONLY ASK (`index_ask`) when it asks for any."""
         if not self.on:
             return ""
         total = sum(self.window.values())
         share = (100.0 * self.window["equity"] / total) if total else 0.0
-        return (f"EQUITY QUOTA (the last {self.c['window_hours']:g} h of births, every lane): equity lanes "
-                f"{self.window['equity']} of {total} ({share:.0f}%); the equity lanes aim at {self.share:.0%} of births. "
-                f"Families in Train research: {self.researching} of at most {self.c['max_alive']}. This pass: propose "
-                f"{self.want}; more are not born.")
+        out = (f"EQUITY QUOTA (the last {self.c['window_hours']:g} h of births, every lane): equity lanes "
+               f"{self.window['equity']} of {total} ({share:.0f}%); the equity lanes aim at {self.share:.0%} of births. "
+               f"Families in Train research: {self.researching} of at most {self.c['max_alive']}. This pass: propose "
+               f"{self.want}; more are not born.")
+        least, most = self.index_ask()
+        if most:
+            places = self.want - self.panel
+            if least == most:
+                asked = (f"{most} of this pass's {places} share-program place{'' if places == 1 else 's'} should be an "
+                         "index-only family")
+            else:
+                asked = (f"at least {least} and up to {most} of this pass's {places} share-program places should be "
+                         "index-only families")
+            rest = "; the other places are open to any symbol of THE UNIVERSE" if places > most else ""
+            out += (f" A SOFT ASK, no place reserved: {asked} (every symbol one of {_named(self.index_open)}: THE ROUTE "
+                    f"BY SYMBOLS) in cells no row binds (any cell the equity birth cells block does not list){rest}.")
+        return out
 
 
 # ----------------------------------------------------------------------------------------------------------- the text
-SYSTEM = """You are the architect of the swarm's EQUITY LANES: AI-written programs that trade long-only ETFs (stocks in a
-later release) with real money on one brokerage account, cash only, deciding once a session after the close and trading at
-the next session's open or close. Propose NEW equity-lane families: each a mechanism with a published reason to exist, a
-lane, a universe slice, a card and its first program. Every program is judged the same way, in order: on the Train years
-2016-19 and 2022-24 by the bar in the request; then its lineage's ONE Validation try (2025) and ONE sealed holdout look
-(2026) by the share screen S2, whose rule and false-positive cap per program were pinned before any look; then, if it
-passes, real money at Probe size. The Validation and holdout outcomes are SEALED: nobody who writes programs ever sees
-them, you included, so they cannot be fitted; write mechanisms, not history. You know the market's history: a rule that
-works only because you know which years fell is not a mechanism. Use scale-free state (returns, realized volatility, a
-price against its own moving average or recent high, the calendar fields), never a price level or a date, and never the
-sleeve's own dollars since the run began (ctx.equity, ctx.cash, ctx.budget, ctx.caps or a lot's value, pnl or qty against
-a constant, a PARAMS value, ctx.budget or what a lot cost: every judged run starts flat, live trading never restarts where
-a window does, and a rule whose trading depends on how far the run is ahead or behind is refused, whatever its spelling).
+#: THE ROUTE BY SYMBOLS (L2, Oct 15, 2026): the system prompt and THE LANES/EQUITY block said every program is judged the
+#: same way, one Validation try and one sealed look and then real money at Probe size. Under R-SEC (league/swarm/elane.py
+#: `forward_only`, on league/equity/config.py `INDEX_ETFS`) that holds for index-only programs alone; a program naming
+#: any other symbol takes no sealed try and no look, and its only route is the forward screen FWD1-R; a panel program
+#: likewise (A34). Rules only: no count of programs, no seat yield, no word of a look's outcome (A26, A9 D3). The index
+#: ETFs are R-SEC's own tuple, never a copied list. The first verdict at 5 forward sessions is FWD1-R's first checkpoint
+#: (league/ops/fwd1_rule.py `PLAN`; no swarm module imports it, so a test holds the two equal).
+FWD1_FIRST_SESSIONS = 5
+SYSTEM = """You are the architect of the swarm's EQUITY LANES: AI-written programs that trade long-only ETFs (stocks in
+a later release) with real money on one brokerage account, cash only, deciding once a session after the close and
+trading at the next session's open or close. Propose NEW equity-lane families: each a mechanism with a published reason
+to exist, a lane, a universe slice, a card and its first program. Every program is judged first on the Train years
+2016-19 and 2022-24 by the bar in the request. Its route after Train is set by its symbols alone (R-SEC). A program
+whose every symbol is an index ETF (<INDEX ETFS>) takes its lineage's ONE Validation try (2025) and ONE sealed holdout
+look (2026) by the share screen S2, whose rule and false-positive cap per program were pinned before any look; a program
+S2's rule admits then waits for a Probe seat. A program naming any other symbol (a sector ETF, TLT, GLD) never takes a
+sealed try or a sealed look: its only route to money is the forward screen FWD1-R, which reads only the sessions after
+the program is registered and gives its first verdict after <FIRST> forward sessions, labelled WEAK. A panel program
+likewise never takes a sealed try (A34): its only route is the same forward screen. The Validation and holdout outcomes
+are SEALED: nobody who writes programs ever sees them, you included, so they cannot be fitted; write mechanisms, not
+history. You know the market's history: a rule that works only because you know which years fell is not a mechanism. Use
+scale-free state (returns, realized volatility, a price against its own moving average or recent high, the calendar
+fields), never a price level or a date, and never the sleeve's own dollars since the run began (ctx.equity, ctx.cash,
+ctx.budget, ctx.caps or a lot's value, pnl or qty against a constant, a PARAMS value, ctx.budget or what a lot cost:
+every judged run starts flat, live trading never restarts where a window does, and a rule whose trading depends on how
+far the run is ahead or behind is refused, whatever its spelling).
 
 Reply with ONE JSON object: {"families": [{"slug": "short-kebab-name", "lane": "beta or equity", "agenda": "<one key of
 THE AGENDA>", "mechanism": "one or two sentences: why it should make money and who pays", "structure": "etf", "symbols":
@@ -287,7 +338,7 @@ the same symbols held on the same schedule without the signal's condition", "abl
 "falsification": "the concrete result that kills it"}, "program": "<the whole Python file under THE PROGRAM CONTRACT>"}]}.
 
 THE PROGRAM CONTRACT (league/equity/EQUITY.md):
-"""
+""".replace("<INDEX ETFS>", ", ".join(eqconfig.INDEX_ETFS)).replace("<FIRST>", str(FWD1_FIRST_SESSIONS))
 
 
 def _symbols_line(settings: Mapping[str, Any] | None) -> str:
@@ -305,6 +356,11 @@ GROUP_WORDS = {"index": "the index ETFs", "sectors": "the sector ETFs", "defensi
                "stocks": "the stocks"}
 
 
+def _named(syms: Sequence[str]) -> str:
+    """Symbols in words: "SPY", "SPY and QQQ", "SPY, QQQ and IWM"."""
+    return syms[0] if len(syms) == 1 else f"{', '.join(syms[:-1])} and {syms[-1]}"
+
+
 def _costs_line(settings: Mapping[str, Any] | None) -> str:
     """The half-spread of each group of symbols `elane.universe` holds (league/equity/config.py `HALF_SPREAD_BP`), in
     the universe's own symbols and no other (release E2.4): "1 bp the index ETFs SPY, QQQ, IWM and DIA". The line
@@ -316,14 +372,42 @@ def _costs_line(settings: Mapping[str, Any] | None) -> str:
             groups.setdefault((elane_train.symbols_group([sym]), int(eqconfig.HALF_SPREAD_BP[sym])), []).append(sym)
     order = {group: i for i, group in enumerate(elane_train.GROUPS)}
     rows = sorted(groups.items(), key=lambda row: (order.get(row[0][0], len(order)), row[0][1]))
-    named = lambda syms: syms[0] if len(syms) == 1 else f"{', '.join(syms[:-1])} and {syms[-1]}"  # noqa: E731
-    return "; ".join(f"{bp} bp {GROUP_WORDS.get(group, group)} {named(syms)}" for (group, bp), syms in rows) \
+    return "; ".join(f"{bp} bp {GROUP_WORDS.get(group, group)} {_named(syms)}" for (group, bp), syms in rows) \
         or "no symbol is open"
 
 
+def route_symbols(settings: Mapping[str, Any] | None) -> tuple[list[str], list[str]]:
+    """THE ROUTE BY SYMBOLS (L2; `SYSTEM`'s note): the open symbols (`universe`) split by R-SEC's own rule
+    (league/swarm/elane.py `forward_only`, asked of a one-symbol family): (those a program may trade all of and keep the
+    sealed route, those that make a program forward-only)."""
+    from . import elane
+
+    sealed: list[str] = []
+    forward: list[str] = []
+    for symbols in universe(settings).values():
+        for sym in symbols:
+            (forward if elane.forward_only({"roots": [sym]}) else sealed).append(sym)
+    return sealed, forward
+
+
+def route_text(settings: Mapping[str, Any] | None) -> str:
+    """THE ROUTE BY SYMBOLS line of the LANES/EQUITY block (rules only: no count, no yield, no outcome word, no year;
+    A26, A9 D3)."""
+    sealed, forward = route_symbols(settings)
+    index = _named(sealed) if sealed else "none is open now"
+    other = f" ({', '.join(forward)})" if forward else ""
+    return ("- THE ROUTE BY SYMBOLS (R-SEC; the code's rule, never a setting): every program is judged first on Train by "
+            f"the bar below. A program whose every symbol is an index ETF ({index}) then takes its lineage's ONE "
+            "Validation try and ONE sealed holdout look by the share screen S2, and a program S2's rule admits waits for "
+            f"a Probe seat. A program naming any other symbol of THE UNIVERSE{other} never takes a sealed try or a sealed "
+            "look: its only route to money is the forward screen FWD1-R, on the sessions after it is registered, with "
+            f"its first verdict after {FWD1_FIRST_SESSIONS} forward sessions, labelled WEAK. A panel program likewise "
+            "(A34): the forward screen is its only route.")
+
+
 def lanes_text(settings: Mapping[str, Any] | None) -> str:
-    """THE LANES/EQUITY block: each lane's meaning and label, the universe, the contract in brief, the ration and the
-    screen ("" while the births are off). Rules only."""
+    """THE LANES/EQUITY block: each lane's meaning and label, the universe, the contract in brief, the route by symbols,
+    the ration and the screen ("" while the births are off). Rules only."""
     from . import elane
 
     if not births_on(settings):
@@ -346,10 +430,12 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
         "max_hold_sessions (at most 60); an ETF position is at most half the sleeve; fills pay the half-spread ("
         + _costs_line(settings) + ") and sells the SEC and FINRA fees. The whole contract is in your system prompt.",
         "- " + elane_review.READING_CTX,
-        "- THE RATION: ONE Validation try and ONE sealed look a LINEAGE. A family continuing an idea (its parent, or a "
-        "dead family of the same slice and idea), the same template, or a program whose Train daily returns correlate "
-        "0.7 or more with one already looked at, is the same lineage: once a lineage has its try, a proposal continuing "
-        "it is not born, and a near-copy of a looked-at program is refused at the look. Send ideas, not variants.",
+        route_text(settings),
+        "- THE RATION: ONE route a LINEAGE. A family continuing an idea (its parent, or a dead family of the same slice "
+        "and idea), the same template, or a program whose Train daily returns correlate 0.7 or more with a program of "
+        "a spent lineage, is the same lineage: once a lineage is spent by rule (LINEAGES WITH THEIR TRY), a proposal "
+        "continuing it is not born, and an index-only near-copy of a spent lineage's program is refused at its look. "
+        "Send ideas, not variants.",
         elane_train.bar_text(),
     ])
 
@@ -517,8 +603,9 @@ def tried_text(store: Any, *, limit: int = 40) -> str:
                     f"{facts['mechanism'][:160]}")
     if not rows:
         return ""
-    return ("LINEAGES WITH THEIR TRY (each below has its one Validation try; its outcome is sealed and never shown; a "
-            "proposal continuing one is not born):\n" + "\n".join(rows[-limit:]))
+    return ("LINEAGES WITH THEIR TRY (each below is spent by rule, its route taken: an index-only one its one Validation "
+            "try, any other the forward screen; no outcome is ever shown; a proposal continuing one is not born):\n"
+            + "\n".join(rows[-limit:]))
 
 
 def families_text(store: Any, settings: Mapping[str, Any] | None) -> str:
@@ -1021,4 +1108,5 @@ class EquityPass:
 __all__ = ["BIRTHS_AT_KEY", "LAST_KEY", "DEFAULTS", "BOUNDS", "SYSTEM", "cfg", "lane_cfg", "birth_share", "births_on",
            "universe", "researching", "due", "EquityQuota", "lanes_text", "agenda_text", "graveyard_text", "seeded_ids",
            "tried", "tried_text", "families_text", "vocabulary_text", "last_text", "refusal_said", "REFUSAL_SAID",
-           "OTHER_SAID", "CARD_FIELDS", "NO_SECTORS", "SETTING_KEYS", "EquityPass"]
+           "OTHER_SAID", "CARD_FIELDS", "NO_SECTORS", "SETTING_KEYS", "EquityPass", "FWD1_FIRST_SESSIONS",
+           "route_symbols", "route_text"]
