@@ -1655,6 +1655,11 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   review's dollars are on rows of their own ("review:<route>"); `days` is the spend by UTC day against `usd_day`. The
   route for the next question is chosen from births, dollars and Train passes ONLY, never from a later stage (a choice
   made on look outcomes would feed the holdout back into which model writes programs).
+- **Research dollars by lane** (Oct 15, 2026): the `dlane` report's `lane_yield` (league/ops/lane_yield.py). For 24 h
+  and 7 days, each research group (`alpha`, `direction`, `equity_lanes`, `panel`): its booked dollars by route, the
+  shared pools with the rule that divides each (`allocation`; the harness is said beside, never carried), the funnel's
+  counts of the same window with the forward record's registrations and new lineages, `per_usd` and `usd_per`. An
+  operator's reading: no generator, screen or route choice reads it.
 - Alerts (House warnings through the swarm's status events, in the owner's `swarm_alerts` cause):
   `elane_train_window`, `elane_train_state`, and `elane_train_house` (the equity Train is not running: a version's
   third failure of the House's since it was last judged, the decider child failing every run or no equity store; at
