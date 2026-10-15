@@ -920,8 +920,11 @@ CONSTITUTION: dict[str, Any] = {
     # refused entries a path 19.6 -> 15.8 (18.4 -> 14.5), sessions with a window pause at an open 94% -> 90%, the
     # consistency clause's failures (A14) 7.1% -> 4.6% of paths (5.0% -> 3.4%). Its cost, stated: about 0.6 fewer
     # options closes a path in 12 weeks (5.4 -> 4.8), a Probe options program trades a smaller book than its own
-    # replay holds (a refused open is no close, so no twin moves), and the practice book (league/live/shadow.py) scales
-    # to one structure a family too. No program is stopped, no position is sold. Rollback, one owner deploy:
+    # replay holds (a refused open is no close, so no twin moves), the practice book (league/live/shadow.py) scales
+    # to one structure a family too, and a two-sided `long_single` family at Probe (none is at Probe today) holds one
+    # of its two legs at a time: its put waits until its call has closed (league/tests/test_live_long_single.py). Two
+    # a family was measured too and is no better than three (the family share and the window already stop the third
+    # call): the gain is one at a time. No program is stopped, no position is sold. Rollback, one owner deploy:
     # `open_per_family` 3 here (re-pin `PINNED_DIGEST`); the money digest moves back and the standing grant re-ratifies
     # at the House's start; no fingerprint move, no evidence reset.
     "options_money": {
