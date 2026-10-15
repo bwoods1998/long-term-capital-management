@@ -578,7 +578,9 @@ def train_score(base: Mapping[str, Any] | None, stress: Mapping[str, Any] | None
 
 
 def bar_text() -> str:
-    """THE BAR in words (rules only)."""
+    """THE BAR in words (rules only). Its last sentence is route-neutral (L2, Oct 15, 2026): it reaches the equity
+    architect's request and every family's Train brief, sector families included, so it says the route R-SEC gives a
+    lineage by its symbols (league/swarm/elane.py `forward_only`) and never that every program takes a sealed try."""
     return (f"THE TRAIN BAR ({OBJECTIVE}), on the House's {TRAIN_LABEL} (one run a span, each starting flat, summed) "
             f"at 1.0x and 1.5x the half-spread: (Y1) at least {BAR['year_min_trades']} closed lots on "
             f"{BAR['year_min_days']} entry days in each of at least {BAR['min_active_years']} of the {len(TRAIN_YEARS)} "
@@ -595,8 +597,9 @@ def bar_text() -> str:
             "what ctx gives now and the sizes differ; recompute it from ctx.bars at every call (a lot's own facts are "
             "in ctx.positions). Reported beside, never a bar: the same-exposure "
             "buy-and-hold over the same sessions, the mean time-matched excess (MTE) and the drift share. The first "
-            "version that passes is the lineage's ONE Validation try, then ONE sealed look; their outcomes are sealed and "
-            "never shown to anyone who writes programs.")
+            "version that passes spends its lineage's one route, set by its symbols (R-SEC): for an index-only program "
+            "its ONE Validation try and ONE sealed look; for any other, the forward screen FWD1-R. No outcome of either "
+            "is ever shown to anyone who writes programs.")
 
 
 # ----------------------------------------------------------------------------------------------------------- the record

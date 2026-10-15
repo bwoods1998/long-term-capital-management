@@ -1696,15 +1696,29 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   registered: the first verdict comes after 5 forward sessions and is labelled WEAK. A panel program likewise (A34).
   The index set is R-SEC's own (`elane.forward_only` on `INDEX_ETFS`), never a copied list. Rules only: no count, no
   seat yield, no look outcome (A26, A9 D3). THE RATION now says "spent" where it said "looked at".
+- **The same route in the rest of the request** (Oct 15, 2026, L2's review follow-up). The Train bar's last sentence
+  (`elane_train.bar_text`) ends the lanes block and every family's Train brief. It now says the first passing version
+  spends its lineage's one route by its symbols: the try and the look for an index-only program, FWD1-R for any
+  other. The panel bar and panel block (`elane_xs.route_words`) say a panel program takes no sealed try and no XS1
+  look under A34. THE RATION says what a look compares: a program that has taken its sealed look, or is taking it
+  (`elane.same_lineage`). A forward-only lineage is spent by its Train pass and never looked at. The next request
+  says a continuation refusal as "a lineage spent by rule". The admission's refusal text is unchanged, because
+  `league/ops/elane_health.py` classes refusals by it.
 - **The index-only ask** (Oct 15, 2026, L2; `EquityQuota.index_ask`). The quota lines ask that at least 1, and up to
-  half (rounded down) of the pass's share-program places, be index-only families in cells no row binds (cells the
-  EQUITY BIRTH CELLS block does not list). That is 1 of 3 places at want 3 and 1 to 3 of 6 at want 6. Panel places are
-  not counted. It is a soft ask: no place is reserved, and the admission and the quota are unchanged. The ask names
+  half (rounded down) of the pass's share-program places, be index-only families in cells no row binds and not
+  CLOSED. The ask says where each list is: the birth cells block lists the bound cells, most rows first, and may leave
+  some unlisted; THE EQUITY GRAVEYARD lists the CLOSED ones. That is 1 of 3 places at want 3 and 1 to 3 of 6 at want 6.
+  With one place (want 1, the quota's floor when the equity lanes are at their share) it asks that place; it stays
+  soft. Panel places are not counted. It is a soft ask: no place is reserved, and the admission and the quota are
+  unchanged. The ask names
   the block in lower case, so "EQUITY BIRTH CELLS" in a request still means the block is there. Why: after the universe
   widened (03:43Z Oct 15) no pass bore an index family, and every equity birth of the day was forward-only. Watch:
   index births a pass over 24 h, index Train passes and S2 looks, and the seat plan's waiting list on Oct 21-23.
 - **Owed:** deriving a card's holding bucket from its program's NEEDS `max_hold_sessions` (in `cards.validate`). It
-  was proposed beside L2 and dropped: the verifier found the check mislabelled.
+  was proposed beside L2 and dropped: the verifier found the check mislabelled. Also owed: the researchers' system
+  prompts (`elane_train.RESEARCHER_SYSTEM`, `elane_xs.RESEARCHER_SYSTEM`) still say every program takes one Validation
+  try. The review rubrics say it too. They stay as L2 left them: a rubric edit changes what every review reads, and a
+  panel review record names its rubric by its sha.
 
 **The budget: E2's own pace, inside the House's Sail day.** E2's MODEL dollars (births, Train research and the equity
 review together) are Sail research dollars inside the swarm's research budget and under THE GATE'S RESERVE like any

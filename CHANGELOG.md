@@ -59,7 +59,7 @@ updater is on. What is built and not deployed is on branches.
   `9c0651a3`). Nothing is migrated: the account reading is recomputed every five minutes, `lane_yield` is read by
   nothing, and a request without the birth cells is the request before.
 
-### The equity pass says the route by symbols and asks for index-only families, on `feat/elane-route-text` (unreleased; L2, cut from the evening bundle's head `efc9fa00`, which carries #552; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
+### The equity pass says the route by symbols and asks for index-only families, on `feat/elane-route-text` (unreleased; L2, cut from the evening bundle's head `efc9fa00`, which carries #552; an owner deploy: `league/swarm/elane_births.py`, `elane_train.py` and `elane_xs.py` are protected; no identity moves; no setting)
 
 - **What it is** (`league/swarm/elane_births.py`). The equity architect's system prompt and THE LANES/EQUITY block
   said every program is judged the same way: one Validation try, one sealed look, then real money at Probe size.
@@ -70,9 +70,27 @@ updater is on. What is built and not deployed is on branches.
   programs likewise (A34). The index set is R-SEC's own (`elane.forward_only` on `INDEX_ETFS`), not a copied list.
   THE RATION and the LINEAGES WITH THEIR TRY header say "spent" where they said "looked at" or "has its one
   Validation try" (A26).
+- **The review's follow-up** (same branch; `league/swarm/elane_train.py` and `league/swarm/elane_xs.py` are protected
+  too; no identity hashes either). The rest of the request now says the same route:
+  - The Train bar's last sentence (`elane_train.bar_text`) said a lineage's first passing version takes ONE Validation
+    try, then ONE sealed look. It ends the LANES/EQUITY block and every family's Train brief, sector families
+    included. Now it says the first passing version spends its lineage's one route, set by its symbols: the try and
+    the look for an index-only program, FWD1-R for any other.
+  - The panel bar's last sentence and the panel block (`elane_xs.route_words`) say a panel program takes no sealed
+    try and no XS1 look under A34; its only route is FWD1-R. With the historical route open (a test's world), the
+    words are as built.
+  - THE RATION says what `elane.same_lineage` compares: at an index-only program's sealed look, a program that has
+    taken its sealed look, or is taking it. It no longer says "a program of a spent lineage": a forward-only lineage
+    is spent by its Train pass and never looked at.
+  - The next request's sentence for a continuation refusal (`REFUSAL_SAID["tried_lineage"]`) says "a lineage spent by
+    rule". The admission's own refusal text is unchanged; `league/ops/elane_health.py` classes refusals by that text.
+  - The soft ask points to cells no row binds and not CLOSED. It no longer says "any cell the block does not list":
+    the block may leave bound cells unlisted, and a CLOSED cell is another key.
+  - One share-program place (want 1, the quota's floor when the equity lanes are at their share) is asked as 1 of 1.
+    Accepted: the ask stays soft, and no ask there would drop it from every pass at the floor.
 - **The index-only ask** (`EquityQuota.index_ask`, in the quota lines). At least 1, and up to half (rounded down) of
-  the pass's share-program places, should be index-only families in cells no row binds (cells the EQUITY BIRTH CELLS
-  block does not list). At want 3 that is 1 of 3, so it cannot take every place; at want 6, 1 to 3. It is a soft ask:
+  the pass's share-program places, should be index-only families in cells no row binds and not CLOSED. At want 3
+  that is 1 of 3, so it cannot take every place; at want 6, 1 to 3; at one place, 1 of 1. It is a soft ask:
   no place is reserved, and no admission or quota code reads it. It names the block in lower case, so the block's
   name in a request still means the block is there (release 1015e's check).
 - **Why:** after the universe widened (03:43Z Oct 15), 0 of 22 equity passes bore an index family, 17 index
@@ -80,14 +98,20 @@ updater is on. What is built and not deployed is on branches.
   ones S2 can seat in time for the reversal seat's decision on Oct 23.
 - **Dropped, owed:** the optional tightening that derives a card's holding bucket from its NEEDS `max_hold_sessions`
   (`cards.validate`). The verifier found it mislabelled, so it is not in this change.
-- **Not changed:** the refusal words a continuation refusal carries ("has its one Validation try", read by
-  `league/ops/elane_health.py`), the panel block's own words (`elane_xs.request_text`), the review's rubric.
-- **Verified:** `league/tests/test_elane_route_text.py` (16 tests: the route words present, no outcome word, the
-  index set is R-SEC's, the soft ask at want 1 to 20, no place reserved) and the modules that import the births
-  module, with their neighbours (every `test_elane*`, `test_e3_*`, `test_e4*`, `test_forward*`, `test_ci`, the
-  architect, loop, stall, allocation, hook and settings tests, `test_equity_seats_seal`): 1,714 tests OK on Python
-  3.11 and 3.14; `league.ci --no-tests` passed on 3.14. The full suites are the bundle's, on its exact head. Ids
-  unchanged on both: fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`, constitution `60796aed`.
+- **Not changed, owed:** the refusal text a continuation refusal carries ("has its one Validation try", read by
+  `league/ops/elane_health.py`; the next request never shows it). The researchers' system prompts
+  (`elane_train.RESEARCHER_SYSTEM`, `elane_xs.RESEARCHER_SYSTEM`) still say every program takes ONE Validation try:
+  owed, in plain route words. The review rubrics (`elane_review.REVIEW`, `elane_xs.REVIEW_SYSTEM`) say the same and
+  stay as L2 left them: a rubric edit changes what every review reads, and a panel review record names its rubric by
+  its sha (`elane_xs.rubric_sha`).
+- **Verified:** `league/tests/test_elane_route_text.py` (20 tests: the route words present, no outcome word, the
+  index set is R-SEC's, the soft ask at want 1 to 20, no place reserved, the old claims absent from the whole request,
+  the Train bar, the panel block and the refusal sentence) and the modules that import the births, Train or panel
+  module (directly or through their fakes), with their neighbours (every `test_elane*`, `test_e3_*`, `test_e4*`,
+  `test_forward*`, `test_equity*`, `test_ci`, the architect, loop, stall, allocation, hook, settings and bands tests):
+  110 modules, 3,518 tests OK on Python 3.11 and 3.14; `league.ci --no-tests` passed on 3.14. The full suites are the
+  bundle's, on its exact head. Ids unchanged on both: fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`,
+  constitution `60796aed`.
 - **Rollback:** the release before; the request is words only.
 
 ### The equity birth cells: the equity pass's request shows where the graveyard binds, on `feat/elane-birth-cells` (unreleased; in release 1015e, merged on main `8ef19fc1` with the yield check's resolution of `league/swarm/elane_births.py` (`f62ca5b6`), tree for tree; cut from main `aec0c8a5`, release U; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)

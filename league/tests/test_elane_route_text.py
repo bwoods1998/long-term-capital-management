@@ -4,19 +4,23 @@ program by its symbols (an index-only program takes the one Validation try and t
 Probe seat; any other symbol, and a panel program, goes by the forward screen FWD1-R alone), in R-SEC's own index set,
 rules only (no count, no seat yield, no word of a look's outcome: A26, A9 D3); and THE EQUITY QUOTA's lines ask, softly,
 for at least 1 and up to half of the share-program places to be index-only families in cells no row binds, with no place
-reserved and no admission changed. Every family and number here is invented."""
+reserved and no admission changed. L2's follow-up: the Train bar's last sentence, THE RATION, the continuation
+refusal's sentence and the panel block say the same route, and the whole request is read for the old claim. Every
+family and number here is invented."""
 
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from unittest import mock
 
 from league.equity import config as econfig
-from league.ops import fwd1_rule
-from league.swarm import elane, elane_births
-from league.swarm.elane_births import EquityPass, EquityQuota
+from league.ops import elane_health, fwd1_rule
+from league.swarm import elane, elane_births, elane_train, elane_xs
+from league.swarm.elane_births import LAST_KEY, EquityPass, EquityQuota
 from league.tests import elane_e2_fakes as fx
+from league.tests import elane_xs_fakes as F
 from league.tests import test_elane_e2_births as births
 
 #: Words a generator text may never carry of a look or a seat (A26: "spent" by rule, never "looked at", "passed" or
@@ -25,9 +29,12 @@ from league.tests import test_elane_e2_births as births
 OUTCOME = re.compile(r"\b(looked|look(?:ed)?[- ]at|passed|fail|fails|failed|yield|yields|seated|won|lost)\b|%",
                      re.IGNORECASE)
 PASS_WORD = re.compile(r"\bpass\w*", re.IGNORECASE)
-#: The claim R-SEC made false, in the words the request used to carry.
+#: The claim R-SEC made false, in the words the request used to carry: the system prompt's, THE RATION's, the Train
+#: bar's last sentence (league/swarm/elane_train.py `bar_text`, the panel's in league/swarm/elane_xs.py), the panel
+#: block's and the next request's sentence for a continuation refusal (L2's follow-up).
 OLD_CLAIMS = ("Every program is judged the same way", "if it passes, real money", "ONE Validation try and ONE sealed look "
-              "a LINEAGE", "one already looked at", "a looked-at program")
+              "a LINEAGE", "one already looked at", "a looked-at program", "ONE Validation try, then ONE sealed look",
+              "has its one Validation try", "then by the screen XS1")
 
 
 def flat(text: str) -> str:
@@ -79,17 +86,34 @@ class TheRouteIsSaid(Case):
                       "WEAK", route)
         self.assertIn("A panel program likewise (A34)", route)
         self.assertIn("- THE RATION: ONE route a LINEAGE.", lanes)
-        self.assertIn("a program of a spent lineage", ration_line(lanes))
+        # What `elane.same_lineage` compares at a look: a program that has taken its sealed look or is taking it (a
+        # forward-only lineage spent by its Train pass is never looked at, so it is not named here).
+        self.assertIn("At an index-only program's sealed look, it is the same lineage as a program that has taken its "
+                      "sealed look, or is taking it, when it has that program's template in the same lane or its Train "
+                      "daily returns correlate 0.7 or more with that program's; such a near-copy is refused at its own "
+                      "look.", ration_line(lanes))
+        self.assertNotIn("of a spent lineage", ration_line(lanes))
         self.assertLess(lanes.index("- THE ROUTE BY SYMBOLS"), lanes.index("- THE RATION"))
         for claim in OLD_CLAIMS:
             self.assertNotIn(claim, lanes)
         self.assertNotRegex(lanes, r"\b202[56]\b", "the request names no Validation or holdout year")
 
     def test_the_request_carries_it(self):
+        # The whole request, with a lineage that has its try and a continuation refusal of the last pass in it (so
+        # LINEAGES WITH THEIR TRY and the refusal's sentence are read too).
+        fx.e2_family(self.store, "tried-one", record={"status": "passed", "passed_version": 1, "versions": {}})
+        self.store.put(LAST_KEY, {"at": "not a time",  # said as "the last pass": the request names no year
+                                  "refused": [{"slug": "x", "why": "x", "cls": "tried_lineage", "n": 1}]})
         system, user = EquityPass(self.arch).request(EquityQuota(self.store, self.settings, now=self.clock()))
         self.assertIn("Its route after Train is set by its symbols alone (R-SEC)", flat(system))
         self.assertIn("- THE ROUTE BY SYMBOLS", user)
         self.assertIn("A SOFT ASK, no place reserved", user)
+        self.assertIn("LINEAGES WITH THEIR TRY (each below is spent by rule", user)
+        self.assertIn("- proposal 1: it continues a lineage spent by rule", user)
+        self.assertIn(flat(elane_train.bar_text()), flat(user))
+        for claim in OLD_CLAIMS:
+            self.assertNotIn(claim, flat(system), claim)
+            self.assertNotIn(claim, flat(user), claim)
         self.assertNotRegex(user, r"\b202[56]\b")
 
     def test_an_index_only_universe_names_no_forward_symbol_and_still_says_the_rule(self):
@@ -104,6 +128,60 @@ class TheRouteIsSaid(Case):
         sectors["elane"]["universe"] = ["XLK", "TLT"]
         self.assertEqual(elane_births.route_symbols(sectors), ([], ["XLK", "TLT"]))
         self.assertIn("an index ETF (none is open now)", elane_births.route_text(sectors))
+
+
+class TheOtherTextsSayTheSameRoute(Case):
+    """L2's follow-up: the texts the request (and a Train brief) carries beside the route line say no other route."""
+
+    def test_the_train_bar_is_route_neutral(self):
+        # elane_train.bar_text ends the LANES/EQUITY block and every share family's Train brief, sector ones included.
+        bar = flat(elane_train.bar_text())
+        self.assertTrue(bar.endswith("The first version that passes spends its lineage's one route, set by its symbols "
+                                     "(R-SEC): for an index-only program its ONE Validation try and ONE sealed look; for "
+                                     "any other, the forward screen FWD1-R. No outcome of either is ever shown to anyone "
+                                     "who writes programs."), bar[-300:])
+        for claim in OLD_CLAIMS:
+            self.assertNotIn(claim, bar, claim)
+        self.assertTrue(flat(elane_births.lanes_text(self.settings)).endswith(bar), "the block ends with the bar")
+
+    def test_the_continuation_refusal_says_spent_and_health_still_reads_the_admissions_words(self):
+        said = elane_births.refusal_said({"cls": "tried_lineage"}, self.settings)
+        self.assertEqual(said, "it continues a lineage spent by rule (LINEAGES WITH THEIR TRY; no outcome is shown): "
+                               "propose a different idea")
+        self.assertIsNone(OUTCOME.search(said))
+        # league/ops/elane_health.py classes a refusal by the admission's own text, which is unchanged.
+        for why in ("it continues seed-x's lineage, which has its one Validation try (outcome sealed): propose a "
+                    "different idea", "its rebirth continues seed-x's lineage, which has its one Validation try (outcome "
+                    "sealed): propose a different idea"):
+            self.assertEqual(next(cls for start, cls, _ in elane_health.REFUSALS if why.startswith(start)),
+                             "tried_lineage", why)
+
+
+class ThePanelSaysItsRoute(unittest.TestCase):
+    """The panel block of the equity request (league/swarm/elane_xs.py `request_text`, `bar_text`) under the House's
+    A34: no sealed try and no XS1 look; with the historical route open (a test's world), the words as built."""
+
+    def block(self, historical: bool) -> str:
+        F.switch_on(self, historical=historical)
+        store = F.new_store(self)
+        F.ready(store.root)
+        block = elane_xs.request_text(store, F.settings("gate"), 4)
+        self.assertTrue(block)
+        return flat(block)
+
+    def test_under_a34_the_panel_block_says_the_forward_screen(self):
+        self.assertIs(elane_xs.A34_FORWARD_ONLY, True, "the House's value")
+        block = self.block(historical=False)
+        self.assertIn(elane_xs.ROUTE_A34, block)
+        self.assertIn("by the bar below on Train and then by the forward screen FWD1-R alone (A34: no XS1 look)", block)
+        self.assertIn("XS1", flat(elane_xs.bar_text()))
+        for claim in OLD_CLAIMS:
+            self.assertNotIn(claim, block, claim)
+
+    def test_with_the_historical_route_open_the_words_are_as_built(self):
+        block = self.block(historical=True)
+        self.assertIn(elane_xs.ROUTE_HISTORICAL, block)
+        self.assertIn("by the bar below on Train and then by the screen XS1;", block)
 
 
 class TheIndexSetIsRSECs(Case):
@@ -170,8 +248,11 @@ class TheSoftAsk(Case):
         self.assertIn("This pass: propose 3; more are not born.", text)
         self.assertIn("A SOFT ASK, no place reserved: 1 of this pass's 3 share-program places should be an index-only "
                       "family (every symbol one of SPY, QQQ, IWM and DIA: THE ROUTE BY SYMBOLS) in cells no row binds "
-                      "(any cell the equity birth cells block does not list); the other places are open to any symbol of "
-                      "THE UNIVERSE.", text)
+                      "and not CLOSED (the equity birth cells block lists the bound cells, most rows first; THE EQUITY "
+                      "GRAVEYARD lists the CLOSED ones); the other places are open to any symbol of THE UNIVERSE.", text)
+        # The block may list only the bound cells with the most rows (it says how many more it does not list), and a
+        # CLOSED cell is another key: the ask never calls an unlisted cell unbound.
+        self.assertNotIn("does not list", text)
         # The block's own name stays the block's: a request with no bound cell carries no "EQUITY BIRTH CELLS"
         # (test_elane_birth_cells.py reads the name as the block's presence).
         self.assertNotIn("EQUITY BIRTH CELLS", text)
@@ -189,7 +270,10 @@ class TheSoftAsk(Case):
         self.assertNotIn("SOFT ASK", self.quota(3, panel=3).text())
 
     def test_small_passes(self):
+        # ONE PLACE, ASKED (accepted): want 1 is the quota's floor whenever the equity lanes are at their share, so
+        # making no ask at one place would drop the ask from every pass there; it stays a soft ask.
         self.assertEqual(self.quota(1).index_ask(), (1, 1))
+        self.assertEqual(self.quota(2, panel=1).index_ask(), (1, 1))
         self.assertIn("1 of this pass's 1 share-program place should be an index-only family", self.quota(1).text())
         self.assertNotIn("the other places", self.quota(1).text())
         self.assertEqual(self.quota(2).index_ask(), (1, 1))
@@ -211,7 +295,8 @@ class TheSoftAsk(Case):
         self.assertEqual((q.index_ask(), q.text()), ((0, 0), ""))
 
     def test_no_place_is_reserved(self):
-        # The quota's own arithmetic and admission are unchanged: every place is admitted to a forward-only birth.
+        # The quota's own arithmetic and admission are unchanged: `admits` takes a lane and a structure, never a
+        # symbol, so the ask cannot change which proposal takes a place, and every place is admitted while there is room.
         self.born_options(30)
         q = EquityQuota(self.store, self.settings, now=self.clock())
         self.assertEqual((q.want, q.index_ask()), (4, (1, 2)))
@@ -220,7 +305,9 @@ class TheSoftAsk(Case):
             q.born("equity")
         self.assertFalse(q.admits("equity"))
         self.assertEqual(q.event()["equity_births"], {"beta": 0, "equity": 4})
-        self.assertNotIn("index", " ".join(q.event()), "the pass's event carries no ask")
+        event = json.dumps(q.event())
+        for words in ("index", "SOFT ASK", "ask"):
+            self.assertNotIn(words, event, "the pass's event carries no ask, in its keys or its values")
 
 
 if __name__ == "__main__":

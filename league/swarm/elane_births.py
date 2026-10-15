@@ -37,7 +37,10 @@ any other symbol takes no sealed try and no look, and its only route is the forw
 after 5 forward sessions, WEAK); a panel program likewise (A34). They said every program is judged the same way, and
 all 38 equity births of Oct 15 were forward-only. THE EQUITY QUOTA's lines then ask, softly, for at least 1 and up to
 half (rounded down, never under 1) of the pass's share-program places to be index-only families in cells no row binds
-(`EquityQuota.index_ask`): no place is reserved and no admission or quota code reads it.
+(`EquityQuota.index_ask`): no place is reserved and no admission or quota code reads it. Every other text of the
+request says the same route (L2's follow-up, Oct 15, 2026): the Train bar's last sentence (league/swarm/elane_train.py
+`bar_text`, also in each family's Train brief), the panel block's (league/swarm/elane_xs.py `route_words`), THE RATION
+(what `elane.same_lineage` compares at a look) and the next request's sentence for a continuation refusal.
 
 THE ADMISSION (`EquityPass.admit`). A proposal is born as an equity family when: its lane is "beta" or "equity"; its
 structure is in `elane.structures` (a beta card's is "etf"); its symbols (1-20) are in `elane.universe` and of its
@@ -267,7 +270,9 @@ class EquityQuota:
         up to half of the places rounded down, never under 1 (so 1 of 1, 1 of 2, 1 of 3, 1 to 3 of 6). (0, 0) while
         off, with no share-program place, or with no index ETF open. A SOFT ask: no place is reserved and the admission
         and the quota never read it (THE EQUITY QUOTA is unchanged); a place it asks for is not taken from a family of
-        any other open symbol."""
+        any other open symbol. ONE PLACE, ASKED (L2's follow-up, accepted): with one share-program place (want 1, the
+        quota's floor whenever the equity lanes are at their share, or want 2 with one panel place) the ask is that
+        place. It stays soft, and making no ask there would drop the ask from every pass at the floor."""
         places = max(0, self.want - self.panel)
         if not self.on or places <= 0 or not self.index_open:
             return (0, 0)
@@ -294,7 +299,8 @@ class EquityQuota:
                          "index-only families")
             rest = "; the other places are open to any symbol of THE UNIVERSE" if places > most else ""
             out += (f" A SOFT ASK, no place reserved: {asked} (every symbol one of {_named(self.index_open)}: THE ROUTE "
-                    f"BY SYMBOLS) in cells no row binds (any cell the equity birth cells block does not list){rest}.")
+                    "BY SYMBOLS) in cells no row binds and not CLOSED (the equity birth cells block lists the bound "
+                    f"cells, most rows first; THE EQUITY GRAVEYARD lists the CLOSED ones){rest}.")
         return out
 
 
@@ -432,10 +438,11 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
         "- " + elane_review.READING_CTX,
         route_text(settings),
         "- THE RATION: ONE route a LINEAGE. A family continuing an idea (its parent, or a dead family of the same slice "
-        "and idea), the same template, or a program whose Train daily returns correlate 0.7 or more with a program of "
-        "a spent lineage, is the same lineage: once a lineage is spent by rule (LINEAGES WITH THEIR TRY), a proposal "
-        "continuing it is not born, and an index-only near-copy of a spent lineage's program is refused at its look. "
-        "Send ideas, not variants.",
+        "and idea) is the same lineage: once a lineage is spent by rule (LINEAGES WITH THEIR TRY), a proposal "
+        "continuing it is not born. At an index-only program's sealed look, it is the same lineage as a program that "
+        "has taken its sealed look, or is taking it, when it has that program's template in the same lane or its Train "
+        "daily returns correlate 0.7 or more with that program's; such a near-copy is refused at its own look. Send "
+        "ideas, not variants.",
         elane_train.bar_text(),
     ])
 
@@ -694,8 +701,10 @@ REFUSAL_SAID: dict[str, str] = {
     "closed_cell": ("its cell (lane, agenda and universe group) is CLOSED: refuted on Train too often with no pass (THE "
                     "EQUITY GRAVEYARD lists the closed cells)"),
     "same_idea": "the same idea on the same symbols is in Train research already (EQUITY FAMILIES BORN BY THIS PASS)",
-    "tried_lineage": ("it continues a lineage that has its one Validation try (LINEAGES WITH THEIR TRY; the outcome is "
-                      "sealed): propose a different idea"),
+    # L2's follow-up (Oct 15, 2026): route-neutral, as the lanes block. league/ops/elane_health.py reads the refusal's
+    # own text (`EquityPass.admit`'s "it continues ...") and its class, never this sentence.
+    "tried_lineage": ("it continues a lineage spent by rule (LINEAGES WITH THEIR TRY; no outcome is shown): propose a "
+                      "different idea"),
     "card": "its card failed the card checks{fields}",
     "graveyard": ("a refuted row of THE EQUITY GRAVEYARD binds its cell{cell} (its mechanism class, holding and universe "
                   "group: a card on any group the row traded): a card there needs a valid \"rebirth\" naming one of that "
