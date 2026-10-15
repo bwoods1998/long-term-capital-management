@@ -1159,6 +1159,11 @@ class TheRepresentativeBeforeAnyForwardDay(Fixture):
             FS.event(db, "repicked", at=1.0, lineage="equity:f1", pid=v2, once=f"{v1}>{v2}")
             db.execute("UPDATE fwd1_lineages SET rep=?, start='2026-10-19' WHERE lineage='equity:f1'", (v2,))
         db.rollback()
+        for column, value in (("type", "PANEL"), ("case_", "XS1"), ("judged", 0), ("why", "x")):
+            with self.assertRaises(sqlite3.DatabaseError, msg=column):     # what it is judged as moved: refused
+                FS.event(db, "repicked", at=1.0, lineage="equity:f1", pid=v2, once=f"{v1}>{v2}")
+                db.execute(f"UPDATE fwd1_lineages SET rep=?, {column}=? WHERE lineage='equity:f1'", (v2, value))
+            db.rollback()
         with self.assertRaises(sqlite3.DatabaseError):                     # a checkpoint exists: refused
             db.execute("INSERT INTO fwd1_checks(lineage, k, pid, engine, day, t, s, s15, g_bp, ll, count, draws, "
                        "c_used, passed, why, at) VALUES ('equity:f1', 5, ?, 1, '2026-10-22', 0.1, 0.0, 0.0, 2, 0, "
@@ -1197,7 +1202,7 @@ class TheRepresentativeBeforeAnyForwardDay(Fixture):
                 fdb = Unreadable(self.fdb, table)
                 self.assertEqual(FS.frozen(db, fdb, "equity:f1", [v1, v2], "2026-10-16", EVE), "unreadable")
                 got = FS.repick(db, fdb, self.families, rule=self.rule, pin_start=START, now=EVE)
-                self.assertEqual(got, {"repicked": 0, "repick_frozen": 0, "repick_unread": 1})
+                self.assertEqual(got, {"repicked": 0, "repick_frozen": 0, "repick_kept": 0, "repick_unread": 1})
         got = FS.repick(db, Unreadable(self.fdb, "fwd_registry"), self.families, rule=self.rule, pin_start=START,
                         now=EVE)
         self.assertEqual(got["repick_unread"], 1)
@@ -1209,6 +1214,164 @@ class TheRepresentativeBeforeAnyForwardDay(Fixture):
         receipt = self.night(now=EVE)
         self.assertEqual(receipt["repick_unread"], 1)
         self.assertEqual(self.lineage()["rep"], v1)
+
+    def kept(self, fid: str = "f1") -> list[dict]:
+        db = self.store()
+        try:
+            return [dict(r) for r in db.execute("SELECT * FROM fwd1_events WHERE kind='kept' AND lineage=? "
+                                                "ORDER BY seq", (f"equity:{fid}",))]
+        finally:
+            db.close()
+
+    def test_every_per_pid_table_of_the_record_freezes(self):
+        """A row of any per-pid table of the record (RECORD_DAY_TABLES) for a pid of the lineage is a forward day of it:
+        a checkpoint, a live-like re-price, a twin, a closed live lot, a participation row."""
+        rows = {
+            "fwd_checks": ("INSERT INTO fwd_checks(pid, n, day, engine, t_r, sum_r, sum_r15, t_x, mean_w, p_x, t_x0, "
+                           "p_x0, final, at) VALUES (?, 20, '2026-10-16', {engine}, 0, 0, 0, 0, 0, 0, NULL, NULL, 0, 1)"),
+            "fwd_ll": "INSERT INTO fwd_ll(pid, day, engine, r_ll, at) VALUES (?, '2026-10-16', {engine}, 0, 1)",
+            "fwd_twins": ("INSERT INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, why, at) VALUES "
+                          "('f1@2:r', '2026-10-15', ?, '[]', '[]', 1, NULL, 1)"),
+            "fwd_lotgap": ("INSERT INTO fwd_lotgap(lid, instance, pid, symbol, opened_day, exit_day, entry_at, exit_at, "
+                           "model_bp, at) VALUES (1, 'f1@2:r', ?, 'SPY', '2026-10-13', '2026-10-14', 'a', 'b', 2.0, 1.0)"),
+            "fwd_part": ("INSERT INTO fwd_part(instance, through, pid, matched, missed, extra, at) VALUES "
+                         "('f1@2:r', '2026-10-14', ?, 1, 0, 0, 1.0)")}
+        self.assertEqual(set(rows), set(FS.RECORD_DAY_TABLES) - {"fwd_days"})   # fwd_days: the test above
+        for table, sql in rows.items():
+            for which in ("v1", "v2"):
+                with self.subTest(table=table, pid_of=which):
+                    self.tearDown()
+                    self.setUp()
+                    v1 = self.sighted_on_v1()
+                    self.first_night()
+                    v2 = self.row("f1", 2, reason="seed", first_day="2026-10-16")
+                    self.fdb.execute(sql.format(engine=self.engine), (v1 if which == "v1" else v2,))
+                    self.fdb.commit()
+                    db = self.store()
+                    self.assertEqual(FS.frozen(db, self.fdb, "equity:f1", [v1, v2], "2026-10-16", EVE), "forward_day")
+                    db.close()
+                    receipt = self.night(now=EVE)
+                    self.assertNotIn("repicked", receipt)
+                    self.assertEqual((receipt["repick_frozen"], receipt["repick_kept"]), (1, 1))
+                    self.assertEqual(self.lineage()["rep"], v1)
+                    self.assertEqual(self.repicks(), [])
+                    self.assertEqual(json.loads(self.kept()[0]["payload"])["because"],
+                                     FS.KEPT_BECAUSE["forward_day"])
+
+    def test_the_last_run_that_can_repick_is_before_the_first_days_open(self):
+        """The window closes at the first_day's open (Fri Oct 16 13:30Z), not at the record's night of it; the job is
+        quiet from 13:00Z and skips near the 12:28Z pre-open deadline, so Thursday's night run is the one."""
+        v1 = self.sighted_on_v1()
+        self.first_night()
+        v2 = self.row("f1", 2, first_day="2026-10-16")
+        self.advance("2026-10-15")                                          # Thursday's record night ran
+        at = {hm: dt.datetime(2026, 10, 16, *hm, tzinfo=dt.timezone.utc).timestamp()
+              for hm in ((12, 0), (12, 59), (13, 0), (13, 30), (21, 45))}
+        db = self.store()
+        self.assertIsNone(FS.frozen(db, self.fdb, "equity:f1", [v1, v2], "2026-10-16", EVE))
+        self.assertIsNone(FS.frozen(db, self.fdb, "equity:f1", [v1, v2], "2026-10-16", at[(12, 59)]))
+        for hm in ((13, 30), (21, 45)):                                     # Friday evening, before its record night
+            self.assertEqual(FS.frozen(db, self.fdb, "equity:f1", [v1, v2], "2026-10-16", at[hm]), "begun")
+        db.close()
+        from league.ops import forward_shadow
+
+        self.assertFalse(forward_shadow.quiet(EVE))
+        self.assertFalse(forward_shadow.quiet(at[(12, 59)]))
+        self.assertTrue(forward_shadow.quiet(at[(13, 0)]))                  # the job skips from 09:00 New York
+        self.assertLess(FS.preopen_deadline(at[(12, 0)]) - at[(12, 0)], 3600)   # and before the 12:28Z deadline
+        late = self.night(now=at[(21, 45)])
+        self.assertNotIn("repicked", late)
+        self.assertEqual((late["repick_frozen"], late["repick_kept"]), (1, 1))
+        self.assertEqual(self.lineage()["rep"], v1)
+        self.assertEqual(json.loads(self.kept()[0]["payload"])["because"], FS.KEPT_BECAUSE["begun"])
+
+    def test_a_rebirth_in_the_same_lineage_takes_its_passing_family(self):
+        """The fifth lineage of Oct 15: four failed versions of one family, then a passing family of the same lineage
+        with the same first_day."""
+        self.family("rev", lineage="rev")
+        failed = [self.row("rev", n, reason="train_fail", first_day="2026-10-16") for n in (1, 2)]
+        self.first_night()
+        failed += [self.row("rev", n, reason="train_fail", first_day="2026-10-16") for n in (3, 4)]
+        self.family("rev-exhaustion", lineage="rev")
+        born = self.row("rev-exhaustion", 1, first_day="2026-10-16", lineage="equity:rev")
+        before = self.lineage("rev")
+        self.assertEqual(self.night(now=EVE)["repicked"], 1)
+        lin = self.lineage("rev")
+        self.assertEqual((lin["rep"], lin["family"], lin["version"], lin["versions"]), (born, "rev-exhaustion", 1, 5))
+        self.assertEqual({k: lin[k] for k in FS.REPICK_KEEPS}, {k: before[k] for k in FS.REPICK_KEEPS})
+        self.assertEqual([e["once"] for e in self.repicks("rev")], [f"{failed[0]}>{born}"])
+        self.assertEqual(self.kept("rev"), [])
+
+    def test_a_better_pid_that_would_change_what_is_judged_is_kept(self):
+        """A re-pick changes which version is judged, never what it is judged as: a better pid that would move the
+        row's type, case, judged flag or reason is kept off, once, and the lineage stays as sighted."""
+        shapes = {"etf to panel": (dict(panel=True), ["type"]),
+                  "its family gone from the swarm store": (dict(fid="ghost"), ["type", "case_", "judged", "why"]),
+                  "a live row": (dict(reason="live"), ["case_", "judged", "why"])}
+        for name, (kw, changes) in shapes.items():
+            with self.subTest(shape=name):
+                self.tearDown()
+                self.setUp()
+                v1 = self.sighted_on_v1()
+                self.first_night()
+                before = self.lineage()
+                fid = kw.pop("fid", "f1")
+                v2 = self.row(fid, 2, first_day="2026-10-16", lineage="equity:f1", **kw)
+                receipt = self.night(now=EVE)
+                self.assertNotIn("repicked", receipt)
+                self.assertEqual((receipt["repick_frozen"], receipt["repick_kept"]), (1, 1))
+                self.assertEqual(self.lineage(), before)
+                self.assertEqual(self.repicks(), [])
+                (kept,) = self.kept()
+                payload = json.loads(kept["payload"])
+                self.assertEqual((kept["pid"], kept["once"]), (v2, f"{v1}>{v2}"))
+                self.assertEqual((payload["because"], payload["changes"], payload["why"]),
+                                 (FS.KEPT_BECAUSE["keeps"], changes, FS.KEPT_WHY))
+                again = self.night(now=EVE + 600)                           # the event is written once
+                self.assertEqual((again["repick_frozen"], again.get("repick_kept")), (1, None))
+                self.assertEqual(len(self.kept()), 1)
+
+    def test_the_same_facts_give_the_same_record_whenever_the_better_version_came(self):
+        """Two lineages with the same registry rows and the same sealed try of v2 (after the sighting, before
+        FWD1_START): one sighted before v2 was registered, one after. Both are voided by the judge as case N."""
+        for structure, panel in (("etf", False), ("panel", True)):
+            with self.subTest(structure=structure):
+                self.tearDown()
+                self.setUp()
+                for fid in ("a", "b"):
+                    self.family(fid, structure=structure)
+                self.row("a", 1, reason="train_fail", first_day="2026-10-16", panel=panel)
+                self.row("b", 1, reason="train_fail", first_day="2026-10-16", panel=panel)
+                b2 = self.row("b", 2, first_day="2026-10-16", panel=panel)   # before the sighting
+                self.first_night()
+                a2 = self.row("a", 2, first_day="2026-10-16", panel=panel)   # after it
+                for pid in (a2, b2):
+                    self.fdb.execute("INSERT INTO fwd_tags(pid, tag, value, at) VALUES (?, 'try', '', 1.0)", (pid,))
+                self.fdb.commit()
+                receipt = self.night(now=EVE)
+                self.assertNotIn("repicked", receipt)
+                self.assertEqual(receipt["repick_kept"], 1)
+                db = self.store()
+                got = {r["lineage"]: (r["case_"], r["judged"]) for r in db.execute("SELECT * FROM fwd1_lineages")}
+                verdicts = {r["lineage"]: r["verdict"] for r in db.execute("SELECT * FROM fwd1_verdicts")}
+                db.close()
+                self.assertEqual(got, {"equity:a": ("N", 1), "equity:b": ("N", 1)})
+                self.assertEqual(verdicts, {"equity:a": "void", "equity:b": "void"})
+                self.assertEqual(json.loads(self.kept("a")[0]["payload"])["changes"],
+                                 ["case_", "judged", "why"] if structure == "etf" else ["case_"])
+
+    def test_the_job_warns_when_a_better_version_is_first_kept(self):
+        ctx = types.SimpleNamespace(root=self.root, now=lambda: EVE, config={}, alerts=[])
+        ctx.alert = lambda level, text: ctx.alerts.append((level, text))
+        import league.swarm.settings as ss
+
+        with mock.patch.object(ss, "load", lambda root, config=None: self.settings), \
+                mock.patch.object(R, "rule", lambda policy=None: (self.rule, None)):
+            for receipt, warned in (({"repick_frozen": 5}, False), ({"repick_frozen": 5, "repick_kept": 5}, True)):
+                ctx.alerts.clear()
+                with mock.patch.object(FS, "night", lambda *a, **k: dict(receipt)):
+                    self.assertEqual(FS.run(ctx), receipt)
+                self.assertEqual(any("keep a representative" in text for _, text in ctx.alerts), warned, ctx.alerts)
 
     def test_a_store_of_the_earlier_build_takes_the_repick_trigger(self):
         old_schema = "PRAGMA recursive_triggers=ON;\n" + FS._TABLES + "".join(

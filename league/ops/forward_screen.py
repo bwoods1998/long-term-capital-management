@@ -28,16 +28,23 @@ THE NIGHT (`night`; after each of the record's two nights, E3's and the panel's,
    not cover (a stock program); a representative with no counted day yet is simply pending.
    THE REPRESENTATIVE BEFORE ANY FORWARD DAY (`repick`, after `register` each run). The rule fixes the representative
    before any forward day of the lineage exists, not at its first sighting. A sighting can come between a failed
-   version's registration and a passing one's with the same first_day (Oct 15: four sector families sighted on their
-   Train-failed v1). So each run re-reads the representative of a sighted lineage while NO FORWARD DAY of it exists
-   (`frozen`): no row of the forward record for any pid of the lineage (`RECORD_DAY_TABLES`), no night of the record
-   through its first_day (`fwd_runs.through`), its first_day's session not yet open, and no judge row for it (a
-   checkpoint, a pending reading, a verdict, sides, a floor, or any event but `registered` and `repicked`). When the
-   rule now gives another pid with the same first_day and start, the row is rewritten in place to it, in one
-   transaction with an append-only `repicked` event (old pid, new pid, the old row's ids and words). The store's
-   trigger allows that UPDATE alone (`REPICK_ONLY`). Once any forward day or judge row exists the row is frozen. A
-   forward record that cannot be read re-picks nothing (fail closed). The placebo seed reads the representative's
-   row hash (`fwd1_rule.placebo_seed`): a re-pick before any day changes the seed, and it is fixed from then on.
+   version's registration and a passing one's with the same first_day (Oct 15: five lineages sighted on a
+   Train-failed v1, four of them families whose later version passed and one through a rebirth in the same lineage).
+   So each run re-reads the representative of a sighted lineage while NO FORWARD DAY of it exists (`frozen`): no row
+   of the forward record for any pid of the lineage (`RECORD_DAY_TABLES`), no night of the record through its
+   first_day (`fwd_runs.through`), its first_day's session not yet open, and no judge row for it (a checkpoint, a
+   pending reading, a verdict, sides, a floor, or any event but `registered`, `repicked` and `kept`). The job is
+   quiet from 09:00 New York on a session, so the last run that can re-pick is the night before the first_day (or
+   a run before that morning's pre-open). When the rule now gives another pid with the same first_day and start, and
+   that pid keeps the row's type, case, judged flag and reason, the row is rewritten in place to it, in one
+   transaction with an append-only `repicked` event (old pid, new pid, the old row's ids and words). A re-pick
+   changes which version is judged, never what it is judged as: a case or judged flag read again from sealed facts
+   learned after the sighting would give the lineage another record than one whose better version was registered
+   before it (that one is voided by the judge, 4). The store's trigger allows that UPDATE alone (`REPICK_ONLY`).
+   Once any forward day or judge row exists the row is frozen. A better pid that is not taken (frozen, or another
+   type, case, flag or reason) is written once as a `kept` event and the job warns (`repick_kept`). A forward record
+   that cannot be read re-picks nothing (fail closed). The placebo seed reads the representative's row hash
+   (`fwd1_rule.placebo_seed`): a re-pick before any day changes the seed, and it is fixed from then on.
 2. THE CHECKPOINTS (`fwd1_checks`, written once a lineage and checkpoint: the checkpoint of record, never recomputed).
    The representative's counted days (`forward_db.counted_days`) under ONE engine id from FWD1_START; each day's SIDES
    (`fwd1_sides`: the weights of the shadow's lots in and out that session, which the record does not keep: read from
@@ -143,15 +150,20 @@ ENGINE_TOUCH = forward_db.TOL
 #: refuses a version before any Validation read (a Train segment its own errors ended, the same lineage as a twin).
 SEALED_STATE = ("elane_try", "elane_verdicts", "elane_look", "elane_xs_precheck", "elane_xs_look")
 PRECHECK_STATE = "elane_xs_precheck"
-EVENT_KINDS = ("pinned", "registered", "repicked", "engine_switched", "ineligible", "void", "house", "waited",
+EVENT_KINDS = ("pinned", "registered", "repicked", "kept", "engine_switched", "ineligible", "void", "house", "waited",
                "stalled")
-#: THE REPRESENTATIVE BEFORE ANY FORWARD DAY (`repick`, `frozen`): the forward record's per-pid rows of a forward day
-#: (league/ops/forward_db.py: E3's night and the panel night write `fwd_days` and `fwd_checks`, the twins `fwd_ll` and
-#: `fwd_twins`). Any one of them for any pid of a lineage is a forward day of it.
-RECORD_DAY_TABLES = ("fwd_days", "fwd_checks", "fwd_ll", "fwd_twins")
+#: THE REPRESENTATIVE BEFORE ANY FORWARD DAY (`repick`, `frozen`): the forward record's per-pid rows (league/ops/
+#: forward_db.py: E3's night and the panel night write `fwd_days` and `fwd_checks`, the twins `fwd_ll` and `fwd_twins`,
+#: a live instance's closed real lots `fwd_lotgap` and its participation `fwd_part`). Any one of them for any pid of a
+#: lineage counts as a forward day of it.
+RECORD_DAY_TABLES = ("fwd_days", "fwd_checks", "fwd_ll", "fwd_twins", "fwd_lotgap", "fwd_part")
 #: The events of a lineage that are no step of the judge: any other kind freezes its representative.
-UNJUDGED_EVENTS = ("registered", "repicked")
+UNJUDGED_EVENTS = ("registered", "repicked", "kept")
+#: The columns a re-pick keeps (`repick`, `REPICK_ONLY`): it changes which version is judged, never what it is
+#: judged as.
+REPICK_KEEPS = ("type", "case_", "judged", "why")
 REPICK_WHY = "a better version registered before any forward day of the lineage"
+KEPT_WHY = "a better version of the same first_day was not taken: the representative stays as sighted"
 APPEND_ONLY_ERROR = "forward-screen.sqlite is append-only"
 #: THE STALL RULE (the reviews' fix): a lineage whose next step waits on the House (its sides cannot be read from its
 #: own forward run, its rows under a new engine id have not come, a placebo span holds a session the House left out)
@@ -211,13 +223,15 @@ CREATE TABLE IF NOT EXISTS fwd1_runs (seq INTEGER PRIMARY KEY AUTOINCREMENT, sta
 TABLES = ("fwd1_pins", "fwd1_sides", "fwd1_lineages", "fwd1_floors", "fwd1_checks", "fwd1_verdicts", "fwd1_events",
           "fwd1_pending", "fwd1_runs")
 #: THE ONE UPDATE THE STORE ALLOWS (`repick`): a `fwd1_lineages` row may change only to a new representative, with its
-#: lineage, start, receipt and first-sighting time kept, after its `repicked` event (once "<old pid>><new pid>") in the
-#: same transaction, and only while the judge holds no checkpoint, pending reading or verdict of the lineage and no
-#: sides or floor of either pid. Every other UPDATE aborts as before. A store written by an earlier build loses its
-#: unconditional `fwd1_lineages_no_update` trigger to this one on its next writable open (no row is touched).
+#: lineage, start, receipt, first-sighting time, type, case, judged flag and reason kept, after its `repicked` event
+#: (once "<old pid>><new pid>") in the same transaction, and only while the judge holds no checkpoint, pending reading
+#: or verdict of the lineage and no sides or floor of either pid. Every other UPDATE aborts as before. A store written
+#: by an earlier build loses its unconditional `fwd1_lineages_no_update` trigger to this one on its next writable open
+#: (no row is touched).
 REPICK_ONLY = (
     "CREATE TRIGGER IF NOT EXISTS fwd1_lineages_repick_only BEFORE UPDATE ON fwd1_lineages WHEN NOT ("
     "NEW.lineage IS OLD.lineage AND NEW.start IS OLD.start AND NEW.receipt IS OLD.receipt AND NEW.at IS OLD.at "
+    "AND NEW.type IS OLD.type AND NEW.case_ IS OLD.case_ AND NEW.judged IS OLD.judged AND NEW.why IS OLD.why "
     "AND NEW.rep IS NOT OLD.rep "
     "AND EXISTS (SELECT 1 FROM fwd1_events e WHERE e.kind = 'repicked' AND e.lineage = OLD.lineage "
     "AND e.pid = NEW.rep AND e.once = (OLD.rep || '>' || NEW.rep)) "
@@ -498,9 +512,9 @@ def frozen(store: sqlite3.Connection, fdb: sqlite3.Connection, lineage: str, pid
     the module docstring, 1), or None while it can. `pids`: every registry pid of the lineage; `first_day`: its
     representative's (the lineage's earliest).
     - "judged": the judge holds a row for it: a checkpoint, a pending reading, a verdict, sides or a floor of one of its
-      pids, or an event of it but `registered` and `repicked` (a wait, a stall, a House failure, a void...).
-    - "forward_day": the forward record holds a per-pid row of a day for one of its pids (`RECORD_DAY_TABLES`, any
-      engine id, any status).
+      pids, or an event of it but `registered`, `repicked` and `kept` (a wait, a stall, a House failure, a void...).
+    - "forward_day": the forward record holds a per-pid row for one of its pids (`RECORD_DAY_TABLES`, any engine id,
+      any status: a day, a checkpoint, a live-like re-price, a twin, a closed live lot, a participation row).
     - "counted": a night of the record ran through its first_day (`MAX(fwd_runs.through)`): the day is being counted.
     - "begun": its first_day's session has opened (or the calendar does not know it).
     - "unreadable": a store or the calendar could not be read. FAIL CLOSED: nothing is re-picked."""
@@ -539,15 +553,48 @@ def frozen(store: sqlite3.Connection, fdb: sqlite3.Connection, lineage: str, pid
     return None
 
 
+#: Why a better pid of a sighted lineage was not taken (`repick`, the `kept` event's "because"): `frozen`'s reasons
+#: and the re-pick's own.
+KEPT_BECAUSE = {
+    "judged": "the judge holds a row of the lineage",
+    "forward_day": "the forward record holds a row of a pid of the lineage",
+    "counted": "a night of the record ran through its first_day",
+    "begun": "its first_day's session had opened",
+    "first_day": "the better pid is not of the representative's first_day",
+    "start": "the better pid gives another FWD1_START",
+    "keeps": "the better pid would change the row's type, case, judged flag or reason",
+    "refused": "the store refused the update (a judge row came)"}
+
+
+def _kept(store: sqlite3.Connection, row: Mapping[str, Any], best: Mapping[str, Any], because: str, *,
+          now: float, changes: Sequence[str] = ()) -> int:
+    """The `kept` event of a lineage whose better pid `repick` did not take, once "<rep>><better pid>" (ids and
+    words only). 1 when written now, 0 when it was already written or the store refused it (the next run asks
+    again)."""
+    try:
+        with store:
+            wrote = event(store, "kept", at=now, lineage=str(row["lineage"]), pid=int(best["pid"]),
+                          once=f"{int(row['rep'])}>{int(best['pid'])}",
+                          payload={"why": KEPT_WHY, "because": KEPT_BECAUSE[because], "rep": int(row["rep"]),
+                                   "rep_version": row["version"], "better": int(best["pid"]),
+                                   "better_family": best["family"], "better_version": best["version"],
+                                   "changes": list(changes)})
+    except sqlite3.Error:
+        return 0
+    return int(wrote)
+
+
 def repick(store: sqlite3.Connection, fdb: sqlite3.Connection, families: Mapping[str, Mapping[str, Any]], *,
            rule: Any, pin_start: dt.date, now: float) -> dict[str, int]:
     """THE REPRESENTATIVE BEFORE ANY FORWARD DAY (the module docstring, 1): every lineage sighted under this receipt
     whose representative the rule now gives as another pid, with the same first_day and FWD1_START, while `frozen` says
-    none: its row rewritten in place to the new representative (type, rep, family, version, run_sha, row_hash, case,
-    judged, why, cell, versions) with one `repicked` event (once "<old pid>><new pid>": the old row's ids and words, the
-    new pid's), in one transaction. {"repicked": rows rewritten, "repick_frozen": lineages a better pid came too late
-    for, "repick_unread": lineages left as they were because a store could not be read}."""
-    out = {"repicked": 0, "repick_frozen": 0, "repick_unread": 0}
+    none and the new sighting keeps the row's type, case, judged flag and reason (`REPICK_KEEPS`): its row rewritten
+    in place to the new representative (rep, family, version, run_sha, row_hash, cell, versions) with one `repicked`
+    event (once "<old pid>><new pid>": the old row's ids and words, the new pid's), in one transaction.
+    {"repicked": rows rewritten, "repick_frozen": lineages that keep a representative the rule no longer gives,
+    "repick_kept": those of them whose `kept` event was first written in this run (the job warns), "repick_unread":
+    lineages left as they were because a store could not be read}."""
+    out = {"repicked": 0, "repick_frozen": 0, "repick_kept": 0, "repick_unread": 0}
     held = [dict(r) for r in store.execute("SELECT * FROM fwd1_lineages WHERE receipt=? ORDER BY lineage",
                                            (rule.receipt_sha256,))]
     if not held:
@@ -565,36 +612,45 @@ def repick(store: sqlite3.Connection, fdb: sqlite3.Connection, families: Mapping
         if best is None or int(best["pid"]) == int(row["rep"]):
             continue                                  # the representative is already the rule's: untouched
         old = next((r for r in rows if int(r["pid"]) == int(row["rep"])), None)
+        changes: list[str] = []
         if old is None or str(old["first_day"]) != str(best["first_day"]):
-            out["repick_frozen"] += 1                 # not a better row of the same first_day: kept (fail closed)
+            why = "first_day"                         # not a better row of the same first_day: kept (fail closed)
+        else:
+            why = frozen(store, fdb, lineage, [int(r["pid"]) for r in rows], str(old["first_day"]), now)
+        if why == "unreadable":
+            out["repick_unread"] += 1
             continue
-        why = frozen(store, fdb, lineage, [int(r["pid"]) for r in rows], str(old["first_day"]), now)
-        if why is not None:
-            out["repick_unread" if why == "unreadable" else "repick_frozen"] += 1
-            continue
-        seen = sighting(lineage, rows, families, sealed_pids=sealed_pids, pin_start=pin_start)
-        if seen is None or seen["rep"] != int(best["pid"]) or seen["start"] != str(row["start"]):
-            out["repick_frozen"] += 1
-            continue
-        was = {key: row[key] for key in ("type", "family", "version", "run_sha", "row_hash", "case_", "judged", "why",
-                                         "cell", "versions")}
-        try:
-            with store:
-                event(store, "repicked", at=now, lineage=lineage, pid=seen["rep"],
-                      once=f"{int(row['rep'])}>{seen['rep']}",
-                      payload={"why": REPICK_WHY, "from": int(row["rep"]), "to": seen["rep"],
-                               "from_version": row["version"], "to_version": seen["version"],
-                               "first_day": seen["first_day"], "was": was})
-                cursor = store.execute(
-                    "UPDATE fwd1_lineages SET type=?, rep=?, family=?, version=?, run_sha=?, row_hash=?, case_=?, "
-                    "judged=?, why=?, cell=?, versions=? WHERE lineage=? AND rep=?",
-                    (seen["type"], seen["rep"], seen["family"], seen["version"], seen["run_sha"], seen["row_hash"],
-                     seen["case_"], seen["judged"], seen["why"], seen["cell"], seen["versions"], lineage,
-                     int(row["rep"])))
-        except sqlite3.Error:                         # the trigger refused it (a judge row came): nothing is written
-            out["repick_frozen"] += 1
-            continue
-        out["repicked"] += int(cursor.rowcount)
+        seen = None
+        if why is None:
+            seen = sighting(lineage, rows, families, sealed_pids=sealed_pids, pin_start=pin_start)
+            if seen is None or seen["rep"] != int(best["pid"]) or seen["start"] != str(row["start"]):
+                why = "start"
+            else:
+                changes = [key for key in REPICK_KEEPS if seen[key] != row[key]]
+                if changes:
+                    why = "keeps"                     # which version, never what it is judged as: the judge decides
+        if why is None and seen is not None:
+            was = {key: row[key] for key in ("type", "family", "version", "run_sha", "row_hash", "case_", "judged",
+                                             "why", "cell", "versions")}
+            try:
+                with store:
+                    event(store, "repicked", at=now, lineage=lineage, pid=seen["rep"],
+                          once=f"{int(row['rep'])}>{seen['rep']}",
+                          payload={"why": REPICK_WHY, "from": int(row["rep"]), "to": seen["rep"],
+                                   "from_version": row["version"], "to_version": seen["version"],
+                                   "first_day": seen["first_day"], "was": was})
+                    cursor = store.execute(
+                        "UPDATE fwd1_lineages SET rep=?, family=?, version=?, run_sha=?, row_hash=?, cell=?, "
+                        "versions=? WHERE lineage=? AND rep=?",
+                        (seen["rep"], seen["family"], seen["version"], seen["run_sha"], seen["row_hash"], seen["cell"],
+                         seen["versions"], lineage, int(row["rep"])))
+            except sqlite3.Error:                     # the trigger refused it (a judge row came): nothing is written
+                why = "refused"
+            else:
+                out["repicked"] += int(cursor.rowcount)
+                continue
+        out["repick_frozen"] += 1
+        out["repick_kept"] += _kept(store, row, best, why, now=now, changes=changes)
     return out
 
 
@@ -1630,11 +1686,11 @@ def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, no
           release: str | Path | None, runs: Any = None, families: Mapping[str, Mapping[str, Any]] | None = None,
           clock: Callable[[], float] = time.time, deadline: float = float("inf")) -> dict[str, Any]:
     """One night over the state root (the module docstring): the clock's row, the lineages' first sightings, their
-    representatives before any forward day (`repick`: "repicked", "repick_frozen", "repick_unread" in the receipt when
-    not 0), the judge, the permit file and the report, and the run's own `fwd1_runs` row. The receipt (counts only).
-    `families` (tests): the equity families by id, in place of the swarm store's (read-only). `deadline`: THE
-    DEADLINE (the job passes it; +inf for a test). The child seconds are what ONE BUDGET A NIGHT leaves
-    (`night_spent`)."""
+    representatives before any forward day (`repick`: "repicked", "repick_frozen", "repick_kept", "repick_unread" in
+    the receipt when not 0), the judge, the permit file and the report, and the run's own `fwd1_runs` row. The
+    receipt (counts only). `families` (tests): the equity families by id, in place of the swarm store's (read-only).
+    `deadline`: THE DEADLINE (the job passes it; +inf for a test). The child seconds are what ONE BUDGET A NIGHT
+    leaves (`night_spent`)."""
     root = Path(root)
     c = cfg(settings)
     began = clock()
@@ -1713,6 +1769,11 @@ def run(ctx: Any) -> dict[str, Any]:
     if int(receipt.get("house") or 0):
         ctx.alert("warning", f"forward_screen: {receipt['house']} checkpoints waited on the House's own failures (a run "
                              "the child did not finish): no program is marked, the next night asks again")
+    if int(receipt.get("repick_kept") or 0):
+        ctx.alert("warning", f"forward_screen: {receipt['repick_kept']} lineages keep a representative the rule no "
+                             "longer picks: a better version of the same first_day was not taken (a forward day or "
+                             "a judge row of the lineage came first, or it would change the lineage's type, case or "
+                             "judged flag); each one's `kept` event names both pids, and the judge reads the one kept")
     if int(receipt.get("repick_unread") or 0):
         ctx.alert("warning", f"forward_screen: {receipt['repick_unread']} lineages' representatives could not be read "
                              "again before their first forward day (a store could not be read): each is kept as first "
@@ -1727,7 +1788,8 @@ def run(ctx: Any) -> dict[str, Any]:
 __all__ = ["JOB", "DB", "PERMITS", "PERMITS_VERSION", "REPORT", "MODES", "SEATS", "DEFAULTS", "BOUNDS", "VERDICTS",
            "NOT_JUDGED", "PREFERRED", "SEALED_TAGS", "SEALED_STATE", "PRECHECK_STATE", "ENGINE_TOUCH", "EVENT_KINDS",
            "STALL_NIGHTS", "STATUSES", "NIGHT_WINDOW_S", "WALL_S", "MARGIN_S", "PREOPEN_BEFORE_S", "MIN_RUN_S",
-           "TABLES", "SCHEMA", "REPICK_ONLY", "RECORD_DAY_TABLES", "UNJUDGED_EVENTS", "REPICK_WHY", "cfg",
+           "TABLES", "SCHEMA", "REPICK_ONLY", "RECORD_DAY_TABLES", "UNJUDGED_EVENTS", "REPICK_KEEPS", "REPICK_WHY",
+           "KEPT_WHY", "KEPT_BECAUSE", "cfg",
            "open_store", "event", "lot_sides", "pinned", "representative", "family_sealed", "type_of", "case_of",
            "cell_of", "sighting", "register", "frozen", "repick", "OwnFloorRefused", "Late", "HouseRuns",
            "engine_reading", "preopen_deadline", "night_spent", "Night", "status_rows", "write_permits", "beside_for",
