@@ -505,6 +505,12 @@ class Scaled(T.BookTest):
         sha2 = pin(self.root, {KEY_A: 2}, plan="cd" * 32)
         with band(sha2, lines=True):
             self.assertEqual(h.book._scale_for(a, D(E)).rung, 2, "a new pinned version of the plan reopens it")
+            h.clock.set(h.clock() + 60)
+            h.book._scale_now()
+            mem = h.state.get(L.SCALE_KEY)
+            self.assertEqual(mem["ladder_for"], "cd" * 32)
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 2, "its total starts again: the old closes are not its")
+            self.assertEqual(h.book._scaled_room(T.MONDAY.isoformat(), D(E)).total, D(0))
 
 
 class TheFamilyLine(unittest.TestCase):

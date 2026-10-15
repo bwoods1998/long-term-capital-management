@@ -57,7 +57,8 @@ row, after Done's first checkpoint receipt; every raise after it is another such
   rung change at most -$300 at R1 and -10% of its sleeve from R2; or since it first reached R1 at most the line of the
   highest rung it reached): that program back to Probe, for good. D5, the Scaled window reached: Scaled opens pause
   (no Scaled entry fits the room), said once; the down-one-rung is the captain's setting. D6, the Scaled total reached:
-  every program back to Probe and the ladder closed for the pin's plan version (a pin with a new plan sha reopens it).
+  every program back to Probe and the ladder closed for the pin's plan version (a pin with a new plan sha reopens it,
+  its total counted again from that minute and from no sleeve).
   Every other step-down (D1, D2, D4, D7, D8) is the captain's same-day `elane.scale`, from the receipt. Nothing is ever
   sold or placed by a rung: lots exit by their own rules.
 - **A pin that does not match its row** (none there, unreadable, another file, rungs that cannot be read): NO NEW SCALED

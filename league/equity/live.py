@@ -2741,6 +2741,10 @@ class EquityBook:
         weights = getattr(et, "open_risk_weight", None) or {}
         lots = [lot for lot in self._scale_lots() if lot.info.get(B.SCALED_INFO) is True]
         closes = [(lot.exit_day, lot.cash) for lot in lots if lot.status == LOT_CLOSED]
+        # The total reads the closes since the ladder's start: a new pinned version after D6 starts it again.
+        start = self._scale_mem().get("ladder_from")
+        since_start = [(lot.exit_day, lot.cash) for lot in lots if lot.status == LOT_CLOSED
+                       and (start is None or float(lot.closed_at or 0) >= float(start))]
         risk = sum((_weight(weights, lot.klass) * lot.value for lot in lots if lot.status != LOT_CLOSED), ZERO)
         risk += sum((_weight(weights, o.klass) * o.remaining * o.limit_px for o in self._orders(WORKING)
                      if o.side == "buy" and o.scaled and o.instance.endswith(REAL_SUFFIX)), ZERO)
@@ -2752,7 +2756,10 @@ class EquityBook:
                 sleeves = self._scaled_sleeves(st, pin, E, mem)
                 peak = max(D(mem.get("peak_usd"), ZERO), sleeves)
         since = R.probe_window_start(day, st.window_sessions)
-        return B.scaled_room(st, sleeves_usd=sleeves, peak_usd=peak, closes=closes, window_since=since, open_risk=risk)
+        room = B.scaled_room(st, sleeves_usd=sleeves, peak_usd=peak, closes=closes, window_since=since, open_risk=risk)
+        total = B.scaled_room(st, sleeves_usd=sleeves, peak_usd=peak, closes=since_start, window_since=since,
+                              open_risk=risk).total
+        return B.ScaledRoom(room.window_budget, room.window, room.total_budget, total, room.open_risk)
 
     def _program_lines_hit(self, key: str, inst: Instance, rung: int, st: B.ScaledSettings, pin: ProbePin, E: Decimal,
                            mem: Mapping[str, Any], lots: Sequence[Lot]) -> str | None:
@@ -2790,6 +2797,13 @@ class EquityBook:
             if changed:
                 self._scale_keep(mem)
             return
+        closed = mem.get("closed") or {}
+        if closed and closed.get("plan_sha256") != pin.plan_sha256 and mem.get("ladder_for") != pin.plan_sha256:
+            # D6 closed the ladder for an earlier version of the plan; a pin of a new pinned version reopens it, and its
+            # total starts again (the closes since now, the largest sleeves from nothing).
+            mem.update(ladder_for=pin.plan_sha256, ladder_from=self.clock(), peak_usd=text(ZERO))
+            changed = True
+            self.record("equity.scale", {"event": "reopened", "why": "a pin of a new pinned version of the plan"})
         E = self.sizing_equity()
         live = [i for i in self._instances(alive=True) if i.kind == EQUITY_KIND and i.band == "probe" and i.live]
         lots = self._scale_lots()

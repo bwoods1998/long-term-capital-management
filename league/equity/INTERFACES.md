@@ -421,7 +421,8 @@ activity types the venue refused), `eq_preopen_activities`. The book reads the h
   swarm's tighten-only `elane.scale`), its buy stamped `answer["rung"]` and, R2 and up with the Scaled lines in force,
   `probe` `SCALED_MARK`; its lot keeps `info` {"rung", "scaled"} (`bands.RUNG_INFO`, `SCALED_INFO`) and `probe` 0 when
   Scaled. `probe_figures(rows, *, weights, scaled_lines=None)` leaves Scaled open risk out of the Probe room while
-  the lines are in force and counts Scaled lots as Probe ones while they are not. A pin that does not match opens no
+  the lines are in force and the band is not dark (`ScaledSettings.lines_live`), and counts Scaled lots as Probe ones
+  otherwise. A pin that does not match opens no
   new Scaled lot (`SCALE_REFUSAL`). The memory is the kv `SCALE_KEY` (private). Families readers gain
   `scale_setting() -> {"rung", "programs"} | None` (None: no word; the pin alone).
 - Calls it makes: `league.equity.sizing.size_entry` (money), `league.live.money.available_cash` (money) with

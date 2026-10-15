@@ -1249,22 +1249,23 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   PROGRAM LINES (league/equity/bands.py, at every rung, D3): realized since the program's last rung change at most
 #   -$300 at R1 (`demotion.program_loss_usd`) and -`program_share` (10%) of the sleeve from R2; and cumulatively since it
 #   first reached R1 at most the line of the highest rung it reached; either one hit returns it to Probe at once, for
-#   good. While `in_force` is False a Scaled-marked lot (none exists before it) counts in the Probe window, total and
-#   room like a Probe lot: nothing escapes both budgets. `family_line_probe_only` (plan 3.4 loosening 3, separable):
-#   True with `in_force`, the swarm's -$300 family line (league/swarm/elane.py `loss_line`) reads Probe-marked lots
-#   only; False (his no to that part alone), it reads every real lot, Scaled ones too, which in practice caps the
-#   ladder near R2. THE FOUR LOOSENINGS OF HIS YES, WITH THEIR COSTS (plan 3.4, whose figures are in dollars and stay in
-#   the private plan): a second loss budget beside goal item 4 (0.18 x the Scaled sleeves in force a window and 0.36 x
-#   the largest reached in total, beside the $400 / $800; at the top of the ladder the worst loss before every line
-#   stops is about a third of the account); the program line from -$300 to -10% of the sleeve (since a change and
-#   cumulatively, at R5 well past -$300); the -$300 family line stops reading Scaled lots; Scaled open risk leaves the
-#   Probe room. Without his yes nothing goes past R1.
+#   good. While `in_force` is False, or the band is dark again (`pin_sha256` ""), a Scaled-marked lot (none exists
+#   before the yes) counts in the Probe window, total and room like a Probe lot: nothing escapes both budgets.
+#   `family_line_probe_only` (plan 3.4 loosening 3, separable): True with `in_force`, the swarm's -$300 family line
+#   (league/swarm/elane.py `loss_line`) reads Probe-marked lots only; False (his no to that part alone), it reads every
+#   real lot, Scaled ones too, which in practice caps the ladder near R2. THE FOUR LOOSENINGS OF HIS YES, WITH THEIR
+#   COSTS (plan 3.4, whose figures are in dollars and stay in the private plan): a second loss budget beside goal item 4
+#   (0.18 x the Scaled sleeves in force a window and 0.36 x the largest reached in total, beside the $400 / $800; at the
+#   top of the ladder the worst loss before every line stops is about a third of the account); the program line from
+#   -$300 to -10% of the sleeve (since a change and cumulatively, at R5 well past -$300); the -$300 family line stops
+#   reading Scaled lots; Scaled open risk leaves the Probe room. Without his yes nothing goes past R1.
 # - Step-downs never wait for Blake (plan 4.3): the House's own (D3, D5, D6) above; every other one (D1, D2, D4, D7, D8)
 #   is the captain's same-day lowering of `elane.scale`, from the checkpoint receipt. A newer version of a family is
 #   at Probe at once (the pin names a program by family and version). Nothing is ever sold or placed by a rung.
 # Bounds: each multiple at most the plan's (a row may only tighten), never decreasing from R1 to R5; the shares at most
 # the plan's; the window at least 20 sessions. A table with no `scaled` block at all is dark too (a table from before
-# C3 still builds). Rollback, one owner deploy: `pin_sha256` "" (dark; open lots exit by their own rules).
+# C3 still builds). Rollback, one owner deploy: `pin_sha256` "" (dark; open lots exit by their own rules, and a Scaled
+# one counts in the Probe budget until it does).
 CONSTITUTION["equity_money"]["scaled"] = {
     "pin_sha256": "",
     "rungs": {"r1": "0.50", "r2": "1.25", "r3": "2.25", "r4": "4.00", "r5": "6.75"},
