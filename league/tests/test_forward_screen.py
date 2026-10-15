@@ -983,6 +983,254 @@ class TheJob(Fixture):
                 self.assertNotIn(FS.REPORT, text, str(path))
 
 
+#: Thursday Oct 15 22:30Z: after the record's night of Oct 15, before Friday Oct 16 (the first forward day) opens.
+EVE = dt.datetime(2026, 10, 15, 22, 30, tzinfo=dt.timezone.utc).timestamp()
+#: The four sector families the 08:06Z run of Oct 15 sighted on their Train-failed v1: the versions registered then,
+#: and the version that passed Train (registered later with the same first_day).
+FOUR = {"sector-sync-beta": (("train_fail", "train_fail", "train_pass"), 3),
+        "sector-turn-month-beta": (("train_fail", "train_pass"), 2),
+        "sector-monthly-rotation": (("train_fail", "train_pass"), 2),
+        "defensive-low-vol-relative": (("train_fail", "train_fail", "train_fail", "train_pass"), 4)}
+
+
+class TheRepresentativeBeforeAnyForwardDay(Fixture):
+    """THE REPRESENTATIVE BEFORE ANY FORWARD DAY (`repick`): a lineage sighted on a failed version takes the version the
+    rule prefers, of the same first_day, while no forward day and no judge row of it exists; then it is frozen."""
+
+    def sighted_on_v1(self, fid: str = "f1") -> int:
+        """A family whose Train-failed v1 (first_day Oct 16) is all the registry holds when the pin is first seen."""
+        self.family(fid)
+        pid = self.row(fid, 1, reason="train_fail", first_day="2026-10-16")
+        return pid
+
+    def lineage(self, fid: str = "f1") -> dict:
+        db = self.store()
+        try:
+            return dict(db.execute("SELECT * FROM fwd1_lineages WHERE lineage=?", (f"equity:{fid}",)).fetchone())
+        finally:
+            db.close()
+
+    def repicks(self, fid: str = "f1") -> list[dict]:
+        db = self.store()
+        try:
+            return [dict(r) for r in db.execute("SELECT * FROM fwd1_events WHERE kind='repicked' AND lineage=? "
+                                                "ORDER BY seq", (f"equity:{fid}",))]
+        finally:
+            db.close()
+
+    def test_the_four_families_take_their_passing_versions_and_one_event_each(self):
+        firsts = {fid: self.sighted_on_v1(fid) for fid in FOUR}
+        self.family("steady")
+        steady = self.row("steady", 1, first_day="2026-10-16")            # its v1 passed: already the rule's
+        self.first_night()
+        before = {fid: self.lineage(fid) for fid in (*FOUR, "steady")}
+        self.assertEqual({fid: before[fid]["rep"] for fid in FOUR}, firsts)  # sighted on the failed v1
+        passing = {}
+        for fid, (reasons, passed) in FOUR.items():
+            for n, reason in enumerate(reasons[1:], start=2):
+                pid = self.row(fid, n, reason=reason, first_day="2026-10-16")
+                if n == passed:
+                    passing[fid] = pid
+            self.row(fid, len(reasons) + 1, first_day="2026-10-19")           # a later first_day: never chosen
+        self.row("steady", 2, first_day="2026-10-16")                         # a second pass: not the lowest pid
+        receipt = self.night(now=EVE)
+        self.assertEqual(receipt["repicked"], 4)
+        self.assertNotIn("repick_frozen", receipt)
+        permits = self.permits()
+        for fid, (reasons, passed) in FOUR.items():
+            with self.subTest(family=fid):
+                lin, old = self.lineage(fid), before[fid]
+                self.assertEqual((lin["rep"], lin["version"], lin["family"]), (passing[fid], passed, fid))
+                self.assertEqual(lin["run_sha"], f"{passing[fid]:064d}")
+                self.assertEqual(lin["row_hash"], f"{passing[fid]:063d}h")
+                self.assertEqual(lin["versions"], len(reasons) + 1)
+                self.assertEqual((lin["case_"], lin["judged"], lin["why"], lin["type"]), ("N", 1, None, "ETF"))
+                # the lineage, its start, its receipt and its first sighting stand
+                self.assertEqual({k: lin[k] for k in ("lineage", "start", "receipt", "at")},
+                                 {k: old[k] for k in ("lineage", "start", "receipt", "at")})
+                # THE PLACEBO SEED follows the new row hash (no day was read under the old one)
+                self.assertNotEqual(R.placebo_seed(self.rule.receipt_sha256, lin["row_hash"]),
+                                    R.placebo_seed(self.rule.receipt_sha256, old["row_hash"]))
+                events = self.repicks(fid)
+                self.assertEqual(len(events), 1)
+                self.assertEqual((events[0]["pid"], events[0]["once"]), (passing[fid], f"{firsts[fid]}>{passing[fid]}"))
+                payload = json.loads(events[0]["payload"])
+                self.assertEqual((payload["from"], payload["to"], payload["from_version"], payload["to_version"]),
+                                 (firsts[fid], passing[fid], 1, passed))
+                self.assertEqual(payload["why"], FS.REPICK_WHY)
+                self.assertEqual(payload["was"]["row_hash"], old["row_hash"])
+                self.assertEqual((permits[f"equity:{fid}"]["status"], permits[f"equity:{fid}"]["version"]),
+                                 ("pending", passed))
+        self.assertEqual(self.lineage("steady"), before["steady"])           # already the rule's: untouched
+        self.assertEqual(self.lineage("steady")["rep"], steady)
+        self.assertEqual(self.repicks("steady"), [])
+        again = self.night(now=EVE + 600)                                    # a second run that night: no change
+        self.assertNotIn("repicked", again)
+        self.assertEqual(sum(len(self.repicks(fid)) for fid in FOUR), 4)     # the event is written once a change
+
+    def test_the_judge_reads_the_version_it_repicked(self):
+        self.sighted_on_v1()
+        self.first_night()
+        passed = self.row("f1", 2, first_day="2026-10-16")
+        self.assertEqual(self.night(now=EVE)["repicked"], 1)
+        names = self.days(passed, [0.01 + 0.001 * (i % 3) for i in range(12)], first=START)
+        self.sides(passed, names, 0.5)
+        self.night()
+        db = self.store()
+        v = dict(db.execute("SELECT * FROM fwd1_verdicts").fetchone())
+        db.close()
+        self.assertEqual((v["verdict"], v["pid"]), ("pass", passed))
+        self.assertEqual((self.permits()["equity:f1"]["version"], self.permits()["equity:f1"]["run_sha"]),
+                         (2, f"{passed:064d}"))
+
+    def test_no_repick_once_a_forward_day_exists_for_any_pid_of_the_lineage(self):
+        for which in ("the failed v1", "the passing v2"):
+            with self.subTest(day_of=which):
+                self.tearDown()
+                self.setUp()
+                v1 = self.sighted_on_v1()
+                self.first_night()
+                v2 = self.row("f1", 2, first_day="2026-10-16")
+                self.days(v1 if which == "the failed v1" else v2, [0.0], first=START)
+                receipt = self.night(now=EVE)
+                self.assertNotIn("repicked", receipt)
+                self.assertEqual(receipt["repick_frozen"], 1)
+                self.assertEqual(self.lineage()["rep"], v1)
+                self.assertEqual(self.repicks(), [])
+
+    def test_no_repick_once_the_record_ran_through_its_first_day_or_the_day_opened(self):
+        v1 = self.sighted_on_v1()
+        self.first_night()
+        self.row("f1", 2, first_day="2026-10-16")
+        opened = dt.datetime(2026, 10, 16, 13, 30, tzinfo=dt.timezone.utc).timestamp()   # 09:30 New York
+        self.assertEqual(self.night(now=opened)["repick_frozen"], 1)        # the forward day has begun
+        self.assertEqual(self.lineage()["rep"], v1)
+        db = self.store()
+        self.assertIsNone(FS.frozen(db, self.fdb, "equity:f1", [v1, v1 + 1], "2026-10-16", EVE))
+        self.advance("2026-10-16")                                          # a night of the record through it
+        self.assertEqual(FS.frozen(db, self.fdb, "equity:f1", [v1, v1 + 1], "2026-10-16", EVE), "counted")
+        db.close()
+        self.assertEqual(self.night(now=EVE)["repick_frozen"], 1)
+        self.assertEqual(self.lineage()["rep"], v1)
+
+    def test_no_repick_once_a_judge_row_exists(self):
+        cases = {
+            "a checkpoint": "INSERT INTO fwd1_checks(lineage, k, pid, engine, day, t, s, s15, g_bp, ll, count, draws, "
+                            "c_used, passed, why, at) VALUES ('equity:f1', 5, {v1}, 1, '2026-10-22', 0.1, 0.0, 0.0, 2, "
+                            "0, NULL, NULL, NULL, 0, 'x', 1)",
+            "a pending reading": "INSERT INTO fwd1_pending(lineage, k, engine, pid, day, t, s, s15, g_bp, ll, at) "
+                                 "VALUES ('equity:f1', 5, 1, {v1}, '2026-10-22', 3.0, 0.1, 0.1, 2, 0, 1)",
+            "a verdict": "INSERT INTO fwd1_verdicts(lineage, pid, verdict, k, day, c_used, why, beside, words, at) "
+                         "VALUES ('equity:f1', {v1}, 'void', NULL, NULL, NULL, 'x', NULL, NULL, 1)",
+            "sides": "INSERT INTO fwd1_sides(pid, day, engine, sides, at) VALUES ({v1}, '2026-10-16', 1, 0.0, 1)",
+            "a floor": "INSERT INTO fwd1_floors(pid, case_, k_own, cells, drift, why, seconds, at) VALUES "
+                       "({v1}, 'N', 150, '{{}}', NULL, NULL, 0, 1)",
+            "a wait": "INSERT INTO fwd1_events(at, kind, lineage, pid, once, payload) VALUES "
+                      "(1, 'waited', 'equity:f1', {v1}, 'sides:1:2026-10-16', '{{}}')"}
+        for name, sql in cases.items():
+            with self.subTest(judge_row=name):
+                self.tearDown()
+                self.setUp()
+                v1 = self.sighted_on_v1()
+                self.first_night()
+                v2 = self.row("f1", 2, first_day="2026-10-16")
+                db = self.store()
+                with db:
+                    db.execute(sql.format(v1=v1))
+                self.assertEqual(FS.frozen(db, self.fdb, "equity:f1", [v1, v2], "2026-10-16", EVE), "judged")
+                db.close()
+                receipt = self.night(now=EVE)
+                self.assertNotIn("repicked", receipt)
+                self.assertEqual(self.lineage()["rep"], v1)
+                self.assertEqual(self.repicks(), [])
+
+    def test_the_store_allows_the_repick_update_alone(self):
+        v1 = self.sighted_on_v1()
+        self.first_night()
+        v2 = self.row("f1", 2, first_day="2026-10-16")
+        db = self.store()
+        with self.assertRaises(sqlite3.DatabaseError):                     # no event: refused
+            db.execute("UPDATE fwd1_lineages SET rep=? WHERE lineage='equity:f1'", (v2,))
+        db.rollback()
+        with self.assertRaises(sqlite3.DatabaseError):                     # the same pid: no re-pick, refused
+            db.execute("UPDATE fwd1_lineages SET why='x' WHERE lineage='equity:f1'")
+        db.rollback()
+        with self.assertRaises(sqlite3.DatabaseError):                     # its start moved: refused
+            FS.event(db, "repicked", at=1.0, lineage="equity:f1", pid=v2, once=f"{v1}>{v2}")
+            db.execute("UPDATE fwd1_lineages SET rep=?, start='2026-10-19' WHERE lineage='equity:f1'", (v2,))
+        db.rollback()
+        with self.assertRaises(sqlite3.DatabaseError):                     # a checkpoint exists: refused
+            db.execute("INSERT INTO fwd1_checks(lineage, k, pid, engine, day, t, s, s15, g_bp, ll, count, draws, "
+                       "c_used, passed, why, at) VALUES ('equity:f1', 5, ?, 1, '2026-10-22', 0.1, 0.0, 0.0, 2, 0, "
+                       "NULL, NULL, NULL, 0, 'x', 1)", (v1,))
+            FS.event(db, "repicked", at=1.0, lineage="equity:f1", pid=v2, once=f"{v1}>{v2}")
+            db.execute("UPDATE fwd1_lineages SET rep=? WHERE lineage='equity:f1'", (v2,))
+        db.rollback()
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.execute("DELETE FROM fwd1_lineages")
+        db.rollback()
+        with db:                                                           # the event, then the row: allowed
+            FS.event(db, "repicked", at=1.0, lineage="equity:f1", pid=v2, once=f"{v1}>{v2}")
+            db.execute("UPDATE fwd1_lineages SET rep=? WHERE lineage='equity:f1'", (v2,))
+        self.assertEqual(self.lineage()["rep"], v2)
+        db.close()
+
+    def test_an_unreadable_forward_record_repicks_nothing(self):
+        v1 = self.sighted_on_v1()
+        self.first_night()
+        v2 = self.row("f1", 2, first_day="2026-10-16")
+
+        class Unreadable:
+            """The forward record, but its day rows cannot be read."""
+
+            def __init__(self, db, table):
+                self.db, self.table = db, table
+
+            def execute(self, sql, *args):
+                if self.table in sql:
+                    raise sqlite3.OperationalError("database is locked")
+                return self.db.execute(sql, *args)
+
+        db = self.store()
+        for table in (*FS.RECORD_DAY_TABLES, "fwd_runs"):
+            with self.subTest(table=table):
+                fdb = Unreadable(self.fdb, table)
+                self.assertEqual(FS.frozen(db, fdb, "equity:f1", [v1, v2], "2026-10-16", EVE), "unreadable")
+                got = FS.repick(db, fdb, self.families, rule=self.rule, pin_start=START, now=EVE)
+                self.assertEqual(got, {"repicked": 0, "repick_frozen": 0, "repick_unread": 1})
+        got = FS.repick(db, Unreadable(self.fdb, "fwd_registry"), self.families, rule=self.rule, pin_start=START,
+                        now=EVE)
+        self.assertEqual(got["repick_unread"], 1)
+        db.close()
+        self.assertEqual(self.lineage()["rep"], v1)
+        self.assertEqual(self.repicks(), [])
+        self.fdb.execute("DROP TABLE fwd_days")                            # the whole night: kept, said in the receipt
+        self.fdb.commit()
+        receipt = self.night(now=EVE)
+        self.assertEqual(receipt["repick_unread"], 1)
+        self.assertEqual(self.lineage()["rep"], v1)
+
+    def test_a_store_of_the_earlier_build_takes_the_repick_trigger(self):
+        old_schema = "PRAGMA recursive_triggers=ON;\n" + FS._TABLES + "".join(
+            f"CREATE TRIGGER IF NOT EXISTS {t}_no_{verb.lower()} BEFORE {verb} ON {t} BEGIN SELECT RAISE(ABORT, "
+            f"'{FS.APPEND_ONLY_ERROR}'); END;\n" for t in FS.TABLES for verb in ("UPDATE", "DELETE"))
+        path = self.root / FS.DB
+        db = sqlite3.connect(str(path))
+        db.executescript(old_schema)
+        db.close()
+        v1 = self.sighted_on_v1()
+        self.first_night()
+        v2 = self.row("f1", 2, first_day="2026-10-16")
+        db = self.store()
+        names = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND "
+                                          "tbl_name='fwd1_lineages'")}
+        self.assertEqual(names, {"fwd1_lineages_no_delete", "fwd1_lineages_repick_only"})
+        db.close()
+        self.assertEqual(self.night(now=EVE)["repicked"], 1)
+        self.assertEqual(self.lineage()["rep"], v2)
+        self.assertEqual(json.loads(self.repicks()[0]["payload"])["from"], v1)
+
+
 class World:
     """A state root of INVENTED forward rows for the judge's whole-night tests (seeded draws, no market data): ETF and
     panel lineages, each with its representative's rows and its sides already kept (no forward run is needed), the

@@ -52,12 +52,51 @@ updater is on. What is built and not deployed is on branches.
   (08:00Z) as deployed, and its running-release line names #557's release; docs/operations.md's release U, FWD1-R and
   panel lane sections say deployed, its money-rules row names the digest in force, and **Release 1015e** heads it.
   `league/live/shadow.py` is not edited (its docstring is inside the options execution fingerprint).
+- **FWD1-R's representative before any forward day** (`fix/fwd1-repick`, the entry below), cut from this release's
+  head `efc9fa00`. It must be deployed before the record's night of Fri Oct 16 (about 22:30Z) writes the first forward
+  day; after that it changes nothing for these lineages.
 - **Identities**, on both Pythons from this tree: fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`,
   constitution `60796aed` (`PINNED_DIGEST`), the ids of the running release.
 - **Rollback:** the House, `scripts/floor_box.py rollback` to `20261015T075939Z-89d93d40bfda` (main `0b978378`);
   the gateway, `npx --no-install wrangler@4.129.1 rollback <the version the deploy replaced>` (the last recorded,
   `9c0651a3`). Nothing is migrated: the account reading is recomputed every five minutes, `lane_yield` is read by
   nothing, and a request without the birth cells is the request before.
+
+### FWD1-R's representative before any forward day: a lineage sighted on a failed version is judged on the version the rule picks, on `fix/fwd1-repick` (unreleased; in release 1015e; cut from `rel/1015e` `efc9fa00`; an owner deploy: `league/ops/` is protected; no identity moves; no setting; the pin and its receipt are unchanged)
+
+- **The defect.** The forward screen wrote a lineage's row once, at its first sighting, and never chose again. The
+  receipt's rule says the representative is fixed before any forward day exists, not at first sighting. The 08:06Z
+  run of Oct 15 sighted sector families while only their Train-failed v1 was registered. Their passing versions came
+  at 10:25-11:25Z with the same first_day (Oct 16) and were never chosen. A pass of a failed v1 would have seated it.
+- **The fix** (`league/ops/forward_screen.py` `repick`, after `register` each run). While no forward day of a sighted
+  lineage exists, the job reads its representative again. If the rule now gives another pid with the same first_day
+  and start, the row is rewritten in place to it, with one append-only `repicked` event (old pid, new pid, the old
+  row's ids and words). The row's lineage, start, receipt and first-sighting time stay.
+- **What "no forward day" means** (`frozen`, fail closed). No row of the forward record for any pid of the lineage
+  (`fwd_days`, `fwd_checks`, `fwd_ll`, `fwd_twins`; any engine id, any status). No night of the record through its
+  first_day (`fwd_runs.through`). Its first_day's session not yet open. No judge row for it (a checkpoint, a pending
+  reading, a verdict, sides, a floor, or any event but `registered` and `repicked`). A store or the calendar that
+  cannot be read re-picks nothing: the receipt says `repick_unread` and the job warns.
+- **The store.** `forward-screen.sqlite` stays append-only but for this one UPDATE. Its trigger
+  (`fwd1_lineages_repick_only`) allows a row to change only to a new pid, after its `repicked` event in the same
+  transaction, with no checkpoint, pending reading, verdict, sides or floor of it. The store's old unconditional
+  trigger is dropped on the first writable open; no row is touched.
+- **The placebo seed** reads the representative's row hash (`fwd1_rule.placebo_seed`). A re-pick before any day
+  changes the seed. No day was read under the old one, and the seed is fixed from then on.
+- **Dry run on the House** (read-only, 14:57Z Oct 15; `scratch/fwd1fix/dryrun_repick.py`, nothing of the repo
+  imported). Pin `e0ef05f9`, record through Oct 14, 77 lineages sighted. Five would be re-picked, none with a forward
+  day row: `beta:sector-sync-beta` v1 -> v3 (pid 325 -> 378), `beta:sector-turn-month-beta` v1 -> v2 (261 -> 350),
+  `equity:sector-monthly-rotation` v1 -> v2 (259 -> 361), `equity:defensive-low-vol-relative` v1 -> v4 (258 -> 360),
+  and `equity:sector-reversal-liquidity`: its four versions failed Train, and a rebirth in the same lineage,
+  `sector-volume-exhaustion-reversal` v1 (353), passed with the same first_day (the same timing).
+- **Verified:** eight new tests in `league/tests/test_forward_screen.py` (`TheRepresentativeBeforeAnyForwardDay`: the
+  four-family shape, the judge reading the re-picked version, no re-pick after a forward day of any pid, after the
+  record's night through the first_day or the day's open, after any judge row, the trigger, an unreadable record,
+  a store of the earlier build), the forward-screen suite and every module that imports it on both Pythons, the full
+  suites.
+- **Rollback:** the release before. A row already re-picked keeps its new representative (the `repicked` event names
+  the old one). The release before puts its unconditional UPDATE trigger back on its first open, and never updates
+  a row.
 
 ### The equity birth cells: the equity pass's request shows where the graveyard binds, on `feat/elane-birth-cells` (unreleased; in release 1015e, merged on main `8ef19fc1` with the yield check's resolution of `league/swarm/elane_births.py` (`f62ca5b6`), tree for tree; cut from main `aec0c8a5`, release U; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
 

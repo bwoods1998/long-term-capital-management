@@ -20,13 +20,24 @@ none) is written once a receipt sha, with FWD1_START = `fwd1_rule.start_after(pi
 judged, and a lineage registered earlier enters mid-run from it.
 
 THE NIGHT (`night`; after each of the record's two nights, E3's and the panel's, in the registry):
-1. THE LINEAGES (`fwd1_lineages`, written once a lineage, first write stands). Every lineage of the registry but the
-   controls, at its first sighting: its representative (`representative`), type, case (`case_of`: the sealed facts of
-   every family and pid of the lineage; a panel pre-check record counts only when it says `reached`), FWD1_START and
-   its mechanism cell (lane / agenda / universe group). Not judged, with the reason: an ETF lineage that reached a
-   sealed pre-check (no forward verdict for an S1/S2 look), a lineage that already trades (a live row: it passed a
-   sealed look), a type FWD1-R does not cover (a stock program); a representative with no counted day yet is simply
-   pending.
+1. THE LINEAGES (`fwd1_lineages`, one row a lineage). Every lineage of the registry but the controls, at its first
+   sighting: its representative (`representative`), type, case (`case_of`: the sealed facts of every family and pid of
+   the lineage; a panel pre-check record counts only when it says `reached`), FWD1_START and its mechanism cell (lane
+   / agenda / universe group). Not judged, with the reason: an ETF lineage that reached a sealed pre-check (no forward
+   verdict for an S1/S2 look), a lineage that already trades (a live row: it passed a sealed look), a type FWD1-R does
+   not cover (a stock program); a representative with no counted day yet is simply pending.
+   THE REPRESENTATIVE BEFORE ANY FORWARD DAY (`repick`, after `register` each run). The rule fixes the representative
+   before any forward day of the lineage exists, not at its first sighting. A sighting can come between a failed
+   version's registration and a passing one's with the same first_day (Oct 15: four sector families sighted on their
+   Train-failed v1). So each run re-reads the representative of a sighted lineage while NO FORWARD DAY of it exists
+   (`frozen`): no row of the forward record for any pid of the lineage (`RECORD_DAY_TABLES`), no night of the record
+   through its first_day (`fwd_runs.through`), its first_day's session not yet open, and no judge row for it (a
+   checkpoint, a pending reading, a verdict, sides, a floor, or any event but `registered` and `repicked`). When the
+   rule now gives another pid with the same first_day and start, the row is rewritten in place to it, in one
+   transaction with an append-only `repicked` event (old pid, new pid, the old row's ids and words). The store's
+   trigger allows that UPDATE alone (`REPICK_ONLY`). Once any forward day or judge row exists the row is frozen. A
+   forward record that cannot be read re-picks nothing (fail closed). The placebo seed reads the representative's
+   row hash (`fwd1_rule.placebo_seed`): a re-pick before any day changes the seed, and it is fixed from then on.
 2. THE CHECKPOINTS (`fwd1_checks`, written once a lineage and checkpoint: the checkpoint of record, never recomputed).
    The representative's counted days (`forward_db.counted_days`) under ONE engine id from FWD1_START; each day's SIDES
    (`fwd1_sides`: the weights of the shadow's lots in and out that session, which the record does not keep: read from
@@ -132,7 +143,15 @@ ENGINE_TOUCH = forward_db.TOL
 #: refuses a version before any Validation read (a Train segment its own errors ended, the same lineage as a twin).
 SEALED_STATE = ("elane_try", "elane_verdicts", "elane_look", "elane_xs_precheck", "elane_xs_look")
 PRECHECK_STATE = "elane_xs_precheck"
-EVENT_KINDS = ("pinned", "registered", "engine_switched", "ineligible", "void", "house", "waited", "stalled")
+EVENT_KINDS = ("pinned", "registered", "repicked", "engine_switched", "ineligible", "void", "house", "waited",
+               "stalled")
+#: THE REPRESENTATIVE BEFORE ANY FORWARD DAY (`repick`, `frozen`): the forward record's per-pid rows of a forward day
+#: (league/ops/forward_db.py: E3's night and the panel night write `fwd_days` and `fwd_checks`, the twins `fwd_ll` and
+#: `fwd_twins`). Any one of them for any pid of a lineage is a forward day of it.
+RECORD_DAY_TABLES = ("fwd_days", "fwd_checks", "fwd_ll", "fwd_twins")
+#: The events of a lineage that are no step of the judge: any other kind freezes its representative.
+UNJUDGED_EVENTS = ("registered", "repicked")
+REPICK_WHY = "a better version registered before any forward day of the lineage"
 APPEND_ONLY_ERROR = "forward-screen.sqlite is append-only"
 #: THE STALL RULE (the reviews' fix): a lineage whose next step waits on the House (its sides cannot be read from its
 #: own forward run, its rows under a new engine id have not come, a placebo span holds a session the House left out)
@@ -191,9 +210,28 @@ CREATE TABLE IF NOT EXISTS fwd1_runs (seq INTEGER PRIMARY KEY AUTOINCREMENT, sta
 #: seconds (ONE BUDGET A NIGHT).
 TABLES = ("fwd1_pins", "fwd1_sides", "fwd1_lineages", "fwd1_floors", "fwd1_checks", "fwd1_verdicts", "fwd1_events",
           "fwd1_pending", "fwd1_runs")
+#: THE ONE UPDATE THE STORE ALLOWS (`repick`): a `fwd1_lineages` row may change only to a new representative, with its
+#: lineage, start, receipt and first-sighting time kept, after its `repicked` event (once "<old pid>><new pid>") in the
+#: same transaction, and only while the judge holds no checkpoint, pending reading or verdict of the lineage and no
+#: sides or floor of either pid. Every other UPDATE aborts as before. A store written by an earlier build loses its
+#: unconditional `fwd1_lineages_no_update` trigger to this one on its next writable open (no row is touched).
+REPICK_ONLY = (
+    "CREATE TRIGGER IF NOT EXISTS fwd1_lineages_repick_only BEFORE UPDATE ON fwd1_lineages WHEN NOT ("
+    "NEW.lineage IS OLD.lineage AND NEW.start IS OLD.start AND NEW.receipt IS OLD.receipt AND NEW.at IS OLD.at "
+    "AND NEW.rep IS NOT OLD.rep "
+    "AND EXISTS (SELECT 1 FROM fwd1_events e WHERE e.kind = 'repicked' AND e.lineage = OLD.lineage "
+    "AND e.pid = NEW.rep AND e.once = (OLD.rep || '>' || NEW.rep)) "
+    "AND NOT EXISTS (SELECT 1 FROM fwd1_checks c WHERE c.lineage = OLD.lineage) "
+    "AND NOT EXISTS (SELECT 1 FROM fwd1_pending p WHERE p.lineage = OLD.lineage) "
+    "AND NOT EXISTS (SELECT 1 FROM fwd1_verdicts v WHERE v.lineage = OLD.lineage) "
+    "AND NOT EXISTS (SELECT 1 FROM fwd1_sides s WHERE s.pid IN (OLD.rep, NEW.rep)) "
+    "AND NOT EXISTS (SELECT 1 FROM fwd1_floors f WHERE f.pid IN (OLD.rep, NEW.rep))) "
+    f"BEGIN SELECT RAISE(ABORT, '{APPEND_ONLY_ERROR}'); END;\n"
+    "DROP TRIGGER IF EXISTS fwd1_lineages_no_update;\n")
 SCHEMA = "PRAGMA recursive_triggers=ON;\n" + _TABLES + "".join(
     f"CREATE TRIGGER IF NOT EXISTS {t}_no_{verb.lower()} BEFORE {verb} ON {t} BEGIN SELECT RAISE(ABORT, "
-    f"'{APPEND_ONLY_ERROR}'); END;\n" for t in TABLES for verb in ("UPDATE", "DELETE"))
+    f"'{APPEND_ONLY_ERROR}'); END;\n" for t in TABLES for verb in ("UPDATE", "DELETE")
+    if (t, verb) != ("fwd1_lineages", "UPDATE")) + REPICK_ONLY
 
 
 # ------------------------------------------------------------------------------------------------------------ settings
@@ -395,49 +433,169 @@ def _sealed_pids(fdb: sqlite3.Connection) -> set[int]:
         f"SELECT DISTINCT pid FROM fwd_tags WHERE tag IN ({', '.join('?' * len(SEALED_TAGS))})", SEALED_TAGS)}
 
 
+def sighting(lineage: str, rows: Sequence[Mapping[str, Any]], families: Mapping[str, Mapping[str, Any]], *,
+             sealed_pids: set[int], pin_start: dt.date) -> dict[str, Any] | None:
+    """A lineage's `fwd1_lineages` columns as a sighting now reads them (the module docstring, 1): its representative
+    over `rows`, type, case, why it is not judged, FWD1_START, cell and how many versions, with the representative's
+    `first_day` beside them (not a column). None for no row."""
+    rep = representative(rows)
+    if rep is None:
+        return None
+    fam = families.get(str(rep["family"]))
+    typ = type_of(rep, fam)
+    why = None
+    case = None
+    if fam is None:
+        why = "family"
+    elif typ is None:
+        why = "type"
+    elif any(str(r["reason"]) == "live" for r in rows):
+        why = "live"
+    else:
+        sealed = any(int(r["pid"]) in sealed_pids for r in rows) or any(
+            family_sealed(families.get(str(r["family"]))) for r in rows)
+        case = case_of(typ, sealed)
+        if case is None:
+            why = "sealed"
+    start = R.forward_start(dt.date.fromisoformat(str(rep["first_day"])), pin_start)
+    return {"lineage": lineage, "type": typ, "rep": int(rep["pid"]), "family": rep["family"], "version": rep["version"],
+            "run_sha": rep["run_sha"], "row_hash": rep["row_hash"], "case_": case, "judged": 0 if why else 1,
+            "why": None if why is None else NOT_JUDGED[why], "start": start.isoformat(),
+            "cell": cell_of(typ or "ETF", rep, fam), "versions": len(rows), "first_day": str(rep["first_day"])}
+
+
 def register(store: sqlite3.Connection, fdb: sqlite3.Connection, families: Mapping[str, Mapping[str, Any]], *,
              rule: Any, pin_start: dt.date, now: float) -> int:
-    """THE LINEAGES' first sightings (the module docstring, 1): one `fwd1_lineages` row each, first write stands. How
-    many it wrote."""
+    """THE LINEAGES' first sightings (the module docstring, 1): one `fwd1_lineages` row each (`repick` alone may
+    rewrite one, before any forward day of it). How many it wrote."""
     known = {str(r[0]) for r in store.execute("SELECT lineage FROM fwd1_lineages")}
     sealed_pids = _sealed_pids(fdb)
     wrote = 0
     for lineage, rows in sorted(_registry(fdb).items()):
         if lineage in known:
             continue
-        rep = representative(rows)
-        if rep is None:
+        seen = sighting(lineage, rows, families, sealed_pids=sealed_pids, pin_start=pin_start)
+        if seen is None:
             continue
-        fam = families.get(str(rep["family"]))
-        typ = type_of(rep, fam)
-        why = None
-        case = None
-        if fam is None:
-            why = "family"
-        elif typ is None:
-            why = "type"
-        elif any(str(r["reason"]) == "live" for r in rows):
-            why = "live"
-        else:
-            sealed = any(int(r["pid"]) in sealed_pids for r in rows) or any(
-                family_sealed(families.get(str(r["family"]))) for r in rows)
-            case = case_of(typ, sealed)
-            if case is None:
-                why = "sealed"
-        start = R.forward_start(dt.date.fromisoformat(str(rep["first_day"])), pin_start)
         with store:
             cursor = store.execute(
                 "INSERT OR IGNORE INTO fwd1_lineages(lineage, type, rep, family, version, run_sha, row_hash, case_, "
                 "judged, why, start, cell, receipt, versions, at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (lineage, typ, int(rep["pid"]), rep["family"], rep["version"], rep["run_sha"], rep["row_hash"], case,
-                 0 if why else 1, None if why is None else NOT_JUDGED[why], start.isoformat(),
-                 cell_of(typ or "ETF", rep, fam), rule.receipt_sha256, len(rows), float(now)))
+                (lineage, seen["type"], seen["rep"], seen["family"], seen["version"], seen["run_sha"], seen["row_hash"],
+                 seen["case_"], seen["judged"], seen["why"], seen["start"], seen["cell"], rule.receipt_sha256,
+                 seen["versions"], float(now)))
             if cursor.rowcount:
                 wrote += 1
-                event(store, "registered", at=now, lineage=lineage, pid=int(rep["pid"]), once="first",
-                      payload={"why": "first sighting under the forward screen", "case": case, "type": typ,
-                               "judged": not why, "versions": len(rows)})
+                event(store, "registered", at=now, lineage=lineage, pid=seen["rep"], once="first",
+                      payload={"why": "first sighting under the forward screen", "case": seen["case_"],
+                               "type": seen["type"], "judged": bool(seen["judged"]), "versions": seen["versions"]})
     return wrote
+
+
+def frozen(store: sqlite3.Connection, fdb: sqlite3.Connection, lineage: str, pids: Sequence[int], first_day: str,
+           now: float) -> str | None:
+    """Why a sighted lineage's representative can no longer be re-picked (THE REPRESENTATIVE BEFORE ANY FORWARD DAY,
+    the module docstring, 1), or None while it can. `pids`: every registry pid of the lineage; `first_day`: its
+    representative's (the lineage's earliest).
+    - "judged": the judge holds a row for it: a checkpoint, a pending reading, a verdict, sides or a floor of one of its
+      pids, or an event of it but `registered` and `repicked` (a wait, a stall, a House failure, a void...).
+    - "forward_day": the forward record holds a per-pid row of a day for one of its pids (`RECORD_DAY_TABLES`, any
+      engine id, any status).
+    - "counted": a night of the record ran through its first_day (`MAX(fwd_runs.through)`): the day is being counted.
+    - "begun": its first_day's session has opened (or the calendar does not know it).
+    - "unreadable": a store or the calendar could not be read. FAIL CLOSED: nothing is re-picked."""
+    pids = [int(p) for p in pids]
+    marks = ", ".join("?" * len(pids)) or "NULL"
+    try:
+        for sql, args in (
+                ("SELECT 1 FROM fwd1_checks WHERE lineage=? LIMIT 1", (lineage,)),
+                ("SELECT 1 FROM fwd1_pending WHERE lineage=? LIMIT 1", (lineage,)),
+                ("SELECT 1 FROM fwd1_verdicts WHERE lineage=? LIMIT 1", (lineage,)),
+                (f"SELECT 1 FROM fwd1_sides WHERE pid IN ({marks}) LIMIT 1", tuple(pids)),
+                (f"SELECT 1 FROM fwd1_floors WHERE pid IN ({marks}) LIMIT 1", tuple(pids)),
+                (f"SELECT 1 FROM fwd1_events WHERE lineage=? AND kind NOT IN "
+                 f"({', '.join('?' * len(UNJUDGED_EVENTS))}) LIMIT 1", (lineage, *UNJUDGED_EVENTS))):
+            if store.execute(sql, args).fetchone() is not None:
+                return "judged"
+    except sqlite3.Error:
+        return "unreadable"
+    try:
+        for table in RECORD_DAY_TABLES:
+            if fdb.execute(f"SELECT 1 FROM {table} WHERE pid IN ({marks}) LIMIT 1", tuple(pids)).fetchone() is not None:
+                return "forward_day"
+        row = fdb.execute("SELECT MAX(through) FROM fwd_runs").fetchone()
+    except sqlite3.Error:
+        return "unreadable"
+    if row is not None and row[0] is not None and str(row[0]) >= str(first_day):
+        return "counted"
+    try:
+        from ..equity import schedule
+
+        moments = schedule.moments(dt.date.fromisoformat(str(first_day)))
+    except Exception:  # noqa: BLE001 - a calendar that cannot answer: fail closed
+        return "unreadable"
+    if moments is None or float(now) >= float(moments.open_at):
+        return "begun"
+    return None
+
+
+def repick(store: sqlite3.Connection, fdb: sqlite3.Connection, families: Mapping[str, Mapping[str, Any]], *,
+           rule: Any, pin_start: dt.date, now: float) -> dict[str, int]:
+    """THE REPRESENTATIVE BEFORE ANY FORWARD DAY (the module docstring, 1): every lineage sighted under this receipt
+    whose representative the rule now gives as another pid, with the same first_day and FWD1_START, while `frozen` says
+    none: its row rewritten in place to the new representative (type, rep, family, version, run_sha, row_hash, case,
+    judged, why, cell, versions) with one `repicked` event (once "<old pid>><new pid>": the old row's ids and words, the
+    new pid's), in one transaction. {"repicked": rows rewritten, "repick_frozen": lineages a better pid came too late
+    for, "repick_unread": lineages left as they were because a store could not be read}."""
+    out = {"repicked": 0, "repick_frozen": 0, "repick_unread": 0}
+    held = [dict(r) for r in store.execute("SELECT * FROM fwd1_lineages WHERE receipt=? ORDER BY lineage",
+                                           (rule.receipt_sha256,))]
+    if not held:
+        return out
+    try:
+        registry = _registry(fdb)
+        sealed_pids = _sealed_pids(fdb)
+    except sqlite3.Error:
+        out["repick_unread"] = len(held)
+        return out
+    for row in held:
+        lineage = str(row["lineage"])
+        rows = registry.get(lineage) or []
+        best = representative(rows)
+        if best is None or int(best["pid"]) == int(row["rep"]):
+            continue                                  # the representative is already the rule's: untouched
+        old = next((r for r in rows if int(r["pid"]) == int(row["rep"])), None)
+        if old is None or str(old["first_day"]) != str(best["first_day"]):
+            out["repick_frozen"] += 1                 # not a better row of the same first_day: kept (fail closed)
+            continue
+        why = frozen(store, fdb, lineage, [int(r["pid"]) for r in rows], str(old["first_day"]), now)
+        if why is not None:
+            out["repick_unread" if why == "unreadable" else "repick_frozen"] += 1
+            continue
+        seen = sighting(lineage, rows, families, sealed_pids=sealed_pids, pin_start=pin_start)
+        if seen is None or seen["rep"] != int(best["pid"]) or seen["start"] != str(row["start"]):
+            out["repick_frozen"] += 1
+            continue
+        was = {key: row[key] for key in ("type", "family", "version", "run_sha", "row_hash", "case_", "judged", "why",
+                                         "cell", "versions")}
+        try:
+            with store:
+                event(store, "repicked", at=now, lineage=lineage, pid=seen["rep"],
+                      once=f"{int(row['rep'])}>{seen['rep']}",
+                      payload={"why": REPICK_WHY, "from": int(row["rep"]), "to": seen["rep"],
+                               "from_version": row["version"], "to_version": seen["version"],
+                               "first_day": seen["first_day"], "was": was})
+                cursor = store.execute(
+                    "UPDATE fwd1_lineages SET type=?, rep=?, family=?, version=?, run_sha=?, row_hash=?, case_=?, "
+                    "judged=?, why=?, cell=?, versions=? WHERE lineage=? AND rep=?",
+                    (seen["type"], seen["rep"], seen["family"], seen["version"], seen["run_sha"], seen["row_hash"],
+                     seen["case_"], seen["judged"], seen["why"], seen["cell"], seen["versions"], lineage,
+                     int(row["rep"])))
+        except sqlite3.Error:                         # the trigger refused it (a judge row came): nothing is written
+            out["repick_frozen"] += 1
+            continue
+        out["repicked"] += int(cursor.rowcount)
+    return out
 
 
 # ------------------------------------------------------------------------------------------------------- the runs
@@ -1471,10 +1629,12 @@ def report(store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any],
 def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, now: float, base: str | Path | None,
           release: str | Path | None, runs: Any = None, families: Mapping[str, Mapping[str, Any]] | None = None,
           clock: Callable[[], float] = time.time, deadline: float = float("inf")) -> dict[str, Any]:
-    """One night over the state root (the module docstring): the clock's row, the lineages' first sightings, the
-    judge, the permit file and the report, and the run's own `fwd1_runs` row. The receipt (counts only). `families`
-    (tests): the equity families by id, in place of the swarm store's (read-only). `deadline`: THE DEADLINE (the job
-    passes it; +inf for a test). The child seconds are what ONE BUDGET A NIGHT leaves (`night_spent`)."""
+    """One night over the state root (the module docstring): the clock's row, the lineages' first sightings, their
+    representatives before any forward day (`repick`: "repicked", "repick_frozen", "repick_unread" in the receipt when
+    not 0), the judge, the permit file and the report, and the run's own `fwd1_runs` row. The receipt (counts only).
+    `families` (tests): the equity families by id, in place of the swarm store's (read-only). `deadline`: THE
+    DEADLINE (the job passes it; +inf for a test). The child seconds are what ONE BUDGET A NIGHT leaves
+    (`night_spent`)."""
     root = Path(root)
     c = cfg(settings)
     began = clock()
@@ -1493,6 +1653,8 @@ def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, no
             families = forward_register._families(SwarmStore(root, readonly=True))
         registered = register(store, fdb, families, rule=rule, pin_start=dt.date.fromisoformat(str(pin["start"])),
                               now=now)
+        repicked = {k: v for k, v in repick(store, fdb, families, rule=rule,
+                                            pin_start=dt.date.fromisoformat(str(pin["start"])), now=now).items() if v}
         budget = max(0.0, float(c["cpu_seconds_night"]) - night_spent(store, now))
         judge = Night(store, fdb, families, runs=runs, rule=rule, pin=pin, budget=budget, clock=clock,
                       settings=settings, deadline=deadline)
@@ -1507,7 +1669,7 @@ def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, no
                           (float(began), float(clock()), round(judge.spent, 3),
                            int(store.execute("SELECT COUNT(*) FROM fwd1_lineages WHERE judged=1").fetchone()[0]),
                            float(clock())))
-        return {"start": pin["start"], "registered": registered, **{k: int(v) for k, v in tally.items()},
+        return {"start": pin["start"], "registered": registered, **repicked, **{k: int(v) for k, v in tally.items()},
                 "seconds": round(judge.spent, 3), "budget": round(budget, 3)}
     finally:
         if own_runs:
@@ -1551,6 +1713,10 @@ def run(ctx: Any) -> dict[str, Any]:
     if int(receipt.get("house") or 0):
         ctx.alert("warning", f"forward_screen: {receipt['house']} checkpoints waited on the House's own failures (a run "
                              "the child did not finish): no program is marked, the next night asks again")
+    if int(receipt.get("repick_unread") or 0):
+        ctx.alert("warning", f"forward_screen: {receipt['repick_unread']} lineages' representatives could not be read "
+                             "again before their first forward day (a store could not be read): each is kept as first "
+                             "sighted tonight, and the next run asks again while no forward day exists")
     if int(receipt.get("stalled") or 0):
         ctx.alert("warning", f"forward_screen: {receipt['stalled']} lineages STALLED tonight: their next step waited on "
                              f"the House on {STALL_NIGHTS} of the record's nights (the report's 'stalled' names the "
@@ -1561,7 +1727,8 @@ def run(ctx: Any) -> dict[str, Any]:
 __all__ = ["JOB", "DB", "PERMITS", "PERMITS_VERSION", "REPORT", "MODES", "SEATS", "DEFAULTS", "BOUNDS", "VERDICTS",
            "NOT_JUDGED", "PREFERRED", "SEALED_TAGS", "SEALED_STATE", "PRECHECK_STATE", "ENGINE_TOUCH", "EVENT_KINDS",
            "STALL_NIGHTS", "STATUSES", "NIGHT_WINDOW_S", "WALL_S", "MARGIN_S", "PREOPEN_BEFORE_S", "MIN_RUN_S",
-           "TABLES", "SCHEMA", "cfg", "open_store", "event", "lot_sides", "pinned", "representative", "family_sealed",
-           "type_of", "case_of", "cell_of", "register", "OwnFloorRefused", "Late", "HouseRuns", "engine_reading",
-           "preopen_deadline", "night_spent", "Night", "status_rows", "write_permits", "beside_for", "report",
-           "night", "run"]
+           "TABLES", "SCHEMA", "REPICK_ONLY", "RECORD_DAY_TABLES", "UNJUDGED_EVENTS", "REPICK_WHY", "cfg",
+           "open_store", "event", "lot_sides", "pinned", "representative", "family_sealed", "type_of", "case_of",
+           "cell_of", "sighting", "register", "frozen", "repick", "OwnFloorRefused", "Late", "HouseRuns",
+           "engine_reading", "preopen_deadline", "night_spent", "Night", "status_rows", "write_permits", "beside_for",
+           "report", "night", "run"]
