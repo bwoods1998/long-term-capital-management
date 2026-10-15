@@ -1235,7 +1235,7 @@ the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's 
 equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
 0.50 x E.
-Money digest `cfcc94b1`, full digest `60796aed` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
+Money digest `4cd610a5`, full digest `18636b3f` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `5128b198` / `4af19b45`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of

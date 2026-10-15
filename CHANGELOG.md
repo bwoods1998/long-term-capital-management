@@ -30,6 +30,27 @@ The running House release is `20261015T075939Z-89d93d40bfda` (main `0b978378`, P
 Probe family and the Probe sleeve 0.33 x E, 08:00Z Oct 15), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's
 updater is on. What is built and not deployed is on branches.
 
+### C2 (A45) of the scaling plan: the options sizing-up step parked, on `feat/scale-c2` (unreleased; an owner deploy outside 12:55-20:05Z on a trading day; THE MONEY DIGEST MOVES ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
+
+- **The options row** (`league/constitution.py`, the comment above `options_money`): `options_money.sized.min_trades`
+  20 -> 1000, inside its bound (20 to 1000) at its tight end, a tightening, as the equity table's was on Oct 11. Sized
+  is the one options route whose stake grows with E with no test against the same-risk buy-and-hold, and its opens
+  carry no Probe mark (outside the $400 window, the $800 total and the program lines). With 1000 no options family
+  reaches Sized; one the swarm holds at Sized is read back to Probe at the live path's next band pass, and nothing it
+  holds is sold. The rule stays pre-registered at its own 20.
+- **The bound's tight end**: `OPTIONS_MONEY_BOUNDS` `probe.max_loss_share` 0.02 -> 0.005 (the loose end, the goal's
+  10%, and the row in force, 0.10, are unchanged), so a later step's row can hold one Probe structure at the dollars it
+  holds today while E grows. It admits only tighter rows, and it is no row of the constitution: it moves no digest.
+- **Nothing changes size at today's E.** Every Probe open is planned as before (`test_options_sized_parked`).
+- **Identities.** Money digest `cfcc94b1` -> `4cd610a5`, constitution `60796aed` -> `18636b3f` (`PINNED_DIGEST`); the
+  equity design blocks restate them. With the row set back both are main's exactly (the bound alone moves neither).
+  Fingerprint `b60410ad` and equity `78022ca6` unchanged. `league/tests/equity_design.py` keeps the older pins as
+  `DIGESTS_OPF1` (`before_options_park`); every older table's helper sets the row back; `test_live_money` tests the
+  rule at its own 20.
+- **Its cost.** No options family can size up while it stands.
+- **Rollback**, one owner deploy: `sized.min_trades` 20 (re-pin `PINNED_DIGEST`, rewrite the design blocks); the money
+  digest moves back and the grant re-ratifies.
+
 ### Release 1015f: release 1015e plus three fixes, on `rel/1015f` (unreleased; one House deploy and one gateway deploy
 from one commit, outside 12:55-20:05Z on a trading day; no identity moves: the options execution fingerprint
 `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are
@@ -1352,7 +1373,7 @@ the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's 
 equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
 0.50 x E.
-Money digest `cfcc94b1`, full digest `60796aed` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
+Money digest `4cd610a5`, full digest `18636b3f` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `5128b198` / `4af19b45`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

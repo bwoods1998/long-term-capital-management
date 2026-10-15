@@ -2,6 +2,7 @@
 applies it. Standard library only."""
 
 import copy
+import dataclasses
 import tempfile
 import unittest
 from decimal import Decimal as D
@@ -20,6 +21,14 @@ def table(**changes):
             node = node[k]
         node[keys[-1]] = value
     return M.Table.from_constitution(c)
+
+
+def pre_registered() -> M.Table:
+    """The table in force with the options Sized count at the rule's own pre-registered 20 forward trades. THE OPTIONS
+    SIZING-UP STEP IS PARKED (C2 (A45) of the scaling plan: `options_money.sized.min_trades` 1000, the constitution's
+    comment above `options_money`), so the Sized rule's own arithmetic is tested here, at the count it was written
+    with, and the park itself in league/tests/test_options_sized_parked.py."""
+    return dataclasses.replace(M.Table.from_constitution(), sized_min_trades=20)
 
 
 def fwd(returns, *, max_loss=100.0, negative=None, confidence=0.8):
@@ -49,7 +58,9 @@ class TheTable(unittest.TestCase):
         self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.10"), 1, D("0.15"), D("0")))
         self.assertEqual((t.probe_contracts, t.probe_max_open, t.probe_loss_budget), (1, 8, D("400")))
         self.assertEqual((t.probe_loss_basis, t.probe_demotion), ("net", "dm1"))
-        self.assertEqual((t.sized_min_trades, t.sized_confidence, t.kelly_fraction), (20, 0.8, 0.25))
+        # THE OPTIONS SIZING-UP STEP IS PARKED (C2 (A45) of the scaling plan): 1000 forward trades, the bound's tight end,
+        # in place of the rule's own 20, so no options family reaches Sized; `pre_registered` tests the rule at 20.
+        self.assertEqual((t.sized_min_trades, t.sized_confidence, t.kelly_fraction), (1000, 0.8, 0.25))
         self.assertEqual((t.sized_share, t.sized_family_share, t.book_share), (D("0.10"), D("0.30"), D("0.90")))
         self.assertEqual((t.daily_stop_share, t.drawdown_stop_share), (D("0.35"), D("0.60")))
         self.assertEqual((t.tuition_day, t.tuition_week, t.calibration_day), (D("200"), D("300"), D("50")))
@@ -79,7 +90,9 @@ class TheTable(unittest.TestCase):
     def test_every_d4_row_is_at_the_bold_end_and_inside_the_plans_range(self):
         c = CONSTITUTION["options_money"]
         self.assertEqual(c["probe"]["floor_usd"], "0", "the fast lane: no one-contract floor")
-        self.assertEqual(OPTIONS_MONEY_BOUNDS["probe.max_loss_share"], ("0.02", "0.10"), "the goal's 10%")
+        # The tight end 0.02 -> 0.005 (C2 (A45) of the scaling plan): a later step's row may hold one Probe structure at
+        # today's dollars while E grows; the loose end, the goal's 10%, and the row in force are unchanged.
+        self.assertEqual(OPTIONS_MONEY_BOUNDS["probe.max_loss_share"], ("0.005", "0.10"), "the goal's 10%")
         for path, value in (("probe.max_loss_share", "0.10"), ("probe.family_share", "0.15"),
                             ("probe.max_open", 8), ("probe.loss_budget_usd", "400"),
                             ("book_share", "0.90"), ("daily_stop_share", "0.35"), ("drawdown_stop_share", "0.60"),
@@ -182,12 +195,13 @@ class Bands(unittest.TestCase):
 
     def test_a_candidate_becomes_a_probe_first_never_sized_at_once(self):
         good = [0.2, 0.1, 0.3, -0.1, 0.25] * 5
-        self.assertEqual(M.band_for(self.t, row(band="candidate"), D("5000"), fwd(good), probe_sessions=5)[0], "probe")
-        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), fwd(good), probe_sessions=5)[0], "probe",
+        t = pre_registered()   # (at the rule's own 20: the park would hold both at Probe whatever the record)
+        self.assertEqual(M.band_for(t, row(band="candidate"), D("5000"), fwd(good), probe_sessions=5)[0], "probe")
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), fwd(good), probe_sessions=5)[0], "probe",
                          "no real Probe trade yet: the Probe stage is real, never a formality")
 
     def test_sized_needs_real_probe_trades_and_a_full_session_at_probe(self):
-        t = self.t
+        t = pre_registered()   # the rule at its own 20 (C2 parked the count in force at 1000)
         self.assertEqual((t.min_probe_real_trades, t.min_probe_sessions), (5, 1))
         rows = [{"day": f"2026-09-{d:02d}", "source": "shadow", "pnl": 20.0, "max_loss": 100.0} for d in range(1, 21)]
         rows += [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": 3.0, "max_loss": 20.0} for d in range(1, 5)]
@@ -201,14 +215,15 @@ class Bands(unittest.TestCase):
         def real(returns):
             return M.forward_stats([{"day": f"2026-10-{i + 1:02d}", "source": "real", "pnl": r * 100.0, "max_loss": 100.0}
                                     for i, r in enumerate(returns)], 0.8)
+        t = pre_registered()   # the rule at its own 20 (C2 parked the count in force at 1000)
         good = [0.2, 0.1, 0.3, -0.1, 0.25] * 4
-        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), real(good), probe_sessions=1)[0], "sized")
-        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), real(good[:19]), probe_sessions=1)[0], "probe")
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), real(good), probe_sessions=1)[0], "sized")
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), real(good[:19]), probe_sessions=1)[0], "probe")
         noisy = [1.0, -0.95] * 10 + [0.01]
         f = fwd(noisy)
         self.assertGreater(f.mean, 0)
         self.assertLess(f.lcb, 0)
-        self.assertEqual(M.band_for(self.t, row(band="sized"), D("5000"), f, probe_sessions=1)[0], "probe")
+        self.assertEqual(M.band_for(t, row(band="sized"), D("5000"), f, probe_sessions=1)[0], "probe")
 
     def test_one_decision_counts_once_preferring_real_then_shadow_then_nightly(self):
         shadow = [{"day": f"2026-10-{d:02d}", "source": "shadow", "pnl": 10.0, "max_loss": 100.0} for d in range(1, 13)]
@@ -228,11 +243,11 @@ class Bands(unittest.TestCase):
             rows.append({"day": f"2026-10-{d:02d}", "source": "real", "pnl": -30.0, "max_loss": 60.0})
         f = M.forward_stats(rows, 0.8)
         self.assertLess(f.mean, 0)
-        self.assertFalse(M.sized_ok(M.Table.from_constitution(), f))
+        self.assertFalse(M.sized_ok(pre_registered(), f), "refused by its mean, not by the park's count")
         self.assertTrue(f.negative)
 
     def test_a_real_record_that_loses_holds_the_family_at_probe(self):
-        t = M.Table.from_constitution()
+        t = pre_registered()   # the rule at its own 20 (C2 parked the count in force at 1000)
         rows = [{"day": f"2026-09-{d:02d}", "source": "shadow", "pnl": 30.0, "max_loss": 100.0} for d in range(1, 21)]
         rows += [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": -1.0, "max_loss": 50.0} for d in range(1, 11)]
         rows += [{"day": f"2026-10-{d:02d}", "source": "shadow", "pnl": 30.0, "max_loss": 100.0} for d in range(11, 31)]
@@ -322,7 +337,7 @@ class Sizing(unittest.TestCase):
         one that buys no whole structure, is sized under the Probe's limits: one structure, `open_per_family` open (one
         since Oct 15, 2026; three before), 15% the family."""
         weak = fwd([0.44, -0.28] * 10)                 # mean 0.08, sd 0.37: LCB barely positive, quarter-Kelly about $105
-        self.assertTrue(M.sized_ok(self.t, weak))
+        self.assertTrue(M.sized_ok(pre_registered(), weak), "at the rule's own 20 (C2 parked the count in force)")
         kelly = M.kelly_cap(self.t, D("5481.65"), weak)
         self.assertLess(kelly, M.probe_cap(self.t, D("5481.65")))
         self.assertEqual(M.sizing_band(self.t, "sized", D("5481.65"), weak, D("10")), "probe", "Kelly under the Probe's cap")

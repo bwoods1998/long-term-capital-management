@@ -185,6 +185,8 @@ class TheRows(unittest.TestCase):
         def pre_e1(**probe):
             # (and before one open structure a Probe family, Oct 15, 2026: `open_per_family` 3 in every release here)
             c = constitution(**{"open_per_family": 3, **probe})
+            # (and before the options sizing-up step was parked, C2 (A45): the Sized rule's own 20 in every release here)
+            c["options_money"]["sized"]["min_trades"] = 20
             del c["equity_money"]
             return c
 

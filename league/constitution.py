@@ -927,6 +927,24 @@ CONSTITUTION: dict[str, Any] = {
     # call): the gain is one at a time. No program is stopped, no position is sold. Rollback, one owner deploy:
     # `open_per_family` 3 here (re-pin `PINNED_DIGEST`); the money digest moves back and the standing grant re-ratifies
     # at the House's start; no fingerprint move, no evidence reset.
+    #
+    # THE OPTIONS SIZING-UP STEP IS PARKED (Oct 15, 2026; C2 (A45) of the scaling plan, its options row, the captain's
+    # build for the owner's deploy): `sized.min_trades` 20 -> 1000, inside its bound (20 to 1000) at its tight end, a
+    # TIGHTENING, as `equity_money.sized.min_trades` was parked on Oct 11. Why: Sized is the one route by which an
+    # options family's stake grows with E (Kelly on the lower bound, up to `sized.max_loss_share` a structure and
+    # `sized.family_share` a family) with no test against the same-risk buy-and-hold, and a Sized open carries no Probe
+    # mark, so its closes sit outside the $400 window, the $800 total and the program lines. The scaling plan scales
+    # only a program that beat its own buy-and-hold on live closes, and options are tested and reported there, never
+    # scaled. With 1000 no options family reaches Sized (`league/live/money.py` `sized_ok`), and a family the swarm
+    # holds at Sized is read back to Probe by `band_for` at its next pass (no position is sold: what it holds exits by
+    # its own rules). The rule stays pre-registered as written (its own count is 20 forward trades); the row is
+    # switched back only with a test that counts what Sized risks. Beside it, the bound's tight end
+    # `probe.max_loss_share` 0.02 -> 0.005 (`OPTIONS_MONEY_BOUNDS`, not a row: it moves no digest), so a later step's
+    # row can hold one Probe structure at the dollars it holds today while E grows. It admits only tighter rows; the
+    # row in force stays 0.10 x E, so nothing changes size at today's E. Its cost: no options family can size up
+    # while it stands, and a family with a real edge trades one Probe structure. Rollback, one owner deploy:
+    # `sized.min_trades` 20 here (re-pin `PINNED_DIGEST`); the money digest moves back and the standing grant
+    # re-ratifies at the House's start; no fingerprint move, no evidence reset.
     "options_money": {
         "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
@@ -934,7 +952,7 @@ CONSTITUTION: dict[str, Any] = {
         "probe": {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 1, "family_share": "0.15", "floor_usd": "0",
                   "max_open": 8, "loss_budget_usd": "400", "loss_window_sessions": 20, "loss_total_usd": "800",
                   "loss_basis": "net", "demotion": "dm1"},
-        "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
+        "sized": {"min_trades": 1000, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
                   "family_share": "0.30", "min_probe_real_trades": 5, "min_probe_sessions": 1},
         "book_share": "0.90",
         "daily_stop_share": "0.35",
@@ -1225,7 +1243,10 @@ def money_digest(constitution: dict[str, Any] | None = None) -> str:
 OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # THE FAST LANE (Oct 7, 2026): the owner's goal item 4 allows up to 10% of equity at risk per Probe position (a
     # loosening from 5%, reported with its cost) and a Probe loss budget up to $400; one structure a Probe position.
-    "probe.max_loss_share": ("0.02", "0.10"),
+    # C2 (A45) of the scaling plan (Oct 15, 2026): the TIGHT end 0.02 -> 0.005, so a later step's row can keep one Probe
+    # structure at the dollars it holds today while E grows. It admits only tighter rows; the loose end, the goal's
+    # 10%, is unchanged.
+    "probe.max_loss_share": ("0.005", "0.10"),
     "probe.contracts": ("1", "1"),
     # Release L-D (Oct 9, 2026; Claude's decision under the same goal item, its cost in the table's comment): 8 Probe
     # slots (3 before it). The $400 envelope, not the count, bounds what Probe opens may lose.
@@ -1591,4 +1612,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '60796aed0c82235b802fa925f865daf10d6eca6d355ddd80ae044380edd4d93d'
+PINNED_DIGEST = '18636b3f13d5746d25b80a06a0413d1ffccf675968f0b5bed9e94b1d9ac0265e'

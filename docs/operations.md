@@ -8,6 +8,40 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## C2 (A45) of the scaling plan (Oct 15, 2026): the options sizing-up step parked: `feat/scale-c2`, not deployed
+
+C2 is the scaling plan's precondition for any deposit or ceiling release, built in two commits so the owner can deploy
+the options row alone first. Every part is a tightening and changes no size at today's E.
+
+- **The options row** (`league/constitution.py`, the comment above `options_money`): `options_money.sized.min_trades`
+  20 -> 1000, inside its bound (20 to 1000) at its tight end, as `equity_money.sized.min_trades` was parked on Oct 11.
+  Sized is the one route by which an options family's stake grows with E (Kelly on the lower bound, up to
+  `sized.max_loss_share` a structure and `sized.family_share` a family) with no test against the same-risk
+  buy-and-hold, and a Sized open carries no Probe mark, so its closes sit outside the $400 window, the $800 total and
+  the program lines. With 1000 no options family reaches Sized (`money.sized_ok`), and a family the swarm holds at
+  Sized is read back to Probe by the live path's band pass (`step._move_band`, `money.band_for`) while real money is
+  on; nothing it holds is sold. The swarm's progress report shows `forward_trades` against 1000. The rule stays
+  pre-registered as written (its own count is 20); the row is switched back only with a test that counts what Sized
+  risks.
+- **The bound's tight end** (`OPTIONS_MONEY_BOUNDS` `probe.max_loss_share` 0.02-0.10 -> 0.005-0.10): it lets a later
+  step's row hold one Probe structure at the dollars it holds today while E grows. It admits only tighter rows; the
+  row in force stays 0.10 x E. The bounds are no row of the constitution, so this moves no digest.
+- **Identities.** The row moves the money digest `cfcc94b1` -> `4cd610a5` and the constitution digest `60796aed` ->
+  `18636b3f` (`PINNED_DIGEST`); with the row set back the digests are main's exactly, so the bound alone moves
+  neither. The options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move (no file of
+  league/live, the Gym or the equity evidence changes): no evidence reset. `league/tests/equity_design.py` keeps the
+  older pins as `DIGESTS_OPF1` (`before_options_park`), and every older table's helper sets the row back.
+- **Deploy**: an owner deploy (the constitution is the owner's file), never 12:55-20:05Z on a trading day. The standing
+  grant re-ratifies on the new money digest at the House's start (`league/ops/grant.py`; `scripts/live_trading.py
+  --ratify` on the box if it refuses). Verify: the four ids above, the grant ratified on `4cd610a5`, real money on,
+  and no `live.band` record moving an options family to Sized from the deploy on.
+- **Its cost.** No options family can size up while it stands; a family with a real edge trades one Probe structure.
+- **Proof**: `league/tests/test_options_sized_parked.py` (no family reaches Sized below 1000 trades, a Sized family
+  read back to Probe, every Probe open planned the same, the tight end, the digests); `test_live_money` tests the rule
+  at its own 20 (`pre_registered`).
+- **Rollback**, one owner deploy: `sized.min_trades` 20 (re-pin `PINNED_DIGEST`); the money digest moves back and the
+  grant re-ratifies.
+
 ## Release 1015e (Oct 15, 2026): the equity birth cells, research dollars by lane, the watchdog on an interrupted box, the equity book's own shares: `rel/1015e`, not deployed
 
 Release 1015e is main `0b978378` (#557, the running release `20261015T075939Z-89d93d40bfda`) with three pull requests
@@ -2254,7 +2288,7 @@ the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's 
 equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
 0.50 x E.
-Money digest `cfcc94b1`, full digest `60796aed` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
+Money digest `4cd610a5`, full digest `18636b3f` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `5128b198` / `4af19b45`.
 <!-- equity-design:end -->
 
 - **Its source.** The pair is the captain's to set, before Monday's open, from the verdict of the pre-registered
@@ -7355,9 +7389,10 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | `researcher.retire_guard_days` | `swarm.json` on the box | default 14 (Oct 1) | the validated-family guard: a researcher may not retire a family that holds a version which passed the validation line (in its state, in the tournament's verdict records, or archived by any evaluator adoption) last validated within this many days, unless a later validation of that version failed the line; a number at or below 0 turns it off; null, a boolean or a string reads as 14 | edit `swarm.json` |
 | `funding` (`enabled`, `every_seconds`, `lead_hours`, `repeat_hours`, `clear_factor`, `claude_out_usd`, `burn_window_hours`, `after_end_hours`, `fallback_every_seconds`, `fallback_flush_seconds`) | `swarm.json` on the box | defaults (Release A, #439): on, 300, per cliff, 12, 1.5, 2, 6, 48, 21600, 30 | the funding cliff alerts (**Funding cliffs and alerts**) | edit `swarm.json` |
 | `research.enabled`, `requests_day`, `family_requests_day`, `cycle_calls` | `swarm.json` on the box | defaults (Release B, #447): false, 300, 12, 2 | the research library on the House, and its lines: calls a UTC day for the floor, a family, a research cycle (**The research library**) | edit `swarm.json`; on only after the gateway and the House that carry it |
-| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`); the incubator cap moves `incubator.max_loss_usd` to $75 (`1665c385`); release L-D moves the Probe row's `max_open` and adds `loss_basis`, `demotion`, `loss_window_sessions` and `loss_total_usd` (`0310779c`); the Probe total at $800 moves `loss_total_usd` to 800 (`fdf2ac7c`, Oct 10); the equity lane's rows from release E1 on; in force since 08:00Z Oct 15, 2026: `cfcc94b1` (#557: one open options structure a Probe family and the Probe sleeve 0.33 x E; the CHANGELOG lists every move) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
+| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`); the incubator cap moves `incubator.max_loss_usd` to $75 (`1665c385`); release L-D moves the Probe row's `max_open` and adds `loss_basis`, `demotion`, `loss_window_sessions` and `loss_total_usd` (`0310779c`); the Probe total at $800 moves `loss_total_usd` to 800 (`fdf2ac7c`, Oct 10); the equity lane's rows from release E1 on; in force since 08:00Z Oct 15, 2026: `cfcc94b1` (#557: one open options structure a Probe family and the Probe sleeve 0.33 x E; the CHANGELOG lists every move); C2 (A45) of the scaling plan, the options sizing-up step parked, moves it to `4cd610a5` (`feat/scale-c2`, not deployed) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
 | `options_money.probe` | `league/constitution.py` | from fast lane v2: `max_loss_share` 0.10, `contracts` 1, `open_per_family` 3 (1 since Oct 15, 2026: one open structure a Probe family), `family_share` 0.15, `floor_usd` 0, `loss_budget_usd` 400; from release L-D: `max_open` 8 (3 before), `loss_basis` "net" ("gross" before), `demotion` "dm1" ("dm0" before), `loss_window_sessions` 20 and `loss_total_usd` 400; from the Probe total at $800 (Oct 10): `loss_total_usd` 800, the owner's ceiling (the $400 in total before L-D, with no window) | the Probe: one structure within 10% of E, at most `max_open` Probe positions at once, the Probe loss budget ($400 over the last `loss_window_sessions` NY sessions and `loss_total_usd` in total) read by `loss_basis`, live demotion by `demotion` (0 in `max_open`, `loss_budget_usd` or `loss_total_usd` stops Probe opens; "gross", 3, "dm0", a $400 total and a 2000-session window together are L-D's CON-only rollback) | owner deploy; the standing grant re-ratifies at the House's start; no fingerprint move |
 | `tournament.drift_screen` | `league/swarm/policy.json` and `swarm.json` on the box | false (the box since 15:53Z Oct 7; the policy from fast lane v2) | THE DRIFT SCREEN's refusal (direction counts since fast lane v2; its fit is reported by the `direction` and `fast_lane` jobs into `<state>/fast-lane-report.json`, and by `scripts/fast_lane_report.py` on copies) | edit the file; true restores the screen |
+| `options_money.sized` | `league/constitution.py` | the sprint's: `min_trades` 20, `confidence` 0.80, `kelly_fraction` 0.25, `max_loss_share` 0.10, `family_share` 0.30, `min_probe_real_trades` 5, `min_probe_sessions` 1; `min_trades` 1000 from C2 (A45) of the scaling plan (the options sizing-up step parked; `feat/scale-c2`, not deployed) | when a Probe options family is Sized and how far Kelly sizes it up; at 1000 no options family reaches Sized | owner deploy; the standing grant re-ratifies at the House's start; no fingerprint move; 20 is the rollback |
 | `options_money.incubator` | `league/constitution.py` | from Release B, with `max_loss_usd` 75 from the incubator cap (Oct 8, 2026; 50 before it): `max_loss_usd` 75, `contracts` 1, `max_open` 4, `week_loss_usd` 150, `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80 | the incubator's caps and its pre-registered practice rule; each row may only tighten (`max_loss_usd` within $0-75), and 0 in `max_open`, `week_loss_usd` or `max_loss_usd` stops the route | owner deploy; the standing grant re-ratifies at the House's start (`--ratify` if it refuses; no evidence reset) |
 
 In the settings, `researcher.sail_usd_per_hour`, when set, is the researcher pace: the Sail models' spend over the

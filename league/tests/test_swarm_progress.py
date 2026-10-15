@@ -1,6 +1,7 @@
 """Public progress follows current proof and keeps private evidence private; all programs/results are invented."""
 
 import copy
+import dataclasses
 import datetime as dt
 import json
 import os
@@ -46,7 +47,11 @@ class ProgressCase(unittest.TestCase):
         (self.root / "swarm.json").write_text(json.dumps({"gym": {
             "image_checkpoint": "sbcp_synthetic_gym", "gate_checkpoint": "sbcp_synthetic_gate"}}))
         self.local = {}
-        self.live = SimpleNamespace(table=M.Table.from_constitution(), real_money=True, book=object(),
+        # The options Sized count at the rule's own 20 forward trades: C2 (A45) of the scaling plan parked it at 1000
+        # (`LiveProgress.test_the_park_shows_a_thousand_forward_trades`), so the checklist's arithmetic is read here at
+        # the count it was written with.
+        self.live = SimpleNamespace(table=dataclasses.replace(M.Table.from_constitution(), sized_min_trades=20),
+                                    real_money=True, book=object(),
             _grant=lambda: {"active": True, "policy": {"capital_usd": "5500"}},
             state=SimpleNamespace(get=lambda key, default=None: self.local.get(key, default)))
 
@@ -188,6 +193,17 @@ class GymProgress(ProgressCase):
 
 
 class LiveProgress(ProgressCase):
+    def test_the_park_shows_a_thousand_forward_trades(self):
+        """THE OPTIONS SIZING-UP STEP IS PARKED (C2 (A45) of the scaling plan): on the table in force a Probe's checklist
+        needs 1000 forward trades, so a record the rule's own 20 would size up stays incomplete."""
+        self.live.table = M.Table.from_constitution()
+        self.assertEqual(self.live.table.sized_min_trades, 1000)
+        self.family(band="probe")
+        self.forward(source="shadow", n=60, pnl=30)
+        value = self.read()
+        self.assertEqual(self.checks(value)["forward_trades"], (60, 1000))
+        self.assertEqual(value["blocked"], "forward_incomplete")
+
     def test_candidate_checks_fit_use_grant_ceiling_and_disabled_execution_cannot_complete(self):
         self.family(band="candidate")
         self.assertIsNone(self.read()["blocked"])
