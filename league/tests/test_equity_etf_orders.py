@@ -59,8 +59,12 @@ from league.tests import equity_week as W
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "equity_etf_orders.json"
 #: The release the fixture was recorded on: main, with releases E5-A (the seat rule) and E3.1 (the exit wait's end,
-#: the re-based twin) deployed, and decision A32 (the Probe sleeve 0.50 x E at six seats, 47ed6872, PR #543).
-RECORDED_ON = "47ed6872ce6c232b743cc556f5540892b9132470"
+#: the re-based twin) deployed, and decision A32 (the Probe sleeve 0.50 x E at six seats, 47ed6872, PR #543); then
+#: re-recorded on EQDONE-7's design (12 seats at 0.33 x E; the scenarios' book at six seats, `SCENARIO_SEATS`):
+#: every scenario's lots and orders are sized at the 0.33 sleeve; in three, where the loss budget or the instrument cap
+#: cut a 0.50 lot, one more of the smaller lots fits (posts 84 -> 86, 3 -> 4, 2 -> 3); the seat rule's lines are the
+#: same in all 75.
+RECORDED_ON = "0d492a7d77729f58785dd69d245e99feeb27bb83"
 
 
 def differences(name: str, want: dict, got: dict) -> str:
