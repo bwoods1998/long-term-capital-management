@@ -226,7 +226,9 @@ def collect_house(root: Path, cutoff: str, gateway: Any, *, now: float, config: 
     fills_c = [f for f in rb["fills"] if float(f["at"]) <= CUT]
     cb = {"orders": cut_orders(rb["orders"]), "fills": fills_c, "positions": cut_positions(rb["positions"], fills_c, action),
           "external": rb["external"], "every_order": cut_orders(rb["every_order"]),
-          "every_position": cut_positions(rb["every_position"], fills_c, action), "orders_from": rb["orders_from"]}
+          "every_position": cut_positions(rb["every_position"], fills_c, action), "orders_from": rb["orders_from"],
+          # The equity book's own orders and lots (league/account_activity.py: its share fills are not an assignment's).
+          "equity": rb.get("equity")}
     book_now = {"positions": rb["every_position"], "orders": rb["every_order"], "fills": rb["fills"]}
     cbook = {"positions": cb["every_position"], "orders": cb["every_order"], "fills": fills_c, "recon": recon}
     out["book_changes_after_cutoff"] = {
@@ -280,7 +282,8 @@ def collect_house(root: Path, cutoff: str, gateway: Any, *, now: float, config: 
                 later.append(a)
         acts[:] = kept
         vorders = [o for o in orders if (ep_or_none(o.get("submitted_at")) or 0) <= CUT]
-        reading = AA.classify(kept, vorders, cb, now=CUT, shares_held=lambda: AA.shares_held(broker))
+        reading = AA.classify(kept, vorders, cb, now=CUT,
+                              shares_held=lambda: AA.shares_held(broker, (rb.get("equity") or {}).get("held")))
         by_type: dict[str, Any] = {}
         for a in kept:
             k = str(a.get("activity_type"))

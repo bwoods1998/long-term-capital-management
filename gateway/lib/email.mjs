@@ -4,17 +4,25 @@
 //
 // Composition is pure and lives here so every subject and every line of every alert is checked by
 // the test suite rather than discovered in production. Nothing composed here can contain a
-// credential: the facts that reach it are numbers, a box status and a short failure code.
+// credential: the facts that reach it are numbers, a box status, a short failure code, and (for an
+// interrupted box) ids, names and times each kept only in its own shape and the provider's sentence
+// cut to plain words with any token-shaped run redacted (`lib/sail.mjs` `boxStatus`).
 
 export const ALERT_KINDS = [
   'sail_balance_low',
   'sail_balance_critical',
   'floor_stopped',
   'box_not_running',
+  'box_interrupted',
   'kill_switch_engaged',
   'caps_exhausted',
   'daily_digest',
 ];
+
+//: Where Sail's docs send a person for help with a Sailbox ("Getting Help": the Sail community Slack, where the Sail team
+//: answers), and that page.
+export const SAIL_SLACK = 'https://join.slack.com/t/sailresearchcrew/shared_invite/zt-41pdcym9j-UU0Ey~A~r6n2H0DQVQsQHQ';
+export const SAIL_HELP = 'https://docs.sailresearch.com/sailboxes-getting-help';
 
 export const FROM = 'agent@blakewoods.us';
 export const TO = 'blakewoods98@gmail.com';
@@ -76,6 +84,38 @@ export function compose(kind, facts = {}) {
         'Venue credentials are unaffected: they live in the gateway, not on the box.',
       );
       break;
+    case 'box_interrupted': {
+      // Oct 14, 2026: an AWS spot interruption left the House `interrupted_restorable` for seven hours; every resume hung
+      // and only the Sail team could restore it. One message an interruption, with the words to post.
+      const box = facts.box_id || 'the House box';
+      const status = facts.box_status || 'interrupted_restorable';
+      const since = when(facts.status_since || facts.first_seen_at);
+      const what = facts.error_message ? `"${facts.error_message}"` : 'no reason given';
+      const tries = Number.isSafeInteger(facts.tries) ? facts.tries : 0;
+      const last = facts.last_answer || 'unknown';
+      const outcome = last === 'timeout' ? 'timed out with no answer' : `answered ${last}`;
+      subject = 'LTCM: the House box was interrupted and has not come back — ask Sail on Slack';
+      lines.push(
+        `The Sailbox ${box} is ${status} since ${since} (${what}). The gateway asked Sail to restore it ${tries} `
+          + `time${tries === 1 ? '' : 's'} since ${when(facts.first_seen_at)}; the last call ${outcome}.`,
+        `Only Sail can bring it back. Sail's docs ("Getting Help", ${SAIL_HELP}) send you to their community Slack: ${SAIL_SLACK}`,
+        'Post this, as it is:',
+        '',
+        `> Sailbox ${box} (app ${facts.app_name || 'unknown'}, ${facts.app_id || 'app id unknown'}, name ${facts.box_name || 'unknown'}) `
+          + `went ${status} at ${since} (${what}; last_checkpointed_at ${facts.last_checkpointed_at || 'unknown'}, `
+          + `checkpoint_generation ${number(facts.checkpoint_generation)}). Since ${when(facts.first_seen_at)} our watchdog's `
+          + `POST /v1/sailboxes/{id}/resume (REST, ${tries} tries, the last at ${when(facts.last_try_at)}) has not brought it `
+          + `back: the last call ${outcome}; GET /v1/sailboxes/{id} answers. Please restore it from its last checkpoint on the same id. It runs `
+          + 'a live trading daemon on a real account, so a fork to a second box is not an option for us.',
+        '',
+        'Do not fork the box or start another from a checkpoint: a resume still queued could bring this one back beside it, '
+          + 'and two Houses would trade one account.',
+        `The watchdog keeps asking Sail every ${number(facts.cooldown_minutes)} minutes (at most ${number(facts.max_tries)} tries) `
+          + 'and sends nothing more about this interruption. Open orders rest at the venue; the kill switch and the caps are unchanged.',
+        'Venue credentials are unaffected: they live in the gateway, not on the box.',
+      );
+      break;
+    }
     case 'kill_switch_engaged':
       subject = 'LTCM: the order gateway kill switch is engaged';
       lines.push(

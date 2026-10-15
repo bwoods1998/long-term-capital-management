@@ -9,12 +9,17 @@
 // It sends mail only when it has run out of things it can do by itself, and then at most once
 // every six hours per kind. The one exception is the evening digest, which is the owner reading
 // the floor rather than the floor asking for help.
+//
+// A box the provider took away with its checkpoint kept (`interrupted_restorable`: Oct 14, 2026, an AWS spot
+// interruption, seven hours down) is asked back with Sail's resume, once every fifteen minutes and at most 48 times, on
+// a key of its own window, and never forked. After three calls that did not bring it back, or 45 minutes, the owner
+// hears ONE message for the interruption: Sail's community Slack and the words to post there.
 
 import { iso } from './http.mjs';
 import { compose, FROM, TO } from './email.mjs';
 import { parsePico } from './money.mjs';
 import {
-  usageSummary, boxStatus, resumeBox, execRestart, boundedText, STOPPED, RESUMABLE,
+  usageSummary, boxStatus, resumeBox, execRestart, boundedText, STOPPED, RESUMABLE, RESTORABLE,
 } from './sail.mjs';
 
 export const DEFAULT_CHECKPOINT = 'https://blakewoods.us/api/capital/checkpoint';
@@ -31,6 +36,19 @@ export const RESERVE_USD = 10;
 export const LOW_RUNWAY_DAYS = 7;
 export const CRITICAL_RUNWAY_DAYS = 2;
 export const DIGEST_UTC_HOUR = 21;
+/**
+ * An interrupted box (`RESTORABLE`): Sail's resume is asked at most once a `RESTORE_COOLDOWN_SECONDS` window (each call
+ * bounded by the Sail client's own 45 s timeout; Oct 14 every call hung), at most `RESTORE_MAX_TRIES` times an
+ * interruption (twelve hours), and the owner is mailed once, after `RESTORE_MAIL_TRIES` calls that did not bring it
+ * back or `RESTORE_MAIL_MINUTES` since the watchdog first saw it, whichever comes first (at once when Sail says it can
+ * never resume).
+ */
+export const RESTORE_COOLDOWN_SECONDS = 900;
+export const RESTORE_MAX_TRIES = 48;
+export const RESTORE_MAIL_TRIES = 3;
+export const RESTORE_MAIL_MINUTES = 45;
+//: The least time between two interruption mails, whatever the episodes (a box that flaps mails at most this often).
+export const RESTORE_MAIL_FLOOR_SECONDS = 3600;
 /**
  * Sail's `range` accepts `1h`, `6h`, `24h`, `7d`, `30d` and `period`, and silently falls back to
  * its 30-day default for anything else -- so "a day" has to be spelled `24h` or the digest would
@@ -104,7 +122,9 @@ export async function readCheckpoint({ url, fetcher }) {
  *
  * Actions: `ok`, `checkpoint_unreachable`, `checkpoint_unreadable`, `stale_no_sailbox`,
  * `cooldown`, `resumed`, `resume_failed`, `restarted`, `restart_failed`,
- * `stopped_low_balance`, `box_unrecoverable`.
+ * `stopped_low_balance`, `box_unrecoverable`, and for an interrupted box `restored`, `restore_failed`,
+ * `restore_cooldown`, `restore_exhausted` (the tries are used up) and `restore_unavailable` (Sail said it can never
+ * resume).
  */
 /** Seconds in a Sail usage range such as `24h`, `6h`, `7d`. Unknown spellings read as a day. */
 export function rangeSeconds(range) {
@@ -126,6 +146,10 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
   const lowRunway = positive(env.LOW_RUNWAY_DAYS, LOW_RUNWAY_DAYS);
   const criticalRunway = positive(env.CRITICAL_RUNWAY_DAYS, CRITICAL_RUNWAY_DAYS);
   const alertEvery = positive(env.ALERT_EVERY_SECONDS, ALERT_EVERY_SECONDS) * 1000;
+  const restoreCooldown = positive(env.RESTORE_COOLDOWN_SECONDS, RESTORE_COOLDOWN_SECONDS) * 1000;
+  const restoreMaxTries = Math.floor(positive(env.RESTORE_MAX_TRIES, RESTORE_MAX_TRIES));
+  const restoreMailTries = Math.floor(positive(env.RESTORE_MAIL_TRIES, RESTORE_MAIL_TRIES));
+  const restoreMailMs = positive(env.RESTORE_MAIL_MINUTES, RESTORE_MAIL_MINUTES) * 60000;
 
   // ---- look ------------------------------------------------------------------------------------
   const checkpoint = await readCheckpoint({ url: env.CHECKPOINT_URL || DEFAULT_CHECKPOINT, fetcher });
@@ -159,8 +183,21 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
   const previousRestart = Date.parse(gate.watchdog().last_restart_at || '');
   const cooling = Number.isFinite(previousRestart) && now - previousRestart < cooldown;
   const stopped = status !== null && STOPPED.includes(status);
+  const restorable = status !== null && RESTORABLE.includes(status);
   const record = {};
   let action = 'ok';
+  // THE INTERRUPTION, one episode a box from the pass that first saw it to the pass that sees another status. A pass
+  // that could not read the box keeps the episode as it was.
+  const before = gate.watchdog().restore;
+  const open = before && typeof before === 'object' && !before.ended_at && before.box_id === boxId ? before : null;
+  let episode = null;
+  if (restorable && boxId) {
+    episode = open ? { ...open } : {
+      box_id: boxId, first_seen_at: at, tries: 0, last_try_at: null, last_answer: null, mailed_at: null, unavailable: false,
+    };
+  } else if (open && status !== null) {
+    record.restore = { ...open, ended_at: at, ended_status: status };
+  }
 
   if (checkpoint.error) {
     action = checkpoint.error;
@@ -168,7 +205,35 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
     action = 'ok';
   } else if (!apiKey || !boxId) {
     action = 'stale_no_sailbox';
-  } else if (stopped && !RESUMABLE.includes(status)) {
+  } else if (restorable && !(balance !== null && balance <= reserve)) {
+    const lastTry = Date.parse(episode.last_try_at || '');
+    if (episode.unavailable) {
+      action = 'restore_unavailable';
+    } else if (episode.tries >= restoreMaxTries) {
+      action = 'restore_exhausted';
+    } else if (Number.isFinite(lastTry) && now - lastTry < restoreCooldown) {
+      action = 'restore_cooldown';
+    } else {
+      // Sail restores an interrupted box from its last completed checkpoint on the same id: the resume call asks for it.
+      // One key a window, so a retry inside it is the same request. Never a fork, and no restart in the same pass: a
+      // box that comes back warm has the House running mid-session; the stale-checkpoint path below restarts it after
+      // the usual cooldown if it stays quiet (`last_restart_at` is set here for that).
+      const key = `ltcm-restore:${boxId}:${Math.floor(now / restoreCooldown)}`;
+      const resumed = await resumeBox({ apiKey, boxId, fetcher, idempotencyKey: `resume:${key}` });
+      episode.tries += 1;
+      episode.last_try_at = at;
+      episode.last_answer = resumed.ready ? resumed.resume_state : String(resumed.error || resumed.resume_state || 'unknown');
+      gate.recordSail({ last_resume_at: at, last_resume_state: resumed.resume_state ?? `error:${resumed.error}` });
+      if (resumed.ready) {
+        action = 'restored';
+        record.last_restart_at = at;
+      } else {
+        action = 'restore_failed';
+        record.detail = episode.last_answer;
+        if (resumed.resume_state === 'terminal_unavailable') episode.unavailable = true;
+      }
+    }
+  } else if (stopped && !RESUMABLE.includes(status) && !restorable) {
     action = 'box_unrecoverable';
   } else if (stopped && balance !== null && balance <= reserve) {
     // Under the reserve the floor itself would refuse every model call, so a resumed box
@@ -198,6 +263,7 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
     }
   }
 
+  if (episode) record.restore = episode;
   gate.recordWatchdog({
     last_check_at: at,
     last_action: action,
@@ -256,10 +322,32 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
   // sent before that minute is up is a false alarm on every deploy. The mail goes out when a
   // recovery attempt failed outright, when the box is stopped and this pass could not resume
   // it, or when a restart went out on an earlier pass and the floor is still quiet.
-  const recoveredNow = action === 'resumed' || action === 'restarted';
+  const recoveredNow = action === 'resumed' || action === 'restarted' || action === 'restored';
   const recoveryFailed = ['restart_failed', 'resume_failed', 'box_unrecoverable', 'stale_no_sailbox', 'stopped_low_balance'].includes(action);
   const stillQuiet = stale && cooling;
-  if (recoveryFailed || (stopped && !recoveredNow) || stillQuiet) await send('box_not_running');
+  // AN INTERRUPTED BOX the watchdog is asking back is told once, by its own message, never by the six-hourly "not
+  // running" (under the reserve it is the credit's case, told as before).
+  const restoring = restorable && ['restore_failed', 'restore_cooldown', 'restore_exhausted', 'restore_unavailable'].includes(action);
+  if (restoring && episode && !episode.mailed_at && mailer && (episode.unavailable || episode.tries >= restoreMailTries
+      || now - Date.parse(episode.first_seen_at) >= restoreMailMs)
+      && gate.alertDue('box_interrupted', now, RESTORE_MAIL_FLOOR_SECONDS * 1000)) {
+    const message = compose('box_interrupted', {
+      ...facts, ...episode, box_name: box?.name ?? null, app_id: box?.app_id ?? null, app_name: box?.app_name ?? null,
+      error_message: box?.error_message ?? null, status_since: box?.updated_at ?? null,
+      last_checkpointed_at: box?.last_checkpointed_at ?? null, checkpoint_generation: box?.checkpoint_generation ?? null,
+      cooldown_minutes: Math.round(restoreCooldown / 60000), max_tries: restoreMaxTries,
+    });
+    try {
+      await mailer({ from: env.ALERT_FROM || FROM, to: env.ALERT_TO || TO, ...message, at: now });
+      gate.recordAlert('box_interrupted', now);
+      episode.mailed_at = at;
+      gate.recordWatchdog({ restore: episode });
+      sent.push('box_interrupted');
+    } catch (error) {
+      gate.recordWatchdog({ last_mail_error: error?.name || 'send_failed', last_mail_error_at: at });
+    }
+  }
+  if (!restoring && (recoveryFailed || (stopped && !recoveredNow) || stillQuiet)) await send('box_not_running');
   if (facts.kill_switch) await send('kill_switch_engaged');
   if (gate.capsExhausted(now)) await send('caps_exhausted');
   if (new Date(now).getUTCHours() === DIGEST_UTC_HOUR) await send('daily_digest');

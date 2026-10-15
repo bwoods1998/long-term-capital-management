@@ -400,3 +400,199 @@ test('the MIME envelope is well formed and carries a non-ASCII subject safely', 
   assert.equal(Buffer.from(encoded.trim(), 'base64').toString('utf8'), 'line one\nline two\n');
   assert.equal(encodeHeader('plain ascii'), 'plain ascii');
 });
+
+// ---- an interrupted box (Oct 14, 2026: an AWS spot interruption left the House `interrupted_restorable` for seven
+// ---- hours; every resume hung and the watchdog only mailed "not running", every six hours)
+
+const INTERRUPTED = {
+  name: 'ltcm-house', app_id: 'app_01a0a5c4-c6a0-76d8-be8e-31414562e31b', app_name: 'ltcm',
+  error_message: 'worker received an AWS spot interruption notice', updated_at: '2026-09-15T15:58:00Z',
+  last_checkpointed_at: '2026-09-15T15:58:00Z', checkpoint_generation: 5213,
+};
+
+/** The control plane with an interrupted box: `resume` is 'hang' (the call times out), a resume_state, or a function. */
+function interrupted({ resume = 'hang', box = INTERRUPTED, balanceCents = 12000, status = 'interrupted_restorable' } = {}) {
+  const calls = [];
+  let at = NOW;
+  let current = status;
+  const fetcher = async (url, options = {}) => {
+    calls.push({ url: String(url), method: options.method || 'GET', headers: options.headers || {}, body: options.body });
+    const href = String(url);
+    if (href.startsWith(CHECKPOINT)) return reply(checkpointBody(at, Math.round((at - NOW) / 1000) + 1200));
+    if (href.includes('/v2/usage/summary')) return reply({ balance: balanceCents, period_spend: 412.5, range: '24h' });
+    if (href.endsWith('/resume')) {
+      const answer = typeof resume === 'function' ? resume(at) : resume;
+      if (answer === 'hang') {
+        const error = new Error('The operation was aborted due to timeout');
+        error.name = 'TimeoutError';
+        throw error;
+      }
+      if (answer === 'running') current = 'running';
+      return reply({ sailbox_id: BOX, status: current, resume_state: answer, error_message: answer === 'terminal_unavailable' ? 'gone' : null });
+    }
+    if (href.endsWith('/exec')) return reply('{"type":"started","exec_request_id":"exec_9"}\n');
+    if (/\/v1\/sailboxes\/[^/]+$/.test(href)) return reply({ sailbox_id: BOX, status: current, ...box });
+    return reply({}, 404);
+  };
+  return { fetcher, calls, at: value => { at = value; }, set: value => { current = value; } };
+}
+
+const resumes = calls => calls.filter(call => call.url.endsWith('/resume'));
+//: A fork or a start from a checkpoint (`/sailboxes/{id}/checkpoint`, `/sailboxes/from_checkpoint`, `/sailbox-checkpoints`).
+const forks = calls => calls.filter(call => call.url.startsWith('https://sailbox-api.') && /checkpoint/.test(call.url));
+const MIN = 60000;
+
+test('an interrupted box is asked back with Sail resume on a window of its own, and is not restarted in that pass', async () => {
+  const gate = gateWith();
+  const plane = interrupted({ resume: 'running' });
+  const { mailer, sent } = recorder();
+  const result = await runWatchdog({ gate, env: ENV, fetcher: plane.fetcher, mailer, now: NOW });
+  assert.equal(result.action, 'restored');
+  const [resume] = resumes(plane.calls);
+  assert.equal(resume.method, 'POST');
+  assert.equal(resume.url, `https://sailbox-api.sailresearch.com/v1/sailboxes/${BOX}/resume`);
+  assert.equal(resume.headers['Idempotency-Key'], `resume:ltcm-restore:${BOX}:${Math.floor(NOW / 900000)}`);
+  assert.equal(plane.calls.some(call => call.url.endsWith('/exec')), false, 'a box back warm keeps its House running');
+  assert.deepEqual(forks(plane.calls), [], 'never a fork');
+  assert.deepEqual(sent, [], 'it healed by itself: nobody is told');
+  assert.equal(gate.watchdog().last_restart_at, '2026-09-15T16:00:00.000Z', 'the restart cooldown gives the restore its grace');
+  assert.equal(gate.status(NOW).watchdog.restore.tries, 1);
+  assert.equal(gate.status(NOW).sail.last_resume_state, 'running');
+
+  // The next pass sees it running again: the episode ends, and a quiet checkpoint is the usual path, after the cooldown.
+  plane.at(NOW + 5 * MIN);
+  const next = await runWatchdog({ gate, env: ENV, fetcher: plane.fetcher, mailer, now: NOW + 5 * MIN });
+  assert.equal(next.action, 'cooldown');
+  assert.equal(gate.watchdog().restore.ended_status, 'running');
+  assert.equal(gate.watchdog().restore.ended_at, '2026-09-15T16:05:00.000Z');
+});
+
+test('a resume that hangs is asked again every fifteen minutes and the owner gets ONE message naming Sail Slack and the words to post', async () => {
+  const gate = gateWith();
+  const plane = interrupted();
+  const { mailer, sent } = recorder();
+  const actions = [];
+  for (let minute = 0; minute <= 6 * 60; minute += 5) {
+    plane.at(NOW + minute * MIN);
+    actions.push((await runWatchdog({ gate, env: ENV, fetcher: plane.fetcher, mailer, now: NOW + minute * MIN })).action);
+  }
+  assert.deepEqual(actions.slice(0, 7), ['restore_failed', 'restore_cooldown', 'restore_cooldown', 'restore_failed',
+    'restore_cooldown', 'restore_cooldown', 'restore_failed']);
+  assert.equal(resumes(plane.calls).length, 25, 'one call a fifteen-minute window over six hours');
+  const keys = resumes(plane.calls).map(call => call.headers['Idempotency-Key']);
+  assert.equal(new Set(keys).size, keys.length, 'each window its own key');
+  assert.equal(plane.calls.some(call => call.url.endsWith('/exec')), false);
+  assert.deepEqual(forks(plane.calls), []);
+  // One message in six hours, sent on the third call (minute 30); never the six-hourly "not running" (the evening digest,
+  // the owner reading the floor, goes at 21:00 as ever).
+  assert.deepEqual(sent.map(message => message.subject).filter(subject => !subject.startsWith('LTCM daily')),
+    ['LTCM: the House box was interrupted and has not come back — ask Sail on Slack']);
+  assert.equal(gate.watchdog().restore.mailed_at, '2026-09-15T16:30:00.000Z');
+  const text = sent[0].text;
+  assert.match(text, /https:\/\/join\.slack\.com\/t\/sailresearchcrew\/shared_invite\/zt-41pdcym9j-UU0Ey~A~r6n2H0DQVQsQHQ/);
+  assert.match(text, /https:\/\/docs\.sailresearch\.com\/sailboxes-getting-help/);
+  const post = text.split('\n').find(line => line.startsWith('> '));
+  for (const fact of [BOX, 'app ltcm', 'app_01a0a5c4-c6a0-76d8-be8e-31414562e31b', 'name ltcm-house', 'interrupted_restorable',
+    '2026-09-15 15:58 UTC', '"worker received an AWS spot interruption notice"', 'last_checkpointed_at 2026-09-15T15:58:00Z',
+    'checkpoint_generation 5213', '3 tries', 'timed out with no answer', 'restore it from its last checkpoint on the same id']) {
+    assert.ok(post.includes(fact), fact);
+  }
+  assert.match(text, /Do not fork the box/);
+  assert.doesNotMatch(text, /sail-secret|Bearer/, 'never the key');
+  // The health body carries the episode.
+  const restore = gate.status(NOW + 6 * 60 * MIN).watchdog.restore;
+  assert.deepEqual([restore.box_id, restore.first_seen_at, restore.tries, restore.last_answer],
+    [BOX, '2026-09-15T16:00:00.000Z', 25, 'timeout']);
+});
+
+test('the minutes bind when the calls are fewer, and the calls are bounded', async () => {
+  // A one-hour window between calls: one call by minute 45, so the minutes send the message.
+  const gate = gateWith();
+  const plane = interrupted();
+  const { mailer, sent } = recorder();
+  const env = { ...ENV, RESTORE_COOLDOWN_SECONDS: '3600', RESTORE_MAX_TRIES: '2' };
+  for (let minute = 0; minute <= 50; minute += 5) {
+    plane.at(NOW + minute * MIN);
+    await runWatchdog({ gate, env, fetcher: plane.fetcher, mailer, now: NOW + minute * MIN });
+  }
+  assert.equal(resumes(plane.calls).length, 1);
+  assert.equal(sent.length, 1);
+  assert.equal(gate.watchdog().restore.mailed_at, '2026-09-15T16:45:00.000Z');
+  // Two calls at most: the third window asks nothing.
+  for (let minute = 55; minute <= 200; minute += 5) {
+    plane.at(NOW + minute * MIN);
+    await runWatchdog({ gate, env, fetcher: plane.fetcher, mailer, now: NOW + minute * MIN });
+  }
+  assert.equal(resumes(plane.calls).length, 2);
+  assert.equal(gate.watchdog().last_action, 'restore_exhausted');
+  assert.equal(sent.length, 1, 'still the one message');
+});
+
+test('Sail saying the box can never resume is told at once, and nothing more is asked', async () => {
+  const gate = gateWith();
+  const plane = interrupted({ resume: 'terminal_unavailable' });
+  const { mailer, sent } = recorder();
+  const first = await runWatchdog({ gate, env: ENV, fetcher: plane.fetcher, mailer, now: NOW });
+  assert.equal(first.action, 'restore_failed');
+  assert.equal(first.detail, 'terminal_unavailable');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /the last call answered terminal_unavailable/);
+  plane.at(NOW + 20 * MIN);
+  assert.equal((await runWatchdog({ gate, env: ENV, fetcher: plane.fetcher, mailer, now: NOW + 20 * MIN })).action, 'restore_unavailable');
+  assert.equal(resumes(plane.calls).length, 1);
+  assert.equal(sent.length, 1);
+});
+
+test('a second interruption is its own episode: asked again and told again, at most once an hour', async () => {
+  const gate = gateWith();
+  const plane = interrupted();
+  const { mailer, sent } = recorder();
+  for (let minute = 0; minute <= 30; minute += 5) {
+    plane.at(NOW + minute * MIN);
+    await runWatchdog({ gate, env: ENV, fetcher: plane.fetcher, mailer, now: NOW + minute * MIN });
+  }
+  assert.equal(sent.length, 1);
+  plane.set('running');
+  plane.at(NOW + 35 * MIN);
+  await runWatchdog({ gate, env: ENV, fetcher: plane.fetcher, mailer, now: NOW + 35 * MIN });
+  assert.equal(gate.watchdog().restore.ended_status, 'running');
+  plane.set('interrupted_restorable');
+  for (let minute = 40; minute <= 120; minute += 5) {
+    plane.at(NOW + minute * MIN);
+    await runWatchdog({ gate, env: ENV, fetcher: plane.fetcher, mailer, now: NOW + minute * MIN });
+  }
+  const restore = gate.watchdog().restore;
+  assert.equal(restore.first_seen_at, '2026-09-15T16:40:00.000Z', 'a new episode');
+  assert.equal(sent.filter(message => message.subject.includes('interrupted')).length, 2);
+  assert.equal(restore.mailed_at, '2026-09-15T17:30:00.000Z', 'its third call at 17:10 waited for the hour since the first mail');
+});
+
+test('an interrupted box under the reserve is the credit case, told as before; one unsafe to retry is never resumed', async () => {
+  const low = interrupted({ balanceCents: 800 });
+  const told = recorder();
+  const result = await runWatchdog({ gate: gateWith(), env: ENV, fetcher: low.fetcher, mailer: told.mailer, now: NOW });
+  assert.equal(result.action, 'stopped_low_balance');
+  assert.equal(resumes(low.calls).length, 0);
+  assert.deepEqual(told.sent.map(message => message.subject), [
+    'LTCM: the desks have stopped — Sail credit is at the reserve', 'LTCM: the desks are not running']);
+  const unsafe = interrupted({ status: 'interrupted_unsafe_to_retry' });
+  const pass = await runWatchdog({ gate: gateWith(), env: ENV, fetcher: unsafe.fetcher, now: NOW });
+  assert.equal(pass.action, 'box_unrecoverable');
+  assert.equal(resumes(unsafe.calls).length, 0);
+});
+
+test('what Sail says about the box reaches the mail only in its own shape: a token-shaped run is redacted', async () => {
+  const gate = gateWith();
+  const plane = interrupted({
+    resume: 'terminal_unavailable',
+    box: { ...INTERRUPTED, name: 'ltcm house; rm -rf /', app_id: 'app_<script>', error_message: 'host lost\nkey sk-abcdefghijklmnopqrstuvwxyz012345 leaked',
+      last_checkpointed_at: 'yesterday', checkpoint_generation: -4 },
+  });
+  const { mailer, sent } = recorder();
+  await runWatchdog({ gate, env: ENV, fetcher: plane.fetcher, mailer, now: NOW });
+  const post = sent[0].text.split('\n').find(line => line.startsWith('> '));
+  assert.match(post, /"host lost key \[redacted\] leaked"/);
+  assert.match(post, /app id unknown, name unknown\)/);
+  assert.match(post, /last_checkpointed_at unknown, checkpoint_generation unknown/);
+  assert.doesNotMatch(sent[0].text, /sk-abcdefghij|<script>|rm -rf/);
+});
