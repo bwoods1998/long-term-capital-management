@@ -124,7 +124,16 @@ the constitution digest `4ef472e1` are A32's sleeve, 0.50 x E at six seats).
 **The rule** (one verdict a LINEAGE of the forward registry):
 - **Who.** A lineage is judged on its REPRESENTATIVE, fixed before any forward day of it exists: of its rows with the
   lineage's earliest `first_day`, the lowest pid whose reason is train_pass, seed or live, else the lowest pid. Every
-  version stays in the denominator. CASE at FWD1_START: **N** when no version ever reached a sealed pre-check (an S1,
+  version stays in the denominator. The job sights a lineage once, but it reads the representative again on each run
+  until a forward day of it exists (`forward_screen.repick`, release 1015e). A passing version registered after the
+  sighting with the same first_day then replaces a failed one, with an append-only `repicked` event. A re-pick changes
+  which version is judged, never what it is judged as: the row's type, case, judged flag and reason stay, and a better
+  pid that would change one is not taken. "No forward day" means: no row of the record for any pid of the lineage
+  (`fwd_days`, `fwd_checks`, `fwd_ll`, `fwd_twins`, `fwd_lotgap`, `fwd_part`), no night of the record through its
+  first_day, its first_day's session not yet open, and no judge row for it. The job is quiet from 09:00 New York on a
+  session, so the night before the first_day is the last run that re-picks. A better pid not taken is written once as
+  a `kept` event and the job warns. A store that cannot be read re-picks nothing. The placebo seed follows the new row
+  hash, and is fixed from then on. CASE at FWD1_START: **N** when no version ever reached a sealed pre-check (an S1,
   S2 or XS1 Validation try, its pre-check or a look: the forward record's tags and the family's state); a PANEL
   lineage that reached XS1's is case **XS1**; an ETF lineage that reached one is NOT judged (no forward verdict for an
   S1/S2 look); a lineage that already trades (a live row) needs none; a stock program is not covered.
@@ -180,7 +189,8 @@ registered earlier enters mid-run. **Whoever pins it must not read `fwd_days` fi
 **The job** `forward_screen` (league/ops/registry.py, after `forward_shadow` and after `forward_xs`; in a pause too;
 skipped inside 09:00-17:30 New York on a session) reads the forward record and the swarm store read-only and writes
 `<state>/forward-screen.sqlite` (append-only: the pin, the sides, the lineages, the own floors, the checkpoints of
-record, the verdicts), `<state>/forward-screen-permits.json` (ids and words only: no t, no P&L) and
+record, the verdicts; its one UPDATE is a lineage's re-pick before any forward day, after its `repicked` event),
+`<state>/forward-screen-permits.json` (ids and words only: no t, no P&L) and
 `<state>/forward-screen-report.json` (operator-only: counts by type and case and status, the registry's expected
 zero-edge passes against the observed, every pass's sentence and each stalled lineage's cause). Each day's SIDES (the
 weights of the shadow's lots in and out, which the record does not keep) come from the representative's own forward
