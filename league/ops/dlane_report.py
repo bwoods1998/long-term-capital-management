@@ -203,9 +203,23 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   residual and its twin's agreement on rebalance sessions are the forward record's (release E4's package J,
   league/ops/forward_xs.py `beside`; `panel_forward` puts them beside the program, `PANEL_OWED` while that record
   holds none of it yet). None of it is a rule.
+- THE SPAN BUY-AND-HOLD (C1, A45: the scaling plan's 2.4, the benchmark its script tests a share program against;
+  `span_bh`): each checkpoint's `by_program` row of a share program carries `span_bh`, one entry a program version
+  among the checkpoint's first K counts: {version, usd, priced, why, basis "adjustment=all", blocked [[from, to]],
+  symbols {SYM: {before, last, sessions, close_before, close_last, closes at every segment boundary, exposure_usd,
+  usd, sha, ...}}, spy {closes, usd} for a panel}. A single-name program's is the House's own `_bh_pnl` rule
+  (league/equity/live.py `span_bh`) with the plan's one change: the sessions the House blocked it from opening, while
+  it held nothing in the symbol, are taken out of the span, which splits there; with none it is `_bh_pnl` exactly. The
+  blocked sessions are the House's open note's (`SPAN_BLOCKED`, which says what it does not hold). A panel program's is
+  B10 (`b10_bh`). Every close is the book's own (`eq_bars`, adjustment=all, one fetch). Unreadable is `priced` False
+  with `why`, never a figure. It is written with its checkpoint and FROZEN WITH IT (a final checkpoint is carried
+  whole, so the field is never recomputed: an adjustment=all close a later dividend moves cannot move it). No Done
+  rule, count, checkpoint or rule sha reads it or changes with it.
 
 Standard library only, except the Probe envelope's figures (`fast_lane.probe_budget` and `real.probe_figures` read
 `league.live.real`, whose Gym legs need numpy, as the House box has): they are an `error` entry where that cannot load.
+The span buy-and-hold's rule is league/equity/live.py's, imported inside `span_bh`: where it cannot load, each entry is
+`priced` False and says so.
 """
 from __future__ import annotations
 
@@ -270,6 +284,22 @@ EQUITY_PREFIX = "eq:"
 PANEL_TAG = "xs"
 PANEL_KIND = "panel"
 PANEL_LABEL = "EQUITY (PANEL)"
+#: C1 (A45; the scaling plan's 2.4, `span_bh`): the equity book's open note (league/equity/live.py `OPEN_NOTE_KEY`) and
+#: the one basis every span close is read on (its `SPAN_BASIS`); a test holds both equal to the book's.
+OPEN_NOTE_KEY = "eq_open_note"
+SPAN_BASIS = "adjustment=all"
+#: Where a share program's `span_bh.blocked` comes from, and what that source does not hold (said in every entry). The
+#: open note (league/equity/live.py `refused_days`, A30 (2)) holds the sessions in which the House refused every real
+#: equity open in an entry window it looked in: its real-money block (the kill switch, the daily and drawdown stops, the
+#: House's pause, the grant, a reconciliation freeze), equity_money off, the stock proof. Kept by session in NO House
+#: record, so never in `blocked`: the program's own seat lost (the book keeps its last band mark only; band moves are
+#: events), the shared loss window's refusals (a buy refused or cut for budget is recorded per intent, and only when
+#: one was asked), and a session the House did not run in.
+SPAN_BLOCKED = ("the House's open note (eq_open_note: A30 (2)'s sessions in which it refused every open), less this "
+                "version's entry days; a seat lost and the loss window's refusals are kept by session nowhere, so "
+                "never listed")
+#: What a panel program's entry says instead: B10 holds each lot over its own sessions, so nothing is split.
+SPAN_B10 = "B10 holds each lot in SPY over its own sessions: there is no span to split"
 #: What rides beside a panel program's close dates (the captain's A14; E4-SPEC 10.5).
 PANEL_BY_DATE = (
     "A panel program is read ONE OBSERVATION A CLOSE DATE: five lots bought on one date and sold on another share one "
@@ -767,13 +797,16 @@ def lane_label(lane: Any) -> str | None:
 def read_book(live_path: str | Path) -> dict[str, list[dict[str, Any]]]:
     """The live book's positions and instances, and (release E1) the EquityBook's lots and instances (`lots`,
     `eq_instances`; empty for a book from before E1), and (release E5-A) its seat plan (`seat_plan`: the kv `eq_seat`,
-    None before its first band sync), read-only in one transaction; an absent book is an empty one: nothing traded."""
+    None before its first band sync), and (C1, A45) the span buy-and-hold's inputs (`bars`: the adjustment=all rows of
+    `eq_bars` of every symbol a closed lot holds, each with its series sha; `open_note`: the kv `OPEN_NOTE_KEY`, {}
+    when the book has written none, None when it cannot be read), read-only in one transaction; an absent book is an
+    empty one: nothing traded."""
     from . import guard
 
     path = Path(live_path)
     if not path.exists():
         return {"positions": [], "instances": [], "lots": [], "eq_instances": [], "rebalances": [], "spy": [],
-                "seat_plan": None}
+                "seat_plan": None, "bars": [], "open_note": {}}
 
     def read(db: Any) -> dict[str, list[dict[str, Any]]]:
         tables = set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'"))
@@ -802,8 +835,15 @@ def read_book(live_path: str | Path) -> dict[str, list[dict[str, Any]]]:
         # THE SEAT PLAN (release E5-A): the book's own kv, read in the same transaction as its instances.
         plan = guard.ids(db, "SELECT value FROM kv WHERE key='eq_seat'") if "kv" in tables else []
         plan = _loads(plan[0], None) if plan else None
+        # C1 (A45; `span_bh`): the closes of the span buy-and-hold as the book fetched them, and its open note.
+        bars = guard.rows(db, "SELECT day, symbol, c, sha FROM eq_bars WHERE adjustment='all' AND symbol IN (SELECT "
+                              "DISTINCT symbol FROM eq_lots WHERE status='closed') ORDER BY symbol, day"
+                          ) if "eq_bars" in tables and "eq_lots" in tables else []
+        note = guard.ids(db, "SELECT value FROM kv WHERE key=?", (OPEN_NOTE_KEY,)) if "kv" in tables else []
+        note = _loads(note[0], None) if note else {}
         return {"positions": positions, "instances": instances, "lots": lots, "eq_instances": eq_instances,
-                "rebalances": rebalances, "spy": spy, "seat_plan": dict(plan) if isinstance(plan, Mapping) else None}
+                "rebalances": rebalances, "spy": spy, "seat_plan": dict(plan) if isinstance(plan, Mapping) else None,
+                "bars": bars, "open_note": dict(note) if isinstance(note, Mapping) else None}
 
     return guard.read(path, read)
 
@@ -1984,12 +2024,123 @@ def close_dates(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "note": "beside, never a rule: the closes of one date are one market move (A14)"}
 
 
+def _session_ranges(days: Iterable[str]) -> list[list[str]]:
+    """Sorted session days as [[from, to], ...], each a run of consecutive sessions (both ends counted)."""
+    from ..equity import schedule as ES
+
+    out: list[list[str]] = []
+    for day in sorted(set(days)):
+        if out and ES.next_session(out[-1][1]).isoformat() == day:
+            out[-1][1] = day
+        else:
+            out.append([day, day])
+    return out
+
+
+def span_bh(counted: Sequence[Mapping[str, Any]], book: Mapping[str, Any], *,
+            constitution: Mapping[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
+    """C1 (A45; THE SCALING PLAN's 2.4, its benchmark): EACH SHARE PROGRAM'S SPAN BUY-AND-HOLD over exactly the equity
+    closes of `counted` (a checkpoint's first K counts), from the book's own store (`book`: `read_book`'s `bars`,
+    `spy` and `open_note`): {family: [one entry a version, oldest first]}, where an entry is {version, usd, priced,
+    why, basis "adjustment=all", blocked [[from, to], ...], symbols {SYM: {before, last, sessions, sessions_used,
+    segments, close_before, close_last, closes {day: close} at every segment boundary, exposure_usd, usd, sha}}, spy
+    {closes {day: close}, usd, sha} | None, lots, blocked_from}.
+
+    - A SINGLE-NAME PROGRAM: the House's own `_bh_pnl` rule (league/equity/live.py `span_bh`: per symbol, the mean
+      exposure from the close before the first entry to the close of the last exit, at adjustment=all closes of ONE
+      fetch), with the plan's ONE CHANGE: a session in `blocked` on which the program held nothing in the symbol is
+      taken out of the span, which splits there. With no such session it is `_bh_pnl` exactly. `blocked` is the
+      House's sessions in which it refused every open (`SPAN_BLOCKED` says which, and what it does not hold), inside
+      the program's span, less its own entry days (a session it opened in did not block it); it is listed whole, and
+      the split takes out only the sessions held empty.
+    - A PANEL PROGRAM (EQUITY (PANEL)): B10, the House's own panel benchmark (`b10_bh`: per lot, entry notional x SPY's
+      move from the close before its entry to its exit day's close); `symbols` is empty and nothing is split.
+    A close with no version gives no entry (the plan's script reads an entry with no version as any version's).
+    FAIL CLOSED: an unreadable input (the bar store's close missing or off one basis, a lot without a notional, the
+    open note unreadable, the seat rule "first-come", under which the House keeps no note) is `priced` False with
+    `why`, never a guessed figure. Beside the reading, never a rule: no item, hold, count or alarm reads it. Never
+    raises."""
+    groups: dict[str, dict[int, list[Mapping[str, Any]]]] = {}
+    for c in counted:
+        version = c.get("version")
+        if c.get("equity") and isinstance(version, int) and not isinstance(version, bool):
+            groups.setdefault(str(c["family"]), {}).setdefault(version, []).append(c)
+    if not groups:
+        return {}
+    unread = blocked_why = None
+    refused: set[str] = set()
+    try:
+        from ..equity import bands as EB
+        from ..equity import live as EL
+        from ..equity import schedule as ES
+    except Exception as exc:  # noqa: BLE001 - no rule, no figure: every entry says so
+        unread = f"the equity book's span rule cannot be imported here ({type(exc).__name__})"
+    else:
+        note = book.get("open_note")
+        if not isinstance(note, Mapping):
+            blocked_why = "the House's open note (eq_open_note) cannot be read: the sessions it blocked are unknown"
+        elif EB.seat_settings(constitution).first_come:
+            blocked_why = ("the seat rule in force is first-come: the House keeps no open note, so the sessions it "
+                           "blocked are unknown")
+        else:
+            refused = set(EL.refused_days(note))
+    bars: dict[str, dict[str, tuple]] = {}
+    for r in book.get("bars") or []:
+        bars.setdefault(str(r.get("symbol")), {})[str(r.get("day"))] = (r.get("c"), r.get("sha"))
+    spy = {str(r.get("day")): (r.get("c"), r.get("sha")) for r in book.get("spy") or []} or bars.get("SPY") or {}
+    out: dict[str, list[dict[str, Any]]] = {}
+    for family, versions in sorted(groups.items()):
+        for version, rows in sorted(versions.items()):
+            panel = any(c.get("panel") for c in rows)
+            entry: dict[str, Any] = {"version": version, "usd": None, "priced": False, "why": unread,
+                                     "basis": SPAN_BASIS, "blocked": [], "symbols": {}, "spy": None, "lots": len(rows),
+                                     "blocked_from": SPAN_B10 if panel else SPAN_BLOCKED}
+            out.setdefault(family, []).append(entry)
+            if unread:
+                continue
+            lots = [{"symbol": c.get("symbol"), "opened_day": c.get("opened_day"), "exit_day": c.get("day"),
+                     "entry_notional": c.get("notional"), "closed_at": c.get("closed_at"), "lid": c.get("lid")}
+                    for c in rows]
+            try:
+                if panel:
+                    got = EL.b10_bh(lots, spy)
+                    if not got["priced"]:
+                        entry["why"] = f"B10 unpriced: {got['why']}"
+                        continue
+                    entry.update(priced=True, usd=_usd(got["usd"]),
+                                 spy={"closes": {d: float(v) for d, v in got["closes"].items()},
+                                      "usd": _usd(got["usd"]), "sha": got["sha"]})
+                    continue
+                if blocked_why:
+                    entry["why"] = blocked_why
+                    continue
+                opened = {str(c.get("opened_day") or "")[:10] for c in rows}
+                start = ES.previous_session(min(opened)).isoformat()
+                end = max(str(c.get("day") or "")[:10] for c in rows)
+                blocked = sorted(d for d in refused - opened if start < d <= end and ES.is_session(d))
+                entry["blocked"] = _session_ranges(blocked)
+                got = EL.span_bh(lots, bars, blocked)
+                if not got["priced"]:
+                    entry["why"] = f"span buy-and-hold unpriced: {got['why']}"
+                    continue
+                entry.update(priced=True, usd=_usd(got["usd"]), symbols={
+                    s: {"before": x["before"], "last": x["last"], "sessions": x["sessions"],
+                        "sessions_used": x["sessions_used"], "segments": x["segments"],
+                        "close_before": float(x["closes"][x["before"]]), "close_last": float(x["closes"][x["last"]]),
+                        "closes": {d: float(v) for d, v in x["closes"].items()}, "exposure_usd": _usd(x["exposure"]),
+                        "usd": _usd(x["usd"]), "sha": x["sha"]} for s, x in got["symbols"].items()})
+            except Exception as exc:  # noqa: BLE001 - unread is said, never a figure
+                entry.update(priced=False, usd=None, symbols={}, spy=None,
+                             why=f"the span could not be read ({type(exc).__name__}: {str(exc)[:120]})")
+    return out
+
+
 def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store: Any, *,
           nightly_cache: dict[str, list] | None = None, lanes: Lanes | None = None,
           previous: Mapping[str, Any] | None = None, research: Any = None,
           replay_days: Mapping[str, Mapping[str, Any]] | None = None, fees_as_of: str | None = None,
           now: float | None = None, twins: Mapping[str, Mapping[str, Any]] | None = None,
-          twins_on: bool = False) -> dict[str, Any]:
+          twins_on: bool = False, span: Any = None) -> dict[str, Any]:
     """One Done meter (`done_screen` or `done_all`): the agent closes on `routes`, the running figures (never a reading),
     and a reading at every checkpoint reached (the first K closes, K = 30, 40, ...: `dlane.DONE`).
 
@@ -2000,6 +2151,10 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
     and 7 all hold; a Done claim is made only on a holding FINAL checkpoint (the meter's `holds`; alarm A8). A final
     reading is FROZEN: when the `previous` report's meter has the checkpoint final, it is carried forward as it was,
     whatever the inputs say now (nightly rows are replaced each night; the reading may not flip after A8).
+
+    C1 (A45; `span_bh`): with `span` (a callable of a checkpoint's counted closes, `report` hands it `span_bh` over the
+    book), each share program's `by_program` row of a checkpoint read here also carries `span_bh`, beside the reading
+    and never part of it. A frozen checkpoint is carried whole, its field with it: written once, never recomputed.
 
     A14 (release E3; `a14_of`): a checkpoint's reading also needs A14 over its counted closes (it holds outright with no
     equity close); it is in the checkpoint's `holds`, its item 4 and `consistent_ok`, carried whole as `a14`, and a
@@ -2058,6 +2213,15 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
         programs = [{"family": p["family"], "lane": p["lane"], "closes": p["closes"], "matched": p["replay"]["matched"],
                      "gap": p["replay"]["gap"], "consistent": p["replay"]["consistent"], "net_usd": p["net_usd"],
                      **({"label": p["label"]} if p.get("label") else {})} for p in at["by_program"]]
+        if callable(span):
+            # C1 (A45): each share program's span buy-and-hold over exactly these closes; it never fails the meter.
+            try:
+                spans = span(upto) or {}
+            except Exception:  # noqa: BLE001 - no field: the plan's script reads its closes file or fails closed
+                spans = {}
+            for p in programs:
+                if spans.get(p["family"]):
+                    p["span_bh"] = spans[p["family"]]
         checkpoints.append({"at_close": k, "closed_at": _iso(ends[k - 1]["closed_at"]),
                             "holds": at["holds"] and item7 and a14["holds"], "why": "; ".join(whys) or None,
                             "items": {**at["items"], "4": at["items"]["4"] and a14["holds"], "7": item7},
@@ -3364,7 +3528,8 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
         twins = {**twin_records(store), **eq_twins}
         twins_on = TW.cfg(settings) is not None
         common = dict(store=store, nightly_cache=cache, lanes=lanes, research=research, replay_days=replay_days,
-                      fees_as_of=fees_as_of, now=now, twins=twins, twins_on=twins_on)
+                      fees_as_of=fees_as_of, now=now, twins=twins, twins_on=twins_on,
+                      span=lambda upto: span_bh(upto, book))   # C1 (A45): each checkpoint's span buy-and-hold
         done = {"all": meter(counted, dlane.DONE["routes_all"], previous=prev_done.get("all"), **common),
                 "screen": meter(counted, dlane.DONE["routes_screen"], previous=prev_done.get("screen"), **common)}
         # DONE WITH AND WITHOUT THE THREE SEEDED PROGRAMS (A8.12): the same meters over every other program's closes.

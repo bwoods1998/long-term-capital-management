@@ -345,6 +345,12 @@ OPEN_NOTE_KEY = "eq_open_note"
 #: to a seat with fewer than `idle_sessions` counted sessions in all that time). A session every window of which was
 #: clear is dropped the day after: only a refusal is ever read.
 OPEN_NOTE_KEEP_DAYS = 400
+#: C1 (A45, the scaling plan's span buy-and-hold; `span_bh`, `b10_bh`, read by the `dlane` report): the one basis every
+#: span close is read on, as `_bh_pnl` reads its two (total return: adjusted for every event to the day of its fetch).
+SPAN_BASIS = "adjustment=all"
+#: B10's market symbol (league/xs/config.py `REF[MARKET_COLUMN]`, which `date_record`'s SPY closes are fetched for; a
+#: test holds the two equal, so this module names it without importing league/xs).
+B10_SYMBOL = "SPY"
 _SLUG = re.compile(r"[^a-z0-9-]+")
 _DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -1664,12 +1670,8 @@ class EquityBook:
         """THE SESSIONS IN WHICH THE HOUSE REFUSED EVERY OPEN (`OPEN_NOTE_KEY`): {day: why}, a session with an entry
         window the House looked in and never once would have opened in. A session it did not look at at all (the
         House did not run in its windows, or ran under "first-come") is not one: nothing is known of it, and it
-        counts as any other."""
-        held = self.state.get(OPEN_NOTE_KEY, {})
-        if not isinstance(held, Mapping):
-            return {}
-        return {str(day): _refused(windows) for day, windows in held.items()
-                if _refused(windows) and _DAY.fullmatch(str(day))}
+        counts as any other. The rule is `refused_days`' (the `dlane` report reads the same kv through it)."""
+        return refused_days(self.state.get(OPEN_NOTE_KEY, {}))
 
     def _quote(self, symbol: str) -> dict[str, Any]:
         if symbol not in self._quotes:
@@ -4676,6 +4678,172 @@ def _counted(first: str, last: str, refused: Mapping[str, Any]) -> tuple[int, in
     less the sessions in which the House refused every open (`EquityBook._refused_days`; A30 (2))."""
     out = sum(1 for day in refused if str(first) < str(day) <= str(last) and S.is_session(str(day)))
     return S.sessions_between(first, last) - out, out
+
+
+def refused_days(held: Any) -> dict[str, str]:
+    """THE SESSIONS IN WHICH THE HOUSE REFUSED EVERY OPEN, read from the open note's value (`OPEN_NOTE_KEY`: {day:
+    {window: {clear, why}}}): {day: why}, a session with an entry window the House looked in and never once would have
+    opened in (`_refused`). {} for a note that is not a mapping. The book's own reader (`EquityBook._refused_days`, the
+    idle clock's) and the `dlane` report's span buy-and-hold (C1, which reads the kv read-only) both read it here, so
+    the House has one meaning of the words."""
+    if not isinstance(held, Mapping):
+        return {}
+    return {str(day): _refused(windows) for day, windows in held.items()
+            if _refused(windows) and _DAY.fullmatch(str(day))}
+
+
+def _lot_field(lot: Any, name: str) -> Any:
+    """A lot's field, from a `Lot` or from an `eq_lots`-shaped mapping alike (the report reads rows, the book Lots)."""
+    return lot.get(name) if isinstance(lot, Mapping) else getattr(lot, name, None)
+
+
+def _span_days(before: str, last: str) -> list[str]:
+    """The sessions in (before, last], in order: the ones `schedule.sessions_between` counts."""
+    out, day, end = [], dt.date.fromisoformat(str(before)[:10]), dt.date.fromisoformat(str(last)[:10])
+    while day < end:
+        day += dt.timedelta(days=1)
+        if S.is_session(day):
+            out.append(day.isoformat())
+    return out
+
+
+def _one_series(rows: Mapping[str, Any], days: Collection[str]) -> tuple[dict[str, Decimal] | None, str | None, str]:
+    """({day: close}, sha, "") when each of `days` has a positive close in `rows` ({day: (close, series sha)}, the
+    adjustment=all rows of `eq_bars`) and ONE series sha holds them all: one fetch, one basis (`_bh_pnl`'s rule: two
+    fetches straddling an ex-date or a split are not one series). Else (None, None, why)."""
+    missing = sorted(d for d in days if d not in rows)
+    if missing:
+        return None, None, f"no {SPAN_BASIS} close on {', '.join(missing[:4])} in the House's bar store (eq_bars)"
+    closes, shas = {}, set()
+    for day in days:
+        close, sha = rows[day]
+        close = A.dec(close)
+        if close is None or close <= 0:
+            return None, None, f"the {SPAN_BASIS} close of {day} is not a positive price"
+        closes[day] = close
+        shas.add(str(sha or ""))
+    if len(shas) != 1 or "" in shas:
+        return None, None, (f"the closes are not from one fetch ({len(shas)} series shas over {len(days)} days): no "
+                            "single basis")
+    return closes, shas.pop(), ""
+
+
+def span_bh(lots: Sequence[Any], closes: Mapping[str, Mapping[str, Any]], blocked: Collection[str] = ()
+            ) -> dict[str, Any]:
+    """C1 (A45; the scaling plan's 2.4): THE SAME-RISK BUY-AND-HOLD OVER THE SAME SESSIONS of one program version's
+    closed lots, by `EquityBook._bh_pnl`'s rule, with ONE CHANGE, stated as the plan states it. Per symbol: the span
+    runs from the close before the first entry (`before`) to the close of the last exit (`last`); its sessions are in
+    (before, last] (`sessions`, the calendar's count); each lot is held entry notional x the sessions in (entry, exit]
+    (at least 1); the figure is the mean exposure x the adjustment=all close at `last` / at `before` - 1, every close
+    from ONE fetch (`_one_series`). THE CHANGE: a session in `blocked` (the House blocked the program from opening:
+    the caller says which) on which the program held nothing in the symbol is taken out of the span. The span splits
+    there; the mean exposure is the same held dollar-sessions over the sessions left (`sessions_used`), and the figure
+    sums it x each segment's return (from the close of the session before the segment's first to the close of its
+    last). With no such session it is `_bh_pnl` exactly, to the Decimal. Were every session taken out, none is (the
+    split is not made), as the plan's script reads it.
+
+    `lots`: `Lot`s or `eq_lots` rows (symbol, opened_day, exit_day, entry_notional); a lot with no exit day is not
+    held (as `_bh_pnl`). `closes`: {symbol: {day: (close, series sha)}}, the bar store's adjustment=all rows. Returns
+    {priced, why, usd (Decimal, the sum over symbols), symbols: {symbol: {before, last, sessions, sessions_used,
+    segments [[first, last] session of each], closes {day: Decimal} at every segment boundary (`before` and `last`
+    among them), exposure (Decimal), usd (Decimal), sha}}}. FAIL CLOSED: a lot without a symbol, a day or a positive
+    notional, a calendar that cannot place a day, or a close missing or off one basis is `priced` False with `why`
+    and no figure, never a guess."""
+    out: dict[str, Any] = {"priced": False, "why": None, "usd": None, "symbols": {}}
+    blocked = {str(day)[:10] for day in blocked or ()}
+    total = ZERO
+    for symbol in sorted({str(_lot_field(lot, "symbol") or "") for lot in lots}):
+        mine = [lot for lot in lots if str(_lot_field(lot, "symbol") or "") == symbol and _lot_field(lot, "exit_day")]
+        if not mine:
+            continue
+        if not symbol:
+            out["why"] = "a lot has no symbol"
+            return out
+        legs = []
+        for lot in mine:
+            notional = A.dec(_lot_field(lot, "entry_notional"))
+            opened, exited = str(_lot_field(lot, "opened_day") or "")[:10], str(_lot_field(lot, "exit_day"))[:10]
+            if notional is None or notional <= 0 or not _DAY.fullmatch(opened) or not _DAY.fullmatch(exited):
+                out["why"] = f"{symbol}: a lot without a positive entry notional, an entry day or an exit day"
+                return out
+            legs.append((notional, opened, exited))
+        first, last = min(o for _, o, _ in legs), max(x for _, _, x in legs)
+        try:
+            before = S.previous_session(first).isoformat()
+            days = _span_days(before, last)
+            held = {day: ZERO for day in days}
+            weight = ZERO
+            for notional, opened, exited in legs:
+                inside = _span_days(opened, exited)
+                for day in inside:
+                    if day in held:
+                        held[day] += notional
+                weight += notional * max(1, len(inside))
+            keep = [day for day in days if not (day in blocked and held[day] == 0)] or list(days) or [last]
+            at = {day: i for i, day in enumerate(days)}
+            segments: list[list[str]] = []
+            for day in keep:
+                if segments and day in at and segments[-1][-1] in at and at[day] == at[segments[-1][-1]] + 1:
+                    segments[-1].append(day)
+                else:
+                    segments.append([day])
+            bounds = [(S.previous_session(seg[0]).isoformat(), seg[-1]) for seg in segments]
+        except ValueError as exc:
+            out["why"] = f"{symbol}: the calendar cannot place the span ({str(exc)[:120]})"
+            return out
+        series, sha, why = _one_series(closes.get(symbol) or {}, {before, last} | {d for pair in bounds for d in pair})
+        if series is None:
+            out["why"] = f"{symbol}: {why}"
+            return out
+        exposure = weight / max(1, len(keep))
+        usd = ZERO
+        for start, end in bounds:
+            usd += exposure * (series[end] / series[start] - 1)
+        total += usd
+        out["symbols"][symbol] = {"before": before, "last": last, "sessions": max(1, len(days)),
+                                  "sessions_used": len(keep), "segments": [[seg[0], seg[-1]] for seg in segments],
+                                  "closes": dict(sorted(series.items())), "exposure": exposure, "usd": usd, "sha": sha}
+    out.update(priced=True, usd=total)
+    return out
+
+
+def b10_bh(lots: Sequence[Any], spy: Mapping[str, Any]) -> dict[str, Any]:
+    """C1 (A45): B10, A PANEL PROGRAM'S SAME-RISK BUY-AND-HOLD (league/xs/book.py `date_record`, which
+    `_panel_record_of` feeds the band rules): per closed lot, its entry notional x (SPY's adjustment=all close on its
+    exit day / on the session before its entry day - 1), summed in `date_record`'s order, every close from ONE fetch
+    (`_one_series`). No split: each lot is held over its own sessions only. `spy`: {day: (close, series sha)}. Returns
+    {priced, why, usd (Decimal), closes {day: Decimal}, sha}; fail closed as `span_bh` (where `date_record` reads an
+    unreadable notional as zero, this reads no figure)."""
+    out: dict[str, Any] = {"priced": False, "why": None, "usd": None, "closes": {}, "sha": None}
+    closed = sorted((lot for lot in lots if _lot_field(lot, "exit_day")),
+                    key=lambda lot: (str(_lot_field(lot, "exit_day")), float(_lot_field(lot, "closed_at") or 0.0),
+                                     int(_lot_field(lot, "lid") or 0)))
+    legs, need = [], set()
+    for lot in closed:
+        notional = A.dec(_lot_field(lot, "entry_notional"))
+        opened, exited = str(_lot_field(lot, "opened_day") or "")[:10], str(_lot_field(lot, "exit_day"))[:10]
+        if notional is None or notional <= 0 or not _DAY.fullmatch(opened) or not _DAY.fullmatch(exited):
+            out["why"] = "a lot without a positive entry notional, an entry day or an exit day"
+            return out
+        try:
+            start = S.previous_session(opened).isoformat()
+        except ValueError as exc:
+            out["why"] = f"the calendar cannot place an entry day ({str(exc)[:120]})"
+            return out
+        legs.append((notional, start, exited))
+        need |= {start, exited}
+    if not legs:
+        out.update(priced=True, usd=ZERO)            # no closed lot: nothing held (`date_record`'s zero)
+        return out
+    series, sha, why = _one_series(spy, need)
+    if series is None:
+        out["why"] = f"{B10_SYMBOL}: {why}"
+        return out
+    total = ZERO
+    for notional, start, end in legs:
+        total += notional * (series[end] / series[start] - 1)
+    out.update(priced=True, usd=total, closes=dict(sorted(series.items())), sha=sha)
+    return out
 
 
 def record_edm1(why: Any) -> bool:

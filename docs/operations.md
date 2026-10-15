@@ -2572,6 +2572,48 @@ posted: the book reads the account's `FEE` activities (the REG and TAF rows with
 proceeds (`eq_lots.info.fee_basis` "broker", the estimate kept beside); a day without a fee row five sessions on is told
 to the owner once a lot. The funnel (`league/ops/funnel.py`) counts the equity lanes apart (`equity`).
 
+**The span buy-and-hold beside each checkpoint** (C1, A45: the scaling plan's benchmark, its section 2.4; on
+`feat/span-bh-c1`, not deployed). Each Done checkpoint's `by_program` row of a share program carries `span_bh`
+(league/ops/dlane_report.py `span_bh`), one entry a program version among the checkpoint's first K counts:
+`{version, usd, priced, why, basis: "adjustment=all", blocked: [[from, to], ...], symbols: {SYM: {before, last,
+sessions, sessions_used, segments, close_before, close_last, closes, exposure_usd, usd, sha}}, spy, lots,
+blocked_from}`. The plan's script reads it, checks it and rebuilds its figure. Nothing else reads it. It is beside the
+reading and never part of it: no Done rule, count, checkpoint trigger, rule sha or alarm reads it or moves with it.
+- **A single-name program** gets the House's own `_bh_pnl` rule (league/equity/live.py `span_bh`), per symbol. The
+  span runs from the close before the first entry (`before`) to the close of the last exit (`last`). Its `sessions`
+  are the calendar's count in (before, last]. The mean exposure is the lots' entry notional x sessions held, over the
+  span's sessions. The figure is the mean exposure x (the adjustment=all close at `last` / the one at `before` - 1),
+  and a program's `usd` is the sum over its symbols. The plan's ONE CHANGE:
+  a session the House blocked the program from opening, while it held nothing in that symbol, is taken out of the
+  span. The span splits there. The mean exposure is then over the sessions left (`sessions_used`), and the figure sums
+  it times each segment's return (`segments`; `closes` holds every segment's two ends). With no such session it is
+  `_bh_pnl` exactly, to the Decimal.
+- **A panel program** gets B10, the House's own panel benchmark (`b10_bh`, `date_record`'s rule): per lot, entry
+  notional x SPY's move from the close of the session before its entry to its exit day's close. `spy.closes` holds
+  those closes. Nothing is split (`blocked` is empty).
+- **The closes** are the book's own (`eq_bars`, adjustment=all), read only when one fetch wrote every close a symbol
+  needs (the same series sha, `_bh_pnl`'s rule). The report fetches nothing.
+- **The blocked sessions** (`blocked`, both ends counted) come from the book's open note (live.sqlite kv
+  `eq_open_note`, `refused_days`: A30 (2)'s sessions in which the House refused every real equity open in an entry
+  window it looked in). That covers the kill switch, the daily and drawdown stops, the House's pause, the grant, a
+  reconciliation freeze, `equity_money` off and the stock proof. The program's own entry days are left out of it: a
+  session it opened in did not block it. **What the House does not record by session, so `blocked` cannot hold it:**
+  a program's own seat lost (the book keeps only its last band mark; band moves are events), the shared loss window's
+  refusals (a buy refused or cut for budget is recorded per intent, and only when one was asked), and a session the
+  House did not run in. `blocked_from` says this in every entry.
+- **Fail closed:** a close missing or off one basis, a lot without a notional, an unreadable open note, or the seat
+  rule "first-come" (the House keeps no note then) gives `priced` false with `why` and no figure. The plan's script
+  then fails that program closed at that look. It does not fall back to its closes file for an entry that is there.
+- **Frozen with the checkpoint:** the field is written with its checkpoint and carried whole once that checkpoint is
+  final. It is never recomputed, so a later fetch that re-adjusts a close cannot move it. A checkpoint frozen by a
+  report from before C1 carries no field.
+- **THE CAPTAIN'S LEDGER MUST CARRY `blocked`:** the plan's script takes the blocked sessions from its ledger, never
+  from this field, and rebuilds the figure with them. A program whose entry lists blocked sessions passes the
+  script's cents check only when the ledger holds the same ranges for it (`{"program": "eq|<family>|v<N>", "from",
+  "to", "why"}`). A ledger range the entry does not hold fails it too.
+- Held by `league/tests/test_dlane_report_span_bh.py`. It runs the script's own checks, copied, on these reports, and
+  the script itself where `LTCM_SCALING_SCRIPT` names the pinned file.
+
 **Pre-registered before the first equity close** (the captain's A14, Oct 10, 2026; the same three sentences ride in
 every `dlane` report as `done.preregistered`). Consistency is computed since release E3 (each checkpoint's `a14`: the
 size of the mean fill gap either way, and the intents; **The forward record**, at the top): a checkpoint that holds

@@ -30,6 +30,37 @@ The running House release is `20261015T075939Z-89d93d40bfda` (main `0b978378`, P
 Probe family and the Probe sleeve 0.33 x E, 08:00Z Oct 15), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's
 updater is on. What is built and not deployed is on branches.
 
+### C1 (A45): span_bh in each checkpoint's by_program, the scaling plan's benchmark, on `feat/span-bh-c1` (unreleased; cut from `e136c251`, the head of `fix/fw9-alarms`; an owner deploy: `league/ops/` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no Done rule, count, checkpoint trigger, rule sha, bound, money rule or setting changes)
+
+- **Why** (the scaling plan's 2.4): the plan's script tests a share program against the same-risk buy-and-hold over
+  its span. Until now it needed a hand-made closes file. Now the report gives the closes and the figure, from the
+  House's own store, and the script checks them before it uses them.
+- **`span_bh`** (`league/ops/dlane_report.py`; each Done checkpoint's `by_program` row of a share program): one entry
+  a program version among the checkpoint's first K counts: {version, usd, priced, why, basis "adjustment=all",
+  blocked [[from, to]], symbols {SYM: {before, last, sessions, sessions_used, segments, close_before, close_last,
+  closes at every segment boundary, exposure_usd, usd, sha}}, spy, lots, blocked_from}. The meter hands each
+  checkpoint's counted closes to it. The running figures carry none.
+- **The rule** (`league/equity/live.py` `span_bh`): the House's own `_bh_pnl`, with the plan's one change. A session
+  the House blocked the program from opening, while it held nothing in the symbol, is taken out of the span, which
+  splits there. With no such session it is `_bh_pnl` to the Decimal. A panel program's is B10 (`b10_bh`,
+  `date_record`'s rule, SPY over each lot's own sessions). Every close is the book's adjustment=all `eq_bars` row,
+  read only when one fetch wrote every close a symbol needs.
+- **The blocked sessions** are the book's open note (`eq_open_note`, `refused_days`, now the one reader of it,
+  `EquityBook._refused_days` included): A30 (2)'s sessions in which the House refused every real equity open. That
+  covers the kill switch, the stops, the House's pause, the grant and the freezes. The program's own entry days are
+  left out. The House records no session-level trace of a program's own seat loss or of the shared loss window's
+  refusals, so `blocked` cannot hold them, and `blocked_from` says so in every entry.
+- **Fail closed:** a close missing or off one basis, an unreadable open note, or the seat rule "first-come" (no note
+  is kept then) gives `priced` false with `why`, never a figure.
+- **Frozen with the checkpoint:** a final checkpoint is carried whole, so the field is never recomputed. A checkpoint
+  frozen before this release carries none.
+- **The captain's ledger must carry each entry's `blocked`:** the script reads blocked sessions from its ledger
+  only, and its cents check fails closed when the ledger's ranges differ from the entry's (docs/operations.md, **The
+  span buy-and-hold beside each checkpoint**).
+- Tests: `league/tests/test_dlane_report_span_bh.py` (18). It covers one and two symbols, a blocked run, a panel, a
+  missing close, the field frozen, and every other Done key unchanged. It also runs the script's own checks, copied,
+  and the pinned script itself where `LTCM_SCALING_SCRIPT` names it.
+
 ### Release 1015f: release 1015e plus three fixes, on `rel/1015f` (unreleased; one House deploy and one gateway deploy
 from one commit, outside 12:55-20:05Z on a trading day; no identity moves: the options execution fingerprint
 `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are
