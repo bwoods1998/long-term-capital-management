@@ -30,6 +30,30 @@ The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, r
 Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
 on branches.
 
+### The equity graveyard's universe group: an index row no longer binds a sector, bond or gold card, on `fix/graveyard-group` (unreleased; on release U, main `aec0c8a5`; an owner deploy; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `de5ed74e` and the constitution digest `111ede85` are release U's; no setting changes)
+
+- **Why:** at 03:40Z Oct 15 the captain widened `elane.universe` to the sixteen ETFs (A35). The first births pass
+  (03:43:16Z) proposed six sector cards and the graveyard refused all six, each by an index row of its cell ("graveyard:
+  its cell (trend_momentum / equity:etf / days_11_plus / underlying_price) holds 1 graveyard row(s) killed by a
+  mechanism verdict, the newest trend-spy (REFUTED) ..."): the equity cell had no universe group.
+- **The change** (`league/swarm/cards.py` THE EQUITY GRAVEYARD'S UNIVERSE GROUP: `universe_group`, `row_group`,
+  `groups_meet`, `graveyard_key`, `budget_cell`, `RebirthIndex.matched`; `league/swarm/elane_births.py`'s graveyard
+  header and closed refusal words; docs/operations.md, **The equity graveyard's universe group**). For equity cards and
+  rows only, the graveyard cell gains the universe group (`elane_train.symbols_group`: index, sectors, defensive,
+  stocks, or a mix), and a row binds an equity card only when their groups meet (share one): an index row binds no
+  sector, bond or gold card, a mixed row binds a card of each group it traded, a mixed card is bound by the rows of each
+  of its groups (one extra symbol escapes nothing). Unreadable symbols have no group and meet every group (fail
+  closed). Each group of an equity cell has its own rebirth budget; a claim a free card makes on a row only the group
+  kept from binding it (a sector card naming an index row) is dropped, so it spends no budget. `key_of`, `matches`, `cell_of`, the stored keys,
+  every options card's reading, panel cards, FWD1-R's mechanism cell, the screens, the sealed data, the money rules and
+  the Train bar are unchanged.
+- **Its cost:** more equity lineages tried, each forward-only under R-SEC; FWD1-R ETF case N's per-program
+  false-positive rate is unchanged; the lucky forward passes grow with the lineages (about 1.4% of each added zero-edge
+  lineage by checkpoint 60), capped by one live forward seat a mechanism cell.
+- **Tests:** `league/tests/test_elane_graveyard_group.py` (19): options readings and index verdicts pinned to release
+  U's output on a fixture store; the six sector cards free and born; an index card of the same idea refused; the group
+  rule, fail closed, the budget by group, the dropped claim, FWD1-R's cell.
+
 ### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, a post-close checkpoint, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
 
 - **What it carries:** release T (`rel/e4-fwd1` `6b0c41bb`, PR #546: E4 step one with A32, FWD1-R, R-SEC), merged with

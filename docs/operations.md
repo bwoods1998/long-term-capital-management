@@ -227,6 +227,50 @@ without R-SEC is NOT safe while a sector family is alive: retire every family th
 index ETFs first, or its next 300 s equity round takes the 2025 pre-check and a look, and A33(4) then bars it from
 forward evidence for good.
 
+**The equity graveyard's universe group (`fix/graveyard-group`, Oct 15, 2026; a reported loosening).** At 03:40Z Oct
+15 the captain widened `elane.universe` to the sixteen ETFs (A35). The first births pass (03:43:16Z) proposed six
+sector cards (a trend, a rotation, a low-volatility, a reversal and an overnight-after-a-down-day card, and a beta
+turn-of-month card) and the graveyard refused all six, each by an index row of its cell: "graveyard: its cell
+(trend_momentum / equity:etf / days_11_plus / underlying_price) holds 1 graveyard row(s) killed by a mechanism verdict,
+the newest trend-spy (REFUTED) ...". The cell had no universe group, so a mechanism refuted on SPY, QQQ, IWM and DIA
+closed it on the sector, bond and gold ETFs, which are other hypotheses (industry momentum, sector rotation, a
+defensive asset's premium). **The rule, equity cards and rows only** (`league/swarm/cards.py`, THE EQUITY GRAVEYARD'S
+UNIVERSE GROUP: `universe_group`, `row_group`, `groups_meet`, `graveyard_key`, `budget_cell`, `RebirthIndex.matched`):
+an equity card's graveyard cell is its class, lane-scoped structure family and holding AND its universe group, the
+group `elane_train.symbols_group` gives its symbols (index, sectors, defensive, stocks, or a mix such as
+index+sectors: the Train map's, FWD1-R's mechanism cells' and the forward controls' groups); a row's group is that of
+every symbol it is known by (its card's, its graveyard roots, its spec's). A row binds an equity card only when their
+groups **meet** (share a group): an index row binds index cards and no sector, bond or gold card; a sector row binds the
+sector cards; a mixed row binds a card on any group it traded; a mixed card is bound by the rows of each of its groups,
+so naming one extra symbol of another group escapes no row. Neither "equal" nor "contained in" would hold that: with
+equality SPY+XLK escapes an index row and a sector row alike, and with containment a card adds one symbol to escape.
+A card or row whose symbols cannot be read, or that names a symbol outside every group, has no group and meets every
+group (fail closed: the release before's binding). Each group of an equity cell has its own rebirth budget
+(`architect.max_rebirths_per_cell` counts by class, family, holding and group); the claim's tests are unchanged. A
+card no row binds that carries a claim on a row only the group kept from binding it (a sector card naming an index row,
+as the 03:43Z refusals asked for) is born without the claim (`dropped`), so it spends no index row's budget. The
+refusal names the group ("... / underlying_price / universe group index"); the equity request's graveyard header and
+its closed refusal words say a row binds the cards whose group meets one it traded.
+**What does not change:** `cards.key_of`, `matches`, `cell_of`, `infer_key` and the stored card keys (the born payload,
+the cell yields, the researcher's lineage reading and the memory judge read them); every options card, alpha or
+direction (no group: `elane.card_lane` is None), its rows, verdicts, cells and lines, byte for byte; a panel card (its
+own "equity:panel" cell, no symbols); FWD1-R's one live forward seat a mechanism cell (league/ops/forward_screen.py
+`cell_of`: `elane_train.cell_of` of the program's NEEDS symbols, never a card key), every screen, the sealed data, the
+money rules, the Train bar and R-SEC. On the live store every equity row before the widening trades index ETFs, so
+every index card is bound by exactly the rows it was. Tests: `league/tests/test_elane_graveyard_group.py` (GOLDEN: the
+options readings and the index cards' verdicts on a fixture store equal to release U's `aec0c8a5`; the six sector
+cards free of their index rows and born by the equity pass, an index card of the same idea refused; the group rule for
+sector, mixed and defensive rows and cards, fail closed; the budget by group; FWD1-R's cell).
+**Its cost, stated:** more equity lineages are tried: an idea refuted on the index may be born on the sectors, on TLT
+and GLD, and in a mix, once a group (and again only through a valid rebirth claim once a row of that group binds it).
+Every such lineage is forward-only under R-SEC (no sealed Validation try, no S2 look); its only route to money is
+FWD1-R ETF case N, whose per-program false-positive rate is unchanged (the receipt's 2.8% worst-regime point, 5.5%
+bound; 1.4% passing by checkpoint 60 at zero edge in the haircut world). The count of lucky forward passes grows with
+the lineages (about 1.4% of each added zero-edge lineage by checkpoint 60), capped by one live forward seat a mechanism
+cell (lane / agenda / universe group), and the money rules size and demote every seat as before.
+**Its rollback:** a code rollback to release U (the graveyard then binds sector cards by index rows again; families
+already born are unaffected), or the widening's own rollback above (no new sector births).
+
 **Inspect** (on the box, read-only): `sqlite3 -readonly <state>/forward-screen.sqlite "SELECT lineage, verdict, k, day
 FROM fwd1_verdicts"`, `... "SELECT lineage, k, passed, why FROM fwd1_checks ORDER BY lineage, k"`, and
 `<state>/forward-screen-report.json`.

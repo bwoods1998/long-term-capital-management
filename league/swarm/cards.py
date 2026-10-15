@@ -173,6 +173,40 @@ before's, and with the equity lanes off (THE ROLLBACK) `validate` reads a card's
 card is admitted: `store.add_family` refuses an equity structure without an equity lane); the stored cards' cells and
 the graveyard's lanes stay lane-scoped whatever the mode.
 
+THE EQUITY GRAVEYARD'S UNIVERSE GROUP (Oct 15, 2026; A REPORTED LOOSENING, after the captain's A35 widened
+`elane.universe` to sixteen ETFs). WHY: the first births pass after the widening (03:43:16Z) proposed six sector cards
+and the index rows refused every one: "its cell (trend_momentum / equity:etf / days_11_plus / underlying_price) holds 1
+graveyard row(s) killed by a mechanism verdict, the newest trend-spy (REFUTED) ...". A mechanism refuted on SPY, QQQ,
+IWM and DIA is not refuted on sector, bond or gold ETFs: industry momentum, sector rotation or a defensive asset's
+low-volatility premium are other hypotheses (Moskowitz and Grinblatt 1999 found industry momentum where index momentum
+says nothing of it). THE RULE, for EQUITY cards and rows only: an equity card's graveyard cell gains its UNIVERSE GROUP
+(`universe_group`: `elane_train.symbols_group` of its symbols, "index", "sectors", "defensive", "stocks", or a mix such
+as "index+sectors": the Train map's cells, FWD1-R's mechanism cells and the forward controls' groups are made by the
+same rule), and each equity row's key gains the group of every symbol it is known by (`row_group`: its card's, its
+graveyard roots, its spec's). A row binds an equity card only when THEIR GROUPS MEET (`groups_meet`: they share a group;
+`RebirthIndex.matched` filters the lane's rows so, before any other test). So an index row binds index cards and no
+sector, bond or gold card; a sector row binds sector cards; a mixed row binds a card of each group it traded; and a mixed
+card is bound by the rows of each of its groups, so naming one extra symbol of another group never escapes a row (the
+rule cannot be gamed by widening a card, only by trading a group no row of its cell has refuted, which is the new
+hypothesis). Why meet, not equal or contain: equality would let SPY+XLK escape an index row and a sector row alike; a
+card contained in its row's groups would let a card add one symbol to escape. FAIL CLOSED: a card or row whose symbols
+cannot be read, or that names a symbol outside every group, has no group and meets every group (the release before's
+reading). Each group of an equity cell has its own rebirth budget (`budget_cell`: the cell's class, structure family,
+holding and group; the row and the claim tests are unchanged). A claim an equity card that no row binds makes on a row
+of its lane that only the group kept from binding it (a sector card naming an index row, as the 03:43Z refusals asked)
+is `dropped`, so no unchecked claim spends that row's or its cell's budgets. The refusal names the group ("... /
+underlying_price / universe group index"). WHAT IS UNCHANGED: `key_of`, `matches`, `cell_of`, `infer_key` and the stored keys (`put`), so
+the born payload, the cell yields (`exhausted` reads `cell_of`), the researcher's lineage reading and the memory judge
+read what they read before; an options card (alpha or direction) has no group (`elane.card_lane` None), so every
+options key, row, verdict, cell and line is the release before's byte for byte; a panel card has none (its cell is
+"equity:panel"); FWD1-R's one-live-seat-a-mechanism-cell rule reads `elane_train.cell_of` (league/ops/forward_screen.py
+`cell_of`), never a card key; no screen, sealed datum, money rule or Train bar reads the graveyard key. On the live
+store every equity row before the widening trades index ETFs, so every index card is bound by exactly the rows it was.
+ITS COST: more equity lineages tried (a mechanism refuted on the index may be born on the sectors, on TLT and GLD, and
+in a mix), each forward-only under R-SEC (no sealed Validation try, no S2 look; its only route to money is FWD1-R ETF
+case N, whose per-program false-positive rate is unchanged); the count of lucky forward passes grows with the lineages,
+capped by one live forward seat a mechanism cell (lane / agenda / universe group).
+
 Standard library only.
 """
 
@@ -547,8 +581,81 @@ def key_of(card: Mapping[str, Any], structure: Any) -> dict[str, Any]:
 
 
 def key_text(key: Mapping[str, Any]) -> str:
+    """A key as the refusals write it; an equity graveyard key (`graveyard_key`) ends with its universe group's name."""
     inputs = "+".join(key.get("inputs") or []) or "?"
-    return f"{key.get('class')} / {key.get('family')} / {key.get('holding')} / {inputs}"
+    text = f"{key.get('class')} / {key.get('family')} / {key.get('holding')} / {inputs}"
+    return f"{text} / universe group {key['group']}" if key.get("group") else text
+
+
+# ------------------------------------------------------------------------------- the equity graveyard's universe group
+#: A panel card's structure (league/swarm/elane_xs.py `STRUCTURE`): its cell is "equity:panel" and it names no symbol, so
+#: it has no universe group (THE EQUITY GRAVEYARD'S UNIVERSE GROUP in the module docstring).
+PANEL_STRUCTURE = "panel"
+
+
+def symbols_group(symbols: Iterable[Any]) -> str | None:
+    """THE EQUITY GRAVEYARD'S UNIVERSE GROUP of a symbol list: `elane_train.symbols_group` ("index", "sectors",
+    "defensive", "stocks", joined by "+" for a mix: the Train map's cells, FWD1-R's mechanism cells and the forward
+    controls' groups are made by the same rule), or None when the list names no symbol or any symbol outside every group:
+    FAIL CLOSED, a key without a group meets every group (`groups_meet`), the release before's reading."""
+    from .elane_train import symbols_group as group_of  # a local import: elane_train's imports reach this module
+
+    names = sorted({str(s).strip().upper() for s in symbols if str(s).strip()})
+    if not names or any(group_of([s]) == "none" for s in names):
+        return None
+    return group_of(names)
+
+
+def _symbol_list(raw: Any) -> list[str] | None:
+    """A stored symbol list (a list, or its JSON text), upper case; None when it is not one."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+    return [str(s).strip().upper() for s in raw] if isinstance(raw, (list, tuple)) else None
+
+
+def universe_group(card: Any, structure: Any = None, symbols: Any = None) -> str | None:
+    """An EQUITY card's universe group (`symbols_group` of its own `symbols` and `symbols`, the proposal's: the card
+    must name the proposal's symbols, `validate`). None for an options card (alpha or direction: `elane.card_lane` None,
+    so every options key and reading is the release before's), a panel card (`PANEL_STRUCTURE`) and an equity card whose
+    symbols cannot be read (fail closed: it is then bound by every row of its cell, as before)."""
+    if elane.card_lane(card) is None:
+        return None
+    if PANEL_STRUCTURE in (_token(structure), _token(card.get("structure"))):
+        return None
+    own, given = _symbol_list(card.get("symbols")), _symbol_list(symbols) if symbols is not None else []
+    if own is None or given is None:
+        return None
+    return symbols_group(own + given)
+
+
+def groups_meet(card_group: Any, row_group: Any) -> bool:
+    """THE GROUP RULE (THE EQUITY GRAVEYARD'S UNIVERSE GROUP): a row binds an equity card only when their universe
+    groups share a group ("index+sectors" meets "index" and "sectors", "index" never meets "sectors"); a side without
+    a group (None: an options or panel key, or symbols that cannot be read) meets every group."""
+    if not card_group or not row_group:
+        return True
+    return bool(set(str(card_group).split("+")) & set(str(row_group).split("+")))
+
+
+def graveyard_key(card: Mapping[str, Any], structure: Any, symbols: Any = None) -> dict[str, Any]:
+    """The graveyard's key of a card: `key_of` with, for an equity card that has one, its `universe_group` as "group".
+    `key_of` itself is unchanged, and so is every reader of it: the stored key (`put`), the born payload, the
+    researcher's lineage reading, the cell yields, the memory judge; FWD1-R's mechanism cell is `elane_train.cell_of`
+    (league/ops/forward_screen.py `cell_of`), never a card key."""
+    key = key_of(card, structure)
+    group = universe_group(card, structure, symbols)
+    return key if group is None else {**key, "group": group}
+
+
+def budget_cell(key: Mapping[str, Any]) -> tuple[str, ...]:
+    """A graveyard key's rebirth-budget cell: `cell_of`'s (class, structure family, holding), with an equity key's
+    universe group as a fourth part, so each group of an equity cell has its own `architect.max_rebirths_per_cell`. An
+    options key has no group: its cell is `cell_of`'s, as before."""
+    cell = cell_of(key)
+    return (*cell, str(key["group"])) if key.get("group") else cell
 
 
 # ----------------------------------------------------------------------------------------------------------- storage
@@ -1035,6 +1142,28 @@ def always_in_families(store: Any, roots: Iterable[str], *, exclude: Iterable[st
     return out
 
 
+def row_group(grave: Mapping[str, Any], fam: Mapping[str, Any] | None, card: Any) -> str | None:
+    """THE EQUITY GRAVEYARD'S UNIVERSE GROUP of an equity graveyard row: `symbols_group` of EVERY symbol the row is known
+    by (its card's `symbols`, its graveyard `roots`, its spec's `symbols` and `roots`: the more it names, the more cards
+    it binds), None for a panel row (`PANEL_STRUCTURE`: no symbol, its own "equity:panel" cell) and for a row that names
+    no readable symbol or one outside every group (fail closed: it binds every card of its cell, as before)."""
+    spec = _spec_of(fam)
+    shapes = (grave.get("structure"), spec.get("structure"), card.get("structure") if isinstance(card, Mapping) else None)
+    if PANEL_STRUCTURE in {_token(s) for s in shapes}:
+        return None
+    names: list[str] = []
+    for raw in (card.get("symbols") if isinstance(card, Mapping) else None, grave.get("roots"), spec.get("symbols"),
+                spec.get("roots")):
+        names += _symbol_list(raw) or []
+    return symbols_group(names)
+
+
+def _grouped(key: Mapping[str, Any], card: Any) -> Mapping[str, Any]:
+    """A stored card key (`put`: `key_of`'s, never a group) with its card's universe group, for its budget cell."""
+    group = universe_group(card) if isinstance(card, Mapping) else None
+    return key if group is None else {**key, "group": group}
+
+
 # ------------------------------------------------------------------------------------------ the rebirth refusal
 class RebirthIndex:
     """The graveyard's rows killed by a mechanism verdict, each with its cell (its card's, else `infer_key`'s), and the
@@ -1115,6 +1244,12 @@ class RebirthIndex:
             equity_lane = row_lane(fam, carded["card"] if carded is not None else None, equity_by_sha)
             if equity_lane in elane.LANES or str(g["structure"]) in elane.STRUCTURES:
                 row["elane"] = equity_lane if equity_lane in elane.LANES else None  # a lane unknown binds no card
+                # THE EQUITY GRAVEYARD'S UNIVERSE GROUP (Oct 15, 2026): the row's key gains its group, read from every
+                # symbol it is known by (its card's, its graveyard roots, its spec's), so it binds only the equity
+                # cards whose group meets it (`matched`); a row whose symbols cannot be read has none and binds as before.
+                group = row_group(g, fam, carded["card"] if carded is not None else None)
+                if group is not None:
+                    row["key"] = {**row["key"], "group": group}
                 self.equity_rows.append(row)
                 continue
             self.rows.append(row)
@@ -1125,7 +1260,7 @@ class RebirthIndex:
         if now is not None:
             cutoff = now - dt.timedelta(days=self.window_days)
         self.backed: dict[str, int] = {}
-        self.cell_births: dict[tuple[str, str, str], int] = {}
+        self.cell_births: dict[tuple[str, ...], int] = {}
         for c in cards.values():
             reb = c["card"].get("rebirth") if isinstance(c["card"], Mapping) else None
             if not (isinstance(reb, Mapping) and reb.get("row")):
@@ -1134,7 +1269,7 @@ class RebirthIndex:
             self.backed[row] = self.backed.get(row, 0) + 1
             at = _parse_at(c.get("at"))
             if cutoff is None or (at is not None and at >= cutoff):
-                cell = self._cell_of_rebirth(row, c["key"])
+                cell = self._cell_of_rebirth(row, _grouped(c["key"], c["card"]))
                 self.cell_births[cell] = self.cell_births.get(cell, 0) + 1
 
     def _setting(self, name: str, default: int) -> int:
@@ -1222,20 +1357,30 @@ class RebirthIndex:
         out["cells"] = cells[:40]
         return out
 
-    def _cell_of_rebirth(self, row: str, key: Mapping[str, Any]) -> tuple[str, str, str]:
-        """A rebirth counts against the cell of the row it named (its own declared cell when that row is gone)."""
+    def _cell_of_rebirth(self, row: str, key: Mapping[str, Any]) -> tuple[str, ...]:
+        """A rebirth counts against the cell of the row it named (its own declared cell when that row is gone): its
+        `budget_cell` (an equity row's universe group included; an options cell is `cell_of`'s)."""
         named = self.by_id.get(row)
-        return cell_of(named["key"] if named else key)
+        return budget_cell(named["key"] if named else key)
 
-    def matched(self, card: Mapping[str, Any], structure: Any, mechanism: Any = "", dte: Any = None) -> tuple[list[dict[str, Any]], str | None]:
+    def matched(self, card: Mapping[str, Any], structure: Any, mechanism: Any = "", dte: Any = None, *,
+                roots: Iterable[str] | None = None) -> tuple[list[dict[str, Any]], str | None]:
         """(the matched rows, oldest first; the class the proposal's own text reads as when that adds rows): the rows in its
         declared cell, and the rows of the cell its mechanism text reads as (`infer_key`'s class, with its structure family
-        and holding) when that is another class; inputs are `match_inputs` (declared, and named by its own words)."""
+        and holding) when that is another class; inputs are `match_inputs` (declared, and named by its own words). An
+        equity card (`roots`: the proposal's symbols) is matched only against its own lane's rows whose universe group
+        meets its own (`universe_group`, `groups_meet`)."""
         keys, other = match_keys(card, structure, mechanism, dte)
         # THE EQUITY LANES (A8.12): an equity card is matched against its own lane's rows alone, an options card against
-        # the options rows alone.
+        # the options rows alone. THE EQUITY GRAVEYARD'S UNIVERSE GROUP (Oct 15, 2026): and, of those, the rows whose
+        # group meets the card's (an index row binds no sector card; a card naming one extra symbol of a row's group
+        # meets it). An options card has no group: its pool is the release before's.
         lane = elane.card_lane(card)
-        pool = self.rows if lane is None else [r for r in self.equity_rows if r.get("elane") == lane]
+        if lane is None:
+            pool = self.rows
+        else:
+            group = universe_group(card, structure, roots)
+            pool = [r for r in self.equity_rows if r.get("elane") == lane and groups_meet(group, r["key"].get("group"))]
         hit = [r for r in pool if matches(keys[0], r["key"])]
         text_class = None
         if other is not None:
@@ -1281,9 +1426,10 @@ class RebirthIndex:
         answered by `_always_in` alone."""
         if self.lane_on and dlane.always_in(card):
             return self._always_in(card, structure, mechanism, dte, roots)
-        hit, text_class = self.matched(card, structure, mechanism, dte)
+        hit, text_class = self.matched(card, structure, mechanism, dte, roots=roots)
         if not hit:
-            return {"ok": True, "matched": []}
+            stray = self._other_group_claim(card, structure, roots)
+            return {"ok": True, "matched": [], **({"dropped": stray} if stray else {})}
         lane = lane_of_card(card)
         need = [r for r in hit if self.needs_claim(r, lane)]
         # THE DIRECTION LANE'S GRAVEYARD: how many matched rows its lane read as alpha (0, and no key, for an alpha card
@@ -1301,12 +1447,29 @@ class RebirthIndex:
             out = {"ok": True, "matched": ids[-12:], "count": len(hit), why: True,
                    **({"text_class": text_class} if text_class else {}), **extra}
             if isinstance(card, Mapping) and isinstance(card.get("rebirth"), Mapping):
-                claim = self._claim(card, structure, hit, text_class)
+                claim = self._claim(card, structure, hit, text_class, roots=roots)
                 if claim["ok"]:
                     return {**claim, why: True, **extra}
                 out["dropped"] = claim["reason"]
             return out
-        return {**self._claim(card, structure, hit, text_class, need if len(need) < len(hit) else None), **extra}
+        return {**self._claim(card, structure, hit, text_class, need if len(need) < len(hit) else None, roots=roots),
+                **extra}
+
+    def _other_group_claim(self, card: Mapping[str, Any], structure: Any, roots: Iterable[str] | None) -> str | None:
+        """THE EQUITY GRAVEYARD'S UNIVERSE GROUP: why an equity card that no row binds may not keep a claim naming a row
+        of its lane that only the universe group kept from binding it (a sector card's claim on an index row): unchecked,
+        it would spend that row's and its cell's rebirth budgets and link no lineage it continues. None otherwise (an
+        options card, no claim, or a claim on any other row: the release before's reading)."""
+        lane = elane.card_lane(card)
+        reb = card.get("rebirth") if lane is not None else None
+        named = self.by_id.get(str(reb.get("row") or "")) if isinstance(reb, Mapping) else None
+        if named is None or named.get("elane") != lane:
+            return None
+        group = universe_group(card, structure, roots)
+        if groups_meet(group, named["key"].get("group")):
+            return None
+        return (f"card.rebirth names {named['row']}, a row of the {named['key'].get('group')} group, which binds no card "
+                f"of the {group} group: its claim is not needed and is not kept")
 
     def always_in_rows(self, roots: Iterable[str] | None = None) -> list[dict[str, Any]]:
         """THE ALWAYS-IN CARD (Oct 10, 2026): the always-in direction rows (`row["always_in"]`, while the lane is on) on any
@@ -1362,13 +1525,15 @@ class RebirthIndex:
         return ALWAYS_IN_LINE + "; ".join(parts)
 
     def _claim(self, card: Mapping[str, Any], structure: Any, hit: list[dict[str, Any]], text_class: str | None,
-               need: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+               need: list[dict[str, Any]] | None = None, *, roots: Iterable[str] | None = None) -> dict[str, Any]:
         """`check` on matched rows `hit`: refused without a valid `rebirth` naming one of them (the module docstring).
-        `need` (THE CELL'S YIELD, only when some of `hit` need no claim): the rows that do, which the refusal points at."""
+        `need` (THE CELL'S YIELD, only when some of `hit` need no claim): the rows that do, which the refusal points at.
+        The refusal's cell is the card's `graveyard_key` (an equity card's names its universe group; `roots`, the
+        proposal's symbols)."""
         ids = [r["row"] for r in hit]
         newest = hit[-1] if need is None else need[-1]
         out = {"ok": False, "matched": ids[-12:], "count": len(hit), "row": newest["row"], "lesson": newest["lesson"],
-               "tag": newest["tag"], "key": key_text(key_of(card, structure))}
+               "tag": newest["tag"], "key": key_text(graveyard_key(card, structure, roots))}
         if text_class:
             out["text_class"] = text_class
         where = (f"its cell ({out['key']})" + (f", and the {text_class} cell its own mechanism text reads as," if text_class else "")
@@ -1415,7 +1580,7 @@ class RebirthIndex:
             out["reason"] = (f"{row['row']} has already backed {self.backed[row['row']]} rebirth(s) (the most one row may): its "
                              "lesson stands")
             return out
-        cell = cell_of(row["key"])
+        cell = budget_cell(row["key"])  # an equity row's universe group included (each group its own budget)
         if self.cell_births.get(cell, 0) >= self.per_cell:
             out["reason"] = (f"the cell {' / '.join(cell)} has had {self.cell_births[cell]} rebirth(s) in the last "
                              f"{self.window_days} days (the most a cell may): look in another cell")
@@ -1429,7 +1594,7 @@ class RebirthIndex:
         if isinstance(reb, Mapping) and reb.get("row"):
             row = str(reb["row"])
             self.backed[row] = self.backed.get(row, 0) + 1
-            cell = self._cell_of_rebirth(row, key_of(card, structure))
+            cell = self._cell_of_rebirth(row, graveyard_key(card, structure))
             self.cell_births[cell] = self.cell_births.get(cell, 0) + 1
 
     def grid(self, families: Iterable[str]) -> list[tuple[tuple[str, str, str], list[dict[str, Any]]]]:
@@ -1533,4 +1698,5 @@ __all__ = ["MECHANISM_CLASSES", "LANE_CLASSES", "mechanism_classes", "lane_of_ca
            "card_of", "add_evidence", "evidence", "vocabulary_text", "brief_text", "infer_key", "infer_inputs", "match_inputs",
            "match_keys", "matches", "cell_of", "RebirthIndex", "YIELD_EXCUSED", "CELL_YIELD_DEFAULTS", "WILSON_Z",
            "wilson_upper", "cell_yield_settings", "cell_yields", "direction_cells", "row_lane", "ALWAYS_IN_LINE",
-           "always_in_families"]
+           "always_in_families", "PANEL_STRUCTURE", "symbols_group", "universe_group", "groups_meet", "graveyard_key",
+           "budget_cell", "row_group"]

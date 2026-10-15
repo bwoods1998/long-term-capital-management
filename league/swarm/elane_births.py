@@ -33,8 +33,9 @@ structure's class; its agenda is an available mechanism; its cell (lane x agenda
 family in Train research holds the same idea on the same slice; its card is valid (`cards.validate`, E1's equity
 admission through `elane.card_errors`); THE GRAVEYARD BINDS (the design's lane-scoped REFUTED rows, PR #519): a card in
 the cell of a family E2 refuted on Train (its own lane's rows only: E1's `cards.RebirthIndex`, every other row excluded,
-so no row with an outcome lesson is read) needs a valid `card.rebirth` naming the row, as an options card does, while
-`architect.card_rebirth` is "refuse"; NO lineage it continues (the equity parent it names, EVERY family of its slice
+so no row with an outcome lesson is read; since Oct 15, 2026 the cell holds the universe group too, so an index row binds
+no sector, bond or gold card: cards.py, THE EQUITY GRAVEYARD'S UNIVERSE GROUP) needs a valid `card.rebirth` naming the
+row, as an options card does, while `architect.card_rebirth` is "refuse"; NO lineage it continues (the equity parent it names, EVERY family of its slice
 with the same idea, and the row it is reborn from) has taken a Validation try (no seeded program and no Train pass in
 any of them: an outcome-free rule, A9 D3; naming an untried parent hides no tried one); and THE EQUITY QUOTA admits it. Its spec carries `lane`, `symbols` (its `roots` too), `agenda`, the card's
 sha and `e2_route` (the route that bore it: its yield row, and the route its Train revisions are asked on). A program
@@ -379,7 +380,7 @@ def graveyard_text(store: Any, settings: Mapping[str, Any] | None) -> str:
         return ""
     lines = ["THE EQUITY GRAVEYARD (families refuted on Train by the bar, newest first; a proposal near one names it in "
              "differs_from and says the mechanism-level difference; a new symbol or parameter of a refuted idea is not "
-             "one):"]
+             "one; a row binds only the cards whose universe group, index, sectors or defensive, meets one it traded):"]
     for r in rows:
         lines.append(f"- {r['id']} ({r['lane']} / {r['agenda']} / {', '.join(r['symbols'])}): {r['mechanism']} "
                      f"Refuted on Train after {r['versions']} versions: {', '.join(r['codes']) or 'none scored'}.")
@@ -513,8 +514,9 @@ REFUSAL_SAID: dict[str, str] = {
     "tried_lineage": ("it continues a lineage that has its one Validation try (LINEAGES WITH THEIR TRY; the outcome is "
                       "sealed): propose a different idea"),
     "card": "its card failed the card checks{fields}",
-    "graveyard": ("a refuted row of THE EQUITY GRAVEYARD binds its cell: a card there needs a valid \"rebirth\" naming "
-                  "the row, with an input the dead row did not read"),
+    "graveyard": ("a refuted row of THE EQUITY GRAVEYARD binds its cell (its mechanism class, holding and universe group: "
+                  "a card on any group the row traded): a card there needs a valid \"rebirth\" naming the row, with an "
+                  "input the dead row did not read"),
     "quota": "the pass's births were born before it: it was one proposal more than the pass asked for",
     "store": "the store did not take the birth (a fault of the House's, not of the proposal)",
 }
