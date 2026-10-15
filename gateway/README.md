@@ -423,8 +423,11 @@ it, and the exact text to post (the box id, its app and name, the status and Sai
 changed, `last_checkpointed_at` and `checkpoint_generation`, the calls tried). Each fact is kept only
 in its own shape and Sail's sentence is cut to plain words with any token-shaped run redacted, so
 nothing secret can reach the mail. The six-hourly "not running" stays quiet for an interrupted box
-the watchdog is asking back. `interrupted_unsafe_to_retry` is never resumed. `/v1/health` shows the
-interruption under `watchdog.restore`.
+the watchdog is asking back. Once its `RESTORE_MAX_TRIES` calls are used up (`restore_exhausted`, twelve
+hours at the defaults) nothing asks any more, so the six-hourly "not running" goes again while the box
+stays down, naming the calls tried (Oct 15, 2026: the first cut kept it quiet, and an interruption past
+twelve hours sent no mail after its one message). `interrupted_unsafe_to_retry` is never resumed.
+`/v1/health` shows the interruption under `watchdog.restore`.
 
 ## Secrets
 

@@ -41,7 +41,7 @@ export const DIGEST_UTC_HOUR = 21;
  * bounded by the Sail client's own 45 s timeout; Oct 14 every call hung), at most `RESTORE_MAX_TRIES` times an
  * interruption (twelve hours), and the owner is mailed once, after `RESTORE_MAIL_TRIES` calls that did not bring it
  * back or `RESTORE_MAIL_MINUTES` since the watchdog first saw it, whichever comes first (at once when Sail says it can
- * never resume).
+ * never resume). Once the tries are used up the six-hourly "not running" mail goes again while the box stays down.
  */
 export const RESTORE_COOLDOWN_SECONDS = 900;
 export const RESTORE_MAX_TRIES = 48;
@@ -210,7 +210,10 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
     if (episode.unavailable) {
       action = 'restore_unavailable';
     } else if (episode.tries >= restoreMaxTries) {
+      // The tries are used up: it is no longer being asked back, so the six-hourly "not running" below tells the owner
+      // again while it stays down, and says why in its own words.
       action = 'restore_exhausted';
+      record.detail = `Sail's resume was asked ${episode.tries} times since ${episode.first_seen_at} and did not bring it back`;
     } else if (Number.isFinite(lastTry) && now - lastTry < restoreCooldown) {
       action = 'restore_cooldown';
     } else {
@@ -326,8 +329,11 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
   const recoveryFailed = ['restart_failed', 'resume_failed', 'box_unrecoverable', 'stale_no_sailbox', 'stopped_low_balance'].includes(action);
   const stillQuiet = stale && cooling;
   // AN INTERRUPTED BOX the watchdog is asking back is told once, by its own message, never by the six-hourly "not
-  // running" (under the reserve it is the credit's case, told as before).
-  const restoring = restorable && ['restore_failed', 'restore_cooldown', 'restore_exhausted', 'restore_unavailable'].includes(action);
+  // running" (under the reserve it is the credit's case, told as before). Once the tries are used up
+  // (`restore_exhausted`, twelve hours at the defaults) nothing is asking any more: the six-hourly "not running" goes
+  // again while the box stays down (Oct 15, 2026: the first cut kept it quiet, so an interruption past twelve hours
+  // sent no mail at all after its one message).
+  const restoring = restorable && ['restore_failed', 'restore_cooldown', 'restore_unavailable'].includes(action);
   if (restoring && episode && !episode.mailed_at && mailer && (episode.unavailable || episode.tries >= restoreMailTries
       || now - Date.parse(episode.first_seen_at) >= restoreMailMs)
       && gate.alertDue('box_interrupted', now, RESTORE_MAIL_FLOOR_SECONDS * 1000)) {

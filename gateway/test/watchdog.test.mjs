@@ -525,7 +525,41 @@ test('the minutes bind when the calls are fewer, and the calls are bounded', asy
   }
   assert.equal(resumes(plane.calls).length, 2);
   assert.equal(gate.watchdog().last_action, 'restore_exhausted');
-  assert.equal(sent.length, 1, 'still the one message');
+  // Used up at minute 120: nothing asks any more, so the six-hourly "not running" goes, once in the six hours.
+  assert.deepEqual(sent.map(message => message.subject), [
+    'LTCM: the House box was interrupted and has not come back — ask Sail on Slack', 'LTCM: the desks are not running']);
+});
+
+test('an interruption past the tries is not left silent: the six-hourly "not running" goes again once nothing asks', async () => {
+  // Oct 15, 2026: the first cut counted `restore_exhausted` as being asked back, so after its one message at minute 30
+  // an interruption that outlived the 48 calls (twelve hours) sent nothing more at all.
+  const gate = gateWith();
+  const plane = interrupted();
+  const { mailer, sent } = recorder();
+  const told = [];
+  for (let minute = 0; minute <= 19 * 60; minute += 5) {
+    plane.at(NOW + minute * MIN);
+    const before = sent.length;
+    const pass = await runWatchdog({ gate, env: ENV, fetcher: plane.fetcher, mailer, now: NOW + minute * MIN });
+    for (const message of sent.slice(before)) {
+      if (!message.subject.startsWith('LTCM daily')) told.push([minute, pass.action, message.subject, message.text]);
+    }
+  }
+  assert.equal(resumes(plane.calls).length, 48, 'one call a fifteen-minute window, at most 48 an interruption');
+  assert.equal(plane.calls.some(call => call.url.endsWith('/exec')), false, 'never a restart of a box that is not there');
+  assert.deepEqual(forks(plane.calls), [], 'never a fork');
+  assert.deepEqual(told.map(([minute, action, subject]) => [minute, action, subject]), [
+    [30, 'restore_failed', 'LTCM: the House box was interrupted and has not come back — ask Sail on Slack'],
+    // The 48th call went at minute 705 (11:45 in); the next pass finds the tries used up.
+    [710, 'restore_exhausted', 'LTCM: the desks are not running'],
+    [1070, 'restore_exhausted', 'LTCM: the desks are not running'],
+  ]);
+  assert.match(told[1][3], /The Sailbox is interrupted_restorable and the gateway could not bring it back\./);
+  assert.match(told[1][3],
+    /Last failure: Sail's resume was asked 48 times since 2026-09-15T16:00:00\.000Z and did not bring it back\./);
+  assert.doesNotMatch(told[1][3], /sail-secret|Bearer/, 'never the key');
+  assert.equal(gate.watchdog().restore.tries, 48);
+  assert.equal(gate.watchdog().restore.mailed_at, '2026-09-15T16:30:00.000Z', 'the interruption message stays the one');
 });
 
 test('Sail saying the box can never resume is told at once, and nothing more is asked', async () => {
