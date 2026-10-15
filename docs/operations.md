@@ -8,7 +8,40 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Release U (Oct 15, 2026): E4 step two with panel seats through FWD1-R only, the SIP gap hand-off, a post-close checkpoint: `rel/u`, not deployed
+## Release 1015e (Oct 15, 2026): the equity birth cells, research dollars by lane, the watchdog on an interrupted box, the equity book's own shares: `rel/1015e`, not deployed
+
+Release 1015e is main `0b978378` (#557, the running release `20261015T075939Z-89d93d40bfda`) with three pull requests
+merged, #552, #551 and #549, a follow-up to #549's watchdog and a docs pass. **Two deploys from one commit:** the House
+by an owner deploy (`league/swarm/elane_births.py`, `league/ops/` and `league/ops/economics.py` are protected files),
+never 12:55-20:05Z on a trading day, then the gateway (`npx --no-install wrangler@4.129.1 deploy` from `gateway/`).
+**No identity moves** (fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`, constitution `60796aed`) and no
+setting changes: the grant holds as it is.
+
+- **The equity birth cells** (#552): the equity pass's request lists the cells the equity graveyard binds (**The
+  equity lanes' births**, "The equity birth cells"). The binding itself is unchanged.
+- **Research dollars by lane** (#551): the `dlane` report's `lane_yield` section (same section, "Research dollars by
+  lane"). An operator's reading: nothing gates on it.
+- **The account reading knows the equity book's own shares** (#549, the House half; `league/account_activity.py`,
+  `league/ops/economics.py`). The reading predated release E1 and read every share fill on the account as an
+  assignment's, so from the first real share buy (13:32Z Oct 12) every budget run's `budget.json` carried the error
+  "the account reading names an event the book has not settled (blocking): p30 is unknown", and the site's Profit and
+  the close economics' `reconciled` were unknown while the lane held a lot. It now reads the equity book's orders and
+  open lots: a share fill on one of its orders is left out, and `shares_held` counts only shares beyond its open
+  lots, so a real assignment beside held lots still waits for its own shares.
+- **The watchdog asks an interrupted box back** (#549 and its follow-up, the gateway; [gateway/README.md](../gateway/README.md),
+  the watchdog). A box Sail lists `interrupted_restorable` above the reserve is asked back with Sail's resume once a
+  15-minute window, at most 48 times an interruption, never forked; after 3 calls or 45 minutes (at once on Sail's
+  `terminal_unavailable`) the owner gets ONE message naming Sail's community Slack with the words to post. The
+  six-hourly "the desks are not running" is quiet while the watchdog asks, and goes again once the 48 calls are used
+  up and the box is still down. `/v1/health` shows the episode at `watchdog.restore`.
+- **Verify after it** (read-only, ten minutes on): the ids above; `budget.json` `errors` empty (the account reading's
+  block gone); the next equity births pass's request carrying EQUITY BIRTH CELLS; the next `dlane` report carrying
+  `lane_yield`; the gateway deploy's printed version id (the rollback's target is the one it replaced).
+- **Rollback:** the House, `python3 scripts/floor_box.py rollback` to `20261015T075939Z-89d93d40bfda` (main
+  `0b978378`); the gateway, `npx --no-install wrangler@4.129.1 rollback <the version the deploy replaced>`. Nothing is
+  migrated.
+
+## Release U (Oct 15, 2026): E4 step two with panel seats through FWD1-R only, the SIP gap hand-off, a post-close checkpoint: `rel/u`, deployed 03:28Z Oct 15 (House `20261015T032807Z-35a60d3ba499`, main `aec0c8a5`, #548)
 
 Release U is release T (`rel/e4-fwd1`, PR #546: E4 step one with A32, the forward screen FWD1-R, R-SEC), with the SIP
 gap hand-off (`fix/nightly-sip-gap`, PR #545: **The source gap**, in the CHANGELOG) and E4's step two
@@ -72,7 +105,7 @@ store first (E4's own rule: a code rollback past E4 retires the panel families f
 seated nothing of the panel trades, so the rollback sells nothing. The post-close checkpoints left behind expire at
 their TTL; the release before keeps taking the daily one.
 
-## The forward screen FWD1-R (Oct 2026): `feat/equity-fwd1`, not deployed
+## The forward screen FWD1-R (Oct 2026): `feat/equity-fwd1`, deployed 03:28Z Oct 15 in release U
 
 E3 records every equity program's forward days and judges nothing. **FWD1-R judges them**: a program may take a seat on
 sessions that came after its code and the screen were frozen, so the judged sessions' contamination is zero by
@@ -293,7 +326,7 @@ a representative a checkpoint it reaches (seven at most), and its own floor its 
 child inside `cpu_seconds_night` (one core): a lineage left over waits a night, its checkpoint still the first k days. ETF lineages with an S2 look have no
 forward route. The stand-ins are 2010-19 and 2022-24 history; none is the truth for October 2026 onward.
 
-## The panel lane (release E4, "breadth", Oct 2026): `feat/equity-e4`, not deployed
+## The panel lane (release E4, "breadth", Oct 2026): `feat/equity-e4`, deployed 03:28Z Oct 15 in release U, shipped switched off
 
 E1 gave the equity lanes a live path and E2 made the swarm breed share programs for it, on four index ETFs. E4 opens
 the place where independent history is: **the point-in-time S&P 500 PANEL**. A panel program picks 5 to 12 names out
@@ -7262,7 +7295,7 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | `researcher.retire_guard_days` | `swarm.json` on the box | default 14 (Oct 1) | the validated-family guard: a researcher may not retire a family that holds a version which passed the validation line (in its state, in the tournament's verdict records, or archived by any evaluator adoption) last validated within this many days, unless a later validation of that version failed the line; a number at or below 0 turns it off; null, a boolean or a string reads as 14 | edit `swarm.json` |
 | `funding` (`enabled`, `every_seconds`, `lead_hours`, `repeat_hours`, `clear_factor`, `claude_out_usd`, `burn_window_hours`, `after_end_hours`, `fallback_every_seconds`, `fallback_flush_seconds`) | `swarm.json` on the box | defaults (Release A, #439): on, 300, per cliff, 12, 1.5, 2, 6, 48, 21600, 30 | the funding cliff alerts (**Funding cliffs and alerts**) | edit `swarm.json` |
 | `research.enabled`, `requests_day`, `family_requests_day`, `cycle_calls` | `swarm.json` on the box | defaults (Release B, #447): false, 300, 12, 2 | the research library on the House, and its lines: calls a UTC day for the floor, a family, a research cycle (**The research library**) | edit `swarm.json`; on only after the gateway and the House that carry it |
-| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`); the incubator cap moves `incubator.max_loss_usd` to $75 (`1665c385`); release L-D moves the Probe row's `max_open` and adds `loss_basis`, `demotion`, `loss_window_sessions` and `loss_total_usd` (`0310779c`); the Probe total at $800 moves `loss_total_usd` to 800 (`fdf2ac7c`, Oct 10) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
+| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`); the incubator cap moves `incubator.max_loss_usd` to $75 (`1665c385`); release L-D moves the Probe row's `max_open` and adds `loss_basis`, `demotion`, `loss_window_sessions` and `loss_total_usd` (`0310779c`); the Probe total at $800 moves `loss_total_usd` to 800 (`fdf2ac7c`, Oct 10); the equity lane's rows from release E1 on; in force since 08:00Z Oct 15, 2026: `cfcc94b1` (#557: one open options structure a Probe family and the Probe sleeve 0.33 x E; the CHANGELOG lists every move) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
 | `options_money.probe` | `league/constitution.py` | from fast lane v2: `max_loss_share` 0.10, `contracts` 1, `open_per_family` 3 (1 since Oct 15, 2026: one open structure a Probe family), `family_share` 0.15, `floor_usd` 0, `loss_budget_usd` 400; from release L-D: `max_open` 8 (3 before), `loss_basis` "net" ("gross" before), `demotion` "dm1" ("dm0" before), `loss_window_sessions` 20 and `loss_total_usd` 400; from the Probe total at $800 (Oct 10): `loss_total_usd` 800, the owner's ceiling (the $400 in total before L-D, with no window) | the Probe: one structure within 10% of E, at most `max_open` Probe positions at once, the Probe loss budget ($400 over the last `loss_window_sessions` NY sessions and `loss_total_usd` in total) read by `loss_basis`, live demotion by `demotion` (0 in `max_open`, `loss_budget_usd` or `loss_total_usd` stops Probe opens; "gross", 3, "dm0", a $400 total and a 2000-session window together are L-D's CON-only rollback) | owner deploy; the standing grant re-ratifies at the House's start; no fingerprint move |
 | `tournament.drift_screen` | `league/swarm/policy.json` and `swarm.json` on the box | false (the box since 15:53Z Oct 7; the policy from fast lane v2) | THE DRIFT SCREEN's refusal (direction counts since fast lane v2; its fit is reported by the `direction` and `fast_lane` jobs into `<state>/fast-lane-report.json`, and by `scripts/fast_lane_report.py` on copies) | edit the file; true restores the screen |
 | `options_money.incubator` | `league/constitution.py` | from Release B, with `max_loss_usd` 75 from the incubator cap (Oct 8, 2026; 50 before it): `max_loss_usd` 75, `contracts` 1, `max_open` 4, `week_loss_usd` 150, `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80 | the incubator's caps and its pre-registered practice rule; each row may only tighten (`max_loss_usd` within $0-75), and 0 in `max_open`, `week_loss_usd` or `max_loss_usd` stops the route | owner deploy; the standing grant re-ratifies at the House's start (`--ratify` if it refuses; no evidence reset) |

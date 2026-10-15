@@ -26,11 +26,40 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261011T225041Z-65fa6d3946ea` (main `8ab31e32`, releases E5-A and E3.1, 22:51Z
-Oct 11), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's updater is on. What is built and not deployed is
-on branches.
+The running House release is `20261015T075939Z-89d93d40bfda` (main `0b978378`, PR #557: one open options structure a
+Probe family and the Probe sleeve 0.33 x E, 08:00Z Oct 15), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's
+updater is on. What is built and not deployed is on branches.
 
-### The equity birth cells: the equity pass's request shows where the graveyard binds, on `feat/elane-birth-cells` (unreleased; cut from main `aec0c8a5`, release U; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
+### Release 1015e: births cells, research spend by yield, the watchdog on interrupted boxes, docs, on `rel/1015e` (unreleased; TWO deploys from one commit: the House by an owner deploy, never 12:55-20:05Z on a trading day (`league/swarm/elane_births.py`, `league/ops/` and `league/ops/economics.py` are protected), then the gateway by the owner's wrangler deploy; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
+
+- **What it carries**, on main `0b978378` (#557, the running release): the equity birth cells (PR #552,
+  `feat/elane-birth-cells` `0bccff2c`), research dollars by measured yield (PR #551, `feat/ops-lane-yield` `692956f3`)
+  and reliability (PR #549, `fix/reliability-1015` `99fce7c4`), the three entries below, merged in that order onto
+  main `8ef19fc1`, each its own commit, then main's `0b978378` merged under them. Their conflicts were in this file
+  alone, and #552's in `league/swarm/elane_births.py` against #550 too, taken as the yield check resolved it
+  (`f62ca5b6`), tree for tree. Then two commits of its own, below.
+- **The watchdog after its tries** (`gateway/lib/watchdog.mjs`; #549's follow-up). #549 counted `restore_exhausted`
+  among the actions of a box being asked back, so once its 48 calls (twelve hours) were used up the six-hourly "the
+  desks are not running" stayed quiet, and the one `box_interrupted` message had gone at the start: an interruption
+  past twelve hours sent no mail after its first. Now nothing asking is not "being asked back": the six-hourly mail goes
+  again while the box stays down, its "Last failure" naming the calls tried ("Sail's resume was asked 48 times since
+  ... and did not bring it back"). Unchanged: 48 calls at most, never a fork, no restart, one `box_interrupted` message
+  an interruption, and `restore_unavailable` (Sail said it can never resume) is told once by that message. One new
+  test (a resume that hangs, a pass every five minutes for nineteen hours: the message at minute 30, "not running" at
+  minutes 710 and 1070, 48 calls); the bounded-calls test now expects the not-running mail after its tries.
+  `npm run check`, `npm test` 464/464; gateway/README.md says it.
+- **The docs pass.** This file records A32 (20:06Z Oct 14), release U (03:28Z Oct 15), #550 (06:17Z) and #557
+  (08:00Z) as deployed, and its running-release line names #557's release; docs/operations.md's release U, FWD1-R and
+  panel lane sections say deployed, its money-rules row names the digest in force, and **Release 1015e** heads it.
+  `league/live/shadow.py` is not edited (its docstring is inside the options execution fingerprint).
+- **Identities**, on both Pythons from this tree: fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`,
+  constitution `60796aed` (`PINNED_DIGEST`), the ids of the running release.
+- **Rollback:** the House, `scripts/floor_box.py rollback` to `20261015T075939Z-89d93d40bfda` (main `0b978378`);
+  the gateway, `npx --no-install wrangler@4.129.1 rollback <the version the deploy replaced>` (the last recorded,
+  `9c0651a3`). Nothing is migrated: the account reading is recomputed every five minutes, `lane_yield` is read by
+  nothing, and a request without the birth cells is the request before.
+
+### The equity birth cells: the equity pass's request shows where the graveyard binds, on `feat/elane-birth-cells` (unreleased; in release 1015e, merged on main `8ef19fc1` with the yield check's resolution of `league/swarm/elane_births.py` (`f62ca5b6`), tree for tree; cut from main `aec0c8a5`, release U; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
 
 - **What it is:** `elane_births.cells_text`, a block of the equity pass's request after THE EQUITY GRAVEYARD: one line a
   bound cell (mechanism_class / lane:structure / holding, and the universe group where the graveyard's key carries
@@ -50,7 +79,68 @@ on branches.
   rows, 2,663 characters.
 - **Rollback:** the release before.
 
-### The Probe sleeve 0.33 x E at six seats beside one open options structure a family (`set_design 6 0.33`), on `feat/equity-sleeve-033` above `feat/options-opf1` (DRAFT for the captain's decision; unreleased; an owner deploy; THE MONEY DIGEST MOVES ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
+### Research dollars by measured yield: the `dlane` report's `lane_yield` section, on `feat/ops-lane-yield` (unreleased; in release 1015e; cut from main `aec0c8a5`, release U; an owner deploy: `league/ops/` is protected; no identity moves: no evidence, money, swarm or equity module changes; no setting)
+
+- **What it is:** a read-only section of the operator's `dlane` report (`league/ops/lane_yield.py`, called once at the
+  end of `report`, inside its own try: an error is `{"error": ...}`, never a failed report). For the report's windows
+  (24 h and 7 days) each research group (the options lanes `alpha` and `direction`, the share programs of the BETA and
+  EQUITY lanes, the stock `panel`) gets its booked dollars (`spend` rows, as `costs` reads them, by request key or
+  family; by route), the shared pools named with the rule that divides them (the Gym's boxes by options Gym
+  evaluations, the options architect and strategist by options births, E2's births passes by equity births; the
+  harness never), the funnel's own counts of the same window plus the forward record's registrations and new
+  lineages, and each count per dollar and the dollars per count.
+- **Why:** the goal's items 2, 3 and 8 ("choose by measured yield per dollar", the daily funnel within the research
+  line, "evolve generators by measured yield per dollar; report compounding metrics"): until now a captain had to read
+  the spend table by hand to compare what a research dollar of each lane bought.
+- **What it is not:** it moves no money, edits no setting and gates nothing; no generator, screen or route choice
+  reads it (league/swarm imports no ops module); `elane_yield.choose` still reads Train facts alone (A9 D3).
+- **Verified:** `league/tests/test_lane_yield.py` (14 tests) on both Pythons, the full suites; a read-only dry run on
+  the House's own records (04:15Z Oct 15, the module loaded in memory under `guard.readonly()`): 0.42 s for both
+  windows.
+- **Rollback:** the release before; nothing reads the section.
+
+### Reliability: the gateway watchdog asks an interrupted box back and tells the owner where to ask; the account reading knows the equity book's own shares, on `fix/reliability-1015` (unreleased; in release 1015e, with the watchdog's follow-up said in its entry; from main `aec0c8a5`, release U; TWO deploys: the gateway by the owner's wrangler deploy, and the House by an owner deploy, `league/ops/economics.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the constitution digest `111ede85` and the money digest `de5ed74e` are main's; no setting changes)
+
+- **The watchdog and an interrupted box** (`gateway/lib/watchdog.mjs`, `sail.mjs`, `email.mjs`, `gate.mjs`). Oct 14,
+  2026: an AWS spot interruption left the House `interrupted_restorable` from 20:12:46Z to 03:26:54Z Oct 15; the
+  watchdog listed the status as stopped but not resumable, so it never asked Sail for the box and mailed "the desks
+  are not running" every six hours. Now an interrupted box above the reserve is asked back with Sail's resume (which
+  restores it from its last completed checkpoint on the same id) once a 15-minute window on a key of its own, at
+  most 48 times an interruption, never forked and not restarted in the pass that brings it back; after 3 calls that
+  did not bring it back, 45 minutes, or Sail's `terminal_unavailable`, the owner gets ONE message for the
+  interruption (`box_interrupted`, at most one an hour across interruptions) naming Sail's community Slack, as Sail's
+  "Getting Help" page does, with the exact text to post (box id, app, name, status and Sail's reason, since when,
+  `last_checkpointed_at`, `checkpoint_generation`, the calls tried) and the warning not to fork. Every fact keeps
+  its own shape and Sail's sentence is cut to plain words with token-shaped runs redacted. The six-hourly "not
+  running" stays quiet for a box being asked back; under the reserve it is the credit's case as before;
+  `interrupted_unsafe_to_retry` is never resumed. `/v1/health` shows the episode at `watchdog.restore`. Seven new
+  watchdog tests; `npm run check`, `npm test` 463/463.
+- **The equity book's own shares** (`league/account_activity.py`, `league/ops/economics.py`). The account reading
+  predated release E1 and read every share fill on the account as an assignment's: from the first real share buy
+  (13:32Z Oct 12) every reading said "shares an assignment or an exercise left are still held", so the site's Profit, the
+  budget's p30 (`budget.json` errors; earned 0, which lifts no research) and the close economics' `reconciled` were
+  unknown while the lane held a lot, and every budget run raised a House warning. `read_book` now also reads the
+  equity book's orders and open lots; a share fill on one of its orders is left out; `shares_held` counts only shares
+  beyond its open lots, so a real assignment beside held lots still waits for its own shares. Replayed read-only on
+  the live record: the block clears and every dollar field of the reading is unchanged. Three new tests.
+- **Rollback:** the gateway, `npx --no-install wrangler@4.129.1 rollback <the previous version id>`; the House, the
+  release before (in release 1015e: main `0b978378`; nothing is migrated; the reading is recomputed every five minutes).
+
+### 08:00Z Oct 15, 2026: one open options structure a Probe family and the Probe sleeve 0.33 x E (#557, carrying #556; the captain's A37), House `20261015T075939Z-89d93d40bfda`, main `0b978378`; gateway unchanged `9c0651a3`
+
+One owner deploy of the two entries below, new lots only: CI green on the exact head; a fast-forward of `8ef19fc1`;
+no order in flight at 07:59:25Z and no hand-chain job mid-run; the nightly stop written BEFORE the push (07:59:35Z);
+promoted 08:00:09Z (rollback `20261015T061716Z-262ec61bb251`); nightly back and the harness observer's base repointed
+08:10Z. Verified 08:10Z: health clean, real money on, no real-money block; execution fingerprint `b60410ad` and gate
+contract `397b22b772b3` unchanged (the equity identity `78022ca6`, computed on the tree, does not move); money `de5ed74e` -> `cfcc94b1` and constitution
+`111ede85` -> `60796aed` on purpose (the pair; `cd579e5d` / `1e14c7f7`, the row below alone, was never live); the
+grant job at 08:05:41Z: status ok, nothing to do.
+
+- Its pre-stated revert (A37): `set_design 6 0.50` in one owner deploy, new lots only, after 5 consecutive sessions
+  with no options family at Probe, or when the options family at Probe is demoted or retired and no other is there.
+  `open_per_family` stays 1 whatever happens: the one-structure row is never rolled back while 0.33 is live.
+
+### The Probe sleeve 0.33 x E at six seats beside one open options structure a family (`set_design 6 0.33`), on `feat/equity-sleeve-033` above `feat/options-opf1` (DEPLOYED 08:00Z Oct 15 with the row below, as PR #557 on main `8ef19fc1`; the captain's A37; an owner deploy; THE MONEY DIGEST MOVES ONCE for the pair, `de5ed74e` -> `cfcc94b1`, and the grant re-ratifies; no fingerprint moves, no evidence reset)
 
 - **The rows** (`set_design 6 0.33`): `equity_money.probe.sleeve_share` "0.50" -> "0.33", inside its bound, new lots
   only; the seats stay 6. The design blocks restate the figures.
@@ -69,7 +159,7 @@ on branches.
   `league/tests/equity_week.py`: the six share programs' week at the 0.33 sleeve, order for order; `RECORDED_ON` moves.
 - **Rollback**, one owner deploy: `set_design 6 0.50` (new lots only).
 
-### One open structure a Probe family (`options_money.probe.open_per_family` 3 -> 1), on `feat/options-opf1` (unreleased; an owner deploy outside 12:55-20:05Z; THE MONEY DIGEST MOVES ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
+### One open structure a Probe family (`options_money.probe.open_per_family` 3 -> 1), on `feat/options-opf1` (DEPLOYED 08:00Z Oct 15 with the sleeve above, as PR #556 inside #557; an owner deploy outside 12:55-20:05Z; THE MONEY DIGEST MOVES ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
 
 - **The row** (`league/constitution.py`, the comment above `options_money`): `probe.open_per_family` 3 -> 1, inside
   its bound (1 to 5), a tightening. A Probe options family holds one open structure at a time; its next open waits
@@ -94,7 +184,14 @@ on branches.
 - **Rollback**, one owner deploy: `open_per_family` 3 (re-pin `PINNED_DIGEST`, rewrite the design blocks); the money
   digest moves back and the grant re-ratifies.
 
-### The equity graveyard's universe group: an index row no longer binds a sector, bond or gold card, on `fix/graveyard-group` (unreleased; on release U, main `aec0c8a5`; an owner deploy; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `de5ed74e` and the constitution digest `111ede85` are release U's; no setting changes)
+### 06:17Z Oct 15, 2026: the equity graveyard's universe group (#550), House `20261015T061716Z-262ec61bb251`, main `8ef19fc1`; gateway unchanged `9c0651a3`
+
+One owner deploy: no order in flight at 06:17:02Z; the nightly stop written, then main pushed (`aec0c8a5..8ef19fc1`);
+promoted 06:17:52Z (rollback `20261015T032807Z-35a60d3ba499`); nightly back and the harness observer's base repointed
+06:28Z. Verified 06:28Z: health clean, real money on; execution fingerprint `b60410ad`, constitution `111ede85`, money
+`de5ed74e` and gate contract `397b22b772b3` unchanged.
+
+### The equity graveyard's universe group: an index row no longer binds a sector, bond or gold card, on `fix/graveyard-group` (DEPLOYED 06:17Z Oct 15, PR #550; on release U, main `aec0c8a5`; an owner deploy; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `de5ed74e` and the constitution digest `111ede85` are release U's; no setting changes)
 
 - **Why:** at 03:40Z Oct 15 the captain widened `elane.universe` to the sixteen ETFs (A35). The first births pass
   (03:43:16Z) proposed six sector cards and the graveyard refused all six, each by an index row of its cell ("graveyard:
@@ -126,54 +223,24 @@ on branches.
   with the sectors budget spent, refused as release U refused them; a mixed rebirth counted in each group; a card
   without a group charged to its row's groups).
 
-### Research dollars by measured yield: the `dlane` report's `lane_yield` section, on `feat/ops-lane-yield` (unreleased; cut from main `aec0c8a5`, release U; an owner deploy: `league/ops/` is protected; no identity moves: no evidence, money, swarm or equity module changes; no setting)
+### 03:28Z Oct 15, 2026: release U, E4 (switched off) with panel seats through FWD1-R only, the forward screen FWD1-R, sector programs forward-only, the SIP gap hand-off, a post-close checkpoint (#548, carrying #546, #545 and #544), House `20261015T032807Z-35a60d3ba499`, main `aec0c8a5`; gateway unchanged `9c0651a3`
 
-- **What it is:** a read-only section of the operator's `dlane` report (`league/ops/lane_yield.py`, called once at the
-  end of `report`, inside its own try: an error is `{"error": ...}`, never a failed report). For the report's windows
-  (24 h and 7 days) each research group (the options lanes `alpha` and `direction`, the share programs of the BETA and
-  EQUITY lanes, the stock `panel`) gets its booked dollars (`spend` rows, as `costs` reads them, by request key or
-  family; by route), the shared pools named with the rule that divides them (the Gym's boxes by options Gym
-  evaluations, the options architect and strategist by options births, E2's births passes by equity births; the
-  harness never), the funnel's own counts of the same window plus the forward record's registrations and new
-  lineages, and each count per dollar and the dollars per count.
-- **Why:** the goal's items 2, 3 and 8 ("choose by measured yield per dollar", the daily funnel within the research
-  line, "evolve generators by measured yield per dollar; report compounding metrics"): until now a captain had to read
-  the spend table by hand to compare what a research dollar of each lane bought.
-- **What it is not:** it moves no money, edits no setting and gates nothing; no generator, screen or route choice
-  reads it (league/swarm imports no ops module); `elane_yield.choose` still reads Train facts alone (A9 D3).
-- **Verified:** `league/tests/test_lane_yield.py` (14 tests) on both Pythons, the full suites; a read-only dry run on
-  the House's own records (04:15Z Oct 15, the module loaded in memory under `guard.readonly()`): 0.42 s for both
-  windows.
-- **Rollback:** the release before; nothing reads the section.
+One owner deploy, two minutes after the House box came back from its interruption (03:26:54Z; the Reliability entry
+above): no order in flight at 03:27:52Z; the nightly stop A32's deploy wrote still stood; main pushed
+(`47ed6872..aec0c8a5`); promoted 03:28:45Z (rollback `20261014T200642Z-b4a90df41c4a`); nightly back and the harness
+observer's base repointed 03:39Z. Verified 03:38:51Z: health clean, real money on; execution fingerprint `b60410ad`
+and gate contract `397b22b772b3` unchanged; money `5b95d73e` -> `de5ed74e` and constitution `4ef472e1` -> `111ede85`
+on purpose (step two's panel row).
 
-### Reliability: the gateway watchdog asks an interrupted box back and tells the owner where to ask; the account reading knows the equity book's own shares, on `fix/reliability-1015` (unreleased; from main `aec0c8a5`, release U; TWO deploys: the gateway by the owner's wrangler deploy, and the House by an owner deploy, `league/ops/economics.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the constitution digest `111ede85` and the money digest `de5ed74e` are main's; no setting changes)
+- Seen on the House after: every budget run's `budget.json` error "the account reading names an event the book has
+  not settled (blocking): p30 is unknown", standing since the first real share buy (13:32Z Oct 12; the Reliability
+  entry above is its fix); FWD1-R's `forward_screen` job runs with its start on Fri Oct 16 (its 06:24Z and
+  08:06Z receipts).
+- No deploy (`swarm.json`), 03:40Z: the captain widened `elane.universe` to the sixteen ETFs (A35; no XLF), R-SEC
+  holding every sector, bond and gold program forward-only. The first births pass after it (03:43:16Z) had all six
+  proposals refused by index rows of their cells: the 06:17Z entry above.
 
-- **The watchdog and an interrupted box** (`gateway/lib/watchdog.mjs`, `sail.mjs`, `email.mjs`, `gate.mjs`). Oct 14,
-  2026: an AWS spot interruption left the House `interrupted_restorable` from 20:12:46Z to 03:26:54Z Oct 15; the
-  watchdog listed the status as stopped but not resumable, so it never asked Sail for the box and mailed "the desks
-  are not running" every six hours. Now an interrupted box above the reserve is asked back with Sail's resume (which
-  restores it from its last completed checkpoint on the same id) once a 15-minute window on a key of its own, at
-  most 48 times an interruption, never forked and not restarted in the pass that brings it back; after 3 calls that
-  did not bring it back, 45 minutes, or Sail's `terminal_unavailable`, the owner gets ONE message for the
-  interruption (`box_interrupted`, at most one an hour across interruptions) naming Sail's community Slack, as Sail's
-  "Getting Help" page does, with the exact text to post (box id, app, name, status and Sail's reason, since when,
-  `last_checkpointed_at`, `checkpoint_generation`, the calls tried) and the warning not to fork. Every fact keeps
-  its own shape and Sail's sentence is cut to plain words with token-shaped runs redacted. The six-hourly "not
-  running" stays quiet for a box being asked back; under the reserve it is the credit's case as before;
-  `interrupted_unsafe_to_retry` is never resumed. `/v1/health` shows the episode at `watchdog.restore`. Seven new
-  watchdog tests; `npm run check`, `npm test` 463/463.
-- **The equity book's own shares** (`league/account_activity.py`, `league/ops/economics.py`). The account reading
-  predated release E1 and read every share fill on the account as an assignment's: from the first real share buy
-  (13:32Z Oct 12) every reading said "shares an assignment or an exercise left are still held", so the site's Profit, the
-  budget's p30 (`budget.json` errors; earned 0, which lifts no research) and the close economics' `reconciled` were
-  unknown while the lane held a lot, and every budget run raised a House warning. `read_book` now also reads the
-  equity book's orders and open lots; a share fill on one of its orders is left out; `shares_held` counts only shares
-  beyond its open lots, so a real assignment beside held lots still waits for its own shares. Replayed read-only on
-  the live record: the block clears and every dollar field of the reading is unchanged. Three new tests.
-- **Rollback:** the gateway, `npx --no-install wrangler@4.129.1 rollback <the previous version id>`; the House, repoint
-  to `aec0c8a5` (nothing is migrated; the reading is recomputed every five minutes).
-
-### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, a post-close checkpoint, on `rel/u` (unreleased; an owner deploy after 20:05Z Thu Oct 15, 2026; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
+### Release U: E4 step two (panel seats via FWD1-R only), the SIP gap hand-off, a post-close checkpoint, on `rel/u` (DEPLOYED 03:28Z Oct 15, PR #548; an owner deploy; THE MONEY DIGEST MOVES ONCE, by step two's panel row, and the grant re-ratifies; no fingerprint moves)
 
 - **What it carries:** release T (`rel/e4-fwd1` `6b0c41bb`, PR #546: E4 step one with A32, FWD1-R, R-SEC), merged with
   the SIP gap hand-off (`fix/nightly-sip-gap` `66f19b56`, PR #545: the entry below) and E4's step two
@@ -214,7 +281,7 @@ on branches.
 - **On deploy:** the grant re-ratifies at the House's start (the money digest moved). Rollback: repoint to release T's
   main `6b0c41bb` or A32's `47ed6872`, panel families retired first.
 
-### Release T: E4 step one with A32, the forward screen FWD1-R, sector programs forward-only, on `rel/e4-fwd1` (unreleased; to deploy before 12:55Z Thu Oct 15, 2026 so that FWD1-R's clock starts Fri Oct 16)
+### Release T: E4 step one with A32, the forward screen FWD1-R, sector programs forward-only, on `rel/e4-fwd1` (DEPLOYED 03:28Z Oct 15 inside release U, PR #546: before 12:55Z, so FWD1-R's clock starts Fri Oct 16)
 
 - **What it carries:** E4 step one merged with A32 (`feat/equity-e4-a32`, PR #544, which carries PR #543: the Probe
   sleeve 0.50 x E at six seats), merged with the forward screen FWD1-R (`feat/equity-fwd1` `90fc0c3f`, the entry
@@ -236,7 +303,7 @@ on branches.
   (`scripts/panel_rollback.py`, E4's entry below) and, if the universe was widened, every family naming a symbol
   outside the four index ETFs retired first (a release without R-SEC would give them a sealed try).
 
-### Release FWD1-R, the forward screen: one verdict a lineage on the sessions after its code and the screen were pinned, on `feat/equity-fwd1` (unreleased; cut from `feat/equity-e4-m3` at `6f99652d`; the captain's A33; no identity moves: the options execution fingerprint, the equity identity, the money digest and the constitution digest are `6f99652d`'s; ships with the seat path OFF)
+### Release FWD1-R, the forward screen: one verdict a lineage on the sessions after its code and the screen were pinned, on `feat/equity-fwd1` (DEPLOYED 03:28Z Oct 15 inside release T, in release U; cut from `feat/equity-e4-m3` at `6f99652d`; the captain's A33; no identity moves: the options execution fingerprint, the equity identity, the money digest and the constitution digest are `6f99652d`'s; ships with the seat path OFF)
 
 - **What it adds** (docs/operations.md, "The forward screen FWD1-R"): the judge E3 left for a later release. A lineage
   of the forward registry, judged on a representative fixed before its first forward day, passes at the first of the
@@ -299,7 +366,7 @@ on branches.
     the panel runs on package J's world, the job's panel calls under the ops child's 500 MB at the production
     panel's size (`league/tests/fwd1_panel_budget.py`).
 
-### Release E4 step two: what a panel look and a panel seat need that can be built before XS1-R rules, on `feat/equity-e4-step2` (unreleased; on step one `6f99652d` with #543 merged, `47ed6872`: the Probe sleeve 0.50 x E; THE MONEY DIGEST MOVES ONCE, in its marked commit; no fingerprint moves)
+### Release E4 step two: what a panel look and a panel seat need that can be built before XS1-R rules, on `feat/equity-e4-step2` (DEPLOYED 03:28Z Oct 15 inside release U, without its probe wiring B1 (A34 (4)); on step one `6f99652d` with #543 merged, `47ed6872`: the Probe sleeve 0.50 x E; THE MONEY DIGEST MOVES ONCE, in its marked commit; no fingerprint moves)
 
 - **The A31 look hold.** `elane.panel.look_rule` (policy.json "hold"): no XS1 look before study XS1-R rules. A
   look waits, nothing spent, even with its receipt, permit, review and room present, and says "A31: no XS1 look
@@ -348,7 +415,7 @@ on branches.
   options book's exits keep their room). Before it, a held basket's re-priced sales used the count up on a fast
   open and the ETF lots' sales were carried to the next session. No id moves (league/equity/live.py is plumbing).
 
-### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; then with A32 `47ed6872ce6c232b743cc556f5540892b9132470` (PR #543, the Probe sleeve 0.50 x E at six seats), which deploys FIRST, on `feat/equity-e4-a32`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
+### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (DEPLOYED 03:28Z Oct 15, switched off: step one inside release T (PR #544) and step two's seat pieces, both in release U's one owner deploy (PR #548); as built: merged with main `8ab31e32dc77a730d6d3397c222f530294dec632`, then the running release: main's releases through E5-A and E3.1 are under it, on `feat/equity-e4-m3`; then with A32 `47ed6872ce6c232b743cc556f5540892b9132470` (PR #543, the Probe sleeve 0.50 x E at six seats), which deploys FIRST, on `feat/equity-e4-a32`; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 
 - **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
   day's S&P 500 members by a symmetric cross-sectional rule, see salted slots with no ticker, no date and no price
@@ -640,7 +707,7 @@ on branches.
 - Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
   the universe deploy and its rollback, the alarms, the code rollback past E4).
 
-### The source gap: a SIP minute the source never serves no longer holds every later forward day, and the stall alarm names the day and the root, on `fix/nightly-sip-gap` (unreleased; an owner deploy: `scripts/data/nightly.py`, `sip.py` and `league/ops/stall.py` are protected files; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the constitution digest `4ef472e1` and the money digest `5b95d73e` are main's; no setting changes)
+### The source gap: a SIP minute the source never serves no longer holds every later forward day, and the stall alarm names the day and the root, on `fix/nightly-sip-gap` (DEPLOYED 03:28Z Oct 15 inside release U, PR #545; an owner deploy: `scripts/data/nightly.py`, `sip.py` and `league/ops/stall.py` are protected files; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the constitution digest `4ef472e1` and the money digest `5b95d73e` are main's; no setting changes)
 
 - **What happened.** The nightly retried 2026-10-12 every five minutes from 06:20Z Oct 13 for two days, with "SIPError:
   incomplete regular-session SIP bars: SLV 389/390". The source never served SLV's 13:45 ET bar (completion minute
@@ -686,6 +753,15 @@ on branches.
   SLV off 6 h after that first tick, because Oct 13's close has passed. 2026-10-13 is pulled right after (about 20
   minutes: stages 7 and 8, the relay, the copy, the checkpoint), and 2026-10-14 runs at 06:00Z Oct 15. One gateway
   bars call is made per try.
+
+### 20:06Z Oct 14, 2026: A32, the Probe sleeve 0.50 x E at six seats (#543), House `20261014T200642Z-b4a90df41c4a`, main `47ed6872`; gateway unchanged `9c0651a3`
+
+One owner deploy, new lots only (the captain's A32: `set_design 6 0.50`; money `11a1dc0c` -> `5b95d73e`, constitution
+`00c2bf6f` -> `4ef472e1`; the grant re-ratifies): promoted 20:07:23Z (rollback `20261011T225041Z-65fa6d3946ea`). The
+deploy's wait for the in-box watchdog's verdict ended with none: an AWS spot interruption took the House box at
+20:12:46Z, and it was `interrupted_restorable` until 03:26:54Z Oct 15 (the Reliability entry above). Release U
+deployed over it at 03:28Z, before it had traded a session. Its fixture record and the sleeve's design are in release
+E4's entry above ("The merge with A32").
 
 ### 22:51Z Oct 11, 2026: releases E5-A and E3.1, the seat rule, the exit wait's end and the re-based twin (#542), House `20261011T225041Z-65fa6d3946ea`, main `8ab31e32`; gateway unchanged `9c0651a3`
 
