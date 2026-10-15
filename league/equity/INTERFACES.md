@@ -413,6 +413,17 @@ activity types the venue refused), `eq_preopen_activities`. The book reads the h
   sizes every sleeve on min(E, E_P) once one is read, on E while none was ever read on the box, and on the last E_P
   read when the pin cannot be read or is gone (league/equity/live.py, the constants' comment). `size_entry`'s `E`
   stays the sizing equity.
+- THE SCALED BAND (C3 (A45) of the scaling plan, shipped dark; book and money, additive): `scaled() -> {state, why,
+  lines, rungs, out, closed, window, since}` (`health()["scaled"]`, read by the pre-open check; never a figure, never
+  a sha). With `equity_money.scaled.pin_sha256` "" it is "dark" and nothing of the band runs. With a row, a pin whose
+  bytes are that sha256 names each program's rung (`ProbePin.rungs`, keys `program_key(family, version)`): a Probe-band
+  share program is sized at `bands.rung_sleeve` (the rung the lower of the pin's and `families.scale_setting()`, the
+  swarm's tighten-only `elane.scale`), its buy stamped `answer["rung"]` and, R2 and up with the Scaled lines in force,
+  `probe` `SCALED_MARK`; its lot keeps `info` {"rung", "scaled"} (`bands.RUNG_INFO`, `SCALED_INFO`) and `probe` 0 when
+  Scaled. `probe_figures(rows, *, weights, scaled_lines=None)` leaves Scaled open risk out of the Probe room while
+  the lines are in force and counts Scaled lots as Probe ones while they are not. A pin that does not match opens no
+  new Scaled lot (`SCALE_REFUSAL`). The memory is the kv `SCALE_KEY` (private). Families readers gain
+  `scale_setting() -> {"rung", "programs"} | None` (None: no word; the pin alone).
 - Calls it makes: `league.equity.sizing.size_entry` (money), `league.live.money.available_cash` (money) with
   `working_buys_worst` = its own and `reserved` = the options book's `reserved()` (its working opens' maximum loss with
   fees and buffer: at least their worst cost, so no option buy is counted twice), `table.equity` (money's `EquityTable`),
@@ -1242,7 +1253,7 @@ the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's 
 equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
 0.50 x E.
-Money digest `4cd610a5`, full digest `18636b3f` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `5128b198` / `4af19b45`.
+Money digest `558dc3a2`, full digest `d4e59a79` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `68f1bca9` / `d244fb10`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of

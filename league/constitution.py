@@ -1208,6 +1208,71 @@ CONSTITUTION["equity_money"]["probe"]["seat"] = {"rule": "activity-1-free", "k_f
 # fingerprint, reads its rows by name and does not read this one).
 CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 
+# ---- THE SCALED BAND (`equity_money.scaled`; C3 (A45) of the scaling plan, Oct 15, 2026; the captain's build for the
+# owner's deploy, SHIPPED DARK: NO RUNG IS LIVE). A program that beat its own same-risk buy-and-hold on live closes (the
+# plan's test, applied outside the House at each Done checkpoint) may be sized above the Probe sleeve, one rung at a
+# time, each rung Blake's deploy. Shares and multiples only here, never dollars: the dollars (E_P, the Probe pool frozen
+# by C2) and each program's rung live in the House's PRIVATE pin (`/workspace/state/scale-pin.json`, which C2 reads for
+# E_P), and only the pin's sha256 is public, in this table. Its reader is league/equity/bands.py `scaled_settings`
+# (league/live/money.py's `EquityTable`, inside the options execution fingerprint, reads its rows by name and does not
+# read this one); the House applies it in league/equity/live.py (`EquityBook._scale_for`, `_scale_now`).
+# - `pin_sha256`: the sha256 of the pin's bytes. EMPTY ("") IS DARK: every program is at Probe, exactly as before C3, and
+#   nothing of the band runs. A pin whose bytes are not this sha256 (none there, unreadable, another file) opens NO NEW
+#   SCALED LOT: a program the House last read at a rung waits (its entries are refused), every other one trades at
+#   Probe, exits go on, and it is one standing error alert. Every rung raise is Blake's deploy of a new pin and of its
+#   sha256 here (plan 11 item 7), so the money digest moves and the grant re-ratifies at each one. The first sha256 is
+#   written only after Done's first checkpoint receipt and Blake's yes; C2's E_P comes from the re-ratification of the
+#   very release that carries this block, so that release cannot carry the pin's sha256 (the captain's decision).
+# - `rungs`: each rung's sleeve as a multiple of E_P (the plan's table 3.2: R1 0.50, R2 1.25, R3 2.25, R4 4.00, R5
+#   6.75), never above `max_sleeve_share` x E (0.50, the top of the Sized sleeve's own bound): a program's sleeve is
+#   min(its rung's multiple x E_P, `max_sleeve_share` x E), where its rung is the LOWER of the pin's and the swarm's
+#   setting `elane.scale` (a setting may only lower it, and a lowering sticks for that pin: only a new pin raises a
+#   rung again; "stop the ladder" is `elane.scale.rung` 0). Every wall of the
+#   account binds as before through `size_entry`: an ETF at most 0.50 x E across all programs, 1.00 x E invested, the
+#   cash reserve. A share program only (no panel, no options program), in the Probe band only.
+# - R1 IS INSIDE THE LINES IN FORCE: its lots carry the PROBE mark, so they count in the shared $400 window and $800
+#   total (open risk and closes), EDM1's -$300 line and the swarm's -$300 family line read them, as every Probe lot.
+#   R1 IS A LOOSENING, SAID SO (plan 3.2): one program gets A32's 0.50 sleeve back against A37's 0.33 x E for every
+#   seat; its lots take more of the shared window; A37 measured what the 0.50 world (all six seats) cost against 0.33
+#   (refused share entries 19.6 against 8.0 a path, consistency failures 7.05% against 1.54%, a window pause at an
+#   open in 94% against 64% of paths, the options program crowded out); one program is a sixth of that move, not
+#   measured alone; like A37 it buys variance and market exposure, not edge.
+# - `lines`: THE SCALED LINES, Blake's amendment of his goal's item 4 (plan 3.4). `in_force` False: NOTHING GOES PAST R1
+#   (every rung is capped at R1) and no lot carries the Scaled mark. True (his yes): a lot opened at R2 or above carries
+#   the SCALED mark: its close counts in the Scaled lines, not in the Probe window, total or EDM1's line; its open risk
+#   is kept out of the Probe room (league/equity/live.py `probe_figures`, the one path by which equity open risk reaches
+#   either lane's Probe room); and a Scaled entry is sized to the Scaled room: the lower of `window_share` x the Scaled
+#   sleeves in force less the worst net stretch of the Scaled closes of the last `window_sessions` sessions, and
+#   `total_share` x the largest Scaled sleeves reached less their net loss since the ladder's start, each less the
+#   Scaled open risk (the same weights: an ETF 20% of its value, a stock 40%). At the window Scaled opens pause (D5);
+#   at the total the House returns every program to Probe and the ladder closes for the plan's version (D6). THE
+#   PROGRAM LINES (league/equity/bands.py, at every rung, D3): realized since the program's last rung change at most
+#   -$300 at R1 (`demotion.program_loss_usd`) and -`program_share` (10%) of the sleeve from R2; and cumulatively since it
+#   first reached R1 at most the line of the highest rung it reached; either one hit returns it to Probe at once, for
+#   good. While `in_force` is False a Scaled-marked lot (none exists before it) counts in the Probe window, total and
+#   room like a Probe lot: nothing escapes both budgets. `family_line_probe_only` (plan 3.4 loosening 3, separable):
+#   True with `in_force`, the swarm's -$300 family line (league/swarm/elane.py `loss_line`) reads Probe-marked lots
+#   only; False (his no to that part alone), it reads every real lot, Scaled ones too, which in practice caps the
+#   ladder near R2. THE FOUR LOOSENINGS OF HIS YES, WITH THEIR COSTS (plan 3.4, whose figures are in dollars and stay in
+#   the private plan): a second loss budget beside goal item 4 (0.18 x the Scaled sleeves in force a window and 0.36 x
+#   the largest reached in total, beside the $400 / $800; at the top of the ladder the worst loss before every line
+#   stops is about a third of the account); the program line from -$300 to -10% of the sleeve (since a change and
+#   cumulatively, at R5 well past -$300); the -$300 family line stops reading Scaled lots; Scaled open risk leaves the
+#   Probe room. Without his yes nothing goes past R1.
+# - Step-downs never wait for Blake (plan 4.3): the House's own (D3, D5, D6) above; every other one (D1, D2, D4, D7, D8)
+#   is the captain's same-day lowering of `elane.scale`, from the checkpoint receipt. A newer version of a family is
+#   at Probe at once (the pin names a program by family and version). Nothing is ever sold or placed by a rung.
+# Bounds: each multiple at most the plan's (a row may only tighten), never decreasing from R1 to R5; the shares at most
+# the plan's; the window at least 20 sessions. A table with no `scaled` block at all is dark too (a table from before
+# C3 still builds). Rollback, one owner deploy: `pin_sha256` "" (dark; open lots exit by their own rules).
+CONSTITUTION["equity_money"]["scaled"] = {
+    "pin_sha256": "",
+    "rungs": {"r1": "0.50", "r2": "1.25", "r3": "2.25", "r4": "4.00", "r5": "6.75"},
+    "max_sleeve_share": "0.50",
+    "lines": {"in_force": False, "window_share": "0.18", "window_sessions": 20, "total_share": "0.36",
+              "program_share": "0.10", "family_line_probe_only": False},
+}
+
 
 def digest(constitution: dict[str, Any] | None = None) -> str:
     """The SHA-256 of the constitution's canonical JSON."""
@@ -1478,6 +1543,21 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "order_path.bars_after_close_s": ("60", "7200"),
     "order_path.decide_after_close_s": ("60", "14400"),
     "order_path.audit_before_open_s": ("60", "14400"),
+    # THE SCALED BAND (C3 (A45) of the scaling plan; the comment under the table): each rung's sleeve as a multiple of
+    # E_P at most the pinned plan's (its table 3.2), never above 0.50 x E (`max_sleeve_share`, the Sized sleeve's own
+    # top); the Scaled lines' shares at most the plan's (0.18 and 0.36 of the sleeves, 0.10 of the sleeve the program
+    # line); a window of at least 20 sessions (a longer one is never looser: the worst
+    # net stretch of a longer window holds every stretch of a shorter one).
+    "scaled.rungs.r1": ("0", "0.50"),
+    "scaled.rungs.r2": ("0", "1.25"),
+    "scaled.rungs.r3": ("0", "2.25"),
+    "scaled.rungs.r4": ("0", "4.00"),
+    "scaled.rungs.r5": ("0", "6.75"),
+    "scaled.max_sleeve_share": ("0", "0.50"),
+    "scaled.lines.window_share": ("0", "0.18"),
+    "scaled.lines.window_sessions": ("20", "2000"),
+    "scaled.lines.total_share": ("0", "0.36"),
+    "scaled.lines.program_share": ("0", "0.10"),
 }
 #: The rows whose low end is EXCLUSIVE: a share of zero is no setting (the lane stops by `enabled` False).
 EQUITY_MONEY_ABOVE_LOW = ("position_share.etf", "position_share.stock", "invested_share")
@@ -1489,7 +1569,15 @@ EQUITY_MONEY_CHOICES: dict[str, tuple[Any, ...]] = {
     # THE SEAT RULE (A24): the value in force, and the rollback ("first-come": release E5-S's behaviour exactly).
     # Outranking ("activity-1") is NOT a value here: it is not adopted, and adding it is the owner's line to write.
     "probe.seat.rule": ("activity-1-free", "first-come"),
+    # THE SCALED LINES (C3): Blake's amendment of goal item 4 (False: nothing past R1, no Scaled mark), and its separable
+    # third loosening (the swarm's family line reads Probe-marked lots only).
+    "scaled.lines.in_force": (False, True),
+    "scaled.lines.family_line_probe_only": (False, True),
 }
+#: THE SCALED BAND's rungs in order (`equity_money.scaled.rungs`): R1 to R5, never decreasing (C3).
+EQUITY_SCALED_RUNGS = ("r1", "r2", "r3", "r4", "r5")
+#: The pin's sha256 as the row holds it: "" (dark: no rung) or 64 lowercase hex digits (C3).
+_PIN_SHA = re.compile(r"[0-9a-f]{64}")
 #: The schedule's offsets (`league/equity/schedule.py` DEFAULTS' keys), read by `league/live/money.py` `EquityTable`.
 EQUITY_ORDER_OFFSETS = ("preopen_before_open_s", "open_send_after_open_s", "exit_wait_s", "entry_until_after_open_s",
                         "exit_until_before_close_s", "close_send_before_close_s", "close_until_before_close_s",
@@ -1502,7 +1590,8 @@ _EQUITY_COUNTS = ("probe.max_programs", "probe.seat.idle_sessions", "panel.seats
                   "demotion.twin_min_closes", "holds.min_hold_sessions", "holds.default_max_hold_sessions",
                   "holds.max_hold_sessions", "holds.failed_decides_exit", "order_path.entry_collar_bp.etf",
                   "order_path.entry_collar_bp.stock", "order_path.max_collar_bp.etf", "order_path.max_collar_bp.stock",
-                  "order_path.max_orders_day", *(f"order_path.{name}" for name in EQUITY_ORDER_OFFSETS))
+                  "order_path.max_orders_day", *(f"order_path.{name}" for name in EQUITY_ORDER_OFFSETS),
+                  "scaled.lines.window_sessions")
 EQUITY_CLASSES = ("etf", "stock")
 #: A ticker as the venue and the gateway's STOCK_UNIVERSE write it (a share class after a dot: BRK.B).
 _TICKER = re.compile(r"[A-Z]{1,5}(\.[A-Z])?")
@@ -1530,7 +1619,12 @@ def equity_money_problems(constitution: dict[str, Any] | None = None) -> list[st
         return ["equity_money: the table is missing"]
     problems: list[str] = []
     values: dict[str, Decimal] = {}
+    # THE SCALED BAND (C3): a table with no `scaled` block at all is DARK (no rung; league/equity/bands.py
+    # `scaled_settings`), never a problem, so a table from before C3 still builds; a block that is there is checked whole.
+    no_scaled = "scaled" not in table
     for path, (low, high) in EQUITY_MONEY_BOUNDS.items():
+        if no_scaled and path.startswith("scaled."):
+            continue
         node = _at(table, path)
         if isinstance(node, bool) or node is None:
             problems.append(f"equity_money.{path} is missing")
@@ -1549,6 +1643,8 @@ def equity_money_problems(constitution: dict[str, Any] | None = None) -> list[st
         else:
             values[path] = value
     for path, allowed in EQUITY_MONEY_CHOICES.items():
+        if no_scaled and path.startswith("scaled."):
+            continue
         node = _at(table, path)
         if not any(type(node) is type(choice) and node == choice for choice in allowed):
             problems.append(f"equity_money.{path} = {node!r} is not exactly one of {list(allowed)}")
@@ -1588,6 +1684,16 @@ def equity_money_problems(constitution: dict[str, Any] | None = None) -> list[st
           "the close window is sent before its cut-off")
     order("order_path.bars_after_close_s", "order_path.decide_after_close_s", "programs decide on the day's bars")
     order("order_path.preopen_before_open_s", "order_path.audit_before_open_s", "the bars' audit comes before the pre-open")
+    # THE SCALED BAND (C3): the pin's sha256 is "" (dark) or 64 lowercase hex digits; a higher rung never sizes smaller.
+    sha = _at(table, "scaled.pin_sha256")
+    if not no_scaled and (not isinstance(sha, str) or (sha and not _PIN_SHA.fullmatch(sha))):
+        problems.append(f"equity_money.scaled.pin_sha256 = {sha!r} is neither \"\" (dark) nor a sha256 of 64 lowercase "
+                        "hex digits")
+    for lower, higher in zip(EQUITY_SCALED_RUNGS, EQUITY_SCALED_RUNGS[1:]):
+        a, b = f"scaled.rungs.{lower}", f"scaled.rungs.{higher}"
+        if a in values and b in values and values[a] > values[b]:
+            problems.append(f"equity_money.{a} ({values[a]}) is above {b} ({values[b]}): a higher rung never sizes "
+                            "smaller")
     return problems
 
 
@@ -1612,4 +1718,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '18636b3f13d5746d25b80a06a0413d1ffccf675968f0b5bed9e94b1d9ac0265e'
+PINNED_DIGEST = 'd4e59a79a7161a2a79cc741e37376a0267d864f1e04e47243fc8bd6bb26c0e04'

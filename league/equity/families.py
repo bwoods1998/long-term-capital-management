@@ -121,6 +121,18 @@ class EquityFamilies:
         except Exception:  # noqa: BLE001 - fail closed: no new seat
             return 0
 
+    def scale_setting(self) -> dict[str, Any]:
+        """THE SCALED BAND's setting as the swarm sets it (C3 (A45) of the scaling plan; `elane.scale`, league/swarm/elane.py
+        `scale_setting`: swarm.json over policy.json): {"rung": the ladder's cap for every program, "programs":
+        {"eq|<family>|v<N>": one program's cap}}, each 0 to 5. A setting may only LOWER a rung (the book sizes at the
+        lower of the pin's and this); one that cannot be read is the last good, else every rung 0 (fail closed: Probe)."""
+        try:
+            from ..swarm import elane
+
+            return elane.scale_setting(self.root)
+        except Exception:  # noqa: BLE001 - fail closed: every program at Probe
+            return {"rung": 0, "programs": {}}
+
     def read(self, family: str | None = None) -> list[dict]:
         """The equity-lane rows (the module docstring); [] with `last_error` set when the store cannot be read (no
         store, not within a second, no equity identity)."""
@@ -254,13 +266,15 @@ class MemoryEquityFamilies:
     them out and `standing` says `HELD`."""
 
     def __init__(self, rows: Iterable[Mapping[str, Any]] = (), *, seats: int | None = None,
-                 panel_seats: int | None = None):
+                 panel_seats: int | None = None, scale: Mapping[str, Any] | None = None):
         self.held: dict[str, str] = {}
         self.rows = {str(r["family"]): dict(r) for r in rows}
         #: The swarm's roster as `EquityFamilies.seats` answers it; None: no word of it (the table's count alone).
         self.roster = seats
         #: The swarm's panel seats as `EquityFamilies.panel_seats` answers them; None: no word (the row's count alone).
         self.panel_roster = panel_seats
+        #: THE SCALED BAND's setting as `EquityFamilies.scale_setting` answers it (C3); None: no word (the pin alone).
+        self.scale = None if scale is None else dict(scale)
         self.forward: dict[str, dict[str, dict]] = {}
         self.moves: list[tuple[str, str, str]] = []
         self.twin_rows: dict[str, dict] = {}
@@ -336,6 +350,9 @@ class MemoryEquityFamilies:
 
     def panel_seats(self) -> int | None:
         return self.panel_roster
+
+    def scale_setting(self) -> dict[str, Any] | None:
+        return None if self.scale is None else copy.deepcopy(self.scale)
 
 
 __all__ = ["TWINS_KEY", "BOOK_BANDS", "RUNNING_BANDS", "GONE", "CONFIRM_FIELDS", "validation_r_sd", "EquityFamilies",

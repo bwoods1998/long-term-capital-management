@@ -126,9 +126,14 @@ class TheDigests(unittest.TestCase):
         self.assertEqual(X.DIGESTS_OPF1[(6, "0.33")],
                          ("cfcc94b14973a174c522928012df1b3aea97dabda171679b1566841ecdb2de0c",
                           "60796aed0c82235b802fa925f865daf10d6eca6d355ddd80ae044380edd4d93d"))
-        self.assertEqual(X.DIGESTS[(6, "0.33")],
+        # C2's own pins of the pair in force (C3's Scaled block, `equity_money.scaled`, moved them once more: with it left
+        # out, `before_scaled`, the digests are C2's exactly).
+        self.assertEqual(X.DIGESTS_C2[(6, "0.33")],
                          ("4cd610a542397fbc78cade6f0d3fd9054faab2ea8395c07b19160e200c840014",
                           "18636b3f13d5746d25b80a06a0413d1ffccf675968f0b5bed9e94b1d9ac0265e"))
+        for pair in X.CANDIDATES:
+            back = X.before_scaled(X.constitution_at(*pair))
+            self.assertEqual((money_digest(back), digest(back)), X.DIGESTS_C2[pair], f"{pair}: before the Scaled block")
         # Every older table's helper sets the row back too: one open structure a Probe family's pins still hold.
         for pair in X.CANDIDATES:
             back = X.before_opf1(X.constitution_at(*pair))
