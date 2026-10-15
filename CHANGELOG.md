@@ -49,6 +49,51 @@ on branches.
   seal suites, the full suites; a read-only dry run on the House's graveyard (04:25Z Oct 15): 14 bound cells from 20
   rows, 2,663 characters.
 - **Rollback:** the release before.
+
+### The Probe sleeve 0.33 x E at six seats beside one open options structure a family (`set_design 6 0.33`), on `feat/equity-sleeve-033` above `feat/options-opf1` (DRAFT for the captain's decision; unreleased; an owner deploy; THE MONEY DIGEST MOVES ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
+
+- **The rows** (`set_design 6 0.33`): `equity_money.probe.sleeve_share` "0.50" -> "0.33", inside its bound, new lots
+  only; the seats stay 6. The design blocks restate the figures.
+- **Why, and what the pre-registered rule said.** With the options program trading as its code does (one short-dated
+  call a gate-on session, held to expiry, one open structure a family by the parent change), the $400 window is shared
+  by the six share programs' lots and its calls. Measured on the House's own engine and sizing over 3,048 historical
+  paths from the live state: P(Done) by Dec 7 +4.9 points (SE 0.8) with the calls priced from the paths, +3.9 (SE 1.0)
+  at zero edge; by Nov 6 +5.9 / +4.3; refused share entries 15.8 -> 8.0 a path; a window pause at an open on 90% ->
+  64% of paths; the consistency clause failing on 4.6% -> 1.5% of paths. THE RULE PINNED BEFORE THE RUN SAYS A32 STAYS:
+  0.33's 5% tail of the 12-week tally is $2.73 past its $50 proviso in one of the two pricings. Shipping this
+  overrides that proviso: a loosened rule, said so.
+- **Its cost.** The tail (the 5% worst 12-week tally about $50 deeper); smaller share lots (about $190 against $250),
+  so each close carries less market direction; the options program opens more (5.0 -> 5.8 a path in 12 weeks); the
+  sleeve is set a third time (A27 allowed it once more after Monday's option close; A32 used that).
+- **Recorded fixture.** `league/tests/fixtures/equity_etf_orders.json` re-recorded on this tree (`e7cd68d1`) by
+  `league/tests/equity_week.py`: the six share programs' week at the 0.33 sleeve, order for order; `RECORDED_ON` moves.
+- **Rollback**, one owner deploy: `set_design 6 0.50` (new lots only).
+
+### One open structure a Probe family (`options_money.probe.open_per_family` 3 -> 1), on `feat/options-opf1` (unreleased; an owner deploy outside 12:55-20:05Z; THE MONEY DIGEST MOVES ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
+
+- **The row** (`league/constitution.py`, the comment above `options_money`): `probe.open_per_family` 3 -> 1, inside
+  its bound (1 to 5), a tightening. A Probe options family holds one open structure at a time; its next open waits
+  until that one has closed. Nothing else moves: the 10% cap, `family_share` 0.15, `max_open` 8, the $400 window, the
+  $800 total, DM1, the kill switch and the stops.
+- **Why.** The one options program at Probe buys a short-dated call on every session its gate is on and holds each to
+  expiry; at 3 it can hold three, each taking room in the $400 window the six share programs size their lots against.
+  A pre-registered study on the House's own engine and sizing (3,048 historical paths from the live state, A32's six,
+  no new share program arriving) read the program as coded against one structure at a time: P(Done) by Dec 7 +3.2
+  points (SE 1.1) with its calls priced from the paths, +2.3 (SE 1.1) with their mean set to a 10% loss; fewer refused
+  share entries (19.6 -> 15.8 a path) and fewer checkpoints failing the consistency clause (7.1% -> 4.6% of paths).
+- **Its cost.** About 0.6 fewer options closes a path in 12 weeks; a Probe options program trades a smaller book than
+  its replay holds (a refused open is no close, so no twin moves); the practice book (`league/live/shadow.py`) scales
+  to one structure a family too; a two-sided `long_single` family at Probe (none is at Probe today) holds one leg at a
+  time, its put waiting until its call has closed. Two a family was measured too and is no better than three (the
+  family share and the window already stop the third call). No program is stopped and no position is sold.
+- **Identities.** Money digest `de5ed74e` -> `cd579e5d`, constitution `111ede85` -> `1e14c7f7` (`PINNED_DIGEST`); the
+  equity design blocks restate them. `league/tests/equity_design.py` keeps the older pins as `DIGESTS_E4S2`
+  (`before_opf1`: the row set back to 3) and every older table's helper sets the row back too;
+  `league/tests/test_options_one_open.py` holds the row, `plan_open` with it, and the digests; the long_single and
+  practice tests of two or three open structures run at the rollback's 3, and one more shows the put waiting at 1.
+- **Rollback**, one owner deploy: `open_per_family` 3 (re-pin `PINNED_DIGEST`, rewrite the design blocks); the money
+  digest moves back and the grant re-ratifies.
+
 ### The equity graveyard's universe group: an index row no longer binds a sector, bond or gold card, on `fix/graveyard-group` (unreleased; on release U, main `aec0c8a5`; an owner deploy; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `de5ed74e` and the constitution digest `111ede85` are release U's; no setting changes)
 
 - **Why:** at 03:40Z Oct 15 the captain widened `elane.universe` to the sixteen ETFs (A35). The first births pass
@@ -999,20 +1044,20 @@ contract `397b22b772b3` unchanged; no evidence reset.
 - **The pair in force**, in rule arithmetic of the two numbers:
 
 <!-- equity-design:begin -->
-THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.50 x E
-(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.25 x E.
-A lot in every seat asks for 1.50 x E of ETFs; the lane holds at most 1.00 x E of them, 0.20 x E of
-open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 2 whole lots fit; the
-next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 3 of
+THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.33 x E
+(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.165 x E.
+A lot in every seat asks for 0.99 x E of ETFs; the lane holds at most 0.99 x E of them, 0.198 x E of
+open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 3 whole lots fit; the
+next program's lot of it is 0.005 x E. At E = $2,000, the account all cash and nothing realized: 5 of
 6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-4 of 6 in the $400 window alone; the window alone holds all 6 up to E = $1,333.
-Whole sleeves (programs that hold several ETFs) ask for 3.00 x E; the lane holds at most 1.00 x E,
+6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,020.
+Whole sleeves (programs that hold several ETFs) ask for 1.98 x E; the lane holds at most 1.00 x E,
 0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
-the equity lots: $400 - 0.20 x E against the one-ETF lots above. The gateway's day line (4x
-equity of buys a day, a cancelled one too) admits 16 sends of such a lot: 3 entries can each climb the
-collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.50 x E and
+the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's day line (4x
+equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
+collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
 0.50 x E.
-Money digest `de5ed74e`, full digest `111ede85` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `46b933a9` / `d9cf3149`.
+Money digest `cfcc94b1`, full digest `60796aed` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

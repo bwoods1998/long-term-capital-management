@@ -54,11 +54,18 @@ def decide(ctx):
 '''
 
 
-def table(real_types=None):
+def table(real_types=None, open_per_family=None):
     c = copy.deepcopy(CONSTITUTION)
     if real_types is not None:
         c["options_money"]["real_types"] = list(real_types)
+    if open_per_family is not None:
+        c["options_money"]["probe"]["open_per_family"] = int(open_per_family)
     return M.Table.from_constitution(c)
+
+
+#: A family's call and its put open side by side at three open structures a Probe family, the row's rollback (one open
+#: structure a family since Oct 15, 2026: then the put waits for the call; `test_at_one_open_structure_a_family_...`).
+BOTH = 3
 
 
 def row(**kw):
@@ -156,7 +163,7 @@ class RealEligibility(unittest.TestCase):
 
     def test_sizing_is_each_orders_own_unit(self):
         # The same family's call and put are sized apart: each by its own maximum loss with fees, under the same caps.
-        t, equity, fwd = table(), D("5481.65"), M.forward_stats([], 0.8)
+        t, equity, fwd = table(open_per_family=BOTH), D("5481.65"), M.forward_stats([], 0.8)
         call = M.plan_open(t, band="probe", tuition=False, equity=equity, unit=D("60.00"), fwd=fwd, exposure=M.Exposure())
         put = M.plan_open(t, band="probe", tuition=False, equity=equity, unit=D("130.00"), fwd=fwd,
                           exposure=M.Exposure(family_open=1, family_loss=D("240.00"), book_loss=D("240.00"),
@@ -173,7 +180,8 @@ class OnTheLivePath(LiveCase):
         return [p["why"] for p, a in self.ledger.of("live.refusal")]
 
     def test_a_probe_sends_a_real_long_call_and_a_real_long_put_each_sized_by_its_own_unit(self):
-        live = self.make([family("two-sided", TWO_SIDED, band="probe", structure="long_single", typical=60.0)])
+        live = self.make([family("two-sided", TWO_SIDED, band="probe", structure="long_single", typical=60.0)],
+                         table=table(open_per_family=BOTH))
         self.run_to(9, 33)
         self.assertIn("two-sided@1:r", live.instances)
         opens = [b for b in self.venue.sent if b.get("position_intent") == "buy_to_open"]
@@ -198,7 +206,7 @@ class OnTheLivePath(LiveCase):
 
     def test_both_sides_reach_the_forward_record_each_with_its_own_maximum_loss(self):
         live = self.make([family("two-sided", TWO_SIDED, band="probe", structure="long_single", typical=60.0,
-                                 params={"hold": 2})])
+                                 params={"hold": 2})], table=table(open_per_family=BOTH))
         self.run_to(9, 40)
         self.assertEqual(live.book.positions, {})
         trades = sorted(live.book.closed_trades(), key=lambda t: t["max_loss"])
@@ -267,11 +275,23 @@ class OnTheLivePath(LiveCase):
 
     def test_a_one_sided_single_family_is_left_as_it_was(self):
         # A long_call family's program may open a long_put (the long_call starter does): each is judged by its own type.
-        live = self.make([family("calls", TWO_SIDED, band="probe", structure="long_call", typical=60.0)])
+        live = self.make([family("calls", TWO_SIDED, band="probe", structure="long_call", typical=60.0)],
+                         table=table(open_per_family=BOTH))
         self.run_to(9, 33)
         opens = [b for b in self.venue.sent if b.get("position_intent") == "buy_to_open"]
         self.assertEqual([b["symbol"][-9] for b in opens], ["C", "P"])
         self.assertEqual(sorted(p.type for p in live.book.positions.values()), ["long_call", "long_put"])
+
+    def test_at_one_open_structure_a_family_the_put_waits_for_the_call(self):
+        """THE ROW IN FORCE (`options_money.probe.open_per_family` 1, Oct 15, 2026), and its cost for a two-sided family:
+        while its call is held its put is refused by the count (no order), so a program that asks for the put only while
+        it holds the call trades one side at Probe."""
+        live = self.make([family("two-sided", TWO_SIDED, band="probe", structure="long_single", typical=60.0)])
+        self.run_to(9, 33)
+        opens = [b for b in self.venue.sent if b.get("position_intent") == "buy_to_open"]
+        self.assertEqual([b["symbol"][-9] for b in opens], ["C"], "the call only")
+        self.assertEqual(sorted(p.type for p in live.book.positions.values()), ["long_call"])
+        self.assertTrue(any("the most a Probe family holds is 1" in w for w in self.refusals()), self.refusals())
 
 
 if __name__ == "__main__":

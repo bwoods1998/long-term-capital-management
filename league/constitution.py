@@ -908,11 +908,30 @@ CONSTITUTION: dict[str, Any] = {
     # in league/swarm/dlane.py's `DEFAULTS` (the line's bound is its default), and `dlane.ZERO_EDGE` back to
     # `ZERO_EDGES[0.024]`. The money digest moves back and the standing grant re-ratifies at the House's start; no
     # fingerprint move, no evidence reset.
+    #
+    # ONE OPEN STRUCTURE A PROBE FAMILY (Oct 15, 2026; the captain's decision from the pre-registered study THRU-1015,
+    # parts B and C, private): `probe.open_per_family` 3 -> 1, inside its bound (1 to 5), a TIGHTENING. Why: the one
+    # options program at Probe buys one short-dated call on every session its gate is on and holds each to expiry, so
+    # at 3 it can hold three at once, and every one of them takes room in the $400 window the six share programs size
+    # their lots against. Measured on the House's own engine and sizing over 3,048 historical paths from the live
+    # state (A32's six at 0.50 x E, no new share program arriving), the program as coded against the same program one
+    # structure at a time: P(Done) by Dec 7 +3.2 points (SE 1.1) with its calls priced from the paths, +2.3 (SE 1.1)
+    # with their mean set to a 10% loss (zero edge); by Nov 6 +1.5 / +1.2, by Jan 6 +3.7 / +3.0. The share programs'
+    # refused entries a path 19.6 -> 15.8 (18.4 -> 14.5), sessions with a window pause at an open 94% -> 90%, the
+    # consistency clause's failures (A14) 7.1% -> 4.6% of paths (5.0% -> 3.4%). Its cost, stated: about 0.6 fewer
+    # options closes a path in 12 weeks (5.4 -> 4.8), a Probe options program trades a smaller book than its own
+    # replay holds (a refused open is no close, so no twin moves), the practice book (league/live/shadow.py) scales
+    # to one structure a family too, and a two-sided `long_single` family at Probe (none is at Probe today) holds one
+    # of its two legs at a time: its put waits until its call has closed (league/tests/test_live_long_single.py). Two
+    # a family was measured too and is no better than three (the family share and the window already stop the third
+    # call): the gain is one at a time. No program is stopped, no position is sold. Rollback, one owner deploy:
+    # `open_per_family` 3 here (re-pin `PINNED_DIGEST`); the money digest moves back and the standing grant re-ratifies
+    # at the House's start; no fingerprint move, no evidence reset.
     "options_money": {
         "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_min_equity_usd": "2000",
-        "probe": {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 3, "family_share": "0.15", "floor_usd": "0",
+        "probe": {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 1, "family_share": "0.15", "floor_usd": "0",
                   "max_open": 8, "loss_budget_usd": "400", "loss_window_sessions": 20, "loss_total_usd": "800",
                   "loss_basis": "net", "demotion": "dm1"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
@@ -1005,18 +1024,18 @@ CONSTITUTION: dict[str, Any] = {
     #   7e41909a was the table before that block); the standing grant re-ratifies at the House's start; no
     #   fingerprint move, no evidence reset.
     # <equity-design>
-    #   THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.50 x E
-    #   (`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.25 x E.
-    #   A lot in every seat asks for 1.50 x E of ETFs; the lane holds at most 1.00 x E of them, 0.20 x E of
-    #   open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 2 whole lots fit; the
-    #   next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 3 of
+    #   THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.33 x E
+    #   (`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.165 x E.
+    #   A lot in every seat asks for 0.99 x E of ETFs; the lane holds at most 0.99 x E of them, 0.198 x E of
+    #   open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 3 whole lots fit; the
+    #   next program's lot of it is 0.005 x E. At E = $2,000, the account all cash and nothing realized: 5 of
     #   6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-    #   4 of 6 in the $400 window alone; the window alone holds all 6 up to E = $1,333.
-    #   Whole sleeves (programs that hold several ETFs) ask for 3.00 x E; the lane holds at most 1.00 x E,
+    #   6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,020.
+    #   Whole sleeves (programs that hold several ETFs) ask for 1.98 x E; the lane holds at most 1.00 x E,
     #   0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
-    #   the equity lots: $400 - 0.20 x E against the one-ETF lots above. The gateway's day line (4x
-    #   equity of buys a day, a cancelled one too) admits 16 sends of such a lot: 3 entries can each climb the
-    #   collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.50 x E and
+    #   the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's day line (4x
+    #   equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
+    #   collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
     #   0.50 x E.
     # </equity-design>
     #   THE PROBE SLEEVE AT 0.50 (A20, Oct 11, 2026; Claude's decision under goal item 4, from the pre-registered study
@@ -1081,7 +1100,7 @@ CONSTITUTION: dict[str, Any] = {
         "invested_share": "1.00",
         "cash_reserve_usd": "50",
         "open_risk_weight": {"etf": "0.20", "stock": "0.40"},
-        "probe": {"sleeve_share": "0.50", "max_programs": 6, "min_order_usd": "10"},
+        "probe": {"sleeve_share": "0.33", "max_programs": 6, "min_order_usd": "10"},
         "sized": {"min_trades": 1000, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
                   "beat_bh": True, "min_probe_sessions": 5},
         "demotion": {"rule": "edm1", "min_trades": 10, "z": "1.645", "program_loss_usd": "-300", "twin_gap_bp": "15",
@@ -1572,4 +1591,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '111ede85f9b401c9af74f0f1967f9390c37ccd35a47f6fb048257db3c691ce6f'
+PINNED_DIGEST = '60796aed0c82235b802fa925f865daf10d6eca6d355ddd80ae044380edd4d93d'

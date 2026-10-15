@@ -337,6 +337,10 @@ class PreE1(StandingCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         CONSTITUTION.pop("equity_money", None)
+        # ... and before one open structure a Probe family (Oct 15, 2026): three a family in every release they replay.
+        opf = patch.dict(CONSTITUTION["options_money"]["probe"], open_per_family=3)
+        opf.start()
+        self.addCleanup(opf.stop)
 
 
 class TheIncubatorCap(PreE1):
