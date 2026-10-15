@@ -59,8 +59,9 @@ from league.tests import equity_week as W
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "equity_etf_orders.json"
 #: The release the fixture was recorded on: main, with releases E5-A (the seat rule) and E3.1 (the exit wait's end,
-#: the re-based twin) deployed, and decision A32 (the Probe sleeve 0.50 x E at six seats, 47ed6872, PR #543).
-RECORDED_ON = "47ed6872ce6c232b743cc556f5540892b9132470"
+#: the re-based twin) deployed, decision A32 (the Probe sleeve 0.50 x E at six seats, 47ed6872, PR #543), and since
+#: Oct 15, 2026 the Probe sleeve 0.33 x E beside one open options structure a family (3292f0a4, set_design 6 0.33).
+RECORDED_ON = "3292f0a4696ac96164b067a62561ee983cf6de62"
 
 
 def differences(name: str, want: dict, got: dict) -> str:
