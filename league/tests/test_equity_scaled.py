@@ -347,7 +347,12 @@ class Scaled(T.BookTest):
             self.assertEqual(self.size(h, a).sleeve_equity, D("0.25") * D(E_P), "Probe: no rung")
             self.assertEqual(h.state.rows("SELECT value FROM kv WHERE key=?", (L.SCALE_KEY,))[0]["value"], "{not json")
             self.assertEqual(h.book.scaled()["state"], "memory")
-            self.assertEqual(len(h.standing()), 1)
+            [alert] = h.standing()
+            self.assertTrue(alert["began_at"], "a standing condition, dated its first minute (the watch inherits it)")
+            h.clock.set(h.clock() + 3600)
+            h.restart()
+            h.book._scale_now()
+            self.assertEqual([a["began_at"] for a in h.standing()], [alert["began_at"]] * 2, "kept across restarts")
         from league.ops.preopen import check_equity
         from league.tests.test_equity_money import ThePreopenEquityCheck
 
@@ -355,6 +360,53 @@ class Scaled(T.BookTest):
         with band(sha):
             house["release"]["live"]["equity"] = {"frozen": "", "scaled": h.book.scaled()}
         self.assertFalse(check_equity(house).ok)
+
+    def test_an_unread_setting_minute_is_no_rung_change(self):
+        """The review of C3 (round two): an unreadable setting sizes at Probe for that minute but moves neither the
+        program line's "since the last change" nor the ratchet, nor the window's reading."""
+        sha = pin(self.root, {KEY_A: 2})
+        h = self.harness()
+        a = h.instance("fam-a")
+        with band(sha, lines=True):
+            h.book._scale_now()
+            since = h.state.get(L.SCALE_KEY)["programs"][KEY_A]["since_at"]
+            h.clock.set(h.clock() + 120)
+            h.families.scale_setting = mock.Mock(side_effect=OSError("unreadable"))
+            self.assertIs(h.book._scale_for(a, D(E)), L.SCALE_PROBE)
+            h.book._scale_now()
+            del h.families.scale_setting
+            h.clock.set(h.clock() + 120)
+            h.book._scale_now()
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 2)
+            row = h.state.get(L.SCALE_KEY)["programs"][KEY_A]
+            self.assertEqual((row["since_at"], row["rung"]), (since, 2), "no change noted for the unread minute")
+            self.assertFalse(h.state.get(L.SCALE_KEY).get("window"))
+
+    def test_a_memory_row_gone_once_written_is_no_fresh_start(self):
+        sha = pin(self.root, {KEY_A: 1})
+        h = self.harness()
+        a = h.instance("fam-a")
+        with band(sha):
+            h.book._scale_now()
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 1)
+            h.state.execute("DELETE FROM kv WHERE key=?", (L.SCALE_KEY,))
+            self.assertIs(h.book._scale_for(a, D(E)), L.SCALE_PROBE, "gone after it was written: unreadable")
+            h.book._scale_now()
+            self.assertEqual(h.book.scaled()["state"], "memory")
+            self.assertEqual(h.state.rows("SELECT key FROM kv WHERE key=?", (L.SCALE_KEY,)), [], "never written over")
+            from league.ops.preopen import check_equity
+            from league.tests.test_equity_money import ThePreopenEquityCheck
+
+            house = ThePreopenEquityCheck("test_each_fault_fails").house()
+            house["release"]["live"]["equity"] = {"frozen": "", "scaled": h.book.scaled()}
+            check = check_equity(house)
+            self.assertFalse(check.ok)
+            self.assertIn("the Scaled band's memory cannot be read", check.headline())
+            # Removing both keys on purpose is the one fresh start; the owner is told it reads again.
+            h.state.execute("DELETE FROM kv WHERE key=?", (L.SCALE_SEEN_KEY,))
+            h.book._scale_now()
+            self.assertEqual(h.book.scaled()["state"], "matched")
+            self.assertIn("matches its row again", " ".join(t for lvl, t in h.alerts if lvl == "warning"))
 
     def test_d3_at_the_sizing_itself(self):
         sha = pin(self.root, {KEY_A: 1})

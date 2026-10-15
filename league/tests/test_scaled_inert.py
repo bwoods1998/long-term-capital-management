@@ -74,7 +74,7 @@ class Inert(unittest.TestCase):
             got = self.run_scenario()
         self.assert_same(got, TRADING)
         added = sorted(set(got["kv_keys"]) - set(golden()["kv_keys"]))
-        self.assertEqual(added, ["eq_scale"], "the memory holds the mismatch's first minute")
+        self.assertEqual(added, ["eq_scale", "eq_scale_seen"], "the memory holds the mismatch's first minute")
         self.assertEqual(sorted(json.loads(got["kv"]["eq_scale"])), ["mismatch_since"], "no program at a rung was kept")
         said = [e for e in got["events"] if e[0] in ("equity.scale", "ops.alert")]
         self.assertEqual([e[0] for e in said], ["equity.scale", "ops.alert"], "one record and one standing alert")
@@ -105,12 +105,12 @@ class Inert(unittest.TestCase):
         with mock.patch.dict(CONSTITUTION["equity_money"]["scaled"], {"pin_sha256": sha}):
             got = self.run_scenario(configure=stop)
         self.assert_same(got, TRADING + ("alerts",))
-        self.assertEqual(sorted(set(got["kv_keys"]) - set(golden()["kv_keys"])), ["eq_scale"])
+        self.assertEqual(sorted(set(got["kv_keys"]) - set(golden()["kv_keys"])), ["eq_scale", "eq_scale_seen"])
         # The ratchet holds the pin's rungs as first read (R1: the lines are not in force) and the setting's caps; a stop
         # set before the pin was read is not learned, one set after it would stick.
         self.assertEqual(json.loads(got["kv"]["eq_scale"]), {"ratchet": {"sha256": sha, "rungs": {
             "eq|fam-a|v1": 1, "eq|fam-b|v1": 1}, "caps": {"eq|fam-a|v1": 0, "eq|fam-b|v1": 0}}})
-        self.assertEqual({k: v for k, v in got["kv"].items() if k != "eq_scale"}, golden()["kv"])
+        self.assertEqual({k: v for k, v in got["kv"].items() if k not in ("eq_scale", "eq_scale_seen")}, golden()["kv"])
         self.assertEqual([e[1]["state"] for e in got["events"] if e[0] == "equity.scale"], ["matched"])
 
 

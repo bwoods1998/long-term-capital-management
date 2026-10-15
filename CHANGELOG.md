@@ -57,7 +57,8 @@ updater is on. What is built and not deployed is on branches.
   highest rung's: back to Probe for good), D5 (the Scaled window: Scaled opens pause, said once), D6 (the Scaled
   total: every program back to Probe, the ladder closed for the pin's plan version). Every other step-down is the
   captain's same-day setting (D3 is judged at each entry's sizing too). A rung that changes during an entry sends no
-  more shares under other marks. A memory that cannot be read sizes every program at Probe and is never written over.
+  more shares under other marks. A memory that cannot be read (or is gone once written) sizes every program at Probe
+  and is never written over; an unreadable setting minute notes nothing.
   A pin that does not match its row opens no new Scaled lot: a program last read at a rung
   waits, the rest trade at Probe, one standing error alert, health `scaled`, the pre-open check fails
   (league/ops/preopen.py). Memory in the private live.sqlite (`eq_scale`); a private ledger kind `equity.scale`

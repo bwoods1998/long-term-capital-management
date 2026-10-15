@@ -424,6 +424,13 @@ PIN_REFUSAL = "the Probe pin cannot be read and no E_P was ever read on this box
 #: buy `probe` `SCALED_MARK`; the lot it opens carries `info` {"rung", "scaled"} (league/equity/bands.py `RUNG_INFO`,
 #: `SCALED_INFO`) and a Scaled lot `probe` 0, so EDM1's `realized_net` and the Probe window's closes leave it out.
 SCALE_KEY = "eq_scale"
+#: When this box first found `SCALE_KEY` unreadable ({"since": ISO}; a key of its own, since the memory cannot hold it):
+#: the standing alert's `began_at`, so the watch after a promotion counts it as inherited. Removed once it reads again.
+SCALE_UNREAD_KEY = "eq_scale_unread"
+#: That `SCALE_KEY` was ever written on this box ({"at": ISO}): a memory row MISSING once one was written is read as
+#: unreadable, never as a fresh start (it would forget D3's sends-back, D6's closure and the ratchet), as C2 reads a pin
+#: gone once one was read. Removing both keys on purpose is the one fresh start.
+SCALE_SEEN_KEY = "eq_scale_seen"
 SCALED_MARK = 2
 PIN_RUNGS_FIELD = "rungs"
 PIN_PLAN_FIELD = "plan_sha256"
@@ -2316,7 +2323,7 @@ class EquityBook:
         sized = self._size(intent, inst, symbol, klass, limit, usd, today)
         if sized is None:
             return
-        first = orders[0] if orders else None
+        first = next((o for o in orders if o.filled_qty > 0), None)      # the buy that opened the lot
         now_at = self._sized_scale.get(intent.iid, SCALE_PROBE)
         if first is not None and filled_qty > 0 and (first.scaled, _order_rung(first)) != (now_at.scaled, now_at.rung):
             # C3: ONE INTENT, ONE LOT, ONE MARK. Its lot keeps the marks of the buy that opened it; a replacement sized at
@@ -2610,10 +2617,11 @@ class EquityBook:
         lost; the review of C3, Oct 15, 2026)."""
         try:
             rows = self.state.rows("SELECT value FROM kv WHERE key=?", (SCALE_KEY,))
+            if not rows:
+                seen = self.state.rows("SELECT key FROM kv WHERE key=?", (SCALE_SEEN_KEY,))
+                return None if seen else {}
         except Exception:  # noqa: BLE001
             return None
-        if not rows:
-            return {}
         try:
             mem = json.loads(rows[0]["value"])
         except (TypeError, ValueError):
@@ -2731,6 +2739,12 @@ class EquityBook:
             kept = int(((mem.get("programs") or {}).get(key) or {}).get("rung") or 0)
             return ScaleRung(refusal=f"{SCALE_REFUSAL}: {why}"[:300]) if kept >= 1 else SCALE_PROBE
         changed = self._scale_ratchet(mem, key, pin, st)
+        if self._scale_cap(key) is None:
+            # The setting cannot be read: Probe for this entry (fail closed), and NO rung change is noted (an unread
+            # minute moving "since the last change" would reset the program line; the review of C3).
+            if changed:
+                self._scale_keep(mem)
+            return SCALE_PROBE
         rung = self._effective_rung(key, pin, st, mem)
         changed = self._scale_track(mem, key, rung) or changed
         if rung >= 1:
@@ -2755,6 +2769,9 @@ class EquityBook:
 
     def _scale_keep(self, mem: Mapping[str, Any]) -> None:
         try:
+            if not self.state.rows("SELECT key FROM kv WHERE key=?", (SCALE_SEEN_KEY,)):
+                self.state.put(SCALE_SEEN_KEY, {"at": dt.datetime.fromtimestamp(self.clock(), dt.timezone.utc)
+                                                .isoformat(timespec="seconds")})
             self.state.put(SCALE_KEY, dict(mem))
         except Exception:  # noqa: BLE001 - kept in memory only this minute; the next minute writes it again
             pass
@@ -2839,8 +2856,10 @@ class EquityBook:
         state, pin, why = self._scale_pin(st)
         mem = self._scale_mem()
         if mem is None:
-            self._scale_said("memory", "the Scaled band's memory (eq_scale) cannot be read: every program at Probe", {})
+            self._scale_said("memory", "the Scaled band's memory (eq_scale) cannot be read: every program at Probe", {},
+                             began_at=self._scale_unread_since())
             return
+        self._scale_unread_since(clear=True)            # it reads again (or always did): no unread minute kept
         changed = self._scale_said(state, why, mem)
         if state != "matched" or pin is None or pin.e_p is None:
             if changed:
@@ -2858,6 +2877,12 @@ class EquityBook:
         lots = self._scale_lots()
         for key, _ in pin.rungs or ():
             changed |= self._scale_ratchet(mem, key, pin, st)  # every program the pin names, seated or not
+        if self._scale_cap("") is None:
+            # The setting cannot be read this minute: nothing is noted (no rung change, no line, no window or total read
+            # on rungs it cannot know); every entry sizes at Probe meanwhile (`_scale_for`).
+            if changed:
+                self._scale_keep(mem)
+            return
         for inst in live:
             key = program_key(inst.family, inst.version)
             rung = self._effective_rung(key, pin, st, mem)
@@ -2898,7 +2923,26 @@ class EquityBook:
         if changed:
             self._scale_keep(mem)
 
-    def _scale_said(self, state: str, why: str, mem: dict[str, Any]) -> bool:
+    def _scale_unread_since(self, *, clear: bool = False) -> str | None:
+        """`SCALE_UNREAD_KEY`: when this box first found the memory unreadable (written the first time, kept across
+        restarts); with `clear`, the key removed (the memory reads again). Never raises."""
+        try:
+            rows = self.state.rows("SELECT value FROM kv WHERE key=?", (SCALE_UNREAD_KEY,))
+            if clear:
+                if rows:
+                    self.state.execute("DELETE FROM kv WHERE key=?", (SCALE_UNREAD_KEY,))
+                return None
+            if rows:
+                kept = json.loads(rows[0]["value"])
+                if isinstance(kept, Mapping) and isinstance(kept.get("since"), str):
+                    return kept["since"]
+            since = dt.datetime.fromtimestamp(self.clock(), dt.timezone.utc).isoformat(timespec="seconds")
+            self.state.put(SCALE_UNREAD_KEY, {"since": since})
+            return since
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _scale_said(self, state: str, why: str, mem: dict[str, Any], *, began_at: str | None = None) -> bool:
         """Say a change of the scaling pin's state under a pin-sha row, once a process: a record (`equity.scale`); a pin
         that does not match ONE standing error alert (`began_at` the memory's `mismatch_since`, its first minute on this
         box, kept across restarts); its repair a warning. True when the memory changed."""
@@ -2914,15 +2958,17 @@ class EquityBook:
         before, self._scale_state = self._scale_state, state
         self.record("equity.scale", {"state": state, "was": before, "why": why[:200]})
         if state == "memory":
-            self._standing_alert("error", f"equity: {why[:200]}; replace or remove the kv row by hand after reading it "
-                                          "(its D3 sends-back, D6's closure and the ratchet are in it)", began_at=None)
+            self._standing_alert("error", f"equity: {why[:200]}; repair the kv row {SCALE_KEY} by hand from the private "
+                                          "ledger and receipts (its D3 sends-back, D6's closure, the ratchet); removing "
+                                          f"it does not clear this ({SCALE_SEEN_KEY} remembers it was written)",
+                                 began_at=began_at)
         elif state == "mismatch":
             self._standing_alert("error", f"equity: the scaling pin ({PROBE_PIN_FILE}) does not match "
                                           f"equity_money.scaled.pin_sha256 ({why[:160]}): no new Scaled lot opens; a "
                                           "program last read at a rung waits, every other one trades at Probe; write "
                                           "the pin the row names, or deploy the row of the pin there",
                                  began_at=mem.get("mismatch_since"))
-        elif before == "mismatch":
+        elif before in ("mismatch", "memory"):
             self.alert("warning", "equity: the scaling pin matches its row again: the rungs it names apply")
         return changed
 

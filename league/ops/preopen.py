@@ -637,6 +637,9 @@ def check_equity(h: Mapping[str, Any]) -> Check:
             c.req(True, f"the scaling pin matches its row: {at} program(s) at a rung"
                         + (", the ladder closed (D6)" if band.get("closed") else "")
                         + (", the Scaled window reached (D5)" if band.get("window") else ""))
+        elif state == "memory":
+            c.req(False, f"the Scaled band's memory cannot be read ({str(band.get('why') or 'no reason given')[:160]}): "
+                         "every program at Probe; repair it from the private ledger")
         else:
             c.req(False, f"the scaling pin does not match its row (since {band.get('since') or 'unknown'}: "
                          f"{str(band.get('why') or 'no reason given')[:160]}): no new Scaled lot opens; write the pin "

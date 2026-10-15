@@ -69,8 +69,11 @@ row, after Done's first checkpoint receipt; every raise after it is another such
   `state` "mismatch", and the pre-open check FAILS (league/ops/preopen.py). The plan's section 9 says "no new equity
   lot"; the build opens none of the Scaled pool and keeps Probe trading (a deviation, said: it keeps Done's pace and
   the consistency clause, and Probe sizing never depended on the rungs).
-- **Fail closed** (the review of Oct 15): a memory (`eq_scale`) that cannot be read sizes every program at Probe, is
-  never written over, and is one standing error alert (health `scaled.state` "memory"; the pre-open check fails); D3 is
+- **Fail closed** (the review of Oct 15): a memory (`eq_scale`) that cannot be read, or that is gone once it was written
+  (`eq_scale_seen` remembers it), sizes every program at Probe, is never written over, and is one standing error alert
+  dated its first minute (`eq_scale_unread`; health `scaled.state` "memory"; the pre-open check fails; repair it from
+  the private ledger, and only removing both keys on purpose is a fresh start); an unreadable `elane.scale` sizes at
+  Probe that minute and notes nothing (no rung change, no ratchet, no window reading); D3 is
   judged at each entry's sizing too, so a close of that very minute sends the program back before its entry; a rung that
   changes during an entry (the setting, a program line) sends no more shares under other marks (one intent, one lot,
   one mark); a line of zero (a row tightened to nothing) is hit by the first loss, never by no loss.
