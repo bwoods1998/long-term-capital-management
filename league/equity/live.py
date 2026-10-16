@@ -5639,7 +5639,7 @@ def _one_series(rows: Mapping[str, Any], days: Collection[str]) -> tuple[dict[st
     if missing:
         return None, None, f"no {SPAN_BASIS} close on {', '.join(missing[:4])} in the House's bar store (eq_bars)"
     closes, shas = {}, set()
-    for day in days:
+    for day in sorted(days):                         # sorted: the `why` never depends on string-hash order
         close, sha = rows[day]
         close = A.dec(close)
         if close is None or close <= 0 or not _finite(close):
