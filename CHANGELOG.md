@@ -26,11 +26,337 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261015T075939Z-89d93d40bfda` (main `0b978378`, PR #557: one open options structure a
-Probe family and the Probe sleeve 0.33 x E, 08:00Z Oct 15), the gateway is `9c0651a3` (20:25:11Z Oct 11), and the box's
-updater is on. What is built and not deployed is on branches.
+The running House release is `20261015T204317Z-ad3c7f9653cc` (main `e136c251`, PR #560: release 1015f and FW9,
+20:43Z Oct 15), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
+is on branches.
 
-### Release 1015f: release 1015e plus three fixes, on `rel/1015f` (unreleased; one House deploy and one gateway deploy
+### Release 1017a: C2 and C3 of the scaling plan, and the budget's Claude wait, on `rel/1017a` (unreleased; ONE OWNER deploy by Blake, outside 12:55-20:05Z on a trading day and never in the deploy freeze from Fri Oct 23 00:00Z; THE MONEY DIGEST MOVES cfcc94b1 -> 558dc3a2 and the constitution 60796aed -> d4e59a79, the grant re-ratifies; the options execution fingerprint b60410ad and the equity identity 78022ca6 do not move)
+
+- C2 (A45) of the scaling plan, both parts (entry below): A, the options park (`options_money.sized.min_trades`
+  20 -> 1000, and the bound's tight end `probe.max_loss_share` 0.02 -> 0.005); B, the Probe pool frozen at E_P, read
+  from the private pin `/workspace/state/scale-pin.json`. Part B is inert until the owner's step writes the pin: with
+  no pin ever read on the box every sleeve sizes on E exactly as today, and nothing is written. Part A's own digests
+  (`4cd610a5` / `18636b3f`) are inside this release and never deploy: the grant re-ratifies on C3's.
+- C3 (A45), the Scaled band, SHIPPED DARK (entry below): `equity_money.scaled.pin_sha256` "", so no rung is live and,
+  while it is dark, every sizing, line and Done reading is byte-identical to C2's (`league/tests/test_scaled_inert.py`
+  against C2's fixture; three lens reviews found 0 bytes moved in their own dark scenarios). The reviewers'
+  disagreement table (the pinned plan against the build, with their calls) is in its entry. The first rung is Blake's
+  later pin deploy, never this release, and the `ship_house.sh` pin-sha preflight is owed before it.
+- The budget's Claude wait (item7-claude, entry below): L4's wait for the Sail guard's next reading covers the Claude
+  meter too, so one missed `/v1/health` read after a restart no longer writes Claude `unreadable` and fails Done item
+  7's day.
+- fix7 (the C3 ops review's finding 3, on C1's code from release 1016a): `_one_series` (league/equity/live.py) walks
+  `sorted(days)`, so span_bh's `why` no longer depends on the process's string-hash order when two or more closes are
+  bad. Done's verdict never read it (a checkpoint's `holds` comes from items 3, 4 and 7 and A14); live.py is outside
+  both identities.
+- Built as merges onto `ba95167e` (release 1016a): C3 `6407b7d8` (which carries C2 `22646a97`), then the Claude wait
+  `a60438a9`, then fix7. Before fix7, `league/` is the C3 ops review's trial merge plus C3's three later commits
+  (`798c6fe5`, `e20e7131`, `6407b7d8`), tree for tree.
+- **Order:** after release 1016a is live; any evening Oct 16-21 after 20:05Z, with Thu Oct 22 after 20:05Z the
+  fallback (about 3h55m to the freeze: one retry at most). `ship_house.sh <head> <PR> r1017a 558dc3a2 d4e59a79`, no
+  `--gateway` (no gateway change). Then the owner's steps: the re-ratification check on `558dc3a2`, the dark checks
+  (health `probe_pin` "absent" and `scaled` "dark", no `equity.probe_pin` or `equity.scale` record), then the pin,
+  which alone turns C2's freeze on, BEFORE any deposit, ceiling or envelope release or any other money-digest deploy,
+  and a Sail checkpoint after it.
+- **Rollback:** release 1016a (one owner deploy; the money digest moves back to `cfcc94b1` and the grant re-ratifies
+  again; a pin already written stays on the box, read by no code there). Once any Scaled lot exists, roll back only by
+  the dark row (`pin_sha256` ""), never by a release without C3.
+
+### C3 (A45) of the scaling plan: the Scaled band, SHIPPED DARK (no rung live), on `feat/scale-c3` (stacked on C2; unreleased; one owner release with C2's two parts, outside 12:55-20:05Z on a trading day; it MOVES THE MONEY DIGEST ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
+
+- **The rows** (`league/constitution.py`, the block `equity_money.scaled` under the table, shares and multiples only,
+  never a dollar): `pin_sha256` "" (DARK: the first rung is Blake's later deploy of a pin and of its sha256 here, after
+  Done's first checkpoint receipt; C2's E_P comes from this very release's re-ratification, so it cannot carry the
+  pin's sha256); `rungs` R1 0.50, R2 1.25, R3 2.25, R4 4.00, R5 6.75 (multiples of E_P, the plan's table 3.2),
+  `max_sleeve_share` 0.50 (no sleeve above 0.50 x E); `lines` (THE SCALED LINES, Blake's amendment of goal item 4):
+  `in_force` false (nothing past R1, no Scaled mark), `window_share` 0.18 over `window_sessions` 20, `total_share`
+  0.36, `program_share` 0.10, `family_line_probe_only` false (the separable third loosening). Each in a bound with the
+  plan's figure at its loose end (`EQUITY_MONEY_BOUNDS`, `EQUITY_MONEY_CHOICES`); the pin's sha "" or a sha256; rungs
+  never decreasing; a table without the block is dark. Reader: league/equity/bands.py `scaled_settings` (never
+  league/live/money.py).
+- **The book** (`league/equity/live.py`, plumbing outside both identities; the rules in `league/equity/bands.py`):
+  - the same private pin C2 reads (`scale-pin.json`) names each program's rung (`rungs`, keys "eq|<family>|v<N>") and
+    the plan's sha256; the House reads a rung ONLY from a pin whose bytes are the row's sha256;
+  - a live share program in the Probe band is sized at min(its rung's multiple x THAT PIN'S E_P, 0.50 x E), never
+    through C2's frozen pool; its rung is the lower of the pin's and the swarm's tighten-only setting `elane.scale`
+    (league/swarm/elane.py `scale_setting`, read through league/equity/families.py; "stop the ladder" is
+    `{"rung": 0}`; a lowering after the pin was read sticks for that pin, so only a new pin raises a rung again), at
+    most R1 while the lines are not in force;
+  - an R1 buy and lot carry the PROBE mark (inside the $400 / $800, EDM1's -$300, the family line); from the yes an
+    R2-and-up buy carries the SCALED mark (`eq_orders.probe` 2; its lot `probe` 0 and `info` {"rung", "scaled"}), is
+    sized to the Scaled room, its open risk leaves the Probe room (`probe_figures`, the one path into either lane's),
+    and its close is outside the Probe window, the total and EDM1's line; a rung that changes during an entry sends no
+    more shares under other marks;
+  - the House's own step-downs: D3 (the program line since the last rung change, -$300 at R1 and -10% of the sleeve
+    from R2, and the cumulative line since R1 at the highest rung's, each over EVERYTHING the program version realized
+    whatever its marks, judged every minute and at each entry's sizing: back to Probe for good), D5 (the Scaled
+    window: Scaled opens pause, said once), D6 (the Scaled total: every program back to Probe, that version of the
+    plan closed for good; only a version never run on the box reopens the ladder, loudly);
+  - a pin that does not match its row opens no new Scaled lot: a program last read at a rung waits, the rest trade at
+    Probe on the E_P of the last pin that matched (never the mismatched pin's), and with none ever matched no equity
+    open goes at all (plan 9); one standing error alert, health `scaled`, the pre-open check fails
+    (league/ops/preopen.py);
+  - fail closed: a memory (`eq_scale`) that cannot be read, or is gone once written, sizes every program at Probe and
+    is never written over; an unreadable setting minute notes nothing. Memory in the private live.sqlite; a private
+    ledger kind `equity.scale` (league/ledger.py). No figure in any alert, record or health, and no public alert names
+    a program or a rung.
+- **The family line** (league/swarm/elane.py `loss_line`): with the lines in force and `family_line_probe_only`, the
+  forward rows of Scaled-marked lots are left out (read from live.sqlite, read only, matched by lot and cash;
+  unreadable: nothing left out).
+- **Dark is C2 exactly.** With the row unset nothing of the band runs: `league/tests/test_scaled_inert.py` runs one
+  synthetic book through the House's code and reads every sizing, line and Done reading against
+  `league/tests/fixtures/scaled_inert_c2.json`, which the same scenario wrote on C2's head (3.14 and 3.11): identical,
+  the book's memory too; the pin's own row with the ladder stopped is identical in every sizing, line and reading.
+  Three independent lens reviews (walls and inertness, plan conformance, production) found 0 bytes moved in their own
+  dark scenarios. Proof of the rules: `league/tests/test_equity_scaled.py`.
+- **Where the build and the pinned plan differ** (each with the reviews' call: (a) accepted as built, (b) fixed,
+  (c) an amendment for the captain's packet):
+
+| # | the plan | as built | call |
+|---|---|---|---|
+| 1 | 9: a pin that does not match opens no new equity lot; the deploy preflight refuses such a release first | no new Scaled lot; Probe and panel trade on the last MATCHING pin's E_P; with none ever matched, no equity open at all; no preflight yet (owed in `ship_house.sh` before the first rung) | (c) |
+| 2 | 3.2, 4.2 item 6: the account must hold E_P plus the sleeves and twice the largest | left to the receipt; the House caps each sleeve at 0.50 x E and every account wall binds through `size_entry` | (a) |
+| 3 | 9, 11 item 7: a setting may only lower; every raise is a new pin | a per-pin ratchet: a lowering seen after the pin was read sticks; switching the lines on later raises nothing; a cap already there holds but is not learned (stricter than the plan) | (a) |
+| 4 | 4.3: the step-downs | the House: D3, D5's pause, D6; the captain's same-day `elane.scale`: D1, D2, D4, D5's down-one-rung, D8; D7 by the pin's version key. After a kill switch or a stop clears, Scaled programs resume at their rungs unless lowered | (a), Blake told |
+| 4b | 4.3 D6 | fires on realized loss (Scaled entries already stop on realized plus open risk); a closed version stays closed | (a), (b) |
+| 4c | 4.3 D3 "since the change" | counted from when the House first read the rung | (a) |
+| 4d | 3.4: both program lines read all realized since R1 / since the change | they read every real lot of the program version whatever its marks | (b) |
+| 5 | 3.4 loosening 3 inside the yes | a separate row `family_line_probe_only`: Blake's yes must set both rows | (a) |
+| 6 | (silent) withdrawing the yes, or going dark | every Scaled lot, open or CLOSED, then counts in the Probe window, the $800 total and the room: past Scaled losses can stop the Probe opens of BOTH lanes; once any Scaled lot has existed, roll back only by `pin_sha256` "", never by a release without C3 | (a), Blake told |
+| 7 | 3.4: elane's line reads Probe-marked lots | the forward table has no mark, so elane reads live.sqlite read only | (a) |
+| 8 | (smaller) | Scaled lots keep their Probe slot; the pin is `scale-pin.json`; health gains `scaled`; a refused Scaled entry counts toward the idle clock; every rung raise is a captain build (three tests pin the shipped tree dark); rung status is never in a public alert | (a) each |
+
+- **Identities.** Money digest `4cd610a5` -> `558dc3a2`, constitution `18636b3f` -> `d4e59a79` (`PINNED_DIGEST`); the
+  equity design blocks restate them; with the block left out both are C2's exactly (`DIGESTS_C2`, `before_scaled`).
+  Fingerprint `b60410ad` and equity `78022ca6` unchanged (no file of league/live/, the Gym or the equity evidence).
+- **Its cost, dark:** none in size; one more money-digest move and re-ratification. **At R1 (a later deploy):** one
+  program back at A32's 0.50 sleeve against A37's 0.33 (plan 3.2). **The yes (later):** the four loosenings of plan 3.4.
+- **Rollback**, one owner deploy: the release before C3 while no Scaled-marked lot has ever existed; after that only
+  `pin_sha256` "" (row 6 above); open lots exit by their own rules; the money digest moves and the grant re-ratifies.
+
+### C2 (A45) of the scaling plan: the options sizing-up step parked, and the Probe pool frozen at E_P, on `feat/scale-c2` (unreleased; two owner deploys, part A then part B, or both at once, outside 12:55-20:05Z on a trading day; part A MOVES THE MONEY DIGEST ONCE and the grant re-ratifies; part B moves no identity; no fingerprint moves, no evidence reset)
+
+- **Part B, the Probe pool frozen at E_P** (`league/equity/live.py`, plumbing outside both fingerprints;
+  `league/ops/preopen.py`; one private ledger kind in `league/ledger.py`). Once the private pin
+  `/workspace/state/scale-pin.json` is read (`probe_e_usd`, the sizing E on C2's deploy day: the owner's step writes it
+  once C2 is live, from the grant's capital ratified around C2's money digest, before any deposit or ceiling release;
+  never in the repository), every program's sleeve, the Probe's, the panel's and a Sized one's, sizes on min(E, E_P) at
+  the send, at a share program's decide and at a panel's budget; the account's walls (an instrument's share of E, the
+  invested cap) stay on E. THE NAME IS NOT THE PLAN'S (a deviation, said): the plan's name for the pin carries its
+  target figure, which this public repository does not carry, so the House reads `scale-pin.json` (the plan's script
+  reads E_P from the private ledger, never the pin). NO PIN, AND NONE EVER READ ON THIS BOX, NO FREEZE: the House sizes
+  on E exactly as before and writes nothing, so part B deploys dark. A pin read is kept in the private live.sqlite (E_P,
+  and a marker with its sha256 and times, no figure), so a pin that cannot be read (not a regular file, never followed
+  or waited on; unreadable content) or one lost once one was read sizes on the last E_P read on this box, across
+  restarts, never on E; only with none ever read does it size nothing and refuse every open House-wide. It is ONE
+  standing error alert a process (`began_at` its first minute, kept), which the watch after a promotion inherits; health
+  shows `probe_pin`; the pre-open check fails on it. No figure in any of them. The options Probe structure is read in
+  `league/live/money.py` and is not part B's: each step's row holds it, as the plan says. Proof:
+  `test_equity_probe_pin`. Rollback: the release before part B (replace a pin, never remove it).
+
+Part A, the options row:
+
+- **The options row** (`league/constitution.py`, the comment above `options_money`): `options_money.sized.min_trades`
+  20 -> 1000, inside its bound (20 to 1000) at its tight end, a tightening, as the equity table's was on Oct 11. Sized
+  is the one options route whose stake grows with E with no test against the same-risk buy-and-hold, and its opens
+  carry no Probe mark (outside the $400 window, the $800 total and the program lines). With 1000 no options family
+  reaches Sized; one the swarm holds at Sized is read back to Probe at the live path's next band pass, and nothing it
+  holds is sold. The rule stays pre-registered at its own 20.
+- **The bound's tight end**: `OPTIONS_MONEY_BOUNDS` `probe.max_loss_share` 0.02 -> 0.005 (the loose end, the goal's
+  10%, and the row in force, 0.10, are unchanged), so a later step's row can hold one Probe structure at the dollars it
+  holds today while E grows. It admits only tighter rows, and it is no row of the constitution: it moves no digest.
+- **Nothing changes size at today's E.** Every Probe open is planned as before (`test_options_sized_parked`).
+- **Identities.** Money digest `cfcc94b1` -> `4cd610a5`, constitution `60796aed` -> `18636b3f` (`PINNED_DIGEST`); the
+  equity design blocks restate them. With the row set back both are main's exactly (the bound alone moves neither).
+  Fingerprint `b60410ad` and equity `78022ca6` unchanged. `league/tests/equity_design.py` keeps the older pins as
+  `DIGESTS_OPF1` (`before_options_park`); every older table's helper sets the row back; `test_live_money` tests the
+  rule at its own 20.
+- **Its cost.** No options family can size up while it stands.
+- **Rollback**, one owner deploy: `sized.min_trades` 20 (re-pin `PINNED_DIGEST`, rewrite the design blocks); the money
+  digest moves back and the grant re-ratifies.
+
+### The budget job's wait covers the Claude meter too, on `fix/budget-claude-wait` (unreleased; cut from main `e136c251`, FW9's head; an owner deploy: `league/ops/budget.py` is protected; ship it only inside the single pre-freeze owner release, by Oct 22, never alone in the freeze; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting)
+
+- **What it is** (the pre-mortem's item7-claude): L4's wait for the Sail guard's next reading (entry below) now
+  covers the Claude meter. A `budget` run whose read gives no Claude balance (the gateway's `/v1/health` read timed
+  out or failed, or gave no `claude` block) reads every input again every 20 s at a new time, inside the same wait:
+  at most 270 s from its start, with the same bounds on the sleeps and the looks. It goes on from the first read that
+  gives every meter it waits for. While Sail is unread too, it reads again only once the guard has a good reading, as
+  L4 does. With no such read by the end it goes on from the read that ranks highest (the earliest of those that rank
+  alike), else from its first read: a read ranks by how many of the meters waited for (those the first read did not
+  give) it gives, then by how many meters it gives, and a later read is taken only when it ranks strictly higher. So
+  a read that gives the guard's reading but loses a Claude balance the first read had is taken over the first read,
+  as L4 alone took it (Sail at the ceiling, Claude `unreadable`), and the run keeps looking for Claude to the end of
+  the wait: never worse than L4 alone. With no Claude balance by the end, Claude is `unreadable` exactly as before,
+  and the warning starts "waited N s (K looks) for the gateway's Claude balance: none came". With Sail late too it
+  names both, and for each meter what came at any read, e.g. "the Sail guard's reading came; the Claude balance, read
+  at the first read, did not come again". No balance is invented, and no meter is marked `ceiling` that its read did
+  not give. `guard_wait` adds `waited_for` (the meters unread at the first read) and `unread` (the ones the read the
+  run goes on from does not give); `read` is true only when that read gives every meter. A run with no gateway to
+  read does not wait for Claude.
+- **Why:** the Claude balance was one `/v1/health` read (20 s timeout) with no retry. A run right after a restart that
+  missed it wrote Claude `unreadable`, and that receipt fails Done item 7's clause "every budget receipt reads
+  limited_by 'ceiling' on every meter" for the UTC day. The risk is small: the pre-mortem's verify counted 0 health
+  failures in about 516 reads since Oct 7, well under 1% over the window.
+- **What does not change:** a run that reads both meters at once does not wait, so the normal 00:30Z run takes as long
+  as before. The rule, its constants, the ceiling, the guard, the split, the Done reader and `budget_refresh` (which
+  never waits) are unchanged, and so are the Sail-only wait's texts and figures. In a gateway outage each `budget` run
+  waits the full 270 s, reading the box spend again at each look (two Sail spend calls, at most 14 looks), and the
+  next job waits behind it.
+- **Verified:** `league/tests/test_ops_budget.py` `GuardWait`, 7 new tests (17 in all) with an injected clock and
+  sleeper: a Claude balance missing at the first read and readable at +40 s reads the meter at the new time, with every
+  input read again at each look; a Claude balance missing throughout fails closed with the same meters as a run that did
+  not wait, the run's own time, and the first error naming the wait (and a 280 s first read never looks); Sail and
+  Claude both late (the guard at +40 s, the gateway at +60 s) read both at +60 s with no gateway read before the guard's
+  reading; with the guard at +40 s and the gateway never, the run goes on from the +40 s read (Sail at the ceiling,
+  Claude `unreadable`); with neither ever, both are `unreadable` at the run's own time; no gateway, no wait. From the
+  review: the gateway answering at the first read only, with the guard at +40 s (the review's Probe A: the run goes on
+  from the +40 s read and keeps looking for Claude to the end; it fails on the first cut `cf2201ad`, which went on from
+  the first read and wrote that the guard's reading never came), and with the gateway back at +100 s (both read there);
+  the mirror, the Claude balance back at +20 s and the guard's reading stale from +10 s (the +20 s read is taken); and
+  later reads that rank alike with the one held (not taken; the first error says at which looks the Claude balance
+  came). The L4 tests' records carry the two new keys. The review's 13 mutations of the wait are each killed (one
+  adapted to the rewritten adopt line). The budget tests (106) on Python 3.11 and 3.14; their importers, 34 modules and
+  1,078 tests (every test module the grep for `ops.budget` or `from league.ops import budget` names, and the users of
+  `budget_refresh` and `unbound_budget`), on 3.14; the whole suite on 3.14 (12,070 tests); `league.ci --no-tests`; the
+  four ids on both.
+- **Rollback:** the release before. Nothing is migrated, and nothing reads `guard_wait`.
+
+### Release 1016a: L5 and C1, on `rel/1016a` (unreleased; one House deploy, outside 12:55-20:05Z on a trading day; no
+gateway change; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the
+money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
+
+- L5 (A48), an index-only case-N lineage keeps its S2 try until its first forward session closes (entry below; PR #561).
+  It must land before A39 turns `elane.fwd1.seats` on (20:05Z Wed Oct 21).
+- C1 (A45), span_bh in each checkpoint's by_program (entry below). It must land before the deploy freeze (Oct 27).
+- **Rollback:** the release before, main `e136c251` (nothing is migrated: the permit file's "start" and the report's
+  `span_bh` are recomputed or absent).
+
+### L5: an index-only case-N lineage keeps its S2 try until its first forward day closes, on `fix/fwd1-index-untried` (unreleased; cut from `e136c251`, PR #560's head; the captain's A48; an owner deploy: `league/ops/` is protected and `league/swarm/elane_forward.py` is FORBIDDEN; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting; no pin, receipt, digest or bar moves; `forward_screen.register` and the rule module `fwd1_rule.py` are unchanged)
+
+- **What it is** (the captain's L5, option B): L5 (A48): an index-only case-N lineage keeps its S2 try until the
+  close of its FWD1_START session; the judge then voids it (A33 (4)). A loosening of A39's stated cost "while on, a
+  lineage FWD1 lists takes no sealed S2 try". It acts only with `elane.fwd1.seats` on (A39, from Oct 21); with the
+  seats off nothing changes. A48 supersedes the sentence of `league/ops/fwd1_rule.py` point 1 "A case-N lineage
+  takes no sealed look afterwards (league/swarm/elane_forward.py refuses its Validation try while the seat switch is
+  on; ...)": that module is pinned, so the sentence stays as written; its own next clause (a pending lineage that
+  reached one anyway is VOID) is what A48 relies on.
+- **Why:** with the seats on, `try_refused` refuses the S2 try of every lineage the permit file lists pending. An
+  index family whose v1 fails Train is registered (hourly at :25) and sighted by a forward-screen run as case N, so it
+  is listed pending. Its v2 usually passes Train hours later (most index Train passes come on v2 or later), and could
+  then no longer take its S2 try: it was left to FWD1-R's WEAK screen. That is a timing race, not evidence.
+- **The permit file** (`league/ops/forward_screen.py` `write_permits`): every row now carries its lineage's
+  FWD1_START (`"start"`, the `fwd1_lineages` row's ISO date; `status_rows` already carried it). A date is no figure:
+  the file is still ids and words only. `PERMITS_VERSION` stays 1 (an added key).
+- **The swarm** (`league/swarm/elane_forward.py` `untried`, asked by `try_refused`, which reads the file once with
+  `permit_file`; `permits` keeps its shape for its other callers). A lineage listed "pending" is not refused when
+  all of these hold:
+  - its row is case "N" and type "ETF";
+  - the family asking is the row's own family, the representative's (a sibling family of the lineage is refused: the
+    judge's void reads the families of the lineage's registry rows, and the registry may not have taken a sibling
+    yet);
+  - the row's start is strictly after the file's top-level "start", the pin's first judged session. FWD1_START is
+    max(first_day, the pin's start), and only a start after the pin's is the lineage's own first forward day: a
+    lineage registered before the pin has forward days in the record already. The pin in force starts Oct 16 and A39
+    turns the seats on Oct 21, after the close of any start this refuses for it, so this costs nothing now; it bites
+    at a re-pin;
+  - the family is not forward-only (`elane.forward_only` is asked again inside the exemption, so it cannot outlive
+    R-SEC) and not a panel;
+  - the store's clock is before the close of the start session (`league/equity/schedule.py`
+    `moments(start).close_at`). Before that close no forward day of it can be counted (the forward night runs after
+    the close), so it has seen nothing forward.
+  Fail closed, refused as before: a row without "start" (a file of the earlier job), a file without its top-level
+  start, a date that is not one in the job's own form, a start that is no session or that the calendar cannot
+  answer, a calendar that raises, a clock that cannot be read, case XS1 or type PANEL, status pass or fail, a time at
+  or after the close. `try_refused` takes an optional `now`; `elane.try_open` passes none (the store's clock). The
+  docstrings of `try_open`, both modules, and `docs/operations.md` say it.
+- **One look** (no change to the judge): once the family records its pre-check (`elane_try`) or the registry tags
+  it, the judge's next night writes "void" ("a case-N lineage reached a sealed pre-check after FWD1_START: it is
+  judged no further"), before any checkpoint is read. That holds because the exemption is the representative's own
+  family, which has a registry row of the lineage (above). The file then lists it "void", which `JUDGED` does not
+  include, so it keeps its sealed path. A lineage not tried by that close stays pending and refused, as A39 built it.
+  A Validation run that errors, finds no data or ends with the family retired mid-run records no sealed state, so an
+  exempt lineage that hits one stays pending toward its FWD1 verdict; no verdict was read on that run, so it is not a
+  second look.
+- **An expected warning, not a fault:** in the motivating timing (v1 sighted; v2 passes Train with the same
+  first_day and takes its exempt try before the next night), that night's `repick` reads v2 as the better version
+  but sealed (another case), keeps v1 with a `kept` event and the job raises its `repick_kept` warning, before the
+  judge voids the lineage.
+- **What does not change:** who FWD1 sights and how (`register`, `repick`), the rule module, the pin, its receipt,
+  every bar, screen and false-positive figure; R-SEC (a sector, bond or gold family is refused by `try_open` before
+  this is asked) and A34 (a panel family likewise); `seat_refused`, `step` and the panel pool.
+- **Verified:** `league/tests/test_elane_forward.py` `TheIndexLineageBeforeItsFirstForwardDay` (exempt before the
+  close; refused at and after it; a start at or before the pin's, and a file with no pin start or a malformed one; a
+  sibling family of the lineage and a row with no family; the store's clock, the wall's without one, a clock that
+  cannot be read; no "start" and seven malformed ones; a Saturday start and a year the calendar does not cover; a
+  calendar that raises or answers None; case XS1 and None, type PANEL and None, status pass and fail; forward-only
+  families and a mocked R-SEC; a panel family; the seats off; an unreadable file and no file).
+  `league/tests/test_forward_screen.py` `TheIndexLineageUntried`: every permit row carries its start; THE WHOLE PATH
+  on one store (a v1 failed Train, sighted pending with start Mon Oct 19 after the pin's Fri Oct 16; its try open
+  before that close and shut at it, a sibling refused; the try recorded; the judge's next night writes "void" with no
+  checkpoint; the file lists it void and it keeps its sealed path); the motivating timing's `kept` event and
+  `repick_kept` before the void; a lineage registered before the pin refused; a lineage untried by the close stays
+  pending and refused. `league/tests/test_elane_rsec.py`: `try_open` and `next_try` on the real store's clock, a
+  sector family under the same row, the pin's start and another family's row still refused. The three files,
+  107 tests, on Python 3.11 and 3.14; the six seal suites (E3's skeleton and identities, the panel, E2, memory and
+  seat seals), 107 tests, and `test_elane`, `test_elane_gate`, `test_ci`, `test_panel_forward_seat` and
+  `test_e4_integration`, 127 tests, on 3.14; `league.ci --no-tests` against `e136c251`. The four identities do
+  not move on either.
+- **Rollback:** the release before. Its job writes no "start" and its swarm reader ignores one, so every listed
+  pending lineage is refused again; nothing is migrated.
+
+### C1 (A45): span_bh in each checkpoint's by_program, the scaling plan's benchmark, on `feat/span-bh-c1` (unreleased; cut from `e136c251`, the head of `fix/fw9-alarms`; an owner deploy: `league/ops/` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no Done rule, count, checkpoint trigger, rule sha, bound, money rule or setting changes)
+
+- **Why** (the scaling plan's 2.4): the plan's script tests a share program against the same-risk buy-and-hold over
+  its span. Until now it needed a hand-made closes file. Now the report gives the closes and the figure, from the
+  House's own store, and the script checks them before it uses them.
+- **`span_bh`** (`league/ops/dlane_report.py`; each Done checkpoint's `by_program` row of a share program): one entry
+  a program version among the checkpoint's first K counts: {version, usd, priced, why, basis "adjustment=all",
+  blocked [[from, to]], symbols {SYM: {before, last, sessions, sessions_used, segments, close_before, close_last,
+  closes at every segment boundary, exposure_usd, usd, sha}}, spy, lots, blocked_from}. The meter hands each
+  checkpoint's counted closes to it. The running figures carry none.
+- **The rule** (`league/equity/live.py` `span_bh`): the House's own `_bh_pnl`, with the plan's one change. A session
+  the House blocked the program from opening, while it held nothing in the symbol, is taken out of the span, which
+  splits there. With no such session it is `_bh_pnl` to the Decimal. A panel program's is B10 (`b10_bh`,
+  `date_record`'s rule, SPY over each lot's own sessions). Every close is the book's adjustment=all `eq_bars` row,
+  read only when one fetch wrote every close a symbol needs.
+- **The blocked sessions** are the sessions in which the House let no open go at all: the book's open note
+  (`eq_open_note`, A30 (2)) with every entry window it names refused (`shut_days`). That covers the kill switch, the
+  stops, the House's pause, the grant and the freezes. A session refused in one window and clear in the other is not
+  blocked: a program could still open. (The idle clock's `refused_days`, now a module function the book's
+  `_refused_days` calls, reads one window as enough.) Every entry day of the version's lots in the book is left out
+  too. Neither half depends on K, so one ledger list per version serves every checkpoint. The House records no
+  session-level trace of a program's own seat loss or of the shared loss window's refusals, so `blocked` cannot hold
+  them, and `blocked_from` says so in every entry.
+- **Fail closed:** a close missing, off one basis or not a finite price, a figure a float cannot hold, an unreadable
+  open note, the seat rule "first-come" (no note is kept then), or a read of the book that raises gives `priced`
+  false with `why`, never a figure. The reader never raises. The book's closes are read for SPY and the symbols of
+  programs that are not panels.
+- **Frozen with the checkpoint:** a final checkpoint is carried whole, so the field is never recomputed. A checkpoint
+  frozen before this release carries none.
+- **The captain copies each priced entry's `blocked` into the ledger before each receipt:** the script reads blocked
+  sessions from its ledger only, and its cents check fails closed when the ledger's sessions differ from the entry's
+  (docs/operations.md, **The span buy-and-hold beside each checkpoint**).
+- **A `priced: false` entry blocks the script's `--closes` fallback at that look,** so the captain checks the
+  not-yet-final checkpoint in the 01:30Z report and fixes its `why` before the pre-open run makes it final.
+- **The review's fixes** (on top): F1, the blocked sessions above (before them a session refused in one window, less
+  the counted lots' entry days only, could be blocked at K=30 and not at K=40, so no single ledger passed both); F6,
+  no Infinity; F7, every read inside the reader's guard; F8, no panel basket's closes read.
+- Tests: `league/tests/test_dlane_report_span_bh.py` (26). It covers one and two symbols, a blocked run, a panel, a
+  missing close, the field frozen, the same blocked list at K=30 and K=40, no Infinity, a reader that never raises,
+  and every other Done key unchanged. It also runs the script's own checks, copied, and the pinned script itself
+  where `LTCM_SCALING_SCRIPT` names it.
+
+### 20:43Z Oct 15, 2026: release 1015f and FW9 (#560, carrying #559 and #558), House `20261015T204317Z-ad3c7f9653cc`, main `e136c251`; gateway `a6026308`
+
+One owner deploy (`ship_house.sh`): CI green on the exact head; a fast-forward of `0b978378`; no order in flight and no
+hand-chain job mid-run at 20:43:13Z; the nightly stop written BEFORE the push; promoted 20:44:12Z (rollback
+`20261015T075939Z-89d93d40bfda`); nightly back and the harness observer's base repointed 20:54Z. Verified 20:54Z: health
+clean, real money on, no real-money block; fingerprint `b60410ad`, money `cfcc94b1`, constitution `60796aed` and gate
+contract `397b22b772b3` unchanged. Then the gateway from the same commit: 464 of 464 tests, version `a6026308`
+(rollback `9c0651a3`). After it the account reading blocks nothing (the equity book's own share fills are known).
+
+### Release 1015f: release 1015e plus three fixes, on `rel/1015f` (DEPLOYED 20:43Z Oct 15 in #560; one House deploy and one gateway deploy
 from one commit, outside 12:55-20:05Z on a trading day; no identity moves: the options execution fingerprint
 `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are
 main's; no setting changes)
@@ -43,7 +369,7 @@ main's; no setting changes)
 - L2, the equity pass says the route by symbols (entry below).
 - L4, the budget job waits for the Sail guard's next reading after a start (entry below).
 
-### FW9, the twins' failures in the House warning, and DC1: the alarms that see the first Done checkpoint coming, on `fix/fw9-alarms` (unreleased; cut from `caa10eba`, the head of `rel/1015f`, PR #559; an owner deploy: `league/ops/` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no bound, screen, false-positive rate, money rule or setting changes)
+### FW9, the twins' failures in the House warning, and DC1: the alarms that see the first Done checkpoint coming, on `fix/fw9-alarms` (DEPLOYED 20:43Z Oct 15 in #560; cut from `caa10eba`, the head of `rel/1015f`, PR #559; an owner deploy: `league/ops/` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no bound, screen, false-positive rate, money rule or setting changes)
 
 - **Why** (the Oct 15 rehearsal of the 30th close's checkpoint): a failure there could be seen first at the
   checkpoint itself. FW6 reads an instance's twin agreement from 20 sessions, and an instance has about 17 by Nov 2.
@@ -109,7 +435,7 @@ main's; no setting changes)
   close.
 - **Rollback:** the House release before it. Nothing is migrated.
 
-### The budget job waits for the Sail guard's next reading after a start, on `fix/budget-guard-wait` (unreleased; cut from `efc9fa00`, PR #558's head; an owner deploy: `league/ops/budget.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting)
+### The budget job waits for the Sail guard's next reading after a start, on `fix/budget-guard-wait` (DEPLOYED 20:43Z Oct 15 in #560; cut from `efc9fa00`, PR #558's head; an owner deploy: `league/ops/budget.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting)
 
 - **What it is** (the captain's L4): when a `budget` run finds no fresh Sail guard reading, it now waits for the
   guard's next good one. It looks at the guard's record every 20 s, for at most 270 s from its start, inside the
@@ -140,7 +466,7 @@ main's; no setting changes)
   and 593 tests, on Python 3.11 and 3.14; the four ids on both.
 - **Rollback:** the release before. Nothing is migrated, and nothing reads `guard_wait`.
 
-### Release 1015e: births cells, research spend by yield, the watchdog on interrupted boxes, docs, on `rel/1015e` (unreleased; TWO deploys from one commit: the House by an owner deploy, never 12:55-20:05Z on a trading day (`league/swarm/elane_births.py`, `league/ops/` and `league/ops/economics.py` are protected), then the gateway by the owner's wrangler deploy; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
+### Release 1015e: births cells, research spend by yield, the watchdog on interrupted boxes, docs, on `rel/1015e` (DEPLOYED 20:43Z Oct 15 in #560; TWO deploys from one commit: the House by an owner deploy, never 12:55-20:05Z on a trading day (`league/swarm/elane_births.py`, `league/ops/` and `league/ops/economics.py` are protected), then the gateway by the owner's wrangler deploy; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
 
 - **What it carries**, on main `0b978378` (#557, the running release): the equity birth cells (PR #552,
   `feat/elane-birth-cells` `0bccff2c`), research dollars by measured yield (PR #551, `feat/ops-lane-yield` `692956f3`)
@@ -175,7 +501,7 @@ main's; no setting changes)
   `9c0651a3`). Nothing is migrated: the account reading is recomputed every five minutes, `lane_yield` is read by
   nothing, and a request without the birth cells is the request before.
 
-### The equity pass says the route by symbols and asks for index-only families, on `feat/elane-route-text` (unreleased; L2, cut from the evening bundle's head `efc9fa00`, which carries #552; an owner deploy: `league/swarm/elane_births.py`, `elane_train.py` and `elane_xs.py` are protected; no identity moves; no setting)
+### The equity pass says the route by symbols and asks for index-only families, on `feat/elane-route-text` (DEPLOYED 20:43Z Oct 15 in #560; L2, cut from the evening bundle's head `efc9fa00`, which carries #552; an owner deploy: `league/swarm/elane_births.py`, `elane_train.py` and `elane_xs.py` are protected; no identity moves; no setting)
 
 - **What it is** (`league/swarm/elane_births.py`). The equity architect's system prompt and THE LANES/EQUITY block
   said every program is judged the same way: one Validation try, one sealed look, then real money at Probe size.
@@ -230,7 +556,7 @@ main's; no setting changes)
   constitution `60796aed`.
 - **Rollback:** the release before; the request is words only.
 
-### FWD1-R's representative before any forward day: a lineage sighted on a failed version is judged on the version the rule picks, on `fix/fwd1-repick` (unreleased; in release 1015e; cut from `rel/1015e` `efc9fa00`; an owner deploy: `league/ops/` is protected; no identity moves; no setting; the pin and its receipt are unchanged)
+### FWD1-R's representative before any forward day: a lineage sighted on a failed version is judged on the version the rule picks, on `fix/fwd1-repick` (DEPLOYED 20:43Z Oct 15 in #560; in release 1015e; cut from `rel/1015e` `efc9fa00`; an owner deploy: `league/ops/` is protected; no identity moves; no setting; the pin and its receipt are unchanged)
 
 - **The defect.** The forward screen wrote a lineage's row once, at its first sighting, and never chose again. The
   receipt's rule says the representative is fixed before any forward day exists, not at first sighting. The 08:06Z
@@ -278,7 +604,7 @@ main's; no setting changes)
   the old one). The release before puts its unconditional UPDATE trigger back on its first open, and never updates
   a row.
 
-### The equity birth cells: the equity pass's request shows where the graveyard binds, on `feat/elane-birth-cells` (unreleased; in release 1015e, merged on main `8ef19fc1` with the yield check's resolution of `league/swarm/elane_births.py` (`f62ca5b6`), tree for tree; cut from main `aec0c8a5`, release U; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
+### The equity birth cells: the equity pass's request shows where the graveyard binds, on `feat/elane-birth-cells` (DEPLOYED 20:43Z Oct 15 in #560; in release 1015e, merged on main `8ef19fc1` with the yield check's resolution of `league/swarm/elane_births.py` (`f62ca5b6`), tree for tree; cut from main `aec0c8a5`, release U; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves; no setting)
 
 - **What it is:** `elane_births.cells_text`, a block of the equity pass's request after THE EQUITY GRAVEYARD: one line a
   bound cell (mechanism_class / lane:structure / holding, and the universe group where the graveyard's key carries
@@ -298,7 +624,7 @@ main's; no setting changes)
   rows, 2,663 characters.
 - **Rollback:** the release before.
 
-### Research dollars by measured yield: the `dlane` report's `lane_yield` section, on `feat/ops-lane-yield` (unreleased; in release 1015e; cut from main `aec0c8a5`, release U; an owner deploy: `league/ops/` is protected; no identity moves: no evidence, money, swarm or equity module changes; no setting)
+### Research dollars by measured yield: the `dlane` report's `lane_yield` section, on `feat/ops-lane-yield` (DEPLOYED 20:43Z Oct 15 in #560; in release 1015e; cut from main `aec0c8a5`, release U; an owner deploy: `league/ops/` is protected; no identity moves: no evidence, money, swarm or equity module changes; no setting)
 
 - **What it is:** a read-only section of the operator's `dlane` report (`league/ops/lane_yield.py`, called once at the
   end of `report`, inside its own try: an error is `{"error": ...}`, never a failed report). For the report's windows
@@ -318,7 +644,7 @@ main's; no setting changes)
   windows.
 - **Rollback:** the release before; nothing reads the section.
 
-### Reliability: the gateway watchdog asks an interrupted box back and tells the owner where to ask; the account reading knows the equity book's own shares, on `fix/reliability-1015` (unreleased; in release 1015e, with the watchdog's follow-up said in its entry; from main `aec0c8a5`, release U; TWO deploys: the gateway by the owner's wrangler deploy, and the House by an owner deploy, `league/ops/economics.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the constitution digest `111ede85` and the money digest `de5ed74e` are main's; no setting changes)
+### Reliability: the gateway watchdog asks an interrupted box back and tells the owner where to ask; the account reading knows the equity book's own shares, on `fix/reliability-1015` (DEPLOYED 20:43Z Oct 15 in #560; in release 1015e, with the watchdog's follow-up said in its entry; from main `aec0c8a5`, release U; TWO deploys: the gateway by the owner's wrangler deploy, and the House by an owner deploy, `league/ops/economics.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the constitution digest `111ede85` and the money digest `de5ed74e` are main's; no setting changes)
 
 - **The watchdog and an interrupted box** (`gateway/lib/watchdog.mjs`, `sail.mjs`, `email.mjs`, `gate.mjs`). Oct 14,
   2026: an AWS spot interruption left the House `interrupted_restorable` from 20:12:46Z to 03:26:54Z Oct 15; the
@@ -1352,7 +1678,7 @@ the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's 
 equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
 0.50 x E.
-Money digest `cfcc94b1`, full digest `60796aed` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
+Money digest `558dc3a2`, full digest `d4e59a79` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `68f1bca9` / `d244fb10`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

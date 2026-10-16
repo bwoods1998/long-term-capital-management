@@ -1,6 +1,7 @@
 """The live path end to end (`league/live/step.py`): live chains -> the decider -> the shadow book and the real route,
 with the fakes of `live_fakes` (the venue's shapes, invented numbers) and the in-process decider."""
 
+import dataclasses
 import datetime as dt
 import json
 import tempfile
@@ -306,9 +307,16 @@ class OrderPathInTheLoop(LiveCase):
         self.assertTrue(live.book.state.rows("SELECT tuition FROM orders WHERE action='open'")[0]["tuition"])
 
 
+def pre_registered():
+    """The money table in force with the options Sized count at the rule's own 20 forward trades: C2 (A45) of the
+    scaling plan parked it at 1000 (league/tests/test_options_sized_parked.py), so the Sized route is tested here at the
+    count it was written with."""
+    return dataclasses.replace(M.Table.from_constitution(), sized_min_trades=20)
+
+
 class Sized(LiveCase):
     def test_a_probe_that_earns_it_is_sized_by_quarter_kelly_on_its_lower_bound(self):
-        live = self.make([family("vert", VERTICAL, band="probe")])
+        live = self.make([family("vert", VERTICAL, band="probe")], table=pre_registered())
         returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
         self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
                                                        "max_loss": 100.0} for i, r in enumerate(returns)])
@@ -325,10 +333,27 @@ class Sized(LiveCase):
         unit = pos.max_loss_share * 100 + 2 * pos.fees / pos.qty
         self.assertEqual(pos.qty, min(int(cap // D(str(round(unit, 2)))), int(D("822.2475") // D(str(round(unit, 2))))))
 
+    def test_the_park_holds_the_same_probe_at_probe_on_the_table_in_force(self):
+        """THE OPTIONS SIZING-UP STEP IS PARKED (C2 (A45) of the scaling plan): the record above, which sizes a Probe up
+        at the rule's own 20, holds it at Probe through the live path's band pass at 1000, and its open is a Probe's."""
+        live = self.make([family("vert", VERTICAL, band="probe")])
+        self.assertEqual(live.table.sized_min_trades, 1000)
+        returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
+        self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
+                                                       "max_loss": 100.0} for i, r in enumerate(returns)])
+        self.families.add_forward("vert", "real", [{"id": f"r{i}", "day": f"2026-08-{i + 1:02d}", "pnl": 6.0, "max_loss": 50.0}
+                                                   for i in range(5)])
+        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 7 * 86400}})
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["vert"]["band"], "probe")
+        for pos in live.book.positions.values():
+            self.assertLessEqual(pos.max_loss, float(M.probe_cap(live.table, min(D("5481.65"), D("5500")))))
+
 
 class ProbeStage(LiveCase):
     def test_a_probe_without_real_trades_is_never_sized(self):
-        live = self.make([family("vert", VERTICAL, band="probe")])
+        # (at the rule's own 20: on the table in force the park alone would hold it)
+        live = self.make([family("vert", VERTICAL, band="probe")], table=pre_registered())
         returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
         self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
                                                        "max_loss": 100.0} for i, r in enumerate(returns)])

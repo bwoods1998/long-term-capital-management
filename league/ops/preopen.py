@@ -34,7 +34,9 @@ and went stale (GOAL Appendix C 7); here each check asks what the running House 
              LANE (release E4): while the equity book holds a panel program that is not retired, or a lot of one, the
              lane's own readiness rule holds (`league.swarm.elane_xs.live_ready`: the store fresh by this job's clock,
              the universe deploy in force, the tradable share, the universe's age, the nightly I6, the twin marker;
-             the leg that fails is named). With no panel program nothing of the panel is read
+             the leg that fails is named). With no panel program nothing of the panel is read; and THE PROBE PIN (C2
+             (A45) of the scaling plan): the equity book's `probe_pin` unreadable FAILS (no figure is read or shown);
+             and THE SCALED BAND (C3): its `scaled` state "mismatch" (a pin-sha row and no pin of that sha) FAILS
 
 Read-only (`guard.readonly()`; GET only). Each FAIL is one House warning ("preopen 5 swarm FAIL: ..."); the receipt
 holds every line. The warning is PUBLIC (`ops.alert`) and the runner scrubs only what carries a `$`
@@ -605,6 +607,43 @@ def check_equity(h: Mapping[str, Any]) -> Check:
         c.req(False, "the equity book reports no freeze state while equity_money.enabled is true")
     else:
         c.info("the equity book reports no freeze state (equity_money.enabled false: no equity open goes)")
+    # THE PROBE PIN (C2 (A45) of the scaling plan; league/equity/live.py `probe_pin`, never a figure): unreadable
+    # FAILS, before the open, so the stall mail says it; absent (none ever read on this box) is C2 dark, told.
+    pin = book.get("probe_pin") if isinstance(book, dict) else None
+    if isinstance(pin, Mapping):
+        state = pin.get("state")
+        if state == "read":
+            c.req(True, "the Probe pin is read: every sleeve sizes on the smaller of E and E_P")
+        elif state == "absent":
+            c.info("no Probe pin, and none was ever read on this box: every sleeve sizes on E (C2 dark)")
+        else:
+            c.req(False, f"the Probe pin cannot be read (since {pin.get('since') or 'unknown'}: "
+                         f"{str(pin.get('why') or 'no reason given')[:160]}): every sleeve holds at the smaller of E and "
+                         "the last E_P read on this box" + ("" if pin.get("held") else
+                                                            ", and none was ever read, so no equity entry is sized")
+                         + "; replace the pin")
+    elif isinstance(book, dict):
+        c.info("the equity book reports no Probe pin state (a release before C2)")
+    # THE SCALED BAND (C3 (A45) of the scaling plan; league/equity/live.py `scaled`, never a figure): a pin that does not
+    # match its row FAILS (no new Scaled lot opens); dark (no pin-sha row) is told; matched passes.
+    band = book.get("scaled") if isinstance(book, dict) else None
+    if isinstance(band, Mapping):
+        state = band.get("state")
+        if state == "dark":
+            c.info("the Scaled band is dark (no pin-sha row): every program is at Probe")
+        elif state == "matched":
+            rungs = band.get("rungs") if isinstance(band.get("rungs"), Mapping) else {}
+            at = sum(1 for r in rungs.values() if isinstance(r, int) and r >= 1)
+            c.req(True, f"the scaling pin matches its row: {at} program(s) at a rung"
+                        + (", the ladder closed (D6)" if band.get("closed") else "")
+                        + (", the Scaled window reached (D5)" if band.get("window") else ""))
+        elif state == "memory":
+            c.req(False, f"the Scaled band's memory cannot be read ({str(band.get('why') or 'no reason given')[:160]}): "
+                         "every program at Probe; repair it from the private ledger")
+        else:
+            c.req(False, f"the scaling pin does not match its row (since {band.get('since') or 'unknown'}: "
+                         f"{str(band.get('why') or 'no reason given')[:160]}): no new Scaled lot opens; write the pin "
+                         "the row names, or deploy the row of the pin there")
     sb = g.get("stock_buys")
     if not isinstance(sb, dict):
         c.req(False, f"the gateway reports no stock route (/v1/health stock_buys): {g.get('health_error') or 'missing'}")

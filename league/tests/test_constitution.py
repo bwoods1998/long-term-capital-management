@@ -60,6 +60,7 @@ class ConstitutionTest(unittest.TestCase):
         t800 = copy.deepcopy(CONSTITUTION)
         del t800["equity_money"]
         t800["options_money"]["probe"]["open_per_family"] = 3     # every release before E1 held three a family
+        t800["options_money"]["sized"]["min_trades"] = 20         # and the options Sized rule's own count (C2 parked it)
         self.assertEqual(money_digest(t800), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
         self.assertEqual(digest(t800), "0adb4f0ed7d9f20fc05cb3ce73590b5a2dfdfe38e5d6aa6759e071d1beb4d5b2")
         # The $800 total is the only money rule it moved: at "400", the money digest and the full digest are L-D's.
@@ -82,6 +83,7 @@ class ConstitutionTest(unittest.TestCase):
 
         rollback = constitution(**FAST_LANE_V2)
         del rollback["equity_money"]
+        rollback["options_money"]["sized"]["min_trades"] = 20     # (L-D's era: the options Sized rule's own count)
         self.assertEqual(money_digest(rollback), "320899d675059182509a62b67d122afd2fdc54b08c59b2053a684d88fc8b55f2")
         self.assertEqual(digest(rollback), "c9d8ef5bd5e55544884924c8ef0c309e03d89fd230945f346103db3bea18c31f")
         self.assertEqual(CONSTITUTION["options_money"]["probe"],
