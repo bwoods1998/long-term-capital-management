@@ -92,10 +92,11 @@ class TheCheckpointNeedsA14(A14Fixture):
         self.assertEqual((cp["items"], cp["consistent_ok"]), ({"3": True, "4": True, "7": True}, True))
         self.assertEqual(own(cp["a14"], a14()), a14())
         self.assertTrue(out["done"]["all"]["holds"])
-        # It is read over exactly the checkpoint's counted closes, from the state root.
-        root, pids = self.asked[0]
-        self.assertEqual((root, len(pids)), (self.root, 30))
-        self.assertEqual(pids, [c["pid"] for c in out["done"]["all"]["closes"]][:30])
+        # It is read over exactly each checkpoint's counted closes, from the state root: since the owner's change (A50,
+        # Oct 16, 2026) thirty closes are four checkpoints, the 15th, 20th, 25th and 30th (one, the 30th, before).
+        order = [c["pid"] for c in out["done"]["all"]["closes"]]
+        self.assertEqual({root for root, _ in self.asked}, {self.root})
+        self.assertEqual([pids for _, pids in self.asked[:4]], [order[:k] for k in (15, 20, 25, 30)])
 
     def test_it_is_read_over_the_checkpoints_first_k_closes_only(self):
         self.thirty()
@@ -103,10 +104,12 @@ class TheCheckpointNeedsA14(A14Fixture):
             self.twin(self.eq_close("p-a", cash="-9.00", posted=True, closed_at=ny("2026-10-15", 15, 56) + i),
                       live_r=-0.09, twin_r=-0.09)
         out = self.report()
-        first = [c["pid"] for c in out["done"]["all"]["closes"]][:30]
+        order = [c["pid"] for c in out["done"]["all"]["closes"]]
         self.assertEqual(len(out["done"]["all"]["closes"]), 34)
         self.assertTrue(self.asked)
-        self.assertTrue(all(pids == first for _, pids in self.asked), "never the closes after the K-th")
+        # A50's checkpoints (the 15th close, then every 5th): each reads its own first K, never a close after it.
+        self.assertTrue(all(pids == order[:len(pids)] and len(pids) in (15, 20, 25, 30) for _, pids in self.asked),
+                        "never the closes after the K-th")
         self.assertEqual(out["done"]["all"]["latest"]["at_close"], 30)
 
     def test_a_checkpoint_that_held_stops_holding_when_a14_fails(self):
@@ -164,7 +167,9 @@ class TheCheckpointNeedsA14(A14Fixture):
         for i in range(30):
             self.twin(self.eq_close("p-a" if i % 2 == 0 else "p-b", cash="2.00", posted=True,
                                     closed_at=ny("2026-10-14", 15, 56) + i), live_r=0.02, twin_r=0.021)
-        self.steady(skip=("2026-10-12",))                    # research 24/7 fails too: a day with no research
+        # Research 24/7 fails too: a day with no research. The closes' own day, Oct 14, since the owner's change (A50):
+        # the 30th close's window is every day after the 25th's, that same day (Oct 12 was in the 7-day window before).
+        self.steady(skip=("2026-10-14",))
         self.answer = a14(holds=False, final=False, why="19 of 21 counted sessions agree")
         cp = self.latest()
         self.assertEqual((cp["holds"], cp["items"]), (False, {"3": True, "4": False, "7": False}))
@@ -373,7 +378,9 @@ class TheForwardRecordInTheReport(A14Fixture):
         self.assertIsNone(out["forward_record"])
         self.assertEqual(out["done"]["preregistered"]["status"], R.PREREGISTERED["status"])
         self.assertIn("computed since release E3", out["done"]["preregistered"]["status"])
-        self.assertEqual(out["loosened"][-1]["rule"], "the equity Train bar")
+        # Release E3's loosening, now followed by the owner's four of A50 (Oct 16, 2026).
+        self.assertIn("the equity Train bar", [row["rule"] for row in out["loosened"]])
+        self.assertEqual(out["loosened"][-1]["rule"], "Done's research 24/7 window (A50, the owner's goal of Oct 16)")
         self.assertIn("either way (release E3)", out["tightened"][-1])
         self.assertEqual(out["rule"]["sha256"], dlane.DONE["rule_sha256"], "the pinned Done rule is not this release's")
 
@@ -414,8 +421,9 @@ if __name__ == "__main__":
 
 class DoneCountsAPanelProgramByDate(A14Fixture):
     """DONE COUNTS A PANEL PROGRAM'S CLOSES BY DATE (release E4 step two; the review of step two, its major): a panel
-    program's lots closed on one New York day are ONE of Done's counts, for the 30th close, every later checkpoint
-    and its program's 5; the lots stand beside. An ETF close is one count as ever. Every close invented."""
+    program's lots closed on one New York day are ONE of Done's counts, for the 15th close (the 30th before the owner's
+    A50), every later checkpoint and its program's 3 (5 before A50); the lots stand beside. An ETF close is one count as
+    ever. Every close invented."""
 
     def panel_lots(self, family: str, day: str, n: int = 8, *, cash: str = "0.02") -> list[int]:
         from league.tests.test_equity_twins import lot, put_lot
@@ -454,31 +462,35 @@ class DoneCountsAPanelProgramByDate(A14Fixture):
         self.eq_family("p-a")
         self.eq_family("p-b", lane="equity")
         self.eq_family("xs-a", lane="equity")
-        for i in range(25):
+        # A50's first checkpoint is the 15th count (the 30th before): 13 ETF closes and one basket date are 14 counts,
+        # where 21 lots counted a close each would have passed the 15th and the 20th.
+        for i in range(13):
             self.twin(self.eq_close("p-a" if i % 2 == 0 else "p-b", cash="2.00", posted=True,
                                     closed_at=ny("2026-10-14", 15, 56) + i), live_r=0.02, twin_r=0.021, bh=1.5)
         self.panel_lots("xs-a", "2026-10-15")
         self.steady()
         meter = self.report()["done"]["all"]
-        self.assertEqual(len(meter["closes"]), 33, "every lot is listed")
-        self.assertEqual((meter["running"]["closes"], meter["running"]["lots"]), (26, 33))
+        self.assertEqual(len(meter["closes"]), 21, "every lot is listed")
+        self.assertEqual((meter["running"]["closes"], meter["running"]["lots"]), (14, 21))
         program = next(p for p in meter["running"]["by_program"] if p["family"] == "xs-a")
         self.assertEqual((program["closes"], program["lots"]), (1, 8))
-        self.assertEqual((meter["checkpoints"], meter["next_checkpoint"]), ([], 30), "26 counts: no checkpoint yet")
+        self.assertEqual((meter["checkpoints"], meter["next_checkpoint"]), ([], 15), "14 counts: no checkpoint yet")
 
-    def test_one_rotation_date_does_not_meet_a_second_programs_five(self):
+    def test_one_rotation_date_does_not_meet_a_second_programs_three(self):
+        # A50 (the owner's goal of Oct 16, 2026): the 15th count and 3 a program (the 30th and 5 before). The basket's
+        # 8 lots of one date are one count: they would meet the 3 counted a close each.
         self.eq_family("p-a")
         self.eq_family("xs-a", lane="equity")
         self.panel_lots("xs-a", "2026-10-13")
-        self.etf_closes("p-a", 30)
+        self.etf_closes("p-a", 15)
         self.steady()
         meter = self.report()["done"]["all"]
         cp = meter["checkpoints"][0]
-        self.assertEqual((cp["at_close"], cp["closes"], cp["lots"]), (30, 30, 37), "the basket's date and 29 ETF closes")
+        self.assertEqual((cp["at_close"], cp["closes"], cp["lots"]), (15, 15, 22), "the basket's date and 14 ETF closes")
         self.assertEqual((cp["programs_with_min_closes"], cp["items"]["3"]), (1, False))
-        self.assertIn("1 programs with 5+ closes of the 2 needed", cp["why"])
-        self.assertEqual(cp["close_dates"]["closes"], 37, "the close dates beside read the lots")
-        self.assertEqual(cp["closed_at"], R._iso(R._epoch("2026-10-14T19:56:28Z") or 0), "the 29th ETF close")
+        self.assertIn("1 programs with 3+ closes of the 2 needed", cp["why"])
+        self.assertEqual(cp["close_dates"]["closes"], 22, "the close dates beside read the lots")
+        self.assertEqual(cp["closed_at"], R._iso(R._epoch("2026-10-14T19:56:13Z") or 0), "the 14th ETF close")
 
     def test_five_rebalance_dates_are_a_programs_five(self):
         self.eq_family("p-a")

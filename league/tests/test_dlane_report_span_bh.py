@@ -324,9 +324,11 @@ class SpanFixture(A14Fixture):
         self.steady()
 
     def checkpoint(self, out: dict) -> dict:
+        """The checkpoint over every one of the thirty counts. Since the owner's change (A50, Oct 16, 2026) thirty counts
+        are four checkpoints, the 15th, 20th, 25th and 30th (one, the 30th, before): each carries its own span_bh."""
         cps = out["done"]["all"]["checkpoints"]
-        self.assertEqual([c["at_close"] for c in cps], [30])
-        return cps[0]
+        self.assertEqual([c["at_close"] for c in cps], [15, 20, 25, 30])
+        return cps[-1]
 
     @staticmethod
     def spans(cp: dict) -> dict:
@@ -476,7 +478,12 @@ class TheCheckpointCarriesIt(SpanFixture):
         self.forty()
         out = self.report()
         cps = {cp["at_close"]: cp for cp in out["done"]["all"]["checkpoints"]}
-        self.assertEqual(sorted(cps), [30, 40])
+        # A50's checkpoints (the 15th count, then every 5th; the 30th and the 40th before): C1 at each of them. At the
+        # 15th, 20th and 25th count `p-a`'s span ends Oct 13, so Oct 15 lies outside it and none is listed.
+        self.assertEqual(sorted(cps), [15, 20, 25, 30, 35, 40])
+        for k in (15, 20, 25):
+            early, = self.spans(cps[k])["p-a"]
+            self.assertEqual((early["priced"], early["blocked"]), (True, []), (k, early["why"]))
         a30, = self.spans(cps[30])["p-a"]
         a40, = self.spans(cps[40])["p-a"]
         self.assertTrue(a30["priced"] and a40["priced"], (a30["why"], a40["why"]))
@@ -740,10 +747,12 @@ class TheScriptsChecks(SpanFixture):
                    for r in e["blocked"]}
         ledger = [{"program": "eq|p-a|v1", "from": a, "to": z, "why": "House blocked (C1)"} for a, z in sorted(blocked)]
         self.assertEqual(ledger[0]["from"], "2026-10-15")
-        for k in (30, 40):
+        # Every one of the owner's checkpoints (A50: the 15th count, then every 5th; 30 and 40 before).
+        for k in (15, 20, 25, 30, 35, 40):
             self.assertEqual(script_check(out, "p-a", 1, ledger, at=k), (True, None), k)
             self.assertEqual(script_check(out, "p-b", 1, ledger, at=k), (True, None), k)
-        # A ledger on the idle clock's reading (one refused window enough) would hold Oct 14 too: it fails closed.
+        # A ledger on the idle clock's reading (one refused window enough) would hold Oct 14 too: it fails closed where
+        # the span holds Oct 14 (from the 30th count; before it `p-a`'s span ends Oct 13).
         old = ledger + [{"program": "eq|p-a|v1", "from": "2026-10-14", "to": "2026-10-14", "why": "one window"}]
         self.assertEqual([script_check(out, "p-a", 1, old, at=k)[0] for k in (30, 40)], [False, False])
 
@@ -764,6 +773,13 @@ class TheScriptItself(SpanFixture):
     """The plan's script run whole on these reports (`run`: its gate, its window, its span checks), when it is the pinned
     one; and its calendar against the House's."""
 
+    #: THE OWNER'S CHANGE OF THE DONE RULE (A50, Oct 16, 2026): the pinned plan (scale30k-v1, A45) gates on the Oct 9
+    #: rule, its sha 0d007696 and its checkpoints 30, 40, ...; the owner's are 15, 20, 25, ... under sha 9693fe00. Until
+    #: the plan is re-pinned for them it refuses every report this release writes, printing no figure: the tests that run
+    #: it whole are skipped, saying so, and `test_the_pinned_plan_refuses_the_owners_checkpoints` holds the refusal.
+    OWED = ("the pinned plan (scale30k-v1, A45) reads the Oct 9 rule's checkpoints (30, 40, ...; sha 0d007696), not the "
+            "owner's (A50: 15, 20, ...): its re-pin is owed before it can read a checkpoint")
+
     @classmethod
     def setUpClass(cls):
         path = Path(os.environ["LTCM_SCALING_SCRIPT"]).expanduser()
@@ -772,6 +788,23 @@ class TheScriptItself(SpanFixture):
         spec = importlib.util.spec_from_file_location("scaling_script", path)
         cls.script = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.script)
+        cls.on_this_rule = ((cls.script.FIRST_CHECKPOINT, cls.script.CHECKPOINT_EVERY, cls.script.RULE_SHA256)
+                            == (dlane.DONE["first_checkpoint"], dlane.DONE["checkpoint_every"], dlane.DONE["rule_sha256"]))
+
+    def setUp(self):
+        super().setUp()
+        if not self.on_this_rule and self._testMethodName not in ("test_its_calendar_is_the_houses",
+                                                                  "test_the_pinned_plan_refuses_the_owners_checkpoints"):
+            self.skipTest(self.OWED)
+
+    def test_the_pinned_plan_refuses_the_owners_checkpoints(self):
+        if self.on_this_rule:
+            self.skipTest("the plan at hand is pinned to the rule in force")
+        self.build()
+        code, got = self.script.run(json.loads(json.dumps(self.report())), n_boot=20, horizons=(20,))
+        self.assertEqual(code, 2, got.get("why"))
+        self.assertIn("30, 40, 50", got.get("why") or "", "it names its own grid, and prints no figure")
+        self.assertFalse(got.get("qualification"))
 
     def run_script(self, out: dict, ledger: dict | None = None) -> dict:
         code, got = self.script.run(json.loads(json.dumps(out)), ledger=ledger, n_boot=20, horizons=(20,))

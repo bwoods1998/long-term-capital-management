@@ -154,11 +154,18 @@ class AFinalCheckpointThatDoesNotHold(Base):
         self.assertEqual(R.dc1_alarms(self.done(m), now=ep("2026-11-04T14:00:00Z")), [])
 
     def test_only_the_latest_checkpoint_of_each_meter_is_read(self):
-        # The 30th failed on its research window; the 40th reads the days after it and holds.
+        # The owner's checkpoints (A50, Oct 16, 2026: the 15th close, then every 5th; the 30th and the 40th before).
+        # The 15th and the 20th hold program A's closes alone (item 3), and the 20th (Oct 20 01:31Z) also failed its
+        # research window, Oct 18-20; the later ones read the days after it and hold, so the latest (the 40th) raises
+        # nothing.
         rows = self.closes(40, start="2026-10-10T13:31:00Z", last="2026-11-10T14:31:00Z")
         m = self.meter(rows, now="2026-11-11T14:00:00Z", research=Research(failed={"2026-10-20"}))
         self.assertEqual([(cp["at_close"], cp["final"], cp["holds"]) for cp in m["checkpoints"]],
-                         [(30, True, False), (40, True, True)])
+                         [(15, True, False), (20, True, False), (25, True, True), (30, True, True), (35, True, True),
+                          (40, True, True)])
+        self.assertEqual([(cp["items"]["3"], cp["items"]["7"]) for cp in m["checkpoints"][:2]], [(False, True), (False, False)])
+        self.assertEqual((m["checkpoints"][1]["research_247"]["first_day"], m["checkpoints"][1]["research_247"]["last_day"]),
+                         ("2026-10-18", "2026-10-20"))
         self.assertEqual(R.dc1_alarms(self.done(m), now=ep("2026-11-11T14:00:00Z")), [])
 
     def test_both_meters_are_read(self):

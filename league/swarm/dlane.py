@@ -257,14 +257,23 @@ AGENDA_MAX = 4000
 HIDDEN_YEAR_DIGITS = ("2020", "2021")
 #: THE DONE RULE (DONE-RULE.md, pinned Oct 9, 2026 before L-D or D-1 shipped; decision 8). Not settings: how Done is read
 #: is fixed before any number is seen. The `dlane` report job reads them.
+#: THE OWNER'S CHANGE OF THE PINNED RULE (A50, the goal of Oct 16, 2026, 02:10Z; its text is
+#: goal-2026-10-10/GOAL-MESSAGE-SPEED.txt): `rule_sha256` is now the sha256 of docs/goals/DONE-RULE-A50.md, the pinned
+#: rule restated with the owner's Done (league/tests/test_done_a50.py holds the file to it), pinned before any
+#: checkpoint was reached (6 counted closes, none frozen). The bar is 15 closes with 3 from each of 2 programs, read at
+#: the 15th counted close and then every 5th (fixed by count, never chosen); item 7's first window is 3 UTC days
+#: (`research_first_days`, read by the `dlane` job's research window). A1 (`amendment_sha256`) stands whole. Each is a
+#: loosening the owner chose, listed with its cost in the `dlane` job's report (`loosened`). The rule as pinned on Oct 9
+#: is `OLD_DONE`, below: kept so the history reads, and read by nothing.
 DONE: dict[str, Any] = {
-    "rule_sha256": "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca",
+    "rule_sha256": "9693fe0034926fda43270668fbaa40eecb3e8645022ec14fcd6ca94d61980eef",
     "inception": "2026-09-26T06:23:00Z",       # the options swarm's start: every agent real close since counts
     "routes_all": (":r", ":t", ":i"),           # done_all: Probe/Sized, tuition, incubator
     "routes_screen": (":r",),                    # done_screen: the evidence route alone
-    "min_closes": 30, "min_programs": 2, "min_closes_per_program": 5,
+    "min_closes": 15, "min_programs": 2, "min_closes_per_program": 3,     # A50 (were 30 and 5)
     "gap_limit": 0.10, "gap_min_matched": 5,     # consistent: mean live-minus-replay gap within +/-0.10 over 5+ matched
-    "first_checkpoint": 30, "checkpoint_every": 10,
+    "first_checkpoint": 15, "checkpoint_every": 5,                         # A50 (were 30 and 10)
+    "research_first_days": 3,                                              # A50 (was 7: the report job's own constant)
     # AMENDMENT A1 (DONE-RULE-A1.md, pinned Oct 9, 2026 ~20:50Z, before the first Probe close; tightenings only; the
     # readiness audit's B1, M10, M11 and M8). A1.1: item 4 held with ZERO replay evidence (a program under 5 matched
     # closes was never inconsistent), so a claim also needs at least `min_measured_programs` programs with
@@ -273,6 +282,13 @@ DONE: dict[str, Any] = {
     # and A1.3 are figures and a policy setting (`ZERO_EDGE`, `program_loss_usd`).
     "amendment_sha256": "333bad0679fb9c9a76c1cc0b5248d52c5f84c96e0cff5376f9c8d446a4c4ff0b",
     "min_measured_programs": 2,
+}
+#: THE RULE AS PINNED ON OCT 9, 2026 (DONE-RULE.md), before the owner's change (A50): HISTORY ONLY. No code reads it
+#: (league/tests/test_done_a50.py holds that): the meter, the checkpoints and item 7 read `DONE`.
+OLD_DONE: dict[str, Any] = {
+    "rule_sha256": "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca",
+    "min_closes": 30, "min_closes_per_program": 5, "first_checkpoint": 30, "checkpoint_every": 10,
+    "research_first_days": 7,
 }
 #: A1.2 (DONE-RULE-A1.md): P(Done | zero edge) under the budget in force, the figure beside every claim. Every figure this
 #: code names, each with what it is (`ZERO_EDGES`), and the one for the rules it ships (`ZERO_EDGE`, which `DEFAULTS`

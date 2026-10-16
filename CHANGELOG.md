@@ -30,6 +30,52 @@ The running House release is `20261015T204317Z-ad3c7f9653cc` (main `e136c251`, P
 20:43Z Oct 15), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
+### Done at the 15th close, then every 5th: the owner's new goal (A50), on `feat/done-a50` (unreleased; cut from `d6bcf0cd`, release 1016a's head; the owner's goal of 02:10Z Oct 16, 2026, `goal-2026-10-10/GOAL-MESSAGE-SPEED.txt`, and the captain's A50; an owner deploy: `league/swarm/dlane.py` and `league/ops/` are protected; it must be live before the 15th counted close, forecast Oct 21-22; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's, and no Done constant lives in the constitution; no setting)
+
+- **What it is: the owner's change of the pinned Done rule.** `dlane.DONE["rule_sha256"]` is now `9693fe00...`, the
+  sha256 of `docs/goals/DONE-RULE-A50.md` (new): the rule of Oct 9 (DONE-RULE.md, `0d007696...`) restated with the
+  owner's Done, pinned before any checkpoint was reached (6 counted closes, none frozen, no checkpoint record).
+  DONE-RULE-A1 (`333bad06...`) stands whole. The Oct 9 numbers stay visible as `dlane.OLD_DONE`, read by no module (a
+  test walks every module's syntax tree for it).
+- **The loosenings and their costs, as A50 states them** (each a row of the report's `loosened`):
+  (1) the checkpoints: the 15th counted close, then every 5th (`first_checkpoint` 30 -> 15, `checkpoint_every`
+  10 -> 5), fixed by count and never chosen. Cost: far fewer closes stand behind the sign, so the profit sign is mostly
+  market direction, near a coin flip at zero edge; reads every 5th give luck more chances (optional stopping).
+  (2) the bar: at least 3 closes each from at least 2 programs (`min_closes` 30 -> 15, `min_closes_per_program`
+  5 -> 3). A50 states no cost of its own beyond (1)'s.
+  (3) A14's intents: at least 95% of the S counted sessions, or all but one when S is under 40
+  (`forward_db.A14_ALL_BUT_ONE_UNDER` 40 and `a14_intents_ok`, read by `forward_twins.a14_reading` and by FW6; a
+  session with no twin row is never the one forgiven). Cost: one bad session forgiven at small S (under 20 sessions
+  the 95% forgave none; from 20 to 39 the two bounds agree, so FW6 fires as before).
+  (4) research 24/7 on each of the 3 UTC days ending on the first checkpoint's day (`research_first_days` 7 -> 3, now
+  in `dlane.DONE`; the report's own `RESEARCH_FIRST_DAYS` is gone); later checkpoints every UTC day since the previous
+  one, as before. A50 states no cost of its own beyond (1)'s.
+- **Unchanged:** what counts (agent programs, not House routes, from Oct 10, 2026), both meters, realized after-fee
+  P&L, the replay gap's bound and A1.1 (2 programs with 5+ matched closes: so a holding checkpoint still has two
+  programs with 5 matched closes each), finality and freezing (A1.4), the fill gap's 15 bp, `span_bh` (C1, written at
+  every one of the owner's checkpoints), the loss budget, sizing, screens and every wall.
+- **A reading under another pinned rule** is never carried (the frozen carry also needs the previous report's
+  `rule.sha256` to be this one's) and does not silence A8. None existed.
+- **A14's registered sentence stays as registered**; the owner's sentence (`A50_INTENTS`) rides beside it as
+  `done.preregistered.amended` and in docs/operations.md. Each reading's `intents` gains `all_but_one_under` and
+  `ok_by` ("share" | "all_but_one").
+- **Owed, outside this build: the $30k plan's pinned script** (`scale30k.py`, scale30k-v1, A45) gates on the Oct 9
+  rule's sha and its grid (30, 40, ...): it refuses every report written under A50 (exit 2, no figure) until the plan
+  is re-pinned for the owner's checkpoints. league/tests/test_dlane_report_span_bh.py `TheScriptItself` (run with
+  `LTCM_SCALING_SCRIPT`) holds that refusal and skips its whole-script runs, saying so.
+- **Text:** the stall's Done step names "the $30k scaling plan (pinned A45)"; FW6's and FW9's docstrings, the panel
+  seats' sentence (the 15th close and a program's 3) and the meter's docstrings say the owner's numbers.
+- **Tests:** league/tests/test_done_a50.py (new: the pin, each rule at its edges: 14 vs 15 closes, 3 vs 2 a program,
+  one program vs two, S 19, 39, 40, 41 and 1, a missing session, FW6's range, the 3-day window across a weekend, New
+  York's clock change and a close after 00:00Z, later windows, the schedule 15, 20, 25, ..., another rule's reading),
+  and the tests that pinned 30, 10, 5, 7 or the 95% alone, each with its reason. The equity week's record
+  (league/tests/fixtures/equity_etf_orders.json, main's) is unchanged: the book's path is main's order for order, and
+  `equity_week.a14_as_main` reads the one difference, three readings the owner's clause holds (5 and 7 sessions, one
+  miss), back under the 95% alone, held to that clause.
+- **Rollback:** the House, to the release before (release 1016a). Nothing is migrated. Clean before the 15th count
+  is final; after it the release before (which checks no rule sha) would carry a frozen A50 reading at 30, 40, ... as
+  its own.
+
 ### Release 1016a: L5 and C1, on `rel/1016a` (unreleased; one House deploy, outside 12:55-20:05Z on a trading day; no
 gateway change; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the
 money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)

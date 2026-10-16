@@ -66,7 +66,8 @@ as-of prices a live decision read and the ones a later store gives are not alway
 decision can differ from the live one for that cause alone. The forward shadow records the bars hash each shadow
 decision used (`fwd_days.bars`), the twins record the shadow's and the live decision's (`fwd_twins.shadow_bars`,
 `live_bars`), and an intent disagreement is DATA: counted, with its `cause` (`CAUSES`) when the bars differ, never an
-error. A14's pre-registered rule (95% of the counted sessions) is not changed by it.
+error. A14's pre-registered rule (95% of the counted sessions; since the owner's change, A50, also all but one of
+them when fewer than 40 are read: `a14_intents_ok`) is not changed by it.
 
 THE TWIN IS RE-BASED AFTER A DIFFERENCE (the captain's A29, registered before the first real share order and before
 any twin row existed; league/ops/forward_twins.py applies it). What the store holds of it: the `twin_rebased` event
@@ -137,6 +138,28 @@ DQ_NIGHTS = 3
 #: A14 as coded (D13): the size of the mean fill gap in bp a side, either way, and the share of sessions agreeing.
 A14_GAP_BP = 15.0
 A14_AGREE = 0.95
+#: THE OWNER'S CHANGE OF THE INTENTS BOUND (A50, the goal of Oct 16, 2026: "intents agree on >= 95% of sessions, or all
+#: but one when fewer than 40 are read"): under this many counted sessions the intents also pass with all of them but
+#: one agreeing (`a14_intents_ok`). A loosening the owner chose (its cost: one bad session is forgiven at small S; under
+#: 20 sessions the 95% bound forgave none, from 20 to 39 the two bounds agree). Before it the bound was 95% alone
+#: (`A14_AGREE`, unchanged).
+A14_ALL_BUT_ONE_UNDER = 40
+
+
+def a14_intents_ok(agreed: int, sessions: int, missing: int = 0) -> bool | None:
+    """A14'S INTENTS BOUND AS THE OWNER SET IT (A50): with S counted sessions and `agreed` of them agreeing, True when
+    agreed >= `A14_AGREE` x S (95%, as registered), OR when S < `A14_ALL_BUT_ONE_UNDER` (40), every one of the S was
+    read (`missing` 0) and agreed >= S - 1 (all but one). The one the owner forgives is a session READ that disagreed
+    ("one bad session"): a session with no twin row is not read, so it is never the one forgiven (it holds the reading
+    from final anyway, and unmeasured never holds). None with no session (unmeasured: never held). The one reading of
+    the bound: league/ops/forward_twins.py `a14_reading` (a Done checkpoint's) and league/ops/forward_report.py FW6 (an
+    instance's, before any checkpoint) both ask it."""
+    sessions, agreed, missing = int(sessions), int(agreed), int(missing)
+    if sessions <= 0:
+        return None
+    if agreed >= A14_AGREE * sessions - 1e-9:
+        return True
+    return sessions < A14_ALL_BUT_ONE_UNDER and missing == 0 and agreed >= sessions - 1
 #: The forward route and alpha every program row of E3 carries in its hashed row (D2); a control carries the second pair.
 E3_ROUTE = "S2"
 E3_ALPHA_F = "0.03"
@@ -935,7 +958,8 @@ def stored_days(db: sqlite3.Connection, pid: int, *, engine: int | None = None) 
 
 __all__ = ["DB", "SCHEMA", "GENESIS", "MODES", "REASONS", "LANES", "CHECKPOINTS", "CHECKPOINT_EVERY", "FWD_SERIES",
            "FILL_VERSION", "TOL", "NEFF_WINDOW", "NEFF_MIN_DAYS", "NEFF_PROVISIONAL", "Q", "RC_READS", "RC_MIN_GROUP",
-           "SUSPECT_NIGHTS", "DQ_NIGHTS", "A14_GAP_BP", "A14_AGREE", "E3_ROUTE", "E3_ALPHA_F", "CONTROL_ROUTE",
+           "SUSPECT_NIGHTS", "DQ_NIGHTS", "A14_GAP_BP", "A14_AGREE", "A14_ALL_BUT_ONE_UNDER", "a14_intents_ok",
+           "E3_ROUTE", "E3_ALPHA_F", "CONTROL_ROUTE",
            "CONTROL_ALPHA_F", "XS_ROUTE", "PANEL_UGROUP", "FGS", "FGS_SHA", "HASHED", "DEFAULTS", "BOUNDS", "TAGS", "EVENT_KINDS", "ONCE_KINDS",
            "KV_KEYS", "CAUSES", "BARS_HEX", "TABLES", "APPEND_ONLY", "WRITERS", "APPEND_ONLY_ERROR", "ADDED_COLUMNS",
            "has_column", "Program",

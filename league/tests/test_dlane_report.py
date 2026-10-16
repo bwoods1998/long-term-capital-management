@@ -160,7 +160,10 @@ class TheDoneMeter(Fixture):
         self.assertNotIn("house:calibration", families)
         self.assertNotIn("house:rebound-live", families)
         self.assertIn("tuition-before-d1", families)
-        self.assertEqual(out["rule"]["sha256"], "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca")
+        # THE OWNER'S CHANGE OF THE PINNED RULE (A50, the goal of Oct 16, 2026): the pinned rule is now
+        # docs/goals/DONE-RULE-A50.md's; the Oct 9 rule's sha (0d007696) is history (`dlane.OLD_DONE`).
+        self.assertEqual(out["rule"]["sha256"], "9693fe0034926fda43270668fbaa40eecb3e8645022ec14fcd6ca94d61980eef")
+        self.assertNotEqual(out["rule"]["sha256"], dlane.OLD_DONE["rule_sha256"])
         # DONE-RULE-A1 A1.2: the figure under the budget in force, said with its source: 2.7% at 12 weeks since THE
         # PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026, on fixed 2-, 3- and 5-session holds; 2.4% at 3-session holds
         # under L-D's $400 total before it).
@@ -174,8 +177,9 @@ class TheDoneMeter(Fixture):
         self.assertTrue(zero["by"].startswith("PREREG-T"))
         self.assertNotIn("note", zero, "the figure for the rules this code ships")
         self.assertEqual(out["rule"]["amendment_sha256"], dlane.DONE["amendment_sha256"])
-        self.assertIsNone(out["done"]["all"]["latest"], "no reading before the 30th close")
-        self.assertEqual(out["done"]["all"]["next_checkpoint"], 30)
+        # A50: the first checkpoint is the 15th counted close (the 30th before the owner's change).
+        self.assertIsNone(out["done"]["all"]["latest"], "no reading before the 15th close")
+        self.assertEqual(out["done"]["all"]["next_checkpoint"], 15)
         # Every direction figure carries the label; the alpha program's does not.
         rows = {p["family"]: p for p in run_all["by_program"]}
         self.assertEqual(rows["dir-a"]["label"], dlane.LABEL)
@@ -184,45 +188,52 @@ class TheDoneMeter(Fixture):
         self.assertEqual(out["contamination"]["statement"], R.CONTAMINATION)
 
     def test_a_reading_is_made_only_at_a_checkpoint_over_its_first_k_closes(self):
+        # THE OWNER'S RULE (A50, Oct 16, 2026): the 15th counted close, then every 5th; item 7 first over 3 UTC days.
+        # Before it this test read the 30th close, its last 7 days, and the 40th.
         self.fam("dir-a", lane="direction")
         self.fam("dir-b", lane="direction")
-        for i in range(15):
+        for i in range(7):
             self.close("dir-a", pnl=5.0)
             self.close("dir-b", pnl=5.0)
+        self.close("dir-a", pnl=5.0)                   # the 15th: dir-a 8, dir-b 7
         self.replays("dir-a", ["2026-10-05"])
         self.replays("dir-b", ["2026-10-05"])
         self.steady()
         self.posted()
         for _ in range(4):
-            self.close("dir-a", pnl=-100.0)           # closes 31-34: after the checkpoint
+            self.close("dir-a", pnl=-100.0)           # closes 16-19: after the checkpoint, before the 20th
         out = self.report(settings=NIGHTLY)["done"]["screen"]
         self.assertEqual(len(out["checkpoints"]), 1)
         cp = out["checkpoints"][0]
-        self.assertEqual((cp["at_close"], cp["closes"], cp["net_usd"], cp["holds"], cp["final"]), (30, 30, 150.0, True, True))
+        self.assertEqual((cp["at_close"], cp["closes"], cp["net_usd"], cp["holds"], cp["final"]), (15, 15, 75.0, True, True))
         self.assertEqual(cp["items"], {"3": True, "4": True, "7": True})
-        self.assertEqual(cp["research_247"]["first_day"], "2026-10-02", "the first checkpoint reads its last 7 UTC days")
+        self.assertEqual((cp["research_247"]["first_day"], cp["research_247"]["last_day"]), ("2026-10-06", "2026-10-08"),
+                         "the first checkpoint reads its last 3 UTC days")
         self.assertTrue(out["holds"])
-        self.assertEqual(out["running"]["net_usd"], -250.0)
+        self.assertEqual(out["running"]["net_usd"], -325.0)
         self.assertIsNone(out["running"]["holds"], "a running figure is never a reading")
-        self.assertEqual(out["next_checkpoint"], 40)
-        for _ in range(6):
-            self.close("dir-b", pnl=-1.0)
+        self.assertEqual(out["next_checkpoint"], 20)
+        self.close("dir-b", pnl=-1.0)                  # the 20th
         out = self.report()["done"]["screen"]
-        self.assertEqual([c["at_close"] for c in out["checkpoints"]], [30, 40])
+        self.assertEqual([c["at_close"] for c in out["checkpoints"]], [15, 20])
         self.assertFalse(out["checkpoints"][1]["holds"])
         self.assertIn("not above $0", out["checkpoints"][1]["why"])
+        self.assertEqual(out["next_checkpoint"], 25)
 
-    def test_the_bar_needs_five_closes_from_each_of_two_programs(self):
+    def test_the_bar_needs_three_closes_from_each_of_two_programs(self):
+        # A50 (the owner's goal of Oct 16, 2026): at least 3 from each of 2 programs at the 15th close (was 5 at the
+        # 30th); league/tests/test_done_a50.py holds the edges.
         self.fam("dir-a", lane="direction")
         self.fam("dir-b", lane="direction")
-        for _ in range(26):
+        for _ in range(13):
             self.close("dir-a", pnl=5.0)
-        for _ in range(4):
+        for _ in range(2):
             self.close("dir-b", pnl=5.0)
         cp = self.report()["done"]["screen"]["latest"]
+        self.assertEqual(cp["at_close"], 15)
         self.assertFalse(cp["holds"])
         self.assertEqual(cp["programs_with_min_closes"], 1)
-        self.assertIn("programs with 5+ closes", cp["why"])
+        self.assertIn("1 programs with 3+ closes of the 2 needed", cp["why"])
 
     def test_an_unpriced_close_makes_the_net_unknown_never_zero(self):
         self.fam("dir-a", lane="direction")
@@ -236,32 +247,33 @@ class TheDoneMeter(Fixture):
         self.fam("dir-a", lane="direction")
         self.fam("dir-b", lane="direction")
         self.fam("dir-c", lane="direction")
+        # A50 (the owner's goal of Oct 16, 2026): the first checkpoint is the 15th close (the 30th before), so the
+        # programs close fewer times before it; the 5 matched closes item 4 binds are unchanged.
         days = sessions_from("2026-10-01", 12)
-        for i, day in enumerate(days[:10]):
+        for i, day in enumerate(days[:6]):
             self.close("dir-a", pnl=5.0, max_loss=50.0, day=day)
             self.close("dir-b", pnl=-25.0, max_loss=50.0, day=day)
-            if i < 3:
+            if i < 2:
                 self.close("dir-c", pnl=5.0, day=day)
         # Nightly replays: dir-a's matches its live fills; dir-b's replay made money where live lost half a max loss;
-        # dir-c's replay covers 3 of its closes only.
+        # dir-c's replay covers 2 of its closes only.
         self.store.add_forward("dir-a", "nightly", [{"id": f"a{i}", "day": d, "pnl": 5.0, "max_loss": 50.0}
-                                                    for i, d in enumerate(days[:10])], version=1)
+                                                    for i, d in enumerate(days[:6])], version=1)
         self.store.add_forward("dir-b", "nightly", [{"id": f"b{i}", "day": d, "pnl": 5.0, "max_loss": 50.0}
-                                                    for i, d in enumerate(days[:10])], version=1)
+                                                    for i, d in enumerate(days[:6])], version=1)
         self.store.add_forward("dir-c", "nightly", [{"id": f"c{i}", "day": d, "pnl": 5.0, "max_loss": 50.0}
-                                                    for i, d in enumerate(days[:3])], version=1)
+                                                    for i, d in enumerate(days[:2])], version=1)
         out = self.report()["done"]["screen"]
         rows = {p["family"]: p["replay"] for p in out["running"]["by_program"]}
-        self.assertEqual(rows["dir-a"], {"matched": 10, "gap": 0.0, "consistent": True})
+        self.assertEqual(rows["dir-a"], {"matched": 6, "gap": 0.0, "consistent": True})
         self.assertEqual(rows["dir-b"]["consistent"], False)
         self.assertAlmostEqual(rows["dir-b"]["gap"], -0.6)
-        self.assertEqual((rows["dir-c"]["matched"], rows["dir-c"]["consistent"]), (3, None), "listed, never dropped")
-        self.assertIsNone(out["latest"], "23 closes: no checkpoint yet")
-        # Seven more closes of dir-a take the screen to 30: dir-b's inconsistency fails the reading.
-        for day in days[:7]:
-            self.close("dir-a", pnl=5.0, max_loss=50.0, day=day, version=2)
+        self.assertEqual((rows["dir-c"]["matched"], rows["dir-c"]["consistent"]), (2, None), "listed, never dropped")
+        self.assertIsNone(out["latest"], "14 closes: no checkpoint yet")
+        # One more close of dir-a takes the screen to 15: dir-b's inconsistency fails the reading.
+        self.close("dir-a", pnl=5.0, max_loss=50.0, day=days[0], version=2)
         cp = self.report()["done"]["screen"]["latest"]
-        self.assertEqual(cp["at_close"], 30)
+        self.assertEqual(cp["at_close"], 15)
         self.assertFalse(cp["consistent_ok"])
         self.assertIn("inconsistent with replay: dir-b", cp["why"])
 
@@ -413,13 +425,15 @@ class TheAlarms(Fixture):
         a = self.alarms(done=done)["A8"]
         self.assertEqual((a["level"], a["meter"], a["at_close"]), ("info", "done_all", 30))
         self.assertIn("FINAL checkpoint of close 30 (item 3, item 4, item 7", a["text"])
-        self.assertNotIn("A8", self.alarms(done=done, previous={"done": done}))
+        # A previous report is read for A8 only under the same pinned rule (A50): its `rule.sha256` says which.
+        same = {"sha256": dlane.DONE["rule_sha256"]}
+        self.assertNotIn("A8", self.alarms(done=done, previous={"done": done, "rule": same}))
         # DONE-RULE-A1 A1.4: a provisional holding reading raises nothing; it is said once it is final, even if an earlier
         # report saw it holding provisionally.
         provisional = {"all": {"checkpoints": [{"at_close": 30, "holds": True, "final": False, "items": items}]},
                        "screen": {"checkpoints": []}}
         self.assertNotIn("A8", self.alarms(done=provisional))
-        self.assertIn("A8", self.alarms(done=done, previous={"done": provisional}))
+        self.assertIn("A8", self.alarms(done=done, previous={"done": provisional, "rule": same}))
 
     def test_a9_every_live_direction_program_flat_for_ten_sessions(self):
         self.fam("dir-a", lane="direction")
@@ -617,7 +631,9 @@ class TheAmendment(Fixture):
         self.posted()
         final = self.report(settings=NIGHTLY, previous=out)
         self.assertTrue(final["done"]["screen"]["holds"])
-        self.assertEqual([a["id"] for a in final["alarms"] if a["id"] == "A8"], ["A8", "A8"], "done_all and done_screen")
+        # Since A50 the 15th, 20th, 25th and 30th closes are each a checkpoint: A8 says each once, a meter (two before).
+        self.assertEqual([(a["meter"], a["at_close"]) for a in final["alarms"] if a["id"] == "A8"],
+                         [(m, k) for m in ("done_all", "done_screen") for k in (15, 20, 25, 30)], "done_all and done_screen")
         # Frozen: the nightly rows are replaced each night; a final reading does not flip after A8.
         self.store.replace_forward("dir-b", "nightly", [], version=1)
         later = self.report(settings=NIGHTLY, previous=final)
@@ -631,7 +647,7 @@ class TheAmendment(Fixture):
 
         (self.root / R.FILE).write_text(json.dumps(later, default=str))
         self.assertEqual(ST.dlane_facts(self.root)["done_final"],
-                         [{"meter": "done_all", "at_close": 30}, {"meter": "done_screen", "at_close": 30}])
+                         [{"meter": m, "at_close": k} for m in ("done_all", "done_screen") for k in (15, 20, 25, 30)])
 
     def test_finality_reads_each_close(self):
         rows = [{"family": "f", "day": "2026-10-08", "pnl_usd": Decimal("1"), "fee_basis": "broker"}]

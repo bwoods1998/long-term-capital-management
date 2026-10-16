@@ -1705,8 +1705,11 @@ K5_STEP = ("the direction lane reads shadow while K5 holds (no new direction Can
            "dlane.k5_clear true for one dlane run, then take it out; or delete the swarm store's kv dlane_k5)")
 K5_DISARMED_STEP = "take dlane.k5_clear out of swarm.json: while it is true K5 cannot trip, whatever the lane loses"
 LANE_OFF_WHAT = "The direction lane is off (dlane.mode): its last report is not read."
+#: Since the owner's goal of Oct 16, 2026 (A50: "Then provide the $30k scaling plan (pinned A45)") the step names the
+#: pinned plan; the checkpoints it names are the owner's (the 15th counted close, then every 5th: `dlane.DONE`).
 DONE_STEP = ("Done holds at a FINAL checkpoint ({named}): read the claim in dlane-report.json (done.<meter>.latest, beside "
-             "P(Done | zero edge), the same-risk buy-and-hold and Net after costs); the plan to scale follows from it")
+             "P(Done | zero edge), the same-risk buy-and-hold and Net after costs); then the $30k scaling plan (pinned "
+             "A45) follows from it")
 
 
 #: The direction lane's warnings the `dlane` cause's mail names first (`_lane_checks`), in this order.
@@ -1714,7 +1717,7 @@ MAIL_FIRST = ("K5", "DC1")
 
 
 def done_key(meter: Any, at_close: Any) -> str:
-    """A Done checkpoint's key in stall.json's `done_told` ("done_all:30")."""
+    """A Done checkpoint's key in stall.json's `done_told` ("done_all:15": the owner's first checkpoint since A50)."""
     return f"{meter}:{at_close}"
 
 

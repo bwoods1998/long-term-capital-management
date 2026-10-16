@@ -552,7 +552,8 @@ class TheConstantsOfTheDlaneReport(unittest.TestCase):
         cls.R = integrated("dlane_report")
 
     def test_the_loosening_of_the_train_bar_is_listed_with_its_cost(self):
-        row = self.R.LOOSENED[-1]
+        # Release E3's row, found by its rule: the owner's four rows of A50 (Oct 16, 2026) follow it.
+        row = next(r for r in self.R.LOOSENED if r["rule"] == "the equity Train bar")
         self.assertEqual(set(row), {"rule", "was", "now", "cost"})
         self.assertEqual(row["rule"], "the equity Train bar")
         self.assertIn("seven Train years 2016-19 and 2022-24 (A15)", row["was"])

@@ -35,7 +35,9 @@ swarm's reader and, every one again, through the REAL reader over a real swarm s
 lane's switch (none, "off", "train"; at "train" the store also holds a panel family in Train research). TWO
 DIFFERENCES ARE ALLOWED, each held to what it must be (`equity_week.main_shape`): the column `eq_instances.kind`,
 "equity" on every row, and the panel adapter's table `eq_rebalances`, empty. The forward store has none: release E4
-adds no table and no column to it.
+adds no table and no column to it. SINCE THE OWNER'S A50 (Oct 16, 2026) A THIRD, of the forward record's readings and
+nothing of the book's path: A14's intents carry two keys, and a reading the owner's clause alone held (under 40
+sessions, all but one agreeing) is read back under main's 95% alone (`equity_week.a14_as_main`, held to that clause).
 
 A LATER CHANGE OF THE SHARE PROGRAMS' PATH FAILS HERE. When it is meant (a release of main that changes the book),
 record the fixture again on that release's clean tree and say in the commit which scenarios moved and why."""
@@ -199,6 +201,27 @@ class TheSeatedShareProgramsTradeAsOnMain(unittest.TestCase):
         quiet = W.run("twin: every buy fills, nothing is re-based")
         self.assertFalse([e for e in quiet["twin_events"] if e[0] == "twin_rebased"])
         self.assertTrue(all(r["agree"] == 1 and r["rebased"] == 0 and r["base_agree"] == 1 for r in quiet["twins"]))
+
+    def test_the_owners_a14_clause_is_the_readings_one_difference(self):
+        """THE OWNER'S CHANGE OF A14's INTENTS BOUND (A50, Oct 16, 2026): the book's path is main's; of the forward
+        record's readings, two instances of "Monday's buys missed" (5 and 7 sessions, one miss each) and one of
+        "Wednesday's open refused" now hold by all but one, where main's 95% alone did not (`equity_week.a14_as_main`
+        reads them back, held to what the owner's clause allows). Every other reading is main's but for the two keys."""
+        held = {}
+        for name in ("twin: Monday's buys missed, the twins re-based",
+                     "twin: Wednesday's open refused, a rebuy missed and the twin re-based"):
+            for key, reading in W.run(name)["a14"]:
+                if reading["intents"]["ok_by"] == "all_but_one":
+                    held[(name[:20], key)] = (reading["intents"]["sessions"], reading["intents"]["agreed"],
+                                              reading["holds"], W.a14_as_main(reading)["holds"])
+        self.assertEqual(held, {("twin: Monday's buys ", "bred-a-hold3@1:r"): (5, 4, True, False),
+                                ("twin: Monday's buys ", "bred-b-range@1:r"): (7, 6, True, False),
+                                ("twin: Wednesday's op", "bred-b-range@1:r"): (7, 6, True, False)})
+        bad = {"applies": True, "holds": True, "why": None, "gap": {"ok": True},
+               "intents": {"sessions": 40, "agreed": 39, "missing": 0, "ok": True, "ok_by": "all_but_one",
+                           "all_but_one_under": 40}}
+        with self.assertRaises(ValueError):
+            W.a14_as_main(bad)
 
     def test_every_scenario_is_mains_order_for_order(self):
         for name in W.SCENARIOS:

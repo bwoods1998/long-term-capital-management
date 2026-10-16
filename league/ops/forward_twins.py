@@ -135,9 +135,12 @@ THE A14 READING (D13; `a14_reading`) of a Done checkpoint's counted closes C. C_
 does not apply (it holds). Gap: over C_eq's twin records that are final and priced, gap ok iff |mean(gap_bp)| <=
 `forward_db.A14_GAP_BP` (None with no priced twin): the SIZE of the mean gap, either way. Intents: for each instance
 I of C_eq, the sessions d with d_first(I) <= d <= previous_session(I's last counted exit day), less the unreadable
-ones; share = agreed / all those sessions; intents ok iff share >= `forward_db.A14_AGREE` (a session with no
-`fwd_twins` row is not agreed and counts in `missing`; None with no session). A14 holds iff gap ok is True and
-intents ok is True. It is final iff every close of C_eq has a final twin and `missing` = 0. Unmeasured never holds.
+ones; share = agreed / all those sessions S; intents ok iff agreed >= `forward_db.A14_AGREE` x S, OR (THE OWNER'S
+CHANGE, A50, the goal of Oct 16, 2026) S < `forward_db.A14_ALL_BUT_ONE_UNDER` (40) and agreed >= S - 1, all but one
+(`forward_db.a14_intents_ok`; `ok_by` says which clause held: "share", or "all_but_one" when only the owner's clause
+did; a session with no `fwd_twins` row is not agreed, counts in `missing` and is never the one forgiven; None with no
+session). Before A50 the bound was the 95% alone. A14 holds iff gap ok is True and intents ok is True. It is final
+iff every close of C_eq has a final twin and `missing` = 0. Unmeasured never holds.
 `d_first(I)` is read as the day of the instance's first `fwd_twins` row (the rows are written in day order from it);
 an instance with no row yet has every session from the one before its first counted lot's entry missing.
 BESIDE IT, never in its rule (A29; the reading's `rebase`, `A14_REBASE_KEYS`): over the same counted sessions, how many
@@ -174,8 +177,10 @@ UNREADABLE = ("split", "retired")
 A14_KEYS = ("applies", "holds", "final", "why", "gap", "intents", "by_instance", "rebase")
 A14_GAP_KEYS = ("closes", "priced", "unpriced", "pending", "mean_gap_bp", "bound_bp", "ok")
 #: `disagreed` and `causes` ({cause: sessions}, `forward_db.CAUSES`) are counted beside the share, never in its rule.
-A14_INTENT_KEYS = ("instances", "sessions", "agreed", "missing", "unreadable", "share", "bound", "ok", "disagreed",
-                   "causes")
+#: `all_but_one_under` and `ok_by` (A50, the owner's change of the intents bound): the session count under which all but
+#: one agreeing also passes, and which clause held ("share" | "all_but_one" | None).
+A14_INTENT_KEYS = ("instances", "sessions", "agreed", "missing", "unreadable", "share", "bound", "all_but_one_under",
+                   "ok", "ok_by", "disagreed", "causes")
 A14_INSTANCE_KEYS = ("instance", "sessions", "agreed", "missing", "unreadable")
 #: A29, BESIDE THE READING AND NEVER IN ITS RULE (`a14_reading`'s "rebase"): `rebases` (how many times the counted
 #: instances' twins were re-based within the counted sessions) and the UN-RE-BASED twin runs' own agreement over the
@@ -1388,8 +1393,8 @@ def _blank(*, applies: bool, holds: bool, final: bool, why: str | None) -> dict[
             "gap": {"closes": 0, "priced": 0, "unpriced": 0, "pending": 0, "mean_gap_bp": None,
                     "bound_bp": forward_db.A14_GAP_BP, "ok": None},
             "intents": {"instances": 0, "sessions": 0, "agreed": 0, "missing": 0, "unreadable": 0, "share": None,
-                        "bound": forward_db.A14_AGREE, "ok": None, "disagreed": 0,
-                        "causes": {name: 0 for name in forward_db.CAUSES}},
+                        "bound": forward_db.A14_AGREE, "all_but_one_under": forward_db.A14_ALL_BUT_ONE_UNDER,
+                        "ok": None, "ok_by": None, "disagreed": 0, "causes": {name: 0 for name in forward_db.CAUSES}},
             "by_instance": [],
             "rebase": {"rebases": 0, "sessions": 0, "agreed": 0, "share": None, "by_instance": []}}
 
@@ -1516,8 +1521,12 @@ def a14_reading(root: str | Path, counted: Sequence[Mapping[str, Any]]) -> dict[
         out["rebase"]["share"] = round(out["rebase"]["agreed"] / out["rebase"]["sessions"], 6)
     if intents["sessions"]:
         intents["share"] = round(intents["agreed"] / intents["sessions"], 6)
-        intents["ok"] = intents["agreed"] >= forward_db.A14_AGREE * intents["sessions"] - 1e-9
-        if not intents["ok"]:
+        # THE OWNER'S BOUND (A50): 95% of the S sessions, or all but one when S is under 40 (`a14_intents_ok`).
+        intents["ok"] = forward_db.a14_intents_ok(intents["agreed"], intents["sessions"], intents["missing"]) is True
+        if intents["ok"]:
+            share_ok = intents["agreed"] >= forward_db.A14_AGREE * intents["sessions"] - 1e-9
+            intents["ok_by"] = "share" if share_ok else "all_but_one"
+        else:
             whys.append(f"the live and the shadow intents agree on {intents['agreed']} of {intents['sessions']} "
                         "counted sessions, under the bound")
     else:
