@@ -42,6 +42,16 @@ request says the same route (L2's follow-up, Oct 15, 2026): the Train bar's last
 `bar_text`, also in each family's Train brief), the panel block's (league/swarm/elane_xs.py `route_words`), THE RATION
 (what `elane.same_lineage` compares at a look) and the next request's sentence for a continuation refusal.
 
+THE ONE-SESSION ASK (goal item 1, Oct 16, 2026; words only, as L2's ask). With any share-program place, THE EQUITY
+QUOTA's lines also say the floor is short of programs that close every session and ask, softly, for mechanisms that hold
+one session in cells no row binds and not CLOSED: a close-to-open overnight hold of an index ETF, or another 1-session
+hold (`SESSION_ASK`, at most `SESSION_ASK_CHARS`). They claim no edge and say every proposal is judged by the same Train
+bar and the same route by symbols. No place is reserved, and no admission, quota, seat, screen, bar or graveyard code
+reads it. THE ENGINE holds such a lot for a bred program as for the seed seed-overnight-qqq (league/swarm/seeds.py
+`EQUITY_OVERNIGHT`): a buy "at": "close", then the lot sold "at": "open" by the next decide (a close-bought lot may
+sell at the next open: league/equity/config.py `may_sell`), or NEEDS max_hold_sessions 1, which exits it at that open
+(`max_hold_due`). A same-session hold is not possible (`MIN_HOLD_SESSIONS`, in an identity file), so it is not asked.
+
 THE ADMISSION (`EquityPass.admit`). A proposal is born as an equity family when: its lane is "beta" or "equity"; its
 structure is in `elane.structures` (a beta card's is "etf"); its symbols (1-20) are in `elane.universe` and of its
 structure's class; its agenda is an available mechanism; its cell (lane x agenda x universe group) is not CLOSED; no
@@ -184,6 +194,22 @@ def due(store: Any, settings: Mapping[str, Any] | None, *, now: float | None = N
 
 
 # ----------------------------------------------------------------------------------------------------------- the quota
+#: THE ONE-SESSION ASK (the module docstring; goal item 1, Oct 16, 2026): the owner's goal counts real closes, a program
+#: that closes every session adds about one a session (seed-overnight-qqq, a close-to-open overnight hold, does), and
+#: most bred programs hold 2-8 sessions. A soft ask in words only, after THE INDEX-ONLY ASK, as L2 made it: no count, no
+#: seat or look word, no edge claimed; the Train bar, the route by symbols and THE RATION are said to be unchanged.
+#: `{of_index}` is " of an index ETF" while one is open (`EquityQuota.index_open`), else "". At most `SESSION_ASK_CHARS`
+#: (a test holds both forms under it). Its head says "a soft ask" in lower case: "A SOFT ASK" names THE INDEX-ONLY ASK
+#: alone (test_elane_route_text.py reads it so).
+SESSION_ASK = ("ONE-SESSION HOLDS (a soft ask: a preference, not a rule): the floor is short of programs that "
+               "CLOSE EVERY SESSION. In a cell no row binds and not CLOSED, prefer a mechanism that holds one session: "
+               "a close-to-open overnight hold{of_index} (buy \"at\": \"close\", sell the lot \"at\": \"open\" at the "
+               "next decide, or NEEDS max_hold_sessions 1) or another 1-session hold. No edge is claimed for them: "
+               "every proposal is still judged by the same Train bar, then the same Validation try and sealed look, "
+               "or forward screen, as any program of its symbols (THE ROUTE BY SYMBOLS), and THE RATION still holds.")
+SESSION_ASK_CHARS = 600
+
+
 class EquityQuota:
     """THE EQUITY QUOTA for one equity pass (the module docstring): the window's births by lane, read once, and the
     pass's own so far."""
@@ -278,8 +304,16 @@ class EquityQuota:
             return (0, 0)
         return (1, max(1, places // 2))
 
+    def session_ask(self) -> str:
+        """THE ONE-SESSION ASK (`SESSION_ASK`): its sentence while on with any share-program place (its `want` less its
+        `panel` places), else "". A SOFT ask, as `index_ask`: no place, admission or count reads it."""
+        if not self.on or self.want - self.panel <= 0:
+            return ""
+        return SESSION_ASK.format(of_index=" of an index ETF" if self.index_open else "")
+
     def text(self) -> str:
-        """The request's quota lines ("" while off), with THE INDEX-ONLY ASK (`index_ask`) when it asks for any."""
+        """The request's quota lines ("" while off), with THE INDEX-ONLY ASK (`index_ask`) when it asks for any, then
+        THE ONE-SESSION ASK (`session_ask`) when it asks."""
         if not self.on:
             return ""
         total = sum(self.window.values())
@@ -301,7 +335,8 @@ class EquityQuota:
             out += (f" A SOFT ASK, no place reserved: {asked} (every symbol one of {_named(self.index_open)}: THE ROUTE "
                     "BY SYMBOLS) in cells no row binds and not CLOSED (the equity birth cells block lists the bound "
                     f"cells, most rows first; THE EQUITY GRAVEYARD lists the CLOSED ones){rest}.")
-        return out
+        session = self.session_ask()
+        return f"{out} {session}" if session else out
 
 
 # ----------------------------------------------------------------------------------------------------------- the text
@@ -1118,4 +1153,4 @@ __all__ = ["BIRTHS_AT_KEY", "LAST_KEY", "DEFAULTS", "BOUNDS", "SYSTEM", "cfg", "
            "universe", "researching", "due", "EquityQuota", "lanes_text", "agenda_text", "graveyard_text", "seeded_ids",
            "tried", "tried_text", "families_text", "vocabulary_text", "last_text", "refusal_said", "REFUSAL_SAID",
            "OTHER_SAID", "CARD_FIELDS", "NO_SECTORS", "SETTING_KEYS", "EquityPass", "FWD1_FIRST_SESSIONS",
-           "route_symbols", "route_text"]
+           "route_symbols", "route_text", "SESSION_ASK", "SESSION_ASK_CHARS"]

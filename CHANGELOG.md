@@ -30,6 +30,53 @@ The running House release is `20261015T204317Z-ad3c7f9653cc` (main `e136c251`, P
 20:43Z Oct 15), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
+### The equity pass asks, softly, for programs that close every session, on `feat/births-every-session` (unreleased; cut from main `d6bcf0cd`; goal item 1's births lever; an owner deploy: `league/swarm/elane_births.py` is protected; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's; no setting; no seat, screen, Train or Validation bar, money rule or graveyard change)
+
+- **What it is** (`league/swarm/elane_births.py` `SESSION_ASK`, `EquityQuota.session_ask`). After L2's index-only ask,
+  THE EQUITY QUOTA's lines now say the floor is short of programs that close every session. They ask, softly, for
+  mechanisms that hold one session, in cells no row binds and not CLOSED: a close-to-open overnight hold of an index
+  ETF (buy "at": "close", sell the lot "at": "open" at the next decide, or NEEDS max_hold_sessions 1), or another
+  1-session hold. The ask says it is a preference, not a rule, and claims no edge. It says every proposal is still
+  judged by the same Train bar, then the same Validation try and sealed look, or forward screen, as any program of
+  its symbols, and that THE RATION still holds. It is said whenever the pass has a share-program place (its want
+  less its panel places). With no index ETF open it names none. Its head says "a soft ask" in lower case, so "A SOFT
+  ASK" in a request still names the index-only ask alone (L2's tests read it so).
+- **Why:** the goal counts real closes, and the close rate per seat is the lever: about 1.64 closes a session on 6
+  seats today. seed-overnight-qqq closes about every session; most bred programs hold 2-8 sessions. The seat rule
+  (A24/A30, K first: the lower of Validation and Train close days per 250 sessions) already ranks frequent closers
+  first once they compete, so the lever is what gets born.
+- **The engine already holds it.** A bred program has the seed's contract and engine. A lot bought at a close may
+  sell at the next open (`config.may_sell`, `MIN_HOLD_SESSIONS` 1), and NEEDS max_hold_sessions 1 exits a
+  close-bought lot at that open (`max_hold_due`). seed-overnight-qqq does the first (`seeds.EQUITY_OVERNIGHT`). A
+  same-session (intraday) hold would need an identity-file change (`league/equity/config.py`), which is excluded, so
+  it is not asked.
+- **What is unchanged:** the quota's arithmetic and the admission (no code reads the ask; a test reads their source),
+  the pass's event, the system prompt, the seats, screens, the Train and Validation bars, money rules and the
+  graveyard. The overnight lineage is spent (seed-overnight-spy was refused as its lineage), so a plain copy of
+  seed-overnight-qqq is refused at its own look under THE RATION. The ask says THE RATION still holds.
+- **Size:** no budget bounds the whole equity request. Its blocks have their own (`CELLS_CHARS` 8,000,
+  `CONTRACT_CHARS` 20,000, `families_shown`, `REFUSALS_SHOWN`). The ask has one too, `SESSION_ASK_CHARS` (600): 596
+  characters with the index ETF named, 580 without. On the test fixture (want 4) the request grows from 10,856 to
+  11,453 characters, the ask and one space. The system prompt is unchanged (18,121).
+- **Expected effect, stated:** small and late. A new birth cannot be seated, trade and close before checkpoint 15
+  (about Oct 22). The speed-goal check put an every-session closer's first close at about Oct 27, at about 3 points
+  of P(Done) for each early checkpoint, nearly all of it also gained at zero edge: earlier readings, not evidence.
+  It estimated, without measuring, about a 10% chance that such a passer exists by Oct 23. It suggested shipping this
+  in 1017b or after checkpoint 15 is final (the A50 freeze). Watch: births a pass by NEEDS max_hold_sessions, their
+  Train passes, and the bound days_1_3 cells.
+- **Verified:** `league/tests/test_elane_session_ask.py` (14 tests: the ask in the quota lines after L2's and once
+  in the request, at want 1 to 20 and with no share-program place, with no index ETF open, both forms within the
+  budget and the request grown by the ask alone, no outcome word, pass word or figure, unmoved by what happened after
+  Train, no place reserved and no admission or quota code reading it, a five-session proposal born as before; and
+  the engine: a bred-style close-to-open program passes `check_code` and closes every session close-to-open in
+  `engine.run`, by its own sell and by max_hold_sessions 1). The modules that import the births module, its fakes or
+  its callers (the architect, panel and health modules), with the seal tests (`test_elane_*seal*`, `test_e3_*`,
+  `test_equity_seats_seal`: 146 tests), one module a process with a timeout: 101 modules, 3,457 tests OK on Python
+  3.14 and 3.11 (1 skip, in `test_dlane_trainmap`). L2's 20 tests pass unchanged. `league.ci --no-tests` passed.
+  Ids unchanged on both Pythons: fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`, constitution
+  `60796aed`.
+- **Rollback:** the release before; the request is words only.
+
 ### Release 1016a: L5 and C1, on `rel/1016a` (unreleased; one House deploy, outside 12:55-20:05Z on a trading day; no
 gateway change; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the
 money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
