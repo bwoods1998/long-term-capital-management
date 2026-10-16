@@ -30,6 +30,119 @@ The running House release is `20261015T204317Z-ad3c7f9653cc` (main `e136c251`, P
 20:43Z Oct 15), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
+### C3 (A45) of the scaling plan: the Scaled band, SHIPPED DARK (no rung live), on `feat/scale-c3` (stacked on C2; unreleased; one owner release with C2's two parts, outside 12:55-20:05Z on a trading day; it MOVES THE MONEY DIGEST ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
+
+- **The rows** (`league/constitution.py`, the block `equity_money.scaled` under the table, shares and multiples only,
+  never a dollar): `pin_sha256` "" (DARK: the first rung is Blake's later deploy of a pin and of its sha256 here, after
+  Done's first checkpoint receipt; C2's E_P comes from this very release's re-ratification, so it cannot carry the
+  pin's sha256); `rungs` R1 0.50, R2 1.25, R3 2.25, R4 4.00, R5 6.75 (multiples of E_P, the plan's table 3.2),
+  `max_sleeve_share` 0.50 (no sleeve above 0.50 x E); `lines` (THE SCALED LINES, Blake's amendment of goal item 4):
+  `in_force` false (nothing past R1, no Scaled mark), `window_share` 0.18 over `window_sessions` 20, `total_share`
+  0.36, `program_share` 0.10, `family_line_probe_only` false (the separable third loosening). Each in a bound with the
+  plan's figure at its loose end (`EQUITY_MONEY_BOUNDS`, `EQUITY_MONEY_CHOICES`); the pin's sha "" or a sha256; rungs
+  never decreasing; a table without the block is dark. Reader: league/equity/bands.py `scaled_settings` (never
+  league/live/money.py).
+- **The book** (`league/equity/live.py`, plumbing outside both identities; the rules in `league/equity/bands.py`):
+  - the same private pin C2 reads (`scale-pin.json`) names each program's rung (`rungs`, keys "eq|<family>|v<N>") and
+    the plan's sha256; the House reads a rung ONLY from a pin whose bytes are the row's sha256;
+  - a live share program in the Probe band is sized at min(its rung's multiple x THAT PIN'S E_P, 0.50 x E), never
+    through C2's frozen pool; its rung is the lower of the pin's and the swarm's tighten-only setting `elane.scale`
+    (league/swarm/elane.py `scale_setting`, read through league/equity/families.py; "stop the ladder" is
+    `{"rung": 0}`; a lowering after the pin was read sticks for that pin, so only a new pin raises a rung again), at
+    most R1 while the lines are not in force;
+  - an R1 buy and lot carry the PROBE mark (inside the $400 / $800, EDM1's -$300, the family line); from the yes an
+    R2-and-up buy carries the SCALED mark (`eq_orders.probe` 2; its lot `probe` 0 and `info` {"rung", "scaled"}), is
+    sized to the Scaled room, its open risk leaves the Probe room (`probe_figures`, the one path into either lane's),
+    and its close is outside the Probe window, the total and EDM1's line; a rung that changes during an entry sends no
+    more shares under other marks;
+  - the House's own step-downs: D3 (the program line since the last rung change, -$300 at R1 and -10% of the sleeve
+    from R2, and the cumulative line since R1 at the highest rung's, each over EVERYTHING the program version realized
+    whatever its marks, judged every minute and at each entry's sizing: back to Probe for good), D5 (the Scaled
+    window: Scaled opens pause, said once), D6 (the Scaled total: every program back to Probe, that version of the
+    plan closed for good; only a version never run on the box reopens the ladder, loudly);
+  - a pin that does not match its row opens no new Scaled lot: a program last read at a rung waits, the rest trade at
+    Probe on the E_P of the last pin that matched (never the mismatched pin's), and with none ever matched no equity
+    open goes at all (plan 9); one standing error alert, health `scaled`, the pre-open check fails
+    (league/ops/preopen.py);
+  - fail closed: a memory (`eq_scale`) that cannot be read, or is gone once written, sizes every program at Probe and
+    is never written over; an unreadable setting minute notes nothing. Memory in the private live.sqlite; a private
+    ledger kind `equity.scale` (league/ledger.py). No figure in any alert, record or health, and no public alert names
+    a program or a rung.
+- **The family line** (league/swarm/elane.py `loss_line`): with the lines in force and `family_line_probe_only`, the
+  forward rows of Scaled-marked lots are left out (read from live.sqlite, read only, matched by lot and cash;
+  unreadable: nothing left out).
+- **Dark is C2 exactly.** With the row unset nothing of the band runs: `league/tests/test_scaled_inert.py` runs one
+  synthetic book through the House's code and reads every sizing, line and Done reading against
+  `league/tests/fixtures/scaled_inert_c2.json`, which the same scenario wrote on C2's head (3.14 and 3.11): identical,
+  the book's memory too; the pin's own row with the ladder stopped is identical in every sizing, line and reading.
+  Three independent lens reviews (walls and inertness, plan conformance, production) found 0 bytes moved in their own
+  dark scenarios. Proof of the rules: `league/tests/test_equity_scaled.py`.
+- **Where the build and the pinned plan differ** (each with the reviews' call: (a) accepted as built, (b) fixed,
+  (c) an amendment for the captain's packet):
+
+| # | the plan | as built | call |
+|---|---|---|---|
+| 1 | 9: a pin that does not match opens no new equity lot; the deploy preflight refuses such a release first | no new Scaled lot; Probe and panel trade on the last MATCHING pin's E_P; with none ever matched, no equity open at all; no preflight yet (owed in `ship_house.sh` before the first rung) | (c) |
+| 2 | 3.2, 4.2 item 6: the account must hold E_P plus the sleeves and twice the largest | left to the receipt; the House caps each sleeve at 0.50 x E and every account wall binds through `size_entry` | (a) |
+| 3 | 9, 11 item 7: a setting may only lower; every raise is a new pin | a per-pin ratchet: a lowering seen after the pin was read sticks; switching the lines on later raises nothing; a cap already there holds but is not learned (stricter than the plan) | (a) |
+| 4 | 4.3: the step-downs | the House: D3, D5's pause, D6; the captain's same-day `elane.scale`: D1, D2, D4, D5's down-one-rung, D8; D7 by the pin's version key. After a kill switch or a stop clears, Scaled programs resume at their rungs unless lowered | (a), Blake told |
+| 4b | 4.3 D6 | fires on realized loss (Scaled entries already stop on realized plus open risk); a closed version stays closed | (a), (b) |
+| 4c | 4.3 D3 "since the change" | counted from when the House first read the rung | (a) |
+| 4d | 3.4: both program lines read all realized since R1 / since the change | they read every real lot of the program version whatever its marks | (b) |
+| 5 | 3.4 loosening 3 inside the yes | a separate row `family_line_probe_only`: Blake's yes must set both rows | (a) |
+| 6 | (silent) withdrawing the yes, or going dark | every Scaled lot, open or CLOSED, then counts in the Probe window, the $800 total and the room: past Scaled losses can stop the Probe opens of BOTH lanes; once any Scaled lot has existed, roll back only by `pin_sha256` "", never by a release without C3 | (a), Blake told |
+| 7 | 3.4: elane's line reads Probe-marked lots | the forward table has no mark, so elane reads live.sqlite read only | (a) |
+| 8 | (smaller) | Scaled lots keep their Probe slot; the pin is `scale-pin.json`; health gains `scaled`; a refused Scaled entry counts toward the idle clock; every rung raise is a captain build (four tests pin the tree dark); rung status is never in a public alert | (a) each |
+
+- **Identities.** Money digest `4cd610a5` -> `558dc3a2`, constitution `18636b3f` -> `d4e59a79` (`PINNED_DIGEST`); the
+  equity design blocks restate them; with the block left out both are C2's exactly (`DIGESTS_C2`, `before_scaled`).
+  Fingerprint `b60410ad` and equity `78022ca6` unchanged (no file of league/live/, the Gym or the equity evidence).
+- **Its cost, dark:** none in size; one more money-digest move and re-ratification. **At R1 (a later deploy):** one
+  program back at A32's 0.50 sleeve against A37's 0.33 (plan 3.2). **The yes (later):** the four loosenings of plan 3.4.
+- **Rollback**, one owner deploy: the release before C3 while no Scaled-marked lot has ever existed; after that only
+  `pin_sha256` "" (row 6 above); open lots exit by their own rules; the money digest moves and the grant re-ratifies.
+
+### C2 (A45) of the scaling plan: the options sizing-up step parked, and the Probe pool frozen at E_P, on `feat/scale-c2` (unreleased; two owner deploys, part A then part B, or both at once, outside 12:55-20:05Z on a trading day; part A MOVES THE MONEY DIGEST ONCE and the grant re-ratifies; part B moves no identity; no fingerprint moves, no evidence reset)
+
+- **Part B, the Probe pool frozen at E_P** (`league/equity/live.py`, plumbing outside both fingerprints;
+  `league/ops/preopen.py`; one private ledger kind in `league/ledger.py`). Once the private pin
+  `/workspace/state/scale-pin.json` is read (`probe_e_usd`, the sizing E on C2's deploy day: the owner's step writes it
+  once C2 is live, from the grant's capital ratified around C2's money digest, before any deposit or ceiling release;
+  never in the repository), every program's sleeve, the Probe's, the panel's and a Sized one's, sizes on min(E, E_P) at
+  the send, at a share program's decide and at a panel's budget; the account's walls (an instrument's share of E, the
+  invested cap) stay on E. THE NAME IS NOT THE PLAN'S (a deviation, said): the plan's name for the pin carries its
+  target figure, which this public repository does not carry, so the House reads `scale-pin.json` (the plan's script
+  reads E_P from the private ledger, never the pin). NO PIN, AND NONE EVER READ ON THIS BOX, NO FREEZE: the House sizes
+  on E exactly as before and writes nothing, so part B deploys dark. A pin read is kept in the private live.sqlite (E_P,
+  and a marker with its sha256 and times, no figure), so a pin that cannot be read (not a regular file, never followed
+  or waited on; unreadable content) or one lost once one was read sizes on the last E_P read on this box, across
+  restarts, never on E; only with none ever read does it size nothing and refuse every open House-wide. It is ONE
+  standing error alert a process (`began_at` its first minute, kept), which the watch after a promotion inherits; health
+  shows `probe_pin`; the pre-open check fails on it. No figure in any of them. The options Probe structure is read in
+  `league/live/money.py` and is not part B's: each step's row holds it, as the plan says. Proof:
+  `test_equity_probe_pin`. Rollback: the release before part B (replace a pin, never remove it).
+
+Part A, the options row:
+
+- **The options row** (`league/constitution.py`, the comment above `options_money`): `options_money.sized.min_trades`
+  20 -> 1000, inside its bound (20 to 1000) at its tight end, a tightening, as the equity table's was on Oct 11. Sized
+  is the one options route whose stake grows with E with no test against the same-risk buy-and-hold, and its opens
+  carry no Probe mark (outside the $400 window, the $800 total and the program lines). With 1000 no options family
+  reaches Sized; one the swarm holds at Sized is read back to Probe at the live path's next band pass, and nothing it
+  holds is sold. The rule stays pre-registered at its own 20.
+- **The bound's tight end**: `OPTIONS_MONEY_BOUNDS` `probe.max_loss_share` 0.02 -> 0.005 (the loose end, the goal's
+  10%, and the row in force, 0.10, are unchanged), so a later step's row can hold one Probe structure at the dollars it
+  holds today while E grows. It admits only tighter rows, and it is no row of the constitution: it moves no digest.
+- **Nothing changes size at today's E.** Every Probe open is planned as before (`test_options_sized_parked`).
+- **Identities.** Money digest `cfcc94b1` -> `4cd610a5`, constitution `60796aed` -> `18636b3f` (`PINNED_DIGEST`); the
+  equity design blocks restate them. With the row set back both are main's exactly (the bound alone moves neither).
+  Fingerprint `b60410ad` and equity `78022ca6` unchanged. `league/tests/equity_design.py` keeps the older pins as
+  `DIGESTS_OPF1` (`before_options_park`); every older table's helper sets the row back; `test_live_money` tests the
+  rule at its own 20.
+- **Its cost.** No options family can size up while it stands.
+- **Rollback**, one owner deploy: `sized.min_trades` 20 (re-pin `PINNED_DIGEST`, rewrite the design blocks); the money
+  digest moves back and the grant re-ratifies.
+
 ### Release 1016a: L5 and C1, on `rel/1016a` (unreleased; one House deploy, outside 12:55-20:05Z on a trading day; no
 gateway change; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the
 money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
@@ -1486,7 +1599,7 @@ the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's 
 equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
 0.50 x E.
-Money digest `cfcc94b1`, full digest `60796aed` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
+Money digest `558dc3a2`, full digest `d4e59a79` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `68f1bca9` / `d244fb10`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

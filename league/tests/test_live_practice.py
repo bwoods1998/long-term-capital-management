@@ -520,6 +520,14 @@ class Embargo(LiveCase):
     RETURNS = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
 
     def probe(self, created, *, returns=None, real=True, table=None):
+        # At the options Sized rule's own 20 forward trades unless a table is given: C2 (A45) of the scaling plan parked
+        # the count in force at 1000 (league/tests/test_options_sized_parked.py), so no family is Sized on it.
+        if table is None:
+            import dataclasses
+
+            from league.live import money as M
+
+            table = dataclasses.replace(M.Table.from_constitution(), sized_min_trades=20)
         live = self.make([dict(family("vert", VERTICAL, band="probe"), version_created_at=created)], table=table)
         self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
                                                        "max_loss": 100.0} for i, r in enumerate(returns or self.RETURNS)])

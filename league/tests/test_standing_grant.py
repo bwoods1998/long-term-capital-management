@@ -341,6 +341,10 @@ class PreE1(StandingCase):
         opf = patch.dict(CONSTITUTION["options_money"]["probe"], open_per_family=3)
         opf.start()
         self.addCleanup(opf.stop)
+        # ... and before the options sizing-up step was parked (C2 (A45) of the scaling plan): the Sized rule's own 20.
+        park = patch.dict(CONSTITUTION["options_money"]["sized"], min_trades=20)
+        park.start()
+        self.addCleanup(park.stop)
 
 
 class TheIncubatorCap(PreE1):

@@ -19,6 +19,14 @@ THE BANDS (the EquityBook moves them, writing through its families reader, leagu
 - probe | sized -> candidate, exits only and sticky for the version: `edm1` names why (EDM1), or the program's realized
   Probe net reached `demotion.program_loss_usd` (-$300; the swarm's `elane.program_loss_usd` retires it too).
 
+THE SCALED BAND (C3 (A45) of the scaling plan, SHIPPED DARK; owner: money; `equity_money.scaled`, read here by
+`scaled_settings`, never by league/live/money.py): a Probe-band share program the private pin names at a rung is sized
+at `rung_sleeve` (the rung's multiple of E_P, never above `max_sleeve_share` x E) instead of the Probe sleeve. An R1 lot
+is Probe-marked, so EDM1 (`realized_net`) and the shared budget read it as any Probe lot; from Blake's yes
+(`lines.in_force`) an R2-and-up lot is Scaled-marked, falls outside `realized_net` with no edit here, and counts in the
+Scaled lines (`scaled_room`: D5 the window, D6 the total) and the two program lines (`program_line`, `program_lines`:
+D3). With no pin-sha row nothing of it runs.
+
 THE SEAT RULE (release E5-A; the captain's A24 as amended by A30 before it went live; the constitution's
 `equity_money.probe.seat`, read here by `seat_settings`, never by league/live/money.py). Owner: swarm. Pure
 functions; the EquityBook applies them (league/equity/live.py `_seat_bands`) and is THE ONE SOURCE of who holds a
@@ -330,6 +338,191 @@ def panel_settings(constitution: Mapping[str, Any] | None = None) -> PanelSettin
         return PANEL_FALLBACK
 
 
+# ------------------------------------------------------------------------------------------- THE SCALED BAND (C3)
+# C3 (A45) of the scaling plan (owner: money; the constitution's `equity_money.scaled` comment). Pure rules: the book
+# (league/equity/live.py `EquityBook._scale_for`, `_scale_now`, `_scaled_room`) applies them and keeps their memory.
+#: The ladder's top rung, and Probe's (no rung).
+TOP_RUNG = 5
+PROBE_RUNG = 0
+#: A lot's marks in its `eq_lots.info` (league/equity/live.py writes them when the lot opens, from its buy): `RUNG_INFO`
+#: the rung it was opened at (R1 and up), `SCALED_INFO` True for a Scaled-marked lot (its `probe` column is 0, so it is
+#: outside EDM1's `realized_net` and the Probe window's closes). The swarm's family line reads the same key
+#: (league/swarm/elane.py `scaled_trades`).
+RUNG_INFO = "rung"
+SCALED_INFO = "scaled"
+
+
+@dataclass(frozen=True)
+class ScaledSettings:
+    """`equity_money.scaled` as the book reads it: `pin_sha256` (None: unset, THE BAND IS DARK and every program is at
+    Probe), `rungs` (R1 to R5's sleeves as multiples of E_P), `max_sleeve_share` (no sleeve above it x E), and THE
+    SCALED LINES: `lines_in_force` (Blake's amendment of goal item 4; without it nothing goes past R1 and no lot is
+    Scaled-marked), `window_share` of the Scaled sleeves in force over `window_sessions`, `total_share` of the largest
+    Scaled sleeves reached, `program_share` of a sleeve (the program line from R2), and `family_line_probe_only` (the
+    swarm's family line reads Probe-marked lots only: with `lines_in_force` alone)."""
+
+    pin_sha256: str | None
+    rungs: tuple[Decimal, ...]
+    max_sleeve_share: Decimal
+    lines_in_force: bool
+    window_share: Decimal
+    window_sessions: int
+    total_share: Decimal
+    program_share: Decimal
+    family_line_probe_only: bool
+
+    @property
+    def dark(self) -> bool:
+        """No pin-sha row: no rung for any program (today's behaviour)."""
+        return self.pin_sha256 is None
+
+    @property
+    def lines_live(self) -> bool:
+        """The Scaled lines bind as a budget of their own: Blake's yes is in force AND the band is not dark. A band made
+        dark again (the rollback, `pin_sha256` "") with Scaled lots still open counts them in the Probe budget like
+        Probe lots (league/equity/live.py `probe_figures`): nothing escapes both budgets."""
+        return self.lines_in_force and not self.dark
+
+    @property
+    def top(self) -> int:
+        """The highest rung a program may be at under this table: R5 with the Scaled lines in force, else R1."""
+        return TOP_RUNG if self.lines_in_force else 1
+
+    def multiple(self, rung: int) -> Decimal:
+        """A rung's sleeve as a multiple of E_P (zero for Probe and for a rung that is no rung)."""
+        return self.rungs[rung - 1] if isinstance(rung, int) and 1 <= rung <= len(self.rungs) else Decimal(0)
+
+    def scaled(self, rung: int) -> bool:
+        """Whether a lot opened at `rung` carries the SCALED mark (R2 and above, with the Scaled lines in force); an R1
+        lot carries the Probe mark."""
+        return self.lines_in_force and isinstance(rung, int) and rung >= 2
+
+
+#: What a table with no readable scaled block is read as: DARK (no rung, the Scaled lines not in force, so a
+#: Scaled-marked lot counts in the Probe budget like a Probe lot). The constitution's own check refuses such a table.
+SCALED_DARK = ScaledSettings(None, (Decimal(0),) * TOP_RUNG, Decimal(0), False, Decimal(0), 20, Decimal(0), Decimal(0),
+                             False)
+
+
+def scaled_settings(constitution: Mapping[str, Any] | None = None) -> ScaledSettings:
+    """(money and book) THE SCALED BAND's rows, `equity_money.scaled` of `constitution` (None: the one in force), read
+    here so that league/live/money.py (inside the options execution fingerprint) never has to learn them, as
+    `seat_settings` and `panel_settings` read theirs. `SCALED_DARK` when the block is absent or any of its rows is
+    outside the constitution's own bounds (`equity_money_problems`): fail closed, no rung."""
+    from .. import constitution as C
+
+    rules = C.CONSTITUTION if constitution is None else constitution
+    try:
+        block = rules["equity_money"]["scaled"]
+        if any(p.startswith("equity_money.scaled") for p in C.equity_money_problems(dict(rules))):
+            return SCALED_DARK
+        lines = block["lines"]
+        sha = str(block["pin_sha256"])
+        return ScaledSettings(sha or None, tuple(Decimal(str(block["rungs"][k])) for k in C.EQUITY_SCALED_RUNGS),
+                              Decimal(str(block["max_sleeve_share"])), lines["in_force"] is True,
+                              Decimal(str(lines["window_share"])), int(lines["window_sessions"]),
+                              Decimal(str(lines["total_share"])), Decimal(str(lines["program_share"])),
+                              lines["family_line_probe_only"] is True)
+    except (KeyError, TypeError, ValueError, InvalidOperation, AttributeError):
+        return SCALED_DARK
+
+
+def rung_sleeve(settings: ScaledSettings, rung: int, e_p: Decimal, E: Decimal) -> Decimal:
+    """(money) A program's sleeve at `rung`, in dollars: min(the rung's multiple x E_P, `max_sleeve_share` x E), never
+    below zero; zero at Probe (the Probe sleeve is the book's own, on the frozen pool)."""
+    if not isinstance(rung, int) or rung < 1:
+        return Decimal(0)
+    return max(Decimal(0), min(settings.multiple(rung) * Decimal(e_p), settings.max_sleeve_share * Decimal(E)))
+
+
+def program_line(settings: ScaledSettings, rung: int, sleeve: Decimal, probe_line: Decimal) -> Decimal | None:
+    """(money) THE PROGRAM LINE of a rung, in dollars (negative): at R1 the Probe line in force (`probe_line`,
+    `demotion.program_loss_usd`: -$300); from R2 -`program_share` x the rung's sleeve (plan 3.4); None at Probe."""
+    if not isinstance(rung, int) or rung < 1:
+        return None
+    if rung == 1:
+        return Decimal(probe_line)
+    return -(settings.program_share * Decimal(sleeve))
+
+
+def program_lines(*, rung: int, since_change: Decimal, line_now: Decimal | None, cumulative: Decimal,
+                  line_highest: Decimal | None) -> str | None:
+    """(money) D3, THE TWO PROGRAM LINES of a program at a rung: why it returns to Probe for good, or None. `since_change`:
+    the realized net of its rung lots closed since its last rung change; `cumulative`: since it first reached R1 (both
+    dollars, fees and dividends in); `line_now`: its rung's `program_line`; `line_highest`: the line of the highest rung it
+    reached (the cumulative line never resets, so losses cannot pile up across rung changes). Either one, a LOSS at or
+    below its line, is D3 (a line of zero, a row tightened to nothing, is hit by the first loss, never by no loss). Never a
+    figure in the words (the receipt and the private record carry the figures)."""
+    if not isinstance(rung, int) or rung < 1:
+        return None
+    if line_now is not None and Decimal(since_change) < 0 and Decimal(since_change) <= line_now:
+        return (f"D3: its realized net since its last rung change reached the program line of R{rung} "
+                "(R1: the Probe line; from R2: -10% of its sleeve): back to Probe, for good")
+    if line_highest is not None and Decimal(cumulative) < 0 and Decimal(cumulative) <= line_highest:
+        return ("D3: its realized net since it first reached R1 reached the program line of the highest rung it reached "
+                "(the cumulative line): back to Probe, for good")
+    return None
+
+
+def worst_net_stretch(closes: Iterable[tuple[str | None, Decimal]], *, since: str | None) -> Decimal:
+    """(money) THE SCALED WINDOW's figure, as the Probe window's (league/live/real.py `probe_realized`, "net"): the largest
+    max(0, -(the summed cash of the closes on or after s)) over every close day s on or after `since` (ISO; None: every
+    close). A close whose day cannot be read counts in every stretch."""
+    by_day: dict[str, Decimal] = {}
+    for day, cash in closes:
+        if since is not None and day is not None and str(day) < since:
+            continue
+        key = "~" if day is None else str(day)          # "~" sorts after every ISO day: in every stretch
+        by_day[key] = by_day.get(key, Decimal(0)) + Decimal(cash)
+    worst = running = Decimal(0)
+    for day in sorted(by_day, reverse=True):
+        running += by_day[day]
+        worst = max(worst, -running)
+    return worst
+
+
+@dataclass(frozen=True)
+class ScaledRoom:
+    """(money) THE SCALED LINES' figures, dollars (private: the book's live.sqlite and its sizing only): the window's
+    budget (`window_share` x the Scaled sleeves in force) and its realized figure (the worst net stretch of the last
+    `window_sessions` sessions), the total's budget (`total_share` x the largest Scaled sleeves reached) and its realized
+    figure (the net loss of every Scaled close since the ladder's start), and the Scaled open risk."""
+
+    window_budget: Decimal
+    window: Decimal
+    total_budget: Decimal
+    total: Decimal
+    open_risk: Decimal
+
+    @property
+    def room(self) -> Decimal:
+        """What a Scaled entry may still put at risk: the lower of the two, less the open risk (`size_entry`'s
+        `budget_room`)."""
+        return min(self.window_budget - self.window, self.total_budget - self.total) - self.open_risk
+
+    @property
+    def window_reached(self) -> bool:
+        """D5: the window is reached (realized plus open risk at or past its budget): Scaled opens pause."""
+        return self.window_budget - self.window - self.open_risk <= 0
+
+    @property
+    def total_reached(self) -> bool:
+        """D6: the Scaled closes' net loss reached the total (a total there is: some Scaled sleeve was reached)."""
+        return self.total_budget > 0 and self.total >= self.total_budget
+
+
+def scaled_room(settings: ScaledSettings, *, sleeves_usd: Decimal, peak_usd: Decimal,
+                closes: Sequence[tuple[str | None, Decimal]], window_since: str | None, open_risk: Decimal) -> ScaledRoom:
+    """(money) THE SCALED LINES (plan 3.4) over the Scaled-marked closes ((NY close day, net cash), ...) and the Scaled
+    open risk: `ScaledRoom`. `sleeves_usd`: the Scaled sleeves in force now; `peak_usd`: the largest they ever summed to;
+    `window_since`: the window's first day (None: every close)."""
+    net = sum((Decimal(cash) for _, cash in closes), Decimal(0))
+    return ScaledRoom(window_budget=settings.window_share * Decimal(sleeves_usd),
+                      window=worst_net_stretch(closes, since=window_since),
+                      total_budget=settings.total_share * Decimal(peak_usd), total=max(Decimal(0), -net),
+                      open_risk=Decimal(open_risk))
+
+
 def close_days(lots: Iterable[Mapping[str, Any]], *, floor: Decimal) -> int:
     """(swarm) K's count over ONE run's lots (league/equity/engine.py's `lots` rows): the number of days on which the
     lots that closed (`exit_day`; a lot still open at the run's end has none and counts nowhere) have entry weights
@@ -522,4 +715,6 @@ def band_for_row(row: Mapping[str, Any]) -> tuple[str, str]:
 __all__ = ["EquityRecord", "sized_up", "sized_sleeve_share", "edm1", "next_band", "band_for_row", "FIRST_COME",
            "ACTIVITY_FREE", "SEAT_RULES", "K_TOLERANCE", "K_PER_SESSIONS", "SeatSettings", "SEAT_FALLBACK",
            "seat_settings", "close_days", "run_sessions", "seat_counts", "seat_k", "SeatFacts", "seat_key", "seat_order",
-           "seat_idle", "seat_yielder", "seat_plan", "PanelSettings", "PANEL_FALLBACK", "panel_settings"]
+           "seat_idle", "seat_yielder", "seat_plan", "PanelSettings", "PANEL_FALLBACK", "panel_settings", "TOP_RUNG",
+           "PROBE_RUNG", "RUNG_INFO", "SCALED_INFO", "ScaledSettings", "SCALED_DARK", "scaled_settings", "rung_sleeve", "program_line",
+           "program_lines", "worst_net_stretch", "ScaledRoom", "scaled_room"]

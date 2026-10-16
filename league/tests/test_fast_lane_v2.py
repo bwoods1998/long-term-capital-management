@@ -507,7 +507,12 @@ class TheLivePath(LiveCase):
         self.assertNotIn("probe", self.venue.sent[0], "the mark never reaches the venue")
 
     def test_a_sized_familys_open_is_not_marked(self):
-        live = self.make([family("vert", VERTICAL, band="probe")])
+        # At the Sized rule's own 20 forward trades: C2 (A45) of the scaling plan parked the count in force at 1000, so
+        # no family reaches Sized on the table in force (league/tests/test_options_sized_parked.py).
+        import dataclasses
+
+        live = self.make([family("vert", VERTICAL, band="probe")],
+                         table=dataclasses.replace(M.Table.from_constitution(), sized_min_trades=20))
         returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
         self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
                                                        "max_loss": 100.0} for i, r in enumerate(returns)])

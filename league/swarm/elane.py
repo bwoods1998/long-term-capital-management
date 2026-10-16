@@ -35,7 +35,20 @@ SETTINGS (`cfg`; policy.json "elane", swarm.json over it; `DEFAULTS` is the roll
 - `val_tries` 1 and `looks_per_lineage` 1 (whatever is written), plus R3's one Validation-only retry when the
   receipt permits it and the first try FAILED its pre-check, the retry version's hash recorded at the first try
   (A9 D3; league/equity/screen.py `retry_permitted`);
-- `program_loss_usd` -300 (a tightening only: -300 to -25).
+- `program_loss_usd` -300 (a tightening only: -300 to -25);
+- `scale` (C3 (A45) of the scaling plan, the Scaled band): {"rung": the ladder's cap for every program, "programs":
+  {"eq|<family>|v<N>": one program's cap}}, each a whole number 0 to 5 (default 5 and none: the pin alone). The House
+  sizes a program at the LOWER of the private pin's rung and this, so a setting may only lower a rung, never raise one
+  (a raise is Blake's deploy of a new pin; a lowering seen after a pin was read sticks for that pin, so putting it back
+  raises nothing until a new pin: league/equity/live.py `_setting_rung`); 0 is Probe, `{"rung": 0}` is "stop the
+  ladder". It is how the captain applies a receipt's step-down the same day (plan 4.3). Read by the House through
+  `scale_setting` (league/equity/families.py), failing closed: unreadable is the last good value, else every rung 0,
+  marked `unread` (the House sizes at Probe and learns nothing from it).
+
+THE FAMILY LINE AND THE SCALED MARK (C3): `loss_line` reads the family's real forward rows, every version, as before; with
+Blake's Scaled lines in force AND their separable third part (`equity_money.scaled.lines.in_force` and
+`family_line_probe_only`, league/equity/bands.py `scaled_settings`), it leaves out the rows of Scaled-marked lots (read
+from the House's live.sqlite, read only; an unreadable book leaves nothing out). An R1 lot is Probe-marked and stays in.
 
 R-SEC, SECTOR PROGRAMS ARE FORWARD-ONLY (the captain's decision from the widening review of Oct 14, 2026, under A19,
 A31 and A33): an equity family whose symbols name anything outside the four index ETFs (`econfig.INDEX_ETFS`) takes
@@ -143,10 +156,12 @@ are imported where they are used, on the House.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import math
 import re
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -262,7 +277,13 @@ DEFAULTS: dict[str, Any] = {
     "val_tries": 1,
     "looks_per_lineage": 1,
     "program_loss_usd": -300,
+    # C3 (A45): the Scaled band's tighten-only setting (the module docstring); 5 and no program's cap: the pin alone.
+    "scale": {"rung": 5, "programs": {}},
 }
+#: `scale`'s bound: a rung is a whole number from Probe (0) to the ladder's top (league/equity/bands.py `TOP_RUNG`).
+SCALE_TOP = 5
+#: A program's key in `scale.programs` (and in the House's private pin): "eq|<family>|v<N>", the plan's own.
+_SCALE_KEY = re.compile(r"^eq\|[^|\s]+\|v[1-9][0-9]*$")
 
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 
@@ -357,7 +378,35 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         "looks_per_lineage": int(number("looks_per_lineage", 1, 1, count=True)),
         # The line's bound is its default (-300): a setting can only raise it toward zero.
         "program_loss_usd": number("program_loss_usd", float(DEFAULTS["program_loss_usd"]), -25.0),
+        # C3: `scale` is NOT read here: the House reads it through `scale_setting` alone, which fails closed (a cfg
+        # reading would have to fall back to some default, and the default 5 would fail open; the review of C3).
     }
+
+
+def _rung(value: Any) -> int | None:
+    """A rung as a setting writes it: a whole number (an int, never a bool) from 0 to `SCALE_TOP`, else None."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= SCALE_TOP:
+        return None
+    return int(value)
+
+
+def scale_block(raw: Any) -> dict[str, Any] | None:
+    """`elane.scale` as written, or None when it is not readable WHOLE (no object; a rung that is no whole number from
+    0 to 5; a program key that is not "eq|<family>|v<N>"): a setting that cannot be read is never read in part. Absent
+    keys are their defaults (5; no program's cap)."""
+    if not isinstance(raw, Mapping):
+        return None
+    rung = _rung(raw.get("rung", DEFAULTS["scale"]["rung"]))
+    programs = raw.get("programs", {})
+    if rung is None or not isinstance(programs, Mapping):
+        return None
+    caps: dict[str, int] = {}
+    for key, value in programs.items():
+        cap = _rung(value)
+        if not isinstance(key, str) or not _SCALE_KEY.match(key) or cap is None:
+            return None
+        caps[key] = cap
+    return {"rung": rung, "programs": dict(sorted(caps.items()))}
 
 
 def on(settings: Mapping[str, Any] | None) -> bool:
@@ -978,23 +1027,117 @@ def loss_line(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | 
     EDM1 demotes at the same line): `LOSS_LINE` when the family's realized real net (its forward record's "real" rows, the
     EquityBook's closed lots: net cash after fees and dividends, every version) is at or below the line, else None. The
     tournament's equity round retires it then; its lots exit by the House's rules (a band-dropped program's lots exit at
-    the next open, A8.5). A tightening, never a trade. None on any error (a rule that cannot be read retires nothing)."""
+    the next open, A8.5). A tightening, never a trade. None on any error (a rule that cannot be read retires nothing).
+    C3 (the module docstring): with the Scaled lines in force and their family-line part, the rows of Scaled-marked lots
+    are left out (`scaled_trades`), so the line reads Probe-marked lots only; R1's lots are Probe-marked."""
     try:
         if lane_of(store, fam) is None:
             return None
-        rows = store._all("SELECT pnl FROM forward WHERE family=? AND source='real'", (str(fam["id"]),))
+        fid = str(fam["id"])
+        rows = store._all("SELECT trade_id, pnl FROM forward WHERE family=? AND source='real'", (fid,))
         if not rows:
             return None
-        net = sum(float(r["pnl"]) for r in rows)
+        scaled = scaled_trades(store, fid)
+        net = sum(float(r["pnl"]) for r in rows if not _same_lot(scaled.get(str(r["trade_id"])), r["pnl"]))
         return LOSS_LINE if math.isfinite(net) and net <= float(cfg(settings)["program_loss_usd"]) else None
     except Exception:  # noqa: BLE001
         return None
+
+
+def scaled_trades(store: Any, fid: str) -> dict[str, float]:
+    """C3: {forward id (`eq-<lid>`, league/equity/live.py `export_row`): the lot's net cash} of the family's Scaled-marked
+    lots, which the family line leaves out ONLY while Blake's Scaled lines are in force with their family-line part
+    (`equity_money.scaled.lines`), and only a row whose P&L is that lot's cash (`_same_lot`: a book restored with its lot
+    ids reused, or a dividend booked after the export, leaves the row in); else, and whenever the House's live.sqlite
+    cannot be read (read only, within a second), nothing is left out (the line reads more, never less)."""
+    from ..equity import bands as eb
+
+    rules = eb.scaled_settings()
+    if not (rules.lines_live and rules.family_line_probe_only):
+        return {}
+    path = Path(getattr(store, "root", "") or "") / "live.sqlite"
+    if not str(getattr(store, "root", "") or "") or not path.exists():
+        return {}
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+        try:
+            rows = db.execute("SELECT lid, cash, info FROM eq_lots WHERE family=?", (str(fid),)).fetchall()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return {}
+    out: dict[str, float] = {}
+    for lid, cash, info in rows:
+        try:
+            mark = json.loads(info) if info else {}
+            value = float(cash)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(mark, Mapping) and mark.get(eb.SCALED_INFO) is True and math.isfinite(value):
+            out[f"eq-{int(lid)}"] = value
+    return out
+
+
+def _same_lot(cash: float | None, pnl: Any) -> bool:
+    """Whether a forward row's P&L is the Scaled lot's cash (to the cent): only then is the row left out."""
+    try:
+        return cash is not None and abs(float(pnl) - cash) < 0.005
+    except (TypeError, ValueError):
+        return False
+
+
+def scale_setting(root: str | Path) -> dict[str, Any]:
+    """C3: `elane.scale` from <root>/swarm.json over the repository's policy.json (the module docstring), FAILING CLOSED
+    as `roster_seats` does: a block there that cannot be read whole is the last good value this process read of that
+    file, else `SCALE_CLOSED` (every rung 0: Probe). No block in swarm.json is the policy's (else the default: 5, the pin
+    alone)."""
+    path = Path(root) / "swarm.json"
+    key = str(path)
+    try:
+        doc = json.loads(path.read_text())
+    except FileNotFoundError:
+        return _policy_scale()
+    except (OSError, ValueError):
+        with _roster_lock:
+            return copy.deepcopy(_scale_good.get(key, SCALE_CLOSED))
+    block = doc.get("elane") if isinstance(doc, Mapping) else None
+    bad = not isinstance(doc, Mapping) or ("elane" in doc and not isinstance(block, Mapping))
+    if not bad:
+        if block is None or "scale" not in block:
+            return _policy_scale()
+        good = scale_block(block["scale"])
+        if good is not None:
+            with _roster_lock:
+                _scale_good[key] = copy.deepcopy(good)
+            return good
+    with _roster_lock:
+        return copy.deepcopy(_scale_good.get(key, SCALE_CLOSED))
+
+
+def _policy_scale() -> dict[str, Any]:
+    """`elane.scale` of the repository's policy.json, whole, else the default (5: the pin alone); a policy block that
+    cannot be read whole is `SCALE_CLOSED`."""
+    try:
+        from . import settings as settings_mod
+
+        layer, _ = settings_mod.read_policy()
+    except Exception:  # noqa: BLE001 - fail closed, never to the default (the review of C3)
+        return copy.deepcopy(SCALE_CLOSED)
+    block = (layer.get("elane") if isinstance(layer, Mapping) else None) or {}
+    if not isinstance(block, Mapping) or "scale" not in block:
+        return copy.deepcopy(DEFAULTS["scale"])
+    return scale_block(block["scale"]) or copy.deepcopy(SCALE_CLOSED)
 
 
 # ----------------------------------------------------------------------------------------------------------- the roster
 #: `roster_seats` when swarm.json's `elane` cannot be read and this process never read a good value: no new seat.
 ROSTER_CLOSED = -1
 _roster_good: dict[str, int] = {}
+#: C3: `scale_setting` when swarm.json's `elane.scale` cannot be read and this process never read a good one (or the
+#: repository's policy cannot be read): every rung 0 (Probe), marked `unread` so the House learns nothing from it (its
+#: ratchet keeps only a setting that was read); and the last good value read of each file.
+SCALE_CLOSED: dict[str, Any] = {"rung": 0, "programs": {}, "unread": True}
+_scale_good: dict[str, dict[str, Any]] = {}
 _roster_lock = threading.Lock()
 
 
@@ -1847,4 +1990,5 @@ __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_K
            "FLOOR_INELIGIBLE", "REFUSED_BEFORE_LOOK", "REFUSED_CAUSES",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",
            "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LineageUnread", "LOSS_LINE",
-           "loss_line", "SEAT_KEY", "SEAT_RETRY_SECONDS", "seat_recorded", "seat_activity", "seat_backfill"]
+           "loss_line", "SEAT_KEY", "SEAT_RETRY_SECONDS", "seat_recorded", "seat_activity", "seat_backfill",
+           "SCALE_TOP", "SCALE_CLOSED", "scale_block", "scale_setting", "scaled_trades"]

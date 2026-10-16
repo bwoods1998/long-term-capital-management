@@ -405,7 +405,27 @@ activity types the venue refused), `eq_preopen_activities`. The book reads the h
   - `tick(now, *, account_row, positions, open_orders, real_block, killed) -> dict` (never raises);
   - `frozen` (str), `expected_shares() -> {sym: Decimal}`, `busy() -> set[str]`, `health() -> dict`,
     `flatten(why) -> int` (the rollback's first step: every open lot queued to exit through the normal path);
-    `reconcile(positions, now=None) -> [problems]` (one reading; book, additive).
+    `reconcile(positions, now=None) -> [problems]` (one reading; book, additive); `probe_pin() -> {state, why,
+    since, held}` (`health()["probe_pin"]`, read by the pre-open check; never a figure).
+- THE PROBE POOL FROZEN AT E_P (C2 (A45) of the scaling plan; book, additive): `read_probe_pin(root) -> ProbePin`
+  (`state` "absent" | "read" | "unreadable", `e_p`, `why`, `sha256`) reads the private pin `PROBE_PIN_FILE` under
+  `root`, a regular file only; the book keeps a read in live.sqlite (`PROBE_PIN_GOOD_KEY`, `PROBE_PIN_MARK_KEY`),
+  sizes every sleeve on min(E, E_P) once one is read, on E while none was ever read on the box, and on the last E_P
+  read when the pin cannot be read or is gone (league/equity/live.py, the constants' comment). `size_entry`'s `E`
+  stays the sizing equity.
+- THE SCALED BAND (C3 (A45) of the scaling plan, shipped dark; book and money, additive): `scaled() -> {state, why,
+  lines, rungs, out, closed, window, since}` (`health()["scaled"]`, read by the pre-open check; never a figure, never
+  a sha). With `equity_money.scaled.pin_sha256` "" it is "dark" and nothing of the band runs. With a row, a pin whose
+  bytes are that sha256 names each program's rung (`ProbePin.rungs`, keys `program_key(family, version)`): a Probe-band
+  share program is sized at `bands.rung_sleeve` (the rung the lower of the pin's and `families.scale_setting()`, the
+  swarm's tighten-only `elane.scale`), its buy stamped `answer["rung"]` and, R2 and up with the Scaled lines in force,
+  `probe` `SCALED_MARK`; its lot keeps `info` {"rung", "scaled"} (`bands.RUNG_INFO`, `SCALED_INFO`) and `probe` 0 when
+  Scaled. `probe_figures(rows, *, weights, scaled_lines=None)` leaves Scaled open risk out of the Probe room while
+  the lines are in force and the band is not dark (`ScaledSettings.lines_live`), and counts Scaled lots as Probe ones
+  otherwise. A pin that does not match opens no new Scaled lot (`SCALE_REFUSAL`); while a row is set the Probe and
+  panel pool sizes on the last matching pin's E_P (`SCALE_EP_KEY`), refusing every open when none ever matched
+  (`SCALE_POOL_REFUSAL`). The memory is the kv `SCALE_KEY` (private). Families readers gain
+  `scale_setting() -> {"rung", "programs"} | None` (None: no word; the pin alone).
 - Calls it makes: `league.equity.sizing.size_entry` (money), `league.live.money.available_cash` (money) with
   `working_buys_worst` = its own and `reserved` = the options book's `reserved()` (its working opens' maximum loss with
   fees and buffer: at least their worst cost, so no option buy is counted twice), `table.equity` (money's `EquityTable`),
@@ -1235,7 +1255,7 @@ the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's 
 equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
 0.50 x E.
-Money digest `cfcc94b1`, full digest `60796aed` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
+Money digest `558dc3a2`, full digest `d4e59a79` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `68f1bca9` / `d244fb10`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of
