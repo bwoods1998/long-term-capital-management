@@ -248,11 +248,12 @@ class Scaled(T.BookTest):
         pin(self.root, {KEY_A: 2})
         h = self.harness()
         inst = h.instance("fam-a")
-        with mock.patch.object(L, "read_probe_pin", side_effect=AssertionError("asked")):
+        with band(""), mock.patch.object(L, "read_probe_pin", side_effect=AssertionError("asked")):
             self.assertIs(h.book._scale_for(inst, D(E)), L.SCALE_PROBE)
             h.book._scale_now()
             self.assertEqual(h.book.scaled()["state"], "dark")
-        self.assertEqual(self.size(h, inst).sleeve_equity, D("0.25") * D(E_P), "C2's frozen Probe sleeve")
+        with band(""):
+            self.assertEqual(self.size(h, inst).sleeve_equity, D("0.25") * D(E_P), "C2's frozen Probe sleeve")
         self.assertIsNone(h.state.get(L.SCALE_KEY))
 
     # -- a matching pin: the sleeve, the lower of pin and setting, R1 without the lines
@@ -475,7 +476,8 @@ class Scaled(T.BookTest):
             self.assertEqual(self.size(h, b).sleeve_equity, D("0.25") * D(E_P), "the last matching pin's E_P, not 4000")
             budget, sleeve = h.book._panel_budget(L.replace(h.instance("fam-p"), kind="panel"), T.MONDAY.isoformat(), [])
             self.assertLessEqual(sleeve, D("0.10") * D(E_P))
-        self.assertEqual(self.size(h, b).sleeve_equity, D("0.25") * D("4000"), "dark: C2's freeze reads the pin there")
+        with band(""):
+            self.assertEqual(self.size(h, b).sleeve_equity, D("0.25") * D("4000"), "dark: C2's freeze reads the pin there")
         fresh = self.harness(state="fresh")
         c = fresh.instance("fam-c")
         with band(sha):
@@ -483,7 +485,8 @@ class Scaled(T.BookTest):
             self.assertEqual(fresh.get_intent(self.last_intent.iid).why, L.SCALE_POOL_REFUSAL)
             no_block = (lambda opening=True: None)
             self.assertEqual(fresh.book._open_block(no_block, c, killed=lambda: False), L.SCALE_POOL_REFUSAL)
-        self.assertIsNone(fresh.book._open_block(no_block, c, killed=lambda: False), "dark: C2's rule")
+        with band(""):
+            self.assertIsNone(fresh.book._open_block(no_block, c, killed=lambda: False), "dark: C2's rule")
 
     def test_the_production_unread_marker_teaches_nothing(self):
         """The third review's W11 (mutant M22): the families reader's own `unread` answer (elane.SCALE_CLOSED) sizes at
