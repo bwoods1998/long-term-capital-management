@@ -55,14 +55,18 @@ row, after Done's first checkpoint receipt; every raise after it is another such
   (`probe_figures`, the one path by which equity open risk reaches either; verified: `equity_open_risk` is display
   only), and a Scaled entry is sized to the Scaled room (the lower of the window's and the total's, less the Scaled
   open risk at the shared weights). While the lines are not in force a Scaled-marked lot counts as a Probe one.
-- **The House's own step-downs** (`_scale_now`, every minute; plan 4.3): D3, a program line hit (realized since its last
-  rung change at most -$300 at R1 and -10% of its sleeve from R2; or since it first reached R1 at most the line of the
-  highest rung it reached): that program back to Probe, for good. D5, the Scaled window reached: Scaled opens pause
-  (no Scaled entry fits the room), said once; the down-one-rung is the captain's setting. D6, the Scaled total reached:
-  every program back to Probe and the ladder closed for the pin's plan version (a pin with a new plan sha reopens it,
-  its window and total counted again from that minute and from no sleeve).
-  Every other step-down (D1, D2, D4, D7, D8) is the captain's same-day `elane.scale`, from the receipt. Nothing is ever
-  sold or placed by a rung: lots exit by their own rules.
+- **The House's own step-downs** (`_scale_now`, every minute, and D3 at each entry's sizing too; plan 4.3): D3, a
+  program line hit (EVERYTHING the program version realized, every real lot whatever its marks, since its last rung
+  change at most -$300 at R1 and -10% of its sleeve from R2; or since it first reached R1 at most the line of the
+  highest rung it reached): that program back to Probe, for good. D5, the Scaled window reached: Scaled opens pause (no
+  Scaled entry fits the room), said once; the down-one-rung is the captain's setting. D6, the Scaled total reached:
+  every program back to Probe and that version of the plan closed FOR GOOD (kv `eq_scale` keeps every closed version
+  and every version the ladder ran under; a pin of a closed version finds it closed; only a version never run on this
+  box reopens the ladder, with its window and total counted from that minute and from no sleeve, and one error-level
+  standing alert dated when its pin was written). Every other step-down (D1, D2, D4, D5's down-one-rung, D8) is the
+  captain's same-day `elane.scale`, from the receipt, and D7 is the pin's version key. So after a kill switch or a stop
+  clears, Scaled programs resume at their rungs unless the captain lowered them. Nothing is ever sold or placed by a
+  rung: lots exit by their own rules.
 - **A pin that does not match its row** (none there, unreadable, another file, rungs that cannot be read): NO NEW SCALED
   LOT. A program this box last read at a rung waits (`SCALE_REFUSAL`; its entry is missed at its cut-off), every other
   one trades at Probe, exits go on. The Probe and panel pool then sizes on min(E, the E_P of the LAST PIN THAT MATCHED
@@ -91,8 +95,9 @@ row, after Done's first checkpoint receipt; every raise after it is another such
   budget, the equity Probe figures, both lanes' Probe budget and room, the EDM1 records, the forward rows, the Done
   meter's equity closes, counts and beside-figures and the family line with `league/tests/fixtures/scaled_inert_c2.json`,
   which the same scenario wrote on C2's head (22646a97) under Python 3.14 and 3.11: identical, the book's own memory
-  too. With a pin-sha row that is not the pin's, with the lines in force too, or with the pin's own row and the ladder
-  stopped, every sizing, line and reading is identical. The rules: `league/tests/test_equity_scaled.py`.
+  too. With the pin's own row and the ladder stopped, every sizing, line and reading is identical. (A set row that no
+  pin on the box ever matched opens no new equity lot: plan 9, not inert by design.) Three independent lens reviews
+  found 0 bytes moved in their own dark scenarios. The rules: `league/tests/test_equity_scaled.py`.
 - **Identities.** Money digest `4cd610a5` -> `558dc3a2`, constitution `18636b3f` -> `d4e59a79` (`PINNED_DIGEST`); with
   the block left out both are C2's exactly (`league/tests/equity_design.py` `DIGESTS_C2`, `before_scaled`). The options
   execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move: league/equity/live.py, bands.py and
@@ -101,8 +106,24 @@ row, after Done's first checkpoint receipt; every raise after it is another such
 - **Deploy**: ONE owner release with C2's parts A and B (after release 1016a), never 12:55-20:05Z on a trading day; the
   standing grant re-ratifies on `558dc3a2`, and C2's pin step reads THAT ratification. Verify: the ids above, health
   equity `scaled.state` "dark", no `equity.scale` record, the pre-open check's line "the Scaled band is dark".
-- **Rollback**: the release before C3, or (once a rung is live) `pin_sha256` "" in one owner deploy; open lots exit by
-  their own rules.
+- **Rollback**: the release before C3 ONLY while no Scaled-marked lot has ever existed (count them read only:
+  `SELECT count(*) FROM eq_lots WHERE info LIKE '%"scaled":true%'`); after that only `pin_sha256` "" in one owner
+  deploy, because C2 counts only Probe-marked closes, so past Scaled losses would escape both budgets. Going dark (or
+  withdrawing the yes) after Scaled losses puts every Scaled lot, open or closed, into the Probe window, the $800 total
+  and the room, which can stop the Probe opens of BOTH lanes. Open lots exit by their own rules.
+- **Where the build and the pinned plan differ** (the three lens reviews' calls: (a) accepted as built, (b) fixed, (c)
+  an amendment for the captain's packet): 1 (c) plan 9's "no new equity lot" narrowed to no new Scaled lot once a
+  matching pin was read here (the pool on the last matching pin's E_P; none ever matched, no equity open), and the
+  deploy preflight not built yet (owed in `ship_house.sh` before the first rung); 2 (a) the account-size check of plan
+  3.2 / 4.2 left to the receipt (each sleeve at most 0.50 x E, every account wall through `size_entry`); 3 (a) the
+  per-pin ratchet, stricter than the plan; 4 (a) the step-downs split between the House (D3, D5's pause, D6) and the
+  captain's same-day setting (D1, D2, D4, D5's step, D8), told to Blake; 4b (a, b) D6 on realized loss, a closed
+  version closed for good; 4c (a) D3 counted from the House's first reading of the rung; 4d (b) both program lines
+  read everything realized; 5 (a) `family_line_probe_only` a separate row Blake's yes must set; 6 (a) withdrawing the
+  yes or going dark puts every Scaled lot in the Probe budget (told to Blake); 7 (a) elane reads live.sqlite read only;
+  8 (a) the smaller ones: Scaled lots keep their Probe slot, the pin's name, health's `scaled`, a refused Scaled entry
+  counts toward the idle clock, every rung raise a captain build, no rung status in a public alert. The CHANGELOG's C3
+  entry holds the same table.
 
 ## C2 (A45) of the scaling plan (Oct 15, 2026): the options sizing-up step parked, and the Probe pool frozen at E_P: `feat/scale-c2`, not deployed
 
