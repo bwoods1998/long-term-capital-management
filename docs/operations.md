@@ -1035,8 +1035,9 @@ Read with the amendments in force, which the text above predates:
   otherwise (a lot each, or panel closes counted apart); the captain records the ruling and its cost in
   CAPTAIN-AMENDMENTS before any panel seat opens.
 - **The Probe sleeve** is the constitution's `equity_money.probe.sleeve_share` x E. The text's "$557 sleeve" is
-  0.25 x E at about $2,229, which IS the design in force since release E5-S (six seats at 0.25 x E; **The seats and
-  the sleeve**, below); between E1's deploy and E5-S it was the captain's A20, three seats at 0.50 x E, and
+  0.25 x E at about $2,229: release E5-S's design (six seats at 0.25 x E) and, by the captain's A51 (new lots only),
+  the design in force again (**The seats and the sleeve**, below). Between E1's deploy and E5-S it was the captain's
+  A20, three seats at 0.50 x E; after E5-S, A32's six seats at 0.50 x E and then A37's six at 0.33 x E; and
   `set_design` may move the pair again. The rules do not change with the pair; the dollar examples scale with the
   sleeve. What does not scale is the shared loss window: a stock weighs 0.40 of it, so a FULL sleeve of stocks is
   0.40 x the sleeve of open risk against $400.
@@ -2284,20 +2285,20 @@ section 17 and the CHANGELOG entry), and nothing else; run again with the same p
 force, in rule arithmetic of the two numbers:
 
 <!-- equity-design:begin -->
-THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.33 x E
-(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.165 x E.
-A lot in every seat asks for 0.99 x E of ETFs; the lane holds at most 0.99 x E of them, 0.198 x E of
-open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 3 whole lots fit; the
-next program's lot of it is 0.005 x E. At E = $2,000, the account all cash and nothing realized: 5 of
+THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
+(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.125 x E.
+A lot in every seat asks for 0.75 x E of ETFs; the lane holds at most 0.75 x E of them, 0.15 x E of
+open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 4 whole lots fit; the
+next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 6 of
 6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,020.
-Whole sleeves (programs that hold several ETFs) ask for 1.98 x E; the lane holds at most 1.00 x E,
+6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,666.
+Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
 0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
-the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's day line (4x
-equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
-collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
+the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
+equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
+collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `cfcc94b1`, full digest `60796aed` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
+Money digest `5ea6f99f`, full digest `82a9a5a4` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
 <!-- equity-design:end -->
 
 - **Its source.** The pair is the captain's to set, before Monday's open, from the verdict of the pre-registered
