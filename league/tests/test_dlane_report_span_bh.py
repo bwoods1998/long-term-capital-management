@@ -49,8 +49,9 @@ QQQ = {"2026-10-09": "498.00", "2026-10-12": "500.00", "2026-10-13": "505.00", "
 NOTE_F1 = {"2026-10-14": {"open": {"clear": False, "why": "the House is paused"}, "close": {"clear": True}},
            "2026-10-15": {"open": {"clear": False, "why": "the House is paused"},
                           "close": {"clear": False, "why": "the House is paused"}}}
-#: The plan's script, pinned (its sha256): `TheScriptItself` runs it only when it is this one.
-SCRIPT_SHA256 = "367a784d5d22d1501e6d320dd96a038a416aadaffc8bfef2972a90ba3555ede7"
+#: The plan's script, pinned (its sha256): `TheScriptItself` runs it only when it is this one. scale30k-v2.1 (A45b:
+#: the owner's grid and the A50 rule sha; v1, 367a784d, refuses every report written under A50).
+SCRIPT_SHA256 = "0723dc9c5e691fe946167ae5c56adf6440cb9a623d3270e87dbdcac5995ae488"
 
 
 def series(prices: dict, sha: str = "fetch-1") -> dict:

@@ -67,12 +67,13 @@ their costs, and the captain's A50a(2)):
   (A45).
 - **A reading under another pinned rule** is never carried into this one (a frozen checkpoint is carried only from a
   report whose `rule.sha256` is this rule's), and does not silence A8. None existed: no checkpoint was ever reached.
-- **The $30k plan's pinned script is owed a re-pin.** `scale30k.py` (scale30k-v1, A45) gates on the Oct 9 rule's sha
-  (`0d007696`) and its checkpoint grid (30, 40, ...): it refuses every report this release writes (exit 2, no figure)
-  until the plan is re-pinned for the owner's checkpoints (its `RULE_SHA256` the final rule sha `027c12b7...`, not the
-  first draft's `9693fe00...`; `FIRST_CHECKPOINT` 15, `CHECKPOINT_EVERY` 5; its ladder's "checkpoints in a row" then
-  count 5-close steps). The report's `span_bh` (C1) is written at every one of
-  the owner's checkpoints. With `LTCM_SCALING_SCRIPT` set, league/tests/test_dlane_report_span_bh.py says so.
+- **The $30k plan's script is re-pinned (A45b).** `scale30k.py` (scale30k-v1, A45) gates on the Oct 9 rule's sha
+  (`0d007696`) and its grid (30, 40, ...) and refuses every report this release writes. Its successor scale30k-v2.1
+  (sha256 `0723dc9c`, A45b) accepts the owner's grid (15, 20, 25, ...) and the rule sha `027c12b7...` exactly: it prints
+  the plan at every checkpoint and runs its scaling looks, bars, ladder and step-downs at 30, 40, 50, ... only, so its
+  "checkpoints in a row" count LOOK checkpoints, 10 counts apart, and v1's measured false-positive rate holds. The
+  report's `span_bh` (C1) is written at every one of the owner's checkpoints. With `LTCM_SCALING_SCRIPT` set,
+  league/tests/test_dlane_report_span_bh.py runs the pinned v2.1 on these reports.
 - **Order with release 1017a.** Whichever of this and `rel/1017a` deploys second must contain the other (`rel/1017a`
   is rebased onto main after this lands; the two conflict only in CHANGELOG.md and this page). Deploying 1017a's
   current head after this one would silently put Done back on 30/10/7 under `0d007696`; deploying this branch alone
@@ -1857,6 +1858,20 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   the block in lower case, so "EQUITY BIRTH CELLS" in a request still means the block is there. Why: after the universe
   widened (03:43Z Oct 15) no pass bore an index family, and every equity birth of the day was forward-only. Watch:
   index births a pass over 24 h, index Train passes and S2 looks, and the seat plan's waiting list on Oct 21-23.
+- **The one-session ask** (Oct 16, 2026, goal item 1; `elane_births.SESSION_ASK`, `EquityQuota.session_ask`). After
+  the index-only ask, the quota lines say the floor is short of programs that close every session. They ask, softly,
+  for mechanisms that hold one session, in cells no row binds and not CLOSED: a close-to-open overnight hold of an
+  index ETF (buy "at": "close", sell the lot "at": "open" at the next decide, or NEEDS max_hold_sessions 1), or
+  another 1-session hold. The ask says it is a preference, not a rule, and claims no edge. It says every proposal is
+  still judged by the same Train bar and then the same route by symbols, and that THE RATION still holds. It is said
+  whenever the pass has a share-program place; with no index ETF open it names none. It is at most
+  `SESSION_ASK_CHARS` (600) characters, and no admission, quota, seat, screen or bar code reads it. The engine holds
+  such a lot for a bred program as for seed-overnight-qqq: a close-bought lot may sell at the next open
+  (`config.may_sell`), and max_hold_sessions 1 exits it there. A same-session hold is not possible
+  (`MIN_HOLD_SESSIONS`, an identity file). Why: the goal counts real closes, and most bred programs hold 2-8
+  sessions; the seat rule (A24/A30) already ranks frequent closers first. A plain copy of seed-overnight-qqq is
+  refused at its own look (the overnight lineage is spent). Watch: births a pass by NEEDS max_hold_sessions, and
+  their Train passes.
 - **Owed:** deriving a card's holding bucket from its program's NEEDS `max_hold_sessions` (in `cards.validate`). It
   was proposed beside L2 and dropped: the verifier found the check mislabelled. Also owed: the researchers' system
   prompts (`elane_train.RESEARCHER_SYSTEM`, `elane_xs.RESEARCHER_SYSTEM`) still say every program takes one Validation
