@@ -1342,6 +1342,21 @@ class TheJob(World):
         self.assertEqual(self.permits()["why"], "nonconforming_receipt")
         self.assertEqual(len(ctx.alerts), 1)
 
+    def test_a_wrong_constant_pin_writes_a_word_and_alarms(self):
+        """The review's F8 probe: a pin with one wrong constant used to put "the pin's cap is not this code's (0.12)"
+        in the file, which the figure check refused, so no file was written and the job failed each night."""
+        ctx = self.ctx(at("2026-10-23", 23, 30))
+        block = {"name": P.NAME, "prereg_sha256": P.PREREG_SHA256, "receipt_sha256": "a" * 64, **P.CONSTANTS,
+                 "p1": P.P1_RULE, "cap": 0.13}
+        with mock.patch("league.swarm.settings.load", lambda root, config=None: SETTINGS), \
+                mock.patch.object(P, "pin", lambda *a, **k: block):
+            out = PS.run(ctx)
+        self.assertIn("nothing is judged", out["why"])
+        doc = self.permits()
+        self.assertEqual((doc["why"], P.figure_free(doc)), ("no_receipt", []))
+        self.assertIn("cap", json.loads((self.root / PS.REPORT).read_text())["notes"][0])
+        self.assertEqual(len(ctx.alerts), 1)
+
     def test_the_conformance_is_run_once_and_kept(self):
         calls = {"n": 0}
         real = P.conform
