@@ -5786,7 +5786,8 @@ earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lif
   cuts no research.
 - **Unknown is never money:** an unreadable balance, fixed cost or reserve gives its meter no research; an unreadable
   `p30` earns nothing; a rule that cannot run at all is no research on either meter.
-- **The wait for the guard's next reading** (L4, on `fix/budget-guard-wait`, not deployed). A `budget` run that finds
+- **The wait for the guard's next reading** (L4, live since 20:43Z Oct 15, 2026: release
+  `20261015T204317Z-ad3c7f9653cc`, main `e136c251`). A `budget` run that finds
   no fresh Sail guard reading waits for the guard's next one. It looks at the guard's record every 20 s, for at most
   270 s from its start, inside the job's 600 s wall. When a reading comes, the run takes a new time after it and reads
   every input again at that time. With no reading by then, Sail stays `unreadable`, as before. The warning then starts
@@ -5800,6 +5801,25 @@ earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lif
   that takes more than about 4 minutes to reach its loop: that run still writes `unreadable`. `budget.json` and the
   receipt say `guard_wait` (the first read's seconds, the seconds waited after it, looks, whether it read) when the
   run found no fresh reading.
+- **The Claude meter in the same wait** (the pre-mortem's item7-claude, on `fix/budget-claude-wait`, not deployed).
+  Claude's balance is one read of the gateway's `/v1/health` (20 s). A `budget` run whose read gives no Claude balance
+  (the read timed out or failed, or gave no `claude` block) now waits too, in the same 270 s and to the same bounds:
+  every 20 s it reads every input again at a new time, and goes on from the first read that gives every meter it
+  waits for. While Sail is unread as well, it reads again only once the guard has a good reading, as above. With no
+  such read by the end, it goes on from the read that gives the most of the meters it waited for (those its first
+  read did not give), then the most meters, the earliest of those alike, else from its first read. So when the
+  guard's reading came and the Claude balance did not, also when a later read lost the Claude balance the first read
+  had, the run goes on from the read that gave Sail, as L4 alone would, and keeps looking for Claude to the end. With
+  no Claude balance by the end, Claude stays `unreadable`, as before, and the warning starts "waited N s (K looks)
+  for the gateway's Claude balance: none came" (with Sail late too, it names both; for each meter it says what came
+  at any read, e.g. "the Sail guard's reading came; the Claude balance, read at the first read, did not come
+  again"). No balance is invented. A run with no gateway to read does not wait for Claude. `guard_wait` also says
+  `waited_for` (the meters unread at the first read) and `unread` (the ones the read the run goes on from does not
+  give); `read` is true only when that read gives every meter.
+  Why: one missed `/v1/health` read after a restart wrote Claude `unreadable`, and one such receipt fails the day for
+  Done item 7 ("every budget receipt reads limited_by 'ceiling' on every meter"). In a gateway outage each `budget`
+  run waits the full 270 s, reading the box spend again at each look (two Sail spend calls, at most 14 looks), and
+  the next job waits behind it.
 - **Output:** `<state>/budget.json` (private): the inputs, each meter's research $/day and the day's figure, the knobs,
   the direction against the last file (`cut`, `raise`, `same`), each meter's runway at the rate the rule holds it to,
   its days of research left at the ceiling and its card date (when those days fall to 5: the day the taper starts),
