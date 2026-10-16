@@ -26,9 +26,19 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261015T204317Z-ad3c7f9653cc` (main `e136c251`, PR #560: release 1015f and FW9,
-20:43Z Oct 15), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
+The running House release is `20261016T024305Z-e90d75adb36b` (main `d6bcf0cd`, PR #562: release 1016a, L5 and C1,
+02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
+
+### Release 1017r: the owner's new Done (A50) and the ETF Probe sleeve 0.25 x E (A51), on `rel/1017r` (unreleased; one House deploy by the captain, never 12:55-20:05Z on a trading day and never inside an entry window; live before Mon Oct 19 13:30Z; THE MONEY DIGEST MOVES `cfcc94b1` -> `5ea6f99f` and the constitution `60796aed` -> `82a9a5a4` (A51's row alone), the standing grant re-ratifies at start; the options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move)
+
+- A50 (PR #564): Done at the 15th counted close, then every 5th; >= 3 each from >= 2 programs; A1.1's matched minimum
+  3 (A50a(2)); A14 intents >= 95% or all but one under 40 sessions; research over the 3 UTC days ending on the
+  checkpoint day. New rule sha `027c12b7`. Entry below.
+- A51 (X9's pick): the ETF Probe sleeve 0.25 x E at six seats, new lots only; options unchanged. Entry below.
+- **Rollback:** the release before, `20261016T024305Z-e90d75adb36b` (main `d6bcf0cd`), and `set_design 6 0.33` is
+  then in force again; do not roll back past A50 once a checkpoint is final without re-reading those checkpoints.
+- Whichever of this release and rel/1017a (C2/C3, the owner's) deploys second must contain the other.
 
 ### Done at the 15th close, then every 5th: the owner's new goal (A50), on `feat/done-a50` (unreleased; cut from `d6bcf0cd`, main, release 1016a's head; the owner's goal of 02:10Z Oct 16, 2026, `goal-2026-10-10/GOAL-MESSAGE-SPEED.txt`, and the captain's A50 and A50a; a captain deploy outside 12:55-20:05Z on a trading day: `league/swarm/dlane.py` and `league/ops/` are protected; it must be live before the 15th counted close, forecast about Thu Oct 22, and before A49/A50's freeze from the day the count reaches 12; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `cfcc94b1` and the constitution digest `60796aed` are the base's, and no Done constant lives in the constitution; no setting)
 
@@ -102,7 +112,49 @@ is on branches.
   is final; after it, do not roll back past A50 once a checkpoint is final without re-reading those checkpoints: the
   release before (which checks no rule sha) would carry a frozen A50 reading at 30, 40, ... as its own.
 
-### Release 1016a: L5 and C1, on `rel/1016a` (unreleased; one House deploy, outside 12:55-20:05Z on a trading day; no
+### The Probe sleeve 0.25 x E at six seats (A51, X9's pick), options unchanged (`set_design 6 0.25`), on `feat/equity-sleeve-025` (unreleased; cut from main `d6bcf0cd`; the captain's A51; ships in the weekend release with the A50 reader, live before Mon Oct 19 13:30Z; an owner deploy; new lots only; THE MONEY DIGEST MOVES ONCE, `cfcc94b1` -> `5ea6f99f`, and the grant re-ratifies; no fingerprint moves, no evidence reset)
+
+- **The rows** (`set_design 6 0.25`): `equity_money.probe.sleeve_share` "0.33" -> "0.25", inside its bound (0 to
+  0.50), a tightening; the seats stay 6. The design blocks restate the figures: a one-ETF lot 0.165 -> 0.125 x E, six
+  lots ask 0.75 x E (0.15 x E of open risk), 4 whole lots fit in one ETF, and the window alone holds all six up to
+  E = $2,666. THE OPTIONS ROWS DO NOT MOVE: `options_money.probe` stays at `max_loss_share` 0.10 x E and
+  `open_per_family` 1, with the $400 window and the $800 total.
+- **New lots only.** No lot is resized or sold: the House's exits are the maximum hold, the failed decides and a
+  retired or demoted program (`_house_exits`), never a size. A lot bought at 0.33 (0.165 x E) keeps its own exits;
+  its program's next entries are held to the 0.25 sleeve (no more of that ETF while the lot is over half the sleeve,
+  `sleeve_cap`; of another ETF only what the sleeve has left, `sleeve_cash`, about 0.085 x E); a buy planned under
+  0.33 is sized at its send under 0.25. Nobody is unseated (`test_equity_design` `TheDeploy`).
+- **Why** (X9, pre-registered: PREREG `05ea6aec` pinned before code and figures; one run of 768,096 simulations over
+  the 3,048 paths; read once; its verifier: sound, every headline re-derived). Against the row in force (A37's 6 x
+  0.33, options 0.10 x E, one open structure a family) on the A50 reader, gate arms pooled: P(Done) +0.33 / +0.99 /
+  +1.45 / +1.15 / +1.06 points by Oct 23 / Oct 30 / Nov 6 / Nov 20 / Dec 7 (as traded, priced); G_d +0.99 (SE 0.32),
+  +0.70 (SE 0.29) with the options at zero edge; 0 of 50 readings below 1 SE; the consistency proviso fails on 0.70% /
+  0.55% of paths (the row's 1.14% / 0.79%); the 12-week tail $34.47 / $37.79 worse, inside the $50 line; no wall
+  breach in any cell; it survives the six-design selection and run (c)'s seventeen. Every options cap (O05, O02, O00,
+  S25O05, S25O02) failed, losing 2.7-7.8 points by Oct 23 and 8.7-37 by Dec 7: the options stay as they are.
+- **Its costs, as A51 states them.** THE GAIN IS LUCK, NOT EDGE: the zero-edge gain is 80-121% of the edge gain. It
+  comes from more looks at the options lottery as smaller ETF lots leave the window room (refused share entries 9.13
+  -> 5.94 a path, options opens 5.70 -> 6.18). P(total loss > $600) 5.30% -> 7.81%. The worst 20-session loss is
+  $399.62 against the $400 line, read from a zero start, and the live book, with losses already booked, has less
+  room. The 2022 block's Dec 7 gain is negative (-3.07, SE 2.01). A later start than Mon Oct 19 was not measured, and
+  the gain is about zero on the paths where pid 44 paid. Each share close carries less market direction.
+- **Identities.** Money digest `cfcc94b1` -> `5ea6f99f`, the grid's own pin for (6, "0.25") in
+  `league/tests/equity_design.py` `DIGESTS` (no pin moves and no older table is added: the pair lands on a digest the
+  tree already states, as A37's did); constitution `60796aed` -> `82a9a5a4` (`PINNED_DIGEST`). The options execution
+  fingerprint `b60410ad` and the equity identity `78022ca6` do not move (3.14 and 3.11). The standing grant
+  re-ratifies on the trigger `digest` when the House starts on the owner's deploy (the `grant` job,
+  `league/ops/grant.py`; `python3 scripts/live_trading.py --ratify` if it refuses); until then no new real entry.
+- **Recorded fixture.** `league/tests/fixtures/equity_etf_orders.json` re-recorded on this tree (`ecd43828`) by
+  `league/tests/equity_week.py`, 75 + 75 scenarios. Every lot the sleeve sizes is 0.25/0.33 of its size before, and
+  its sales with it; no sale is added or removed. Near the window's line ("window loss $... realized and an option
+  position at risk") a lot the window cuts keeps the window's size ($330, $345), a buy the window cut at 0.33 is
+  whole at 0.25 ($250), and one more, smaller buy is sent ($270, $300). `RECORDED_ON` moves.
+- **Revert** (A51), one owner deploy: `set_design 6 0.33` (new lots only) if the 20-session window's room falls under
+  one unit for 3 sessions. A37's revert now reads `set_design 6 0.50` from 0.25, on A37's same trigger (5 consecutive
+  sessions with no options family at Probe, or the options family at Probe demoted or retired and no other there);
+  `open_per_family` stays 1.
+
+### Release 1016a: L5 and C1, on `rel/1016a` (DEPLOYED 02:43Z Oct 16 as House `20261016T024305Z-e90d75adb36b`, main `d6bcf0cd`, #562; one House deploy, outside 12:55-20:05Z on a trading day; no
 gateway change; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the
 money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no setting changes)
 
@@ -1545,20 +1597,20 @@ contract `397b22b772b3` unchanged; no evidence reset.
 - **The pair in force**, in rule arithmetic of the two numbers:
 
 <!-- equity-design:begin -->
-THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.33 x E
-(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.165 x E.
-A lot in every seat asks for 0.99 x E of ETFs; the lane holds at most 0.99 x E of them, 0.198 x E of
-open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 3 whole lots fit; the
-next program's lot of it is 0.005 x E. At E = $2,000, the account all cash and nothing realized: 5 of
+THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
+(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.125 x E.
+A lot in every seat asks for 0.75 x E of ETFs; the lane holds at most 0.75 x E of them, 0.15 x E of
+open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 4 whole lots fit; the
+next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 6 of
 6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,020.
-Whole sleeves (programs that hold several ETFs) ask for 1.98 x E; the lane holds at most 1.00 x E,
+6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,666.
+Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
 0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
-the equity lots: $400 - 0.198 x E against the one-ETF lots above. The gateway's day line (4x
-equity of buys a day, a cancelled one too) admits 24 sends of such a lot: 4 entries can each climb the
-collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.33 x E and
+the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
+equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
+collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `cfcc94b1`, full digest `60796aed` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
+Money digest `5ea6f99f`, full digest `82a9a5a4` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over
