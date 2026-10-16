@@ -8,6 +8,37 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1017a (Oct 2026): C2 and C3 of the scaling plan, and the budget's Claude wait: `rel/1017a`, not deployed
+
+Release 1017a is release 1016a (deploying 04:07Z Oct 16; `rel/1016a` `ba95167e`, PR #562) with C2 (A45: the options
+park and the Probe pool frozen at E_P), C3 (A45: the Scaled band, shipped dark), the budget's Claude wait
+(item7-claude) and fix7 (C1's span closes read in day order) merged. **One owner deploy, Blake's** (the money digest
+moves; `league/ops/` and `league/ops/budget.py` are protected), never 12:55-20:05Z on a trading day and never in the
+deploy freeze from Fri Oct 23 00:00Z; no gateway change. **The money digest moves** `cfcc94b1` -> `558dc3a2` and the
+constitution `60796aed` -> `d4e59a79` (pinned `d4e59a79`), so the standing grant re-ratifies; the options execution
+fingerprint `b60410ad` and the equity identity `78022ca6` do not move. No setting changes.
+
+- **C2** (**C2 (A45) of the scaling plan** below): part A parks options Sized (`options_money.sized.min_trades` 1000);
+  part B freezes the Probe pool at E_P once the private pin `/workspace/state/scale-pin.json` is read, and is inert
+  until the owner's step writes it. Part A's own digests (`4cd610a5` / `18636b3f`) never deploy: the grant
+  re-ratifies on C3's.
+- **C3** (**C3 (A45) of the scaling plan** below): dark, `equity_money.scaled.pin_sha256` "": no rung is live, and
+  every sizing, line and Done reading is C2's exactly. The first rung is Blake's later pin deploy, never this release.
+- **The Claude wait** (**The Claude meter in the same wait**, in the budget job's section below).
+- **fix7**: `_one_series` walks `sorted(days)`, so span_bh's `why` no longer depends on string-hash order.
+- **When**: after 1016a is live; any evening Oct 16-21 after 20:05Z, Thu Oct 22 after 20:05Z the fallback.
+  `scratch/accel-1015/shiplist/ship_house.sh <head> <PR> r1017a 558dc3a2 d4e59a79` (no `--gateway`).
+- **Then, in order** (the captain's private owner steps for C2 and C3): (1) check the re-ratification onto
+  `558dc3a2` (no figure printed; if the standing grant refused, Blake's own `scripts/live_trading.py --ratify`); (2)
+  the dark checks: the ids above, health equity `probe_pin.state` "absent" and `scaled.state` "dark", no
+  `equity.probe_pin` or `equity.scale` record, the pre-open lines "no Probe pin, and none was ever read on this box"
+  and "the Scaled band is dark"; (3) write the pin from that ratification, which alone turns the freeze on, at least
+  an hour before the next open and BEFORE any deposit, ceiling or envelope release or other money-digest deploy; then
+  health `probe_pin.state` "read" before the next open, and a Sail checkpoint of the box.
+- **Rollback:** the House, `python3 scripts/floor_box.py rollback` to release 1016a's House release; the money digest
+  moves back to `cfcc94b1` and the grant re-ratifies again. ONCE ANY SCALED-MARKED LOT EXISTS, roll back only by the
+  dark row (`pin_sha256` ""), never by a release without C3 (**C3** below). A pin, once written, is never removed.
+
 ## C3 (A45) of the scaling plan (Oct 15, 2026): the Scaled band, shipped dark: `feat/scale-c3` (stacked on C2), not deployed
 
 C3 builds the scaling plan's ladder (a program that beat its own same-risk buy-and-hold on live closes, judged outside

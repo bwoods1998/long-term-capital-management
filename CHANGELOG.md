@@ -30,6 +30,38 @@ The running House release is `20261015T204317Z-ad3c7f9653cc` (main `e136c251`, P
 20:43Z Oct 15), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
+### Release 1017a: C2 and C3 of the scaling plan, and the budget's Claude wait, on `rel/1017a` (unreleased; ONE OWNER deploy by Blake, outside 12:55-20:05Z on a trading day and never in the deploy freeze from Fri Oct 23 00:00Z; THE MONEY DIGEST MOVES cfcc94b1 -> 558dc3a2 and the constitution 60796aed -> d4e59a79, the grant re-ratifies; the options execution fingerprint b60410ad and the equity identity 78022ca6 do not move)
+
+- C2 (A45) of the scaling plan, both parts (entry below): A, the options park (`options_money.sized.min_trades`
+  20 -> 1000, and the bound's tight end `probe.max_loss_share` 0.02 -> 0.005); B, the Probe pool frozen at E_P, read
+  from the private pin `/workspace/state/scale-pin.json`. Part B is inert until the owner's step writes the pin: with
+  no pin ever read on the box every sleeve sizes on E exactly as today, and nothing is written. Part A's own digests
+  (`4cd610a5` / `18636b3f`) are inside this release and never deploy: the grant re-ratifies on C3's.
+- C3 (A45), the Scaled band, SHIPPED DARK (entry below): `equity_money.scaled.pin_sha256` "", so no rung is live and,
+  while it is dark, every sizing, line and Done reading is byte-identical to C2's (`league/tests/test_scaled_inert.py`
+  against C2's fixture; three lens reviews found 0 bytes moved in their own dark scenarios). The reviewers'
+  disagreement table (the pinned plan against the build, with their calls) is in its entry. The first rung is Blake's
+  later pin deploy, never this release, and the `ship_house.sh` pin-sha preflight is owed before it.
+- The budget's Claude wait (item7-claude, entry below): L4's wait for the Sail guard's next reading covers the Claude
+  meter too, so one missed `/v1/health` read after a restart no longer writes Claude `unreadable` and fails Done item
+  7's day.
+- fix7 (the C3 ops review's finding 3, on C1's code from release 1016a): `_one_series` (league/equity/live.py) walks
+  `sorted(days)`, so span_bh's `why` no longer depends on the process's string-hash order when two or more closes are
+  bad. Done's verdict never read it (a checkpoint's `holds` comes from items 3, 4 and 7 and A14); live.py is outside
+  both identities.
+- Built as merges onto `ba95167e` (release 1016a): C3 `6407b7d8` (which carries C2 `22646a97`), then the Claude wait
+  `a60438a9`, then fix7. Before fix7, `league/` is the C3 ops review's trial merge plus C3's three later commits
+  (`798c6fe5`, `e20e7131`, `6407b7d8`), tree for tree.
+- **Order:** after release 1016a is live; any evening Oct 16-21 after 20:05Z, with Thu Oct 22 after 20:05Z the
+  fallback (about 3h55m to the freeze: one retry at most). `ship_house.sh <head> <PR> r1017a 558dc3a2 d4e59a79`, no
+  `--gateway` (no gateway change). Then the owner's steps: the re-ratification check on `558dc3a2`, the dark checks
+  (health `probe_pin` "absent" and `scaled` "dark", no `equity.probe_pin` or `equity.scale` record), then the pin,
+  which alone turns C2's freeze on, BEFORE any deposit, ceiling or envelope release or any other money-digest deploy,
+  and a Sail checkpoint after it.
+- **Rollback:** release 1016a (one owner deploy; the money digest moves back to `cfcc94b1` and the grant re-ratifies
+  again; a pin already written stays on the box, read by no code there). Once any Scaled lot exists, roll back only by
+  the dark row (`pin_sha256` ""), never by a release without C3.
+
 ### C3 (A45) of the scaling plan: the Scaled band, SHIPPED DARK (no rung live), on `feat/scale-c3` (stacked on C2; unreleased; one owner release with C2's two parts, outside 12:55-20:05Z on a trading day; it MOVES THE MONEY DIGEST ONCE and the grant re-ratifies; no fingerprint moves, no evidence reset)
 
 - **The rows** (`league/constitution.py`, the block `equity_money.scaled` under the table, shares and multiples only,
@@ -92,7 +124,7 @@ is on branches.
 | 5 | 3.4 loosening 3 inside the yes | a separate row `family_line_probe_only`: Blake's yes must set both rows | (a) |
 | 6 | (silent) withdrawing the yes, or going dark | every Scaled lot, open or CLOSED, then counts in the Probe window, the $800 total and the room: past Scaled losses can stop the Probe opens of BOTH lanes; once any Scaled lot has existed, roll back only by `pin_sha256` "", never by a release without C3 | (a), Blake told |
 | 7 | 3.4: elane's line reads Probe-marked lots | the forward table has no mark, so elane reads live.sqlite read only | (a) |
-| 8 | (smaller) | Scaled lots keep their Probe slot; the pin is `scale-pin.json`; health gains `scaled`; a refused Scaled entry counts toward the idle clock; every rung raise is a captain build (four tests pin the tree dark); rung status is never in a public alert | (a) each |
+| 8 | (smaller) | Scaled lots keep their Probe slot; the pin is `scale-pin.json`; health gains `scaled`; a refused Scaled entry counts toward the idle clock; every rung raise is a captain build (three tests pin the shipped tree dark); rung status is never in a public alert | (a) each |
 
 - **Identities.** Money digest `4cd610a5` -> `558dc3a2`, constitution `18636b3f` -> `d4e59a79` (`PINNED_DIGEST`); the
   equity design blocks restate them; with the block left out both are C2's exactly (`DIGESTS_C2`, `before_scaled`).
