@@ -569,8 +569,13 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
 - **What Done means here.** The goal's Done is read by a rule pinned before D-1 shipped (DONE-RULE, sha256
   `0d007696...`): every agent real close on Probe/Sized, tuition and the incubator since the options swarm began, 30 of
   them from at least 2 programs with 5 each, net positive after fees, live consistent with replay, read only at the 30th
-  close and every 10th. If Done comes through this lane it will mostly certify a rising market, not skill: the
-  `dlane` report carries P(Done | zero edge) (13%, a simulation), the same-risk buy-and-hold two ways, the screen's
+  close and every 10th. THE OWNER'S CHANGE OF THE PINNED RULE (A50, the goal of Oct 16, 2026; docs/goals/DONE-RULE-A50.md,
+  sha256 `027c12b7...`): counted from Oct 10, 2026, 15 closes with 3 each from at least 2 programs, 2 of them with 3 or
+  more closes matched to a replay (A1.1 at 3, the captain's A50a(2); 5 before), read only at the 15th close and every
+  5th, A14's intents at 95% or all but one under 40 sessions, research 24/7 on the 3 UTC days ending on the first
+  checkpoint's day. If Done comes through this lane it will mostly certify a rising market, not skill: the `dlane`
+  report carries P(Done | zero edge) (a simulation; under the owner's rule it is stated only once measured under it,
+  and the Oct 9 rule's figure rides beside, labelled so), the same-risk buy-and-hold two ways, the screen's
   world-conditional false-positive rate and the contamination statement beside every figure.
 - **Contamination.** Train, Validation and most of the holdout lie inside every author's training data, the operators'
   who designed this lane included; the 2017-19 census is spent for the lane as a whole. The clean evidence is the

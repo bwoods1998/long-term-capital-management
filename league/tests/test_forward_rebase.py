@@ -222,8 +222,10 @@ class AsRegistered(Rebase):
         last = schedule.previous_session(forward_twins._date(counted[-1]["day"])).isoformat()
         sessions = len(forward_twins._sessions(forward_twins._date(D1), forward_twins._date(last)))
         self.assertEqual((out["applies"], out["holds"], out["final"], out["why"]), (True, True, True, None))
+        # A50 (the owner's goal of Oct 16, 2026) adds `all_but_one_under` and `ok_by` beside the registered keys.
         self.assertEqual(out["intents"], {"instances": 1, "sessions": sessions, "agreed": sessions, "missing": 0,
-                                          "unreadable": 0, "share": 1.0, "bound": 0.95, "ok": True, "disagreed": 0,
+                                          "unreadable": 0, "share": 1.0, "bound": 0.95, "all_but_one_under": 40,
+                                          "ok": True, "ok_by": "share", "disagreed": 0,
                                           "causes": {"bars": 0, "program": 0, "unknown": 0}})
         self.assertEqual(out["by_instance"], [{"instance": iid, "sessions": sessions, "agreed": sessions, "missing": 0,
                                                "unreadable": 0}])

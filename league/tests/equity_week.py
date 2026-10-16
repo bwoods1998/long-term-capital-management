@@ -1315,17 +1315,53 @@ def seat_lines(house: House) -> list[str]:
 E4_COLUMN, E4_TABLE = "kind", "eq_rebalances"
 
 
+#: THE OWNER'S CHANGE OF A14's INTENTS BOUND (A50, the goal of Oct 16, 2026; league/ops/forward_db.py
+#: `a14_intents_ok`), the one difference of the forward record's READINGS and nothing of the book's path: each reading's
+#: intents carry `all_but_one_under` and `ok_by`, and one that the owner's clause alone held (fewer than 40 sessions,
+#: none missing, all but one agreeing) holds where main's 95% alone did not. Main's reading is that one read back under
+#: the 95% alone (`a14_as_main`), EACH HELD FIRST to what the owner's clause allows (ValueError otherwise).
+A50_INTENT_KEYS = ("all_but_one_under", "ok_by")
+
+
+def a14_as_main(reading: Any) -> Any:
+    """An A14 reading of a tree that carries A50, as main's `a14_reading` gave it (a reading of main as it is)."""
+    from league.ops import forward_db
+
+    intents = reading.get("intents") if isinstance(reading, dict) else None
+    if not isinstance(intents, dict) or not set(A50_INTENT_KEYS) & set(intents):
+        return reading
+    if intents.get("all_but_one_under") != forward_db.A14_ALL_BUT_ONE_UNDER:
+        raise ValueError(f"an A14 reading's all_but_one_under reads {intents.get('all_but_one_under')!r}")
+    out = {**reading, "intents": {k: v for k, v in intents.items() if k not in A50_INTENT_KEYS}}
+    if intents.get("ok_by") == "all_but_one":
+        sessions, agreed, missing = intents["sessions"], intents["agreed"], intents["missing"]
+        if not (sessions < forward_db.A14_ALL_BUT_ONE_UNDER and missing == 0 and agreed == sessions - 1
+                and agreed < forward_db.A14_AGREE * sessions - 1e-9 and intents["ok"] is True):
+            raise ValueError(f"an A14 reading held by all but one that the owner's clause does not allow: {intents}")
+        whys = [w for w in str(reading.get("why") or "").split("; ") if w]
+        whys.insert(0 if reading["gap"]["ok"] is True else 1,
+                    f"the live and the shadow intents agree on {agreed} of {sessions} counted sessions, under the bound")
+        out.update(holds=False, why="; ".join(whys))
+        out["intents"]["ok"] = False
+    elif intents.get("ok_by") not in ("share", None):
+        raise ValueError(f"an A14 reading's ok_by reads {intents.get('ok_by')!r}")
+    return out
+
+
 def main_shape(snap: dict[str, Any]) -> dict[str, Any]:
     """A snapshot of a tree that carries release E4, as main's book would have left it: `E4_COLUMN` and `E4_TABLE`
-    taken out, EACH HELD FIRST to what it must be for a book of share programs (ValueError otherwise). A snapshot of
-    main is returned as it is."""
+    taken out, and (A50) each A14 reading as main read it (`a14_as_main`), EACH HELD FIRST to what it must be for a
+    book of share programs (ValueError otherwise). A snapshot of main is returned as it is."""
     kinds = {row.get(E4_COLUMN, "equity") for row in snap["instances"]}
     if kinds - {"equity"}:
         raise ValueError(f"a share program's instance row reads kind {sorted(kinds)}")
     if snap["rebalances"]:
         raise ValueError(f"{len(snap['rebalances'])} rebalance row(s) in a book of share programs")
-    return {**snap, "instances": [{k: v for k, v in row.items() if k != E4_COLUMN} for row in snap["instances"]],
-            "tables": [t for t in snap["tables"] if t != E4_TABLE]}
+    out = {**snap, "instances": [{k: v for k, v in row.items() if k != E4_COLUMN} for row in snap["instances"]],
+           "tables": [t for t in snap["tables"] if t != E4_TABLE]}
+    if "a14" in snap:
+        out["a14"] = [[key, a14_as_main(reading)] for key, reading in snap["a14"]]
+    return out
 
 
 #: A snapshot's parts the fixture keeps WHOLE (what an operator reads first); the others it keeps as a digest.

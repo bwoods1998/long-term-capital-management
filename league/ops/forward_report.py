@@ -124,17 +124,20 @@ still raises RR, CP and MM, and `alarms` still hands them to the dlane report.
 - FW4 (warning): `verify_chain` not ok (owner step: stop the forward jobs and compare with the backup).
 - FW5 (warning): cey_day under its 20-day median for 10 forward days running while equity births continue.
 - FW6 (warning): a live instance with 5 or more priced closes whose mean twin gap is beyond the A14 bound either
-  way, or with 20 or more sessions under the A14 agreement bound (before any checkpoint); the text names the instance
-  and the counts, no figure. A session whose intents differ counts against the bound whatever its cause (A14's rule is
-  not changed by it); the text says how many of them read other bars (the bars hash: a disagreement is data).
+  way, or with 20 or more sessions under the A14 agreement bound (before any checkpoint; `forward_db.a14_intents_ok`,
+  the one reading of the bound: 95%, or since the owner's change (A50, the goal of Oct 16, 2026) all but one when
+  fewer than 40 sessions are read; from 20 sessions on the two clauses agree, so FW6 fires as before); the text names
+  the instance and the counts, no figure. A session whose intents differ counts against the bound whatever its cause
+  (A14's rule is not changed by it); the text says how many of them read other bars (the bars hash: a disagreement is
+  data).
 - FW7 (warning): while `eq_instances` holds a live row: the live book's kv `eq_decide` for the last session is status
   "failed", or status "done" with no `why` and `at` later than that session's `close_at` + 2,400 s while an instance
   the record names (every living one when it names none) was in the book by then: a catch-up decide with nobody
   seated, whose record the seating pass wrote again without its `why`, kept nobody waiting.
 - FW8 (warning): the equity fingerprint moved while a lineage is live (`identity_moved`).
 - FW9 (warning; the rehearsal of Oct 15, 2026): THE ETF LANE'S TWINS FROM THE FIRST SESSION, as FX1 and FX2 are the
-  panel lane's. FW6 reads an instance's agreement from 20 sessions, and the first Done checkpoint comes sooner; a
-  missing row it never read. So:
+  panel lane's. FW6 reads an instance's agreement from 20 sessions, and the first Done checkpoint comes sooner (the
+  15th counted close since the owner's change, A50; the 30th before it); a missing row it never read. So:
   (a) AN ETF INSTANCE WITH A SESSION THAT HAS NO `fwd_twins` ROW (`_twin_gaps`). The sessions read run from its
   first row (its first decision session, `forward_twins.d_first`, while it has none) through the session before the
   one the last E3 night wrote. The night of `through` writes the row of the session before `through`; a twin
@@ -1270,7 +1273,7 @@ def _twins_early(db: sqlite3.Connection, root: Path) -> list[dict[str, Any]]:
         if row["priced"] >= FW6_CLOSES and gap is not None and abs(gap) > forward_db.A14_GAP_BP:
             out.append(_row("FW6", f"its mean twin gap over {row['priced']} priced closes is beyond the A14 bound "
                                    f"({'worse' if gap < 0 else 'better'} than the model)", f"instance {row['instance']} gap"))
-        if row["sessions"] >= FW6_SESSIONS and row["agreed"] < forward_db.A14_AGREE * row["sessions"]:
+        if row["sessions"] >= FW6_SESSIONS and forward_db.a14_intents_ok(row["agreed"], row["sessions"]) is False:
             out.append(_row("FW6", f"{row['agreed']} of {row['sessions']} sessions agree with its twin, under the A14 "
                                    f"bound ({row['causes']['bars']} of the {row['disagreed']} that differ read other bars "
                                    "than the store now holds)", f"instance {row['instance']} intents"))

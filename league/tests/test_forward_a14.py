@@ -154,8 +154,10 @@ class WhenItApplies(Reading):
         self.assertEqual((out["applies"], out["holds"], out["final"], out["why"]), (True, True, True, None))
         self.assertEqual(out["gap"], {"closes": 1, "priced": 1, "unpriced": 0, "pending": 0, "mean_gap_bp": -3.0,
                                       "bound_bp": 15.0, "ok": True})
+        # A50 (the owner's goal of Oct 16, 2026) adds `all_but_one_under` and `ok_by` (which clause held).
         self.assertEqual(out["intents"], {"instances": 1, "sessions": 20, "agreed": 20, "missing": 0, "unreadable": 0,
-                                          "share": 1.0, "bound": 0.95, "ok": True, "disagreed": 0,
+                                          "share": 1.0, "bound": 0.95, "all_but_one_under": 40, "ok": True,
+                                          "ok_by": "share", "disagreed": 0,
                                           "causes": {"bars": 0, "program": 0, "unknown": 0}})
         self.assertEqual(out["by_instance"], [{"instance": A, "sessions": 20, "agreed": 20, "missing": 0, "unreadable": 0}])
 
@@ -223,7 +225,8 @@ class TheGap(Reading):
 
 
 class TheIntents(Reading):
-    """share = agreed / the counted sessions, less the unreadable ones; ok iff share >= 0.95."""
+    """share = agreed / the counted sessions S, less the unreadable ones; ok iff share >= 0.95, or (THE OWNER'S CHANGE,
+    A50, Oct 16, 2026) S < 40, none missing, and all but one agree. league/tests/test_done_a50.py holds the edges."""
 
     def test_19_of_20_sessions_passes_and_18_of_20_fails(self):
         out = self.held(verdicts=(1,) * 19 + (0,))
@@ -236,8 +239,10 @@ class TheIntents(Reading):
         self.assertTrue(out["final"])
 
     def test_the_bound_at_other_counts(self):
+        # A50: under 40 sessions all but one passes, so 0 of 1 now passes (it failed under the 95% alone); 19 of 21 is
+        # two misses and still fails; from 40 on the 95% alone.
         for agreed, total, ok in ((38, 40, True), (37, 40, False), (95, 100, True), (94, 100, False), (1, 1, True),
-                                  (0, 1, False), (20, 21, True), (19, 21, False)):
+                                  (0, 1, True), (20, 21, True), (19, 21, False)):
             out = self.held(verdicts=(1,) * agreed + (0,) * (total - agreed))
             self.assertEqual((out["intents"]["sessions"], out["intents"]["agreed"], out["intents"]["ok"]),
                              (total, agreed, ok), (agreed, total))
@@ -269,7 +274,9 @@ class TheIntents(Reading):
         out = self.held(verdicts=(1,) * 15 + (None, None, None, "retired", 0))
         self.assertEqual((out["intents"]["sessions"], out["intents"]["agreed"], out["intents"]["unreadable"],
                           out["intents"]["missing"]), (16, 15, 4, 0))
-        self.assertEqual((out["intents"]["share"], out["intents"]["ok"], out["final"]), (0.9375, False, True))
+        # 15 of 16 read: under the 95% (it failed before A50), all but one under 40 since the owner's change.
+        self.assertEqual((out["intents"]["share"], out["intents"]["ok"], out["intents"]["ok_by"], out["final"]),
+                         (0.9375, True, "all_but_one", True))
         out = self.held(verdicts=(1,) * 19 + ("retired",))
         self.assertEqual((out["intents"]["sessions"], out["intents"]["share"], out["intents"]["unreadable"],
                           out["holds"], out["final"]), (19, 1.0, 1, True, True))

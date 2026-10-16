@@ -902,13 +902,24 @@ class Wall(unittest.TestCase):
         self.assertEqual(set(imports) - allowed, set())
 
     def test_the_done_rule_is_pinned_not_a_setting(self):
-        self.assertEqual(dlane.DONE["rule_sha256"], "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca")
+        # THE OWNER'S CHANGE OF THE PINNED RULE (A50, the goal of Oct 16, 2026): docs/goals/DONE-RULE-A50.md's sha256
+        # (league/tests/test_done_a50.py holds the file to it); the Oct 9 rule (0d007696) is `OLD_DONE`, history only.
+        self.assertEqual(dlane.DONE["rule_sha256"], "027c12b7cca3f4450b3eee92957dc8c2d6e28a8db9b81625c2ba323528db2491")
+        self.assertEqual(dlane.OLD_DONE["rule_sha256"], "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca")
         # DONE-RULE-A1.md (pinned Oct 9, 2026 ~20:50Z): its sha256, and A1.1's two measured programs.
         self.assertEqual(dlane.DONE["amendment_sha256"], "333bad0679fb9c9a76c1cc0b5248d52c5f84c96e0cff5376f9c8d446a4c4ff0b")
         self.assertEqual(dlane.DONE["min_measured_programs"], 2)
-        self.assertEqual((dlane.DONE["min_closes"], dlane.DONE["min_programs"], dlane.DONE["min_closes_per_program"]), (30, 2, 5))
-        self.assertEqual((dlane.DONE["gap_limit"], dlane.DONE["gap_min_matched"]), (0.10, 5))
-        self.assertEqual((dlane.DONE["first_checkpoint"], dlane.DONE["checkpoint_every"]), (30, 10))
+        # A50: 15 closes, 3 each from 2 programs (were 30, 2 and 5); the replay gap's bound unchanged, and A1.1's matched
+        # closes 3 since the captain's A50a(2) (this pinned 5 before it: 5 would block the 15th close in ~92% of paths).
+        self.assertEqual((dlane.DONE["min_closes"], dlane.DONE["min_programs"], dlane.DONE["min_closes_per_program"]), (15, 2, 3))
+        self.assertEqual((dlane.DONE["gap_limit"], dlane.DONE["gap_min_matched"]), (0.10, 3))
+        # A50: the 15th close, then every 5th (were 30 and 10); item 7's first window 3 UTC days (was 7).
+        self.assertEqual((dlane.DONE["first_checkpoint"], dlane.DONE["checkpoint_every"]), (15, 5))
+        self.assertEqual(dlane.DONE["research_first_days"], 3)
+        self.assertEqual((dlane.OLD_DONE["min_closes"], dlane.OLD_DONE["min_closes_per_program"],
+                          dlane.OLD_DONE["first_checkpoint"], dlane.OLD_DONE["checkpoint_every"],
+                          dlane.OLD_DONE["research_first_days"], dlane.OLD_DONE["gap_min_matched"]), (30, 5, 30, 10, 7, 5),
+                         "the history as pinned on Oct 9")
         self.assertNotIn("min_closes", dlane.cfg(GATE))
 
 

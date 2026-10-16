@@ -34,8 +34,9 @@ passes reconcile the broker's expiry; pid 14's (Oct 7) landed at 01:11Z, minutes
 (New York on standard time) the same 21:11 New York time is 02:11Z, after it. Without the pre-open run a program whose
 expiry carried it past the program loss line would trade one more session before the next 01:30Z run retired it.
 
-THE DONE METER (DONE-RULE.md, pinned Oct 9, 2026 before release L-D or D-1 shipped; `dlane.DONE` holds its sha256 and
-constants), read exactly as pinned:
+THE DONE METER (DONE-RULE.md, pinned Oct 9, 2026 before release L-D or D-1 shipped; since THE OWNER'S CHANGE OF THE
+PINNED RULE, A50, the goal of Oct 16, 2026, docs/goals/DONE-RULE-A50.md; `dlane.DONE` holds its sha256 and constants,
+`dlane.OLD_DONE` the rule as pinned on Oct 9, read by nothing), read exactly as pinned:
 - WHAT COUNTS: every real close of an agent program (a swarm family; never a House route: the calibration round trips,
   the House live test, any `house:*` family) closed since 2026-09-26T06:23Z on Probe/Sized `:r`, tuition `:t` or the
   incubator `:i` (`economics.route_of`), the Oct 8 tuition close included. Nothing is dropped after the fact: a close on
@@ -45,14 +46,17 @@ constants), read exactly as pinned:
   each close labelled `broker` or `estimate`. A close the book could not price (`unpriced_close`) makes a meter's net
   unknown, never an invented zero.
 - TWO METERS: `done_screen` (`:r` only, the evidence route) and `done_all` (`:r` + `:t` + `:i`, the goal's letter).
-- THE BAR: at least 30 closes, at least 5 closes from each of at least 2 programs, and net > 0 after fees.
-- CONSISTENT WITH REPLAY: every program with 5 or more MATCHED closes (closes of a version on a day its nightly replay
-  also traded: D5's measure, `money.forward_stats`, read here live minus replay and pooled over the program's versions;
-  `GAP_MEASURE` says it is a ratio of sums) has a gap within +/-0.10 a dollar of maximum loss, AND (DONE-RULE-A1 A1.1,
-  Oct 10, 2026) at least 2 programs are so measured: zero matched closes never passes. Every program is listed with its
+- THE BAR: at least 15 closes, at least 3 closes from each of at least 2 programs, and net > 0 after fees (A50: were 30
+  and 5).
+- CONSISTENT WITH REPLAY: every program with 3 or more MATCHED closes (5 before the captain's A50a(2), Oct 16, 2026;
+  closes of a version on a day its nightly replay also traded: D5's measure, `money.forward_stats`, read here live
+  minus replay and pooled over the program's versions; `GAP_MEASURE` says it is a ratio of sums) has a gap within
+  +/-0.10 a dollar of maximum loss, AND (DONE-RULE-A1 A1.1, Oct 10, 2026) at least 2 programs are so measured: zero
+  matched closes never passes. Every program is listed with its
   closes, matched closes and gap (each checkpoint's `by_program`, `replay_coverage`), never dropped.
 - RESEARCH 24/7 (DONE-RULE item 7; `Research247`, Oct 10, 2026): births, Gym runs and Validations every UTC day of the
-  checkpoint's window (its last 7 days for the first, every day since the one before for the rest), at the research
+  checkpoint's window (its last 3 UTC days for the first, `dlane.DONE["research_first_days"]`, 7 before A50; every day
+  since the one before for the rest), at the research
   budget, with no owner step waiting (the `stall` job's receipts: a day with none is not held); the operator's edits
   listed beside it.
   THE PER-CLOSE TWIN (Oct 10, 2026; the readiness audit's B1 (c); `league/ops/twins.py`): a close whose own replay
@@ -63,16 +67,20 @@ constants), read exactly as pinned:
   replay instead; a close with no twin record (none yet, or the twins switched off) is matched by (version, entry day)
   to the nightly replay exactly as before. With no twin record at all a program's figures are exactly D5's, key for key.
   `replay_twins` lists every counted close with its twin's verdict.
-- READ ONLY AT CHECKPOINTS: the 30th counted close, then every 10th; each reading is over exactly the first K closes in
+- READ ONLY AT CHECKPOINTS: the 15th counted close, then every 5th (A50: the 30th, then every 10th, before), fixed by
+  count and never chosen; each reading is over exactly the first K closes in
   close order (`checkpoints`); it holds when items 3, 4 and 7 hold. The running figures between checkpoints are counts,
   never a reading. FINAL READINGS (DONE-RULE-A1 A1.4; `finality`): a reading is final once every counted close's
   replay has landed (its own twin final, with the twins on; else its program's nightly) and its broker fees have posted
   (and the research window has ended); a final reading is frozen (carried from the previous report as it was). A Done claim is a holding FINAL checkpoint (the meter's `holds`);
   A8 (an `info` alert) names one the first time a report sees it final.
-- BESIDE IT, ALWAYS: P(Done | zero edge) (`dlane.done_zero_edge_p`, labelled as a simulation; since DONE-RULE-A1 A1.2
-  the figure for the rules in force with its horizon, holds, budget and source, `zero_edge`: 2.7% since THE PROBE
-  TOTAL AT $800, Oct 10, 2026, PREREG-T's at roster 5; 2.4%, A1.2's pin, under L-D's $400 total before it; both kept
-  labelled in `dlane.ZERO_EDGES`); Net after costs (`net_after_costs`, from the close economics over the same days);
+- BESIDE IT, ALWAYS: P(Done | zero edge) (`zero_edge`, labelled as a simulation; DONE-RULE-A1 A1.2 and DONE-RULE-A50
+  item 6): the figure MEASURED UNDER THE RULE IN FORCE, stated only from the setting `dlane.done_zero_edge_p` written
+  as a block (`dlane.ZERO_EDGE_BLOCK_KEYS`) whose `measured_under` is the pinned rule's sha256; until one is, the report
+  says plainly that it is not yet measured. Beside it (`beside`), the figure as before with its horizon, holds, budget
+  and source, labelled as simulated under the Oct 9 rule: 2.7% since THE PROBE TOTAL AT $800, Oct 10, 2026, PREREG-T's
+  at roster 5; 2.4%, A1.2's pin, under L-D's $400 total before it; both kept labelled in `dlane.ZERO_EDGES`. It is
+  never stated as the figure under the owner's rule (A50); Net after costs (`net_after_costs`, from the close economics over the same days);
   the same-risk buy-and-hold two ways (below); the world-conditional false-positive rate beside the unconditional one
   for the screen that admitted each Candidate, Probe or Sized family (`probes`, with each program's own realized Probe
   net and when DM1 can first fire, A1.3); every loosened rule with its cost (`LOOSENED`); the contamination statement
@@ -129,9 +137,11 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
 - DONE IS COUNTED FROM OCT 10, 2026 (the goal: "counted from Oct 10, 2026 (earlier closes reported beside, not
   counted)"; `DONE_FROM`, 00:00 New York): both meters read only the agent closes from then on (`done.counted_from`),
   and every earlier agent close since the rule's inception is listed beside them (`done.earlier`), never counted. The
-  Done rule itself is unchanged (30 closes, 5 from each of 2 programs, net > 0 after fees, consistent with replay,
-  research 24/7, read at the 30th close and every 10th). A frozen reading is carried only from a report that counted
-  from the same instant.
+  Done rule itself was unchanged by it (then 30 closes, 5 from each of 2 programs, net > 0 after fees, consistent with
+  replay, research 24/7, read at the 30th close and every 10th; since A50 15 closes, 3 from each of 2 programs, read at
+  the 15th close and every 5th, item 7 first over 3 UTC days). A frozen reading is carried only from a report that
+  counted from the same instant UNDER THE SAME PINNED RULE (`rule.sha256`: a reading frozen under the Oct 9 rule is
+  never carried into the owner's).
 - AN EQUITY CLOSE is one lot of the House's EquityBook (`live.sqlite` `eq_lots`, league/equity/live.py) fully closed,
   with its net cash (fees and dividends included: the lot's `cash`), on the route its instance names (`:r`, so both
   meters), its entry notional standing for the maximum loss (a long lot can lose at most what it paid), its key
@@ -158,7 +168,9 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   the Done rule's
   "live fills consistent with their replay" is read (`A14_CONSISTENCY`: the mean fill gap against the official-price
   model at most 15 bp a side AND the live and the shadow intents agreeing on at least 95% of the counted sessions, read
-  at each Done checkpoint over its counted closes; else "not consistent" beside the P&L), what every Done reading is
+  at each Done checkpoint over its counted closes; else "not consistent" beside the P&L; since THE OWNER'S CHANGE, A50,
+  the intents also pass with all but one agreeing when fewer than 40 sessions are read: `A50_INTENTS`, beside it as
+  `done.preregistered.amended`, read by league/ops/forward_db.py `a14_intents_ok`), what every Done reading is
   reported beside (`A14_BESIDE_DONE`: the number of distinct close dates and a date-clustered t), and the forward
   seat rule, written and inactive (`A14_SEAT_RULE`). ITEM 4 OF A READING THAT HOLDS AN EQUITY CLOSE IS READ BY A14, NEVER
   BY THE OPTIONS MEASURE (`a14_consistency`): the pinned replay gap divides by the maximum loss, which for a long lot is
@@ -192,9 +204,9 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   it (None when absent or stale), and its alarms (FW1-FW8, RR1, RR2, CP1, CP2, MM1: ids, counts and dates only) ride
   this report's `alarms`, so the `dlane` stall cause mails a warning. Read only, and never this report's failure.
   (Release E4, package J: the panel lane's FX1-FX3 ride with them, by their own two switches.)
-- P(DONE | ZERO EDGE) IS THE OPTIONS RULES' FIGURE (`ZERO_EDGE_EQUITY_NOTE`): it was never measured for share closes,
-  and a delta-one lane's is far higher. A report that holds an equity close says so on the figure and in each
-  checkpoint's `equity` block; no figure for the equity lanes is stated.
+- P(DONE | ZERO EDGE) AS BEFORE IS THE OPTIONS RULES' FIGURE (`ZERO_EDGE_EQUITY_NOTE`): it was never measured for
+  share closes, and a delta-one lane's is far higher. A report that holds an equity close says so on that figure
+  (`beside`) and in each checkpoint's `equity` block; no figure for the equity lanes is stated but a measured one.
 - THE PANEL LANE (release E4; `panel_section`, `equity.panel`): a panel program's close is an equity close under the
   label EQUITY (PANEL); beside EVERY live panel trade rides XS1's sentence, the line its program's one look recorded
   (`EquityScreens.xs1`); beside its closes the distinct close dates and the date-clustered t (A14: one observation a
@@ -352,6 +364,17 @@ A14_SEAT_RULE = (
 #: sessions on which the live and the shadow intents agree.
 A14_GAP_BP = 15.0
 A14_AGREEMENT = 0.95
+#: THE OWNER'S CHANGE OF A14's INTENTS BOUND (A50, the goal of Oct 16, 2026: "intents agree on >= 95% of sessions, or
+#: all but one when fewer than 40 are read"). A14's sentences above stay as the captain registered them on Oct 10, 2026;
+#: this one rides beside them in every report (`done.preregistered.amended`) and in docs/operations.md. The bound is
+#: read once, by league/ops/forward_db.py `a14_intents_ok` (`A14_ALL_BUT_ONE_UNDER` here is its figure, held equal to
+#: `forward_db.A14_ALL_BUT_ONE_UNDER` by league/tests/test_done_a50.py).
+A14_ALL_BUT_ONE_UNDER = 40
+A50_INTENTS = (
+    "Changed by the owner (A50, the goal of Oct 16, 2026): the live and the shadow intents agree on at least 95% of the "
+    "counted sessions, or, when fewer than 40 counted sessions are read, on all of them but one. The fill-gap half (at "
+    "most 15 bp a side) is unchanged. Its cost: one bad session is forgiven at small counts (under 20 sessions the 95% "
+    "bound forgave none; from 20 to 39 the two bounds agree).")
 #: A24, THE SEAT RULE (the captain's pre-registration of 13:42Z Oct 11, 2026, BEFORE the first live share close and
 #: before any program waited for a seat; release E5-A builds it; the constitution's `equity_money.probe.seat` holds its
 #: name and constants, league/equity/bands.py and league/equity/live.py apply it). The sentences are in every report
@@ -407,6 +430,9 @@ PREREGISTERED = {
     "status": "consistency is computed since release E3 (each checkpoint's `a14`: the size of the mean fill gap "
               "either way, and the intents); the close-date figures are computed since release E4's step two (each "
               "checkpoint's `close_dates`, beside and never a rule); no forward rule moves a seat",
+    # A50 (Oct 16, 2026): the owner's change of the intents bound, beside A14's sentence, which stays as registered.
+    "amended": {"id": "A50", "registered": "2026-10-16T02:10Z", "by": "the owner's goal of Oct 16, 2026",
+                "before": "the first Done checkpoint (6 counted closes, none frozen)", "text": A50_INTENTS},
 }
 #: P(DONE | ZERO EDGE) BESIDE EQUITY CLOSES: the figure the report carries is the options Probe rules' simulation. No
 #: figure for the share lanes is stated (none is committed); this sentence rides on the figure and in each checkpoint's
@@ -440,8 +466,8 @@ EQUITY_PANEL_SENTENCE = (
     "the stock weight ({weight}), in the same ${window} window, first come (no slice of it is kept for the panel). "
     "Outside that room a basket bought from flat or rotated whole is scaled to the room and a partial rotation's new "
     "name is refused at the send. ITS COST: one more program on real money at once, and a basket's lots closed at one "
-    "open are one market move, so Done counts a panel program's lots closed on one date as ONE close (for the 30th "
-    "close, every later checkpoint and its program's 5; the lots and the distinct close dates stand beside).")
+    "open are one market move, so Done counts a panel program's lots closed on one date as ONE close (for the 15th "
+    "close, every later checkpoint and its program's 3; the lots and the distinct close dates stand beside).")
 #: The same statement for a constitution with no panel row: no figure.
 EQUITY_PANEL_BARE = ("THE PANEL SEATS (equity_money.panel): the constitution has no panel row, so no panel program "
                      "holds a seat or a sleeve.")
@@ -609,6 +635,40 @@ LOOSENED: tuple[dict[str, str], ...] = (
      "now": "six seen years for a family born with a hidden year, each stretch of them a run starting flat (release E3)",
      "cost": "more zero-edge versions pass Train and take a Validation try; the screen's false-positive rate per program "
              "is unchanged (Train is in-sample)"},
+    # THE OWNER'S CHANGE OF THE PINNED DONE RULE (A50, the goal of Oct 16, 2026, 02:10Z; docs/goals/DONE-RULE-A50.md,
+    # `dlane.DONE`): four loosenings the owner chose, each with its cost as A50 states it, and the captain's A50a(2)
+    # after them. Pinned before any checkpoint was reached (6 counted closes, none frozen). Every other rule of Done is
+    # unchanged.
+    {"rule": "Done's checkpoints (A50, the owner's goal of Oct 16)", "was": "the 30th counted close, then every 10th",
+     "now": "the 15th counted close, then every 5th (20, 25, 30, ...), fixed by count, never chosen",
+     "cost": "far fewer closes stand behind the sign, so the profit sign is mostly market direction, near a coin flip at "
+             "zero edge; a reading every 5th close gives luck more chances (optional stopping)"},
+    {"rule": "Done's bar (A50, the owner's goal of Oct 16)", "was": "at least 30 closes, at least 5 from each of at least "
+                                                                   "2 programs",
+     "now": "at least 15 closes, at least 3 from each of at least 2 programs (net above zero after fees, unchanged)",
+     "cost": "A50 states none beyond the checkpoints' (above); plainly, a second program meets the bar on 3 closes and "
+             "the sum on 15: less evidence that either program beat zero"},
+    {"rule": "A14's intents bound (A50, the owner's goal of Oct 16)", "was": "the live and the shadow intents agree on "
+                                                                           "at least 95% of the counted sessions",
+     "now": "at least 95% of them, or all but one when fewer than 40 counted sessions are read (forward_db."
+            "a14_intents_ok); the fill gap's 15 bp a side unchanged",
+     "cost": "one bad session is forgiven at small S: under 20 sessions the 95% bound forgave none; from 20 to 39 the "
+             "two bounds agree"},
+    {"rule": "Done's research 24/7 window (A50, the owner's goal of Oct 16)",
+     "was": "the 7 UTC days ending on the first checkpoint's day; every day since the previous one after it",
+     "now": "the 3 UTC days ending on the first checkpoint's day (dlane.DONE research_first_days); every day since the "
+            "previous checkpoint's after it",
+     "cost": "A50 states none beyond the checkpoints' (above); plainly, research need be clean on 3 days, not 7, "
+             "before the first claim: a stall earlier in its week no longer blocks it"},
+    # THE CAPTAIN'S A50a(2) (02:31Z Oct 16, 2026; DONE-RULE-A50.md item 4, `dlane.DONE` `gap_min_matched`): A1.1's 5
+    # would block the 15th close in about 92% of paths and contradict the owner's ">= 3 each".
+    {"rule": "A1.1's matched replay closes (the captain's A50a(2), Oct 16)",
+     "was": "at least 2 programs with 5 or more matched replay closes each, every one within the gap",
+     "now": "at least 2 programs with 3 or more matched replay closes each, every one within the gap (dlane.DONE "
+            "gap_min_matched 3)",
+     "cost": "a program's replay gap is judged on 3 closes instead of 5; for ETF lots the +/-0.10 of max loss is far "
+             "looser than A14's 15 bp, so the practical cost is small; a program with 3 or 4 matched closes is now "
+             "judged, so it can also read inconsistent"},
 )
 #: And what D-1 TIGHTENED (said beside the loosenings), with release L-D's rolling budget, a tightening of its NET.
 TIGHTENED: tuple[str, ...] = (
@@ -632,8 +692,9 @@ TIGHTENED: tuple[str, ...] = (
     "release D-1b: calls only: dlane.structures [\"long_single\"] (no debit vertical, no put) and every Train trade a long "
     "call (bar C1)",
     # DONE-RULE-A1 (pinned Oct 9, 2026 ~20:50Z, before the first Probe close; read by the code since the weekend fixes).
-    "DONE-RULE-A1 A1.1: a Done claim also needs 2 programs with 5+ matched replay closes each, every one within the gap: "
-    "zero replay evidence never passes (it did: B1)",
+    "DONE-RULE-A1 A1.1: a Done claim also needs 2 programs with 5+ matched replay closes each (3+ since the captain's "
+    "A50a(2), a loosening listed with its cost), every one within the gap: zero replay evidence never passes (it did: "
+    "B1)",
     "DONE-RULE-A1 A1.3: a program whose own realized Probe net is at or below dlane.program_loss_usd (-$300 since "
     "Oct 10, with the $800 total; -$200 before) is retired swarm-side by the dlane job (exits go on), since DM1 cannot "
     "fire before about 17 real trades",
@@ -1692,9 +1753,10 @@ def done_counts(counted: Sequence[Mapping[str, Any]]) -> list[int]:
     worth cents, pulled the 30th close and every later checkpoint earlier and could meet a second program's "at least
     5" alone). For each close of `counted` (in close order) the number of the Done count it is part of, from 1: every
     close is one count, as before, EXCEPT A PANEL PROGRAM'S (`panel`): its lots closed on one New York day are ONE
-    count, placed where the first of them closed. The checkpoints (the 30th count, then every 10th) and the per-program
-    5 read these counts; the lots stand beside (`lots`). A TIGHTENING (fewer counts, never more), until the owner rules
-    otherwise; an ETF or options close is counted exactly as before."""
+    count, placed where the first of them closed. The checkpoints (the 15th count, then every 5th, since the owner's
+    A50; the 30th, then every 10th, before) and the per-program 3 (5 before A50) read these counts; the lots stand
+    beside (`lots`). A TIGHTENING (fewer counts, never more), until the owner rules otherwise; an ETF or options close
+    is counted exactly as before."""
     seen: dict[tuple[str, ...], int] = {}
     out: list[int] = []
     for c in counted:
@@ -1759,8 +1821,8 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
     per_program_ok = len(enough) >= int(rule["min_programs"])
     # CONSISTENCY MUST BE MEASURED (DONE-RULE-A1 A1.1, pinned Oct 9, 2026; the readiness audit's B1): item 4 alone held
     # with ZERO replay evidence, since a program under 5 matched closes is never inconsistent. Now a reading also needs
-    # `min_measured_programs` (2) programs with `gap_min_matched` (5) or more matched closes and a gap measured, and every
-    # such program within the gap. Zero matched closes never passes; every program is listed with its closes, matched
+    # `min_measured_programs` (2) programs with `gap_min_matched` (3 since the captain's A50a(2), Oct 16, 2026; 5
+    # before) or more matched closes and a gap measured, and every such program within the gap. Zero matched closes never passes; every program is listed with its closes, matched
     # closes and gap (`by_program`).
     min_matched = int(rule["gap_min_matched"])
     need_measured = int(rule.get("min_measured_programs", dlane.DONE["min_measured_programs"]))
@@ -1837,6 +1899,7 @@ def a14_consistency(counted: Sequence[Mapping[str, Any]], forward: Mapping[str, 
       close with no final priced twin is counted in `unpriced`, never dropped silently.
     - THE INTENTS (not read here): the live and the shadow intents agreeing on at least `A14_AGREEMENT` of the
       counted sessions are read at a Done checkpoint, by the forward record's twins (release E3).
+      Since the owner's change (A50) all but one of them also passes when fewer than `A14_ALL_BUT_ONE_UNDER` are read.
     - `consistent`: False when the fill gap is past its bound; else None (NOT READ: a half is missing). Never True
       until both halves are read, so `reading` never holds item 4 on equity closes by the options measure."""
     rows = [c for c in counted if c.get("equity")]
@@ -1850,7 +1913,7 @@ def a14_consistency(counted: Sequence[Mapping[str, Any]], forward: Mapping[str, 
             gaps.append(gap)
     mean = statistics.fmean(gaps) if gaps else None
     fill_ok = None if mean is None else abs(mean) <= A14_GAP_BP
-    intents = {"agreement": None, "bound": A14_AGREEMENT,
+    intents = {"agreement": None, "bound": A14_AGREEMENT, "all_but_one_under": A14_ALL_BUT_ONE_UNDER,
                "status": "not read here: the live and the shadow intents are read at a Done checkpoint (A14's second "
                          "half; release E3)"}
     if fill_ok is False:
@@ -1926,9 +1989,13 @@ def equity_beside(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None
 GAP_MEASURE = ("ratio of sums, D5's measure: over the (version, entry day) cells where a counted close and its "
                "version's nightly replay both traded, sum(live P&L) / sum(live maximum loss) - sum(replay P&L) / "
                "sum(replay maximum loss), the live side at the book's cash")
-#: The first checkpoint's research window (DONE-RULE item 7): its last this many UTC days; a later checkpoint's is every
-#: UTC day since the one before it.
-RESEARCH_FIRST_DAYS = 7
+#: The first checkpoint's research window (DONE-RULE item 7): its last `dlane.DONE["research_first_days"]` UTC days, 3
+#: since THE OWNER'S CHANGE OF THE PINNED RULE (A50, the goal of Oct 16, 2026: "on each of the 3 UTC days ending on the
+#: checkpoint day"; this module's own `RESEARCH_FIRST_DAYS = 7` before it, `dlane.OLD_DONE`'s, read by nothing); a later
+#: checkpoint's is every UTC day since the one before it (`research_window`).
+#: The report's running view of item 7 beside the meters (`done.research_247_last_7_days`, never a reading): its own
+#: span, which the rule's window no longer sets, so the key and its days are as they were.
+RESEARCH_BESIDE_DAYS = 7
 
 
 def finality(counted: Sequence[Mapping[str, Any]], *, replay_days: Mapping[str, Mapping[str, Any]] | None,
@@ -1996,12 +2063,16 @@ def finality(counted: Sequence[Mapping[str, Any]], *, replay_days: Mapping[str, 
 
 def research_window(counted: Sequence[Mapping[str, Any]], k: int, previous_k: int | None) -> tuple[str, str]:
     """The UTC days (first, last) DONE-RULE item 7 is read over at the checkpoint of close `k` (the readiness audit's M7):
-    the last `RESEARCH_FIRST_DAYS` days ending on the day of the K-th close for the first checkpoint; for a later one,
-    every day after the previous checkpoint's day through its own (at least its own day)."""
+    the last `dlane.DONE["research_first_days"]` UTC days ending on the UTC day of the K-th close for the first
+    checkpoint (3 since the owner's A50: "on each of the 3 UTC days ending on the checkpoint day"; 7 before); for a
+    later one, every UTC day after the previous checkpoint's day through its own (at least its own day: two
+    checkpoints on one UTC day read that day). UTC days, so a weekend or a clock change in New York moves nothing."""
+    from ..swarm import dlane
+
     last = time.strftime("%Y-%m-%d", time.gmtime(float(counted[k - 1]["closed_at"])))
     end = datetime.fromisoformat(last).date()
     if previous_k is None:
-        first = (end - timedelta(days=RESEARCH_FIRST_DAYS - 1)).isoformat()
+        first = (end - timedelta(days=int(dlane.DONE["research_first_days"]) - 1)).isoformat()
     else:
         before = datetime.fromisoformat(time.strftime("%Y-%m-%d", time.gmtime(float(counted[previous_k - 1]["closed_at"])))
                                         ).date()
@@ -2182,7 +2253,8 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
           now: float | None = None, twins: Mapping[str, Mapping[str, Any]] | None = None,
           twins_on: bool = False, span: Any = None) -> dict[str, Any]:
     """One Done meter (`done_screen` or `done_all`): the agent closes on `routes`, the running figures (never a reading),
-    and a reading at every checkpoint reached (the first K closes, K = 30, 40, ...: `dlane.DONE`).
+    and a reading at every checkpoint reached (the first K closes, K = 15, 20, 25, ...: `dlane.DONE`, the owner's
+    rule since A50; K = 30, 40, ... before it).
 
     Each checkpoint (Oct 10, 2026; DONE-RULE-A1 and the readiness audit's B1, M7 and M8) lists every counted program with
     its closes, matched replay closes and gap (`by_program`), reads DONE-RULE item 7 over its research window
@@ -3316,7 +3388,10 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
     # broker's fees posted, the research window ended) can raise it, and a checkpoint holds only when items 3, 4 (A1.1)
     # and 7 all hold; the text names them. A provisional holding reading raises nothing: it may still flip.
     seen = set()
-    for meter_name in ("all", "screen"):
+    # A report under another pinned rule (the Oct 9 rule, before the owner's A50) saw ITS checkpoints, not this rule's.
+    same_rule = isinstance(previous, Mapping) and isinstance(previous.get("rule"), Mapping) \
+        and previous["rule"].get("sha256") == dlane.DONE["rule_sha256"]
+    for meter_name in ("all", "screen") if same_rule else ():
         for cp in (((previous or {}).get("done") or {}).get(meter_name) or {}).get("checkpoints") or []:
             if cp.get("holds") and cp.get("final") is True:
                 seen.add((meter_name, cp.get("at_close")))
@@ -3472,31 +3547,71 @@ def pt1_alarms(roster: Mapping[str, Any] | None, settings: Mapping[str, Any] | N
 
 
 def zero_edge(settings: Mapping[str, Any] | None, *, equity_closes: int = 0) -> dict[str, Any]:
-    """P(Done | zero edge) beside the meter (decision 8; DONE-RULE-A1 A1.2, the readiness audit's M10): the setting's
-    figure, and when it is one this code names (`dlane.ZERO_EDGES`: 0.024, A1.2's pin under L-D's $400 total; 0.027,
-    PREREG-T's under the $800 total, since Oct 10, 2026) what it is: its horizon, holds, the budget variant, its source
-    and who named it. A named figure that is not the one for the rules this code ships (`dlane.ZERO_EDGE`) says so;
-    another figure is a setting's and says so: the claim states the figure for the rules in force. `equity_closes`: the
-    counted closes that are equity closes; with any, the figure says it is the options rules' only
-    (`ZERO_EDGE_EQUITY_NOTE`: `applies_to`, `equity_closes`, `equity_note`)."""
+    """P(Done | zero edge) beside the meter (decision 8; DONE-RULE-A1 A1.2, the readiness audit's M10; DONE-RULE-A50 item
+    6 and the reviews of A50, Oct 16, 2026). {label, rule_sha256 (the pinned rule in force), measured, value, ...,
+    beside}:
+
+    - THE FIGURE UNDER THE RULE IN FORCE comes only from the setting `dlane.done_zero_edge_p` written as a block
+      (`dlane.ZERO_EDGE_BLOCK_KEYS`) whose `measured_under` is `dlane.DONE["rule_sha256"]`: then `measured` is True and
+      `value`, `horizon`, `source_sha256` and `measured_under` are the block's. Otherwise `measured` is False, `value`
+      is None and `note` says plainly that it is not yet measured (`ZERO_EDGE_UNMEASURED`); a block measured under
+      another rule, or malformed, is never stated, and `refused` says why.
+    - `beside`: the figure as before, `dlane.cfg`'s number (the default when the setting is a block), and when it is one
+      this code names (`dlane.ZERO_EDGES`: 0.024, A1.2's pin under L-D's $400 total; 0.027, PREREG-T's under the $800
+      total, since Oct 10, 2026) what it is: its horizon, holds, the budget variant, its source, who named it and the
+      rule it was simulated under (`measured_under`, the Oct 9 rule's sha). A named figure that is not the one this code
+      ships (`dlane.ZERO_EDGE`) says so; another figure is a setting's and says so. It is never the figure under the
+      rule in force. `equity_closes`: the counted closes that are equity closes; with any, `beside` says it is the
+      options rules' figure only (`ZERO_EDGE_EQUITY_NOTE`: `applies_to`, `equity_closes`, `equity_note`)."""
     from ..swarm import dlane
 
-    value = dlane.cfg(settings)["done_zero_edge_p"]
-    out: dict[str, Any] = {"value": value, "label": ZERO_EDGE_LABEL}
-    if int(equity_closes) > 0:
-        out.update(applies_to="the options Probe rules only", equity_closes=int(equity_closes),
-                   equity_note=ZERO_EDGE_EQUITY_NOTE)
+    c = dlane.cfg(settings)
+    rule_sha = dlane.DONE["rule_sha256"]
+    value = c["done_zero_edge_p"]
+    beside: dict[str, Any] = {"value": value, "label": ZERO_EDGE_LABEL}
     named = next((z for v, z in dlane.ZERO_EDGES.items() if abs(value - float(v)) < 1e-9), None)
     if named is not None:
-        out.update({k: v for k, v in named.items() if k != "value"})
+        beside.update({k: v for k, v in named.items() if k != "value"})
+        beside["rule"] = "the Oct 9 rule (DONE-RULE.md), not the rule in force"
         if named is not dlane.ZERO_EDGE:
-            out["note"] = (f"a setting chose {named['value']} ({named['by']}); the rules this code ships carry "
-                           f"{dlane.ZERO_EDGE['value']} ({dlane.ZERO_EDGE['by']})")
+            beside["note"] = (f"a setting chose {named['value']} ({named['by']}); the rules this code ships carry "
+                              f"{dlane.ZERO_EDGE['value']} ({dlane.ZERO_EDGE['by']})")
     else:
-        out["note"] = ("a setting's figure (dlane.done_zero_edge_p), not one this code names ("
-                       + "; ".join(f"{z['value']}: {z['by']}" for z in dlane.ZERO_EDGES.values())
-                       + "): its horizon and budget are not said here")
+        beside["note"] = ("a setting's figure (dlane.done_zero_edge_p), not one this code names ("
+                          + "; ".join(f"{z['value']}: {z['by']}" for z in dlane.ZERO_EDGES.values())
+                          + "): its horizon, budget and rule are not said here")
+    if int(equity_closes) > 0:
+        beside.update(applies_to="the options Probe rules only", equity_closes=int(equity_closes),
+                      equity_note=ZERO_EDGE_EQUITY_NOTE)
+    out: dict[str, Any] = {"label": ZERO_EDGE_LABEL, "rule_sha256": rule_sha}
+    block = c.get("done_zero_edge_measured")
+    if isinstance(block, Mapping) and "refused" not in block and block.get("measured_under") == rule_sha:
+        out.update(measured=True, **{k: block[k] for k in dlane.ZERO_EDGE_BLOCK_KEYS})
+    else:
+        out.update(measured=False, value=None, note=zero_edge_unmeasured(beside))
+        if isinstance(block, Mapping):
+            out["refused"] = block.get("refused") or (
+                f"dlane.done_zero_edge_p's block was measured under the rule {str(block.get('measured_under'))[:8]}, "
+                f"not the rule in force ({rule_sha[:8]}): it is not stated")
+    out["beside"] = beside
     return out
+
+
+#: WHAT THE REPORT SAYS while no figure measured under the rule in force is set (the reviews of A50, Oct 16, 2026):
+#: never the Oct 9 rule's figure in its place.
+ZERO_EDGE_UNMEASURED = ("P(Done | zero edge) under the rule in force is not yet measured (the {figure} beside it was "
+                        "simulated under the Oct 9 rule)")
+ZERO_EDGE_UNMEASURED_SETTING = ("P(Done | zero edge) under the rule in force is not yet measured (the {figure} beside it "
+                                "is a setting's figure, under no rule this code names)")
+
+
+def zero_edge_unmeasured(beside: Mapping[str, Any]) -> str:
+    """`ZERO_EDGE_UNMEASURED` with the figure beside it (`ZERO_EDGE_UNMEASURED_SETTING` when that figure is no figure
+    `dlane.ZERO_EDGES` names, so no rule is claimed for it)."""
+    from ..swarm import dlane
+
+    text = ZERO_EDGE_UNMEASURED if beside.get("measured_under") == dlane.OCT9_RULE_SHA256 else ZERO_EDGE_UNMEASURED_SETTING
+    return text.format(figure=f"{float(beside['value']):g}")
 
 
 def roster_now(root: str | Path) -> dict[str, Any] | None:
@@ -3562,6 +3677,11 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
         prev_done = ((previous or {}).get("done") or {}) if isinstance(previous, Mapping) else {}
         if not isinstance(prev_done, Mapping) or (prev_done.get("counted_from") or _iso(start)) != _iso(count_from):
             prev_done = {}  # a frozen reading is carried only from a report that counted from the same instant
+        prev_rule = (previous.get("rule") or {}) if isinstance(previous, Mapping) else {}
+        if not isinstance(prev_rule, Mapping) or prev_rule.get("sha256") != dlane.DONE["rule_sha256"]:
+            # THE OWNER'S CHANGE OF THE PINNED RULE (A50, Oct 16, 2026): a reading frozen under another pinned rule (the
+            # Oct 9 rule's 30th close, say) is never carried into this one's checkpoints; each is read afresh.
+            prev_done = {}
         # The per-close twins (B1 (c), Oct 10, 2026; `league/ops/twins.py`): read once, matched in each meter's replay gap
         # and, with the switch on, a close's replay is final only once its twin is (A1.4, the integration of Oct 10).
         # The equity twins (release E1) are always on: an equity close has no nightly replay to fall back on.
@@ -3622,8 +3742,8 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
                      "net_after_costs": {**net_after_costs(root, counted, now=now), "counted_from": _iso(count_from),
                                          "counted_note": "the meters' closes count from counted_from; the costs are the "
                                                          "close economics' own, since its cost_start"},
-                     "research_247_last_7_days": research((yesterday - timedelta(days=RESEARCH_FIRST_DAYS - 1)).isoformat(),
-                                                          yesterday.isoformat()),
+                     "research_247_last_7_days": research(
+                         (yesterday - timedelta(days=RESEARCH_BESIDE_DAYS - 1)).isoformat(), yesterday.isoformat()),
                      "other_routes": [{"pid": c["pid"], "family": c["family"], "instance": c["instance"],
                                        "route": c["route"], "pnl_usd": _usd(c["pnl_usd"])} for c in other],
                      "inception": dlane.DONE["inception"],
@@ -3847,5 +3967,5 @@ __all__ = ["run", "report", "FILE", "CONTAMINATION", "PREREGISTERED", "A14_CONSI
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
            "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP", "finality",
            "research_window", "Research247", "operator_edits", "program_losses", "dm1_reach", "net_after_costs",
-           "zero_edge", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS", "pl1_alarms", "pt1_alarms",
+           "zero_edge", "ZERO_EDGE_UNMEASURED", "ZERO_EDGE_UNMEASURED_SETTING", "zero_edge_unmeasured", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS", "pl1_alarms", "pt1_alarms",
            "dc1_alarms", "DC1_SESSIONS", "lane_off"]

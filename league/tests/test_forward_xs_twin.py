@@ -422,7 +422,12 @@ class TheA14ReadingOfABasket(unittest.TestCase):
         self.assertEqual((reading["intents"]["disagreed"], reading["intents"]["missing"]), (1, 0))
         self.assertEqual(reading["intents"]["agreed"], reading["intents"]["sessions"] - 1)
         self.assertEqual(reading["intents"]["causes"]["program"], 1, "the two sides read one ctx and decided otherwise")
-        self.assertFalse(reading["holds"], "one session of a dozen is under the bound: A14's rule is E3's, unchanged")
+        # THE OWNER'S CHANGE (A50, Oct 16, 2026): fewer than 40 sessions read, so all but one agreeing passes; before it
+        # one session of a dozen was under the 95% bound and failed. The basket is read by the one rule every program is.
+        self.assertLess(reading["intents"]["sessions"], 40)
+        self.assertEqual((reading["intents"]["ok"], reading["intents"]["ok_by"], reading["holds"]),
+                         (True, "all_but_one", True), "one session of a dozen is forgiven: A14's rule as the owner set it")
+        self.assertFalse(reading["intents"]["agreed"] >= 0.95 * reading["intents"]["sessions"], "under the 95% alone")
 
 
 class TheLinesBesideAPanelProgram(unittest.TestCase):

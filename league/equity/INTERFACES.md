@@ -1053,8 +1053,8 @@ differ, this section is the code.
   fill_gap_ok, intents, consistent, why}; `A14_GAP_BP` 15.0, `A14_AGREEMENT` 0.95): a reading that holds an equity
   close carries it as `a14`, its item 4 is never True while the intents half has no reader, and it does not hold.
   `EquityScreens.of` returns `s1x` and `lane_label` (no `label`). `zero_edge(settings, *, equity_closes=0)` adds
-  `applies_to`, `equity_closes`, `equity_note` (`ZERO_EDGE_EQUITY_NOTE`) when any is counted; `equity_beside` carries
-  `zero_edge_note`. `funnel.equity_counts` reads Validation verdicts from the `swarm.status` events with action
+  `applies_to`, `equity_closes`, `equity_note` (`ZERO_EDGE_EQUITY_NOTE`) when any is counted (since A50, Oct 16, 2026,
+  on its `beside` block, the options rules' figure; docs/operations.md); `equity_beside` carries `zero_edge_note`. `funnel.equity_counts` reads Validation verdicts from the `swarm.status` events with action
   "elane_validation".
 
 ## 15. The review's fixes on the order path, the daily step and the hooks, and the rehearsal's (Oct 11, 2026; as built, additive unless it says so)

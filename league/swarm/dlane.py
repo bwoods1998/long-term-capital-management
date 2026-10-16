@@ -257,22 +257,46 @@ AGENDA_MAX = 4000
 HIDDEN_YEAR_DIGITS = ("2020", "2021")
 #: THE DONE RULE (DONE-RULE.md, pinned Oct 9, 2026 before L-D or D-1 shipped; decision 8). Not settings: how Done is read
 #: is fixed before any number is seen. The `dlane` report job reads them.
+#: THE OWNER'S CHANGE OF THE PINNED RULE (A50, the goal of Oct 16, 2026, 02:10Z; its text is
+#: goal-2026-10-10/GOAL-MESSAGE-SPEED.txt): `rule_sha256` is now the sha256 of docs/goals/DONE-RULE-A50.md, the pinned
+#: rule restated with the owner's Done (league/tests/test_done_a50.py holds the file to it), pinned before any
+#: checkpoint was reached (6 counted closes, none frozen). The bar is 15 closes with 3 from each of 2 programs, read at
+#: the 15th counted close and then every 5th (fixed by count, never chosen); item 7's first window is 3 UTC days
+#: (`research_first_days`, read by the `dlane` job's research window). A1 (`amendment_sha256`) stands but for A1.1's
+#: count of matched closes, `gap_min_matched`, which the captain's A50a(2) (02:31Z Oct 16, 2026) makes 3 (was 5: it
+#: would block the 15th close in about 92% of paths and contradict the owner's ">= 3 each"); item 4 of the pinned file
+#: says so. Each is a loosening, listed with its cost in the `dlane` job's report (`loosened`). The rule as pinned on
+#: Oct 9 is `OLD_DONE`, below: kept so the history reads, and read by nothing.
 DONE: dict[str, Any] = {
-    "rule_sha256": "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca",
+    "rule_sha256": "027c12b7cca3f4450b3eee92957dc8c2d6e28a8db9b81625c2ba323528db2491",
     "inception": "2026-09-26T06:23:00Z",       # the options swarm's start: every agent real close since counts
     "routes_all": (":r", ":t", ":i"),           # done_all: Probe/Sized, tuition, incubator
     "routes_screen": (":r",),                    # done_screen: the evidence route alone
-    "min_closes": 30, "min_programs": 2, "min_closes_per_program": 5,
-    "gap_limit": 0.10, "gap_min_matched": 5,     # consistent: mean live-minus-replay gap within +/-0.10 over 5+ matched
-    "first_checkpoint": 30, "checkpoint_every": 10,
+    "min_closes": 15, "min_programs": 2, "min_closes_per_program": 3,     # A50 (were 30 and 5)
+    "gap_limit": 0.10, "gap_min_matched": 3,     # consistent: mean live-minus-replay gap within +/-0.10 over 3+ matched
+                                                 # (A50a(2), Oct 16, 2026; was 5, A1.1)
+    "first_checkpoint": 15, "checkpoint_every": 5,                         # A50 (were 30 and 10)
+    "research_first_days": 3,                                              # A50 (was 7: the report job's own constant)
     # AMENDMENT A1 (DONE-RULE-A1.md, pinned Oct 9, 2026 ~20:50Z, before the first Probe close; tightenings only; the
     # readiness audit's B1, M10, M11 and M8). A1.1: item 4 held with ZERO replay evidence (a program under 5 matched
     # closes was never inconsistent), so a claim also needs at least `min_measured_programs` programs with
-    # `gap_min_matched` or more matched closes each, every one of them within the gap. A1.4: a checkpoint is read only
+    # `gap_min_matched` (5 as A1.1 pinned it; 3 since the captain's A50a(2)) or more matched closes each, every one of
+    # them within the gap. A1.4: a checkpoint is read only
     # once its inputs are final (the night's replay landed and the broker's fees posted for every counted close). A1.2
     # and A1.3 are figures and a policy setting (`ZERO_EDGE`, `program_loss_usd`).
     "amendment_sha256": "333bad0679fb9c9a76c1cc0b5248d52c5f84c96e0cff5376f9c8d446a4c4ff0b",
     "min_measured_programs": 2,
+}
+#: The sha256 of DONE-RULE.md, the rule as pinned on Oct 9, 2026: `OLD_DONE`'s, and the rule every figure in
+#: `ZERO_EDGES` was simulated under (their `measured_under`).
+OCT9_RULE_SHA256 = "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca"
+#: THE RULE AS PINNED ON OCT 9, 2026 (DONE-RULE.md, with A1.1's 5 matched closes), before the owner's change (A50) and
+#: the captain's A50a(2): HISTORY ONLY. No code reads it (league/tests/test_done_a50.py holds that): the meter, the
+#: checkpoints and item 7 read `DONE`.
+OLD_DONE: dict[str, Any] = {
+    "rule_sha256": OCT9_RULE_SHA256,
+    "min_closes": 30, "min_closes_per_program": 5, "first_checkpoint": 30, "checkpoint_every": 10,
+    "research_first_days": 7, "gap_min_matched": 5,
 }
 #: A1.2 (DONE-RULE-A1.md): P(Done | zero edge) under the budget in force, the figure beside every claim. Every figure this
 #: code names, each with what it is (`ZERO_EDGES`), and the one for the rules it ships (`ZERO_EDGE`, which `DEFAULTS`
@@ -281,22 +305,35 @@ DONE: dict[str, Any] = {
 #: THE PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026): the $800 total and the -$300 program loss line, measured at roster
 #: 5 alone, on fixed 2-, 3- and 5-session holds (the simulation's stand-in for the House's pool). The rollback to the
 #: $400 total is `ZERO_EDGE = ZERO_EDGES[0.024]`, with 0.024 in `DEFAULTS` and in policy.json.
+#: EVERY ONE WAS SIMULATED UNDER THE OCT 9 RULE (`measured_under`: 30 closes, 5 each, read every 10th), so since the
+#: owner's change (A50) none is the figure for the rule in force: the `dlane` report prints one only BESIDE, labelled so,
+#: and the figure under the rule in force only from a measured block (`zero_edge_measured`, below).
 ZERO_EDGES: dict[float, dict[str, Any]] = {
     0.024: {"value": 0.024, "horizon": "12 weeks", "holds": "3-session holds",
             "variant": "(i) $400 worst net stretch in any 20 sessions + $400 net in total (release L-D's budget, D2)",
             "source": "the operator's budget simulation (dlane-1009/budget/RESULT.md, worst-stretch section, variant i, "
                       "zero edge; 6.0% at 24 weeks), pinned by DONE-RULE-A1 A1.2 (sha 333bad06)",
-            "by": "DONE-RULE-A1 A1.2, under L-D's $400 total"},
+            "by": "DONE-RULE-A1 A1.2, under L-D's $400 total",
+            "measured_under": OCT9_RULE_SHA256},
     0.027: {"value": 0.027, "horizon": "12 weeks",
             "holds": "fixed 2-, 3- and 5-session holds (the simulation's stand-in for the House's pool)",
             "variant": "roster 5 + $400 worst net stretch in any 20 sessions + $800 net in total + the -$300 program "
                        "loss line (the Probe total at $800, PREREG-T)",
             "source": "the operator's pre-registered simulation PREREG-T (Oct 10, 2026: roster 5, $800 total, -$300 "
                       "line, fixed 2-, 3- and 5-session holds, arrivals, cross-fit, 12 weeks, zero edge; 9.0% at 24 "
-                      "weeks), the figure DONE-RULE-A1 A1.2 (sha 333bad06) asks for under the rules in force",
-            "by": "PREREG-T, under the $800 total and the -$300 line at roster 5"},
+                      "weeks), the figure DONE-RULE-A1 A1.2 (sha 333bad06) asked for under the Oct 9 rule",
+            "by": "PREREG-T, under the $800 total and the -$300 line at roster 5",
+            "measured_under": OCT9_RULE_SHA256},
 }
 ZERO_EDGE = ZERO_EDGES[0.027]
+#: P(DONE | ZERO EDGE) UNDER THE RULE IN FORCE (the reviews of A50, Oct 16, 2026; DONE-RULE-A50.md item 6): the setting
+#: `dlane.done_zero_edge_p` written as a BLOCK of these keys: `value` (the figure), `horizon` (the date or span it is
+#: read by), `source_sha256` (the sha256 of the result it comes from) and `measured_under` (the sha256 of the pinned
+#: Done rule it was measured under). The `dlane` report states `value` as P(Done | zero edge) only when `measured_under`
+#: is `DONE["rule_sha256"]`; otherwise it says the figure under the rule in force is not yet measured. A bare number
+#: there is the figure as before (one of `ZERO_EDGES`, simulated under the Oct 9 rule, or a setting's), stated beside,
+#: never as the figure under the rule in force. No identity reads either form.
+ZERO_EDGE_BLOCK_KEYS = ("value", "horizon", "source_sha256", "measured_under")
 
 DEFAULTS: dict[str, Any] = {
     # The code's default is the rollback; policy.json switches the lane on ("gate").
@@ -329,7 +366,9 @@ DEFAULTS: dict[str, Any] = {
     # THE DONE METER's zero-edge figure (decision 8: "P(Done | zero edge), simulation"). 0.027 since THE PROBE TOTAL AT
     # $800 (PREREG-T, Oct 10, 2026; `ZERO_EDGE` says what it is); 0.024 from DONE-RULE-A1 A1.2 (Oct 9, 2026) under L-D's
     # $400 total (`ZERO_EDGES` keeps its label for the rollback); 0.13 before it described the NET-total rules release
-    # L-D retired.
+    # L-D retired. Each was simulated under the Oct 9 rule (`ZERO_EDGES`' `measured_under`): since A50 the `dlane` report
+    # states it BESIDE. The figure under the rule in force is this key written as a block (`ZERO_EDGE_BLOCK_KEYS`), in
+    # swarm.json or policy.json, once measured; the report states it only when its `measured_under` is the rule's sha.
     "done_zero_edge_p": 0.027,
     # K5 (decision 9).
     "k5_net_usd": -600, "k5_clear": False,
@@ -350,6 +389,29 @@ DEFAULTS: dict[str, Any] = {
 }
 
 _SHA = re.compile(r"^[0-9a-f]{64}$")
+
+
+def zero_edge_measured(raw: Any) -> dict[str, Any] | None:
+    """The measured block of `dlane.done_zero_edge_p` (`ZERO_EDGE_BLOCK_KEYS`), checked: None when the setting is no
+    block (a number, or absent); {value, horizon, source_sha256, measured_under} when every key is well formed (`value`
+    a number from 0 to 1, `horizon` a text, both shas 64 lowercase hex); else {"refused": why}, never a figure. Whether
+    it is the figure for the rule in force is the `dlane` report's to say (`measured_under` against `DONE`'s sha)."""
+    if not isinstance(raw, Mapping):
+        return None
+    bad = []
+    value = raw.get("value")
+    if _num(value) is None or not 0.0 <= float(value) <= 1.0:
+        bad.append("value is not a number from 0 to 1")
+    horizon = raw.get("horizon")
+    if not isinstance(horizon, str) or not horizon.strip() or len(horizon) > 120:
+        bad.append("horizon is not a text of 1 to 120 characters")
+    for key in ("source_sha256", "measured_under"):
+        if not isinstance(raw.get(key), str) or not _SHA.match(raw[key]):
+            bad.append(f"{key} is not a sha256")
+    if bad:
+        return {"refused": "dlane.done_zero_edge_p's block is malformed (" + "; ".join(bad) + "): no figure"}
+    return {"value": float(value), "horizon": horizon.strip(), "source_sha256": raw["source_sha256"],
+            "measured_under": raw["measured_under"]}
 
 
 # ----------------------------------------------------------------------------------------------------------- settings
@@ -406,6 +468,7 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     sc_raw = screens_raw.get("S-C") if isinstance(screens_raw.get("S-C"), Mapping) else {}
     d2_raw = screens_raw.get("D2") if isinstance(screens_raw.get("D2"), Mapping) else {}
     sc_default = DEFAULTS["screens"]["S-C"]
+    zero_default = DEFAULTS["done_zero_edge_p"] if _num(DEFAULTS["done_zero_edge_p"]) is not None else ZERO_EDGE["value"]
     return {
         "mode": mode,
         "roots": words("roots", ROOTS, upper=True), "structures": words("structures", STRUCTURES),
@@ -434,7 +497,10 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         "val_tries": whole("val_tries", 1, 1), "looks_per_lineage": whole("looks_per_lineage", 1, 1),
         "alarm_min_looks": whole("alarm_min_looks", 10, 1000),
         "alarm_pass_share": number("alarm_pass_share", 0.30, 0.60),
-        "done_zero_edge_p": number("done_zero_edge_p", 0.0, 1.0),
+        # A block here (`ZERO_EDGE_BLOCK_KEYS`) is the measured figure, `done_zero_edge_measured`; the number beside it is
+        # then the default's (the Oct 9 rule's figure, stated beside), `ZERO_EDGE`'s when the default is a block too.
+        "done_zero_edge_p": number("done_zero_edge_p", 0.0, 1.0, default=zero_default),
+        "done_zero_edge_measured": zero_edge_measured(raw.get("done_zero_edge_p", DEFAULTS["done_zero_edge_p"])),
         "k5_net_usd": number("k5_net_usd", -600.0, -50.0),
         "k5_clear": raw.get("k5_clear") is True,
         # The line's bound is its default (THE PROBE TOTAL AT $800's review, Oct 10, 2026): a rollback of `DEFAULTS` to
