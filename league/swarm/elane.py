@@ -378,8 +378,8 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         "looks_per_lineage": int(number("looks_per_lineage", 1, 1, count=True)),
         # The line's bound is its default (-300): a setting can only raise it toward zero.
         "program_loss_usd": number("program_loss_usd", float(DEFAULTS["program_loss_usd"]), -25.0),
-        # C3: the Scaled band's setting, each rung inside 0 to the top (its default): it may only lower a rung.
-        "scale": scale_block(raw.get("scale")) or copy.deepcopy(DEFAULTS["scale"]),
+        # C3: `scale` is NOT read here: the House reads it through `scale_setting` alone, which fails closed (a cfg
+        # reading would have to fall back to some default, and the default 5 would fail open; the review of C3).
     }
 
 

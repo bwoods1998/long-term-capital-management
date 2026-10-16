@@ -422,8 +422,9 @@ activity types the venue refused), `eq_preopen_activities`. The book reads the h
   `probe` `SCALED_MARK`; its lot keeps `info` {"rung", "scaled"} (`bands.RUNG_INFO`, `SCALED_INFO`) and `probe` 0 when
   Scaled. `probe_figures(rows, *, weights, scaled_lines=None)` leaves Scaled open risk out of the Probe room while
   the lines are in force and the band is not dark (`ScaledSettings.lines_live`), and counts Scaled lots as Probe ones
-  otherwise. A pin that does not match opens no
-  new Scaled lot (`SCALE_REFUSAL`). The memory is the kv `SCALE_KEY` (private). Families readers gain
+  otherwise. A pin that does not match opens no new Scaled lot (`SCALE_REFUSAL`); while a row is set the Probe and
+  panel pool sizes on the last matching pin's E_P (`SCALE_EP_KEY`), refusing every open when none ever matched
+  (`SCALE_POOL_REFUSAL`). The memory is the kv `SCALE_KEY` (private). Families readers gain
   `scale_setting() -> {"rung", "programs"} | None` (None: no word; the pin alone).
 - Calls it makes: `league.equity.sizing.size_entry` (money), `league.live.money.available_cash` (money) with
   `working_buys_worst` = its own and `reserved` = the options book's `reserved()` (its working opens' maximum loss with

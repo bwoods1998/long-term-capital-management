@@ -400,6 +400,13 @@ PROBE_PIN_MARK_KEY = "eq_probe_pin"
 #: `_open_block`'s answer (a House-wide refusal, so THE OPEN NOTE leaves the session out of every seat's idle clock)
 #: and the send's.
 PIN_REFUSAL = "the Probe pin cannot be read and no E_P was ever read on this box: no entry is sized (fail closed)"
+#: C3 (plan 9): WHILE A PIN-SHA ROW IS SET, the Probe and panel pool sizes on min(E, the E_P of the last pin whose bytes
+#: matched the row), kept in live.sqlite under `SCALE_EP_KEY` ({"e_p", "sha256", "at"}: a figure, private), never on a
+#: pin that does not match the row; with no matching pin ever read on this box every open is refused House-wide
+#: (`SCALE_POOL_REFUSAL`), as C2 refuses for a pin never read. While the row is "" (dark) the pool is C2's exactly.
+SCALE_EP_KEY = "eq_scale_ep"
+SCALE_POOL_REFUSAL = ("a scaling pin-sha row is set and no pin matching it was ever read on this box: no entry is sized "
+                      "(fail closed)")
 #: THE SCALED BAND (C3 (A45) of the scaling plan; owner: book; the constitution's `equity_money.scaled` comment, the
 #: rules in league/equity/bands.py). The same private pin (`PROBE_PIN_FILE`) names each program's rung under
 #: `PIN_RUNGS_FIELD` ({"eq|<family>|v<N>": 0 to 5}, `program_key`) and the plan's sha256 under `PIN_PLAN_FIELD` (a pin
@@ -415,8 +422,9 @@ PIN_REFUSAL = "the Probe pin cannot be read and no E_P was ever read on this box
 #:   program in the Probe band has one (a panel, a Sized program, an options family never).
 #: - A ROW AND NO MATCHING PIN (none, unreadable, another file, rungs that cannot be read): NO NEW SCALED LOT. A program
 #:   this box last read at a rung WAITS (its entry is refused, `SCALE_REFUSAL`, and missed at its cut-off), every other
-#:   one trades at Probe, exits go on. ONE standing error alert a process, `began_at` kept; health says it (`scaled`);
-#:   the pre-open check fails on it.
+#:   one trades at Probe on the E_P of the last pin that matched (`SCALE_EP_KEY`; with none ever matched on this box no
+#:   equity open goes at all, `SCALE_POOL_REFUSAL`: plan 9), exits go on. ONE standing error alert a process,
+#:   `began_at` kept; health says it (`scaled`); the pre-open check fails on it.
 #: THE MEMORY (`SCALE_KEY`, the private live.sqlite): each program's rung as last read, since when (its last change), when
 #: it first reached R1 and the highest rung it reached (the program lines read them), the programs sent back for good,
 #: the ladder's closure, the largest Scaled sleeves reached (dollars: the Scaled total's base), and since when the pin
@@ -1863,7 +1871,7 @@ class EquityBook:
         if frozen:
             return f"equity reconciliation: {frozen}"
         if self._sleeve_equity(Decimal(1)) is None:
-            return PIN_REFUSAL
+            return self._pool_refusal()
         if inst is None or not inst.live:
             return "the program is not at Probe or Sized"
         if inst.kind != EQUITY_KIND:
@@ -2397,7 +2405,7 @@ class EquityBook:
             return None
         pool = self._sleeve_equity(E)
         if pool is None:
-            wait(PIN_REFUSAL)
+            wait(self._pool_refusal())
             return None
         # THE SCALED BAND (C3): a program at a rung is sized on the matching pin's E_P, never through the frozen pool's
         # `_sleeve_equity`; Probe (every program while the band is dark) exactly as before.
@@ -2485,13 +2493,35 @@ class EquityBook:
         pin and none ever read on this box; min(E, E_P) with one read; with one that cannot be read, or one gone once
         one was read here, min(E, the last E_P ever read on this box), and None when none ever was (the send sizes
         nothing), or E for the decide's view (`view`), which opens nothing. Never above E, and never above the last
-        E_P once one was read."""
+        E_P once one was read. C3 (plan 9): while a pin-sha row is set, min(E, the E_P of the last pin that MATCHED the
+        row, `_scale_pool_e_p`), never a mismatched pin's, and None (E for the view) when none ever matched; dark, C2's
+        exactly."""
         state, e_p, _ = self._pin_now()
+        st = B.scaled_settings()
+        if not st.dark:
+            kept = self._scale_pool_e_p(st)
+            if kept is None:
+                return E if view else None
+            return min(E, kept)
         if state == "absent":
             return E
         if e_p is not None:
             return min(E, e_p)
         return E if view else None
+
+    def _scale_pool_e_p(self, st: B.ScaledSettings) -> Decimal | None:
+        """C3: the E_P of the pin on the state root when its bytes are the row's sha256 (kept, `_scale_pin`), else the E_P
+        of the last pin that matched on this box (`SCALE_EP_KEY`), else None."""
+        pin = read_probe_pin(self.root)
+        if pin.state == "read" and pin.e_p is not None and pin.sha256 == st.pin_sha256:
+            self._scale_pin(st)
+            return pin.e_p
+        return self._scale_kept_e_p()
+
+    def _pool_refusal(self) -> str:
+        """Why the pool sizes nothing (`_sleeve_equity` None): C2's `PIN_REFUSAL`, or under a set row
+        `SCALE_POOL_REFUSAL`."""
+        return PIN_REFUSAL if B.scaled_settings().dark else SCALE_POOL_REFUSAL
 
     def _pin_judge(self, pin: ProbePin) -> tuple[str, Decimal | None, str]:
         """(state, the E_P a sleeve sizes on or None, why) of a reading, with what this box kept (pure: nothing is
@@ -2597,18 +2627,36 @@ class EquityBook:
         self.record("ops.alert", payload)
 
     # ------------------------------------------------------------------ THE SCALED BAND (C3 (A45) of the scaling plan)
-    def _scale_pin(self, st: B.ScaledSettings) -> tuple[str, ProbePin | None, str]:
+    def _scale_pin(self, st: B.ScaledSettings, *, keep: bool = True) -> tuple[str, ProbePin | None, str]:
         """Under a pin-sha row: ("matched", the pin, "") when the pin on the state root is read (`read_probe_pin`, C2's
         reader: a regular file only) and its bytes are the row's sha256 and its rungs can be read; else ("mismatch",
-        None, why). Never a figure in `why`."""
+        None, why). Never a figure in `why`. A matching pin's E_P is kept (`SCALE_EP_KEY`, when it changed; `keep`),
+        what the pool sizes on while a later pin does not match (`_scale_pool_e_p`)."""
         pin = read_probe_pin(self.root)
         if pin.state != "read" or pin.e_p is None:
             return "mismatch", None, f"the pin is {pin.state} ({pin.why or 'no reason given'})"
         if pin.sha256 != st.pin_sha256:
             return "mismatch", None, "the pin's sha256 is not the row's (another pin, or the row not yet deployed)"
+        if keep and self._scale_kept_e_p() != pin.e_p:
+            try:
+                self.state.put(SCALE_EP_KEY, {"e_p": str(pin.e_p), "sha256": pin.sha256, "at": dt.datetime.fromtimestamp(
+                    self.clock(), dt.timezone.utc).isoformat(timespec="seconds")})
+            except Exception:  # noqa: BLE001 - the next read keeps it
+                pass
         if pin.rungs is None:
             return "mismatch", None, f"the pin's rungs cannot be read ({pin.rungs_why})"
         return "matched", pin, ""
+
+    def _scale_kept_e_p(self) -> Decimal | None:
+        """The E_P of the last pin that matched the row on this box (`SCALE_EP_KEY`), or None."""
+        try:
+            got = self.state.get(SCALE_EP_KEY)
+            if isinstance(got, Mapping) and isinstance(got.get("e_p"), str):
+                value = Decimal(got["e_p"])
+                return value if value.is_finite() and value > 0 else None
+        except Exception:  # noqa: BLE001 - unread: only a pin matching now sizes anything
+            return None
+        return None
 
     def _scale_mem(self) -> dict[str, Any] | None:
         """THE SCALED BAND's memory (`SCALE_KEY`, private live.sqlite): {} when there is none yet; None when a row is there
@@ -2692,8 +2740,7 @@ class EquityBook:
         rung = self._setting_rung(key, pin, st, mem)
         if key in (mem.get("out") or {}):
             return B.PROBE_RUNG
-        closed = mem.get("closed") or {}
-        if closed and closed.get("plan_sha256") == pin.plan_sha256:
+        if pin.plan_sha256 in _closed_plans(mem):
             return B.PROBE_RUNG
         return max(B.PROBE_RUNG, int(rung))
 
@@ -2749,8 +2796,7 @@ class EquityBook:
         changed = self._scale_track(mem, key, rung) or changed
         if rung >= 1:
             # D3 AT THE SIZING TOO: a close of this minute that crossed a program line sends it back before its entry.
-            own = [lot for lot in self._scale_lots() if lot.instance == inst.id]
-            hit = self._program_lines_hit(key, inst, rung, st, pin, E, mem, own)
+            hit = self._program_lines_hit(key, inst, rung, st, pin, E, mem)
             if hit:
                 self._scale_out(mem, key, hit)
                 rung, changed = B.PROBE_RUNG, True
@@ -2765,7 +2811,9 @@ class EquityBook:
         mem.setdefault("out", {})[key] = {"at": self.clock(), "why": hit[:200]}
         self._scale_track(mem, key, B.PROBE_RUNG)
         self.record("equity.scale", {"event": "program_line", "program": key, "why": hit[:200]})
-        self.alert("warning", f"equity: {key} {hit[:200]}")
+        # The public alert names no program and no rung (the private record does).
+        self.alert("warning", "equity: D3: a scaled program's realized net reached its program line: it is back at "
+                              "Probe for good (the private equity.scale record names it)")
 
     def _scale_keep(self, mem: Mapping[str, Any]) -> None:
         try:
@@ -2825,14 +2873,15 @@ class EquityBook:
         return B.scaled_room(st, sleeves_usd=sleeves, peak_usd=peak, closes=closes, window_since=since, open_risk=risk)
 
     def _program_lines_hit(self, key: str, inst: Instance, rung: int, st: B.ScaledSettings, pin: ProbePin, E: Decimal,
-                           mem: Mapping[str, Any], lots: Sequence[Lot]) -> str | None:
-        """D3 for one program at a rung (`bands.program_lines`): the realized net of its rung lots (`info.rung`) closed
-        since its last rung change, against its rung's line; and of those closed since it first reached R1, against the
-        line of the highest rung it reached."""
+                           mem: Mapping[str, Any]) -> str | None:
+        """D3 for one program at a rung (`bands.program_lines`; plan 3.4): EVERYTHING the program version realized (every
+        real lot of its instance, whatever its marks: a Probe lot opened before R1 and closed after it counts) closed
+        since its last rung change, against its rung's line; and closed since it first reached R1, against the line of
+        the highest rung it reached."""
         row = (mem.get("programs") or {}).get(key) or {}
         since, first = row.get("since_at"), row.get("first_at")
-        own = [lot for lot in lots if lot.instance == inst.id and lot.status == LOT_CLOSED
-               and int(lot.info.get(B.RUNG_INFO) or 0) >= 1]
+        own = [Lot.of(r) for r in self.state.rows("SELECT * FROM eq_lots WHERE instance=? AND status=? ORDER BY lid",
+                                                  (inst.id, LOT_CLOSED))]
         since_net = sum((lot.cash for lot in own if since is not None and float(lot.closed_at or 0) >= float(since)), ZERO)
         cumulative = sum((lot.cash for lot in own if first is not None and float(lot.closed_at or 0) >= float(first)),
                          ZERO)
@@ -2865,16 +2914,23 @@ class EquityBook:
             if changed:
                 self._scale_keep(mem)
             return
-        closed = mem.get("closed") or {}
-        if closed and closed.get("plan_sha256") != pin.plan_sha256 and mem.get("ladder_for") != pin.plan_sha256:
-            # D6 closed the ladder for an earlier version of the plan; a pin of a new pinned version reopens it, and its
-            # window and total start again (the closes since now, the largest sleeves from nothing).
-            mem.update(ladder_for=pin.plan_sha256, ladder_from=self.clock(), peak_usd=text(ZERO))
+        plans = [str(x) for x in (mem.get("plans") or []) if isinstance(x, str)]
+        if pin.plan_sha256 and pin.plan_sha256 not in plans:
+            if _closed_plans(mem):
+                # D6 closed the ladder for an earlier version of the plan; a pin of a version NEVER RUN ON THIS BOX
+                # reopens it (plan 4.3: reopening is a new pinned version), its window and total from now and its
+                # largest sleeves from nothing. A version once closed stays closed (`_effective_rung`), whatever pins
+                # come after. Loud: one error-level standing alert, dated when that pin was written.
+                mem.update(ladder_from=self.clock(), peak_usd=text(ZERO))
+                self.record("equity.scale", {"event": "reopened", "why": "a pin of a version of the plan never run on "
+                                                                         "this box, after D6 closed the ladder"})
+                self._standing_alert("error", "equity: the Scaled ladder is REOPENED by a pin of a new version of the "
+                                              "plan after D6 closed it: check that this is Blake's pinned version",
+                                     began_at=self._pin_written_at())
+            mem["plans"] = plans + [pin.plan_sha256]
             changed = True
-            self.record("equity.scale", {"event": "reopened", "why": "a pin of a new pinned version of the plan"})
         E = self.sizing_equity()
         live = [i for i in self._instances(alive=True) if i.kind == EQUITY_KIND and i.band == "probe" and i.live]
-        lots = self._scale_lots()
         for key, _ in pin.rungs or ():
             changed |= self._scale_ratchet(mem, key, pin, st)  # every program the pin names, seated or not
         if self._scale_cap("") is None:
@@ -2889,7 +2945,7 @@ class EquityBook:
             changed |= self._scale_track(mem, key, rung)
             if rung < 1 or E is None or E <= 0:
                 continue
-            hit = self._program_lines_hit(key, inst, rung, st, pin, E, mem, lots)
+            hit = self._program_lines_hit(key, inst, rung, st, pin, E, mem)
             if hit:
                 self._scale_out(mem, key, hit)
                 changed = True
@@ -2902,16 +2958,16 @@ class EquityBook:
                 mem["peak_usd"] = text(sleeves)
                 changed = True
             room = self._scaled_room(S.ny_day(self.clock()).isoformat(), E)
-            closed = mem.get("closed") or {}
-            if room.total_reached and closed.get("plan_sha256") != pin.plan_sha256:
-                mem["closed"] = {"plan_sha256": pin.plan_sha256, "at": self.clock(),
-                                 "why": "D6: the Scaled total is reached: every program back to Probe; the ladder is "
-                                        "closed for this version of the plan"}
+            closed = _closed_plans(mem)
+            if room.total_reached and pin.plan_sha256 not in closed:
+                why = ("D6: the Scaled total is reached: every program back to Probe; the ladder is closed for this "
+                       "version of the plan, for good")
+                mem["closed"] = {**closed, pin.plan_sha256: {"at": self.clock(), "why": why}}
                 for key in list((mem.get("programs") or {})):
                     self._scale_track(mem, key, B.PROBE_RUNG)
                 changed = True
-                self.record("equity.scale", {"event": "scaled_total", "why": mem["closed"]["why"]})
-                self.alert("error", f"equity: {mem['closed']['why']} (a new pinned version reopens it)")
+                self.record("equity.scale", {"event": "scaled_total", "why": why})
+                self.alert("error", f"equity: {why} (only a new pinned version reopens it)")
             reached = bool(sleeves > 0 and room.window_reached)
             if reached != bool(mem.get("window")):
                 mem["window"] = reached
@@ -2922,6 +2978,14 @@ class EquityBook:
                                           "steps every Scaled program down one rung (elane.scale)")
         if changed:
             self._scale_keep(mem)
+
+    def _pin_written_at(self) -> str | None:
+        """When the pin on the state root was written (its file's mtime, ISO UTC), or None."""
+        try:
+            at = os.lstat(Path(self.root) / PROBE_PIN_FILE).st_mtime if self.root is not None else None
+        except OSError:
+            return None
+        return None if at is None else dt.datetime.fromtimestamp(at, dt.timezone.utc).isoformat(timespec="seconds")
 
     def _scale_unread_since(self, *, clear: bool = False) -> str | None:
         """`SCALE_UNREAD_KEY`: when this box first found the memory unreadable (written the first time, kept across
@@ -2981,14 +3045,14 @@ class EquityBook:
         if st.dark:
             return {"state": "dark", "why": "no pin-sha row (equity_money.scaled.pin_sha256 is unset): every program is "
                                             "at Probe"}
-        state, _, why = self._scale_pin(st)
+        state, pin, why = self._scale_pin(st, keep=False)
         mem = self._scale_mem()
         if mem is None:
             return {"state": "memory", "why": "the Scaled band's memory (eq_scale) cannot be read: every program at "
                                               "Probe", "lines": st.lines_in_force}
         return {"state": state, "why": why, "lines": st.lines_in_force,
                 "rungs": {k: int((v or {}).get("rung") or 0) for k, v in sorted((mem.get("programs") or {}).items())},
-                "out": sorted(mem.get("out") or {}), "closed": bool(mem.get("closed")),
+                "out": sorted(mem.get("out") or {}), "closed": bool(pin is not None and pin.plan_sha256 in _closed_plans(mem)),
                 "window": bool(mem.get("window")), "since": mem.get("mismatch_since") if state == "mismatch" else None}
 
     def _options_open_loss(self, day: str) -> Decimal:
@@ -5431,6 +5495,12 @@ class EquityBook:
             return {}
         return {d: A.dec(r.get("c")) for r in (fetched or {}).get(symbol) or []
                 for d in (_bar_day(r),) if d in (first, last)}
+
+
+def _closed_plans(mem: Mapping[str, Any]) -> dict[str, Any]:
+    """C3: every version of the plan D6 closed on this box, {plan sha256: {at, why}} (`SCALE_KEY`'s `closed`)."""
+    closed = mem.get("closed") if isinstance(mem, Mapping) else None
+    return {str(k): v for k, v in closed.items() if isinstance(k, str) and k} if isinstance(closed, Mapping) else {}
 
 
 def _order_rung(order: Order) -> int:

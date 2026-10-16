@@ -9,9 +9,7 @@ equity closes, counts and beside-figures, the swarm's family line, the book's kv
 scenario run on C2's head (22646a97, `feat/scale-c2`) under Python 3.14 and 3.11 wrote
 league/tests/fixtures/scaled_inert_c2.json; here it runs on this tree and must give that file back:
 - as shipped (the row unset): everything, the book's own memory included;
-- with a pin-sha row that is NOT the pin's (the pin there names rungs for two programs): every sizing, line and reading
-  (the book then says the mismatch: its memory, a record and one standing alert, and nothing else);
-- the same with Blake's Scaled lines and their family-line part in force (no Scaled lot exists, so nothing moves);
+- (not inert, by plan 9) with a pin-sha row that no pin on this box ever matched, no new equity lot opens (exits go on);
 - with the row the pin's own and the swarm's setting at "stop the ladder" (`elane.scale.rung` 0): every sizing, line
   and reading (the book keeps the pin's rungs and the caps as its ratchet, and says the pin matched, once).
 The pin's E_P and every figure are invented. Standard library only."""
@@ -69,22 +67,23 @@ class Inert(unittest.TestCase):
         self.assert_same(got, TRADING + MEMORY)
         self.assertEqual(got, golden())
 
-    def test_a_row_that_is_not_the_pins_moves_no_sizing_line_or_reading(self):
-        with mock.patch.dict(CONSTITUTION["equity_money"]["scaled"], {"pin_sha256": "cd" * 32}):
-            got = self.run_scenario()
-        self.assert_same(got, TRADING)
-        added = sorted(set(got["kv_keys"]) - set(golden()["kv_keys"]))
-        self.assertEqual(added, ["eq_scale", "eq_scale_seen"], "the memory holds the mismatch's first minute")
-        self.assertEqual(sorted(json.loads(got["kv"]["eq_scale"])), ["mismatch_since"], "no program at a rung was kept")
-        said = [e for e in got["events"] if e[0] in ("equity.scale", "ops.alert")]
-        self.assertEqual([e[0] for e in said], ["equity.scale", "ops.alert"], "one record and one standing alert")
+    def test_a_row_that_no_pin_here_ever_matched_opens_no_new_equity_lot(self):
+        """Plan 9 (the third review): a set row and no pin on this box that ever matched it opens NO NEW EQUITY LOT
+        (exits go on): every entry is refused House-wide, sized nothing, its reason `SCALE_POOL_REFUSAL`. Only a row
+        that is set can do it, so the shipped (dark) tree never does."""
+        from league.equity import live as L
 
-    def test_with_the_scaled_lines_in_force_nothing_moves_while_no_lot_is_scaled(self):
-        with mock.patch.dict(CONSTITUTION["equity_money"]["scaled"], {"pin_sha256": "cd" * 32}), \
-                mock.patch.dict(CONSTITUTION["equity_money"]["scaled"]["lines"],
-                                {"in_force": True, "family_line_probe_only": True}):
-            got = self.run_scenario()
-        self.assert_same(got, TRADING)
+        for lines in (False, True):
+            with mock.patch.dict(CONSTITUTION["equity_money"]["scaled"], {"pin_sha256": "cd" * 32}), \
+                    mock.patch.dict(CONSTITUTION["equity_money"]["scaled"]["lines"],
+                                    {"in_force": lines, "family_line_probe_only": lines}):
+                got = self.run_scenario()
+            sides = [o["side"] for o in got["orders"]]
+            self.assertEqual(sides, ["sell"], f"only the exit went (lines {lines})")
+            self.assertEqual({v["why"] for v in got["sized_now"].values()}, {L.SCALE_POOL_REFUSAL})
+            self.assertEqual(got["records"]["fam-sized"], golden()["records"]["fam-sized"], "nothing realized moved")
+            said = [e for e in got["events"] if e[0] in ("equity.scale", "ops.alert")]
+            self.assertEqual([e[0] for e in said], ["equity.scale", "ops.alert"], "one record and one standing alert")
 
     def test_the_diff_sees_a_live_rung(self):
         """The scenario is not blind: with the pin's own row and nothing stopping the ladder (both programs the pin
@@ -105,12 +104,14 @@ class Inert(unittest.TestCase):
         with mock.patch.dict(CONSTITUTION["equity_money"]["scaled"], {"pin_sha256": sha}):
             got = self.run_scenario(configure=stop)
         self.assert_same(got, TRADING + ("alerts",))
-        self.assertEqual(sorted(set(got["kv_keys"]) - set(golden()["kv_keys"])), ["eq_scale", "eq_scale_seen"])
+        self.assertEqual(sorted(set(got["kv_keys"]) - set(golden()["kv_keys"])), ["eq_scale", "eq_scale_ep", "eq_scale_seen"])
         # The ratchet holds the pin's rungs as first read (R1: the lines are not in force) and the setting's caps; a stop
         # set before the pin was read is not learned, one set after it would stick.
         self.assertEqual(json.loads(got["kv"]["eq_scale"]), {"ratchet": {"sha256": sha, "rungs": {
-            "eq|fam-a|v1": 1, "eq|fam-b|v1": 1}, "caps": {"eq|fam-a|v1": 0, "eq|fam-b|v1": 0}}})
-        self.assertEqual({k: v for k, v in got["kv"].items() if k not in ("eq_scale", "eq_scale_seen")}, golden()["kv"])
+            "eq|fam-a|v1": 1, "eq|fam-b|v1": 1}, "caps": {"eq|fam-a|v1": 0, "eq|fam-b|v1": 0}},
+            "plans": [SC.PLAN_SHA]}, "the plan's version the ladder runs under is kept too (D6)")
+        self.assertEqual({k: v for k, v in got["kv"].items() if k not in ("eq_scale", "eq_scale_ep", "eq_scale_seen")},
+                         golden()["kv"])
         self.assertEqual([e[1]["state"] for e in got["events"] if e[0] == "equity.scale"], ["matched"])
 
 

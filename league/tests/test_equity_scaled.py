@@ -408,6 +408,118 @@ class Scaled(T.BookTest):
             self.assertEqual(h.book.scaled()["state"], "matched")
             self.assertIn("matches its row again", " ".join(t for lvl, t in h.alerts if lvl == "warning"))
 
+    def test_d3_reads_everything_realized_since_r1_whatever_its_marks(self):
+        """Plan 3.4 (the third review): both program lines read EVERY real lot of the program version closed since the
+        change and since R1, whatever its marks: a Probe lot opened before R1 and closed after it counts in both."""
+        sha = pin(self.root, {KEY_A: 2})
+        h = self.harness()
+        a = h.instance("fam-a")
+        before_r1 = self.open_lot(h, a, value="500")                  # a Probe lot opened before any rung
+        with band(sha, lines=True):
+            h.book._scale_now()                                         # R2: sleeve 2,500, line -250
+            self.closed_lot(h, a, "-200", rung=2, scaled=True, closed_at=h.clock() + 1)
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 2, "-200 is inside -250")
+            lot = h.book._lot(before_r1.lid)
+            lot.status, lot.qty, lot.cash, lot.exit_day = L.LOT_CLOSED, D(0), D("-60"), "2026-10-12"
+            lot.closed_at = h.clock() + 2
+            h.book._save_lot(lot)
+            self.assertIs(h.book._scale_for(a, D(E)), L.SCALE_PROBE, "the Probe lot's -60 counts: -260 since the change")
+            self.assertIn(KEY_A, h.state.get(L.SCALE_KEY)["out"])
+
+    def test_w12_a_plan_d6_closed_stays_closed_whatever_pins_follow(self):
+        """The third review's W12: D6 closes plan A, a pin of plan B reopens the ladder (loudly), D6 closes B; a pin of
+        plan A again finds A closed: Probe."""
+        h = self.harness()
+        a = h.instance("fam-a")
+
+        def d6(plan):
+            sha = pin(self.root, {KEY_A: 2}, plan=plan)
+            with band(sha, lines=True):
+                h.clock.set(h.clock() + 60)
+                h.book._scale_now()
+                self.assertEqual(h.book._scale_for(a, D(E)).rung, 2, plan[:2])
+                for _ in range(4):                     # losses of a seatless earlier program: D6, not D3
+                    lot = L.Lot(h.book._next("eq_lots", "lid"), L.instance_key("fam-z", 1), "fam-z", 1, "equity",
+                                "SPY", "etf", D("1"), D("1"), D("500"), D("500"), "open",
+                                opened_at=T.at(T.FRIDAY, 9, 31), opened_day="2026-10-09", status=L.LOT_CLOSED,
+                                exit_px=D("280"), exit_at="close", exit_day="2026-10-09", closed_at=h.clock() + 1,
+                                cash=D("-240"), reason="program", probe=False, info={B.RUNG_INFO: 2, B.SCALED_INFO: True})
+                    h.book._save_lot(lot)
+                h.clock.set(h.clock() + 60)
+                h.book._scale_now()
+                self.assertIs(h.book._scale_for(a, D(E)), L.SCALE_PROBE, f"D6 closed {plan[:2]}")
+            return sha
+
+        d6("aa" * 32)
+        d6("bb" * 32)
+        self.assertEqual(sorted(h.state.get(L.SCALE_KEY)["closed"]), ["aa" * 32, "bb" * 32])
+        self.assertEqual(sum("REOPENED" in x["text"] for x in h.standing()), 1, "plan B's reopening, loudly")
+        sha = pin(self.root, {KEY_A: 2}, plan="aa" * 32, rungs_at="again")
+        with band(sha, lines=True):
+            h.clock.set(h.clock() + 60)
+            h.book._scale_now()
+            self.assertIs(h.book._scale_for(a, D(E)), L.SCALE_PROBE, "plan A, once closed, stays closed")
+            self.assertTrue(h.book.scaled()["closed"])
+
+    def test_plan_9_under_a_set_row_the_pool_sizes_on_the_last_matching_pins_e_p(self):
+        """Plan 9 (the third review): with the row set and a pin there that does not match it, Probe and the panel size
+        on min(E, the E_P of the last pin that matched), never the mismatched pin's; with none ever matched, every open
+        is refused House-wide; dark, C2's freeze follows any readable pin as before."""
+        sha = pin(self.root, {KEY_A: 0})
+        h = self.harness()
+        b = h.instance("fam-b")
+        with band(sha):
+            self.assertEqual(self.size(h, b).sleeve_equity, D("0.25") * D(E_P), "a matching pin: its E_P")
+        pin(self.root, {}, e_p="4000")                                 # another readable pin, a larger E_P
+        with band(sha):
+            self.assertEqual(self.size(h, b).sleeve_equity, D("0.25") * D(E_P), "the last matching pin's E_P, not 4000")
+            budget, sleeve = h.book._panel_budget(L.replace(h.instance("fam-p"), kind="panel"), T.MONDAY.isoformat(), [])
+            self.assertLessEqual(sleeve, D("0.10") * D(E_P))
+        self.assertEqual(self.size(h, b).sleeve_equity, D("0.25") * D("4000"), "dark: C2's freeze reads the pin there")
+        fresh = self.harness(state="fresh")
+        c = fresh.instance("fam-c")
+        with band(sha):
+            self.assertIsNone(self.size(fresh, c), "no matching pin ever read on this box: nothing sized")
+            self.assertEqual(fresh.get_intent(self.last_intent.iid).why, L.SCALE_POOL_REFUSAL)
+            no_block = (lambda opening=True: None)
+            self.assertEqual(fresh.book._open_block(no_block, c, killed=lambda: False), L.SCALE_POOL_REFUSAL)
+        self.assertIsNone(fresh.book._open_block(no_block, c, killed=lambda: False), "dark: C2's rule")
+
+    def test_the_production_unread_marker_teaches_nothing(self):
+        """The third review's W11 (mutant M22): the families reader's own `unread` answer (elane.SCALE_CLOSED) sizes at
+        Probe that minute, moves no "since", and the rung comes back with the setting."""
+        from league.swarm import elane
+
+        sha = pin(self.root, {KEY_A: 2})
+        h = self.harness()
+        a = h.instance("fam-a")
+        with band(sha, lines=True):
+            h.book._scale_now()
+            since = h.state.get(L.SCALE_KEY)["programs"][KEY_A]["since_at"]
+            h.clock.set(h.clock() + 120)
+            h.families.scale = dict(elane.SCALE_CLOSED)
+            self.assertIs(h.book._scale_for(a, D(E)), L.SCALE_PROBE)
+            h.book._scale_now()
+            h.families.scale = {"rung": 5, "programs": {}}
+            h.clock.set(h.clock() + 120)
+            h.book._scale_now()
+            self.assertEqual(h.book._scale_for(a, D(E)).rung, 2, "nothing learned from the unread minute")
+            self.assertEqual(h.state.get(L.SCALE_KEY)["programs"][KEY_A]["since_at"], since)
+
+    def test_public_alerts_name_no_program_and_no_rung(self):
+        sha = pin(self.root, {KEY_A: 1})
+        h = self.harness()
+        a = h.instance("fam-a")
+        with band(sha):
+            h.book._scale_now()
+            self.closed_lot(h, a, "-300.01", rung=1, closed_at=h.clock() + 1)
+            h.book._scale_now()
+        texts = [t for _, t in h.alerts] + [x["text"] for x in h.standing()]
+        self.assertTrue(any("D3" in t for t in texts))
+        self.assertFalse(any("fam-a" in t or KEY_A in t or "R1" in t for t in texts), texts)
+        [record] = [p for k, p in h.events if k == "equity.scale" and p.get("event") == "program_line"]
+        self.assertEqual(record["program"], KEY_A, "the private record names it")
+
     def test_d3_at_the_sizing_itself(self):
         sha = pin(self.root, {KEY_A: 1})
         h = self.harness()
@@ -579,7 +691,7 @@ class Scaled(T.BookTest):
             h.book._scale_now()
             self.closed_lot(h, a, "-150", rung=1, closed_at=h.clock() + 1)
             self.closed_lot(h, a, "-140", rung=1, closed_at=h.clock() + 2)
-            self.closed_lot(h, a, "-400", closed_at=h.clock() + 3, probe=True)        # a Probe lot: no rung, not read
+            self.closed_lot(h, a, "-400", closed_at=h.clock() - 3600, probe=True)     # closed before R1: not read
             self.closed_lot(h, b, "-249.99", rung=2, scaled=True, closed_at=h.clock() + 4)
             h.book._scale_now()
             self.assertEqual(h.book._scale_for(a, D(E)).rung, 1, "-290 is inside -300")
@@ -636,7 +748,7 @@ class Scaled(T.BookTest):
                                 closed_at=h.clock() - 86400 * 30)            # before the rung's "since": no D3
             h.book._scale_now()
             mem = h.state.get(L.SCALE_KEY)
-            self.assertEqual(mem["closed"]["plan_sha256"], PLAN)
+            self.assertEqual(sorted(mem["closed"]), [PLAN])
             self.assertIs(h.book._scale_for(a, D(E)), L.SCALE_PROBE, "D6: every program back to Probe")
             self.assertIs(h.book._scale_for(b, D(E)), L.SCALE_PROBE)
             self.assertIn("D6", " ".join(t for lvl, t in h.alerts if lvl == "error"))
@@ -646,7 +758,8 @@ class Scaled(T.BookTest):
             h.clock.set(h.clock() + 60)
             h.book._scale_now()
             mem = h.state.get(L.SCALE_KEY)
-            self.assertEqual(mem["ladder_for"], "cd" * 32)
+            self.assertEqual(mem["plans"], [PLAN, "cd" * 32])
+            self.assertIn("REOPENED", " ".join(a["text"] for a in h.standing()), "loud: an error-level standing alert")
             self.assertEqual(h.book._scale_for(a, D(E)).rung, 2, "its total starts again: the old closes are not its")
             room = h.book._scaled_room(T.MONDAY.isoformat(), D(E))
             self.assertEqual((room.total, room.window), (D(0), D(0)), "the window too: the old version's closes are not its")
@@ -718,7 +831,7 @@ class TheSetting(unittest.TestCase):
     def test_it_may_only_lower_and_fails_closed(self):
         e = self.elane
         self.assertEqual(e.scale_setting(self.root), {"rung": 5, "programs": {}}, "no file: the policy's default")
-        self.assertEqual(e.cfg({})["scale"], {"rung": 5, "programs": {}})
+        self.assertNotIn("scale", e.cfg({"elane": {"scale": {"rung": 9}}}), "cfg never reads it: only scale_setting")
         self.write({"elane": {"scale": {"rung": 2, "programs": {KEY_A: 0}}}})
         self.assertEqual(e.scale_setting(self.root), {"rung": 2, "programs": {KEY_A: 0}})
         for bad in ({"rung": 6}, {"rung": -1}, {"rung": True}, {"rung": 1.0}, {"programs": {"fam-a": 1}},
@@ -732,7 +845,6 @@ class TheSetting(unittest.TestCase):
         self.assertEqual(e.scale_setting(self.root), e.SCALE_CLOSED, "never read a good one: every rung 0")
         self.write({"elane": {"roster": 3}})
         self.assertEqual(e.scale_setting(self.root), {"rung": 5, "programs": {}}, "no scale block: the policy's")
-        self.assertEqual(e.cfg({"elane": {"scale": {"rung": 9}}})["scale"], {"rung": 5, "programs": {}})
 
     def test_the_books_reader(self):
         from league.equity.families import EquityFamilies

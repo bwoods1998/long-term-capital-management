@@ -1216,28 +1216,29 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 # E_P), and only the pin's sha256 is public, in this table. Its reader is league/equity/bands.py `scaled_settings`
 # (league/live/money.py's `EquityTable`, inside the options execution fingerprint, reads its rows by name and does not
 # read this one); the House applies it in league/equity/live.py (`EquityBook._scale_for`, `_scale_now`).
-# - `pin_sha256`: the sha256 of the pin's bytes. EMPTY ("") IS DARK: every program is at Probe, exactly as before C3, and
-#   nothing of the band runs. A pin whose bytes are not this sha256 (none there, unreadable, another file) opens NO NEW
-#   SCALED LOT: a program the House last read at a rung waits (its entries are refused), every other one trades at
-#   Probe, exits go on, and it is one standing error alert. Every rung raise is Blake's deploy of a new pin and of its
-#   sha256 here (plan 11 item 7), so the money digest moves and the grant re-ratifies at each one. The first sha256 is
-#   written only after Done's first checkpoint receipt and Blake's yes; C2's E_P comes from the re-ratification of the
-#   very release that carries this block, so that release cannot carry the pin's sha256 (the captain's decision).
+# - `pin_sha256`: the sha256 of the pin's bytes. EMPTY ("") IS DARK: every program is at Probe, exactly as before C3,
+#   and nothing of the band runs. A pin whose bytes are not this sha256 (none there, unreadable, another file) opens NO
+#   NEW SCALED LOT: a program the House last read at a rung waits (its entries are refused), every other one trades at
+#   Probe sized on the E_P of the last pin that DID match on this box (never the mismatched pin's), and with none ever
+#   matched no equity open goes at all (plan 9); exits go on, and it is one standing error alert. Every rung raise is
+#   Blake's deploy of a new pin and of its sha256 here (plan 11 item 7), so the money digest moves and the grant
+#   re-ratifies at each one. The first sha256 is written only after Done's first checkpoint receipt and Blake's yes;
+#   C2's E_P comes from the re-ratification of the very release that carries this block, so that release cannot carry
+#   the pin's sha256 (the captain's decision).
 # - `rungs`: each rung's sleeve as a multiple of E_P (the plan's table 3.2: R1 0.50, R2 1.25, R3 2.25, R4 4.00, R5
 #   6.75), never above `max_sleeve_share` x E (0.50, the top of the Sized sleeve's own bound): a program's sleeve is
 #   min(its rung's multiple x E_P, `max_sleeve_share` x E), where its rung is the LOWER of the pin's and the swarm's
 #   setting `elane.scale` (a setting may only lower it, and a lowering after the pin was read sticks for that pin, as
-#   does R1 for a pin read before the lines: only a new pin raises a rung again; "stop the ladder" is
-#   `elane.scale.rung` 0). Every wall of the account binds as before through `size_entry`: an ETF at most 0.50 x E
-#   across all programs, 1.00 x E invested, the cash reserve. A share program only (no panel, no options program), in
-#   the Probe band only.
+#   does R1 for a pin read before the lines: only a new pin raises a rung again; "stop the ladder" is `elane.scale.rung`
+#   0). Every wall of the account binds as before through `size_entry`: an ETF at most 0.50 x E across all programs,
+#   1.00 x E invested, the cash reserve. A share program only (no panel, no options program), in the Probe band only.
 # - R1 IS INSIDE THE LINES IN FORCE: its lots carry the PROBE mark, so they count in the shared $400 window and $800
-#   total (open risk and closes), EDM1's -$300 line and the swarm's -$300 family line read them, as every Probe lot.
-#   R1 IS A LOOSENING, SAID SO (plan 3.2): one program gets A32's 0.50 sleeve back against A37's 0.33 x E for every
-#   seat; its lots take more of the shared window; A37 measured what the 0.50 world (all six seats) cost against 0.33
-#   (refused share entries 19.6 against 8.0 a path, consistency failures 7.05% against 1.54%, a window pause at an
-#   open in 94% against 64% of paths, the options program crowded out); one program is a sixth of that move, not
-#   measured alone; like A37 it buys variance and market exposure, not edge.
+#   total (open risk and closes), EDM1's -$300 line and the swarm's -$300 family line read them, as every Probe lot. R1
+#   IS A LOOSENING, SAID SO (plan 3.2): one program gets A32's 0.50 sleeve back against A37's 0.33 x E for every seat;
+#   its lots take more of the shared window; A37 measured what the 0.50 world (all six seats) cost against 0.33 (refused
+#   share entries 19.6 against 8.0 a path, consistency failures 7.05% against 1.54%, a window pause at an open in 94%
+#   against 64% of paths, the options program crowded out); one program is a sixth of that move, not measured alone;
+#   like A37 it buys variance and market exposure, not edge.
 # - `lines`: THE SCALED LINES, Blake's amendment of his goal's item 4 (plan 3.4). `in_force` False: NOTHING GOES PAST R1
 #   (every rung is capped at R1) and no lot carries the Scaled mark. True (his yes): a lot opened at R2 or above carries
 #   the SCALED mark: its close counts in the Scaled lines, not in the Probe window, total or EDM1's line; its open risk
@@ -1245,13 +1246,14 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   either lane's Probe room); and a Scaled entry is sized to the Scaled room: the lower of `window_share` x the Scaled
 #   sleeves in force less the worst net stretch of the Scaled closes of the last `window_sessions` sessions, and
 #   `total_share` x the largest Scaled sleeves reached less their net loss since the ladder's start, each less the
-#   Scaled open risk (the same weights: an ETF 20% of its value, a stock 40%). At the window Scaled opens pause (D5);
-#   at the total the House returns every program to Probe and the ladder closes for the plan's version (D6). THE
-#   PROGRAM LINES (league/equity/bands.py, at every rung, D3): realized since the program's last rung change at most
-#   -$300 at R1 (`demotion.program_loss_usd`) and -`program_share` (10%) of the sleeve from R2; and cumulatively since it
-#   first reached R1 at most the line of the highest rung it reached; either one hit returns it to Probe at once, for
-#   good. While `in_force` is False, or the band is dark again (`pin_sha256` ""), a Scaled-marked lot (none exists
-#   before the yes) counts in the Probe window, total and room like a Probe lot: nothing escapes both budgets.
+#   Scaled open risk (the same weights: an ETF 20% of its value, a stock 40%). At the window Scaled opens pause (D5); at
+#   the total the House returns every program to Probe and the ladder closes for the plan's version, for good (D6; every
+#   version it closed stays closed; only a version never run on the box reopens it, loudly). THE PROGRAM LINES
+#   (league/equity/bands.py, at every rung, D3): realized since the program's last rung change at most -$300 at R1
+#   (`demotion.program_loss_usd`) and -`program_share` (10%) of the sleeve from R2; and cumulatively since it first
+#   reached R1 at most the line of the highest rung it reached; either one hit returns it to Probe at once, for good.
+#   While `in_force` is False, or the band is dark again (`pin_sha256` ""), a Scaled-marked lot (none exists before the
+#   yes) counts in the Probe window, total and room like a Probe lot: nothing escapes both budgets.
 #   `family_line_probe_only` (plan 3.4 loosening 3, separable): True with `in_force`, the swarm's -$300 family line
 #   (league/swarm/elane.py `loss_line`) reads Probe-marked lots only; False (his no to that part alone), it reads every
 #   real lot, Scaled ones too, which in practice caps the ladder near R2. THE FOUR LOOSENINGS OF HIS YES, WITH THEIR
@@ -1261,12 +1263,16 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   -$300 to -10% of the sleeve (since a change and cumulatively, at R5 well past -$300); the -$300 family line stops
 #   reading Scaled lots; Scaled open risk leaves the Probe room. Without his yes nothing goes past R1.
 # - Step-downs never wait for Blake (plan 4.3): the House's own (D3, D5's pause, D6) above; every other one (D1, D2, D4,
-#   D5's down-one-rung, D7, D8) is the captain's same-day lowering of `elane.scale`, from the checkpoint receipt. A newer version of a family is
-#   at Probe at once (the pin names a program by family and version). Nothing is ever sold or placed by a rung.
+#   D5's down-one-rung, D7, D8) is the captain's same-day lowering of `elane.scale`, from the checkpoint receipt. A
+#   newer version of a family is at Probe at once (the pin names a program by family and version). Nothing is ever sold
+#   or placed by a rung.
 # Bounds: each multiple at most the plan's (a row may only tighten), never decreasing from R1 to R5; the shares at most
-# the plan's; the window at least 20 sessions. A table with no `scaled` block at all is dark too (a table from before
-# C3 still builds). Rollback, one owner deploy: `pin_sha256` "" (dark; open lots exit by their own rules, and a Scaled
-# one counts in the Probe budget until it does).
+# the plan's; the window at least 20 sessions. A table with no `scaled` block at all is dark too (a table from before C3
+# still builds). Rollback, one owner deploy: `pin_sha256` "" (dark; open lots exit by their own rules). ITS COST ONCE
+# ANY SCALED-MARKED LOT HAS EXISTED: every Scaled lot, open or CLOSED, then counts in the Probe window, the $800 total
+# (from inception) and the room, so past Scaled losses can stop the Probe opens of BOTH lanes; and once any has existed,
+# never roll back by a release without C3 (C2 counts only Probe-marked closes, so Scaled losses would escape both
+# budgets).
 CONSTITUTION["equity_money"]["scaled"] = {
     "pin_sha256": "",
     "rungs": {"r1": "0.50", "r2": "1.25", "r3": "2.25", "r4": "4.00", "r5": "6.75"},

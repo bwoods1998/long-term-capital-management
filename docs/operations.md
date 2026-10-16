@@ -65,10 +65,14 @@ row, after Done's first checkpoint receipt; every raise after it is another such
   sold or placed by a rung: lots exit by their own rules.
 - **A pin that does not match its row** (none there, unreadable, another file, rungs that cannot be read): NO NEW SCALED
   LOT. A program this box last read at a rung waits (`SCALE_REFUSAL`; its entry is missed at its cut-off), every other
-  one trades at Probe, exits go on. One standing error alert a process (`began_at` its first minute), health `scaled`
-  `state` "mismatch", and the pre-open check FAILS (league/ops/preopen.py). The plan's section 9 says "no new equity
-  lot"; the build opens none of the Scaled pool and keeps Probe trading (a deviation, said: it keeps Done's pace and
-  the consistency clause, and Probe sizing never depended on the rungs).
+  one trades at Probe, exits go on. The Probe and panel pool then sizes on min(E, the E_P of the LAST PIN THAT MATCHED
+  the row on this box, kv `eq_scale_ep`), never on the mismatched pin's (C2 alone would follow any readable pin), and
+  with no matching pin ever read on this box no equity open goes at all (`SCALE_POOL_REFUSAL`, House-wide, as C2 for
+  a pin never read). One standing error alert a process (`began_at` its first minute), health `scaled` `state`
+  "mismatch", and the pre-open check FAILS (league/ops/preopen.py). The plan's section 9 says "no new equity lot":
+  the build narrows that to no new Scaled lot once a matching pin was read here (an amendment for the captain's
+  packet: it keeps Done's pace and the consistency clause; the pool cannot follow a pin the row does not name). While
+  the row is "" (dark) all of this is C2's exactly.
 - **Fail closed** (the review of Oct 15): a memory (`eq_scale`) that cannot be read, or that is gone once it was written
   (`eq_scale_seen` remembers it), sizes every program at Probe, is never written over, and is one standing error alert
   dated its first minute (`eq_scale_unread`; health `scaled.state` "memory"; the pre-open check fails; repair it from
