@@ -230,6 +230,72 @@ class TheClock(Fixture):
         db.close()
 
 
+class ThePooledScreenWithholdsItsLineages(Fixture):
+    """POOL1 (A55a: PREREG-POOL1 sections 8 and 11 P1 item 5): a lineage on the pooled screen's POOL-route or hold
+    list has no pass sentence, no status count and no registry entry in FWD1's operator report until its unit's
+    verdict is final (it is counted as `pool_route` only), and is shown after; FWD1-R's verdict and permit file are
+    unchanged. The pool's file failing closed withholds every ETF lineage."""
+
+    def pool(self, word: str = "pending", *, raw: str | None = None):
+        from league.ops import pool_screen
+
+        path = self.root / pool_screen.PERMITS
+        if raw is not None:
+            path.write_text(raw)
+            return
+        cell = "trend_momentum/sectors"
+        path.write_text(json.dumps({"version": 1, "screen": "POOL1", "receipt": "d" * 64, "clock": "2026-10-26",
+                                    "at": "x", "routes": {"equity:f1": {"cell": cell, "cluster": "trend_momentum"}},
+                                    "holds": [], "units": {cell: {"cluster": "trend_momentum", "word": word}},
+                                    "lineages": {}, "eligible": []}))
+
+    def passed(self):
+        self.family("f1")
+        pid = self.row("f1", 1, first_day="2026-10-16")
+        names = self.days(pid, [0.01 + 0.001 * (i % 3) for i in range(12)], first=START)
+        self.sides(pid, names, 0.5)
+        return pid
+
+    def report(self) -> dict:
+        return json.loads((self.root / FS.REPORT).read_text())
+
+    def test_absent_until_final_and_present_after(self):
+        self.passed()
+        self.pool("pending")
+        self.first_night()
+        report = self.report()
+        self.assertEqual(report["passes"], [])
+        self.assertEqual(report["pool_route"], 1)
+        self.assertEqual(report["registry"]["ETF|N"]["observed"], 0)
+        self.assertNotIn("ETF|N", report["counts"])
+        db = self.store()
+        self.assertEqual(db.execute("SELECT verdict FROM fwd1_verdicts").fetchone()[0], "pass")   # FWD1-R unchanged
+        db.close()
+        self.assertEqual(json.loads((self.root / FS.PERMITS).read_text())["lineages"]["equity:f1"]["status"], "pass")
+        for word in ("FAIL", "DEMOTED", "VOID", "REFUTED", "PASS"):
+            self.pool(word)
+            self.night()
+            with self.subTest(word=word):
+                report = self.report()
+                self.assertEqual([p["lineage"] for p in report["passes"]], ["equity:f1"])
+                self.assertEqual(report["pool_route"], 0)
+                self.assertEqual(report["registry"]["ETF|N"]["observed"], 1)
+
+    def test_fail_closed_withholds_every_etf_lineage(self):
+        self.passed()
+        self.pool(raw="{not json")
+        self.first_night()
+        self.assertEqual(self.report()["passes"], [])
+        self.assertEqual(self.report()["pool_route"], 1)
+        (self.root / "pool-screen-permits.json").unlink()
+        self.settings = {**self.settings, "elane": {**self.settings["elane"], "pool": {"mode": "record"}}}
+        self.night()
+        self.assertEqual(self.report()["pool_route"], 1)          # missing while the pool's mode is on
+        self.settings = {**self.settings, "elane": {**self.settings["elane"], "pool": {"mode": "off"}}}
+        self.night()
+        self.assertEqual(self.report()["pool_route"], 0)          # missing with the mode off: nothing withheld
+
+
 class TheVerdicts(Fixture):
     def test_a_pass_its_floor_its_words_and_one_verdict_a_lineage(self):
         self.family("f1")

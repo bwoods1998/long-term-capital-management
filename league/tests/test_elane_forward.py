@@ -425,5 +425,168 @@ class TheSeat(Base):
         self.assertLess(source.index("seat_backfill"), source.index("elane_forward.step"))
 
 
+
+#: POOL1 (A55a): the pooled screen's switch on (policy.json ships "record") and rolled back ("off").
+POOL_ON = {"elane": {"fwd1": {"mode": "record", "seats": "on"}, "pool": {"mode": "record", "seats": "off"}}}
+POOL_ROLLED = {"elane": {"fwd1": {"mode": "record", "seats": "on"}, "pool": {"mode": "off", "seats": "off"}}}
+POOL_FWD1_OFF = {"elane": {"fwd1": {"mode": "record", "seats": "off"}, "pool": {"mode": "record", "seats": "off"}}}
+
+
+class ThePoolRoute(Base):
+    """POOL1's ROUTE REFUSAL (the module docstring, 4; PREREG-POOL1 7.2 and 11 P1 item 4): a lineage the pooled
+    screen's permit file lists on its POOL route or hold list takes no FWD1-R seat and no sealed try, whatever
+    `elane.pool.mode` and `elane.fwd1.seats` say, for good under the receipt; the file failing closed refuses every
+    forward-only ETF pass and every lineage FWD1 lists as judged; `one_a_cell` counts a pooled seat."""
+
+    def pool(self, routes=(), holds=(), *, words=None, raw=None):
+        if raw is not None:
+            (self.root / EF.POOL_PERMITS).write_text(raw)
+            return
+        cell = "trend_momentum/sectors"
+        doc = {"version": EF.POOL_PERMITS_VERSION, "screen": "POOL1", "receipt": "d" * 64, "clock": "2026-10-26",
+               "at": "x", "routes": {lin: {"cell": cell, "cluster": "trend_momentum"} for lin in routes},
+               "holds": list(holds), "units": {cell: {"cluster": "trend_momentum", "word": words or "pending"}},
+               "lineages": {}, "eligible": []}
+        (self.root / EF.POOL_PERMITS).write_text(json.dumps(doc))
+
+    def sector(self, fid: str = "f1", **kw) -> dict:
+        return self.store.add(fid, symbols=["XLK"], **kw)
+
+    def test_the_name_is_the_jobs(self):
+        from league.ops import pool_screen
+
+        self.assertEqual(EF.POOL_PERMITS, pool_screen.PERMITS)
+        self.assertEqual(EF.POOL_PERMITS_VERSION, pool_screen.PERMITS_VERSION)
+
+    def test_step_makes_no_candidate_of_a_pool_route_lineages_pass(self):
+        for settings in (POOL_ON, POOL_ROLLED, ON):                 # whatever elane.pool.mode says (absent: off)
+            store_fam = self.sector(f"f{len(self.store.fams)}")
+            fid = store_fam["id"]
+            self.permit({f"equity:{fid}": self.passed(fid)})
+            self.pool(routes=[f"equity:{fid}"])
+            with self.subTest(settings=settings["elane"].get("pool")):
+                out = EF.step(self.gate(settings))
+                self.assertEqual(out["seated"], [])
+                self.assertEqual(out["waits"][fid], EF.POOL_REFUSED)
+                self.assertEqual(store_fam["band"], "gym")
+                self.assertFalse(EF.eligible(store_fam["state"]))
+
+    def test_the_hold_list_refuses_alike(self):
+        fam = self.sector()
+        self.permit({"equity:f1": self.passed("f1")})
+        self.pool(holds=["equity:f1"])
+        self.assertEqual(EF.step(self.gate(POOL_ON))["waits"]["f1"], EF.POOL_REFUSED)
+        self.assertEqual(fam["band"], "gym")
+
+    def test_seat_refused_refuses_it(self):
+        fam = self.sector()
+        self.permit({"equity:f1": self.passed("f1")})
+        self.pool()
+        EF.step(self.gate(POOL_ON))                                   # seated before the pool listed it
+        self.assertIsNone(EF.seat_refused(self.store, fam, POOL_ON))
+        self.pool(routes=["equity:f1"])
+        for settings in (POOL_ON, POOL_ROLLED, ON):
+            self.assertEqual(EF.seat_refused(self.store, fam, settings), EF.POOL_REFUSED)
+        self.assertFalse(EF.mark_seated(self.store, "f1", POOL_ON))
+
+    def test_try_refused_refuses_it_with_fwd1_seats_off(self):
+        fam = self.store.add("i1", symbols=["SPY"])                  # an index lineage FWD1 judges as case N
+        self.permit({"equity:i1": {"status": "pending", "type": "ETF", "case": "N", "family": "i1",
+                                   "start": "2026-10-13"}})
+        self.pool(routes=["equity:i1"])
+        for settings in (POOL_FWD1_OFF, OFF, {}, POOL_ROLLED):
+            with self.subTest(settings=settings):
+                self.assertEqual(EF.try_refused(self.store, fam, settings, now=CLOSE + 86400.0 * 5), EF.POOL_REFUSED)
+                self.assertFalse(elane.try_open(self.store, fam, 1, settings))
+        other = self.store.add("i2", symbols=["SPY"])               # a lineage the pool does not list: as before
+        self.assertIsNone(EF.try_refused(self.store, other, POOL_FWD1_OFF, now=CLOSE))
+
+    def test_a_held_index_lineage_keeps_its_l5_try_until_its_first_close(self):
+        fam = self.store.add("f1", symbols=["SPY", "QQQ"])
+        (self.root / EF.PERMITS).write_text(json.dumps({
+            "version": EF.PERMITS_VERSION, "screen": "FWD1-R", "receipt": "c" * 64, "start": PIN_START, "at": "x",
+            "lineages": {"equity:f1": {"status": "pending", "type": "ETF", "case": "N", "family": "f1",
+                                       "start": START}}}))
+        self.pool(holds=["equity:f1"])
+        self.assertIsNone(EF.try_refused(self.store, fam, POOL_FWD1_OFF, now=CLOSE - 3600.0))
+        self.assertIsNone(EF.try_refused(self.store, fam, POOL_ON, now=CLOSE - 3600.0))
+        self.assertEqual(EF.try_refused(self.store, fam, POOL_FWD1_OFF, now=CLOSE), EF.POOL_REFUSED)
+        sibling = self.store.add("f1b", symbols=["SPY"], lineage="f1")
+        self.assertEqual(EF.try_refused(self.store, sibling, POOL_FWD1_OFF, now=CLOSE - 3600.0), EF.POOL_REFUSED)
+
+    def test_rollback_and_a_pooled_fail_leave_the_refusal_in_place(self):
+        fam = self.sector()
+        self.permit({"equity:f1": self.passed("f1")})
+        for words in ("FAIL", "DEMOTED", "VOID", "REFUTED", "PASS"):
+            self.pool(routes=["equity:f1"], words=words)
+            for settings in (POOL_ON, POOL_ROLLED):
+                with self.subTest(words=words, mode=settings["elane"]["pool"]["mode"]):
+                    self.assertEqual(EF.step(self.gate(settings))["waits"]["f1"], EF.POOL_REFUSED)
+                    self.assertEqual(EF.try_refused(self.store, fam, settings, now=CLOSE), EF.POOL_REFUSED)
+        self.assertEqual(fam["band"], "gym")
+
+    def test_an_unreadable_pool_file_fails_closed(self):
+        sector = self.sector("s1")
+        index = self.store.add("x1", symbols=["SPY"])
+        self.permit({"equity:s1": self.passed("s1"), "equity:x1": self.passed("x1", cell="equity / trend / index")})
+        for raw in ("{not json", json.dumps({"version": 2, "routes": {}, "holds": []}),
+                    json.dumps({"version": 1, "routes": [], "holds": []}), json.dumps([1])):
+            self.pool(raw=raw)
+            for settings in (POOL_ON, POOL_ROLLED, ON):               # unreadable: whatever the mode
+                with self.subTest(raw=raw[:20], settings=settings["elane"].get("pool")):
+                    self.assertEqual(EF.pool_listed(self.root, settings), (None, EF.POOL_UNREADABLE))
+                    out = EF.step(self.gate(settings))
+                    self.assertEqual(out["waits"].get("s1"), EF.POOL_UNREADABLE)   # a forward-only ETF pass waits
+        self.assertEqual(sector["band"], "gym")
+        self.assertEqual(index["band"], "candidate")                  # an index-only pass is not forward-only
+        sector["state"][EF.STATE_KEY] = {"eligible": True, "type": "ETF", "case": "N", "lineage": "equity:s1"}
+        self.assertEqual(EF.seat_refused(self.store, sector, POOL_ON), EF.POOL_UNREADABLE)
+
+    def test_a_missing_pool_file_fails_closed_while_the_mode_is_on(self):
+        sector = self.sector("s1")
+        self.permit({"equity:s1": self.passed("s1")})
+        self.assertEqual(EF.pool_listed(self.root, POOL_ON), (None, EF.POOL_MISSING))
+        self.assertEqual(EF.step(self.gate(POOL_ON))["waits"]["s1"], EF.POOL_MISSING)
+        self.assertEqual(EF.pool_listed(self.root, POOL_ROLLED), (frozenset(), None))
+        self.assertEqual(EF.pool_listed(self.root, {}), (frozenset(), None))
+        self.assertEqual(EF.pool_listed(self.root, {"elane": {"pool": {"mode": "recrod"}}}), (None, EF.POOL_MISSING))
+        self.assertEqual(EF.step(self.gate(POOL_ROLLED))["seated"], ["s1"])
+        del sector
+
+    def test_the_fail_closed_try_refuses_every_lineage_fwd1_judges(self):
+        judged = self.store.add("i1", symbols=["SPY"])
+        free = self.store.add("i2", symbols=["SPY"])
+        self.permit({"equity:i1": {"status": "pending", "type": "ETF", "case": "N", "family": "i1",
+                                   "start": "2026-10-13"}})
+        self.assertEqual(EF.try_refused(self.store, judged, POOL_FWD1_OFF, now=CLOSE), EF.POOL_MISSING)
+        self.assertIsNone(EF.try_refused(self.store, free, POOL_FWD1_OFF, now=CLOSE))
+        self.pool(raw="{bad")
+        self.assertEqual(EF.try_refused(self.store, judged, OFF, now=CLOSE), EF.POOL_UNREADABLE)
+        (self.root / EF.PERMITS).write_text("{bad")                 # FWD1's file unreadable too: no equity try
+        self.assertEqual(EF.try_refused(self.store, free, OFF, now=CLOSE), EF.POOL_UNREADABLE)
+
+    def test_seats_off_does_nothing_else(self):
+        fam = self.sector()
+        self.permit({"equity:f1": self.passed("f1")})
+        self.pool(routes=["equity:other"])
+        self.assertEqual(EF.step(self.gate(POOL_FWD1_OFF)), {})
+        self.assertEqual(EF.seat_refused(self.store, fam, POOL_FWD1_OFF), "the forward seats are off (elane.fwd1.seats)")
+        self.assertIsNone(EF.try_refused(self.store, fam, POOL_FWD1_OFF, now=CLOSE))
+        self.assertEqual(fam["band"], "gym")
+
+    def test_one_a_cell_counts_a_pooled_seat(self):
+        cell = "equity / trend / sectors"
+        holder = self.sector("p1", band="probe", state={EF.POOL_KEY: {"seated": True, "cluster": "trend_momentum",
+                                                                      "fwd1_cell": cell}})
+        self.sector("f1")
+        self.permit({"equity:f1": self.passed("f1", cell=cell)})
+        self.pool()
+        self.assertEqual(EF.one_a_cell(self.store, cell, but="f1"), "p1")
+        self.assertIn("one live forward seat a mechanism cell: p1", EF.step(self.gate(POOL_ON))["waits"]["f1"])
+        holder["band"] = "gym"                                         # left the live bands: the cell is free
+        self.assertIsNone(EF.one_a_cell(self.store, cell, but="f1"))
+        self.assertEqual(EF.step(self.gate(POOL_ON))["seated"], ["f1"])
+
+
 if __name__ == "__main__":
     unittest.main()

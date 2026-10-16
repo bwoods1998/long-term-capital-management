@@ -651,6 +651,49 @@ class TheMeter(Fixture):
         self.assertEqual(meter["engines"], [])
 
 
+class ThePooledScreenWithholdsItsLineagesFromTheMeter(Fixture):
+    """POOL1 (A55a: PREREG-POOL1 sections 8 and 11 P1 item 5): a lineage on the pooled screen's POOL-route or hold
+    list has no BH/BY entry until its unit's verdict is final, and has one after; the pool's file failing closed
+    leaves out every ETF lineage (a panel lineage stays in)."""
+
+    def pool(self, *, routes=(), holds=(), word="pending", raw=None):
+        path = self.root / R.POOL_PERMITS
+        if raw is not None:
+            path.write_text(raw)
+            return
+        cell = "trend_momentum/sectors"
+        path.write_text(json.dumps({"version": 1, "screen": "POOL1", "receipt": "d" * 64, "clock": "2026-10-26",
+                                    "at": "x", "routes": {lin: {"cell": cell, "cluster": "trend_momentum"}
+                                                          for lin in routes},
+                                    "holds": list(holds), "units": {cell: {"cluster": "trend_momentum", "word": word}},
+                                    "lineages": {}, "eligible": []}))
+
+    def test_absent_until_final_and_present_after(self):
+        for i in range(6):
+            self.check(self.register(f"fam-{i}@1", lineage=f"equity:fam-{i}"), 20, DAYS[20], 0.2 + 0.1 * i)
+        self.pool(routes=["equity:fam-0"], holds=["equity:fam-1"])
+        self.night(DAYS[21])
+        self.meters()
+        self.assertEqual({r["day"]: r["m"] for r in self.table("fwd_meter")}[DAYS[20]], 4)
+        self.pool(routes=["equity:fam-0"], holds=[], word="FAIL")           # its unit final, the hold assigned
+        self.night(DAYS[22])
+        self.meters()
+        self.assertEqual({r["day"]: r["m"] for r in self.table("fwd_meter")}[DAYS[22]], 6)
+        self.assertEqual({r["day"]: r["m"] for r in self.table("fwd_meter")}[DAYS[20]], 4)   # a written day stands
+
+    def test_fail_closed_leaves_out_every_etf_lineage(self):
+        for i in range(5):
+            self.check(self.register(f"fam-{i}@1", lineage=f"equity:fam-{i}"), 20, DAYS[20], 0.3)
+        self.pool(raw="{not json")
+        self.night(DAYS[21])
+        self.meters()
+        self.assertEqual(self.table("fwd_meter")[-1]["m"], 0)
+        self.assertEqual(R._pool_withheld(self.root, {"elane": {"pool": {"mode": "record"}}}), (frozenset(), True))
+        (self.root / R.POOL_PERMITS).unlink()
+        self.assertEqual(R._pool_withheld(self.root, {"elane": {"pool": {"mode": "record"}}}), (frozenset(), True))
+        self.assertEqual(R._pool_withheld(self.root, RECORD), (frozenset(), False))
+
+
 class ADaysMetersWaitForItsRows(Fixture):
     """A day's rows are first-write and never recomputed: written the night a budget cut (or a vendor bar came late),
     the day's N_eff, CEY and group counts were short of the programs left without a row, for good. The wait is real
@@ -2570,7 +2613,10 @@ class TheReportShowsOnlyWhatItMay(Fixture):
         # (league/ops/forward_screen.py) reads the record read-only to judge it, and what it hands on is held by its
         # own seal (league/tests/test_forward_screen.py: the permit file carries ids and words only, no generator-side
         # module imports it, the family-state key it leads to is sealed from every generator).
-        allowed = {"dlane_report.py", "funnel.py", "stall.py", "forward_xs.py", "forward_screen.py",
+        # POOL1 (the owner's A55, A55a) is the next such judge: its job (league/ops/pool_screen.py) reads the record
+        # read-only to judge it, and what it hands on is held by its own seal (league/tests/test_pool_screen.py: the
+        # permit file carries ids and words only, no generator-side module imports it).
+        allowed = {"dlane_report.py", "funnel.py", "stall.py", "forward_xs.py", "forward_screen.py", "pool_screen.py",
                    *(f"{name}.py" for name in E3_OPS)}
         names = ("forward_report", "forward_twins", "forward_db", "forward_shadow", "forward_register", "forward_audit",
                  "forward_controls", "fill_minutes", "release_receipts", "contam_probe", "forward_xs")

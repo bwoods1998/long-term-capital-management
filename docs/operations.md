@@ -8,6 +8,103 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## POOL1, the pooled-by-mechanism forward screen, record half P1 (Oct 2026): `feat/pool1-record`, not deployed
+
+The owner's A55 ("Pool evidence by mechanism") as pre-registered in the captain's A55a:
+`scratch/pooled-screen/PREREG-POOL1.md` sha256 `f42bcdc1...` (PINS.log). P1 is its record half (section 11 P1): the
+units, members and POOL-route list, the cell sessions and the looks, kept append-only, and the permit file the swarm's
+refusal reads. **Mode record only; no seat exists in P1** (seats are P2's, before look 40). Rule:
+`league/ops/pool_rule.py`; job: `league/ops/pool_screen.py`; refusal: `league/swarm/elane_forward.py` (its docstring,
+4); receipt (written by the calibration, not in this branch): `docs/benchmarks/pool_screen_1.json`. Departures from
+the pinned text and the readings P1 fixed are in `scratch/pooled-screen/DEVIATIONS.log` (D1-D7).
+
+**No identity moves**: nothing under `league/equity/` (no evidence module), `league/gym/`, `league/live/`, the four
+`LEAGUE_FILES` or `league/constitution.py` changes, so the options execution fingerprint `b60410ad`, the money digest
+`cfcc94b1`, the constitution digest `60796aed` and the equity identity `78022ca6` are main's (`d6bcf0cd`). FWD1-R's rule
+(`fwd1_rule.py`), runner, checkpoints, verdicts, permit file and receipt sha do not move; E3's record modules
+(`forward_db`, `forward_shadow`, `forward_xs`) are untouched.
+
+**What ships.**
+- `elane.pool` in policy.json: `mode` "record", `seats` "off", `cpu_seconds_night` 600 (60-1200). The code default is
+  `mode` "off". **The `elane.pool_screen` pin block and the receipt are NOT in this branch** (the calibration has not
+  run: D1). Without both the job judges nothing: no clock, no unit, no route list. The release that ships P1 adds the
+  receipt and its pin block in the same reviewed PR; `pool_rule.load` refuses any constant other than the code's, and
+  `load_receipt` reads the receipt only at the pin's sha256.
+- The job `pool_screen` (registry): after `forward_shadow`, listed right after `forward_screen` (it reads FWD1's
+  lineages, checkpoints and verdicts), once a record night (a second start on the same `MAX(fwd_runs.through)` writes
+  nothing), grace 2 h, CPU 900 s, wall 1500 s, in a pause too; quiet 09:00-17:30 New York; THE DEADLINE is
+  forward_screen's. It reads `forward.sqlite`, `forward-screen.sqlite` and the swarm store read-only and writes only
+  `<state>/pool-screen.sqlite` (0600, WAL, append-only by trigger), `<state>/pool-screen-permits.json` and
+  `<state>/pool-screen-report.json`. A failure is an ops alarm (failed receipt and House warning), never a stall cause.
+- `elane_seal.SEALED_KEYS` gains `elane_pool` (P2's pooled-seat record).
+
+**The night** (`pool_screen.py`'s docstring is the full rule):
+1. **The clock and the route list, once.** On the job's first night under the release that carries the receipt (a
+   record night written after the release began, later than the record's last night before it), one transaction
+   writes the founding units (the receipt's cells, clusters, stage 1; each cluster's U_u at the FWD1-R checkpoint count
+   its candidates read before the clock, CAP_u = 0.12 - U_u, WALL_u = 0.15 - U_u(97.5%), report-only at U_u >= 0.12),
+   the founders' membership, a REFUTED verdict for each unit stage 1 refuted, and **the POOL-route list**: every
+   founder FWD1 judges as ETF case N with no FWD1-R pass, in a unit stage 1 did not refute, of a cluster that is not
+   report-only (a merged copy follows its member). The clock starts at the next session: Mon Oct 26 for a release
+   started Fri Oct 23 after 20:05Z; a weekend release moves it to Tue Oct 27; each later first night moves it a session.
+2. **Later lineages.** A registry lineage the receipt does not list, with a passing version, is read once: a panel, a
+   stocks symbol, the beta class `equity_premium` or an event reader (card input `event_calendar`, or its frozen code
+   naming `ctx.events` / `ctx.events_next`) is out; otherwise, while FWD1 judges it as case N it is **held** (no FWD1-R
+   seat, no sealed try) until the House decides it from its own Train series: out by exposure (under 1%, no base group
+   above 2/3), merged into an earlier member (Train z correlation >= 0.7 or the same program sha: it follows that
+   member's route), or assigned to the clocked cell of its group its Train z correlates with most at >= rho_assign
+   (a member from its first counted day after the clock; on the POOL route when the unit is pending and not
+   report-only). One assigned to a final unit stays on FWD1-R.
+3. **The House's Train series** (`PoolRuns.train_series`, its own decider child): per-symbol exposure and returns of
+   each member's k 1.0 and 1.5 runs over 2016-19 and 2022-24, founders first, inside the night's budget; mu_s, wbar_s,
+   sigma, the House group and K's Train counts frozen with them.
+4. **Cell sessions** (settled once the record holds a later night; each active member's row in or 5 record nights
+   passed; every lineage registered by the session's close decided): a cell session has at least 3 counted rows.
+5. **Looks at 40, 60 and 120 cell sessions**, on exactly D_1..k: each member-day's reading written once; the cluster
+   re-tested by the member rule (a join's U_u is the union bound of its parts); c_own (N0, N0R, N1; 2,000 bootstrap
+   resamples spread over nights); c_used = max(c_G, c_own + margin); the stress leg; the placebo leg (999 pseudo-cells
+   of the group's controls); the zeroed-days void. **A non-final look writes the word and the sha256 of D_1..k only.**
+   A PASS, a FAIL at 120 and a VOID write the series with the verdict, once. A later look reads D_1..k again and checks
+   it against the stored sha (a moved series is VOID).
+6. **After a PASS**: re-derived after a join at the joint bar and after an engine move at the same k and bar (LOST,
+   never gained); the cell demotion every 20th post-pass session (DEMOTED, sticky).
+7. **The permit file**: the receipt's sha, the clock, each unit's word (`pending`, `report_only`, `ineligible` or its
+   final word), THE POOL-ROUTE LIST and the hold list (every entry ever written, read from the store), every registry
+   lineage's pool cell and cluster, and the eligible lineages after a PASS (ids, in Train K order). Ids and words only
+   (`pool_rule.figure_free` refuses a figure). The job never deletes it; with no receipt it still writes it from the
+   store, so the swarm reads a file of the job's.
+
+**The swarm's refusal** (`elane_forward.py` 4): a lineage on the POOL-route or hold list takes no FWD1-R seat (`step`'s
+ETF branch, `seat_refused`) and no sealed try (`try_refused`, whatever `elane.fwd1.seats` says), **whatever
+`elane.pool.mode` says**, for good under the receipt (mode off, seats off, a pooled FAIL, DEMOTED or VOID, a rollback
+leave it). FWD1's L5 still holds for a HELD index lineage before the close of its FWD1_START session (index lineages
+keep S2). **Fail closed**: the file missing while `elane.pool.mode` is not "off", or unreadable at any time: no
+forward-only ETF pass is seated and no lineage FWD1 lists as judged takes a sealed try (every equity try while FWD1's
+own file is unreadable too). `one_a_cell` counts a pooled seat (P2's `elane_pool` state).
+
+**The operator views** (judge-module edits of views only): FWD1's report (`forward_screen.report`) leaves a lineage on
+the POOL-route or hold list out of its pass sentences, status counts, stall rows and registry figures until its unit
+is final, counting it only as `pool_route`; the BH/BY meter (`forward_report._meter_row`) leaves it out of the family
+on the days written meanwhile. Both withhold every ETF lineage while the pool's file fails closed.
+
+**Stated limits of P1** (DEVIATIONS.log): a cell first judged after the clock (D3) is not clocked (its lineages stay
+on FWD1-R) until a release carries the calibration's code for U_u, G6 and the floor-wide expected seats; a later
+lineage with FWD1-R checkpoints read before its hold is released to FWD1-R (D4); a join's U_u is a union bound (D5).
+
+**Ship it** (after checkpoint 15 is final, per the PREREG's timeline: an evening or weekend window after 20:05Z,
+avoiding 00:20-00:40Z and 01:40-02:30Z; one House deploy, owner deploy: `league/ops/` is protected and
+`league/swarm/elane_forward.py` is FORBIDDEN; no gateway change), WITH the receipt and its pin block in the same PR.
+- **Between the deploy and the job's first night** the permit file does not exist and `elane.pool.mode` is "record",
+  so the swarm fails closed for those hours: forward-only ETF FWD1-R passes wait a round, and FWD1-judged lineages'
+  sealed tries are refused (index lineages past L5 are refused by FWD1-R anyway once its seats are on). It lifts on the
+  job's first run.
+- **Verify** (read-only): the ids above; the next night's `pool_screen` receipt; `pool-screen-permits.json` with the
+  receipt's sha, the clock (the next session after that night) and the route list; `forward-screen-report.json`'s
+  `pool_route` count; no pooled figure in any file the swarm reads.
+- **Rollback**: `elane.pool.mode` "off" (allowed while no pooled seat is held: none can be in P1) stops the job and
+  keeps the file; THE POOL-ROUTE REFUSAL DOES NOT LIFT. A code rollback to a release before P1 would drop the refusal
+  (that release has no reader): the captain's call, stated as a POOL1 cost (PREREG 13.6).
+
 ## Done at the 15th close, then every 5th (Oct 16, 2026): the owner's new goal (A50): `feat/done-a50`, not deployed
 
 The owner set a new goal at 02:10Z Oct 16, 2026 (`goal-2026-10-10/GOAL-MESSAGE-SPEED.txt`; the captain's amendments

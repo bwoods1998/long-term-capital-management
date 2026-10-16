@@ -60,6 +60,20 @@ WITH IT ON:
    in the same transaction as the band move; reading `eligible(state)` alone is not the contract.
    The verdict's words are kept beside it (`STATE_KEY`["words"]); the operator's sentence with the t and the shadow
    P&L stays in the job's own report.
+4. POOL1's ROUTE REFUSAL (the owner's A55, pre-registered in A55a: PREREG-POOL1 sections 7.2 and 11 P1 item 4; its job
+   league/ops/pool_screen.py, which this module never imports): the pooled screen's permit file (`POOL_PERMITS`: ids
+   and words) lists the lineages on its POOL ROUTE and its HOLD list (`pool_listed`). Such a lineage TAKES NO FWD1-R
+   SEAT (`step`'s ETF branch, before the band move, and `seat_refused` refuse it) AND NO SEALED TRY (`try_refused`,
+   whatever `elane.fwd1.seats` says), WHATEVER `elane.pool.mode` SAYS: the refusal is keyed by lineage id, the list is
+   append-only and copied whole into every file the job writes, and nothing lifts it under the receipt (mode off,
+   seats off, a pooled FAIL, DEMOTED or VOID, a rollback). The one exception is FWD1's own L5 (A48, 1 above): an
+   index-only case-N lineage the pool HOLDS keeps its S2 try until the close of its FWD1_START session (index
+   lineages keep S2 unchanged, PREREG 7.2), and is then judged no further by FWD1. FAIL CLOSED: with the file missing
+   while `elane.pool.mode` is not "off" (absent: the code's "off"), or unreadable at any time, `step` and
+   `seat_refused` refuse every ETF pass whose family is forward-only (`elane.forward_only`) and `try_refused` refuses
+   every lineage FWD1's permit file lists as judged (`JUDGED`; every equity try when that file cannot be read
+   either). `one_a_cell` counts a pooled seat too (P2's `POOL_KEY` state: seated, in a live band, its FWD1 cell).
+   These are tightenings; with `elane.fwd1.seats` off `step` and `seat_refused` still do nothing else.
 
 Standard library only.
 """
@@ -92,6 +106,20 @@ UNREADABLE = "the FWD1-R permit file cannot be read while forward seats are on: 
 #: The cases a PANEL pass may take a seat on (the captain's A34: case N only).
 PANEL_CASES = ("N",)
 A34 = "A34: a panel program's only path to money is FWD1-R case N (this pass is case {case}): recorded, no seat"
+#: POOL1 (A55a; the module docstring, 4): the pooled screen's permit file under the state root (league/ops/
+#: pool_screen.py `PERMITS`; a test holds the two equal), its version, and `elane.pool.mode`'s words.
+POOL_PERMITS = "pool-screen-permits.json"
+POOL_PERMITS_VERSION = 1
+POOL_MODES = ("off", "record")
+#: P2's family-state key of a pooled seat (sealed from every generator: league/swarm/elane_seal.py `SEALED_KEYS`):
+#: {"seated": True, "cluster": <pool cluster id>, "fwd1_cell": <its FWD1 cell text>}; `one_a_cell` counts it.
+POOL_KEY = "elane_pool"
+POOL_REFUSED = ("POOL1 (A55a): the pooled screen lists this lineage on its POOL route or hold list: it takes no FWD1-R "
+                "seat and no sealed try under this receipt")
+POOL_UNREADABLE = ("POOL1 (A55a): the pooled screen's permit file cannot be read: no forward-only ETF pass is seated and "
+                   "no lineage FWD1 judges takes a sealed try (fail closed)")
+POOL_MISSING = ("POOL1 (A55a): the pooled screen's permit file is missing while elane.pool.mode is on: no forward-only "
+                "ETF pass is seated and no lineage FWD1 judges takes a sealed try (fail closed)")
 
 
 def seats_on(settings: Mapping[str, Any] | None) -> bool:
@@ -190,16 +218,69 @@ def untried(store: Any, fam: Mapping[str, Any], row: Mapping[str, Any] | None, *
         return False
 
 
+def pool_on(settings: Mapping[str, Any] | None) -> bool:
+    """`elane.pool.mode` is not "off" (the module docstring, 4: the fail-closed reading of a missing file). An absent
+    block or key is the code's default, "off"; any other value, a malformed one included, is not "off"."""
+    raw = settings.get("elane") if isinstance(settings, Mapping) else None
+    raw = raw.get("pool") if isinstance(raw, Mapping) else None
+    if not isinstance(raw, Mapping) or "mode" not in raw:
+        return False
+    return raw.get("mode") != "off"
+
+
+def pool_listed(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[frozenset[str] | None, str | None]:
+    """THE POOLED SCREEN'S REFUSAL LIST (the module docstring, 4), read WHATEVER `elane.pool.mode` says: (the lineages
+    its permit file lists on the POOL route or the hold list, None); (frozenset(), None) when there is no file and the
+    mode is "off"; (None, why) when the swarm must FAIL CLOSED: no file while the mode is not "off" (`pool_on`), or a
+    file that cannot be read or is not the job's shape, at any time."""
+    path = Path(root) / POOL_PERMITS
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return (None, POOL_MISSING) if pool_on(settings) else (frozenset(), None)
+    except (OSError, ValueError):
+        return None, POOL_UNREADABLE
+    if not isinstance(doc, Mapping) or doc.get("version") != POOL_PERMITS_VERSION \
+            or not isinstance(doc.get("routes"), Mapping) or not isinstance(doc.get("holds"), list):
+        return None, POOL_UNREADABLE
+    return frozenset(str(k) for k in doc["routes"]) | frozenset(str(x) for x in doc["holds"]), None
+
+
+def _pool_try(store: Any, fam: Mapping[str, Any], lineage: str, settings: Mapping[str, Any] | None,
+              now: float | None) -> str | None:
+    """POOL1's half of `try_refused` (the module docstring, 4), whatever `elane.fwd1.seats` says: a lineage the pool
+    lists takes no sealed try (but an L5 index lineage before the close of its FWD1_START session: `untried`); with
+    the pool's file failing closed, no lineage FWD1's permit file lists as judged does (L5 alike), and no equity
+    family's at all while FWD1's file cannot be read either."""
+    listed, why = pool_listed(store.root, settings)
+    if listed is not None and lineage not in listed:
+        return None
+    read = permit_file(store.root)
+    if read is None:
+        return POOL_REFUSED if listed is not None else why
+    rows, pin_start = read
+    row = rows.get(lineage)
+    if listed is not None:
+        return None if row is not None and untried(store, fam, row, pin_start=pin_start, now=now) else POOL_REFUSED
+    if row is not None and row.get("status") in JUDGED and not untried(store, fam, row, pin_start=pin_start, now=now):
+        return why
+    return None
+
+
 def try_refused(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None, *,
                 now: float | None = None) -> str | None:
-    """Why this family's lineage takes no sealed Validation try (the module docstring, 1), or None. A lineage listed
-    "pending", "pass" or "fail" is refused unless `untried` holds for it at `now` (L5, A48: the representative's own
-    index-only family of a case-N lineage whose start is after the pin's, before the close of its FWD1_START session;
-    the store's clock when `now` is None). The file is read once (`permit_file`)."""
-    if not seats_on(settings):
-        return None
+    """Why this family's lineage takes no sealed Validation try (the module docstring, 1 and 4), or None. POOL1 first,
+    whatever `elane.fwd1.seats` says (`_pool_try`). Then, with the seats on, a lineage listed "pending", "pass" or
+    "fail" is refused unless `untried` holds for it at `now` (L5, A48: the representative's own index-only family of a
+    case-N lineage whose start is after the pin's, before the close of its FWD1_START session; the store's clock when
+    `now` is None). The file is read once (`permit_file`)."""
     lineage = lineage_of(store, fam)
     if lineage is None:
+        return None
+    pooled = _pool_try(store, fam, lineage, settings, now)
+    if pooled is not None:
+        return pooled
+    if not seats_on(settings):
         return None
     read = permit_file(store.root)
     if read is None:
@@ -223,12 +304,18 @@ def one_a_cell(store: Any, cell: str, *, but: str) -> str | None:
     """THE CELL'S ONE LIVE FORWARD SEAT: the family (other than `but`), of either type, alive, whose forward pass in
     `cell` holds it: one seated on its pass (made a Candidate here, or recorded by a pool's `mark_seated`) that is still
     in a live band, or one made eligible here and not yet seated (a panel pass waiting for the pool's seat); None when
-    the cell is free. A seated family that left the live bands (demoted, exited) frees it, as a retired one does."""
+    the cell is free. A seated family that left the live bands (demoted, exited) frees it, as a retired one does.
+    POOL1 (the module docstring, 4): a family seated on a pooled pass (P2's `POOL_KEY` state, seated, its FWD1 cell
+    `fwd1_cell`) in a live band holds its FWD1 cell's seat too."""
     from . import elane
 
     for fam in store.families(alive=True, lanes=elane.LANES):
         if str(fam["id"]) == str(but) or fam.get("retired_at"):
             continue
+        pooled = (fam.get("state") or {}).get(POOL_KEY)
+        if isinstance(pooled, Mapping) and pooled.get("seated") is True and pooled.get("fwd1_cell") == cell \
+                and fam.get("band") in LIVE_BANDS:
+            return str(fam["id"])
         held = (fam.get("state") or {}).get(STATE_KEY)
         if not isinstance(held, Mapping) or held.get("cell") != cell or held.get("eligible") is not True:
             continue
@@ -243,7 +330,9 @@ def seat_refused(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[st
     take a seat on its forward pass now, or None. Refused: the seat switch off; no eligible forward pass in its state;
     a panel pass of a case other than N (A34); the permit file unreadable, or no longer listing its lineage as a pass
     of this version and run sha; the version's run sha not the judged one; another family holding the mechanism
-    cell's one live forward seat (`one_a_cell`)."""
+    cell's one live forward seat (`one_a_cell`); POOL1 (the module docstring, 4): its lineage on the pooled screen's
+    POOL route or hold list, whatever `elane.pool.mode` says, or, failing closed on that file, any forward-only ETF
+    pass."""
     if not seats_on(settings):
         return "the forward seats are off (elane.fwd1.seats)"
     if not isinstance(fam, Mapping) or fam.get("retired_at"):
@@ -251,6 +340,14 @@ def seat_refused(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[st
     held = (fam.get("state") or {}).get(STATE_KEY)
     if not eligible(fam.get("state")) or not isinstance(held, Mapping):
         return "no forward pass is eligible in its state"
+    listed, pool_why = pool_listed(store.root, settings)
+    if listed is None:
+        from . import elane
+
+        if held.get("type") != "PANEL" and elane.forward_only(fam):
+            return pool_why
+    elif str(held.get("lineage") or "") in listed:
+        return POOL_REFUSED
     if held.get("type") == "PANEL" and held.get("case") not in PANEL_CASES:
         return A34.format(case=held.get("case"))
     rows = permits(store.root)
@@ -302,6 +399,7 @@ def step(gate: Any) -> dict[str, Any]:
     {family: why}}; {} with the switch off. One family's failure never stops the others."""
     if not seats_on(gate.settings):
         return {}
+    from . import elane
     from .gate import run_sha
 
     store = gate.store
@@ -309,6 +407,7 @@ def step(gate: Any) -> dict[str, Any]:
     out: dict[str, Any] = {"seated": [], "eligible": [], "waits": {}}
     if not rows:
         return out
+    listed, pool_why = pool_listed(store.root, gate.settings)
     for lineage, row in sorted(rows.items()):
         if row.get("status") != "pass":
             continue
@@ -350,6 +449,14 @@ def step(gate: Any) -> dict[str, Any]:
                                                 "lane": row.get("type"), "screen": "FWD1-R"})
                 out["eligible"].append(fid)
                 continue
+            # POOL1 (the module docstring, 4): no FWD1-R seat for a lineage the pooled screen lists, whatever
+            # elane.pool.mode says; failing closed on its file, no forward-only ETF pass
+            if listed is None and elane.forward_only(fam):
+                out["waits"][fid] = str(pool_why)
+                continue
+            if listed is not None and lineage in listed:
+                out["waits"][fid] = POOL_REFUSED
+                continue
             if fam.get("band") != "gym" or state.get("gate_hold"):
                 out["waits"][fid] = f"in the {fam.get('band')} band" if fam.get("band") != "gym" else "held by the operator"
                 continue
@@ -375,5 +482,7 @@ def step(gate: Any) -> dict[str, Any]:
 
 
 __all__ = ["PERMITS", "PERMITS_VERSION", "STATE_KEY", "SEATS", "JUDGED", "UNTRIED", "LIVE_BANDS", "REFUSED",
-           "UNREADABLE", "PANEL_CASES", "A34", "seats_on", "permit_file", "permits", "lineage_of", "untried",
-           "try_refused", "eligible", "one_a_cell", "seat_refused", "mark_seated", "step"]
+           "UNREADABLE", "PANEL_CASES", "A34", "POOL_PERMITS", "POOL_PERMITS_VERSION", "POOL_MODES", "POOL_KEY",
+           "POOL_REFUSED", "POOL_UNREADABLE", "POOL_MISSING", "seats_on", "permit_file", "permits", "lineage_of",
+           "untried", "pool_on", "pool_listed", "try_refused", "eligible", "one_a_cell", "seat_refused", "mark_seated",
+           "step"]

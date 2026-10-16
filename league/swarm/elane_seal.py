@@ -78,6 +78,9 @@ SEALED_KEYS = frozenset({
     "elane_forward",
     # (step two: K's Train-era half of a passing panel version, `elane_xs.ACTIVITY_KEY`)
     "elane_xs_activity",
+    # POOL1 (A55a; league/swarm/elane_forward.py `POOL_KEY`, a test holds the two equal): a pooled seat's record (P2
+    # writes it) says how a cell's forward sessions went.
+    "elane_pool",
 })
 #: The family columns no generator reads of an equity family.
 SEALED_COLUMNS = frozenset({"band", "band_since", "retired_at", "retire_reason", "validated_version", "best_validation",

@@ -89,6 +89,8 @@ THE NIGHT (`night`; after each of the record's two nights, E3's and the panel's,
    its sealed path, as a void or an ineligible one does.
 6. THE REPORT (`REPORT`, operator-only): per type and case the lineages by status, the registry's expected zero-edge
    passes against the observed (`fwd1_rule.expected_passes`), each pass's sentence and each stalled lineage's cause.
+   POOL1 (A55a): a lineage on the pooled screen's POOL-route or hold list is left out of all of it until its unit's
+   verdict is final, counted only as `pool_route` (`report`); every ETF lineage while that file fails closed.
 
 A FAILURE OF THE HOUSE NEVER MARKS A PROGRAM: a run the child could not finish, a store under a lock, a run that does
 not reproduce the record's day, rows not yet written under a new engine id, a placebo span the House left a session
@@ -119,7 +121,7 @@ import sqlite3
 import time
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Collection, Mapping, Sequence
 
 from . import forward_db
 from . import fwd1_rule as R
@@ -1662,12 +1664,25 @@ def beside_for(root: str | Path | None, lineage: str) -> str | None:
     return None if row is None or not row["beside"] else str(row["beside"])
 
 
-def report(store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any],
-           fdb: sqlite3.Connection | None = None) -> dict[str, Any]:
+def report(store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any], fdb: sqlite3.Connection | None = None,
+           withheld: Collection[str] = (), withhold_etf: bool = False) -> dict[str, Any]:
     """THE OPERATOR'S REPORT (the module docstring, 5): counts by type and case and status, the expected zero-edge
     passes against the observed, every pass's sentence, and the lineages stalled under the newest engine id with the
-    cause. Operator-only (it holds each pass's t and shadow P&L)."""
-    rows = status_rows(store, fdb=fdb, rule=rule)
+    cause. Operator-only (it holds each pass's t and shadow P&L).
+    POOL1 (A55a: PREREG-POOL1 sections 8 and 11 P1 item 5; a judge-module edit of this operator view only: FWD1-R's
+    rule, checkpoints, verdicts and permit file are unchanged): a lineage on the pooled screen's POOL-route or hold
+    list whose unit's verdict is not final (`withheld`, from league/ops/pool_screen.py `withheld`) has no pass
+    sentence, no status count, no stall row and no entry in the registry's observed and expected passes; such
+    lineages appear only as the count `pool_route`. With the pool's permit file failing closed (`withhold_etf`) every
+    ETF lineage is withheld so. Once its unit is final it is shown again."""
+    held = {str(x) for x in withheld}
+    pooled = 0
+    rows = []
+    for row in status_rows(store, fdb=fdb, rule=rule):
+        if row["judged"] and (str(row["lineage"]) in held or (withhold_etf and str(row["type"]) == "ETF")):
+            pooled += 1
+            continue
+        rows.append(row)
     by: dict[str, Counter] = {}
     read: list[tuple[str, str, int]] = []
     for row in rows:
@@ -1689,7 +1704,8 @@ def report(store: sqlite3.Connection, *, rule: Any, pin: Mapping[str, Any],
             "passes": [{"lineage": r["lineage"], "family": r["family"], "version": r["version"], "k": r["k"],
                         "beside": r["beside"]} for r in rows if r["status"] == "pass"],
             "stalled": [{"lineage": r["lineage"], "k": r["k"], "cause": causes.get(str(r["lineage"]))}
-                        for r in rows if r["status"] == "stalled"]}
+                        for r in rows if r["status"] == "stalled"],
+            "pool_route": pooled}
 
 
 # --------------------------------------------------------------------------------------------------------- the job
@@ -1729,8 +1745,10 @@ def night(root: str | Path, *, rule: Any, settings: Mapping[str, Any] | None, no
         labels = {int(r["id"]): str(r["label"]) for r in fdb.execute("SELECT id, label FROM fwd_engines")}
         write_permits(root, store, rule=rule, pin=pin, at=clock(), labels=labels, fdb=fdb)
         from .context import write_json
+        from .pool_screen import withheld as pool_withheld
 
-        write_json(root / REPORT, report(store, rule=rule, pin=pin, fdb=fdb))
+        held, all_etf = pool_withheld(root, settings)
+        write_json(root / REPORT, report(store, rule=rule, pin=pin, fdb=fdb, withheld=held, withhold_etf=all_etf))
         with store:
             store.execute("INSERT INTO fwd1_runs(started, finished, seconds, lineages, at) VALUES (?,?,?,?,?)",
                           (float(began), float(clock()), round(judge.spent, 3),

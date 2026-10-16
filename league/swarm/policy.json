@@ -315,6 +315,11 @@
       "cpu_seconds_night": 900,
       "run_budget_seconds": 300
     },
+    "pool": {
+      "mode": "record",
+      "seats": "off",
+      "cpu_seconds_night": 600
+    },
     "panel": {
       "mode": "off",
       "panels": [

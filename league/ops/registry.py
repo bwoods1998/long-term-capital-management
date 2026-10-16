@@ -225,6 +225,21 @@ JOBS: tuple[Job, ...] = (
              "pin (checkpoints 5-60, its own floor, the panel's placebo leg), the permit file of ids and words the "
              "swarm's seat path reads (switched off) and the operator's report with the registry's expected "
              "zero-edge passes"),
+    # POOL1, THE POOLED-BY-MECHANISM FORWARD SCREEN'S RECORD HALF (the owner's A55, pre-registered in A55a;
+    # league/ops/pool_screen.py, its rule league/ops/pool_rule.py): after the ETF record night (`forward_shadow`),
+    # and listed after `forward_screen` so it runs after FWD1-R's ETF night when both are due (it reads FWD1's
+    # lineages, checkpoints and verdicts). Once a record night (a second start on one night writes nothing); mode
+    # record, no seat (seats are P2's). Skipped while `elane.pool.mode` is "off" (the permit file is kept) and inside
+    # 09:00-17:30 New York on a session; with no pin or no receipt it writes the permit file from its store and judges
+    # nothing. It reads the record, FWD1's store and the swarm store read-only and writes only
+    # <state>/pool-screen.sqlite, the permit file and its report, so it runs in a pause too. Its child seconds are
+    # `elane.pool.cpu_seconds_night` (600) a night inside its 900 of CPU; THE DEADLINE is forward_screen's (the
+    # earlier of its wall and the next pre-open, less 120 s). A failure is an ops alarm, never a stall cause.
+    Job("pool_screen", "league.ops.pool_screen", (S.after("forward_shadow"),), grace=2 * HOUR, cpu=900, wall=1500,
+        in_pause=True, owner="POOL1 pooled screen",
+        what="the pooled-by-mechanism forward screen POOL1, record half: its units, members and the append-only "
+             "POOL-route list, cell sessions and looks at 40/60/120 on forward days after its release, and the permit "
+             "file of ids and words the swarm's refusal reads (no seat)"),
     # THE PANEL LANE's data and measurement jobs (release E4, "breadth"; league/xs/E4_INTERFACES.md). WITH THE LANE'S
     # SWITCH OFF NONE OF THEM RUNS: each one's first statements are the switch (`league.ops.equity_universe.lane_off`:
     # `elane.panel.mode` "off" in the box's settings is a `skipped` receipt: no gateway call, no file) and

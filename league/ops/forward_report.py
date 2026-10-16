@@ -24,7 +24,8 @@ THE METERS (`meters`; arithmetic in league/ops/forward_stats.py), for every forw
   largest n, a final one included) under the NEWEST engine that pid has a checkpoint for; a lineage with no
   checkpoint is outside it. The same over every control with a checkpoint, on its `p_x0` (the cost-free excess),
   gives `controls_bh`, `controls_by` and `controls_p10`. Reading: "none yet" while BY = 0; "unreliable" beside it
-  while `controls_by` > 0.
+  while `controls_by` > 0. POOL1 (A55a): a lineage on the pooled screen's POOL-route or hold list has no entry in the
+  family until its unit's verdict is final, and no ETF lineage has while that file fails closed (`_pool_withheld`).
 - RC RECORDING AND READS (D9). Each forward day, for grp in {train_pass, train_fail (registry reasons), look_pass,
   look_fail (tags), seed, control:<g>}: n, `mean_x`, `mean_r`, `mean_w`, `mean_x0` (control groups) and `ugroups`. A
   pid is in a tag group on day d iff the tag's `at` is before `schedule.moments(d).close_at`. THE PAIRS: (look_pass,
@@ -200,7 +201,7 @@ import sqlite3
 import statistics
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Collection, Mapping, Sequence
 
 from . import forward_db, forward_stats, guard
 from . import schedule as S
@@ -577,10 +578,54 @@ def _latest_checks(db: sqlite3.Connection, day: str, *, controls: bool) -> dict[
     return out
 
 
-def _meter_row(db: sqlite3.Connection, day: str) -> dict[str, Any]:
-    """D8's row of `day` (the module docstring: a checkpoint with no p is in the family at p = 1)."""
+#: POOL1 (A55a: PREREG-POOL1 sections 8 and 11 P1 item 5): the pooled screen's permit file (league/ops/pool_screen.py
+#: `PERMITS`), read here for the BH/BY meter's membership alone, and the words after which a unit's looks are over
+#: (`pool_screen.OVER`). Release E3's seal: this module imports no pool module; tests hold the names and the reading
+#: (`_pool_withheld` against `pool_screen.withheld`) equal.
+POOL_PERMITS = "pool-screen-permits.json"
+POOL_OVER = ("PASS", "FAIL", "DEMOTED", "VOID", "REFUTED", "ineligible")
+
+
+def _pool_withheld(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[frozenset[str], bool]:
+    """THE BH/BY METER'S POOL WITHHOLDING (POOL1, a judge-module edit of this operator view only): (the lineages on the
+    pooled screen's POOL-route or hold list whose unit's verdict is not final, False); (frozenset(), True), "every ETF
+    lineage", when that file cannot be read or is not the job's shape, or is missing while `elane.pool.mode` is not
+    "off" (fail closed). league/ops/pool_screen.py `withheld` is the same reading."""
+    raw = settings.get("elane") if isinstance(settings, Mapping) else None
+    raw = raw.get("pool") if isinstance(raw, Mapping) else None
+    on = isinstance(raw, Mapping) and "mode" in raw and raw.get("mode") != "off"
+    try:
+        doc = json.loads((Path(root) / POOL_PERMITS).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return frozenset(), on
+    except (OSError, ValueError):
+        return frozenset(), True
+    if not isinstance(doc, Mapping) or doc.get("version") != 1 or not isinstance(doc.get("routes"), Mapping) \
+            or not isinstance(doc.get("holds"), list) or not isinstance(doc.get("units"), Mapping):
+        return frozenset(), True
+    out = {str(x) for x in doc["holds"]}
+    for lineage, row in doc["routes"].items():
+        cell = row.get("cell") if isinstance(row, Mapping) else None
+        unit = doc["units"].get(cell) if cell is not None else None
+        if not isinstance(unit, Mapping) or unit.get("word") not in POOL_OVER:
+            out.add(str(lineage))
+    return frozenset(out), False
+
+
+def _meter_row(db: sqlite3.Connection, day: str, *, withheld: Collection[str] = (),
+               withhold_etf: bool = False) -> dict[str, Any]:
+    """D8's row of `day` (the module docstring: a checkpoint with no p is in the family at p = 1). POOL1 (A55a): a
+    lineage on the pooled screen's POOL-route or hold list whose unit is not final (`withheld`) has no entry in the
+    family; with that file failing closed (`withhold_etf`) no ETF lineage has (a panel lineage still does)."""
     latest = _latest_checks(db, day, controls=False)
-    family = [latest[pid]["p_x"] for pid, _ in _lineage_representatives(db, day) if pid in latest]
+    reps = _lineage_representatives(db, day)
+    if withheld or withhold_etf:
+        held = {str(x) for x in withheld}
+        rows = {int(r["pid"]): (str(r["lineage"]), str(r["ugroup"])) for r in _rows(
+            db, "SELECT pid, lineage, ugroup FROM fwd_registry WHERE lane!='control'")}
+        reps = [(pid, key) for pid, key in reps if rows.get(pid, ("", ""))[0] not in held
+                and not (withhold_etf and not rows.get(pid, ("", ""))[1].startswith(forward_db.PANEL_UGROUP))]
+    family = [latest[pid]["p_x"] for pid, _ in reps if pid in latest]
     ps = [1.0 if p is None else float(p) for p in family]
     known = [float(p) for p in family if p is not None]
     controls = [row["p_x0"] for row in _latest_checks(db, day, controls=True).values()]
@@ -679,7 +724,8 @@ def rc_pairs(db: sqlite3.Connection, day: str) -> list[dict[str, Any]]:
 
 
 def _write_day(root: str | Path, db: sqlite3.Connection, day: str, *, now: float, settings: Mapping[str, Any] | None,
-               cap: int, history: dict[tuple[str, ...], float | None], awaited: int = 0) -> dict[str, int]:
+               cap: int, history: dict[tuple[str, ...], float | None], awaited: int = 0,
+               withheld: Collection[str] = (), withhold_etf: bool = False) -> dict[str, int]:
     """One forward day's D6, D7, D8 and D9 rows, computed and then written in one transaction; the rows written."""
     n = forward_stats.neff(_population(db, day, cap)[1])
     cey_day = float(n["neff"]) / forward_stats.YEAR_SESSIONS
@@ -695,7 +741,9 @@ def _write_day(root: str | Path, db: sqlite3.Connection, day: str, *, now: float
         hist_iy = history[symbols]
     except Exception:  # noqa: BLE001
         hist_iy = None
-    meter, groups = _meter_row(db, day), _group_rows(db, day)
+    meter = _meter_row(db, day, withheld=withheld, withhold_etf=withhold_etf) if (withheld or withhold_etf) \
+        else _meter_row(db, day)                                    # POOL1: the family less the withheld lineages
+    groups = _group_rows(db, day)
     wrote = {"cey": 0, "meter": 0, "groups": 0}
     with db:   # one transaction a day; the `fwd_cey` row is the day's mark and goes last
         for g in groups:
@@ -796,6 +844,7 @@ def meters(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Ma
     cap = int(_cfg(settings)["neff_max_members"])
     history: dict[tuple[str, ...], float | None] = {}
     nights = [str(n) for n in guard.ids(db, "SELECT DISTINCT through FROM fwd_runs WHERE through IS NOT NULL")]
+    pool_held, pool_all = _pool_withheld(root, settings)            # POOL1: the meter's membership, read once
     for day in forward_days(forward_db.t0(), through):
         if day in have:
             continue
@@ -805,7 +854,8 @@ def meters(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Ma
             if awaited and sum(1 for night in nights if night > day) < METER_WAIT_NIGHTS:
                 out["waiting"] = {"day": day, "programs": awaited}
                 break
-            wrote = _write_day(root, db, day, now=now, settings=settings, cap=cap, history=history, awaited=awaited)
+            wrote = _write_day(root, db, day, now=now, settings=settings, cap=cap, history=history, awaited=awaited,
+                               withheld=pool_held, withhold_etf=pool_all)
         except Exception as exc:  # noqa: BLE001 - named, and the pass stops: unread is never zero
             out["error"] = {"day": day, "why": type(exc).__name__}
             break

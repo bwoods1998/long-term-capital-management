@@ -47,6 +47,8 @@ E3_OPS = ("forward_db", "forward_register", "forward_controls", "forward_shadow"
 E4_OPS = ("forward_xs",)
 #: The files and the directory the forward record lives in: named by ops alone.
 NAMES = ("forward.sqlite", "forward-report.json", "equity-fill-minutes", "contamination.json")
+#: POOL1's ops modules (A55a): no sealed tree imports them (`test_the_sealed_trees_import_no_pool_module_...`).
+POOL_OPS = ("pool_rule", "pool_screen")
 #: The memory modules (league/swarm) and what each may import of the league, at its top and inside its functions.
 MEMORY = ("elane_folds", "elane_effects", "elane_memory")
 MEMORY_TOP = {"league.equity", "league.equity.config", "league.equity.results", "league.equity.screen",
@@ -197,6 +199,30 @@ class TheForwardRecordIsOpsOnly(unittest.TestCase):
         self.assertTrue(all(table.startswith("fwd_") for table in forward_db.TABLES))
         for tree in SEALED_TREES:
             self.assertEqual(named(REPO, tree, NAMES, pattern=r"\bfwd_[a-z0-9_]+"), [], tree)
+
+    def test_the_sealed_trees_import_no_pool_module_and_never_name_its_store(self):
+        """POOL1 (the owner's A55, A55a; PREREG-POOL1 sections 8 and 11 P1 item 7): no swarm, equity, live or gym module
+        imports a pool ops module (league/ops/pool_rule.py, league/ops/pool_screen.py) or names one as a dotted module,
+        and none names the pool's store or one of its tables: the swarm reads the pool's permit file of ids and words
+        alone (league/swarm/elane_forward.py `pool_listed`), as it reads FWD1-R's."""
+        from league.ops import pool_screen
+
+        self.assertEqual(pool_screen.DB, "pool-screen.sqlite")
+        self.assertTrue(all(table.startswith("pool_") for table in pool_screen.TABLES))
+        wanted = {f"league.ops.{name}" for name in POOL_OPS}
+        dotted = re.compile(r"\bops\.(?:" + "|".join(POOL_OPS) + r")\b")
+        tables = r"\b(?:" + "|".join(pool_screen.TABLES) + r")\b"
+        for tree in SEALED_TREES:
+            found = []
+            for path in sources(REPO, tree):
+                for module, _, line in imports(REPO, path):
+                    if module in wanted:
+                        found.append(f"{path.relative_to(REPO)}:{line} imports {module}")
+                for number, text in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                    if dotted.search(text):
+                        found.append(f"{path.relative_to(REPO)}:{number} names {dotted.search(text).group(0)}")
+            self.assertEqual(found, [], tree)
+            self.assertEqual(named(REPO, tree, (pool_screen.DB,), pattern=tables), [], tree)
 
     def test_the_names_are_the_ones_the_ops_modules_use(self):
         # The scan looks for what the jobs really write (a renamed file would slip past a stale list).
