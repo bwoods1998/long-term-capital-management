@@ -25,7 +25,9 @@ THE METERS (`meters`; arithmetic in league/ops/forward_stats.py), for every forw
   checkpoint is outside it. The same over every control with a checkpoint, on its `p_x0` (the cost-free excess),
   gives `controls_bh`, `controls_by` and `controls_p10`. Reading: "none yet" while BY = 0; "unreliable" beside it
   while `controls_by` > 0. POOL1 (A55a): a lineage on the pooled screen's POOL-route or hold list has no entry in the
-  family until its unit's verdict is final, and no ETF lineage has while that file fails closed (`_pool_withheld`).
+  family until its unit's verdict is final; while that file fails closed (`_pool_withheld`) the day's rows WAIT (the
+  pass stops there, "waiting": {"day", "pool"}) and are written once the file reads, never a row without the ETF
+  lineages.
 - RC RECORDING AND READS (D9). Each forward day, for grp in {train_pass, train_fail (registry reasons), look_pass,
   look_fail (tags), seed, control:<g>}: n, `mean_x`, `mean_r`, `mean_w`, `mean_x0` (control groups) and `ugroups`. A
   pid is in a tag group on day d iff the tag's `at` is before `schedule.moments(d).close_at`. THE PAIRS: (look_pass,
@@ -583,21 +585,25 @@ def _latest_checks(db: sqlite3.Connection, day: str, *, controls: bool) -> dict[
 #: (`pool_screen.OVER`). Release E3's seal: this module imports no pool module; tests hold the names and the reading
 #: (`_pool_withheld` against `pool_screen.withheld`) equal.
 POOL_PERMITS = "pool-screen-permits.json"
-POOL_OVER = ("PASS", "FAIL", "DEMOTED", "VOID", "REFUTED", "ineligible")
+POOL_STORE = "pool-screen.sqlite"
+POOL_OVER = ("PASS", "FAIL", "DEMOTED", "VOID", "REFUTED", "ineligible", "nonconforming")
+#: The meter's word while the pool's permit file fails closed (`meters`: it waits, it writes no reduced row).
+POOL_WAIT = "the pooled screen's permit file fails closed: the meter waits for it"
 
 
 def _pool_withheld(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[frozenset[str], bool]:
     """THE BH/BY METER'S POOL WITHHOLDING (POOL1, a judge-module edit of this operator view only): (the lineages on the
     pooled screen's POOL-route or hold list whose unit's verdict is not final, False); (frozenset(), True), "every ETF
     lineage", when that file cannot be read or is not the job's shape, or is missing while `elane.pool.mode` is not
-    "off" (fail closed). league/ops/pool_screen.py `withheld` is the same reading."""
+    "off" or while the pool's own store exists (`POOL_STORE`: its name only) (fail closed). league/ops/pool_screen.py
+    `withheld` is the same reading."""
     raw = settings.get("elane") if isinstance(settings, Mapping) else None
     raw = raw.get("pool") if isinstance(raw, Mapping) else None
     on = isinstance(raw, Mapping) and "mode" in raw and raw.get("mode") != "off"
     try:
         doc = json.loads((Path(root) / POOL_PERMITS).read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return frozenset(), on
+        return frozenset(), on or (Path(root) / POOL_STORE).exists()
     except (OSError, ValueError):
         return frozenset(), True
     if not isinstance(doc, Mapping) or doc.get("version") != 1 or not isinstance(doc.get("routes"), Mapping) \
@@ -848,6 +854,12 @@ def meters(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Ma
     for day in forward_days(forward_db.t0(), through):
         if day in have:
             continue
+        if pool_all:
+            # POOL1 (A55a; the P1 review's F11): while the pooled screen's permit file fails closed the meter WAITS for
+            # this day (and every later one) instead of writing a row with every ETF lineage left out for good; the
+            # pass resumes at this day once the file reads.
+            out["waiting"] = {"day": day, "pool": POOL_WAIT}
+            break
         try:
             # A DAY'S METERS WAIT FOR ITS ROWS (the module docstring): the pass stops at a day still awaited.
             awaited = _awaited(db, day)

@@ -1,6 +1,8 @@
 """POOL1's job, THE RECORD HALF P1 (the owner's A55, pre-registered in A55a: scratch/pooled-screen/PREREG-POOL1.md
-sha256 f42bcdc1..., section 11 P1): the pooled-by-mechanism forward screen's units, members, route list and looks,
-kept append-only, and the permit file of ids and words the swarm reads. The rule is league/ops/pool_rule.py.
+sha256 f42bcdc1..., section 11 P1; the receipt contract POOL1-RECEIPT-1, scratch/pooled-screen/RECEIPT-CONTRACT.md,
+section 9): the pooled-by-mechanism forward screen's units, members, route list and looks, kept append-only, and the
+permit file of ids and words the swarm reads. The rule is league/ops/pool_rule.py; every definition the calibration
+gates is computed with the calibration's own pinned code (league/ops/pool_calib/, `pool_rule.calib`).
 
 Owner: the POOL1 build. Protected (league/ops/ is FORBIDDEN to every role). Ops only (no module of league/swarm,
 league/equity, league/live or league/gym imports it): it reads `<state>/forward.sqlite` (E3's record),
@@ -11,70 +13,86 @@ setting. MODE RECORD ONLY: `elane.pool.seats` is P2's switch and nothing here re
 
 WITH ITS SWITCH OFF NOTHING RUNS (`elane.pool.mode` "off", the code's default; policy.json ships "record"): a `skipped`
 receipt, and THE PERMIT FILE IS KEPT (mode off stops the job, not the file: the POOL-route refusal never lifts).
-WITHOUT A PIN AND ITS RECEIPT NOTHING IS JUDGED (`pool_rule.rule`: `elane.pool_screen` of the repository's policy.json
-and docs/benchmarks/pool_screen_1.json at the pin's sha256): no clock, no unit, no route list, no look; the job still
-writes the permit file from what its store holds (empty before any clock), so the swarm reads a file of the job's.
+WITHOUT A PIN, ITS RECEIPT AND ITS CONFORMANCE NOTHING IS JUDGED (`pool_rule.rule`: `elane.pool_screen` of the
+repository's policy.json, docs/benchmarks/pool_screen_1.json at the pin's sha256, the vendored code at the receipt's
+shas, and every conformance vector reproduced on this box once a (receipt, code, numpy, Python), `pool_conform`): no
+clock, no unit, no route list, no look; the job still writes the permit file from what its store and the existing
+file hold, so the swarm reads a file of the job's.
 
 THE NIGHT (`Night.run`, once a record night: a second start on the same `MAX(fwd_runs.through)` writes nothing):
-1. THE CLOCK AND THE ROUTE LIST (`Night.clock`, section 7.2, 9, 12; `pool_pins`, written ONCE a receipt sha): on the
-   job's first night under the release that carries the pin (a record night written after the release began: its
-   `through` later than the record's last night before the release), the founding units (`pool_units`: the
-   receipt's cells, clusters and stage 1; each cluster's U_u at the FWD1-R checkpoint count its candidates read
-   before the clock, CAP_u, WALL_u, report-only), the founders' membership (`pool_members`), a REFUTED verdict for each
-   unit stage 1 refuted and THE POOL-ROUTE LIST (`pool_routes`) from FWD1's lineages, checkpoints and verdicts as of
-   that night, in ONE transaction. The clock starts at the next session (`next_session(night)`). A night FWD1's store
-   cannot be read writes nothing and the next night is the first (each later night moves the clock a session).
+1. THE CLOCK AND THE ROUTE LIST (`Night.clock_row`, PREREG 7.2, 9, 12; the contract's 6.4): the job's first sighting
+   of the receipt is stored once (`pool_sighting`: the release's start from the deploys record, else the sighting's
+   own time); the first NEW record night written after it is the clock night. FIRST THE CLOCK-START CONFORMANCE
+   (`Night.clock_check`): every founding cluster that could be clocked (not refuted, not ineligible, not report-only)
+   has its floors recomputed with the vendored `cluster_floor` steps on the House's own Train series (`pool_train`:
+   the vendored House job's `one_run` records, founders first, over nights inside the budget), the receipt's members,
+   joins 0, its boot seed, the pin's caps and B 2000 (its resamples kept in `pool_boot`, so the work spans nights);
+   every value of the receipt's `c_own_at_pin` must be equal, or the cluster is NONCONFORMING: not clocked, its members
+   per-program, an alarm. Then, in ONE transaction, the founding units (`pool_units`: the receipt's cells and clusters,
+   stage 1, each cluster's U_u at the FWD1-R checkpoint count its members read before the clock (P1 D7), the caps,
+   report-only, ineligible, conforming), the founders' membership (`pool_members`), a REFUTED or INELIGIBLE verdict for
+   each such unit and THE POOL-ROUTE LIST (`pool_routes`) from FWD1's lineages as of that night. The clock starts at
+   the next session (`next_session(night)`). A night that cannot finish this writes nothing and the next night is the
+   first (each later night moves the clock a session; after `CLOCK_ALARM_NIGHTS` such nights an alarm). A founder FWD1
+   has no row for yet is decided later, once it has one (a missing row is a wait, never a route). A STORE LOST: a
+   permit file that already names this receipt with a clock while the store holds no clock refuses the clock (no
+   judging, an alarm; the file's lists are carried whole).
 2. THE LATER LINEAGES (`Night.sight`, `Night.decide`; section 1.1, 1.3): a registry lineage the receipt does not list,
-   with a passing version, is read once: a panel, a stocks symbol, the beta class or an event reader (its card, or a
-   static scan of its frozen code) is out (`pool_members`, why); otherwise, while FWD1 judges it as case N it is HELD
-   (`pool_holds`: no FWD1-R seat, no sealed try) until the House assigns it. Once its own `pool_train` rows and its
-   group's founders' rows exist: out by its Train exposure (under 1%, no base group above 2/3); merged into an
-   earlier member (Train z correlation >= 0.7 or the same program sha: it follows that member's route, never a
-   member); assigned to the clocked cell of its group its Train z correlates with most at >= rho_assign: a member
-   from its first counted day after the clock (staggered), on the POOL route when the unit is pending and its cluster
-   not report-only. One assigned to a final unit is not a member and stays on FWD1-R; so is one of a report-only
-   cluster (a member there, on FWD1-R). A held lineage leaves the hold by its release (`pool_releases`) or the route.
-3. THE HOUSE'S TRAIN SERIES (`pool_train`, `pool_params`, section 2 and 11): each member's per-symbol Train-era runs
-   (`PoolRuns.train_series`, its k 1.0 and 1.5 runs over 2016-19 and 2022-24 in the job's own decider child from the
-   pools' third session; per-symbol exposure by `pool_rule.lot_exposure`, which is `screen.series`' accounting a
-   symbol), written once, founders first, then later lineages in pid order, inside the night's budget; mu_s, wbar_s,
-   sigma, the House group, the exposure and K's Train counts frozen with them. A member without them at a look is a
-   House wait, never z = 0.
+   with a passing version, is read once: a panel, a stocks symbol, the beta class, no declared class or an event reader
+   (its card, or `pool_rule.reads_events` on its frozen code) is out (`pool_members`, why); otherwise, while FWD1 judges
+   it as case N it is HELD (`pool_holds`: no FWD1-R seat, no sealed try) until the House decides it. It is decided once
+   FWD1 has its row (a missing row is a wait), its own `pool_train` series and every earlier member's (by pid) exist or
+   are out: out by the vendored `member_from_runs` (its exposure, its group, a stock); merged into an earlier member
+   (vendored `merge_copies`: it follows that member's route, never a member); assigned (`pool_rule.assign`) to the cell
+   of its group whose founders' Train D its Train z correlates with most at >= rho_assign: a member from its first
+   counted day after the clock (staggered), on the POOL route when the unit is pending and its cluster is clocked. One
+   assigned to a final, ineligible or nonconforming unit is not a member and stays per-program; so is one of a
+   report-only cluster (a member there, on FWD1-R). A held lineage leaves the hold by its release or the route.
+3. THE HOUSE'S TRAIN SERIES (`pool_train`, `pool_params`, the contract's 4.6): each member's four Train parts (e0k10,
+   e0k15, e1k10, e1k15) are the vendored House job's `one_run` records in the job's own decider child (`PoolRuns`),
+   written once a part; K's Train counts from the same runs' lots; its constants (mu, wbar, sigma, abar, abar_v), its
+   House group and its status from the vendored `member_from_runs` (`fit_constants` at the 2 bp floor haircut). The
+   market is the vendored `prices()` record per era (`pool_market`). A run the House cannot finish on two nights is
+   the program's own failure (out). A member without its Train series at a look is a House wait, never z = 0.
 4. THE CELL SESSIONS (`Night.classify`; `pool_sessions`, first write stands): each session from the clock, in order,
    once the record holds a later night, every active member's row for it has come (or `STALL_NIGHTS` record nights
    have passed) and every lineage registered by its close is decided: a CELL SESSION when at least `M_MIN` active
    members have counted rows.
 5. THE LOOKS (`Night.look`; section 2, 3; `pool_checks`, `pool_verdicts`, `pool_floors`, `pool_boot`): at 40, 60 and
    120 cell sessions, on exactly D_1..k. Each member-day's reading (`pool_fwd`: the record's r, r15, w, b with the
-   live-like re-price, the haircut, the sides and the House's per-symbol exposure and returns from its own forward
-   run, kept where that run IS the record's day) is written once and D is computed only at looks. The cluster is
-   re-tested by the member rule (a join's U_u is the union bound of its parts: a cap only falls; a recorded pass is
-   re-derived at the joint bar, LOST never gained); c_own on the cluster's members (`pool_rule.own_floor`, its 2,000
-   resamples spread over nights); c_used; the stress leg; the placebo leg (999 pseudo-cells of the group's skill-free
+   live-like re-price, the haircut, the sides and the House's per-symbol exposure (screen.series of that symbol's lots,
+   the House job's accounting) and returns from its own forward run, kept where that run IS the record's day) is
+   written once and D is computed only at looks. The cluster is re-tested by the vendored member rule (a join's U_u is
+   the union bound of its parts: a cap only falls; a recorded pass is re-derived at the joint bar, LOST never gained);
+   c_own by the vendored floor pipeline on the cluster's members active through k, their joins, the receipt's boot seed
+   and the caps of the count read (`pool_rule.house_floor`, its 2,000 resamples spread over nights); c_used with the
+   matched minimum of the receipt's table; the stress leg; the placebo leg (999 pseudo-cells of the group's skill-free
    controls on the same sessions); the zeroed-days void. A non-final look writes the word and the sha256 of D_1..k
-   only (no interim figure); a PASS, a FAIL at 120 and a VOID write the series with the verdict, once. A later look
-   reads D_1..k again from the store and checks it against the stored sha (a mismatch is a moved series: VOID).
+   only (no interim figure); a PASS, a FAIL at 120 and a VOID write the series with the verdict, once.
 6. THE DEMOTION (`Night.demotions`, section 7.1): a PASS cell's post-pass sessions, read on the members active at the
    pass, every 20th: DEMOTED (sticky) on the rule; an engine move that touches judged days voids a pending cell and
    loses a pass (re-derived at the same k and bar), never gains one.
-7. THE PERMIT FILE (`write_permits`, `PERMITS`): the receipt's sha, the clock, each unit's word (pending, report_only
-   or its final word), THE POOL-ROUTE LIST and the hold list (every entry ever written, from the store: never
-   removed), every registry lineage's pool cell and cluster id, and the eligible lineages after a PASS. IDS AND WORDS
-   ONLY (`pool_rule.figure_free`). The job never deletes it.
-8. THE REPORT (`REPORT`, operator-only): units by word (final words only), counts, waits and stalls, "X passes of J
-   units; Y expected at zero edge". No interim word or figure.
+7. THE PERMIT FILE (`write_permits`, `PERMITS`), written right after the routes and holds of the night (in a finally)
+   and again at its end: the receipt's sha, the clock, each unit's word, THE POOL-ROUTE LIST and the hold list, every
+   registry lineage's pool cell and cluster id, and the eligible lineages after a PASS. IDS AND FIXED WORDS ONLY
+   (`pool_rule.figure_free`; a reason is a word of `WHY_WORDS`, its detail goes to the report). NEVER SHORTER: the
+   existing readable file's routes are carried whole and its holds unless the store records their release; an
+   existing file that cannot be read is never overwritten (an alarm). The job never deletes it.
+8. THE REPORT (`REPORT`, operator-only): units by word (final words only), counts, waits and stalls, the
+   conformance and the clock's reasons in words, "X passes of J units; Y expected at zero edge". No interim figure.
 
 A FAILURE OF THE HOUSE NEVER MARKS A CELL: a child that did not finish, a store under a lock, a run that does not
 reproduce the record: nothing is written, and the next night reads the same D_1..k. THE STALL RULE (`STALL_NIGHTS`):
 a cell whose look waited on the House on that many record nights under one engine id is STALLED (a House warning; it
 is asked again each night). A pool-job failure is an ops alarm, never a stall cause of league/ops/stall.py. The
 DEADLINE is forward_screen's (the earlier of the job's wall and the next pre-open, less `MARGIN_S`); quiet 09:00-17:30
-New York on a session. THE STATED LIMITS OF P1 (scratch/pooled-screen/DEVIATIONS.log): a cell first judged after the
-clock (a later lineage under rho_assign, or a cell below `M_MIN` that grows) is not clocked here: its members stay on
-FWD1-R until a release that recomputes U_u, G6 and the floor-wide expected seats with the calibration's pinned code;
-a later lineage with FWD1-R checkpoints read before its hold is released to FWD1-R for the same reason.
+New York on a session. THE STATED LIMITS OF P1 (scratch/pooled-screen/DEVIATIONS.log P1 D3, D4): a cell first judged
+after the clock is not clocked here, and a later lineage with FWD1-R checkpoints read before its hold is released to
+FWD1-R. A CODE ROLLBACK to a release below P1 has no reader of the permit file and lifts the refusal: while the route
+list is non-empty it needs a captain amendment (docs/operations.md).
 
-Standard library at import; numpy, league.equity and the swarm inside the functions that need them.
+Standard library at import; numpy, league.equity, the swarm and the vendored calibration inside the functions that
+need them.
 """
 
 from __future__ import annotations
@@ -84,8 +102,10 @@ import hashlib
 import json
 import math
 import os
+import platform
 import sqlite3
 import time
+import zlib
 from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -109,6 +129,10 @@ DEFAULTS: dict[str, Any] = {"mode": "off", "seats": "off", "cpu_seconds_night": 
 BOUNDS: dict[str, tuple[int, int]] = {"cpu_seconds_night": (60, 1200)}
 #: THE STALL RULE: record nights a cell's look may wait on the House under one engine id before it is STALLED.
 STALL_NIGHTS = 5
+#: Record nights the clock may wait (a receipt pinned, the clock not started) before an alarm fires each night.
+CLOCK_ALARM_NIGHTS = 5
+#: Nights a member's Train run may fail on the House before it is the program's own failure (the calibration's C5).
+TRAIN_FAILS = 2
 #: THE DEADLINE (forward_screen's): no run past the earlier of the job's wall less `MARGIN_S` and the next pre-open less
 #: `MARGIN_S` (a test holds `WALL_S` to the registry's).
 WALL_S = 1500
@@ -116,21 +140,31 @@ MARGIN_S = FS.MARGIN_S
 MIN_RUN_S = FS.MIN_RUN_S
 #: A member enters as z = 0 throughout when more than this share of its days does not reproduce (section 2, step 1).
 UNREPRODUCED_MAX = 0.10
-#: The route words of `pool_members.route`.
-ROUTES = ("pool", "fwd1", "sealed", "merged", "out", "new_cell", "final_unit")
-EVENT_KINDS = ("pinned", "clock_wait", "sighted", "held", "released", "routed", "train", "decided", "waited",
-               "stalled", "house", "look", "verdict", "lost", "demoted", "engine_switched", "joined", "unreproduced",
-               "ineligible", "new_cell")
+#: The route words of `pool_members.route` ("per_program": a founder of a cell below M_MIN or of a cluster that is not
+#: clocked; it stays on its per-program route).
+ROUTES = ("pool", "fwd1", "sealed", "merged", "out", "new_cell", "final_unit", "per_program")
+#: The FIXED WORDS a permit file's "why" may carry (never a figure; the detail goes to the report and an alarm).
+WHY_WORDS = ("no_receipt", "no_record", "nonconforming_receipt", "store_lost", "clock_wait", "pool_off")
+EVENT_KINDS = ("pinned", "clock_wait", "sighting", "sighted", "held", "released", "routed", "train", "train_failed",
+               "decided", "waited", "stalled", "house", "look", "verdict", "lost", "demoted", "engine_switched", "joined",
+               "unreproduced", "ineligible", "new_cell", "conformance", "nonconforming", "store_lost", "permits_kept",
+               "permits_refused", "clock_alarm", "look_failed", "market")
 APPEND_ONLY_ERROR = "pool-screen.sqlite is append-only"
 
 _TABLES = """
+CREATE TABLE IF NOT EXISTS pool_sighting (sha TEXT PRIMARY KEY, release TEXT NOT NULL, release_start REAL NOT NULL,
+  evidence TEXT NOT NULL, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS pool_conform (key TEXT PRIMARY KEY, sha TEXT NOT NULL, ok INTEGER NOT NULL, why TEXT,
+  results TEXT NOT NULL, at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS pool_pins (sha TEXT PRIMARY KEY, release TEXT NOT NULL, release_start REAL NOT NULL,
   before TEXT, night TEXT NOT NULL, clock TEXT NOT NULL, evidence TEXT NOT NULL, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS pool_clockcheck (cluster TEXT PRIMARY KEY, conforming INTEGER NOT NULL, row TEXT NOT NULL,
+  at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS pool_units (cell TEXT PRIMARY KEY, cls TEXT NOT NULL, grp TEXT NOT NULL, cluster TEXT NOT NULL,
   founders TEXT NOT NULL, clock TEXT NOT NULL, origin TEXT NOT NULL, refuted INTEGER NOT NULL, stage1 TEXT NOT NULL,
-  u_point REAL NOT NULL,
-  u_bound REAL NOT NULL, cap REAL NOT NULL, wall REAL NOT NULL, report_only INTEGER NOT NULL, fwd1_count INTEGER NOT NULL,
-  at REAL NOT NULL);
+  u_point REAL NOT NULL, u_bound REAL NOT NULL, cap REAL NOT NULL, wall REAL NOT NULL, report_only INTEGER NOT NULL,
+  report_why TEXT, ineligible INTEGER NOT NULL, conforming INTEGER NOT NULL, clocked INTEGER NOT NULL,
+  fwd1_count INTEGER NOT NULL, at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS pool_members (lineage TEXT PRIMARY KEY, pid INTEGER, cell TEXT, route TEXT NOT NULL,
   joins TEXT, declared TEXT, assigned INTEGER NOT NULL, merged_into TEXT, infer_key TEXT, why TEXT, corr TEXT,
   at REAL NOT NULL);
@@ -139,14 +173,15 @@ CREATE TABLE IF NOT EXISTS pool_routes (lineage TEXT PRIMARY KEY, cell TEXT, clu
 CREATE TABLE IF NOT EXISTS pool_holds (lineage TEXT PRIMARY KEY, night TEXT NOT NULL, why TEXT NOT NULL,
   at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS pool_releases (lineage TEXT PRIMARY KEY, why TEXT NOT NULL, at REAL NOT NULL);
-CREATE TABLE IF NOT EXISTS pool_train (pid INTEGER NOT NULL, era INTEGER NOT NULL, days TEXT NOT NULL,
-  arrays TEXT NOT NULL, sha TEXT NOT NULL, at REAL NOT NULL, PRIMARY KEY (pid, era)) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS pool_params (pid INTEGER PRIMARY KEY, symbols TEXT, mu TEXT, wbar TEXT, sigma REAL,
-  g_bp REAL, exposure TEXT, mean_exposure REAL, grp TEXT, why TEXT, k_close INTEGER, k_sessions INTEGER,
-  at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS pool_train (pid INTEGER NOT NULL, part TEXT NOT NULL, record TEXT NOT NULL, sha TEXT NOT NULL,
+  k TEXT, at REAL NOT NULL, PRIMARY KEY (pid, part)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS pool_trainfail (pid INTEGER NOT NULL, night TEXT NOT NULL, why TEXT NOT NULL, at REAL NOT NULL,
+  PRIMARY KEY (pid, night)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS pool_params (pid INTEGER PRIMARY KEY, status TEXT NOT NULL, symbols TEXT, mu TEXT, wbar TEXT,
+  sigma REAL, abar REAL, abar_v TEXT, grp TEXT, why TEXT, k_close INTEGER, k_sessions INTEGER, at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS pool_sigma (cell TEXT PRIMARY KEY, sigma_tilde REAL NOT NULL, at REAL NOT NULL);
-CREATE TABLE IF NOT EXISTS pool_market (era INTEGER PRIMARY KEY, days TEXT NOT NULL, arrays TEXT NOT NULL,
-  sha TEXT NOT NULL, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS pool_market (era INTEGER PRIMARY KEY, record TEXT NOT NULL, sha TEXT NOT NULL,
+  at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS pool_controls (pid INTEGER PRIMARY KEY, grp TEXT NOT NULL, symbols TEXT NOT NULL,
   mu TEXT NOT NULL, wbar TEXT NOT NULL, sigma REAL, at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS pool_fwd (pid INTEGER NOT NULL, day TEXT NOT NULL, engine INTEGER NOT NULL, row TEXT NOT NULL,
@@ -155,11 +190,13 @@ CREATE TABLE IF NOT EXISTS pool_sessions (cell TEXT NOT NULL, day TEXT NOT NULL,
   counted INTEGER NOT NULL, active INTEGER NOT NULL, session INTEGER NOT NULL, at REAL NOT NULL,
   PRIMARY KEY (cell, day, engine)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS pool_clusters (look TEXT NOT NULL, cluster TEXT NOT NULL, cells TEXT NOT NULL,
-  u_point REAL NOT NULL, u_bound REAL NOT NULL, at REAL NOT NULL, PRIMARY KEY (look, cluster)) WITHOUT ROWID;
+  u_point REAL NOT NULL, u_bound REAL NOT NULL, report_only INTEGER NOT NULL, at REAL NOT NULL,
+  PRIMARY KEY (look, cluster)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS pool_floors (cluster TEXT NOT NULL, look TEXT NOT NULL, row TEXT NOT NULL, at REAL NOT NULL,
   PRIMARY KEY (cluster, look)) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS pool_boot (cluster TEXT NOT NULL, look TEXT NOT NULL, null_ TEXT NOT NULL, draw INTEGER NOT NULL,
-  row TEXT NOT NULL, at REAL NOT NULL, PRIMARY KEY (cluster, look, null_, draw)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS pool_boot (cluster TEXT NOT NULL, look TEXT NOT NULL, null_ TEXT NOT NULL, era INTEGER NOT NULL,
+  key TEXT NOT NULL, shape TEXT NOT NULL, blob BLOB NOT NULL, at REAL NOT NULL,
+  PRIMARY KEY (cluster, look, null_, era, key)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS pool_checks (cell TEXT NOT NULL, k INTEGER NOT NULL, engine INTEGER NOT NULL, word TEXT NOT NULL,
   sha TEXT NOT NULL, look TEXT NOT NULL, at REAL NOT NULL, PRIMARY KEY (cell, k)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS pool_verdicts (cell TEXT PRIMARY KEY,
@@ -175,10 +212,10 @@ CREATE TABLE IF NOT EXISTS pool_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, a
 CREATE UNIQUE INDEX IF NOT EXISTS pool_events_once ON pool_events(kind, IFNULL(cell, ''), IFNULL(lineage, ''), once)
   WHERE once IS NOT NULL;
 """
-TABLES = ("pool_pins", "pool_units", "pool_members", "pool_routes", "pool_holds", "pool_releases", "pool_train",
-          "pool_params", "pool_sigma", "pool_market", "pool_controls", "pool_fwd", "pool_sessions", "pool_clusters",
-          "pool_floors", "pool_boot", "pool_checks", "pool_verdicts", "pool_post", "pool_demotions", "pool_runs",
-          "pool_events")
+TABLES = ("pool_sighting", "pool_conform", "pool_pins", "pool_clockcheck", "pool_units", "pool_members", "pool_routes",
+          "pool_holds", "pool_releases", "pool_train", "pool_trainfail", "pool_params", "pool_sigma", "pool_market",
+          "pool_controls", "pool_fwd", "pool_sessions", "pool_clusters", "pool_floors", "pool_boot", "pool_checks",
+          "pool_verdicts", "pool_post", "pool_demotions", "pool_runs", "pool_events")
 #: APPEND-ONLY BY TRIGGER: UPDATE and DELETE abort on every table (a replace too: recursive triggers are on).
 SCHEMA = "PRAGMA recursive_triggers=ON;\n" + _TABLES + "".join(
     f"CREATE TRIGGER IF NOT EXISTS {t}_no_{verb.lower()} BEFORE {verb} ON {t} BEGIN SELECT RAISE(ABORT, "
@@ -237,6 +274,11 @@ def _dumps(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
+def record_sha(record: Mapping[str, Any]) -> str:
+    """A House job record's sha (the receipt's `train_sha256` rule): sha256 of its sorted, compact JSON."""
+    return hashlib.sha256(_dumps(record).encode()).hexdigest()
+
+
 def event(store: sqlite3.Connection, kind: str, *, at: float, cell: str | None = None, lineage: str | None = None,
           once: str | None = None, payload: Mapping[str, Any] | None = None) -> bool:
     """One `pool_events` row (ids, counts and words only); with `once` at most one a (kind, cell, lineage, once).
@@ -246,6 +288,39 @@ def event(store: sqlite3.Connection, kind: str, *, at: float, cell: str | None =
     cursor = store.execute("INSERT OR IGNORE INTO pool_events(at, kind, cell, lineage, once, payload) VALUES (?,?,?,?,?,?)",
                            (float(at), kind, cell, lineage, once, _dumps(dict(payload or {}))))
     return cursor.rowcount == 1
+
+
+def conformance_key(receipt: P.Receipt) -> str:
+    """The key a conformance result is kept under (the contract's 6.3): the receipt's sha, the vendored code's shas,
+    numpy's and Python's versions."""
+    import numpy as np
+
+    text = _dumps({"receipt": receipt.sha256, "calib": dict(P.CALIB_SHA256), "numpy": np.__version__,
+                   "python": platform.python_version()})
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def conformed(root: str | Path, at: float) -> Callable[[P.Receipt, P.Calib], tuple[bool, str | None]]:
+    """`pool_rule.load_receipt`'s conformance, run ONCE a (receipt, vendored code, numpy, Python) and kept in this
+    store's `pool_conform` (the contract's 6.3): a later night reads the kept result."""
+
+    def check(receipt: P.Receipt, cal: P.Calib) -> tuple[bool, str | None]:
+        key = conformance_key(receipt)
+        store = open_store(root)
+        try:
+            row = store.execute("SELECT ok, why FROM pool_conform WHERE key=?", (key,)).fetchone()
+            if row is not None:
+                return bool(row["ok"]), row["why"]
+            ok, why, results = P.conform(receipt, cal)
+            with store:
+                store.execute("INSERT OR IGNORE INTO pool_conform(key, sha, ok, why, results, at) VALUES (?,?,?,?,?,?)",
+                              (key, receipt.sha256, int(ok), why, _dumps(results), float(at)))
+                event(store, "conformance", at=float(at), once=key, payload={"ok": bool(ok), "why": why})
+            return ok, why
+        finally:
+            store.close()
+
+    return check
 
 
 # ------------------------------------------------------------------------------------------------------- the readings
@@ -344,75 +419,64 @@ def _infer(fam: Mapping[str, Any] | None) -> str | None:
     return None if not found else found.get("class")
 
 
+
+
 # --------------------------------------------------------------------------------------------------------- the runs
+class _Capture:
+    """A decider handing every call on unchanged, keeping the last engine run's result (its lots: K's Train counts of
+    the very run the House job's `one_run` reads)."""
+
+    def __init__(self, decider: Any):
+        self._decider = decider
+        self.result: Mapping[str, Any] | None = None
+
+    def kind(self, kind: str, op: str, payload: Mapping[str, Any], **kw: Any) -> Any:
+        answer = self._decider.kind(kind, op, payload, **kw)
+        if op == "run":
+            self.result = answer.get("result") if isinstance(answer, Mapping) else None
+        return answer
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._decider, name)
+
+
 class PoolRuns(FS.HouseRuns):
-    """THE POOL'S OWN RUNNER (section 11 P1 item 2), a subclass of forward_screen's `HouseRuns` (whose runner is
-    unchanged), in the job's own decider child: per Train era and for the forward run, the series' days, r, r15, w, b
-    and per-symbol exposure and returns. Each method raises the child's or the data's failure (the House's: nothing
-    is written) or `forward_screen.OwnFloorRefused` for the program's own."""
+    """THE POOL'S OWN RUNNER (section 11 P1 item 2; the contract's 4.6), a subclass of forward_screen's `HouseRuns`
+    (whose runner is unchanged), in the job's own decider child: a member's Train parts by the VENDORED House job's
+    `one_run` (so the series is the calibration's by construction), the market by its `prices()`, and the forward run
+    with the House job's per-symbol accounting. Each method raises the child's or the data's failure (the House's:
+    nothing is written, asked again)."""
 
-    def train_series(self, program: Any) -> list[dict[str, Any] | None]:
-        """Each Train era's series (`config.TRAIN_ERA_SEGMENTS`, from the pools' third session, `screen.POOL_SKIP`;
-        None for an era the program has no history in): {"days", "symbols", "r", "r15", "w", "b", "ws" (S x n), "R"
-        (S x n), "sides", "k_close", "k_sessions"} from its k 1.0 and 1.5 runs (E1's runner in this job's child)."""
-        import numpy as np
-
+    def train_part(self, cal: P.Calib, pid: int, part: str) -> tuple[dict[str, Any], dict[str, int] | None]:
+        """(the vendored `one_run` record of one Train part of the member's registered version, K's counts of that
+        run {"close_days", "sessions"} for a k 1.0 part that ended ok, else None)."""
         from ..equity import bands as eq_bands
-        from ..equity import config as econfig
-        from ..equity import screen as S
-        from ..equity.runner import Isolated
-        from ..equity.store import EquityStore
 
-        iso = Isolated(self._child(), self.root / "equity-daily", budget_seconds=self.budget())
-        needs = iso._needs(program.code, program.params, program.key)
-        store = EquityStore(self.root / "equity-daily")
-        floor = eq_bands.seat_settings().k_floor
-        out: list[dict[str, Any] | None] = []
-        epoch = dt.date(1970, 1, 1)
-        for first, last in econfig.TRAIN_ERA_SEGMENTS:
-            bars = store.span(needs.symbols, first, last, history=needs.history)
-            runs = []
-            for k in (econfig.K_BASE, econfig.K_STRESS):
-                iso.budget_seconds = self.budget()
-                runs.append(iso._run(program.code, program.params, program.key, bars, k))
-            statuses = [str(run.result.get("status")) for run in runs]
-            if any(s == "no_data" for s in statuses):
-                out.append(None)
-                continue
-            if any(s != "ok" for s in statuses):
-                raise FS.OwnFloorRefused(f"a Train-era run ended {statuses}: its series is partial")
-            universe = [str(s) for s in (runs[0].result.get("symbols") or needs.symbols)]
-            try:
-                base, stress = (S.series(run.result.get("lots") or [], run.bars, universe=universe,
-                                         capital=FS._capital(run.result, econfig.SLEEVE_USD)) for run in runs)
-                days = [(epoch + dt.timedelta(days=int(d))).isoformat() for d in base.days]
-                lots = runs[0].result.get("lots") or []
-                ws = P.lot_exposure(lots, days, universe)
-                R = _returns(runs[0].bars, universe)
-                sides = P.lot_sides(lots, days)
-                k_close = eq_bands.close_days(lots, floor=floor)
-                k_sessions = eq_bands.run_sessions(runs[0].result)
-            except ValueError as exc:
-                raise FS.OwnFloorRefused(f"its Train-era series cannot be read from its own runs ({str(exc)[:120]})") \
-                    from None
-            if len(base.r) != len(stress.r):
-                raise FS.OwnFloorRefused("its two Train-era runs differ in their sessions")
-            skip = S.POOL_SKIP
-            out.append({"days": days[skip:], "symbols": universe, "r": base.r[skip:].tolist(),
-                        "r15": stress.r[skip:].tolist(), "w": base.w[skip:].tolist(), "b": base.b[skip:].tolist(),
-                        "ws": np.asarray(ws)[:, skip:].tolist(), "R": np.asarray(R)[:, skip:].tolist(),
-                        "sides": np.asarray(sides)[skip:].tolist(), "k_close": int(k_close),
-                        "k_sessions": int(k_sessions), "lots": [dict(lot) for lot in lots]})
-        return out
+        decider = _Capture(self._child())
+        rec = cal.house_job.one_run(self.root, decider, self.fdb, int(pid), str(part), [], run_budget=self.budget())
+        k = None
+        if str(part).endswith("k10") and rec.get("status") == "ok" and isinstance(decider.result, Mapping):
+            floor = eq_bands.seat_settings().k_floor
+            k = {"close_days": int(eq_bands.close_days(decider.result.get("lots") or [], floor=floor)),
+                 "sessions": int(eq_bands.run_sessions(decider.result))}
+        return dict(rec), k
+
+    def market(self, cal: P.Calib) -> dict[str, Any]:
+        """The vendored House job's `prices()`: each ETF's cost-free close-to-close return on every Train-era session."""
+        return dict(cal.house_job.prices(self.root))
 
     def forward_series(self, program: Any, *, settings: Mapping[str, Any] | None,
                        fdb: sqlite3.Connection | None = None) -> dict[str, Any]:
-        """THE FORWARD RUN of a member (E3's `Shadow.slice` and its k 1.0 run, as `HouseRuns.forward_sides` reads it):
-        {"symbols", "r": {day: r}, "ws": {day: [w_s]}, "R": {day: [R_s]}, "sides", "entries", "exits", "bars"}."""
+        """THE FORWARD RUN of a member (E3's `Shadow.slice` and its k 1.0 run, as `HouseRuns.forward_sides` reads it),
+        with the House job's own per-symbol accounting (`one_run`'s: each symbol's exposure the `screen.series` of
+        that symbol's lots, the sides `forward_screen.lot_sides`, each symbol's close-to-close return, 0 where a close
+        is missing): {"symbols", "r": {day: r}, "ws": {day: [w_s]}, "R": {day: [R_s]}, "sides", "entries", "exits",
+        "bars"}."""
         import numpy as np
 
         from ..equity import config as econfig
         from ..equity import ctx as eq_ctx
+        from ..equity import screen as S
         from ..equity.program import parse_needs
         from . import forward_shadow
 
@@ -429,11 +493,16 @@ class PoolRuns(FS.HouseRuns):
         epoch = dt.date(1970, 1, 1)
         days = [(epoch + dt.timedelta(days=int(d))).isoformat() for d in series.days]
         needs = parse_needs(whole.needs)
-        universe = [str(s) for s in needs.symbols]
+        universe = [str(s) for s in (result.get("symbols") or needs.symbols)]    # one_run's universe rule
         lots = result.get("lots") or []
-        ws = np.asarray(P.lot_exposure(lots, days, universe))
+        capital = result.get("capital") or econfig.SLEEVE_USD
+        ws = np.zeros((len(universe), len(days)))
+        for j, sym in enumerate(universe):
+            mine = [lot for lot in lots if str(lot.get("symbol")) == sym]
+            if mine:
+                ws[j] = np.asarray(S.series(mine, bars, universe=universe, capital=capital).w, dtype=np.float64)
         R = np.asarray(_returns(bars, universe))
-        sides = P.lot_sides(lots, days)
+        sides = FS.lot_sides({"lots": lots})
         entered = Counter(str(lot.get("entry_day"))[:10] for lot in lots)
         hashes = {day: forward_db.bars_hash(eq_ctx.inputs_from_bars(
             bars, int(bars.first) + i - 1, needs=needs, cash=0.0, equity=0.0, budget=0.0, caps={}, params={}))
@@ -441,44 +510,10 @@ class PoolRuns(FS.HouseRuns):
         return {"symbols": universe, "r": {d: float(v) for d, v in zip(days, series.r)},
                 "ws": {d: ws[:, i].tolist() for i, d in enumerate(days)},
                 "R": {d: R[:, i].tolist() for i, d in enumerate(days)},
-                "sides": {d: float(sides[i]) for i, d in enumerate(days)},
+                "sides": {d: float(sides.get(d, 0.0)) for d in days},
                 "entries": {d: int(entered.get(d, 0)) for d in days},
                 "exits": {d: int(v) for d, v in zip(days, series.exits)}, "bars": hashes,
                 "lots": [dict(lot) for lot in lots]}
-
-    def market(self) -> list[dict[str, Any]]:
-        """Each Train era's market series for the regime cells (SPY, the sector ETFs, TLT, GLD: cost-free close-to-close
-        returns from the pools' third session; NaN where a symbol has no bar)."""
-        import numpy as np
-
-        from ..equity import config as econfig
-        from ..equity import screen as S
-        from ..equity.store import EquityStore
-
-        from ..equity.store import MissingData
-
-        store = EquityStore(self.root / "equity-daily")
-        out = []
-        epoch = dt.date(1970, 1, 1)
-        for first, last in econfig.TRAIN_ERA_SEGMENTS:
-            spy = store.span(["SPY"], first, last, history=1)
-            days = [(epoch + dt.timedelta(days=int(d))).isoformat() for d in spy.days[int(spy.first):]]
-            rows = {"SPY": np.asarray(_returns(spy, ["SPY"], nan=True))[0]}
-            for sym in (*P.SECTOR_ETFS, "TLT", "GLD"):
-                try:
-                    bars = store.span([sym], first, last, history=1)       # a symbol the store lacks is NaN
-                except MissingData:
-                    rows[sym] = np.full(len(days), np.nan)
-                    continue
-                ret = np.asarray(_returns(bars, [sym], nan=True))[0]
-                own = {(epoch + dt.timedelta(days=int(d))).isoformat(): float(v)
-                       for d, v in zip(bars.days[int(bars.first):], ret)}
-                rows[sym] = np.array([own.get(d, np.nan) for d in days])
-            skip = S.POOL_SKIP
-            out.append({"days": days[skip:], "spy": rows["SPY"][skip:].tolist(),
-                        "sectors": [rows[s][skip:].tolist() for s in P.SECTOR_ETFS],
-                        "tlt": rows["TLT"][skip:].tolist(), "gld": rows["GLD"][skip:].tolist()})
-        return out
 
     def control_train(self, spec: Mapping[str, Any]) -> list[dict[str, Any] | None]:
         """A control's Train-era replay of its hash law (section 2.1; reads no price for its lots): each era's
@@ -513,7 +548,7 @@ class PoolRuns(FS.HouseRuns):
             lots0 = [lot for lot in forward_controls.control_lots(spec, sessions, k=0.0) if lot["symbol"] in held]
             r0 = forward_controls.cost_free(lots0, bars, capital=econfig.SLEEVE_USD)
             days = [(epoch + dt.timedelta(days=int(d))).isoformat() for d in bars.days[int(bars.first):]]
-            ws = P.lot_exposure(lots0, days, symbols)
+            ws = control_exposure(lots0, bars, symbols)
             R = _returns(bars, symbols)                        # a symbol left out: no bar, return 0, exposure 0
             skip = S.POOL_SKIP
             out.append({"days": days[skip:], "symbols": symbols, "r0": np.asarray(r0)[skip:].tolist(),
@@ -539,10 +574,61 @@ class PoolRuns(FS.HouseRuns):
         lots = forward_controls.control_lots(spec, sessions, k=0.0)
         epoch = dt.date(1970, 1, 1)
         days = [(epoch + dt.timedelta(days=int(d))).isoformat() for d in bars.days[int(bars.first):]]
-        ws = np.asarray(P.lot_exposure(lots, days, symbols))
+        ws = np.asarray(control_exposure(lots, bars, symbols))
         R = np.asarray(_returns(bars, symbols))
         return {"symbols": symbols, "ws": {d: ws[:, i].tolist() for i, d in enumerate(days)},
                 "R": {d: R[:, i].tolist() for i, d in enumerate(days)}}
+
+
+def control_exposure(lots: Sequence[Mapping[str, Any]], bars: Any, symbols: Sequence[str]) -> Any:
+    """A CONTROL's per-symbol exposure ((S, n) over the bars' run sessions): its hash law's lots by weight and day only
+    (no price: a control's lots are drawn, never filled), screen.series' rule a symbol: a lot entered at the open counts
+    half its weight on its entry session, one at the close nothing; it counts its weight on each session held through;
+    an exit at the open counts half, one at the close all of it. ValueError for a lot of another symbol or a day that
+    is no session of the bars."""
+    import numpy as np
+
+    epoch = dt.date(1970, 1, 1)
+    days = [(epoch + dt.timedelta(days=int(d))).isoformat() for d in bars.days[int(bars.first):]]
+    where = {d: i for i, d in enumerate(days)}
+    n = len(days)
+    first, last = (days[0], days[-1]) if n else ("", "")
+    rows = {str(s): i for i, s in enumerate(symbols)}
+    out = np.zeros((len(symbols), n))
+
+    def at(day: Any, what: str) -> int | None:
+        d = str(day)[:10]
+        if d in where:
+            return where[d]
+        if d < first:
+            return -1
+        if d > last:
+            return None
+        raise ValueError(f"a lot's {what} day {d} is not a session of the series")
+
+    for lot in lots:
+        sym = str(lot.get("symbol"))
+        if sym not in rows:
+            raise ValueError(f"lot {lot.get('lid')}: {sym} is outside the symbols")
+        om = float(lot.get("weight") or 0.0)
+        if not math.isfinite(om) or om <= 0:
+            raise ValueError(f"lot {lot.get('lid')}: a weight that is not a positive number")
+        e = at(lot.get("entry_day"), "entry")
+        if e is None:
+            continue
+        x = None if lot.get("exit_day") in (None, "") else at(lot["exit_day"], "exit")
+        if x is not None and x < 0:
+            continue
+        row = out[rows[sym]]
+        if e >= 0 and (lot.get("entry_at") or "open") == "open":
+            row[e] += om / 2.0
+        h0 = max(e + 1, 0)
+        h1 = n - 1 if x is None else min(x - 1, n - 1)
+        if h1 >= h0:
+            row[h0:h1 + 1] += om
+        if x is not None and 0 <= x < n:
+            row[x] += om / 2.0 if (lot.get("exit_at") or "open") == "open" else om
+    return out
 
 
 def _by_symbol(row: Mapping[str, Any], symbols: Sequence[str]) -> tuple[list[float], list[float]] | None:
@@ -558,7 +644,7 @@ def _by_symbol(row: Mapping[str, Any], symbols: Sequence[str]) -> tuple[list[flo
 
 def _returns(bars: Any, symbols: Sequence[str], *, nan: bool = False) -> Any:
     """Each symbol's cost-free close-to-close return over the bars' run sessions ((S, n); 0, or NaN with `nan`, where
-    a close is missing)."""
+    a close is missing: the House job's close-ratio rule)."""
     import numpy as np
 
     lo = int(bars.first)
@@ -587,29 +673,55 @@ class Wait(Exception):
         self.why = why
 
 
+def read_permit_file(root: str | Path) -> tuple[dict[str, Any] | None, bool]:
+    """THE EXISTING PERMIT FILE: (its document when it exists and is the job's shape, whether it exists at all). A file
+    that exists but cannot be read or is not the job's shape is (None, True): it is never overwritten."""
+    path = Path(root) / PERMITS
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, False
+    except (OSError, ValueError):
+        return None, True
+    if not isinstance(doc, Mapping) or doc.get("version") != PERMITS_VERSION or not isinstance(doc.get("routes"), Mapping) \
+            or not isinstance(doc.get("holds"), list) or not isinstance(doc.get("units"), Mapping) \
+            or not all(isinstance(k, str) and isinstance(v, Mapping) for k, v in doc["routes"].items()) \
+            or not all(isinstance(x, str) for x in doc["holds"]):
+        return None, True
+    return dict(doc), True
+
+
 class Night:
     """One night of the pool (the module docstring): `store` (the pool's own, writable), `fdb` (the forward record,
-    read-only), `receipt` (`pool_rule.Receipt`), `runs` (`PoolRuns` or a test's fake), `families` (the equity families
-    by id), `swarm` (the swarm store, read-only, for the cards; None: no card read), `budget` (child seconds tonight),
-    `deadline`."""
+    read-only), `receipt` (`pool_rule.Receipt`), `cal` (the vendored calibration, `pool_rule.calib`), `runs`
+    (`PoolRuns` or a test's fake), `families` (the equity families by id), `swarm` (the swarm store, read-only, for the
+    cards; None: no card read), `budget` (child seconds tonight), `deadline`."""
 
     def __init__(self, root: str | Path, store: sqlite3.Connection, fdb: sqlite3.Connection, *, receipt: P.Receipt,
                  runs: Any, families: Mapping[str, Mapping[str, Any]], swarm: Any = None, settings: Any = None,
                  budget: float = 600.0, clock: Callable[[], float] = time.time, deadline: float = float("inf"),
-                 base: str | Path | None = None, release: str | Path | None = None):
+                 base: str | Path | None = None, release: str | Path | None = None, cal: P.Calib | None = None):
         self.root = Path(root)
         self.store, self.fdb, self.receipt, self.runs = store, fdb, receipt, runs
         self.families, self.swarm, self.settings = families, swarm, settings
         self.budget, self.clock, self.deadline = float(budget), clock, float(deadline)
         self.base, self.release = base, release
+        if cal is None:
+            cal, why = P.calib()
+            if cal is None:
+                raise ValueError(f"the vendored calibration cannot be loaded: {why}")
+        self.cal = cal
         self.spent = 0.0
         self.tally: Counter = Counter()
+        self.notes: list[str] = []
         self.engine_now = forward_db.engine_now(fdb)
         self.night = record_night(fdb)
         self.registry = _registry(fdb)
         self._fwd1: dict[str, dict[str, Any]] | None = None
         self._fwd1_read = False
-        self._z: dict[int, tuple[list[str], list[float]] | None] = {}
+        self._members: dict[int, Any] = {}
+        self._hc: dict[str, Any] | None = None
+        self._by_pid = {f.pid: f for f in receipt.founders.values()}
 
     # ------------------------------------------------------------------------------------------------ helpers
     def fwd1(self) -> dict[str, dict[str, Any]] | None:
@@ -632,6 +744,11 @@ class Night:
         with self.store:
             return event(self.store, kind, at=self.clock(), **kw)
 
+    def note(self, why: str) -> None:
+        """A reason in words for the operator's report (never the permit file)."""
+        if why not in self.notes:
+            self.notes.append(why)
+
     def pin_row(self) -> dict[str, Any] | None:
         row = self.store.execute("SELECT * FROM pool_pins WHERE sha=?", (self.receipt.sha256,)).fetchone()
         return None if row is None else dict(row)
@@ -650,35 +767,42 @@ class Night:
     def units(self) -> dict[str, dict[str, Any]]:
         return {str(r["cell"]): dict(r) for r in self.store.execute("SELECT * FROM pool_units")}
 
+    def judged_units(self) -> dict[str, dict[str, Any]]:
+        """The units whose looks run: clocked, or of a report-only cluster (its verdict to the operator's report), and
+        neither refuted, ineligible nor nonconforming."""
+        return {c: u for c, u in self.units().items()
+                if (int(u["clocked"]) or int(u["report_only"])) and not int(u["refuted"]) and not int(u["ineligible"])
+                and int(u["conforming"]) != 0}
+
     def verdict(self, cell: str) -> dict[str, Any] | None:
         row = self.store.execute("SELECT * FROM pool_verdicts WHERE cell=?", (cell,)).fetchone()
         return None if row is None else dict(row)
 
     def word(self, cell: str) -> str:
-        """A unit's word: its final verdict's (a lost or demoted pass: DEMOTED; an ineligible end: ineligible), else
-        pending."""
+        """A unit's word: its final verdict's (a lost or demoted pass: DEMOTED; an ineligible end: ineligible), a
+        nonconforming cluster's "nonconforming", else pending."""
         if self.store.execute("SELECT 1 FROM pool_demotions WHERE cell=?", (cell,)).fetchone() is not None:
             return "DEMOTED"
         v = self.verdict(cell)
-        if v is None:
-            return P.PENDING
-        return P.INELIGIBLE if v["word"] == "INELIGIBLE" else str(v["word"])
+        if v is not None:
+            return P.INELIGIBLE if v["word"] == "INELIGIBLE" else str(v["word"])
+        u = self.units().get(cell)
+        if u is not None and int(u["conforming"]) == 0:
+            return P.NONCONFORMING
+        return P.PENDING
 
     def final(self, cell: str) -> bool:
-        """Whether a unit's looks are over (a final word, or an ineligible end): no lineage joins it."""
-        return self.word(cell) in (*P.FINAL, P.INELIGIBLE)
+        """Whether a unit's looks are over (a final word, an ineligible end, a nonconforming cluster): no lineage joins
+        it."""
+        return self.word(cell) in OVER
 
     def params(self, pid: int) -> dict[str, Any] | None:
         row = self.store.execute("SELECT * FROM pool_params WHERE pid=?", (int(pid),)).fetchone()
         return None if row is None else dict(row)
 
-    def train(self, pid: int) -> list[dict[str, Any] | None]:
-        eras: dict[int, dict[str, Any]] = {}
-        for r in self.store.execute("SELECT era, days, arrays FROM pool_train WHERE pid=? ORDER BY era", (int(pid),)):
-            arrays = json.loads(r["arrays"])
-            eras[int(r["era"])] = {"days": json.loads(r["days"]), **arrays}
-        n = max(eras) + 1 if eras else 0
-        return [eras.get(e) for e in range(max(n, 2))]
+    def lineage_of_pid(self, pid: int) -> str | None:
+        row = self.fdb.execute("SELECT lineage FROM fwd_registry WHERE pid=?", (int(pid),)).fetchone()
+        return None if row is None else str(row["lineage"])
 
     # ------------------------------------------------------------------------------------------------ the stall rule
     def missed(self, cell: str, cause: str, why: str) -> bool:
@@ -702,14 +826,255 @@ class Night:
         self.tally["stalled_now"] += 1
         return True
 
-    # --------------------------------------------------------------------------------------------- 1. the clock
-    def clock_row(self, now: float) -> dict[str, Any] | None:
-        """THE CLOCK AND THE ROUTE LIST (the module docstring, 1): the pin's row, written once with the founding units,
-        the founders' membership, the REFUTED verdicts and the POOL-route list in one transaction, on the job's first
-        new record night after the release began; None while there is none (or FWD1's store cannot be read)."""
-        held = self.pin_row()
-        if held is not None:
-            return held
+    # ------------------------------------------------------------------------------------- the House's Train data
+    def prices(self) -> dict[str, Any]:
+        """The Train eras' market (`pool_market`: the vendored House job's `prices()` record per era, written once);
+        its sha beside the receipt's `market` ids (a difference is an event and a line of the report, not a refusal:
+        the clock-start conformance binds). Raises `Wait`."""
+        rows = {int(r["era"]): json.loads(r["record"]) for r in self.store.execute("SELECT era, record FROM pool_market")}
+        if len(rows) == 2:
+            return {"e0": rows[0], "e1": rows[1]}
+        if self._over():
+            raise Wait("budget", "the night's budget is spent: the market series wait")
+        try:
+            found = self._timed(lambda: self.runs.market(self.cal))
+            recs = {e: found[f"e{e}"] for e in (0, 1)}
+            texts = {e: P.canonical(recs[e]) for e in (0, 1)}
+        except FS.Late:
+            raise Wait("budget", "the deadline is too near for the market series") from None
+        except Exception as exc:  # noqa: BLE001 - the House's
+            self._ev("house", once=f"market:{self.night}", payload={"why": "the Train eras' market series could not "
+                                                                            "be read", "error": type(exc).__name__})
+            raise Wait("house", "the Train eras' market series could not be read") from None
+        with self.store:
+            for e in (0, 1):
+                sha = hashlib.sha256(texts[e].encode()).hexdigest()
+                self.store.execute("INSERT OR IGNORE INTO pool_market(era, record, sha, at) VALUES (?,?,?,?)",
+                                   (e, texts[e], sha, self.clock()))
+                want = (self.receipt.market.get(f"e{e}") or {}).get("sha256")
+                if sha != want:
+                    event(self.store, "market", at=self.clock(), once=f"e{e}",
+                          payload={"why": "the House's Train-era market record is not the receipt's (a diagnostic: "
+                                          "the clock-start conformance binds)", "era": e})
+                    self.note(f"the House's Train-era market record of e{e} is not the receipt's (its sha differs; a "
+                              "diagnostic: the clock-start conformance binds)")
+        return {"e0": json.loads(texts[0]), "e1": json.loads(texts[1])}
+
+    def hc(self) -> dict[str, Any]:
+        """The House's Train calendar and regime cells at the receipt's cutpoints (vendored `house_context`)."""
+        if self._hc is None:
+            self._hc = P.house_context(self.cal, self.prices(), self.receipt)
+        return self._hc
+
+    def records(self, pid: int) -> dict[str, dict[str, Any]]:
+        """A member's stored Train parts ({part: the House job's one_run record})."""
+        return {str(r["part"]): json.loads(r["record"]) for r in self.store.execute(
+            "SELECT part, record FROM pool_train WHERE pid=?", (int(pid),))}
+
+    def meta(self, pid: int) -> dict[str, Any] | None:
+        """A member's House meta row: a founder's from the receipt; a later lineage's from its registry row, its card,
+        its frozen code's event scan and FWD1's row."""
+        f = self._by_pid.get(int(pid))
+        if f is not None:
+            return P.founder_meta(f)
+        reg = self.fdb.execute("SELECT * FROM fwd_registry WHERE pid=?", (int(pid),)).fetchone()
+        if reg is None:
+            return None
+        reg = dict(reg)
+        card = _card(self.swarm, reg.get("family"))
+        program = self.program(pid)
+        facts = (self.fwd1() or {}).get(str(reg["lineage"])) or {}
+        return P.member_meta(lineage=str(reg["lineage"]), pid=int(pid), family=str(reg.get("family") or ""),
+                             version=reg.get("version"), lane=str(reg.get("lane") or ""), ugroup=str(reg.get("ugroup") or ""),
+                             first_day=str(reg.get("first_day") or ""),
+                             declared_class=(card or {}).get("mechanism_class") or None,
+                             program_sha=reg.get("program_sha"),
+                             panel=str(reg.get("ugroup") or "").startswith(forward_db.PANEL_UGROUP),
+                             inputs=[str(x) for x in ((card or {}).get("inputs") or [])],
+                             event_word=P.reads_events(None if program is None else program.code),
+                             infer_key_class=_infer(self.families.get(str(reg.get("family")))),
+                             fwd1_type=facts.get("type"), fwd1_case=facts.get("case_"))
+
+    def member(self, pid: int) -> Any:
+        """A member's vendored `Member` on the House eras (`pool_rule.house_member` on its four stored parts), None while
+        its parts are not all written or when it is out."""
+        pid = int(pid)
+        if pid in self._members:
+            return self._members[pid]
+        recs = self.records(pid)
+        if any(part not in recs for part in P.PARTS):
+            return None
+        meta = self.meta(pid)
+        if meta is None:
+            return None
+        _, mm = P.house_member(self.cal, meta, recs, self.hc())
+        self._members[pid] = mm
+        return mm
+
+    def train_member(self, pid: int) -> None:
+        """A member's Train parts, the missing ones in order inside the budget (`pool_train`, one row a part, written
+        once), then its constants, group and status (`pool_params`). Raises `Wait` (budget, deadline, the House's); a
+        run the House failed on `TRAIN_FAILS` nights is the program's own failure (out)."""
+        pid = int(pid)
+        if self.params(pid) is not None:
+            return
+        have = self.records(pid)
+        for part in P.PARTS:
+            if part in have:
+                continue
+            if self._over():
+                raise Wait("budget", "the night's budget is spent: the Train series continue the next night")
+            try:
+                rec, k = self._timed(lambda part=part: self.runs.train_part(self.cal, pid, part))
+            except FS.Late:
+                raise Wait("budget", "the deadline is too near for a Train run") from None
+            except Exception as exc:  # noqa: BLE001 - the House's: nothing written, asked again (twice: out)
+                self.train_failed(pid, f"{type(exc).__name__}")
+                raise Wait("house", "a member's Train run did not finish") from None
+            text = _dumps(rec)
+            with self.store:
+                self.store.execute("INSERT OR IGNORE INTO pool_train(pid, part, record, sha, k, at) VALUES (?,?,?,?,?,?)",
+                                   (pid, part, text, hashlib.sha256(text.encode()).hexdigest(),
+                                    None if k is None else _dumps(k), self.clock()))
+            have[part] = rec
+        self.freeze(pid)
+
+    def train_failed(self, pid: int, error: str) -> None:
+        """One night the House could not finish a member's Train run; at `TRAIN_FAILS` such nights it is OUT, the
+        program's own failure (the calibration's C5)."""
+        with self.store:
+            self.store.execute("INSERT OR IGNORE INTO pool_trainfail(pid, night, why, at) VALUES (?,?,?,?)",
+                               (int(pid), str(self.night), error, self.clock()))
+            event(self.store, "house", once=f"train:{pid}:{self.night}", at=self.clock(),
+                  payload={"why": "a member's Train-era runs did not finish", "pid": pid, "error": error})
+        self.tally["house"] += 1
+        nights = int(self.store.execute("SELECT COUNT(*) FROM pool_trainfail WHERE pid=?", (int(pid),)).fetchone()[0])
+        if nights >= TRAIN_FAILS:
+            self.freeze(int(pid), out="its Train run failed twice on the House (counted as the program's own failure)")
+
+    def freeze(self, pid: int, *, out: str | None = None) -> None:
+        """A member's constants, group and status from its four parts (`pool_params`, written once): the vendored
+        `member_from_runs` (`fit_constants` at the 2 bp floor haircut), K's Train counts from its k 1.0 runs."""
+        at = self.clock()
+        if out is None:
+            meta = self.meta(pid)
+            recs = self.records(pid)
+            rec, mm = P.house_member(self.cal, meta or {"pid": pid, "lineage": "", "panel": True}, recs, self.hc())
+            status = str(rec.get("status"))
+        else:
+            mm, status = None, f"out: {out}"
+        ks = [json.loads(r["k"]) for r in self.store.execute("SELECT k FROM pool_train WHERE pid=? AND k IS NOT NULL",
+                                                             (int(pid),))]
+        with self.store:
+            if mm is None:
+                self.store.execute("INSERT OR IGNORE INTO pool_params(pid, status, why, at) VALUES (?,?,?,?)",
+                                   (int(pid), "out", status[5:] if status.startswith("out: ") else status, at))
+            else:
+                self.store.execute(
+                    "INSERT OR IGNORE INTO pool_params(pid, status, symbols, mu, wbar, sigma, abar, abar_v, grp, why, "
+                    "k_close, k_sessions, at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (int(pid), "member", _dumps(list(mm.syms)), _dumps([float(x) for x in mm.mu]),
+                     _dumps([float(x) for x in mm.wbar]), float(mm.sigma), float(mm.abar),
+                     _dumps([float(x) for x in mm.abar_v]), str(mm.group), None,
+                     sum(int(k.get("close_days") or 0) for k in ks), sum(int(k.get("sessions") or 0) for k in ks), at))
+            event(self.store, "train", at=at, once=f"{pid}", payload={"pid": pid, "status": status[:120]})
+        self._members.pop(int(pid), None)
+        self.tally["train"] += 1
+
+    def founder_pids(self) -> list[int]:
+        """The founders the House owes Train series to, in order: the members of the clusters that could be clocked
+        (not refuted, ineligible or report-only at the pin), then every other founding member, each by pid."""
+        rec = self.receipt
+        first = sorted({rec.founders[x].pid for cid, cl in rec.clusters.items()
+                        if not (cl.refuted or cl.ineligible or cl.report_only) for x in cl.members})
+        rest = sorted({f.pid for f in rec.founders.values() if f.member} - set(first))
+        return first + rest
+
+    def needing_train(self) -> list[int]:
+        """The pids whose Train series the House owes: the founders (`founder_pids`), then the later lineages that are
+        not decided (pid order)."""
+        have = {int(r[0]) for r in self.store.execute("SELECT pid FROM pool_params")}
+        first = [p for p in self.founder_pids() if p not in have]
+        decided = {str(r[0]) for r in self.store.execute("SELECT lineage FROM pool_members")}
+        later = []
+        for lineage, rows in self._candidate_rows():
+            if lineage in decided:
+                continue
+            pid = P.member_pid(rows)
+            if pid is not None and pid not in have:
+                later.append(pid)
+        return first + sorted(set(later) - set(first))
+
+    def train_step(self, *, founders_only: bool = False) -> bool:
+        """THE HOUSE'S TRAIN SERIES (the module docstring, 3), inside the night's budget; whether every series owed
+        (the founders' alone with `founders_only`) is written."""
+        todo = [p for p in (self.founder_pids() if founders_only else self.needing_train())
+                if self.params(p) is None]
+        for pid in todo:
+            if self._over():
+                self.tally["deferred"] += 1
+                return False
+            try:
+                self.train_member(pid)
+            except Wait as w:
+                if w.cause == "budget":
+                    self.tally["deferred"] += 1
+                    return False
+        return all(self.params(p) is not None for p in todo)
+
+    # ------------------------------------------------------------------------------------------------ the resamples
+    @staticmethod
+    def floor_key(look_key: str, judged: Mapping[tuple[str, str], Sequence[Any]], joins: Mapping[str, int] | None,
+                  B: int, seed: int) -> str:
+        """The key a floor's resamples are kept under: the look and a digest of everything they depend on (the
+        members by cell, their joins, B and the boot seed), so a resample kept on one night is never read for another
+        member set."""
+        text = _dumps({"cells": {f"{k[0]}/{k[1]}": [m.name for m in ms] for k, ms in sorted(judged.items())},
+                       "joins": dict(sorted((joins or {}).items())), "B": int(B), "seed": int(seed)})
+        return f"{look_key}#{hashlib.sha256(text.encode()).hexdigest()[:16]}"
+
+    def boot_hook(self, cid: str, look_key: str) -> P.BootHook:
+        """`house_floor`'s resamples, so a floor can span nights: a variant kept in `pool_boot` is read back; a new one
+        is computed while the budget lasts and held in memory; when the budget runs out every one computed tonight is
+        written (one row a cluster, look, null, era and variant) and the floor waits (`Wait`). A floor that finishes in
+        its night writes none (at B 2000 a cluster takes seconds, its resamples megabytes)."""
+        import numpy as np
+
+        pending: dict[tuple[str, int, str], Any] = {}
+
+        def keep() -> None:
+            with self.store:
+                for (null, e, key), arr in pending.items():
+                    self.store.execute("INSERT OR IGNORE INTO pool_boot(cluster, look, null_, era, key, shape, blob, at) "
+                                       "VALUES (?,?,?,?,?,?,?,?)",
+                                       (cid, look_key, null, int(e), key, ",".join(str(x) for x in arr.shape),
+                                        zlib.compress(arr.tobytes(), 6), self.clock()))
+            pending.clear()
+
+        def hook(null: str, e: int, key: str, compute: Callable[[], Any]) -> Any:
+            row = self.store.execute("SELECT shape, blob FROM pool_boot WHERE cluster=? AND look=? AND null_=? AND era=? "
+                                     "AND key=?", (cid, look_key, null, int(e), key)).fetchone()
+            if row is not None:
+                shape = tuple(int(x) for x in str(row["shape"]).split(","))
+                return np.frombuffer(zlib.decompress(row["blob"]), dtype=np.int16).reshape(shape).copy()
+            if (null, int(e), key) in pending:
+                return pending[(null, int(e), key)]
+            if self._over():
+                keep()
+                raise Wait("budget", "the floor's resamples continue the next night")
+            arr = np.asarray(self._timed(compute), dtype=np.int16)
+            pending[(null, int(e), key)] = arr
+            return arr
+
+        return hook
+
+    # --------------------------------------------------------------------------- 1. the clock and the conformance
+    def sighting(self, now: float) -> dict[str, Any]:
+        """THE FIRST SIGHTING of this receipt (`pool_sighting`, written once): the release's start from the deploys
+        record, else this night's own time (`evidence` "sighting"); read back on every later night."""
+        row = self.store.execute("SELECT * FROM pool_sighting WHERE sha=?", (self.receipt.sha256,)).fetchone()
+        if row is not None:
+            return dict(row)
         name = Path(self.release).name if self.release is not None else ""
         started = None
         if self.base is not None and name:
@@ -722,83 +1087,236 @@ class Night:
         if started is not None and started > now:
             started = None
         evidence = "deploys" if started is not None else "sighting"
-        release_start = float(now if started is None else started)
-        night, before = first_night(self.fdb, release_start)
+        start = float(now if started is None else started)
+        with self.store:
+            self.store.execute("INSERT OR IGNORE INTO pool_sighting(sha, release, release_start, evidence, at) "
+                               "VALUES (?,?,?,?,?)", (self.receipt.sha256, name, start, evidence, self.clock()))
+            event(self.store, "sighting", at=self.clock(), once=self.receipt.sha256,
+                  payload={"release": name, "evidence": evidence})
+        return dict(self.store.execute("SELECT * FROM pool_sighting WHERE sha=?", (self.receipt.sha256,)).fetchone())
+
+    def clock_waited(self, why: str, cause: str = "clock") -> None:
+        """A record night the clock waited (`clock_wait`, once a night); from `CLOCK_ALARM_NIGHTS` such nights on an
+        alarm each night (`clock_alarm`)."""
+        sha = self.receipt.sha256
+        with self.store:
+            event(self.store, "clock_wait", at=self.clock(), once=f"{sha}:{self.night}",
+                  payload={"why": why, "cause": cause, "night": self.night})
+        self.tally["clock_wait"] += 1
+        self.note(f"the clock waits: {why}")
+        nights = int(self.store.execute("SELECT COUNT(*) FROM pool_events WHERE kind='clock_wait' AND substr(once, 1, ?) "
+                                        "= ?", (len(sha) + 1, sha + ":")).fetchone()[0])
+        if nights >= CLOCK_ALARM_NIGHTS:
+            with self.store:
+                event(self.store, "clock_alarm", at=self.clock(), once=f"{sha}:{self.night}",
+                      payload={"why": why, "nights": nights})
+            self.tally["clock_alarm"] += 1
+
+    def clock_check(self) -> dict[str, dict[str, Any]]:
+        """THE CLOCK-START CONFORMANCE (the contract's 6.4), before the route list: for each founding cluster that
+        could be clocked, its floors recomputed with the vendored floor pipeline on the House's own Train series (the
+        receipt's members, joins 0, its boot seed, the pin's caps, the receipt's B) must equal every value of the
+        receipt's `c_own_at_pin` (each null's floor, c_own, the minimum and the bar, both floor definitions); else it
+        is NONCONFORMING. The founders' Train sha and the market sha are diagnostics beside. {cluster: {"conforming",
+        "why", ...}} (kept once a cluster in `pool_clockcheck`). Raises `Wait` while it cannot finish tonight."""
+        rec = self.receipt
+        out: dict[str, dict[str, Any]] = {}
+        for cid, cl in sorted(rec.clusters.items()):
+            held = self.store.execute("SELECT conforming, row FROM pool_clockcheck WHERE cluster=?", (cid,)).fetchone()
+            if held is not None:
+                out[cid] = {"conforming": bool(held["conforming"]), **json.loads(held["row"])}
+                continue
+            if cl.refuted or cl.ineligible or cl.report_only:
+                out[cid] = {"conforming": None, "why": "not a candidate"}
+                continue
+            judged: dict[tuple[str, str], list[Any]] = {}
+            why = None
+            diag = []
+            for cell in cl.cells:
+                ms = []
+                for lin in rec.units[cell].members:
+                    f = rec.founders[lin]
+                    self.train_member(f.pid)
+                    prm = self.params(f.pid)
+                    mm = self.member(f.pid) if prm is not None and prm["status"] == "member" else None
+                    if mm is None:
+                        why = f"founder {lin} is out on this House's own Train series"
+                        break
+                    ms.append(mm)
+                    mine = {part: record_sha(r) for part, r in self.records(f.pid).items()}
+                    if f.train_sha256 is not None and mine != dict(f.train_sha256):
+                        diag.append(lin)
+                if why:
+                    break
+                judged[P.cell_key(cell)] = ms
+            if why is None:
+                caps_ = P.caps(*cl.U[P.U_PIN_COUNT], cl.dropped)
+                look = self.floor_key("clock", judged, None, rec.B, cl.boot_seed)
+                fl = P.house_floor(self.cal, cid=cid, keys=[P.cell_key(c) for c in cl.cells], judged=judged, hc=self.hc(),
+                                   B=rec.B, boot_seed=cl.boot_seed, caps_=caps_, boot=self.boot_hook(cid, look))
+                minimum = P.minimum_of(rec, {c: rec.units[c].m for c in cl.cells})
+                mine_floors = P.pin_floors(fl, rec, minimum)
+                want = {fd: {k: cl.c_own_at_pin[fd].get(k) for k in P.PIN_FLOOR_KEYS} for fd in P.FLOORS}
+                conforming = mine_floors == want
+                row = {"why": None if conforming else "its floors at the clock are not the receipt's at the pin",
+                       "floors": mine_floors, "train_sha_differs": sorted(diag)}
+            else:
+                conforming = False
+                row = {"why": why, "floors": None, "train_sha_differs": sorted(diag)}
+            with self.store:
+                self.store.execute("INSERT OR IGNORE INTO pool_clockcheck(cluster, conforming, row, at) VALUES (?,?,?,?)",
+                                   (cid, int(conforming), _dumps(row), self.clock()))
+                event(self.store, "conformance" if conforming else "nonconforming", at=self.clock(), cell=None,
+                      once=f"clock:{cid}", payload={"cluster": cid, "conforming": conforming, "why": row["why"]})
+            if diag:
+                self.note(f"cluster {cid}: the House's Train records of {len(diag)} founders are not the receipt's "
+                          "(their shas differ; a diagnostic beside the floors)")
+            if not conforming:
+                self.tally["nonconforming"] += 1
+                self.note(f"cluster {cid} is NONCONFORMING at the clock ({row['why']}): not clocked, its members stay "
+                          "on their per-program routes; only a captain amendment can clock it")
+            out[cid] = {"conforming": conforming, **row}
+        return out
+
+    def cluster_states(self, facts: Mapping[str, Mapping[str, Any]], checks: Mapping[str, Mapping[str, Any]]
+                       ) -> dict[str, dict[str, Any]]:
+        """Each founding cluster at the clock: its U_u at the FWD1-R checkpoint count its members read before it (P1
+        D7: the largest among its members FWD1 judges as case N or that hold an FWD1-R pass; above the table: report-only),
+        its caps (`pool_rule.caps`, dropped tickets included), report-only (the receipt's or the count's), refuted,
+        ineligible, conforming and CLOCKED (none of those, and conforming)."""
+        rec = self.receipt
+        out = {}
+        for cid, cl in sorted(rec.clusters.items()):
+            count = P.u_count(facts.get(x) for x in cl.members)
+            u = rec.u_at(cid, count)
+            caps_ = P.caps(None, None) if u is None else P.caps(u[0], u[1], cl.dropped)
+            report_only = bool(cl.report_only or caps_.report_only)
+            if report_only and not caps_.report_only:
+                caps_ = P.caps(None, None)
+            chk = checks.get(cid) or {}
+            conforming = chk.get("conforming")
+            clocked = not (cl.refuted or cl.ineligible or report_only) and conforming is True
+            out[cid] = {"count": count, "u": (1.0, 1.0) if u is None else (float(u[0]), float(u[1])), "caps": caps_,
+                        "report_only": report_only, "refuted": cl.refuted, "ineligible": cl.ineligible,
+                        "conforming": conforming, "clocked": clocked}
+        return out
+
+    def founder_route(self, lineage: str, row: Mapping[str, Any] | None, state: Mapping[str, Any] | None,
+                      unit_final: bool = False) -> tuple[str | None, str | None]:
+        """A founder's route (PREREG 7.2): (route, why), or (None, None) while FWD1 has no row for a founder of a
+        clocked unit (a WAIT: decided once it has one)."""
+        f = self.receipt.founders[lineage]
+        if f.merged_into:
+            return "merged", f"merged into {f.merged_into} (the receipt's copy merge)"
+        if not f.member:
+            return "out", f.why
+        unit = self.receipt.units.get(f.cell or "")
+        if unit is None:
+            return "per_program", "its cell is below M_MIN at the pin: it stays on its per-program route"
+        st = state or {}
+        if not st.get("clocked"):
+            why = ("its unit was refuted by stage 1" if st.get("refuted") else
+                   "its cluster has no bar on the grid (ineligible)" if st.get("ineligible") else
+                   "its cluster is report-only" if st.get("report_only") else
+                   "its cluster is nonconforming at the clock")
+            return "per_program", f"{why}: it stays on its per-program route"
+        if not isinstance(row, Mapping):
+            return None, None
+        if unit_final:
+            return "final_unit", "FWD1 sighted it after its unit's verdict was final: it stays on its per-program route"
+        if P.on_pool_route(row, unit_judged=True, refuted=False, report_only=False):
+            return "pool", None
+        if int(row.get("judged") or 0) == 1 and str(row.get("status")) != "void":
+            return "fwd1", "an FWD1-R pass before the clock: a member, its FWD1-R ticket in U_u"
+        return "sealed", "FWD1 does not judge it (a sealed pre-check, or a voided lineage): a member, evidence only"
+
+    def clock_row(self, now: float) -> dict[str, Any] | None:
+        """THE CLOCK AND THE ROUTE LIST (the module docstring, 1): the pin's row, written once with the founding units,
+        the founders' membership, the REFUTED and INELIGIBLE verdicts and the POOL-route list in one transaction, on the
+        job's first new record night after the receipt's first sighting once the clock-start conformance is done;
+        None while there is none (the night, FWD1's store, the House's series or the conformance waits), or when the
+        store was lost (an existing permit file already names this receipt's clock)."""
+        held = self.pin_row()
+        if held is not None:
+            return held
+        sight = self.sighting(now)
+        existing, exists = read_permit_file(self.root)
+        if existing is not None and existing.get("receipt") == self.receipt.sha256 and existing.get("clock"):
+            with self.store:
+                event(self.store, "store_lost", at=self.clock(), once=f"{self.night}",
+                      payload={"why": "the permit file already names this receipt's clock but the store holds none: "
+                                      "the store was lost or reset; no clock, no judging, the file's lists are carried "
+                                      "whole"})
+            self.tally["store_lost"] += 1
+            self.note("STORE LOST: the permit file names this receipt's clock but pool-screen.sqlite holds none; nothing "
+                      "is judged and no clock starts (a captain's step)")
+            return None
+        night, before = first_night(self.fdb, float(sight["release_start"]))
         if night is None:
-            self._ev("clock_wait", once=f"{before}", payload={"why": "no record night written since the release that "
-                                                                     "carries the receipt began: the clock waits"})
-            self.tally["clock_wait"] += 1
+            self.clock_waited("no record night written since the receipt was first sighted")
             return None
         facts = self.fwd1()
         if facts is None:
             self._ev("house", once=f"clock:{night}", payload={"why": "FWD1's store could not be read on the first "
                                                                      "night: the route list waits a night"})
             self.tally["house"] += 1
+            self.clock_waited("FWD1's store could not be read", cause="house")
+            return None
+        try:
+            self.hc()
+            if not self.train_step(founders_only=True):
+                raise Wait("train", "the founders' Train series are not all written yet")
+            checks = self.clock_check()
+        except Wait as w:
+            self.clock_waited(f"the clock-start conformance is not done ({w.why})", cause=w.cause)
             return None
         from ..equity import schedule
 
         clock = schedule.next_session(dt.date.fromisoformat(night)).isoformat()
         rec = self.receipt
         at = self.clock()
-        # each founding cluster's U_u at the FWD1-R checkpoint count its candidates read before the clock
-        cluster_caps: dict[str, tuple[P.Caps, int]] = {}
-        for cid, cl in rec.clusters.items():
-            count = 0
-            for cell in cl.cells:
-                for lineage in rec.units[cell].founders:
-                    row = facts.get(lineage)
-                    if fwd1_case_n(row) or str((row or {}).get("status")) == "pass":
-                        count = max(count, int((row or {}).get("k_read") or 0))
-            u = rec.u_at(cid, count)
-            caps = P.caps(1.0, 1.0) if u is None else P.caps(*u)
-            cluster_caps[cid] = (caps, count)
+        states = self.cluster_states(facts, checks)
         routes: dict[str, tuple[str, str, str]] = {}
         member_rows = []
         for lineage, f in sorted(rec.founders.items()):
             unit = rec.units.get(f.cell or "")
-            row = facts.get(lineage)
-            judged = isinstance(row, Mapping) and int(row.get("judged") or 0) == 1
-            why = f.why
-            if f.merged_into:
-                route = "merged"
-            elif f.why:
-                route = "out"
-            elif unit is None:
-                route, why = ("fwd1" if judged else "sealed"), ("its cell is below M_MIN at the clock: it stays on "
-                                                                "its per-program route")
-            else:
-                caps, _ = cluster_caps[unit.cluster]
-                if P.on_pool_route(row, unit_judged=True, refuted=unit.refuted, report_only=caps.report_only):
-                    route = "pool"
-                    routes[lineage] = (unit.cell, unit.cluster, "a founder FWD1 judges as case N, with no FWD1-R pass")
-                elif judged:
-                    route = "fwd1"
-                    why = ("its unit was refuted by stage 1" if unit.refuted else
-                           "its cluster is report-only" if caps.report_only else
-                           "an FWD1-R pass before the clock: a member, its FWD1-R ticket in U_u")
-                else:
-                    route, why = "sealed", "FWD1 does not judge it (a sealed pre-check, or a live row): evidence only"
-            member_rows.append((lineage, f.pid, f.cell if unit is not None else None, route,
-                                clock if unit is not None else None, f.cls, 0, f.merged_into, None, why, None, at))
+            state = states.get(unit.cluster) if unit is not None else None
+            route, why = self.founder_route(lineage, facts.get(lineage), state)
+            if route is None:
+                continue                                  # FWD1 has no row yet: decided once it has one
+            judged = unit is not None and state is not None and (state["clocked"] or state["report_only"]) \
+                and not state["refuted"] and not state["ineligible"]
+            if route == "pool":
+                routes[lineage] = (unit.cell, unit.cluster, "a founder FWD1 judges as case N, with no FWD1-R pass")
+            member_rows.append((lineage, f.pid, f.cell if judged else None, route, clock if judged else None, f.cls, 0,
+                                f.merged_into, f.infer_key_class, why, None, at))
         for lineage, f in sorted(rec.founders.items()):
-            if f.merged_into and f.merged_into in routes:            # a merged copy follows its member's route
+            if f.merged_into and f.merged_into in routes:             # a merged copy follows its member's route
                 cell, cid, _ = routes[f.merged_into]
                 routes[lineage] = (cell, cid, f"merged into {f.merged_into}, which is on the POOL route")
         with self.store:
             self.store.execute("INSERT OR IGNORE INTO pool_pins(sha, release, release_start, before, night, clock, "
                                "evidence, at) VALUES (?,?,?,?,?,?,?,?)",
-                               (rec.sha256, name, release_start, before, night, clock, evidence, at))
+                               (rec.sha256, str(sight["release"]), float(sight["release_start"]), before, night, clock,
+                                str(sight["evidence"]), at))
             for cell, unit in sorted(rec.units.items()):
-                caps, count = cluster_caps[unit.cluster]
+                st = states[unit.cluster]
+                caps_ = st["caps"]
+                conforming = -1 if st["conforming"] is None else int(bool(st["conforming"]))
                 self.store.execute(
                     "INSERT OR IGNORE INTO pool_units(cell, cls, grp, cluster, founders, clock, origin, refuted, stage1, "
-                    "u_point, u_bound, cap, wall, report_only, fwd1_count, at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (cell, unit.cls, unit.group, unit.cluster, _dumps(list(unit.founders)), clock, "receipt",
-                     int(unit.refuted), _dumps(dict(unit.stage1)), caps.u_point, caps.u_bound, caps.cap, caps.wall,
-                     int(caps.report_only), count, at))
-                if unit.refuted:
+                    "u_point, u_bound, cap, wall, report_only, report_why, ineligible, conforming, clocked, fwd1_count, "
+                    "at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (cell, unit.cls, unit.group, unit.cluster, _dumps(list(unit.members)), clock, "receipt",
+                     int(st["refuted"]), _dumps(dict(rec.clusters[unit.cluster].stage1)), st["u"][0], st["u"][1],
+                     float(caps_.cap), float(caps_.wall), int(st["report_only"]), caps_.why, int(st["ineligible"]),
+                     conforming, int(st["clocked"]), int(st["count"]), at))
+                if st["refuted"]:
                     self.store.execute("INSERT OR IGNORE INTO pool_verdicts(cell, word, why, at) VALUES (?,?,?,?)",
-                                       (cell, "REFUTED", "stage 1 refuted the unit on its seen-span Train runs", at))
+                                       (cell, "REFUTED", "stage 1 refuted the cluster on its seen-span Train runs", at))
+                elif st["ineligible"]:
+                    self.store.execute("INSERT OR IGNORE INTO pool_verdicts(cell, word, why, at) VALUES (?,?,?,?)",
+                                       (cell, "INELIGIBLE", "the receipt's cluster has no bar on the grid at the pin", at))
             for row in member_rows:
                 self.store.execute("INSERT OR IGNORE INTO pool_members(lineage, pid, cell, route, joins, declared, "
                                    "assigned, merged_into, infer_key, why, corr, at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -810,7 +1328,8 @@ class Night:
                   payload={"why": "the pooled screen's first night under the release that carries its receipt: the "
                                   "units, the founders and the POOL-route list are written; the clock starts at the "
                                   "next session", "night": night, "clock": clock, "routes": len(routes),
-                           "units": len(rec.units)})
+                           "units": len(rec.units),
+                           "clocked": sorted(cid for cid, st in states.items() if st["clocked"])})
         self.tally["routes_written"] += len(routes)
         return self.pin_row()
 
@@ -846,20 +1365,22 @@ class Night:
                 with self.store:
                     self.store.execute("INSERT OR IGNORE INTO pool_holds(lineage, night, why, at) VALUES (?,?,?,?)",
                                        (lineage, str(self.night), "a later lineage FWD1 judges as case N: held off "
-                                                                  "FWD1-R seats until the House assigns it",
-                                        self.clock()))
+                                                                  "FWD1-R seats and sealed tries until the House "
+                                                                  "decides it", self.clock()))
                     event(self.store, "held", at=self.clock(), lineage=lineage, once="held", payload={"pid": pid})
                 held.add(lineage)
                 self.tally["held"] += 1
 
     def _member(self, lineage: str, pid: int | None, *, cell: str | None, route: str, why: str | None,
                 fam: Mapping[str, Any] | None, row: Mapping[str, Any] | None, assigned: bool = False,
-                merged: str | None = None, joins: str | None = None, corr: Mapping[str, Any] | None = None) -> None:
+                merged: str | None = None, joins: str | None = None, corr: Mapping[str, Any] | None = None,
+                declared: str | None = None) -> None:
         card = _card(self.swarm, (row or {}).get("family")) if row is not None else None
         with self.store:
             self.store.execute("INSERT OR IGNORE INTO pool_members(lineage, pid, cell, route, joins, declared, assigned, "
                                "merged_into, infer_key, why, corr, at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                               (lineage, pid, cell, route, joins, (card or {}).get("mechanism_class"), int(assigned),
+                               (lineage, pid, cell, route, joins, declared or (card or {}).get("mechanism_class"),
+                                int(assigned),
                                 merged, _infer(fam), why, None if corr is None else _dumps(corr), self.clock()))
             event(self.store, "decided", at=self.clock(), lineage=lineage, once="decided",
                   payload={"route": route, "cell": cell, "why": why})
@@ -881,134 +1402,153 @@ class Night:
             event(self.store, "routed", at=self.clock(), lineage=lineage, once="routed", payload={"cell": cell})
         self.tally["routed"] += 1
 
-    def train_z(self, pid: int) -> tuple[list[str], list[float]] | None:
-        """A member's Train z (era-restart alpha over its pools / sigma_used at its own sigma), or None without its
-        Train series."""
-        import numpy as np
+    def train_z(self, pid: int) -> Any:
+        """A member's raw Train z on the House calendar (vendored `z_on_calendar`), or None without its Train series."""
+        mm = self.member(pid)
+        return None if mm is None else P.train_z(self.cal, mm, self.hc())
 
-        if int(pid) in self._z:
-            return self._z[int(pid)]
-        prm = self.params(pid)
-        if prm is None or prm.get("sigma") is None or prm.get("mu") is None:
-            return None
-        mu, wbar = np.array(json.loads(prm["mu"])), np.array(json.loads(prm["wbar"]))
-        g = float(prm["g_bp"]) * 1e-4
-        days: list[str] = []
-        zs: list[float] = []
-        for era in self.train(pid):
-            if era is None:
-                continue
-            rg = np.asarray(era["r"]) - g * np.asarray(era["sides"])
-            a = P.era_alpha(rg, np.asarray(era["r"]) - np.asarray(era["r15"]), np.asarray(era["ws"]),
-                            np.asarray(era["R"]), mu, wbar)
-            sigma = P.sigma_used(float(prm["sigma"]), None)
-            days.extend(era["days"])
-            zs.extend((a / sigma).tolist())
-        out = (days, zs) if days else None
-        self._z[int(pid)] = out
-        return out
-
-    def cell_D(self, cell: str) -> tuple[list[str], list[float]] | None:
-        """A clocked cell's founders' Train D (the mean of their Train z each Train session), or None while a founder
-        lacks its Train series."""
-        unit = self.units().get(cell)
+    def founders_z(self, cell: str) -> list[Any] | None:
+        """A unit's founders' Train z (their nanmean is the cell's Train D an assignment correlates with: the contract's
+        3.5), or None while a founder lacks its Train series."""
+        unit = self.receipt.units.get(cell)
         if unit is None:
             return None
-        series = []
-        for lineage in json.loads(unit["founders"]):
-            f = self.receipt.founders.get(lineage)
-            z = None if f is None else self.train_z(f.pid)
+        zs = []
+        for lineage in unit.members:
+            z = self.train_z(self.receipt.founders[lineage].pid)
             if z is None:
                 return None
-            series.append(z)
-        return P.mean_series(series) if series else None
+            zs.append(z)
+        return zs or None
+
+    def decide_founders(self) -> None:
+        """A founder of a clocked unit FWD1 had no row for at the clock, decided once it has one (a missing row is a
+        wait, never a route): on the POOL route when its unit is still pending and FWD1 judges it as case N."""
+        facts = self.fwd1() or {}
+        decided = {str(r[0]) for r in self.store.execute("SELECT lineage FROM pool_members")}
+        units = self.units()
+        for lineage, f in sorted(self.receipt.founders.items()):
+            if lineage in decided or not f.member or f.cell not in units:
+                continue
+            u = units[f.cell]
+            state = {"clocked": bool(int(u["clocked"])), "refuted": bool(int(u["refuted"])),
+                     "ineligible": bool(int(u["ineligible"])), "report_only": bool(int(u["report_only"]))}
+            route, why = self.founder_route(lineage, facts.get(lineage), state, unit_final=self.final(f.cell))
+            if route is None:
+                continue
+            self._member(lineage, f.pid, cell=f.cell, route=route, why=why, fam=self.families.get(f.family), row=None,
+                         joins=str(u["clock"]), declared=f.cls)
+            if route == "pool":
+                self._route(lineage, f.cell, str(u["cluster"]), "a founder FWD1 sighted after the clock as case N")
+                for other, g in sorted(self.receipt.founders.items()):
+                    if g.merged_into == lineage:
+                        self._route(other, f.cell, str(u["cluster"]), f"merged into {lineage}, which is on the POOL route")
+
+    def _earlier_ready(self, pid: int) -> bool:
+        """THE COPY MERGE WAITS (the P1 review's F13): every earlier member (by pid) is settled first: a founding member
+        has its Train series written, and a later lineage with a passing version is decided (it has its Train series,
+        or is out), so a copy is never assigned or routed past an earlier member it could merge into. `decide` reads the
+        later lineages in pid order, so a night settles an earlier one before a later one."""
+        for f in self.receipt.founders.values():
+            if f.member and f.pid < pid and self.params(f.pid) is None:
+                return False
+        decided = {str(r[0]) for r in self.store.execute("SELECT lineage FROM pool_members")}
+        for lineage, rows in self._candidate_rows():
+            other = P.member_pid(rows)
+            if other is None or other >= pid:
+                continue
+            if lineage not in decided:
+                return False
+        return True
+
+    def _earlier_members(self, pid: int) -> list[Any]:
+        """Every earlier kept member by pid (the founding members and the decided later lineages that are neither out
+        nor merged), as vendored `Member`s."""
+        out = []
+        for f in sorted(self.receipt.founders.values(), key=lambda x: x.pid):
+            if f.member and f.pid < pid:
+                mm = self.member(f.pid)
+                if mm is not None:
+                    out.append(mm)
+        for r in self.store.execute("SELECT pid FROM pool_members WHERE route NOT IN ('out', 'merged') AND pid IS NOT NULL "
+                                    "AND pid < ? ORDER BY pid", (int(pid),)):
+            if int(r["pid"]) in self._by_pid:
+                continue
+            mm = self.member(int(r["pid"]))
+            if mm is not None:
+                out.append(mm)
+        return sorted(out, key=lambda m: int(m.meta.get("pid") or 0))
 
     def decide(self) -> None:
-        """THE LATER LINEAGES' House decision (the module docstring, 2), once each one's Train series and its group's
-        founders' exist."""
+        """THE LATER LINEAGES' House decision (the module docstring, 2), once FWD1 has its row, its own Train series
+        and every earlier member's exist."""
         facts = self.fwd1() or {}
         units = self.units()
         decided = {str(r[0]) for r in self.store.execute("SELECT lineage FROM pool_members")}
-        for lineage, rows in self._candidate_rows():
+        order = sorted(((P.member_pid(rows), lineage, rows) for lineage, rows in self._candidate_rows()
+                        if P.member_pid(rows) is not None), key=lambda x: (x[0], x[1]))
+        for pid, lineage, rows in order:
             if lineage in decided:
                 continue
-            pid = P.member_pid(rows)
-            if pid is None:
-                continue
+            fwd1 = facts.get(lineage)
+            if not isinstance(fwd1, Mapping):
+                continue                                  # FWD1 has not sighted it: a wait, never a route (the P1 review's F5)
             prm = self.params(pid)
             if prm is None:
                 continue                                  # its Train series first (`train_step`)
             row = next(r for r in rows if int(r["pid"]) == pid)
             fam = self.families.get(str(row["family"]))
-            if prm.get("why"):
-                self._member(lineage, pid, cell=None, route="out", why=str(prm["why"]), fam=fam, row=row)
-                self._release(lineage, str(prm["why"]))
-                continue
-            why = P.excluded(panel=False, symbols=[], card=None, code="", mean_exposure=prm.get("mean_exposure"),
-                             group_why=None if prm.get("grp") else "no base group holds more than 2/3 of its Train-era "
-                                                                   "exposure")
-            if why is not None:
+            if prm["status"] != "member":
+                why = str(prm.get("why") or "no Train-era series")
                 self._member(lineage, pid, cell=None, route="out", why=why, fam=fam, row=row)
                 self._release(lineage, why)
                 continue
-            grp = str(prm["grp"])
-            z = self.train_z(pid)
-            if z is None:
+            if not self._earlier_ready(pid):
+                continue                                  # every earlier lineage settled first (the P1 review's F13)
+            mm = self.member(pid)
+            if mm is None:
                 continue
-            # THE COPY MERGE against every earlier member (founders and decided members) with a Train series
-            earlier = []
-            for other, f in self.receipt.founders.items():
-                if f.why or f.merged_into or f.pid >= pid:
-                    continue
-                prog = self.program(f.pid)
-                earlier.append((other, f.pid, self.train_z(f.pid), "" if prog is None else prog.program_sha))
-            for m in self.store.execute("SELECT lineage, pid FROM pool_members WHERE cell IS NOT NULL AND merged_into IS "
-                                        "NULL AND assigned=1"):
-                if m["pid"] is None or int(m["pid"]) >= pid:
-                    continue
-                prog = self.program(int(m["pid"]))
-                earlier.append((str(m["lineage"]), int(m["pid"]), self.train_z(int(m["pid"])),
-                                "" if prog is None else prog.program_sha))
-            me = self.program(pid)
-            into = P.merge_copy(z, "" if me is None else me.program_sha, earlier)
+            into = P.merge_copy(self.cal, mm, self._earlier_members(pid), self.hc())
             if into is not None:
+                target = self.lineage_of_pid(int(str(into)[1:])) or str(into)
                 routes = self.routes()
-                self._member(lineage, pid, cell=None, route="merged", why=f"merged into {into}", fam=fam, row=row,
-                             merged=into)
-                if into in routes:
-                    self._route(lineage, str(routes[into]["cell"]), str(routes[into]["cluster"]),
-                                f"merged into {into}, which is on the POOL route")
+                self._member(lineage, pid, cell=None, route="merged", why=f"merged into {target}", fam=fam, row=row,
+                             merged=target)
+                if target in routes:
+                    self._route(lineage, str(routes[target]["cell"]), str(routes[target]["cluster"]),
+                                f"merged into {target}, which is on the POOL route")
                 else:
-                    self._release(lineage, f"merged into {into}, which is not on the POOL route")
+                    self._release(lineage, f"merged into {target}, which is not on the POOL route")
                 continue
-            # THE ASSIGNMENT among the clocked cells of its group
-            cells = {}
+            grp = str(prm["grp"])
+            cells: dict[str, Any] | None = {}
             for cell, unit in units.items():
                 if unit["grp"] != grp:
                     continue
-                d = self.cell_D(cell)
-                if d is None:
+                zs = self.founders_z(cell)
+                if zs is None:
                     cells = None
                     break
-                cells[cell] = d
+                cells[cell] = zs                                                    # type: ignore[index]
             if cells is None:
                 continue                                  # its group's founders' Train series first
-            target, corrs = P.assign(z, cells, self.receipt.rho_assign)
-            corr = {c: (None if v is None else round(v, 6)) for c, v in corrs.items()}
+            target, corrs = P.assign(self.cal, self.train_z(pid), cells, self.receipt.rho_assign)
+            corr = {c: (None if not math.isfinite(v) else round(v, 6)) for c, v in corrs.items()}
             if target is None:
                 self._member(lineage, pid, cell=None, route="new_cell", fam=fam, row=row, corr=corr,
-                             why="under rho_assign with every clocked cell of its group: it counts toward a new cell "
-                                 "under its declared class (not clocked in P1: it stays on its per-program route)")
+                             why="under rho_assign with every cell of its group (or no rho_assign): it counts toward a "
+                                 "new cell under its declared class (not clocked in P1: it stays on its per-program "
+                                 "route)")
                 self._release(lineage, "counts toward a new cell (not clocked in P1)")
                 continue
             unit = units[target]
-            if self.final(target):
+            if self.final(target) or not (int(unit["clocked"]) or int(unit["report_only"])):
                 self._member(lineage, pid, cell=None, route="final_unit", fam=fam, row=row, corr=corr,
-                             why=f"assigned to {target}, whose verdict is final: not a member, it stays on FWD1-R")
-                self._release(lineage, f"assigned to {target}, whose verdict is final")
+                             why=f"assigned to {target}, whose verdict is final or which is not clocked: not a member, "
+                                 "it stays on its per-program route")
+                self._release(lineage, f"assigned to {target}, whose verdict is final or which is not clocked")
                 continue
-            fwd1 = facts.get(lineage)
-            spend = fwd1 is not None and int(fwd1.get("k_read") or 0) > 0 and (
+            spend = int(fwd1.get("k_read") or 0) > 0 and (
                 fwd1.get("first_check_at") is None or self._held_at(lineage) is None
                 or float(fwd1["first_check_at"]) < float(self._held_at(lineage)))
             if int(unit["report_only"]):
@@ -1026,129 +1566,50 @@ class Night:
                 self._member(lineage, pid, cell=target, route="pool", fam=fam, row=row, assigned=True, corr=corr,
                              joins=str(unit["clock"]), why=None)
                 self._route(lineage, target, str(unit["cluster"]), "a later lineage assigned to a pending unit")
-            else:
+            elif int(fwd1.get("judged") or 0) == 0 or str(fwd1.get("status")) == "void":
                 self._member(lineage, pid, cell=target, route="sealed", fam=fam, row=row, assigned=True, corr=corr,
                              joins=str(unit["clock"]),
                              why="assigned to a pending unit; FWD1 does not judge it (a sealed pre-check): a member, "
                                  "evidence only")
                 self._release(lineage, "a member that FWD1 does not judge: its sealed path, evidence only")
+            else:
+                self._member(lineage, pid, cell=None, route="fwd1", fam=fam, row=row, corr=corr,
+                             why="FWD1 judges it outside case N: not a member, it stays on FWD1-R")
+                self._release(lineage, "FWD1 judges it outside case N")
 
     def _held_at(self, lineage: str) -> float | None:
         row = self.store.execute("SELECT at FROM pool_holds WHERE lineage=?", (lineage,)).fetchone()
         return None if row is None else float(row[0])
 
-    # --------------------------------------------------------------------------------------- 3. the Train series
-    def needing_train(self) -> list[int]:
-        """The pids whose Train series the House owes: founders of judged units first (pid order), then the later
-        lineages that are not decided (pid order)."""
-        have = {int(r[0]) for r in self.store.execute("SELECT pid FROM pool_params")}
-        first = sorted({f.pid for cell, u in self.receipt.units.items() for lin in u.founders
-                        for f in [self.receipt.founders[lin]]} - have)
-        decided = {str(r[0]) for r in self.store.execute("SELECT lineage FROM pool_members")}
-        later = []
-        for lineage, rows in self._candidate_rows():
-            if lineage in decided:
-                continue
-            pid = P.member_pid(rows)
-            if pid is not None and pid not in have:
-                later.append(pid)
-        return first + sorted(set(later) - set(first))
-
-    def train_step(self) -> None:
-        """THE HOUSE'S TRAIN SERIES (the module docstring, 3), inside the night's budget."""
-        for pid in self.needing_train():
-            if self._over():
-                self.tally["deferred"] += 1
-                return
-            program = self.program(pid)
-            if program is None:
-                continue
-            try:
-                eras = self._timed(lambda: self.runs.train_series(program))
-            except FS.OwnFloorRefused as exc:         # the program's own: no Train series for good, stated
-                self._freeze(pid, None, why=f"no Train series: {str(exc)[:160]}")
-                continue
-            except FS.Late:
-                self.tally["deferred"] += 1
-                return
-            except Exception as exc:  # noqa: BLE001 - the House's: nothing written, asked again
-                self.tally["house"] += 1
-                self._ev("house", once=f"train:{pid}:{self.night}",
-                         payload={"why": "a member's Train-era runs did not finish", "pid": pid,
-                                  "error": type(exc).__name__})
-                continue
-            self._freeze(pid, eras)
-
-    def _freeze(self, pid: int, eras: Sequence[Mapping[str, Any] | None] | None, *, why: str | None = None) -> None:
-        """A member's Train series and its constants, written once (`pool_train`, `pool_params`): mu_s and wbar_s over
-        its pools, sigma (era-restart alpha, the haircut of tonight), its House group, its total exposure by symbol, its
-        mean total exposure and K's Train counts."""
-        import numpy as np
-
-        at = self.clock()
-        g_bp = F.haircut_bp("ETF", FS._lotgaps(self.fdb).get("ETF", []))
-        if eras is None or not any(e is not None for e in eras):
-            with self.store:
-                self.store.execute("INSERT OR IGNORE INTO pool_params(pid, why, g_bp, at) VALUES (?,?,?,?)",
-                                   (int(pid), why or "no Train-era history", float(g_bp), at))
-                event(self.store, "train", at=at, once=f"{pid}", payload={"pid": pid, "why": why or "no history"})
-            return
-        held = [e for e in eras if e is not None]
-        symbols = list(held[0]["symbols"])
-        ws = np.concatenate([np.asarray(e["ws"], dtype=np.float64) for e in held], axis=1)
-        R = np.concatenate([np.asarray(e["R"], dtype=np.float64) for e in held], axis=1)
-        mu = R.mean(axis=1)
-        wbar = ws.mean(axis=1)
-        g = float(g_bp) * 1e-4
-        sigma = P.train_sigma([(np.asarray(e["r"]) - g * np.asarray(e["sides"]),
-                                np.asarray(e["r"]) - np.asarray(e["r15"]), np.asarray(e["ws"]), np.asarray(e["R"]))
-                               for e in held], mu, wbar)
-        exposure = {s: float(np.abs(ws[i]).sum()) for i, s in enumerate(symbols)}
-        grp, gwhy = P.group_of(exposure, symbols)
-        mean_exposure = float(np.abs(ws).sum(axis=0).mean()) if ws.size else 0.0
-        k_close = sum(int(e.get("k_close") or 0) for e in held)
-        k_sessions = sum(int(e.get("k_sessions") or 0) for e in held)
-        with self.store:
-            for era, e in enumerate(eras):
-                if e is None:
-                    continue
-                arrays = {k: e[k] for k in ("symbols", "r", "r15", "w", "b", "ws", "R", "sides")}
-                text = _dumps(arrays)
-                self.store.execute("INSERT OR IGNORE INTO pool_train(pid, era, days, arrays, sha, at) VALUES (?,?,?,?,?,?)",
-                                   (int(pid), era, _dumps(list(e["days"])), text,
-                                    hashlib.sha256(text.encode()).hexdigest(), at))
-            self.store.execute(
-                "INSERT OR IGNORE INTO pool_params(pid, symbols, mu, wbar, sigma, g_bp, exposure, mean_exposure, grp, why, "
-                "k_close, k_sessions, at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (int(pid), _dumps(symbols), _dumps(mu.tolist()), _dumps(wbar.tolist()), sigma, float(g_bp),
-                 _dumps(exposure), mean_exposure, grp,
-                 "no Train-era sigma (fewer than two Train sessions)" if sigma is None else gwhy, k_close, k_sessions,
-                 at))
-            event(self.store, "train", at=at, once=f"{pid}", payload={"pid": pid, "group": grp, "why": gwhy})
-        self.tally["train"] += 1
-
     def sigma_tilde(self, cell: str) -> float | None:
-        """A cell's frozen sigma_tilde (its founders'), written once every founder has its sigma."""
+        """A cell's frozen sigma_tilde (its receipt founders'), written once every founder has its sigma."""
         row = self.store.execute("SELECT sigma_tilde FROM pool_sigma WHERE cell=?", (cell,)).fetchone()
         if row is not None:
             return float(row[0])
-        unit = self.units().get(cell)
+        unit = self.receipt.units.get(cell)
         if unit is None:
             return None
         sigmas = []
-        for lineage in json.loads(unit["founders"]):
+        for lineage in unit.members:
             prm = self.params(self.receipt.founders[lineage].pid)
             if prm is None or prm.get("sigma") is None:
                 return None
             sigmas.append(float(prm["sigma"]))
-        tilde = P.sigma_tilde(sigmas)
-        if tilde is None:
-            return None
+        tilde = float(self.cal.stat.sigma_tilde(sigmas))
         with self.store:
             self.store.execute("INSERT OR IGNORE INTO pool_sigma(cell, sigma_tilde, at) VALUES (?,?,?)",
                                (cell, tilde, self.clock()))
         return tilde
 
+    def founders_sigma(self, cell: str) -> list[float]:
+        """The cell's receipt founders' sigma (`cluster_cells`' founders_sigma: a joiner takes the founders')."""
+        out = []
+        for lineage in self.receipt.units[cell].members:
+            prm = self.params(self.receipt.founders[lineage].pid)
+            if prm is None or prm.get("sigma") is None:
+                raise Wait("train", "a founder's Train series is not written yet")
+            out.append(float(prm["sigma"]))
+        return out
     # --------------------------------------------------------------------------------------- 4. the cell sessions
     def cell_members(self, cell: str) -> list[dict[str, Any]]:
         """A unit's members: its founders and the later lineages assigned to it (each {lineage, pid, joins})."""
@@ -1389,7 +1850,7 @@ class Night:
     def clusters_now(self) -> dict[str, list[str]]:
         """Every cluster as it stands: the receipt's (`pool_units.cluster`), joined by every join a look recorded
         (`pool_clusters`, in order; a join only tightens and no cluster is ever split). {id: its cells}; a joined
-        cluster's id is its parts' ids joined by "+"."""
+        cluster's id is its parts' ids joined by "+" (the vendored `join_clusters`' naming)."""
         groups: dict[str, set[str]] = {}
         for c, u in self.units().items():
             groups.setdefault(str(u["cluster"]), set()).add(c)
@@ -1402,174 +1863,129 @@ class Night:
             groups["+".join(sorted(touched))] = union
         return {cid: sorted(cells) for cid, cells in sorted(groups.items())}
 
-    def u_of(self, cells: Sequence[str]) -> tuple[float, float]:
-        """U_u of a cluster of these cells: its receipt cluster's at the clock, or, for a cluster joined at a look,
-        the union bound over the receipt clusters it holds (`pool_rule.joined_u`: a cap only falls)."""
+    def u_of(self, cells: Sequence[str]) -> tuple[tuple[float, float], list[Any]]:
+        """U_u of a cluster of these cells and the tickets its parts dropped: its receipt cluster's at the clock, or,
+        for a cluster joined at a look, the union bound over the receipt clusters it holds (`pool_rule.joined_u`: a cap
+        only falls)."""
         units = self.units()
         parts: dict[str, tuple[float, float]] = {}
+        dropped: list[Any] = []
         for c in cells:
             u = units[c]
-            parts[str(u["cluster"])] = (float(u["u_point"]), float(u["u_bound"]))
+            cid = str(u["cluster"])
+            if cid not in parts:
+                parts[cid] = (float(u["u_point"]), float(u["u_bound"]))
+                found = self.receipt.clusters.get(cid)
+                dropped.extend(found.dropped if found is not None else ())
         values = [parts[k] for k in sorted(parts)]
-        return values[0] if len(values) == 1 else P.joined_u(values)
+        return (values[0] if len(values) == 1 else P.joined_u(values)), dropped
 
-    def effective_cluster(self, cell: str) -> tuple[str, list[str], tuple[float, float]]:
-        """The cluster a cell is judged in now (`clusters_now`): (its id, its cells, its U_u (`u_of`))."""
+    def effective_cluster(self, cell: str) -> tuple[str, list[str], P.Caps]:
+        """The cluster a cell is judged in now (`clusters_now`): (its id, its cells, its caps (`u_of` through
+        `pool_rule.caps`: a report-only unit's or a join's report-only caps included))."""
         for cid, cells in self.clusters_now().items():
             if cell in cells:
-                return cid, cells, self.u_of(cells)
+                u, dropped = self.u_of(cells)
+                caps_ = P.caps(u[0], u[1], dropped)
+                if any(int(self.units()[c]["report_only"]) for c in cells) and not caps_.report_only:
+                    caps_ = P.caps(None, None)
+                return cid, cells, caps_
         raise KeyError(cell)
 
+    def judged_members(self, cells: Sequence[str], members_at: Mapping[str, Sequence[Mapping[str, Any]]]
+                       ) -> dict[tuple[str, str], list[Any]]:
+        """{cell key: [Member]} of these cells (the looking cell's members active through its look, `members_at`;
+        every other cell's as they stand), by pid; `Wait` while a member lacks its Train series."""
+        out: dict[tuple[str, str], list[Any]] = {}
+        for c in cells:
+            ms = []
+            for m in members_at.get(c, self.cell_members(c)):
+                mm = self.member(int(m["pid"]))
+                if mm is None:
+                    raise Wait("train", f"{m['lineage']}'s Train series is not written yet")
+                ms.append(mm)
+            out[P.cell_key(c)] = sorted(ms, key=lambda x: int(x.meta.get("pid") or 0))
+        return out
+
     def retest(self, cell: str, look_key: str, members_at: Mapping[str, Sequence[Mapping[str, Any]]]) -> None:
-        """THE CLUSTERS RE-TESTED at a look (section 1.4) on Train only, with the members then active (the looking
-        cell's through its look, every other cell's as it stands): clusters the member rule joins are recorded
-        (`pool_clusters`) from this look; their joint floor and U_u follow (`effective_cluster`), and a recorded pass of
-        either is re-derived at the joint bar (`demotions`)."""
+        """THE CLUSTERS RE-TESTED at a look (section 1.4) on Train only by the vendored member rule (`pool_rule.cluster`:
+        `join_clusters`), with the members then active (the looking cell's through its look, every other cell's as it
+        stands): clusters it joins are recorded (`pool_clusters`) from this look; their joint floor and U_u follow
+        (`effective_cluster`), a join that makes its caps report-only makes it report-only from this look on (sticky),
+        and a recorded pass of either is re-derived at the joint bar (`demotions`)."""
         current = self.clusters_now()
-        payload: dict[str, dict[str, list[Any]]] = {}
-        for cid, cells in current.items():
-            payload[cid] = {}
-            for c in cells:
-                zs = []
-                for m in members_at.get(c, self.cell_members(c)):
-                    z = self.train_z(int(m["pid"]))
-                    if z is None:
-                        raise Wait("train", "a member's Train series is not written yet (the cluster re-test)")
-                    zs.append(z)
-                payload[cid][c] = zs
-        for g in P.member_join(payload):
-            if len(g) < 2:
+        all_cells = [c for cells in current.values() for c in cells]
+        judged = self.judged_members(all_cells, members_at)
+        clusters = {cid: [P.cell_key(c) for c in cells] for cid, cells in current.items()}
+        joined, _ = P.cluster(self.cal, clusters, judged, self.hc())
+        for name, keys in sorted(joined.items()):
+            if name in current:
                 continue
-            cells = sorted(set().union(*(set(current[cid]) for cid in g)))
-            u = self.u_of(cells)
-            name = "+".join(sorted(g))
+            cells = sorted(f"{k[0]}/{k[1]}" for k in keys)
+            u, dropped = self.u_of(cells)
+            ro = P.caps(u[0], u[1], dropped).report_only or any(int(self.units()[c]["report_only"]) for c in cells)
             with self.store:
-                self.store.execute("INSERT OR IGNORE INTO pool_clusters(look, cluster, cells, u_point, u_bound, at) "
-                                   "VALUES (?,?,?,?,?,?)", (look_key, name, _dumps(cells), u[0], u[1], self.clock()))
+                self.store.execute("INSERT OR IGNORE INTO pool_clusters(look, cluster, cells, u_point, u_bound, "
+                                   "report_only, at) VALUES (?,?,?,?,?,?,?)",
+                                   (look_key, name, _dumps(cells), u[0], u[1], int(ro), self.clock()))
                 event(self.store, "joined", at=self.clock(), cell=cell, once=f"{look_key}:{name}",
-                      payload={"clusters": sorted(g), "cells": cells})
+                      payload={"cluster": name, "cells": cells, "report_only": bool(ro)})
             self.tally["joined"] += 1
 
-    def floor_members(self, cells: Sequence[str], engine: int, through: Mapping[str, str]) -> list[P.FloorMember]:
-        """The cluster's members as the own floor reads them (their Train series, constants and join offsets: the
-        cell session each joined its cell at, through each cell's look)."""
-        import numpy as np
-
-        from ..equity import config as econfig
-
-        out = []
+    def c_own(self, cid: str, cells: Sequence[str], look_key: str, engine: int, through: Mapping[str, str],
+              caps: P.Caps) -> int | None:
+        """THE BAR of the cluster at a look (the contract's 4.1; `pool_floors`, once a cluster and look): the vendored
+        floor pipeline (`pool_rule.house_floor`) on the cluster's members active through the look (each joined at the
+        cell session it joined its cell at; each cell's founders' sigma), the receipt's boot seed (a cluster made by a
+        join takes `pool_rule.joined_seed`), the receipt's B and the caps of the count read; c_own of the receipt's
+        floor definition, the matched minimum of the receipt's table at each cell's active m, and the bar
+        (`pool_rule.k_used`; None: ineligible). Its resamples are kept in `pool_boot` across nights; raises `Wait`
+        while it cannot be finished tonight or a cell's m has no row (above 60)."""
+        held = self.store.execute("SELECT row FROM pool_floors WHERE cluster=? AND look=?", (cid, look_key)).fetchone()
+        if held is not None:
+            return json.loads(held[0]).get("k_used")
+        judged: dict[tuple[str, str], list[Any]] = {}
+        joins: dict[str, int] = {}
+        fsig: dict[tuple[str, str], list[float]] = {}
+        m_by_cell: dict[str, int] = {}
         for c in cells:
-            tilde = self.sigma_tilde(c)
-            if tilde is None:
-                raise Wait("train", "a founder's Train series is not written yet (the own floor)")
             sess = self.sessions(c, engine)
             cutoff = through.get(c)
             sess = [s for s in sess if cutoff is None or s <= cutoff]
+            ms = []
             for m in self.cell_members(c):
-                prm = self.params(int(m["pid"]))
-                if prm is None or prm.get("mu") is None or prm.get("sigma") is None:
-                    raise Wait("train", f"{m['lineage']}'s Train series is not written yet (the own floor)")
                 counted = counted_by_day(self.fdb, int(m["pid"]), engine)
                 join_day = min((d for d in counted if d >= m["joins"]), default=None)
                 if join_day is None or (cutoff is not None and join_day > cutoff):
                     continue                              # not active by the look: not in the floor
-                offset = sum(1 for s in sess if s < join_day)
-                symbols = json.loads(prm["symbols"])
-                hs = np.array([econfig.half_spread(s) for s in symbols])
-                g = float(prm["g_bp"]) * 1e-4
-                eras = []
-                for era in self.train(int(m["pid"])):
-                    if era is None:
-                        eras.append(None)
-                        continue
-                    r = np.asarray(era["r"])
-                    eras.append(P.Era(days=tuple(era["days"]), rg=r - g * np.asarray(era["sides"]),
-                                      gap=r - np.asarray(era["r15"]), ws=np.asarray(era["ws"]), R=np.asarray(era["R"]),
-                                      hs=hs))
-                out.append(P.FloorMember(key=str(m["lineage"]), cell=c, join=offset,
-                                         mu=np.array(json.loads(prm["mu"])), wbar=np.array(json.loads(prm["wbar"])),
-                                         sigma=P.sigma_used(float(prm["sigma"]), tilde), g=g, eras=tuple(eras)))
-        return out
-
-    def markets(self) -> list[P.Market]:
-        """The Train eras' market series (`pool_market`, written once from the House's store)."""
-        import numpy as np
-
-        rows = list(self.store.execute("SELECT era, days, arrays FROM pool_market ORDER BY era"))
-        if not rows:
-            if self._over():
-                raise Wait("budget", "the night's budget is spent: the market series wait")
-            try:
-                found = self._timed(lambda: self.runs.market())
-            except Exception as exc:  # noqa: BLE001 - the House's
-                self._ev("house", once=f"market:{self.night}", payload={"why": "the Train eras' market series could not "
-                                                                                "be read", "error": type(exc).__name__})
-                raise Wait("house", "the Train eras' market series could not be read") from None
-            with self.store:
-                for era, m in enumerate(found):
-                    text = _dumps({k: m[k] for k in ("spy", "sectors", "tlt", "gld")})
-                    self.store.execute("INSERT OR IGNORE INTO pool_market(era, days, arrays, sha, at) VALUES (?,?,?,?,?)",
-                                       (era, _dumps(list(m["days"])), text, hashlib.sha256(text.encode()).hexdigest(),
-                                        self.clock()))
-            rows = list(self.store.execute("SELECT era, days, arrays FROM pool_market ORDER BY era"))
-        out = []
-        for r in rows:
-            arr = json.loads(r["arrays"])
-            out.append(P.Market(days=tuple(json.loads(r["days"])), spy=np.array(arr["spy"], dtype=np.float64),
-                                sectors=np.array(arr["sectors"], dtype=np.float64), tlt=np.array(arr["tlt"], dtype=np.float64),
-                                gld=np.array(arr["gld"], dtype=np.float64)))
-        return out
-
-    def c_own(self, cid: str, cells: Sequence[str], look_key: str, engine: int, through: Mapping[str, str],
-              caps: P.Caps) -> int | None:
-        """THE OWN FLOOR of the cluster at a look (`pool_floors`, once a cluster and look; its bootstrap resamples
-        spread over nights in `pool_boot`). Raises `Wait` while it cannot be finished tonight."""
-        held = self.store.execute("SELECT row FROM pool_floors WHERE cluster=? AND look=?", (cid, look_key)).fetchone()
-        if held is not None:
-            return json.loads(held[0]).get("k_own")
-        members = self.floor_members(cells, engine, through)
-        markets = self.markets()
-        aligned_members, aligned_markets = P.aligned(members, markets)
-        axes = P.unit_axes(cells)
-        cuts = self.receipt.regimes
-        hists: dict[str, dict[int, Any]] = {}
-        for null in P.NULLS:
-            done = {int(r["draw"]): json.loads(r["row"]) for r in self.store.execute(
-                "SELECT draw, row FROM pool_boot WHERE cluster=? AND look=? AND null_=?", (cid, look_key, null))}
-            todo = [d for d in range(P.BOOT_RESAMPLES) if d not in done]
-            while todo:
-                if self._over():
-                    raise Wait("budget", "the own floor's bootstrap resamples continue the next night")
-                chunk, todo = todo[:50], todo[50:]
-                found = self._timed(lambda: P.bootstrap_histograms(aligned_members, aligned_markets, null,
-                                                                    unit=f"{cid}@{look_key}", draws=chunk, cuts=cuts,
-                                                                    axes=axes))
-                with self.store:
-                    for draw, row in found.items():
-                        self.store.execute("INSERT OR IGNORE INTO pool_boot(cluster, look, null_, draw, row, at) "
-                                           "VALUES (?,?,?,?,?,?)", (cid, look_key, null, int(draw), _dumps(row),
-                                                                    self.clock()))
-                done.update(found)
-            hists[null] = done
-        units = self.units()
-        m_by_cell = Counter(m.cell for m in members)
-        matched = []
-        for c in cells:
-            k = self.receipt.matched(str(units[c]["grp"]), str(units[c]["cls"]), m_by_cell.get(c, 0))
-            matched.append(k)
-        if any(k is None for k in matched):
-            raise Wait("receipt", "the receipt holds no matched stand-in family's N1 floor for a cell of the cluster")
-        matched_k = max(matched)                                                  # type: ignore[type-var]
-        result = self._timed(lambda: P.own_floor(members, markets, unit=f"{cid}@{look_key}",
-                                                 floor_def=self.receipt.floor, caps_=caps, cuts=cuts,
-                                                 matched_k=matched_k, hists=hists))
-        if result["k_own"] is None and "resamples" in str(result.get("why")):
-            raise Wait("budget", str(result["why"]))
+                mm = self.member(int(m["pid"]))
+                if mm is None:
+                    raise Wait("train", f"{m['lineage']}'s Train series is not written yet (the own floor)")
+                ms.append(mm)
+                joins[mm.name] = sum(1 for s in sess if s < join_day)
+            judged[P.cell_key(c)] = sorted(ms, key=lambda x: int(x.meta.get("pid") or 0))
+            fsig[P.cell_key(c)] = self.founders_sigma(c)
+            m_by_cell[c] = len(ms)
+        minimum = P.minimum_of(self.receipt, m_by_cell)
+        fd = self.receipt.rule.floor_def
+        if minimum.get(fd) is None:
+            raise Wait("receipt", "a cell's active members have no row of the receipt's matched-family table (m above "
+                                  "60): no bar, the look waits")
+        found = self.receipt.clusters.get(cid)
+        seed = found.boot_seed if found is not None else P.joined_seed(cid, look_key)
+        look = self.floor_key(look_key, judged, joins, self.receipt.B, seed)
+        fl = P.house_floor(self.cal, cid=cid, keys=[P.cell_key(c) for c in cells], judged=judged, hc=self.hc(),
+                           B=self.receipt.B, boot_seed=seed, caps_=caps, joins=joins, founders_sigma=fsig,
+                           boot=self.boot_hook(cid, look))
+        floors = P.pin_floors(fl, self.receipt, minimum)
+        ku = floors[fd]["k_used"]
         with self.store:
             self.store.execute("INSERT OR IGNORE INTO pool_floors(cluster, look, row, at) VALUES (?,?,?,?)",
-                               (cid, look_key, _dumps({"k_own": result["k_own"], "why": result["why"],
-                                                       "nulls": result["nulls"], "matched": matched_k}), self.clock()))
-        return result["k_own"]
+                               (cid, look_key, _dumps({"k_used": ku, "floors": floors, "seed": seed,
+                                                       "cap": caps.cap, "wall": caps.wall,
+                                                       "report_only": caps.report_only, "m": m_by_cell,
+                                                       "joins": joins}), self.clock()))
+        return ku
 
     def placebo(self, cell: str, engine: int, sessions: Sequence[str], m: int, T: float, k: int) -> tuple[int | None, int]:
         """THE PLACEBO LEG (section 2.1): (how many of 999 pseudo-cells of the cell's group's skill-free controls have
@@ -1673,14 +2089,11 @@ class Night:
                             why="its zeroed member-days cluster on the sessions of large benchmark moves (section 2.2)")
                 return "VOID"
             point = P.look(out["D"], out["D15"], k)
-            cid, cells, u = self.effective_cluster(cell)
-            members_at = {cell: members}
+            members_at = {cell: [m for m in members if (self.join_day(m, engine) or "9999") <= head[-1]]}
             self.retest(cell, look_key, members_at)
-            cid, cells, u = self.effective_cluster(cell)
-            caps = P.caps(*u)
+            cid, cells, caps = self.effective_cluster(cell)
             through = {cell: head[-1]}
-            k_own = self.c_own(cid, cells, look_key, engine, through, caps)
-            ku = P.k_used(self.receipt.c_G, self.receipt.margin, k_own)
+            ku = self.c_own(cid, cells, look_key, engine, through, caps)
             c_value = None if ku is None else ku / 100.0
             passed = False
             count = draws = None
@@ -1777,7 +2190,7 @@ class Night:
                 held = self.store.execute("SELECT row FROM pool_floors WHERE cluster=? AND look=?", (cid, str(r[0]))).fetchone()
                 if held is None:
                     continue
-                ku = P.k_used(self.receipt.c_G, self.receipt.margin, json.loads(held[0]).get("k_own"))
+                ku = json.loads(held[0]).get("k_used")
                 if ku is None or v["t"] is None or float(v["t"]) < ku / 100.0:
                     self._lost(cell, None, "re-derived at the joint bar of the cluster it joined: the pass is lost")
                     return
@@ -1844,15 +2257,25 @@ class Night:
         self.tally["demoted"] += 1
 
     # ------------------------------------------------------------------------------------------------ the night
-    def run(self, now: float) -> dict[str, Any]:
+    def run_routes(self, now: float) -> dict[str, Any] | None:
+        """THE NIGHT'S FIRST HALF: the clock and the route list (1), the later lineages' sightings and holds, the
+        founders waiting on an FWD1 row, the Train series and the decisions (2, 3); the pin's row, or None while there
+        is no clock. The permit file is written right after it (`night`, in a finally)."""
         pin = self.clock_row(now)
         if pin is None:
-            return dict(self.tally)
+            return None
         self.sight(pin)
+        self.decide_founders()
         self.train_step()
         self.decide()
-        for cell in sorted(self.units()):
-            if self.verdict(cell) is not None and self.verdict(cell)["word"] != "PASS":
+        return pin
+
+    def run_looks(self) -> None:
+        """THE NIGHT'S SECOND HALF: every judged unit's sessions, look and demotion (4-6); a cell whose step fails is an
+        alarm (`look_failed`, once a cell and night) and the others go on."""
+        for cell in sorted(self.judged_units()):
+            v = self.verdict(cell)
+            if v is not None and v["word"] != "PASS":
                 continue
             try:
                 self.classify(cell)
@@ -1860,6 +2283,16 @@ class Night:
                 self.demotions(cell)
             except sqlite3.Error:
                 self.tally["house"] += 1
+            except Exception as exc:  # noqa: BLE001 - one cell's failure never stops the others; an alarm
+                self.tally["look_failed"] += 1
+                self._ev("look_failed", cell=cell, once=f"{self.night}", payload={"error": type(exc).__name__,
+                                                                                 "why": str(exc)[:200]})
+                self.note(f"cell {cell}: its look failed tonight ({type(exc).__name__}); asked again the next night")
+
+    def run(self, now: float) -> dict[str, Any]:
+        """Both halves of one night (`run_routes`, then `run_looks` when there is a clock); the tally."""
+        if self.run_routes(now) is not None:
+            self.run_looks()
         return dict(self.tally)
 
 
@@ -1875,22 +2308,24 @@ def pool_on(settings: Mapping[str, Any] | None) -> bool:
     return raw.get("mode") != "off"
 
 
-#: The words after which a unit's looks are over (its verdict is final, or it ended ineligible): its lineages are
-#: shown again in FWD1's report and the BH/BY meter.
-OVER = (*P.FINAL, P.INELIGIBLE)
+#: The words after which a unit's looks are over (its verdict is final, it ended ineligible, or its cluster is
+#: nonconforming): its lineages are shown again in FWD1's report and the BH/BY meter
+#: (league/ops/forward_report.py `POOL_OVER`; a test holds the two equal).
+OVER = (*P.FINAL, P.INELIGIBLE, P.NONCONFORMING)
 
 
 def withheld(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[frozenset[str], bool]:
     """THE OPERATOR VIEWS' WITHHOLDING (section 8; 11 P1 item 5): (the lineages on the permit file's POOL-route or hold
     list whose unit's verdict is not final (a held lineage has no unit yet), False). FAIL CLOSED: (frozenset(), True),
     "withhold every ETF lineage", when the file cannot be read or is not the job's shape, or is missing while
-    `elane.pool.mode` is not "off" (`pool_on`). league/ops/forward_report.py keeps its own copy (release E3's seal:
-    it imports no pool module); a test holds the two equal."""
+    `elane.pool.mode` is not "off" (`pool_on`) or while this job's store exists (the job never deletes the file).
+    league/ops/forward_report.py keeps its own copy (release E3's seal: it imports no pool module); a test holds the
+    two equal."""
     path = Path(root) / PERMITS
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return frozenset(), pool_on(settings)
+        return frozenset(), pool_on(settings) or (Path(root) / DB).exists()
     except (OSError, ValueError):
         return frozenset(), True
     if not isinstance(doc, Mapping) or doc.get("version") != PERMITS_VERSION or not isinstance(doc.get("routes"), Mapping) \
@@ -1906,16 +2341,27 @@ def withheld(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[froz
 
 
 def unit_words(store: sqlite3.Connection) -> dict[str, dict[str, Any]]:
-    """Every unit's cluster and word: its final verdict's (a lost or demoted pass DEMOTED; an ineligible end
-    "ineligible"), "report_only" for a report-only cluster's unit (its verdict goes to the operator's report alone),
-    else pending."""
+    """Every unit's cluster and word: REFUTED or "ineligible" when the clock found it so; "report_only" for a
+    report-only cluster's unit, or one a join made report-only (its verdict goes to the operator's report alone);
+    "nonconforming" for a cluster the clock-start conformance did not hold; else its final verdict's (a lost or demoted
+    pass DEMOTED; an ineligible end "ineligible"), else pending."""
     demoted = {str(r[0]) for r in store.execute("SELECT cell FROM pool_demotions")}
     verdicts = {str(r["cell"]): str(r["word"]) for r in store.execute("SELECT cell, word FROM pool_verdicts")}
+    joined_ro: set[str] = set()
+    for r in store.execute("SELECT cells FROM pool_clusters WHERE report_only=1"):
+        joined_ro.update(str(c) for c in json.loads(r["cells"]))
     out = {}
-    for u in store.execute("SELECT cell, cluster, report_only FROM pool_units ORDER BY cell"):
+    for u in store.execute("SELECT cell, cluster, report_only, refuted, ineligible, conforming FROM pool_units "
+                           "ORDER BY cell"):
         cell = str(u["cell"])
-        if int(u["report_only"]):
+        if int(u["refuted"]):
+            word = "REFUTED"
+        elif int(u["ineligible"]):
+            word = P.INELIGIBLE
+        elif int(u["report_only"]) or cell in joined_ro:
             word = P.REPORT_ONLY
+        elif int(u["conforming"]) == 0:
+            word = P.NONCONFORMING
         elif cell in demoted:
             word = "DEMOTED"
         elif cell in verdicts:
@@ -1982,18 +2428,24 @@ def eligible_rows(store: sqlite3.Connection, fdb: sqlite3.Connection, fwd1: Mapp
 
 def permits_doc(store: sqlite3.Connection | None, *, receipt: P.Receipt | None, at: float,
                 fdb: sqlite3.Connection | None = None, why: str | None = None,
-                fwd1: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
-    """THE PERMIT FILE's document (the module docstring, 7): ids and words only."""
+                fwd1: Mapping[str, Mapping[str, Any]] | None = None,
+                existing: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """THE PERMIT FILE's document (the module docstring, 7): ids and fixed words only. NEVER SHORTER than `existing`
+    (the readable file on disk): its routes are carried whole, its holds unless the store records the lineage's
+    release (or route), its units' words where the store has none, and its receipt sha and clock while the store has
+    none (a lost store lifts nothing). `why` is a word of `WHY_WORDS` (another text is written "unreadable_reason")."""
     routes: dict[str, Any] = {}
-    holds: list[str] = []
+    holds: set[str] = set()
     units: dict[str, Any] = {}
     lineages: dict[str, Any] = {}
+    released: set[str] = set()
     clock = None
     sha = None
     if store is not None:
         for r in store.execute("SELECT lineage, cell, cluster FROM pool_routes ORDER BY lineage"):
             routes[str(r["lineage"])] = {"cell": r["cell"], "cluster": r["cluster"]}
-        holds = held_lineages(store)
+        holds = set(held_lineages(store))
+        released = {str(r[0]) for r in store.execute("SELECT lineage FROM pool_releases")}
         units = unit_words(store)
         pin = store.execute("SELECT sha, clock FROM pool_pins ORDER BY at LIMIT 1").fetchone()
         if pin is not None:
@@ -2002,44 +2454,81 @@ def permits_doc(store: sqlite3.Connection | None, *, receipt: P.Receipt | None, 
             cell = r["cell"]
             lineages[str(r["lineage"])] = {"cell": cell, "cluster": None if cell is None else
                                            (units.get(str(cell)) or {}).get("cluster")}
+    if existing:
+        for lineage, row in (existing.get("routes") or {}).items():
+            if str(lineage) not in routes:
+                routes[str(lineage)] = {"cell": (row or {}).get("cell"), "cluster": (row or {}).get("cluster")}
+        for lineage in existing.get("holds") or []:
+            if str(lineage) not in released and str(lineage) not in routes:
+                holds.add(str(lineage))
+        for cell, row in (existing.get("units") or {}).items():
+            if str(cell) not in units and isinstance(row, Mapping):
+                units[str(cell)] = {"cluster": row.get("cluster"), "word": row.get("word")}
+        for lineage, row in (existing.get("lineages") or {}).items():
+            if isinstance(row, Mapping):
+                lineages.setdefault(str(lineage), {"cell": row.get("cell"), "cluster": row.get("cluster")})
+        if sha is None and existing.get("clock"):
+            sha, clock = existing.get("receipt"), existing.get("clock")
+    holds -= set(routes)
     if fdb is not None:
         for lineage in sorted(_registry(fdb)):
             lineages.setdefault(lineage, {"cell": None, "cluster": None})
     eligible = eligible_rows(store, fdb, fwd1) if store is not None and fdb is not None else []
     doc = {"version": PERMITS_VERSION, "screen": P.SCREEN, "receipt": sha or (None if receipt is None else receipt.sha256),
-           "clock": clock, "at": _iso(at), "routes": routes, "holds": holds, "units": units, "lineages": lineages,
-           "eligible": eligible}
+           "clock": clock, "at": _iso(at), "routes": dict(sorted(routes.items())), "holds": sorted(holds), "units": units,
+           "lineages": dict(sorted(lineages.items())), "eligible": eligible}
     if why:
-        doc["why"] = why
+        doc["why"] = why if why in WHY_WORDS else "unreadable_reason"
     return doc
 
 
 def write_permits(root: str | Path, store: sqlite3.Connection | None, *, receipt: P.Receipt | None, at: float,
-                  fdb: sqlite3.Connection | None = None, why: str | None = None) -> Path:
-    """THE PERMIT FILE, atomically, 0600 (`permits_doc`). Refused (ValueError) when it would carry a figure."""
+                  fdb: sqlite3.Connection | None = None, why: str | None = None) -> Path | None:
+    """THE PERMIT FILE, atomically, 0600 (`permits_doc`, never shorter than the readable file on disk). NOTHING IS
+    WRITTEN (None, and an event when there is a store) when the existing file cannot be read (it is never overwritten:
+    the swarm keeps failing closed) or the document would carry a figure."""
     from .context import write_json
 
+    existing, exists = read_permit_file(root)
+    if exists and existing is None:
+        if store is not None:
+            with store:
+                event(store, "permits_kept", at=at, once=_iso(at)[:10],
+                      payload={"why": "the permit file on disk cannot be read: it is never overwritten (the swarm "
+                                      "fails closed); an operator's step"})
+        return None
     fwd1 = fwd1_facts(root, fdb) if fdb is not None else None
-    doc = permits_doc(store, receipt=receipt, at=at, fdb=fdb, why=why, fwd1=fwd1)
+    doc = permits_doc(store, receipt=receipt, at=at, fdb=fdb, why=why, fwd1=fwd1, existing=existing)
     problems = P.figure_free(doc)
     if problems:
-        raise ValueError(f"the pool's permit file would carry a figure at {problems[:3]}")
+        if store is not None:
+            with store:
+                event(store, "permits_refused", at=at, once=_iso(at)[:10],
+                      payload={"why": "the permit file would carry a figure: not written", "places": len(problems)})
+        return None
     return write_json(Path(root) / PERMITS, doc)
 
 
-def report(store: sqlite3.Connection, *, receipt: P.Receipt | None) -> dict[str, Any]:
-    """THE OPERATOR'S REPORT (the module docstring, 8): no interim word or figure."""
+def report(store: sqlite3.Connection | None, *, receipt: P.Receipt | None, notes: Sequence[str] = ()) -> dict[str, Any]:
+    """THE OPERATOR'S REPORT (the module docstring, 8): no interim word or figure; the reasons in words (`notes`: the
+    clock's waits, a nonconforming cluster, a refused receipt, a lost store)."""
+    if store is None:
+        return {"screen": P.SCREEN, "receipt": None if receipt is None else receipt.sha256, "clock": None, "units": {},
+                "notes": list(notes)}
     words = unit_words(store)
     final = {c: w for c, w in words.items() if w["word"] in P.FINAL}
     report_words = {str(r["cell"]): (str(r["word"]) if str(r["word"]) != "INELIGIBLE" else P.INELIGIBLE)
                     for r in store.execute("SELECT cell, word FROM pool_verdicts")}
     read = []
-    for r in store.execute("SELECT cell, MAX(k) AS k FROM pool_checks GROUP BY cell"):
-        cid = str(store.execute("SELECT cluster FROM pool_units WHERE cell=?", (str(r["cell"]),)).fetchone()[0])
-        read.append((cid, int(r["k"])))
+    for r in store.execute("SELECT c.cell AS cell, c.k AS k, u.cluster AS cluster FROM pool_checks c JOIN pool_units u ON "
+                           "u.cell = c.cell"):
+        read.append((str(r["cluster"]), int(r["k"])))
     expected = P.expected_passes(read, receipt) if receipt is not None else None
     stalled = [{"cell": r["cell"], "cause": json.loads(r["payload"]).get("cause")} for r in store.execute(
         "SELECT cell, payload FROM pool_events WHERE kind='stalled' ORDER BY seq")]
+    checks = {str(r["cluster"]): {"conforming": bool(r["conforming"]), "why": json.loads(r["row"]).get("why")}
+              for r in store.execute("SELECT cluster, conforming, row FROM pool_clockcheck ORDER BY cluster")}
+    waits = int(store.execute("SELECT COUNT(*) FROM pool_events WHERE kind='clock_wait'").fetchone()[0])
     return {"screen": P.SCREEN, "receipt": None if receipt is None else receipt.sha256,
             "clock": (store.execute("SELECT clock FROM pool_pins LIMIT 1").fetchone() or [None])[0],
             "units": {c: {"cluster": w["cluster"], "word": w["word"]} for c, w in words.items()},
@@ -2050,16 +2539,22 @@ def report(store: sqlite3.Connection, *, receipt: P.Receipt | None) -> dict[str,
             "members": int(store.execute("SELECT COUNT(*) FROM pool_members WHERE cell IS NOT NULL").fetchone()[0]),
             "beside": f"{sum(1 for w in final.values() if w['word'] == 'PASS')} passes of {len(words)} units; "
                       f"{'n/a' if expected is None else f'{expected:.2f}'} expected at zero edge",
-            "stalled": stalled}
+            "clock_check": checks, "clock_waits": waits,
+            "store_lost": store.execute("SELECT 1 FROM pool_events WHERE kind='store_lost' LIMIT 1").fetchone() is not None,
+            "stalled": stalled, "notes": list(notes)}
 
 
 # --------------------------------------------------------------------------------------------------------- the job
 def night(root: str | Path, *, receipt: P.Receipt, settings: Mapping[str, Any] | None, now: float,
           base: str | Path | None = None, release: str | Path | None = None, runs: Any = None,
           families: Mapping[str, Mapping[str, Any]] | None = None, swarm: Any = None,
-          clock: Callable[[], float] = time.time, deadline: float = float("inf")) -> dict[str, Any]:
+          clock: Callable[[], float] = time.time, deadline: float = float("inf"), cal: P.Calib | None = None
+          ) -> dict[str, Any]:
     """One night over the state root (the module docstring): skipped when this record night already ran; else the
-    night, the permit file and the report, and the run's own `pool_runs` row. The receipt of counts only."""
+    night's first half, THE PERMIT FILE (in a finally: written even when a later step fails), the looks, the permit
+    file and the report again, and the run's own `pool_runs` row. The receipt of counts only."""
+    from .context import write_json
+
     root = Path(root)
     c = cfg(settings)
     began = clock()
@@ -2068,6 +2563,7 @@ def night(root: str | Path, *, receipt: P.Receipt, settings: Mapping[str, Any] |
     fdb.row_factory = sqlite3.Row
     own_runs = runs is None
     opened = None
+    judge = None
     try:
         tonight = record_night(fdb)
         if tonight is not None and store.execute("SELECT 1 FROM pool_runs WHERE night=?", (tonight,)).fetchone():
@@ -2082,16 +2578,23 @@ def night(root: str | Path, *, receipt: P.Receipt, settings: Mapping[str, Any] |
             swarm = opened if swarm is None else swarm
             families = forward_register._families(opened) if families is None else families
         judge = Night(root, store, fdb, receipt=receipt, runs=runs, families=families, swarm=swarm, settings=settings,
-                      budget=float(c["cpu_seconds_night"]), clock=clock, deadline=deadline, base=base, release=release)
-        tally = judge.run(now)
-        write_permits(root, store, receipt=receipt, at=clock(), fdb=fdb)
-        from .context import write_json
-
-        write_json(root / REPORT, report(store, receipt=receipt))
+                      budget=float(c["cpu_seconds_night"]), clock=clock, deadline=deadline, base=base, release=release,
+                      cal=cal)
+        try:
+            pin = judge.run_routes(now)
+        finally:
+            write_permits(root, store, receipt=receipt, at=clock(), fdb=fdb,
+                          why=None if judge.pin_row() is not None else "clock_wait")
+        if pin is not None:
+            try:
+                judge.run_looks()
+            finally:
+                write_permits(root, store, receipt=receipt, at=clock(), fdb=fdb)
+        write_json(root / REPORT, report(store, receipt=receipt, notes=judge.notes))
         with store:
             store.execute("INSERT INTO pool_runs(night, started, finished, seconds, at) VALUES (?,?,?,?,?)",
                           (tonight, float(began), float(clock()), round(judge.spent, 3), float(clock())))
-        return {**{k: int(v) for k, v in tally.items()}, "seconds": round(judge.spent, 3)}
+        return {**{k: int(v) for k, v in judge.tally.items()}, "seconds": round(judge.spent, 3)}
     finally:
         if own_runs and runs is not None:
             runs.close()
@@ -2104,9 +2607,13 @@ def night(root: str | Path, *, receipt: P.Receipt, settings: Mapping[str, Any] |
         store.close()
 
 
-def keep_permits(root: Path, receipt: P.Receipt | None, why: str, now: float) -> None:
-    """The permit file written from what the store holds (no judging): with no pin, no receipt or no record, so the
-    swarm reads a file of the job's and every POOL-route entry ever written stays listed."""
+def keep_permits(root: Path, receipt: P.Receipt | None, why: str, now: float, *, detail: str | None = None) -> bool:
+    """The permit file written from what the store and the readable file on disk hold (no judging): with no pin, no
+    receipt, no conformance or no record, so the swarm reads a file of the job's and every POOL-route entry ever
+    written stays listed. `why` is a word of `WHY_WORDS`; `detail` (words) goes to the operator's report. Whether the
+    file was written (an unreadable file on disk is never overwritten)."""
+    from .context import write_json
+
     store = open_store(root) if (root / DB).exists() else None
     fdb = None
     try:
@@ -2116,7 +2623,9 @@ def keep_permits(root: Path, receipt: P.Receipt | None, why: str, now: float) ->
                 fdb.row_factory = sqlite3.Row
             except sqlite3.Error:
                 fdb = None
-        write_permits(root, store, receipt=receipt, at=now, fdb=fdb, why=why)
+        wrote = write_permits(root, store, receipt=receipt, at=now, fdb=fdb, why=why)
+        write_json(root / REPORT, report(store, receipt=receipt, notes=[detail] if detail else []))
+        return wrote is not None
     finally:
         if store is not None:
             store.close()
@@ -2127,7 +2636,9 @@ def keep_permits(root: Path, receipt: P.Receipt | None, why: str, now: float) ->
 def run(ctx: Any) -> dict[str, Any]:
     """THE JOB (league/ops/registry.py, after `forward_shadow`, listed after `forward_screen`): skipped with its switch
     off (the permit file kept), inside 09:00-17:30 New York on a session, too near the next pre-open; with no pin, no
-    receipt or no forward record it writes the permit file from its store and judges nothing; else `night`."""
+    receipt, a receipt whose conformance fails on this box, or no forward record, it writes the permit file from its
+    store and the file on disk and judges nothing (an alarm when a pin is set and its receipt is refused); else
+    `night`."""
     from ..swarm import settings as swarm_settings
     from . import forward_shadow
 
@@ -2141,12 +2652,16 @@ def run(ctx: Any) -> dict[str, Any]:
     deadline = min(float(now) + WALL_S - MARGIN_S, FS.preopen_deadline(now))
     if deadline - float(now) <= 10 * MIN_RUN_S:
         return {"status": "skipped", "why": "too near the next pre-open for a run to finish"}
-    receipt, why = P.rule()
+    pinned = bool(P.pin())
+    receipt, why = P.rule(conformed=conformed(root, float(now)))
     if receipt is None:
-        keep_permits(root, None, f"no POOL1 receipt is pinned: {why}", float(now))
+        word = "nonconforming_receipt" if "conformance" in str(why) else "no_receipt"
+        keep_permits(root, None, word, float(now), detail=f"nothing is judged: {why}")
+        if pinned:
+            ctx.alert("warning", f"pool_screen: a POOL1 pin is set but nothing is judged: {why}")
         return {"status": "skipped", "why": f"nothing is judged: {why}"}
     if forward_db.mode(settings) == "off" or not (root / forward_db.DB).exists():
-        keep_permits(root, receipt, "no forward record to judge", float(now))
+        keep_permits(root, receipt, "no_record", float(now), detail="no forward record to judge")
         return {"status": "skipped", "why": "no forward record to judge"}
     try:
         receipt_ = night(root, receipt=receipt, settings=settings, now=now, base=getattr(ctx, "base", None),
@@ -2162,11 +2677,24 @@ def run(ctx: Any) -> dict[str, Any]:
     if int(receipt_.get("stalled_now") or 0):
         ctx.alert("warning", f"pool_screen: {receipt_['stalled_now']} cells STALLED: their look waited on the House on "
                              f"{STALL_NIGHTS} record nights (the report names the cause); nothing marks them")
+    if int(receipt_.get("clock_alarm") or 0):
+        ctx.alert("warning", f"pool_screen: the clock has waited on {CLOCK_ALARM_NIGHTS} or more record nights with a "
+                             "receipt pinned (the report names why); each later night moves it a session")
+    if int(receipt_.get("store_lost") or 0):
+        ctx.alert("error", "pool_screen: the permit file names this receipt's clock but pool-screen.sqlite holds none "
+                           "(a lost or reset store): nothing is judged and no clock starts; the file's lists are kept")
+    if int(receipt_.get("nonconforming") or 0):
+        ctx.alert("warning", f"pool_screen: {receipt_['nonconforming']} founding clusters are NONCONFORMING at the clock "
+                             "(their floors are not the receipt's): not clocked, their members stay per-program")
+    if int(receipt_.get("look_failed") or 0):
+        ctx.alert("warning", f"pool_screen: {receipt_['look_failed']} cells' looks failed tonight (the events name the "
+                             "error); the permit file was written first, the next night asks again")
     return receipt_
 
 
 __all__ = ["JOB", "DB", "PERMITS", "PERMITS_VERSION", "REPORT", "MODES", "SEATS", "DEFAULTS", "BOUNDS", "STALL_NIGHTS",
-           "WALL_S", "MARGIN_S", "UNREPRODUCED_MAX", "ROUTES", "EVENT_KINDS", "TABLES", "SCHEMA", "cfg", "open_store",
-           "event", "fwd1_facts", "fwd1_case_n", "record_night", "first_night", "PoolRuns", "Wait", "Night", "pool_on",
-           "OVER", "withheld", "unit_words", "held_lineages", "eligible_rows", "permits_doc", "write_permits", "report",
-           "night", "keep_permits", "run"]
+           "CLOCK_ALARM_NIGHTS", "TRAIN_FAILS", "WALL_S", "MARGIN_S", "UNREPRODUCED_MAX", "ROUTES", "WHY_WORDS",
+           "EVENT_KINDS", "TABLES", "SCHEMA", "cfg", "open_store", "record_sha", "event", "conformance_key", "conformed",
+           "fwd1_facts", "fwd1_case_n", "record_night", "first_night", "PoolRuns", "control_exposure", "Wait",
+           "read_permit_file", "Night", "pool_on", "OVER", "withheld", "unit_words", "held_lineages", "eligible_rows",
+           "permits_doc", "write_permits", "report", "night", "keep_permits", "run"]

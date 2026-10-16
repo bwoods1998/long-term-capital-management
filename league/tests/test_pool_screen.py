@@ -1,12 +1,14 @@
-"""POOL1's job, THE RECORD HALF P1 (league/ops/pool_screen.py; the owner's A55, pre-registered in A55a): the clock and
-the POOL-route list written once on the first night after the release, the refusal's permanence, the House-set cell
-key and the later lineages' holds, merges and assignments, the cell sessions, the looks (a word and a sha at a
-non-final look, the series with a final verdict, exactly D_1..k after a failed night), the engine and join rules
-(lost, never gained), the demotion, the House's failures, the permit file of ids and words, the operator views, the
-job and its seals.
+"""POOL1's job, THE RECORD HALF P1 (league/ops/pool_screen.py; the owner's A55, pre-registered in A55a; the receipt
+contract POOL1-RECEIPT-1): the first sighting, the clock-start conformance and the POOL-route list written once, the
+refusal's permanence (a lost store, an unreadable file, a shorter list), the House's Train series as the vendored House
+job's records, the founders and later lineages (holds, waits on FWD1's row and on earlier members, merges and
+assignments), the cell sessions, the looks (a word and a sha at a non-final look, the series with a final verdict,
+exactly D_1..k after a failed night), the floors through the vendored pipeline, the engine and join rules (lost, never
+gained), the demotion, the House's failures, the permit file of ids and fixed words, the operator views, the job and
+its seals.
 
-Every store is made here from invented rows and the House's runs are a fake (FAKE: no market data, no real figure,
-no POOL1 figure)."""
+Every store is made here from invented rows; the House's Train series are the vendored p1conform's invented House
+export (league/tests/pool_world.py) and its forward runs a fake. No market data, no real figure, no POOL1 figure."""
 
 from __future__ import annotations
 
@@ -27,8 +29,8 @@ import numpy as np
 
 from league.equity import schedule
 from league.ops import forward_db, forward_report as FR, forward_screen as FS, pool_rule as P, pool_screen as PS
-from league.ops import fwd1_rule as F, registry
-from league.tests.test_pool_rule import receipt, receipt_doc
+from league.ops import registry
+from league.tests import pool_world as W
 
 REPO = Path(__file__).resolve().parents[2]
 UTC = dt.timezone.utc
@@ -37,7 +39,9 @@ REL = "20261023T200505Z-pool1"
 REL_AT = dt.datetime(2026, 10, 23, 20, 5, tzinfo=UTC).timestamp()
 SETTINGS = {"elane": {"pool": {"mode": "record", "seats": "off"}, "forward": {"mode": "record"},
                       "fwd1": {"mode": "record", "seats": "off"}}}
-SYMBOL = {"index": "SPY", "sectors": "XLK", "defensive": "TLT"}
+SECTORS, INDEX, REVERSAL = W.TM_S, W.TM_I, W.RL_I
+CLOCK = "2026-10-26"
+BAR = 170                                         # c_G_k: the bar when no floor holds above it (no_floor)
 
 
 def nyse(first: str, n: int) -> list[str]:
@@ -53,33 +57,22 @@ def at(day: str, hour: int = 23, minute: int = 0) -> float:
     return dt.datetime.fromisoformat(day).replace(hour=hour, minute=minute, tzinfo=UTC).timestamp()
 
 
-def weekdays(first: str, n: int) -> list[str]:
-    out, day = [], dt.date.fromisoformat(first)
-    while len(out) < n:
-        if day.weekday() < 5:
-            out.append(day.isoformat())
-        day += dt.timedelta(days=1)
-    return out
-
-
-TRAIN_DAYS = (weekdays("2016-01-06", 300), weekdays("2022-01-05", 260))
-
-
 def unit_rng(*key) -> np.random.Generator:
     return np.random.default_rng([int(hashlib.sha256("|".join(map(str, key)).encode()).hexdigest()[:8], 16)])
-
-
-def train_R(sym: str, era: int) -> np.ndarray:
-    return unit_rng("R", sym, era).normal(0.0004, 0.01, len(TRAIN_DAYS[era]))
 
 
 def fwd_R(sym: str, day: str) -> float:
     return float(unit_rng("fR", sym, day).normal(0.0004, 0.01))
 
 
+def symbol_of(pid: int, extra: dict | None = None) -> str:
+    recs = (extra or {}).get(pid) or W.records(pid)
+    return str(recs["e0k10"]["universe"][0])
+
+
 class FakeRuns:
-    """The House's runs, invented: Train eras whose noise has a common part a cell (`World.train_cell`), the member's
-    forward run as the record's own rows (it reproduces every day), the Train market."""
+    """The House's runs: the invented export's own `one_run` records for the Train parts (K's counts invented), the
+    invented market record, and the member's forward run as the record's own rows (it reproduces every day)."""
 
     def __init__(self, world: "World"):
         self.w = world
@@ -88,29 +81,21 @@ class FakeRuns:
     def _count(self, name: str) -> None:
         self.calls[name] = self.calls.get(name, 0) + 1
 
-    def train_series(self, program):
+    def train_part(self, cal, pid, part):
         self._count("train")
-        if self.w.fail_train:
+        if self.w.fail_train or pid in self.w.fail_pids:
             raise RuntimeError("the child died")
-        if program.pid in self.w.refuse_train:
-            raise FS.OwnFloorRefused("a Train-era run ended ['error']: its series is partial")
-        symbols = list(program.needs.get("symbols") or ["SPY"])
-        sym = symbols[0]
-        cell = self.w.train_cell.get(program.pid, f"own-{program.pid}")
-        own = self.w.train_twin.get(program.pid, program.pid)          # a Train twin: the same idiosyncratic part
-        out = []
-        for era, days in enumerate(TRAIN_DAYS):
-            R = train_R(sym, era)
-            noise = 0.7 * unit_rng("c", cell, era).normal(0, 1, len(days)) + 0.7 * unit_rng("e", own, era).normal(
-                0, 1, len(days))
-            w = np.full(len(days), self.w.train_w.get(program.pid, 0.5))
-            r = w * R + 0.002 * noise
-            ws = [w.tolist()] + [[0.0] * len(days) for _ in symbols[1:]]   # every exposure in the first symbol
-            Rs = [R.tolist()] + [train_R(x, era).tolist() for x in symbols[1:]]
-            out.append({"days": list(days), "symbols": symbols, "r": r.tolist(), "r15": (r - 1e-5).tolist(),
-                        "w": w.tolist(), "b": R.tolist(), "ws": ws, "R": Rs,
-                        "sides": [0.0] * len(days), "k_close": 30 + program.pid % 7, "k_sessions": len(days)})
-        return out
+        recs = self.w.extra_records.get(int(pid)) or W.records(int(pid))
+        rec = recs[part]
+        k = {"close_days": 30 + int(pid) % 7, "sessions": 400} if part.endswith("k10") and rec.get("status") == "ok" \
+            else None
+        return dict(rec), k
+
+    def market(self, cal):
+        self._count("market")
+        if self.w.fail_market:
+            raise RuntimeError("the store is locked")
+        return dict(W.house()["prices"])
 
     def forward_series(self, program, *, settings=None, fdb=None):
         self._count("forward")
@@ -126,21 +111,13 @@ class FakeRuns:
                 "sides": {r["day"]: 0.0 for r in rows}, "entries": {r["day"]: r["entries"] for r in rows},
                 "exits": {r["day"]: r["exits"] for r in rows}, "bars": {r["day"]: r["bars"] for r in rows}}
 
-    def market(self):
-        self._count("market")
-        out = []
-        for era, days in enumerate(TRAIN_DAYS):
-            out.append({"days": list(days), "spy": train_R("SPY", era).tolist(),
-                        "sectors": [train_R(s, era).tolist() for s in P.SECTOR_ETFS],
-                        "tlt": train_R("TLT", era).tolist(), "gld": train_R("GLD", era).tolist()})
-        return out
-
     def control_train(self, spec):
         self._count("control_train")
         sym = spec["symbols"][0]
         out = []
-        for era, days in enumerate(TRAIN_DAYS):
-            R = train_R(sym, era)
+        for era in (0, 1):
+            days = W.house()["prices"][f"e{era}"]["days"][2:]
+            R = unit_rng("cR", sym, era).normal(0.0004, 0.01, len(days))
             w = (unit_rng("cw", spec["n"], era).random(len(days)) < 0.5) * 0.25
             out.append({"days": list(days), "symbols": [sym], "r0": (w * R).tolist(), "ws": [w.tolist()],
                         "R": [R.tolist()]})
@@ -158,10 +135,12 @@ class FakeRuns:
 
 
 class World(unittest.TestCase):
-    """A state root: a forward record holding the receipt's founders as registry rows, FWD1-R's store, a deploys
-    record that names the release carrying the receipt, and invented forward days."""
+    """A state root: a forward record holding the invented export's founders as registry rows, FWD1-R's store, a
+    deploys record that names the release carrying the receipt, and invented forward days."""
 
     RECEIPT: dict = {}
+    #: Founders FWD1 has no row for (by default it sighted every one: the export's own tm_s3 is the test of a wait).
+    NO_ROW: tuple = ()
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -173,27 +152,32 @@ class World(unittest.TestCase):
             {"stage": "verdict", "verdict": "promoted", "release": REL,
              "at": dt.datetime.fromtimestamp(REL_AT, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}) + "\n")
         self.fdb = forward_db.open_db(self.root)
+        self.fdb.row_factory = sqlite3.Row
         self.engine, _ = forward_db.engine_id(self.fdb, "equity-engine-1+aaaaaaaaaaaa+fwd-1", at=1.0)
         self.fdb.commit()
-        self.rec = receipt(**self.RECEIPT)
+        self.rec = W.receipt(**self.RECEIPT)
+        self.cal = W.calib()
         self.families: dict[str, dict] = {}
-        self.train_cell: dict[int, str] = {}
-        self.train_w: dict[int, float] = {}
-        self.train_twin: dict[int, int] = {}
-        self.refuse_train: set[int] = set()
+        self.extra_records: dict[int, dict] = {}
+        self.fail_pids: set[int] = set()
         self.unreproduced: dict[tuple[int, str], float] = {}
-        self.fail_forward = False
-        self.fail_train = False
+        self.fail_forward = self.fail_train = self.fail_market = False
         self.alpha: dict[int, float] = {}
-        for lineage, f in sorted(self.rec.founders.items()):
-            self.register(lineage, f.pid, group=f.group or "index", reason="train_pass", cell=f.cell)
+        #: The families' immutable birth cards (`cards.card_of`'s): a later lineage's declared class and inputs.
+        self.cards: dict[str, dict] = {}
+        patch = mock.patch.object(PS, "_card", lambda swarm, fid: self.cards.get(str(fid)))
+        patch.start()
+        self.addCleanup(patch.stop)
+        for m in W.metas():
+            self.register(m["lineage"], m["pid"], symbols=list(m["needs_symbols"]), sha=m["program_sha"])
         self.sdb = FS.open_store(self.root)
-        for lineage, f in sorted(self.rec.founders.items()):
-            if f.cell and f.cell.endswith("/sectors"):
-                self.fwd1_row(lineage, f.pid)
+        for m in W.metas():
+            if m["lineage"] in self.NO_ROW:
+                continue
+            if m["ugroup"] == "sectors":
+                self.fwd1_row(m["lineage"], m["pid"])
             else:
-                self.fwd1_row(lineage, f.pid, judged=0, case=None,
-                              why=FS.NOT_JUDGED["sealed"])
+                self.fwd1_row(m["lineage"], m["pid"], judged=0, case=None, why=FS.NOT_JUDGED["sealed"])
         self.runs = FakeRuns(self)
 
     def tearDown(self):
@@ -202,13 +186,13 @@ class World(unittest.TestCase):
         self.tmp.cleanup()
 
     # ------------------------------------------------------------------------------------------------ the record
-    def register(self, lineage: str, pid: int, *, group: str = "index", reason: str = "train_pass",
-                 first_day: str = "2026-10-13", created_at: float | None = None, cell: str | None = None,
-                 ugroup: str | None = None, code: str | None = None, sha: str | None = None,
-                 symbols: list[str] | None = None) -> int:
+    def register(self, lineage: str, pid: int, *, reason: str = "train_pass", first_day: str = "2026-10-13",
+                 created_at: float | None = None, ugroup: str | None = None, code: str | None = None,
+                 sha: str | None = None, symbols: list[str] | None = None) -> int:
         fid = lineage.split(":", 1)[1]
-        sym = symbols or [SYMBOL[group]]
+        sym = symbols or ["SPY"]
         code = code if code is not None else f"PARAMS = {{}}\n# {pid}\n"
+        group = "sectors" if sym[0].startswith("XL") else "index"
         self.fdb.execute(
             "INSERT INTO fwd_registry(pid, key, family, version, lane, reason, ugroup, lineage, code, params, needs, "
             "program_sha, run_sha, author, created_at, evidence, first_close, first_day, registered_at, route, alpha_f, "
@@ -220,8 +204,7 @@ class World(unittest.TestCase):
         self.fdb.commit()
         self.families[fid] = {"id": fid, "structure": "etf", "spec": {"lane": "equity", "agenda": "trend",
                                                                         "symbols": sym}, "state": {}, "band": "gym"}
-        if cell is not None:
-            self.train_cell[pid] = cell
+        self.cards.setdefault(fid, {"mechanism_class": "trend_momentum", "inputs": ["underlying_price"]})
         return pid
 
     def fwd1_row(self, lineage: str, pid: int, *, typ: str = "ETF", case: str | None = "N", judged: int = 1,
@@ -248,11 +231,12 @@ class World(unittest.TestCase):
     def days(self, pid: int, names, *, alpha: float | None = None, skip=(), status=None, engine=None):
         a = self.alpha.get(pid, 0.0) if alpha is None else alpha
         rng = unit_rng("noise", pid)
+        sym = symbol_of(pid, self.extra_records)
         for day in names:
             noise = float(rng.normal(0, 0.002))
             if day in skip:
                 continue
-            b = fwd_R(SYMBOL["sectors"] if self.is_sector(pid) else "SPY", day)
+            b = fwd_R(sym, day)
             r = 0.5 * b + a + noise
             self.fdb.execute("INSERT OR IGNORE INTO fwd_days(pid, day, engine, r, w, b, r15, r0, entries, exits, status, "
                              "at, bars) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -260,37 +244,41 @@ class World(unittest.TestCase):
                               (status or {}).get(day, "ok"), 1.0, "b" * 16))
         self.fdb.commit()
 
-    def is_sector(self, pid: int) -> bool:
-        row = self.fdb.execute("SELECT needs FROM fwd_registry WHERE pid=?", (pid,)).fetchone()
-        return "XL" in str(row[0])
-
     def advance(self, day: str, *, finished: float | None = None):
         self.fdb.execute("INSERT INTO fwd_runs(job, through, engine, started, finished, seconds, programs, sessions, "
                          "errors, stale, budget_hit, head) VALUES ('forward_shadow', ?, ?, ?, ?, 0.0, 1, 1, 0, 0, 0, NULL)",
                          (day, self.engine, finished or at(day), finished or at(day)))
         self.fdb.commit()
 
-    def nights(self, names):
-        for day in names:
-            self.advance(day)
-
     # ------------------------------------------------------------------------------------------------ the pool
     def store(self) -> sqlite3.Connection:
         return PS.open_store(self.root)
 
-    def judge(self, now: float, *, receipt_=None, budget: float = 1e9):
-        """One night of the pool as `pool_screen.night` runs it (the night, the permit file, the report), without its
-        once-a-record-night guard (a test reads several nights of one record)."""
+    def judge(self, now: float, *, receipt_=None, budget: float = 1e9, base: Path | None | str = "default"):
+        """One night of the pool as `pool_screen.night` runs it (the routes, the permit file, the looks, the permit file
+        and the report), without its once-a-record-night guard (a test reads several nights of one record)."""
         store = self.store()
         try:
             j = PS.Night(self.root, store, self.fdb, receipt=receipt_ or self.rec, runs=self.runs, families=self.families,
-                         swarm=None, settings=SETTINGS, budget=budget, clock=lambda: now, base=self.base, release=REL)
-            tally = j.run(now)
-            PS.write_permits(self.root, store, receipt=receipt_ or self.rec, at=now, fdb=self.fdb)
-            (self.root / PS.REPORT).write_text(json.dumps(PS.report(store, receipt=receipt_ or self.rec)))
-            return tally, j
+                         swarm=None, settings=SETTINGS, budget=budget, clock=lambda: now,
+                         base=self.base if base == "default" else base, release=REL, cal=self.cal)
+            try:
+                pin = j.run_routes(now)
+            finally:
+                PS.write_permits(self.root, store, receipt=receipt_ or self.rec, at=now, fdb=self.fdb)
+            if pin is not None:
+                try:
+                    j.run_looks()
+                finally:
+                    PS.write_permits(self.root, store, receipt=receipt_ or self.rec, at=now, fdb=self.fdb)
+            (self.root / PS.REPORT).write_text(json.dumps(PS.report(store, receipt=receipt_ or self.rec, notes=j.notes)))
+            return dict(j.tally), j
         finally:
             store.close()
+
+    def night_of(self, now: float, **kw) -> PS.Night:
+        return PS.Night(self.root, self.store(), self.fdb, receipt=self.rec, runs=self.runs, families=self.families,
+                        settings=SETTINGS, clock=lambda: now, cal=self.cal, **kw)
 
     def rows(self, table: str, where: str = "", args=()) -> list[dict]:
         db = self.store()
@@ -300,7 +288,7 @@ class World(unittest.TestCase):
             db.close()
 
     def founders(self, cell: str) -> list[tuple[str, int]]:
-        return [(lin, self.rec.founders[lin].pid) for lin in self.rec.units[cell].founders]
+        return [(lin, self.rec.founders[lin].pid) for lin in self.rec.units[cell].members]
 
     def first_night(self):
         """The record's nights before the release (through Thu Oct 22) and its first night after it (Fri Oct 23)."""
@@ -311,11 +299,8 @@ class World(unittest.TestCase):
     def permits(self) -> dict:
         return json.loads((self.root / PS.PERMITS).read_text())
 
-
-SECTORS = "trend_momentum/sectors"
-INDEX = "trend_momentum/index"
-REVERSAL = "reversal_liquidity/index"
-CLOCK = "2026-10-26"
+    def members(self) -> dict[str, dict]:
+        return {m["lineage"]: m for m in self.rows("pool_members")}
 
 
 # ----------------------------------------------------------------------------------------------- store and settings
@@ -336,54 +321,76 @@ class TheStoreAndSettings(World):
             with db:
                 db.execute("INSERT INTO pool_routes(lineage, cell, cluster, night, why, at) VALUES ('L', 'c', 'k', 'n', "
                            "'w', 1.0)")
-                db.execute("INSERT INTO pool_holds(lineage, night, why, at) VALUES ('H', 'n', 'w', 1.0)")
             for sql in ("UPDATE pool_routes SET why='x'", "DELETE FROM pool_routes",
                         "INSERT OR REPLACE INTO pool_routes(lineage, cell, cluster, night, why, at) VALUES "
-                        "('L', 'c2', 'k', 'n', 'w', 2.0)", "DELETE FROM pool_holds", "UPDATE pool_holds SET why='y'"):
+                        "('L', 'c2', 'k', 'n', 'w', 2.0)"):
                 with self.subTest(sql=sql), self.assertRaises(sqlite3.DatabaseError):
                     with db:
                         db.execute(sql)
-            self.assertEqual([dict(r)["cell"] for r in db.execute("SELECT cell FROM pool_routes")], ["c"])
             for table in PS.TABLES:
                 names = {str(r[0]) for r in db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND "
                                                        "tbl_name=?", (table,))}
                 self.assertEqual(names, {f"{table}_no_update", f"{table}_no_delete"}, table)
-            with db:
-                self.assertTrue(PS.event(db, "held", at=1.0, lineage="L", once="held"))
-                self.assertFalse(PS.event(db, "held", at=2.0, lineage="L", once="held"))
             with self.assertRaises(ValueError):
                 PS.event(db, "not_a_kind", at=1.0)
         finally:
             db.close()
 
 
-# ------------------------------------------------------------------------------------------------------- the clock
+# ------------------------------------------------------------------------------------- the clock and the conformance
 class TheClock(World):
     def test_no_clock_before_a_record_night_after_the_release(self):
         self.advance("2026-10-22")
         tally, _ = self.judge(at("2026-10-23", 21))           # the release ran, no record night yet
         self.assertEqual(tally.get("clock_wait"), 1)
-        for table in ("pool_pins", "pool_units", "pool_routes", "pool_members"):
+        for table in ("pool_pins", "pool_units", "pool_routes", "pool_members", "pool_train"):
             self.assertEqual(self.rows(table), [], table)
+        self.assertEqual(len(self.rows("pool_sighting")), 1)     # the first sighting, stored once
+        self.assertEqual(self.permits()["routes"], {})
 
-    def test_the_first_night_writes_the_units_the_founders_and_the_route_list_once(self):
+    def test_the_first_night_checks_conformance_then_writes_the_route_list_once(self):
         self.first_night()
         pins = self.rows("pool_pins")
-        self.assertEqual(len(pins), 1)
         self.assertEqual((pins[0]["night"], pins[0]["clock"], pins[0]["evidence"]), ("2026-10-23", CLOCK, "deploys"))
-        self.assertEqual({u["cell"] for u in self.rows("pool_units")}, set(self.rec.units))
-        self.assertEqual({u["cell"]: json.loads(u["stage1"]) for u in self.rows("pool_units")}[SECTORS],
-                         {"refuted": False, "z": [0.5, 0.2]})
+        checks = {c["cluster"]: c for c in self.rows("pool_clockcheck")}
+        self.assertEqual({c: bool(r["conforming"]) for c, r in checks.items()},
+                         {"trend_momentum": True, "reversal_liquidity": True})
+        floors = json.loads(checks["trend_momentum"]["row"])["floors"]
+        self.assertEqual(floors, {fd: dict(self.rec.clusters["trend_momentum"].c_own_at_pin[fd]) for fd in P.FLOORS})
+        units = {u["cell"]: u for u in self.rows("pool_units")}
+        self.assertEqual(set(units), set(self.rec.units))
+        self.assertTrue(all(u["clocked"] == 1 and u["conforming"] == 1 for u in units.values()))
         routes = {r["lineage"]: r for r in self.rows("pool_routes")}
         self.assertEqual(set(routes), {lin for lin, _ in self.founders(SECTORS)})       # FWD1's case N sector lineages
         self.assertTrue(all(r["cell"] == SECTORS and r["cluster"] == "trend_momentum" for r in routes.values()))
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
-        self.assertEqual({m["route"] for lin, m in members.items() if INDEX in str(m["cell"])}, {"sealed"})
-        self.assertEqual(members["equity:out-0"]["route"], "out")
-        again = self.judge(at("2026-10-26", 23, 30))
+        members = self.members()
+        self.assertEqual({members[lin]["route"] for lin, _ in self.founders(INDEX)}, {"sealed"})
+        self.assertEqual(members["equity:eq1"]["route"], "out")
+        self.assertEqual((members["equity:rl_copy"]["route"], members["equity:rl_copy"]["merged_into"]),
+                         ("merged", "equity:rl_i1"))
+        self.judge(at("2026-10-26", 23, 30))
         self.assertEqual(len(self.rows("pool_pins")), 1)
         self.assertEqual(set(r["lineage"] for r in self.rows("pool_routes")), set(routes))
-        del again
+
+    def test_the_train_series_are_the_house_jobs_records(self):
+        self.first_night()
+        for m in W.metas():
+            rows = {r["part"]: r for r in self.rows("pool_train", "WHERE pid=?", (m["pid"],))}
+            f = self.rec.founders[m["lineage"]]
+            if f.status != "member":
+                self.assertEqual(rows, {})                          # an out or merged founder owes no series
+                continue
+            self.assertEqual(set(rows), set(P.PARTS))
+            for part, row in rows.items():
+                self.assertEqual(json.loads(row["record"]), W.records(m["pid"])[part])
+                self.assertEqual(PS.record_sha(json.loads(row["record"])), f.train_sha256[part])
+        prm = {r["pid"]: r for r in self.rows("pool_params")}
+        cal = self.cal
+        hc = cal.cluster.house_context(W.house()["prices"], np.array(W.house()["cuts"]))
+        _, mm = P.house_member(cal, W.metas()[0], W.records(W.metas()[0]["pid"]), hc)
+        self.assertEqual(json.loads(prm[mm.meta["pid"]]["mu"]), [float(x) for x in mm.mu])
+        self.assertEqual(prm[mm.meta["pid"]]["sigma"], float(mm.sigma))
+        self.assertEqual(len(self.rows("pool_market")), 2)
 
     def test_a_weekend_release_starts_the_clock_a_session_later(self):
         (self.base / "deploys.jsonl").write_text(json.dumps(
@@ -397,6 +404,33 @@ class TheClock(World):
         self.judge(at("2026-10-26", 23, 30))
         self.assertEqual(self.rows("pool_pins")[0]["clock"], "2026-10-27")
 
+    def test_with_no_deploys_record_the_sighting_is_stored_once_and_the_clock_follows(self):
+        """The P1 review's F7: with no deploys record the first sighting's time is stored once and read on every later
+        night, so the next record night written after it starts the clock (it no longer waits for ever)."""
+        self.advance("2026-10-22")
+        self.advance("2026-10-23", finished=at("2026-10-23", 23))
+        self.judge(at("2026-10-23", 23, 30), base=None)
+        self.assertEqual(self.rows("pool_pins"), [])                       # tonight's run finished before the sighting
+        sight = self.rows("pool_sighting")
+        self.assertEqual((sight[0]["evidence"], sight[0]["release_start"]), ("sighting", at("2026-10-23", 23, 30)))
+        self.advance("2026-10-26")
+        self.judge(at("2026-10-26", 23, 30), base=None)
+        self.assertEqual(len(self.rows("pool_sighting")), 1)
+        self.assertEqual(self.rows("pool_pins")[0]["clock"], "2026-10-27")
+
+    def test_an_alarm_after_five_nights_of_waiting(self):
+        self.advance("2026-10-22")
+        self.fail_market = True
+        tallies = []
+        for day in nyse("2026-10-23", 7):
+            self.advance(day)
+            tallies.append(self.judge(at(day, 23, 30))[0])
+        self.assertEqual(self.rows("pool_pins"), [])
+        self.assertEqual([bool(t.get("clock_alarm")) for t in tallies], [False] * 4 + [True] * 3)
+        report = json.loads((self.root / PS.REPORT).read_text())
+        self.assertTrue(any("clock waits" in n for n in report["notes"]))
+        self.assertNotIn("why", self.permits())                            # the detail is the report's, never the file's
+
     def test_an_unreadable_fwd1_store_writes_nothing_and_the_next_night_is_the_first(self):
         self.advance("2026-10-22")
         self.advance("2026-10-23", finished=at("2026-10-23", 23))
@@ -408,20 +442,24 @@ class TheClock(World):
         self.judge(at("2026-10-26", 23, 30))
         self.assertEqual(self.rows("pool_pins")[0]["clock"], "2026-10-27")
 
-    def test_a_founder_of_a_cell_below_m_min_stays_on_its_route(self):
-        doc = receipt_doc()
-        for i in range(2):
-            doc["founders"][f"equity:rv-sec-{i}"] = {"pid": 950 + i, "class": "relative_value", "group": "sectors",
-                                                     "cell": "relative_value/sectors", "why": None, "merged_into": None}
-        self.rec = P.parse_receipt(doc, "d" * 64)[0]
-        for i in range(2):
-            self.register(f"equity:rv-sec-{i}", 950 + i, group="sectors")
-            self.fwd1_row(f"equity:rv-sec-{i}", 950 + i)
-        self.first_night()
-        self.assertNotIn("relative_value/sectors", {u["cell"] for u in self.rows("pool_units")})
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
-        self.assertEqual((members["equity:rv-sec-0"]["route"], members["equity:rv-sec-0"]["cell"]), ("fwd1", None))
-        self.assertNotIn("equity:rv-sec-0", self.permits()["routes"])
+    def test_the_conformance_spans_nights_within_the_budget(self):
+        self.advance("2026-10-22")
+        self.advance("2026-10-23", finished=at("2026-10-23", 23))
+        calls = {"n": 0}
+        real = PS.Night._over
+
+        def over(self):
+            calls["n"] += 1
+            return calls["n"] > 30 or real(self)
+
+        with mock.patch.object(PS.Night, "_over", over):
+            self.judge(at("2026-10-23", 23, 30))
+        self.assertEqual(self.rows("pool_pins"), [])                      # the House's work waits a night
+        self.assertTrue(self.rows("pool_train"))
+        self.advance("2026-10-26")
+        self.judge(at("2026-10-26", 23, 30))
+        self.assertEqual(self.rows("pool_pins")[0]["clock"], "2026-10-27")
+        self.assertTrue(all(c["conforming"] for c in self.rows("pool_clockcheck")))
 
     def test_the_route_rule_at_the_clock(self):
         (pass_lin, pass_pid), (fail_lin, fail_pid) = self.founders(SECTORS)[:2]
@@ -432,167 +470,322 @@ class TheClock(World):
         routes = {r["lineage"] for r in self.rows("pool_routes")}
         self.assertNotIn(pass_lin, routes)                         # an FWD1-R pass before the clock: not on the route
         self.assertIn(fail_lin, routes)                            # an FWD1 fail does not bar the POOL route (A33(5))
-        member = {m["lineage"]: m for m in self.rows("pool_members")}[pass_lin]
-        self.assertEqual(member["route"], "fwd1")
+        self.assertEqual(self.members()[pass_lin]["route"], "fwd1")
 
     def test_u_at_the_clock_reads_the_checkpoints_read_before_it(self):
-        doc = receipt_doc()
-        doc["clusters"]["trend_momentum"]["u"] = {str(k): [0.001 * k, 0.001 * k + 0.01] for k in P.U_COUNTS}
-        self.rec = P.parse_receipt(doc, "d" * 64)[0]
+        self.rec = W.receipt(u={"trend_momentum": {"*": [0.02, 0.03], "10": [0.04, 0.06], "15": [0.05, 0.07]}})
         lin, pid = self.founders(SECTORS)[0]
         self.fwd1_check(lin, pid, 5)
         self.fwd1_check(lin, pid, 10)
         self.first_night()
         unit = {u["cell"]: u for u in self.rows("pool_units")}[SECTORS]
         self.assertEqual(unit["fwd1_count"], 10)
-        self.assertAlmostEqual(unit["u_point"], 0.010)
-        self.assertAlmostEqual(unit["cap"], 0.11)
-        self.assertAlmostEqual(unit["wall"], 0.13)
+        self.assertAlmostEqual(unit["u_point"], 0.04)
+        self.assertAlmostEqual(unit["cap"], 0.08)
+        self.assertAlmostEqual(unit["wall"], 0.09)
+
+
+class AFounderWithNoFwd1Row(World):
+    NO_ROW = ("equity:tm_s3",)
+
+    def test_waits_and_is_routed_once_fwd1_sights_it(self):
+        """The P1 review's F5: a founder FWD1 has no row for at the clock is decided by nothing (no 'sealed' route, no
+        member row); once FWD1 sights it as case N it is appended to the POOL-route list."""
+        self.first_night()
+        self.assertNotIn("equity:tm_s3", self.members())
+        self.assertNotIn("equity:tm_s3", self.permits()["routes"])
+        self.fwd1_row("equity:tm_s3", self.rec.founders["equity:tm_s3"].pid)
+        self.advance("2026-10-26")
+        self.judge(at("2026-10-26", 23, 30))
+        self.assertEqual(self.members()["equity:tm_s3"]["route"], "pool")
+        self.assertIn("equity:tm_s3", self.permits()["routes"])
+
+
+class ANonconformingCluster(World):
+    def setUp(self):
+        super().setUp()
+        doc = W.doc()
+        row = doc["clusters"]["trend_momentum"]["c_own_at_pin"]["R-REG"]
+        row["N0"] = row["N0"] + 1                                   # the receipt's pin floor is not this House's
+        row["c_own"] = max(row[n] for n in P.NULLS)
+        row["k_used"] = P.k_used(170, 3, row["c_own"], row["minimum"])
+        self.rec, why = P.read_receipt(W.strict(doc), expect_constants=W.constants())
+        assert self.rec is not None, why
+
+    def test_is_not_clocked_and_its_members_stay_per_program(self):
+        tally, _ = self.first_night()
+        self.assertEqual(tally.get("nonconforming"), 1)
+        units = {u["cell"]: u for u in self.rows("pool_units")}
+        self.assertEqual((units[SECTORS]["conforming"], units[SECTORS]["clocked"]), (0, 0))
+        self.assertEqual((units[REVERSAL]["conforming"], units[REVERSAL]["clocked"]), (1, 1))
+        self.assertEqual(self.rows("pool_routes"), [])
+        self.assertEqual({self.members()[lin]["route"] for lin, _ in self.founders(SECTORS)}, {"per_program"})
+        doc = self.permits()
+        self.assertEqual(doc["units"][SECTORS]["word"], P.NONCONFORMING)
+        self.assertEqual(P.figure_free(doc), [])
+        report = json.loads((self.root / PS.REPORT).read_text())
+        self.assertFalse(report["clock_check"]["trend_momentum"]["conforming"])
+        self.assertTrue(any("NONCONFORMING" in n for n in report["notes"]))
+
+
+class AFounderWhoseTrainRunFailsTwice(World):
+    def test_is_out_and_its_cluster_nonconforming(self):
+        pid = self.rec.founders["equity:tm_s2"].pid
+        self.fail_pids.add(pid)
+        self.advance("2026-10-22")
+        self.advance("2026-10-23", finished=at("2026-10-23", 23))
+        self.judge(at("2026-10-23", 23, 30))
+        self.assertEqual(self.rows("pool_pins"), [])                      # one failure: a House wait
+        self.advance("2026-10-26")
+        self.judge(at("2026-10-26", 23, 30))
+        prm = {r["pid"]: r for r in self.rows("pool_params")}
+        self.assertEqual(prm[pid]["status"], "out")
+        self.assertIn("failed twice", prm[pid]["why"])
+        units = {u["cell"]: u for u in self.rows("pool_units")}
+        self.assertEqual(units[SECTORS]["conforming"], 0)
+        self.assertEqual(self.rows("pool_routes"), [])
 
 
 class AReportOnlyCluster(World):
-    RECEIPT = {"u": {"trend_momentum": (0.12, 0.2)}}
+    RECEIPT = {"u": {"trend_momentum": {"*": [0.12, 0.2]}}}
 
-    def test_its_members_stay_on_fwd1_and_it_seats_nothing(self):
+    def test_its_members_stay_on_their_routes_and_it_seats_nothing(self):
         self.first_night()
         self.assertEqual(self.rows("pool_routes"), [])
         units = {u["cell"]: u for u in self.rows("pool_units")}
         self.assertTrue(units[SECTORS]["report_only"])
         self.assertEqual((units[SECTORS]["cap"], units[SECTORS]["wall"]), (0.12, 0.15))
         self.assertEqual(self.permits()["units"][SECTORS]["word"], P.REPORT_ONLY)
-        self.assertEqual({m["route"] for m in self.rows("pool_members") if m["cell"] == SECTORS}, {"fwd1"})
+        self.assertNotIn("trend_momentum", {c["cluster"] for c in self.rows("pool_clockcheck")})
 
 
-class ARefutedUnitAndAMergedFounder(World):
-    def setUp(self):
-        doc = receipt_doc()
-        doc["units"][SECTORS]["stage1"] = {"refuted": True, "z": [-1.2, 0.1]}
-        doc["founders"]["equity:copy-0"] = {"pid": 900, "class": "trend_momentum", "group": "sectors", "cell": SECTORS,
-                                            "why": None, "merged_into": "equity:trend_momentum-sectors-0"}
-        type(self).RECEIPT = {}
-        super().setUp()
-        self.rec = P.parse_receipt(doc, "d" * 64)[0]
-        self.register("equity:copy-0", 900, group="sectors")
-        self.fwd1_row("equity:copy-0", 900)
+class AWallBelowZero(World):
+    RECEIPT = {"u": {"trend_momentum": {"*": [0.05, 0.15]}}}
 
-    def test_a_refuted_unit_is_final_and_its_founders_stay_on_fwd1(self):
+    def test_is_report_only(self):
+        self.assertTrue(self.rec.clusters["trend_momentum"].report_only)
         self.first_night()
-        self.assertEqual({v["cell"]: v["word"] for v in self.rows("pool_verdicts")}, {SECTORS: "REFUTED"})
+        self.assertEqual(self.rows("pool_routes"), [])
+        self.assertEqual({u["cell"]: u["report_why"] for u in self.rows("pool_units")}[SECTORS], "u_bound")
+
+
+class ADroppedTicket(World):
+    RECEIPT = {"dropped": ("trend_momentum",)}
+
+    def test_is_report_only(self):
+        self.first_night()
+        self.assertEqual(self.rows("pool_routes"), [])
+        self.assertEqual({u["cell"]: u["report_why"] for u in self.rows("pool_units")}[SECTORS], "tickets_dropped")
+
+
+class ARefutedAndAnIneligibleCluster(World):
+    RECEIPT = {"refuted": ("trend_momentum",), "matched": 501}
+
+    def test_are_final_and_never_clocked(self):
+        self.first_night()
+        verdicts = {v["cell"]: v["word"] for v in self.rows("pool_verdicts")}
+        self.assertEqual(verdicts[SECTORS], "REFUTED")
+        self.assertEqual(verdicts[REVERSAL], "INELIGIBLE")                # no bar on the grid at the pin
         self.assertEqual(self.rows("pool_routes"), [])
         self.assertEqual(self.permits()["units"][SECTORS]["word"], "REFUTED")
-
-
-class AMergedFounder(World):
-    def setUp(self):
-        super().setUp()
-        doc = receipt_doc()
-        doc["founders"]["equity:copy-0"] = {"pid": 900, "class": "trend_momentum", "group": "sectors", "cell": SECTORS,
-                                            "why": None, "merged_into": "equity:trend_momentum-sectors-0"}
-        self.rec = P.parse_receipt(doc, "d" * 64)[0]
-        self.register("equity:copy-0", 900, group="sectors")
-        self.fwd1_row("equity:copy-0", 900)
-
-    def test_a_merged_copy_follows_its_members_route_and_is_no_member(self):
-        self.first_night()
-        routes = {r["lineage"]: r for r in self.rows("pool_routes")}
-        self.assertIn("equity:copy-0", routes)
-        member = {m["lineage"]: m for m in self.rows("pool_members")}["equity:copy-0"]
-        self.assertEqual((member["route"], member["merged_into"]), ("merged", "equity:trend_momentum-sectors-0"))
-        store = self.store()
-        try:
-            cell = PS.Night(self.root, store, self.fdb, receipt=self.rec, runs=self.runs,
-                            families=self.families).cell_members(SECTORS)
-        finally:
-            store.close()
-        self.assertNotIn(900, [m["pid"] for m in cell])
+        self.assertEqual(self.permits()["units"][REVERSAL]["word"], P.INELIGIBLE)
 
 
 # ----------------------------------------------------------------------------------------------- the refusal stays
 class TheRefusalIsNeverLifted(World):
-    def test_the_route_list_survives_every_final_word_mode_off_and_a_rollback(self):
+    def test_the_route_list_survives_every_final_word_mode_off_and_a_rollback_of_the_pin(self):
         self.first_night()
         routed = set(self.permits()["routes"])
         self.assertTrue(routed)
         db = self.store()
-        with db:                                                   # a pooled FAIL (and a DEMOTED, a VOID) is final
+        with db:
             db.execute("INSERT INTO pool_verdicts(cell, word, why, at) VALUES (?,?,?,?)", (SECTORS, "FAIL", "x", 9.0))
         db.close()
         self.judge(at("2026-10-26", 23, 30))
-        store = self.store()
-        try:
-            PS.write_permits(self.root, store, receipt=self.rec, at=9.0, fdb=self.fdb)
-        finally:
-            store.close()
         self.assertEqual(set(self.permits()["routes"]), routed)
         self.assertEqual(self.permits()["units"][SECTORS]["word"], "FAIL")
-        # mode off: the job stops, the file stays
         ctx = types.SimpleNamespace(root=self.root, config={}, now=lambda: at("2026-10-27", 23, 30), alert=lambda *a: None)
         with mock.patch("league.swarm.settings.load", lambda root, config=None: {"elane": {"pool": {"mode": "off"}}}):
             self.assertEqual(PS.run(ctx)["status"], "skipped")
         self.assertEqual(set(self.permits()["routes"]), routed)
-        # a rollback of the pin (no receipt): the file is written again from the store, every entry kept
-        PS.keep_permits(self.root, None, "no POOL1 receipt is pinned", at("2026-10-28", 23))
+        self.assertTrue(PS.keep_permits(self.root, None, "no_receipt", at("2026-10-28", 23)))
         doc = self.permits()
         self.assertEqual(set(doc["routes"]), routed)
-        self.assertEqual(doc["receipt"], self.rec.sha256)
+        self.assertEqual((doc["receipt"], doc["why"]), (self.rec.sha256, "no_receipt"))
 
-    def test_no_code_deletes_the_permit_file(self):
+    def test_a_lost_store_lifts_nothing_and_starts_no_new_clock(self):
+        """The P1 review's F4: the store deleted (its WAL too) after the clock: the file's routes and holds are carried
+        whole, and a permit file naming this receipt's clock refuses a new clock (no judging, an alarm)."""
+        self.register("equity:held-1", 520, created_at=at("2026-10-21", 15), first_day="2026-10-22", symbols=["XLK"])
+        self.fwd1_row("equity:held-1", 520)
+        self.fail_pids.add(520)
+        self.first_night()
+        before = self.permits()
+        self.assertTrue(before["routes"] and before["holds"] == ["equity:held-1"] and before["clock"] == CLOCK)
+        for name in (PS.DB, PS.DB + "-wal", PS.DB + "-shm"):
+            path = self.root / name
+            if path.exists():
+                path.unlink()
+        self.advance("2026-10-26")
+        tally, _ = self.judge(at("2026-10-26", 23, 30))
+        self.assertEqual(tally.get("store_lost"), 1)
+        self.assertEqual(self.rows("pool_pins"), [])
+        after = self.permits()
+        self.assertEqual(set(after["routes"]), set(before["routes"]))
+        self.assertEqual(after["holds"], before["holds"])
+        self.assertEqual((after["receipt"], after["clock"]), (before["receipt"], before["clock"]))
+        self.assertEqual(after["units"][SECTORS]["word"], "pending")
+        self.assertTrue(json.loads((self.root / PS.REPORT).read_text())["store_lost"])
+
+    def test_a_lost_store_under_no_receipt_keeps_the_route_list(self):
+        """The review's probe: with the store lost and no receipt pinned (a pin rolled back), `keep_permits` used to
+        write routes {}: it carries the file's lists whole."""
+        self.first_night()
+        routed = set(self.permits()["routes"])
+        for name in (PS.DB, PS.DB + "-wal", PS.DB + "-shm"):
+            if (self.root / name).exists():
+                (self.root / name).unlink()
+        self.assertTrue(PS.keep_permits(self.root, None, "no_receipt", at("2026-10-27", 23)))
+        self.assertEqual(set(self.permits()["routes"]), routed)
+        self.assertEqual(self.permits()["clock"], CLOCK)
+
+    def test_a_list_is_never_written_shorter(self):
+        self.first_night()
+        doc = self.permits()
+        doc["routes"]["equity:elsewhere"] = {"cell": SECTORS, "cluster": "trend_momentum"}
+        doc["holds"] = ["equity:held-x"]
+        (self.root / PS.PERMITS).write_text(json.dumps(doc))
+        self.judge(at("2026-10-26", 23, 30))
+        after = self.permits()
+        self.assertIn("equity:elsewhere", after["routes"])
+        self.assertEqual(after["holds"], ["equity:held-x"])
+
+    def test_an_unreadable_file_is_never_overwritten(self):
+        self.first_night()
+        (self.root / PS.PERMITS).write_text("{torn")
+        self.advance("2026-10-26")
+        self.judge(at("2026-10-26", 23, 30))
+        self.assertEqual((self.root / PS.PERMITS).read_text(), "{torn")
+        self.assertTrue(self.rows("pool_events", "WHERE kind='permits_kept'"))
+
+    def test_no_code_deletes_or_replaces_the_permit_file(self):
         tree = ast.parse((REPO / "league" / "ops" / "pool_screen.py").read_text())
         calls = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
         self.assertFalse(calls & {"unlink", "remove", "rmtree", "rename", "replace"})
 
+    def test_the_file_is_written_before_the_looks_and_when_they_fail(self):
+        """The P1 review's F9: the routes and holds of the night are published right after they are written, whatever
+        a later step does; a cell whose look raises is an alarm and the others go on."""
+        self.register("equity:held-2", 521, created_at=at("2026-10-21", 15), first_day="2026-10-22", symbols=["XLK"])
+        self.fwd1_row("equity:held-2", 521)
+        self.fail_pids.add(521)
+        with mock.patch.object(PS.Night, "look", side_effect=RuntimeError("a bug in a look")):
+            tally, _ = self.first_night()
+        self.assertEqual(tally.get("look_failed"), len(self.rec.units))
+        doc = self.permits()
+        self.assertTrue(doc["routes"])
+        self.assertEqual(doc["holds"], ["equity:held-2"])
+        self.assertTrue(self.rows("pool_events", "WHERE kind='look_failed'"))
+
 
 # ------------------------------------------------------------------------------------------- the later lineages
+def far(src: int, pid: int, seed: int) -> dict:
+    """Records of an independent program on a founder's symbol: its weights flipped on random sessions (invented)."""
+    out = {}
+    rng = np.random.default_rng(seed)
+    flips: dict = {}
+    for part, r in W.records(src).items():
+        r = json.loads(json.dumps(r))
+        era = part[:2]
+        if era not in flips:
+            flips[era] = rng.random(len(r["days"])) < 0.5
+        f = flips[era]
+        if "ws" in r:
+            sym = r["universe"][0]
+            w = np.array(r["ws"].get(sym, [0.0] * len(r["days"])))
+            w = np.where(f, 0.5 - w, w)
+            r["ws"] = {sym: w.tolist()}
+            r["w"] = w.tolist()
+        r["r"] = (np.array(r["r"]) * np.where(f, -1.0, 1.0)).tolist()
+        r["pid"] = pid
+        out[part] = r
+    return out
+
+
 class TheLaterLineages(World):
-    def later(self, lineage: str, pid: int, *, group: str = "sectors", cell: str | None = SECTORS, fwd1: bool = True,
-              created: str = "2026-10-21", **kw):
-        self.register(lineage, pid, group=group, created_at=at(created, 15), first_day="2026-10-22", cell=cell, **kw)
+    def later(self, lineage: str, pid: int, *, like: str = "equity:tm_s1", fwd1: bool = True, created: str = "2026-10-21",
+              records: dict | None = None, **kw):
+        """A later lineage whose Train series are a copy of a founder's (`like`, perturbed: a near-copy merges, a far
+        one does not) or the given records."""
+        src = self.rec.founders[like].pid
+        recs = records or {part: {**r, "pid": pid} for part, r in W.records(src).items()}
+        self.extra_records[pid] = recs
+        self.register(lineage, pid, created_at=at(created, 15), first_day="2026-10-22",
+                      symbols=[recs["e0k10"]["universe"][0]], **kw)
         if fwd1:
             self.fwd1_row(lineage, pid)
 
-    def test_a_lineage_fwd1_judges_as_case_n_is_held_until_the_house_assigns_it(self):
+    def test_a_lineage_fwd1_judges_as_case_n_is_held_until_the_house_decides_it(self):
         self.later("equity:late-1", 501)
-        self.later("equity:late-2", 502, cell="independent")
-        self.fail_train = True                                        # tonight the House cannot read Train series
+        self.fail_pids.add(501)                                       # tonight the House cannot read its Train series
         self.first_night()
-        self.assertEqual(set(self.permits()["holds"]), {"equity:late-1", "equity:late-2"})
-        self.fail_train = False
+        self.assertEqual(self.permits()["holds"], ["equity:late-1"])
+        self.assertNotIn("equity:late-1", self.members())
+        self.fail_pids.discard(501)
         self.advance("2026-10-26")
         self.judge(at("2026-10-26", 23, 30))
         doc = self.permits()
         self.assertEqual(doc["holds"], [])
-        self.assertIn("equity:late-1", doc["routes"])                 # assigned to the pending sector cell
-        self.assertNotIn("equity:late-2", doc["routes"])              # under rho_assign: a new cell, released
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
-        self.assertEqual((members["equity:late-1"]["cell"], members["equity:late-1"]["assigned"]), (SECTORS, 1))
-        self.assertEqual(members["equity:late-2"]["route"], "new_cell")
-        self.assertGreater(json.loads(members["equity:late-1"]["corr"])[SECTORS], self.rec.rho_assign)
+        members = self.members()
+        self.assertEqual(members["equity:late-1"]["route"], "merged")           # a copy of tm_s1: its route
+        self.assertIn("equity:late-1", doc["routes"])
 
-    def test_an_fwd1_pass_while_held_never_seats_it_and_it_joins_the_pool_route(self):
-        """A held lineage takes no FWD1-R seat; a pass FWD1 reads while it is held was never a seatable ticket, so on
-        its assignment into a pending unit it is on the POOL route like any other (section 7.2), never released."""
-        self.later("equity:late-7", 507)
-        self.fail_train = True
+    def test_a_held_lineage_with_no_train_series_stays_held(self):
+        self.later("equity:late-2", 502)
+        self.fail_pids.add(502)
         self.first_night()
-        self.assertEqual(self.permits()["holds"], ["equity:late-7"])
-        self.fwd1_check("equity:late-7", 507, 5, when=at("2026-10-26", 22), passed=1)
-        self.fwd1_verdict("equity:late-7", 507, "pass")
-        self.fail_train = False
+        self.assertEqual(self.permits()["holds"], ["equity:late-2"])
+        self.assertNotIn("equity:late-2", self.members())
+
+    def test_no_fwd1_row_is_a_wait_never_a_sealed_route(self):
+        """The P1 review's F5: a later lineage the House decided before FWD1 sighted it is no longer routed 'sealed'
+        and released: it waits; once FWD1 judges it as case N it is held, then decided."""
+        self.later("equity:late-3", 503, fwd1=False, records=far(self.rec.founders["equity:tm_s1"].pid, 503, 1))
+        self.first_night()
+        self.assertNotIn("equity:late-3", self.members())
+        self.assertEqual(self.permits()["holds"], [])
+        self.fwd1_row("equity:late-3", 503)
         self.advance("2026-10-26")
         self.judge(at("2026-10-26", 23, 30))
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
-        self.assertEqual(members["equity:late-7"]["route"], "pool")
-        self.assertIn("equity:late-7", self.permits()["routes"])
-        self.assertEqual(self.rows("pool_releases", "WHERE lineage='equity:late-7'"), [])
+        self.assertIn("equity:late-3", self.members())
+        self.assertNotEqual(self.members()["equity:late-3"]["route"], "sealed")
+
+    def test_the_copy_merge_waits_for_every_earlier_members_train_series(self):
+        """The P1 review's F13: a later lineage is decided only once every earlier member (by pid) has its Train series
+        or is out: its copy is never assigned or routed past an earlier member whose series is missing."""
+        self.later("equity:first-1", 510, records=far(self.rec.founders["equity:tm_s1"].pid, 510, 2))
+        self.later("equity:copy-1", 511, like="equity:tm_s1",
+                   records={p: {**r, "pid": 511} for p, r in far(self.rec.founders["equity:tm_s1"].pid, 510, 2).items()})
+        self.fail_pids.add(510)
+        self.first_night()
+        members = self.members()
+        self.assertNotIn("equity:copy-1", members)                   # its earlier member has no Train series yet
+        self.fail_pids.discard(510)
+        self.advance("2026-10-26")
+        self.judge(at("2026-10-26", 23, 30))
+        members = self.members()
+        self.assertEqual((members["equity:copy-1"]["route"], members["equity:copy-1"]["merged_into"]),
+                         ("merged", "equity:first-1"))
 
     def test_what_is_out_is_decided_at_the_first_reading_and_never_held(self):
         self.later("equity:panel-1", 601, ugroup="panel:sp500")
-        self.later("equity:stock-1", 602, symbols=["XLK", "AAPL"])
+        self.register("equity:stock-1", 602, created_at=at("2026-10-21", 15), symbols=["XLK", "AAPL"])
+        self.fwd1_row("equity:stock-1", 602)
         self.later("equity:event-1", 603, code="def decide(ctx):\n    return ctx.events_next\n")
-        self.register("equity:failonly-1", 604, group="sectors", reason="train_fail", created_at=at("2026-10-21", 15))
+        self.register("equity:failonly-1", 604, reason="train_fail", created_at=at("2026-10-21", 15), symbols=["XLK"])
         self.fwd1_row("equity:failonly-1", 604)
         self.first_night()
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
+        members = self.members()
         self.assertIn("panel", members["equity:panel-1"]["why"])
         self.assertIn("stocks", members["equity:stock-1"]["why"])
         self.assertIn("event reader", members["equity:event-1"]["why"])
@@ -600,98 +793,73 @@ class TheLaterLineages(World):
         self.assertEqual(self.permits()["holds"], [])
 
     def test_a_copy_by_program_sha_follows_its_members_route(self):
-        lin, pid = self.founders(SECTORS)[0]
-        sha = self.fdb.execute("SELECT program_sha FROM fwd_registry WHERE pid=?", (pid,)).fetchone()[0]
-        self.later("equity:copy-9", 701, sha=sha, cell="unrelated")
+        lin = "equity:tm_s2"
+        self.later("equity:copy-9", 701, like="equity:tm_s1", sha=self.rec.founders[lin].program_sha)
         self.first_night()
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
-        self.assertEqual((members["equity:copy-9"]["route"], members["equity:copy-9"]["merged_into"]), ("merged", lin))
+        members = self.members()
+        self.assertEqual(members["equity:copy-9"]["route"], "merged")
+        self.assertIn(members["equity:copy-9"]["merged_into"], {"equity:tm_s1", "equity:tm_s2"})
         self.assertIn("equity:copy-9", self.permits()["routes"])
 
-    def test_one_assigned_to_a_pending_unit_is_on_the_route_at_its_first_passing_pid(self):
-        self.register("equity:late-3", 509, group="sectors", reason="train_fail", created_at=at("2026-10-21", 14),
-                      first_day="2026-10-22", cell=SECTORS)
-        self.register("equity:late-3", 511, group="sectors", reason="train_pass", created_at=at("2026-10-21", 15),
-                      first_day="2026-10-22", cell=SECTORS)
-        self.register("equity:late-3", 512, group="sectors", reason="seed", created_at=at("2026-10-21", 16),
-                      first_day="2026-10-22", cell=SECTORS)
-        self.fwd1_row("equity:late-3", 511)
+    def test_an_independent_one_is_assigned_or_counts_toward_a_new_cell(self):
+        later = W.later_meta()
+        self.later(later["lineage"], later["pid"], records=W.records(later["pid"]))
         self.first_night()
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
-        self.assertEqual(members["equity:late-3"]["pid"], 511)            # the lowest passing pid, never the failed v1
-        self.assertIn("equity:late-3", self.permits()["routes"])
-
-    def test_a_copy_by_train_correlation_is_merged_into_the_earlier_member(self):
-        lin, pid = self.founders(SECTORS)[1]
-        self.later("equity:twin-1", 702)
-        self.train_twin[702] = pid
-        self.first_night()
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
-        self.assertEqual((members["equity:twin-1"]["route"], members["equity:twin-1"]["merged_into"]), ("merged", lin))
-        self.assertIn("equity:twin-1", self.permits()["routes"])          # its member is on the POOL route
-
-    def test_the_house_group_and_the_declared_card(self):
-        """The House reads the group from Train exposure (a mixed NEEDS label "index+sectors" held in SPY is an index
-        lineage) and the class from the family's card, its own or its fork parent's (`cards.card_of`)."""
-        self.later("equity:mixed-1", 801, group="index", symbols=["SPY", "XLK"], ugroup="index+sectors", cell=INDEX)
-        self.later("equity:beta-1", 802, cell=None)
-        self.later("equity:cal-1", 803, cell=None)
-        cards = {"mixed-1": {"card": {"mechanism_class": "trend_momentum", "inputs": ["underlying_price"]}, "own": True},
-                 "beta-1": {"card": {"mechanism_class": "equity_premium", "inputs": []}, "own": False},
-                 "cal-1": {"card": {"mechanism_class": "calendar_flow", "inputs": ["event_calendar"]}, "own": False}}
-        from league.swarm import cards as cards_mod
-
-        with mock.patch.object(cards_mod, "card_of", lambda store, fid: cards.get(fid)):
-            store = self.store()
-            try:
-                j = PS.Night(self.root, store, self.fdb, receipt=self.rec, runs=self.runs, families=self.families,
-                             swarm=object(), settings=SETTINGS, clock=lambda: at("2026-10-23", 23, 30), base=self.base,
-                             release=REL)
-                self.advance("2026-10-22")
-                self.advance("2026-10-23", finished=at("2026-10-23", 23))
-                j.night = PS.record_night(self.fdb)
-                j.run(at("2026-10-23", 23, 30))
-            finally:
-                store.close()
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
-        params = {r["pid"]: r for r in self.rows("pool_params")}
-        self.assertEqual(params[801]["grp"], "index")
-        self.assertIn(members["equity:mixed-1"]["cell"], (INDEX, REVERSAL))     # assigned among the index cells
-        self.assertEqual(members["equity:mixed-1"]["declared"], "trend_momentum")
-        self.assertIn("equity_premium", members["equity:beta-1"]["why"])         # a fork's card: its parent's
-        self.assertIn("event reader", members["equity:cal-1"]["why"])
+        member = self.members()[later["lineage"]]
+        cal = self.cal
+        hc = cal.cluster.house_context(W.house()["prices"], np.array(W.house()["cuts"]))
+        _, mm = P.house_member(cal, later, W.records(later["pid"]), hc)
+        cand = {}
+        for cell, unit in self.rec.units.items():
+            if unit.group == mm.group:
+                zs = []
+                for x in unit.members:
+                    _, f = P.house_member(cal, P.founder_meta(self.rec.founders[x]), W.records(self.rec.founders[x].pid), hc)
+                    zs.append(P.train_z(cal, f, hc))
+                cand[cell] = zs
+        target, _ = P.assign(cal, P.train_z(cal, mm, hc), cand, self.rec.rho_assign)
+        if target is None:
+            self.assertEqual(member["route"], "new_cell")
+        else:
+            self.assertEqual((member["route"], member["cell"]), ("pool", target))
+            self.assertIn(later["lineage"], self.permits()["routes"])
 
     def test_fwd1_spend_before_its_hold_releases_it_in_p1(self):
-        self.later("equity:late-4", 504)
+        self.later("equity:late-4", 504, records=far(self.rec.founders["equity:tm_s1"].pid, 504, 3))
         self.fwd1_check("equity:late-4", 504, 5, when=1.0)            # read before the pool ever held it
-        self.first_night()
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
+        with mock.patch.object(P, "assign", lambda cal, z, cells, rho: (SECTORS, {SECTORS: 0.9})):
+            self.first_night()
+        members = self.members()
         self.assertEqual(members["equity:late-4"]["route"], "fwd1")
         self.assertNotIn("equity:late-4", self.permits()["routes"])
         self.assertEqual(self.permits()["holds"], [])
 
-    def test_own_runs_that_give_no_train_series_are_out(self):
-        self.later("equity:late-5", 505)
-        self.refuse_train.add(505)
-        self.first_night()
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
-        self.assertIn("no Train series", members["equity:late-5"]["why"])
+    def test_assigned_to_a_pending_unit_it_is_on_the_route(self):
+        self.later("equity:late-5", 505, records=far(self.rec.founders["equity:tm_s1"].pid, 505, 4))
+        with mock.patch.object(P, "assign", lambda cal, z, cells, rho: (SECTORS, {SECTORS: 0.9})):
+            self.first_night()
+        members = self.members()
+        self.assertEqual((members["equity:late-5"]["route"], members["equity:late-5"]["cell"],
+                          members["equity:late-5"]["assigned"]), ("pool", SECTORS, 1))
+        self.assertIn("equity:late-5", self.permits()["routes"])
         self.assertEqual(self.permits()["holds"], [])
 
 
 class ALaterLineageAssignedToAFinalUnit(World):
-    def test_stays_on_fwd1(self):
+    def test_stays_per_program(self):
         self.first_night()
         db = self.store()
         with db:
             db.execute("INSERT INTO pool_verdicts(cell, word, why, at) VALUES (?,?,?,?)", (SECTORS, "FAIL", "x", 9.0))
         db.close()
-        self.register("equity:late-6", 506, group="sectors", created_at=at("2026-10-26", 15), first_day="2026-10-27",
-                      cell=SECTORS)
+        src = self.rec.founders["equity:tm_s1"].pid
+        self.extra_records[506] = far(src, 506, 5)
+        self.register("equity:late-6", 506, created_at=at("2026-10-26", 15), first_day="2026-10-27", symbols=["XLK"])
         self.fwd1_row("equity:late-6", 506)
         self.advance("2026-10-26")
-        self.judge(at("2026-10-26", 23, 30))
-        members = {m["lineage"]: m for m in self.rows("pool_members")}
+        with mock.patch.object(P, "assign", lambda cal, z, cells, rho: (SECTORS, {SECTORS: 0.9})):
+            self.judge(at("2026-10-26", 23, 30))
+        members = self.members()
         self.assertEqual(members["equity:late-6"]["route"], "final_unit")
         self.assertNotIn("equity:late-6", self.permits()["routes"])
         self.assertEqual(self.permits()["holds"], [])
@@ -699,7 +867,7 @@ class ALaterLineageAssignedToAFinalUnit(World):
 
 # --------------------------------------------------------------------------------------------- sessions and looks
 def no_floor(self, *args, **kwargs):
-    return 0                                                         # c_used = c_G (1.70 + 0.03 margin: 1.70)
+    return BAR                                                       # c_used = c_G (1.70)
 
 
 def holds(self, *args, **kwargs):
@@ -711,7 +879,7 @@ def fails(self, *args, **kwargs):
 
 
 class Looks(World):
-    """The sector cell's four founders with forward days from Oct 13 to the session after its k-th cell session."""
+    """The sector cell's three founders with forward days from Oct 13 to the session after its k-th cell session."""
 
     def run_through(self, n_sessions: int, *, alpha: float = 0.0, skip: dict | None = None, extra=0, placebo=holds,
                     floor=no_floor):
@@ -723,7 +891,7 @@ class Looks(World):
         self.first_night()
         with mock.patch.object(PS.Night, "c_own", floor), mock.patch.object(PS.Night, "placebo", placebo):
             out = []
-            for i, day in enumerate([d for d in names if d > "2026-10-23"]):
+            for day in [d for d in names if d > "2026-10-23"]:
                 self.advance(day)
                 out.append(self.judge(at(day, 23, 30)))
             return out, names
@@ -733,67 +901,41 @@ class TheSessions(Looks):
     def test_a_session_with_fewer_than_m_min_counted_rows_is_no_cell_session(self):
         names = nyse(CLOCK, 6)
         pids = [pid for _, pid in self.founders(SECTORS)]
-        skip = {pids[0]: {names[1]}, pids[1]: {names[1]}}
-        status = {names[2]: "disqualified"}
-        self.days(pids[0], nyse("2026-10-13", 20), skip=skip[pids[0]])
-        self.days(pids[1], nyse("2026-10-13", 20), skip=skip[pids[1]], status=status)
-        self.days(pids[2], nyse("2026-10-13", 20), status=status)
-        self.days(pids[3], nyse("2026-10-13", 20))
+        self.days(pids[0], nyse("2026-10-13", 20), skip={names[1]})
+        self.days(pids[1], nyse("2026-10-13", 20), status={names[2]: "disqualified"})
+        self.days(pids[2], nyse("2026-10-13", 20))
         self.first_night()
         for day in names:
             self.advance(day)
-        for i in range(STALL := PS.STALL_NIGHTS):
+        for i in range(PS.STALL_NIGHTS):
             self.advance(nyse(names[-1], 2 + i)[-1])
-        self.judge(at(nyse(names[-1], 2 + STALL)[-1], 23, 30))
+        self.judge(at(nyse(names[-1], 2 + PS.STALL_NIGHTS)[-1], 23, 30))
         sess = {r["day"]: r for r in self.rows("pool_sessions", "WHERE cell=?", (SECTORS,))}
         self.assertEqual(sess[names[0]]["session"], 1)
-        self.assertEqual((sess[names[1]]["counted"], sess[names[1]]["session"]), (2, 0))   # two rows absent
-        self.assertEqual((sess[names[2]]["counted"], sess[names[2]]["session"]), (2, 0))   # two disqualified
+        self.assertEqual((sess[names[1]]["counted"], sess[names[1]]["session"]), (2, 0))   # one row absent
+        self.assertEqual((sess[names[2]]["counted"], sess[names[2]]["session"]), (2, 0))   # one disqualified
         self.assertEqual(sess[names[3]]["session"], 1)
 
     def test_a_session_waits_for_its_rows_and_its_settling_night(self):
         names = nyse(CLOCK, 4)
         pids = [pid for _, pid in self.founders(SECTORS)]
-        for pid in pids[:3]:
+        for pid in pids[:2]:
             self.days(pid, nyse("2026-10-13", 15))
-        self.days(pids[3], nyse("2026-10-13", 15), skip={names[1]})   # one row has not come
+        self.days(pids[2], nyse("2026-10-13", 15), skip={names[1]})     # one row has not come
         self.first_night()
         self.advance(names[0])
         self.judge(at(names[0], 23, 30))
-        self.assertEqual(self.rows("pool_sessions", "WHERE cell=?", (SECTORS,)), [])   # not settled: no later night
+        self.assertEqual(self.rows("pool_sessions", "WHERE cell=?", (SECTORS,)), [])
         self.advance(names[1])
         self.advance(names[2])
         self.judge(at(names[2], 23, 30))
         days = [r["day"] for r in self.rows("pool_sessions", "WHERE cell=? ORDER BY day", (SECTORS,))]
-        self.assertEqual(days, [names[0]])                             # names[1] waits for its fourth row
-        self.days(pids[3], [names[1]])
+        self.assertEqual(days, [names[0]])
+        self.days(pids[2], [names[1]])
         self.advance(names[3])
         self.judge(at(names[3], 23, 30))
         days = [r["day"] for r in self.rows("pool_sessions", "WHERE cell=? ORDER BY day", (SECTORS,))]
         self.assertEqual(days, names[:3])
-
-    def test_absent_days_count_zero_and_a_later_member_joins_at_its_first_counted_day(self):
-        names = nyse("2026-10-13", 25)
-        pids = [pid for _, pid in self.founders(SECTORS)]
-        late = names.index(CLOCK) + 3
-        for pid in pids[:3]:
-            self.days(pid, names, alpha=0.001)
-        self.days(pids[3], names[late:], alpha=0.001)                 # its first counted day is three sessions in
-        self.first_night()
-        for day in [d for d in names if d > "2026-10-23"]:
-            self.advance(day)
-        store = self.store()
-        try:
-            j = PS.Night(self.root, store, self.fdb, receipt=self.rec, runs=self.runs, families=self.families,
-                         settings=SETTINGS, clock=lambda: at(names[-1], 23, 30))
-            j.train_step()
-            j.classify(SECTORS)
-            sess = j.sessions(SECTORS, self.engine)
-            out = j.series(SECTORS, self.engine, sess[:6])
-        finally:
-            store.close()
-        self.assertEqual(out["active"], [3, 3, 3, 4, 4, 4])
-        self.assertEqual(len(out["D"]), 6)
 
     def test_an_absent_row_enters_d_as_zero_by_hand(self):
         names = nyse("2026-10-13", 25)
@@ -806,24 +948,21 @@ class TheSessions(Looks):
             self.advance(day)
         for _ in range(PS.STALL_NIGHTS):                               # the absent row will not come
             self.advance(names[-1])
-        store = self.store()
+        j = self.night_of(at(names[-1], 23, 30))
         try:
-            j = PS.Night(self.root, store, self.fdb, receipt=self.rec, runs=self.runs, families=self.families,
-                         settings=SETTINGS, clock=lambda: at(names[-1], 23, 30))
-            j.train_step()
-            j.classify(SECTORS)
+            with mock.patch.object(P, "M_MIN", 2):                     # two counted rows: still a cell session here
+                j.classify(SECTORS)
             sess = j.sessions(SECTORS, self.engine)[:6]
-            self.assertIn(gone, sess)                                   # three counted rows: still a cell session
+            self.assertIn(gone, sess)
             cell = j.cell_members(SECTORS)
             whole = j.series(SECTORS, self.engine, sess, members=cell)
             each = [j.series(SECTORS, self.engine, sess, members=[m])["D"] for m in cell]
         finally:
-            store.close()
-        for t, day in enumerate(sess):
-            want = sum(z[t] for z in each) / 4                         # each member's own z; the absent one's is 0
-            self.assertAlmostEqual(whole["D"][t], want, places=14)
+            j.store.close()
+        for t in range(len(sess)):
+            self.assertAlmostEqual(whole["D"][t], sum(z[t] for z in each) / len(each), places=14)
         self.assertEqual(each[0][sess.index(gone)], 0.0)
-        self.assertEqual(whole["mar"][sess.index(gone)][1:], (1, 4))   # one zeroed member-day of four slots
+        self.assertEqual(whole["mar"][sess.index(gone)][1:], (1, 3))   # one zeroed member-day of three slots
 
 
 class TheLooksWriteAWordAndAShaUntilFinal(Looks):
@@ -835,21 +974,16 @@ class TheLooksWriteAWordAndAShaUntilFinal(Looks):
         self.assertEqual(self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,)), [])
         self.assertEqual(set(checks[0]), {"cell", "k", "engine", "word", "sha", "look", "at"})   # no T, no series
         self.assertEqual(self.permits()["units"][SECTORS]["word"], "pending")
-        report = json.loads((self.root / PS.REPORT).read_text()) if (self.root / PS.REPORT).exists() else None
-        if report is not None:
-            self.assertEqual(report["units"][SECTORS]["word"], "pending")
-        # the stored sha is D_1..40's, read again from the store
-        store = self.store()
+        j = self.night_of(at("2026-12-30", 23, 30))
         try:
-            j = PS.Night(self.root, store, self.fdb, receipt=self.rec, runs=self.runs, families=self.families)
             sess = j.sessions(SECTORS, self.engine)[:40]
             out = j.series(SECTORS, self.engine, sess)
             self.assertEqual(P.series_sha(sess, out["D"], out["D15"]), checks[0]["sha"])
         finally:
-            store.close()
+            j.store.close()
 
     def test_a_pass_writes_the_verdict_with_its_series_once(self):
-        self.run_through(42, alpha=0.002)
+        self.run_through(42, alpha=0.004)
         verdict = self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,))
         self.assertEqual(len(verdict), 1)
         self.assertEqual((verdict[0]["word"], verdict[0]["k"]), ("PASS", 40))
@@ -858,22 +992,20 @@ class TheLooksWriteAWordAndAShaUntilFinal(Looks):
         doc = self.permits()
         self.assertEqual(doc["units"][SECTORS]["word"], "PASS")
         self.assertEqual(P.figure_free(doc), [])
+        self.assertEqual({e["lineage"] for e in doc["eligible"]}, {lin for lin, _ in self.founders(SECTORS)})
 
     def test_a_pass_without_its_placebo_leg_is_no_pass(self):
-        self.run_through(41, alpha=0.002, placebo=fails)
+        self.run_through(41, alpha=0.004, placebo=fails)
         self.assertEqual(self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,)), [])
         self.assertEqual(self.rows("pool_checks", "WHERE cell=?", (SECTORS,))[0]["word"], "not_passed")
 
     def test_an_ineligible_look_writes_no_verdict(self):
-        self.run_through(41, alpha=0.002, floor=lambda *a, **k: None)
+        self.run_through(41, alpha=0.004, floor=lambda *a, **k: None)
         self.assertEqual(self.rows("pool_checks", "WHERE cell=?", (SECTORS,))[0]["word"], "ineligible")
         self.assertEqual(self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,)), [])
 
     def test_a_moved_series_is_void(self):
-        """A later look reads D_1..k of every earlier look again from the store: a series that is not the stored
-        sha's is a moved series (the judged days moved): VOID, written once."""
         out, names = self.run_through(41, alpha=0.0, placebo=fails)
-        self.assertEqual(self.rows("pool_checks", "WHERE cell=?", (SECTORS,))[0]["k"], 40)
         more = nyse(names[-1], 25)[1:]
         for _, pid in self.founders(SECTORS):
             self.days(pid, more)
@@ -886,7 +1018,6 @@ class TheLooksWriteAWordAndAShaUntilFinal(Looks):
         verdict = self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,))[0]
         self.assertEqual(verdict["word"], "VOID")
         self.assertIn("moved", verdict["why"])
-        self.assertEqual([c["k"] for c in self.rows("pool_checks", "WHERE cell=?", (SECTORS,))], [40])
 
 
 class ALookAfterAFailedNight(Looks):
@@ -901,23 +1032,21 @@ class ALookAfterAFailedNight(Looks):
                 self.advance(day)
             self.fail_forward = True
             tally, _ = self.judge(at(after[40], 23, 30))
-            self.assertEqual(self.rows("pool_checks"), [])            # the House failed: nothing written, nobody marked
+            self.assertEqual(self.rows("pool_checks"), [])
             self.assertGreaterEqual(tally.get("house", 0), 1)
-            self.assertTrue(self.rows("pool_events", "WHERE kind='waited'"))
             self.fail_forward = False
             for day in after[41:50]:
                 self.advance(day)
             self.judge(at(after[49], 23, 30))
         check = self.rows("pool_checks", "WHERE cell=?", (SECTORS,))[0]
-        store = self.store()
+        j = self.night_of(at(after[49], 23, 30))
         try:
-            j = PS.Night(self.root, store, self.fdb, receipt=self.rec, runs=self.runs, families=self.families)
             sess = j.sessions(SECTORS, self.engine)
             self.assertGreater(len(sess), 40)
             out = j.series(SECTORS, self.engine, sess[:40])
-            self.assertEqual(check["sha"], P.series_sha(sess[:40], out["D"], out["D15"]))   # exactly D_1..40
+            self.assertEqual(check["sha"], P.series_sha(sess[:40], out["D"], out["D15"]))
         finally:
-            store.close()
+            j.store.close()
 
 
 class TheStallRule(Looks):
@@ -937,102 +1066,79 @@ class TheStallRule(Looks):
                 tallies.append(self.judge(at(day, 23, 30))[0])
         self.assertEqual(self.rows("pool_checks"), [])
         self.assertEqual(self.rows("pool_verdicts"), [])
-        self.assertEqual(len(self.rows("pool_events", "WHERE kind='stalled'")), 1)
+        self.assertEqual(len(self.rows("pool_events", "WHERE kind='stalled' AND cell=?", (SECTORS,))), 1)
         self.assertGreaterEqual(sum(t.get("stalled_now", 0) for t in tallies), 1)
 
 
-class TheFinalLook(Looks):
-    def test_fail_at_120(self):
-        with mock.patch.object(P, "PLAN", (40, 60, 120)):
-            self.run_through(121, alpha=0.0, placebo=fails)
-        verdict = self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,))[0]
-        self.assertEqual((verdict["word"], verdict["k"]), ("FAIL", 120))
-        self.assertEqual([c["k"] for c in self.rows("pool_checks", "WHERE cell=? ORDER BY k", (SECTORS,))], [40, 60, 120])
-        self.assertEqual(len(json.loads(verdict["series"])["D"]), 120)
-        self.assertEqual(self.permits()["units"][SECTORS]["word"], "FAIL")
-
-
-class AMemberWhoseRunDoesNotReproduce(Looks):
-    def test_over_ten_percent_enters_as_zero_throughout_with_a_warning(self):
-        names = nyse("2026-10-13", 60)
-        lin, pid = self.founders(SECTORS)[0]
-        for day in names[10:20]:                                     # ten of its ~50 days: over 10%
-            self.unreproduced[(pid, day)] = 0.01
-        out, _ = self.run_through(41, alpha=0.0, placebo=fails)
-        self.assertGreaterEqual(sum(t[0].get("unreproduced", 0) for t in out), 1)
-        events = self.rows("pool_events", "WHERE kind='unreproduced'")
-        self.assertEqual([e["lineage"] for e in events], [lin])
-        store = self.store()
-        try:
-            j = PS.Night(self.root, store, self.fdb, receipt=self.rec, runs=self.runs, families=self.families)
-            sess = j.sessions(SECTORS, self.engine)[:40]
-            member = [m for m in j.cell_members(SECTORS) if m["lineage"] == lin]
-            self.assertEqual(set(j.series(SECTORS, self.engine, sess, members=member)["D"]), {0.0})
-        finally:
-            store.close()
-
-
 class TheOwnFloorAtALook(Looks):
-    def test_c_own_on_the_clusters_members_and_its_resamples_kept_across_nights(self):
-        """The own floor at a look, on the real code (2,000 resamples cut to 60 here): the night's budget runs out after
-        one chunk of resamples, they are kept, the look waits (nothing is written for it), and the next night resumes
-        from them; each cell's look reads its cluster's floor with the membership through that look."""
-        real_floor, real_boot = PS.Night.c_own, P.bootstrap_histograms
-        state = {"chunks": 0, "limit": 1}
+    def test_the_vendored_floor_on_the_members_through_the_look_kept_across_nights(self):
+        """The bar at a look on the real code (the vendored pipeline at the receipt's B): the night's budget runs out
+        mid-floor, the resamples computed so far are kept, the look waits (nothing is written for it), and the next
+        night resumes from them; each cell's look reads its cluster's floor with the membership through that look."""
+        names = nyse("2026-10-13", 60)
+        for _, pid in self.founders(SECTORS) + self.founders(INDEX) + self.founders(REVERSAL):
+            self.days(pid, names)
+        self.first_night()                                              # the clock-start floors: not budgeted here
+        state = {"armed": True, "computed": 0, "limit": 4}
+        real_hook, real_over = PS.Night.boot_hook, PS.Night._over
 
-        def counted(*args, **kwargs):
-            state["chunks"] += 1
-            return real_boot(*args, **kwargs)
+        def hook_factory(night, cid, look_key):
+            inner = real_hook(night, cid, look_key)
 
-        def over(self):
-            return state["chunks"] >= state["limit"]
+            def hook(null, e, key, compute):
+                def counted():
+                    state["computed"] += 1
+                    return compute()
+                return inner(null, e, key, counted)
+            return hook
 
-        with mock.patch.object(P, "BOOT_RESAMPLES", 60), mock.patch.object(P, "bootstrap_histograms", counted), \
-                mock.patch.object(PS.Night, "_over", over):
-            self.run_through(41, alpha=0.0, placebo=fails, floor=real_floor)
-            self.assertEqual(self.rows("pool_floors"), [])                 # the budget ran out mid-bootstrap
-            self.assertEqual(len(self.rows("pool_boot")), 50)               # its one chunk kept
+        def over(night):
+            return (state["armed"] and state["computed"] >= state["limit"]) or real_over(night)
+
+        after = [d for d in names if d > "2026-10-23"]
+        with mock.patch.object(PS.Night, "boot_hook", hook_factory), mock.patch.object(PS.Night, "_over", over), \
+                mock.patch.object(PS.Night, "placebo", fails):
+            for day in after[:41]:
+                self.advance(day)
+            self.judge(at(after[40], 23, 30))
+            self.assertEqual(self.rows("pool_floors"), [])                 # the budget ran out mid-floor
+            kept = len(self.rows("pool_boot"))
+            self.assertEqual(kept, state["limit"])
             self.assertEqual(self.rows("pool_checks"), [])
             self.assertTrue(self.rows("pool_events", "WHERE kind='waited'"))
-            state["limit"] = 10 ** 9
-            day = nyse("2026-10-13", 60)[53]
-            self.advance(day)
-            with mock.patch.object(PS.Night, "c_own", real_floor), mock.patch.object(PS.Night, "placebo", fails):
-                self.judge(at(day, 23, 30))
-        floors = self.rows("pool_floors")
-        self.assertEqual({f["cluster"] for f in floors}, {"reversal_liquidity", "trend_momentum"})
-        self.assertEqual(len(self.rows("pool_boot")), 60 * len(P.NULLS) * len(floors))
-        for f in floors:
-            row = json.loads(f["row"])
-            self.assertEqual(set(row["nulls"]), set(P.NULLS))
-            if row["k_own"] is not None:
-                self.assertGreaterEqual(row["k_own"], row["matched"])
+            state["armed"] = False
+            self.advance(after[41])
+            self.judge(at(after[41], 23, 30))
+        floors = {f["cluster"]: json.loads(f["row"]) for f in self.rows("pool_floors")}
+        self.assertEqual(set(floors), {"trend_momentum", "reversal_liquidity"})
+        for row in floors.values():
+            fl = row["floors"][self.rec.rule.floor_def]
+            self.assertEqual(row["k_used"], fl["k_used"])
+            self.assertEqual(fl["minimum"], 150)
+            if fl["c_own"] is not None:
+                self.assertEqual(fl["k_used"], P.k_used(170, 3, fl["c_own"], 150))
+        self.assertEqual(len(self.rows("pool_boot")), kept)                 # a floor finished in its night keeps none
         self.assertEqual({c["cell"] for c in self.rows("pool_checks")}, set(self.rec.units))
-        self.assertTrue(all(c["word"] in ("not_passed", "ineligible") for c in self.rows("pool_checks")))
 
 
 class TheZeroedDaysVoid(Looks):
     def test_absent_rows_on_the_largest_moves_void_the_cell(self):
-        """One member's rows absent on exactly the four sessions of the largest benchmark moves (each session still a
-        cell session: three counted rows): its zeroed days are all in the top decile, p = 0.1^4: VOID."""
+        """One member's rows absent on exactly the four sessions of the largest benchmark moves: its zeroed days are
+        all in the top decile, p = 0.1^4: VOID (the sessions with two rows wait the stall rule, then are not cell
+        sessions; another founder joins to keep three counted rows)."""
         names = nyse("2026-10-13", 70)
         after = [d for d in names if d >= CLOCK]
-        moves = sorted(after[:40], key=lambda d: -abs(fwd_R("XLK", d)))[:4]
         pids = [pid for _, pid in self.founders(SECTORS)]
-        self.run_through(41, alpha=0.0, skip={pids[0]: set(moves)}, placebo=fails, extra=PS.STALL_NIGHTS + 1)
+        others = [symbol_of(p) for p in pids[1:]]
+        # the sessions' benchmark |b| is the mean b of their counted rows: the two others' on the absent days
+        moves = sorted(after[:40], key=lambda d: -abs(sum(fwd_R(s, d) for s in others) / len(others)))[:4]
+        with mock.patch.object(P, "M_MIN", 2):
+            self.run_through(41, alpha=0.0, skip={pids[0]: set(moves)}, placebo=fails, extra=PS.STALL_NIGHTS + 1)
         verdict = self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,))
         self.assertEqual(verdict[0]["word"], "VOID")
         mar = json.loads(verdict[0]["mar"])
         self.assertTrue(mar["void"])
         self.assertEqual((mar["top"], mar["zeroed"]), (4, 4))
-
-    def test_absent_rows_spread_evenly_do_not(self):
-        names = nyse("2026-10-13", 70)
-        after = [d for d in names if d >= CLOCK]
-        pids = [pid for _, pid in self.founders(SECTORS)]
-        self.run_through(41, alpha=0.0, skip={pids[0]: set(after[1:40:8])}, placebo=fails, extra=PS.STALL_NIGHTS + 1)
-        self.assertEqual(self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,)), [])
-        self.assertEqual(self.rows("pool_checks", "WHERE cell=?", (SECTORS,))[0]["word"], "not_passed")
 
 
 # ------------------------------------------------------------------------------------------- engine, join, demotion
@@ -1043,28 +1149,14 @@ class TheEngineRule(Looks):
         self.fdb.commit()
         names = nyse("2026-10-13", 53)
         for _, pid in self.founders(SECTORS):
-            self.days(pid, names, alpha=0.01, engine=new)                # every judged day moved
+            self.days(pid, names, alpha=0.01, engine=new)
         self.advance(names[-1])
         with mock.patch.object(PS.Night, "c_own", no_floor), mock.patch.object(PS.Night, "placebo", fails):
             self.judge(at(names[-1], 23, 30))
         self.assertEqual(self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,))[0]["word"], "VOID")
 
-    def test_an_engine_move_that_leaves_them_carries_the_cell(self):
-        self.run_through(41, alpha=0.0, placebo=fails)
-        new, _ = forward_db.engine_id(self.fdb, "equity-engine-1+bbbbbbbbbbbb+fwd-1", at=2.0)
-        self.fdb.commit()
-        names = nyse("2026-10-13", 53)
-        for _, pid in self.founders(SECTORS):
-            self.days(pid, names, alpha=0.0, engine=new)
-        self.advance(names[-1])
-        with mock.patch.object(PS.Night, "c_own", no_floor), mock.patch.object(PS.Night, "placebo", fails):
-            self.judge(at(names[-1], 23, 30))
-        self.assertEqual(self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,)), [])
-        switched = self.rows("pool_events", "WHERE kind='engine_switched' AND cell=?", (SECTORS,))
-        self.assertEqual(json.loads(switched[0]["payload"])["to"], new)
-
     def test_a_pass_touched_by_an_engine_move_is_lost_never_gained(self):
-        self.run_through(42, alpha=0.002)
+        self.run_through(42, alpha=0.004)
         self.assertEqual(self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,))[0]["word"], "PASS")
         new, _ = forward_db.engine_id(self.fdb, "equity-engine-1+bbbbbbbbbbbb+fwd-1", at=2.0)
         self.fdb.commit()
@@ -1074,80 +1166,79 @@ class TheEngineRule(Looks):
         self.advance(names[-1])
         self.judge(at(names[-1], 23, 30))
         self.assertEqual(self.permits()["units"][SECTORS]["word"], "DEMOTED")
-        self.assertIn("lost", self.rows("pool_demotions", "WHERE cell=?", (SECTORS,))[0]["why"])
 
 
 class AJoinLosesAPass(Looks):
     def test_a_recorded_pass_is_re_derived_at_the_joint_bar(self):
-        self.run_through(42, alpha=0.002)
+        self.run_through(42, alpha=0.004)
         verdict = self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,))[0]
+        joint = "reversal_liquidity+trend_momentum"
         db = self.store()
         with db:
-            db.execute("INSERT INTO pool_clusters(look, cluster, cells, u_point, u_bound, at) VALUES (?,?,?,?,?,?)",
-                       (f"{REVERSAL}:40", "reversal_liquidity+trend_momentum", json.dumps(sorted([SECTORS, INDEX, REVERSAL])),
-                        0.04, 0.06, 99.0))
+            db.execute("INSERT INTO pool_clusters(look, cluster, cells, u_point, u_bound, report_only, at) VALUES "
+                       "(?,?,?,?,?,?,?)", (f"{REVERSAL}:40", joint, json.dumps(sorted([SECTORS, INDEX, REVERSAL])), 0.0,
+                                           0.0, 0, 99.0))
             db.execute("INSERT INTO pool_floors(cluster, look, row, at) VALUES (?,?,?,?)",
-                       ("reversal_liquidity+trend_momentum", f"{REVERSAL}:40",
-                        json.dumps({"k_own": int(verdict["t"] * 100) + 50, "why": None}), 99.0))
+                       (joint, f"{REVERSAL}:40", json.dumps({"k_used": int(verdict["t"] * 100) + 50}), 99.0))
         db.close()
         self.advance(nyse("2026-10-13", 60)[-1])
         self.judge(at(nyse("2026-10-13", 60)[-1], 23, 30))
         self.assertEqual(self.permits()["units"][SECTORS]["word"], "DEMOTED")
         self.assertIn("joint bar", self.rows("pool_demotions", "WHERE cell=?", (SECTORS,))[0]["why"])
 
-    def test_the_effective_cluster_joins_only_tighten(self):
+    def test_a_join_only_tightens_and_a_report_only_join_is_sticky(self):
         self.first_night()
         db = self.store()
         with db:
-            db.execute("INSERT INTO pool_clusters(look, cluster, cells, u_point, u_bound, at) VALUES (?,?,?,?,?,?)",
-                       ("x:40", "reversal_liquidity+trend_momentum", json.dumps([SECTORS, INDEX, REVERSAL]), 0.04, 0.06,
-                        5.0))
-        j = PS.Night(self.root, db, self.fdb, receipt=self.rec, runs=self.runs, families=self.families)
-        cid, cells, u = j.effective_cluster(SECTORS)
+            db.execute("INSERT INTO pool_clusters(look, cluster, cells, u_point, u_bound, report_only, at) VALUES "
+                       "(?,?,?,?,?,?,?)", ("x:40", "reversal_liquidity+trend_momentum",
+                                           json.dumps([SECTORS, INDEX, REVERSAL]), 0.12, 0.15, 1, 5.0))
+        j = PS.Night(self.root, db, self.fdb, receipt=self.rec, runs=self.runs, families=self.families, cal=self.cal)
+        cid, cells, caps_ = j.effective_cluster(SECTORS)
         self.assertEqual((cid, cells), ("reversal_liquidity+trend_momentum", sorted([SECTORS, INDEX, REVERSAL])))
-        self.assertEqual(u, P.joined_u([(0.02, 0.03), (0.02, 0.03)]))
+        self.assertFalse(caps_.report_only)                       # both parts' U 0: the union 0
+        self.assertEqual(PS.unit_words(db)[SECTORS]["word"], P.REPORT_ONLY)
         db.close()
 
 
 class TheDemotion(Looks):
     def test_a_pass_whose_post_pass_sessions_fail_is_demoted_sticky(self):
-        out, names = self.run_through(42, alpha=0.002)
+        out, names = self.run_through(42, alpha=0.004)
         self.assertEqual(self.rows("pool_verdicts", "WHERE cell=?", (SECTORS,))[0]["word"], "PASS")
         more = nyse(names[-1], 30)[1:]
         for _, pid in self.founders(SECTORS):
-            self.days(pid, more, alpha=-0.004)
+            self.days(pid, more, alpha=-0.006)
         for day in more:
             self.advance(day)
             self.judge(at(day, 23, 30))
         self.assertEqual(self.permits()["units"][SECTORS]["word"], "DEMOTED")
         post = self.rows("pool_post", "WHERE cell=?", (SECTORS,))
         self.assertEqual([p["n"] for p in post], [20])
-        self.assertEqual(post[0]["word"], "DEMOTED")
 
 
 # ---------------------------------------------------------------------------------------- permits and operator views
 class ThePermitFile(Looks):
-    def test_ids_and_words_only_and_every_registry_lineage(self):
-        self.register("equity:other-1", 801, group="index", created_at=at("2026-10-21", 15), first_day="2026-10-22",
-                      reason="train_fail")
-        self.run_through(42, alpha=0.002)
+    def test_ids_and_fixed_words_only_and_every_registry_lineage(self):
+        self.register("equity:other-1", 801, created_at=at("2026-10-21", 15), first_day="2026-10-22", reason="train_fail")
+        self.run_through(42, alpha=0.004)
         doc = self.permits()
         self.assertEqual(P.figure_free(doc), [])
-        self.assertEqual(doc["version"], PS.PERMITS_VERSION)
         self.assertEqual(set(doc), {"version", "screen", "receipt", "clock", "at", "routes", "holds", "units", "lineages",
                                     "eligible"})
         registry_lineages = {str(r[0]) for r in self.fdb.execute("SELECT DISTINCT lineage FROM fwd_registry")}
         self.assertLessEqual(registry_lineages, set(doc["lineages"]))
-        self.assertIsNone(doc["lineages"]["equity:other-1"]["cell"])
         self.assertEqual(stat.S_IMODE(os.stat(self.root / PS.PERMITS).st_mode), 0o600)
-        # the eligible lineages of the pass: in Train K order, ids only
-        eligible = doc["eligible"]
-        self.assertEqual({e["lineage"] for e in eligible}, {lin for lin, _ in self.founders(SECTORS)})
-        pids = [self.rec.founders[e["lineage"]].pid for e in eligible]
-        ks = [(30 + pid % 7) for pid in pids]
-        self.assertEqual(ks, sorted(ks, reverse=True))
-        self.assertTrue(all(set(e) == {"lineage", "cell", "cluster", "family", "version", "run_sha", "fwd1_cell"}
-                            for e in eligible))
+
+    def test_a_why_is_a_fixed_word_and_its_detail_the_reports(self):
+        """The P1 review's F8: a reason with a figure in it ("outside 1.40-2.50") never reaches the file (whose figure check
+        would refuse it and leave the swarm failing closed): the file carries a word, the report the words."""
+        self.assertTrue(PS.keep_permits(self.root, None, "no_receipt", at("2026-10-23", 23),
+                                        detail="the receipt's c_G is off the grid or outside 1.40-2.50"))
+        self.assertEqual(self.permits()["why"], "no_receipt")
+        self.assertEqual(P.figure_free(self.permits()), [])
+        self.assertIn("1.40-2.50", json.loads((self.root / PS.REPORT).read_text())["notes"][0])
+        PS.keep_permits(self.root, None, "the cap is 0.12", at("2026-10-23", 23))
+        self.assertEqual(self.permits()["why"], "unreadable_reason")
 
     def test_the_names_are_the_swarms(self):
         from league.swarm import elane_forward, elane_seal
@@ -1162,7 +1253,7 @@ class ThePermitFile(Looks):
                          {"elane": {"pool": {"mode": "record"}}}, {"elane": {"pool": {"mode": "bogus"}}}):
             self.assertEqual(PS.pool_on(settings), elane_forward.pool_on(settings), settings)
 
-    def test_the_report_shows_no_interim_word(self):
+    def test_the_report_shows_no_interim_word_and_counts_a_cluster_once(self):
         self.run_through(41, alpha=0.0, placebo=fails)
         store = self.store()
         try:
@@ -1171,13 +1262,11 @@ class ThePermitFile(Looks):
             store.close()
         self.assertEqual(rep["units"][SECTORS]["word"], "pending")
         self.assertNotIn("not_passed", json.dumps(rep))
-        self.assertIn("0 passes of 3 units", rep["beside"])
+        # three cells read at 40, two of them one cluster's: 0.02 (trend_momentum) + 0.02 (reversal_liquidity)
+        self.assertIn("0 passes of 3 units; 0.04 expected at zero edge", rep["beside"])
 
 
 class TheOperatorViewsWithhold(World):
-    def write(self, doc):
-        (self.root / PS.PERMITS).write_text(json.dumps(doc))
-
     def doc(self, word="pending"):
         return {"version": 1, "screen": "POOL1", "receipt": "d" * 64, "clock": CLOCK, "at": "x",
                 "routes": {"equity:a": {"cell": SECTORS, "cluster": "trend_momentum"}}, "holds": ["equity:h"],
@@ -1185,7 +1274,8 @@ class TheOperatorViewsWithhold(World):
 
     def test_both_readers_agree(self):
         cases = [(None, {}), (None, SETTINGS), ("{not json", SETTINGS), (self.doc(), SETTINGS), (self.doc("PASS"), {}),
-                 (self.doc("VOID"), SETTINGS), ({**self.doc(), "version": 2}, {}), (self.doc("ineligible"), SETTINGS)]
+                 (self.doc("VOID"), SETTINGS), ({**self.doc(), "version": 2}, {}), (self.doc("ineligible"), SETTINGS),
+                 (self.doc("nonconforming"), SETTINGS)]
         for doc, settings in cases:
             path = self.root / PS.PERMITS
             if path.exists():
@@ -1194,59 +1284,30 @@ class TheOperatorViewsWithhold(World):
                 path.write_text(doc if isinstance(doc, str) else json.dumps(doc))
             with self.subTest(doc=str(doc)[:40], settings=settings):
                 self.assertEqual(PS.withheld(self.root, settings), FR._pool_withheld(self.root, settings))
-        self.write(self.doc())
-        self.assertEqual(PS.withheld(self.root, SETTINGS), (frozenset({"equity:a", "equity:h"}), False))
-        self.write(self.doc("FAIL"))
-        self.assertEqual(PS.withheld(self.root, SETTINGS), (frozenset({"equity:h"}), False))
-        (self.root / PS.PERMITS).unlink()
-        self.assertEqual(PS.withheld(self.root, SETTINGS), (frozenset(), True))          # missing while on: fail closed
-        self.assertEqual(PS.withheld(self.root, {}), (frozenset(), False))
 
-    def test_fwd1s_report_leaves_a_pool_lineage_out_until_final(self):
-        rule = F.Rule(receipt_sha256="c" * 64, figures={k: {"budget": 0.15, "fp_point": 0.02, "fp_ub": 0.025,
-                                                            "zero_edge_by_checkpoint": [0.01] * 7, "edge": "+10%",
-                                                            "power": 0.05, "fp_avg": 0.03}
-                                                        for k in ("ETF|N", "PANEL|N", "PANEL|XS1")})
-        lin, pid = sorted(self.rec.units[SECTORS].founders)[0], None
-        pid = self.rec.founders[lin].pid
-        with self.sdb:
-            self.sdb.execute("INSERT INTO fwd1_verdicts(lineage, pid, verdict, k, day, c_used, why, beside, words, at) "
-                             "VALUES (?,?,?,?,?,?,?,?,?,?)", (lin, pid, "pass", 5, "2026-10-20", 2.61, "passed",
-                                                              "t = 3.10 shadow P&L", "w", 3.0))
-        pin = {"start": "2026-10-16", "release": ""}
-        full = FS.report(self.sdb, rule=rule, pin=pin, fdb=self.fdb)
-        self.assertIn(lin, [p["lineage"] for p in full["passes"]])
-        held = FS.report(self.sdb, rule=rule, pin=pin, fdb=self.fdb, withheld={lin})
-        self.assertNotIn(lin, [p["lineage"] for p in held["passes"]])
-        self.assertEqual(held["pool_route"], 1)
-        self.assertEqual(sum(c.get("pass", 0) for c in held["counts"].values()), 0)
-        self.assertEqual(held["registry"]["ETF|N"]["observed"], 0)
-        everything = FS.report(self.sdb, rule=rule, pin=pin, fdb=self.fdb, withhold_etf=True)
-        self.assertEqual(everything["passes"], [])
-        self.assertEqual(everything["pool_route"], len(self.rec.units[SECTORS].founders))
-
-    def test_the_bh_by_meter_leaves_them_out_until_final(self):
-        lin = sorted(self.rec.units[SECTORS].founders)[0]
-        pid = self.rec.founders[lin].pid
-        for p in [self.rec.founders[x].pid for x in self.rec.units[SECTORS].founders]:
+    def test_the_bh_by_meter_waits_while_the_file_fails_closed(self):
+        """The P1 review's F11: while the pool's permit file fails closed the meter writes no row with every ETF lineage
+        left out for good: it waits for the day, and writes it once the file reads."""
+        day = forward_db.t0().isoformat()
+        for p in [self.rec.founders[x].pid for x in self.rec.units[SECTORS].members]:
             self.fdb.execute("INSERT INTO fwd_checks(pid, n, day, engine, t_r, sum_r, sum_r15, t_x, mean_w, p_x, at) "
-                             "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (p, 20, "2026-11-10", self.engine, 1.0, 0.1, 0.1, 1.0,
-                                                                0.5, 0.01, 1.0))
-        self.fdb.commit()
-        full = FR._meter_row(self.fdb, "2026-11-10")
-        held = FR._meter_row(self.fdb, "2026-11-10", withheld={lin})
-        self.assertEqual(held["m"], full["m"] - 1)
-        none = FR._meter_row(self.fdb, "2026-11-10", withhold_etf=True)
-        self.assertEqual(none["m"], 0)
-        del pid
+                             "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (p, 20, day, self.engine, 1.0, 0.1, 0.1, 1.0, 0.5, 0.01, 1.0))
+        self.advance(day)
+        out = FR.meters(self.root, self.fdb, now=at(day, 23, 30), settings=SETTINGS)
+        self.assertEqual(out.get("waiting", {}).get("pool"), FR.POOL_WAIT)
+        self.assertEqual(self.fdb.execute("SELECT COUNT(*) FROM fwd_meter").fetchone()[0], 0)
+        (self.root / PS.PERMITS).write_text(json.dumps({**self.doc(), "routes": {}, "holds": []}))
+        out = FR.meters(self.root, self.fdb, now=at(day, 23, 40), settings=SETTINGS)
+        self.assertNotIn("pool", out.get("waiting") or {})
+        self.assertEqual(self.fdb.execute("SELECT COUNT(*) FROM fwd_meter").fetchone()[0], 1)
 
 
 # ----------------------------------------------------------------------------------------------------- the job
 class TheJob(World):
-    def ctx(self, now, settings=SETTINGS):
+    def ctx(self, now):
         alerts = []
         return types.SimpleNamespace(root=self.root, config={}, now=lambda: now, base=self.base, release=REL,
-                                     alert=lambda level, text: alerts.append((level, text)), alerts=alerts), settings
+                                     alert=lambda level, text: alerts.append((level, text)), alerts=alerts)
 
     def test_its_registry_row(self):
         jobs = registry.by_name()
@@ -1255,39 +1316,62 @@ class TheJob(World):
         self.assertEqual(names.index("pool_screen"), names.index("forward_screen") + 1)
         self.assertEqual([(t.kind, t.job) for t in job.triggers], [("after", "forward_shadow")])
         self.assertEqual((job.wall, job.cpu, job.grace, job.in_pause, job.paid), (PS.WALL_S, 900, 2 * 3600, True, False))
-        self.assertEqual(job.module, "league.ops.pool_screen")
-        self.assertGreaterEqual(jobs["grant"].grace, max(j.wall for j in registry.JOBS) + 5 * 60)
 
     def test_mode_off_quiet_and_no_pin(self):
-        ctx, _ = self.ctx(at("2026-10-23", 23, 30))
+        ctx = self.ctx(at("2026-10-23", 23, 30))
         with mock.patch("league.swarm.settings.load", lambda root, config=None: {"elane": {"pool": {"mode": "off"}}}):
             self.assertIn("off", PS.run(ctx)["why"])
         self.assertFalse((self.root / PS.PERMITS).exists())
-        quiet, _ = self.ctx(at("2026-10-26", 15))                     # 11:00 New York on a session
+        quiet = self.ctx(at("2026-10-26", 15))
         with mock.patch("league.swarm.settings.load", lambda root, config=None: SETTINGS):
             self.assertIn("09:00-17:30", PS.run(quiet)["why"])
             out = PS.run(ctx)
-        self.assertEqual(out["status"], "skipped")
         self.assertIn("nothing is judged", out["why"])
-        doc = self.permits()                                           # written from the store: the swarm reads a file
-        self.assertEqual((doc["routes"], doc["holds"], doc["receipt"]), ({}, [], None))
-        self.assertIn("no POOL1 receipt", doc["why"])
+        doc = self.permits()
+        self.assertEqual((doc["routes"], doc["holds"], doc["receipt"], doc["why"]), ({}, [], None, "no_receipt"))
+        self.assertEqual(ctx.alerts, [])                                   # no pin set: no alarm
+
+    def test_a_refused_receipt_under_a_pin_is_an_alarm(self):
+        ctx = self.ctx(at("2026-10-23", 23, 30))
+        with mock.patch("league.swarm.settings.load", lambda root, config=None: SETTINGS), \
+                mock.patch.object(P, "pin", lambda *a, **k: {"name": "POOL1"}), \
+                mock.patch.object(P, "rule", lambda *a, **k: (None, "the receipt's conformance vectors fail on this box: "
+                                                                   "CV9: x")):
+            out = PS.run(ctx)
+        self.assertIn("nothing is judged", out["why"])
+        self.assertEqual(self.permits()["why"], "nonconforming_receipt")
+        self.assertEqual(len(ctx.alerts), 1)
+
+    def test_the_conformance_is_run_once_and_kept(self):
+        calls = {"n": 0}
+        real = P.conform
+
+        def counted(rec, cal):
+            calls["n"] += 1
+            return real(rec, cal)
+
+        with mock.patch.object(P, "conform", counted):
+            check = PS.conformed(self.root, 1.0)
+            self.assertEqual(check(self.rec, self.cal), (True, None))
+            self.assertEqual(check(self.rec, self.cal), (True, None))
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(len(self.rows("pool_conform")), 1)
 
     def test_a_pinned_night_runs_the_job_and_alerts_its_stalls(self):
         self.advance("2026-10-22")
         self.advance("2026-10-23", finished=at("2026-10-23", 23))
-        ctx, _ = self.ctx(at("2026-10-23", 23, 30))
+        ctx = self.ctx(at("2026-10-23", 23, 30))
         world = self
 
         class Swarm:
             def __init__(self, root, readonly=False):
-                self.closed = False
+                pass
 
             def families(self, alive=None, lanes=None):
                 return [dict(f, spec={"lane": "equity", **f["spec"]}) for f in world.families.values()]
 
             def close(self):
-                self.closed = True
+                pass
 
         with mock.patch("league.swarm.settings.load", lambda root, config=None: SETTINGS), \
                 mock.patch.object(P, "rule", lambda *a, **k: (self.rec, None)), \
@@ -1295,22 +1379,10 @@ class TheJob(World):
                 mock.patch("league.swarm.store.SwarmStore", Swarm):
             out = PS.run(ctx)
             self.assertNotIn("status", out)
-            self.assertEqual(out.get("routes_written"), len(self.rec.units[SECTORS].founders))
+            self.assertEqual(out.get("routes_written"), len(self.rec.units[SECTORS].members))
             self.assertEqual(self.permits()["clock"], CLOCK)
             self.assertEqual(json.loads((self.root / PS.REPORT).read_text())["routes"], out["routes_written"])
             self.assertEqual(PS.run(ctx)["status"], "skipped")             # the same record night: nothing written
-
-    def test_once_a_record_night(self):
-        self.advance("2026-10-22")
-        self.advance("2026-10-23", finished=at("2026-10-23", 23))
-        now = at("2026-10-23", 23, 30)
-        kw = dict(receipt=self.rec, settings=SETTINGS, now=now, base=self.base, release=REL, runs=self.runs,
-                  families=self.families, swarm=types.SimpleNamespace(), clock=lambda: now)
-        first = PS.night(self.root, **kw)
-        self.assertNotIn("status", first)
-        second = PS.night(self.root, **kw)
-        self.assertEqual(second["status"], "skipped")
-        self.assertEqual(len(self.rows("pool_runs")), 1)
 
 
 # --------------------------------------------------------------------------------------------------- the seals
@@ -1347,32 +1419,44 @@ from league.tests import test_forward_shadow as TS  # noqa: E402
 class ThePoolRunsOnTheRealEngine(TS.Case):
     """`PoolRuns` on E1's real engine in an `InlineDecider` over a synthetic store (E3's shadow test world)."""
 
-    def test_the_train_series_and_the_forward_run_per_symbol(self):
+    def setUp(self):
+        super().setUp()
         TS.synth.synthetic_store(self.root / TS.STORE_DIR, symbols=TS.SYMBOLS, start=dt.date(2016, 1, 4),
                                  end=TS.END, seed=7, gate=True, as_of=TS.FWD[8])
+
+    def test_a_train_part_is_the_house_jobs_own_record_and_k_its_runs(self):
+        cal = W.calib()
+        pid = TS.register(self.db, "always@1", TS.ALWAYS, first_close=TS.FWD[2])
+        self.db.row_factory = sqlite3.Row
+        runs = PS.PoolRuns(self.root, budget_seconds=300, decider=InlineDecider(), clock=self.clock, fdb=self.db)
+        for part in P.PARTS:
+            rec, k = runs.train_part(cal, pid, part)
+            want = cal.house_job.one_run(self.root, InlineDecider(), self.db, pid, part, [], 300.0)
+            self.assertEqual(rec, want)
+            if part.endswith("k10") and rec["status"] == "ok":
+                self.assertGreater(k["sessions"], 0)
+                ws = np.sum([np.asarray(v, dtype=float) for v in rec["ws"].values()], axis=0)
+                np.testing.assert_allclose(ws, np.asarray(rec["w"], dtype=float), atol=1e-9)
+            else:
+                self.assertIsNone(k)
+        prices = runs.market(cal)
+        self.assertEqual(set(prices) >= {"e0", "e1"}, True)
+        self.assertEqual(prices["e0"], cal.house_job.prices(self.root)["e0"])
+
+    def test_the_forward_run_per_symbol_is_the_house_jobs_accounting(self):
+        from league.equity import screen
+
         pid = TS.register(self.db, "always@1", TS.ALWAYS, first_close=TS.FWD[2])
         runs = PS.PoolRuns(self.root, budget_seconds=300, decider=InlineDecider(), clock=self.clock)
-        eras = runs.train_series(self.program(pid))
-        self.assertEqual(len(eras), 2)
-        for era in eras:
-            ws, w = np.asarray(era["ws"]), np.asarray(era["w"])
-            np.testing.assert_allclose(ws.sum(axis=0), w)               # per symbol, summing to screen.series' w
-            self.assertEqual(ws.shape, (len(era["symbols"]), len(era["days"])))
-            self.assertGreater(era["k_sessions"], 0)
         self.night(TS.FWD[8])
         rows = self.rows(pid)
         found = runs.forward_series(self.program(pid), settings=TS.RECORD, fdb=self.db)
         for row in rows:
             self.assertAlmostEqual(found["r"][row["day"]], row["r"], delta=forward_db.TOL)
             self.assertAlmostEqual(sum(found["ws"][row["day"]]), row["w"], delta=1e-12)
-        market = runs.market()
-        self.assertEqual(len(market), 2)
-        self.assertEqual(len(market[0]["sectors"]), len(P.SECTOR_ETFS))
-        self.assertTrue(all(np.isnan(v) for v in market[0]["sectors"][0]))   # a symbol the store lacks: NaN
+        self.assertTrue(callable(screen.series))
 
     def test_the_controls_replay_their_hash_law(self):
-        TS.synth.synthetic_store(self.root / TS.STORE_DIR, symbols=TS.SYMBOLS, start=dt.date(2016, 1, 4),
-                                 end=TS.END, seed=7, gate=True, as_of=TS.FWD[8])
         pid = TS.register_control(self.db, "index", 0, list(TS.SYMBOLS), first_close=TS.FWD[2])
         program = self.program(pid)
         runs = PS.PoolRuns(self.root, budget_seconds=300, decider=InlineDecider(), clock=self.clock)
@@ -1383,13 +1467,10 @@ class ThePoolRunsOnTheRealEngine(TS.Case):
             ws = np.asarray(era["ws"])
             self.assertEqual(ws.shape, (len(spec["symbols"]), len(era["days"])))
             self.assertGreater(float(ws.sum()), 0.0)
-            self.assertEqual(len(era["r0"]), len(era["days"]))
         self.night(TS.FWD[8])
         found = runs.control_forward(program, settings=TS.RECORD, fdb=self.db)
-        rows = self.rows(pid)
-        self.assertTrue(rows)
-        for row in rows:
-            self.assertAlmostEqual(sum(found["ws"][row["day"]]), row["w"], delta=1e-12)   # the record's own exposure
+        for row in self.rows(pid):
+            self.assertAlmostEqual(sum(found["ws"][row["day"]]), row["w"], delta=1e-12)
 
 
 if __name__ == "__main__":

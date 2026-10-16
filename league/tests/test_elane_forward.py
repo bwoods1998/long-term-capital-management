@@ -435,8 +435,9 @@ POOL_FWD1_OFF = {"elane": {"fwd1": {"mode": "record", "seats": "off"}, "pool": {
 class ThePoolRoute(Base):
     """POOL1's ROUTE REFUSAL (the module docstring, 4; PREREG-POOL1 7.2 and 11 P1 item 4): a lineage the pooled
     screen's permit file lists on its POOL route or hold list takes no FWD1-R seat and no sealed try, whatever
-    `elane.pool.mode` and `elane.fwd1.seats` say, for good under the receipt; the file failing closed refuses every
-    forward-only ETF pass and every lineage FWD1 lists as judged; `one_a_cell` counts a pooled seat."""
+    `elane.pool.mode` and `elane.fwd1.seats` say, for good under the receipt (a route-listed one outright, L5 kept for
+    a held one); the file failing closed refuses every ETF FWD1-R pass and every lineage FWD1 lists as judged, L5
+    included; `one_a_cell` counts a pooled seat."""
 
     def pool(self, routes=(), holds=(), *, words=None, raw=None):
         if raw is not None:
@@ -453,10 +454,11 @@ class ThePoolRoute(Base):
         return self.store.add(fid, symbols=["XLK"], **kw)
 
     def test_the_name_is_the_jobs(self):
-        from league.ops import pool_screen
+        from league.ops import forward_report, pool_screen
 
         self.assertEqual(EF.POOL_PERMITS, pool_screen.PERMITS)
         self.assertEqual(EF.POOL_PERMITS_VERSION, pool_screen.PERMITS_VERSION)
+        self.assertEqual(forward_report.POOL_STORE, pool_screen.DB)
 
     def test_step_makes_no_candidate_of_a_pool_route_lineages_pass(self):
         for settings in (POOL_ON, POOL_ROLLED, ON):                 # whatever elane.pool.mode says (absent: off)
@@ -514,6 +516,22 @@ class ThePoolRoute(Base):
         sibling = self.store.add("f1b", symbols=["SPY"], lineage="f1")
         self.assertEqual(EF.try_refused(self.store, sibling, POOL_FWD1_OFF, now=CLOSE - 3600.0), EF.POOL_REFUSED)
 
+    def test_a_route_listed_index_lineage_takes_no_l5_try(self):
+        """The P1 review's F6: L5 (A48) is kept for a HELD lineage only; one on the POOL-route list takes no sealed try,
+        even before the close of its FWD1_START session."""
+        fam = self.store.add("f1", symbols=["SPY", "QQQ"])
+        (self.root / EF.PERMITS).write_text(json.dumps({
+            "version": EF.PERMITS_VERSION, "screen": "FWD1-R", "receipt": "c" * 64, "start": PIN_START, "at": "x",
+            "lineages": {"equity:f1": {"status": "pending", "type": "ETF", "case": "N", "family": "f1",
+                                       "start": START}}}))
+        self.pool(routes=["equity:f1"])
+        for settings in (POOL_FWD1_OFF, POOL_ON, POOL_ROLLED):
+            with self.subTest(settings=settings["elane"]["pool"]["mode"]):
+                self.assertEqual(EF.try_refused(self.store, fam, settings, now=CLOSE - 3600.0), EF.POOL_REFUSED)
+                self.assertFalse(elane.try_open(self.store, fam, 1, settings))
+        self.pool(holds=["equity:f1"])                                # the same lineage, held: its L5 try
+        self.assertIsNone(EF.try_refused(self.store, fam, POOL_FWD1_OFF, now=CLOSE - 3600.0))
+
     def test_rollback_and_a_pooled_fail_leave_the_refusal_in_place(self):
         fam = self.sector()
         self.permit({"equity:f1": self.passed("f1")})
@@ -537,10 +555,24 @@ class ThePoolRoute(Base):
                     self.assertEqual(EF.pool_listed(self.root, settings), (None, EF.POOL_UNREADABLE))
                     out = EF.step(self.gate(settings))
                     self.assertEqual(out["waits"].get("s1"), EF.POOL_UNREADABLE)   # a forward-only ETF pass waits
+                    self.assertEqual(out["waits"].get("x1"), EF.POOL_UNREADABLE)   # and an index-only one (the P1 review's F3)
         self.assertEqual(sector["band"], "gym")
-        self.assertEqual(index["band"], "candidate")                  # an index-only pass is not forward-only
-        sector["state"][EF.STATE_KEY] = {"eligible": True, "type": "ETF", "case": "N", "lineage": "equity:s1"}
-        self.assertEqual(EF.seat_refused(self.store, sector, POOL_ON), EF.POOL_UNREADABLE)
+        self.assertEqual(index["band"], "gym")
+        for fam in (sector, index):
+            fam["state"][EF.STATE_KEY] = {"eligible": True, "type": "ETF", "case": "N", "lineage": f"equity:{fam['id']}"}
+            self.assertEqual(EF.seat_refused(self.store, fam, POOL_ON), EF.POOL_UNREADABLE)
+
+    def test_the_reviews_lift_an_index_route_lineage_once_the_file_is_torn(self):
+        """The P1 review's F3 probe: an index-only lineage on the POOL route (it missed its S2 try: FWD1 judges it as case
+        N) with an FWD1-R pass was refused while the file read and seated once it was torn; it is refused in both."""
+        index = self.store.add("x1", symbols=["SPY"])
+        self.permit({"equity:x1": self.passed("x1", cell="equity / trend / index")})
+        self.pool(routes=["equity:x1"])
+        self.assertEqual(EF.step(self.gate(POOL_ON))["waits"]["x1"], EF.POOL_REFUSED)
+        self.pool(raw="{torn write")
+        out = EF.step(self.gate(POOL_ON))
+        self.assertEqual((out["seated"], out["waits"]["x1"]), ([], EF.POOL_UNREADABLE))
+        self.assertEqual(index["band"], "gym")
 
     def test_a_missing_pool_file_fails_closed_while_the_mode_is_on(self):
         sector = self.sector("s1")
@@ -552,6 +584,15 @@ class ThePoolRoute(Base):
         self.assertEqual(EF.pool_listed(self.root, {"elane": {"pool": {"mode": "recrod"}}}), (None, EF.POOL_MISSING))
         self.assertEqual(EF.step(self.gate(POOL_ROLLED))["seated"], ["s1"])
         del sector
+
+    def test_the_fail_closed_try_refuses_l5_too(self):
+        fam = self.store.add("f1", symbols=["SPY", "QQQ"])
+        (self.root / EF.PERMITS).write_text(json.dumps({
+            "version": EF.PERMITS_VERSION, "screen": "FWD1-R", "receipt": "c" * 64, "start": PIN_START, "at": "x",
+            "lineages": {"equity:f1": {"status": "pending", "type": "ETF", "case": "N", "family": "f1",
+                                       "start": START}}}))
+        self.pool(raw="{torn")
+        self.assertEqual(EF.try_refused(self.store, fam, POOL_FWD1_OFF, now=CLOSE - 3600.0), EF.POOL_UNREADABLE)
 
     def test_the_fail_closed_try_refuses_every_lineage_fwd1_judges(self):
         judged = self.store.add("i1", symbols=["SPY"])

@@ -653,8 +653,9 @@ class TheMeter(Fixture):
 
 class ThePooledScreenWithholdsItsLineagesFromTheMeter(Fixture):
     """POOL1 (A55a: PREREG-POOL1 sections 8 and 11 P1 item 5): a lineage on the pooled screen's POOL-route or hold
-    list has no BH/BY entry until its unit's verdict is final, and has one after; the pool's file failing closed
-    leaves out every ETF lineage (a panel lineage stays in)."""
+    list has no BH/BY entry until its unit's verdict is final, and has one after; while the pool's file fails closed
+    the day's meters WAIT (the P1 review's F11: no row with every ETF lineage left out for good) and are written once
+    it reads."""
 
     def pool(self, *, routes=(), holds=(), word="pending", raw=None):
         path = self.root / R.POOL_PERMITS
@@ -681,17 +682,25 @@ class ThePooledScreenWithholdsItsLineagesFromTheMeter(Fixture):
         self.assertEqual({r["day"]: r["m"] for r in self.table("fwd_meter")}[DAYS[22]], 6)
         self.assertEqual({r["day"]: r["m"] for r in self.table("fwd_meter")}[DAYS[20]], 4)   # a written day stands
 
-    def test_fail_closed_leaves_out_every_etf_lineage(self):
+    def test_fail_closed_the_meter_waits_and_writes_once_the_file_reads(self):
         for i in range(5):
             self.check(self.register(f"fam-{i}@1", lineage=f"equity:fam-{i}"), 20, DAYS[20], 0.3)
         self.pool(raw="{not json")
         self.night(DAYS[21])
+        out = self.meters()
+        self.assertEqual(out["waiting"]["pool"], R.POOL_WAIT)
+        self.assertEqual(self.table("fwd_meter"), [])                         # no reduced row, nothing written
+        self.assertEqual(self.table("fwd_cey"), [])
+        self.pool()
         self.meters()
-        self.assertEqual(self.table("fwd_meter")[-1]["m"], 0)
+        self.assertEqual({r["day"]: r["m"] for r in self.table("fwd_meter")}[DAYS[20]], 5)
+        self.pool(raw="{not json")
         self.assertEqual(R._pool_withheld(self.root, {"elane": {"pool": {"mode": "record"}}}), (frozenset(), True))
         (self.root / R.POOL_PERMITS).unlink()
         self.assertEqual(R._pool_withheld(self.root, {"elane": {"pool": {"mode": "record"}}}), (frozenset(), True))
         self.assertEqual(R._pool_withheld(self.root, RECORD), (frozenset(), False))
+        (self.root / R.POOL_STORE).write_bytes(b"")                          # the pool has run: a lost file waits
+        self.assertEqual(R._pool_withheld(self.root, RECORD), (frozenset(), True))
 
 
 class ADaysMetersWaitForItsRows(Fixture):

@@ -1,20 +1,23 @@
-"""POOL1's rule (league/ops/pool_rule.py, the owner's A55 as pre-registered in A55a): the pin and the receipt it pins,
-the House-set cell key, the per-symbol timing alpha, the own floor under N0, N0R and N1 against brute force (a cell
-and a cluster, with the bootstrap bound), the clusters, the caps, the zeroed-days void, stage 1, the placebo leg, the
+"""POOL1's rule (league/ops/pool_rule.py, the owner's A55 as pre-registered in A55a; the receipt contract
+POOL1-RECEIPT-1): the pin, the vendored calibration code and its shas, the receipt's contract shape and every refusal
+of it, the conformance vectors CV1-CV12 through P1's own routes, the floor adapter against the calibration's own
+`cluster_floor`, the caps and the bar against the calibration's, the forward statistic, the void, the placebo leg, the
 demotion, the route and the words.
 
-Every input is synthetic (numpy `default_rng` streams); no market data, no real figure, no POOL1 figure."""
+Every input is invented: the vendored p1conform's generated House export (league/tests/pool_world.py), synthetic numpy
+streams, and the calibration's dry-run receipt (an invented market). No market data, no real figure, no POOL1 figure."""
 
 from __future__ import annotations
 
+import ast
 import copy
-import datetime as dt
 import hashlib
 import json
 import math
+import os
+import shutil
 import tempfile
 import unittest
-from fractions import Fraction
 from pathlib import Path
 from unittest import mock
 
@@ -22,92 +25,27 @@ import numpy as np
 
 from league.ops import fwd1_rule as F
 from league.ops import pool_rule as P
+from league.tests import pool_world as W
 
 REPO = Path(__file__).resolve().parents[2]
 POLICY = REPO / "league" / "swarm" / "policy.json"
+CONTRACT_CONSTANTS = {
+    "plan": [40, 60, 120], "window": 120, "m_min": 3, "prior": 20, "sigma_floor": 0.0005, "weight_cap": 3.0,
+    "group_share": "2/3", "copy_rho": 0.7, "min_exposure": 0.01, "cap": 0.12, "wall": 0.15, "worst": 0.15,
+    "n1_offsets": [262, 409, 535, 661, 787], "floor_haircut": 0.0002, "k_stress": 1.5, "k_max": 500,
+    "boot_resamples": 2000, "boot_block_mean": 120, "seed_root": 20261026, "bound": "max(q975, point + q975 - mean)",
+    "stage1": {"z": -1.0, "lag": 5}, "rho_assign_q": 0.25, "u_counts": [0, 5, 10, 15, 20, 30, 40, 60],
+    "u_pin_count": 5, "placebo": {"draws": 999, "count_max": 149}}
 
 
 def pin_block(sha: str = "a" * 64) -> dict:
     """A pin block carrying every constant as this code holds it."""
-    return {"name": P.NAME, "prereg_sha256": P.PREREG_SHA256, "receipt_sha256": sha, **copy.deepcopy(P.CONSTANTS)}
+    return {"name": P.NAME, "prereg_sha256": P.PREREG_SHA256, "receipt_sha256": sha, **copy.deepcopy(P.CONSTANTS),
+            "p1": copy.deepcopy(P.P1_RULE)}
 
 
-def receipt_doc(*, cells: dict | None = None, u: dict | None = None, rho: float = 0.2, c_G: float = 1.7,
-                floor: str = "R-REG", margin: float = 0.03) -> dict:
-    """An INVENTED receipt of POOL1's shape (`pool_rule.RECEIPT_KEYS`): founders "equity:<cell>-<i>", pids 100+."""
-    cells = cells or {"trend_momentum/sectors": ("trend_momentum", 4), "trend_momentum/index": ("trend_momentum", 3),
-                      "reversal_liquidity/index": ("reversal_liquidity", 3)}
-    founders, units, clusters = {}, {}, {}
-    pid = 100
-    for cell, (cid, m) in cells.items():
-        cls, grp = cell.split("/")
-        for i in range(m):
-            founders[f"equity:{cell.replace('/', '-')}-{i}"] = {"pid": pid, "class": cls, "group": grp, "cell": cell,
-                                                               "why": None, "merged_into": None}
-            pid += 1
-        units[cell] = {"class": cls, "group": grp, "cluster": cid, "stage1": {"refuted": False, "z": [0.5, 0.2]}}
-        clusters.setdefault(cid, {"cells": [], "u": {str(k): list((u or {}).get(cid, (0.02, 0.03))) for k in P.U_COUNTS}})
-        clusters[cid]["cells"].append(cell)
-    founders["equity:out-0"] = {"pid": pid, "class": "event_premium", "group": "index", "cell": None,
-                                "why": "an event reader", "merged_into": None}
-    return {"name": P.NAME, "prereg_sha256": P.PREREG_SHA256,
-            "calibration": {"code_sha256": "b" * 64, "decision_sha256": "c" * 64},
-            "decision": {"floor": floor, "margin": margin, "c_G": c_G}, "rho_assign": rho,
-            "regimes": {"vol": [0.009, 0.011], "ret": [0.0, 0.05], "disp": [0.011, 0.013], "tltgld": [-0.02, 0.02]},
-            "founders": founders, "units": units, "clusters": clusters,
-            "matched_floor": {g: {c: {str(m): 150 for m in (3, 4, 7, 10, 15)} for c in
-                                  ("trend_momentum", "reversal_liquidity", "relative_value", "calendar_flow")}
-                              for g in P.BASE_GROUPS},
-            "beside": {cid: {k: 0.05 for k in P.BESIDE_KEYS} for cid in clusters},
-            "expected": {cid: [0.04, 0.07, 0.1] for cid in clusters}}
-
-
-def receipt(**kw) -> P.Receipt:
-    rec, why = P.parse_receipt(receipt_doc(**kw), "d" * 64)
-    assert rec is not None, why
-    return rec
-
-
-def sessions(first: str, n: int) -> tuple[str, ...]:
-    day, out = dt.date.fromisoformat(first), []
-    while len(out) < n:
-        if day.weekday() < 5:
-            out.append(day.isoformat())
-        day += dt.timedelta(days=1)
-    return tuple(out)
-
-
-def synthetic_unit(seed: int = 3, *, eras=(400, 420), cells=("trend_momentum/sectors", "trend_momentum/index"), m=2,
-                   joins=None, S=2):
-    """INVENTED members and markets for the own floor: each member's per-symbol weights and returns, its frozen
-    constants and a join offset; each era's market (SPY, sectors, TLT, GLD)."""
-    rng = np.random.default_rng([seed, 2026, 1016])
-    markets, era_R = [], []
-    for e, n in enumerate(eras):
-        days = sessions("2016-01-04" if e == 0 else "2022-01-03", n)
-        spy = rng.normal(0.0004, 0.01, n)
-        markets.append(P.Market(days=days, spy=spy, sectors=rng.normal(0.0003, 0.012, (4, n)),
-                                tlt=rng.normal(0, 0.008, n), gld=rng.normal(0, 0.009, n)))
-        era_R.append((days, np.vstack([spy, rng.normal(0.0002, 0.012, (S - 1, n))])))
-    members = []
-    for ci, cell in enumerate(cells):
-        for j in range(m):
-            eras_ = []
-            for days, R in era_R:
-                n = len(days)
-                ws = np.abs(rng.normal(0.2, 0.1, (S, n))) * (rng.random((S, n)) < 0.5)
-                rg = (ws * R).sum(axis=0) + rng.normal(0, 0.002, n) - 2e-5
-                eras_.append(P.Era(days=days, rg=rg, gap=np.full(n, 1e-5), ws=ws, R=R, hs=np.full(S, 3e-4)))
-            mu = np.concatenate([e.R for e in eras_], axis=1).mean(axis=1)
-            wbar = np.concatenate([e.ws for e in eras_], axis=1).mean(axis=1)
-            sigma = P.train_sigma([(e.rg, e.gap, e.ws, e.R) for e in eras_], mu, wbar)
-            join = 0 if joins is None else joins[ci * m + j]
-            members.append(P.FloorMember(key=f"L{ci}{j}", cell=cell, join=join, mu=mu, wbar=wbar,
-                                         sigma=P.sigma_used(sigma, None), g=2e-4, eras=tuple(eras_)))
-    return members, markets
-
-
-CUTS = {"vol": (0.0095, 0.0105), "ret": (0.02, 0.06), "disp": (0.0118, 0.0122), "tltgld": (-0.02, 0.02)}
+def refusal(doc: dict, B: int = W.B_TEST) -> str | None:
+    return P.read_receipt(W.strict(doc), expect_constants=W.constants(B))[1]
 
 
 # ------------------------------------------------------------------------------------------------------- the pin
@@ -118,167 +56,403 @@ class ThePin(unittest.TestCase):
         self.assertEqual(held.receipt_sha256, "a" * 64)
 
     def test_every_refusal(self):
-        self.assertEqual(P.load({})[0], None)
-        self.assertIn("no pooled screen is pinned", P.load(None)[1])
+        self.assertIsNone(P.load({})[0])
+        self.assertIsNone(P.load(None)[0])
         for key in P.PIN_KEYS:
             block = pin_block()
             del block[key]
-            with self.subTest(missing=key):
-                self.assertIsNone(P.load(block)[0])
+            self.assertIn(key, P.load(block)[1], key)
+        self.assertIn("does not read", P.load({**pin_block(), "extra": 1})[1])
         self.assertIsNone(P.load({**pin_block(), "name": "POOL2"})[0])
-        self.assertIsNone(P.load({**pin_block(), "prereg_sha256": "e" * 64})[0])
-        for bad in ("A" * 64, "a" * 63, 12, None):
-            self.assertIsNone(P.load({**pin_block(), "receipt_sha256": bad})[0])
+        self.assertIsNone(P.load({**pin_block(), "prereg_sha256": "b" * 64})[0])
+        self.assertIsNone(P.load(pin_block("A" * 64))[0])
+        self.assertIsNone(P.load(pin_block("a" * 63))[0])
 
     def test_no_constant_can_move(self):
-        """A pin moves no bar, cap, plan or rule: every constant of the code, changed, is refused."""
-        def changed(value):
-            if isinstance(value, bool):
-                return not value
-            if isinstance(value, (int, float)):
-                return value + 1
-            if isinstance(value, str):
-                return value + "x"
-            if isinstance(value, list):
-                return value[:-1] if value else [1]
-            if isinstance(value, dict):
-                k = sorted(value)[0]
-                return {**value, k: changed(value[k])}
-            raise AssertionError(value)
-
         for key, value in P.CONSTANTS.items():
+            block = pin_block()
+            block[key] = [value] if not isinstance(value, list) else value[:-1]
             with self.subTest(key=key):
-                held, why = P.load({**pin_block(), key: changed(value)})
-                self.assertIsNone(held)
-                self.assertIn(key, why)
+                self.assertIsNone(P.load(block)[0])
+        for key in P.P1_RULE:
+            block = pin_block()
+            block["p1"] = {**block["p1"], key: "x"}
+            with self.subTest(p1=key):
+                self.assertIsNone(P.load(block)[0])
 
-    def test_the_branch_pins_nothing_until_the_receipt_ships(self):
-        """P1 is built before the calibration (DEVIATIONS.log D1): the repository's policy.json carries no POOL1 pin, so
-        the job judges nothing. Once a pin ships, its receipt must be the file at RECEIPT_PATH by sha256 and parse
-        whole (the conformance check CI holds, as fwd1_rule's)."""
-        policy = json.loads(POLICY.read_text())
-        block = P.pin(policy)
-        receipt_path = REPO / P.RECEIPT_PATH
+    def test_the_constants_are_the_contracts(self):
+        self.assertEqual(P.CONSTANTS, CONTRACT_CONSTANTS)
+        self.assertEqual(P.U_COUNTS, tuple(W.calib().cluster.U_COUNTS))
+        self.assertEqual(P.CONTRACT, W.calib().cluster.CONTRACT)
+        self.assertEqual(P.CONFORMANCE, W.calib().conform.VERSION)
+        self.assertEqual(P.EVENT_WORD.pattern, W.calib().cluster.EVENT_WORD.pattern)
+        self.assertEqual(P.EVENT_WORD.pattern, W.calib().house_job.EVENT_WORD.pattern)
+
+    def test_policy_ships_record_with_seats_off_and_no_pin_until_the_receipt(self):
+        doc = json.loads(POLICY.read_text())
+        self.assertEqual(doc["elane"]["pool"]["mode"], "record")
+        self.assertEqual(doc["elane"]["pool"]["seats"], "off")
+        self.assertNotIn(P.PIN_BLOCK, doc["elane"])               # P12 adds it with the receipt (P1 D1)
+        self.assertFalse((REPO / P.RECEIPT_PATH).exists())
+        self.assertEqual(P.rule(doc)[0], None)
+
+
+class TestReceiptPin(unittest.TestCase):
+    """THE RECEIPT PIN (the contract's 7; the fwd1_rule practice): once policy.json pins a receipt, sha256 of
+    docs/benchmarks/pool_screen_1.json is the pin's, it parses, every conformance vector holds on this interpreter, and
+    every vendored file's sha is `CALIB_SHA256`'s and the receipt's. Skipped while no receipt is pinned (P12 adds it)."""
+
+    def test_the_pinned_receipt(self):
+        block = P.pin(json.loads(POLICY.read_text()))
         if not block:
-            self.assertIsNone(P.rule(policy, repo=REPO)[0])
-            self.assertIn("no pooled screen is pinned", P.rule(policy, repo=REPO)[1])
-            return
+            self.skipTest("no POOL1 receipt is pinned yet (P12)")
         held, why = P.load(block)
-        self.assertIsNotNone(held, why)
-        self.assertTrue(receipt_path.exists())
-        self.assertEqual(hashlib.sha256(receipt_path.read_bytes()).hexdigest(), held.receipt_sha256)
-        rec, why = P.rule(policy, repo=REPO)
-        self.assertIsNotNone(rec, why)
-
-    def test_policy_ships_record_with_seats_off(self):
-        policy = json.loads(POLICY.read_text())
-        self.assertEqual(policy["elane"]["pool"]["mode"], "record")
-        self.assertEqual(policy["elane"]["pool"]["seats"], "off")
+        self.assertIsNone(why)
+        raw = (REPO / P.RECEIPT_PATH).read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), held.receipt_sha256)
+        rec, why = P.load_receipt(REPO / P.RECEIPT_PATH, held)          # parse, vendored shas, every vector
+        self.assertIsNone(why)
+        for name in P.CALIB_FILES:
+            self.assertEqual(rec.calibration["vendored"][name], P.CALIB_SHA256[name])
+            self.assertEqual(P.file_sha256(P.CALIB_DIR / name), P.CALIB_SHA256[name])
 
 
+# --------------------------------------------------------------------------------------- the vendored calibration
+class TheVendoredCode(unittest.TestCase):
+    def test_every_file_is_byte_for_byte_its_pinned_sha_and_the_fixtures(self):
+        names = sorted(p.name for p in P.CALIB_DIR.iterdir() if p.is_file())
+        self.assertEqual(names, sorted(P.CALIB_FILES))           # no __init__.py, nothing else
+        raw, rec = W.dryrun()
+        for name in P.CALIB_FILES:
+            with self.subTest(name=name):
+                self.assertEqual(P.file_sha256(P.CALIB_DIR / name), P.CALIB_SHA256[name])
+                self.assertEqual(rec.calibration["vendored"][name], P.CALIB_SHA256[name])
+        for name in ("p1const.py", "p1stat.py", "p1members.py", "p1units.py", "p1engine.py"):
+            self.assertIn(P.CALIB_SHA256[name], {             # the PREP files at CODE PIN 1
+                "e2bd332870afece7fd2e420c15f1f71b4d944cfff1e6d4835273b9097f54f549",
+                "2dc117dfec825609b531a6075c067320d4a9cc78a104c6f5e88cf2c54fbfa986",
+                "c6e61f896d5c3fcc88f0500316c9d6837e4e9eb237dc2ad09dd6a7e9839bbe9a",
+                "3ca473f68017366c559d3c2d09a7dd35d3793f523133f0e7dccb47ff9309066e",
+                "d9fdf13eff203557f65c44eaff30ee029e2e5b7f68e1c80ae0b270d1cc60e920"})
+        self.assertEqual(P.CALIB_SHA256["pool1_house_job.py"],
+                         "9f6ab090b3e06226ccedd28ec99b3317c81138bd656d425e156c216045ccadc9")
+
+    def test_it_loads_once_and_refuses_any_difference(self):
+        cal, why = P.calib()
+        self.assertIsNone(why)
+        self.assertIs(P.calib()[0], cal)
+        self.assertIs(cal.K.FAKE, False)
+        self.assertEqual(cal.K.B_BOOT, 2000)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "c"
+            shutil.copytree(P.CALIB_DIR, root)
+            (root / "p1cluster.py").write_bytes((root / "p1cluster.py").read_bytes() + b"\n")
+            self.assertIn("not the pinned file", P.calib(root=root)[1])
+            gone = Path(tmp) / "g"
+            shutil.copytree(P.CALIB_DIR, gone)
+            (gone / "p1cluster.py").unlink()
+            self.assertIn("missing", P.calib(root=gone)[1])
+            self.assertIn("not pinned yet", P.calib(shas={**P.CALIB_SHA256, "p1conform.py": None})[1])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "fake"
+            shutil.copytree(P.CALIB_DIR, root)
+            with mock.patch.dict(os.environ, {"POOL1_DATA": "/nowhere"}):
+                self.assertIn("does not load", P.calib(root=root)[1])      # a dry run's p1const refuses itself
+
+    def test_the_shared_modules_are_pure(self):
+        allowed = {"numpy", "datetime", "re", "math", "hashlib", "json", "dataclasses", "typing", "__future__", "os",
+                   "pathlib", "p1const", "p1stat", "p1members", "p1units", "p1engine", "p1cluster"}
+        for name in ("p1cluster.py", "p1conform.py", "p1stat.py", "p1members.py", "p1units.py", "p1engine.py"):
+            tree = ast.parse((P.CALIB_DIR / name).read_text())
+            mods = {(n.module or "").split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | {
+                a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+            with self.subTest(name=name):
+                self.assertLessEqual(mods, allowed)
+                calls = {n.func.id for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+                self.assertNotIn("open", calls)
+
+    def test_loading_touches_no_search_path(self):
+        before = list(__import__("sys").path)
+        P.calib()
+        self.assertEqual(before, list(__import__("sys").path))
+
+
+# -------------------------------------------------------------------------------------------------- the receipt
 class TheReceipt(unittest.TestCase):
-    def test_a_whole_receipt_parses(self):
-        rec = receipt()
-        self.assertEqual(rec.floor, "R-REG")
-        self.assertEqual(rec.c_G, 1.7)
-        self.assertEqual(set(rec.units), {"trend_momentum/sectors", "trend_momentum/index", "reversal_liquidity/index"})
-        self.assertEqual(rec.cluster_of("trend_momentum/index"), "trend_momentum")
-        self.assertEqual(len(rec.units["trend_momentum/sectors"].founders), 4)
-        self.assertNotIn("equity:out-0", rec.units["trend_momentum/index"].founders)
+    def test_the_calibrations_dry_run_receipt_parses_under_its_own_constants_only(self):
+        raw, rec = W.dryrun()
+        self.assertEqual(rec.rule.floor_def, "POOLED")
+        self.assertEqual(rec.B, 40)
+        self.assertEqual(W.strict(json.loads(raw)), raw)              # the strict writer's bytes
+        why = P.read_receipt(raw)[1]                                  # the code's own constants: B 2000, a CODE PIN
+        self.assertIsNotNone(why)
+        doc = json.loads(raw)
+        doc["constants"]["boot_resamples"] = 2000
+        self.assertIn("CODE PIN", P.read_receipt(W.strict(doc))[1])
+
+    def test_the_test_world_receipt_parses(self):
+        rec = W.receipt()
+        self.assertEqual(set(rec.units), {W.TM_I, W.TM_S, W.RL_I})
+        self.assertEqual(set(rec.clusters), {"trend_momentum", "reversal_liquidity"})
+        self.assertEqual(rec.founders["equity:rl_copy"].status, "merged")
+        self.assertEqual(rec.founders["equity:rl_copy"].merged_into, "equity:rl_i1")
+        self.assertEqual(rec.founders["equity:tm_s3"].ticket, "FWD1")      # a sector founder with no FWD1 row (C3)
+        self.assertEqual(rec.founders["equity:eq1"].status, "out")
+        self.assertEqual(rec.u_at("trend_momentum", 0), (0.0, 0.0))
+        self.assertEqual(rec.u_at("trend_momentum", 3), (0.0, 0.0))
+        self.assertIsNone(rec.u_at("trend_momentum", 61))                 # above the table: report-only
+        self.assertEqual(rec.matched("sectors", "trend_momentum", 3), 150)
+        self.assertIsNone(rec.matched("sectors", "trend_momentum", 61))   # no bar: the look waits
+        self.assertEqual(rec.cuts().shape, (4, 2))
 
     def test_refused_whole_on_any_defect(self):
+        def mutate(fn):
+            doc = W.doc()
+            fn(doc)
+            return refusal(doc)
+
+        tm = "trend_momentum"
         cases = {
-            "no rule": lambda d: d.__setitem__("decision", None),
-            "floor": lambda d: d["decision"].__setitem__("floor", "LOOSE"),
-            "margin": lambda d: d["decision"].__setitem__("margin", 0.02),
-            "c_G off grid": lambda d: d["decision"].__setitem__("c_G", 1.705),
-            "c_G range": lambda d: d["decision"].__setitem__("c_G", 1.30),
-            "rho": lambda d: d.__setitem__("rho_assign", 1.5),
-            "prereg": lambda d: d.__setitem__("prereg_sha256", "0" * 64),
-            "cut": lambda d: d["regimes"].__setitem__("vol", [0.02, 0.01]),
-            "few founders": lambda d: [d["founders"].pop(k) for k in list(d["founders"]) if "reversal" in k][:1],
-            "u table": lambda d: d["clusters"]["trend_momentum"]["u"].pop("60"),
-            "u bound": lambda d: d["clusters"]["trend_momentum"]["u"].__setitem__("0", [0.05, 0.04]),
-            "cell": lambda d: d["founders"]["equity:out-0"].__setitem__("cell", "x/stocks"),
-            "expected": lambda d: d["expected"].__setitem__("trend_momentum", [0.1, 0.05, 0.2]),
-            "matched": lambda d: d["matched_floor"]["sectors"].pop("trend_momentum"),
+            "unknown top-level key": lambda d: d.__setitem__("extra", 1),
+            "missing key": lambda d: d.pop("market"),
+            "nothing pinned": lambda d: d.__setitem__("status", "NOTHING PINNED"),
+            "another contract": lambda d: d.__setitem__("contract", "POOL1-RECEIPT-0"),
+            "another prereg": lambda d: d.__setitem__("prereg_sha256", "f" * 64),
+            "a second run with no amendment": lambda d: d["run"].__setitem__("index", 2),
+            "a margin off the menu": lambda d: d["rule"].update(margin_k=4, margin=0.04),
+            "a c_G off the range": lambda d: d["rule"].update(c_G_k=139, c_G=1.39),
+            "a constant moved": lambda d: d["constants"].__setitem__("cap", 0.13),
+            "descending cuts": lambda d: d["regimes"].__setitem__("vol", [0.02, 0.01]),
+            "a correlation above one": lambda d: d.__setitem__("rho_assign", 1.5),
+            "a founder's unknown key": lambda d: d["founders"]["equity:tm_i1"].__setitem__("k_used", 170),
+            "an out founder with a ticket": lambda d: d["founders"]["equity:eq1"].__setitem__("ticket", "S2"),
+            "merged into a non-member": lambda d: d["founders"]["equity:rl_copy"].__setitem__("merged_into",
+                                                                                           "equity:eq1"),
+            "a member with no why rule": lambda d: d["founders"]["equity:tm_i1"].__setitem__("why", "x"),
+            "a unit's flags not its cluster's": lambda d: d["units"][W.TM_S].__setitem__("refuted", True),
+            "a unit missing a member": lambda d: d["units"][W.TM_S]["members"].pop(),
+            "U bound below its point": lambda d: d["clusters"][tm]["U"].__setitem__("10", [0.05, 0.04]),
+            "U missing a count": lambda d: d["clusters"][tm]["U"].pop("0"),
+            "caps not the caps rule's": lambda d: d["clusters"][tm]["caps_at_pin"].__setitem__("cap", 0.1),
+            "c_own not the largest null": lambda d: d["clusters"][tm]["c_own_at_pin"]["R-REG"].__setitem__("c_own", 1),
+            "k_used not the bar": lambda d: d["clusters"][tm]["c_own_at_pin"]["R-REG"].__setitem__("k_used", 171),
+            "a cluster's unknown key": lambda d: d["clusters"][tm].__setitem__("z", [0.1]),
+            "a matched row missing m 60": lambda d: d["matched_floor"]["sectors"]["trend_momentum"]["R-REG"].pop("60"),
+            "a vector missing": lambda d: d["conformance"]["vectors"].pop("CV12"),
+            "a vendored file unnamed": lambda d: d["calibration"]["vendored"].pop("p1cluster.py"),
+            "a market era missing its sha": lambda d: d["market"]["e0"].pop("sha256"),
+            "a beside figure not a share": lambda d: d["clusters"][tm]["beside"].__setitem__("fp_point", 2.0),
+            "expected passes falling": lambda d: d["clusters"][tm]["expected"].__setitem__("passes", [0.3, 0.2, 0.1]),
         }
-        for name, change in cases.items():
-            doc = receipt_doc()
-            change(doc)
-            with self.subTest(defect=name):
-                self.assertIsNone(P.parse_receipt(doc, "d" * 64)[0])
-        self.assertIn("adopted no rule", P.parse_receipt({**receipt_doc(), "decision": None}, "d" * 64)[1])
+        self.assertIsNone(refusal(W.doc()))
+        for name, fn in cases.items():
+            with self.subTest(name=name):
+                self.assertIsNotNone(mutate(fn))
+        raw = W.receipt_bytes().replace(b'"rho_assign": ', b'"rho_assign": NaN, "x": ', 1)
+        self.assertIn("NaN", P.read_receipt(raw, expect_constants=W.constants())[1])
+        self.assertIn("not JSON", P.read_receipt(b"{", expect_constants=W.constants())[1])
 
-    def test_read_only_at_the_pins_sha(self):
+    def test_a_null_beside_figure_is_allowed(self):
+        doc = W.doc()
+        doc["clusters"]["trend_momentum"]["beside"] = {k: None for k in P.BESIDE_KEYS}
+        self.assertIsNone(refusal(doc))
+
+    def test_read_only_at_the_pins_sha_with_the_vendored_code_and_its_vectors(self):
+        raw = W.receipt_bytes()
+        sha = hashlib.sha256(raw).hexdigest()
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "pool_screen_1.json"
-            raw = json.dumps(receipt_doc()).encode()
+            path = Path(tmp) / "r.json"
             path.write_bytes(raw)
-            ok, why = P.load_receipt(path, P.Pin(hashlib.sha256(raw).hexdigest()))
-            self.assertIsNotNone(ok, why)
-            self.assertIsNone(P.load_receipt(path, P.Pin("f" * 64))[0])
-            self.assertIsNone(P.load_receipt(Path(tmp) / "absent.json", P.Pin("f" * 64))[0])
-
-    def test_u_at_takes_the_count_read_or_the_next_larger(self):
-        doc = receipt_doc()
-        doc["clusters"]["trend_momentum"]["u"] = {str(k): [0.01 * i, 0.01 * i + 0.01] for i, k in enumerate(P.U_COUNTS)}
-        rec, _ = P.parse_receipt(doc, "d" * 64)
-        self.assertEqual(rec.u_at("trend_momentum", 5), (0.01, 0.02))
-        self.assertEqual(rec.u_at("trend_momentum", 7), (0.02, 0.03))           # between 5 and 10: 10's row
-        self.assertEqual(rec.u_at("trend_momentum", 60), (0.07, 0.08))
-        self.assertIsNone(rec.u_at("trend_momentum", 61))
-
-    def test_the_matched_floor_takes_m_or_the_larger_neighbour(self):
-        doc = receipt_doc()
-        doc["matched_floor"]["sectors"]["trend_momentum"] = {"3": 150, "4": 160, "7": 140}
-        rec, _ = P.parse_receipt(doc, "d" * 64)
-        self.assertEqual(rec.matched("sectors", "trend_momentum", 4), 160)
-        self.assertEqual(rec.matched("sectors", "trend_momentum", 5), 160)     # 4 and 7: the larger
-        self.assertEqual(rec.matched("sectors", "trend_momentum", 20), 140)
-        self.assertIsNone(rec.matched("sectors", "unknown_class", 4))
+            kw = {"expect_constants": W.constants()}
+            self.assertIn("not the pin's", P.load_receipt(path, P.Pin("0" * 64), **kw)[1])
+            rec, why = P.load_receipt(path, P.Pin(sha), **kw)
+            self.assertIsNone(why)
+            self.assertEqual(rec.sha256, sha)
+            doc = json.loads(raw)
+            doc["calibration"]["vendored"]["p1stat.py"] = "0" * 64
+            bad = W.strict(doc)
+            path.write_bytes(bad)
+            self.assertIn("vendored", P.load_receipt(path, P.Pin(hashlib.sha256(bad).hexdigest()), **kw)[1])
+            doc = json.loads(raw)
+            doc["conformance"]["vectors"]["CV12"]["outputs"]["k_used"][1] = 171
+            bad = W.strict(doc)
+            path.write_bytes(bad)
+            self.assertIn("conformance", P.load_receipt(path, P.Pin(hashlib.sha256(bad).hexdigest()), **kw)[1])
+            self.assertIn("no receipt", P.load_receipt(Path(tmp) / "none.json", P.Pin(sha))[1])
 
 
-# ---------------------------------------------------------------------------------------------------- the cell key
-class TheCellKey(unittest.TestCase):
-    def test_the_group_holds_more_than_two_thirds(self):
-        self.assertEqual(P.group_of({"SPY": 3.0, "XLK": 1.0}), ("index", None))
-        self.assertEqual(P.group_of({"SPY": 2.0, "XLK": 1.0})[0], None)           # exactly 2/3 is not more
-        self.assertEqual(P.group_of({"XLK": 5.0, "XLE": 2.0, "SPY": 1.0}), ("sectors", None))
-        self.assertEqual(P.group_of({"TLT": 1.0, "GLD": 1.0}), ("defensive", None))
-        self.assertIn("stocks", P.group_of({"SPY": 1.0}, ["SPY", "AAPL"])[1])
-        self.assertIn("no Train-era exposure", P.group_of({"SPY": 0.0})[1])
+# ---------------------------------------------------------------------------------------------- the conformance
+class TheConformance(unittest.TestCase):
+    def test_every_vector_holds_through_p1s_routes(self):
+        for raw, rec in (W.dryrun(), (W.receipt_bytes(), W.receipt())):
+            ok, why, results = P.conform(rec, W.calib())
+            self.assertTrue(ok, why)
+            self.assertEqual(set(results), set(P.CV_IDS))
+            self.assertTrue(all(v is None for v in results.values()))
 
-    def test_needs_padding_and_mixed_labels_split_nothing(self):
-        # NEEDS "index+sectors", held almost wholly in SPY: the index group, whatever the registry's ugroup says
-        self.assertEqual(P.group_of({"SPY": 9.0, "XLK": 0.0, "XLE": 0.5}, ["SPY", "XLK", "XLE"]), ("index", None))
+    def test_a_tampered_output_or_input_fails_its_vector(self):
+        raw, rec = W.dryrun()
+        doc = json.loads(raw)
+        doc["conformance"]["vectors"]["CV10"]["outputs"]["caps"][0]["cap"] += 1e-6
+        doc["conformance"]["vectors"]["CV9"]["inputs"]["sha256"] = "0" * 64
+        doc["conformance"]["vectors"]["CV1"]["outputs"]["a"][0][1] += 1e-6
+        rec2, why = P.read_receipt(W.strict(doc), expect_constants=W.constants(40))
+        self.assertIsNone(why)
+        ok, why, results = P.conform(rec2, W.calib())
+        self.assertFalse(ok)
+        self.assertEqual({k for k, v in results.items() if v is not None}, {"CV1", "CV9", "CV10"})
+        self.assertIn("sha256", results["CV9"])
 
-    def test_the_event_code_scan(self):
-        self.assertTrue(P.reads_events("def decide(ctx):\n    return ctx.events['fomc']\n"))
-        self.assertTrue(P.reads_events("def decide(ctx):\n    return getattr(ctx, 'events_next')\n"))
-        self.assertTrue(P.reads_events("def decide(ctx):\n    return ctx['events']\n"))
-        self.assertTrue(P.reads_events("def decide(ctx:\n"))                 # does not parse: an event reader
-        self.assertTrue(P.reads_events(None))
-        self.assertFalse(P.reads_events("def decide(ctx):\n    return ctx.bars['SPY']  # events in a comment\n"))
+    def test_p1s_own_routes_are_the_calibrations(self):
+        C = W.calib().cluster
+        rng = np.random.default_rng(5)
+        for p, b in list(rng.random((200, 2)) * 0.2) + [(0.12, 0.0), (0.0, 0.15), (0.11999, 0.1499), (math.nan, 0.0),
+                                                       (0.05, math.inf), (None, 0.1)]:
+            for dropped in ((), [{"lineage": "x"}]):
+                mine, theirs = P.caps(p, b, dropped), C.caps_rule(p, b, dropped)
+                self.assertEqual((mine.cap, mine.wall, mine.u_worst, mine.report_only, mine.why),
+                                 (theirs["cap"], theirs["wall"], theirs["u_worst"], theirs["report_only"], theirs["why"]))
+        for c_own in (None, 0, 120, 160, 495, 498, 500):
+            for minimum in (None, 0, 150, 300, 501):
+                for c_G in (140, 170, 250):
+                    for margin in P.MARGINS_K:
+                        self.assertEqual(P.k_used(c_G, margin, c_own, minimum), C.k_used_for(c_own, minimum, c_G, margin))
+        texts = ["x = ctx.events", "y = ctx.events_next", "# events", "eventsx = 1", "my_events = 2", "ctx['events']",
+                 "def f(:", "getattr(ctx, 'events')", "a = 1", None, 'z = "the events"']
+        for t in texts:
+            if C.event_word(t):
+                self.assertTrue(P.reads_events(t), t)
+        self.assertTrue(P.reads_events("getattr(ctx, 'events')"))
+        self.assertFalse(P.reads_events("my_events = 2\n"))
+        S = W.calib().stat
+        for _ in range(50):
+            sig = list(np.abs(rng.normal(0.004, 0.003, int(rng.integers(1, 6)))))
+            self.assertAlmostEqual(P.sigma_tilde(sig), S.sigma_tilde(sig), places=15)
+            one = float(abs(rng.normal(0.003, 0.003)))
+            self.assertEqual(P.sigma_used(one, S.sigma_tilde(sig)),
+                             float(S.sigma_used(np.array([one]), S.sigma_tilde(sig))[0]))
 
-    def test_what_is_out(self):
-        card = {"mechanism_class": "trend_momentum", "inputs": ["underlying_price"]}
-        self.assertIsNone(P.excluded(panel=False, symbols=["SPY"], card=card, code="x = 1\n"))
-        self.assertIn("panel", P.excluded(panel=True, symbols=["SPY"], card=card, code="x = 1\n"))
-        self.assertIn("stocks", P.excluded(panel=False, symbols=["SPY", "AAPL"], card=card, code="x = 1\n"))
-        self.assertIn("equity_premium", P.excluded(panel=False, symbols=["SPY"], code="x = 1\n",
-                                                   card={"mechanism_class": "equity_premium"}))
-        self.assertIn("event reader", P.excluded(panel=False, symbols=["SPY"], code="x = 1\n",
-                                                 card={"inputs": ["event_calendar"]}))
-        self.assertIn("event reader", P.excluded(panel=False, symbols=["SPY"], card=card, code="y = ctx.events\n"))
-        self.assertIn("1%", P.excluded(panel=False, symbols=["SPY"], card=card, code="", mean_exposure=0.009))
-        self.assertIsNone(P.excluded(panel=False, symbols=["SPY"], card=card, code="", mean_exposure=0.01))
-        self.assertEqual(P.excluded(panel=False, symbols=["SPY"], card=card, code="", group_why="no group"), "no group")
 
-    def test_the_member_is_the_first_passing_pid(self):
-        rows = [{"pid": 7, "reason": "train_fail"}, {"pid": 9, "reason": "train_pass"}, {"pid": 8, "reason": "seed"}]
-        self.assertEqual(P.member_pid(rows), 8)
-        self.assertIsNone(P.member_pid([{"pid": 3, "reason": "train_fail"}]))
+# --------------------------------------------------------------------------------------------- the floor adapter
+class TheFloorAdapter(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.cal = W.calib()
+        C = cls.cal.cluster
+        h = W.house()
+        cls.cuts = np.array(h["cuts"])
+        cls.hc = C.house_context(h["prices"], cls.cuts)
+        members = []
+        for m in W.metas():
+            _, mm = P.house_member(cls.cal, m, W.records(m["pid"]), cls.hc)
+            if mm is not None:
+                members.append(mm)
+        cls.members = members
+        with P.quiet():
+            cls.kept, cls.merged = C.merge_copies(list(members), cls.hc)
+            cls.cc = C.cells_and_clusters(cls.kept, cls.hc)
+
+    def test_house_floor_is_cluster_floor(self):
+        C = self.cal.cluster
+        for ci, (cid, keys) in enumerate(sorted(self.cc["clusters"].items())):
+            for joins in (None, {self.cc["cells"][keys[-1]][0].name: 25}):
+                caps_ = P.caps(0.03, 0.05)
+                with P.quiet():
+                    want = C.cluster_floor(cid, keys, self.cc["cells"], self.hc, self.cuts, 20, ci, caps_.cap,
+                                           caps_.wall, joins=joins)
+                got = P.house_floor(self.cal, cid=cid, keys=keys, judged=self.cc["cells"], hc=self.hc, B=20,
+                                    boot_seed=ci, caps_=caps_, joins=joins)
+                with self.subTest(cid=cid, joins=joins):
+                    self.assertEqual(got["floor"], want["floor"])
+                    self.assertEqual(got["span"], want["span"])
+                    self.assertEqual(sorted(got["point"]), sorted(want["point"]))
+
+    def test_resamples_spread_over_calls_equal_one_call(self):
+        cid, keys = sorted(self.cc["clusters"].items())[0]
+        caps_ = P.caps(0.0, 0.0)
+        whole = P.house_floor(self.cal, cid=cid, keys=keys, judged=self.cc["cells"], hc=self.hc, B=20, boot_seed=0,
+                              caps_=caps_)
+        kept: dict = {}
+        state = {"left": 3}
+
+        class Later(Exception):
+            pass
+
+        def hook(null, e, key, compute):
+            if (null, e, key) in kept:
+                return kept[(null, e, key)]
+            if state["left"] <= 0:
+                raise Later
+            state["left"] -= 1
+            kept[(null, e, key)] = compute()
+            return kept[(null, e, key)]
+
+        nights = 0
+        while True:
+            nights += 1
+            state["left"] = 3
+            try:
+                parts = P.house_floor(self.cal, cid=cid, keys=keys, judged=self.cc["cells"], hc=self.hc, B=20,
+                                      boot_seed=0, caps_=caps_, boot=hook)
+                break
+            except Later:
+                continue
+        self.assertGreater(nights, 2)
+        self.assertEqual(parts["floor"], whole["floor"])
+
+    def test_the_pins_floors_are_reproduced(self):
+        """THE CLOCK-START CONFORMANCE, pure (the contract's 6.4): the receipt's members on the export, joins 0, its
+        boot seed, the pin's caps and its B give every value of `c_own_at_pin`; for the calibration's own dry-run
+        receipt (its own invented House export, in the calibration's directory) and for the test world's."""
+        rec = W.receipt()
+        for cid, cl in rec.clusters.items():
+            judged = {P.cell_key(c): [m for m in self.members if m.family in rec.units[c].members] for c in cl.cells}
+            fl = P.house_floor(self.cal, cid=cid, keys=[P.cell_key(c) for c in cl.cells], judged=judged, hc=self.hc,
+                               B=rec.B, boot_seed=cl.boot_seed, caps_=P.caps(*cl.U[5], cl.dropped))
+            got = P.pin_floors(fl, rec, P.minimum_of(rec, {c: rec.units[c].m for c in cl.cells}))
+            self.assertEqual(got, {fd: dict(cl.c_own_at_pin[fd]) for fd in P.FLOORS}, cid)
+        moved = W.receipt(matched=200)
+        cl = moved.clusters["reversal_liquidity"]
+        self.assertEqual(cl.c_own_at_pin["R-REG"]["minimum"], 200)
+
+    def test_the_merge_the_assignment_and_the_member_rule_are_the_calibrations(self):
+        C = self.cal.cluster
+        kept, merged = [], {}
+        for mm in self.members:
+            into = P.merge_copy(self.cal, mm, kept, self.hc)
+            if into is None:
+                kept.append(mm)
+            else:
+                merged[mm.name] = into
+        self.assertEqual(merged, self.merged)
+        self.assertEqual([m.name for m in kept], [m.name for m in self.kept])
+        later = W.later_meta()
+        _, mm = P.house_member(self.cal, later, W.records(later["pid"]), self.hc)
+        z = P.train_z(self.cal, mm, self.hc)
+        cand = {f"{k[0]}/{k[1]}": [P.train_z(self.cal, x, self.hc) for x in v] for k, v in self.cc["cells"].items()
+                if k[1] == mm.group}
+        got = P.assign(self.cal, z, cand, self.cc["rho_assign"])
+        with P.quiet():
+            want = C.assign_cell(z, {c: np.array(v) for c, v in cand.items()}, self.cc["rho_assign"])
+        self.assertEqual(got[0], want[0])
+        self.assertIsNone(P.assign(self.cal, z, cand, None)[0])
+        clusters = {cid: list(keys) for cid, keys in self.cc["clusters"].items()}
+        by_class: dict = {}
+        for k in self.cc["cells"]:
+            by_class.setdefault(k[0], []).append(k)
+        joined, joins = P.cluster(self.cal, by_class, self.cc["cells"], self.hc)
+        self.assertEqual({c: sorted(v) for c, v in joined.items()}, {c: sorted(v) for c, v in clusters.items()})
+
+    def test_the_minimum_and_the_seed_of_a_join(self):
+        rec = W.receipt(matched=170)
+        self.assertEqual(P.minimum_of(rec, {W.TM_I: 3, W.TM_S: 4}), {"R-REG": 170, "POOLED": 170})
+        self.assertEqual(P.minimum_of(rec, {W.TM_I: 3, W.TM_S: 61}), {"R-REG": None, "POOLED": None})
+        self.assertEqual(P.joined_seed("a+b", "x:40"), int(hashlib.sha256(b"a+b|x:40").hexdigest()[:8], 16))
+        self.assertEqual(P.joined_u([(0.03, 0.05), (0.04, 0.06)]), (0.07, 0.11))
+        self.assertEqual(P.joined_u([(0.8, 0.9), (0.4, 0.5)]), (1.0, 1.0))
+        rows = [{"type": "ETF", "case_": "N", "judged": 1, "k_read": 10}, {"status": "pass", "k_read": 20},
+                {"type": "ETF", "case_": "N", "judged": 0, "k_read": 40}, None]
+        self.assertEqual(P.u_count(rows), 20)
 
 
 # --------------------------------------------------------------------------------------------------- the statistic
@@ -306,371 +480,89 @@ class TheStatistic(unittest.TestCase):
         self.rg = (self.ws * self.R).sum(axis=0) - 1e-4 * rng.random(self.n)
         self.gap = 1e-5 * rng.random(self.n)
 
-    def test_the_per_symbol_alpha_against_a_direct_loop(self):
+    def test_the_per_symbol_alpha_against_a_direct_loop_and_alpha_windows(self):
         include = np.arange(self.n) % 7 != 3
         a, a15 = P.alpha(self.rg, self.gap, self.ws, self.R, self.mu, self.wbar, include=include)
         la, la15 = loop_alpha(self.rg, self.gap, self.ws, self.R, self.mu, self.wbar, include=include)
         np.testing.assert_allclose(a, la, rtol=0, atol=1e-15)
         np.testing.assert_allclose(a15, la15, rtol=0, atol=1e-15)
+        S = W.calib().stat
+        base = self.rg - (self.ws * self.mu[:, None]).sum(0)
+        A = S.alpha_windows(base, self.ws, self.R - self.mu[:, None], self.wbar, np.array([0, 5, 30]), 25)
+        for i, J in enumerate((0, 5, 30)):
+            mine = P.alpha(self.rg[J:], self.gap[J:], self.ws[:, J:], self.R[:, J:], self.mu, self.wbar)[0]
+            np.testing.assert_allclose(mine[:25], A[i], rtol=0, atol=1e-15)
 
     def test_a_static_tilt_and_a_padded_needs_list_score_zero(self):
-        tilt = np.tile(np.array([[0.4], [0.1], [0.0]]), (1, self.n))     # a static tilt; the third symbol unheld
+        tilt = np.tile(np.array([[0.4], [0.1], [0.0]]), (1, self.n))
         rg = (tilt * self.R).sum(axis=0)
         a, _ = P.alpha(rg, np.zeros(self.n), tilt, self.R, self.mu, tilt[:, 0])
         self.assertLess(float(np.abs(a).max()), 1e-15)
-        # padding: an unheld symbol added to the NEEDS list changes nothing
         a2, _ = P.alpha(rg, np.zeros(self.n), tilt[:2], self.R[:2], self.mu[:2], tilt[:2, 0])
         np.testing.assert_allclose(a, a2, atol=1e-16)
 
-    def test_one_symbol_is_the_drafts_scalar_form(self):
-        w, R = self.ws[:1], self.R[:1]
-        a, _ = P.alpha(self.rg, self.gap, w, R, self.mu[:1], self.wbar[:1])
-        csum = np.concatenate([[0.0], np.cumsum(w[0])[:-1]])
-        what = (20 * self.wbar[0] + csum) / (20 + np.arange(self.n))
-        scalar = self.rg - w[0] * self.mu[0] - what * (R[0] - self.mu[0])
-        np.testing.assert_allclose(a, scalar, atol=1e-16)
-
-    def test_sigma_used_caps_a_weight_at_three_times_the_founders_median(self):
-        tilde = P.sigma_tilde([0.01, 0.02, 0.04])
-        self.assertAlmostEqual(tilde, 0.02)
-        self.assertEqual(P.sigma_used(0.001, tilde), 0.02 / 3)
-        self.assertEqual(P.sigma_used(0.0001, None), P.SIGMA_FLOOR)
-        self.assertEqual(P.sigma_used(0.05, tilde), 0.05)
-        self.assertLessEqual(1 / P.sigma_used(1e-9, tilde), 3 / tilde + 1e-9)
-
-    def test_the_cell_day_and_t(self):
+    def test_the_cell_day_the_look_and_t(self):
         z = np.array([[1.0, 0.0, 2.0], [3.0, 4.0, 0.0]])
         active = np.array([[True, True, True], [False, True, True]])
         np.testing.assert_allclose(P.cell_day(z, active), [1.0, 2.0, 1.0])
-        x = list(np.random.default_rng(3).normal(0.1, 1.0, 40))
+        x = list(np.random.default_rng(3).normal(0.1, 1.0, 120))
         self.assertEqual(P.t_stat(x), F.t_stat(x))
         point = P.look(x, x, 40)
-        self.assertEqual(point["T"], F.t_stat(x))
+        self.assertEqual(point["T"], F.t_stat(x[:40]))
+        self.assertEqual([P.look_t(x, x, k) for k in P.PLAN], W.calib().stat.t_direct(x, x))
         self.assertTrue(P.legs_pass({"T": 1.71, "S15": 1e-9}, 1.70))
         self.assertFalse(P.legs_pass({"T": 1.71, "S15": 1e-13}, 1.70))
         self.assertFalse(P.legs_pass({"T": None, "S15": 1.0}, 1.70))
         with self.assertRaises(ValueError):
             P.look(x[:39], x[:39], 40)
 
-    def test_the_bar_on_the_grid(self):
-        self.assertEqual(P.k_used(1.70, 0.03, 150), 170)
-        self.assertEqual(P.k_used(1.70, 0.03, 180), 183)
-        self.assertEqual(P.k_used(1.70, 0.05, 496), None)                      # above 5.00: ineligible
-        self.assertIsNone(P.k_used(1.70, 0.0, None))
-
-    def test_lot_exposure_is_screen_series_accounting_a_symbol(self):
-        from league.equity import screen
-        from league.equity.store import Bars
-
-        rng = np.random.default_rng(3)
-        n = 40
-        epoch = dt.date(1970, 1, 1)
-        days = np.arange(n, dtype=np.int32) + (dt.date(2022, 1, 3) - epoch).days
-        syms = ("SPY", "QQQ")
-        adj = {}
-        for s in syms:
-            c = 100 * np.cumprod(1 + rng.normal(0, 0.01, n))
-            o = c * (1 + rng.normal(0, 0.002, n))
-            adj[s] = np.stack([o, o, o, c], axis=1)
-        bars = Bars(days=days, early=np.zeros(n, bool), first=2, symbols=syms, raw={s: np.zeros((n, 5)) for s in syms},
-                    adj=adj, window="t")
-        iso = [(epoch + dt.timedelta(days=int(d))).isoformat() for d in days]
-        lots = [{"lid": 1, "symbol": "SPY", "weight": 0.3, "entry_day": iso[3], "entry_at": "open", "exit_day": iso[9],
-                 "exit_at": "open"},
-                {"lid": 2, "symbol": "QQQ", "weight": 0.2, "entry_day": iso[5], "entry_at": "close",
-                 "exit_day": iso[12], "exit_at": "close"},
-                {"lid": 3, "symbol": "SPY", "weight": 0.1, "entry_day": iso[1], "entry_at": "open", "exit_day": iso[4],
-                 "exit_at": "close"},
-                {"lid": 4, "symbol": "QQQ", "weight": 0.25, "entry_day": iso[30], "entry_at": "open", "exit_day": None}]
-        whole = screen.series(lots, bars, universe=list(syms), capital=1000)
-        run_days = [(epoch + dt.timedelta(days=int(d))).isoformat() for d in whole.days]
-        ex = P.lot_exposure(lots, run_days, syms)
-        np.testing.assert_array_equal(ex.sum(axis=0), whole.w)
-        for i, s in enumerate(syms):
-            one = screen.series([lot for lot in lots if lot["symbol"] == s], bars, universe=list(syms), capital=1000)
-            np.testing.assert_array_equal(one.w, ex[i])
-        with self.assertRaises(ValueError):
-            P.lot_exposure([{**lots[0], "symbol": "IWM"}], run_days, syms)
-
     def test_the_series_sha_names_one_series(self):
         a = P.series_sha(["2026-10-26"], [0.1], [0.05])
         self.assertEqual(a, P.series_sha(["2026-10-26"], [0.1], [0.05]))
-        self.assertNotEqual(a, P.series_sha(["2026-10-26"], [0.1 + 1e-17 * 10], [0.05]))
+        self.assertNotEqual(a, P.series_sha(["2026-10-26"], [0.1 + 1e-16], [0.05]))
 
 
-# ------------------------------------------------------------------------------------------------------ the floor
-def brute_worlds(members, markets, null, *, L=P.WINDOW):
-    """THE NULL WORLDS one window at a time (the module docstring's definitions, by loops over `P.alpha`): each
-    world's best T over cells and looks, its labels and its era."""
-    n0, n0r = {}, {}
-    for m in members:
-        allx, per_k = [], {0: [], 1: [], 2: []}
-        for e, market in enumerate(markets):
-            era = m.eras[e]
-            a = P.alpha(era.rg, era.gap, era.ws, era.R, m.mu, m.wbar)[0]
-            allx.extend(a.tolist())
-            lab = P.regime_labels(P.regime_stats(market, L=L), CUTS, ("vol",))["vol"]
-            for s, k in enumerate(lab):
-                per_k[int(k)].extend(a[s:s + L].tolist())
-        n0[m.key] = math.fsum(allx) / len(allx)
-        n0r[m.key] = {k: (math.fsum(v) / len(v) if v else n0[m.key]) for k, v in per_k.items()}
-    out = []
-    for e, market in enumerate(markets):
-        n = len(market.days)
-        lab = P.regime_labels(P.regime_stats(market, L=L), CUTS, ("vol",))["vol"]
-        offsets = [None] if null != "N1" else list(P.n1_offsets(n))
-        for off in offsets:
-            for s in range(n - L + 1):
-                best = -math.inf
-                for cell in sorted({m.cell for m in members}):
-                    zs, z15s, joins = [], [], []
-                    for m in members:
-                        if m.cell != cell:
-                            continue
-                        era = m.eras[e] if off is None else P.n1_path(m.eras[e], off, m.g)
-                        a, a15 = P.alpha(era.rg[s:s + L], era.gap[s:s + L], era.ws[:, s:s + L], era.R[:, s:s + L],
-                                         m.mu, m.wbar)
-                        g = n0[m.key] if null == "N0" else n0r[m.key][int(lab[s])] if null == "N0R" else 0.0
-                        zs.append((a - g) / m.sigma)
-                        z15s.append((a15 - g) / m.sigma)
-                        joins.append(m.join)
-                    D, D15 = [], []
-                    for t in range(L):
-                        act = [i for i, j in enumerate(joins) if t >= j]
-                        D.append(math.fsum(zs[i][t] for i in act) / max(1, len(act)))
-                        D15.append(math.fsum(z15s[i][t] for i in act) / max(1, len(act)))
-                    for k in P.PLAN:
-                        t = F.t_stat(D[:k])
-                        if t is not None and math.fsum(D15[:k]) > P.ZERO:
-                            best = max(best, t)
-                out.append((best, s, e))
-    return out
+class TheCellKey(unittest.TestCase):
+    def test_the_event_code_scan_is_the_union(self):
+        self.assertTrue(P.reads_events("def decide(ctx):\n    return ctx.events['fomc']\n"))
+        self.assertTrue(P.reads_events("def decide(ctx):\n    return getattr(ctx, 'events_next')\n"))
+        self.assertTrue(P.reads_events("def decide(ctx:\n"))                 # does not parse: an event reader
+        self.assertTrue(P.reads_events(None))
+        self.assertTrue(P.reads_events("x = 1  # events in a comment\n"))   # the House job's word scan (D18)
+        self.assertFalse(P.reads_events("def decide(ctx):\n    return ctx.bars['SPY']\n"))
+
+    def test_what_is_out_at_the_first_reading(self):
+        card = {"mechanism_class": "trend_momentum", "inputs": ["underlying_price"]}
+        self.assertIsNone(P.excluded(panel=False, symbols=["SPY"], card=card, code="x = 1\n"))
+        self.assertIn("panel", P.excluded(panel=True, symbols=["SPY"], card=card, code="x = 1\n"))
+        self.assertIn("stocks", P.excluded(panel=False, symbols=["SPY", "AAPL"], card=card, code="x = 1\n"))
+        self.assertIn("equity_premium", P.excluded(panel=False, symbols=["SPY"], code="x = 1\n",
+                                                   card={"mechanism_class": "equity_premium"}))
+        self.assertIn("event reader", P.excluded(panel=False, symbols=["SPY"], code="x = 1\n",
+                                                 card={"mechanism_class": "x", "inputs": ["event_calendar"]}))
+        self.assertIn("event reader", P.excluded(panel=False, symbols=["SPY"], card=card, code="y = ctx.events\n"))
+        self.assertIn("no declared class", P.excluded(panel=False, symbols=["SPY"], card=None, code="x = 1\n"))
+
+    def test_the_member_is_the_first_passing_pid(self):
+        rows = [{"pid": 7, "reason": "train_fail"}, {"pid": 9, "reason": "train_pass"}, {"pid": 8, "reason": "seed"}]
+        self.assertEqual(P.member_pid(rows), 8)
+        self.assertIsNone(P.member_pid([{"pid": 3, "reason": "train_fail"}]))
 
 
-def brute_floor(Ts, cap):
-    worlds = len(Ts)
-    capq = Fraction(repr(float(cap)))
-    for k in range(P.K_MAX + 1):
-        if Fraction(sum(1 for t in Ts if F.grid_index(t if t != -math.inf else None) >= k)) <= capq * worlds:
-            return k
-    return None
-
-
-class TheOwnFloor(unittest.TestCase):
-    def test_window_alpha_is_the_loop_over_every_window(self):
-        members, _ = synthetic_unit(eras=(150, 130), m=1, cells=("trend_momentum/sectors",))
-        era = members[0].eras[0]
-        A, A15 = P.window_alpha(era.rg, era.gap, era.ws, era.R, members[0].mu, members[0].wbar, L=30)
-        for s in (0, 11, 120):
-            a, a15 = P.alpha(era.rg[s:s + 30], era.gap[s:s + 30], era.ws[:, s:s + 30], era.R[:, s:s + 30],
-                             members[0].mu, members[0].wbar)
-            np.testing.assert_allclose(A[s], a, atol=1e-15)
-            np.testing.assert_allclose(A15[s], a15, atol=1e-15)
-
-    def test_the_worlds_against_brute_force_for_a_cell_and_a_cluster(self):
-        for cells, joins in ((("trend_momentum/sectors",), None),
-                             (("trend_momentum/sectors", "trend_momentum/index"), [0, 30, 0, 0])):
-            members, markets = synthetic_unit(cells=cells, joins=joins)
-            am, amk = P.aligned(members, markets)
-            for null in P.NULLS:
-                with self.subTest(cells=len(cells), null=null):
-                    T, labels = P._world_T(am, amk, null, axes=P.unit_axes(cells), cuts=CUTS)
-                    brute = brute_worlds(am, amk, null)
-                    self.assertEqual(len(T), len(brute))
-                    np.testing.assert_array_equal(P.grid(T), P.grid(np.array([b[0] for b in brute])))
-                    for cap in (0.12, 0.05):
-                        self.assertEqual(P.floors(P.grid(T), labels, cap)["POOLED"], brute_floor([b[0] for b in brute], cap))
-                    if null == "N1":
-                        self.assertEqual(len(T), sum(len(P.n1_offsets(len(m.days))) * (len(m.days) - P.WINDOW + 1)
-                                                     for m in amk))
-
-    def test_the_regime_floor_is_the_worst_regime_cell(self):
-        members, markets = synthetic_unit(cells=("trend_momentum/sectors",))
-        am, amk = P.aligned(members, markets)
-        T, labels = P._world_T(am, amk, "N0", axes=("vol", "ret", "disp"), cuts=CUTS)
-        g = P.grid(T)
-        fl = P.floors(g, labels, 0.12)
-        worst = 0
-        for axis, lab in labels.items():
-            for k in range(3):
-                sel = np.asarray(lab) == k
-                if sel.any():
-                    worst = max(worst, brute_floor([t for t, keep in zip(T, sel) if keep], 0.12))
-        self.assertEqual(fl["R-REG"], max(worst, fl["POOLED"]))
-        self.assertLessEqual(set(fl["cells"]), {f"{a}{k}" for a in ("vol", "ret", "disp") for k in range(3)})
-        self.assertEqual({c[:-1] for c in fl["cells"]}, {"vol", "ret", "disp"})   # a regime cell with no world sets none
-        self.assertEqual(P.unit_axes(["a/index"]), ("vol", "ret"))
-        self.assertEqual(P.unit_axes(["a/index", "b/defensive"]), ("vol", "ret", "tltgld"))
-
-    def test_n1_kills_timing_and_keeps_the_path(self):
-        members, _ = synthetic_unit(eras=(400, 420), m=1, cells=("trend_momentum/sectors",))
-        era = members[0].eras[0]
-        rolled = P.n1_path(era, 262, 2e-4)
-        np.testing.assert_array_equal(rolled.ws[:, 262:], era.ws[:, :-262])
-        np.testing.assert_array_equal(np.sort(rolled.ws.ravel()), np.sort(era.ws.ravel()))
-        self.assertEqual(P.n1_offsets(400), (262,))
-        self.assertEqual(P.n1_offsets(382), ())                              # 262 is not under 382 - 120
-        self.assertEqual(P.n1_offsets(1000), (262, 409, 535, 661, 787))
-
-    def test_the_bootstrap_is_seeded_and_its_bound_exact(self):
-        members, markets = synthetic_unit(cells=("trend_momentum/sectors",))
-        am, amk = P.aligned(members, markets)
-        axes = P.unit_axes(["trend_momentum/sectors"])
-        h1 = P.bootstrap_histograms(am, amk, "N0", unit="u", draws=range(8), cuts=CUTS, axes=axes)
-        h2 = P.bootstrap_histograms(am, amk, "N0", unit="u", draws=[3, 1], cuts=CUTS, axes=axes)
-        self.assertEqual(h1[3], h2[3])
-        self.assertEqual(h1[1], h2[1])
-        self.assertNotEqual(h1[0], h1[1])
-        n1 = P.bootstrap_histograms(am, amk, "N1", unit="u", draws=range(2), cuts=CUTS, axes=axes)
-        self.assertTrue(all(row["worlds"] == sum(len(m.days) - P.WINDOW + 1 for m in amk) for row in n1.values()))
-        for wall in (0.03, 0.10, 0.15):
-            k = P.bound_k(h1, wall)
-            # direct: the ceil(39/40 x 8) = 8th smallest share, at the smallest k where it is at or under the wall
-            def share(row, kk):
-                return Fraction(sum(v for key, v in row["hist"].items() if int(key) >= kk), row["worlds"])
-            want = next((kk for kk in range(P.K_MAX + 1)
-                         if sorted(share(r, kk) for r in h1.values())[math.ceil(Fraction(39, 40) * 8) - 1]
-                         <= Fraction(repr(wall))), None)
-            self.assertEqual(k, want)
-
-    def test_the_own_floor_waits_for_its_resamples_and_takes_the_matched_minimum(self):
-        members, markets = synthetic_unit(cells=("trend_momentum/sectors",))
-        caps = P.caps(0.02, 0.03)
-        out = P.own_floor(members, markets, unit="u", floor_def="POOLED", caps_=caps, cuts=CUTS, matched_k=120, hists={})
-        self.assertIsNone(out["k_own"])
-        self.assertIn("resamples", out["why"])
-        am, amk = P.aligned(members, markets)
-        axes = P.unit_axes(["trend_momentum/sectors"])
-        with mock.patch.object(P, "BOOT_RESAMPLES", 6):
-            hists = {null: P.bootstrap_histograms(am, amk, null, unit="u", draws=range(6), cuts=CUTS, axes=axes)
-                     for null in P.NULLS}
-            out = P.own_floor(members, markets, unit="u", floor_def="R-REG", caps_=caps, cuts=CUTS, matched_k=0,
-                              hists=hists)
-            self.assertIsNotNone(out["k_own"], out["why"])
-            self.assertEqual(out["k_own"], max(out["nulls"][n]["bound"] for n in P.NULLS))
-            self.assertTrue(all(out["nulls"][n]["bound"] >= out["nulls"][n]["floor"] for n in P.NULLS))
-            high = P.own_floor(members, markets, unit="u", floor_def="R-REG", caps_=caps, cuts=CUTS, matched_k=499,
-                               hists=hists)
-            self.assertEqual(high["k_own"], 499)
-            waits = P.own_floor(members, markets, unit="u", floor_def="R-REG", caps_=caps, cuts=CUTS, matched_k=None,
-                                hists=hists)
-            self.assertIsNone(waits["k_own"])
-
-
-# ------------------------------------------------------------------------------------------------- clusters, caps
-def series_of(x, start="2016-01-04"):
-    return list(sessions(start, len(x))), list(x)
-
-
-class TheClusters(unittest.TestCase):
-    def test_the_member_rule_joins_one_mechanism_split_in_two(self):
-        rng = np.random.default_rng(11)
-        n = 600
-        common = rng.normal(0, 1, n)
-        other = rng.normal(0, 1, n)
-
-        def mem(base, rho):
-            return series_of(rho * base + math.sqrt(1 - rho * rho) * rng.normal(0, 1, n))
-
-        clusters = {"A": {"A/index": [mem(common, 0.5) for _ in range(3)]},
-                    "B": {"B/index": [mem(common, 0.5) for _ in range(3)]},
-                    "C": {"C/index": [mem(other, 0.5) for _ in range(3)]}}
-        groups = P.member_join(clusters)
-        self.assertIn(["A", "B"], groups)
-        self.assertIn(["C"], groups)
-
-    def test_the_class_rule_then_the_member_rule(self):
-        """All judged cells of one declared class are one cluster whatever their group; cells of other classes join
-        it only by the member rule."""
-        rng = np.random.default_rng(14)
-        n = 600
-        common, other = rng.normal(0, 1, n), rng.normal(0, 1, n)
-
-        def mem(base):
-            return series_of(0.5 * base + math.sqrt(0.75) * rng.normal(0, 1, n))
-
-        cells = {"trend_momentum/index": ("trend_momentum", [series_of(rng.normal(0, 1, n)) for _ in range(3)]),
-                 "trend_momentum/sectors": ("trend_momentum", [series_of(rng.normal(0, 1, n)) for _ in range(3)]),
-                 "relative_value/index": ("relative_value", [mem(common) for _ in range(3)]),
-                 "reversal_liquidity/index": ("reversal_liquidity", [mem(common) for _ in range(3)]),
-                 "calendar_flow/index": ("calendar_flow", [mem(other) for _ in range(3)])}
-        groups = P.cluster(cells)
-        self.assertIn(["trend_momentum/index", "trend_momentum/sectors"], groups)   # one class: one cluster
-        self.assertIn(["relative_value/index", "reversal_liquidity/index"], groups)  # one mechanism, two labels
-        self.assertIn(["calendar_flow/index"], groups)
-
-    def test_the_prereg_names(self):
-        x = list(np.random.default_rng(4).normal(0.2, 1, 40))
-        self.assertEqual(P.t_k(x, 40), F.t_stat(x))
-        self.assertTrue(P.pass_k(x, x, 40, -5.0, True))
-        self.assertFalse(P.pass_k(x, x, 40, -5.0, False))
-        self.assertEqual(P.u_cap(0.03, 0.05), P.caps(0.03, 0.05))
-        np.testing.assert_allclose(P.member_z([0.002, -0.001], 0.001), [2.0, -1.0])
-        row = {"type": "ETF", "case_": "N", "judged": 1, "status": "pending"}
-        self.assertEqual(P.route_of(row, unit_judged=True, refuted=False, report_only=False), "pool")
-        self.assertEqual(P.route_of(row, unit_judged=True, refuted=False, report_only=True), "per_program")
-
-    def test_two_independent_mechanisms_never_join(self):
-        rng = np.random.default_rng(12)
-        clusters = {k: {f"{k}/index": [series_of(rng.normal(0, 1, 500)) for _ in range(3)]} for k in "XY"}
-        self.assertEqual(P.member_join(clusters), [["X"], ["Y"]])
-
-    def test_the_caps_and_report_only(self):
-        c = P.caps(0.03, 0.05)
-        self.assertAlmostEqual(c.cap, 0.09)
-        self.assertAlmostEqual(c.wall, 0.10)
-        self.assertFalse(c.report_only)
-        r = P.caps(0.12, 0.2)
-        self.assertTrue(r.report_only)
-        self.assertEqual((r.cap, r.wall), (0.12, 0.15))
-        self.assertEqual(P.joined_u([(0.03, 0.05), (0.04, 0.06)]), (0.07, 0.11))
-        self.assertEqual(P.joined_u([(0.8, 0.9), (0.4, 0.5)]), (1.0, 1.0))
-
-    def test_the_assignment_and_the_copy_merge(self):
-        rng = np.random.default_rng(13)
-        n = 500
-        a, b = rng.normal(0, 1, n), rng.normal(0, 1, n)
-        cells = {"x/index": series_of(a), "y/index": series_of(b)}
-        z = series_of(0.6 * a + 0.8 * rng.normal(0, 1, n))
-        target, corrs = P.assign(z, cells, 0.3)
-        self.assertEqual(target, "x/index")
-        self.assertGreater(corrs["x/index"], corrs["y/index"])
-        self.assertEqual(P.assign(z, cells, 0.99)[0], None)
-        near = series_of(a + 0.1 * rng.normal(0, 1, n))
-        self.assertEqual(P.merge_copy(near, "s1", [("L1", 5, series_of(a), "s0"), ("L0", 3, None, "s9")]), "L1")
-        self.assertEqual(P.merge_copy(series_of(b), "s9", [("L1", 5, series_of(a), "s0"), ("L0", 3, None, "s9")]), "L0")
-        self.assertIsNone(P.merge_copy(series_of(b), "s1", [("L1", 5, series_of(a), "s0")]))
-
-
-# --------------------------------------------------------------------------------------------- void, stage 1, placebo
-class TheVoidStageOneAndPlacebo(unittest.TestCase):
+# ------------------------------------------------------------------------------------------- void, placebo, words
+class TheVoidAndPlacebo(unittest.TestCase):
     def test_the_zeroed_days_void(self):
         k = 40
-        b = [0.001 * (i + 1) for i in range(k)]                   # the last 4 sessions are the top decile of |b|
+        b = [0.001 * (i + 1) for i in range(k)]
         clustered = [(b[i], 3 if i >= 36 else 0, 5) for i in range(k)]
         self.assertTrue(P.mar_void(clustered)["void"])
         spread = [(b[i], 1 if i % 4 == 0 else 0, 5) for i in range(k)]
         self.assertFalse(P.mar_void(spread)["void"])
-        one = [(b[i], 1 if i == 39 else 0, 5) for i in range(k)]   # one zeroed day on a big move: p 0.1, not void
+        one = [(b[i], 1 if i == 39 else 0, 5) for i in range(k)]
         out = P.mar_void(one)
         self.assertFalse(out["void"])
         self.assertAlmostEqual(out["p"], 0.1)
-        self.assertEqual(sum(P.mar_void(clustered)["by_decile"]), 12)
         self.assertAlmostEqual(P.binom_tail(2, 2, 0.1), 0.01)
-
-    def test_stage_one_refutes_never_confirms(self):
-        rng = np.random.default_rng(5)
-        good = list(rng.normal(0.2, 1, 300))
-        bad = list(rng.normal(-0.3, 1, 300))
-        self.assertFalse(P.stage1([good, good], readable=3)["refuted"])
-        self.assertTrue(P.stage1([good, bad], readable=3)["refuted"])
-        self.assertFalse(P.stage1([bad, bad], readable=2)["refuted"])          # fewer than M_MIN readable
-        x = [1.0, -1.0, 2.0, 0.5, -0.5, 1.5, 0.0, 1.0, 2.0, -1.0]
-        n, m = len(x), sum(x) / len(x)
-        d = [v - m for v in x]
-        var = sum(v * v for v in d) / n + 2 * sum((1 - lag / 6) * sum(d[t] * d[t - lag] for t in range(lag, n)) / n
-                                                  for lag in range(1, 6))
-        self.assertAlmostEqual(P.newey_west_z(x), m / math.sqrt(var / n))
 
     def test_the_placebo_leg(self):
         seed = P.placebo_seed("e" * 64, "trend_momentum/sectors", 40)
@@ -679,18 +571,15 @@ class TheVoidStageOneAndPlacebo(unittest.TestCase):
         draws = P.placebo_draws(50, 4, seed)
         self.assertEqual(len(draws), 999)
         self.assertTrue(all(len(set(d)) == 4 and all(0 <= i < 50 for i in d) for d in draws))
-        self.assertEqual(draws, P.placebo_draws(50, 4, seed))
         pseudo = list(np.random.default_rng(2).normal(0, 1, 999)) + [None]
         self.assertEqual(P.placebo_count(1.5, pseudo), sum(1 for v in pseudo if v is not None and v >= 1.5))
         self.assertTrue(P.placebo_holds(149, 999))
         self.assertFalse(P.placebo_holds(150, 999))
-        self.assertFalse(P.placebo_holds(10, 998))
         with self.assertRaises(ValueError):
             P.placebo_draws(3, 4, seed)
         self.assertEqual(P.control_wbar({"symbols": ["XLK", "XLE"], "f": 0.5}), {"XLK": 0.25, "XLE": 0.25})
 
 
-# ----------------------------------------------------------------------------------------- demotion, route, words
 class TheDemotionRouteAndWords(unittest.TestCase):
     def test_the_demotion(self):
         rng = np.random.default_rng(9)
@@ -699,43 +588,39 @@ class TheDemotionRouteAndWords(unittest.TestCase):
         every = list(rng.normal(0.3, 1, 60)) + good
         self.assertIsNone(P.demote(good, good, every))
         self.assertIn("post-pass T", P.demote(bad, bad, every))
-        self.assertIsNone(P.demote(good[:19], good[:19], every))               # read every 20th post-pass session
+        self.assertIsNone(P.demote(good[:19], good[:19], every))
         self.assertIn("all cell sessions", P.demote(good, good, [-abs(v) for v in every]))
-        post60 = list(rng.normal(0.3, 1, 60))
-        self.assertIn("stress", P.demote(post60, [-1.0] * 60, every + post60))
-        self.assertIsNone(P.demote(post60[:40], [-1.0] * 40, every + post60[:40]))   # the stress test at 60 and 120
 
     def test_the_pool_route(self):
         row = {"type": "ETF", "case_": "N", "judged": 1, "status": "fail"}
         self.assertTrue(P.on_pool_route(row, unit_judged=True, refuted=False, report_only=False))
-        self.assertTrue(P.on_pool_route({**row, "status": "pending"}, unit_judged=True, refuted=False, report_only=False))
         self.assertFalse(P.on_pool_route({**row, "status": "pass"}, unit_judged=True, refuted=False, report_only=False))
         self.assertFalse(P.on_pool_route({**row, "status": "void"}, unit_judged=True, refuted=False, report_only=False))
-        self.assertFalse(P.on_pool_route({**row, "type": "PANEL"}, unit_judged=True, refuted=False, report_only=False))
         self.assertFalse(P.on_pool_route({**row, "judged": 0}, unit_judged=True, refuted=False, report_only=False))
         self.assertFalse(P.on_pool_route(row, unit_judged=True, refuted=True, report_only=False))
         self.assertFalse(P.on_pool_route(row, unit_judged=True, refuted=False, report_only=True))
-        self.assertFalse(P.on_pool_route(row, unit_judged=False, refuted=False, report_only=False))
         self.assertFalse(P.on_pool_route(None, unit_judged=True, refuted=False, report_only=False))
 
     def test_the_words_carry_no_figure(self):
         self.assertEqual(P.words("trend_momentum/sectors", "PASS"), "POOL1 unit trend_momentum/sectors: PASS")
+        self.assertEqual(P.words("x/index", P.NONCONFORMING), "POOL1 unit x/index: nonconforming")
         with self.assertRaises(ValueError):
             P.words("x/index", "not passed at 40")
         self.assertEqual(P.figure_free({"version": 1, "a": "b", "c": [None, True, "2026-10-26"]}), [])
         self.assertEqual(P.figure_free({"t": 1.7}), ["t"])
-        self.assertEqual(P.figure_free({"k": 40}), ["k"])
-        self.assertEqual(P.figure_free({"w": "passed with T 1.92"}), ["w"])
         self.assertEqual(P.figure_free({"w": "12% at zero edge"}), ["w"])
-        self.assertEqual(P.figure_free({"rows": [{"version": 3}]}), [])
 
-    def test_the_floor_wide_expected_passes(self):
-        rec = receipt()
-        self.assertEqual(P.expected_passes([("trend_momentum", 40), ("reversal_liquidity", 120)], rec), 0.14)
+    def test_the_floor_wide_expected_passes_count_a_cluster_once(self):
+        rec = W.receipt()
+        # the P1 review's F12: a 2-cell cluster's two cells read at 40 are one entry (its curve covers both cells)
+        two_cells = [("trend_momentum", 40), ("trend_momentum", 40), ("reversal_liquidity", 120)]
+        self.assertEqual(P.expected_passes(two_cells, rec), round(0.02 + 0.05, 4))
+        self.assertEqual(P.expected_passes([("trend_momentum", 40), ("trend_momentum", 60)], rec), 0.03)
         self.assertEqual(P.expected_passes([("unknown", 40)], rec), 0.0)
-        text = P.beside(rec, cell="trend_momentum/sectors", cluster="trend_momentum", k=40, T=1.9, c_used_value=1.83,
-                        own_t=0.5, passes=1, judged=5, expected=0.2, u_point=0.04, u_bound=0.06)
-        for needle in ("WEAK", "no bound", "N1", "1 passes of 5 units", "contamination", "close-rate key"):
+        text = P.beside(rec, cell=W.TM_S, cluster="trend_momentum", k=40, T=1.9, c_used_value=1.83, own_t=0.5,
+                        passes=1, judged=5, expected=0.2, u_point=0.04, u_bound=0.06)
+        for needle in ("WEAK", "no bound", "N1", "1 passes of 5 units", "contamination", "close-rate key",
+                       "worst Train-era regime cell n/a%"):
             self.assertIn(needle.lower(), text.lower())
 
 

@@ -30,6 +30,46 @@ The running House release is `20261016T024305Z-e90d75adb36b` (main `d6bcf0cd`, P
 02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
+### POOL1's record half P1, the pooled-by-mechanism forward screen, on `feat/pool1-record` (unreleased; rebased onto main `4893d0f8`, release 1017r; the owner's A55 as pre-registered in A55a, PREREG-POOL1 `f42bcdc1`, section 11 P1, under the receipt contract POOL1-RECEIPT-1 `8e7df4e7`; an owner deploy: `league/ops/` is protected and `league/swarm/elane_forward.py` is FORBIDDEN; no identity moves: the options execution fingerprint `b60410ad`, the money digest `5ea6f99f`, the constitution digest `82a9a5a4` and the equity identity `78022ca6` are main's; FWD1-R's rule, verdicts, permit file and receipt sha are unchanged)
+
+- NEW `league/ops/pool_calib/`: the calibration's own pinned code, byte for byte (p1const, p1stat, p1members, p1units,
+  p1engine and the House job at CODE PIN 1; p1cluster and p1conform at CODE PIN 3, 22:23:50Z Oct 16), each sha in
+  `pool_rule.CALIB_SHA256`; loaded by `pool_rule.calib()`, refused on any difference.
+- NEW `league/ops/pool_rule.py` (pure): the pin (`elane.pool_screen`: the receipt's constants and P1's own), THE
+  RECEIPT CONTRACT's parse (`parse_receipt`, `read_receipt`: every key and cross-check, NaN and unknown keys refused),
+  the conformance vectors CV1-CV12 through P1's own routes (`conform`), the floor adapter onto the vendored pipeline
+  (`house_floor`, `pin_floors`, `minimum_of`), the vendored copy merge, assignment and member rule (`merge_copy`,
+  `assign`, `cluster`), the caps and the bar held to the calibration's (`caps`, `k_used`), the event scan's union
+  (`reads_events`), and the forward statistic, placebo, void, demotion, route and words.
+- NEW `league/ops/pool_screen.py` (the nightly job, mode record, no seat): the first sighting stored once, THE
+  CLOCK-START CONFORMANCE (each candidate cluster's pin floors recomputed on the House's own Train series, or it is
+  nonconforming and not clocked), the clock and the POOL-route list written once, holds and the House's decisions of
+  later lineages (waits on FWD1's row and on every earlier lineage), the Train series as the vendored House job's
+  `one_run` records and the market as its `prices()` (`PoolRuns`), cell sessions, looks at 40/60/120 on exactly
+  D_1..k with the bar by the vendored pipeline, the engine and join rules (lost, never gained), the demotion, the stall
+  rule, `pool-screen.sqlite` (append-only by trigger), the permit file (fixed words, never shorter, never overwritten
+  when unreadable, written before the looks and in a finally) and the operator's report. Registry: `pool_screen` after
+  `forward_shadow`, listed after `forward_screen`.
+- `league/swarm/elane_forward.py`: the POOL-route refusal keyed by lineage id (`step`'s ETF branch, `seat_refused`,
+  `try_refused` whatever `elane.fwd1.seats` says), whatever `elane.pool.mode` says and never lifted; a route-listed
+  lineage refused its sealed try outright (L5 for a held one only); failing closed on a missing (mode on) or unreadable
+  file: every ETF FWD1-R pass refused and every FWD1-judged lineage's sealed try, L5 included; `one_a_cell` counts a
+  pooled seat. `elane_seal.SEALED_KEYS` gains `elane_pool`.
+- Operator views only: FWD1's report and the BH/BY meter leave POOL-route and held lineages out until their unit is
+  final (`pool_route` count); the meter waits for the day while the pool's file fails closed.
+- The P1 review's findings (`scratch/pooled-screen/calbuild-result.json`, P1: DO NOT SHIP): F1 (the receipt), F2 (the
+  bar and its conformance), F3 (the unreadable-file lift), F4 (the store loss), F5 (the sealed-route race), F6 (L5 on a
+  route), F7 (the sighting), F8 (decimals in the file), F9 (the finally), F10 (the rollback rule, docs/operations.md),
+  F11 (the meter), F12 (expected passes per cluster), F13 (the copy merge's wait): each fixed with its test.
+- policy.json: `elane.pool` {mode "record", seats "off", cpu_seconds_night 600}. **No pin block and no receipt yet**
+  (the calibration's one run is Oct 20: P1 D1): nothing is judged until the release that ships P1 carries both (P12).
+- Departures and readings: `scratch/pooled-screen/DEVIATIONS.log` P1 D1-D7 and P1 D8-D19 (no POOL1 figure existed or was
+  seen).
+- **Ships** after checkpoint 15 is final (evening or weekend window); between the deploy and the job's first night
+  the swarm fails closed (ETF FWD1-R passes wait; FWD1-judged lineages take no sealed try; the meter waits).
+- **Rollback:** `elane.pool.mode` "off" stops the job and keeps the file; the refusal does not lift. A code rollback
+  below P1 lifts it (no reader): while the route list is non-empty it needs a captain amendment (docs/operations.md).
+
 ### Release 1017r: the owner's new Done (A50), the ETF Probe sleeve 0.25 x E (A51) and the births' one-session ask, on `rel/1017r` (unreleased; one House deploy by the captain, never 12:55-20:05Z on a trading day and never inside an entry window; live before Mon Oct 19 13:30Z; THE MONEY DIGEST MOVES `cfcc94b1` -> `5ea6f99f` and the constitution `60796aed` -> `82a9a5a4` (A51's row alone), the standing grant re-ratifies at start; the options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move)
 
 - A50 (PR #564): Done at the 15th counted close, then every 5th; >= 3 each from >= 2 programs; A1.1's matched minimum
@@ -205,34 +245,6 @@ is on branches.
   Ids unchanged on both Pythons: fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`, constitution
   `60796aed`.
 - **Rollback:** the release before; the request is words only.
-
-### POOL1's record half P1, the pooled-by-mechanism forward screen, on `feat/pool1-record` (unreleased; cut from main `d6bcf0cd`; the owner's A55 as pre-registered in A55a, PREREG-POOL1 `f42bcdc1`, section 11 P1; an owner deploy: `league/ops/` is protected and `league/swarm/elane_forward.py` is FORBIDDEN; no identity moves: the options execution fingerprint `b60410ad`, the money digest `cfcc94b1`, the constitution digest `60796aed` and the equity identity `78022ca6` are main's; FWD1-R's rule, verdicts, permit file and receipt sha are unchanged)
-
-- NEW `league/ops/pool_rule.py` (pure): the pin (`elane.pool_screen`, every constant the code's) and the receipt it
-  pins (`docs/benchmarks/pool_screen_1.json`, read only at the pin's sha256; its shape `RECEIPT_KEYS`), the House-set
-  cell key (the base group over 2/3 of Train exposure; the declared class for founders; assignment at rho_assign;
-  the exclusions incl. the event-code scan), the per-symbol timing alpha against a past-only exposure mean, the own
-  floor under N0, N0R and N1 with the block-bootstrap bound (exact enumeration, brute-force tested), the clusters'
-  member rule, CAP_u / WALL_u / report-only, the zeroed-days void, stage 1, the placebo leg, the demotion, the route
-  rule and the words.
-- NEW `league/ops/pool_screen.py` (the nightly job, mode record, no seat): the clock and the POOL-route list written
-  once on the first night after the release that carries the receipt (the clock the next session), holds and the
-  House's assignment of later lineages, the House's per-symbol Train and forward runs (`PoolRuns`, a subclass of
-  forward_screen's `HouseRuns`), cell sessions, looks at 40/60/120 on exactly D_1..k (a word and a sha at a non-final
-  look; the series with a final verdict), the engine and join rules (lost, never gained), the demotion, the stall rule,
-  `pool-screen.sqlite` (append-only by trigger), the permit file of ids and words (never deleted) and the operator's
-  report. Registry: `pool_screen` after `forward_shadow`, listed after `forward_screen`.
-- `league/swarm/elane_forward.py`: the POOL-route refusal keyed by lineage id (`step`'s ETF branch, `seat_refused`,
-  `try_refused` whatever `elane.fwd1.seats` says), whatever `elane.pool.mode` says and never lifted; fail closed on a
-  missing (mode on) or unreadable file; `one_a_cell` counts a pooled seat. `elane_seal.SEALED_KEYS` gains `elane_pool`.
-- Operator views only: FWD1's report and the BH/BY meter leave POOL-route and held lineages out until their unit is
-  final (`pool_route` count).
-- policy.json: `elane.pool` {mode "record", seats "off", cpu_seconds_night 600}. **No pin block and no receipt yet**
-  (the calibration has not run; DEVIATIONS.log D1): nothing is judged until the release that ships P1 carries both.
-- Departures and readings: `scratch/pooled-screen/DEVIATIONS.log` D1-D7 (no POOL1 figure existed or was seen).
-- **Ships** after checkpoint 15 is final (evening or weekend window); between the deploy and the job's first night
-  the swarm fails closed (forward-only ETF FWD1-R passes wait; FWD1-judged lineages take no sealed try).
-- **Rollback:** `elane.pool.mode` "off" stops the job and keeps the file; the refusal does not lift.
 
 ### Release 1016a: L5 and C1, on `rel/1016a` (unreleased; one House deploy, outside 12:55-20:05Z on a trading day; no
 gateway change; no identity moves: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the
