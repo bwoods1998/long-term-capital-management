@@ -161,13 +161,19 @@ class TheDoneMeter(Fixture):
         self.assertNotIn("house:rebound-live", families)
         self.assertIn("tuition-before-d1", families)
         # THE OWNER'S CHANGE OF THE PINNED RULE (A50, the goal of Oct 16, 2026): the pinned rule is now
-        # docs/goals/DONE-RULE-A50.md's; the Oct 9 rule's sha (0d007696) is history (`dlane.OLD_DONE`).
-        self.assertEqual(out["rule"]["sha256"], "9693fe0034926fda43270668fbaa40eecb3e8645022ec14fcd6ca94d61980eef")
+        # docs/goals/DONE-RULE-A50.md's (with the captain's A50a(2) and the zero-edge figure of its item 6); the Oct 9
+        # rule's sha (0d007696) is history (`dlane.OLD_DONE`).
+        self.assertEqual(out["rule"]["sha256"], "027c12b7cca3f4450b3eee92957dc8c2d6e28a8db9b81625c2ba323528db2491")
         self.assertNotEqual(out["rule"]["sha256"], dlane.OLD_DONE["rule_sha256"])
         # DONE-RULE-A1 A1.2: the figure under the budget in force, said with its source: 2.7% at 12 weeks since THE
         # PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026, on fixed 2-, 3- and 5-session holds; 2.4% at 3-session holds
-        # under L-D's $400 total before it).
-        zero = out["done"]["p_done_zero_edge"]
+        # under L-D's $400 total before it). Since A50 (DONE-RULE-A50 item 6; the reviews of Oct 16) it was simulated
+        # under the Oct 9 rule, so it rides BESIDE, labelled so: the figure under the rule in force is not yet measured
+        # (league/tests/test_done_a50.py `TheZeroEdgeFigure`). This read `zero` itself before.
+        top = out["done"]["p_done_zero_edge"]
+        self.assertEqual((top["measured"], top["value"], top["label"]), (False, None, "P(Done | zero edge), simulation"))
+        self.assertIn("under the rule in force is not yet measured", top["note"])
+        zero = top["beside"]
         self.assertEqual((zero["value"], zero["label"], zero["horizon"], zero["holds"]),
                          (0.027, "P(Done | zero edge), simulation", "12 weeks",
                           "fixed 2-, 3- and 5-session holds (the simulation's stand-in for the House's pool)"))
@@ -175,6 +181,7 @@ class TheDoneMeter(Fixture):
         self.assertIn("PREREG-T", zero["source"])
         self.assertIn("$800 net in total", zero["variant"])
         self.assertTrue(zero["by"].startswith("PREREG-T"))
+        self.assertEqual(zero["measured_under"], dlane.OLD_DONE["rule_sha256"], "simulated under the Oct 9 rule")
         self.assertNotIn("note", zero, "the figure for the rules this code ships")
         self.assertEqual(out["rule"]["amendment_sha256"], dlane.DONE["amendment_sha256"])
         # A50: the first checkpoint is the 15th counted close (the 30th before the owner's change).
@@ -544,7 +551,8 @@ class TheAmendment(Fixture):
         cp = self.report()["done"]["screen"]["latest"]
         self.assertFalse(cp["holds"], "B1's local repro: 30 closes, 2 programs, no replay row held before A1.1")
         self.assertEqual(cp["items"], {"3": True, "4": False, "7": True})
-        self.assertIn("replay untested: 0 of 30 closes matched a replay (a twin or the nightly); 0 programs with 5+ matched "
+        # A1.1's count is 3 since the captain's A50a(2) (Oct 16, 2026; 5 before, which this text named).
+        self.assertIn("replay untested: 0 of 30 closes matched a replay (a twin or the nightly); 0 programs with 3+ matched "
                       "closes of the 2 needed (DONE-RULE-A1 A1.1)", cp["why"])
         self.assertEqual(cp["replay_coverage"], {"matched": 0, "closes": 30, "share": 0.0})
         self.assertEqual([(p["family"], p["closes"], p["matched"], p["gap"]) for p in cp["by_program"]],
@@ -556,7 +564,8 @@ class TheAmendment(Fixture):
         cp = self.report()["done"]["screen"]["latest"]
         self.assertFalse(cp["holds"])
         self.assertEqual(cp["measured_programs"], 1)
-        self.assertIn("1 programs with 5+ matched closes of the 2 needed", cp["why"])
+        # A1.1's count is 3 since the captain's A50a(2) (Oct 16, 2026; 5 before, which this text named).
+        self.assertIn("1 programs with 3+ matched closes of the 2 needed", cp["why"])
         self.replays("dir-b", ["2026-10-05"])
         self.assertTrue(self.report()["done"]["screen"]["latest"]["holds"])
 
@@ -699,32 +708,35 @@ class TheAmendment(Fixture):
 
     def test_a_zero_edge_figure_the_amendment_did_not_pin_says_so(self):
         """A figure this code does not name is a setting's; it attributes neither 0.024 nor 0.027 to the wrong rule (the
-        review of THE PROBE TOTAL AT $800, Oct 10, 2026: A1.2 pinned 0.024; PREREG-T measured 0.027)."""
-        out = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": 0.13}})
+        review of THE PROBE TOTAL AT $800, Oct 10, 2026: A1.2 pinned 0.024; PREREG-T measured 0.027). Since A50 the
+        figure as before rides `beside` (DONE-RULE-A50 item 6): this read the top level before."""
+        out = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": 0.13}})["beside"]
         self.assertEqual(out["value"], 0.13)
         self.assertIn("not one this code names", out["note"])
         self.assertIn("0.024: DONE-RULE-A1 A1.2, under L-D's $400 total", out["note"])
         self.assertIn("0.027: PREREG-T", out["note"])
         self.assertNotIn("pinned 0.027", out["note"])
         self.assertNotIn("horizon", out)
+        self.assertNotIn("measured_under", out, "no rule is claimed for a setting's figure")
 
     def test_both_named_zero_edge_figures_keep_their_own_labels_and_the_rollback_reads_l_ds(self):
         """0.024 is A1.2's figure with its own horizon, holds and source whatever the code ships; a setting that picks it
         beside the $800 rules says so; THE ROLLBACK (`ZERO_EDGE = ZERO_EDGES[0.024]`, 0.024 in DEFAULTS and policy.json)
-        reports it as the pinned figure with no note."""
+        reports it as the pinned figure with no note. Since A50 each rides `beside`, simulated under the Oct 9 rule
+        (DONE-RULE-A50 item 6): this read the top level before."""
         from unittest import mock
 
         self.assertEqual(sorted(dlane.ZERO_EDGES), [0.024, 0.027])
         self.assertTrue(all(z["value"] == v for v, z in dlane.ZERO_EDGES.items()))
         self.assertIs(dlane.ZERO_EDGE, dlane.ZERO_EDGES[dlane.DEFAULTS["done_zero_edge_p"]])
-        ld = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": 0.024}})
+        ld = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": 0.024}})["beside"]
         self.assertEqual((ld["value"], ld["holds"], ld["by"]),
                          (0.024, "3-session holds", "DONE-RULE-A1 A1.2, under L-D's $400 total"))
         self.assertIn("pinned by DONE-RULE-A1 A1.2", ld["source"])
         self.assertIn("the rules this code ships carry 0.027", ld["note"])
         with mock.patch.object(dlane, "ZERO_EDGE", dlane.ZERO_EDGES[0.024]), \
                 mock.patch.dict(dlane.DEFAULTS, {"done_zero_edge_p": 0.024}):
-            rolled = R.zero_edge({"dlane": {"mode": "gate"}})
+            rolled = R.zero_edge({"dlane": {"mode": "gate"}})["beside"]
         self.assertEqual((rolled["value"], rolled["holds"]), (0.024, "3-session holds"))
         self.assertNotIn("note", rolled)
 

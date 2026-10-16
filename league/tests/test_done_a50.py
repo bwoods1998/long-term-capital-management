@@ -5,12 +5,16 @@ SPEED.txt; the captain's amendment A50), each new rule at its edges:
   verbatim; the Oct 9 rule is `dlane.OLD_DONE`, history read by no module.
 - THE SCHEDULE: checkpoints at the 15th counted close, then every 5th (20, 25, 30, ...), fixed by count.
 - THE BAR: at least 15 closes, at least 3 from each of at least 2 programs (14 vs 15; 2 vs 3; one program vs two).
-  DONE-RULE-A1 A1.1 is unchanged: a claim still needs 2 programs with 5 or more matched closes each.
+  DONE-RULE-A1 A1.1 as the captain's A50a(2) changed it: a claim needs 2 programs with 3 or more matched closes each
+  (5 before; 3 closes with 2 matched is not a measured program).
 - A14'S INTENTS: agreed >= 0.95 x S, or S < 40, none missing, and agreed >= S - 1 (S 19, 39, 40, 41, 1; a missing
   session is never the one forgiven; FW6's range, 20 sessions and up, reads exactly as before).
 - ITEM 7'S WINDOW: the 3 UTC days ending on the UTC day of the 15th close (across a weekend, across New York's clock
   change, a close after 00:00Z); each later checkpoint every UTC day after the previous one's through its own.
 - A READING UNDER ANOTHER PINNED RULE is never carried into this one's checkpoints, and does not silence A8.
+- P(DONE | ZERO EDGE) UNDER THE RULE IN FORCE (DONE-RULE-A50 item 6, the reviews of Oct 16): stated only from a
+  `dlane.done_zero_edge_p` block measured under this rule's sha; otherwise "not yet measured", with the Oct 9 rule's
+  0.027 beside it, labelled so, and never as the figure.
 
 Every close, session and figure here is invented."""
 
@@ -28,7 +32,7 @@ from league.ops import dlane_report as R
 from league.ops import forward_db
 from league.swarm import dlane
 from league.tests.test_dlane_report import NIGHTLY, Fixture
-from league.tests.test_dlane_report_dc1 import Base, Research, ep, options_close
+from league.tests.test_dlane_report_dc1 import ALL, Base, Research, ep, options_close
 from league.tests.test_forward_a14 import DAYS, Reading, close, priced
 
 REPO = Path(__file__).resolve().parents[2]
@@ -50,21 +54,33 @@ def words(text: str) -> str:
 class ThePinnedRule(unittest.TestCase):
     def test_the_rule_file_is_the_pinned_rule_and_holds_the_owners_done_verbatim(self):
         self.assertEqual(hashlib.sha256(RULE_FILE.read_bytes()).hexdigest(), dlane.DONE["rule_sha256"])
-        self.assertEqual(dlane.DONE["rule_sha256"], "9693fe0034926fda43270668fbaa40eecb3e8645022ec14fcd6ca94d61980eef")
+        # The captain's A50a(2) (A1.1 at 3) and the reviews' item 6 (the zero-edge figure measured under this rule) are
+        # in the pinned file, so its sha moved from the build's first draft (9693fe00, never deployed) to this one.
+        self.assertEqual(dlane.DONE["rule_sha256"], "027c12b7cca3f4450b3eee92957dc8c2d6e28a8db9b81625c2ba323528db2491")
         text = words(RULE_FILE.read_text())
         self.assertIn(OWNERS_DONE, text)
-        for said in ("replaces DONE-RULE.md (sha256 0d007696", "DONE-RULE-A1.md (sha256 333bad06, A1.1-A1.4) stands whole",
+        # A1 stood whole in the first draft; since A50a(2) it stands but for A1.1's count, which is 3.
+        for said in ("replaces DONE-RULE.md (sha256 0d007696",
+                     "DONE-RULE-A1.md (sha256 333bad06, A1.1-A1.4) stands but for A1.1's count of matched closes, which "
+                     "the captain's A50a(2) makes 3 (was 5",
+                     "Every program with 3 or more matched closes has a gap within +/-0.10",
+                     "a program's replay gap is judged on 3 closes instead of 5; for ETF lots the +/-0.10 of max loss is "
+                     "far looser than A14's 15 bp",
+                     "P(Done | zero edge) under the rule in force is not yet measured",
                      "fixed by count", "optional stopping", "near a coin flip at zero edge"):
             self.assertIn(said, text)
+        self.assertNotIn("stands whole", text)
+        self.assertNotIn("5 or more matched closes has a gap", text)
 
     def test_the_owners_constants_and_everything_else_as_it_was(self):
         rule = dlane.DONE
         self.assertEqual((rule["min_closes"], rule["min_programs"], rule["min_closes_per_program"]), (15, 2, 3))
         self.assertEqual((rule["first_checkpoint"], rule["checkpoint_every"], rule["research_first_days"]), (15, 5, 3))
-        # Unchanged: the routes, the inception, A1 (its sha, its 2 measured programs with 5 matched closes, the gap).
+        # Unchanged: the routes, the inception, A1's sha, its 2 measured programs and the gap. A1.1's matched closes are 3
+        # since the captain's A50a(2) (5 would block the 15th close in about 92% of paths): this pinned 5 before it.
         self.assertEqual((rule["routes_all"], rule["routes_screen"], rule["inception"]),
                          ((":r", ":t", ":i"), (":r",), "2026-09-26T06:23:00Z"))
-        self.assertEqual((rule["gap_limit"], rule["gap_min_matched"], rule["min_measured_programs"]), (0.10, 5, 2))
+        self.assertEqual((rule["gap_limit"], rule["gap_min_matched"], rule["min_measured_programs"]), (0.10, 3, 2))
         self.assertEqual(rule["amendment_sha256"], "333bad0679fb9c9a76c1cc0b5248d52c5f84c96e0cff5376f9c8d446a4c4ff0b")
         self.assertEqual(R.DONE_FROM, "2026-10-10T04:00:00Z")
         self.assertEqual((forward_db.A14_GAP_BP, forward_db.A14_AGREE, forward_db.A14_ALL_BUT_ONE_UNDER), (15.0, 0.95, 40))
@@ -72,9 +88,11 @@ class ThePinnedRule(unittest.TestCase):
                          (forward_db.A14_GAP_BP, forward_db.A14_AGREE, forward_db.A14_ALL_BUT_ONE_UNDER))
 
     def test_the_old_rule_is_kept_visible_and_read_by_nothing(self):
+        # The history keeps A1.1's 5 since A50a(2) made it 3 (`gap_min_matched`), and names the Oct 9 sha once.
         self.assertEqual(dlane.OLD_DONE, {"rule_sha256": "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca",
                                           "min_closes": 30, "min_closes_per_program": 5, "first_checkpoint": 30,
-                                          "checkpoint_every": 10, "research_first_days": 7})
+                                          "checkpoint_every": 10, "research_first_days": 7, "gap_min_matched": 5})
+        self.assertEqual(dlane.OCT9_RULE_SHA256, dlane.OLD_DONE["rule_sha256"])
         readers = []
         for path in sorted((REPO / "league").rglob("*.py")):
             if "tests" in path.parts:
@@ -89,13 +107,20 @@ class ThePinnedRule(unittest.TestCase):
         self.assertFalse(hasattr(R, "RESEARCH_FIRST_DAYS"), "item 7's window is the pinned rule's (research_first_days)")
 
     def test_the_report_carries_the_rule_its_loosenings_and_the_intents_amendment(self):
-        self.assertEqual([row["rule"] for row in R.LOOSENED[-4:]],
+        # Five rows since the captain's A50a(2) (A1.1's matched closes, 5 -> 3) joined the owner's four.
+        self.assertEqual([row["rule"] for row in R.LOOSENED[-5:]],
                          ["Done's checkpoints (A50, the owner's goal of Oct 16)", "Done's bar (A50, the owner's goal of Oct 16)",
                           "A14's intents bound (A50, the owner's goal of Oct 16)",
-                          "Done's research 24/7 window (A50, the owner's goal of Oct 16)"])
-        rows = {row["rule"]: row for row in R.LOOSENED[-4:]}
+                          "Done's research 24/7 window (A50, the owner's goal of Oct 16)",
+                          "A1.1's matched replay closes (the captain's A50a(2), Oct 16)"])
+        rows = {row["rule"]: row for row in R.LOOSENED[-5:]}
         self.assertTrue(all(set(row) == {"rule", "was", "now", "cost"} for row in rows.values()))
-        checkpoints, bar, intents, window = rows.values()
+        checkpoints, bar, intents, window, a1_1 = rows.values()
+        self.assertIn("a program's replay gap is judged on 3 closes instead of 5; for ETF lots the +/-0.10 of max loss is "
+                      "far looser than A14's 15 bp", a1_1["cost"])
+        self.assertIn("5 or more matched replay closes", a1_1["was"])
+        self.assertIn("gap_min_matched 3", a1_1["now"])
+        self.assertIn("3+ since the captain's A50a(2)", " ".join(R.TIGHTENED))
         self.assertEqual((checkpoints["was"], bar["was"]), ("the 30th counted close, then every 10th",
                                                             "at least 30 closes, at least 5 from each of at least 2 programs"))
         for said in ("near a coin flip at zero edge", "optional stopping", "mostly market direction"):
@@ -185,14 +210,30 @@ class TheBar(Base):
         cp = self.first(self.rows(6, 6, c=3))
         self.assertEqual((cp["programs"], cp["programs_with_min_closes"], cp["items"]["3"]), (3, 3, True))
 
-    def test_a1_1_is_unchanged_so_a_claim_still_needs_two_programs_with_five_matched_closes(self):
-        """DONE-RULE-A1 A1.1 (pinned Oct 9, 2026) is not the owner's to have changed here: with 3 closes a program meets
-        the bar (item 3) but is not a MEASURED program (5 matched closes), so item 4 fails until two programs have 5."""
+    def test_a1_1_at_3_so_a_program_with_3_matched_closes_is_measured(self):
+        """DONE-RULE-A1 A1.1 as the captain's A50a(2) changed it (02:31Z Oct 16, 2026): 2 programs with 3 or more
+        matched closes each. This test held 5 before A50a(2) (12+3 failed item 4 there, 1 measured program): 5 would
+        block the 15th close in about 92% of paths and contradict the owner's ">= 3 each"."""
         cp = self.first(self.rows(12, 3))
-        self.assertEqual((cp["items"]["3"], cp["items"]["4"], cp["measured_programs"], cp["holds"]), (True, False, 1, False))
-        self.assertIn("1 programs with 5+ matched closes of the 2 needed (DONE-RULE-A1 A1.1)", cp["why"])
+        self.assertEqual((cp["items"], cp["measured_programs"], cp["holds"]), ({"3": True, "4": True, "7": True}, 2, True))
         cp = self.first(self.rows(10, 5))
         self.assertEqual((cp["items"], cp["measured_programs"], cp["holds"]), ({"3": True, "4": True, "7": True}, 2, True))
+
+    def test_3_closes_with_2_matched_is_not_a_measured_program(self):
+        """A close whose twin is final but unpriced is counted by its verdict, never matched: program B then meets the
+        bar on 3 closes (item 3) but has 2 matched, under A1.1's 3, so item 4 fails and the checkpoint is final."""
+        rows = self.rows(12, 3)
+        last_b = [c for c in rows if c["family"] == "prog-b"][-1]
+        twins = {str(c["pid"]): {"status": "priced", "final": True,
+                                 "twin": {"pnl": float(c["pnl_usd"]), "max_loss": c["max_loss_usd"], "r": 0.0}}
+                 for c in rows}
+        twins[str(last_b["pid"])] = {"status": "no_fill", "final": True}   # the model did not fill the real open
+        m = R.meter(rows, ALL, self.store, previous=None, research=Research(), replay_days={}, fees_as_of="2026-12-31",
+                    now=ep("2026-11-04T14:00:00Z"), twins=twins, twins_on=False)
+        cp = m["checkpoints"][0]
+        self.assertEqual((cp["at_close"], cp["items"]["3"], cp["items"]["4"], cp["measured_programs"], cp["holds"]),
+                         (15, True, False, 1, False))
+        self.assertIn("1 programs with 3+ matched closes of the 2 needed (DONE-RULE-A1 A1.1)", cp["why"])
 
     def test_the_sign_is_still_the_bar(self):
         rows = self.rows(10, 5)
@@ -363,6 +404,154 @@ class AReadingUnderAnotherRule(Fixture):
         out = self.report()
         view = out["done"]["research_247_last_7_days"]
         self.assertEqual((view["first_day"], view["last_day"]), ("2026-10-13", "2026-10-19"))
+
+
+
+# ================================================================================================== P(Done | zero edge)
+#: The sentence the report says while no figure measured under the rule in force is set (the task of the reviews' fix).
+UNMEASURED = ("P(Done | zero edge) under the rule in force is not yet measured (the 0.027 beside it was simulated under "
+              "the Oct 9 rule)")
+FIRST_DRAFT = "9693fe0034926fda43270668fbaa40eecb3e8645022ec14fcd6ca94d61980eef"   # this build's first draft, never deployed
+
+
+def measured(**over) -> dict:
+    """A measured block for `dlane.done_zero_edge_p` (an invented figure and source)."""
+    return {"value": 0.21, "horizon": "Fri Oct 23, 2026", "source_sha256": "ab" * 32,
+            "measured_under": dlane.DONE["rule_sha256"], **over}
+
+
+def figures(node, path=""):
+    """Every (path, number) in a nested report block."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from figures(v, f"{path}.{k}")
+    elif isinstance(node, (int, float)) and not isinstance(node, bool):
+        yield path, node
+
+
+class TheZeroEdgeFigure(unittest.TestCase):
+    """DONE-RULE-A50 item 6: P(Done | zero edge) rides with every claim, and under the rule in force it is the figure
+    measured under it or nothing. Every figure in `dlane.ZERO_EDGES` was simulated under the Oct 9 rule (30 closes, 5
+    each, read every 10th): stated beside, labelled so, never as the figure for A50's rule."""
+
+    def test_unmeasured_says_so_plainly_and_0_027_rides_only_beside(self):
+        for settings in (None, {"dlane": {"mode": "gate"}}, {"dlane": {"mode": "gate", "done_zero_edge_p": 0.027}}):
+            out = R.zero_edge(settings)
+            self.assertEqual((out["measured"], out["value"], out["note"]), (False, None, UNMEASURED), settings)
+            self.assertEqual((out["label"], out["rule_sha256"]), (R.ZERO_EDGE_LABEL, dlane.DONE["rule_sha256"]))
+            self.assertNotIn("refused", out, "no block was written")
+            beside = out["beside"]
+            self.assertEqual((beside["value"], beside["by"], beside["measured_under"]),
+                             (0.027, dlane.ZERO_EDGE["by"], dlane.OCT9_RULE_SHA256))
+            self.assertEqual(beside["rule"], "the Oct 9 rule (DONE-RULE.md), not the rule in force")
+            self.assertEqual([p for p, v in figures(out) if v == 0.027], [".beside.value"], "0.027 is never the figure")
+        self.assertTrue(all(z["measured_under"] == dlane.OCT9_RULE_SHA256 for z in dlane.ZERO_EDGES.values()))
+        self.assertNotEqual(dlane.OCT9_RULE_SHA256, dlane.DONE["rule_sha256"])
+
+    def test_a_block_measured_under_the_rule_in_force_is_stated(self):
+        out = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": measured()}})
+        self.assertEqual({k: out[k] for k in ("measured", "value", "horizon", "source_sha256", "measured_under")},
+                         {"measured": True, "value": 0.21, "horizon": "Fri Oct 23, 2026", "source_sha256": "ab" * 32,
+                          "measured_under": dlane.DONE["rule_sha256"]})
+        self.assertNotIn("note", out)
+        self.assertNotIn("refused", out)
+        self.assertEqual(out["beside"]["value"], 0.027, "the Oct 9 rule's figure stays beside, labelled")
+        self.assertEqual(R.zero_edge({"dlane": {"done_zero_edge_p": measured(value=0)}})["value"], 0.0)
+
+    def test_a_block_measured_under_another_rule_is_never_stated(self):
+        for other in (dlane.OCT9_RULE_SHA256, FIRST_DRAFT, "cd" * 32):
+            out = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": measured(measured_under=other)}})
+            self.assertEqual((out["measured"], out["value"], out["note"]), (False, None, UNMEASURED), other)
+            self.assertIn(f"measured under the rule {other[:8]}, not the rule in force", out["refused"])
+            self.assertNotIn(0.21, [v for _, v in figures(out)], "the other rule's figure is not stated at all")
+
+    def test_a_malformed_block_is_never_stated(self):
+        for bad in (measured(value=1.5), measured(value=True), measured(value="0.21"), measured(value=float("nan")),
+                    measured(horizon=""), measured(horizon=None), measured(source_sha256="ab"),
+                    measured(measured_under=dlane.DONE["rule_sha256"].upper()), {"value": 0.21}):
+            out = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": bad}})
+            self.assertEqual((out["measured"], out["value"], out["note"]), (False, None, UNMEASURED), bad)
+            self.assertIn("block is malformed", out["refused"])
+            self.assertEqual(out["beside"]["value"], 0.027, "a block takes the number's place: the default beside")
+            self.assertIn("refused", dlane.cfg({"dlane": {"done_zero_edge_p": bad}})["done_zero_edge_measured"])
+        self.assertIsNone(dlane.cfg({"dlane": {"done_zero_edge_p": 0.027}})["done_zero_edge_measured"])
+
+    def test_a_setting_number_is_beside_and_never_the_figure(self):
+        out = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": 0.13}})
+        self.assertEqual((out["measured"], out["value"]), (False, None))
+        self.assertEqual(out["note"], "P(Done | zero edge) under the rule in force is not yet measured (the 0.13 beside it "
+                                      "is a setting's figure, under no rule this code names)")
+        self.assertEqual(out["beside"]["value"], 0.13)
+        self.assertNotIn("measured_under", out["beside"])
+        rolled = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": 0.024}})
+        self.assertEqual((rolled["value"], rolled["beside"]["value"], rolled["beside"]["measured_under"]),
+                         (None, 0.024, dlane.OCT9_RULE_SHA256))
+        self.assertEqual(rolled["note"], UNMEASURED.replace("0.027", "0.024"))
+
+    def test_the_equity_note_rides_on_the_options_figure_beside(self):
+        out = R.zero_edge(None, equity_closes=2)
+        self.assertEqual((out["beside"]["applies_to"], out["beside"]["equity_closes"], out["beside"]["equity_note"]),
+                         ("the options Probe rules only", 2, R.ZERO_EDGE_EQUITY_NOTE))
+        self.assertNotIn("equity_note", out, "the measured figure, when there is one, is not the options rules' only")
+
+    def test_a_block_may_be_the_code_default(self):
+        """A later release may ship the measured block in `DEFAULTS` itself: the number beside then falls back to
+        `ZERO_EDGE`'s, and the block is read when no layer sets the key."""
+        from unittest import mock
+
+        with mock.patch.dict(dlane.DEFAULTS, {"done_zero_edge_p": measured()}):
+            c = dlane.cfg({"dlane": {"mode": "gate"}})
+            self.assertEqual((c["done_zero_edge_p"], c["done_zero_edge_measured"]["value"]), (0.027, 0.21))
+            self.assertTrue(R.zero_edge(None)["measured"])
+            self.assertFalse(R.zero_edge({"dlane": {"done_zero_edge_p": 0.027}})["measured"], "a layer's number wins")
+
+    def test_the_settings_layers_carry_a_block(self):
+        """The block may sit in policy.json (its shape check reads no `dlane` key) or in the box's swarm.json over the
+        number; a number in swarm.json over a policy block is the number again (said in docs/operations.md)."""
+        import tempfile
+
+        from league.swarm import settings as S
+
+        policy = json.loads((REPO / "league" / "swarm" / "policy.json").read_text())
+        self.assertEqual(policy["dlane"]["done_zero_edge_p"], 0.027, "the repository ships the number: not measured")
+        with_block = json.loads(json.dumps(policy))
+        with_block["dlane"]["done_zero_edge_p"] = measured()
+        self.assertEqual(S.policy_layer(with_block)[1]["state"], "ok")
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(R.zero_edge(S.load(tmp, policy=with_block))["measured"])
+            self.assertFalse(R.zero_edge(S.load(tmp, policy=policy))["measured"])
+            (Path(tmp) / "swarm.json").write_text(json.dumps({"dlane": {"done_zero_edge_p": measured()}}))
+            self.assertEqual(R.zero_edge(S.load(tmp, policy=policy))["value"], 0.21)
+            (Path(tmp) / "swarm.json").write_text(json.dumps({"dlane": {"done_zero_edge_p": 0.027}}))
+            self.assertFalse(R.zero_edge(S.load(tmp, policy=with_block))["measured"])
+
+
+class TheZeroEdgeInTheReport(Fixture):
+    """The `dlane` job's report, written: `done.p_done_zero_edge` from the box's settings."""
+
+    def run_report(self, **dlane_extra) -> dict:
+        from types import SimpleNamespace
+
+        (self.root / "swarm.json").write_text(json.dumps({"dlane": {"mode": "gate", **dlane_extra}}))
+        self.fam("dir-a", lane="direction")
+        self.close("dir-a", pnl=-10.0)
+        out = R.run(SimpleNamespace(root=self.root, now=lambda: self.now, config={}, alert=lambda level, text: None))
+        self.assertTrue(out["ok"])
+        return json.loads((self.root / R.FILE).read_text())["done"]["p_done_zero_edge"]
+
+    def test_not_yet_measured_in_the_report_as_shipped(self):
+        zero = self.run_report()
+        self.assertEqual((zero["measured"], zero["value"], zero["note"], zero["beside"]["value"]),
+                         (False, None, UNMEASURED, 0.027))
+
+    def test_measured_under_the_rule_in_force_in_the_report(self):
+        zero = self.run_report(done_zero_edge_p=measured())
+        self.assertEqual((zero["measured"], zero["value"], zero["horizon"], zero["measured_under"]),
+                         (True, 0.21, "Fri Oct 23, 2026", dlane.DONE["rule_sha256"]))
+
+    def test_measured_under_the_first_draft_is_not_stated_in_the_report(self):
+        zero = self.run_report(done_zero_edge_p=measured(measured_under=FIRST_DRAFT))
+        self.assertEqual((zero["measured"], zero["value"], zero["note"]), (False, None, UNMEASURED))
 
 
 if __name__ == "__main__":

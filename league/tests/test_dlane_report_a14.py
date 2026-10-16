@@ -378,9 +378,11 @@ class TheForwardRecordInTheReport(A14Fixture):
         self.assertIsNone(out["forward_record"])
         self.assertEqual(out["done"]["preregistered"]["status"], R.PREREGISTERED["status"])
         self.assertIn("computed since release E3", out["done"]["preregistered"]["status"])
-        # Release E3's loosening, now followed by the owner's four of A50 (Oct 16, 2026).
+        # Release E3's loosening, now followed by the owner's four of A50 (Oct 16, 2026) and the captain's A50a(2) (A1.1
+        # at 3), the last row since the reviews' fix (the owner's research window was the last before it).
         self.assertIn("the equity Train bar", [row["rule"] for row in out["loosened"]])
-        self.assertEqual(out["loosened"][-1]["rule"], "Done's research 24/7 window (A50, the owner's goal of Oct 16)")
+        self.assertEqual(out["loosened"][-2]["rule"], "Done's research 24/7 window (A50, the owner's goal of Oct 16)")
+        self.assertEqual(out["loosened"][-1]["rule"], "A1.1's matched replay closes (the captain's A50a(2), Oct 16)")
         self.assertIn("either way (release E3)", out["tightened"][-1])
         self.assertEqual(out["rule"]["sha256"], dlane.DONE["rule_sha256"], "the pinned Done rule is not this release's")
 

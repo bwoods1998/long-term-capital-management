@@ -774,7 +774,7 @@ class TheScriptItself(SpanFixture):
     one; and its calendar against the House's."""
 
     #: THE OWNER'S CHANGE OF THE DONE RULE (A50, Oct 16, 2026): the pinned plan (scale30k-v1, A45) gates on the Oct 9
-    #: rule, its sha 0d007696 and its checkpoints 30, 40, ...; the owner's are 15, 20, 25, ... under sha 9693fe00. Until
+    #: rule, its sha 0d007696 and its checkpoints 30, 40, ...; the owner's are 15, 20, 25, ... under sha 027c12b7. Until
     #: the plan is re-pinned for them it refuses every report this release writes, printing no figure: the tests that run
     #: it whole are skipped, saying so, and `test_the_pinned_plan_refuses_the_owners_checkpoints` holds the refusal.
     OWED = ("the pinned plan (scale30k-v1, A45) reads the Oct 9 rule's checkpoints (30, 40, ...; sha 0d007696), not the "

@@ -10,24 +10,32 @@ is [archive/docs/operations.md](../archive/docs/operations.md).
 
 ## Done at the 15th close, then every 5th (Oct 16, 2026): the owner's new goal (A50): `feat/done-a50`, not deployed
 
-The owner set a new goal at 02:10Z Oct 16, 2026 (`goal-2026-10-10/GOAL-MESSAGE-SPEED.txt`; the captain's amendment
-A50). THE OWNER'S CHANGE OF THE PINNED DONE RULE: the pinned rule is now [goals/DONE-RULE-A50.md](goals/DONE-RULE-A50.md)
-(sha256 `9693fe00...`, `dlane.DONE["rule_sha256"]`), the rule of Oct 9 restated with the owner's Done, pinned before
-any checkpoint was reached (6 counted closes, none frozen). DONE-RULE-A1 (sha `333bad06...`) stands whole. Built on
-`feat/done-a50` from `d6bcf0cd` (release 1016a's head). **One House deploy** (owner deploy: `league/swarm/dlane.py` and
-`league/ops/` are protected), never 12:55-20:05Z on a trading day, before the 15th counted close (forecast Oct 21-22);
-no gateway change. **No identity moves** (fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`, constitution
-`60796aed`: no Done constant lives in the constitution) and no setting changes.
+The owner set a new goal at 02:10Z Oct 16, 2026 (`goal-2026-10-10/GOAL-MESSAGE-SPEED.txt`; the captain's amendments
+A50 and A50a). THE OWNER'S CHANGE OF THE PINNED DONE RULE: the pinned rule is now
+[goals/DONE-RULE-A50.md](goals/DONE-RULE-A50.md) (sha256 `027c12b7...`, `dlane.DONE["rule_sha256"]`), the rule of Oct 9
+restated with the owner's Done and the captain's A50a(2), pinned before any checkpoint was reached (6 counted closes,
+none frozen). DONE-RULE-A1 (sha `333bad06...`) stands but for A1.1's count of matched closes (3, was 5). Built on
+`feat/done-a50` from `d6bcf0cd` (main, release 1016a, live on the House since 02:53Z Oct 16). **One House deploy**
+(captain deploy: `league/swarm/dlane.py` and `league/ops/` are protected), never 12:55-20:05Z on a trading day, live
+before the 15th counted close (forecast about Thu Oct 22) and before A49/A50's freeze (no deploy from the day the count
+reaches 12 until checkpoint 15 is final, the reader itself excepted); no gateway change. **No identity moves**
+(fingerprint `b60410ad`, equity `78022ca6`, money `cfcc94b1`, constitution `60796aed` on `d6bcf0cd`: no Done constant
+lives in the constitution) and no setting changes.
 
-What changed, each a loosening the owner chose, with its cost as A50 states it (the report's `loosened` lists all four):
+What changed, each a loosening, with its cost (the report's `loosened` lists all five: the owner's four, as A50 states
+their costs, and the captain's A50a(2)):
 - **The checkpoints** (`dlane.DONE` `first_checkpoint` 15, `checkpoint_every` 5; were 30 and 10): the 15th counted
   close, then every 5th (20, 25, 30, ...), fixed by count and never chosen. Cost: far fewer closes stand behind the
   sign, so the profit sign is mostly market direction, near a coin flip at zero edge; a reading every 5th close gives
   luck more chances (optional stopping).
 - **The bar** (`min_closes` 15, `min_closes_per_program` 3, `min_programs` 2; were 30, 5 and 2): at least 15 closes,
-  at least 3 from each of at least 2 programs, net above zero after fees. A1.1 is unchanged: a claim still needs 2
-  programs with 5 or more MATCHED replay closes each (`gap_min_matched` 5, `min_measured_programs` 2), so at a
-  checkpoint that holds, each of two programs has in fact 5 closes with a replay; the owner's 3 binds the bar alone.
+  at least 3 from each of at least 2 programs, net above zero after fees.
+- **A1.1's matched closes** (the captain's A50a(2), 02:31Z Oct 16; `gap_min_matched` 3, was 5; `min_measured_programs`
+  2 unchanged): a claim needs 2 programs with 3 or more MATCHED replay closes each, every one within the gap. At 5 it
+  would block checkpoint 15 in about 92% of paths and contradict the owner's ">= 3 each". Cost: a program's replay gap
+  is judged on 3 closes instead of 5; for ETF lots the +/-0.10 of max loss is far looser than A14's 15 bp, so the
+  practical cost is small. A program with 3 or 4 matched closes is now judged, so it can also read inconsistent. It
+  binds every program, an equity program through its priced twins.
 - **A14's intents** (`forward_db.A14_ALL_BUT_ONE_UNDER` 40, read by `forward_db.a14_intents_ok`): the live and the shadow
   intents agree on at least 95% of the S counted sessions, or, when S is under 40, on all of them but one. A session
   with no twin row is never the one forgiven (it keeps the reading from final anyway). The fill gap's 15 bp a side is
@@ -38,23 +46,49 @@ What changed, each a loosening the owner chose, with its cost as A50 states it (
   UTC days ending on the UTC day of its last counted close; each later checkpoint reads every UTC day after the
   previous checkpoint's through its own (its own day alone when two fall on one UTC day). The report's running view,
   `done.research_247_last_7_days`, keeps its seven days (beside, never a reading).
-- **Kept visible, read by nothing:** `dlane.OLD_DONE` (the Oct 9 rule's sha and numbers). **Unchanged:** what counts
-  (agent programs, not House routes, from Oct 10, 2026), the meters, P&L after fees, the replay gap's bound, finality
-  (A1.4) and freezing, the loss budget, sizing, screens, every wall, and the $30k plan (A45).
+- **P(Done | zero edge) under the rule in force** (DONE-RULE-A50 item 6; `dlane_report.zero_edge`): every figure the
+  code names (`dlane.ZERO_EDGES`: 0.027, PREREG-T; 0.024, A1.2) was simulated under the Oct 9 rule (its
+  `measured_under`, `dlane.OCT9_RULE_SHA256`), so none is stated as the figure for this rule. `done.p_done_zero_edge`
+  states a figure (`measured` true, `value`, `horizon`, `source_sha256`, `measured_under`) only from the setting
+  `dlane.done_zero_edge_p` written as a block whose `measured_under` is the rule in force's sha; until then `value` is
+  null, `measured` false, and `note` reads "P(Done | zero edge) under the rule in force is not yet measured (the 0.027
+  beside it was simulated under the Oct 9 rule)". The figure as before rides in `beside`, labelled so (with the equity
+  note when an equity close counts). A block measured under another rule, or malformed, is never stated (`refused`
+  says why). The repository ships the number 0.027, so the report says "not yet measured" until the captain writes
+  the block. The A50 rule's measured figure is X9's (`scratch/x9-1016/`, the ROW zero-edge P(Done) by horizon); the
+  captain checks that X9's reader is this rule and then writes, in the box's `swarm.json` (no deploy) or in policy.json
+  (a deploy), `"dlane": {"done_zero_edge_p": {"value": ..., "horizon": "...", "source_sha256": "<X9 result sha>",
+  "measured_under": "027c12b7cca3f4450b3eee92957dc8c2d6e28a8db9b81625c2ba323528db2491"}}`. A number at that key in
+  `swarm.json` replaces a policy block (the layers merge per key), so the report then says "not yet measured" again. No
+  identity reads either form: a block in `DEFAULTS` or policy.json moves none of the four ids.
+- **Kept visible, read by nothing:** `dlane.OLD_DONE` (the Oct 9 rule's sha and numbers, with A1.1's 5).
+  **Unchanged:** what counts (agent programs, not House routes, from Oct 10, 2026), the meters, P&L after fees, the
+  replay gap's bound, finality (A1.4) and freezing, the loss budget, sizing, screens, every wall, and the $30k plan
+  (A45).
 - **A reading under another pinned rule** is never carried into this one (a frozen checkpoint is carried only from a
   report whose `rule.sha256` is this rule's), and does not silence A8. None existed: no checkpoint was ever reached.
 - **The $30k plan's pinned script is owed a re-pin.** `scale30k.py` (scale30k-v1, A45) gates on the Oct 9 rule's sha
   (`0d007696`) and its checkpoint grid (30, 40, ...): it refuses every report this release writes (exit 2, no figure)
-  until the plan is re-pinned for the owner's checkpoints (its `RULE_SHA256`, `FIRST_CHECKPOINT`, `CHECKPOINT_EVERY`;
-  its ladder's "checkpoints in a row" then count 5-close steps). The report's `span_bh` (C1) is written at every one of
+  until the plan is re-pinned for the owner's checkpoints (its `RULE_SHA256` the final rule sha `027c12b7...`, not the
+  first draft's `9693fe00...`; `FIRST_CHECKPOINT` 15, `CHECKPOINT_EVERY` 5; its ladder's "checkpoints in a row" then
+  count 5-close steps). The report's `span_bh` (C1) is written at every one of
   the owner's checkpoints. With `LTCM_SCALING_SCRIPT` set, league/tests/test_dlane_report_span_bh.py says so.
-- **Verify after it** (read-only, ten minutes on): the ids above; the next `dlane` report's `rule.sha256` `9693fe00...`,
-  `rule.first_checkpoint` 15, `rule.checkpoint_every` 5, `rule.research_first_days` 3, `done.all.next_checkpoint` 15
-  (while fewer than 15 counts), four A50 rows at the end of `loosened`, and `done.preregistered.amended.id` "A50".
+- **Order with release 1017a.** Whichever of this and `rel/1017a` deploys second must contain the other (`rel/1017a`
+  is rebased onto main after this lands; the two conflict only in CHANGELOG.md and this page). Deploying 1017a's
+  current head after this one would silently put Done back on 30/10/7 under `0d007696`; deploying this branch alone
+  after 1017a would drop C2/C3.
+- **Verify before and after it** (read-only, ten minutes on): assert the ids of the EXACT head that deploys, not this
+  section's: fingerprint `b60410ad` and equity `78022ca6` either way; money `558dc3a2` and constitution `d4e59a79` if
+  it lands after release 1017a (1017a's own movement, C2/C3), otherwise money `cfcc94b1` and constitution `60796aed`.
+  Then the next `dlane` report's `rule.sha256` `027c12b7...`, `rule.first_checkpoint` 15, `rule.checkpoint_every` 5,
+  `rule.research_first_days` 3, `done.all.next_checkpoint` 15 (while fewer than 15 counts), five rows at the end of
+  `loosened` (the owner's four and A50a(2)'s), `done.preregistered.amended.id` "A50", and `done.p_done_zero_edge`
+  `measured` false with the "not yet measured" note (true, with its `measured_under` `027c12b7...`, once the captain
+  has written the block).
 - **Rollback:** the House, `python3 scripts/floor_box.py rollback` to the release before (release 1016a). Nothing is
-  migrated. Before the 15th count is final a rollback is clean. After it, the release before checks no rule sha: it
-  would carry a frozen A50 reading at a close it also reads (30, 40, ...) as its own, so read its checkpoints with that
-  in mind.
+  migrated. Before the 15th count is final a rollback is clean. After it, do not roll back past A50 once a checkpoint
+  is final without re-reading those checkpoints: the release before checks no rule sha, so it would carry a frozen A50
+  reading at a close it also reads (30, 40, ...) as its own.
 
 ## Release 1016a (Oct 16, 2026): L5 and C1: `rel/1016a`, not deployed
 
@@ -2915,9 +2949,11 @@ In plain words, and where each part lives:
   first session); `league/tests/test_equity_seats_seal.py` (two worlds that differ only in K: every generator
   reads the same bytes, and the seal's list names the key).
 
-**P(Done | zero edge) beside equity closes.** `done.p_done_zero_edge` is the options Probe rules' simulation figure. It
-was never measured for share closes: a delta-one lane reaches Done whenever the market rises, so its zero-edge P(Done)
-is far higher. With any equity close counted the figure says so (`applies_to`, `equity_note`) and each checkpoint's
+**P(Done | zero edge) beside equity closes.** `done.p_done_zero_edge.beside` (the figure as before; since A50 the
+figure under the rule in force is stated only once measured under it, at the top of this page) is the options Probe
+rules' simulation figure. It was never measured for share closes: a delta-one lane reaches Done whenever the market
+rises, so its zero-edge P(Done) is far higher. With any equity close counted that figure says so (`beside.applies_to`,
+`beside.equity_note`) and each checkpoint's
 `equity` block carries the same sentence (`zero_edge_note`); no figure for the share lanes is stated. The screen's row
 beside an equity trade (`fp`) carries S1-X's label as `s1x` (alpha or beta) and the lane's as `lane_label` (MARKET BETA
 or EQUITY), never one `label`.
@@ -3614,8 +3650,8 @@ fingerprint move would retire every Probe program for good).
   claim is the owner's to make, with its evidence, never a "stall" on the public page.
 
 **2. The Done meter** (`league/ops/dlane_report.py`, DONE-RULE + A1):
-- **A1.1, consistency measured.** A checkpoint also needs 2 programs with 5+ matched replay closes, each within
-  +/-0.10; zero matched closes never passes ("replay untested: k of n closes matched"). Every checkpoint lists every
+- **A1.1, consistency measured.** A checkpoint also needs 2 programs with 5+ matched replay closes (3+ since the
+  captain's A50a(2), Oct 16, 2026, at the top of this page), each within +/-0.10; zero matched closes never passes ("replay untested: k of n closes matched"). Every checkpoint lists every
   program with its closes, matched closes and gap (`by_program`), and `replay_coverage`.
 - **Item 7, read** (`research_247`): births, Gym runs and Validations every UTC day of the checkpoint's window (its
   last 7 days for the first checkpoint then; its last 3 UTC days since the owner's A50, Oct 16, 2026; every day since
@@ -4105,7 +4141,7 @@ screen, the alarm and K5 can only be TIGHTENED by a setting.
 | `dlane.screens.D2` | receipt_sha256 `c3605947...`, c 1.0, fp_lane_mixed 0.1037, fp_lane_2224 0.1239, fp_lane_ci_mixed [0.0957, 0.1116], fp_lane_cluster_mixed [0.079, 0.1276], power10 0.1995 (D-1b) | read from the repository's policy.json only, never swarm.json; CI holds the sha to `docs/benchmarks/direction_screen_2.json` and every figure to the receipt's |
 | `dlane.val_tries`, `looks_per_lineage` | 1, 1 (D-1b) | fixed at 1: one Validation try and one holdout look per direction lineage |
 | `dlane.alarm_min_looks`, `alarm_pass_share` | 10, 0.60 | >= 10; <= 0.60 (tighten only) |
-| `dlane.done_zero_edge_p` | 0.027 (the Probe total at $800, Oct 10, at roster 5; 0.024 from DONE-RULE-A1 A1.2; 0.13 before) | reported beside every Done figure: "P(Done \| zero edge), simulation"; at a figure `dlane.ZERO_EDGES` names (0.024, A1.2's; 0.027, PREREG-T's) it carries that figure's horizon, holds, budget, source and who named it, with a `note` when it is not `dlane.ZERO_EDGE` (the rules this code ships); any other figure says it is a setting's |
+| `dlane.done_zero_edge_p` | 0.027 (the Probe total at $800, Oct 10, at roster 5; 0.024 from DONE-RULE-A1 A1.2; 0.13 before) | a NUMBER is the figure as before, reported in `done.p_done_zero_edge.beside` ("P(Done \| zero edge), simulation"): at a figure `dlane.ZERO_EDGES` names (0.024, A1.2's; 0.027, PREREG-T's) it carries that figure's horizon, holds, budget, source, who named it and `measured_under` (the Oct 9 rule), with a `note` when it is not `dlane.ZERO_EDGE` (the rules this code ships); any other figure says it is a setting's. A BLOCK {value, horizon, source_sha256, measured_under} (since A50) is the figure under the rule in force, stated only when `measured_under` is `dlane.DONE["rule_sha256"]`; otherwise the report says it is not yet measured |
 | `dlane.k5_net_usd`, `k5_clear` | -600, false | -600 to -50 (tighten only); `k5_clear` true clears a set K5 and DISARMS K5 while it stays true (a loosening: the report warns every run; take it out once the clear is recorded) |
 | `dlane.program_loss_usd` | -300 (the Probe total at $800, Oct 10, at roster 5; -200 before) | its code default (`DEFAULTS`, -300) to -25 (tighten only): DONE-RULE-A1 A1.3, the `dlane` job retires a program whose own realized Probe net is at or below it |
 | `dlane.train_map` | `true` (Oct 9, `feat/dlane-trainmap`) | true shows **The Train map** to the architect and direction researchers while the lane is on; false (swarm.json) hides it at once; the code's default and any value but `true` are false |
@@ -4144,7 +4180,7 @@ contract changes). It writes `<state>/dlane-report.json`; with `dlane.mode` "off
 receipt) and, since the weekend fixes, still holds the program loss line (DONE-RULE-A1 A1.3: a due program is retired,
 PL1 a House warning, the receipt carrying the figures). The fast lane's report rows gain `lane` while the lane is on
 (off: no key).
-- **The header:** the pinned Done rule (its sha256 `9693fe00...` since the owner's change, A50, Oct 16, 2026:
+- **The header:** the pinned Done rule (its sha256 `027c12b7...` since the owner's change, A50, Oct 16, 2026:
   [goals/DONE-RULE-A50.md](goals/DONE-RULE-A50.md); `0d007696...`, DONE-RULE.md of Oct 9, before it), every loosened and tightened rule with its cost, the
   contamination statement, the label "direction lane: leveraged index beta minus option costs; not alpha" on every
   direction figure.
@@ -4163,7 +4199,7 @@ PL1 a House warning, the receipt carrying the figures). The fast lane's report r
   Oct 8) included; realized after all fees (the broker's posted fees where they have posted, the book's estimate
   otherwise, labelled per close; an unpriced close makes the net unknown); `done_screen` (`:r` only) and `done_all` (all
   three); the bar is 15 closes, 3 closes from each of 2 programs, net > 0 (the owner's A50; 30 and 5 before); every
-  program with 5+ matched closes (a close
+  program with 3+ matched closes (the captain's A50a(2); 5+ before) (a close
   on a day its version's nightly replay also traded; from the per-close fill replay of Oct 10, a close with a priced
   twin of its own, at the top of this page) has a live-minus-replay gap within +/-0.10 a dollar of maximum loss (a ratio
   of sums, D5's measure, `gap_measure`), and since the weekend fixes (DONE-RULE-A1 A1.1) at least 2 programs must be so
@@ -4173,8 +4209,11 @@ PL1 a House warning, the receipt carrying the figures). The fast lane's report r
   exactly the first K closes; it holds when items 3,
   4 and 7 hold, and a Done claim needs it FINAL (A1.4: every counted close's replay landed, its own twin's once the
   twins are on, and its broker fees posted; then frozen); the running figures between are counts, never a reading.
-  Beside it always: P(Done | zero edge) (2.7% at 12 weeks under the budget in force, the $800 total and the -$300 line,
-  PREREG-T; 2.4% with 3-session holds under L-D's $400, DONE-RULE-A1 A1.2; 0.13 before), Net after costs
+  Beside it always: P(Done | zero edge) under the rule in force, stated only once measured under it (DONE-RULE-A50
+  item 6, at the top of this page; until then the report says it is not yet measured), with the figure as before
+  beside it, labelled as simulated under the Oct 9 rule (2.7% at 12 weeks under the budget in force, the $800 total
+  and the -$300 line, PREREG-T; 2.4% with 3-session holds under L-D's $400, DONE-RULE-A1 A1.2; 0.13 before), Net after
+  costs
   (`done.net_after_costs`, from the close economics), the same-risk buy-and-hold two ways (delta-matched: the entry
   delta held in the stock; dollars at risk held in the index; approximations from daily closes), and, for each
   Candidate, Probe or Sized family, the screen that admitted it with its unconditional and both-windows-rose

@@ -48,10 +48,11 @@ PINNED RULE, A50, the goal of Oct 16, 2026, docs/goals/DONE-RULE-A50.md; `dlane.
 - TWO METERS: `done_screen` (`:r` only, the evidence route) and `done_all` (`:r` + `:t` + `:i`, the goal's letter).
 - THE BAR: at least 15 closes, at least 3 closes from each of at least 2 programs, and net > 0 after fees (A50: were 30
   and 5).
-- CONSISTENT WITH REPLAY: every program with 5 or more MATCHED closes (closes of a version on a day its nightly replay
-  also traded: D5's measure, `money.forward_stats`, read here live minus replay and pooled over the program's versions;
-  `GAP_MEASURE` says it is a ratio of sums) has a gap within +/-0.10 a dollar of maximum loss, AND (DONE-RULE-A1 A1.1,
-  Oct 10, 2026) at least 2 programs are so measured: zero matched closes never passes. Every program is listed with its
+- CONSISTENT WITH REPLAY: every program with 3 or more MATCHED closes (5 before the captain's A50a(2), Oct 16, 2026;
+  closes of a version on a day its nightly replay also traded: D5's measure, `money.forward_stats`, read here live
+  minus replay and pooled over the program's versions; `GAP_MEASURE` says it is a ratio of sums) has a gap within
+  +/-0.10 a dollar of maximum loss, AND (DONE-RULE-A1 A1.1, Oct 10, 2026) at least 2 programs are so measured: zero
+  matched closes never passes. Every program is listed with its
   closes, matched closes and gap (each checkpoint's `by_program`, `replay_coverage`), never dropped.
 - RESEARCH 24/7 (DONE-RULE item 7; `Research247`, Oct 10, 2026): births, Gym runs and Validations every UTC day of the
   checkpoint's window (its last 3 UTC days for the first, `dlane.DONE["research_first_days"]`, 7 before A50; every day
@@ -73,10 +74,13 @@ PINNED RULE, A50, the goal of Oct 16, 2026, docs/goals/DONE-RULE-A50.md; `dlane.
   replay has landed (its own twin final, with the twins on; else its program's nightly) and its broker fees have posted
   (and the research window has ended); a final reading is frozen (carried from the previous report as it was). A Done claim is a holding FINAL checkpoint (the meter's `holds`);
   A8 (an `info` alert) names one the first time a report sees it final.
-- BESIDE IT, ALWAYS: P(Done | zero edge) (`dlane.done_zero_edge_p`, labelled as a simulation; since DONE-RULE-A1 A1.2
-  the figure for the rules in force with its horizon, holds, budget and source, `zero_edge`: 2.7% since THE PROBE
-  TOTAL AT $800, Oct 10, 2026, PREREG-T's at roster 5; 2.4%, A1.2's pin, under L-D's $400 total before it; both kept
-  labelled in `dlane.ZERO_EDGES`); Net after costs (`net_after_costs`, from the close economics over the same days);
+- BESIDE IT, ALWAYS: P(Done | zero edge) (`zero_edge`, labelled as a simulation; DONE-RULE-A1 A1.2 and DONE-RULE-A50
+  item 6): the figure MEASURED UNDER THE RULE IN FORCE, stated only from the setting `dlane.done_zero_edge_p` written
+  as a block (`dlane.ZERO_EDGE_BLOCK_KEYS`) whose `measured_under` is the pinned rule's sha256; until one is, the report
+  says plainly that it is not yet measured. Beside it (`beside`), the figure as before with its horizon, holds, budget
+  and source, labelled as simulated under the Oct 9 rule: 2.7% since THE PROBE TOTAL AT $800, Oct 10, 2026, PREREG-T's
+  at roster 5; 2.4%, A1.2's pin, under L-D's $400 total before it; both kept labelled in `dlane.ZERO_EDGES`. It is
+  never stated as the figure under the owner's rule (A50); Net after costs (`net_after_costs`, from the close economics over the same days);
   the same-risk buy-and-hold two ways (below); the world-conditional false-positive rate beside the unconditional one
   for the screen that admitted each Candidate, Probe or Sized family (`probes`, with each program's own realized Probe
   net and when DM1 can first fire, A1.3); every loosened rule with its cost (`LOOSENED`); the contamination statement
@@ -200,9 +204,9 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   it (None when absent or stale), and its alarms (FW1-FW8, RR1, RR2, CP1, CP2, MM1: ids, counts and dates only) ride
   this report's `alarms`, so the `dlane` stall cause mails a warning. Read only, and never this report's failure.
   (Release E4, package J: the panel lane's FX1-FX3 ride with them, by their own two switches.)
-- P(DONE | ZERO EDGE) IS THE OPTIONS RULES' FIGURE (`ZERO_EDGE_EQUITY_NOTE`): it was never measured for share closes,
-  and a delta-one lane's is far higher. A report that holds an equity close says so on the figure and in each
-  checkpoint's `equity` block; no figure for the equity lanes is stated.
+- P(DONE | ZERO EDGE) AS BEFORE IS THE OPTIONS RULES' FIGURE (`ZERO_EDGE_EQUITY_NOTE`): it was never measured for
+  share closes, and a delta-one lane's is far higher. A report that holds an equity close says so on that figure
+  (`beside`) and in each checkpoint's `equity` block; no figure for the equity lanes is stated but a measured one.
 - THE PANEL LANE (release E4; `panel_section`, `equity.panel`): a panel program's close is an equity close under the
   label EQUITY (PANEL); beside EVERY live panel trade rides XS1's sentence, the line its program's one look recorded
   (`EquityScreens.xs1`); beside its closes the distinct close dates and the date-clustered t (A14: one observation a
@@ -632,8 +636,9 @@ LOOSENED: tuple[dict[str, str], ...] = (
      "cost": "more zero-edge versions pass Train and take a Validation try; the screen's false-positive rate per program "
              "is unchanged (Train is in-sample)"},
     # THE OWNER'S CHANGE OF THE PINNED DONE RULE (A50, the goal of Oct 16, 2026, 02:10Z; docs/goals/DONE-RULE-A50.md,
-    # `dlane.DONE`): four loosenings the owner chose, each with its cost as A50 states it. Pinned before any checkpoint
-    # was reached (6 counted closes, none frozen). Every other rule of Done is unchanged.
+    # `dlane.DONE`): four loosenings the owner chose, each with its cost as A50 states it, and the captain's A50a(2)
+    # after them. Pinned before any checkpoint was reached (6 counted closes, none frozen). Every other rule of Done is
+    # unchanged.
     {"rule": "Done's checkpoints (A50, the owner's goal of Oct 16)", "was": "the 30th counted close, then every 10th",
      "now": "the 15th counted close, then every 5th (20, 25, 30, ...), fixed by count, never chosen",
      "cost": "far fewer closes stand behind the sign, so the profit sign is mostly market direction, near a coin flip at "
@@ -655,6 +660,15 @@ LOOSENED: tuple[dict[str, str], ...] = (
             "previous checkpoint's after it",
      "cost": "A50 states none beyond the checkpoints' (above); plainly, research need be clean on 3 days, not 7, "
              "before the first claim: a stall earlier in its week no longer blocks it"},
+    # THE CAPTAIN'S A50a(2) (02:31Z Oct 16, 2026; DONE-RULE-A50.md item 4, `dlane.DONE` `gap_min_matched`): A1.1's 5
+    # would block the 15th close in about 92% of paths and contradict the owner's ">= 3 each".
+    {"rule": "A1.1's matched replay closes (the captain's A50a(2), Oct 16)",
+     "was": "at least 2 programs with 5 or more matched replay closes each, every one within the gap",
+     "now": "at least 2 programs with 3 or more matched replay closes each, every one within the gap (dlane.DONE "
+            "gap_min_matched 3)",
+     "cost": "a program's replay gap is judged on 3 closes instead of 5; for ETF lots the +/-0.10 of max loss is far "
+             "looser than A14's 15 bp, so the practical cost is small; a program with 3 or 4 matched closes is now "
+             "judged, so it can also read inconsistent"},
 )
 #: And what D-1 TIGHTENED (said beside the loosenings), with release L-D's rolling budget, a tightening of its NET.
 TIGHTENED: tuple[str, ...] = (
@@ -678,8 +692,9 @@ TIGHTENED: tuple[str, ...] = (
     "release D-1b: calls only: dlane.structures [\"long_single\"] (no debit vertical, no put) and every Train trade a long "
     "call (bar C1)",
     # DONE-RULE-A1 (pinned Oct 9, 2026 ~20:50Z, before the first Probe close; read by the code since the weekend fixes).
-    "DONE-RULE-A1 A1.1: a Done claim also needs 2 programs with 5+ matched replay closes each, every one within the gap: "
-    "zero replay evidence never passes (it did: B1)",
+    "DONE-RULE-A1 A1.1: a Done claim also needs 2 programs with 5+ matched replay closes each (3+ since the captain's "
+    "A50a(2), a loosening listed with its cost), every one within the gap: zero replay evidence never passes (it did: "
+    "B1)",
     "DONE-RULE-A1 A1.3: a program whose own realized Probe net is at or below dlane.program_loss_usd (-$300 since "
     "Oct 10, with the $800 total; -$200 before) is retired swarm-side by the dlane job (exits go on), since DM1 cannot "
     "fire before about 17 real trades",
@@ -1806,8 +1821,8 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
     per_program_ok = len(enough) >= int(rule["min_programs"])
     # CONSISTENCY MUST BE MEASURED (DONE-RULE-A1 A1.1, pinned Oct 9, 2026; the readiness audit's B1): item 4 alone held
     # with ZERO replay evidence, since a program under 5 matched closes is never inconsistent. Now a reading also needs
-    # `min_measured_programs` (2) programs with `gap_min_matched` (5) or more matched closes and a gap measured, and every
-    # such program within the gap. Zero matched closes never passes; every program is listed with its closes, matched
+    # `min_measured_programs` (2) programs with `gap_min_matched` (3 since the captain's A50a(2), Oct 16, 2026; 5
+    # before) or more matched closes and a gap measured, and every such program within the gap. Zero matched closes never passes; every program is listed with its closes, matched
     # closes and gap (`by_program`).
     min_matched = int(rule["gap_min_matched"])
     need_measured = int(rule.get("min_measured_programs", dlane.DONE["min_measured_programs"]))
@@ -3532,31 +3547,71 @@ def pt1_alarms(roster: Mapping[str, Any] | None, settings: Mapping[str, Any] | N
 
 
 def zero_edge(settings: Mapping[str, Any] | None, *, equity_closes: int = 0) -> dict[str, Any]:
-    """P(Done | zero edge) beside the meter (decision 8; DONE-RULE-A1 A1.2, the readiness audit's M10): the setting's
-    figure, and when it is one this code names (`dlane.ZERO_EDGES`: 0.024, A1.2's pin under L-D's $400 total; 0.027,
-    PREREG-T's under the $800 total, since Oct 10, 2026) what it is: its horizon, holds, the budget variant, its source
-    and who named it. A named figure that is not the one for the rules this code ships (`dlane.ZERO_EDGE`) says so;
-    another figure is a setting's and says so: the claim states the figure for the rules in force. `equity_closes`: the
-    counted closes that are equity closes; with any, the figure says it is the options rules' only
-    (`ZERO_EDGE_EQUITY_NOTE`: `applies_to`, `equity_closes`, `equity_note`)."""
+    """P(Done | zero edge) beside the meter (decision 8; DONE-RULE-A1 A1.2, the readiness audit's M10; DONE-RULE-A50 item
+    6 and the reviews of A50, Oct 16, 2026). {label, rule_sha256 (the pinned rule in force), measured, value, ...,
+    beside}:
+
+    - THE FIGURE UNDER THE RULE IN FORCE comes only from the setting `dlane.done_zero_edge_p` written as a block
+      (`dlane.ZERO_EDGE_BLOCK_KEYS`) whose `measured_under` is `dlane.DONE["rule_sha256"]`: then `measured` is True and
+      `value`, `horizon`, `source_sha256` and `measured_under` are the block's. Otherwise `measured` is False, `value`
+      is None and `note` says plainly that it is not yet measured (`ZERO_EDGE_UNMEASURED`); a block measured under
+      another rule, or malformed, is never stated, and `refused` says why.
+    - `beside`: the figure as before, `dlane.cfg`'s number (the default when the setting is a block), and when it is one
+      this code names (`dlane.ZERO_EDGES`: 0.024, A1.2's pin under L-D's $400 total; 0.027, PREREG-T's under the $800
+      total, since Oct 10, 2026) what it is: its horizon, holds, the budget variant, its source, who named it and the
+      rule it was simulated under (`measured_under`, the Oct 9 rule's sha). A named figure that is not the one this code
+      ships (`dlane.ZERO_EDGE`) says so; another figure is a setting's and says so. It is never the figure under the
+      rule in force. `equity_closes`: the counted closes that are equity closes; with any, `beside` says it is the
+      options rules' figure only (`ZERO_EDGE_EQUITY_NOTE`: `applies_to`, `equity_closes`, `equity_note`)."""
     from ..swarm import dlane
 
-    value = dlane.cfg(settings)["done_zero_edge_p"]
-    out: dict[str, Any] = {"value": value, "label": ZERO_EDGE_LABEL}
-    if int(equity_closes) > 0:
-        out.update(applies_to="the options Probe rules only", equity_closes=int(equity_closes),
-                   equity_note=ZERO_EDGE_EQUITY_NOTE)
+    c = dlane.cfg(settings)
+    rule_sha = dlane.DONE["rule_sha256"]
+    value = c["done_zero_edge_p"]
+    beside: dict[str, Any] = {"value": value, "label": ZERO_EDGE_LABEL}
     named = next((z for v, z in dlane.ZERO_EDGES.items() if abs(value - float(v)) < 1e-9), None)
     if named is not None:
-        out.update({k: v for k, v in named.items() if k != "value"})
+        beside.update({k: v for k, v in named.items() if k != "value"})
+        beside["rule"] = "the Oct 9 rule (DONE-RULE.md), not the rule in force"
         if named is not dlane.ZERO_EDGE:
-            out["note"] = (f"a setting chose {named['value']} ({named['by']}); the rules this code ships carry "
-                           f"{dlane.ZERO_EDGE['value']} ({dlane.ZERO_EDGE['by']})")
+            beside["note"] = (f"a setting chose {named['value']} ({named['by']}); the rules this code ships carry "
+                              f"{dlane.ZERO_EDGE['value']} ({dlane.ZERO_EDGE['by']})")
     else:
-        out["note"] = ("a setting's figure (dlane.done_zero_edge_p), not one this code names ("
-                       + "; ".join(f"{z['value']}: {z['by']}" for z in dlane.ZERO_EDGES.values())
-                       + "): its horizon and budget are not said here")
+        beside["note"] = ("a setting's figure (dlane.done_zero_edge_p), not one this code names ("
+                          + "; ".join(f"{z['value']}: {z['by']}" for z in dlane.ZERO_EDGES.values())
+                          + "): its horizon, budget and rule are not said here")
+    if int(equity_closes) > 0:
+        beside.update(applies_to="the options Probe rules only", equity_closes=int(equity_closes),
+                      equity_note=ZERO_EDGE_EQUITY_NOTE)
+    out: dict[str, Any] = {"label": ZERO_EDGE_LABEL, "rule_sha256": rule_sha}
+    block = c.get("done_zero_edge_measured")
+    if isinstance(block, Mapping) and "refused" not in block and block.get("measured_under") == rule_sha:
+        out.update(measured=True, **{k: block[k] for k in dlane.ZERO_EDGE_BLOCK_KEYS})
+    else:
+        out.update(measured=False, value=None, note=zero_edge_unmeasured(beside))
+        if isinstance(block, Mapping):
+            out["refused"] = block.get("refused") or (
+                f"dlane.done_zero_edge_p's block was measured under the rule {str(block.get('measured_under'))[:8]}, "
+                f"not the rule in force ({rule_sha[:8]}): it is not stated")
+    out["beside"] = beside
     return out
+
+
+#: WHAT THE REPORT SAYS while no figure measured under the rule in force is set (the reviews of A50, Oct 16, 2026):
+#: never the Oct 9 rule's figure in its place.
+ZERO_EDGE_UNMEASURED = ("P(Done | zero edge) under the rule in force is not yet measured (the {figure} beside it was "
+                        "simulated under the Oct 9 rule)")
+ZERO_EDGE_UNMEASURED_SETTING = ("P(Done | zero edge) under the rule in force is not yet measured (the {figure} beside it "
+                                "is a setting's figure, under no rule this code names)")
+
+
+def zero_edge_unmeasured(beside: Mapping[str, Any]) -> str:
+    """`ZERO_EDGE_UNMEASURED` with the figure beside it (`ZERO_EDGE_UNMEASURED_SETTING` when that figure is no figure
+    `dlane.ZERO_EDGES` names, so no rule is claimed for it)."""
+    from ..swarm import dlane
+
+    text = ZERO_EDGE_UNMEASURED if beside.get("measured_under") == dlane.OCT9_RULE_SHA256 else ZERO_EDGE_UNMEASURED_SETTING
+    return text.format(figure=f"{float(beside['value']):g}")
 
 
 def roster_now(root: str | Path) -> dict[str, Any] | None:
@@ -3912,5 +3967,5 @@ __all__ = ["run", "report", "FILE", "CONTAMINATION", "PREREGISTERED", "A14_CONSI
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
            "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP", "finality",
            "research_window", "Research247", "operator_edits", "program_losses", "dm1_reach", "net_after_costs",
-           "zero_edge", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS", "pl1_alarms", "pt1_alarms",
+           "zero_edge", "ZERO_EDGE_UNMEASURED", "ZERO_EDGE_UNMEASURED_SETTING", "zero_edge_unmeasured", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS", "pl1_alarms", "pt1_alarms",
            "dc1_alarms", "DC1_SESSIONS", "lane_off"]

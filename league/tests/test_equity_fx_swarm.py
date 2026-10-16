@@ -1051,14 +1051,16 @@ class TheDoneMeterBesideEquityCloses(EquityFixture):
 
     def test_the_zero_edge_figure_says_it_is_the_options_rules_beside_equity_closes(self):
         """evidence-5: `done.p_done_zero_edge` is the options Probe rules' simulation figure, printed unqualified beside
-        meters that count delta-one share closes."""
-        plain = self.report()["done"]["p_done_zero_edge"]
+        meters that count delta-one share closes. Since A50 that figure rides `beside` (DONE-RULE-A50 item 6: simulated
+        under the Oct 9 rule), and the note with it: this read the top level before."""
+        plain = self.report()["done"]["p_done_zero_edge"]["beside"]
         self.assertNotIn("equity_note", plain, "no equity close counted: the figure as before")
         self.eq_family("seed-overnight-spy")
         lid = self.eq_close("seed-overnight-spy")
         self.twin(lid, live_r=0.01, twin_r=0.01)
         out = self.report()
-        figure = out["done"]["p_done_zero_edge"]
+        figure = out["done"]["p_done_zero_edge"]["beside"]
+        self.assertNotIn("equity_note", out["done"]["p_done_zero_edge"], "said on the options figure, beside")
         self.assertEqual({k: v for k, v in figure.items() if k not in ("applies_to", "equity_closes", "equity_note")}, plain)
         self.assertEqual((figure["applies_to"], figure["equity_closes"], figure["equity_note"]),
                          ("the options Probe rules only", 1, DR.ZERO_EDGE_EQUITY_NOTE))
