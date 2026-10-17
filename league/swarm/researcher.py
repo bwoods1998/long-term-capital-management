@@ -314,6 +314,16 @@ committed policy since fast lane v2) is a brake the lane does not lift: switched
 any other. With `dlane.mode` "off" (THE ROLLBACK) every family is alpha and every path, the prompt included, is the
 release before it (ccfa48d5).
 
+THE EVENT HOLD, AS A RESEARCHER HEARS IT (release 1023a, the review's finding 3; league/swarm/event_hold.py). The brief
+carries THE CALENDAR SENTENCE (`event_hold.calendar_text`: where each event table ends, and the hold). While the version
+the tournament validates next (the best, as `awaiting_validation` reads it) reads a flag whose table ends before today,
+the tournament validates nothing of it (league/swarm/tournament.py), so the status says so AT THE VALIDATION STAGE
+(`event_held`, `event_held_words`: the hold's words, the tables' own dates, no figure) in place of THE VALIDATION WAIT's
+words, and the wait does not protect it: `can_retire` and `retire_wait` read a held best as owed no verdict, so its
+researcher may retire it on its own evidence or revise to a version that reads no held flag. The revision and
+evaluation clocks are not stopped: a held family that goes on researching is retired by them as any family is.
+`awaiting_validation` itself is unchanged (the dormancy clause, the tournament and the diagnostician read it as before).
+
 Every cycle is a `swarm.cycle` event; a notebook entry becomes a public `swarm.note` (the site's tape,
 masked there for quotes) at most every `note_every_cycles` cycles. Standard library only.
 """
@@ -987,6 +997,18 @@ def awaiting_words(fam: Mapping[str, Any]) -> str:
     return (f"Your best Train version ({n}) awaits validation: retire is offered once the tournament has validated it "
             "(pass or fail; it validates a version once its 1.5x robustness run has landed with a profit). Keep researching "
             "beside it, or hold for a specific missing input.")
+
+
+def event_held_words(fam: Mapping[str, Any], held: Mapping[str, Any]) -> str:
+    """THE EVENT HOLD at the Validation stage, in the researcher's status (the module docstring): the hold's own words
+    (`event_hold.hold`'s why: the flags and their tables' last rows, no figure) for the version the tournament validates
+    next."""
+    state = fam.get("state") or {}
+    n = fam.get("best_version") or state.get("best_train_version")
+    return (f"Your best Train version ({n}) is held at Validation. {held.get('why')}. The tournament does not validate "
+            "it while the hold stands, so it awaits no verdict: research a version that reads none of those flags (it is "
+            "validated as usual), or, if the mechanism needs the flag, retire the family with your reason when the tool is "
+            "offered. The revision and evaluation clocks run on as for any family.")
 
 
 def held_at_gate(fam: Mapping[str, Any]) -> bool:
@@ -2044,6 +2066,13 @@ class Researcher:
             lane = dlane.brief_text(self.settings, fam.get("roots"))
             if lane:
                 lines.append(lane)
+        # THE CALENDAR SENTENCE (release 1023a, the review's finding 3; league/swarm/event_hold.py `calendar_text`): where
+        # each event table ends, and THE EVENT HOLD, as every equity Train brief says it.
+        from . import event_hold
+
+        calendar = event_hold.calendar_text()
+        if calendar:
+            lines.append(calendar)
         return "\n".join(lines)
 
     def _game_started(self) -> bool:
@@ -2127,13 +2156,18 @@ class Researcher:
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {diagnostics.scrub(n['text'])[:300]}" for n in notes))
         guard = self.guarded(fam)
+        # THE EVENT HOLD at the Validation stage (release 1023a): the tournament validates nothing of a held best, so the
+        # family is told so, whatever else it hears, in place of THE VALIDATION WAIT's words.
+        held = self.event_held(fam) if fam.get("band") == "gym" else None
+        if held is not None:
+            parts.append(event_held_words(fam, held))
         # THE VALIDATED-FAMILY GUARD: its family is never urged to retire (the tool would refuse); it hears why instead.
         may_retire = guard is None and self.can_retire(fam)
         dead = self.dead(fam) if may_retire else None
         from .practice import kept_version
         if guard is not None:
             parts.append(guard_words(guard))
-        elif fam.get("band") == "gym" and awaiting_validation(fam) and self.retire_earned(fam):
+        elif fam.get("band") == "gym" and awaiting_validation(fam) and held is None and self.retire_earned(fam):
             # THE VALIDATION WAIT: only the verdict the tournament owes its best withholds the offer; it hears why.
             parts.append(awaiting_words(fam))
         elif kept_version(self.store, str(fam["id"]), now=self.clock()) is not None:
@@ -2414,9 +2448,29 @@ class Researcher:
         """
         state = fam.get("state") or {}
         if (fam.get("band") != "gym" or held_at_gate(fam) or state.get("gate_ready") or state.get("look_inflight")
-                or extension_held(fam) or awaiting_validation(fam) or self.cohort_kept(fam) is not None):
+                or extension_held(fam) or (awaiting_validation(fam) and self.event_held(fam) is None)
+                or self.cohort_kept(fam) is not None):
             return False
         return self.retire_earned(fam)
+
+    def event_held(self, fam: Mapping[str, Any]) -> dict[str, Any] | None:
+        """THE EVENT HOLD of the version the tournament validates next (the module docstring; `awaiting_validation`'s
+        version: the submitted best, else the best by Train score), read on this researcher's clock: `event_hold.hold`'s
+        answer {flags, ends, today, why} while that version's program reads a flag whose table ends before today and
+        it awaits validation, else None (also when it cannot be read). Never raises."""
+        try:
+            if not awaiting_validation(fam):
+                return None
+            state = fam.get("state") or {}
+            n = fam.get("best_version") or state.get("best_train_version")
+            version = self.store.version(str(fam["id"]), int(n))
+            if not version or not version.get("code"):
+                return None
+            from . import event_hold
+
+            return event_hold.hold(version["code"], today=event_hold.today_utc(float(self.clock())))
+        except Exception:  # noqa: BLE001 - no word of the hold: THE VALIDATION WAIT as before
+            return None
 
     def cohort_kept(self, fam: Mapping[str, Any]) -> int | None:
         """THE KEEP WAITS FOR RETIREMENT (Oct 9): the version THE COHORT KEEP holds this family alive for
@@ -2434,8 +2488,8 @@ class Researcher:
         """THE VALIDATION WAIT's answer to a retire call: its words (`awaiting_words`), with the version the tournament
         owes a verdict in the cycle's record (`retire_awaiting`), while the Gym family's best Train version awaits
         validation (`awaiting_validation`); else None."""
-        if fam.get("band") != "gym" or not awaiting_validation(fam):
-            return None
+        if fam.get("band") != "gym" or not awaiting_validation(fam) or self.event_held(fam) is not None:
+            return None   # (THE EVENT HOLD: a held best is owed no verdict while the hold stands)
         out["retire_awaiting"] = fam.get("best_version") or (fam.get("state") or {}).get("best_train_version")
         return awaiting_words(fam)
 
@@ -5269,7 +5323,8 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "sanitize", "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "params_of", "check_params",
            "sweep_variants", "sweep_tool", "merged_key", "MAX_SWEEP_VARIANTS", "MAX_SWEEP_JOBS_IN_FLIGHT", "idle_dead",
            "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR", "DORMANT_CYCLES", "ALREADY_RUN",
-           "dormant_limit", "dormant_count", "awaiting_validation", "awaiting_words", "holding", "held_at_gate", "new_run",
+           "dormant_limit", "dormant_count", "awaiting_validation", "awaiting_words", "event_held_words", "holding",
+           "held_at_gate", "new_run",
            "revalidation_owed",
            "objective_for", "span_of", "CORE_SPAN", "RETIRE_GUARD_DAYS", "VERDICTS_KEY", "retire_guard", "retire_guard_days",
            "record_verdict", "validation_refuted", "validated_at", "guard_words", "adoption_archives",

@@ -11,16 +11,24 @@ the Gym and live alike (cpi after 2026-09-11, jobs after 2026-09-04, fomc after 
 them). A program that conditions on cpi or jobs was judged on Train and Validation with the flag set on its release
 days, and live it would trade a different rule: the flag never fires. Nothing caught it: the replay intent match reads
 the same blank table. The edge hunt (Oct 16, 2026, K3) found the hold adopted and never built; no alive program read
-cpi or jobs that day, in either lane, and five equity readers had been born in about nine hours. The tables are an
+cpi or jobs that day, in either lane, and five equity readers had been born in about nine hours. The release's review
+(a read-only census at about 05:30Z Oct 17) found 12 alive cpi or jobs readers, all in Train: births, Train,
+Validation and looks go on until the deploy, so a reader can reach a seat BEFORE the hold ships, and the hold then
+holds it AT its seat (opens stop, exits go on; the EquityBook keeps its seat held, league/equity/live.py
+`_held_seats`). The deploy waits on a counts-only census of event readers by lane and band (docs/operations.md,
+Release 1023a). The tables are an
 identity file (the equity identity, the options execution fingerprint and the Gym bundle), so they are extended only
 by a calendar release (A25 R2), never here.
 
 WHAT "READS" MEANS (`reads`): read from the program's own source, statically and conservatively (never run). A flag is
 read when the program subscripts `events` or `events_next` with it (`ctx.events["cpi"]`), asks `.get("cpi")` of
 either, or tests `"cpi" in` either, through any name bound to either (`ev = ctx.events`) or `getattr(ctx,
-"events")`. ANY OTHER USE READS EVERY FLAG: the dict walked or copied (`.items()`, `.values()`, `any(...)`, `dict(...)`),
-handed to a function, subscripted by a name, `getattr` with a name that is no constant, `vars(...)`, `__dict__` or
-`__getattribute__`. Source that does not parse reads every flag (fail closed). A program that only ever names
+"events")`, or THE GUARD `ctx.events or {}` (or `dict()`, `None`: the same dict or an empty one). Its TRUTH ALONE reads
+no flag (`if ctx.events:`, `not`, `bool()`, an `and` operand that is not the last: the dict always holds every flag;
+the review's finding 5). ANY OTHER USE READS EVERY FLAG: the dict walked or copied (`.items()`, `.values()`, `any(...)`,
+`dict(...)`), handed to a function or returned, subscripted by a name, `getattr` with a name that is no constant,
+`vars(...)`, `__dict__` or `__getattribute__`. Source that does not parse reads every flag (fail closed). The calendar
+sentence tells authors so (`CALENDAR`). A program that only ever names
 `monthly_opex`, `quarter_end` or `half_day` reads none of the three: those come from the calendar and hold everywhere.
 
 WHAT "COVERS ITS WINDOWS" MEANS (`hold`): a program's windows are its Validation, its sealed look and its seat. The
@@ -97,11 +105,49 @@ def today_utc(now: float | None = None) -> dt.date:
 
 
 # ------------------------------------------------------------------------------------------------------- the reading
+def _empty(node: ast.AST) -> bool:
+    """An empty literal a guard falls back to: `{}`, `dict()` or `None`."""
+    if isinstance(node, ast.Dict):
+        return not node.keys
+    if isinstance(node, ast.Constant):
+        return node.value is None
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "dict" \
+        and not node.args and not node.keywords
+
+
+def _is_guard(node: ast.AST, aliases: set[str]) -> bool:
+    """THE GUARD (release 1023a, the review's finding 5): `ctx.events or {}` (or `dict()`, `None`) is the same dict,
+    which is never empty, or an empty one: it is the view, read by whatever reads it."""
+    return isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or) and len(node.values) >= 2 \
+        and _is_view(node.values[0], aliases) and all(_empty(v) for v in node.values[1:])
+
+
+def _truth_only(node: ast.AST, parent: ast.AST | None) -> bool:
+    """A view whose truth alone is used (release 1023a, the review's finding 5): the test of an `if`, `while`, `assert`,
+    conditional expression or comprehension filter, `not` or `bool()` of it, or an `and` operand that is not the
+    last. The dict always holds every flag (league/gym/events.py `EventCalendar.flags`), so its truth reads none;
+    an `or` operand or the last `and` operand is the expression's value (handed on: every flag)."""
+    if isinstance(parent, (ast.If, ast.While, ast.IfExp, ast.Assert)):
+        return parent.test is node
+    if isinstance(parent, ast.comprehension):
+        return any(cond is node for cond in parent.ifs)
+    if isinstance(parent, ast.UnaryOp):
+        return isinstance(parent.op, ast.Not)
+    if isinstance(parent, ast.Call):
+        return isinstance(parent.func, ast.Name) and parent.func.id == "bool" and len(parent.args) == 1 \
+            and parent.args[0] is node and not parent.keywords
+    if isinstance(parent, ast.BoolOp):
+        return isinstance(parent.op, ast.And) and parent.values[-1] is not node
+    return False
+
+
 def _is_view(node: ast.AST, aliases: set[str]) -> bool:
     if isinstance(node, ast.Attribute) and node.attr in _VIEWS:
         return True
     if isinstance(node, ast.NamedExpr) and _is_view(node.value, aliases):
         return True  # `(ev := ctx.events)["cpi"]`: the walrus is the view too
+    if _is_guard(node, aliases):
+        return True  # `ev = ctx.events or {}`: the guard is the view too
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr" \
             and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and node.args[1].value in _VIEWS:
         return True
@@ -162,6 +208,10 @@ def _reads(code: str) -> frozenset[str]:
         parent = parents.get(node)
         if isinstance(parent, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and getattr(parent, "value", None) is node:
             continue  # the alias's own binding, read through the alias above
+        if parent is not None and _is_guard(parent, aliases) and parent.values[0] is node:
+            continue  # the view inside its guard, read through the guard (itself a view)
+        if _truth_only(node, parent):
+            continue  # its truth alone: the dict always holds every flag, so no flag is read
         if isinstance(parent, ast.Subscript) and parent.value is node:
             key = _constant_str(parent.slice)
             if key is None:
@@ -239,7 +289,8 @@ CALENDAR = ("THE EVENT CALENDAR (league/gym/events.py, what ctx.events and ctx.e
             "calendar release adds rows (and on every session before the tables' first rows, all of 2016). False there "
             "says nothing about the day. A program that reads cpi, jobs or fomc may still be researched on Train, and "
             "THE EVENT HOLD gives it no Validation, no look and no seat while a flag it reads is past its table's last "
-            "row.")
+            "row. Walking, copying or handing on the dict, or a key that is no constant, reads every flag; name each "
+            "flag you read (ctx.events['cpi'], .get('half_day')).")
 
 
 def calendar_text() -> str:

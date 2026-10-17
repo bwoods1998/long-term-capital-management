@@ -460,10 +460,28 @@ GOLDEN = {
 }
 
 
+def calendar_sentence() -> str:
+    """THE CALENDAR SENTENCE (release 1023a; league/swarm/event_hold.py `calendar_text`), "" on a tree without it (main
+    d70e00c3): the options architect's request and every options researcher's brief carry it in every lane mode, so the
+    golden texts are of everything else (`golden_texts`), and `Golden` checks it is there."""
+    try:
+        from league.swarm import event_hold
+    except ImportError:
+        return ""
+    return event_hold.calendar_text()
+
+
 def golden_texts() -> dict[str, str]:
-    """The texts the golden digests are of. Uses only APIs main d70e00c3 has, so the same function computes them there."""
+    """The texts the golden digests are of. Uses only APIs main d70e00c3 has, so the same function computes them there.
+    THE CALENDAR SENTENCE (release 1023a, `calendar_sentence`), which the request and the brief carry whatever the
+    lane's mode, is taken out: the switch-off guarantee is of everything else."""
     from league.tests.test_swarm_researcher_dlane import DIRECTION_SPEC
     from league.tests.test_swarm_researcher_dlane import Case as ResearcherCase
+
+    calendar = calendar_sentence()
+
+    def without(text: str, sep: str) -> str:
+        return text.replace(f"{calendar}{sep}" if sep == "\n\n" else f"{sep}{calendar}", "", 1) if calendar else text
 
     out: dict[str, str] = {}
     out["brief committed, map off"] = dlane.brief_text(MAP_OFF, ["SPY", "QQQ"])
@@ -479,7 +497,7 @@ def golden_texts() -> dict[str, str]:
                 settings["dlane"] = copy.deepcopy(block)
                 store.add_family({"id": "alpha-one", "mechanism": "An invented skew program sells rich wings after calm "
                                   "weeks.", "structure": "iron_condor", "roots": ["SPY"], "dte": [7, 21]}, origin="architect")
-                return Architect(store, None, settings, clock=clock).prompt()
+                return without(Architect(store, None, settings, clock=clock).prompt(), "\n\n")
             finally:
                 store.close()
 
@@ -494,7 +512,7 @@ def golden_texts() -> dict[str, str]:
             store, researcher, _ = case.make(mode)
             researcher.settings["dlane"]["train_map"] = train_map
             fid = store.add_family({**spec, "id": "fam"}, origin="architect")["id"]
-            return researcher.brief(store.family(fid))
+            return without(researcher.brief(store.family(fid)), "\n")
         finally:
             case.doCleanups()
 
@@ -524,6 +542,18 @@ class Golden(unittest.TestCase):
         self.assertIn("YOUR FAMILY:", texts["researcher brief alpha"])
         for key, text in texts.items():
             self.assertNotIn("TRAIN MAP", text, key)
+            self.assertNotIn("THE EVENT CALENDAR", text, f"{key}: the calendar sentence is taken out of the golden text")
+
+    def test_the_calendar_sentence_is_in_every_request_and_brief(self):
+        """RELEASE 1023a (the review's finding 3): the options architect's request and every options researcher's brief
+        carry THE CALENDAR SENTENCE whatever the lane's mode; `golden_texts` takes exactly it out."""
+        from league.swarm import event_hold
+
+        calendar = event_hold.calendar_text()
+        self.assertTrue(calendar)
+        with mock.patch.object(event_hold, "calendar_text", return_value=""):
+            bare = golden_texts()
+        self.assertEqual(golden_texts(), bare, "taken out exactly, and nothing else moves")
 
     def test_the_map_on_reaches_a_direction_familys_brief_and_never_an_alpha_familys(self):
         from league.tests.test_swarm_researcher_dlane import DIRECTION_SPEC

@@ -72,12 +72,37 @@ class TheReading(unittest.TestCase):
                      'k = "cpi"\nif ctx.events[k]:\n    return []',
                      'g = ctx.events.get\nif g("cpi"):\n    return []',
                      'if helper(ctx.events):\n    return []',
-                     'if ctx.events:\n    return []',
                      'name = "ev" + "ents"\nif getattr(ctx, name)["x"]:\n    return []',
                      'if vars(ctx)["events"]["cpi"]:\n    return []',
                      'if ctx.__dict__:\n    return []',
-                     'a, b = ctx.events, 1'):
+                     'a, b = ctx.events, 1',
+                     # (release 1023a, the review's finding 5) a guard handed on, an `or` whose other side is no empty
+                     # literal, the last `and` operand, or a guard walked: the value flows out, every flag
+                     'return ctx.events or {}',
+                     'ev = ctx.events or fallback\nif ev["monthly_opex"]:\n    return []',
+                     'ev = ready and ctx.events\nif ev["monthly_opex"]:\n    return []',
+                     'for k in (ctx.events or {}).items():\n    pass',
+                     'ev = ctx.events if ready else {}\nif ev["half_day"]:\n    return []'):
             self.assertEqual(reads(program(body)), EVERY, body)
+
+    def test_a_guard_or_a_truth_test_reads_no_flag_of_its_own(self):
+        """THE GUARD and THE TRUTH TEST (release 1023a, the review's finding 5): `ctx.events or {}` is the view (the same
+        dict, never empty, or an empty one), and the dict's truth alone reads no flag (it always holds every flag)."""
+        cases = {
+            'ev = ctx.events or {}\nif ev.get("monthly_opex"):\n    return []': {"monthly_opex"},
+            'ev = ctx.events_next or dict()\nif ev["fomc"]:\n    return []': {"fomc"},
+            'if (ctx.events or {}).get("cpi"):\n    return []': {"cpi"},
+            'if ctx.events and ctx.events["jobs"]:\n    return []': {"jobs"},
+            'if ctx.events:\n    return []': set(),
+            'if not ctx.events_next:\n    return []': set(),
+            'if bool(ctx.events) and ctx.events.get("quarter_end"):\n    return []': {"quarter_end"},
+            'x = 1 if ctx.events else 2': set(),
+            'assert ctx.events_next': set(),
+            'xs = [1 for _ in range(2) if ctx.events]': set(),
+            'if (ev := ctx.events):\n    if ev["cpi"]:\n        return []': {"cpi"},
+        }
+        for body, want in cases.items():
+            self.assertEqual(reads(program(body)), frozenset(want), body)
         self.assertEqual(reads("def decide(ctx:\n"), EVERY, "source that does not parse: every flag (fail closed)")
         for bad in (None, b"bytes", 3):
             self.assertEqual(reads(bad), EVERY)
@@ -145,7 +170,8 @@ class TheWindowsAndTheTables(unittest.TestCase):
         text = event_hold.calendar_text()
         for words in ("cpi reads False on every session after 2026-09-11", "jobs after 2026-09-04",
                       "fomc after 2026-12-09", "until a calendar release adds rows", "all of 2016",
-                      "THE EVENT HOLD gives it no Validation, no look and no seat"):
+                      "THE EVENT HOLD gives it no Validation, no look and no seat",
+                      "Walking, copying or handing on the dict, or a key that is no constant, reads every flag"):
             self.assertIn(words, text)
         with mock.patch.object(event_hold, "table_ends", side_effect=RuntimeError("x")):
             self.assertEqual(event_hold.calendar_text(), "", "left out rather than said wrong")
@@ -616,3 +642,84 @@ class TheHeldEtfHolderKeepsItsSeat(unittest.TestCase):
                 self.assertIn("bred-a-hold3", alive)
                 self.assertNotIn("bred-e-wait", alive)
             self.assertEqual(house.book.seats().get("held_seats"), ["bred-a-hold3"])
+
+
+# ============================================================================================ the review's finding 3
+class TheOptionsArchitectHearsTheCalendar(unittest.TestCase):
+    def test_the_births_request_carries_the_calendar_sentence(self):
+        from league.swarm.architect import Architect
+        from league.tests.test_swarm_strategist import FakeRouter
+        from league.tests.test_game import round_settings
+
+        settings = round_settings()
+        with tempfile.TemporaryDirectory() as d:
+            clock = Clock(at(OCT_16))
+            store = SwarmStore(Path(d), clock=clock)
+            try:
+                prompt = Architect(store, FakeRouter(), settings, clock=clock).prompt()
+            finally:
+                store.close()
+        self.assertIn(event_hold.calendar_text(), prompt)
+        self.assertIn("THE EVENT HOLD gives it no Validation, no look and no seat", prompt)
+
+
+from league.tests.test_swarm_researcher import ResearcherCase  # noqa: E402 - the researcher's own fixture
+
+
+class TheOptionsResearcherHearsTheHold(ResearcherCase):
+    """A held options family is told AT THE VALIDATION STAGE (the review's finding 3): the brief carries the calendar
+    sentence; while its best reads a flag past its table the status says the hold's words in place of THE VALIDATION
+    WAIT's, and the wait does not protect it (the tournament owes it no verdict), so it may retire on its own
+    evidence. Once the tables cover today it is THE VALIDATION WAIT as before."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings["population"].update(start=0, floor=0)
+        self.fid = self.fam["id"]
+        self.researcher().cycle(self.fid)                     # the starter: version 1, its 1.5x run not back
+        reader = self.code.replace("def decide(ctx):\n", "def decide(ctx):\n    if ctx.events[\"cpi\"]:\n"
+                                                         "        return []\n", 1)
+        self.assertIn('ctx.events["cpi"]', reader)
+        version = self.store.add_version(self.fid, reader, {}, author="test")
+        self.store.update_family(self.fid, best_version=version["n"], trials=12)
+        self.n = version["n"]
+        patcher = mock.patch.object(event_hold, "today_utc", return_value=OCT_16)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_brief_carries_the_calendar_sentence(self):
+        self.assertIn(event_hold.calendar_text(), self.researcher().brief(self.store.family(self.fid)))
+
+    def test_a_held_best_is_told_at_validation_and_may_retire(self):
+        from league.swarm.researcher import awaiting_validation
+
+        fam = self.store.family(self.fid)
+        r = self.researcher()
+        self.assertTrue(awaiting_validation(fam))
+        held = r.event_held(fam)
+        self.assertEqual(held["flags"], ["cpi"])
+        status = r.status(fam)
+        self.assertIn(f"Your best Train version ({self.n}) is held at Validation. THE EVENT HOLD (A25 R1)", status)
+        self.assertIn("2026-09-11", status)
+        self.assertNotIn("awaits validation", status)
+        self.assertTrue(r.retire_earned(fam))
+        self.assertTrue(r.can_retire(fam), "a held best is owed no verdict: the wait does not protect it")
+        self.assertIsNone(r.retire_wait(fam, {}))
+
+    def test_once_the_tables_cover_today_it_is_the_validation_wait(self):
+        with mock.patch.object(event_hold, "today_utc", return_value=SEPT_1):
+            fam = self.store.family(self.fid)
+            r = self.researcher()
+            self.assertIsNone(r.event_held(fam))
+            self.assertFalse(r.can_retire(fam))
+            out: dict = {}
+            self.assertIn(f"Your best Train version ({self.n}) awaits validation", r.retire_wait(fam, out))
+            self.assertNotIn("is held at Validation", r.status(fam))
+
+    def test_a_best_that_reads_no_held_flag_is_the_validation_wait(self):
+        self.store.update_family(self.fid, best_version=1)
+        fam = self.store.family(self.fid)
+        r = self.researcher()
+        self.assertIsNone(r.event_held(fam))
+        self.assertFalse(r.can_retire(fam))
+        self.assertNotIn("is held at Validation", r.status(fam))

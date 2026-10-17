@@ -208,6 +208,11 @@ league/swarm/elane_seal.py): no equity-lane graveyard row reaches this architect
 and so the rebirth index and the cited ids), since a look's failure writes one whose lesson tells the outcome; while no
 equity family exists every read is the release before's.
 
+THE CALENDAR SENTENCE (release 1023a, the review's finding 3; league/swarm/event_hold.py `calendar_text`): the request
+says, after the input card, where each event table ends (cpi, jobs, fomc: the tables' own last rows) and THE EVENT HOLD
+(no Validation, no look and no seat for a program that reads a flag past its table's last row), as the equity births'
+AGENDA says it. Words only: no admission reads it.
+
 Each pass is a `swarm.architect` event; each birth a `swarm.born` event (the site's news; a carded birth's `card` key is
 its cell, sha and rebirth row).
 Standard library only.
@@ -1940,8 +1945,15 @@ class Architect:
                 number, what = str(max(1, min(max(want, 1), cap))), "DIRECTION-lane families (\"lane\": \"direction\")"
         # THE STRUCTURES (`architect.structures`): the allowed types and the last pass's refusals, right after the roots.
         types = self.structures_text()
+        # THE CALENDAR SENTENCE (release 1023a, the review's finding 3; league/swarm/event_hold.py `calendar_text`): where
+        # each event table ends and THE EVENT HOLD, beside the inputs, as the equity births' AGENDA says it ("" when the
+        # tables cannot be read: left out rather than said wrong).
+        from . import event_hold
+
+        calendar = event_hold.calendar_text()
+        calendar = f"{calendar}\n\n" if calendar else ""
         return (f"{lead}Propose {number} new {what}, on these roots only (the Gym "
-                f"holds their data): {roots}.{types}\n\n{available}\n\n{quota_text}{lanes}"
+                f"holds their data): {roots}.{types}\n\n{available}\n\n{calendar}{quota_text}{lanes}"
                 f"In LIVING FAMILIES, {SHARE_LEGEND}.\nLIVING FAMILIES "
                 f"(leaderboard):\n{json.dumps(living)}\n\n{graveyard}\n\n"
                 f"RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n{coverage}\n\n{practice}"
