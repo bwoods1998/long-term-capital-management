@@ -8,6 +8,93 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1023a (Oct 2026): THE EVENT HOLD (A25 R1) in both lanes and the births-text fixes: `rel/1023a`, not deployed
+
+Built in the checkpoint-15 freeze from main `d81a6bb9` (release 1017r and the desk scoreboard), from the edge hunt's
+synthesis (`scratch/edge-hunt/EDGE-HUNT.md` 3c items 8 and 9, Oct 16, 2026) and the captain's A25. **Deploy only after
+checkpoint 15 is FINAL (about 13:30Z Fri Oct 23), in an evening window** (after 20:05Z, avoiding 00:20-00:40Z and
+01:40-02:30Z); then A53's `elane.birth_share` 0.5 so births resume under the corrected text (if checkpoint 15 is final
+and fails, A53's "keep off through the next window" decision comes first). **One House deploy** (owner deploy:
+`league/swarm/elane_births.py`, `elane_train.py`, `elane.py`, `bands.py`, `gate.py`, `tournament.py` and `league/ops/`
+are protected); no gateway change. **No identity moves** (fingerprint `b60410ad`, money `5ea6f99f`, constitution
+`82a9a5a4`, equity `78022ca6`: no file of league/equity's evidence, league/gym/, league/live/ or the constitution
+changes; `league/gym/events.py` is read, never written) and no setting changes.
+
+- **THE EVENT HOLD (A25 R1, adopted 13:42Z Oct 11 and never built until now; `league/swarm/event_hold.py`).** A program
+  that reads fomc, cpi or jobs takes no Validation, no look and no seat while a flag it reads is past its table's last
+  row (cpi after 2026-09-11, jobs after 2026-09-04, fomc after 2026-12-09, as this release finds the tables). WHY:
+  `flags_for` is set membership, so past a table's last row the flag reads False on every session, live and in replay
+  alike, and a program judged with the flag firing would trade a different rule live; the replay intent match cannot
+  see it. Exposure on Oct 16: no alive cpi or jobs reader in either lane; 61 retired readers; five equity readers born
+  in about nine hours on Oct 15-16. Where it holds, each before anything is spent, recorded or paid:
+  - an equity Validation (`elane.validate`): refused before any run, no try recorded, so the lineage keeps its one try;
+  - an equity look (`elane.look`): waits before the sealed run, as R-SEC's forward-only hold does (no look spent, no
+    refusal row, no bad gate outcome);
+  - an options Validation (`Tournament.validate`): no job, no recorded or inherited verdict, no direction try (the
+    round's `event_held`);
+  - an options look (`Gate.run`): waits after every free check, before the review (outcome "waiting"; `gate_ready`
+    stays);
+  - every seat (`bands.py`): no running row for a held program (Candidate, Probe, Sized, options tuition), no incubator
+    facts; a held Candidate takes no roster seat (the equity roster lists it seatless, both rosters under
+    `event_held`). A held program already at Probe or Sized keeps its seat and its lots (A50a (4): a holder is never
+    displaced, so no close is manufactured): its opens stop and its exits go on (an options instance runs exits only;
+    the EquityBook reads `equity_seat_withdrawn` "held", alerts once a decision day and retires nothing).
+  READS is static and conservative (`event_hold.reads`): a flag named by a constant (`ctx.events["cpi"]`, `.get("cpi")`,
+  `"cpi" in`, through an alias or `getattr(ctx, "events")`); any other use of `events` or `events_next` (walked,
+  copied, handed on, a dynamic key) reads every flag, and source that does not parse reads every flag. The calendar's
+  own flags (`monthly_opex`, `quarter_end`, `half_day`) are never held for. COVERS ITS WINDOWS: the last window is live
+  trading, so the hold reads the tables against today (the House's UTC date); it LIFTS BY ITSELF once a calendar
+  release (A25 R2) extends a table. Each hold at Validation or the look is recorded once (family state `event_hold`,
+  one private `swarm.gate` event `event_hold`). It never touches FWD1-R's pinned registry or its judging (holding or
+  annotating forward judging of event readers is the owner's question); R1's other parts (the reproduction tool, the
+  receipt reader, digests at Validation and the look, the calendar watch) are not built here. Cost, stated: an event
+  idea is researched on Train for cents of model dollars and then waits; options Validation supply falls by any
+  options event reader born (none alive on Oct 16; the options seeds event_crush and event_long read all three).
+  OWED before 2026-12-10 (the first day an fomc reader can be held at a seat; a cpi or jobs reader is held from
+  Validation on, so it never reaches one): the EquityBook's ETF pool counts its rows alone (`league/equity/live.py`
+  `_held_seats`), so a held ETF holder's seat reads free to the book's plan and can be refilled while the held
+  program's lots exit (the options roster counts Probe bands in the store, so no options seat is handed out). That
+  is the money path's code, not this release's.
+- **T1, the overnight cell** (`elane_births.SESSION_ASK`, `OVERNIGHT`, `overnight_bound`). 1017r's one-session ask
+  named "a close-to-open overnight hold of an index ETF" as a cell no row binds; a card whose mechanism text says
+  overnight reads as calendar_flow / days_1_3 (`cards.infer_key`, whatever class it declares), and rows bind that cell
+  for the index ETFs (beta 4 rows, equity 1 on Oct 16). The ask now says so, by the cell's own binding as the request
+  reads it ("bound for the index ETFs in both lanes: it needs a valid card.rebirth naming one of that cell's rows"),
+  keeps "or propose another 1-session hold", and stays under `SESSION_ASK_CHARS` (600). Still words only.
+- **T2, the claim field.** The system prompt's card template carries `rebirth` {row, different, evidence} (evidence
+  names the input the row did not read, or cites a run id or a card_evidence seq, as `cards.RebirthIndex` checks it)
+  and says differs_from is a note that admits nothing; THE EQUITY GRAVEYARD's header points at card.rebirth while the
+  rows bind (`GRAVEYARD_BINDS`; with `architect.card_rebirth` "off" the old words, `GRAVEYARD_SOFT`). Each equity
+  pass's `swarm.elane` event carries `claim_fields` (per proposal by place: rebirth and differs_from as booleans, and
+  the counts), so the claim that models fill differs_from in place of card.rebirth (it rested on two answers) is
+  counted. Watch: `claim_fields.counts` and graveyard refusals a pass.
+- **T3, the open cells** (`elane_births.open_cells_text`). After THE EQUITY BIRTH CELLS, one line per universe group
+  names every cell of the vocabulary (class / lane:structure / holding) no row binds there, from the same binding.
+  Rules only: no count, no Train figure, no row id, never a word of the graveyard's text reading.
+- **The calendar sentence** (`event_hold.calendar_text`) in the births' AGENDA and every equity family's Train brief:
+  cpi False after 2026-09-11, jobs after 2026-09-04, fomc after 2026-12-09 (the tables' own last rows), until a
+  calendar release, and THE EVENT HOLD. It is the one place the births request names a 2026 date (the request's
+  "no Validation or holdout year" tests strip it alone).
+- **T5's small part**: wherever an author reads MTE (`elane_train.bar_text`, `version_text`) it is labelled
+  selection-only and timing-blind. The Train map's drift-adjusted alpha column (seen-span drift, Newey-West t,
+  effective tries, zero-skill reference) is NOT built: it needs each family's daily series over its own seen spans,
+  more than a words release carries. The sector short-hold cost line is not added either (an in-sample steering line
+  with no figure in the code to rest on).
+- **T4's INFO line** (`elane_health.births_yield`; the report's `info` and one line of `python3 -m
+  league.ops.elane_health`): THE BIRTHS YIELD over the report's hours: passes that asked a model, families born and
+  the births a pass, proposals, refusals and those the quota refused, share-program places asked against panel places
+  held, births a pass by 0 / 1-3 / 4+ share-program places (K1's measure), and T2's claim-field counts. Not a cause,
+  no owner step, no `BIRTH_LEVERS` entry, never mailed, not in `dlane_report.py`. T4's quota fix (a panel place
+  reserved only for a panel proposal in the answer) is NOT in this release: A54's revert "panel 0.3 when T4 ships"
+  does not fire on it.
+- **Verify after it** (read-only, ten minutes on): the four ids above; the next equity pass's event carrying
+  `claim_fields`; its request (`python3 -m league.ops.elane_health --state /workspace/state` for the INFO line) with
+  the OPEN CELLS line and the bound overnight words; the tournament's and the gate's rounds (`event_held` absent while
+  no alive program reads cpi or jobs); `bands.roster(root, lanes=LANES)` with no `event_held`. A census of event readers
+  (counts only) stays in the daily check until a calendar release.
+- **Rollback:** the House, `python3 scripts/floor_box.py rollback` to the release before. Nothing is migrated; a family
+  state `event_hold` record is read by nothing else.
+
 ## Done at the 15th close, then every 5th (Oct 16, 2026): the owner's new goal (A50): `feat/done-a50`, not deployed
 
 The owner set a new goal at 02:10Z Oct 16, 2026 (`goal-2026-10-10/GOAL-MESSAGE-SPEED.txt`; the captain's amendments
@@ -1871,7 +1958,8 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   (`MIN_HOLD_SESSIONS`, an identity file). Why: the goal counts real closes, and most bred programs hold 2-8
   sessions; the seat rule (A24/A30) already ranks frequent closers first. A plain copy of seed-overnight-qqq is
   refused at its own look (the overnight lineage is spent). Watch: births a pass by NEEDS max_hold_sessions, and
-  their Train passes.
+  their Train passes. RELEASE 1023a (T1) says the overnight index hold's cell: it reads as calendar_flow / days_1_3,
+  bound for the index ETFs, so it needs a valid card.rebirth there (**Release 1023a** at the top of this page).
 - **Owed:** deriving a card's holding bucket from its program's NEEDS `max_hold_sessions` (in `cards.validate`). It
   was proposed beside L2 and dropped: the verifier found the check mislabelled. Also owed: the researchers' system
   prompts (`elane_train.RESEARCHER_SYSTEM`, `elane_xs.RESEARCHER_SYSTEM`) still say every program takes one Validation
@@ -2700,6 +2788,8 @@ places share it so they cannot drift apart:
   is False on every session, in the Gym and live alike (one constructor): every session of 2016, and live every
   session after the table's last row. The three seeds read no events. `events.py` is in the equity identity, so the
   tables are extended, with verified dates, BEFORE any event-conditioned program is born (E2), never after its look.
+  Until they are, THE EVENT HOLD (release 1023a, the captain's A25 R1; `league/swarm/event_hold.py`) gives a program
+  that reads a flag past its table's last row no Validation, no look and no seat, in both lanes.
 
 **The twins and the Done meter.** `equity_twins` (league/ops/twins.py) prices each closed lot's twin in closed form from
 the House's own official opens and closes (`eq_bars`, raw) with the engine's fill function (open and close fills, the

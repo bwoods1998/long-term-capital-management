@@ -30,6 +30,40 @@ The running House release is `20261016T024305Z-e90d75adb36b` (main `d6bcf0cd`, P
 02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
+### Release 1023a: THE EVENT HOLD (A25 R1) in both lanes and the births-text fixes (T1, T2, T3, the calendar sentence, MTE's label, THE BIRTHS YIELD info line), on `rel/1023a` (unreleased; deploy only after checkpoint 15 is FINAL, evening window: after 20:05Z, never 00:20-00:40Z or 01:40-02:30Z, then A53's `elane.birth_share` 0.5; cut from main `d81a6bb9`, release 1017r with the desk scoreboard; built in the checkpoint-15 freeze from the edge hunt's 3c items 8 and 9; an owner deploy: `league/swarm/elane_births.py`, `elane_train.py`, `elane.py`, `bands.py`, `gate.py`, `tournament.py` and `league/ops/` are protected; no identity moves: the options execution fingerprint `b60410ad`, the money digest `5ea6f99f`, the constitution digest `82a9a5a4` and the equity identity `78022ca6` are main's; no setting)
+
+- **THE EVENT HOLD (the captain's A25 R1, adopted Oct 11, built now; `league/swarm/event_hold.py`).** A program that
+  reads fomc, cpi or jobs takes no Validation, no look and no seat while a flag it reads is past its table's last row
+  (league/gym/events.py, read and never written: cpi after 2026-09-11, jobs after 2026-09-04, fomc after
+  2026-12-09). Equity: `elane.validate` refuses before any run (no try recorded), `elane.look` waits before the sealed
+  run. Options: `Tournament.validate` queues no job (`event_held`), `Gate.run` waits before the review. Seats
+  (`bands.py`): no running or tuition row and no incubator facts for a held program, a held Candidate takes no roster
+  seat; a held Probe or Sized holder keeps its seat and lots, its opens stop and its exits go on (EquityBook:
+  `equity_seat_withdrawn` "held"). Reads are static and conservative (a flag named by a constant; any other use of the
+  dict, or source that does not parse, reads every flag). It lifts by itself when a calendar release extends a table.
+  Recorded once a stage (family state `event_hold`, a private `swarm.gate` event). Never touches FWD1-R's pinned
+  registry or judging. R1's other parts (reproduction tool, receipt reader, digests, calendar watch) are not built.
+  Owed before 2026-12-10: the EquityBook's ETF pool counts its rows alone (`league/equity/live.py` `_held_seats`), so
+  a held fomc reader at Probe would read as a free seat to the book's plan (docs/operations.md, Release 1023a).
+- **T1:** the one-session ask says an overnight index hold reads as calendar_flow / days_1_3, bound for the index ETFs
+  (by the request's own reading of the binding), so it needs a valid card.rebirth; "or propose another 1-session hold"
+  kept; at most 600 characters.
+- **T2:** the card template carries `rebirth` {row, different, evidence}; differs_from is "a note only, it admits
+  nothing"; THE EQUITY GRAVEYARD's header points at card.rebirth while rows bind; each pass's event logs
+  `claim_fields` (which field each proposal filled: places and booleans).
+- **T3:** an OPEN CELLS line per universe group from the same binding, rules only.
+- **The calendar sentence** in the births' AGENDA and every equity Train brief (the tables' own last rows; the one 2026
+  date the request names).
+- **T5's small part:** MTE labelled selection-only and timing-blind wherever authors read it. The Train-map alpha
+  column and the sector short-hold line are not built.
+- **T4's INFO line:** `elane_health.births_yield` in the report and its text (passes, births a pass, quota refusals,
+  share against panel places, births by 0 / 1-3 / 4+ share places, claim-field counts): not a cause, no owner step, no
+  lever, not in `dlane_report.py`. T4's quota fix is not in this release (A54's "panel 0.3 when T4 ships" does not
+  fire).
+- **Tests:** league/tests/test_rel_1023a_event_hold.py and test_rel_1023a_births.py (new); the 1017r session-ask test
+  and three "no 2025/2026 in the request" checks follow the new words (the calendar sentence alone is exempt).
+- **Rollback:** the release before; nothing is migrated.
+
 ### Release 1017r: the owner's new Done (A50), the ETF Probe sleeve 0.25 x E (A51) and the births' one-session ask, on `rel/1017r` (unreleased; one House deploy by the captain, never 12:55-20:05Z on a trading day and never inside an entry window; live before Mon Oct 19 13:30Z; THE MONEY DIGEST MOVES `cfcc94b1` -> `5ea6f99f` and the constitution `60796aed` -> `82a9a5a4` (A51's row alone), the standing grant re-ratifies at start; the options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move)
 
 - A50 (PR #564): Done at the 15th counted close, then every 5th; >= 3 each from >= 2 programs; A1.1's matched minimum
