@@ -43,8 +43,10 @@ is on branches.
   dict, or source that does not parse, reads every flag). It lifts by itself when a calendar release extends a table.
   Recorded once a stage (family state `event_hold`, a private `swarm.gate` event). Never touches FWD1-R's pinned
   registry or judging. R1's other parts (reproduction tool, receipt reader, digests, calendar watch) are not built.
-  Owed before 2026-12-10: the EquityBook's ETF pool counts its rows alone (`league/equity/live.py` `_held_seats`), so
-  a held fomc reader at Probe would read as a free seat to the book's plan (docs/operations.md, Release 1023a).
+  The stall job owes a held family no Validation (`league/ops/stall.py` reads the round's `event_held` as it reads
+  `spent_lane`), so the hold makes no owner step and costs no research day. Owed before 2026-12-10: the EquityBook's
+  ETF pool counts its rows alone (`league/equity/live.py` `_held_seats`), so a held fomc reader at Probe would read as
+  a free seat to the book's plan (docs/operations.md, Release 1023a).
 - **T1:** the one-session ask says an overnight index hold reads as calendar_flow / days_1_3, bound for the index ETFs
   (by the request's own reading of the binding), so it needs a valid card.rebirth; "or propose another 1-session hold"
   kept; at most 600 characters.

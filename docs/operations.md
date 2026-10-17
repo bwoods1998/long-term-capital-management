@@ -45,7 +45,9 @@ changes; `league/gym/events.py` is read, never written) and no setting changes.
   own flags (`monthly_opex`, `quarter_end`, `half_day`) are never held for. COVERS ITS WINDOWS: the last window is live
   trading, so the hold reads the tables against today (the House's UTC date); it LIFTS BY ITSELF once a calendar
   release (A25 R2) extends a table. Each hold at Validation or the look is recorded once (family state `event_hold`,
-  one private `swarm.gate` event `event_hold`). It never touches FWD1-R's pinned registry or its judging (holding or
+  one private `swarm.gate` event `event_hold`). The stall job owes a held family no Validation (`stall.py` reads the
+  round's `event_held` as it reads `spent_lane`), so the hold stands as no `validations` cause, makes no owner step and
+  fails no research day of Done's item 7. It never touches FWD1-R's pinned registry or its judging (holding or
   annotating forward judging of event readers is the owner's question); R1's other parts (the reproduction tool, the
   receipt reader, digests at Validation and the look, the calendar watch) are not built here. Cost, stated: an event
   idea is researched on Train for cents of model dollars and then waits; options Validation supply falls by any

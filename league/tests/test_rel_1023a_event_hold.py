@@ -469,3 +469,22 @@ class NoIdMoves(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from league.tests import test_ops_stall as stall_tests  # noqa: E402 - the stall job's own fixture
+
+
+class TheStallJobOwesAHeldFamilyNothing(stall_tests.Base):
+    """A family THE EVENT HOLD keeps from Validation (the tournament round's `event_held`) is owed none: the
+    `validations` cause never stands on it, so the hold makes no owner step and costs no research day."""
+
+    def test_an_event_held_candidate_is_owed_no_validation(self):
+        self.healthy(validation_hours=30)
+        self.family("held", best_version=1, best_train=0.5)
+        self.assertEqual(self.check("validations")["numbers"]["owed_validation"], 1)
+        self.ago(1)
+        self.store.event("swarm.tournament", None, {"validation": {"queued": 0, "judged": {}, "errors": {},
+                                                                    "event_held": ["held"]}})
+        validations = self.check("validations")
+        self.assertFalse(validations["stalled"])
+        self.assertEqual(validations["numbers"]["owed_validation"], 0)
