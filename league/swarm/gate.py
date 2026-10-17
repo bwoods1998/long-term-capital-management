@@ -7,7 +7,10 @@ THE GATE (when a family's validated best meets the validation line):
    refused. THE DRIFT SCREEN (Sept 27, `evidence.drift_screen`) again, in depth: a version whose Train drift-adjusted
    alpha fails it is refused (stage "drift screen": no review is paid, no look is spent); one whose figures are owed
    waits. THE LOOK HOLDS (L6, Oct 2, 2026; `look_hold`) come after the rations and before the review: a look the
-   holdout cannot judge is held.
+   holdout cannot judge is held. THE EVENT HOLD (the captain's A25 R1, release 1023a; league/swarm/event_hold.py)
+   comes after every free check and before anything is paid: a program that reads fomc, cpi or jobs while that flag's
+   table ends before today WAITS (outcome "waiting", which bars no tuition by itself; `gate_ready` stays; no review,
+   no audit, no look; recorded once, `event_hold.note`), and is looked at once a calendar release covers its windows.
 2. THE REVIEW: GPT-6 Sol through the gateway when OpenAI has room (`review_openai_model`; null skips it), else
    DeepSeek-V4-Pro balanced on Sail (Claude first once "review" is in `claude.roles`, Sept 29), reads the program for
    lookahead, leakage (calendar recognition, hard-coded regimes) and fill abuse. A failed review is a recorded refusal
@@ -216,7 +219,7 @@ from typing import Any, Callable, Mapping
 from ..gym.experiment import check_experiment
 from ..gym.review_contract import grounded_answer, review_contract
 from ..gym.safety import CodeRefused
-from . import dlane, elane, evidence
+from . import dlane, elane, event_hold, evidence
 from . import settings as settings_mod
 from .pool import GymJob, PoolError
 from .researcher import drift_verdict, needs_roots, running_span, version_drift
@@ -982,6 +985,14 @@ class Gate:
                 out["waiting"].append(fam["id"])
                 self.outcome(fam["id"], sha, "waiting")
                 self.tell(fam["id"], f"waiting ({closed})")
+                continue
+            held = event_hold.hold(version["code"], today=event_hold.today_utc(self.clock()))
+            if held is not None:  # THE EVENT HOLD (A25 R1): after every free check, before anything is paid or opened
+                out.setdefault("event_held", []).append(fam["id"])
+                if state.get("gate") != f"waiting ({held['why']})":
+                    self.outcome(fam["id"], sha, "waiting")
+                    self.tell(fam["id"], f"waiting ({held['why']})")
+                    event_hold.note(self.store, fam["id"], n, held, stage="look", clock=self.clock)
                 continue
             cached = state.get("review") or {}
             review = cached if cached.get("sha") == sha and cached.get("contract_sha") == gate_contract()["sha256"] else None

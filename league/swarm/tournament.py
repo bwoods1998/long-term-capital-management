@@ -50,6 +50,10 @@
    (`always_in_refused`, no try spent), and a family whose version due for Validation G1 refused retires in `_why`,
    after the ration (`dlane.always_in_failed`, an IDLE death that binds no card); an always-in family never forks
    (`lane_forks`: a fork adds a root, and each root's always-in idea has its own try).
+   THE EVENT HOLD (the captain's A25 R1, release 1023a; league/swarm/event_hold.py): a candidate whose program reads
+   fomc, cpi or jobs while that flag's table (league/gym/events.py) ends before today is validated nothing: no job, no
+   recorded or inherited verdict, no direction try (`event_held`, recorded once on the family: `event_hold.note`). It
+   is validated once a calendar release covers its windows; nothing retires on it.
    THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). The round above never sees an equity-lane family
    (`SwarmStore.families` leaves them out), and `run` never calls their step: the swarm's loop runs it on a thread of
    its own, every `elane.ROUND_SECONDS`, under the brake and with the Gym down too (league/swarm/loop.py
@@ -172,7 +176,7 @@ import random
 import time
 from typing import Any, Callable, Mapping
 
-from . import diagnostics, dlane, elane, elane_train, evidence, game, incubator, practice
+from . import diagnostics, dlane, elane, elane_train, event_hold, evidence, game, incubator, practice
 from .architect import allowed_structures
 from .pool import GymJob, PoolError
 from .researcher import (IDLE_CAUSE, MAX_ROOTS, VALIDATED_CYCLES_KEY, awaiting_validation, dormant_count, dormant_limit,
@@ -371,6 +375,7 @@ class Tournament:
         lane_waiting: list[str] = []
         calls_refused: list[str] = []  # a direction candidate whose code names another open (owed no Validation)
         always_in_refused: list[str] = []  # THE ALWAYS-IN CARD: a candidate with no G1 pass on record (owed no Validation)
+        event_held: list[str] = []  # THE EVENT HOLD (A25 R1): a candidate that reads a flag past its table (owed none yet)
         lane_lines: set[str] = set()
         drift: dict[str, list[str]] = {"waiting": [], "failed": []}
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
@@ -444,6 +449,15 @@ class Tournament:
                                                            "validation_bundle": state.get("validation_bundle")}, gate_ready=False)
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
+                continue
+            # THE EVENT HOLD (A25 R1; league/swarm/event_hold.py): a program that reads a flag whose table ends before today
+            # is validated nothing (no job, no recorded or inherited verdict), so it spends no try and opens no tuition; it
+            # is validated once a calendar release covers its windows. Before the direction lane's checks: its lineage's
+            # one try is not taken for the round.
+            held = event_hold.hold(version["code"], today=event_hold.today_utc(self.clock()))
+            if held is not None:
+                event_hold.note(self.store, fam["id"], n, held, stage="validation", clock=self.clock)
+                event_held.append(fam["id"])
                 continue
             if lines is not None:
                 # THE CALLS-ONLY CODE CHECK (release D-1b, the review's finding 3; `dlane.calls_only_code`): a direction
@@ -523,6 +537,8 @@ class Tournament:
             out["calls_refused"] = calls_refused
         if always_in_refused:  # THE ALWAYS-IN CARD: its candidate has no G1 pass on record: owed no Validation
             out["always_in_refused"] = always_in_refused
+        if event_held:  # THE EVENT HOLD (A25 R1): its candidate reads a flag whose table ends before today
+            out["event_held"] = event_held
         return out
 
     def lane_lines(self, fam: Mapping[str, Any]) -> set[str] | None:

@@ -51,6 +51,13 @@ family takes no sealed Validation try either (`try_open` False while league/swar
 and its look holds (`elane_xs.look_held`); its only path to a seat is a FWD1-R forward pass of case N seated through
 the panel pool (`elane_xs.forward_seats`). Code, never a setting, as R-SEC.
 
+THE EVENT HOLD (the captain's A25 R1, release 1023a; league/swarm/event_hold.py): a program that reads fomc, cpi or
+jobs takes no Validation, no look and no seat while the event tables (league/gym/events.py) end before today for a
+flag it reads. `validate` answers it refused before any run, so no try is recorded and the lineage keeps its one try;
+`look` waits before the sealed run (no look spent, no refusal row, no bad gate outcome), as R-SEC's hold does; the
+seat is league/swarm/bands.py's. Each hold is recorded once (`event_hold.note`). It lifts by itself once a calendar
+release (A25 R2) covers the windows. Code, never a setting; no id moves.
+
 THE ROUNDS RUN ON THEIR OWN (A3: no Gym box, no model dollar). The swarm's main loop starts the two equity rounds below on
 their own thread every `ROUND_SECONDS` while the lane is on (league/swarm/loop.py `Swarm.equity_rounds`: the
 tournament's step, then the gate's, so a version validated in a round takes its look in the same round). Neither the
@@ -1067,6 +1074,16 @@ def _runner(owner: Any) -> Any:
     return runner if runner is not None else isolated_runner(owner.store.root)
 
 
+def _clock_of(owner: Any) -> float | None:
+    """The round's own clock (the tournament's or the gate's `clock`), epoch seconds; None when it has none or it
+    cannot be read (THE EVENT HOLD then reads the House's clock)."""
+    clock = getattr(owner, "clock", None)
+    try:
+        return float(clock()) if callable(clock) else None
+    except Exception:  # noqa: BLE001 - the House's clock
+        return None
+
+
 def _universe(result: Mapping[str, Any]) -> list[str]:
     symbols = result.get("symbols") or (result.get("needs") or {}).get("symbols") or []
     return [str(s) for s in symbols]
@@ -1134,6 +1151,14 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
         return {**out, "refused": SPENT_TRY}
     if not version.get("code"):
         return {**out, "refused": "the version's program cannot be read"}
+    # THE EVENT HOLD (A25 R1; league/swarm/event_hold.py): a program that reads a flag whose table ends before today
+    # takes no Validation, before any run and before any try is recorded (the lineage keeps its one try).
+    from . import event_hold
+
+    held = event_hold.hold(version["code"], today=event_hold.today_utc(_clock_of(tournament)))
+    if held is not None:
+        event_hold.note(store, fid, n, held, stage="validation", clock=getattr(tournament, "clock", None))
+        return {**out, "refused": held["why"], "event_hold": list(held["flags"])}
     from ..equity import screen as S
 
     runner = _runner(tournament)
@@ -1432,6 +1457,17 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         # seat, league/swarm/bands.py BAD_OUTCOMES). The family waits; its one record is written once.
         if (fam.get("state") or {}).get("gate") != f"waiting ({FORWARD_ONLY})":
             _wait(gate, fid, n, sha, FORWARD_ONLY, screen=screen)
+        return None
+    # THE EVENT HOLD (A25 R1; league/swarm/event_hold.py), as R-SEC's: before the sealed run and before any record a look
+    # or a refusal would write. No look spent, no refusal row, no bad gate outcome; `gate_ready` stays, so the look is
+    # taken once a calendar release covers its windows. Its one record is written once.
+    from . import event_hold
+
+    held = event_hold.hold(version.get("code"), today=event_hold.today_utc(_clock_of(gate)))
+    if held is not None:
+        if (fam.get("state") or {}).get("gate") != f"waiting ({held['why']})":
+            _wait(gate, fid, n, sha, held["why"], screen=screen)
+            event_hold.note(store, fid, n, held, stage="look", clock=getattr(gate, "clock", None))
         return None
     receipt, why = _receipt(settings, lane)
     if receipt is None:

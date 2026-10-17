@@ -122,6 +122,16 @@ a store-side leg failed (E4-SPEC 17: its opens stop, its exits go on, nothing is
 when the lane cannot be READ (nothing retired either). Its band in the store is not moved: when the lane is live again
 its row is back and the same instance runs again.
 
+THE EVENT HOLD (the captain's A25 R1, release 1023a; league/swarm/event_hold.py, `held_by_events`): a program that
+reads fomc, cpi or jobs while that flag's table (league/gym/events.py) ends before today takes no seat, in any lane.
+`read` returns no row for it (a Candidate, Probe or Sized row, an options tuition row), `incubator` no facts, and a
+held Candidate takes no roster seat (`seating`'s queue and `equity_seating`'s pools leave it out; the equity roster
+lists it seatless with the hold's words, both rosters under `event_held`). A held program already at Probe or Sized
+keeps its seat and its lots (A50a (4): a holder is never displaced, so no close is manufactured): with no row its
+OPENS STOP AND ITS EXITS GO ON (an options instance runs on exits only; the EquityBook reads `equity_seat_withdrawn`
+"held"). Nothing is retired or sold on it, no id moves, and the hold lifts by itself once a calendar release covers
+the windows. `observe` (shadow only, never real) is unchanged.
+
 `read(root, family=f)` and `observe(root, family=f)` read one family only (the live path's per-minute admissions). The
 Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once per call (it reads and hashes every file
 of the Gym's code).
@@ -315,7 +325,7 @@ def equity_seats(seats: int) -> int:
 
 
 def equity_seating(fams: Sequence[Mapping[str, Any]], seats: int, *, seatable: Any = equity_seatable,
-                   panel_seats: int = 0) -> dict[str, list[str]]:
+                   panel_seats: int = 0, held: Any = ()) -> dict[str, list[str]]:
     """THE EQUITY ROSTER's `seating` over the equity Candidate and Probe families, A POOL AT A TIME (release E4 step
     two; the constitution's `equity_money.panel`): the ETF pool, every family that is not a panel family, over
     `seats` (`elane.roster_seats`), and the PANEL POOL, the panel families, over `panel_seats` (`panel_pool_seats`;
@@ -325,7 +335,13 @@ def equity_seating(fams: Sequence[Mapping[str, Any]], seats: int, *, seatable: A
     lane's effective mode is "live" (otherwise it is seatless: no row, so no instance and no order). THE CAPTAIN'S A34
     (release U): a panel Candidate holds a seat ONLY on a FWD1-R forward pass seated through the panel pool
     (`elane_xs.forward_seated`); any other panel Candidate (one a historical look made, a band written by hand) is
-    seatless whatever the pool's room (`_a34_seatless`, failing closed)."""
+    seatless whatever the pool's room (`_a34_seatless`, failing closed). THE EVENT HOLD (the captain's A25 R1, release
+    1023a): a Candidate named in `held` (`_event_held`: its banded program reads a flag whose table ends before today) is
+    SEATLESS in either pool and queues in neither; a held family at Probe keeps its seat (A50a (4): a holder is never
+    displaced)."""
+    barred = {str(fid) for fid in (held or ())}
+    off = sorted(str(f["id"]) for f in fams if f.get("band") == "candidate" and str(f["id"]) in barred)
+    fams = [f for f in fams if not (f.get("band") == "candidate" and str(f["id"]) in barred)]
     etf = [f for f in fams if str(f.get("structure") or "") != "panel"]
     panel = [f for f in fams if str(f.get("structure") or "") == "panel"]
     out = seating(etf, equity_seats(seats), seatable=seatable)
@@ -336,6 +352,8 @@ def equity_seating(fams: Sequence[Mapping[str, Any]], seats: int, *, seatable: A
         theirs["seatless"] = sorted(theirs["seatless"] + sorted(refused))
         out = {key: sorted(out[key] + theirs[key]) if key in ("probe", "waiting", "seatless") else out[key] + theirs[key]
                for key in out}
+    if off:
+        out = {**out, "seatless": sorted(set(out["seatless"]) | set(off))}
     return out
 
 
@@ -433,12 +451,13 @@ def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
         db.row_factory = sqlite3.Row
         try:
             fams = _banded(db, equity=equity)
+            held = _event_held(db, root, fams)  # THE EVENT HOLD (A25 R1): its Candidates take no seat
         finally:
             db.close()
     except (sqlite3.Error, OSError):
         return None
-    seat = equity_seating(fams, seats, seatable=_equity_seatable(root), panel_seats=panel_pool_seats(root)) \
-        if equity else seating(fams, seats)
+    seat = equity_seating(fams, seats, seatable=_equity_seatable(root), panel_seats=panel_pool_seats(root), held=held) \
+        if equity else seating([f for f in fams if str(f["id"]) not in held], seats)
     out = {"seats": max(seats, 0), "closed": seats == ROSTER_CLOSED, "probe": seat["probe"],
            "seated": sorted(seat["probe"] + seat["seated"]), "waiting": seat["waiting"], "seatless": seat["seatless"]}
     if equity:
@@ -446,7 +465,10 @@ def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
         out.update(rule=rule, plan=seat_plan(root), panel_seats=panel_pool_seats(root),
                    order="by pass time: these lists are the queue (first come)" if rule == "first-come" else
                    "by pass time: NOT who is next under this rule; the EquityBook's plan is (`plan`)")
-        out["seatless_why"] = _seatless_why(root, fams, seat["seatless"])
+        out["seatless_why"] = {**_seatless_why(root, fams, [f for f in seat["seatless"] if f not in held]),
+                               **{fid: why for fid, why in held.items() if fid in seat["seatless"]}}
+    if held:
+        out["event_held"] = sorted(held)
     return out
 
 
@@ -538,6 +560,45 @@ def _banded(db: sqlite3.Connection, *, equity: bool = False) -> list[dict[str, A
     return out
 
 
+def held_by_events(code: Any) -> str | None:
+    """THE EVENT HOLD (the captain's A25 R1, release 1023a; league/swarm/event_hold.py) of one program as a seat reads it:
+    its words when the program reads fomc, cpi or jobs while that flag's table ends before today (the House's UTC date),
+    else None. Never raises."""
+    try:
+        from . import event_hold
+
+        held = event_hold.hold(code)
+        return None if held is None else str(held["why"])
+    except Exception:  # noqa: BLE001 - the hold's own reading fails closed (every flag); this belt never raises
+        return "THE EVENT HOLD (A25 R1): its program could not be read for the event flags it reads"
+
+
+def _event_held(db: sqlite3.Connection, root: str | Path, fams: Sequence[Mapping[str, Any]], *,
+                bands: Sequence[str] = ("candidate",)) -> dict[str, str]:
+    """THE EVENT HOLD of the families of `fams` in one of `bands` (their state parsed or not): {family: words} for each
+    whose BANDED version's program the hold holds (`held_by_events`). A family whose version row or code file cannot be
+    read is not named here (the reader's own rule leaves its row out for that)."""
+    out: dict[str, str] = {}
+    for fam in fams:
+        try:
+            if fam.get("band") not in bands:
+                continue
+            state = fam.get("state") if isinstance(fam.get("state"), Mapping) else loads(fam.get("state"), {}) or {}
+            n = _count(state.get("banded_version"))
+            if not n:
+                continue
+            row = db.execute("SELECT path FROM versions WHERE family=? AND n=?", (str(fam["id"]), n)).fetchone()
+            if row is None:
+                continue
+            code = (Path(root) / row[0]).read_text(encoding="utf-8")
+        except (sqlite3.Error, OSError, KeyError, TypeError, ValueError):
+            continue
+        why = held_by_events(code)
+        if why is not None:
+            out[str(fam["id"])] = why
+    return out
+
+
 def read(root: str | Path, *, family: str | None = None, lanes: Any = None,
          strict: bool = False, queued: bool = False) -> list[dict[str, Any]]:
     """The rows (the module docstring); `family`: that family's row only. [] when there is no store or it cannot be read
@@ -563,7 +624,11 @@ def read(root: str | Path, *, family: str | None = None, lanes: Any = None,
             # THE PROBE ROSTER (`seating`): read inside the same connection, over every Candidate and Probe family, and
             # only when a Candidate is among the rows asked for (a Probe, Sized or Gym row is never hidden)
             seats = _roster_seats(root)
-            hidden = waiting(_banded(db), seats) if seats and any(f["band"] == "candidate" for f in fams) else set()
+            # THE EVENT HOLD (A25 R1): a held Candidate takes no roster seat (it waits behind no one and no one behind
+            # it); a held program at Probe keeps its seat (never displaced) and, below, has no row
+            banded = _banded(db) if seats and any(f["band"] == "candidate" for f in fams) else []
+            events_held = _event_held(db, root, banded) if banded else {}
+            hidden = waiting([f for f in banded if str(f["id"]) not in events_held], seats) if banded else set()
             wanted: dict[str, int] = {}
             for fam in fams:
                 state = loads(fam["state"], {}) or {}
@@ -593,6 +658,8 @@ def read(root: str | Path, *, family: str | None = None, lanes: Any = None,
             code = (Path(root) / v["path"]).read_text(encoding="utf-8")
         except OSError:
             continue
+        if held_by_events(code) is not None:
+            continue  # THE EVENT HOLD (A25 R1): no row, so no new real or tuition order; an instance runs on exits only
         state = fam["state"]
         params = loads(v["params"], {}) or {}
         from .gate import run_sha
@@ -735,7 +802,12 @@ def equity_seat_withdrawn(root: str | Path, fam: Mapping[str, Any]) -> tuple[str
     switch says "live" and a STORE-SIDE LEG of the lane failed, the leg named (the coverage verdict, the spreads'
     share, the receipt, a leg of `live_ready`): E4-SPEC 17, ITS OPENS STOP AND ITS EXITS GO ON: the book keeps the
     instance, sells nothing on it and, having no row, opens nothing; ("unknown", why) when the lane cannot be read,
-    on which the book retires nothing either (A8.5)."""
+    on which the book retires nothing either (A8.5). THE EVENT HOLD (the captain's A25 R1, release 1023a), of ANY equity
+    family, before the panel's word: ("held", why) when its banded program reads a flag whose table ends before today
+    (`read` gives it no row): ITS OPENS STOP AND ITS EXITS GO ON, nothing is retired or sold (A50a (4))."""
+    held = _seat_held(root, fam)
+    if held is not None:
+        return "held", held
     if str((fam or {}).get("structure") or "") != "panel":
         return None
     try:
@@ -747,6 +819,28 @@ def equity_seat_withdrawn(root: str | Path, fam: Mapping[str, Any]) -> tuple[str
     if code == elane_xs.SEAT_LIVE:
         return None
     return (code if code in (elane_xs.SEAT_DEMOTED, elane_xs.SEAT_HELD) else "unknown"), str(why)
+
+
+def _seat_held(root: str | Path, fam: Mapping[str, Any] | None) -> str | None:
+    """THE EVENT HOLD's word on one equity family's banded program (`equity_seat_withdrawn`), read on the store itself,
+    read-only within a second: its words, else None (also when the store, its version row or its code cannot be read:
+    the book's own answer stands then, and on that it retires nothing). Never raises."""
+    try:
+        state = (fam or {}).get("state")
+        state = state if isinstance(state, Mapping) else loads(state, {}) or {}
+        n = _count(state.get("banded_version"))
+        if not n:
+            return None
+        db = sqlite3.connect(f"file:{Path(root) / DB_NAME}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = db.execute("SELECT path FROM versions WHERE family=? AND n=?", (str(fam["id"]), n)).fetchone()
+        finally:
+            db.close()
+        if row is None:
+            return None
+        return held_by_events((Path(root) / row[0]).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - no evidence either way: the book's own answer
+        return None
 
 
 def _panel_proof(proof: Mapping[str, Any]) -> bool:
@@ -803,9 +897,13 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
                 if xs_sha is None and strict:
                     raise EquityUnreadable("the xs identity could not be computed while a panel family is in a running "
                                            "band")
-            seat = equity_seating(_banded(db, equity=True), elane.roster_seats(root), seatable=_equity_seatable(root),
-                                  panel_seats=panel_pool_seats(root)) \
-                if any(f["band"] == "candidate" for f in fams) else {"probe": [], "seated": [], "waiting": [], "seatless": []}
+            banded = _banded(db, equity=True) if any(f["band"] == "candidate" for f in fams) else []
+            # THE EVENT HOLD (A25 R1): a held Candidate is SEATLESS (no row, queued or not, so the book's plan never
+            # sees it), and it takes no place in either pool's queue; a held program at Probe keeps its seat
+            events_held = _event_held(db, root, banded) if banded else {}
+            seat = equity_seating(banded, elane.roster_seats(root), seatable=_equity_seatable(root),
+                                  panel_seats=panel_pool_seats(root), held=events_held) \
+                if banded else {"probe": [], "seated": [], "waiting": [], "seatless": []}
             # (`queued`, THE SEAT RULE: a waiting Candidate has a row too. A SEATLESS one never has, and a panel
             # Candidate is seatless while the panel lane is not live, so the book's seat plan never sees it.)
             hidden = set(seat["seatless"]) if queued else set(seat["waiting"]) | set(seat["seatless"])
@@ -847,6 +945,11 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
         try:
             code = (Path(root) / v["path"]).read_text(encoding="utf-8")
         except OSError:
+            continue
+        if held_by_events(code) is not None:
+            # THE EVENT HOLD (A25 R1): no row. A held Candidate is seatless (above); a held program at Probe or Sized
+            # keeps its seat and its lots, and the book, asking the store (`equity_seat_withdrawn`: "held"), stops its
+            # opens and lets its exits go on: nothing is retired or sold on the hold
             continue
         state, spec = fam["state"], fam["spec"]
         params = loads(v["params"], {}) or {}
@@ -1189,9 +1292,15 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
         fam = fams[0]
         kv = {str(r["key"]): loads(r["value"], None) for r in db.execute(
             "SELECT key, value FROM kv WHERE key IN ('research_evaluator', 'train_objective', 'dlane_k5')")}
-        row = db.execute("SELECT n, sha, params FROM versions WHERE family=? AND n=?", (fam["id"], n)).fetchone()
+        row = db.execute("SELECT n, sha, params, path FROM versions WHERE family=? AND n=?", (fam["id"], n)).fetchone()
         if row is None:
             return []
+        try:
+            code = (Path(root) / row["path"]).read_text(encoding="utf-8")
+        except OSError:
+            return []  # a program that cannot be read for THE EVENT HOLD takes no incubator lot
+        if held_by_events(code) is not None:
+            return []  # THE EVENT HOLD (A25 R1): no incubator lot for a program that reads a flag past its table
         params = loads(row["params"], {}) or {}
         sha = run_sha({"sha": row["sha"], "params": params})
         # THE READER'S BELT's rows, kept for good (no adoption clears them): the gate refused a version of this PROGRAM
