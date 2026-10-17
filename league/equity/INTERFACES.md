@@ -1437,8 +1437,10 @@ at 0.10 x E.
   pool, `_panel_seat_count` for the panel's, the lower of the row and `families.panel_seats()`) and its plan
   (`_pool_plan`, `_put_plan`: the ETF pool's is `eq_seat` itself, to the key; the panel pool's is its key
   `SEAT_PANEL` "panel", written only once a panel row was ever seen). `_held_seats(pool, rows)`: the panel pool's
-  alive instances with no row in the read keep their seats (the plan's `held_seats`). A seat record of the panel
-  pool carries `pool` "panel"; an ETF one is main's. The day's line of the panel pool is `out["panel_seats"]`.
+  alive instances with no row in the read keep their seats (the plan's `held_seats`); in the ETF pool (release 1023a,
+  THE EVENT HOLD) the alive instances of the book's kind with no row whose `families.standing` is `HELD` do. A seat
+  record of the panel pool carries `pool` "panel"; an ETF one is main's. The day's line of the panel pool is
+  `out["panel_seats"]`.
 - **The swarm** (league/swarm/bands.py): `equity_seating(fams, seats, *, seatable, panel_seats=0)` seats a pool at
   a time; `panel_pool_seats(root)` is the lower of the row and `elane_xs.panel_seats(root)` (`elane.panel.seats`,
   0 to 2, default 2: it may only lower the row); `roster` adds `panel_seats`. league/equity/families.py:

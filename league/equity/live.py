@@ -2425,7 +2425,9 @@ class EquityBook:
         `_seat_block` holds every entry at the send) AND ITS EXITS GO ON (it is still asked at every close: its
         program's sells, its ineligible lots, max hold and the failed-decides rule). Nothing is retired and nothing is
         sold on a failed leg: only the captain's switch demotes. The owner is told once a decision day, critically,
-        with the leg named, and the sync is done.
+        with the leg named, and the sync is done. THE EVENT HOLD (release 1023a, the captain's A25 R1) is a HELD of any
+        equity family (`bands.equity_seat_withdrawn`: its program reads a flag whose table ends before today), read the
+        same way; and in either pool a held holder keeps its seat (`_held_seats`), so nobody is seated into it.
 
         `late` (THE SEATING PASS, `_seat_step`): only a Candidate moves (to Probe, when it holds a free seat) and only a
         new instance is made, of a family none of whose versions runs. No demotion, no sizing up, no update of a
@@ -2577,7 +2579,8 @@ class EquityBook:
             out["seats_held"] = f"{'; '.join(held)}: opens stop, exits go on, nothing retired"
             if self._held_day != day:
                 self._held_day = day
-                self.alert("error", f"equity: {'; '.join(held)}: its lane is not ready, so it OPENS NOTHING; it keeps "
+                self.alert("error", f"equity: {'; '.join(held)}: its lane is not ready or THE EVENT HOLD holds it (the "
+                                    "reason named), so it OPENS NOTHING; it keeps "
                                     "its lots, its exits and the House's exit rules go on, and nothing was retired or "
                                     "sold on it (only the captain's switch demotes)")
         if unconfirmed:
@@ -2625,10 +2628,23 @@ class EquityBook:
         whose family has no row in this read (its lane holds its opens: `families.HELD`, or a read that showed it
         nothing). Each keeps its seat, so nobody is seated into it, before or after the leg recovers (every leg of the
         panel lane is the lane's: while one fails no panel row exists at all, and when it recovers the holder's row is
-        back). The ETF pool counts its rows alone, as main's rule did: []."""
-        if pool == POOL_ETF:
-            return []
+        back).
+
+        THE ETF POOL (release 1023a, the review's finding 1): its rows, as main's rule counted them, AND every alive
+        instance of the book's own kind whose family has no row in this read while the store's own word on it is
+        `families.HELD` (`_standing`: THE EVENT HOLD, the captain's A25 R1, gives a held Probe or Sized program no row
+        and the store says "held"). Its opens stop and its exits go on; it keeps its seat, so the pool never counts it
+        free and never seats a waiting Candidate into it (`equity_money.probe.max_programs` holds), and when the hold
+        lifts its row is back in the seat it never left. A held holder keeps its seat flat or not: with no row it is in
+        no seat plan, so it is never asked to yield (the review's finding 6, decided in writing for this release). Any
+        other alive instance with no row (a store that says "retired", "demoted", "live" or "unknown") is counted as
+        main counted it: not here."""
         shown = {str(r["family"]) for r in rows}
+        if pool == POOL_ETF:
+            from .families import HELD
+
+            return sorted({i.family for i in self._instances(alive=True)
+                           if i.kind == EQUITY_KIND and i.family not in shown and self._standing(i)[0] == HELD})
         return sorted({i.family for i in self._instances(alive=True) if i.kind != EQUITY_KIND and i.family not in shown})
 
     def _pool_of_key(self, key: str) -> str:

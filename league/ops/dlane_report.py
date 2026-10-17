@@ -1247,6 +1247,10 @@ def equity_seats(root: str | Path | None, book: Mapping[str, Any], seeded: Itera
                              for x in plan.get("left_out") or [] if isinstance(x, Mapping)]
                    if isinstance(plan.get("left_out"), list) else [],
                    last_change=dict(plan["last"]) if isinstance(plan.get("last"), Mapping) else None)
+        if plan.get("held_seats"):
+            # THE EVENT HOLD (release 1023a): ETF programs that keep a seat with no row (opens stopped, exits on,
+            # nobody seated into it); said beside the holders, which name only the programs with a row.
+            out["held_seats"] = sorted(str(f) for f in plan.get("held_seats") or [])
         if isinstance(plan.get("waiting"), list):
             out["waiting"] = [{"family": str(w.get("family")), "rank": _int(w.get("rank")),
                                "seeded": bool(w.get("seeded")) or str(w.get("family")) in seeded,

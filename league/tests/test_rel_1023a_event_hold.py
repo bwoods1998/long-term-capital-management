@@ -488,3 +488,131 @@ class TheStallJobOwesAHeldFamilyNothing(stall_tests.Base):
         validations = self.check("validations")
         self.assertFalse(validations["stalled"])
         self.assertEqual(validations["numbers"]["owed_validation"], 0)
+
+
+# ============================================================================================ the review's finding 1
+class TheHeldEtfHolderKeepsItsSeat(unittest.TestCase):
+    """THE EVENT HOLD AT AN ETF SEAT (the review's finding 1, release 1023a): an event-held ETF program at Probe has no
+    row (`bands.read`) and the store says `HELD`; the EquityBook keeps its instance and its lots AND ITS SEAT
+    (league/equity/live.py `_held_seats`), so the pool never counts it free, never seats a waiting Candidate into it and
+    never holds more than `equity_money.probe.max_programs` live programs; under the seat rule in force and under the
+    rollback "first-come" alike. When the hold lifts, the held program's row is back in the seat it never left."""
+
+    HELD_WHY = "THE EVENT HOLD (A25 R1): its program reads cpi, whose table (league/gym/events.py) ends 2026-09-11"
+
+    def setUp(self):
+        from league.tests import equity_week as W
+
+        self.W = W
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+
+    def decide(self, house, day) -> None:
+        house.tick(day, 16, 21)
+        house.tick(day, 16, 31)
+
+    def alive(self, house) -> list[str]:
+        from league.equity.live import EQUITY_KIND
+
+        return sorted(i.family for i in house.book._instances(alive=True) if i.kind == EQUITY_KIND)
+
+    def cap(self) -> int:
+        from league.live import money as M
+
+        return int(M.Table.from_constitution().equity.probe_max_programs)
+
+    def test_a_held_holder_never_frees_its_seat(self):
+        from league.tests.equity_design import seat_rule
+
+        W = self.W
+        for rule in ("activity-1-free", "first-come"):
+            with self.subTest(rule=rule), seat_rule(rule):
+                house = W.House(self.tmp / rule, W.ranked_programs(1))
+                self.addCleanup(house.close)
+                W.invented_week(house.market, through=W.FORTNIGHT_END)
+                self.decide(house, W.FRIDAY)
+                seated = sorted(r["family"] for r in W.ranked_programs(0))
+                self.assertEqual(self.alive(house), seated)
+                self.assertEqual(self.cap(), 6)
+                house.families.held["bred-a-hold3"] = self.HELD_WHY
+                for day in (W.MONDAY, W.TUESDAY):
+                    for hh, mm in ((8, 31), (16, 21), (16, 31), (17, 1), (18, 1)):   # the seating pass every minute
+                        house.tick(day, hh, mm)
+                        alive = self.alive(house)
+                        self.assertLessEqual(len(alive), self.cap(), f"{day} {hh}:{mm}: the pool never exceeds its seats")
+                        self.assertIn("bred-a-hold3", alive, "nothing is retired on the hold")
+                        self.assertNotIn("bred-e-wait", alive, "nobody is seated into the held seat")
+                    inst = house.book._instance("bred-a-hold3@1:r")
+                    self.assertIsNone(inst.retired_at)
+                    if rule != "first-come":
+                        plan = house.book.seats()
+                        self.assertEqual(plan["held_seats"], ["bred-a-hold3"])
+                        self.assertEqual(plan["seats"], 6, "the plan says the pool's seats, the held one among them")
+                        self.assertEqual([w["family"] for w in plan["waiting"]], ["bred-e-wait"])
+                        self.assertNotIn("bred-a-hold3", [h["family"] for h in plan["holders"]],
+                                         "a held holder is in no seat plan, so it is never asked to yield")
+                    self.assertTrue(any("seats_held" in out and "bred-a-hold3" in out["seats_held"]
+                                        for _, out in house.ticks), "said: opens stop, exits go on")
+                house.families.held.clear()                                            # the hold lifts
+                day = W.sessions_from(W.TUESDAY, 2)[1]
+                house.tick(day, 8, 31)
+                self.decide(house, day)
+                self.assertEqual(self.alive(house), seated, "its row is back in the seat it never left")
+                if rule != "first-come":
+                    plan = house.book.seats()
+                    self.assertNotIn("held_seats", plan)
+                    self.assertIn("bred-a-hold3", [h["family"] for h in plan["holders"]])
+
+    def test_only_a_held_word_keeps_a_seat_with_no_row(self):
+        """Any other alive ETF instance with no row is counted as main counted it (`_held_seats` names none)."""
+        from league.equity.live import POOL_ETF
+
+        W = self.W
+        house = W.House(self.tmp / "h", W.ranked_programs(0))
+        self.addCleanup(house.close)
+        W.invented_week(house.market, through=W.FORTNIGHT_END)
+        self.decide(house, W.FRIDAY)
+        rows = house.families.read()
+        self.assertEqual(house.book._held_seats(POOL_ETF, rows), [])
+        house.families.hidden.add("bred-a-hold3")                          # no row; the store says "live"
+        rows = house.families.read()
+        self.assertEqual(house.book._held_seats(POOL_ETF, rows), [])
+        house.families.hidden.clear()
+        house.families.held["bred-a-hold3"] = self.HELD_WHY
+        rows = house.families.read()
+        self.assertEqual(house.book._held_seats(POOL_ETF, rows), ["bred-a-hold3"])
+
+    def test_the_real_reader_keeps_the_seat_held(self):
+        """THE REAL READER (`EquityFamilies` over a `SwarmStore`): a seated program whose banded version reads cpi is
+        seated while the table covers today and held once it does not: no row, `standing` HELD, the seat kept."""
+        W = self.W
+        reader = W.HOLD3.replace("    if ctx.positions or ctx.orders:\n",
+                                 "    if ctx.events.get(\"cpi\"):\n        return []\n"
+                                 "    if ctx.positions or ctx.orders:\n")
+        self.assertEqual(reads(reader), frozenset({"cpi"}))
+        rows = W.ranked_programs(1)
+        rows[0] = {**rows[0], "code": reader}
+        self.assertEqual(rows[0]["family"], "bred-a-hold3")
+        today = {"day": SEPT_1}
+        with mock.patch.object(event_hold, "today_utc", side_effect=lambda now=None: today["day"]):
+            house = W.House(self.tmp / "store", rows, reader="store")
+            self.addCleanup(house.close)
+            W.invented_week(house.market, through=W.FORTNIGHT_END)
+            self.decide(house, W.FRIDAY)
+            seated = sorted(r["family"] for r in W.ranked_programs(0))
+            self.assertEqual(self.alive(house), seated)
+            today["day"] = OCT_16                                                # past cpi's last row
+            self.assertNotIn("bred-a-hold3", [r["family"] for r in house.families.read()], "no row")
+            from league.equity.families import HELD
+
+            self.assertEqual(house.families.standing("bred-a-hold3", 1)[0], HELD)
+            for day in (W.MONDAY, W.TUESDAY):
+                house.tick(day, 8, 31)
+                self.decide(house, day)
+                house.tick(day, 17, 1)
+                alive = self.alive(house)
+                self.assertLessEqual(len(alive), 6)
+                self.assertIn("bred-a-hold3", alive)
+                self.assertNotIn("bred-e-wait", alive)
+            self.assertEqual(house.book.seats().get("held_seats"), ["bred-a-hold3"])

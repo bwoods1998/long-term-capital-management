@@ -129,8 +129,9 @@ held Candidate takes no roster seat (`seating`'s queue and `equity_seating`'s po
 lists it seatless with the hold's words, both rosters under `event_held`). A held program already at Probe or Sized
 keeps its seat and its lots (A50a (4): a holder is never displaced, so no close is manufactured): with no row its
 OPENS STOP AND ITS EXITS GO ON (an options instance runs on exits only; the EquityBook reads `equity_seat_withdrawn`
-"held"). Nothing is retired or sold on it, no id moves, and the hold lifts by itself once a calendar release covers
-the windows. `observe` (shadow only, never real) is unchanged.
+"held" and counts the seat held, league/equity/live.py `_held_seats`, so it seats nobody into it). Nothing is retired
+or sold on it, no id moves, and the hold lifts by itself once a calendar release covers the windows. `observe` (shadow
+only, never real) is unchanged.
 
 `read(root, family=f)` and `observe(root, family=f)` read one family only (the live path's per-minute admissions). The
 Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once per call (it reads and hashes every file
@@ -949,7 +950,8 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
         if held_by_events(code) is not None:
             # THE EVENT HOLD (A25 R1): no row. A held Candidate is seatless (above); a held program at Probe or Sized
             # keeps its seat and its lots, and the book, asking the store (`equity_seat_withdrawn`: "held"), stops its
-            # opens and lets its exits go on: nothing is retired or sold on the hold
+            # opens and lets its exits go on, and counts its seat held (league/equity/live.py `_held_seats`): nothing is
+            # retired or sold on the hold, and nobody is seated into it
             continue
         state, spec = fam["state"], fam["spec"]
         params = loads(v["params"], {}) or {}
