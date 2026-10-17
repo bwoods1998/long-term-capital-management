@@ -430,7 +430,14 @@ class WhatAgentsRead(Case):
         self.assertIn("DIRECTION OBJECTIVE (direction-v2), version 1", status)
         self.assertIn(dlane.ALWAYS_IN_NOTE, status)
         self.assertIn("the same exposure held every session", status, "beside it: the buy-and-hold of its exposure")
-        for name, text in (("brief", brief), ("status", status), ("lane", json.dumps(view["lane"])),
+        # The brief names no Validation or holdout year; the one exception is THE CALENDAR SENTENCE (release 1023a), which
+        # says where each event table ends in the tables' own dates (league/swarm/event_hold.py), as the equity births'
+        # request and Train briefs do.
+        from league.swarm import event_hold
+
+        calendar = event_hold.calendar_text()
+        self.assertIn(calendar, brief)
+        for name, text in (("brief", brief.replace(calendar, "")), ("status", status), ("lane", json.dumps(view["lane"])),
                            ("train_score", json.dumps(view["train_score"]))):
             self.assertIsNone(LEAK.search(text), f"{name}: {LEAK.search(text)}")
         self.assertEqual(sorted(view["lane"]["years"]), ["2022", "2023", "2024"])

@@ -82,7 +82,8 @@ is on branches.
   with the real store reader; the guard and truth-test readings; the options request, brief and status); the 1017r
   session-ask test and three "no 2025/2026 in the request" checks follow the new words (the calendar sentence alone is
   exempt); the D lane's golden texts (`test_dlane_trainmap`, main d70e00c3's switch-off request and briefs) take the
-  calendar sentence out, the one text the options request and brief now carry in every lane mode.
+  calendar sentence out, the one text the options request and brief now carry in every lane mode, and the D lane's
+  no-hidden-year check of the brief (`test_swarm_researcher_dlane`) exempts it as the equity checks do.
 - **Rollback:** the release before; nothing is migrated.
 
 ### Release 1017r: the owner's new Done (A50), the ETF Probe sleeve 0.25 x E (A51) and the births' one-session ask, on `rel/1017r` (unreleased; one House deploy by the captain, never 12:55-20:05Z on a trading day and never inside an entry window; live before Mon Oct 19 13:30Z; THE MONEY DIGEST MOVES `cfcc94b1` -> `5ea6f99f` and the constitution `60796aed` -> `82a9a5a4` (A51's row alone), the standing grant re-ratifies at start; the options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move)

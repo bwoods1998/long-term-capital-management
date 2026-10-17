@@ -92,7 +92,9 @@ or the constitution changes; `league/gym/events.py` is read, never written) and 
     held seat goes idle: a FLAT held holder gives up its seat (options: back to Candidate; ETF: through the idle-yield
     rule) while a holder with lots keeps it; league/live/ is an identity, so the options half is a release of its own.
   - **A held options family is told (the review's finding 3).** The options architect's births request carries the
-    calendar sentence after the input card, and every options researcher's brief carries it. While the version the
+    calendar sentence after the input card, and every options researcher's brief carries it (as in the equity
+    request, it is the one text there that names a 2026 date: the tables' own last rows; a held family's status names
+    the same dates in the hold's words). While the version the
     tournament validates next reads a held flag, the researcher's STATUS says so at the Validation stage (the hold's
     words, the tables' own dates) in place of THE VALIDATION WAIT's "awaits validation: retire is offered once
     validated", and the wait no longer protects it (`Researcher.event_held`; `can_retire` and `retire_wait`): it may
