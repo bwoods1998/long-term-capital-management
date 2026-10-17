@@ -1,7 +1,9 @@
 """THE ONE-SESSION ASK (goal item 1, Oct 16, 2026; league/swarm/elane_births.py `SESSION_ASK`, `EquityQuota.session_ask`
 and `text`): THE EQUITY QUOTA's lines say the floor is short of programs that close every session and ask, softly, for
 mechanisms that hold one session (a close-to-open overnight hold of an index ETF, or another 1-session hold) in cells no
-row binds and not CLOSED. Words only, as L2's index-only ask: a preference, not a rule; no edge claimed; the same Train
+row binds and not CLOSED. RELEASE 1023a (T1): the overnight index hold reads as calendar_flow / days_1_3, a cell rows
+bind for the index ETFs, so the ask says that it needs a valid card.rebirth there (by the cell's own binding as the
+request reads it: league/tests/test_rel_1023a_births.py holds the bound form), and keeps "or another 1-session hold". Words only, as L2's index-only ask: a preference, not a rule; no edge claimed; the same Train
 bar and route by symbols; no place reserved and no admission, quota, seat, screen or bar changed; within its size
 budget (`SESSION_ASK_CHARS`). And the engine answer: a bred program can hold one session close-to-open today (a buy "at"
 "close", then the lot sold "at" "open" by the next decide, or NEEDS max_hold_sessions 1), as seed-overnight-qqq does.
@@ -20,13 +22,20 @@ from league.equity import engine, synth
 from league.equity.program import load_program
 from league.equity.store import EquityStore
 from league.swarm import elane_births, elane_train
-from league.swarm.elane_births import SESSION_ASK, SESSION_ASK_CHARS, EquityPass, EquityQuota
+from league.swarm.elane_births import (OVERNIGHT, OVERNIGHT_PLAIN, SESSION_ASK, SESSION_ASK_CHARS, EquityPass,
+                                       EquityQuota, bound_cells, overnight_bound)
 from league.tests import elane_e2_fakes as fx
 from league.tests import test_elane_route_text as rt
 from league.tests.test_equity_engine import gym_sizing
 
-INDEX_FORM = SESSION_ASK.format(of_index=" of an index ETF")
-PLAIN_FORM = SESSION_ASK.format(of_index="")
+#: The ask as the quota says it with no binding read (`EquityQuota.session_ask()`: the rule in words), as a request says
+#: it where no row binds the overnight cell, as it says it where rows bind it, and with no index ETF open.
+INDEX_FORM = SESSION_ASK.format(overnight=OVERNIGHT["unknown"])
+OPEN_FORM = SESSION_ASK.format(overnight=OVERNIGHT["open"])
+BOUND_FORMS = [SESSION_ASK.format(overnight=OVERNIGHT["bound"].format(lanes=lanes))
+               for lanes in ("in both lanes", "in the beta lane", "in the equity lane")]
+PLAIN_FORM = SESSION_ASK.format(overnight=OVERNIGHT_PLAIN)
+ALL_FORMS = [INDEX_FORM, OPEN_FORM, *BOUND_FORMS, PLAIN_FORM]
 
 
 class Case(rt.Case):
@@ -45,18 +54,18 @@ class TheAskIsSaid(Case):
         for words in ("ONE-SESSION HOLDS (a soft ask: a preference, not a rule)",
                       "the floor is short of programs that CLOSE EVERY SESSION",
                       "In a cell no row binds and not CLOSED",
-                      "prefer a mechanism that holds one session",
-                      "a close-to-open overnight hold of an index ETF", "buy \"at\": \"close\"",
+                      "prefer a 1-session hold",
+                      "An overnight index hold reads as calendar_flow / days_1_3", "buy \"at\": \"close\"",
                       "sell the lot \"at\": \"open\" at the next decide", "NEEDS max_hold_sessions 1",
-                      "or another 1-session hold", "No edge is claimed for them",
-                      "every proposal is still judged by the same Train bar, then the same Validation try and sealed "
-                      "look, or forward screen, as any program of its symbols (THE ROUTE BY SYMBOLS)",
-                      "THE RATION still holds"):
+                      "it needs a valid card.rebirth naming one of its rows",
+                      "or propose another 1-session hold", "No edge is claimed",
+                      "the same Train bar, THE ROUTE BY SYMBOLS and THE RATION hold as for any program"):
             self.assertIn(words, flat, words)
 
     def test_the_request_carries_it_once_and_the_system_prompt_not(self):
         system, user = EquityPass(self.arch).request(EquityQuota(self.store, self.settings, now=self.clock()))
-        self.assertEqual(user.count(INDEX_FORM), 1)
+        self.assertEqual(user.count(OPEN_FORM), 1, "no row binds the overnight cell here: the ask as 1017r said it")
+        self.assertEqual(user.count("ONE-SESSION HOLDS"), 1)
         self.assertNotIn("ONE-SESSION HOLDS", system)
         # The blocks it names are in the request it is said in.
         for block in ("- THE ROUTE BY SYMBOLS", "- THE RATION", "THE TRAIN BAR", "- days_1_3: one to three sessions (a "
@@ -80,36 +89,39 @@ class TheAskIsSaid(Case):
         sectors["elane"]["universe"] = ["XLK", "XLF", "TLT"]
         q = self.quota(3, settings=sectors)
         self.assertEqual(q.session_ask(), PLAIN_FORM)
-        self.assertIn("a close-to-open overnight hold (buy", q.text())
+        self.assertEqual(q.session_ask(["beta", "equity"]), PLAIN_FORM, "no index ETF open: no index cell is named")
+        self.assertIn("A close-to-open overnight hold is one, or another 1-session hold.", q.text())
         self.assertNotIn("index ETF", q.session_ask())
         self.assertNotIn("SOFT ASK", q.text(), "L2's index-only ask stays off: \"A SOFT ASK\" is its name alone")
 
 
 class TheSizeBudget(Case):
     def test_both_forms_inside_the_budget(self):
-        for form in (INDEX_FORM, PLAIN_FORM):
+        for form in ALL_FORMS:
             self.assertLessEqual(len(form), SESSION_ASK_CHARS)
         self.assertLessEqual(SESSION_ASK_CHARS, 600, "a short ask: the budget is not raised to fit longer words")
 
     def test_the_request_grows_by_the_ask_alone(self):
         quota = EquityQuota(self.store, self.settings, now=self.clock())
         system, user = EquityPass(self.arch).request(quota)
+        form = quota.session_ask(overnight_bound(bound_cells(EquityPass(self.arch).rebirth_index())))
         with mock.patch.object(EquityQuota, "session_ask", return_value=""):
             before_system, before_user = EquityPass(self.arch).request(quota)
         self.assertEqual(system, before_system)
-        self.assertEqual(len(user) - len(before_user), len(INDEX_FORM) + 1)
-        self.assertEqual(user.replace(" " + INDEX_FORM, "", 1), before_user)
+        self.assertEqual(len(user) - len(before_user), len(form) + 1)
+        self.assertEqual(user.replace(" " + form, "", 1), before_user)
 
 
 class NoOutcomeWordNoNumber(Case):
     def test_no_outcome_word_no_pass_word_no_figure(self):
-        for form in (INDEX_FORM, PLAIN_FORM):
+        for form in ALL_FORMS:
             self.assertIsNone(rt.OUTCOME.search(form), rt.OUTCOME.search(form))
             self.assertIsNone(rt.PASS_WORD.search(form), "no pass word at all")
             for claim in rt.OLD_CLAIMS:
                 self.assertNotIn(claim, form)
-            # The only figures are the contract's (a 1-session hold, NEEDS max_hold_sessions 1): no count, rate or year.
-            self.assertEqual(re.findall(r"\d+", form), ["1", "1"], form)
+            # The only figures are the contract's (a 1-session hold, NEEDS max_hold_sessions 1) and the holding's own
+            # vocabulary word (days_1_3, T1): no count, rate or year.
+            self.assertEqual(set(re.findall(r"\d+", form.replace("days_1_3", ""))), {"1"}, form)
             for word in ("edge is", "profit", "earn", "beat", "seat", "close rate", "closes a session"):
                 self.assertNotIn(word, form.replace("No edge is claimed", ""), word)
 

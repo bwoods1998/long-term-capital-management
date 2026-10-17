@@ -54,7 +54,13 @@ THE BAR, equity-v1 (the design's section 6b on the Train years; `train_score`, t
 REPORTED BESIDE, NEVER A BAR: the same-exposure buy-and-hold over the same sessions (`bh.pnl`), the mean
 time-matched excess (MTE: `mte.mean`, `mte.t`) and the DRIFT SHARE (the buy-and-hold P&L over the program's, while
 the program's is above zero: near one, the program earned what holding its average exposure earned). Every number
-here is a Train figure. The bar's constants are rules (`BAR`), never a market result.
+here is a Train figure. The bar's constants are rules (`BAR`), never a market result. RELEASE 1023a (the edge hunt's
+T5, its small part): wherever an author reads MTE (`bar_text`, `version_text`) it is labelled SELECTION-ONLY AND
+TIMING-BLIND: it compares each lot with its own symbols over the same sessions, so a one-symbol program's MTE says
+nothing of timing skill. The Train map's drift-adjusted alpha column (the
+rest of T5) is not built: it needs each family's daily series over its own seen spans, a Newey-West t and a zero-skill
+reference, more than a words release carries. Each family's brief also carries THE CALENDAR SENTENCE beside its
+agenda (league/swarm/event_hold.py `calendar_text`: where each event table ends, and THE EVENT HOLD).
 
 THE RESTART CHECK (`restart_check`, `state_inputs`). E1's decider child keeps a loaded program instance across "decide"
 requests (the live path's hooks: `kind_load`, `kind(..., "decide", ...)`, `kind_drop`), so an instance's STATE lives
@@ -596,7 +602,9 @@ def bar_text() -> str:
             "since entry): ctx's history is adjusted as of each session and rounded, so the carried value drifts from "
             "what ctx gives now and the sizes differ; recompute it from ctx.bars at every call (a lot's own facts are "
             "in ctx.positions). Reported beside, never a bar: the same-exposure "
-            "buy-and-hold over the same sessions, the mean time-matched excess (MTE) and the drift share. The first "
+            "buy-and-hold over the same sessions, the mean time-matched excess (MTE: selection-only and timing-blind, "
+            "each lot against its own symbols over the same sessions, so it says nothing of timing skill) and the "
+            "drift share. The first "
             "version that passes spends its lineage's one route, set by its symbols (R-SEC): for an index-only program "
             "its ONE Validation try and ONE sealed look; for any other, the forward screen FWD1-R. No outcome of either "
             "is ever shown to anyone who writes programs.")
@@ -1381,8 +1389,9 @@ def version_text(n: Any, v: Mapping[str, Any]) -> str:
             f"{_t(s.get('exposure_mean'))}; at 1.5x: net P&L {_usd(v.get('pnl_15'))}.")
     years = "; ".join(f"{y} {'IN' if r.get('active') else 'out'} lots {r.get('trades')} entry days {r.get('days_traded')} "
                       f"P&L {_usd(r.get('pnl'))} t {_t(r.get('t'))}" for y, r in sorted((v.get("years") or {}).items()))
-    beside = (f"Beside (never a bar): the same-exposure buy-and-hold {_usd(side.get('bh_pnl'))}, MTE mean "
-              f"{_t(side.get('mte_mean'))} (t {_t(side.get('mte_t'))}), drift share {_t(side.get('drift_share'))}.")
+    beside = (f"Beside (never a bar): the same-exposure buy-and-hold {_usd(side.get('bh_pnl'))}, MTE (selection-only, "
+              f"timing-blind) mean {_t(side.get('mte_mean'))} (t {_t(side.get('mte_t'))}), drift share "
+              f"{_t(side.get('drift_share'))}.")
     words = " ".join(f"({f}) {FAILS[f]}." for f in fails if f in FAILS and f != "REVIEW")
     review = v.get("review") if isinstance(v.get("review"), Mapping) else {}
     said = "; ".join(str(r) for r in (review.get("reasons") or [])[:3])
@@ -1686,6 +1695,13 @@ class EquityResearcher:
                  + (f" ({elane.BETA_NOTE})" if lane == BETA else "") + f". Symbols: {', '.join(facts['symbols'])}; "
                  f"structure {facts['structure']}. Mechanism: {facts['mechanism']}",
                  f"ITS AGENDA MECHANISM: {agenda['title']}: {agenda['text']}. Published priors: {agenda['priors']}."]
+        # THE CALENDAR SENTENCE (release 1023a; league/swarm/event_hold.py `calendar_text`): where each event table
+        # ends, and THE EVENT HOLD, beside the agenda as the births request says it.
+        from . import event_hold
+
+        calendar = event_hold.calendar_text()
+        if calendar:
+            lines.append(calendar)
         for name in ("hypothesis", "comparison", "falsification"):
             if card.get(name):
                 lines.append(f"CARD {name.upper()}: {card[name]}")

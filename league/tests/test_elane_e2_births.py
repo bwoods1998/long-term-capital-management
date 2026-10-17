@@ -106,7 +106,12 @@ class TheRequest(BirthCase):
         self.assertIn("earnings_drift: post-earnings drift", user)
         self.assertIn("REFUSED until its data exist", user)
         self.assertNotIn("STRUCTURE FAMILIES", user, "the options structure groups are not the equity cards' words")
-        self.assertNotRegex(user, r"\b202[56]\b")
+        # The request names no Validation or holdout year; the one exception is THE CALENDAR SENTENCE (release 1023a),
+        # which says where each event table ends, in the tables' own dates (league/swarm/event_hold.py).
+        from league.swarm import event_hold
+
+        self.assertIn(event_hold.calendar_text(), user)
+        self.assertNotRegex(user.replace(event_hold.calendar_text(), ""), r"\b202[56]\b")
 
     def test_the_card_vocabulary_is_the_equity_cards_own(self):
         """Finding 9 of the adversarial review: the equity architect was shown the options inputs, the minute of the day

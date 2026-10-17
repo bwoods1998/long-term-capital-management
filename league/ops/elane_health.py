@@ -134,6 +134,16 @@ THE REPORT (`report`, `text`; `python3 -m league.ops.elane_health --state DIR [-
 operator on the box: the four checks, the funnel, and each family's versions (the fail codes, a disqualification's
 class and line) and refusals (the rule and its sentence in closed words).
 
+THE BIRTHS YIELD (release 1023a; the edge hunt's T4 and K1, Oct 16, 2026): AN INFO LINE, NOT A CAUSE (`births_yield`,
+the report's `info`, one line of `text`). What the equity passes of the report's hours bore for what they asked: the
+passes that asked a model, the families born and the births a pass, the proposals and the refusals, those the quota
+refused after the pass's places were born, the share-program places asked against the panel places the quota held
+(and the panel births), the births a pass by how many share-program places a pass had (0, 1-3, 4 or more: the way the
+panel reservation starved equity births showed, K1), and which claim field the proposals filled (release 1023a's
+`claim_fields`: card.rebirth, differs_from, both, neither). It stands for nothing, mails nothing, names no owner step
+and has no lever (`BIRTH_LEVERS` holds none for it), and the Done reader (league/ops/dlane_report.py) never reads it:
+the births' own counts, for an operator choosing a setting.
+
 Standard library only at import; the swarm's own readers (`elane`, `elane_births`, `elane_yield`, the architect and
 the loop for whether E2's rounds are there; `elane_train` for the contract's sentence of an error class; the code's
 universe) are imported inside the functions that need them, and a failure there is "Not judged" with its error and an
@@ -1961,6 +1971,68 @@ def research_counts(db: Any, start: float, end: float) -> dict[str, Any]:
                           "total": round(math.fsum(v for values in usd.values() for v in values), 2)}}
 
 
+#: THE BIRTHS YIELD's buckets of share-program places a pass (the module docstring): (label, least, most or None).
+YIELD_PLACES = (("0", 0, 0), ("1-3", 1, 3), ("4+", 4, None))
+#: THE BIRTHS YIELD's claim-field counts (league/swarm/elane_births.py `claim_fields`; a test holds the keys equal).
+YIELD_CLAIMS = ("rebirth", "differs_from", "both", "neither")
+
+
+def births_yield(db: Any, start: float, end: float) -> dict[str, Any]:
+    """THE BIRTHS YIELD in `[start, end)` (the module docstring: AN INFO LINE, NOT A CAUSE), from the equity passes'
+    own events (`swarm.elane` pass "births"): {passes (asked a model), born, per_pass, proposed, refused, quota_refused,
+    share_places, panel_places, panel_born, by_share_places {bucket: {passes, born}}, claims {rebirth, differs_from,
+    both, neither} (None until a pass logged them), line}. Counts only."""
+    w = _window(db, start, end)
+    out: dict[str, Any] = {"passes": 0, "born": 0, "proposed": 0, "refused": 0, "quota_refused": 0, "share_places": 0,
+                           "panel_places": 0, "panel_born": 0,
+                           "by_share_places": {label: {"passes": 0, "born": 0} for label, _, _ in YIELD_PLACES}}
+    claims: dict[str, int] | None = None
+    for _, payload in w["passes"]:
+        row = pass_read(payload)
+        if not row["asked"]:
+            continue
+        out["passes"] += 1
+        out["born"] += row["born"]
+        out["proposed"] += row["proposed"]
+        out["refused"] += row["refused"]
+        by_quota = payload.get("equity_refused_by_quota")
+        out["quota_refused"] += (_count(by_quota) if by_quota is not None
+                                 else sum(1 for why in row["items"] if refusal_class(why) == "quota"))
+        panel = payload.get("panel") if isinstance(payload.get("panel"), Mapping) else {}
+        held = _count(panel.get("want"))
+        places = max(0, row["want"] - held)
+        out["panel_places"] += held
+        out["panel_born"] += _count(panel.get("born"))
+        out["share_places"] += places
+        label = next(lab for lab, least, most in YIELD_PLACES if places >= least and (most is None or places <= most))
+        out["by_share_places"][label]["passes"] += 1
+        out["by_share_places"][label]["born"] += row["born"]
+        logged = payload.get("claim_fields") if isinstance(payload.get("claim_fields"), Mapping) else None
+        counts = logged.get("counts") if logged and isinstance(logged.get("counts"), Mapping) else None
+        if counts is not None:
+            claims = claims or {k: 0 for k in YIELD_CLAIMS}
+            for k in YIELD_CLAIMS:
+                claims[k] += _count(counts.get(k))
+    out["per_pass"] = round(out["born"] / out["passes"], 2) if out["passes"] else None
+    out["claims"] = claims
+    hours = max(0.0, (end - start) / 3600.0)
+    if not out["passes"]:
+        line = f"no equity pass asked a model in the last {hours:g} h"
+    else:
+        buckets = "; ".join(f"{label} places {b['passes']} passes {b['born']} born"
+                            for label, b in out["by_share_places"].items() if b["passes"])
+        line = (f"{out['passes']} equity passes asked a model in the last {hours:g} h and bore {out['born']} families "
+                f"({out['per_pass']:g} a pass) from {out['proposed']} proposals; {out['refused']} refused, "
+                f"{out['quota_refused']} by the quota once the pass's places were born; share-program places asked "
+                f"{out['share_places']}, panel places held {out['panel_places']} (panel births {out['panel_born']}); "
+                f"by share-program places a pass: {buckets}")
+        if claims is not None:
+            line += (f"; proposals filling card.rebirth {claims['rebirth']}, differs_from {claims['differs_from']}, "
+                     f"both {claims['both']}, neither {claims['neither']}")
+    out["line"] = f"INFO, THE BIRTHS YIELD (not a cause, no owner step): {line}."
+    return out
+
+
 def research(db: Any, start: float, end: float) -> dict[str, Any]:
     """`research_counts` for the funnel (league/ops/funnel.py `swarm_counts`): a read that fails is {"error": ...} and
     no count (unread is never zero), never the failure of the rest of the funnel."""
@@ -2038,10 +2110,15 @@ def report(root: str | Path, *, now: float, hours: float = FUNNEL_HOURS,
     if switched_off(ctx):
         on, why = False, f"switched off (ops.json stall.{SWITCH} is false)"
 
-    def read(db: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        return research(db, now - hours * 3600.0, now), e2_families(db)
+    def read(db: Any) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+        try:
+            info = {"births_yield": births_yield(db, now - hours * 3600.0, now)}
+        except Exception as exc:  # noqa: BLE001 - an info line that cannot be read is said so, never a failed report
+            info = {"births_yield": {"error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                                     "line": "INFO, THE BIRTHS YIELD (not a cause, no owner step): could not be read."}}
+        return research(db, now - hours * 3600.0, now), e2_families(db), info
 
-    funnel, fams = guard.read(root / SWARM_DB, read)
+    funnel, fams, info = guard.read(root / SWARM_DB, read)
     families = []
     for fam in fams:
         versions = {}
@@ -2060,7 +2137,7 @@ def report(root: str | Path, *, now: float, hours: float = FUNNEL_HOURS,
     return {"at": S.iso(now), "judged": on, "why": why,
             "checks": {c: {k: v for k, v in found[c].items() if k not in ("onset", "examples", "mail", "parts", "keep")}
                        for c in CAUSES},
-            "funnel": {"hours": hours, **funnel}, "families": families}
+            "funnel": {"hours": hours, **funnel}, "info": info, "families": families}
 
 
 def text(doc: Mapping[str, Any]) -> str:
@@ -2078,6 +2155,9 @@ def text(doc: Mapping[str, Any]) -> str:
         figures = ", ".join(f"{k} {v}" for k, v in (check.get("numbers") or {}).items()
                             if v is not None and k not in ("judged", "examples", "hint"))
         lines += [f"  {figures}"] if figures else []
+    for name, item in (doc.get("info") or {}).items():  # THE BIRTHS YIELD (release 1023a): info, never a cause
+        if isinstance(item, Mapping) and item.get("line"):
+            lines += ["", str(item["line"])]
     funnel = doc.get("funnel") or {}
     lines += ["", f"The research funnel, last {funnel.get('hours'):g} h:" if _num(funnel.get("hours")) is not None
               else "The research funnel:"]
@@ -2117,7 +2197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = ["CAUSES", "SWITCH", "switched_off", "checks", "judge", "facts", "lanes", "heartbeat", "release_since", "mailed",
-           "warning", "research",
+           "warning", "research", "births_yield", "YIELD_PLACES", "YIELD_CLAIMS",
            "research_counts", "report", "text", "main", "dq_class", "dq_line", "refusal_class", "foreign_symbols",
            "rule_of", "sentences", "skip_kind", "step_read", "pass_read", "refusals_tally", "e2_families",
            "DQ_HOURS", "DQ_MIN_SCORED", "DQ_SHARE", "DQ_MIN_FAMILIES", "DQ_EARLY_FAULTED", "DQ_SHORT", "BIRTHS_HOURS",

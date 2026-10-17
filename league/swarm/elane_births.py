@@ -52,6 +52,24 @@ reads it. THE ENGINE holds such a lot for a bred program as for the seed seed-ov
 sell at the next open: league/equity/config.py `may_sell`), or NEEDS max_hold_sessions 1, which exits it at that open
 (`max_hold_due`). A same-session hold is not possible (`MIN_HOLD_SESSIONS`, in an identity file), so it is not asked.
 
+RELEASE 1023a, THE BIRTHS-TEXT FIXES (the edge hunt, Oct 16, 2026, Tier 3; built in the checkpoint-15 freeze; words and
+one event field only: no admission, quota, seat, screen, bar or graveyard code changes):
+- T1, THE OVERNIGHT CELL: a card whose mechanism text says overnight reads as calendar_flow / days_1_3 (cards.py
+  `infer_key`, whatever class it declares), and rows bind that cell for the index ETFs, so the one-session ask that
+  named "a close-to-open overnight hold of an index ETF" as a cell no row binds steered proposals into a bound cell.
+  The ask now says the cell and that such a card needs a valid card.rebirth, by the cell's own binding as the request
+  reads it (`overnight_bound`), and keeps "or another 1-session hold".
+- T2, THE CLAIM FIELD: the system prompt's card template carries `rebirth` {row, different, evidence} and says
+  differs_from alone admits nothing; THE EQUITY GRAVEYARD's header points at card.rebirth (evidence names the input
+  the row did not read, or cites a run id or a card_evidence seq, as `cards.RebirthIndex` checks it). The pass's
+  event logs which field each proposal filled (`claim_fields`: places and booleans only), so the claim that models
+  fill differs_from in place of card.rebirth is counted, not assumed.
+- T3, THE OPEN CELLS: a line per universe group naming every cell of the vocabulary no row binds (`open_cells_text`,
+  from the same binding as THE EQUITY BIRTH CELLS): rules only, no count, no Train figure, no word of the graveyard's
+  text reading.
+- THE CALENDAR SENTENCE in THE AGENDA (league/swarm/event_hold.py `calendar_text`): where each event table ends (cpi,
+  jobs, fomc), that the flag reads False after it until a calendar release, and THE EVENT HOLD.
+
 THE ADMISSION (`EquityPass.admit`). A proposal is born as an equity family when: its lane is "beta" or "equity"; its
 structure is in `elane.structures` (a beta card's is "etf"); its symbols (1-20) are in `elane.universe` and of its
 structure's class; its agenda is an available mechanism; its cell (lane x agenda x universe group) is not CLOSED; no
@@ -198,16 +216,35 @@ def due(store: Any, settings: Mapping[str, Any] | None, *, now: float | None = N
 #: that closes every session adds about one a session (seed-overnight-qqq, a close-to-open overnight hold, does), and
 #: most bred programs hold 2-8 sessions. A soft ask in words only, after THE INDEX-ONLY ASK, as L2 made it: no count, no
 #: seat or look word, no edge claimed; the Train bar, the route by symbols and THE RATION are said to be unchanged.
-#: `{of_index}` is " of an index ETF" while one is open (`EquityQuota.index_open`), else "". At most `SESSION_ASK_CHARS`
-#: (a test holds both forms under it). Its head says "a soft ask" in lower case: "A SOFT ASK" names THE INDEX-ONLY ASK
-#: alone (test_elane_route_text.py reads it so).
+#: `{overnight}` is `OVERNIGHT`'s sentence while an index ETF is open (`EquityQuota.index_open`), else "a close-to-open
+#: overnight hold". At most `SESSION_ASK_CHARS` (a test holds every form under it). Its head says "a soft ask" in lower
+#: case: "A SOFT ASK" names THE INDEX-ONLY ASK alone (test_elane_route_text.py reads it so).
+#: RELEASE 1023a, T1 (the edge hunt, Oct 16, 2026): the ask named "a close-to-open overnight hold of an index ETF" as a
+#: cell no row binds, but a card whose mechanism text says overnight reads as calendar_flow / days_1_3 (league/swarm/
+#: cards.py `infer_key`, whatever class it declares), and for the index ETFs that cell is bound (its rows: THE EQUITY
+#: BIRTH CELLS): the ask steered proposals into a bound cell with no claim. It now says so (`OVERNIGHT`, by the cell's
+#: own binding when the pass knows it: `overnight_bound`), keeps "or another 1-session hold", and still claims no edge.
 SESSION_ASK = ("ONE-SESSION HOLDS (a soft ask: a preference, not a rule): the floor is short of programs that "
-               "CLOSE EVERY SESSION. In a cell no row binds and not CLOSED, prefer a mechanism that holds one session: "
-               "a close-to-open overnight hold{of_index} (buy \"at\": \"close\", sell the lot \"at\": \"open\" at the "
-               "next decide, or NEEDS max_hold_sessions 1) or another 1-session hold. No edge is claimed for them: "
-               "every proposal is still judged by the same Train bar, then the same Validation try and sealed look, "
-               "or forward screen, as any program of its symbols (THE ROUTE BY SYMBOLS), and THE RATION still holds.")
+               "CLOSE EVERY SESSION. In a cell no row binds and not CLOSED, prefer a 1-session hold (buy \"at\": "
+               "\"close\", sell the lot \"at\": \"open\" at the next decide, or NEEDS max_hold_sessions 1). {overnight} "
+               "No edge is claimed: the same Train bar, THE ROUTE BY SYMBOLS and THE RATION hold as for any "
+               "program.")
 SESSION_ASK_CHARS = 600
+#: THE OVERNIGHT INDEX HOLD'S CELL (T1), by what the pass knows of its binding: "bound" (rows bind calendar_flow /
+#: <lane>:etf / days_1_3 for the index ETFs `{lanes}`), "unknown" (the request did not read the binding: the rule in
+#: words), "open" (no row binds it: the ask as 1017r said it). `OVERNIGHT_PLAIN` while no index ETF is open.
+OVERNIGHT = {
+    "bound": ("An overnight index hold reads as calendar_flow / days_1_3, bound for the index ETFs {lanes}: it needs a "
+              "valid card.rebirth naming one of that cell's rows (the birth cells block); or propose another 1-session "
+              "hold."),
+    "unknown": ("An overnight index hold reads as calendar_flow / days_1_3: where the birth cells block lists that cell "
+                "for the index ETFs it needs a valid card.rebirth naming one of its rows; or propose another 1-session "
+                "hold."),
+    "open": "A close-to-open overnight hold of an index ETF is one, or another 1-session hold.",
+}
+OVERNIGHT_PLAIN = "A close-to-open overnight hold is one, or another 1-session hold."
+#: The overnight hold's cell (`overnight_bound`): its class, holding and universe group.
+OVERNIGHT_CELL = ("calendar_flow", "days_1_3", "index")
 
 
 class EquityQuota:
@@ -304,16 +341,18 @@ class EquityQuota:
             return (0, 0)
         return (1, max(1, places // 2))
 
-    def session_ask(self) -> str:
+    def session_ask(self, bound: Sequence[str] | None = None) -> str:
         """THE ONE-SESSION ASK (`SESSION_ASK`): its sentence while on with any share-program place (its `want` less its
-        `panel` places), else "". A SOFT ask, as `index_ask`: no place, admission or count reads it."""
+        `panel` places), else "". A SOFT ask, as `index_ask`: no place, admission or count reads it. `bound` (T1,
+        release 1023a; `overnight_bound`): the lanes in which rows bind the overnight index hold's cell, [] when none
+        does, None when the request did not read the binding."""
         if not self.on or self.want - self.panel <= 0:
             return ""
-        return SESSION_ASK.format(of_index=" of an index ETF" if self.index_open else "")
+        return SESSION_ASK.format(overnight=overnight_words(bound) if self.index_open else OVERNIGHT_PLAIN)
 
-    def text(self) -> str:
+    def text(self, bound: Sequence[str] | None = None) -> str:
         """The request's quota lines ("" while off), with THE INDEX-ONLY ASK (`index_ask`) when it asks for any, then
-        THE ONE-SESSION ASK (`session_ask`) when it asks."""
+        THE ONE-SESSION ASK (`session_ask`, with `bound`) when it asks."""
         if not self.on:
             return ""
         total = sum(self.window.values())
@@ -335,8 +374,51 @@ class EquityQuota:
             out += (f" A SOFT ASK, no place reserved: {asked} (every symbol one of {_named(self.index_open)}: THE ROUTE "
                     "BY SYMBOLS) in cells no row binds and not CLOSED (the equity birth cells block lists the bound "
                     f"cells, most rows first; THE EQUITY GRAVEYARD lists the CLOSED ones){rest}.")
-        session = self.session_ask()
+        session = self.session_ask(bound)
         return f"{out} {session}" if session else out
+
+
+def overnight_words(bound: Sequence[str] | None) -> str:
+    """T1: the overnight index hold in `OVERNIGHT`'s words for what is known of its cell's binding (`bound`)."""
+    if bound is None:
+        return OVERNIGHT["unknown"]
+    lanes = [lane for lane in LANES if lane in set(bound)]
+    if not lanes:
+        return OVERNIGHT["open"]
+    said = "in both lanes" if len(lanes) == len(LANES) else f"in the {lanes[0]} lane"
+    return OVERNIGHT["bound"].format(lanes=said)
+
+
+def bound_cells(index: Any) -> set[tuple[str, str, str, str]] | None:
+    """THE CELLS THE EQUITY GRAVEYARD BINDS, by universe group (T1, T3: release 1023a): {(class, lane:structure,
+    holding, group)} for every equity row of `index` (`EquityPass.rebirth_index`), a row of a mixed group ("index+
+    sectors") binding each of its groups and a row with NO group (its symbols could not be read: it binds every card
+    of its cell, `cards.groups_meet`) binding every group of `elane_train.GROUPS`. Words and ids only, never a figure.
+    An empty set with no index (None: `architect.card_rebirth` "off", nothing binds); None when the binding could not
+    be read (False)."""
+    if index is False:
+        return None
+    if index is None:
+        return set()
+    out: set[tuple[str, str, str, str]] = set()
+    for r in getattr(index, "equity_rows", None) or []:
+        if not isinstance(r, Mapping) or not r.get("row"):
+            continue
+        key = r.get("key") if isinstance(r.get("key"), Mapping) else {}
+        cell = tuple(str(key.get(k) or "?") for k in ("class", "family", "holding"))
+        groups = [g for g in str(key.get("group") or "").split("+") if g] or list(elane_train.GROUPS)
+        for group in groups:
+            out.add((cell[0], cell[1], cell[2], group))
+    return out
+
+
+def overnight_bound(cells: set[tuple[str, str, str, str]] | None) -> list[str] | None:
+    """T1: the lanes in which rows bind the overnight index hold's cell (`OVERNIGHT_CELL`) for a structure "etf", in
+    `LANES` order; None when the binding could not be read."""
+    if cells is None:
+        return None
+    cls, holding, group = OVERNIGHT_CELL
+    return [lane for lane in LANES if (cls, f"{lane}:{eqconfig.ETF}", holding, group) in cells]
 
 
 # ----------------------------------------------------------------------------------------------------------- the text
@@ -370,13 +452,18 @@ far the run is ahead or behind is refused, whatever its spelling).
 Reply with ONE JSON object: {"families": [{"slug": "short-kebab-name", "lane": "beta or equity", "agenda": "<one key of
 THE AGENDA>", "mechanism": "one or two sentences: why it should make money and who pays", "structure": "etf", "symbols":
 ["SPY"], "rejection": "the Train result that would prove it wrong", "sketch": "how the program decides, in plain words",
-"parent": "an equity family id, only when continuing its idea", "differs_from": ["<an EQUITY GRAVEYARD id>"], "card":
-{"lane": "beta or equity", "structure": "etf", "symbols": ["SPY"], "hypothesis": "who pays and why the opportunity persists
-(60-600 characters), naming its published prior", "mechanism_class": "<one class of the vocabulary>", "inputs": ["<what
-the program conditions on>"], "holding": "<one bucket>", "cost": {"hurdle": <the round trip's half-spreads and fees as a
-fraction of the position, e.g. 0.0004>, "why": "how you estimated it"}, "comparison": "the naive baseline it must beat:
-the same symbols held on the same schedule without the signal's condition", "ablation": {"param": "signal_on", "off": 0},
-"falsification": "the concrete result that kills it"}, "program": "<the whole Python file under THE PROGRAM CONTRACT>"}]}.
+"parent": "an equity family id, only when continuing its idea", "differs_from": ["<an EQUITY GRAVEYARD id: a note
+only, it admits nothing>"], "card": {"lane": "beta or equity", "structure": "etf", "symbols": ["SPY"], "hypothesis": "who
+pays and why the opportunity persists (60-600 characters), naming its published prior", "mechanism_class": "<one class of
+the vocabulary>", "inputs": ["<what the program conditions on>"], "holding": "<one bucket>", "cost": {"hurdle": <the
+round trip's half-spreads and fees as a fraction of the position, e.g. 0.0004>, "why": "how you estimated it"},
+"comparison": "the naive baseline it must beat: the same symbols held on the same schedule without the signal's
+condition", "ablation": {"param": "signal_on", "off": 0}, "falsification": "the concrete result that kills it",
+"rebirth": {"row": "<only for a card in a cell the birth cells block lists: one of that cell's row ids>", "different": "the
+mechanism-level change", "evidence": "names the input the row did not read and what it shows, or cites a run id or a
+card_evidence seq"}}, "program": "<the whole Python file under THE PROGRAM CONTRACT>"}]}. A card in a bound cell is born
+only with a valid card.rebirth (an input the row did not read among its inputs); differs_from alone does not admit it.
+Omit "rebirth" in a cell no row binds.
 
 THE PROGRAM CONTRACT (league/equity/EQUITY.md):
 """.replace("<INDEX ETFS>", ", ".join(eqconfig.INDEX_ETFS)).replace("<FIRST>", str(FWD1_FIRST_SESSIONS))
@@ -496,6 +583,13 @@ def agenda_text(settings: Mapping[str, Any] | None = None) -> str:
     for key, row in AGENDA.items():
         lines.append(f"- {key}: {row['title']} ({row['lane']}): {row['text']}. Priors: {row['priors']}."
                      + ("" if row["available"] else " REFUSED until its data exist."))
+    # THE CALENDAR SENTENCE (release 1023a; league/swarm/event_hold.py `calendar_text`): where each event table ends,
+    # after the mechanisms and before the universe's own sentence (which stays the agenda's last line).
+    from . import event_hold
+
+    calendar = event_hold.calendar_text()
+    if calendar:
+        lines.append(calendar)
     if settings is not None:
         groups = {elane_train.symbols_group([sym]) for symbols in universe(settings).values() for sym in symbols}
         if "sectors" not in groups:
@@ -503,15 +597,32 @@ def agenda_text(settings: Mapping[str, Any] | None = None) -> str:
     return "\n".join(lines)
 
 
-def graveyard_text(store: Any, settings: Mapping[str, Any] | None) -> str:
-    """THE EQUITY GRAVEYARD that binds (E2's Train refutations, newest first, and the CLOSED cells); "" when empty."""
+#: THE EQUITY GRAVEYARD's header while no row binds (`architect.card_rebirth` "off": `graveyard_text(binds=False)`): the
+#: words before release 1023a, which claim no rebirth rule.
+GRAVEYARD_SOFT = ("THE EQUITY GRAVEYARD (families refuted on Train by the bar, newest first; a proposal near one names it "
+                  "in differs_from and says the mechanism-level difference; a new symbol or parameter of a refuted idea "
+                  "is not one; a row binds only the cards whose universe group, index, sectors or defensive, meets one it "
+                  "traded):")
+#: T2 (release 1023a): the header while the rows bind, pointing at card.rebirth (`cards.RebirthIndex.check` reads it,
+#: never differs_from).
+GRAVEYARD_BINDS = ("THE EQUITY GRAVEYARD (families refuted on Train by the bar, newest first; a row binds only the cards "
+                   "whose universe group, index, sectors or defensive, meets one it traded). A card in the cell of a row "
+                   "here (the birth cells block) is born only with a valid card.rebirth {\"row\", \"different\", "
+                   "\"evidence\"} naming one of that cell's rows: an input the row did not read among the card's inputs, "
+                   "the mechanism-level difference, and evidence that names that input and what it shows, or cites a run "
+                   "id or a card_evidence seq. differs_from alone does not admit it, and a new symbol or parameter of a "
+                   "refuted idea is no mechanism-level difference:")
+
+
+def graveyard_text(store: Any, settings: Mapping[str, Any] | None, *, binds: bool = True) -> str:
+    """THE EQUITY GRAVEYARD that binds (E2's Train refutations, newest first, and the CLOSED cells); "" when empty.
+    `binds` (T2, release 1023a): the rows bind (`EquityPass.rebirth_index` is not None): the header points at
+    card.rebirth (`GRAVEYARD_BINDS`); else the header claims no rebirth rule (`GRAVEYARD_SOFT`)."""
     rows = elane_train.refuted_rows(store)
     closed = elane_train.closed_cells(store, settings)
     if not rows and not closed:
         return ""
-    lines = ["THE EQUITY GRAVEYARD (families refuted on Train by the bar, newest first; a proposal near one names it in "
-             "differs_from and says the mechanism-level difference; a new symbol or parameter of a refuted idea is not "
-             "one; a row binds only the cards whose universe group, index, sectors or defensive, meets one it traded):"]
+    lines = [GRAVEYARD_BINDS if binds else GRAVEYARD_SOFT]
     for r in rows:
         lines.append(f"- {r['id']} ({r['lane']} / {r['agenda']} / {', '.join(r['symbols'])}): {r['mechanism']} "
                      f"Refuted on Train after {r['versions']} versions: {', '.join(r['codes']) or 'none scored'}.")
@@ -589,6 +700,65 @@ def cells_text(index: Any) -> str:
     left = len(lines) - len(kept)
     return "\n".join(kept + [f"- ({left} more bound cell{'' if left == 1 else 's'}, with fewer rows, not listed: a "
                              "refusal names its cell)"])
+
+
+#: THE OPEN CELLS (T3, release 1023a; the edge hunt, Oct 16, 2026): the request listed the cells rows bind (EQUITY BIRTH
+#: CELLS) and asked for "a cell no row binds" without naming one, so a model could only guess which were open. This
+#: line names them, per universe group, from the same binding (`bound_cells`, `EquityPass.rebirth_index`): every cell
+#: (mechanism class / lane:structure / holding) of the vocabulary that no row binds for that group. RULES ONLY: no count,
+#: no Train figure, no row id, never a word of the graveyard's text reading (the words a card's mechanism text is read
+#: by stay the House's: naming them would teach a card to slip past its cell).
+OPEN_CELLS_HEADER = ("OPEN CELLS (mechanism_class / lane:structure / holding, by universe group: no row of THE EQUITY "
+                     "GRAVEYARD binds these, so a card there needs no rebirth, unless its own mechanism text reads as a "
+                     "class whose cell is bound; THE EQUITY GRAVEYARD's CLOSED cells, by agenda, are still refused)")
+
+
+def _open_classes() -> list[str]:
+    """The mechanism classes an equity card may name (`vocabulary_text`'s), in its order."""
+    from . import cards, elane
+
+    classes = [k for k in getattr(cards, "MECHANISM_CLASSES", {}) if k in EQUITY_OPTION_CLASSES]
+    own = getattr(elane, "CLASSES", None)
+    classes += [k for k in (dict(own) if isinstance(own, Mapping) and own else EQUITY_CLASSES_FALLBACK) if k not in classes]
+    return classes
+
+
+def open_cells_text(cells: set[tuple[str, str, str, str]] | None, settings: Mapping[str, Any] | None) -> str:
+    """THE OPEN CELLS (above): one line a universe group `elane.universe` opens, each lane:structure with the classes
+    and holdings no row binds there. `cells`: `bound_cells` (None: the binding could not be read, and the admission
+    then refuses every birth: "" here). "" while the births are off."""
+    if cells is None or not births_on(settings):
+        return ""
+    classes = _open_classes()
+    groups: dict[str, list[str]] = {}
+    families: dict[str, list[str]] = {}
+    for structure, symbols in universe(settings).items():
+        for sym in symbols:
+            group = elane_train.symbols_group([sym])
+            groups.setdefault(group, [])
+            if sym not in groups[group]:
+                groups[group].append(sym)
+            for lane in LANES:
+                if lane == BETA and structure != eqconfig.ETF:
+                    continue  # a beta card trades ETFs only
+                family = f"{lane}:{structure}"
+                if family not in families.setdefault(group, []):
+                    families[group].append(family)
+    order = {group: i for i, group in enumerate(elane_train.GROUPS)}
+    lines = [OPEN_CELLS_HEADER + ":"]
+    for group in sorted(groups, key=lambda g: (order.get(g, len(order)), g)):
+        parts = []
+        for family in families.get(group, []):
+            said = []
+            for cls in classes:
+                holdings = [h for h in EQUITY_HOLDING if (cls, family, h, group) not in cells]
+                if len(holdings) == len(EQUITY_HOLDING):
+                    said.append(f"{cls} (any holding)")
+                elif holdings:
+                    said.append(f"{cls} ({', '.join(holdings)})")
+            parts.append(f"{family}: " + ("; ".join(said) if said else "none open"))
+        lines.append(f"- {GROUP_WORDS.get(group, group)} ({_named(groups[group])}): " + " | ".join(parts))
+    return "\n".join(lines)
 
 
 def _closed_cell(card: Mapping[str, Any] | None, structure: Any, lane: str) -> dict[str, Any]:
@@ -827,6 +997,35 @@ def last_text(store: Any, settings: Mapping[str, Any] | None = None) -> str:
     return (f"YOUR LAST EQUITY PASS'S PROPOSALS NOT BORN ({at}; fix them or look elsewhere):\n" + "\n".join(lines))
 
 
+#: T2's LOG (release 1023a; the edge hunt's yield-rebirth-template): the most proposals a pass's event names by place.
+CLAIM_FIELDS_SHOWN = 20
+
+
+def claim_fields(rows: Sequence[Any]) -> dict[str, Any]:
+    """WHICH CLAIM FIELD EACH PROPOSAL FILLED (T2, release 1023a), for the pass's `swarm.elane` event, read from the
+    answer before the admission: {each: [{n (its place in the answer), rebirth (its card names a rebirth row),
+    differs_from (it names any differs_from id)}], counts {rebirth, differs_from, both, neither}}. Booleans and places
+    only, never a word the model wrote: the claim that models fill differs_from in place of card.rebirth rested on two
+    answers, and this counts it on every pass."""
+    each: list[dict[str, Any]] = []
+    counts = {"rebirth": 0, "differs_from": 0, "both": 0, "neither": 0}
+    for place, row in enumerate(rows, 1):
+        if not isinstance(row, Mapping):
+            continue
+        card = row.get("card") if isinstance(row.get("card"), Mapping) else {}
+        reb = card.get("rebirth")
+        rebirth = isinstance(reb, Mapping) and bool(str(reb.get("row") or "").strip())
+        named = row.get("differs_from")
+        differs = isinstance(named, list) and any(str(x).strip() for x in named)
+        counts["rebirth"] += int(rebirth)
+        counts["differs_from"] += int(differs)
+        counts["both"] += int(rebirth and differs)
+        counts["neither"] += int(not rebirth and not differs)
+        if len(each) < CLAIM_FIELDS_SHOWN:
+            each.append({"n": place, "rebirth": rebirth, "differs_from": differs})
+    return {"each": each, "counts": counts}
+
+
 # ----------------------------------------------------------------------------------------------------------- the pass
 class EquityPass:
     """THE EQUITY PASS (the module docstring), over the architect's store, router, settings and clock."""
@@ -850,15 +1049,18 @@ class EquityPass:
                     "the lanes' box, the agenda and the bar below.\n\n")
         from . import elane_xs
 
+        index = self.rebirth_index()  # read once: THE EQUITY BIRTH CELLS, the open cells and the overnight cell's binding
+        cells = bound_cells(index)
         parts = [f"{lead}Propose {want} new EQUITY-LANE families (\"lane\": \"beta\" or \"equity\"), each with its card "
                  "and its first program; propose both lanes when you propose two or more.",
-                 lanes_text(self.settings), agenda_text(self.settings), quota.text(),
+                 lanes_text(self.settings), agenda_text(self.settings), quota.text(overnight_bound(cells)),
                  # RELEASE E4, THE PANEL BLOCK ("" while the panel lane bears nothing): what a panel program is, its
                  # contract in brief, the panel agenda, the panel quota and the closed panel cells; the panel Train
                  # map, with its ZERO-EDGE EXPECTED column, follows the equity one (`elane_train.train_map_text`).
                  elane_xs.request_text(self.store, self.settings, want),
-                 elane_train.train_map_text(self.store, self.settings), graveyard_text(self.store, self.settings),
-                 cells_text(self.rebirth_index()),   # THE EQUITY BIRTH CELLS (Oct 15, 2026): where the graveyard binds
+                 elane_train.train_map_text(self.store, self.settings), graveyard_text(self.store, self.settings, binds=index is not None),
+                 cells_text(index),   # THE EQUITY BIRTH CELLS (Oct 15, 2026): where the graveyard binds
+                 open_cells_text(cells, self.settings),  # THE OPEN CELLS (T3, release 1023a): where no row binds
                  tried_text(self.store), families_text(self.store, self.settings), vocabulary_text(self.settings),
                  last_text(self.store, self.settings)]
         return SYSTEM + elane_train.contract_text(), "\n\n".join(p for p in parts if p)
@@ -896,6 +1098,7 @@ class EquityPass:
                                 "route_chosen": first.key if first else None, **({"setting": fault} if fault else {}),
                                 **quota.event()})
         rows, lenient, recovered = read_families(answer)
+        filled = claim_fields(rows or [])  # T2 (release 1023a): before the admission, which may strip a claim
         born = self.admit(rows or [], quota, route)
         elane_yield.book_births(self.store, route.key, len(born))
         self.store.put(LAST_KEY, {"at": self.store.now(), "born": born, "short": quota.short(), "route": route.key,
@@ -905,7 +1108,7 @@ class EquityPass:
                "truncated": bool(answer.get("truncated")),
                "refused": {"count": len(self.refused), "items": [{k: r.get(k) for k in ("slug", "why")}
                                                                  for r in self.refused[:REFUSALS_SHOWN]]},
-               **quota.event()}
+               "claim_fields": filled, **quota.event()}
         if errors:
             out["route_errors"] = errors[:4]
         if lenient:
@@ -1153,4 +1356,7 @@ __all__ = ["BIRTHS_AT_KEY", "LAST_KEY", "DEFAULTS", "BOUNDS", "SYSTEM", "cfg", "
            "universe", "researching", "due", "EquityQuota", "lanes_text", "agenda_text", "graveyard_text", "seeded_ids",
            "tried", "tried_text", "families_text", "vocabulary_text", "last_text", "refusal_said", "REFUSAL_SAID",
            "OTHER_SAID", "CARD_FIELDS", "NO_SECTORS", "SETTING_KEYS", "EquityPass", "FWD1_FIRST_SESSIONS",
-           "route_symbols", "route_text", "SESSION_ASK", "SESSION_ASK_CHARS"]
+           "route_symbols", "route_text", "SESSION_ASK", "SESSION_ASK_CHARS", "OVERNIGHT", "OVERNIGHT_PLAIN",
+           "OVERNIGHT_CELL", "overnight_words", "bound_cells", "overnight_bound", "OPEN_CELLS_HEADER", "open_cells_text",
+           "claim_fields", "CLAIM_FIELDS_SHOWN", "GRAVEYARD_SOFT",
+           "GRAVEYARD_BINDS"]

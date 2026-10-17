@@ -114,7 +114,9 @@ class TheRouteIsSaid(Case):
         for claim in OLD_CLAIMS:
             self.assertNotIn(claim, flat(system), claim)
             self.assertNotIn(claim, flat(user), claim)
-        self.assertNotRegex(user, r"\b202[56]\b")
+        from league.swarm import event_hold  # THE CALENDAR SENTENCE (release 1023a) names the tables' own last rows
+
+        self.assertNotRegex(user.replace(event_hold.calendar_text(), ""), r"\b202[56]\b")
 
     def test_an_index_only_universe_names_no_forward_symbol_and_still_says_the_rule(self):
         index = fx.settings()

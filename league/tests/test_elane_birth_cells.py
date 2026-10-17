@@ -55,7 +55,9 @@ class TheRequestShowsTheBoundCells(Cells):
         self.assertRegex(user, r"\n- calendar_flow / equity:etf / days_1_3" + group + r": 1 row: dead-flow read "
                                r"[a-z_+]*clock")
         self.assertNotIn("invented Train lesson", user, "ids and input names only: never a row's lesson")
-        self.assertNotRegex(user, r"\b202[56]\b")
+        from league.swarm import event_hold  # THE CALENDAR SENTENCE (release 1023a) names the tables' own last rows
+
+        self.assertNotRegex(user.replace(event_hold.calendar_text(), ""), r"\b202[56]\b")
 
     def test_with_the_architects_rebirth_switch_off_nothing_binds_and_nothing_is_shown(self):
         self.refuted("dead-flow")
