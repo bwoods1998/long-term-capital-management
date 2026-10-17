@@ -85,7 +85,7 @@ is on branches.
     `TheDurableRefusal`, `AFigureInTheFreeText`; `test_elane_forward.TheDurableMark`).
 - policy.json: `elane.pool` {mode "record", seats "off", cpu_seconds_night 600}. **No pin block and no receipt yet**
   (the calibration's one run is Oct 20: P1 D1): nothing is judged until the release that ships P1 carries both (P12).
-- Departures and readings: `scratch/pooled-screen/DEVIATIONS.log` P1 D1-D7, P1 D8-D19 and P1 D20-D25 (no POOL1 figure
+- Departures and readings: `scratch/pooled-screen/DEVIATIONS.log` P1 D1-D7, P1 D8-D19 and P1 D20-D26 (no POOL1 figure
   existed or was seen).
 - **Ships** after checkpoint 15 is final (evening or weekend window); between the deploy and the job's first night
   the swarm fails closed (ETF FWD1-R passes wait; FWD1-judged lineages take no sealed try; the meter waits).

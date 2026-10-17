@@ -19,7 +19,7 @@ swarm's refusal reads. **Mode record only; no seat exists in P1** (seats are P2'
 4); the calibration's own code, vendored byte for byte: `league/ops/pool_calib/` (8 files, no `__init__.py`);
 receipt (written by the calibration's one run, not in this branch): `docs/benchmarks/pool_screen_1.json`. Departures
 from the pinned text and the readings P1 fixed are in `scratch/pooled-screen/DEVIATIONS.log` (P1 D1-D7, D8-D19,
-D20-D25: the conformance review's fixes).
+D20-D26: the conformance review's fixes).
 
 **No identity moves**: nothing under `league/equity/` (no evidence module), `league/gym/`, `league/live/`, the four
 `LEAGUE_FILES` or `league/constitution.py` changes, so the options execution fingerprint `b60410ad`, the money digest
@@ -132,8 +132,9 @@ permits and words.
    (`elane_forward.pool_mark_write`: one transaction; `route`, `held` and `released` parts of ids and words, each added
    once and never changed; a release only after its hold and never beside a route). A route or hold whose mark cannot
    be written is not written that night (an error alarm; the clock waits a night when its route list cannot be
-   marked); a release is written first and its mark after (a failed release mark leaves the lineage refused). Before
-   every permit file the job adds any mark the store or the file holds and lacks (`sync_marks`).
+   marked); a release is written first and its mark after (a failed release mark leaves the lineage refused); a mark
+   whose route the pool's store then fails to commit stays (it only refuses: P1 D26). Before every permit file the job
+   adds any mark the store or the file holds and lacks (`sync_marks`).
 
 **The swarm's refusal** (`elane_forward.py` 4): a lineage on the POOL-route or hold list, **or whose family or lineage
 root carries a route or unreleased held mark** (`pool_mark`, read from the swarm store whatever the pool's file, its
