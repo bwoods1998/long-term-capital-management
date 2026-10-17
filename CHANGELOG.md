@@ -30,7 +30,7 @@ The running House release is `20261016T024305Z-e90d75adb36b` (main `d6bcf0cd`, P
 02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
-### Release 1023a: THE EVENT HOLD (A25 R1) in both lanes and the births-text fixes (T1, T2, T3, the calendar sentence, MTE's label, THE BIRTHS YIELD info line), on `rel/1023a` (unreleased; deploy only after checkpoint 15 is FINAL, evening window: after 20:05Z, never 00:20-00:40Z or 01:40-02:30Z, then A53's `elane.birth_share` 0.5; cut from main `d81a6bb9`, release 1017r with the desk scoreboard; built in the checkpoint-15 freeze from the edge hunt's 3c items 8 and 9; an owner deploy: `league/swarm/elane_births.py`, `elane_train.py`, `elane.py`, `bands.py`, `gate.py`, `tournament.py` and `league/ops/` are protected; no identity moves: the options execution fingerprint `b60410ad`, the money digest `5ea6f99f`, the constitution digest `82a9a5a4` and the equity identity `78022ca6` are main's; no setting)
+### Release 1023a: THE EVENT HOLD (A25 R1) in both lanes and the births-text fixes (T1, T2, T3, the calendar sentence, MTE's label, THE BIRTHS YIELD info line), on `rel/1023a` (unreleased; deploy only after checkpoint 15 is FINAL, evening window: after 20:05Z, never 00:20-00:40Z or 01:40-02:30Z, then A53's `elane.birth_share` 0.5; cut from main `d81a6bb9`, release 1017r with the desk scoreboard; built in the checkpoint-15 freeze from the edge hunt's 3c items 8 and 9; an owner deploy: `league/swarm/elane_births.py`, `elane_train.py`, `elane.py`, `bands.py`, `gate.py`, `tournament.py`, `league/equity/live.py` and `league/ops/` are protected, `researcher.py` and `architect.py` engineer-held; DEPLOY PRECONDITION: the counts-only event census (`scratch/rel1023a/event_census.py`) shows no event-held program at Probe or Sized, or the captain accepts what the docs say happens to one; no identity moves: the options execution fingerprint `b60410ad`, the money digest `5ea6f99f`, the constitution digest `82a9a5a4` and the equity identity `78022ca6` are main's; no setting)
 
 - **THE EVENT HOLD (the captain's A25 R1, adopted Oct 11, built now; `league/swarm/event_hold.py`).** A program that
   reads fomc, cpi or jobs takes no Validation, no look and no seat while a flag it reads is past its table's last row
@@ -44,9 +44,24 @@ is on branches.
   Recorded once a stage (family state `event_hold`, a private `swarm.gate` event). Never touches FWD1-R's pinned
   registry or judging. R1's other parts (reproduction tool, receipt reader, digests, calendar watch) are not built.
   The stall job owes a held family no Validation (`league/ops/stall.py` reads the round's `event_held` as it reads
-  `spent_lane`), so the hold makes no owner step and costs no research day. Owed before 2026-12-10: the EquityBook's
-  ETF pool counts its rows alone (`league/equity/live.py` `_held_seats`), so a held fomc reader at Probe would read as
-  a free seat to the book's plan (docs/operations.md, Release 1023a).
+  `spent_lane`; the captain's ruling), so the hold creates no stall cause and no owner step; it does not protect Done's
+  research day: options Validations fall by the held families' share (Research247 needs them above zero every UTC day).
+  The hold keeps a reader from a seat only from the deploy on: one validated, looked at and seated before it is held AT
+  its seat (opens stop, exits go on); hence the deploy precondition. Census 06:28Z Oct 17: 12 alive cpi/jobs readers,
+  all in Train (beta 5, equity 4 + 1 walking the dict, options 1 + 1), 1 options next-Validation version, none at
+  Candidate, Probe or Sized, no fomc-only reader.
+- **Review fixes (Oct 17):** (1, high) a held ETF holder kept no seat: the EquityBook's ETF pool counted rows alone, so
+  an event-held Probe or Sized program (no row, standing HELD) read as free and a waiting Candidate was seated (7 live
+  in the 6-seat pool). `league/equity/live.py` `_held_seats` now counts, for the ETF pool, every alive instance of the
+  book's kind with no row whose standing is HELD (opens stop, exits go on, nobody seated into it; the plan's and the
+  report's `held_seats`), under the seat rule in force and "first-come". A held holder keeps its seat flat or not in
+  this release (decided in writing; a flat held holder's yield is owed before 2026-12-10). (3) The options architect's
+  births request and every options researcher's brief carry the calendar sentence; a held options family's status says
+  the hold at the Validation stage in place of THE VALIDATION WAIT's words, and the wait no longer protects it
+  (`Researcher.event_held`, `can_retire`, `retire_wait`); the revision and evaluation clocks run on (stated). (5) THE
+  GUARD `ctx.events or {}` is the view and the dict's truth alone reads no flag; the calendar sentence says walking,
+  copying or handing on the dict reads every flag. (2, 4) The docs' claims corrected (docs/operations.md, Release
+  1023a). The EquityBook's held alert names THE EVENT HOLD beside a lane that is not ready.
 - **T1:** the one-session ask says an overnight index hold reads as calendar_flow / days_1_3, bound for the index ETFs
   (by the request's own reading of the binding), so it needs a valid card.rebirth; "or propose another 1-session hold"
   kept; at most 600 characters.
@@ -62,8 +77,12 @@ is on branches.
   share against panel places, births by 0 / 1-3 / 4+ share places, claim-field counts): not a cause, no owner step, no
   lever, not in `dlane_report.py`. T4's quota fix is not in this release (A54's "panel 0.3 when T4 ships" does not
   fire).
-- **Tests:** league/tests/test_rel_1023a_event_hold.py and test_rel_1023a_births.py (new); the 1017r session-ask test
-  and three "no 2025/2026 in the request" checks follow the new words (the calendar sentence alone is exempt).
+- **Tests:** league/tests/test_rel_1023a_event_hold.py and test_rel_1023a_births.py (new; the review's fixes: a held
+  ETF holder never frees its seat and the pool never exceeds its seats, with the memory reader under both seat rules and
+  with the real store reader; the guard and truth-test readings; the options request, brief and status); the 1017r
+  session-ask test and three "no 2025/2026 in the request" checks follow the new words (the calendar sentence alone is
+  exempt); the D lane's golden texts (`test_dlane_trainmap`, main d70e00c3's switch-off request and briefs) take the
+  calendar sentence out, the one text the options request and brief now carry in every lane mode.
 - **Rollback:** the release before; nothing is migrated.
 
 ### Release 1017r: the owner's new Done (A50), the ETF Probe sleeve 0.25 x E (A51) and the births' one-session ask, on `rel/1017r` (unreleased; one House deploy by the captain, never 12:55-20:05Z on a trading day and never inside an entry window; live before Mon Oct 19 13:30Z; THE MONEY DIGEST MOVES `cfcc94b1` -> `5ea6f99f` and the constitution `60796aed` -> `82a9a5a4` (A51's row alone), the standing grant re-ratifies at start; the options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move)

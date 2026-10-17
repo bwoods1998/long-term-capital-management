@@ -15,10 +15,20 @@ synthesis (`scratch/edge-hunt/EDGE-HUNT.md` 3c items 8 and 9, Oct 16, 2026) and 
 checkpoint 15 is FINAL (about 13:30Z Fri Oct 23), in an evening window** (after 20:05Z, avoiding 00:20-00:40Z and
 01:40-02:30Z); then A53's `elane.birth_share` 0.5 so births resume under the corrected text (if checkpoint 15 is final
 and fails, A53's "keep off through the next window" decision comes first). **One House deploy** (owner deploy:
-`league/swarm/elane_births.py`, `elane_train.py`, `elane.py`, `bands.py`, `gate.py`, `tournament.py` and `league/ops/`
-are protected); no gateway change. **No identity moves** (fingerprint `b60410ad`, money `5ea6f99f`, constitution
-`82a9a5a4`, equity `78022ca6`: no file of league/equity's evidence, league/gym/, league/live/ or the constitution
-changes; `league/gym/events.py` is read, never written) and no setting changes.
+`league/swarm/elane_births.py`, `elane_train.py`, `elane.py`, `bands.py`, `gate.py`, `tournament.py`,
+`league/equity/live.py` and `league/ops/` are protected, `researcher.py` and `architect.py` engineer-held); no gateway
+change. **DEPLOY PRECONDITION (the review's finding 2): the event census**, read-only and counts only, run in the
+deploy window before the deploy (`scratch/rel1023a/event_census.py`, through `scratch/weekend/ops/boxrun.py
+--timeout 180`): it prints, by lane and band, how many alive families' versions read a held flag (the banded
+version of a Candidate, Probe or Sized family; a Gym family's next-Validation and latest versions), and
+`held_at_seat`, the event-held programs at Probe or Sized. The deploy proceeds if `held_at_seat` is 0. If it is not,
+what happens to each is exactly this (and the captain decides before the deploy whether that is acceptable): it keeps
+its seat and its lots, ITS OPENS STOP AND ITS EXITS GO ON, nothing is retired or sold, its seat stays counted held (the
+EquityBook's `_held_seats` in the ETF pool, below; the options roster counts its Probe band), and it opens again only
+once a calendar release covers its windows. Until the deploy, EDGE-HUNT 3c item 9's interim rule stays active: a
+reader that reaches Validation is treated as held by hand. **No identity moves** (fingerprint `b60410ad`, money
+`5ea6f99f`, constitution `82a9a5a4`, equity `78022ca6`: no file of league/equity's evidence, league/gym/, league/live/
+or the constitution changes; `league/gym/events.py` is read, never written) and no setting changes.
 
 - **THE EVENT HOLD (A25 R1, adopted 13:42Z Oct 11 and never built until now; `league/swarm/event_hold.py`).** A program
   that reads fomc, cpi or jobs takes no Validation, no look and no seat while a flag it reads is past its table's last
@@ -26,7 +36,14 @@ changes; `league/gym/events.py` is read, never written) and no setting changes.
   `flags_for` is set membership, so past a table's last row the flag reads False on every session, live and in replay
   alike, and a program judged with the flag firing would trade a different rule live; the replay intent match cannot
   see it. Exposure on Oct 16: no alive cpi or jobs reader in either lane; 61 retired readers; five equity readers born
-  in about nine hours on Oct 15-16. Where it holds, each before anything is spent, recorded or paid:
+  in about nine hours on Oct 15-16. **The hold keeps a reader from a seat only from the deploy on**: births run until
+  Oct 18 23:50Z, and Train, Validation and the looks go on until the deploy, so a reader validated, looked at and
+  seated before it is held AT its seat when it ships (the precondition above). The census at 06:28Z Oct 17 (92 alive
+  families): 12 alive families whose latest version reads cpi or jobs, all in Train (beta 5; equity 4 and 1 that
+  walks the dict; options 1 and 1 that walks it), of which 1 options family's next-Validation version reads one; no
+  event reader at Candidate, Probe or Sized in any lane (`held_at_seat` 0, held Candidates 0); no fomc-only reader
+  anywhere; the EquityBook's 6 alive instances, none held. Where it holds, each before anything is spent, recorded or
+  paid:
   - an equity Validation (`elane.validate`): refused before any run, no try recorded, so the lineage keeps its one try;
   - an equity look (`elane.look`): waits before the sealed run, as R-SEC's forward-only hold does (no look spent, no
     refusal row, no bad gate outcome);
@@ -40,23 +57,50 @@ changes; `league/gym/events.py` is read, never written) and no setting changes.
     displaced, so no close is manufactured): its opens stop and its exits go on (an options instance runs exits only;
     the EquityBook reads `equity_seat_withdrawn` "held", alerts once a decision day and retires nothing).
   READS is static and conservative (`event_hold.reads`): a flag named by a constant (`ctx.events["cpi"]`, `.get("cpi")`,
-  `"cpi" in`, through an alias or `getattr(ctx, "events")`); any other use of `events` or `events_next` (walked,
-  copied, handed on, a dynamic key) reads every flag, and source that does not parse reads every flag. The calendar's
+  `"cpi" in`, through an alias, `getattr(ctx, "events")` or THE GUARD `ctx.events or {}`); the dict's truth alone
+  (`if ctx.events:`, `not`, `bool()`, an `and` operand that is not the last) reads no flag, since it always holds
+  every flag (the review's finding 5); any other use of `events` or `events_next` (walked, copied, handed on or
+  returned, a dynamic key) reads every flag, and source that does not parse reads every flag. The calendar sentence
+  tells authors so. The calendar's
   own flags (`monthly_opex`, `quarter_end`, `half_day`) are never held for. COVERS ITS WINDOWS: the last window is live
   trading, so the hold reads the tables against today (the House's UTC date); it LIFTS BY ITSELF once a calendar
   release (A25 R2) extends a table. Each hold at Validation or the look is recorded once (family state `event_hold`,
   one private `swarm.gate` event `event_hold`). The stall job owes a held family no Validation (`stall.py` reads the
-  round's `event_held` as it reads `spent_lane`), so the hold stands as no `validations` cause, makes no owner step and
-  fails no research day of Done's item 7. It never touches FWD1-R's pinned registry or its judging (holding or
+  round's `event_held` as it reads `spent_lane`: the captain's ruling, to be named in the amendment log), so the hold
+  creates no `validations` stall cause and no owner step. It does NOT protect Done's research day (the review's
+  finding 4): Research247 (`league/ops/dlane_report.py`) needs options Validations above zero on every UTC day, the
+  hold removes the held families' Validations, and the stall reading cannot restore them, so options Validations fall
+  by the held families' share. It never touches FWD1-R's pinned registry or its judging (holding or
   annotating forward judging of event readers is the owner's question); R1's other parts (the reproduction tool, the
   receipt reader, digests at Validation and the look, the calendar watch) are not built here. Cost, stated: an event
   idea is researched on Train for cents of model dollars and then waits; options Validation supply falls by any
-  options event reader born (none alive on Oct 16; the options seeds event_crush and event_long read all three).
-  OWED before 2026-12-10 (the first day an fomc reader can be held at a seat; a cpi or jobs reader is held from
-  Validation on, so it never reaches one): the EquityBook's ETF pool counts its rows alone (`league/equity/live.py`
-  `_held_seats`), so a held ETF holder's seat reads free to the book's plan and can be refilled while the held
-  program's lots exit (the options roster counts Probe bands in the store, so no options seat is handed out). That
-  is the money path's code, not this release's.
+  options event reader born (1 options family's next-Validation version on Oct 17; the options seeds event_crush and
+  event_long read all three).
+  - **A held ETF holder keeps its seat (the review's finding 1, fixed in this release).** The EquityBook's ETF pool
+    counted its rows alone, so an event-held holder at Probe or Sized (no row, standing HELD) read as a free seat and
+    the book seated a waiting Candidate into it: 7 live programs in the 6-seat pool (`equity_money.probe.max_programs`,
+    A51's 0.25 x E each), a money wall breached through the money path, under the seat rule in force and under
+    "first-come" alike. `league/equity/live.py` `_held_seats` now counts, for the ETF pool, every alive instance of
+    the book's own kind with no row whose store standing is `families.HELD`, as the panel pool counted its held seats:
+    nobody is seated into it, the plan says it (`held_seats`, the report's `equity_seats.held_seats`), and when the hold
+    lifts its row is back in the seat it never left. Any other alive instance with no row is counted as before.
+  - **A held holder keeps its seat flat or not (the review's finding 6, decided for this release).** With no row it is
+    in no seat plan, so the idle rule never asks it to yield (A50a (4) protects only a holder with a lot; an idle held
+    seat costs closes). Cost, stated: a held seat idles until a calendar release; none is held on Oct 17 (no event
+    reader at a seat), but from 2026-12-10 every seated fomc reader would be (none on Oct 17). An options Probe family
+    held exit-only keeps its roster seat after its instance retires flat. OWED before 2026-12-10, or before any
+    held seat goes idle: a FLAT held holder gives up its seat (options: back to Candidate; ETF: through the idle-yield
+    rule) while a holder with lots keeps it; league/live/ is an identity, so the options half is a release of its own.
+  - **A held options family is told (the review's finding 3).** The options architect's births request carries the
+    calendar sentence after the input card, and every options researcher's brief carries it. While the version the
+    tournament validates next reads a held flag, the researcher's STATUS says so at the Validation stage (the hold's
+    words, the tables' own dates) in place of THE VALIDATION WAIT's "awaits validation: retire is offered once
+    validated", and the wait no longer protects it (`Researcher.event_held`; `can_retire` and `retire_wait`): it may
+    retire on its own evidence, or revise to a version that reads no held flag. The revision and evaluation clocks are
+    not stopped: a held family that goes on researching is retired by them ("no validation improvement") as any
+    family is, so the hold can end in a clock death; that is stated, not exempted. `awaiting_validation` itself is
+    unchanged, so a held family that only holds is spared by the dormancy clause as any family whose best awaits
+    validation (its status urges it to revise or retire; the tournament and the diagnostician read it as before).
 - **T1, the overnight cell** (`elane_births.SESSION_ASK`, `OVERNIGHT`, `overnight_bound`). 1017r's one-session ask
   named "a close-to-open overnight hold of an index ETF" as a cell no row binds; a card whose mechanism text says
   overnight reads as calendar_flow / days_1_3 (`cards.infer_key`, whatever class it declares), and rows bind that cell
@@ -91,9 +135,11 @@ changes; `league/gym/events.py` is read, never written) and no setting changes.
   does not fire on it.
 - **Verify after it** (read-only, ten minutes on): the four ids above; the next equity pass's event carrying
   `claim_fields`; its request (`python3 -m league.ops.elane_health --state /workspace/state` for the INFO line) with
-  the OPEN CELLS line and the bound overnight words; the tournament's and the gate's rounds (`event_held` absent while
-  no alive program reads cpi or jobs); `bands.roster(root, lanes=LANES)` with no `event_held`. A census of event readers
-  (counts only) stays in the daily check until a calendar release.
+  the OPEN CELLS line and the bound overnight words; the tournament's round's `event_held` naming exactly the options
+  families whose next-Validation version reads a held flag (the census's `options gym next_validation held_now`
+  count, 1 on Oct 17) and the gate's waiting only such programs; `bands.roster(root, lanes=LANES)`'s `event_held`
+  naming only held Candidates (0 on Oct 17); the EquityBook's `eq_seat` with no `held_seats` while `held_at_seat` is
+  0. The census (counts only) stays in the daily check until a calendar release.
 - **Rollback:** the House, `python3 scripts/floor_box.py rollback` to the release before. Nothing is migrated; a family
   state `event_hold` record is read by nothing else.
 
