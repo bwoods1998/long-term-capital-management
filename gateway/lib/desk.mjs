@@ -32,7 +32,7 @@ export const FOOTER = 'Committed by the House through the LTCM gateway (POST /v1
 export const SECRET_NAMES = Object.freeze([
   'GATEWAY_TOKEN', 'GATEWAY_ADMIN_TOKEN', 'GITHUB_TOKEN', 'ALPACA_KEY_ID', 'ALPACA_SECRET_KEY', 'ALPACA_PAPER_KEY_ID',
   'ALPACA_PAPER_SECRET_KEY', 'OPENAI_SECRET_KEY', 'CLAUDE_API_KEY', 'SAIL_API_KEY', 'KALSHI_KEY_ID', 'KALSHI_PRIVATE_KEY',
-  'TYPE_SAFE_TOKEN',
+  'TYPE_SAFE_TOKEN', 'TIINGO_TOKEN',
 ]);
 //: Text shaped like a credential, whoever's: a private key block, a GitHub token, an Anthropic or OpenAI key.
 const KEY_SHAPES = [

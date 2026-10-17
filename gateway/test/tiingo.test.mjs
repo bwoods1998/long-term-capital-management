@@ -84,7 +84,7 @@ test('no day of 2020 on, none before 1999-01-04, and only real ordered days', as
     assert.equal(calls.length, 0);
   }
   for (const [start, end] of [['1999-01-04', '2001-04-06'], ['2001-04-09', '2008-12-31'], ['2016-01-04', '2019-12-31']]) {
-    assert.equal(tiingo.refusal('spy', start, end), null, `${start}..${end}`);
+    assert.equal(tiingo.refusal('spy', start, end, 'runtime'), null, `${start}..${end}`);
   }
 });
 
@@ -141,4 +141,37 @@ test('the route is the gateway\'s own and is protected with league/deep/', async
   assert.equal(protectedRefusal('league/deep_notes.md'), null);
   assert.ok(tiingo.isTiingoPath('/v1/tiingo/daily/SPY/prices'));
   assert.ok(!tiingo.isTiingoPath('/v1/research/search'));
+});
+
+test('the sealed era is served to the runtime caller alone, whatever reaches the route', async () => {
+  // The router admits only the runtime token here (above); this wall holds if that ever widens: DVAL cannot be pulled
+  // to the desktop or the phone with the owner's token.
+  const sealed = [['2001-04-09', '2001-04-12'], ['2008-12-30', '2008-12-31'], ['2001-04-06', '2001-04-09'],
+    ['2008-12-31', '2009-01-05'], ['1999-01-04', '2019-12-31']];
+  for (const caller of ['admin', 'none', undefined, '']) {
+    for (const [start, end] of sealed) {
+      assert.equal(tiingo.refusal('SPY', start, end, caller), 'sealed', `${caller} ${start}..${end}`);
+      const tape = upstream();
+      const request = new Request(`${GATEWAY}/v1/tiingo/daily/SPY/prices?startDate=${start}&endDate=${end}`);
+      const response = await tiingo.tiingoRoute(request, env, { fetcher: tape.fetcher, ...(caller === undefined ? {} : { caller }) });
+      assert.equal(response.status, 403, `${caller} ${start}..${end}`);
+      assert.equal((await response.json()).cap, 'sealed');
+      assert.equal(tape.calls.length, 0, 'refused before the token is touched');
+    }
+    for (const [start, end] of [['1999-01-04', '2001-04-06'], ['2009-01-02', '2015-12-31'], ['2016-01-04', '2019-12-31']]) {
+      assert.equal(tiingo.refusal('SPY', start, end, caller), null, `${caller} ${start}..${end}: an open span`);
+    }
+  }
+  for (const [start, end] of sealed) assert.equal(tiingo.refusal('SPY', start, end, 'runtime'), null);
+  assert.equal(tiingo.refusal('SPY', '2001-04-09', '2008-12-31'), 'sealed', 'no caller named: none, refused');
+  const { response, calls } = await call('/v1/tiingo/daily/SPY/prices?startDate=2001-04-09&endDate=2001-04-12');
+  assert.notEqual(response.status, 403, 'the House\'s runtime token is served the sealed era');
+  assert.equal(calls.length, 1);
+});
+
+test('the Tiingo token is one of the secrets no desk commit may carry', async () => {
+  const { SECRET_NAMES, carriesSecret } = await import('../lib/desk.mjs');
+  assert.ok(SECRET_NAMES.includes('TIINGO_TOKEN'));
+  assert.ok(carriesSecret(`a page that leaked ${FAKE_TIINGO} somewhere`, { TIINGO_TOKEN: FAKE_TIINGO }));
+  assert.ok(!carriesSecret('a page that leaked nothing', { TIINGO_TOKEN: FAKE_TIINGO }));
 });

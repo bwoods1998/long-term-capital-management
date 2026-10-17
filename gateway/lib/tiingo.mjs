@@ -9,7 +9,10 @@
 // 1999-01-04..2019-12-31 (`FIRST_DAY`, `LAST_DAY`): the deep store's look-back, DVAL and TRAIN-D, and the 2016-19 SIP
 // overlap its audit reads. Never a day of 2020 on: the reserve (2020-21), Validation (2025), the holdout and the
 // forward days are sealed from this route whatever the House asks. A request outside it is a 403 before the token is
-// touched.
+// touched. THE SEALED ERA ITSELF (DVAL, `SEALED_FIRST`..`SEALED_LAST`) is served to the House's RUNTIME token alone
+// (`caller`, from the router): the router already admits no other caller here, and this wall holds if that ever
+// widens, so DVAL cannot be pulled to the desktop or the phone with the owner's token ("DVAL never touches the
+// desktop").
 //
 // WHAT IS ANSWERED. `{symbol, start, end, rows}`, each row `{date, open, high, low, close, volume, divCash,
 // splitFactor, factorStep}`: the raw bars as printed that day and the day's events. The vendor's adjusted columns are
@@ -30,6 +33,9 @@ export const SYMBOLS = Object.freeze(['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLE', 
   'XLV', 'XLY', 'TLT', 'GLD']);
 export const FIRST_DAY = '1999-01-04';
 export const LAST_DAY = '2019-12-31';
+//: The deep key's sealed era (DVAL): only the runtime caller is served a day of it.
+export const SEALED_FIRST = '2001-04-09';
+export const SEALED_LAST = '2008-12-31';
 export const KEPT = Object.freeze(['date', 'open', 'high', 'low', 'close', 'volume', 'divCash', 'splitFactor']);
 export const STEP_TOLERANCE = 1e-6;
 const ROUTE = /^\/v1\/tiingo\/daily\/([A-Za-z]{1,6})\/prices$/;
@@ -44,11 +50,13 @@ export function validDay(text) {
   return !Number.isNaN(day.getTime()) && day.toISOString().slice(0, 10) === text;
 }
 
-/** Why a request may not be forwarded (null: it may): the symbol, then the window. */
-export function refusal(symbol, start, end) {
+/** Why a request may not be forwarded (null: it may): the symbol, the window, then the sealed era for a caller other
+ * than the House's runtime token (no caller named: none, so the sealed era is refused). */
+export function refusal(symbol, start, end, caller = 'none') {
   if (!SYMBOLS.includes(String(symbol || '').toUpperCase())) return 'symbol';
   if (!validDay(start) || !validDay(end) || start > end) return 'window';
   if (start < FIRST_DAY || end > LAST_DAY) return 'window';
+  if (caller !== 'runtime' && start <= SEALED_LAST && end >= SEALED_FIRST) return 'sealed';
   return null;
 }
 
@@ -76,7 +84,7 @@ export function shape(rows, start, end) {
   return { rows: out };
 }
 
-export async function tiingoRoute(request, env, { fetcher = fetch } = {}) {
+export async function tiingoRoute(request, env, { fetcher = fetch, caller = 'none' } = {}) {
   if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '');
@@ -85,10 +93,13 @@ export async function tiingoRoute(request, env, { fetcher = fetch } = {}) {
   const symbol = match[1].toUpperCase();
   const start = url.searchParams.get('startDate');
   const end = url.searchParams.get('endDate');
-  const why = refusal(symbol, start, end);
+  const why = refusal(symbol, start, end, caller);
   if (why === 'symbol') return json({ error: 'Only the 16 ETFs of the deep store are served.', cap: 'symbol' }, 403);
   if (why === 'window') {
     return json({ error: `Only days inside ${FIRST_DAY}..${LAST_DAY} are served, as startDate <= endDate.`, cap: 'window' }, 403);
+  }
+  if (why === 'sealed') {
+    return json({ error: `The sealed era ${SEALED_FIRST}..${SEALED_LAST} is served to the House alone.`, cap: 'sealed' }, 403);
   }
   const token = typeof env.TIINGO_TOKEN === 'string' ? env.TIINGO_TOKEN.trim() : '';
   if (token.length < 20) return json({ error: 'The Tiingo route is not configured (the owner step D1).', cap: 'setup' }, 503);

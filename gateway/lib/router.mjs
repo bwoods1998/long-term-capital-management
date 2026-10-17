@@ -293,9 +293,9 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   }
 
   if (tiingo.isTiingoPath(path)) {
-    // The deep store's bars (release R1): read-only, $0, inside its allowlist; it moves no money, so the kill switch
-    // does not stop it.
-    return tiingo.tiingoRoute(request, env, { fetcher });
+    // The deep store's bars (release R1): read-only, $0, inside its allowlist, the sealed era to the runtime caller
+    // alone; it moves no money, so the kill switch does not stop it.
+    return tiingo.tiingoRoute(request, env, { fetcher, caller });
   }
 
   if (library.isLibraryPath(path)) {
