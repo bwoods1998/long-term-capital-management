@@ -38,10 +38,25 @@ is on branches.
   own identity. Candidate receipt `docs/benchmarks/equity_screen_3.json`: history-1017 item 5's synthetic receipt,
   verbatim (`4ff8435b`; c_D 1.02, c_R 1.20 on R+V+H; its floor and canary specification are what screen3/gate run).
 - `league/ops/equity_deep.py`, `deep_report.py` (new jobs; `elane.deep.mode` "report" switches them on, "off" is the
-  code's default; the recent key waits on the owner's D2, `elane.deep.reserve` "judged"); `contam_probe.py` asks the
+  code's default; D2 is decided, `elane.deep.reserve` "judged": both keys every look); `contam_probe.py` asks the
   eras 2001-08 and 2010-15 with a deep store; `french.py` drops 2001-2008 and reseals its stored files. The
   eligibility census is the captain's scratch script (history-1017/census/eligibility_census.py).
 - Gateway: `GET /v1/tiingo/daily/<SYM>/prices` (`lib/tiingo.mjs`), and `league/deep/` in the merge list.
+- The two reviews' fixes (Oct 17): a killed look's relabeled DVAL store is swept (temporary stores live in
+  `sealed/.looks/`, named by their process; swept before each new one and first thing in `deep_report`,
+  `equity_deep` and the contamination probe; no look begun with under 20 minutes of the wall left); a DVAL fund's gap
+  in `dval` or `traind` fails the audit and a look-back gap unscores its segment, so no look is spent on data; one
+  version's error of the House's spends no look and never stops the next (guarded, recorded, warned, refused after
+  three under one identity); a sent-and-unanswered sealed run is owed once; the ledger fails closed (`.prev` kept);
+  the route's recall is read before any run (route-less seeds measured, other route-less versions refused); the
+  equity_deep job stops at a 503/refusal and three failures in a row, keeps an audit-failed marker until `refetch`,
+  and stages DVAL in a marked folder; the probe's 2001-08 cells keep only what S3 reads; the report counts by seat and
+  source, the level readers (a report-only level test) and a report-only canary alarm at the receipt's own rate, and
+  states the receipt's unstated limits; the gateway serves the DVAL window to the runtime token alone and
+  `TIINGO_TOKEN` joins the desk's secret scan.
+- **D2 decided (A58): the 2020-21 reserve IS judged, inside S3 beside the deep key, never alone.** `elane.deep.reserve`
+  ships "judged" (and is the code's default): every look reads both keys, deep first; "sealed" makes no look at all.
+  The reserve's one run is made only inside a begun look, after the deep key (`league/deep/DEEP.md`).
 - **Rollback:** the release before; the deep store and ledger stay on the box, read by nothing.
 
 ### Release 1017r: the owner's new Done (A50), the ETF Probe sleeve 0.25 x E (A51) and the births' one-session ask, on `rel/1017r` (unreleased; one House deploy by the captain, never 12:55-20:05Z on a trading day and never inside an entry window; live before Mon Oct 19 13:30Z; THE MONEY DIGEST MOVES `cfcc94b1` -> `5ea6f99f` and the constitution `60796aed` -> `82a9a5a4` (A51's row alone), the standing grant re-ratifies at start; the options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move)

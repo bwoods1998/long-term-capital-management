@@ -43,7 +43,7 @@ owner's `GATEWAY_ADMIN_TOKEN`; `/v1/kill` takes either (V3-A: stopping is never 
 | `GET /v1/research/search?q=&cat=&max=` | the research library: up to `max` (1-10) arXiv papers posted before 2025 for plain keywords, each pinned to a version (below) |
 | `GET /v1/research/read?id=&start=&chars=` | one pinned version's metadata and a window (at most 10,000 characters) of its text |
 | `GET /v1/research/health` | the library's pace, lease and day's count (the same `library` block `/v1/health` carries) |
-| `GET /v1/tiingo/daily/<SYM>/prices?startDate=&endDate=` | the deep key's bars (release R1, `lib/tiingo.mjs`): raw daily OHLCV, `divCash`, `splitFactor` and `factorStep` of the 16 ETFs with a pre-2016 history, days inside 1999-01-04..2019-12-31 only (never 2020 on), the vendor's adjusted columns dropped; read-only, $0, the owner's `TIINGO_TOKEN` (Tiingo Starter: internal use only, nothing committed) |
+| `GET /v1/tiingo/daily/<SYM>/prices?startDate=&endDate=` | the deep key's bars (release R1, `lib/tiingo.mjs`): raw daily OHLCV, `divCash`, `splitFactor` and `factorStep` of the 16 ETFs with a pre-2016 history, days inside 1999-01-04..2019-12-31 only (never 2020 on), the sealed era 2001-04-09..2008-12-31 to the runtime token alone, the vendor's adjusted columns dropped; read-only, $0, the owner's `TIINGO_TOKEN` (Tiingo Starter: internal use only, nothing committed; never in a desk commit) |
 
 Still in the code until the prune removes them (Wave 2b), and unused by the options House:
 `/v1/kalshi/*` and `/v1/kalshi/ws-auth`, `/v1/typesafe/systemone` (Jev), `/v1/web/fetch`,

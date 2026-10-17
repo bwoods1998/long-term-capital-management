@@ -1509,11 +1509,20 @@ change under `gateway/`; nothing waits in `PENDING_GATEWAY`).
 - **The deep key** (release R1; `league/deep/DEEP.md`): `equity_deep` (06:40Z daily until complete, no at-start run)
   fetches 1999-2015 ETF bars through the gateway's Tiingo route into `<state>/equity-deep/` (DVAL, 2001-04-09..
   2008-12-31, in `sealed/`, 0700, opened only by the deep gate inside a look), audited, a failed audit writing nothing;
-  `deep_report` (07:10Z, idle hours only) takes each eligible ETF version's ONE report-only S3 look, verdicts sealed in
-  `ledger.json`, counts in `report.json` for the captain, nothing to the swarm or births (its recent key waits on the
-  owner's D2, `elane.deep.reserve`). Both do nothing while `elane.deep.mode` is off. The eligibility census (under 10
-  eligible, H-lite is parked) is the captain's read-only scratch script, history-1017/census/. The
-  probe asks the eras 2001-08 and 2010-15 once the deep store is complete; the French job drops 2001-2008.
+  `deep_report` (07:10Z, idle hours only) takes each eligible ETF version's ONE report-only S3 look on BOTH keys (D2
+  decided in A58: the reserve judged inside S3, never alone; `elane.deep.reserve` "sealed" stops every look), verdicts
+  sealed in `ledger.json`, counts in `report.json` for the captain (by seat and by source, the level readers, the
+  canary alarm, the House's errors), nothing to the swarm or births. Both do nothing while `elane.deep.mode` is off.
+  The eligibility census (under 10 eligible, H-lite is parked) is the captain's read-only scratch script,
+  history-1017/census/. The probe asks the eras 2001-08 and 2010-15 once the deep store is complete; the French job
+  drops 2001-2008.
+  **Reading its failures.** A House warning "hit an error of the House's" names a version whose look was NOT spent (it
+  is tried again; three under one deep identity refuse it until a release); "sent a sealed run that did not return"
+  is owed once more, then spent and failed. A failed `deep_report` receipt "the look ledger is damaged" means no look
+  until the captain restores `<state>/equity-deep/ledger.json` (`ledger.json.prev` is the file before its last save).
+  An `equity_deep` receipt skipped with "last audit failed" waits for the job setting `refetch` in `<state>/ops.json`
+  (read `audit-failed.json`, counts only); a failed one with "HTTP 503" is the owner's D1 (`TIINGO_TOKEN`) not
+  placed. A killed look's temporary store is swept by the next deep job (a "swept" warning).
 - **Release receipts** (`release_receipts.py`, read by the stall job): a release declares the funnel metric it expects
   to move (`league/ops/release_receipts.json`); the House reads it back after its window and lists the verdict.
   Listed, never reverted. E3 declares two, each read after a week: program-sessions accrue, and out-of-fold rows.
