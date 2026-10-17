@@ -330,12 +330,13 @@ def _alive(pid: int) -> bool:
         return True
 
 
-def sweep(parent: str | Path, *, now: float | None = None) -> int:
+def sweep(parent: str | Path, *, now: float | None = None, nameless: bool = False) -> int:
     """THE SWEEP: remove every `deep-*` directory under `parent` that a process left behind (`config.LOOKS_DIR`): one
-    whose process (`-p<pid>-` in its name) is gone, whose name names none, or that is older than `config.TEMP_STALE_S`.
-    A look's own block removes its directory; this is for the look whose process was killed (the wall's SIGKILL, a CPU
-    or memory limit, a box restart) before its `finally` ran, so no relabeled DVAL store outlives its look. The number
-    removed (0 when `parent` is not a directory)."""
+    whose process (`-p<pid>-` in its name) is gone, or that is older than `config.TEMP_STALE_S`; with `nameless` (a
+    directory that is the deep store's own: its looks directory and its top) also one whose name names no process (the
+    first R1 build's). A look's own block removes its directory; this is for the look whose process was killed (the
+    wall's SIGKILL, a CPU or memory limit, a box restart) before its `finally` ran, so no relabeled DVAL store outlives
+    its look. The number removed (0 when `parent` is not a directory)."""
     import re
     import time
 
@@ -352,6 +353,8 @@ def sweep(parent: str | Path, *, now: float | None = None) -> int:
             age = clock - entry.stat().st_mtime
         except OSError:
             continue
+        if found is None and not nameless:
+            continue   # not the deep store's own directory: only what names its process is ours to judge
         if found is None or not _alive(int(found.group(1))) or age > config.TEMP_STALE_S:
             shutil.rmtree(entry, ignore_errors=True)
             removed += int(not entry.exists())
@@ -361,7 +364,7 @@ def sweep(parent: str | Path, *, now: float | None = None) -> int:
 def sweep_store(root: str | Path) -> int:
     """`sweep` of the deep store at `root`: its looks' directory, and its own top (where the first R1 build wrote
     them). Nothing is created; a root that is not there sweeps nothing."""
-    return sweep(looks_dir(root)) + sweep(root)
+    return sweep(looks_dir(root), nameless=True) + sweep(root, nameless=True)
 
 
 def as_of_closes(store: DeepStore, symbol: str, spans: Sequence[str]) -> dict[str, float]:

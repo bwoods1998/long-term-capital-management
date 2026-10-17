@@ -140,9 +140,9 @@ def relabeled(store: blocks.DeepStore, name: str, symbols: Sequence[str], *,
     directory is made, what a killed process left there is swept (`blocks.sweep`)."""
     if name in config.DVAL_SEGMENTS and not store.gate:
         raise blocks.DeepRefused(f"segment {name} is the sealed era: it is written only inside a look")
-    where = blocks.looks_dir(store.root, make=True) if (name in config.DVAL_SEGMENTS or parent is None) \
-        else Path(parent)
-    blocks.sweep(where)
+    own = name in config.DVAL_SEGMENTS or parent is None
+    where = blocks.looks_dir(store.root, make=True) if own else Path(parent)
+    blocks.sweep(where, nameless=own)
     tmp = Path(tempfile.mkdtemp(prefix=blocks.temp_prefix(name), dir=str(where)))
     try:
         os.chmod(tmp, 0o700)

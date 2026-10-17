@@ -517,6 +517,14 @@ class AKilledLook(unittest.TestCase):
         self.assertEqual(sorted(p for p in os.listdir(self.deep) if p.startswith("deep-")), [])
         self.assertTrue((self.deep / config.SEALED_DIR / "dval").is_dir(), "the store itself is untouched")
         self.assertEqual(blocks.sweep(self.root / "nowhere"), 0)
+        foreign = self.root / "deep-test-someone-elses"   # a caller's parent: what names no process is not ours
+        foreign.mkdir()
+        os.utime(foreign, (0, 0))
+        dead = self.root / "deep-traind-p999999999-x"
+        dead.mkdir()
+        self.assertEqual(blocks.sweep(self.root), 1)
+        self.assertTrue(foreign.exists())
+        self.assertFalse(dead.exists())
 
 
 if __name__ == "__main__":
