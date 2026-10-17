@@ -190,6 +190,30 @@ class TheReceipt(unittest.TestCase):
         doc["constants"]["boot_resamples"] = 2000
         self.assertIn("CODE PIN", P.read_receipt(W.strict(doc))[1])
 
+    def test_a_pinned_receipts_code_is_code_pin_3s_every_file(self):
+        """The conformance review's finding 6: a receipt whose code is not exactly CODE PIN 3's (a file reverted to an
+        earlier pin's sha, which the calibration's preconditions accept, or another pin's label) is refused."""
+        raw, rec = W.dryrun()
+        self.assertEqual({k: rec.calibration["code_sha256"].get(k) for k in P.CODE_PIN_SHA256}, P.CODE_PIN_SHA256)
+        doc = json.loads(raw)
+        doc["calibration"]["code_pin"], doc["calibration"]["code_pin_utc"] = P.CODE_PIN, "2026-10-16T22:23:50Z"
+        cal = doc["calibration"]
+        self.assertIsNone(P._check_calibration(doc))                  # the dry run's code is CODE PIN 3's
+        cal["code_sha256"] = {**cal["code_sha256"],
+                              "p1house.py": "ddb4dd5b267cca5049beafda6bb18fd4e25986e42c2901428a719e4765e3ae29"}
+        with self.assertRaises(P.ReceiptRefused) as caught:
+            P._check_calibration(doc)
+        self.assertIn("p1house.py", str(caught.exception))
+        del cal["code_sha256"]["p1house.py"]
+        with self.assertRaises(P.ReceiptRefused):
+            P._check_calibration(doc)
+        cal["code_sha256"] = dict(rec.calibration["code_sha256"])
+        cal["code_pin"] = "CODE PIN 1"
+        with self.assertRaises(P.ReceiptRefused) as caught:
+            P._check_calibration(doc)
+        self.assertIn(P.CODE_PIN, str(caught.exception))
+        self.assertIsNone(P._check_calibration(doc, test=True))      # a test's own constants: unpinned code allowed
+
     def test_the_test_world_receipt_parses(self):
         rec = W.receipt()
         self.assertEqual(set(rec.units), {W.TM_I, W.TM_S, W.RL_I})
@@ -609,6 +633,31 @@ class TheDemotionRouteAndWords(unittest.TestCase):
         self.assertEqual(P.figure_free({"version": 1, "a": "b", "c": [None, True, "2026-10-26"]}), [])
         self.assertEqual(P.figure_free({"t": 1.7}), ["t"])
         self.assertEqual(P.figure_free({"w": "12% at zero edge"}), ["w"])
+
+    def test_ids_are_not_figures_and_free_text_is_mended(self):
+        """The conformance review's finding 1: a lineage slug with "bp" in it is an id (a key or an id field); a number
+        at an id field still is a figure; the free text is mended to a fixed word, never refusing the document."""
+        doc = {"version": 1, "routes": {"equity:gap-50-bp-fade": {"cell": "a/b", "cluster": "a"}},
+               "holds": ["equity:spy-10-bp-fade", "equity:x-1.5-pct"], "units": {"a/b": {"cluster": "a", "word": "PASS"}},
+               "eligible": [{"lineage": "equity:gap-50-bp-fade", "version": 3, "run_sha": "ab12"}], "why": "no_receipt"}
+        ids, keys = ("cell", "cluster", "lineage", "run_sha", "holds"), ("routes", "units")
+        self.assertEqual(sorted(P.figure_free(doc)), ["eligible[0].lineage", "holds[0]", "holds[1]",
+                                                      "routes.equity:gap-50-bp-fade"])
+        self.assertEqual(P.figure_free(doc, ids=ids, id_keys=keys), [])
+        self.assertEqual(P.figure_free({"cell": 1.5}, ids=ids), ["cell"])                  # a number is a figure
+        self.assertEqual(P.figure_free({"units": {"a": {"word": "t 1.83"}}}, ids=ids, id_keys=keys),
+                         ["units.a.word"])
+        bad = {**doc, "why": "the cap is 0.12", "units": {"a/b": {"cluster": "a", "word": "passed at 1.83"}},
+               "t": 1.7, "n": 4}
+        mended, places, stuck = P.scrub_figures(bad, word="withheld", ids=ids, id_keys=keys)
+        self.assertEqual(sorted(places), ["n", "t", "units.a/b.word", "why"])
+        self.assertEqual(stuck, [])
+        self.assertEqual((mended["why"], mended["t"], mended["units"]["a/b"]["word"]), ("withheld",) * 3)
+        self.assertEqual(mended["routes"], doc["routes"])
+        self.assertEqual(P.figure_free(mended, ids=ids, id_keys=keys), [])
+        self.assertEqual(bad["why"], "the cap is 0.12")                                  # a copy: the input is kept
+        _, _, stuck = P.scrub_figures({"weird": {"0.5": "x"}}, word="withheld", ids=ids, id_keys=keys)
+        self.assertEqual(stuck, ["weird.0.5"])                       # a key it cannot mend: the caller fails closed
 
     def test_the_floor_wide_expected_passes_count_a_cluster_once(self):
         rec = W.receipt()

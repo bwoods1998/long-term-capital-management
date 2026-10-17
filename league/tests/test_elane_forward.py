@@ -629,5 +629,133 @@ class ThePoolRoute(Base):
         self.assertEqual(EF.step(self.gate(POOL_ON))["seated"], ["f1"])
 
 
+
+def route_mark(lineage: str) -> dict:
+    return {"lineage": lineage, "route": {"receipt": "d" * 64, "night": "2026-10-23", "cell": "trend_momentum/sectors",
+                                          "cluster": "trend_momentum"}}
+
+
+class TheDurableMark(Base):
+    """POOL1's DURABLE REFUSAL (the module docstring, 4; P1 D20; the conformance review's findings 2 and 3): a route or
+    held mark on the family or its lineage's root refuses a seat and a sealed try WITHOUT the pool's file, whatever
+    `elane.pool.mode` says; a released hold refuses nothing; a mark that is not the job's shape refuses as a route; the
+    writer is append-only."""
+
+    SETTINGS = (POOL_ON, POOL_ROLLED, ON, {"elane": {"fwd1": {"mode": "record", "seats": "on"}}})
+
+    def test_a_route_mark_refuses_with_no_pool_file_whatever_the_mode(self):
+        fam = self.store.add("s1", symbols=["XLK"], state={EF.POOL_MARK_KEY: route_mark("equity:s1")})
+        self.permit({"equity:s1": self.passed("s1")})
+        self.assertFalse((self.root / EF.POOL_PERMITS).exists())
+        for settings in self.SETTINGS:
+            with self.subTest(settings=settings["elane"].get("pool")):
+                out = EF.step(self.gate(settings))
+                self.assertEqual((out["seated"], out["waits"].get("s1")), ([], EF.POOL_REFUSED))
+                fam["state"][EF.STATE_KEY] = {"eligible": True, "type": "ETF", "case": "N", "lineage": "equity:s1"}
+                self.assertEqual(EF.seat_refused(self.store, fam, settings), EF.POOL_REFUSED)
+                del fam["state"][EF.STATE_KEY]
+                self.assertEqual(EF.try_refused(self.store, fam, settings, now=CLOSE - 3600.0), EF.POOL_REFUSED)
+        for settings in (POOL_FWD1_OFF, OFF, {}):                       # whatever elane.fwd1.seats says
+            self.assertEqual(EF.try_refused(self.store, fam, settings, now=CLOSE - 3600.0), EF.POOL_REFUSED)
+            self.assertFalse(elane.try_open(self.store, fam, 1, settings))
+        self.assertEqual(fam["band"], "gym")
+
+    def test_a_family_born_into_a_marked_lineage_is_refused_by_its_roots_mark(self):
+        self.store.add("root1", symbols=["XLK"], state={EF.POOL_MARK_KEY: route_mark("equity:root1")})
+        fork = self.store.add("fork1", symbols=["XLK"], lineage="root1")
+        self.assertEqual(EF.pool_mark(self.store, fork), "route")
+        self.assertEqual(EF.try_refused(self.store, fork, POOL_ROLLED, now=CLOSE), EF.POOL_REFUSED)
+        self.permit({"equity:root1": self.passed("fork1")})
+        self.assertEqual(EF.step(self.gate(POOL_ROLLED))["waits"]["fork1"], EF.POOL_REFUSED)
+
+    def test_a_held_mark_keeps_l5_and_a_released_one_refuses_nothing(self):
+        held = {"lineage": "equity:f1", "held": {"receipt": "d" * 64, "night": "2026-10-23"}}
+        fam = self.store.add("f1", symbols=["SPY", "QQQ"], state={EF.POOL_MARK_KEY: held})
+        (self.root / EF.PERMITS).write_text(json.dumps({
+            "version": EF.PERMITS_VERSION, "screen": "FWD1-R", "receipt": "c" * 64, "start": PIN_START, "at": "x",
+            "lineages": {"equity:f1": {"status": "pending", "type": "ETF", "case": "N", "family": "f1",
+                                       "start": START}}}))
+        for settings in (POOL_ROLLED, {}, OFF):                      # no pool file, the mode off: the mark is the hold
+            with self.subTest(settings=settings):
+                self.assertIsNone(EF.try_refused(self.store, fam, settings, now=CLOSE - 3600.0))   # L5 kept
+                self.assertEqual(EF.try_refused(self.store, fam, settings, now=CLOSE), EF.POOL_REFUSED)
+        # failing closed on the file (missing under mode record, or torn): no L5 for a held mark either
+        self.assertEqual(EF.try_refused(self.store, fam, POOL_FWD1_OFF, now=CLOSE - 3600.0), EF.POOL_REFUSED)
+        (self.root / EF.POOL_PERMITS).write_text("{torn")
+        self.assertEqual(EF.try_refused(self.store, fam, POOL_ROLLED, now=CLOSE - 3600.0), EF.POOL_REFUSED)
+        (self.root / EF.POOL_PERMITS).unlink()
+        fam["state"][EF.STATE_KEY] = {"eligible": True, "type": "ETF", "case": "N", "lineage": "equity:f1"}
+        self.assertEqual(EF.seat_refused(self.store, fam, POOL_ROLLED), EF.POOL_REFUSED)
+        fam["state"][EF.POOL_MARK_KEY] = {**held, "released": {"receipt": "d" * 64, "night": "2026-10-26"}}
+        self.assertIsNone(EF.pool_mark(self.store, fam))
+        self.assertEqual(EF.try_refused(self.store, fam, POOL_ROLLED, now=CLOSE), EF.REFUSED)    # FWD1's own, no pool's
+        self.assertIsNone(EF.try_refused(self.store, fam, {"elane": {"pool": {"mode": "off"}}}, now=CLOSE))
+        self.assertNotEqual(EF.seat_refused(self.store, fam, POOL_ROLLED), EF.POOL_REFUSED)
+
+    def test_a_mark_that_is_not_the_jobs_shape_refuses_as_a_route(self):
+        for bad in ("route", [1], {"lineage": "equity:f1"}, {"lineage": "equity:f1", "route": "x"},
+                    {"lineage": "equity:f1", "released": {}}, {"lineage": "equity:f1", "held": {}, "other": {}},
+                    {"route": {}}, {"lineage": "equity:f1", "route": {}, "held": {}, "released": {}}):
+            with self.subTest(bad=bad):
+                self.assertEqual(EF.mark_word(bad), "route")
+                fam = self.store.add("f1", symbols=["SPY"], state={EF.POOL_MARK_KEY: bad})
+                self.assertEqual(EF.try_refused(self.store, fam, {}, now=CLOSE - 3600.0), EF.POOL_REFUSED)
+        self.assertIsNone(EF.mark_word(None))
+
+    def test_the_writer_marks_every_family_of_the_lineage_and_never_changes_a_part(self):
+        self.store.add("r1", symbols=["XLK"])
+        self.store.add("r1b", symbols=["XLK"], lineage="r1", retired=True)
+        self.store.add("other", symbols=["XLK"])
+        rec = {"receipt": "d" * 64, "night": "2026-10-23", "cell": "c", "cluster": "k"}
+        self.assertEqual(EF.pool_mark_write(self.store, {"equity:r1": {"held": {"receipt": "d" * 64, "night": "n"}},
+                                                         "equity:none": {"route": rec}}),
+                         {"equity:r1": 2, "equity:none": 0})
+        for fid in ("r1", "r1b"):
+            self.assertEqual(EF.pool_mark(self.store, self.store.family(fid)), "held")
+        self.assertNotIn(EF.POOL_MARK_KEY, self.store.family("other")["state"])
+        EF.pool_mark_write(self.store, {"equity:r1": {"route": rec, "held": {"receipt": "e" * 64, "night": "m"}}})
+        mark = self.store.family("r1")["state"][EF.POOL_MARK_KEY]
+        self.assertEqual(mark["held"], {"receipt": "d" * 64, "night": "n"})          # never changed
+        self.assertEqual(mark["route"], rec)
+        EF.pool_mark_write(self.store, {"equity:r1": {"released": {"receipt": None}}})
+        self.assertNotIn("released", self.store.family("r1")["state"][EF.POOL_MARK_KEY])   # never beside a route
+        self.store.fams["r1"]["state"][EF.POOL_MARK_KEY] = "corrupt"
+        EF.pool_mark_write(self.store, {"equity:r1": {"route": rec}})
+        self.assertEqual(self.store.family("r1")["state"][EF.POOL_MARK_KEY], "corrupt")     # left: it refuses
+        for bad in ({"equity:r1": {"route": {"t": 1.7}}}, {"equity:r1": {"seat": rec}}, {"equity:r1": {}}):
+            with self.assertRaises(ValueError):
+                EF.pool_mark_write(self.store, bad)
+
+    def test_the_key_is_sealed_and_the_swarm_store_reader_fails_closed(self):
+        import sqlite3
+
+        from league.swarm import DB_NAME, elane_seal
+
+        self.assertIn(EF.POOL_MARK_KEY, elane_seal.SEALED_KEYS)
+        self.assertFalse(EF.pool_marked_any(self.root))                 # no swarm store
+        db = sqlite3.connect(str(self.root / DB_NAME))
+        db.execute("CREATE TABLE families (id TEXT, state TEXT)")
+        db.execute("INSERT INTO families VALUES ('a', '{}')")
+        db.commit()
+        self.assertFalse(EF.pool_marked_any(self.root))
+        db.execute("INSERT INTO families VALUES ('b', ?)", (json.dumps({EF.POOL_MARK_KEY: route_mark("equity:b")}),))
+        db.commit()
+        self.assertTrue(EF.pool_marked_any(self.root))
+        db.execute("DROP TABLE families")
+        db.commit()
+        db.close()
+        self.assertTrue(EF.pool_marked_any(self.root))                  # unreadable: fail closed
+
+    def test_a_store_read_that_raises_refuses(self):
+        fam = self.store.add("f1", symbols=["SPY"])
+
+        def boom(fid):
+            raise RuntimeError("locked")
+
+        with mock.patch.object(self.store, "family", boom):
+            self.assertFalse(elane.try_open(self.store, fam, 1, POOL_ROLLED))
+            self.permit({"equity:f1": self.passed("f1")})
+            self.assertEqual(EF.step(self.gate(POOL_ROLLED))["seated"], [])
+
 if __name__ == "__main__":
     unittest.main()

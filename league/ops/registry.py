@@ -231,8 +231,9 @@ JOBS: tuple[Job, ...] = (
     # lineages, checkpoints and verdicts). Once a record night (a second start on one night writes nothing); mode
     # record, no seat (seats are P2's). Skipped while `elane.pool.mode` is "off" (the permit file is kept) and inside
     # 09:00-17:30 New York on a session; with no pin or no receipt it writes the permit file from its store and judges
-    # nothing. It reads the record, FWD1's store and the swarm store read-only and writes only
-    # <state>/pool-screen.sqlite, the permit file and its report, so it runs in a pause too. Its child seconds are
+    # nothing. It reads the record and FWD1's store read-only and writes <state>/pool-screen.sqlite, the permit file,
+    # its report and, in the swarm store, only the durable refusal's marks and clock record (P1 D20: a mark only
+    # refuses, never moves a band or a seat), so it runs in a pause too. Its child seconds are
     # `elane.pool.cpu_seconds_night` (600) a night inside its 900 of CPU; THE DEADLINE is forward_screen's (the
     # earlier of its wall and the next pre-open, less 120 s). A failure is an ops alarm, never a stall cause.
     Job("pool_screen", "league.ops.pool_screen", (S.after("forward_shadow"),), grace=2 * HOUR, cpu=900, wall=1500,

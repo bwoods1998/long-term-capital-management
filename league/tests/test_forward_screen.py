@@ -1032,7 +1032,7 @@ class TheIndexLineageUntried(Fixture):
                          ("pending", "N", "ETF", "2026-10-19", "f1"))
         self.assertEqual(json.loads((self.root / FS.PERMITS).read_text())["start"], START.isoformat())   # the pin's
         close = schedule.moments(dt.date(2026, 10, 19)).close_at
-        swarm = types.SimpleNamespace(root=self.root, clock=lambda: PIN_AT + 3 * 3600.0)
+        swarm = types.SimpleNamespace(root=self.root, clock=lambda: PIN_AT + 3 * 3600.0, family=lambda fid: None)
         # its v2 passes Train hours later: the S2 try is open while Mon Oct 19's session has not closed ...
         self.assertTrue(EF.untried(swarm, fam, row, pin_start=START.isoformat()))
         self.assertIsNone(EF.try_refused(swarm, fam, self.ON))
@@ -1097,7 +1097,7 @@ class TheIndexLineageUntried(Fixture):
         self.first_night()
         row = self.permits()["equity:f2"]
         self.assertEqual((row["status"], row["start"]), ("pending", "2026-10-16"))
-        swarm = types.SimpleNamespace(root=self.root, clock=lambda: PIN_AT + 3600.0)
+        swarm = types.SimpleNamespace(root=self.root, clock=lambda: PIN_AT + 3600.0, family=lambda fid: None)
         self.assertEqual(EF.try_refused(swarm, fam, self.ON), EF.REFUSED)
 
     def test_a_pending_lineage_untried_by_the_close_stays_judged_and_refused(self):
@@ -1107,12 +1107,12 @@ class TheIndexLineageUntried(Fixture):
         pid = self.row("f1", 1, first_day="2026-10-19")
         self.first_night()
         close = schedule.moments(dt.date(2026, 10, 19)).close_at
-        swarm = types.SimpleNamespace(root=self.root, clock=lambda: close - 3600.0)
+        swarm = types.SimpleNamespace(root=self.root, clock=lambda: close - 3600.0, family=lambda fid: None)
         self.assertIsNone(EF.try_refused(swarm, fam, self.ON))       # open before the close ...
         names = self.days(pid, [0.0, 0.0], first=dt.date(2026, 10, 19))
         self.night(now=schedule.moments(dt.date.fromisoformat(names[-1])).close_at + 9000.0)
         self.assertEqual(self.permits()["equity:f1"]["status"], "pending")
-        swarm = types.SimpleNamespace(root=self.root, clock=lambda: close + 9000.0)
+        swarm = types.SimpleNamespace(root=self.root, clock=lambda: close + 9000.0, family=lambda fid: None)
         self.assertEqual(EF.try_refused(swarm, fam, self.ON), EF.REFUSED)    # ... FWD1 judges it: no S2 look now
 
 

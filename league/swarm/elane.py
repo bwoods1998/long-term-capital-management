@@ -849,7 +849,8 @@ def try_open(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, 
     `try_refused`), but L5 (A48): an index-only case-N lineage listed pending keeps its S2 try, for the
     representative's own family, until the close of its FWD1_START session when that start is after the pin's
     (`elane_forward.untried`); the judge then voids it (A33 (4)). POOL1 (A55a): a lineage the pooled screen's permit
-    file lists on its POOL route or hold list takes none whatever `elane.fwd1.seats` says (a route-listed one
+    file lists on its POOL route or hold list, or whose family or lineage root carries its durable route or held mark
+    (`elane_forward.pool_mark`, P1 D20), takes none whatever `elane.fwd1.seats` says (a route-listed one
     outright; only L5's HELD index lineage keeps its S2 try until that close), and that file failing closed refuses
     every lineage FWD1 lists as judged, L5 included (`elane_forward.try_refused`; league/swarm/elane_forward.py's
     docstring, 4). A family trading outside the

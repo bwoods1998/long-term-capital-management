@@ -81,7 +81,7 @@ import warnings
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 
 from . import fwd1_rule as F
 
@@ -267,6 +267,35 @@ CALIB_SHA256: dict[str, str | None] = {
     "p1cluster.py": "97ccad275e34d35394329cc2a66abb25c52ddf433475a28286b6e88aa8af9b62",
     "p1conform.py": "829b76672bba59dc46af7839b4813f2b10249426e719029c0112568056735632",
     "pool1_house_job.py": "9f6ab090b3e06226ccedd28ec99b3317c81138bd656d425e156c216045ccadc9",
+}
+#: THE CALIBRATION'S CODE AT ITS PIN (the conformance review's finding 6; scratch/pooled-screen/PINS.log): the
+#: calibration's run code (its p1run `CODE_FILES`), each file at the sha of its LATEST pin (CODE PIN 1's but for the
+#: driver, CODE PIN 2's, and the seven CODE PIN 3 changed or added). A pinned receipt (`parse_receipt` outside a test's
+#: own constants) must print `CODE_PIN` as its code pin and name every one of these files at exactly this sha in
+#: `calibration.code_sha256`: a file reverted to an earlier pin's sha (which the calibration's preconditions accept,
+#: since they look a sha up anywhere in PINS.log) is refused here, whatever label the run printed.
+CODE_PIN = "CODE PIN 3"
+CODE_PIN_SHA256: dict[str, str] = {
+    "p1const.py": "e2bd332870afece7fd2e420c15f1f71b4d944cfff1e6d4835273b9097f54f549",
+    "p1data.py": "5152b1ccbd7b804ac92602710d2421ef499ba1aa06cd463fcd0253d21d55e17f",
+    "p1stat.py": "2dc117dfec825609b531a6075c067320d4a9cc78a104c6f5e88cf2c54fbfa986",
+    "p1members.py": "c6e61f896d5c3fcc88f0500316c9d6837e4e9eb237dc2ad09dd6a7e9839bbe9a",
+    "p1units.py": "3ca473f68017366c559d3c2d09a7dd35d3793f523133f0e7dccb47ff9309066e",
+    "p1engine.py": "d9fdf13eff203557f65c44eaff30ee029e2e5b7f68e1c80ae0b270d1cc60e920",
+    "p1fam.py": "b74d64eef27323d2a188ed83f1af36ee8b38dfc9a521e542f0de20a0d27dba8a",
+    "p1twins.py": "fffd9f7b92e7d5b1447bcce5928204be66459ae91a0c3a199bf9520697ace4e0",
+    "p1synth.py": "d34a5540ff12b1d6de8575a88c5ebc1249b8266cbbbaccb92a23268e1b246043",
+    "p1prep.py": "5c5fd5046cca9ed626d81de5fbdb81de477b1d7382acbed35812af2eef6aa60b",
+    "p1house.py": "325b0579612091906ee77e2eb081227f7ae2cc04a175e5ecfce3f0425d674656",
+    "p1tickets.py": "a9aff2b253a125c2e311ea652df40814cbdf3acb4d15c95ac890672f36508590",
+    "p1gates.py": "89967249ee0a0a723ba576a24f0aeeb26d175bee2488d9826f09cd3e079eeaa1",
+    "p1run.py": "db61f2c80a9cab55aa064477c9603e53da84c9f1f0796960d40521d4ee391d98",
+    "p1report.py": "59c55c78edd62a8dceacffd684dc16df0c1a62118bb365696397174eead0b17c",
+    "p1cluster.py": "97ccad275e34d35394329cc2a66abb25c52ddf433475a28286b6e88aa8af9b62",
+    "p1conform.py": "829b76672bba59dc46af7839b4813f2b10249426e719029c0112568056735632",
+    "house_job/pool1_house_job.py": "9f6ab090b3e06226ccedd28ec99b3317c81138bd656d425e156c216045ccadc9",
+    "house_job/drive.py": "2684e305ee9fc81d9768ddb7d7ac95390e5af51965a006c42ad09196cca5d020",
+    "read_decision.py": "a3e6bb2472adb909518eb2b908c866743a3d74bc8b69e1fddbe429f78c915bf0",
 }
 
 
@@ -803,9 +832,14 @@ def _check_calibration(doc: Mapping[str, Any], *, test: bool = False) -> None:
     else:
         _need(isinstance(cal["code_pin"], str) and cal["code_pin"].startswith("CODE PIN ")
               and isinstance(cal["code_pin_utc"], str), "the receipt's code is not at a CODE PIN")
+        _need(cal["code_pin"] == CODE_PIN, f"the receipt's code pin is not {CODE_PIN}")
     _need(isinstance(cal["code_sha256"], Mapping) and all(isinstance(k, str) and _is_hex(v)
                                                           for k, v in cal["code_sha256"].items()),
           "the calibration's code shas are not 64-hex shas")
+    if not test:
+        # THE CODE AT ITS PIN (the conformance review's finding 6): every run file at its latest pin's sha
+        wrong = sorted(name for name, sha in CODE_PIN_SHA256.items() if cal["code_sha256"].get(name) != sha)
+        _need(not wrong, f"the receipt's calibration code is not {CODE_PIN}'s: {', '.join(wrong)}")
     _need(isinstance(cal["vendored"], Mapping) and set(cal["vendored"]) == set(CALIB_FILES)
           and all(_is_hex(v) for v in cal["vendored"].values()), "the receipt does not name every vendored file's sha")
     for key in ("pins_log_sha256", "deviations_log_sha256", "decision_sha256", "decision_in_sha256",
@@ -1910,30 +1944,76 @@ def route_of(fwd1: Mapping[str, Any] | None, *, unit_judged: bool, refuted: bool
 _DECIMAL = re.compile(r"\d+\.\d+|%|\bbp\b")
 
 
-def figure_free(doc: Any, *, ints: Sequence[str] = ("version",), path: str = "") -> list[str]:
+def figure_free(doc: Any, *, ints: Sequence[str] = ("version",), ids: Collection[str] = (),
+                id_keys: Collection[str] = (), path: str = "", at: str | None = None) -> list[str]:
     """The places a document a generator-visible process reads holds a FIGURE (section 8: ids and words only): any
-    float, any whole number but at a key of `ints`, any text with a decimal number, a "%" or "bp". [] when none."""
-    found: list[str] = []
+    float, any whole number but at a key of `ints`, any text with a decimal number, a "%" or "bp" (a key of a mapping
+    too). IDS ARE NOT FIGURES (the conformance review's finding 1: a lineage slug like "gap-50-bp-fade" is an id): the
+    text at a key of `ids` (a value, or each text of a list there) and the keys of a mapping at a key of `id_keys` are
+    not read for figures (a number there still is one). [] when none. (`at`: the key the value sits at, by default the
+    last part of `path`.)"""
+    key = path.rsplit(".", 1)[-1] if at is None else at
     if isinstance(doc, bool) or doc is None:
-        return found
+        return []
     if isinstance(doc, float):
         return [path or "<root>"]
     if isinstance(doc, int):
-        return [] if path.rsplit(".", 1)[-1] in ints else [path or "<root>"]
+        return [] if key in ints else [path or "<root>"]
     if isinstance(doc, str):
-        return [path] if _DECIMAL.search(doc) else []
+        return [] if key in ids else [path] if _DECIMAL.search(doc) else []
+    found: list[str] = []
     if isinstance(doc, Mapping):
-        for key, value in doc.items():
-            if _DECIMAL.search(str(key)):
-                found.append(f"{path}.{key}")
-            found.extend(figure_free(value, ints=ints, path=f"{path}.{key}" if path else str(key)))
+        for k, value in doc.items():
+            if key not in id_keys and _DECIMAL.search(str(k)):
+                found.append(f"{path}.{k}")
+            found.extend(figure_free(value, ints=ints, ids=ids, id_keys=id_keys,
+                                     path=f"{path}.{k}" if path else str(k), at=str(k)))
         return found
     if isinstance(doc, (list, tuple)):
         for i, value in enumerate(doc):
-            found.extend(figure_free(value, ints=ints, path=f"{path}[{i}]"))
+            found.extend(figure_free(value, ints=ints, ids=ids, id_keys=id_keys, path=f"{path}[{i}]", at=key))
         return found
     return [path or "<root>"]
 
+
+def scrub_figures(doc: Any, *, word: str, ints: Sequence[str] = ("version",), ids: Collection[str] = (),
+                  id_keys: Collection[str] = (), path: str = "", at: str | None = None
+                  ) -> tuple[Any, list[str], list[str]]:
+    """`figure_free`'s walk, MENDING instead of refusing (the conformance review's finding 1: one bad text never freezes
+    a whole document): (a copy of `doc` with every value `figure_free` would name replaced by the fixed `word`, the
+    places replaced, the places it cannot mend: a mapping KEY holding a figure outside `id_keys`, which the caller must
+    fail closed on)."""
+    key = path.rsplit(".", 1)[-1] if at is None else at
+    if isinstance(doc, bool) or doc is None:
+        return doc, [], []
+    if isinstance(doc, float) or (isinstance(doc, int) and key not in ints) or (
+            isinstance(doc, str) and key not in ids and _DECIMAL.search(doc)):
+        return word, [path or "<root>"], []
+    if isinstance(doc, (int, str)):
+        return doc, [], []
+    mended: list[str] = []
+    stuck: list[str] = []
+    if isinstance(doc, Mapping):
+        out: dict[Any, Any] = {}
+        for k, value in doc.items():
+            if key not in id_keys and _DECIMAL.search(str(k)):
+                stuck.append(f"{path}.{k}")
+            v, m, st = scrub_figures(value, word=word, ints=ints, ids=ids, id_keys=id_keys,
+                                     path=f"{path}.{k}" if path else str(k), at=str(k))
+            out[k] = v
+            mended.extend(m)
+            stuck.extend(st)
+        return out, mended, stuck
+    if isinstance(doc, (list, tuple)):
+        items = []
+        for i, value in enumerate(doc):
+            v, m, st = scrub_figures(value, word=word, ints=ints, ids=ids, id_keys=id_keys, path=f"{path}[{i}]",
+                                     at=key)
+            items.append(v)
+            mended.extend(m)
+            stuck.extend(st)
+        return items, mended, stuck
+    return word, [path or "<root>"], []
 
 
 
@@ -1945,6 +2025,7 @@ __all__ = ["NAME", "SCREEN", "PIN_BLOCK", "RECEIPT_PATH", "CONTRACT", "CONFORMAN
            "P1_RULE", "PIN_KEYS", "FLOORS", "MARGINS_K", "C_G_K_RANGE", "NULLS", "SPANS", "BASE_GROUPS", "CLASSES_OUT",
            "EVENT_INPUT", "EVENT_FIELDS", "EVENT_WORD", "PASSING", "PARTS", "PENDING", "FINAL", "REPORT_ONLY",
            "INELIGIBLE", "NONCONFORMING", "WORDS", "Pin", "pin", "load", "CALIB_DIR", "CALIB_FILES", "CALIB_SHA256",
+           "CODE_PIN", "CODE_PIN_SHA256",
            "Calib", "calib", "file_sha256", "RECEIPT_KEYS", "REGIME_AXES", "BESIDE_KEYS", "PIN_FLOOR_KEYS", "CV_IDS",
            "ReceiptRefused", "Founder", "UnitSpec", "ClusterSpec", "Rule", "Receipt", "receipt_problem",
            "parse_receipt", "read_receipt", "load_receipt", "rule", "cell_name", "cell_key", "member_pid",
@@ -1955,4 +2036,4 @@ __all__ = ["NAME", "SCREEN", "PIN_BLOCK", "RECEIPT_PATH", "CONTRACT", "CONFORMAN
            "pin_floors", "minimum_of", "canonical", "market_record", "vector_inputs", "conform",
            "CV_ROUTES", "binom_tail", "mar_void", "placebo_seed", "placebo_draws", "placebo_count", "placebo_holds",
            "control_wbar", "demote", "on_pool_route", "words", "expected_passes", "beside", "alpha_series", "member_z",
-           "t_k", "pass_k", "u_cap", "route_of", "figure_free"]
+           "t_k", "pass_k", "u_cap", "route_of", "figure_free", "scrub_figures"]

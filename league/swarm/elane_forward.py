@@ -79,6 +79,16 @@ WITH IT ON:
    `elane.fwd1.seats` off `step` and `seat_refused` still do nothing else. A CODE ROLLBACK to a release before POOL1
    has no reader of this file and lifts the refusal: while the route list is non-empty it needs a captain amendment
    (docs/operations.md).
+   THE DURABLE REFUSAL (P1 D20; the conformance review's findings 2 and 3): the refusal does not rest on the pool's own
+   files alone. The job writes a MARK in the state of EVERY family of a lineage it routes or holds (`POOL_MARK_KEY`,
+   sealed from every generator: league/swarm/elane_seal.py `SEALED_KEYS`) BEFORE its own store commits that route or
+   hold (`pool_mark_write`): append-only (a part once written is never changed or removed), ids and words only. `step`,
+   `seat_refused` and `try_refused` read it from this store (`pool_mark`: the family's own row and its lineage root's,
+   so a family born into the lineage later is refused too) INDEPENDENTLY OF THE POOL'S FILE AND STORE AND OF
+   `elane.pool.mode`: a ROUTE mark refuses for good (no FWD1-R seat, no sealed try, L5 included), a HELD mark refuses
+   until the job records the release (the held lineage's L5 S2 try kept, as above), a mark that is not the job's shape
+   refuses as a route. So a permit file deleted while the mode is off or the block absent, or the pool's store and
+   file both deleted, lift nothing.
 
 Standard library only.
 """
@@ -125,6 +135,15 @@ POOL_UNREADABLE = ("POOL1 (A55a): the pooled screen's permit file cannot be read
                    "lineage FWD1 judges takes a sealed try (fail closed)")
 POOL_MISSING = ("POOL1 (A55a): the pooled screen's permit file is missing while elane.pool.mode is on: no ETF FWD1-R "
                 "pass is seated and no lineage FWD1 judges takes a sealed try (fail closed)")
+#: THE DURABLE REFUSAL (the module docstring, 4; scratch/pooled-screen/DEVIATIONS.log P1 D20): the family-state key the
+#: pooled screen's job (league/ops/pool_screen.py, the one writer, through `pool_mark_write`) adds to every family of a
+#: lineage it routes or holds, before its own store commits the route or the hold: {"lineage": <lineage id>, "route":
+#: {...}, "held": {...}, "released": {...}}, each part a mapping of ids and words ("receipt", "night", "cell",
+#: "cluster"), added once and never changed or removed. Sealed from every generator (league/swarm/elane_seal.py
+#: `SEALED_KEYS`; a test holds the two). `pool_mark` reads it.
+POOL_MARK_KEY = "elane_pool_mark"
+#: A mark's parts, in the order they may be added ("released" only after "held" and never beside "route").
+POOL_MARK_PARTS = ("route", "held", "released")
 
 
 def seats_on(settings: Mapping[str, Any] | None) -> bool:
@@ -261,17 +280,130 @@ def pool_listed(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[f
     return routes | holds, None
 
 
+def _mark_shape(mark: Any) -> bool:
+    """A mark the job wrote (`POOL_MARK_KEY`): a mapping of a text "lineage" and parts of `POOL_MARK_PARTS`, each a
+    mapping, with a "released" part only after a "held" one and never beside a "route"."""
+    if not isinstance(mark, Mapping) or not isinstance(mark.get("lineage"), str):
+        return False
+    parts = [k for k in mark if k != "lineage"]
+    if not parts or any(k not in POOL_MARK_PARTS or not isinstance(mark[k], Mapping) for k in parts):
+        return False
+    return "released" not in mark or ("held" in mark and "route" not in mark)
+
+
+def mark_word(mark: Any) -> str | None:
+    """One mark's refusal: "route" for a route part or a mark that is not the job's shape (fail closed), "held" for a
+    held part with no release, else None (no mark, or a released hold)."""
+    if mark is None:
+        return None
+    if not _mark_shape(mark) or "route" in mark:
+        return "route"
+    return "held" if "held" in mark and "released" not in mark else None
+
+
+def pool_mark(store: Any, fam: Mapping[str, Any] | None) -> str | None:
+    """THE DURABLE REFUSAL's reading (the module docstring, 4): "route", "held" or None, the stronger of the marks on
+    the family as this store holds it NOW (the mapping given when the store has no row of it) and on its LINEAGE'S ROOT
+    (the family whose id is its lineage: every family of a lineage is marked when the job writes, and one born into
+    the lineage afterwards reads its root's), by `mark_word`. Read WHATEVER the pooled screen's permit file, its store
+    and `elane.pool.mode` say. A store read that raises propagates: every caller fails closed on it (`try_open` gives no
+    try, `step` seats nothing, a seat pool seats nothing)."""
+    if not isinstance(fam, Mapping):
+        return None
+    fid = str(fam.get("id") or "")
+    root = str(fam.get("lineage") or fid)
+    own = store.family(fid) if fid else None
+    rows = [own if isinstance(own, Mapping) else fam]
+    if root and root != fid:
+        rows.append(store.family(root))
+    words = set()
+    for row in rows:
+        state = row.get("state") if isinstance(row, Mapping) else None
+        if isinstance(state, Mapping) and POOL_MARK_KEY in state:
+            words.add(mark_word(state[POOL_MARK_KEY]))
+    return "route" if "route" in words else "held" if "held" in words else None
+
+
+def pool_mark_write(store: Any, marks: Mapping[str, Mapping[str, Mapping[str, Any]]]) -> dict[str, int]:
+    """THE DURABLE REFUSAL's writer (league/ops/pool_screen.py is its one caller): `marks` {lineage: {part: record}}
+    adds each part to the lineage's mark on EVERY family of that lineage, alive or retired (`lineage_of`), in ONE store
+    transaction (`store.atomic`). Append-only: a part already there is never changed; "released" is added only after
+    "held" and never beside "route" (a release the mark cannot take is left out: the lineage stays refused); a mark that
+    is not the job's shape is left as it is (it refuses already). A record is a mapping of text keys to text or None
+    (ids and words: ValueError for anything else, before anything is written). {lineage: its families in the store}
+    (0: no family of that lineage). Raises on a store failure: the caller then writes nothing of its own."""
+    from . import elane
+
+    for lineage, parts in marks.items():
+        if not isinstance(lineage, str) or not isinstance(parts, Mapping) or not parts:
+            raise ValueError("a pool mark is {lineage: {part: record}}")
+        for part, record in parts.items():
+            if part not in POOL_MARK_PARTS or not isinstance(record, Mapping) or not all(
+                    isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in record.items()):
+                raise ValueError(f"a pool mark's part is one of {POOL_MARK_PARTS}, a record of ids and words")
+    out = {str(lineage): 0 for lineage in marks}
+    with store.atomic():
+        for fam in store.families(alive=None, lanes=elane.LANES):
+            lineage = lineage_of(store, fam)
+            if lineage not in marks:
+                continue
+            out[lineage] += 1
+            state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
+            old = state.get(POOL_MARK_KEY)
+            if old is not None and not _mark_shape(old):
+                continue
+            new = dict(old) if old is not None else {"lineage": lineage}
+            changed = False
+            for part in POOL_MARK_PARTS:
+                if part not in marks[lineage] or part in new:
+                    continue
+                if part == "released" and ("held" not in new or "route" in new):
+                    continue
+                new[part] = {str(k): v for k, v in marks[lineage][part].items()}
+                changed = True
+            if changed:
+                store.set_state(str(fam["id"]), **{POOL_MARK_KEY: new})
+    return out
+
+
+def pool_marked_any(root: str | Path) -> bool:
+    """Whether the swarm store under `root` holds any POOL1 mark (`POOL_MARK_KEY`), read-only: the operator views'
+    fail-closed reading of a MISSING pool permit file (league/ops/pool_screen.py `withheld`, league/ops/
+    forward_report.py `_pool_withheld`). False with no swarm store; True when it cannot be read (fail closed)."""
+    import sqlite3
+
+    from . import DB_NAME
+
+    path = Path(root) / DB_NAME
+    if not path.exists():
+        return False
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        try:
+            row = db.execute("SELECT 1 FROM families WHERE instr(state, ?) > 0 LIMIT 1",
+                             (json.dumps(POOL_MARK_KEY),)).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return True
+    return row is not None
+
+
 def _pool_try(store: Any, fam: Mapping[str, Any], lineage: str, settings: Mapping[str, Any] | None,
               now: float | None) -> str | None:
     """POOL1's half of `try_refused` (the module docstring, 4), whatever `elane.fwd1.seats` says: a lineage on the
     POOL-route list takes no sealed try, OUTRIGHT; a HELD lineage takes none either but for L5 (an index lineage before
     the close of its FWD1_START session: `untried`); with the pool's file failing closed, no lineage FWD1's permit file
-    lists as judged does (L5 included), and no equity family's at all while FWD1's file cannot be read either."""
+    lists as judged does (L5 included), and no equity family's at all while FWD1's file cannot be read either. THE
+    DURABLE MARK first (`pool_mark`, whatever the file says): a route mark refuses outright, a held mark is a hold."""
+    mark = pool_mark(store, fam)
+    if mark == "route":
+        return POOL_REFUSED
     routes, holds, why = pool_lists(store.root, settings)
     if routes is not None and holds is not None:
         if lineage in routes:
             return POOL_REFUSED
-        if lineage not in holds:
+        if lineage not in holds and mark != "held":
             return None
         read = permit_file(store.root)
         if read is None:
@@ -279,6 +411,8 @@ def _pool_try(store: Any, fam: Mapping[str, Any], lineage: str, settings: Mappin
         rows, pin_start = read
         row = rows.get(lineage)
         return None if row is not None and untried(store, fam, row, pin_start=pin_start, now=now) else POOL_REFUSED
+    if mark == "held":
+        return POOL_REFUSED                       # failing closed on the file: no L5 for a held mark either
     read = permit_file(store.root)
     if read is None:
         return why
@@ -352,8 +486,9 @@ def seat_refused(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[st
     take a seat on its forward pass now, or None. Refused: the seat switch off; no eligible forward pass in its state;
     a panel pass of a case other than N (A34); the permit file unreadable, or no longer listing its lineage as a pass
     of this version and run sha; the version's run sha not the judged one; another family holding the mechanism
-    cell's one live forward seat (`one_a_cell`); POOL1 (the module docstring, 4): its lineage on the pooled screen's
-    POOL route or hold list, whatever `elane.pool.mode` says, or, failing closed on that file, any ETF pass."""
+    cell's one live forward seat (`one_a_cell`); POOL1 (the module docstring, 4): a durable route or held mark on it or
+    its lineage's root (`pool_mark`), or its lineage on the pooled screen's POOL route or hold list, whatever
+    `elane.pool.mode` says, or, failing closed on that file, any ETF pass."""
     if not seats_on(settings):
         return "the forward seats are off (elane.fwd1.seats)"
     if not isinstance(fam, Mapping) or fam.get("retired_at"):
@@ -361,6 +496,8 @@ def seat_refused(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[st
     held = (fam.get("state") or {}).get(STATE_KEY)
     if not eligible(fam.get("state")) or not isinstance(held, Mapping):
         return "no forward pass is eligible in its state"
+    if pool_mark(store, fam) is not None:
+        return POOL_REFUSED                       # the durable mark: whatever the pool's file, store and mode say
     listed, pool_why = pool_listed(store.root, settings)
     if listed is None:
         if held.get("type") != "PANEL":
@@ -467,8 +604,11 @@ def step(gate: Any) -> dict[str, Any]:
                                                 "lane": row.get("type"), "screen": "FWD1-R"})
                 out["eligible"].append(fid)
                 continue
-            # POOL1 (the module docstring, 4): no FWD1-R seat for a lineage the pooled screen lists, whatever
+            # POOL1 (the module docstring, 4): no FWD1-R seat for a lineage the pooled screen marked or lists, whatever
             # elane.pool.mode says; failing closed on its file, no ETF pass at all (every one is case N)
+            if pool_mark(store, fam) is not None:
+                out["waits"][fid] = POOL_REFUSED
+                continue
             if listed is None:
                 out["waits"][fid] = str(pool_why)
                 continue
@@ -501,6 +641,7 @@ def step(gate: Any) -> dict[str, Any]:
 
 __all__ = ["PERMITS", "PERMITS_VERSION", "STATE_KEY", "SEATS", "JUDGED", "UNTRIED", "LIVE_BANDS", "REFUSED",
            "UNREADABLE", "PANEL_CASES", "A34", "POOL_PERMITS", "POOL_PERMITS_VERSION", "POOL_MODES", "POOL_KEY",
-           "POOL_REFUSED", "POOL_UNREADABLE", "POOL_MISSING", "seats_on", "permit_file", "permits", "lineage_of",
-           "untried", "pool_on", "pool_lists", "pool_listed", "try_refused", "eligible", "one_a_cell", "seat_refused", "mark_seated",
-           "step"]
+           "POOL_REFUSED", "POOL_UNREADABLE", "POOL_MISSING", "POOL_MARK_KEY", "POOL_MARK_PARTS", "seats_on",
+           "permit_file", "permits", "lineage_of", "untried", "pool_on", "pool_lists", "pool_listed", "mark_word",
+           "pool_mark", "pool_mark_write", "pool_marked_any", "try_refused", "eligible", "one_a_cell", "seat_refused",
+           "mark_seated", "step"]

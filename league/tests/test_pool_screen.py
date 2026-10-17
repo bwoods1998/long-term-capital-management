@@ -1,6 +1,8 @@
 """POOL1's job, THE RECORD HALF P1 (league/ops/pool_screen.py; the owner's A55, pre-registered in A55a; the receipt
 contract POOL1-RECEIPT-1): the first sighting, the clock-start conformance and the POOL-route list written once, the
-refusal's permanence (a lost store, an unreadable file, a shorter list), the House's Train series as the vendored House
+refusal's permanence (a lost store, an unreadable file, a shorter list; the durable marks on the swarm store's families
+and every lift attempt of the conformance review's table), ids never read as figures and free text mended, the
+House's Train series as the vendored House
 job's records, the founders and later lineages (holds, waits on FWD1's row and on earlier members, merges and
 assignments), the cell sessions, the looks (a word and a sha at a non-final look, the series with a final verdict,
 exactly D_1..k after a failed night), the floors through the vendored pipeline, the engine and join rules (lost, never
@@ -30,6 +32,8 @@ import numpy as np
 from league.equity import schedule
 from league.ops import forward_db, forward_report as FR, forward_screen as FS, pool_rule as P, pool_screen as PS
 from league.ops import registry
+from league.swarm import elane_forward as EF
+from league.swarm.store import SwarmStore
 from league.tests import pool_world as W
 
 REPO = Path(__file__).resolve().parents[2]
@@ -148,6 +152,8 @@ class World(unittest.TestCase):
         self.base = Path(self.tmp.name) / "base"
         self.root.mkdir()
         self.base.mkdir()
+        #: The swarm store: every registered lineage's family (the durable refusal's marks are written on it: P1 D20).
+        self.swarm = SwarmStore(self.root)
         (self.base / "deploys.jsonl").write_text(json.dumps(
             {"stage": "verdict", "verdict": "promoted", "release": REL,
              "at": dt.datetime.fromtimestamp(REL_AT, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}) + "\n")
@@ -183,6 +189,7 @@ class World(unittest.TestCase):
     def tearDown(self):
         self.fdb.close()
         self.sdb.close()
+        self.swarm.close()
         self.tmp.cleanup()
 
     # ------------------------------------------------------------------------------------------------ the record
@@ -204,6 +211,11 @@ class World(unittest.TestCase):
         self.fdb.commit()
         self.families[fid] = {"id": fid, "structure": "etf", "spec": {"lane": "equity", "agenda": "trend",
                                                                         "symbols": sym}, "state": {}, "band": "gym"}
+        self.swarm._exec("INSERT OR IGNORE INTO families(id, lineage, origin, mechanism, structure, roots, spec, born_at, "
+                         "band, band_since) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                         (fid, fid, "test", "an invented mechanism of the pool world's tests, never traded", "etf",
+                          json.dumps(sym), json.dumps(self.families[fid]["spec"]), "2026-10-01T00:00:00Z", "gym",
+                          "2026-10-01T00:00:00Z"))
         self.cards.setdefault(fid, {"mechanism_class": "trend_momentum", "inputs": ["underlying_price"]})
         return pid
 
@@ -260,17 +272,19 @@ class World(unittest.TestCase):
         store = self.store()
         try:
             j = PS.Night(self.root, store, self.fdb, receipt=receipt_ or self.rec, runs=self.runs, families=self.families,
-                         swarm=None, settings=SETTINGS, budget=budget, clock=lambda: now,
+                         swarm=self.swarm, settings=SETTINGS, budget=budget, clock=lambda: now,
                          base=self.base if base == "default" else base, release=REL, cal=self.cal)
             try:
                 pin = j.run_routes(now)
             finally:
-                PS.write_permits(self.root, store, receipt=receipt_ or self.rec, at=now, fdb=self.fdb)
+                PS.write_permits(self.root, store, receipt=receipt_ or self.rec, at=now, fdb=self.fdb, marks=j.marks,
+                                 tally=j.tally)
             if pin is not None:
                 try:
                     j.run_looks()
                 finally:
-                    PS.write_permits(self.root, store, receipt=receipt_ or self.rec, at=now, fdb=self.fdb)
+                    PS.write_permits(self.root, store, receipt=receipt_ or self.rec, at=now, fdb=self.fdb,
+                                     marks=j.marks, tally=j.tally)
             (self.root / PS.REPORT).write_text(json.dumps(PS.report(store, receipt=receipt_ or self.rec, notes=j.notes)))
             return dict(j.tally), j
         finally:
@@ -278,7 +292,7 @@ class World(unittest.TestCase):
 
     def night_of(self, now: float, **kw) -> PS.Night:
         return PS.Night(self.root, self.store(), self.fdb, receipt=self.rec, runs=self.runs, families=self.families,
-                        settings=SETTINGS, clock=lambda: now, cal=self.cal, **kw)
+                        swarm=self.swarm, settings=SETTINGS, clock=lambda: now, cal=self.cal, **kw)
 
     def rows(self, table: str, where: str = "", args=()) -> list[dict]:
         db = self.store()
@@ -686,6 +700,397 @@ class TheRefusalIsNeverLifted(World):
         self.assertTrue(doc["routes"])
         self.assertEqual(doc["holds"], ["equity:held-2"])
         self.assertTrue(self.rows("pool_events", "WHERE kind='look_failed'"))
+
+
+# ----------------------------------------------------------------------------- the durable refusal (P1 D20)
+#: The swarm's readings the lift attempts are judged under (fwd1 seats on, so a seat pool would ask).
+ON = {"elane": {"pool": {"mode": "record", "seats": "off"}, "fwd1": {"mode": "record", "seats": "on"}}}
+OFF = {"elane": {"pool": {"mode": "off", "seats": "off"}, "fwd1": {"mode": "record", "seats": "on"}}}
+NOBLOCK = {"elane": {"fwd1": {"mode": "record", "seats": "on"}}}
+SEATS_OFF = {"elane": {"pool": {"mode": "record", "seats": "off"}, "fwd1": {"mode": "record", "seats": "off"}}}
+POOL_WORDS = (EF.POOL_REFUSED, EF.POOL_UNREADABLE, EF.POOL_MISSING)
+
+
+def wipe_store(root: Path) -> None:
+    for name in (PS.DB, PS.DB + "-wal", PS.DB + "-shm"):
+        if (root / name).exists():
+            (root / name).unlink()
+
+
+class Refusal(World):
+    """The swarm's own readers on the World's swarm store: a lineage is HELD when its family takes no sealed try and no
+    forward seat for a POOL1 reason (`try_refused`, `seat_refused`), whatever else they read."""
+
+    def routed(self) -> str:
+        self.first_night()
+        routes = sorted(self.permits()["routes"])
+        self.assertTrue(routes)
+        return routes[0]
+
+    def ctx(self, now: float):
+        alerts: list = []
+        return types.SimpleNamespace(root=self.root, config={}, now=lambda: now, base=self.base, release=REL,
+                                     alert=lambda level, text: alerts.append((level, text)), alerts=alerts)
+
+    def refusal(self, lineage: str, settings) -> tuple[str | None, str | None]:
+        fid = lineage.split(":", 1)[1]
+        fam = self.swarm.family(fid)
+        tried = EF.try_refused(self.swarm, fam, settings, now=at("2026-11-02", 23))
+        state = {"eligible": True, "type": "ETF", "case": "N", "lineage": lineage, "version": 1, "run_sha": "x",
+                 "cell": "equity / trend / sectors"}
+        seat = EF.seat_refused(self.swarm, {**fam, "state": {**fam["state"], EF.STATE_KEY: state}}, settings)
+        return tried, seat
+
+    def assertHeld(self, lineage: str, *settings_list) -> None:
+        for settings in settings_list or (ON, OFF, NOBLOCK):
+            tried, seat = self.refusal(lineage, settings)
+            with self.subTest(lineage=lineage, settings=settings["elane"].get("pool")):
+                self.assertIn(tried, POOL_WORDS)
+                self.assertIn(seat, POOL_WORDS)
+
+
+class TheDurableRefusal(Refusal):
+    def test_every_route_and_hold_is_marked_on_every_family_of_its_lineage_and_the_clock_recorded(self):
+        self.register("equity:held-3", 522, created_at=at("2026-10-21", 15), first_day="2026-10-22", symbols=["XLK"])
+        self.fwd1_row("equity:held-3", 522)
+        self.fail_pids.add(522)
+        self.first_night()
+        doc = self.permits()
+        for lineage, row in doc["routes"].items():
+            mark = self.swarm.family(lineage.split(":", 1)[1])["state"][EF.POOL_MARK_KEY]
+            self.assertEqual(mark["lineage"], lineage)
+            self.assertEqual(mark["route"], {"receipt": self.rec.sha256, "night": "2026-10-23", "cell": row["cell"],
+                                             "cluster": row["cluster"]})
+            self.assertNotIn("held", mark)
+        held = self.swarm.family("held-3")["state"][EF.POOL_MARK_KEY]
+        self.assertEqual(held, {"lineage": "equity:held-3", "held": {"receipt": self.rec.sha256, "night": "2026-10-23"}})
+        self.assertEqual(self.swarm.get(PS.CLOCK_KEY), {self.rec.sha256: {"night": "2026-10-23", "clock": CLOCK}})
+        self.assertIn(PS.CLOCK_KEY, PS.CLOCK_KEY)
+        from league.swarm import elane_seal
+
+        self.assertIn(EF.POOL_MARK_KEY, elane_seal.SEALED_KEYS)
+        # a family born into a routed lineage afterwards reads its root's mark
+        lineage = sorted(doc["routes"])[0]
+        root = lineage.split(":", 1)[1]
+        self.swarm._exec("INSERT INTO families(id, lineage, origin, mechanism, structure, roots, spec, born_at) VALUES "
+                         "(?,?,?,?,?,?,?,?)", ("fork-1", root, "fork", "an invented fork of a routed lineage, never "
+                                               "traded", "etf", '["XLK"]', json.dumps({"lane": "equity"}),
+                                               "2026-10-27T00:00:00Z"))
+        self.assertEqual(EF.pool_mark(self.swarm, self.swarm.family("fork-1")), "route")
+        self.assertEqual(EF.try_refused(self.swarm, self.swarm.family("fork-1"), OFF), EF.POOL_REFUSED)
+
+    def test_a_release_follows_its_hold_and_lifts_the_hold_only(self):
+        self.register("equity:held-4", 523, created_at=at("2026-10-21", 15), first_day="2026-10-22", symbols=["XLK"])
+        self.fwd1_row("equity:held-4", 523)
+        self.fail_pids.add(523)
+        self.first_night()
+        self.assertEqual(EF.pool_mark(self.swarm, self.swarm.family("held-4")), "held")
+        db = self.store()
+        try:
+            night = self.night_of(at("2026-10-26", 23, 30))
+            night.store = db
+            night._release("equity:held-4", "out on its Train series")
+        finally:
+            db.close()
+        mark = self.swarm.family("held-4")["state"][EF.POOL_MARK_KEY]
+        self.assertEqual(set(mark), {"lineage", "held", "released"})
+        self.assertIsNone(EF.pool_mark(self.swarm, self.swarm.family("held-4")))
+
+    def test_a_mark_that_cannot_be_written_writes_no_clock_and_no_route(self):
+        with mock.patch.object(PS.Marks, "write", side_effect=sqlite3.OperationalError("database is locked")):
+            tally, _ = self.first_night()
+        self.assertEqual(self.rows("pool_pins"), [])
+        self.assertEqual(self.rows("pool_routes"), [])
+        self.assertGreaterEqual(tally.get("marks_failed", 0), 1)
+        self.assertTrue(self.rows("pool_events", "WHERE kind='clock_wait'"))
+        self.advance("2026-10-26")
+        self.judge(at("2026-10-26", 23, 30))                   # the next night is the first: the clock a session later
+        self.assertEqual(self.rows("pool_pins")[0]["clock"], "2026-10-27")
+        for lineage in self.permits()["routes"]:
+            self.assertEqual(EF.pool_mark(self.swarm, self.swarm.family(lineage.split(":", 1)[1])), "route")
+
+    def test_a_hold_whose_mark_fails_waits_a_night(self):
+        self.first_night()
+        self.register("equity:held-5", 524, created_at=at("2026-10-26", 15), first_day="2026-10-27", symbols=["XLK"])
+        self.fwd1_row("equity:held-5", 524)
+        self.fail_pids.add(524)
+        self.advance("2026-10-26")
+        real = PS.Marks.write
+
+        def no_hold(marks_self, marks):
+            if any("held" in parts for parts in marks.values()):
+                raise sqlite3.OperationalError("database is locked")
+            return real(marks_self, marks)
+
+        with mock.patch.object(PS.Marks, "write", no_hold):
+            self.judge(at("2026-10-26", 23, 30))
+        self.assertEqual(self.rows("pool_holds"), [])
+        self.advance("2026-10-27")
+        self.judge(at("2026-10-27", 23, 30))
+        self.assertEqual([r["lineage"] for r in self.rows("pool_holds")], ["equity:held-5"])
+        mark = self.swarm.family("held-5")["state"][EF.POOL_MARK_KEY]
+        self.assertIn("held", mark)                                # (its Train run failed twice: released, out)
+        self.assertEqual("released" in mark, [r["lineage"] for r in self.rows("pool_releases")] == ["equity:held-5"])
+
+    def test_no_swarm_store_no_clock(self):
+        self.advance("2026-10-22")
+        self.advance("2026-10-23", finished=at("2026-10-23", 23))
+        store = self.store()
+        try:
+            j = PS.Night(self.root, store, self.fdb, receipt=self.rec, runs=self.runs, families=self.families,
+                         settings=SETTINGS, clock=lambda: at("2026-10-23", 23, 30), base=self.base, release=REL,
+                         cal=self.cal)
+            self.assertIsNone(j.marks)
+            self.assertIsNone(j.run_routes(at("2026-10-23", 23, 30)))
+        finally:
+            store.close()
+        self.assertEqual(self.rows("pool_pins"), [])
+
+    def test_the_file_lists_every_marked_route_and_hold_and_the_clock_record(self):
+        self.register("equity:held-6", 525, created_at=at("2026-10-21", 15), first_day="2026-10-22", symbols=["XLK"])
+        self.fwd1_row("equity:held-6", 525)
+        self.fail_pids.add(525)
+        self.first_night()
+        before = self.permits()
+        wipe_store(self.root)
+        (self.root / PS.PERMITS).unlink()
+        self.assertTrue(PS.keep_permits(self.root, self.rec, "no_record", at("2026-10-27", 23)))
+        after = self.permits()
+        self.assertEqual(set(after["routes"]), set(before["routes"]))
+        self.assertEqual(after["routes"], before["routes"])
+        self.assertEqual(after["holds"], ["equity:held-6"])
+        self.assertEqual((after["receipt"], after["clock"]), (self.rec.sha256, CLOCK))
+
+    def test_marks_are_append_only(self):
+        lineage = self.routed()
+        fid = lineage.split(":", 1)[1]
+        mark = dict(self.swarm.family(fid)["state"][EF.POOL_MARK_KEY])
+        EF.pool_mark_write(self.swarm, {lineage: {"route": {"receipt": "b" * 64, "night": "x", "cell": "other",
+                                                            "cluster": "other"}, "held": {"receipt": None},
+                                                  "released": {"receipt": None}}})
+        after = self.swarm.family(fid)["state"][EF.POOL_MARK_KEY]
+        self.assertEqual(after["route"], mark["route"])                  # never changed
+        self.assertNotIn("released", after)                              # never beside a route
+        self.assertEqual(EF.pool_mark(self.swarm, self.swarm.family(fid)), "route")
+        with self.assertRaises(ValueError):
+            EF.pool_mark_write(self.swarm, {lineage: {"route": {"t": 1.7}}})    # ids and words only
+        self.assertEqual(EF.pool_mark_write(self.swarm, {"equity:nobody": {"held": {"receipt": None}}}),
+                         {"equity:nobody": 0})
+        tree = ast.parse((REPO / "league" / "ops" / "pool_screen.py").read_text())
+        writes = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+        self.assertFalse(writes & {"update_family", "set_band", "retire", "add_family", "compare_and_set_state"})
+
+
+class TheConformanceReviewsLiftAttempts(Refusal):
+    """THE ATTACK TABLE of the conformance review (scratch/pooled-screen/fix-result.json; its probes
+    scratch/pool1-conform-review/test_refusal_attacks.py): every attempt to lift the POOL-route refusal HOLDS."""
+
+    def test_mode_off_with_the_file_kept(self):
+        lineage = self.routed()
+        with mock.patch("league.swarm.settings.load", lambda root, config=None: OFF):
+            self.assertEqual(PS.run(self.ctx(at("2026-10-27", 23, 30)))["status"], "skipped")
+        self.assertHeld(lineage)
+
+    def test_seats_off(self):
+        lineage = self.routed()
+        tried, seat = self.refusal(lineage, SEATS_OFF)
+        self.assertEqual(tried, EF.POOL_REFUSED)
+        self.assertEqual(seat, "the forward seats are off (elane.fwd1.seats)")
+
+    def test_a_pooled_fail_or_demotion(self):
+        lineage = self.routed()
+        db = self.store()
+        with db:
+            db.execute("INSERT INTO pool_verdicts(cell, word, why, at) VALUES (?,?,?,?)", (SECTORS, "FAIL", "x", 9.0))
+            db.execute("INSERT INTO pool_demotions(cell, n_post, why, at) VALUES (?,?,?,?)", (SECTORS, 20, "x", 9.0))
+        db.close()
+        self.advance("2026-10-26")
+        self.judge(at("2026-10-26", 23, 30))
+        self.assertEqual(self.permits()["units"][SECTORS]["word"], "DEMOTED")
+        self.assertHeld(lineage)
+
+    def test_the_file_missing_under_mode_record(self):
+        lineage = self.routed()
+        (self.root / PS.PERMITS).unlink()
+        self.assertEqual(EF.pool_listed(self.root, ON), (None, EF.POOL_MISSING))
+        self.assertHeld(lineage)
+
+    def test_the_file_missing_under_mode_off_or_no_pool_block(self):
+        """The review's finding 2: the file deleted while the mode is off (the job never rewrites it then) or the block
+        absent gave the swarm empty lists; the family's mark holds the refusal, and the operator views fail closed."""
+        lineage = self.routed()
+        (self.root / PS.PERMITS).unlink()
+        self.assertEqual(EF.pool_listed(self.root, OFF), (frozenset(), None))      # the file's reader: nothing listed
+        self.assertHeld(lineage, OFF, NOBLOCK)
+        with mock.patch("league.swarm.settings.load", lambda root, config=None: OFF):
+            PS.run(self.ctx(at("2026-10-27", 23, 30)))
+        self.assertFalse((self.root / PS.PERMITS).exists())
+        self.assertHeld(lineage, OFF, NOBLOCK)
+        wipe_store(self.root)
+        self.assertEqual(PS.withheld(self.root, OFF), (frozenset(), True))        # the operator views fail closed
+        self.assertEqual(FR._pool_withheld(self.root, OFF), (frozenset(), True))
+
+    def test_an_unreadable_or_wrong_shape_file(self):
+        lineage = self.routed()
+        (self.root / PS.PERMITS).write_text("{torn")
+        self.advance("2026-10-26")
+        tally, _ = self.judge(at("2026-10-26", 23, 30))
+        self.assertEqual((self.root / PS.PERMITS).read_text(), "{torn")             # never overwritten
+        self.assertGreaterEqual(tally.get("permits_kept", 0), 1)
+        self.assertHeld(lineage)
+        (self.root / PS.PERMITS).write_text(json.dumps({"version": 1, "routes": [], "holds": []}))
+        self.assertHeld(lineage)
+
+    def test_the_store_deleted_with_the_file_kept(self):
+        lineage = self.routed()
+        wipe_store(self.root)
+        self.advance("2026-10-26")
+        tally, _ = self.judge(at("2026-10-26", 23, 30))
+        self.assertEqual(tally.get("store_lost"), 1)
+        self.assertHeld(lineage)
+        self.advance("2026-10-27")
+        self.judge(at("2026-10-27", 23, 30))
+        self.assertEqual(self.rows("pool_pins"), [])
+        self.assertHeld(lineage)
+
+    def test_the_store_and_the_file_both_deleted(self):
+        """The review's finding 3: with both lost, a new sighting started a new clock under the same receipt and a
+        routed lineage that had passed FWD1-R after the clock dropped off the list. The marks hold the refusal and the
+        clock's record refuses a new clock."""
+        lineage = self.routed()
+        pid = self.rec.founders[lineage].pid
+        clock0 = self.permits()["clock"]
+        self.fwd1_check(lineage, pid, 5, passed=1)
+        self.fwd1_verdict(lineage, pid, "pass")
+        wipe_store(self.root)
+        (self.root / PS.PERMITS).unlink()
+        for day in ("2026-10-26", "2026-10-27"):
+            self.advance(day)
+            tally, _ = self.judge(at(day, 23, 30))
+            self.assertEqual(tally.get("store_lost"), 1)
+        self.assertEqual(self.rows("pool_pins"), [])                           # no new clock under the receipt
+        doc = self.permits()
+        self.assertEqual((doc["receipt"], doc["clock"]), (self.rec.sha256, clock0))
+        self.assertIn(lineage, doc["routes"])
+        self.assertHeld(lineage)
+        (self.root / PS.PERMITS).unlink()
+        self.assertHeld(lineage, OFF, NOBLOCK)
+
+    def test_the_pin_rolled_back_also_with_the_store_lost(self):
+        lineage = self.routed()
+        self.assertTrue(PS.keep_permits(self.root, None, "no_receipt", at("2026-10-28", 23)))
+        self.assertHeld(lineage)
+        wipe_store(self.root)
+        self.assertTrue(PS.keep_permits(self.root, None, "no_receipt", at("2026-10-29", 23)))
+        self.assertIn(lineage, self.permits()["routes"])
+        self.assertHeld(lineage)
+
+    def test_fwd1s_store_unreadable_and_its_permit_file_torn(self):
+        lineage = self.routed()
+        with mock.patch.object(PS, "fwd1_facts", lambda root, fdb: None):
+            self.advance("2026-10-26")
+            self.judge(at("2026-10-26", 23, 30))
+        self.assertHeld(lineage)
+        (self.root / EF.PERMITS).write_text("{torn")
+        self.assertEqual(EF.try_refused(self.swarm, self.swarm.family(lineage.split(":", 1)[1]), ON), EF.POOL_REFUSED)
+
+    def test_a_lineage_id_with_bp_in_it_freezes_nothing(self):
+        """The review's finding 1: a slug carrying the word "bp" is an id, not a figure; the file keeps up with every
+        later hold and route, and the hold is refused in the swarm's reader."""
+        lineage = self.routed()
+        src = self.rec.founders["equity:tm_s1"].pid
+        self.extra_records[530] = {part: {**r, "pid": 530} for part, r in W.records(src).items()}
+        self.register("equity:spy-10-bp-fade", 530, created_at=at("2026-10-26", 15), first_day="2026-10-27",
+                      symbols=["XLK"])
+        self.fwd1_row("equity:spy-10-bp-fade", 530)
+        self.fail_pids.add(530)                                    # its Train series cannot be read tonight: HELD
+        self.advance("2026-10-26")
+        tally, _ = self.judge(at("2026-10-26", 23, 30))
+        doc = self.permits()
+        self.assertEqual(doc["holds"], ["equity:spy-10-bp-fade"])
+        self.assertEqual(doc["at"], "2026-10-26T23:30:00Z")
+        self.assertEqual(PS.permit_figures(doc), [])
+        self.assertNotEqual(P.figure_free(doc), [])                # the plain check would have refused the id
+        self.assertFalse(tally.get("permits_mended") or tally.get("permits_failed_closed"))
+        self.assertFalse(self.rows("pool_events", "WHERE kind IN ('permits_refused', 'permits_failed_closed')"))
+        self.assertHeld("equity:spy-10-bp-fade")
+        self.assertHeld(lineage)
+        self.fail_pids.discard(530)
+        self.advance("2026-10-27")
+        self.judge(at("2026-10-27", 23, 30))
+        self.assertEqual(sorted(r["lineage"] for r in self.rows("pool_routes")), sorted(self.permits()["routes"]))
+
+    def test_an_unrelated_bp_lineage_freezes_no_later_hold(self):
+        self.routed()
+        self.register("equity:gap-50-bp-fade", 540, created_at=at("2026-10-26", 15), first_day="2026-10-27",
+                      symbols=["SPY"])
+        src = self.rec.founders["equity:tm_s1"].pid
+        self.extra_records[541] = {part: {**r, "pid": 541} for part, r in W.records(src).items()}
+        self.register("equity:late-ok", 541, created_at=at("2026-10-26", 15), first_day="2026-10-27", symbols=["XLK"])
+        self.fwd1_row("equity:late-ok", 541)
+        self.fail_pids.add(541)
+        self.advance("2026-10-26")
+        self.judge(at("2026-10-26", 23, 30))
+        doc = self.permits()
+        self.assertIn("equity:gap-50-bp-fade", doc["lineages"])
+        self.assertEqual(doc["holds"], ["equity:late-ok"])
+        self.assertEqual(doc["at"], "2026-10-26T23:30:00Z")
+        self.assertHeld("equity:late-ok")
+
+
+class AFigureInTheFreeText(Refusal):
+    """The review's finding 1, the free text: a value that would carry a figure is written as a fixed word (an event, an
+    alarm), never refusing the whole file; a document that cannot be mended is written as a file the swarm reads as
+    unreadable (it fails closed), never left frozen."""
+
+    def test_is_mended_to_a_fixed_word_and_alarms(self):
+        lineage = self.routed()
+        doc = self.permits()
+        doc["units"]["made/up"] = {"cluster": "made", "word": "passed at 1.83"}     # a hand-edited file's unit word
+        (self.root / PS.PERMITS).write_text(json.dumps(doc))
+        self.advance("2026-10-26")
+        tally, _ = self.judge(at("2026-10-26", 23, 30))
+        after = self.permits()
+        self.assertEqual(after["units"]["made/up"]["word"], PS.MENDED)
+        self.assertEqual(PS.permit_figures(after), [])
+        self.assertGreaterEqual(tally.get("permits_mended", 0), 1)
+        self.assertEqual(after["at"], "2026-10-26T23:30:00Z")
+        self.assertIn(lineage, after["routes"])
+        alerts = self.ctx(0.0)
+        PS.permit_alarms(alerts, tally)
+        self.assertIn("warning", [level for level, _ in alerts.alerts])
+
+    def test_a_document_it_cannot_mend_fails_closed_and_alarms(self):
+        lineage = self.routed()
+        with mock.patch.object(P, "scrub_figures", lambda doc, **kw: (doc, [], ["routes.x"])):
+            self.advance("2026-10-26")
+            tally, _ = self.judge(at("2026-10-26", 23, 30))
+        self.assertGreaterEqual(tally.get("permits_failed_closed", 0), 1)
+        raw = json.loads((self.root / PS.PERMITS).read_text())
+        self.assertEqual(raw["fail_closed"], "figure")
+        self.assertEqual(EF.pool_listed(self.root, ON), (None, EF.POOL_UNREADABLE))
+        self.assertEqual(PS.withheld(self.root, OFF), (frozenset(), True))
+        self.assertHeld(lineage)
+        alerts = self.ctx(0.0)
+        PS.permit_alarms(alerts, tally)
+        self.assertIn("error", [level for level, _ in alerts.alerts])
+
+    def test_an_unreadable_file_is_an_error_alarm_of_the_job(self):
+        """The review's finding 4: an unreadable file on disk raised no alarm (a `permits_kept` event only)."""
+        self.routed()
+        (self.root / PS.PERMITS).write_text("{torn")
+        self.advance("2026-10-26")
+        ctx = self.ctx(at("2026-10-26", 23, 30))
+        with mock.patch("league.swarm.settings.load", lambda root, config=None: SETTINGS), \
+                mock.patch.object(P, "rule", lambda *a, **k: (self.rec, None)), \
+                mock.patch.object(PS, "PoolRuns", lambda *a, **k: FakeRuns(self)):
+            out = PS.run(ctx)
+        self.assertGreaterEqual(out.get("permits_kept", 0), 1)
+        self.assertTrue([t for level, t in ctx.alerts if level == "error" and "permits_kept" in t])
+        ctx = self.ctx(at("2026-10-28", 23, 30))
+        with mock.patch("league.swarm.settings.load", lambda root, config=None: SETTINGS):
+            PS.run(ctx)                                             # no pin: keep_permits, the same alarm
+        self.assertTrue([t for level, t in ctx.alerts if level == "error" and "permits_kept" in t])
 
 
 # ------------------------------------------------------------------------------------------- the later lineages
@@ -1248,6 +1653,11 @@ class ThePermitFile(Looks):
         self.assertEqual(PS.PERMITS_VERSION, elane_forward.POOL_PERMITS_VERSION)
         self.assertEqual(PS.MODES, elane_forward.POOL_MODES)
         self.assertIn(elane_forward.POOL_KEY, elane_seal.SEALED_KEYS)
+        self.assertIn(elane_forward.POOL_MARK_KEY, elane_seal.SEALED_KEYS)
+        from league.swarm import DB_NAME
+
+        self.assertEqual((FR.SWARM_DB, FR.POOL_MARK_KEY), (DB_NAME, elane_forward.POOL_MARK_KEY))
+        self.assertEqual(FR._pool_marked(self.root), elane_forward.pool_marked_any(self.root))
         self.assertEqual(set(FR.POOL_OVER), set(PS.OVER))
         for settings in ({}, {"elane": {}}, {"elane": {"pool": {}}}, {"elane": {"pool": {"mode": "off"}}},
                          {"elane": {"pool": {"mode": "record"}}}, {"elane": {"pool": {"mode": "bogus"}}}):
@@ -1377,22 +1787,10 @@ class TheJob(World):
         self.advance("2026-10-23", finished=at("2026-10-23", 23))
         ctx = self.ctx(at("2026-10-23", 23, 30))
         world = self
-
-        class Swarm:
-            def __init__(self, root, readonly=False):
-                pass
-
-            def families(self, alive=None, lanes=None):
-                return [dict(f, spec={"lane": "equity", **f["spec"]}) for f in world.families.values()]
-
-            def close(self):
-                pass
-
         with mock.patch("league.swarm.settings.load", lambda root, config=None: SETTINGS), \
                 mock.patch.object(P, "rule", lambda *a, **k: (self.rec, None)), \
-                mock.patch.object(PS, "PoolRuns", lambda *a, **k: FakeRuns(world)), \
-                mock.patch("league.swarm.store.SwarmStore", Swarm):
-            out = PS.run(ctx)
+                mock.patch.object(PS, "PoolRuns", lambda *a, **k: FakeRuns(world)):
+            out = PS.run(ctx)                                  # the swarm store under the root, opened writable
             self.assertNotIn("status", out)
             self.assertEqual(out.get("routes_written"), len(self.rec.units[SECTORS].members))
             self.assertEqual(self.permits()["clock"], CLOCK)

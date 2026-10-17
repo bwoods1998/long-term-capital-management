@@ -6,9 +6,14 @@ gates is computed with the calibration's own pinned code (league/ops/pool_calib/
 
 Owner: the POOL1 build. Protected (league/ops/ is FORBIDDEN to every role). Ops only (no module of league/swarm,
 league/equity, league/live or league/gym imports it): it reads `<state>/forward.sqlite` (E3's record),
-`<state>/forward-screen.sqlite` (FWD1-R's judge) and the swarm store READ-ONLY, the repository's pin and receipt, and
-writes only its own `<state>/pool-screen.sqlite` (0600, WAL, append-only by trigger: `SCHEMA`), the permit file
-(`PERMITS`: ids and words only) and the operator's report (`REPORT`). It moves no money, opens no seat and edits no
+`<state>/forward-screen.sqlite` (FWD1-R's judge) READ-ONLY, the repository's pin and receipt, and the swarm store (its
+families and cards), and writes its own `<state>/pool-screen.sqlite` (0600, WAL, append-only by trigger: `SCHEMA`),
+the permit file (`PERMITS`: ids and words only), the operator's report (`REPORT`) and, in the swarm store, ONLY THE
+DURABLE REFUSAL (P1 D20; the conformance review's findings 2 and 3): a sealed, append-only MARK on every family of a
+lineage it routes or holds (league/swarm/elane_forward.py `POOL_MARK_KEY`, `pool_mark_write`), written BEFORE its own
+store commits that route or hold (a route or hold whose mark cannot be written is not written that night), and the
+clock's record (`CLOCK_KEY`, the store's kv), so the swarm's refusal survives the permit file and this store both lost
+whatever `elane.pool.mode` says (`Marks`). A mark only refuses. It moves no money, opens no seat and edits no
 setting. MODE RECORD ONLY: `elane.pool.seats` is P2's switch and nothing here reads it; no seat exists in P1.
 
 WITH ITS SWITCH OFF NOTHING RUNS (`elane.pool.mode` "off", the code's default; policy.json ships "record"): a `skipped`
@@ -16,8 +21,8 @@ receipt, and THE PERMIT FILE IS KEPT (mode off stops the job, not the file: the 
 WITHOUT A PIN, ITS RECEIPT AND ITS CONFORMANCE NOTHING IS JUDGED (`pool_rule.rule`: `elane.pool_screen` of the
 repository's policy.json, docs/benchmarks/pool_screen_1.json at the pin's sha256, the vendored code at the receipt's
 shas, and every conformance vector reproduced on this box once a (receipt, code, numpy, Python), `pool_conform`): no
-clock, no unit, no route list, no look; the job still writes the permit file from what its store and the existing
-file hold, so the swarm reads a file of the job's.
+clock, no unit, no route list, no look; the job still writes the permit file from what its store, the existing file
+and the swarm store's marks hold, so the swarm reads a file of the job's.
 
 THE NIGHT (`Night.run`, once a record night: a second start on the same `MAX(fwd_runs.through)` writes nothing):
 1. THE CLOCK AND THE ROUTE LIST (`Night.clock_row`, PREREG 7.2, 9, 12; the contract's 6.4): the job's first sighting
@@ -31,16 +36,20 @@ THE NIGHT (`Night.run`, once a record night: a second start on the same `MAX(fwd
    per-program, an alarm. Then, in ONE transaction, the founding units (`pool_units`: the receipt's cells and clusters,
    stage 1, each cluster's U_u at the FWD1-R checkpoint count its members read before the clock (P1 D7), the caps,
    report-only, ineligible, conforming), the founders' membership (`pool_members`), a REFUTED or INELIGIBLE verdict for
-   each such unit and THE POOL-ROUTE LIST (`pool_routes`) from FWD1's lineages as of that night. The clock starts at
-   the next session (`next_session(night)`). A night that cannot finish this writes nothing and the next night is the
+   each such unit and THE POOL-ROUTE LIST (`pool_routes`) from FWD1's lineages as of that night, each route's mark
+   written on its lineage's families before that transaction (a list that cannot be marked writes no clock that
+   night). The clock starts at the next session (`next_session(night)`). A night that cannot finish this writes
+   nothing and the next night is the
    first (each later night moves the clock a session; after `CLOCK_ALARM_NIGHTS` such nights an alarm). A founder FWD1
    has no row for yet is decided later, once it has one (a missing row is a wait, never a route). A STORE LOST: a
-   permit file that already names this receipt with a clock while the store holds no clock refuses the clock (no
-   judging, an alarm; the file's lists are carried whole).
+   permit file that already names this receipt with a clock, or a clock record of it in the swarm store (`CLOCK_KEY`,
+   written once the clock is), while this store holds no clock refuses the clock (no judging, an alarm; the file's
+   lists and the marks are carried whole): a store lost WITH its permit file starts no new clock under the receipt.
 2. THE LATER LINEAGES (`Night.sight`, `Night.decide`; section 1.1, 1.3): a registry lineage the receipt does not list,
    with a passing version, is read once: a panel, a stocks symbol, the beta class, no declared class or an event reader
    (its card, or `pool_rule.reads_events` on its frozen code) is out (`pool_members`, why); otherwise, while FWD1 judges
-   it as case N it is HELD (`pool_holds`: no FWD1-R seat, no sealed try) until the House decides it. It is decided once
+   it as case N it is HELD (`pool_holds`, its held mark first: no FWD1-R seat, no sealed try) until the House decides
+   it (a release is recorded here first, then on its mark). It is decided once
    FWD1 has its row (a missing row is a wait), its own `pool_train` series and every earlier member's (by pid) exist or
    are out: out by the vendored `member_from_runs` (its exposure, its group, a stock); merged into an earlier member
    (vendored `merge_copies`: it follows that member's route, never a member); assigned (`pool_rule.assign`) to the cell
@@ -75,9 +84,14 @@ THE NIGHT (`Night.run`, once a record night: a second start on the same `MAX(fwd
 7. THE PERMIT FILE (`write_permits`, `PERMITS`), written right after the routes and holds of the night (in a finally)
    and again at its end: the receipt's sha, the clock, each unit's word, THE POOL-ROUTE LIST and the hold list, every
    registry lineage's pool cell and cluster id, and the eligible lineages after a PASS. IDS AND FIXED WORDS ONLY
-   (`pool_rule.figure_free`; a reason is a word of `WHY_WORDS`, its detail goes to the report). NEVER SHORTER: the
-   existing readable file's routes are carried whole and its holds unless the store records their release; an
-   existing file that cannot be read is never overwritten (an alarm). The job never deletes it.
+   (`permit_figures`: an id, a lineage slug like "gap-50-bp-fade" included, is never read for a figure; only the free
+   text, a "why" (a word of `WHY_WORDS`, its detail goes to the report) and a unit's word, is). A value that would
+   carry a figure is written as the fixed word `MENDED` and an alarm fires (the conformance review's finding 1: one
+   bad text never freezes the file); a document that still cannot be mended is written as a file the swarm reads as
+   unreadable (it fails closed) and an error alarm fires. NEVER SHORTER: the existing readable file's routes are carried
+   whole and its holds unless the store records their release, and every route and unreleased hold the swarm store's
+   marks hold is listed (`sync_marks` first adds the mark of every route and hold the store or the file holds); an
+   existing file that cannot be read is never overwritten (an error alarm). The job never deletes it.
 8. THE REPORT (`REPORT`, operator-only): units by word (final words only), counts, waits and stalls, the
    conformance and the clock's reasons in words, "X passes of J units; Y expected at zero edge". No interim figure.
 
@@ -89,7 +103,9 @@ DEADLINE is forward_screen's (the earlier of the job's wall and the next pre-ope
 New York on a session. THE STATED LIMITS OF P1 (scratch/pooled-screen/DEVIATIONS.log P1 D3, D4): a cell first judged
 after the clock is not clocked here, and a later lineage with FWD1-R checkpoints read before its hold is released to
 FWD1-R. A CODE ROLLBACK to a release below P1 has no reader of the permit file and lifts the refusal: while the route
-list is non-empty it needs a captain amendment (docs/operations.md).
+list is non-empty it needs a captain amendment (docs/operations.md); the House's own automatic rollback goes back one
+release only, to the one current before a failing deploy, inside that deploy's watch (league/watchdog.py), so it
+cannot go below P1 once P1 has run a night (P1 D23).
 
 Standard library at import; numpy, league.equity, the swarm and the vendored calibration inside the functions that
 need them.
@@ -145,10 +161,24 @@ UNREPRODUCED_MAX = 0.10
 ROUTES = ("pool", "fwd1", "sealed", "merged", "out", "new_cell", "final_unit", "per_program")
 #: The FIXED WORDS a permit file's "why" may carry (never a figure; the detail goes to the report and an alarm).
 WHY_WORDS = ("no_receipt", "no_record", "nonconforming_receipt", "store_lost", "clock_wait", "pool_off")
+#: THE PERMIT FILE'S IDS (the conformance review's finding 1; `permit_figures`): the fields whose text is an id (a
+#: lineage slug like "gap-50-bp-fade", a cell, a cluster, a family, a sha, a date) and the mappings whose keys are ids
+#: are never read for a figure (a number there still is one). Its free text, read for figures, is the "why" and each
+#: unit's "word".
+PERMIT_IDS = ("screen", "receipt", "clock", "at", "cell", "cluster", "lineage", "family", "run_sha", "fwd1_cell", "holds")
+PERMIT_ID_KEYS = ("routes", "units", "lineages")
+#: The fixed word a permit-file value that would carry a figure is written as (`write_permits`: an alarm says where).
+MENDED = "withheld"
+#: THE CLOCK'S DURABLE RECORD (P1 D20; the conformance review's finding 3): the swarm store's kv key under which the job
+#: keeps {receipt sha: {"night", "clock"}} once a receipt's clock is written (added once a receipt, never changed or
+#: removed; `Marks`): a store lost with its permit file then starts no new clock under that receipt. No generator reads
+#: it (it names no lineage and no figure).
+CLOCK_KEY = "elane_pool_clock"
 EVENT_KINDS = ("pinned", "clock_wait", "sighting", "sighted", "held", "released", "routed", "train", "train_failed",
                "decided", "waited", "stalled", "house", "look", "verdict", "lost", "demoted", "engine_switched", "joined",
                "unreproduced", "ineligible", "new_cell", "conformance", "nonconforming", "store_lost", "permits_kept",
-               "permits_refused", "clock_alarm", "look_failed", "market")
+               "permits_refused", "clock_alarm", "look_failed", "market", "marks_failed", "unmarked", "permits_mended",
+               "permits_failed_closed")
 APPEND_ONLY_ERROR = "pool-screen.sqlite is append-only"
 
 _TABLES = """
@@ -691,19 +721,129 @@ def read_permit_file(root: str | Path) -> tuple[dict[str, Any] | None, bool]:
     return dict(doc), True
 
 
+class Marks:
+    """THE DURABLE REFUSAL on the swarm store (P1 D20; the conformance review's findings 2 and 3): the job's writer of
+    the route, hold and release marks on every family of a lineage (`write`: league/swarm/elane_forward.py
+    `pool_mark_write`, append-only, one store transaction), its reading of them (`marked`) and the clock's record
+    (`clock`, `put_clock`: `CLOCK_KEY`, added once a receipt). `swarm` is a writable league/swarm/store.py
+    `SwarmStore` (a test's own). Each call raises on a store failure; the callers write nothing of their own then."""
+
+    def __init__(self, swarm: Any):
+        self.swarm = swarm
+
+    def write(self, marks: Mapping[str, Mapping[str, Mapping[str, Any]]]) -> dict[str, int]:
+        from ..swarm import elane_forward
+
+        return elane_forward.pool_mark_write(self.swarm, marks) if marks else {}
+
+    def marked(self) -> dict[str, dict[str, Any]]:
+        """{lineage: {"word": "route" | "held" | None, "route": its route part or None}} over every equity family's
+        mark, the strongest word of a lineage's families (`elane_forward.mark_word`: a mark that is not the job's shape
+        is a route)."""
+        from ..swarm import elane, elane_forward
+
+        out: dict[str, dict[str, Any]] = {}
+        for fam in self.swarm.families(alive=None, lanes=elane.LANES):
+            state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
+            if elane_forward.POOL_MARK_KEY not in state:
+                continue
+            lineage = elane_forward.lineage_of(self.swarm, fam)
+            if lineage is None:
+                continue
+            mark = state[elane_forward.POOL_MARK_KEY]
+            word = elane_forward.mark_word(mark)
+            row = out.setdefault(lineage, {"word": None, "route": None})
+            if word == "route":
+                row["word"] = "route"
+                part = mark.get("route") if isinstance(mark, Mapping) else None
+                if row["route"] is None and isinstance(part, Mapping):
+                    row["route"] = dict(part)
+            elif word == "held" and row["word"] is None:
+                row["word"] = "held"
+        return out
+
+    def clock(self, sha: str) -> dict[str, Any] | None:
+        """The clock's record of receipt `sha`, or None; a record that is not a mapping is {"unreadable": True}
+        (fail closed: the clock is refused, `Night.clock_row`)."""
+        held = self.swarm.get(CLOCK_KEY)
+        if held is None:
+            return None
+        if not isinstance(held, Mapping):
+            return {"unreadable": True}
+        row = held.get(sha)
+        if row is None:
+            return None
+        return dict(row) if isinstance(row, Mapping) else {"unreadable": True}
+
+    def put_clock(self, sha: str, record: Mapping[str, Any]) -> None:
+        """Add receipt `sha`'s clock record once (never changed); a kv value that is not a mapping is never overwritten
+        (ValueError)."""
+        with self.swarm.atomic():
+            held = self.swarm.get(CLOCK_KEY)
+            if held is not None and not isinstance(held, Mapping):
+                raise ValueError(f"the swarm store's {CLOCK_KEY} is not the job's: it is never overwritten")
+            held = dict(held or {})
+            if sha in held:
+                return
+            held[sha] = {str(k): (None if v is None else str(v)) for k, v in record.items()}
+            self.swarm.put(CLOCK_KEY, held)
+
+
+def _text(value: Any) -> str | None:
+    return None if value is None else str(value)
+
+
+def sync_marks(marks: Marks, store: sqlite3.Connection | None, existing: Mapping[str, Any] | None) -> None:
+    """THE MARKS KEPT WHOLE (P1 D20), before every permit file the job writes: every route and hold this store or the
+    readable file on disk holds is marked (a mark a failed write missed is added then), every release this store
+    records is added after its hold, and the clock's record is added once the store holds a pin. Append-only through
+    `Marks`; raises on a store failure (the caller alarms and writes the file all the same)."""
+    want: dict[str, dict[str, dict[str, Any]]] = {}
+
+    def add(lineage: Any, part: str, record: Mapping[str, Any]) -> None:
+        want.setdefault(str(lineage), {}).setdefault(part, {k: _text(v) for k, v in record.items()})
+
+    if store is not None:
+        pin = store.execute("SELECT sha, night, clock FROM pool_pins ORDER BY at LIMIT 1").fetchone()
+        sha = None if pin is None else str(pin["sha"])
+        for r in store.execute("SELECT lineage, cell, cluster, night FROM pool_routes ORDER BY lineage"):
+            add(r["lineage"], "route", {"receipt": sha, "night": r["night"], "cell": r["cell"], "cluster": r["cluster"]})
+        for r in store.execute("SELECT lineage, night FROM pool_holds ORDER BY lineage"):
+            add(r["lineage"], "held", {"receipt": sha, "night": r["night"]})
+        for r in store.execute("SELECT r.lineage AS lineage, r.at AS at FROM pool_releases r JOIN pool_holds h ON "
+                               "h.lineage = r.lineage ORDER BY r.lineage"):
+            add(r["lineage"], "released", {"receipt": sha, "night": _iso(float(r["at"]))[:10]})
+        if pin is not None and marks.clock(sha) is None:
+            marks.put_clock(sha, {"night": pin["night"], "clock": pin["clock"]})
+    if existing:
+        file_sha = existing.get("receipt") if isinstance(existing.get("receipt"), str) else None
+        for lineage, row in (existing.get("routes") or {}).items():
+            row = row if isinstance(row, Mapping) else {}
+            add(lineage, "route", {"receipt": file_sha, "night": None, "cell": row.get("cell"),
+                                   "cluster": row.get("cluster")})
+        for lineage in existing.get("holds") or []:
+            add(lineage, "held", {"receipt": file_sha, "night": None})
+    marks.write(want)
+
+
 class Night:
     """One night of the pool (the module docstring): `store` (the pool's own, writable), `fdb` (the forward record,
     read-only), `receipt` (`pool_rule.Receipt`), `cal` (the vendored calibration, `pool_rule.calib`), `runs`
-    (`PoolRuns` or a test's fake), `families` (the equity families by id), `swarm` (the swarm store, read-only, for the
-    cards; None: no card read), `budget` (child seconds tonight), `deadline`."""
+    (`PoolRuns` or a test's fake), `families` (the equity families by id), `swarm` (the swarm store, for the cards;
+    None: no card read), `marks` (`Marks`, the durable refusal; by default `Marks(swarm)` for a writable swarm store;
+    None: NOTHING IS ROUTED OR HELD and no clock starts, fail closed), `budget` (child seconds tonight), `deadline`."""
 
     def __init__(self, root: str | Path, store: sqlite3.Connection, fdb: sqlite3.Connection, *, receipt: P.Receipt,
                  runs: Any, families: Mapping[str, Mapping[str, Any]], swarm: Any = None, settings: Any = None,
                  budget: float = 600.0, clock: Callable[[], float] = time.time, deadline: float = float("inf"),
-                 base: str | Path | None = None, release: str | Path | None = None, cal: P.Calib | None = None):
+                 base: str | Path | None = None, release: str | Path | None = None, cal: P.Calib | None = None,
+                 marks: Marks | None = None):
         self.root = Path(root)
         self.store, self.fdb, self.receipt, self.runs = store, fdb, receipt, runs
         self.families, self.swarm, self.settings = families, swarm, settings
+        if marks is None and swarm is not None and hasattr(swarm, "atomic") and not getattr(swarm, "readonly", False):
+            marks = Marks(swarm)
+        self.marks = marks
         self.budget, self.clock, self.deadline = float(budget), clock, float(deadline)
         self.base, self.release = base, release
         if cal is None:
@@ -748,6 +888,44 @@ class Night:
         """A reason in words for the operator's report (never the permit file)."""
         if why not in self.notes:
             self.notes.append(why)
+
+    def _marked(self, marks: Mapping[str, Mapping[str, Mapping[str, Any]]]) -> bool:
+        """THE DURABLE REFUSAL FIRST (P1 D20): `marks` {lineage: {part: record}} written on every family of each
+        lineage (`Marks.write`) BEFORE the caller commits the route or hold they mark; whether they were. False (an
+        event and an alarm; the caller writes nothing of it tonight and asks again the next night) with no swarm store
+        to mark or a store failure. A lineage with no family in the swarm store is marked nowhere: True all the same
+        (its route or hold is still written: more refusing), with an alarm."""
+        if not marks:
+            return True
+        first = sorted(marks)[0]
+        if self.marks is None:
+            self._ev("marks_failed", lineage=first, once=f"none:{self.night}",
+                     payload={"why": "no swarm store to keep the durable refusal in: nothing is routed or held tonight"})
+            self.tally["marks_failed"] += 1
+            return False
+        try:
+            counts = self.marks.write(marks)
+        except Exception as exc:  # noqa: BLE001 - the House's: nothing of it is written tonight, asked again
+            self._ev("marks_failed", lineage=first, once=f"{','.join(sorted(next(iter(marks.values()))))}:{self.night}",
+                     payload={"why": "the swarm store could not take the durable refusal's marks: the routes and holds "
+                                     "they mark wait a night", "error": type(exc).__name__, "lineages": len(marks)})
+            self.tally["marks_failed"] += 1
+            self.note("the swarm store could not take the durable refusal's marks tonight: the routes and holds they "
+                      "mark wait for the next night")
+            return False
+        for lineage, n in sorted(counts.items()):
+            if int(n) == 0:
+                with self.store:
+                    if event(self.store, "unmarked", at=self.clock(), lineage=lineage, once="unmarked",
+                             payload={"why": "no family of this lineage is in the swarm store: its refusal has no "
+                                             "family to mark (the permit file still lists it)"}):
+                        self.tally["unmarked"] += 1
+        return True
+
+    def _route_mark(self, cell: str | None, cluster: str | None) -> dict[str, Any]:
+        """A route part's record: the receipt, tonight's record night, the cell and the cluster (ids)."""
+        return {"receipt": self.receipt.sha256, "night": _text(self.night), "cell": _text(cell),
+                "cluster": _text(cluster)}
 
     def pin_row(self) -> dict[str, Any] | None:
         row = self.store.execute("SELECT * FROM pool_pins WHERE sha=?", (self.receipt.sha256,)).fetchone()
@@ -1240,16 +1418,32 @@ class Night:
         if held is not None:
             return held
         sight = self.sighting(now)
+        if self.marks is None:
+            self.clock_waited("no swarm store to keep the durable refusal in (P1 D20): no clock, no route list",
+                              cause="house")
+            return None
         existing, exists = read_permit_file(self.root)
-        if existing is not None and existing.get("receipt") == self.receipt.sha256 and existing.get("clock"):
+        lost = "the permit file" if existing is not None and existing.get("receipt") == self.receipt.sha256 \
+            and existing.get("clock") else None
+        if lost is None:
+            try:
+                if self.marks.clock(self.receipt.sha256) is not None:
+                    lost = "the swarm store's clock record"
+            except Exception as exc:  # noqa: BLE001 - the House's: no clock tonight
+                self._ev("marks_failed", once=f"clock:{self.night}",
+                         payload={"why": "the swarm store's clock record could not be read", "error": type(exc).__name__})
+                self.tally["marks_failed"] += 1
+                self.clock_waited("the swarm store's clock record could not be read", cause="house")
+                return None
+        if lost is not None:
             with self.store:
                 event(self.store, "store_lost", at=self.clock(), once=f"{self.night}",
-                      payload={"why": "the permit file already names this receipt's clock but the store holds none: "
-                                      "the store was lost or reset; no clock, no judging, the file's lists are carried "
-                                      "whole"})
+                      payload={"why": f"{lost} already names this receipt's clock but the store holds none: the store "
+                                      "was lost or reset; no clock, no judging, the file's lists and the marks are "
+                                      "carried whole"})
             self.tally["store_lost"] += 1
-            self.note("STORE LOST: the permit file names this receipt's clock but pool-screen.sqlite holds none; nothing "
-                      "is judged and no clock starts (a captain's step)")
+            self.note(f"STORE LOST: {lost} names this receipt's clock but pool-screen.sqlite holds none; nothing is "
+                      "judged and no clock starts (a captain's step)")
             return None
         night, before = first_night(self.fdb, float(sight["release_start"]))
         if night is None:
@@ -1294,6 +1488,12 @@ class Night:
             if f.merged_into and f.merged_into in routes:             # a merged copy follows its member's route
                 cell, cid, _ = routes[f.merged_into]
                 routes[lineage] = (cell, cid, f"merged into {f.merged_into}, which is on the POOL route")
+        # THE DURABLE REFUSAL FIRST (P1 D20): every route's mark before the clock's transaction; a mark that cannot be
+        # written writes no clock and no route tonight (the next night is the first)
+        if not self._marked({lineage: {"route": {**self._route_mark(cell, cid), "night": night}}
+                             for lineage, (cell, cid, _) in routes.items()}):
+            self.clock_waited("the swarm store could not take the route list's marks", cause="house")
+            return None
         with self.store:
             self.store.execute("INSERT OR IGNORE INTO pool_pins(sha, release, release_start, before, night, clock, "
                                "evidence, at) VALUES (?,?,?,?,?,?,?,?)",
@@ -1331,6 +1531,13 @@ class Night:
                            "units": len(rec.units),
                            "clocked": sorted(cid for cid, st in states.items() if st["clocked"])})
         self.tally["routes_written"] += len(routes)
+        try:                                       # the clock's record (`sync_marks` adds it if this fails)
+            self.marks.put_clock(rec.sha256, {"night": night, "clock": clock})
+        except Exception as exc:  # noqa: BLE001
+            self._ev("marks_failed", once=f"put_clock:{night}", payload={"why": "the clock's record could not be "
+                                                                                 "written: the next file write adds it",
+                                                                         "error": type(exc).__name__})
+            self.tally["marks_failed"] += 1
         return self.pin_row()
 
     # ---------------------------------------------------------------------------------------- 2. later lineages
@@ -1362,6 +1569,8 @@ class Night:
                 self._release(lineage, why)
                 continue
             if lineage not in held and fwd1_case_n(facts.get(lineage)):
+                if not self._marked({lineage: {"held": {"receipt": self.receipt.sha256, "night": _text(self.night)}}}):
+                    continue                              # the durable refusal first (P1 D20): held the next night
                 with self.store:
                     self.store.execute("INSERT OR IGNORE INTO pool_holds(lineage, night, why, at) VALUES (?,?,?,?)",
                                        (lineage, str(self.night), "a later lineage FWD1 judges as case N: held off "
@@ -1387,6 +1596,8 @@ class Night:
         self.tally[f"decided_{route}"] += 1
 
     def _release(self, lineage: str, why: str) -> None:
+        """A held lineage's release, recorded in this store FIRST and then on its mark (a release mark that cannot be
+        written leaves the lineage refused until `sync_marks` adds it: fail closed)."""
         if self.store.execute("SELECT 1 FROM pool_holds WHERE lineage=?", (lineage,)).fetchone() is None:
             return
         with self.store:
@@ -1394,8 +1605,10 @@ class Night:
                                (lineage, why, self.clock()))
             event(self.store, "released", at=self.clock(), lineage=lineage, once="released", payload={"why": why})
         self.tally["released"] += 1
+        self._marked({lineage: {"released": {"receipt": self.receipt.sha256, "night": _text(self.night)}}})
 
     def _route(self, lineage: str, cell: str, cluster: str, why: str) -> None:
+        """One POOL-route row; its mark is written first by the caller (`_marked`, P1 D20)."""
         with self.store:
             self.store.execute("INSERT OR IGNORE INTO pool_routes(lineage, cell, cluster, night, why, at) "
                                "VALUES (?,?,?,?,?,?)", (lineage, cell, cluster, str(self.night), why, self.clock()))
@@ -1436,13 +1649,16 @@ class Night:
             route, why = self.founder_route(lineage, facts.get(lineage), state, unit_final=self.final(f.cell))
             if route is None:
                 continue
+            copies = sorted(other for other, g in self.receipt.founders.items() if g.merged_into == lineage)
+            if route == "pool" and not self._marked({x: {"route": self._route_mark(f.cell, str(u["cluster"]))}
+                                                     for x in [lineage, *copies]}):
+                continue                                  # the durable refusal first (P1 D20): decided the next night
             self._member(lineage, f.pid, cell=f.cell, route=route, why=why, fam=self.families.get(f.family), row=None,
                          joins=str(u["clock"]), declared=f.cls)
             if route == "pool":
                 self._route(lineage, f.cell, str(u["cluster"]), "a founder FWD1 sighted after the clock as case N")
-                for other, g in sorted(self.receipt.founders.items()):
-                    if g.merged_into == lineage:
-                        self._route(other, f.cell, str(u["cluster"]), f"merged into {lineage}, which is on the POOL route")
+                for other in copies:
+                    self._route(other, f.cell, str(u["cluster"]), f"merged into {lineage}, which is on the POOL route")
 
     def _earlier_ready(self, pid: int) -> bool:
         """THE COPY MERGE WAITS (the P1 review's F13): every earlier member (by pid) is settled first: a founding member
@@ -1512,6 +1728,9 @@ class Night:
             if into is not None:
                 target = self.lineage_of_pid(int(str(into)[1:])) or str(into)
                 routes = self.routes()
+                if target in routes and not self._marked({lineage: {"route": self._route_mark(
+                        routes[target]["cell"], routes[target]["cluster"])}}):
+                    continue                              # the durable refusal first (P1 D20): decided the next night
                 self._member(lineage, pid, cell=None, route="merged", why=f"merged into {target}", fam=fam, row=row,
                              merged=target)
                 if target in routes:
@@ -1562,7 +1781,9 @@ class Night:
                 self._release(lineage, "FWD1-R spend before its hold (P1's stated limit)")
             elif fwd1_case_n(fwd1):
                 # ASSIGNED INTO A PENDING UNIT: on the POOL route from its first counted day there (section 7.2),
-                # whatever FWD1 read while it was held (a pass then could never seat it)
+                # whatever FWD1 read while it was held (a pass then could never seat it); its mark first (P1 D20)
+                if not self._marked({lineage: {"route": self._route_mark(target, str(unit["cluster"]))}}):
+                    continue
                 self._member(lineage, pid, cell=target, route="pool", fam=fam, row=row, assigned=True, corr=corr,
                              joins=str(unit["clock"]), why=None)
                 self._route(lineage, target, str(unit["cluster"]), "a later lineage assigned to a pending unit")
@@ -2318,14 +2539,17 @@ def withheld(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[froz
     """THE OPERATOR VIEWS' WITHHOLDING (section 8; 11 P1 item 5): (the lineages on the permit file's POOL-route or hold
     list whose unit's verdict is not final (a held lineage has no unit yet), False). FAIL CLOSED: (frozenset(), True),
     "withhold every ETF lineage", when the file cannot be read or is not the job's shape, or is missing while
-    `elane.pool.mode` is not "off" (`pool_on`) or while this job's store exists (the job never deletes the file).
+    `elane.pool.mode` is not "off" (`pool_on`), while this job's store exists (the job never deletes the file) or while
+    the swarm store holds a durable mark (`elane_forward.pool_marked_any`, P1 D20).
     league/ops/forward_report.py keeps its own copy (release E3's seal: it imports no pool module); a test holds the
     two equal."""
     path = Path(root) / PERMITS
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return frozenset(), pool_on(settings) or (Path(root) / DB).exists()
+        from ..swarm import elane_forward
+
+        return frozenset(), pool_on(settings) or (Path(root) / DB).exists() or elane_forward.pool_marked_any(root)
     except (OSError, ValueError):
         return frozenset(), True
     if not isinstance(doc, Mapping) or doc.get("version") != PERMITS_VERSION or not isinstance(doc.get("routes"), Mapping) \
@@ -2429,11 +2653,15 @@ def eligible_rows(store: sqlite3.Connection, fdb: sqlite3.Connection, fwd1: Mapp
 def permits_doc(store: sqlite3.Connection | None, *, receipt: P.Receipt | None, at: float,
                 fdb: sqlite3.Connection | None = None, why: str | None = None,
                 fwd1: Mapping[str, Mapping[str, Any]] | None = None,
-                existing: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                existing: Mapping[str, Any] | None = None, marked: Mapping[str, Mapping[str, Any]] | None = None,
+                clocked: tuple[str, str] | None = None) -> dict[str, Any]:
     """THE PERMIT FILE's document (the module docstring, 7): ids and fixed words only. NEVER SHORTER than `existing`
     (the readable file on disk): its routes are carried whole, its holds unless the store records the lineage's
     release (or route), its units' words where the store has none, and its receipt sha and clock while the store has
-    none (a lost store lifts nothing). `why` is a word of `WHY_WORDS` (another text is written "unreadable_reason")."""
+    none (a lost store lifts nothing). NOR THAN THE MARKS (`marked`, `Marks.marked`; P1 D20): every lineage a route
+    mark names is on its route list, every one a held mark names (unreleased) on its hold list, and `clocked` (the
+    receipt's sha and the clock's record) stands for the receipt and clock while neither the store nor the file names
+    one. `why` is a word of `WHY_WORDS` (another text is written "unreadable_reason")."""
     routes: dict[str, Any] = {}
     holds: set[str] = set()
     units: dict[str, Any] = {}
@@ -2469,6 +2697,14 @@ def permits_doc(store: sqlite3.Connection | None, *, receipt: P.Receipt | None, 
                 lineages.setdefault(str(lineage), {"cell": row.get("cell"), "cluster": row.get("cluster")})
         if sha is None and existing.get("clock"):
             sha, clock = existing.get("receipt"), existing.get("clock")
+    for lineage, row in sorted((marked or {}).items()):
+        if row.get("word") == "route" and str(lineage) not in routes:
+            part = row.get("route") if isinstance(row.get("route"), Mapping) else {}
+            routes[str(lineage)] = {"cell": part.get("cell"), "cluster": part.get("cluster")}
+        elif row.get("word") == "held" and str(lineage) not in released:
+            holds.add(str(lineage))
+    if sha is None and clocked is not None:
+        sha, clock = clocked
     holds -= set(routes)
     if fdb is not None:
         for lineage in sorted(_registry(fdb)):
@@ -2482,29 +2718,72 @@ def permits_doc(store: sqlite3.Connection | None, *, receipt: P.Receipt | None, 
     return doc
 
 
+def permit_figures(doc: Any) -> list[str]:
+    """The places a permit document holds a figure (`pool_rule.figure_free` with the file's ids, `PERMIT_IDS` and
+    `PERMIT_ID_KEYS`, never read as figures: the conformance review's finding 1)."""
+    return P.figure_free(doc, ids=PERMIT_IDS, id_keys=PERMIT_ID_KEYS)
+
+
+#: The document written when a permit document cannot be mended (`write_permits`): the swarm reads it as unreadable
+#: (no route mapping) and fails closed; the job never overwrites it (an operator's step, an error alarm each night).
+FAILED_CLOSED = {"version": PERMITS_VERSION, "screen": P.SCREEN, "fail_closed": "figure"}
+
+
 def write_permits(root: str | Path, store: sqlite3.Connection | None, *, receipt: P.Receipt | None, at: float,
-                  fdb: sqlite3.Connection | None = None, why: str | None = None) -> Path | None:
-    """THE PERMIT FILE, atomically, 0600 (`permits_doc`, never shorter than the readable file on disk). NOTHING IS
-    WRITTEN (None, and an event when there is a store) when the existing file cannot be read (it is never overwritten:
-    the swarm keeps failing closed) or the document would carry a figure."""
+                  fdb: sqlite3.Connection | None = None, why: str | None = None, marks: Marks | None = None,
+                  tally: Counter | None = None) -> Path | None:
+    """THE PERMIT FILE, atomically, 0600 (`permits_doc`, never shorter than the readable file on disk nor than the
+    marks). With `marks` the marks are kept whole first (`sync_marks`) and read (a failure is an event and
+    `tally["marks_failed"]`: the file is written from the store and the file on disk all the same). NOTHING IS WRITTEN
+    (None; an event and `tally["permits_kept"]`, an error alarm) when the existing file cannot be read: it is never
+    overwritten and the swarm keeps failing closed. A value that would carry a figure is written as `MENDED` (the
+    conformance review's finding 1: an event and `tally["permits_mended"]`); a document that still holds one is written
+    as `FAILED_CLOSED` (the swarm fails closed; an event and `tally["permits_failed_closed"]`, an error alarm). The
+    path written, or None."""
     from .context import write_json
 
-    existing, exists = read_permit_file(root)
-    if exists and existing is None:
+    count = tally if tally is not None else Counter()
+
+    def ev(kind: str, payload: Mapping[str, Any]) -> None:
         if store is not None:
             with store:
-                event(store, "permits_kept", at=at, once=_iso(at)[:10],
-                      payload={"why": "the permit file on disk cannot be read: it is never overwritten (the swarm "
-                                      "fails closed); an operator's step"})
+                event(store, kind, at=at, once=_iso(at), payload=payload)
+        count[kind] += 1
+
+    existing, exists = read_permit_file(root)
+    marked: dict[str, dict[str, Any]] | None = None
+    clocked: tuple[str, str] | None = None
+    if marks is not None:
+        try:
+            sync_marks(marks, store, existing)
+        except Exception as exc:  # noqa: BLE001 - the House's: the file is written all the same, the next write repeats
+            ev("marks_failed", {"why": "the durable refusal's marks could not be kept whole before the permit file",
+                                "error": type(exc).__name__})
+        try:
+            marked = marks.marked()
+            held = marks.clock(receipt.sha256) if receipt is not None else None
+            if isinstance(held, Mapping) and isinstance(held.get("clock"), str):
+                clocked = (receipt.sha256, str(held["clock"]))
+        except Exception as exc:  # noqa: BLE001
+            marked, clocked = None, None
+            ev("marks_failed", {"why": "the durable refusal's marks could not be read for the permit file",
+                                "error": type(exc).__name__})
+    if exists and existing is None:
+        ev("permits_kept", {"why": "the permit file on disk cannot be read: it is never overwritten (the swarm fails "
+                                   "closed); an operator's step"})
         return None
     fwd1 = fwd1_facts(root, fdb) if fdb is not None else None
-    doc = permits_doc(store, receipt=receipt, at=at, fdb=fdb, why=why, fwd1=fwd1, existing=existing)
-    problems = P.figure_free(doc)
-    if problems:
-        if store is not None:
-            with store:
-                event(store, "permits_refused", at=at, once=_iso(at)[:10],
-                      payload={"why": "the permit file would carry a figure: not written", "places": len(problems)})
+    doc = permits_doc(store, receipt=receipt, at=at, fdb=fdb, why=why, fwd1=fwd1, existing=existing, marked=marked,
+                      clocked=clocked)
+    doc, mended, stuck = P.scrub_figures(doc, word=MENDED, ids=PERMIT_IDS, id_keys=PERMIT_ID_KEYS)
+    if mended:
+        ev("permits_mended", {"why": f"values that would carry a figure are written as {MENDED!r}", "places": mended[:20],
+                              "count": len(mended)})
+    if stuck or permit_figures(doc):
+        ev("permits_failed_closed", {"why": "the permit document holds a figure it cannot mend: a file the swarm reads "
+                                            "as unreadable is written (it fails closed); an operator's step",
+                                     "count": len(stuck)})
+        write_json(Path(root) / PERMITS, {**FAILED_CLOSED, "at": _iso(at)})
         return None
     return write_json(Path(root) / PERMITS, doc)
 
@@ -2571,10 +2850,13 @@ def night(root: str | Path, *, receipt: P.Receipt, settings: Mapping[str, Any] |
         if own_runs:
             runs = PoolRuns(root, budget_seconds=300, clock=clock, fdb=fdb, settings=settings, deadline=deadline)
         if families is None or swarm is None:
-            from ..swarm.store import SwarmStore
             from . import forward_register
 
-            opened = SwarmStore(root, readonly=True)                 # read-only: the cards and the families
+            # the cards and the families, and THE DURABLE REFUSAL's marks (P1 D20): the one write the job makes there.
+            # An existing store only (none is made here): without one nothing runs (as the read-only open before it)
+            opened, _ = open_marks(root)
+            if opened is None:
+                raise sqlite3.OperationalError("the swarm store cannot be opened: no family, card or durable mark")
             swarm = opened if swarm is None else swarm
             families = forward_register._families(opened) if families is None else families
         judge = Night(root, store, fdb, receipt=receipt, runs=runs, families=families, swarm=swarm, settings=settings,
@@ -2584,12 +2866,13 @@ def night(root: str | Path, *, receipt: P.Receipt, settings: Mapping[str, Any] |
             pin = judge.run_routes(now)
         finally:
             write_permits(root, store, receipt=receipt, at=clock(), fdb=fdb,
-                          why=None if judge.pin_row() is not None else "clock_wait")
+                          why=None if judge.pin_row() is not None else "clock_wait", marks=judge.marks,
+                          tally=judge.tally)
         if pin is not None:
             try:
                 judge.run_looks()
             finally:
-                write_permits(root, store, receipt=receipt, at=clock(), fdb=fdb)
+                write_permits(root, store, receipt=receipt, at=clock(), fdb=fdb, marks=judge.marks, tally=judge.tally)
         write_json(root / REPORT, report(store, receipt=receipt, notes=judge.notes))
         with store:
             store.execute("INSERT INTO pool_runs(night, started, finished, seconds, at) VALUES (?,?,?,?,?)",
@@ -2601,21 +2884,39 @@ def night(root: str | Path, *, receipt: P.Receipt, settings: Mapping[str, Any] |
         if opened is not None:
             try:
                 opened.close()
-            except Exception:  # noqa: BLE001 - closing a read-only store
+            except Exception:  # noqa: BLE001 - closing the swarm store
                 pass
         fdb.close()
         store.close()
 
 
-def keep_permits(root: Path, receipt: P.Receipt | None, why: str, now: float, *, detail: str | None = None) -> bool:
-    """The permit file written from what the store and the readable file on disk hold (no judging): with no pin, no
-    receipt, no conformance or no record, so the swarm reads a file of the job's and every POOL-route entry ever
-    written stays listed. `why` is a word of `WHY_WORDS`; `detail` (words) goes to the operator's report. Whether the
-    file was written (an unreadable file on disk is never overwritten)."""
+def open_marks(root: str | Path) -> tuple[Any, Marks | None]:
+    """(the writable swarm store under `root`, its `Marks`), or (None, None) when there is none or it cannot be opened
+    (the caller writes the permit file without the marks; an event says so)."""
+    from ..swarm import DB_NAME
+    from ..swarm.store import SwarmStore
+
+    if not (Path(root) / DB_NAME).exists():
+        return None, None
+    try:
+        swarm = SwarmStore(root)
+    except sqlite3.Error:
+        return None, None
+    return swarm, Marks(swarm)
+
+
+def keep_permits(root: Path, receipt: P.Receipt | None, why: str, now: float, *, detail: str | None = None,
+                 tally: Counter | None = None) -> bool:
+    """The permit file written from what the store, the readable file on disk and the swarm store's marks hold (no
+    judging): with no pin, no receipt, no conformance or no record, so the swarm reads a file of the job's and every
+    POOL-route entry ever written stays listed; the marks are kept whole first (`sync_marks`). `why` is a word of
+    `WHY_WORDS`; `detail` (words) goes to the operator's report; `tally` takes `write_permits`' counts (the job's
+    alarms). Whether the file was written (an unreadable file on disk is never overwritten)."""
     from .context import write_json
 
     store = open_store(root) if (root / DB).exists() else None
     fdb = None
+    swarm, marks = open_marks(root)
     try:
         if (root / forward_db.DB).exists():
             try:
@@ -2623,7 +2924,7 @@ def keep_permits(root: Path, receipt: P.Receipt | None, why: str, now: float, *,
                 fdb.row_factory = sqlite3.Row
             except sqlite3.Error:
                 fdb = None
-        wrote = write_permits(root, store, receipt=receipt, at=now, fdb=fdb, why=why)
+        wrote = write_permits(root, store, receipt=receipt, at=now, fdb=fdb, why=why, marks=marks, tally=tally)
         write_json(root / REPORT, report(store, receipt=receipt, notes=[detail] if detail else []))
         return wrote is not None
     finally:
@@ -2631,14 +2932,40 @@ def keep_permits(root: Path, receipt: P.Receipt | None, why: str, now: float, *,
             store.close()
         if fdb is not None:
             fdb.close()
+        if swarm is not None:
+            swarm.close()
+
+
+def permit_alarms(ctx: Any, counts: Mapping[str, Any]) -> None:
+    """The permit file's and the marks' alarms of a run (`write_permits`, `Night._marked`; the conformance review's
+    findings 1 and 4): an unreadable file kept, a document failed closed or a mark that cannot be written are errors
+    (each needs an operator's step or leaves a route or hold waiting); a mended value and a lineage with no family to
+    mark are warnings."""
+    texts = {
+        "permits_kept": ("error", "the permit file on disk cannot be read and is never overwritten: the swarm refuses "
+                                  "every ETF FWD1-R pass and every judged lineage's sealed try until an operator restores "
+                                  "it (the store and the marks hold the lists)"),
+        "permits_failed_closed": ("error", "the permit document held a figure it could not mend: a file the swarm reads "
+                                           "as unreadable was written (it fails closed); an operator's step"),
+        "marks_failed": ("error", "the swarm store could not take the durable refusal's marks: the routes and holds "
+                                  "they mark wait a night (nothing is routed or held unmarked; the events say which)"),
+        "permits_mended": ("warning", f"values of the permit file that would carry a figure were written as {MENDED!r} "
+                                      "(the events name the places)"),
+        "unmarked": ("warning", "lineages routed or held have no family in the swarm store to mark (the permit file "
+                                "still lists them; the events name them)"),
+    }
+    for key, (level, text) in texts.items():
+        n = int(counts.get(key) or 0)
+        if n:
+            ctx.alert(level, f"pool_screen: {text} ({key} x{n})")
 
 
 def run(ctx: Any) -> dict[str, Any]:
     """THE JOB (league/ops/registry.py, after `forward_shadow`, listed after `forward_screen`): skipped with its switch
     off (the permit file kept), inside 09:00-17:30 New York on a session, too near the next pre-open; with no pin, no
     receipt, a receipt whose conformance fails on this box, or no forward record, it writes the permit file from its
-    store and the file on disk and judges nothing (an alarm when a pin is set and its receipt is refused); else
-    `night`."""
+    store, the file on disk and the marks and judges nothing (an alarm when a pin is set and its receipt is refused);
+    else `night`. The permit file's and the marks' alarms (`permit_alarms`) either way."""
     from ..swarm import settings as swarm_settings
     from . import forward_shadow
 
@@ -2656,18 +2983,23 @@ def run(ctx: Any) -> dict[str, Any]:
     receipt, why = P.rule(conformed=conformed(root, float(now)))
     if receipt is None:
         word = "nonconforming_receipt" if "conformance" in str(why) else "no_receipt"
-        keep_permits(root, None, word, float(now), detail=f"nothing is judged: {why}")
+        kept: Counter = Counter()
+        keep_permits(root, None, word, float(now), detail=f"nothing is judged: {why}", tally=kept)
         if pinned:
             ctx.alert("warning", f"pool_screen: a POOL1 pin is set but nothing is judged: {why}")
+        permit_alarms(ctx, kept)
         return {"status": "skipped", "why": f"nothing is judged: {why}"}
     if forward_db.mode(settings) == "off" or not (root / forward_db.DB).exists():
-        keep_permits(root, receipt, "no_record", float(now), detail="no forward record to judge")
+        kept = Counter()
+        keep_permits(root, receipt, "no_record", float(now), detail="no forward record to judge", tally=kept)
+        permit_alarms(ctx, kept)
         return {"status": "skipped", "why": "no forward record to judge"}
     try:
         receipt_ = night(root, receipt=receipt, settings=settings, now=now, base=getattr(ctx, "base", None),
                          release=getattr(ctx, "release", None), clock=ctx.now, deadline=deadline)
     except sqlite3.Error as exc:
         return {"status": "failed", "error": f"a store could not be read or written ({type(exc).__name__})"}
+    permit_alarms(ctx, receipt_)
     if int(receipt_.get("house") or 0):
         ctx.alert("warning", f"pool_screen: {receipt_['house']} steps waited on the House's own failures: no cell is "
                              "marked, the next night asks again")
@@ -2696,5 +3028,7 @@ __all__ = ["JOB", "DB", "PERMITS", "PERMITS_VERSION", "REPORT", "MODES", "SEATS"
            "CLOCK_ALARM_NIGHTS", "TRAIN_FAILS", "WALL_S", "MARGIN_S", "UNREPRODUCED_MAX", "ROUTES", "WHY_WORDS",
            "EVENT_KINDS", "TABLES", "SCHEMA", "cfg", "open_store", "record_sha", "event", "conformance_key", "conformed",
            "fwd1_facts", "fwd1_case_n", "record_night", "first_night", "PoolRuns", "control_exposure", "Wait",
-           "read_permit_file", "Night", "pool_on", "OVER", "withheld", "unit_words", "held_lineages", "eligible_rows",
-           "permits_doc", "write_permits", "report", "night", "keep_permits", "run"]
+           "read_permit_file", "Marks", "sync_marks", "Night", "pool_on", "OVER", "withheld", "unit_words",
+           "held_lineages", "eligible_rows", "permits_doc", "PERMIT_IDS", "PERMIT_ID_KEYS", "MENDED", "CLOCK_KEY",
+           "FAILED_CLOSED", "permit_figures", "write_permits", "report", "night", "open_marks", "keep_permits",
+           "permit_alarms", "run"]

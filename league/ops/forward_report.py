@@ -589,21 +589,44 @@ POOL_STORE = "pool-screen.sqlite"
 POOL_OVER = ("PASS", "FAIL", "DEMOTED", "VOID", "REFUTED", "ineligible", "nonconforming")
 #: The meter's word while the pool's permit file fails closed (`meters`: it waits, it writes no reduced row).
 POOL_WAIT = "the pooled screen's permit file fails closed: the meter waits for it"
+#: POOL1's durable refusal (P1 D20): the swarm store's name and the family-state key of a pool mark
+#: (league/swarm/__init__.py `DB_NAME`, league/swarm/elane_forward.py `POOL_MARK_KEY`; tests hold them equal: this
+#: module imports no swarm reader of it).
+SWARM_DB = "swarm.sqlite"
+POOL_MARK_KEY = "elane_pool_mark"
+
+
+def _pool_marked(root: str | Path) -> bool:
+    """Whether the swarm store under `root` holds any POOL1 mark, read-only (league/swarm/elane_forward.py
+    `pool_marked_any` is the same reading): False with no swarm store; True when it cannot be read (fail closed)."""
+    path = Path(root) / SWARM_DB
+    if not path.exists():
+        return False
+    try:
+        db = guard.connect_ro(path)
+        try:
+            row = db.execute("SELECT 1 FROM families WHERE instr(state, ?) > 0 LIMIT 1",
+                             (json.dumps(POOL_MARK_KEY),)).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return True
+    return row is not None
 
 
 def _pool_withheld(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[frozenset[str], bool]:
     """THE BH/BY METER'S POOL WITHHOLDING (POOL1, a judge-module edit of this operator view only): (the lineages on the
     pooled screen's POOL-route or hold list whose unit's verdict is not final, False); (frozenset(), True), "every ETF
     lineage", when that file cannot be read or is not the job's shape, or is missing while `elane.pool.mode` is not
-    "off" or while the pool's own store exists (`POOL_STORE`: its name only) (fail closed). league/ops/pool_screen.py
-    `withheld` is the same reading."""
+    "off", while the pool's own store exists (`POOL_STORE`: its name only) or while the swarm store holds a durable
+    pool mark (`_pool_marked`, P1 D20) (fail closed). league/ops/pool_screen.py `withheld` is the same reading."""
     raw = settings.get("elane") if isinstance(settings, Mapping) else None
     raw = raw.get("pool") if isinstance(raw, Mapping) else None
     on = isinstance(raw, Mapping) and "mode" in raw and raw.get("mode") != "off"
     try:
         doc = json.loads((Path(root) / POOL_PERMITS).read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return frozenset(), on or (Path(root) / POOL_STORE).exists()
+        return frozenset(), on or (Path(root) / POOL_STORE).exists() or _pool_marked(root)
     except (OSError, ValueError):
         return frozenset(), True
     if not isinstance(doc, Mapping) or doc.get("version") != 1 or not isinstance(doc.get("routes"), Mapping) \
