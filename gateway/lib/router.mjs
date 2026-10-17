@@ -28,6 +28,8 @@
 //   GET             /v1/research/search      the research library: arXiv papers posted before 2025 for plain keywords
 //   GET             /v1/research/read        one pinned version's metadata and a window of its text (lib/library.mjs)
 //   GET             /v1/research/health      the library's pace, lease and day's count (also `library` in /v1/health)
+//   GET             /v1/tiingo/daily/<SYM>/prices  raw daily bars and events of 16 ETFs, 1999-01-04..2019-12-31 only, the
+//                                            vendor's adjusted columns dropped (lib/tiingo.mjs; the deep key, R1)
 //   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
 //   GET             /v1/github/pr/<n>        that pull request and its CI, so the VM can watch it
 //   GET             /v1/github/pr/<n>/failures  why CI refused it: failed runs and their annotations
@@ -83,6 +85,7 @@ import * as account from './account.mjs';
 import * as typesafe from './typesafe.mjs';
 import * as web from './fetch.mjs';
 import * as library from './library.mjs';
+import * as tiingo from './tiingo.mjs';
 import * as github from './github.mjs';
 import * as desk from './desk.mjs';
 import * as merge from './merge.mjs';
@@ -287,6 +290,12 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     // Research reads one public page; it moves no money, so the kill switch does not stop it.
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     return web.webFetch(request, env, { gate, fetcher, now });
+  }
+
+  if (tiingo.isTiingoPath(path)) {
+    // The deep store's bars (release R1): read-only, $0, inside its allowlist; it moves no money, so the kill switch
+    // does not stop it.
+    return tiingo.tiingoRoute(request, env, { fetcher });
   }
 
   if (library.isLibraryPath(path)) {

@@ -783,7 +783,9 @@ class TheSeams(unittest.TestCase):
         self.assertEqual(seal.e3_ops_imports(REPO, "league/swarm"), [])
         self.assertEqual(set(elane_xs.PROBE_STRATA) & set(contam_probe.STRATA), set(), "E3's strata are E3's")
         self.assertEqual(contam_probe.PANEL_STRATA, elane_xs.PROBE_STRATA, "the strata the look reads are the probe's")
-        self.assertEqual(seal.outside(REPO, REPO / "league" / "ops" / "contam_probe.py", seal.OPS_MAY), [])
+        # (release R1's one allowance: the deep eras' modules, inside a function: `seal.DEEP_MAY`, nothing of the panel)
+        self.assertEqual(seal.outside(REPO, REPO / "league" / "ops" / "contam_probe.py", seal.OPS_MAY,
+                                      inside=seal.OPS_MAY | seal.DEEP_MAY), [])
         self.assertEqual(contam_xs.permit(None), {"version": elane_xs.PROBE_VERSION, "routes": {}},
                          "the permit's writer is an ops module of the panel's; with nothing published it permits nothing")
         fam = {"spec": {"e2_route": ROUTE}}

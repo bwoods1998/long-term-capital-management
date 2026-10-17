@@ -72,6 +72,20 @@ captain's scratch; league/xs/E4_INTERFACES.md section 14).
   run that had a plan `probe` tells it again with the file as it stands, so a permit lost is made again.
 - The receipt gains `panel` (the panel cells this probe asks) and, on a publish, `permit`; with no plan neither.
 
+THE DEEP ERAS (release R1, the history-expansion plan A58: "contam_probe gains the eras 2001-08 and 2010-15"). Two
+more eras, `DEEP_ERAS`, asked only while the House holds a deep store whose audit passed (league/ops/equity_deep.py
+writes no other): without one the probe is release E3's (with its panel strata) to the byte. Their cells are E3's strata S1, S2 and S4
+on the ETFs with a deep history (league/deep/config.py `DEEP_UNIVERSE`; S3, the stocks, has none), under THE SAME
+HASH RULE and the same words, months and ISO weeks of THE DEEP CALENDAR (league/deep/calendar.py: the repo's
+pre-2022 rules plus the 2001, 2004, 2007 and 2012 closures). Truth is the deep store's (`_DeepTruth`): the ratio of
+two adjustment=all closes rebuilt from the raw closes and the events (league/deep/blocks.py `as_of_closes`), the
+2001-08 era's from its history and sealed spans under a `DeepGateCapability` this job mints for
+"contamination-probe", the 2010-15 era's from the open span alone; truths are read once a cell's answers are in, and
+dropped with them, as E3's are. The partial keeps `deep_qset` beside `qset` (a deep question set that moved drops
+the deep cells and nothing else); a route whose published result lacks a deep era while the store is there is due
+at once, as a route that lacks a panel stratum is. S3's eligibility reads a route's 2001-08 cells from the file
+(league/ops/deep_report.py `strong_recall`, which imports nothing of this module: the forward record's seal).
+
 THE JOB (`run`): skipped when the mode is "off", no route is due (`due`), or E2's day leaves it no dollar
 (`elane_yield.room(store, settings, now)`: THE BOUND below). One route a run: `router =
 models.build_router(ctx.root, store, settings, config=ctx.config)`; routes = `elane_yield.routes(settings, router)`.
@@ -179,6 +193,14 @@ ERAS: dict[str, tuple[dt.date, dt.date]] = {
     "2026H1": (dt.date(2026, 1, 2), dt.date(2026, 6, 30)),
 }
 STRATA = ("S1", "S2", "S3", "S4")
+#: THE DEEP ERAS (release R1): asked only while the House holds a complete deep store, after E3's and the panel's.
+DEEP_ERAS: dict[str, tuple[dt.date, dt.date]] = {
+    "2001-08": (dt.date(2001, 4, 9), dt.date(2008, 12, 31)),
+    "2010-15": (dt.date(2010, 1, 4), dt.date(2015, 12, 31)),
+}
+DEEP_STRATA = ("S1", "S2", "S4")
+#: The reason the job mints its `DeepGateCapability` with (the 2001-08 truths read the sealed era).
+DEEP_GATE_REASON = "contamination-probe"
 #: THE PANEL STRATA (release E4): asked only with a plan (`probe(ctx, panel=...)`), after E3's own.
 PANEL_STRATA = ("P4", "P5", "P6")
 #: The reserve recall's name in the file, and its months.
@@ -289,14 +311,22 @@ def _digest(text: str) -> str:
 
 
 @functools.lru_cache(maxsize=32)
-def _span_periods(first: dt.date, last: dt.date, weekly: bool) -> tuple[tuple[str, str, str], ...]:
+def _span_periods(first: dt.date, last: dt.date, weekly: bool, deep: bool = False) -> tuple[tuple[str, str, str], ...]:
     """(period, the last session before it, its last session) of every month (or ISO week) whose last session lies in
-    [first, last], oldest first; the calendar is `league.equity.store.nyse_sessions` and nothing else. A period with
-    no session before it in that calendar (the calendar's first month and week) is left out."""
+    [first, last], oldest first; the calendar is `league.equity.store.nyse_sessions` and nothing else (`deep`: the
+    deep calendar, league/deep/calendar.py, for `DEEP_ERAS`). A period with no session before it in that calendar
+    (the calendar's first month and week) is left out."""
     from ..equity.store import FIRST_YEAR, nyse_sessions
 
-    start = max(first - dt.timedelta(days=45), dt.date(FIRST_YEAR, 1, 1))
-    days = [d for d, _ in nyse_sessions(start, last + dt.timedelta(days=10))]
+    if deep:
+        from ..deep import calendar as deep_calendar
+        from ..deep import config as deep_config
+
+        floor = dt.date(deep_config.FIRST_DAY.year, 1, 1)
+        days = deep_calendar.sessions(max(first - dt.timedelta(days=45), floor), last + dt.timedelta(days=10))
+    else:
+        start = max(first - dt.timedelta(days=45), dt.date(FIRST_YEAR, 1, 1))
+        days = [d for d, _ in nyse_sessions(start, last + dt.timedelta(days=10))]
     groups: dict[tuple[int, int], list[int]] = {}
     for i, day in enumerate(days):
         key = tuple(day.isocalendar()[:2]) if weekly else (day.year, day.month)
@@ -323,6 +353,9 @@ def periods(stratum: str, era: str) -> list[tuple[str, str, str]]:
         return list(_span_periods(dt.date(y0, m0, 1), last, False))
     if stratum not in STRATA and stratum not in PANEL_STRATA:
         raise KeyError(f"no stratum {stratum!r}; one of {', '.join((*STRATA, *PANEL_STRATA))}")
+    if era in DEEP_ERAS:
+        first, last = DEEP_ERAS[era]
+        return list(_span_periods(first, last, stratum in WEEKLY, True))
     first, last = ERAS[era]
     return list(_span_periods(first, last, stratum in WEEKLY))
 
@@ -433,6 +466,24 @@ def recall_questions() -> list[dict[str, Any]]:
     return [_question(RECALL, RECALL_ERA, AGAINST, name, first, last) for name, first, last in periods(RECALL, RECALL_ERA)]
 
 
+def deep_questions(symbols: Mapping[str, str], *, per_cell: int) -> list[dict[str, Any]]:
+    """Every question of the deep eras' cells (THE DEEP ERAS), shaped and ordered as `questions`' rows: strata
+    `DEEP_STRATA`, then `DEEP_ERAS`, each a full grid under `_grid`'s one hash rule, on the universe's ETFs that have a
+    deep history. Pure of prices: names and the deep calendar only."""
+    from ..deep import config as deep_config
+
+    out = []
+    for stratum in DEEP_STRATA:
+        for era in DEEP_ERAS:
+            names = [s for s in stratum_symbols(symbols, stratum) if s in deep_config.DEEP_UNIVERSE]
+            bounds = {name: (first, last) for name, first, last in periods(stratum, era)}
+            chosen, asked = _grid(names, list(bounds), stratum, era, per_cell)
+            for period in asked:
+                for symbol in chosen:
+                    out.append(_question(stratum, era, symbol, period, *bounds[period]))
+    return out
+
+
 def qset(questions: Sequence[Mapping[str, Any]]) -> str:
     """The sha256 of the questions' ids, in order: a partial made on another set is dropped."""
     return _digest("\n".join(str(q["id"]) for q in questions))
@@ -451,6 +502,9 @@ def _close(store: Any, symbol: str, day: str) -> float | None:
     from ..equity import config
     from ..equity.store import from_ordinal, window_of
 
+    if dt.date.fromisoformat(day) < config.WINDOWS["train"][0]:  # THE DEEP ERAS: the deep store's truth, or none
+        reader = getattr(store, "deep_close", None)
+        return reader(symbol, day) if callable(reader) else None
     window = window_of(dt.date.fromisoformat(day))
     if window not in config.WINDOWS or symbol not in store.symbols():
         return None
@@ -736,6 +790,45 @@ def _count(value: Any) -> int:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
+def _owing_eras(doc: Mapping[str, Any], eras: Sequence[str]) -> dict[str, Any]:
+    """`doc` as `due` is shown it while the deep store is there: a route whose published result holds no cell of one
+    of the deep `eras` reads as never published (its `at` left out), so it is due at once (as `_owing`)."""
+    def whole(row: Mapping[str, Any]) -> bool:
+        cells = row.get("cells") if isinstance(row.get("cells"), Mapping) else {}
+        return all(any(isinstance(by, Mapping) and era in by for by in cells.values()) for era in eras)
+
+    return {**doc, "routes": {key: (row if whole(row) else {k: v for k, v in row.items() if k != "at"})
+                              for key, row in doc["routes"].items()}}
+
+
+class _DeepTruth:
+    """THE DEEP ERAS' TRUTH (the module docstring): adjustment=all closes rebuilt from the deep store's raw closes
+    and events, one as-of chain for 2001-08 (the history and sealed spans) and one for 2009-15 (the open span), each
+    read once a symbol. A deep store that cannot be read is `MissingData` (the run ends as for a store being
+    rewritten). `store`: a league/deep/blocks.py `DeepStore` opened with the deep gate's capability."""
+
+    def __init__(self, store: Any):
+        self.store = store
+        self._chains: dict[tuple[str, tuple[str, ...]], dict[str, float]] = {}
+
+    def symbols(self) -> dict[str, str]:
+        from ..deep import config as deep_config
+
+        return {s: "etf" for s in deep_config.DEEP_UNIVERSE}
+
+    def deep_close(self, symbol: str, day: str) -> float | None:
+        from ..deep import blocks
+        from ..equity.store import MissingData
+
+        chain = ("history", "dval") if day <= "2008-12-31" else ("traind",)
+        if (symbol, chain) not in self._chains:
+            try:
+                self._chains[(symbol, chain)] = blocks.as_of_closes(self.store, symbol, chain)
+            except (blocks.DeepMissing, blocks.DeepRefused) as exc:
+                raise MissingData(f"the deep store cannot be read ({type(exc).__name__})") from None
+        return self._chains[(symbol, chain)].get(day)
+
+
 def _owing(doc: Mapping[str, Any], strata: Sequence[str]) -> dict[str, Any]:
     """`doc` as `due` is shown it while a plan asks the panel `strata`: a route whose published result lacks one of
     them reads as never published (its `at` left out), so it is due at once. Nothing is written from this view."""
@@ -754,7 +847,8 @@ class Probe:
     release E4's plan of the panel strata (THE PANEL STRATA: `names`, `periods`, `truths`, `published`), or None."""
 
     def __init__(self, ctx: Any, *, store: Any, settings: Mapping[str, Any] | None, router: Any, equity: Any,
-                 symbols: Mapping[str, str], clock: Callable[[], float] = time.monotonic, panel: Any = None):
+                 symbols: Mapping[str, str], clock: Callable[[], float] = time.monotonic, panel: Any = None,
+                 deep: Any = None):
         self.ctx = ctx
         self.root = Path(ctx.root)
         self.store = store
@@ -764,6 +858,7 @@ class Probe:
         self.symbols = dict(symbols)
         self.clock = clock
         self.panel = panel
+        self.deep = deep
 
     def write(self, doc: Mapping[str, Any]) -> None:
         from .context import write_json
@@ -787,7 +882,12 @@ class Probe:
         # before any route is marked), and a route whose result lacks a stratum they ask is due at once.
         further = panel_questions(self.panel, per_cell=c["questions_per_cell"]) if self.panel is not None else []
         asks = sorted({str(q["stratum"]) for q in further})
-        key = due(_owing(doc, asks) if asks else doc, list(served), now=now, every_days=c["every_days"])
+        # THE DEEP ERAS, while the House holds a deep store: asked after the panel's, a route lacking one due at once.
+        deeper = deep_questions(self.symbols, per_cell=c["questions_per_cell"]) if self.deep is not None else []
+        deep_eras = sorted({str(q["era"]) for q in deeper})
+        view = _owing(doc, asks) if asks else doc
+        view = _owing_eras(view, deep_eras) if deep_eras else view
+        key = due(view, list(served), now=now, every_days=c["every_days"])
         if key is None:
             return {"status": "skipped", "why": "no route is due a probe"}
         room = float(elane_yield.room(self.store, self.settings, now))
@@ -802,6 +902,7 @@ class Probe:
         recall = recall_questions()
         mine = qset([*asked_of, *recall])   # E3's own questions and nothing of the panel's: its cells never move
         theirs = qset(further) if further else None
+        deep_set = qset(deeper) if deeper else None
         partial = row.get("partial") if isinstance(row.get("partial"), Mapping) else None
         if partial is None or partial.get("qset") != mine or partial.get("probe_n") != probe_n \
                 or not isinstance(partial.get("cells"), Mapping):
@@ -812,6 +913,10 @@ class Probe:
         if theirs is None or (partial or {}).get("panel_qset") != theirs:
             for stratum in PANEL_STRATA:  # another panel question set, or no plan now: the PANEL cells are dropped
                 cells.pop(stratum, None)
+        if deep_set is None or (partial or {}).get("deep_qset") != deep_set:
+            for by_era in cells.values():  # another deep question set, or no deep store now: the DEEP cells dropped
+                for era in DEEP_ERAS:
+                    by_era.pop(era, None)
         kept_recall = (partial or {}).get("recall") if isinstance((partial or {}).get("recall"), Mapping) else None
         before = _num((partial or {}).get("usd")) or 0.0
         answered_as = (partial or {}).get("model") if isinstance((partial or {}).get("model"), str) else None
@@ -830,6 +935,8 @@ class Probe:
                     "cells": cells, "recall": kept_recall}
             if theirs is not None:
                 held["panel_qset"] = theirs
+            if deep_set is not None:
+                held["deep_qset"] = deep_set
             return held
 
         if partial is not None:
@@ -938,14 +1045,15 @@ class Probe:
                         return None
                     truths = [t if isinstance(t, str) and t in (*WORDS[stratum], "tie") else None for t in truths]
                 else:
-                    truths = [truth(self.equity, q) for q in batch_of]
+                    source = self.deep if str(batch_of[0]["era"]) in DEEP_ERAS else self.equity
+                    truths = [truth(source, q) for q in batch_of]
             except (MissingData, StoreRefused) as exc:  # the store is being rewritten: what is scored so far stays
                 state["stopped"], state["error"] = "data", f"{type(exc).__name__}: {str(exc)[:160]}"
                 return None
             return score(batch_of, answers, truths)
 
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for q in [*asked_of, *further]:  # E3's cells first, then the panel's
+        for q in [*asked_of, *further, *deeper]:  # E3's cells first, then the panel's, then the deep eras
             grouped.setdefault((q["stratum"], q["era"]), []).append(q)
         for (stratum, era), batch_of in grouped.items():
             if era in cells.get(stratum, {}):
@@ -1039,6 +1147,21 @@ def probe(ctx: Any, *, panel: Callable[..., Any] | None = None) -> dict[str, Any
         equity = EquityStore(root / STORE_DIR, gate=capability)
     except (MissingData, StoreRefused) as exc:
         return {"status": "failed", "error": f"the equity store cannot be read ({type(exc).__name__}): {str(exc)[:200]}"}
+    deep = None
+    from ..deep import blocks as deep_blocks
+    from ..deep import config as deep_config
+    from ..deep import gate as deep_gate
+
+    try:  # THE DEEP ERAS only with a deep store whose audit passed (league/ops/equity_deep.py); else E3's probe
+        found = deep_blocks.DeepStore(root / deep_config.STORE_DIR)
+    except deep_blocks.DeepMissing:
+        found = None
+    if found is not None and found.audit().get("ok"):
+        try:
+            cap = deep_gate.mint_deep_gate_capability(root / deep_config.STORE_DIR, DEEP_GATE_REASON)
+            deep = _DeepTruth(deep_blocks.DeepStore(root / deep_config.STORE_DIR, gate=cap))
+        except (deep_blocks.DeepMissing, deep_blocks.DeepRefused) as exc:
+            return {"status": "failed", "error": f"the deep store cannot be read ({type(exc).__name__})"}
     plan = None
     if panel is not None:
         try:
@@ -1054,7 +1177,7 @@ def probe(ctx: Any, *, panel: Callable[..., Any] | None = None) -> dict[str, Any
     try:
         router = build_router(root, store, settings, config=ctx.config)
         out = Probe(ctx, store=store, settings=settings, router=router, equity=equity,
-                    symbols=equity_data.universe(), panel=plan).run()
+                    symbols=equity_data.universe(), panel=plan, deep=deep).run()
     finally:
         store.close()
     if plan is not None and "permit" not in out:
@@ -1069,6 +1192,6 @@ __all__ = ["FILE", "VERSION", "GATE_REASON", "ERAS", "STRATA", "PANEL_STRATA", "
            "RECALL", "RECALL_MONTHS", "ROLE", "SYMBOLS_PER_CELL",
            "PERMUTATIONS", "ASK_SECONDS", "READABLE_ANSWERED", "READABLE_PERIODS", "ALPHA", "HISTORY", "MODES",
            "DEFAULTS", "BOUNDS", "SYSTEM", "KEY_PREFIX", "AGAINST", "WORDS", "RECALL_ERA", "IDLE_ALARM", "JUDGED_ERAS", "CELL_KEYS",
-           "RECALL_KEYS", "cfg", "mode", "periods", "stratum_symbols", "grid", "questions", "panel_questions",
-           "recall_questions", "qset", "truth", "prompt", "parse", "wilson", "perm_p", "score", "read", "due", "Probe",
+           "RECALL_KEYS", "DEEP_ERAS", "DEEP_STRATA", "DEEP_GATE_REASON", "cfg", "mode", "periods", "stratum_symbols",
+           "grid", "questions", "panel_questions", "deep_questions", "recall_questions", "qset", "truth", "prompt", "parse", "wilson", "perm_p", "score", "read", "due", "Probe",
            "run", "probe"]

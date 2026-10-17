@@ -399,6 +399,11 @@
       "every_days": 28,
       "batch": 20,
       "questions_per_cell": 120
+    },
+    "deep": {
+      "mode": "report",
+      "reserve": "sealed",
+      "looks_per_run": 2
     }
   },
   "engineer": {

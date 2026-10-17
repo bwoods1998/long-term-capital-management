@@ -1000,7 +1000,9 @@ class TheWiring(unittest.TestCase):
         forward = {f"league.ops.{name}" for name in seal.E4_OPS}    # package J's module on the forward record
         self.assertFalse({m for m in reached if m.startswith("league.xs")
                           or m in ("league.ops.contam_xs", "league.swarm.elane_xs", *forward)})
-        self.assertEqual(seal.outside(REPO, probe, seal.OPS_MAY), [])
+        # (release R1's one allowance: the deep eras' modules, inside a function: `seal.DEEP_MAY`, nothing of the panel)
+        self.assertEqual(seal.outside(REPO, probe, seal.OPS_MAY, inside=seal.OPS_MAY | seal.DEEP_MAY), [])
+        self.assertFalse({m for m in seal.DEEP_MAY if ".xs" in m})
         self.assertNotIn("contam_xs", (*seal.E3_OPS, *seal.E4_OPS))
         # E3's own list admits NOTHING of the panel. ONE module of it, package J's, is let to the five E3 modules
         # that hand a panel program to it (`J_DISPATCH`, held under the same seal); the probe is none of them, and it

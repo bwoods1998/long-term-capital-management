@@ -315,6 +315,19 @@ class TheEquityLane(unittest.TestCase):
                              ["league/equity/sizing.py", "league/swarm/elane.py", "league/swarm/elane_seal.py",
                               "league/swarm/elane_train.py", "league/xs/child.py", "ltcm/broker.py"])
 
+    def test_the_deep_key_is_protected(self):
+        """Release R1 (the history-expansion plan, A58): S3's judge and the seal on the sealed 2001-08 era (league/deep/)
+        join the wall, in the gateway's merge list with the release; its data jobs (league/ops/) and its receipt
+        (docs/benchmarks/) were behind it already."""
+        self.assertIn("league/deep/", ci.FORBIDDEN)
+        self.assertNotIn("league/deep/", ci.PENDING_GATEWAY)
+        for path in ("league/deep/gate.py", "league/deep/blocks.py", "league/deep/mask_dval_235.txt",
+                     "League/Deep/Screen3.py", "league/ops/equity_deep.py", "league/ops/deep_report.py",
+                     "docs/benchmarks/equity_screen_3.json", "gateway/lib/tiingo.mjs"):
+            self.assertTrue(ci.guard([path], None), path)
+            for role in ci.ROLE_PATHS:
+                self.assertTrue(ci.guard([path], role), (path, role))
+
     def test_the_forward_screens_seat_path_is_protected(self):
         """FWD1-R (the captain's A33): the swarm's seat path (league/swarm/elane_forward.py: which lineages take no
         sealed try, which forward passes become Candidates) joins the wall; its judge was behind it already."""

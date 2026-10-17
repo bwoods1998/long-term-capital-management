@@ -173,6 +173,10 @@ FORBIDDEN: tuple[str, ...] = (
     # no generator may read. In the gateway's merge list too, with the release (Oct 11, 2026). Release E3's other
     # files were behind the wall already (league/ops/, docs/benchmarks/, league/swarm/policy.json).
     "league/swarm/elane_folds.py", "league/swarm/elane_effects.py", "league/swarm/elane_memory.py",
+    # THE DEEP KEY (release R1, Oct 2026; the history-expansion plan, A58): S3's judge and its seal (league/deep/: the
+    # sealed 2001-08 era's reader and its capability, the relabeled store, the calendar-blind check, x2, the keys, bars
+    # and own floors, one look a version, the canaries, the deep identity). In the gateway's merge list with the release.
+    "league/deep/",
 )
 #: THE EQUITY LANE (release E1, Oct 2026): its tree (the engine, the sizing, the bands, the screen and the book that
 #: trade real money, its evidence modules their own identity) and its swarm lane (births, the look, the roster) are

@@ -1,0 +1,2740 @@
+{
+ "name": "equity_screen_3",
+ "screen": "S3",
+ "status": "CANDIDATE, scratch only (history-1017/receipt). Not committed, not pinned by any lane, nothing deployed. R1 (report-only) carries it after checkpoint 15 is FINAL and after rel/1023a and POOL1 P1 settle (about Oct 25-27); S3 gates seats only at H-lite.",
+ "study": "A58 history expansion (HISTORY-PLAN.md, PREREG-H pinned 2026-10-17T19:12:02Z): S3, the two-key screen. This receipt is its SYNTHETIC calibration: null worlds, a crash-stress null, contamination worlds remembered on either era, and the canary design. No market row, no sealed row, no real P&L and no House data were read; the only inputs are the dates-only calendar and mask fixtures.",
+ "beside": "S2 (equity_screen_2.json) and FWD1-R (forward_screen_fwd1.json) are unchanged. S3-eligible programs born after H-lite take S3 instead of S2; all others keep S2 or FWD1-R; FWD1-R demotes everyone.",
+ "prereg": {
+  "file": "PREREG-H.md",
+  "sha256": "6ca65b3e8c9db50aae6d1305ec7fd1a9b5bf7357c2e9219459ac60840ba896dd",
+  "pinned_utc": "2026-10-17T19:12:02Z"
+ },
+ "rule": "S3, per program version, one look. PASS = the deep key AND the recent key. DEEP KEY on DVAL (2001-04-09..2008-12-31, 1,944 sessions, sealed; segments A 2001-04-09..2004-12-31 and B 2005-01-03..2008-12-31 relabeled onto Train-window sessions from 2016-01-04, `all` rebuilt as of each segment's last session): x2_t = r_t - sum_s w_{s,t} mu_s at k 2.0, mu_s the symbol's mean cost-free close-to-close return over the sessions of the series being scored; t = mean / sd(ddof 1) x sqrt(n); pass iff t(x2) >= c_D on BOTH the masked series (1,709 sessions: the 235 mask sessions removed) and the full series (1,944), AND the full series' sum of x2 at k 3.0 > 0. RECENT KEY on R+V+H (2020-21, 2025, 2026-01-02..2026-10-09; 505 + 250 + 194 sessions): the pooled t of r (the lane's S2 variant) >= c_R AND sum_H(r) > 1e-12. BARS: c_D = max(c_D_receipt, c_pD + 0.05), c_R = max(c_R_receipt, c_pR + 0.05), on the 0.01 grid; c_pD and c_pR are the program's own floors (see floor); a bar above 5.00 makes the program ineligible; an sd below 1e-12 fails the key.",
+ "fp_cap_deep_alone": 0.15,
+ "fp_cap_recent_alone": 0.12,
+ "fp_cap_joint": 0.025,
+ "worst_no_edge_now_cap": 0.12,
+ "owner_wall": 0.15,
+ "c_D_receipt": 1.02,
+ "c_R_receipt": 1.2,
+ "c_margin": 0.05,
+ "mask": {
+  "sessions": 235,
+  "one_sided": true,
+  "windows": [
+   "2001-09-10..10-12",
+   "2002-07-01..07-31",
+   "2002-10-01..10-31",
+   "2003-03-10..03-31",
+   "2007-02-26..03-09",
+   "2007-07-23..08-31",
+   "2008-01-14..01-31",
+   "2008-03-10..03-31",
+   "2008-09-01..12-31"
+  ],
+  "by_window": [
+   21,
+   22,
+   23,
+   16,
+   10,
+   30,
+   13,
+   15,
+   85
+  ],
+  "fixture": {
+   "file": "mask_dval_235.txt",
+   "sha256": "a8c00b59e6f3e47ec2b5840cbb0dbe77f5d9deecc08eb5af391216a47f653079"
+  },
+  "meaning": "masked days are traded through; the key must pass with them (full) and without them (masked): losses in the famous windows count, gains made only there do not"
+ },
+ "calendar": {
+  "fixture": "calendar_1999_2015.txt",
+  "sha256": "32383168faa724e3555bc288a8a9d701c03d090796bf903e57520f735f10bd22",
+  "rules": "the repo's NYSE rules (store._year_before_2022) plus closures 2001-09-11..14, 2004-06-11, 2007-01-02, 2012-10-29..30; dates only"
+ },
+ "calibration": {
+  "method": "seed set A. In every null cell the smallest c on the 0.01 grid whose zero-edge per-key rate is <= cap - 2 binomial SE at the cell's draw count (deep: min(t_mask, t_full) >= c, the k 3.0 leg left out, cap 0.15; recent: t(R+V+H) >= c AND sum_H > 0, cap 0.12). The receipt bar of each key is the largest over the null cells. Verification on fresh seed set B.",
+  "null_cells": "segment layer S_iid (phi 1.0, tau 0) and S_real (phi 1.1, tau 0.3), 1,000,000 draws each; daily layer D1..D6 x P1..P5, 60,000 worlds each (see worlds)",
+  "per_cell_A": {
+   "S_iid|-": {
+    "c_deep": 0.89,
+    "c_recent": 1.03,
+    "target_deep": 0.14929,
+    "target_recent": 0.11935,
+    "draws": 1000000
+   },
+   "S_real|-": {
+    "c_deep": 1.02,
+    "c_recent": 1.17,
+    "target_deep": 0.14929,
+    "target_recent": 0.11935,
+    "draws": 1000000
+   },
+   "D1|P1_trend": {
+    "c_deep": 0.47,
+    "c_recent": 0.97,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D1|P2_dip": {
+    "c_deep": 0.86,
+    "c_recent": 1.1,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D1|P3_rotation": {
+    "c_deep": 0.41,
+    "c_recent": 0.98,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D1|P4_voltarget": {
+    "c_deep": 0.15,
+    "c_recent": 1.04,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D1|P5_canary": {
+    "c_deep": 0.45,
+    "c_recent": 1.04,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D2|P1_trend": {
+    "c_deep": 0.47,
+    "c_recent": 0.96,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D2|P2_dip": {
+    "c_deep": 0.86,
+    "c_recent": 1.09,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D2|P3_rotation": {
+    "c_deep": 0.41,
+    "c_recent": 0.99,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D2|P4_voltarget": {
+    "c_deep": 0.19,
+    "c_recent": 1.04,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D2|P5_canary": {
+    "c_deep": 0.46,
+    "c_recent": 1.04,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D3|P1_trend": {
+    "c_deep": 0.46,
+    "c_recent": 0.97,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D6|P1_trend": {
+    "c_deep": 0.55,
+    "c_recent": 1.01,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D3|P2_dip": {
+    "c_deep": 0.86,
+    "c_recent": 1.09,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D6|P2_dip": {
+    "c_deep": 0.91,
+    "c_recent": 1.13,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D3|P3_rotation": {
+    "c_deep": 0.42,
+    "c_recent": 0.99,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D6|P3_rotation": {
+    "c_deep": 0.5,
+    "c_recent": 1.02,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D3|P4_voltarget": {
+    "c_deep": 0.24,
+    "c_recent": 1.04,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D6|P4_voltarget": {
+    "c_deep": 0.37,
+    "c_recent": 1.1,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D3|P5_canary": {
+    "c_deep": 0.46,
+    "c_recent": 1.03,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D6|P5_canary": {
+    "c_deep": 0.54,
+    "c_recent": 1.08,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D4|P1_trend": {
+    "c_deep": 0.47,
+    "c_recent": 1.0,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D4|P2_dip": {
+    "c_deep": 0.9,
+    "c_recent": 1.2,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D4|P3_rotation": {
+    "c_deep": 0.41,
+    "c_recent": 1.01,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D4|P4_voltarget": {
+    "c_deep": 0.2,
+    "c_recent": 1.04,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D4|P5_canary": {
+    "c_deep": 0.46,
+    "c_recent": 1.08,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D5|P1_trend": {
+    "c_deep": 0.39,
+    "c_recent": 0.96,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D5|P2_dip": {
+    "c_deep": 0.78,
+    "c_recent": 1.07,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D5|P3_rotation": {
+    "c_deep": 0.33,
+    "c_recent": 0.96,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D5|P4_voltarget": {
+    "c_deep": 0.0,
+    "c_recent": 1.03,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   },
+   "D5|P5_canary": {
+    "c_deep": 0.37,
+    "c_recent": 1.03,
+    "target_deep": 0.14708,
+    "target_recent": 0.11735,
+    "draws": 60000
+   }
+  },
+  "binding_cells": {
+   "deep": [
+    [
+     "S_real",
+     "-"
+    ]
+   ],
+   "recent": [
+    [
+     "D4",
+     "P2_dip"
+    ]
+   ]
+  }
+ },
+ "worlds": {
+  "segment": "the plan's Section 3 model (plan/s3_power.py), re-implemented in receipt/segment.py: each era adds t = SR sqrt(years) + noise; Dm = DVAL after the mask (6.78 years), Mk = the 235 masked sessions, R 2 years, V 250/252, H 194/252",
+  "daily": "receipt/daily.py: an 8-symbol ETF-like universe (stand-ins for the 2001-04 liquid core; half-spreads 1/1/1/1/3/3/3/5 bp), one market factor (19% a year), generic betas, idiosyncratic vols and drifts (not fitted to any data); DVAL era 252 look-back + 1,944 sessions on the fixture's mask and years (the TLT stand-in from 2003-07-30); recent era 252 + 949 (R2020, R2021, V, H)",
+  "families": {
+   "D1": "iid normal",
+   "D2": "Student t4",
+   "D3": "GARCH(1,1) a 0.08 b 0.90",
+   "D4": "POOL1 G8 negatively skewed jump world (2% chance of a -6 sd jump, rescaled)",
+   "D5": "CRASH-STRESS NULL: D3 plus crash blocks (vol x2.5, -0.25% a session) on the 235 mask sessions and on R2020's 2020-02-20..03-23 block",
+   "D6": "D3 plus year-to-year edge luck, tau 0.3 SR units a calendar year, mean zero"
+  },
+  "programs": {
+   "P1": "trend (50/200-session mean crossover, equal weight)",
+   "P2": "dip-buyer (5-session return below -2 sd, held 5 sessions)",
+   "P3": "rotation (top 2 of 8 by 60-session return, every 21 sessions)",
+   "P4": "vol-target (two assets, inverse 20-session vol)",
+   "P5": "the canary: random on/off timing, matched-turnover Markov chain",
+   "P6": "constant-weight hold (the x2 static-tilt check only)"
+  },
+  "null": "N0 per key: x0 = x - w kappa, kappa = sum(x) / sum(w) pooled over the cell's worlds (zero edge after k 2.0 costs: a null program gets no help from costs); the recent key's r has the synthetic true drift removed first. Planted edges are exact per-part mean shifts of SR x the cell's sd / sqrt(252)."
+ },
+ "fp_zero_edge": {
+  "S_iid|-": {
+   "deep": 0.12005,
+   "deep_with_k3": 0.12005,
+   "recent": 0.09134,
+   "joint": 0.01111,
+   "joint_with_k3": 0.01111,
+   "ci95": {
+    "deep": [
+     0.11941,
+     0.12068
+    ],
+    "recent": [
+     0.09077,
+     0.0919
+    ],
+    "joint": [
+     0.0109,
+     0.01131
+    ]
+   }
+  },
+  "S_real|-": {
+   "deep": 0.14781,
+   "deep_with_k3": 0.14781,
+   "recent": 0.11349,
+   "joint": 0.01666,
+   "joint_with_k3": 0.01666,
+   "ci95": {
+    "deep": [
+     0.14712,
+     0.14851
+    ],
+    "recent": [
+     0.11287,
+     0.11412
+    ],
+    "joint": [
+     0.01641,
+     0.01692
+    ]
+   }
+  },
+  "D1|P1_trend": {
+   "deep": 0.02232,
+   "deep_with_k3": 0.02232,
+   "recent": 0.08133,
+   "joint": 0.00178,
+   "joint_with_k3": 0.00178,
+   "ci95": {
+    "deep": [
+     0.02116,
+     0.02353
+    ],
+    "recent": [
+     0.07917,
+     0.08355
+    ],
+    "joint": [
+     0.00148,
+     0.00215
+    ]
+   }
+  },
+  "D1|P2_dip": {
+   "deep": 0.11082,
+   "deep_with_k3": 0.11082,
+   "recent": 0.09765,
+   "joint": 0.01017,
+   "joint_with_k3": 0.01017,
+   "ci95": {
+    "deep": [
+     0.10833,
+     0.11335
+    ],
+    "recent": [
+     0.0953,
+     0.10005
+    ],
+    "joint": [
+     0.00939,
+     0.011
+    ]
+   }
+  },
+  "D1|P3_rotation": {
+   "deep": 0.00822,
+   "deep_with_k3": 0.00822,
+   "recent": 0.08472,
+   "joint": 0.00063,
+   "joint_with_k3": 0.00063,
+   "ci95": {
+    "deep": [
+     0.00753,
+     0.00897
+    ],
+    "recent": [
+     0.08252,
+     0.08697
+    ],
+    "joint": [
+     0.00046,
+     0.00087
+    ]
+   }
+  },
+  "D1|P4_voltarget": {
+   "deep": 0.0,
+   "deep_with_k3": 0.0,
+   "recent": 0.0908,
+   "joint": 0.0,
+   "joint_with_k3": 0.0,
+   "ci95": {
+    "deep": [
+     0.0,
+     6e-05
+    ],
+    "recent": [
+     0.08853,
+     0.09313
+    ],
+    "joint": [
+     0.0,
+     6e-05
+    ]
+   }
+  },
+  "D1|P5_canary": {
+   "deep": 0.0153,
+   "deep_with_k3": 0.0153,
+   "recent": 0.09148,
+   "joint": 0.00137,
+   "joint_with_k3": 0.00137,
+   "ci95": {
+    "deep": [
+     0.01435,
+     0.01631
+    ],
+    "recent": [
+     0.0892,
+     0.09382
+    ],
+    "joint": [
+     0.0011,
+     0.0017
+    ]
+   }
+  },
+  "D2|P1_trend": {
+   "deep": 0.02347,
+   "deep_with_k3": 0.02347,
+   "recent": 0.08365,
+   "joint": 0.00207,
+   "joint_with_k3": 0.00207,
+   "ci95": {
+    "deep": [
+     0.02229,
+     0.02471
+    ],
+    "recent": [
+     0.08146,
+     0.08589
+    ],
+    "joint": [
+     0.00173,
+     0.00246
+    ]
+   }
+  },
+  "D2|P2_dip": {
+   "deep": 0.11165,
+   "deep_with_k3": 0.11165,
+   "recent": 0.09848,
+   "joint": 0.01055,
+   "joint_with_k3": 0.01055,
+   "ci95": {
+    "deep": [
+     0.10915,
+     0.11419
+    ],
+    "recent": [
+     0.09612,
+     0.10089
+    ],
+    "joint": [
+     0.00976,
+     0.0114
+    ]
+   }
+  },
+  "D2|P3_rotation": {
+   "deep": 0.00932,
+   "deep_with_k3": 0.00932,
+   "recent": 0.08503,
+   "joint": 0.0007,
+   "joint_with_k3": 0.0007,
+   "ci95": {
+    "deep": [
+     0.00858,
+     0.01012
+    ],
+    "recent": [
+     0.08283,
+     0.08729
+    ],
+    "joint": [
+     0.00052,
+     0.00095
+    ]
+   }
+  },
+  "D2|P4_voltarget": {
+   "deep": 0.0,
+   "deep_with_k3": 0.0,
+   "recent": 0.09182,
+   "joint": 0.0,
+   "joint_with_k3": 0.0,
+   "ci95": {
+    "deep": [
+     0.0,
+     6e-05
+    ],
+    "recent": [
+     0.08953,
+     0.09415
+    ],
+    "joint": [
+     0.0,
+     6e-05
+    ]
+   }
+  },
+  "D2|P5_canary": {
+   "deep": 0.01457,
+   "deep_with_k3": 0.01457,
+   "recent": 0.09177,
+   "joint": 0.0011,
+   "joint_with_k3": 0.0011,
+   "ci95": {
+    "deep": [
+     0.01364,
+     0.01556
+    ],
+    "recent": [
+     0.08948,
+     0.0941
+    ],
+    "joint": [
+     0.00086,
+     0.0014
+    ]
+   }
+  },
+  "D3|P1_trend": {
+   "deep": 0.02352,
+   "deep_with_k3": 0.02352,
+   "recent": 0.08145,
+   "joint": 0.00207,
+   "joint_with_k3": 0.00207,
+   "ci95": {
+    "deep": [
+     0.02233,
+     0.02476
+    ],
+    "recent": [
+     0.07929,
+     0.08367
+    ],
+    "joint": [
+     0.00173,
+     0.00246
+    ]
+   }
+  },
+  "D6|P1_trend": {
+   "deep": 0.03717,
+   "deep_with_k3": 0.03717,
+   "recent": 0.08842,
+   "joint": 0.00372,
+   "joint_with_k3": 0.00372,
+   "ci95": {
+    "deep": [
+     0.03568,
+     0.03871
+    ],
+    "recent": [
+     0.08617,
+     0.09071
+    ],
+    "joint": [
+     0.00326,
+     0.00424
+    ]
+   }
+  },
+  "D3|P2_dip": {
+   "deep": 0.10818,
+   "deep_with_k3": 0.10818,
+   "recent": 0.09887,
+   "joint": 0.01055,
+   "joint_with_k3": 0.01055,
+   "ci95": {
+    "deep": [
+     0.10572,
+     0.11069
+    ],
+    "recent": [
+     0.0965,
+     0.10128
+    ],
+    "joint": [
+     0.00976,
+     0.0114
+    ]
+   }
+  },
+  "D6|P2_dip": {
+   "deep": 0.12045,
+   "deep_with_k3": 0.12045,
+   "recent": 0.10597,
+   "joint": 0.01237,
+   "joint_with_k3": 0.01237,
+   "ci95": {
+    "deep": [
+     0.11787,
+     0.12308
+    ],
+    "recent": [
+     0.10353,
+     0.10845
+    ],
+    "joint": [
+     0.01151,
+     0.01328
+    ]
+   }
+  },
+  "D3|P3_rotation": {
+   "deep": 0.01005,
+   "deep_with_k3": 0.01005,
+   "recent": 0.08462,
+   "joint": 0.00073,
+   "joint_with_k3": 0.00073,
+   "ci95": {
+    "deep": [
+     0.00928,
+     0.01088
+    ],
+    "recent": [
+     0.08242,
+     0.08687
+    ],
+    "joint": [
+     0.00055,
+     0.00098
+    ]
+   }
+  },
+  "D6|P3_rotation": {
+   "deep": 0.02272,
+   "deep_with_k3": 0.02272,
+   "recent": 0.09077,
+   "joint": 0.00247,
+   "joint_with_k3": 0.00247,
+   "ci95": {
+    "deep": [
+     0.02155,
+     0.02394
+    ],
+    "recent": [
+     0.08849,
+     0.09309
+    ],
+    "joint": [
+     0.0021,
+     0.0029
+    ]
+   }
+  },
+  "D3|P4_voltarget": {
+   "deep": 0.00053,
+   "deep_with_k3": 0.00053,
+   "recent": 0.09067,
+   "joint": 7e-05,
+   "joint_with_k3": 7e-05,
+   "ci95": {
+    "deep": [
+     0.00038,
+     0.00075
+    ],
+    "recent": [
+     0.0884,
+     0.09299
+    ],
+    "joint": [
+     3e-05,
+     0.00017
+    ]
+   }
+  },
+  "D6|P4_voltarget": {
+   "deep": 0.00455,
+   "deep_with_k3": 0.00455,
+   "recent": 0.0974,
+   "joint": 0.00047,
+   "joint_with_k3": 0.00047,
+   "ci95": {
+    "deep": [
+     0.00404,
+     0.00512
+    ],
+    "recent": [
+     0.09505,
+     0.0998
+    ],
+    "joint": [
+     0.00032,
+     0.00067
+    ]
+   }
+  },
+  "D3|P5_canary": {
+   "deep": 0.01487,
+   "deep_with_k3": 0.01487,
+   "recent": 0.09007,
+   "joint": 0.0011,
+   "joint_with_k3": 0.0011,
+   "ci95": {
+    "deep": [
+     0.01393,
+     0.01587
+    ],
+    "recent": [
+     0.0878,
+     0.09238
+    ],
+    "joint": [
+     0.00086,
+     0.0014
+    ]
+   }
+  },
+  "D6|P5_canary": {
+   "deep": 0.0295,
+   "deep_with_k3": 0.0295,
+   "recent": 0.09735,
+   "joint": 0.00273,
+   "joint_with_k3": 0.00273,
+   "ci95": {
+    "deep": [
+     0.02818,
+     0.03088
+    ],
+    "recent": [
+     0.095,
+     0.09975
+    ],
+    "joint": [
+     0.00235,
+     0.00318
+    ]
+   }
+  },
+  "D4|P1_trend": {
+   "deep": 0.0244,
+   "deep_with_k3": 0.0244,
+   "recent": 0.08905,
+   "joint": 0.00238,
+   "joint_with_k3": 0.00238,
+   "ci95": {
+    "deep": [
+     0.0232,
+     0.02567
+    ],
+    "recent": [
+     0.0868,
+     0.09136
+    ],
+    "joint": [
+     0.00202,
+     0.00281
+    ]
+   }
+  },
+  "D4|P2_dip": {
+   "deep": 0.11918,
+   "deep_with_k3": 0.11918,
+   "recent": 0.11763,
+   "joint": 0.01378,
+   "joint_with_k3": 0.01378,
+   "ci95": {
+    "deep": [
+     0.11662,
+     0.1218
+    ],
+    "recent": [
+     0.11508,
+     0.12024
+    ],
+    "joint": [
+     0.01288,
+     0.01475
+    ]
+   }
+  },
+  "D4|P3_rotation": {
+   "deep": 0.00927,
+   "deep_with_k3": 0.00927,
+   "recent": 0.0882,
+   "joint": 0.00067,
+   "joint_with_k3": 0.00067,
+   "ci95": {
+    "deep": [
+     0.00853,
+     0.01007
+    ],
+    "recent": [
+     0.08596,
+     0.0905
+    ],
+    "joint": [
+     0.00049,
+     0.00091
+    ]
+   }
+  },
+  "D4|P4_voltarget": {
+   "deep": 0.0,
+   "deep_with_k3": 0.0,
+   "recent": 0.09365,
+   "joint": 0.0,
+   "joint_with_k3": 0.0,
+   "ci95": {
+    "deep": [
+     0.0,
+     6e-05
+    ],
+    "recent": [
+     0.09134,
+     0.09601
+    ],
+    "joint": [
+     0.0,
+     6e-05
+    ]
+   }
+  },
+  "D4|P5_canary": {
+   "deep": 0.0171,
+   "deep_with_k3": 0.0171,
+   "recent": 0.09812,
+   "joint": 0.00188,
+   "joint_with_k3": 0.00188,
+   "ci95": {
+    "deep": [
+     0.01609,
+     0.01817
+    ],
+    "recent": [
+     0.09576,
+     0.10052
+    ],
+    "joint": [
+     0.00157,
+     0.00226
+    ]
+   }
+  },
+  "D5|P1_trend": {
+   "deep": 0.02095,
+   "deep_with_k3": 0.02095,
+   "recent": 0.08157,
+   "joint": 0.00187,
+   "joint_with_k3": 0.00187,
+   "ci95": {
+    "deep": [
+     0.01983,
+     0.02213
+    ],
+    "recent": [
+     0.0794,
+     0.08378
+    ],
+    "joint": [
+     0.00155,
+     0.00225
+    ]
+   }
+  },
+  "D5|P2_dip": {
+   "deep": 0.09077,
+   "deep_with_k3": 0.09077,
+   "recent": 0.09535,
+   "joint": 0.00867,
+   "joint_with_k3": 0.00867,
+   "ci95": {
+    "deep": [
+     0.08849,
+     0.09309
+    ],
+    "recent": [
+     0.09303,
+     0.09773
+    ],
+    "joint": [
+     0.00796,
+     0.00944
+    ]
+   }
+  },
+  "D5|P3_rotation": {
+   "deep": 0.00532,
+   "deep_with_k3": 0.00532,
+   "recent": 0.08283,
+   "joint": 0.00037,
+   "joint_with_k3": 0.00037,
+   "ci95": {
+    "deep": [
+     0.00477,
+     0.00593
+    ],
+    "recent": [
+     0.08065,
+     0.08507
+    ],
+    "joint": [
+     0.00024,
+     0.00056
+    ]
+   }
+  },
+  "D5|P4_voltarget": {
+   "deep": 0.00013,
+   "deep_with_k3": 0.00013,
+   "recent": 0.09093,
+   "joint": 0.0,
+   "joint_with_k3": 0.0,
+   "ci95": {
+    "deep": [
+     7e-05,
+     0.00026
+    ],
+    "recent": [
+     0.08866,
+     0.09326
+    ],
+    "joint": [
+     0.0,
+     6e-05
+    ]
+   }
+  },
+  "D5|P5_canary": {
+   "deep": 0.0084,
+   "deep_with_k3": 0.0084,
+   "recent": 0.08915,
+   "joint": 0.00062,
+   "joint_with_k3": 0.00062,
+   "ci95": {
+    "deep": [
+     0.0077,
+     0.00916
+    ],
+    "recent": [
+     0.0869,
+     0.09146
+    ],
+    "joint": [
+     0.00045,
+     0.00085
+    ]
+   }
+  }
+ },
+ "fp_zero_edge_max": {
+  "deep": 0.14781,
+  "recent": 0.11763,
+  "joint": 0.01666
+ },
+ "contamination_and_types": {
+  "S_iid|-": {
+   "zero": 0.01111,
+   "real0.3": 0.07843,
+   "real0.5": 0.19299,
+   "real0.7": 0.36073,
+   "real1.0": 0.62387,
+   "deep_contam": 0.08555,
+   "episode_contam": 0.01427,
+   "crash_skew": 0.0301,
+   "recent_contam": 0.06405,
+   "recent_contam_strong": 0.07996,
+   "dead": 0.05254,
+   "new_edge": 0.04043
+  },
+  "S_real|-": {
+   "zero": 0.01666,
+   "real0.3": 0.08606,
+   "real0.5": 0.18896,
+   "real0.7": 0.33368,
+   "real1.0": 0.5701,
+   "deep_contam": 0.103,
+   "episode_contam": 0.02096,
+   "crash_skew": 0.04002,
+   "recent_contam": 0.07529,
+   "recent_contam_strong": 0.09309,
+   "dead": 0.0631,
+   "new_edge": 0.05015
+  },
+  "D1|P1_trend": {
+   "zero": 0.00178,
+   "real0.3": 0.0536,
+   "real0.5": 0.20527,
+   "real0.7": 0.4211,
+   "real1.0": 0.6693,
+   "deep_contam": 0.0812,
+   "episode_contam": 0.00248,
+   "crash_skew": 0.00515,
+   "recent_contam": 0.01128,
+   "recent_contam_strong": 0.01492,
+   "dead": 0.05513,
+   "new_edge": 0.00665
+  },
+  "D1|P2_dip": {
+   "zero": 0.01017,
+   "real0.3": 0.08925,
+   "real0.5": 0.21965,
+   "real0.7": 0.39937,
+   "real1.0": 0.65123,
+   "deep_contam": 0.09213,
+   "episode_contam": 0.0129,
+   "crash_skew": 0.02978,
+   "recent_contam": 0.06268,
+   "recent_contam_strong": 0.07615,
+   "dead": 0.05722,
+   "new_edge": 0.04033
+  },
+  "D1|P3_rotation": {
+   "zero": 0.00063,
+   "real0.3": 0.05417,
+   "real0.5": 0.2241,
+   "real0.7": 0.44183,
+   "real1.0": 0.66885,
+   "deep_contam": 0.08468,
+   "episode_contam": 0.0011,
+   "crash_skew": 0.00195,
+   "recent_contam": 0.00428,
+   "recent_contam_strong": 0.0054,
+   "dead": 0.05953,
+   "new_edge": 0.00277
+  },
+  "D1|P4_voltarget": {
+   "zero": 0.0,
+   "real0.3": 0.01277,
+   "real0.5": 0.32225,
+   "real0.7": 0.47148,
+   "real1.0": 0.66752,
+   "deep_contam": 0.0908,
+   "episode_contam": 0.0,
+   "crash_skew": 0.0,
+   "recent_contam": 0.0,
+   "recent_contam_strong": 0.0,
+   "dead": 0.08747,
+   "new_edge": 0.0
+  },
+  "D1|P5_canary": {
+   "zero": 0.00137,
+   "real0.3": 0.06193,
+   "real0.5": 0.23405,
+   "real0.7": 0.4461,
+   "real1.0": 0.6709,
+   "deep_contam": 0.0914,
+   "episode_contam": 0.0021,
+   "crash_skew": 0.00373,
+   "recent_contam": 0.00795,
+   "recent_contam_strong": 0.01043,
+   "dead": 0.06278,
+   "new_edge": 0.00513
+  },
+  "D2|P1_trend": {
+   "zero": 0.00207,
+   "real0.3": 0.05362,
+   "real0.5": 0.20952,
+   "real0.7": 0.41965,
+   "real1.0": 0.66798,
+   "deep_contam": 0.08352,
+   "episode_contam": 0.00283,
+   "crash_skew": 0.0059,
+   "recent_contam": 0.01198,
+   "recent_contam_strong": 0.0156,
+   "dead": 0.05625,
+   "new_edge": 0.00748
+  },
+  "D2|P2_dip": {
+   "zero": 0.01055,
+   "real0.3": 0.09267,
+   "real0.5": 0.2283,
+   "real0.7": 0.40752,
+   "real1.0": 0.65772,
+   "deep_contam": 0.09272,
+   "episode_contam": 0.01378,
+   "crash_skew": 0.03125,
+   "recent_contam": 0.06338,
+   "recent_contam_strong": 0.07695,
+   "dead": 0.05898,
+   "new_edge": 0.04297
+  },
+  "D2|P3_rotation": {
+   "zero": 0.0007,
+   "real0.3": 0.0546,
+   "real0.5": 0.22717,
+   "real0.7": 0.44167,
+   "real1.0": 0.66935,
+   "deep_contam": 0.08502,
+   "episode_contam": 0.00107,
+   "crash_skew": 0.00287,
+   "recent_contam": 0.00468,
+   "recent_contam_strong": 0.00618,
+   "dead": 0.0603,
+   "new_edge": 0.003
+  },
+  "D2|P4_voltarget": {
+   "zero": 0.0,
+   "real0.3": 0.02445,
+   "real0.5": 0.30625,
+   "real0.7": 0.47242,
+   "real1.0": 0.66835,
+   "deep_contam": 0.0918,
+   "episode_contam": 0.0,
+   "crash_skew": 0.0,
+   "recent_contam": 0.0,
+   "recent_contam_strong": 0.0,
+   "dead": 0.08348,
+   "new_edge": 0.0
+  },
+  "D2|P5_canary": {
+   "zero": 0.0011,
+   "real0.3": 0.06245,
+   "real0.5": 0.23748,
+   "real0.7": 0.4497,
+   "real1.0": 0.67455,
+   "deep_contam": 0.09167,
+   "episode_contam": 0.0017,
+   "crash_skew": 0.00415,
+   "recent_contam": 0.00782,
+   "recent_contam_strong": 0.00985,
+   "dead": 0.0634,
+   "new_edge": 0.00498
+  },
+  "D3|P1_trend": {
+   "zero": 0.00207,
+   "real0.3": 0.05375,
+   "real0.5": 0.21362,
+   "real0.7": 0.42342,
+   "real1.0": 0.67347,
+   "deep_contam": 0.08122,
+   "episode_contam": 0.00277,
+   "crash_skew": 0.00582,
+   "recent_contam": 0.01227,
+   "recent_contam_strong": 0.01597,
+   "dead": 0.05563,
+   "new_edge": 0.0074
+  },
+  "D6|P1_trend": {
+   "zero": 0.00372,
+   "real0.3": 0.06147,
+   "real0.5": 0.20653,
+   "real0.7": 0.40862,
+   "real1.0": 0.65735,
+   "deep_contam": 0.08785,
+   "episode_contam": 0.00477,
+   "crash_skew": 0.00887,
+   "recent_contam": 0.01913,
+   "recent_contam_strong": 0.02517,
+   "dead": 0.05782,
+   "new_edge": 0.01192
+  },
+  "D3|P2_dip": {
+   "zero": 0.01055,
+   "real0.3": 0.09707,
+   "real0.5": 0.23978,
+   "real0.7": 0.4231,
+   "real1.0": 0.66457,
+   "deep_contam": 0.09337,
+   "episode_contam": 0.01313,
+   "crash_skew": 0.03167,
+   "recent_contam": 0.06377,
+   "recent_contam_strong": 0.07637,
+   "dead": 0.06043,
+   "new_edge": 0.04262
+  },
+  "D6|P2_dip": {
+   "zero": 0.01237,
+   "real0.3": 0.09695,
+   "real0.5": 0.23205,
+   "real0.7": 0.40617,
+   "real1.0": 0.64728,
+   "deep_contam": 0.09968,
+   "episode_contam": 0.0155,
+   "crash_skew": 0.03488,
+   "recent_contam": 0.06915,
+   "recent_contam_strong": 0.08287,
+   "dead": 0.06333,
+   "new_edge": 0.04672
+  },
+  "D3|P3_rotation": {
+   "zero": 0.00073,
+   "real0.3": 0.05505,
+   "real0.5": 0.22767,
+   "real0.7": 0.44422,
+   "real1.0": 0.67478,
+   "deep_contam": 0.08457,
+   "episode_contam": 0.00118,
+   "crash_skew": 0.00263,
+   "recent_contam": 0.00505,
+   "recent_contam_strong": 0.00688,
+   "dead": 0.06002,
+   "new_edge": 0.00312
+  },
+  "D6|P3_rotation": {
+   "zero": 0.00247,
+   "real0.3": 0.06198,
+   "real0.5": 0.21845,
+   "real0.7": 0.42447,
+   "real1.0": 0.65852,
+   "deep_contam": 0.09055,
+   "episode_contam": 0.00315,
+   "crash_skew": 0.00595,
+   "recent_contam": 0.01168,
+   "recent_contam_strong": 0.01507,
+   "dead": 0.06165,
+   "new_edge": 0.00745
+  },
+  "D3|P4_voltarget": {
+   "zero": 7e-05,
+   "real0.3": 0.03368,
+   "real0.5": 0.2883,
+   "real0.7": 0.46977,
+   "real1.0": 0.66623,
+   "deep_contam": 0.09065,
+   "episode_contam": 0.00012,
+   "crash_skew": 0.0002,
+   "recent_contam": 0.0003,
+   "recent_contam_strong": 0.00037,
+   "dead": 0.07757,
+   "new_edge": 0.00018
+  },
+  "D6|P4_voltarget": {
+   "zero": 0.00047,
+   "real0.3": 0.0564,
+   "real0.5": 0.25507,
+   "real0.7": 0.4557,
+   "real1.0": 0.65415,
+   "deep_contam": 0.0974,
+   "episode_contam": 0.0007,
+   "crash_skew": 0.00135,
+   "recent_contam": 0.0026,
+   "recent_contam_strong": 0.0031,
+   "dead": 0.07453,
+   "new_edge": 0.00165
+  },
+  "D3|P5_canary": {
+   "zero": 0.0011,
+   "real0.3": 0.06385,
+   "real0.5": 0.24202,
+   "real0.7": 0.45548,
+   "real1.0": 0.68015,
+   "deep_contam": 0.08993,
+   "episode_contam": 0.00172,
+   "crash_skew": 0.00412,
+   "recent_contam": 0.00773,
+   "recent_contam_strong": 0.00983,
+   "dead": 0.06332,
+   "new_edge": 0.00472
+  },
+  "D6|P5_canary": {
+   "zero": 0.00273,
+   "real0.3": 0.0717,
+   "real0.5": 0.23122,
+   "real0.7": 0.43462,
+   "real1.0": 0.66355,
+   "deep_contam": 0.09697,
+   "episode_contam": 0.0037,
+   "crash_skew": 0.00797,
+   "recent_contam": 0.0147,
+   "recent_contam_strong": 0.01893,
+   "dead": 0.06548,
+   "new_edge": 0.00932
+  },
+  "D4|P1_trend": {
+   "zero": 0.00238,
+   "real0.3": 0.0583,
+   "real0.5": 0.21083,
+   "real0.7": 0.41675,
+   "real1.0": 0.66128,
+   "deep_contam": 0.08897,
+   "episode_contam": 0.00323,
+   "crash_skew": 0.00683,
+   "recent_contam": 0.01273,
+   "recent_contam_strong": 0.01605,
+   "dead": 0.06127,
+   "new_edge": 0.00773
+  },
+  "D4|P2_dip": {
+   "zero": 0.01378,
+   "real0.3": 0.10047,
+   "real0.5": 0.22882,
+   "real0.7": 0.39915,
+   "real1.0": 0.63615,
+   "deep_contam": 0.11012,
+   "episode_contam": 0.01783,
+   "crash_skew": 0.03732,
+   "recent_contam": 0.06813,
+   "recent_contam_strong": 0.08155,
+   "dead": 0.06827,
+   "new_edge": 0.04683
+  },
+  "D4|P3_rotation": {
+   "zero": 0.00067,
+   "real0.3": 0.05637,
+   "real0.5": 0.23183,
+   "real0.7": 0.44178,
+   "real1.0": 0.66798,
+   "deep_contam": 0.0882,
+   "episode_contam": 0.00112,
+   "crash_skew": 0.00225,
+   "recent_contam": 0.00463,
+   "recent_contam_strong": 0.00587,
+   "dead": 0.06258,
+   "new_edge": 0.00283
+  },
+  "D4|P4_voltarget": {
+   "zero": 0.0,
+   "real0.3": 0.0282,
+   "real0.5": 0.2966,
+   "real0.7": 0.46985,
+   "real1.0": 0.66387,
+   "deep_contam": 0.09365,
+   "episode_contam": 0.0,
+   "crash_skew": 0.0,
+   "recent_contam": 0.0,
+   "recent_contam_strong": 0.0,
+   "dead": 0.08342,
+   "new_edge": 0.0
+  },
+  "D4|P5_canary": {
+   "zero": 0.00188,
+   "real0.3": 0.06633,
+   "real0.5": 0.23758,
+   "real0.7": 0.45187,
+   "real1.0": 0.67057,
+   "deep_contam": 0.09803,
+   "episode_contam": 0.00265,
+   "crash_skew": 0.00483,
+   "recent_contam": 0.00957,
+   "recent_contam_strong": 0.01175,
+   "dead": 0.06775,
+   "new_edge": 0.00592
+  },
+  "D5|P1_trend": {
+   "zero": 0.00187,
+   "real0.3": 0.05522,
+   "real0.5": 0.20643,
+   "real0.7": 0.41672,
+   "real1.0": 0.68063,
+   "deep_contam": 0.08117,
+   "episode_contam": 0.0034,
+   "crash_skew": 0.01352,
+   "recent_contam": 0.01108,
+   "recent_contam_strong": 0.01425,
+   "dead": 0.05378,
+   "new_edge": 0.00678
+  },
+  "D5|P2_dip": {
+   "zero": 0.00867,
+   "real0.3": 0.11048,
+   "real0.5": 0.26947,
+   "real0.7": 0.4593,
+   "real1.0": 0.69377,
+   "deep_contam": 0.09152,
+   "episode_contam": 0.0237,
+   "crash_skew": 0.03238,
+   "recent_contam": 0.0549,
+   "recent_contam_strong": 0.06572,
+   "dead": 0.06307,
+   "new_edge": 0.037
+  },
+  "D5|P3_rotation": {
+   "zero": 0.00037,
+   "real0.3": 0.05535,
+   "real0.5": 0.24493,
+   "real0.7": 0.45537,
+   "real1.0": 0.6829,
+   "deep_contam": 0.0828,
+   "episode_contam": 0.00098,
+   "crash_skew": 0.00245,
+   "recent_contam": 0.0027,
+   "recent_contam_strong": 0.00365,
+   "dead": 0.06313,
+   "new_edge": 0.0015
+  },
+  "D5|P4_voltarget": {
+   "zero": 0.0,
+   "real0.3": 0.00602,
+   "real0.5": 0.15245,
+   "real0.7": 0.44988,
+   "real1.0": 0.66788,
+   "deep_contam": 0.09085,
+   "episode_contam": 2e-05,
+   "crash_skew": 0.00333,
+   "recent_contam": 5e-05,
+   "recent_contam_strong": 8e-05,
+   "dead": 0.0412,
+   "new_edge": 3e-05
+  },
+  "D5|P5_canary": {
+   "zero": 0.00062,
+   "real0.3": 0.0671,
+   "real0.5": 0.26177,
+   "real0.7": 0.47317,
+   "real1.0": 0.6874,
+   "deep_contam": 0.08915,
+   "episode_contam": 0.00185,
+   "crash_skew": 0.00463,
+   "recent_contam": 0.00473,
+   "recent_contam_strong": 0.006,
+   "dead": 0.06743,
+   "new_edge": 0.00307
+  }
+ },
+ "worst_no_edge_now": {
+  "S_iid|-": {
+   "rate": 0.08555,
+   "type": "deep_contam"
+  },
+  "S_real|-": {
+   "rate": 0.103,
+   "type": "deep_contam"
+  },
+  "D1|P1_trend": {
+   "rate": 0.0812,
+   "type": "deep_contam"
+  },
+  "D1|P2_dip": {
+   "rate": 0.09213,
+   "type": "deep_contam"
+  },
+  "D1|P3_rotation": {
+   "rate": 0.08468,
+   "type": "deep_contam"
+  },
+  "D1|P4_voltarget": {
+   "rate": 0.0908,
+   "type": "deep_contam"
+  },
+  "D1|P5_canary": {
+   "rate": 0.0914,
+   "type": "deep_contam"
+  },
+  "D2|P1_trend": {
+   "rate": 0.08352,
+   "type": "deep_contam"
+  },
+  "D2|P2_dip": {
+   "rate": 0.09272,
+   "type": "deep_contam"
+  },
+  "D2|P3_rotation": {
+   "rate": 0.08502,
+   "type": "deep_contam"
+  },
+  "D2|P4_voltarget": {
+   "rate": 0.0918,
+   "type": "deep_contam"
+  },
+  "D2|P5_canary": {
+   "rate": 0.09167,
+   "type": "deep_contam"
+  },
+  "D3|P1_trend": {
+   "rate": 0.08122,
+   "type": "deep_contam"
+  },
+  "D6|P1_trend": {
+   "rate": 0.08785,
+   "type": "deep_contam"
+  },
+  "D3|P2_dip": {
+   "rate": 0.09337,
+   "type": "deep_contam"
+  },
+  "D6|P2_dip": {
+   "rate": 0.09968,
+   "type": "deep_contam"
+  },
+  "D3|P3_rotation": {
+   "rate": 0.08457,
+   "type": "deep_contam"
+  },
+  "D6|P3_rotation": {
+   "rate": 0.09055,
+   "type": "deep_contam"
+  },
+  "D3|P4_voltarget": {
+   "rate": 0.09065,
+   "type": "deep_contam"
+  },
+  "D6|P4_voltarget": {
+   "rate": 0.0974,
+   "type": "deep_contam"
+  },
+  "D3|P5_canary": {
+   "rate": 0.08993,
+   "type": "deep_contam"
+  },
+  "D6|P5_canary": {
+   "rate": 0.09697,
+   "type": "deep_contam"
+  },
+  "D4|P1_trend": {
+   "rate": 0.08897,
+   "type": "deep_contam"
+  },
+  "D4|P2_dip": {
+   "rate": 0.11012,
+   "type": "deep_contam"
+  },
+  "D4|P3_rotation": {
+   "rate": 0.0882,
+   "type": "deep_contam"
+  },
+  "D4|P4_voltarget": {
+   "rate": 0.09365,
+   "type": "deep_contam"
+  },
+  "D4|P5_canary": {
+   "rate": 0.09803,
+   "type": "deep_contam"
+  },
+  "D5|P1_trend": {
+   "rate": 0.08117,
+   "type": "deep_contam"
+  },
+  "D5|P2_dip": {
+   "rate": 0.09152,
+   "type": "deep_contam"
+  },
+  "D5|P3_rotation": {
+   "rate": 0.0828,
+   "type": "deep_contam"
+  },
+  "D5|P4_voltarget": {
+   "rate": 0.09085,
+   "type": "deep_contam"
+  },
+  "D5|P5_canary": {
+   "rate": 0.08915,
+   "type": "deep_contam"
+  }
+ },
+ "recent_contam_strong": {
+  "S_iid|-": 0.07996,
+  "S_real|-": 0.09309,
+  "D1|P1_trend": 0.01492,
+  "D1|P2_dip": 0.07615,
+  "D1|P3_rotation": 0.0054,
+  "D1|P4_voltarget": 0.0,
+  "D1|P5_canary": 0.01043,
+  "D2|P1_trend": 0.0156,
+  "D2|P2_dip": 0.07695,
+  "D2|P3_rotation": 0.00618,
+  "D2|P4_voltarget": 0.0,
+  "D2|P5_canary": 0.00985,
+  "D3|P1_trend": 0.01597,
+  "D6|P1_trend": 0.02517,
+  "D3|P2_dip": 0.07637,
+  "D6|P2_dip": 0.08287,
+  "D3|P3_rotation": 0.00688,
+  "D6|P3_rotation": 0.01507,
+  "D3|P4_voltarget": 0.00037,
+  "D6|P4_voltarget": 0.0031,
+  "D3|P5_canary": 0.00983,
+  "D6|P5_canary": 0.01893,
+  "D4|P1_trend": 0.01605,
+  "D4|P2_dip": 0.08155,
+  "D4|P3_rotation": 0.00587,
+  "D4|P4_voltarget": 0.0,
+  "D4|P5_canary": 0.01175,
+  "D5|P1_trend": 0.01425,
+  "D5|P2_dip": 0.06572,
+  "D5|P3_rotation": 0.00365,
+  "D5|P4_voltarget": 8e-05,
+  "D5|P5_canary": 0.006
+ },
+ "power": {
+  "S_iid|-": {
+   "pass_at_SR": {
+    "0.3": 0.07843,
+    "0.5": 0.19299,
+    "0.7": 0.36073,
+    "1.0": 0.62387
+   },
+   "SR_for_50pct": 0.85,
+   "SR_for_80pct": 1.29,
+   "LR_at_0.5": 17.38
+  },
+  "S_real|-": {
+   "pass_at_SR": {
+    "0.3": 0.08606,
+    "0.5": 0.18896,
+    "0.7": 0.33368,
+    "1.0": 0.5701
+   },
+   "SR_for_50pct": 0.91,
+   "SR_for_80pct": 1.41,
+   "LR_at_0.5": 11.34
+  },
+  "D1|P1_trend": {
+   "pass_at_SR": {
+    "0.3": 0.0536,
+    "0.5": 0.20527,
+    "0.7": 0.4211,
+    "1.0": 0.6693
+   },
+   "SR_for_50pct": 0.79,
+   "SR_for_80pct": 1.22,
+   "LR_at_0.5": 115.1
+  },
+  "D1|P2_dip": {
+   "pass_at_SR": {
+    "0.3": 0.08925,
+    "0.5": 0.21965,
+    "0.7": 0.39937,
+    "1.0": 0.65123
+   },
+   "SR_for_50pct": 0.81,
+   "SR_for_80pct": 1.28,
+   "LR_at_0.5": 21.6
+  },
+  "D1|P3_rotation": {
+   "pass_at_SR": {
+    "0.3": 0.05417,
+    "0.5": 0.2241,
+    "0.7": 0.44183,
+    "1.0": 0.66885
+   },
+   "SR_for_50pct": 0.77,
+   "SR_for_80pct": 1.24,
+   "LR_at_0.5": 353.84
+  },
+  "D1|P4_voltarget": {
+   "pass_at_SR": {
+    "0.3": 0.01277,
+    "0.5": 0.32225,
+    "0.7": 0.47148,
+    "1.0": 0.66752
+   },
+   "SR_for_50pct": 0.74,
+   "SR_for_80pct": 1.27,
+   "LR_at_0.5": 322250000.0
+  },
+  "D1|P5_canary": {
+   "pass_at_SR": {
+    "0.3": 0.06193,
+    "0.5": 0.23405,
+    "0.7": 0.4461,
+    "1.0": 0.6709
+   },
+   "SR_for_50pct": 0.76,
+   "SR_for_80pct": 1.26,
+   "LR_at_0.5": 171.26
+  },
+  "D2|P1_trend": {
+   "pass_at_SR": {
+    "0.3": 0.05362,
+    "0.5": 0.20952,
+    "0.7": 0.41965,
+    "1.0": 0.66798
+   },
+   "SR_for_50pct": 0.79,
+   "SR_for_80pct": 1.22,
+   "LR_at_0.5": 101.38
+  },
+  "D2|P2_dip": {
+   "pass_at_SR": {
+    "0.3": 0.09267,
+    "0.5": 0.2283,
+    "0.7": 0.40752,
+    "1.0": 0.65772
+   },
+   "SR_for_50pct": 0.8,
+   "SR_for_80pct": 1.28,
+   "LR_at_0.5": 21.64
+  },
+  "D2|P3_rotation": {
+   "pass_at_SR": {
+    "0.3": 0.0546,
+    "0.5": 0.22717,
+    "0.7": 0.44167,
+    "1.0": 0.66935
+   },
+   "SR_for_50pct": 0.77,
+   "SR_for_80pct": 1.23,
+   "LR_at_0.5": 324.53
+  },
+  "D2|P4_voltarget": {
+   "pass_at_SR": {
+    "0.3": 0.02445,
+    "0.5": 0.30625,
+    "0.7": 0.47242,
+    "1.0": 0.66835
+   },
+   "SR_for_50pct": 0.74,
+   "SR_for_80pct": 1.26,
+   "LR_at_0.5": 306250000.0
+  },
+  "D2|P5_canary": {
+   "pass_at_SR": {
+    "0.3": 0.06245,
+    "0.5": 0.23748,
+    "0.7": 0.4497,
+    "1.0": 0.67455
+   },
+   "SR_for_50pct": 0.75,
+   "SR_for_80pct": 1.26,
+   "LR_at_0.5": 215.89
+  },
+  "D3|P1_trend": {
+   "pass_at_SR": {
+    "0.3": 0.05375,
+    "0.5": 0.21362,
+    "0.7": 0.42342,
+    "1.0": 0.67347
+   },
+   "SR_for_50pct": 0.78,
+   "SR_for_80pct": 1.21,
+   "LR_at_0.5": 103.36
+  },
+  "D6|P1_trend": {
+   "pass_at_SR": {
+    "0.3": 0.06147,
+    "0.5": 0.20653,
+    "0.7": 0.40862,
+    "1.0": 0.65735
+   },
+   "SR_for_50pct": 0.8,
+   "SR_for_80pct": 1.25,
+   "LR_at_0.5": 55.57
+  },
+  "D3|P2_dip": {
+   "pass_at_SR": {
+    "0.3": 0.09707,
+    "0.5": 0.23978,
+    "0.7": 0.4231,
+    "1.0": 0.66457
+   },
+   "SR_for_50pct": 0.78,
+   "SR_for_80pct": 1.26,
+   "LR_at_0.5": 22.73
+  },
+  "D6|P2_dip": {
+   "pass_at_SR": {
+    "0.3": 0.09695,
+    "0.5": 0.23205,
+    "0.7": 0.40617,
+    "1.0": 0.64728
+   },
+   "SR_for_50pct": 0.81,
+   "SR_for_80pct": 1.3,
+   "LR_at_0.5": 18.76
+  },
+  "D3|P3_rotation": {
+   "pass_at_SR": {
+    "0.3": 0.05505,
+    "0.5": 0.22767,
+    "0.7": 0.44422,
+    "1.0": 0.67478
+   },
+   "SR_for_50pct": 0.76,
+   "SR_for_80pct": 1.23,
+   "LR_at_0.5": 310.46
+  },
+  "D6|P3_rotation": {
+   "pass_at_SR": {
+    "0.3": 0.06198,
+    "0.5": 0.21845,
+    "0.7": 0.42447,
+    "1.0": 0.65852
+   },
+   "SR_for_50pct": 0.78,
+   "SR_for_80pct": 1.27,
+   "LR_at_0.5": 88.56
+  },
+  "D3|P4_voltarget": {
+   "pass_at_SR": {
+    "0.3": 0.03368,
+    "0.5": 0.2883,
+    "0.7": 0.46977,
+    "1.0": 0.66623
+   },
+   "SR_for_50pct": 0.74,
+   "SR_for_80pct": 1.27,
+   "LR_at_0.5": 4324.5
+  },
+  "D6|P4_voltarget": {
+   "pass_at_SR": {
+    "0.3": 0.0564,
+    "0.5": 0.25507,
+    "0.7": 0.4557,
+    "1.0": 0.65415
+   },
+   "SR_for_50pct": 0.76,
+   "SR_for_80pct": 1.3,
+   "LR_at_0.5": 546.58
+  },
+  "D3|P5_canary": {
+   "pass_at_SR": {
+    "0.3": 0.06385,
+    "0.5": 0.24202,
+    "0.7": 0.45548,
+    "1.0": 0.68015
+   },
+   "SR_for_50pct": 0.75,
+   "SR_for_80pct": 1.24,
+   "LR_at_0.5": 220.02
+  },
+  "D6|P5_canary": {
+   "pass_at_SR": {
+    "0.3": 0.0717,
+    "0.5": 0.23122,
+    "0.7": 0.43462,
+    "1.0": 0.66355
+   },
+   "SR_for_50pct": 0.77,
+   "SR_for_80pct": 1.28,
+   "LR_at_0.5": 84.59
+  },
+  "D4|P1_trend": {
+   "pass_at_SR": {
+    "0.3": 0.0583,
+    "0.5": 0.21083,
+    "0.7": 0.41675,
+    "1.0": 0.66128
+   },
+   "SR_for_50pct": 0.79,
+   "SR_for_80pct": 1.24,
+   "LR_at_0.5": 88.46
+  },
+  "D4|P2_dip": {
+   "pass_at_SR": {
+    "0.3": 0.10047,
+    "0.5": 0.22882,
+    "0.7": 0.39915,
+    "1.0": 0.63615
+   },
+   "SR_for_50pct": 0.82,
+   "SR_for_80pct": 1.32,
+   "LR_at_0.5": 16.6
+  },
+  "D4|P3_rotation": {
+   "pass_at_SR": {
+    "0.3": 0.05637,
+    "0.5": 0.23183,
+    "0.7": 0.44178,
+    "1.0": 0.66798
+   },
+   "SR_for_50pct": 0.76,
+   "SR_for_80pct": 1.25,
+   "LR_at_0.5": 347.75
+  },
+  "D4|P4_voltarget": {
+   "pass_at_SR": {
+    "0.3": 0.0282,
+    "0.5": 0.2966,
+    "0.7": 0.46985,
+    "1.0": 0.66387
+   },
+   "SR_for_50pct": 0.74,
+   "SR_for_80pct": 1.27,
+   "LR_at_0.5": 296600000.0
+  },
+  "D4|P5_canary": {
+   "pass_at_SR": {
+    "0.3": 0.06633,
+    "0.5": 0.23758,
+    "0.7": 0.45187,
+    "1.0": 0.67057
+   },
+   "SR_for_50pct": 0.75,
+   "SR_for_80pct": 1.27,
+   "LR_at_0.5": 126.15
+  },
+  "D5|P1_trend": {
+   "pass_at_SR": {
+    "0.3": 0.05522,
+    "0.5": 0.20643,
+    "0.7": 0.41672,
+    "1.0": 0.68063
+   },
+   "SR_for_50pct": 0.78,
+   "SR_for_80pct": 1.2,
+   "LR_at_0.5": 110.59
+  },
+  "D5|P2_dip": {
+   "pass_at_SR": {
+    "0.3": 0.11048,
+    "0.5": 0.26947,
+    "0.7": 0.4593,
+    "1.0": 0.69377
+   },
+   "SR_for_50pct": 0.75,
+   "SR_for_80pct": 1.21,
+   "LR_at_0.5": 31.09
+  },
+  "D5|P3_rotation": {
+   "pass_at_SR": {
+    "0.3": 0.05535,
+    "0.5": 0.24493,
+    "0.7": 0.45537,
+    "1.0": 0.6829
+   },
+   "SR_for_50pct": 0.75,
+   "SR_for_80pct": 1.21,
+   "LR_at_0.5": 667.99
+  },
+  "D5|P4_voltarget": {
+   "pass_at_SR": {
+    "0.3": 0.00602,
+    "0.5": 0.15245,
+    "0.7": 0.44988,
+    "1.0": 0.66788
+   },
+   "SR_for_50pct": 0.75,
+   "SR_for_80pct": 1.27,
+   "LR_at_0.5": 152450000.0
+  },
+  "D5|P5_canary": {
+   "pass_at_SR": {
+    "0.3": 0.0671,
+    "0.5": 0.26177,
+    "0.7": 0.47317,
+    "1.0": 0.6874
+   },
+   "SR_for_50pct": 0.73,
+   "SR_for_80pct": 1.22,
+   "LR_at_0.5": 424.49
+  }
+ },
+ "ppv_candidate_mix": {
+  "mix": {
+   "real0.5": 0.05,
+   "zero": 0.7,
+   "deep_contam": 0.08,
+   "recent_contam": 0.1,
+   "crash_skew": 0.04,
+   "episode_contam": 0.03
+  },
+  "by_cell": {
+   "S_iid|-": {
+    "ppv": 0.2987,
+    "per1000": {
+     "true": 9.6,
+     "false": 22.7
+    },
+    "pass_rate": 0.03231
+   },
+   "S_real|-": {
+    "ppv": 0.2416,
+    "per1000": {
+     "true": 9.4,
+     "false": 29.7
+    },
+    "pass_rate": 0.03911
+   },
+   "D1|P1_trend": {
+    "ppv": 0.5287,
+    "per1000": {
+     "true": 10.3,
+     "false": 9.2
+    },
+    "pass_rate": 0.01941
+   },
+   "D1|P2_dip": {
+    "ppv": 0.3296,
+    "per1000": {
+     "true": 11.0,
+     "false": 22.3
+    },
+    "pass_rate": 0.03332
+   },
+   "D1|P3_rotation": {
+    "ppv": 0.591,
+    "per1000": {
+     "true": 11.2,
+     "false": 7.8
+    },
+    "pass_rate": 0.01896
+   },
+   "D1|P4_voltarget": {
+    "ppv": 0.6893,
+    "per1000": {
+     "true": 16.1,
+     "false": 7.3
+    },
+    "pass_rate": 0.02338
+   },
+   "D1|P5_canary": {
+    "ppv": 0.5578,
+    "per1000": {
+     "true": 11.7,
+     "false": 9.3
+    },
+    "pass_rate": 0.02098
+   },
+   "D2|P1_trend": {
+    "ppv": 0.5205,
+    "per1000": {
+     "true": 10.5,
+     "false": 9.6
+    },
+    "pass_rate": 0.02013
+   },
+   "D2|P2_dip": {
+    "ppv": 0.3336,
+    "per1000": {
+     "true": 11.4,
+     "false": 22.8
+    },
+    "pass_rate": 0.03422
+   },
+   "D2|P3_rotation": {
+    "ppv": 0.5896,
+    "per1000": {
+     "true": 11.4,
+     "false": 7.9
+    },
+    "pass_rate": 0.01927
+   },
+   "D2|P4_voltarget": {
+    "ppv": 0.6759,
+    "per1000": {
+     "true": 15.3,
+     "false": 7.3
+    },
+    "pass_rate": 0.02266
+   },
+   "D2|P5_canary": {
+    "ppv": 0.5661,
+    "per1000": {
+     "true": 11.9,
+     "false": 9.1
+    },
+    "pass_rate": 0.02098
+   },
+   "D3|P1_trend": {
+    "ppv": 0.5295,
+    "per1000": {
+     "true": 10.7,
+     "false": 9.5
+    },
+    "pass_rate": 0.02017
+   },
+   "D6|P1_trend": {
+    "ppv": 0.4616,
+    "per1000": {
+     "true": 10.3,
+     "false": 12.0
+    },
+    "pass_rate": 0.02237
+   },
+   "D3|P2_dip": {
+    "ppv": 0.3437,
+    "per1000": {
+     "true": 12.0,
+     "false": 22.9
+    },
+    "pass_rate": 0.03488
+   },
+   "D6|P2_dip": {
+    "ppv": 0.3135,
+    "per1000": {
+     "true": 11.6,
+     "false": 25.4
+    },
+    "pass_rate": 0.03701
+   },
+   "D3|P3_rotation": {
+    "ppv": 0.5896,
+    "per1000": {
+     "true": 11.4,
+     "false": 7.9
+    },
+    "pass_rate": 0.01931
+   },
+   "D6|P3_rotation": {
+    "ppv": 0.5105,
+    "per1000": {
+     "true": 10.9,
+     "false": 10.5
+    },
+    "pass_rate": 0.0214
+   },
+   "D3|P4_voltarget": {
+    "ppv": 0.6625,
+    "per1000": {
+     "true": 14.4,
+     "false": 7.3
+    },
+    "pass_rate": 0.02176
+   },
+   "D6|P4_voltarget": {
+    "ppv": 0.6013,
+    "per1000": {
+     "true": 12.8,
+     "false": 8.5
+    },
+    "pass_rate": 0.02121
+   },
+   "D3|P5_canary": {
+    "ppv": 0.5747,
+    "per1000": {
+     "true": 12.1,
+     "false": 9.0
+    },
+    "pass_rate": 0.02105
+   },
+   "D6|P5_canary": {
+    "ppv": 0.4998,
+    "per1000": {
+     "true": 11.6,
+     "false": 11.6
+    },
+    "pass_rate": 0.02313
+   },
+   "D4|P1_trend": {
+    "ppv": 0.5027,
+    "per1000": {
+     "true": 10.5,
+     "false": 10.4
+    },
+    "pass_rate": 0.02097
+   },
+   "D4|P2_dip": {
+    "ppv": 0.2953,
+    "per1000": {
+     "true": 11.4,
+     "false": 27.3
+    },
+    "pass_rate": 0.03874
+   },
+   "D4|P3_rotation": {
+    "ppv": 0.5883,
+    "per1000": {
+     "true": 11.6,
+     "false": 8.1
+    },
+    "pass_rate": 0.0197
+   },
+   "D4|P4_voltarget": {
+    "ppv": 0.6644,
+    "per1000": {
+     "true": 14.8,
+     "false": 7.5
+    },
+    "pass_rate": 0.02232
+   },
+   "D4|P5_canary": {
+    "ppv": 0.5335,
+    "per1000": {
+     "true": 11.9,
+     "false": 10.4
+    },
+    "pass_rate": 0.02227
+   },
+   "D5|P1_trend": {
+    "ppv": 0.5193,
+    "per1000": {
+     "true": 10.3,
+     "false": 9.6
+    },
+    "pass_rate": 0.01987
+   },
+   "D5|P2_dip": {
+    "ppv": 0.3921,
+    "per1000": {
+     "true": 13.5,
+     "false": 20.9
+    },
+    "pass_rate": 0.03436
+   },
+   "D5|P3_rotation": {
+    "ppv": 0.6272,
+    "per1000": {
+     "true": 12.2,
+     "false": 7.3
+    },
+    "pass_rate": 0.01953
+   },
+   "D5|P4_voltarget": {
+    "ppv": 0.5072,
+    "per1000": {
+     "true": 7.6,
+     "false": 7.4
+    },
+    "pass_rate": 0.01503
+   },
+   "D5|P5_canary": {
+    "ppv": 0.6125,
+    "per1000": {
+     "true": 13.1,
+     "false": 8.3
+    },
+    "pass_rate": 0.02137
+   }
+  },
+  "segment": {
+   "S_iid": 0.2987,
+   "S_real": 0.2416
+  },
+  "daily_range": [
+   0.2953,
+   0.6893
+  ]
+ },
+ "drift_kept": {
+  "meaning": "raw r at k 2.0 in the recent key (direction counts there, as in S2) with raw x2 at k 2.0 in the deep key; programs with no timing skill on positive-drift symbols; not a false positive under the goal, stated beside",
+  "by_cell": {
+   "D1|P1_trend": {
+    "joint": 0.00213,
+    "recent": 0.21932
+   },
+   "D1|P2_dip": {
+    "joint": 0.0093,
+    "recent": 0.1184
+   },
+   "D1|P3_rotation": {
+    "joint": 0.00055,
+    "recent": 0.22133
+   },
+   "D1|P4_voltarget": {
+    "joint": 0.0,
+    "recent": 0.34225
+   },
+   "D1|P5_canary": {
+    "joint": 0.00118,
+    "recent": 0.20955
+   },
+   "D2|P1_trend": {
+    "joint": 0.00272,
+    "recent": 0.22128
+   },
+   "D2|P2_dip": {
+    "joint": 0.0097,
+    "recent": 0.11947
+   },
+   "D2|P3_rotation": {
+    "joint": 0.00067,
+    "recent": 0.2194
+   },
+   "D2|P4_voltarget": {
+    "joint": 0.0,
+    "recent": 0.33747
+   },
+   "D2|P5_canary": {
+    "joint": 0.00118,
+    "recent": 0.21033
+   },
+   "D3|P1_trend": {
+    "joint": 0.0023,
+    "recent": 0.22672
+   },
+   "D3|P2_dip": {
+    "joint": 0.00962,
+    "recent": 0.11788
+   },
+   "D3|P3_rotation": {
+    "joint": 0.00065,
+    "recent": 0.22405
+   },
+   "D3|P4_voltarget": {
+    "joint": 0.00015,
+    "recent": 0.36822
+   },
+   "D3|P5_canary": {
+    "joint": 0.00143,
+    "recent": 0.2142
+   },
+   "D4|P1_trend": {
+    "joint": 0.00275,
+    "recent": 0.22788
+   },
+   "D4|P2_dip": {
+    "joint": 0.01282,
+    "recent": 0.14345
+   },
+   "D4|P3_rotation": {
+    "joint": 0.0006,
+    "recent": 0.22835
+   },
+   "D4|P4_voltarget": {
+    "joint": 0.0,
+    "recent": 0.33723
+   },
+   "D4|P5_canary": {
+    "joint": 0.00167,
+    "recent": 0.22073
+   },
+   "D5|P1_trend": {
+    "joint": 0.00263,
+    "recent": 0.19307
+   },
+   "D5|P2_dip": {
+    "joint": 0.00225,
+    "recent": 0.09493
+   },
+   "D5|P3_rotation": {
+    "joint": 0.0003,
+    "recent": 0.1899
+   },
+   "D5|P4_voltarget": {
+    "joint": 0.00025,
+    "recent": 0.34217
+   },
+   "D5|P5_canary": {
+    "joint": 0.00078,
+    "recent": 0.17742
+   }
+  }
+ },
+ "synthetic_programs": {
+  "D1|P1_trend": {
+   "round_trips_a_year": 6.1,
+   "mean_exposure": 0.823
+  },
+  "D1|P2_dip": {
+   "round_trips_a_year": 21.1,
+   "mean_exposure": 0.111
+  },
+  "D1|P3_rotation": {
+   "round_trips_a_year": 10.4,
+   "mean_exposure": 1.0
+  },
+  "D1|P4_voltarget": {
+   "round_trips_a_year": 0.0,
+   "mean_exposure": 0.665
+  },
+  "D1|P5_canary": {
+   "round_trips_a_year": 32.4,
+   "mean_exposure": 0.619
+  },
+  "D2|P1_trend": {
+   "round_trips_a_year": 6.1,
+   "mean_exposure": 0.825
+  },
+  "D2|P2_dip": {
+   "round_trips_a_year": 20.6,
+   "mean_exposure": 0.111
+  },
+  "D2|P3_rotation": {
+   "round_trips_a_year": 10.4,
+   "mean_exposure": 1.0
+  },
+  "D2|P4_voltarget": {
+   "round_trips_a_year": 0.0,
+   "mean_exposure": 0.689
+  },
+  "D2|P5_canary": {
+   "round_trips_a_year": 32.4,
+   "mean_exposure": 0.619
+  },
+  "D3|P1_trend": {
+   "round_trips_a_year": 6.0,
+   "mean_exposure": 0.833
+  },
+  "D3|P2_dip": {
+   "round_trips_a_year": 21.7,
+   "mean_exposure": 0.116
+  },
+  "D3|P3_rotation": {
+   "round_trips_a_year": 10.4,
+   "mean_exposure": 1.0
+  },
+  "D3|P4_voltarget": {
+   "round_trips_a_year": 0.0,
+   "mean_exposure": 0.676
+  },
+  "D3|P5_canary": {
+   "round_trips_a_year": 32.3,
+   "mean_exposure": 0.619
+  },
+  "D4|P1_trend": {
+   "round_trips_a_year": 6.0,
+   "mean_exposure": 0.825
+  },
+  "D4|P2_dip": {
+   "round_trips_a_year": 24.1,
+   "mean_exposure": 0.127
+  },
+  "D4|P3_rotation": {
+   "round_trips_a_year": 10.4,
+   "mean_exposure": 1.0
+  },
+  "D4|P4_voltarget": {
+   "round_trips_a_year": 0.0,
+   "mean_exposure": 0.673
+  },
+  "D4|P5_canary": {
+   "round_trips_a_year": 32.4,
+   "mean_exposure": 0.619
+  },
+  "D5|P1_trend": {
+   "round_trips_a_year": 6.2,
+   "mean_exposure": 0.761
+  },
+  "D5|P2_dip": {
+   "round_trips_a_year": 24.6,
+   "mean_exposure": 0.129
+  },
+  "D5|P3_rotation": {
+   "round_trips_a_year": 10.3,
+   "mean_exposure": 1.0
+  },
+  "D5|P4_voltarget": {
+   "round_trips_a_year": 0.0,
+   "mean_exposure": 0.637
+  },
+  "D5|P5_canary": {
+   "round_trips_a_year": 32.3,
+   "mean_exposure": 0.619
+  }
+ },
+ "floor": {
+  "status": "specified here, computed on the House by league/deep/screen3.py (R1), never committed; NOT exercised by this receipt: every FP figure here is at the receipt bars alone, an upper bound for the rule with floors, because c_used >= the receipt bar; power figures are upper bounds for the same reason",
+  "series": "the program's own daily series on TRAIN and TRAIN-D: the relabeled TRAIN-D store run (2010-01-04..2015-12-31 scored, 2009 look-back) and the legacy Train runs (2016-01-04..2019-12-31, 2022-01-03..2024-12-31), each piece from its first decision + 2 sessions; per session the per-symbol weights, the cost-free symbol returns, the k 2.0 and k 3.0 costs and r",
+  "worlds": "each world has the key's geometry (deep: 1,944 sessions with the DVAL mask at its relative positions; recent: R 505, V 250, H 194 last) and is filled by a stationary block bootstrap of the program's own sessions (mean block 120, each block circular inside one piece, the piece chosen with probability proportional to its length); 20,000 worlds per world set",
+  "world_sets": {
+   "BASE": "every block start uniform over the pool",
+   "CRASH": "the crash-stress null (POOL1 G8's role, on the program's own Train-era stress): the deep world's 235 mask positions and the recent world's R block 2020-02-20..03-23 positions are filled with blocks that start in the pool's STRESS sessions (the top 5% by the trailing 20-session realized vol of the equal-weight cost-free return of the program's universe; TRAIN-D brings August 2011 and August 2015), every other position as BASE"
+  },
+  "statistic": "in each world the key as judged: deep x2 recomputed with mu_s over the world's sessions of each series (full, masked) and t on both; recent pooled t of r with sum_H",
+  "null": "N0 per key: x0 = x - w kappa, kappa = sum(x) / sum(w) over the pool",
+  "c_pD": "the smallest c on the 0.00..5.00 grid with share(t_mask >= c AND t_full >= c) <= 0.15 in BOTH world sets (the k 3.0 leg left out: it only tightens)",
+  "c_pR": "the smallest c with share(t_R+V+H >= c AND sum_H > 1e-12) <= 0.12 in BOTH world sets",
+  "seeds": "numpy default_rng([20261017, 3, 7, set (BASE 1, CRASH 2), key (deep 1, recent 2), int(version sha256[:8], 16)])"
+ },
+ "canary": {
+  "schedule": "in each block of 10 consecutive S3 looks exactly one is a canary, at block position default_rng([20261017, 3, 8, block]).integers(10): 15 canaries in the 150-look budget",
+  "construction": "random timing with matched turnover and universe: it mirrors the real version looked at just before it (its DVAL-eligible universe, its Train-era round trips a year per symbol and mean holding period, its mean weight per held symbol); per symbol an on/off Markov chain, P(on->off) = 1 / mean hold, P(off->on) set so the invested share matches; seed default_rng([20261017, 3, 9, look index]); it never reads a price",
+  "judged": "exactly as a version on the deep key: the same relabeled DVAL segments, x2 at k 2.0, the mask, the k 3.0 leg and c_D = max(c_D_receipt, its own floor + 0.05); its recent key is not read",
+  "counted": "a canary is a look (it counts toward the 150), is never seated and is never shown to births",
+  "halt_rule": "after the n-th canary look, HALT S3 when the canaries' deep-key pass count exceeds U(n), the upper end of the central 95% band of Binomial(n, 0.15) (smallest u with P(X <= u) >= 0.975)",
+  "U_by_n": {
+   "1": 1,
+   "2": 1,
+   "3": 2,
+   "4": 2,
+   "5": 3,
+   "6": 3,
+   "7": 3,
+   "8": 3,
+   "9": 4,
+   "10": 4,
+   "11": 4,
+   "12": 4,
+   "13": 5,
+   "14": 5,
+   "15": 5
+  },
+  "halt_count_by_n": {
+   "1": 2,
+   "2": 2,
+   "3": 3,
+   "4": 3,
+   "5": 4,
+   "6": 4,
+   "7": 4,
+   "8": 4,
+   "9": 5,
+   "10": 5,
+   "11": 5,
+   "12": 5,
+   "13": 6,
+   "14": 6,
+   "15": 6
+  },
+  "p_halt_by_15": {
+   "0.10": 0.01766,
+   "0.15 (the cap)": 0.05642,
+   "0.20": 0.13132,
+   "0.25": 0.24494,
+   "0.30": 0.38754,
+   "0.40": 0.68413,
+   "0.50": 0.88928,
+   "synthetic canary max D1-D5 (0.0078)": 6e-05
+  },
+  "p_halt_by_5_10_15": {
+   "0.10": [
+    0.0118,
+    0.01535,
+    0.01766
+   ],
+   "0.15 (the cap)": [
+    0.02824,
+    0.04344,
+    0.05642
+   ],
+   "0.20": [
+    0.0528,
+    0.09277,
+    0.13132
+   ],
+   "0.25": [
+    0.08594,
+    0.16573,
+    0.24494
+   ],
+   "0.30": [
+    0.1278,
+    0.2606,
+    0.38754
+   ],
+   "0.40": [
+    0.2368,
+    0.49141,
+    0.68413
+   ],
+   "0.50": [
+    0.375,
+    0.71875,
+    0.88928
+   ],
+   "synthetic canary max D1-D5 (0.0078)": [
+    6e-05,
+    6e-05,
+    6e-05
+   ]
+  },
+  "synthetic_canary_deep_pass_raw_k2": {
+   "D1": 0.0069,
+   "D2": 0.0064,
+   "D3": 0.00703,
+   "D4": 0.00778,
+   "D5": 0.0038
+  }
+ },
+ "looks": {
+  "per_version": 1,
+  "report_only_counts": true,
+  "per_mechanism_cell_max": 3,
+  "total_before_erosion_review": 150,
+  "canary_share": 0.1,
+  "weekly": "the pass count is reported against this receipt's prediction (prediction)"
+ },
+ "prediction": {
+  "zero_edge_pass_rate": {
+   "S_iid": 0.01111,
+   "S_real": 0.01666
+  },
+  "candidate_mix_pass_rate": {
+   "S_iid": 0.03231,
+   "S_real": 0.03911
+  },
+  "daily_candidate_mix_pass_rate_range": [
+   0.015,
+   0.0387
+  ],
+  "note": "S3 passes per look expected under the plan's candidate mix; the weekly line states observed passes against Binomial(looks, this rate)"
+ },
+ "eligibility": [
+  "ETF programs only",
+  "calendar-blind by both the AST scan (ctx.weekday, ctx.session_of_month, ctx.sessions_to_month_end, ctx.events, ctx.events_next) and the behavioural test (two relabelings of one synthetic store give identical intents)",
+  "at most 50 round trips a year",
+  "at most 25% of lots bought at a close and sold at the next open",
+  "at least 750 scored DVAL sessions after symbol inception and look-back",
+  "2001-04 symbols limited to SPY, QQQ, IWM, DIA, XLF, XLE, XLK and TLT; other sector SPDRs from 2005 if the stale-close audit passes",
+  "not strong-recall on contam_probe (m > 0.15 at p_perm <= 0.01)"
+ ],
+ "windows": {
+  "dval": "2001-04-09..2008-12-31: 1,944 sessions (A 937 + B 1,007), masked 1,709",
+  "dval_by_year": {
+   "2001": 181,
+   "2002": 252,
+   "2003": 252,
+   "2004": 252,
+   "2005": 252,
+   "2006": 251,
+   "2007": 251,
+   "2008": 253
+  },
+  "recent": "R 2020-01-02..2021-12-31 (505: 253 + 252), V 2025 (250), H 2026-01-02..2026-10-09 (194)",
+  "floors": "TRAIN 2016-19 + 2022-24 and TRAIN-D 2010-15 only"
+ },
+ "outputs": "verdicts and counts only: no DVAL figure beyond pass or fail, nothing derived from vendor data is committed",
+ "gates": {
+  "G1_deep_alone_le_0.15": {
+   "value": 0.14781,
+   "cell": [
+    "S_real",
+    "-"
+   ],
+   "pass": true
+  },
+  "G2_recent_alone_le_0.12": {
+   "value": 0.11763,
+   "cell": [
+    "D4",
+    "P2_dip"
+   ],
+   "pass": true
+  },
+  "G3_joint_le_0.025": {
+   "value": 0.01666,
+   "cell": [
+    "S_real",
+    "-"
+   ],
+   "pass": true
+  },
+  "G4_worst_no_edge_now_le_0.12_section3": {
+   "value": 0.103,
+   "by_model": {
+    "S_iid": {
+     "rate": 0.08555,
+     "type": "deep_contam"
+    },
+    "S_real": {
+     "rate": 0.103,
+     "type": "deep_contam"
+    }
+   },
+   "pass": true
+  },
+  "G5_crash_stress_nulls": {
+   "value": {
+    "deep": 0.11918,
+    "recent": 0.11763,
+    "joint": 0.01378
+   },
+   "pass": true
+  },
+  "G6_canary_halt_fires": {
+   "p_halt_by_15_at_0.50": 0.88928,
+   "false_halt_at_synthetic_rate": 6e-05,
+   "pass": true
+  },
+  "G7_conformance_plan_row": {
+   "value": {
+    "S_iid": {
+     "got": {
+      "c_deep": 0.89,
+      "c_recent": 1.02,
+      "fp0": 0.01798,
+      "worst": 0.11398,
+      "ppv": 0.2705,
+      "sr50": 0.79
+     },
+     "plan": {
+      "c_deep": 0.886,
+      "c_recent": 1.019,
+      "fp0": 0.018,
+      "worst": 0.114,
+      "ppv": 0.27,
+      "sr50": 0.79
+     },
+     "ok": true
+    },
+    "S_real": {
+     "got": {
+      "c_deep": 1.01,
+      "c_recent": 1.16,
+      "fp0": 0.01792,
+      "worst": 0.10843,
+      "ppv": 0.2375,
+      "sr50": 0.9
+     },
+     "plan": {
+      "c_deep": 1.009,
+      "c_recent": 1.158,
+      "fp0": 0.018,
+      "worst": 0.109,
+      "ppv": 0.24,
+      "sr50": 0.9
+     },
+     "ok": true
+    }
+   },
+   "pass": true
+  },
+  "G8_x2_static_zero": {
+   "value": 4.6351811278100286e-15,
+   "pass": true
+  }
+ },
+ "all_gates_pass": true,
+ "limits": [
+  "synthetic only: the receipt bars hold on the receipt's null worlds; the Train-era calibration is each program's own floor (computed on the House, TRAIN and TRAIN-D only), which can only raise a bar",
+  "every rate is at the receipt bars alone: with own floors the bars are higher, so FP figures are upper bounds and power figures are upper bounds",
+  "the worst no-edge-now figure assumes a remembered mechanism has SR 1.0 on the remembered era and none now (the Section 3 model); stronger memory is watched by contam_probe and the canaries",
+  "the daily worlds have no sign predictability by construction (D5's regime timing is removed by N0); real DVAL may carry serial structure the worlds lack: the canaries and the own floors are its guard",
+  "edges born after 2016 have no deep-key edge and pass S3 at about the new-edge rate (FWD1-R stays their route)",
+  "a pass is moderate evidence: PPV under the plan's candidate mix is stated beside, not a guarantee"
+ ],
+ "stated_beside_every_live_trade": "S3 (two-key screen, receipt equity_screen_3): passed the deep key (sealed 2001-04-09..2008-12-31, full and masked series, k 3.0 stress) at c_D {c_D} (receipt {c_D_receipt}, own floor {c_pD} + 0.05) and the recent key (R+V+H, sum_H > 0) at c_R {c_R} (receipt {c_R_receipt}, own floor {c_pR} + 0.05); S3's zero-edge FP on the receipt's null worlds is at most {fp_joint}% joint ({fp_deep}% deep alone, cap 15%; {fp_recent}% recent alone, cap 12%); a mechanism remembered from either era passes at most {worst}% (FWD1-R keeps the rest of the 15% union); PPV under the plan's candidate mix about {ppv}%; synthetic upper bounds; S3 looks {looks} of 150, canaries {canary_passes} of {canaries} deep-key passes (halt above {halt}); contamination: R, V and part of H can be known to the authoring models, DVAL is sealed and never reaches births",
+ "note": "rates are fractions on seed set B (fresh draws, the receipt bars fixed on seed set A); ci95 is Wilson's; daily cells carry their own draw count; no per-world row is committed",
+ "sha256": {
+  "PREREG-H.md": "6ca65b3e8c9db50aae6d1305ec7fd1a9b5bf7357c2e9219459ac60840ba896dd",
+  "calendar_1999_2015.txt": "32383168faa724e3555bc288a8a9d701c03d090796bf903e57520f735f10bd22",
+  "mask_dval_235.txt": "a8c00b59e6f3e47ec2b5840cbb0dbe77f5d9deecc08eb5af391216a47f653079",
+  "code": {
+   "common.py": "ee9ba99335a7f84c0657c142be5a5c1df215275a4302d3d3a656a90e84bc655b",
+   "daily.py": "765689f7fc68dc74d4655f6a008969daca7a415b7e0d416a1857d6ad581bf32d",
+   "segment.py": "8d370599472dc7389cad18d9a3c90a9727f7a9c7df75cc086bf99270f049b7fe",
+   "canary.py": "d3ffad0294773cbfa29a21c9ae5281493e1952b828ddf0bcb2f6ce49fa955094",
+   "run_receipt.py": "cd55605f42ff1db070ec768e6eb657d0deba9049612b4a2cdc47980b08b49249",
+   "build_receipt.py": "5fd3617fd982ed51aed2326c13f6264e46d330922732da99e4bca418c80566c1",
+   "test_receipt.py": "9d612ca7fec770556f1f036d82327488eb4683db2a345434e89174324adc90b6"
+  },
+  "run_result.json": "3ec25758ee94ebd4be946afe241c4de6aefa283f7a95060a3579e96f812704b8"
+ }
+}

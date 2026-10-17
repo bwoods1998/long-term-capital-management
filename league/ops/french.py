@@ -20,7 +20,10 @@ THE ROUTES, as this release reads them:
 THE SEAL. The library serves whole files, every year in one member: `parse` reads line by line and DROPS, unparsed,
 every line whose first four characters are a year of `DROPPED_YEARS` (never split, never held, never written: seal
 X13, `test_french.ParseDropsTheReserve`); a line of those years that does not BEGIN with its year is not the
-library's format and refuses the whole file. Lines of `SEALED_FROM` on are the look's reader's alone: that reader and
+library's format and refuses the whole file. `DROPPED_YEARS` is the reserve (2020) and its history year (2021) AND,
+from release R1 (the history-expansion plan, A58), THE DEEP KEY's years 2001-2008 (DVAL: sealed for S3's deep key,
+league/deep/). A file this job wrote before R1 held those years: every run first REWRITES the stored files without
+them (`reseal`, counts only), whatever the lane's switch says, before it reads any route. Lines of `SEALED_FROM` on are the look's reader's alone: that reader and
 its file come with the route and are not built now, so `run` COUNTS them and writes none of them anywhere. WHAT
 THAT MEANS TODAY: an inbox file gives the House the factor days of the Train era and before; XS1's French label is
 read on Validation and the holdout (2025 on), so it stays "unmeasured" until the look's file and its reader exist.
@@ -28,8 +31,8 @@ read on Validation and the holdout (2025 on), so it stays "unmeasured" until the
 WHAT IS WRITTEN: `<state>/equity-daily/french/<file>.json` (600, atomic): {"version", "name", "unit": "fraction",
 "days": [ISO day...], "factors": {name: [float | null...]}, "rows", "first", "last"}: the library's percent figures
 as fractions (the decimal point moved two places, never a float division), null where the library marks a missing
-value; days of 1926 through 2019 and of 2022 through 2024, never another. The receipt carries counts, days and
-verdicts, never a factor value.
+value; days of 1926 through 2000, of 2009 through 2019 and of 2022 through 2024, never another. The receipt carries
+counts, days and verdicts, never a factor value.
 """
 
 from __future__ import annotations
@@ -43,8 +46,10 @@ from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 ROUTES = ("/v1/data/french/", "french/inbox")
 DIR = "french"
-#: Lines of these years are dropped unparsed (2020 the reserve, 2021 history only).
-DROPPED_YEARS = ("2020", "2021")
+#: Lines of these years are dropped unparsed (2020 the reserve, 2021 history only; 2001-2008 the deep key's DVAL, R1).
+DROPPED_YEARS = ("2020", "2021", "2001", "2002", "2003", "2004", "2005", "2006", "2007", "2008")
+#: The deep key's years among them (league/deep/config.py `ERAS["dval"]` lies inside them).
+DEEP_YEARS = ("2001", "2002", "2003", "2004", "2005", "2006", "2007", "2008")
 #: Lines from this year on are the look's reader's alone.
 SEALED_FROM = 2025
 FACTORS = ("Mkt-RF", "SMB", "HML", "Mom", "ST_Rev")
@@ -177,6 +182,36 @@ def write(root: str | Path, name: str, days: Sequence[str], factors: Any) -> Pat
                        "rows": len(days), "first": days[0], "last": days[-1]}, indent=None)
 
 
+def reseal(root: str | Path) -> dict[str, int]:
+    """Rewrite every stored factor file under `<root>/french/` without the days of `DROPPED_YEARS` (a file written
+    before a year joined them held it). {file stem: days dropped} for each file rewritten; a file that holds none is
+    left as it is, an unreadable one is removed (it cannot be shown to hold none). Counts only."""
+    from .context import read_json
+
+    out: dict[str, int] = {}
+    for stem in FILES:
+        path = Path(root) / DIR / f"{stem}.json"
+        if not path.exists():
+            continue
+        doc = read_json(path, None)
+        days = doc.get("days") if isinstance(doc, Mapping) else None
+        factors = doc.get("factors") if isinstance(doc, Mapping) else None
+        if not isinstance(days, list) or not isinstance(factors, Mapping) or \
+                not all(isinstance(v, list) and len(v) == len(days) for v in factors.values()):
+            path.unlink(missing_ok=True)
+            out[stem] = -1
+            continue
+        keep = [i for i, day in enumerate(days) if str(day)[:4] not in DROPPED_YEARS]
+        if len(keep) == len(days):
+            continue
+        if keep:
+            write(root, stem, [days[i] for i in keep], {k: [v[i] for i in keep] for k, v in factors.items()})
+        else:
+            path.unlink(missing_ok=True)
+        out[stem] = len(days) - len(keep)
+    return out
+
+
 def inbox(root: str | Path) -> dict[str, Path]:
     """{file stem of `FILES`: the inbox file an operator placed for it} (`<root>/french/inbox/`; the first of
     `INBOX_SUFFIXES` that exists, names compared case-blind). {} when there is no inbox."""
@@ -234,16 +269,17 @@ def _run(ctx: Any) -> dict[str, Any]:
     from ..xs import config as xs_config
     from .equity_universe import lane_off
 
+    resealed = reseal(Path(ctx.root) / STORE_DIR)   # THE SEAL FIRST: whatever the switch, no stored DVAL day stays
     off = lane_off(ctx.root)    # WITH THE LANE'S SWITCH OFF NOTHING OF E4 RUNS (`elane.panel.mode`): its data too
     if off is not None:
-        return {"status": "skipped", "why": off}
+        return {"status": "skipped", "why": off, **({"resealed": resealed} if resealed else {})}
     try:
         why = xs_config.quiet(ctx.now(), WALL_S)
     except Exception as exc:  # noqa: BLE001 - a job that cannot learn whether it stands at a wall does not start
         why = f"the quiet windows could not be read ({type(exc).__name__}: {str(exc)[:160]})"
         ctx.alert("warning", f"french: {why}; the job did not run")
     if why is not None:
-        return {"status": "skipped", "why": why}
+        return {"status": "skipped", "why": why, **({"resealed": resealed} if resealed else {})}
     root = Path(ctx.root) / STORE_DIR
     placed = inbox(root)
     files: dict[str, dict[str, Any]] = {}
@@ -282,8 +318,10 @@ def _run(ctx: Any) -> dict[str, Any]:
                 ctx.alert("warning", f"french: the inbox file of {stem} was read and kept but could not be removed "
                                      f"({type(exc).__name__}): it holds every year, remove it by hand")
     if not files and not problems:
-        return {"status": "skipped", "why": SKIPPED}
+        return {"status": "skipped", "why": SKIPPED, **({"resealed": resealed} if resealed else {})}
     out: dict[str, Any] = {"ok": not problems, "files": files, "missing": missing}
+    if resealed:
+        out["resealed"] = resealed
     if problems:
         out.update(status="failed", problems=problems,
                    error="; ".join(f"{stem}: {text}" for stem, text in sorted(problems.items()))[:600])
@@ -298,5 +336,5 @@ def run(ctx: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
 
     return watched("french", _run)(ctx, *args, **kwargs)
 
-__all__ = ["ROUTES", "DIR", "DROPPED_YEARS", "SEALED_FROM", "FACTORS", "WALL_S", "STORE_DIR", "VERSION", "INBOX",
-           "FILES", "INBOX_SUFFIXES", "MISSING_AT", "SKIPPED", "parse", "write", "inbox", "file_lines", "run"]
+__all__ = ["ROUTES", "DIR", "DROPPED_YEARS", "DEEP_YEARS", "SEALED_FROM", "FACTORS", "WALL_S", "STORE_DIR", "VERSION", "INBOX",
+           "FILES", "INBOX_SUFFIXES", "MISSING_AT", "SKIPPED", "parse", "write", "reseal", "inbox", "file_lines", "run"]

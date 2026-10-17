@@ -50,6 +50,8 @@ export const MERGE_FORBIDDEN = Object.freeze([
   // The equity lanes' folds, out-of-fold effects and memory tables (release E3, Oct 2026): the hidden Train year a
   // family is born with (an input of the Train bar) and that year's sealed tables, which no generator may read.
   'league/swarm/elane_folds.py', 'league/swarm/elane_effects.py', 'league/swarm/elane_memory.py',
+  // The deep key (release R1, Oct 2026): S3's judge and the seal on the sealed 2001-08 era (league/deep/).
+  'league/deep/',
   // What league/live/ and league/gym/ import from outside their trees, and what is sealed into the Gym bundle and the
   // decider's runtime with them: the packages' own __init__ files run first in every House process and in the sandbox;
   // structure_core classifies, limits and prices every real order; ltcm.performance names the owner's flows the stops

@@ -1506,6 +1506,14 @@ change under `gateway/`; nothing waits in `PENDING_GATEWAY`).
   **On a tree that carries release E4** the probe can be handed a plan of the panel strata P4-P6
   (`contam_probe.probe(ctx, panel=...)`: asked after its own cells, inside the same dollars; **The probe's panel
   strata**, in the panel lane's section above). The job (`run`) hands none: it is this probe and nothing else.
+- **The deep key** (release R1; `league/deep/DEEP.md`): `equity_deep` (06:40Z daily until complete, no at-start run)
+  fetches 1999-2015 ETF bars through the gateway's Tiingo route into `<state>/equity-deep/` (DVAL, 2001-04-09..
+  2008-12-31, in `sealed/`, 0700, opened only by the deep gate inside a look), audited, a failed audit writing nothing;
+  `deep_report` (07:10Z, idle hours only) takes each eligible ETF version's ONE report-only S3 look, verdicts sealed in
+  `ledger.json`, counts in `report.json` for the captain, nothing to the swarm or births (its recent key waits on the
+  owner's D2, `elane.deep.reserve`). Both do nothing while `elane.deep.mode` is off. The eligibility census (under 10
+  eligible, H-lite is parked) is the captain's read-only scratch script, history-1017/census/. The
+  probe asks the eras 2001-08 and 2010-15 once the deep store is complete; the French job drops 2001-2008.
 - **Release receipts** (`release_receipts.py`, read by the stall job): a release declares the funnel metric it expects
   to move (`league/ops/release_receipts.json`); the House reads it back after its window and lists the verdict.
   Listed, never reverted. E3 declares two, each read after a week: program-sessions accrue, and out-of-fold rows.

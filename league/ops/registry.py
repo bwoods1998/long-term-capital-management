@@ -225,6 +225,19 @@ JOBS: tuple[Job, ...] = (
              "pin (checkpoints 5-60, its own floor, the panel's placebo leg), the permit file of ids and words the "
              "swarm's seat path reads (switched off) and the operator's report with the registry's expected "
              "zero-edge passes"),
+    # THE DEEP KEY (release R1, the history-expansion plan A58; league/deep/): the deep store from the gateway's Tiingo
+    # route, audited (daily until complete, then a skipped receipt; NO AT-START TRIGGER: a fetch of up to 55 minutes at a
+    # House start before an open would hold the one ops child past the pre-open's grace, E4's live-9), the report-only S3 looks in the
+    # night (one look a version, verdicts sealed in the deep ledger, counts to the captain, births see nothing). Both do
+    # nothing while `elane.deep.mode` is off. (The eligibility census is the captain's scratch script, history-1017.)
+    Job("equity_deep", "league.ops.equity_deep", (S.daily(6, 40),), grace=3 * HOUR, cpu=900, wall=3300,
+        in_pause=True, owner="deep key",
+        what="the deep store: 1999-2015 ETF daily bars from the gateway's Tiingo route, DVAL sealed, audited (calendar, "
+             "OHLC, events, SIP overlap, stale closes); a failed audit writes nothing"),
+    Job("deep_report", "league.ops.deep_report", (S.daily(7, 10),), grace=2 * HOUR, cpu=2400, wall=3300,
+        owner="deep key",
+        what="S3 report-only: one sealed look a current ETF version (deep key on DVAL, recent key), one in ten a canary, "
+             "into the deep ledger; counts to <state>/equity-deep/report.json"),
     # THE PANEL LANE's data and measurement jobs (release E4, "breadth"; league/xs/E4_INTERFACES.md). WITH THE LANE'S
     # SWITCH OFF NONE OF THEM RUNS: each one's first statements are the switch (`league.ops.equity_universe.lane_off`:
     # `elane.panel.mode` "off" in the box's settings is a `skipped` receipt: no gateway call, no file) and

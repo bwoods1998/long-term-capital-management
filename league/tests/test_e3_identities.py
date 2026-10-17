@@ -328,7 +328,10 @@ class TheWiringIsWhole(unittest.TestCase):
             self.assertFalse(set(E3_POLICY) & set(elane))
             self.assertEqual(list(elane)[-1], "e2", "the base: the three blocks go after e2")
             return
-        self.assertEqual(list(elane)[list(elane).index("e2") + 1:], list(E3_POLICY), "after e2, in the spec's order")
+        after = list(elane)[list(elane).index("e2") + 1:]
+        self.assertEqual(after[:len(E3_POLICY)], list(E3_POLICY), "after e2, in the spec's order")
+        # Later releases' blocks follow E3's: release R1's deep key (`elane.deep`, league/deep/config.py `cfg`).
+        self.assertEqual(after[len(E3_POLICY):], ["deep"])
         for name, block in E3_POLICY.items():
             self.assertEqual(elane[name], block, name)
             self.assertEqual(list(elane[name]), list(block), f"{name}: section 5's keys, in its order")

@@ -190,14 +190,16 @@ class RunnerHolds(unittest.TestCase):
         # (release E4) the panel lane's data and measurement jobs, which read the gateway and write their own files,
         # and its half of the forward record (`forward_xs`: it writes the forward store and the twin marker alone).
         # (FWD1-R, A33) the forward screen's job (`forward_screen`: it reads the record read-only and writes only its
-        # own store, the permit file and its report).
+        # own store, the permit file and its report). (Release R1, the deep key) its data job, which reads the gateway
+        # and writes its own store; its report-only looks are no read-only job, so they wait.
         self.assertEqual({j.name for j in JOBS if j.in_pause}, {"budget", "budget_refresh", "clock", "preopen", "economics",
                                                                 "stall", "direction", "fast_lane", "game", "dlane",
                                                                 "equity_data", "equity_twins", "forward_register",
                                                                 "fill_minutes", "forward_shadow", "forward_report",
                                                                 "forward_audit", "forward_xs", "equity_universe",
                                                                 "equity_panel", "equity_spreads", "equity_neff",
-                                                                "french", "xs_zero_edge", "forward_screen"})
+                                                                "french", "xs_zero_edge", "forward_screen",
+                                                            "equity_deep"})
         self.assertEqual({j.name for j in JOBS if j.paid}, {"postmortem", "agenda", "engineer", "contam_probe"})
         longest = max(j.wall for j in JOBS)
         self.assertGreaterEqual(jobs["grant"].grace, longest + 5 * 60, "an hourly grant waits behind the longest job, never missed")

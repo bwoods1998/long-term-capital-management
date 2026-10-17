@@ -30,6 +30,20 @@ The running House release is `20261016T024305Z-e90d75adb36b` (main `d6bcf0cd`, P
 02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
+### Release R1, "deep-report": the deep key (S3) report-only, on `feat/deep-r1` (unreleased; the history-expansion plan, A58; PREREG-H `6ca65b3e`; ships only after checkpoint 15 is FINAL and rel/1023a and POOL1 P1 have settled one night, about Oct 25-27, in an evening window after 21:45Z or a weekend, never inside a checkpoint freeze; the owner's D1 first: `TIINGO_TOKEN` as a gateway secret and the gateway deploy; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the money digest `5ea6f99f` and the constitution `82a9a5a4` are the base's)
+
+- `league/deep/` (new, protected; `league/deep/DEEP.md`): the deep store's blocks and the deep gate's capability, the
+  relabeled store (DVAL on Train-window pseudo-dates through the unchanged engine), the calendar-blind check, x2, S3's
+  keys, bars, own floors and rules, one look a version with the look ledger and the canaries, counts-only report, its
+  own identity. Candidate receipt `docs/benchmarks/equity_screen_3.json`: history-1017 item 5's synthetic receipt,
+  verbatim (`4ff8435b`; c_D 1.02, c_R 1.20 on R+V+H; its floor and canary specification are what screen3/gate run).
+- `league/ops/equity_deep.py`, `deep_report.py` (new jobs; `elane.deep.mode` "report" switches them on, "off" is the
+  code's default; the recent key waits on the owner's D2, `elane.deep.reserve` "judged"); `contam_probe.py` asks the
+  eras 2001-08 and 2010-15 with a deep store; `french.py` drops 2001-2008 and reseals its stored files. The
+  eligibility census is the captain's scratch script (history-1017/census/eligibility_census.py).
+- Gateway: `GET /v1/tiingo/daily/<SYM>/prices` (`lib/tiingo.mjs`), and `league/deep/` in the merge list.
+- **Rollback:** the release before; the deep store and ledger stay on the box, read by nothing.
+
 ### Release 1017r: the owner's new Done (A50), the ETF Probe sleeve 0.25 x E (A51) and the births' one-session ask, on `rel/1017r` (unreleased; one House deploy by the captain, never 12:55-20:05Z on a trading day and never inside an entry window; live before Mon Oct 19 13:30Z; THE MONEY DIGEST MOVES `cfcc94b1` -> `5ea6f99f` and the constitution `60796aed` -> `82a9a5a4` (A51's row alone), the standing grant re-ratifies at start; the options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move)
 
 - A50 (PR #564): Done at the 15th counted close, then every 5th; >= 3 each from >= 2 programs; A1.1's matched minimum

@@ -140,14 +140,55 @@ class ParseDropsTheReserve(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "does not begin with its year"):
                 FR.parse(lines)
 
-    def test_the_dropped_years_are_the_reserve_and_its_history_year(self):
+    def test_the_dropped_years_are_the_reserve_its_history_year_and_the_deep_keys(self):
+        from league.deep import config as deep_config
         from league.xs import config as xs_config
 
-        self.assertEqual(FR.DROPPED_YEARS, ("2020", "2021"))
+        self.assertEqual(FR.DROPPED_YEARS, ("2020", "2021", *FR.DEEP_YEARS))
+        first, last = deep_config.ERAS["dval"]
+        self.assertEqual(FR.DEEP_YEARS, tuple(str(y) for y in range(first.year, last.year + 1)))
         self.assertIn(2020, xs_config.RESERVE_YEARS)
         self.assertIn(2021, xs_config.HISTORY_YEARS)
         self.assertEqual(FR.SEALED_FROM, 2025)
         self.assertLess(max(xs_config.TRAIN_YEARS), FR.SEALED_FROM)
+
+
+class TheDeepKeysYears(unittest.TestCase):
+    """RELEASE R1 (the history-expansion plan, A58): 2001-2008 is the deep key's sealed era (DVAL), dropped like the
+    reserve: never split, parsed, held or written; and a file this job wrote before R1 is rewritten without it."""
+
+    YEARS = tuple(range(1999, 2012))
+
+    def test_no_line_of_2001_to_2008_is_split_parsed_or_kept(self):
+        out = FR.parse(research(years=self.YEARS, trip=True))
+        self.assertEqual(years_of(out["days"]), {1999, 2000, 2009, 2010, 2011})
+        self.assertEqual(out["dropped"], 8 * 3)
+        self.assertNotIn('"2005-', json.dumps(out))
+
+    def test_write_refuses_a_deep_day(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        for day in ("2001-04-09", "2008-12-31", "2004-06-14"):
+            with self.assertRaisesRegex(ValueError, "never written"):
+                FR.write(root, MOMENTUM, ["2000-12-29", day], {"Mom": [0.01, 0.02]})
+        self.assertFalse((root / FR.DIR).exists())
+
+    def test_reseal_rewrites_a_stored_file_without_the_dropped_years(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        days = ["2000-12-29", "2003-05-05", "2008-12-31", "2009-01-02", "2019-12-31"]
+        path = root / FR.DIR / f"{MOMENTUM}.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"version": FR.VERSION, "name": MOMENTUM, "unit": "fraction", "days": days,
+                                    "factors": {"Mom": [0.1, 0.2, 0.3, 0.4, 0.5]}, "rows": 5, "first": days[0],
+                                    "last": days[-1]}))
+        (root / FR.DIR / f"{RESEARCH}.json").write_text("not json")
+        self.assertEqual(FR.reseal(root), {MOMENTUM: 2, RESEARCH: -1})
+        kept = json.loads(path.read_text())
+        self.assertEqual((kept["days"], kept["factors"]["Mom"]), (["2000-12-29", "2009-01-02", "2019-12-31"],
+                                                                  [0.1, 0.4, 0.5]))
+        self.assertFalse((root / FR.DIR / f"{RESEARCH}.json").exists(), "unreadable: it cannot be shown clean")
+        self.assertEqual(FR.reseal(root), {}, "a clean file is left as it is")
 
 
 class TheLibrarysFormat(unittest.TestCase):
@@ -288,6 +329,17 @@ class TheJob(unittest.TestCase):
         self.quiet.assert_called_once_with(self.NOW, FR.WALL_S)
         self.assertEqual((FR.WALL_S, self.gateway.calls, self.written(), self.ctx.alerts), (300, [], {}, []))
         self.assertTrue((self.inbox / f"{RESEARCH}.csv").exists())
+
+    def test_the_seal_runs_first_whatever_the_switch_and_the_walls(self):
+        path = self.root / FR.DIR / f"{MOMENTUM}.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"version": FR.VERSION, "name": MOMENTUM, "unit": "fraction",
+                                    "days": ["2000-12-29", "2006-01-03"], "factors": {"Mom": [0.1, 0.2]}, "rows": 2,
+                                    "first": "2000-12-29", "last": "2006-01-03"}))
+        self.quiet.return_value = "inside the close wall"
+        out = FR.run(self.ctx)
+        self.assertEqual(out, {"status": "skipped", "why": "inside the close wall", "resealed": {MOMENTUM: 1}})
+        self.assertEqual(json.loads(path.read_text())["days"], ["2000-12-29"])
 
     def test_quiet_windows_it_cannot_read_stop_it_and_say_so(self):
         self.quiet.side_effect = RuntimeError("no calendar")

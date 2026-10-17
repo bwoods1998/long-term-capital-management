@@ -74,6 +74,11 @@ J_MAY = {f"league.ops.{name}" for name in E4_OPS}
 #: What release E4's forward module may import beside: the panel's own modules it runs and reads.
 XS_MAY = {"league.xs", *(f"league.xs.{name}" for name in ("store", "runner", "program", "results", "book", "config",
                                                           "identity")), "league.swarm.elane_xs"}
+#: RELEASE R1 (the deep key, the history-expansion plan A58): the contamination probe's two deep eras read the deep
+#: calendar, the deep store's blocks and the deep gate's capability (league/deep/). Those modules, INSIDE A FUNCTION, to
+#: the probe alone: the allowance is its use, held both ways (`test_the_deep_allowance_is_the_probes_use`).
+DEEP_MAY = {"league.deep", *(f"league.deep.{name}" for name in ("config", "calendar", "blocks", "gate"))}
+DEEP_READERS = ("contam_probe",)
 #: Who may import a memory module: the two swarm modules the spec patches, the memory modules themselves, and ops.
 MEMORY_IMPORTERS = ("league/swarm/elane_train.py", "league/swarm/elane_births.py",
                     *(f"league/swarm/{name}.py" for name in MEMORY))
@@ -217,7 +222,8 @@ class TheForwardRecordIsOpsOnly(unittest.TestCase):
     def test_e3s_ops_modules_import_only_what_the_contract_lists(self):
         for name in E3_OPS:
             may = OPS_MAY | J_MAY if name in J_DISPATCH else OPS_MAY
-            self.assertEqual(outside(REPO, REPO / "league" / "ops" / f"{name}.py", may), [], name)
+            inside = may | DEEP_MAY if name in DEEP_READERS else None
+            self.assertEqual(outside(REPO, REPO / "league" / "ops" / f"{name}.py", may, inside=inside), [], name)
         for name in E4_OPS:     # release E4's forward module: E3's list and the panel's own modules, nothing else
             self.assertEqual(outside(REPO, REPO / "league" / "ops" / f"{name}.py", OPS_MAY | XS_MAY), [], name)
 
@@ -235,6 +241,19 @@ class TheForwardRecordIsOpsOnly(unittest.TestCase):
             else:
                 self.assertEqual(found, [], f"{name} imports package J and is no dispatcher")
         self.assertNotIn("contam_probe", J_DISPATCH)
+
+    def test_the_deep_allowance_is_the_probes_use(self):
+        """Release R1's allowance: the probe imports the deep modules, each inside a function and never at its top
+        (E3's job loads without league/deep), and no other E3 ops module imports any of league/deep."""
+        self.assertEqual(DEEP_READERS, ("contam_probe",))
+        for name in E3_OPS:
+            found = [(inside, line) for module, inside, line in imports(REPO, REPO / "league" / "ops" / f"{name}.py")
+                     if module in DEEP_MAY or module.startswith("league.deep.")]
+            if name in DEEP_READERS:
+                self.assertTrue(found, f"{name} is listed as a deep reader and imports nothing of league/deep")
+                self.assertEqual([line for inside, line in found if not inside], [], f"{name}: at its top")
+            else:
+                self.assertEqual(found, [], f"{name} imports league/deep and is no deep reader")
 
     def test_the_memory_modules_import_the_equity_lane_and_the_swarm_inside_functions_only(self):
         for name in MEMORY:
