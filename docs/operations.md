@@ -18,7 +18,8 @@ swarm's refusal reads. **Mode record only; no seat exists in P1** (seats are P2'
 `league/ops/pool_rule.py`; job: `league/ops/pool_screen.py`; refusal: `league/swarm/elane_forward.py` (its docstring,
 4); the calibration's own code, vendored byte for byte: `league/ops/pool_calib/` (8 files, no `__init__.py`);
 receipt (written by the calibration's one run, not in this branch): `docs/benchmarks/pool_screen_1.json`. Departures
-from the pinned text and the readings P1 fixed are in `scratch/pooled-screen/DEVIATIONS.log` (P1 D1-D7, D8-D19).
+from the pinned text and the readings P1 fixed are in `scratch/pooled-screen/DEVIATIONS.log` (P1 D1-D7, D8-D19,
+D20-D25: the conformance review's fixes).
 
 **No identity moves**: nothing under `league/equity/` (no evidence module), `league/gym/`, `league/live/`, the four
 `LEAGUE_FILES` or `league/constitution.py` changes, so the options execution fingerprint `b60410ad`, the money digest
@@ -54,11 +55,13 @@ permits and words.
 - The job `pool_screen` (registry): after `forward_shadow`, listed right after `forward_screen` (it reads FWD1's
   lineages, checkpoints and verdicts), once a record night (a second start on the same `MAX(fwd_runs.through)` writes
   nothing), grace 2 h, CPU 900 s, wall 1500 s, in a pause too; quiet 09:00-17:30 New York; THE DEADLINE is
-  forward_screen's. It reads `forward.sqlite`, `forward-screen.sqlite`, the swarm store and the equity store
-  read-only and writes only `<state>/pool-screen.sqlite` (0600, WAL, append-only by trigger),
-  `<state>/pool-screen-permits.json` and `<state>/pool-screen-report.json`. A failure is an ops alarm, never a stall
+  forward_screen's. It reads `forward.sqlite`, `forward-screen.sqlite` and the equity store read-only and writes
+  `<state>/pool-screen.sqlite` (0600, WAL, append-only by trigger), `<state>/pool-screen-permits.json`,
+  `<state>/pool-screen-report.json` and, in the swarm store, **only the durable refusal** (P1 D20, below): the
+  append-only `elane_pool_mark` family-state mark of every lineage it routes or holds, and the kv `elane_pool_clock`
+  (each receipt's clock night and clock, added once). A mark only refuses. A failure is an ops alarm, never a stall
   cause.
-- `elane_seal.SEALED_KEYS` gains `elane_pool` (P2's pooled-seat record).
+- `elane_seal.SEALED_KEYS` gains `elane_pool` (P2's pooled-seat record) and `elane_pool_mark` (the durable refusal).
 
 **The night** (`pool_screen.py`'s docstring is the full rule):
 1. **The first sighting and the clock.** The job's first sighting of the receipt is stored once (`pool_sighting`: the
@@ -109,18 +112,36 @@ permits and words.
 7. **The permit file**, written right after the night's routes and holds (in a finally) and again at its end: the
    receipt's sha, the clock, each unit's word (`pending`, `report_only`, `ineligible`, `nonconforming` or its final
    word), THE POOL-ROUTE LIST and the hold list, every registry lineage's pool cell and cluster, and the eligible
-   lineages after a PASS (ids, in Train K order). Ids and **fixed words** only (`pool_rule.figure_free`; a reason is a
-   word of `WHY_WORDS`, its detail goes to the report and an alarm). **Never shorter**: the readable file on disk's routes
-   are carried whole and its holds unless the store records their release; a file on disk that cannot be read is never
-   overwritten. The job never deletes it; with no receipt it still writes it, so the swarm reads a file of the job's.
-8. **A lost store** (`pool-screen.sqlite` deleted or reset after the clock): the permit file names this receipt's clock,
-   so the job starts no new clock and judges nothing (an error alarm), and keeps writing the file's lists whole.
-   Restoring the store is a captain's step; never delete the permit file (with both gone the refusal would lift and a
-   new clock would start: a re-test the PREREG forbids, 10.10).
+   lineages after a PASS (ids, in Train K order). Ids and **fixed words** only (`pool_screen.permit_figures`: **an id is
+   never read for a figure** (P1 D21): a lineage slug like `gap-50-bp-fade`, a cell, a cluster, a family, a sha or a
+   date; only the free text, a reason (a word of `WHY_WORDS`, its detail goes to the report) and a unit's word, is). A
+   value that would carry a figure is written as the fixed word `withheld` (a warning alarm); **one bad text never
+   freezes the file** any more. A document that still cannot be mended is written as a file the swarm reads as
+   unreadable (`{"version": 1, "screen": "POOL1", "fail_closed": "figure"}`: it fails closed) with an error alarm.
+   **Never shorter**: the readable file on disk's routes are carried whole and its holds unless the store records their
+   release, and every route and unreleased hold the swarm store's marks hold is listed too; a file on disk that cannot be
+   read is never overwritten (**an error alarm** each night, P1 D22). The job never deletes it; with no receipt it still
+   writes it, so the swarm reads a file of the job's.
+8. **A lost store** (`pool-screen.sqlite` deleted or reset after the clock): the permit file, or the swarm store's clock
+   record (`elane_pool_clock`), names this receipt's clock, so the job starts no new clock and judges nothing (an error
+   alarm), and keeps writing the file's lists and the marked routes and holds whole. **With the store AND the file both
+   gone** the marks still refuse every routed and held lineage and the clock record still refuses a new clock (no
+   re-test, PREREG 10.10); the file is rewritten from the marks. Restoring the store is a captain's step.
+9. **The durable refusal** (P1 D20; the conformance review's findings 2 and 3). Before its own store commits a route or a
+   hold the job adds the mark of it to the state of **every family of that lineage** in the swarm store
+   (`elane_forward.pool_mark_write`: one transaction; `route`, `held` and `released` parts of ids and words, each added
+   once and never changed; a release only after its hold and never beside a route). A route or hold whose mark cannot
+   be written is not written that night (an error alarm; the clock waits a night when its route list cannot be
+   marked); a release is written first and its mark after (a failed release mark leaves the lineage refused). Before
+   every permit file the job adds any mark the store or the file holds and lacks (`sync_marks`).
 
-**The swarm's refusal** (`elane_forward.py` 4): a lineage on the POOL-route or hold list takes no FWD1-R seat (`step`'s
-ETF branch, `seat_refused`) and no sealed try (`try_refused`, whatever `elane.fwd1.seats` says), **whatever
-`elane.pool.mode` says**, for good under the receipt (mode off, seats off, a pooled FAIL, DEMOTED or VOID leave it). A
+**The swarm's refusal** (`elane_forward.py` 4): a lineage on the POOL-route or hold list, **or whose family or lineage
+root carries a route or unreleased held mark** (`pool_mark`, read from the swarm store whatever the pool's file, its
+store and `elane.pool.mode` say; a family born into the lineage later reads its root's mark; a mark that is not the
+job's shape refuses as a route), takes no FWD1-R seat (`step`'s ETF branch, `seat_refused`) and no sealed try
+(`try_refused`, whatever `elane.fwd1.seats` says), **whatever `elane.pool.mode` says**, for good under the receipt (mode
+off, seats off, a pooled FAIL, DEMOTED or VOID leave it; so do the permit file deleted while the mode is off or the
+block absent, and the pool's store and file both deleted). A
 lineage on the ROUTE list is refused its sealed try outright; FWD1's L5 still holds for a HELD index lineage only,
 before the close of its FWD1_START session. **Fail closed**: the file missing while `elane.pool.mode` is not "off", or
 unreadable at any time: **no ETF FWD1-R pass is seated** (FWD1 judges ETF lineages in case N only, and any could be on
@@ -130,9 +151,10 @@ try while FWD1's own file is unreadable too). `one_a_cell` counts a pooled seat 
 **The operator views** (judge-module edits of views only): FWD1's report (`forward_screen.report`) leaves a lineage on
 the POOL-route or hold list out of its pass sentences, status counts, stall rows and registry figures until its unit
 is final, counting it only as `pool_route`; the BH/BY meter (`forward_report._meter_row`) leaves it out of the family
-on the days written meanwhile. **While the pool's file fails closed (or is missing beside the pool's own store), the
-meter WAITS for the day** (`meters` stops there: "waiting": {"day", "pool"}) and writes it once the file reads, never a
-row with the ETF lineages left out for good; FWD1's report (rewritten nightly) withholds every ETF lineage meanwhile.
+on the days written meanwhile. **While the pool's file fails closed (or is missing beside the pool's own store or a
+durable mark in the swarm store), the meter WAITS for the day** (`meters` stops there: "waiting": {"day", "pool"}) and
+writes it once the file reads, never a row with the ETF lineages left out for good; FWD1's report (rewritten nightly)
+withholds every ETF lineage meanwhile.
 
 **Stated limits of P1** (DEVIATIONS.log): a cell first judged after the clock (P1 D3) is not clocked (its lineages stay
 on FWD1-R); a later lineage with FWD1-R checkpoints read before its hold is released to FWD1-R (P1 D4); a join's U_u is
@@ -152,12 +174,21 @@ avoiding 00:20-00:40Z and 01:40-02:30Z; one House deploy, owner deploy: `league/
   the clock (the next session after the clock night) and the route list; `forward-screen-report.json`'s `pool_route`
   count; no pooled figure in any file the swarm reads.
 - **Rollback**: `elane.pool.mode` "off" (allowed while no pooled seat is held: none can be in P1) stops the job and
-  keeps the file; THE POOL-ROUTE REFUSAL DOES NOT LIFT. **A code rollback to a release below P1 LIFTS the refusal**:
-  that release has no reader of the permit file, so a POOL-route lineage could take an FWD1-R seat. That contradicts
+  keeps the file and the marks; THE POOL-ROUTE REFUSAL DOES NOT LIFT (not even if the file is then deleted). **A code
+  rollback to a release below P1 LIFTS the refusal**: that release has no reader of the permit file or the marks, so a
+  POOL-route lineage could take an FWD1-R seat. That contradicts
   PREREG 7.2 ("no entry is ever removed", "never seats that lineage under this receipt") and 13.6 (after a rollback the
   POOL-route lineages have no seat route until a successor receipt). **While the route list is non-empty such a
-  rollback needs a captain amendment**, or the rollback release must carry an equivalent reader of
-  `pool-screen-permits.json` (the refusal of `elane_forward.py` 4).
+  rollback needs a captain amendment**, or the rollback release must carry an equivalent reader of the marks and of
+  `pool-screen-permits.json` (the refusal of `elane_forward.py` 4). The House's own automatic rollbacks cannot go below
+  P1 once it has run a night (P1 D23): a deploy's back-out returns to the release current before that deploy, inside its
+  watch, and the rollback drill to the release it copied; only the operator's `python -m league.watchdog rollback` (from
+  P1 with nothing deployed after it) can. Blocking that command is left to the captain (it is also the emergency way
+  back).
+- **The receipt's code** (P1 D24; the review's finding 6): a pinned receipt must print `CODE PIN 3` and name every file
+  of the calibration's run code (`pool_rule.CODE_PIN_SHA256`, p1run's `CODE_FILES`) at its latest pin's sha; a file
+  reverted to an earlier pin's sha is refused. A later calibration code pin means updating `CODE_PIN` and
+  `CODE_PIN_SHA256` in the same reviewed PR as the receipt.
 
 ## Done at the 15th close, then every 5th (Oct 16, 2026): the owner's new goal (A50): `feat/done-a50`, not deployed
 

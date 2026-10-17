@@ -61,14 +61,37 @@ is on branches.
   bar and its conformance), F3 (the unreadable-file lift), F4 (the store loss), F5 (the sealed-route race), F6 (L5 on a
   route), F7 (the sighting), F8 (decimals in the file), F9 (the finally), F10 (the rollback rule, docs/operations.md),
   F11 (the meter), F12 (expected passes per cluster), F13 (the copy merge's wait): each fixed with its test.
+- The conformance review's findings (`scratch/pooled-screen/fix-result.json`, "reviews": NOT READY, one HIGH):
+  - **1 (HIGH), a lineage slug with "bp" in it froze the permit file**: ids (lineages, cells, clusters, families, shas,
+    dates; `pool_screen.PERMIT_IDS`, `PERMIT_ID_KEYS`) are never read for figures, only the free text (a reason, a
+    unit's word) is; a value that would carry one is written as `withheld` with an alarm (`pool_rule.scrub_figures`),
+    and a document that cannot be mended is written as a file the swarm reads as unreadable (fail closed) with an
+    error alarm, never left frozen (P1 D21).
+  - **2 and 3, the refusal lifted with the file deleted under mode off (or no `elane.pool` block) and with the store and
+    the file both deleted**: THE DURABLE REFUSAL (P1 D20). The job adds a sealed, append-only mark (`elane_pool_mark`:
+    route, held, released parts of ids and words) to every family of each lineage it routes or holds, in the swarm
+    store, BEFORE its own store commits the route or hold (none is written unmarked), and the clock's record to the
+    swarm store's kv (`elane_pool_clock`). `step`, `seat_refused` and `try_refused` read the family's and its lineage
+    root's mark (`elane_forward.pool_mark`) whatever the pool's file, store and mode say; the clock record refuses a new
+    clock under the same receipt; the permit file is never shorter than the marks; the operator views fail closed on a
+    missing file beside a mark. `elane_seal.SEALED_KEYS` gains `elane_pool_mark`.
+  - **4, an unreadable permit file raised no alarm**: an error alarm each night it is kept (P1 D22), beside the alarms
+    of a mended value, a failed-closed document, a mark that could not be written and a lineage with no family to mark.
+  - **5, an automatic rollback below P1**: not possible once P1 has run a night (a deploy's back-out returns to the
+    release current before it; the drill to the release it copied); the operator's rollback is the captain's (P1 D23).
+  - **6, a reverted calibration file labelled CODE PIN 3**: a pinned receipt must print CODE PIN 3 and name every run
+    file at its latest pin's sha (`pool_rule.CODE_PIN_SHA256`; P1 D24).
+  - Every lift attempt of the review's table is a test that holds (`test_pool_screen.TheConformanceReviewsLiftAttempts`,
+    `TheDurableRefusal`, `AFigureInTheFreeText`; `test_elane_forward.TheDurableMark`).
 - policy.json: `elane.pool` {mode "record", seats "off", cpu_seconds_night 600}. **No pin block and no receipt yet**
   (the calibration's one run is Oct 20: P1 D1): nothing is judged until the release that ships P1 carries both (P12).
-- Departures and readings: `scratch/pooled-screen/DEVIATIONS.log` P1 D1-D7 and P1 D8-D19 (no POOL1 figure existed or was
-  seen).
+- Departures and readings: `scratch/pooled-screen/DEVIATIONS.log` P1 D1-D7, P1 D8-D19 and P1 D20-D25 (no POOL1 figure
+  existed or was seen).
 - **Ships** after checkpoint 15 is final (evening or weekend window); between the deploy and the job's first night
   the swarm fails closed (ETF FWD1-R passes wait; FWD1-judged lineages take no sealed try; the meter waits).
-- **Rollback:** `elane.pool.mode` "off" stops the job and keeps the file; the refusal does not lift. A code rollback
-  below P1 lifts it (no reader): while the route list is non-empty it needs a captain amendment (docs/operations.md).
+- **Rollback:** `elane.pool.mode` "off" stops the job and keeps the file and the marks; the refusal does not lift, not
+  even with the file deleted. A code rollback below P1 lifts it (no reader): while the route list is non-empty it needs
+  a captain amendment (docs/operations.md).
 
 ### Release 1017r: the owner's new Done (A50), the ETF Probe sleeve 0.25 x E (A51) and the births' one-session ask, on `rel/1017r` (unreleased; one House deploy by the captain, never 12:55-20:05Z on a trading day and never inside an entry window; live before Mon Oct 19 13:30Z; THE MONEY DIGEST MOVES `cfcc94b1` -> `5ea6f99f` and the constitution `60796aed` -> `82a9a5a4` (A51's row alone), the standing grant re-ratifies at start; the options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move)
 
