@@ -165,7 +165,9 @@ a union bound (P1 D5).
 avoiding 00:20-00:40Z and 01:40-02:30Z; one House deploy, owner deploy: `league/ops/` is protected and
 `league/swarm/elane_forward.py` is FORBIDDEN; no gateway change), WITH the receipt and its pin block in the same PR
 (P12: `cp` the receipt, its sha into `policy.json`, CI green on the exact head; the calibration's dry-run fixture
-`league/tests/fixtures/pool_screen_1_dryrun.json` stays a test's).
+`league/tests/fixtures/pool_screen_1_dryrun.json` stays a test's; when C12 swaps in the calibration's own dry-run
+receipt, keep `league/tests/pool_world.py` for the clocked path: that fixture has no cluster that can be clocked; and
+rebase onto main first, which has moved since `4893d0f8`).
 - **Between the deploy and the job's first night** the permit file does not exist and `elane.pool.mode` is "record",
   so the swarm fails closed for those hours: ETF FWD1-R passes wait a round, and FWD1-judged lineages' sealed tries are
   refused; the BH/BY meter waits for those days. It lifts on the job's first run (which writes the file even before
