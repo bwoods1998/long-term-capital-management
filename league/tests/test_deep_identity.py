@@ -17,8 +17,10 @@ from league.swarm import evaluator
 
 REPO = Path(__file__).resolve().parents[2]
 DEEP = REPO / "league" / "deep"
-#: What a module of league/deep may import of the league beside league/deep itself.
-ALLOWED = {f"league.equity.{name}" for name in ("config", "store", "screen", "synth", "program")} | {"league.equity"}
+#: What a module of league/deep may import of the league beside league/deep itself (six equity evidence modules: the
+#: runner for its `RunLost`, the one failure that is the program's, league/deep/gate.py).
+ALLOWED = {f"league.equity.{name}" for name in ("config", "store", "screen", "synth", "program", "runner")} | \
+    {"league.equity"}
 #: ... and the identity module, inside its functions, the options fingerprint's four files' list.
 IDENTITY_ALLOWED = {"league.gym.driver", "league.gym"}
 SEALED_FROM_DEEP = ("league/swarm", "league/equity", "league/live", "league/gym", "league/xs")
@@ -99,7 +101,7 @@ class TheDeepIdentity(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 identity.deep_fingerprint.__wrapped__(repo)
 
-    def test_the_package_imports_only_its_own_modules_and_five_equity_evidence_modules(self):
+    def test_the_package_imports_only_its_own_modules_and_six_equity_evidence_modules(self):
         for path in sorted(DEEP.glob("*.py")):
             found = {m for m in imports(path) if m != "league.deep" and not m.startswith("league.deep.") and m != "league"}
             allowed = ALLOWED | (IDENTITY_ALLOWED if path.stem == "identity" else set())
@@ -118,6 +120,33 @@ class BirthsSeeNothing(unittest.TestCase):
                     if pattern.search(line):
                         hits.append(f"{path.relative_to(REPO)}:{number}")
         self.assertEqual(hits, [])
+
+    def test_no_file_the_engineer_may_write_names_the_deep_store(self):
+        """The review of Oct 17: league/sailbox.py and league/data_job.py are in the engineer's surface
+        (gateway/lib/github.mjs `ENGINEER_SURFACE`) and outside the trees checked above."""
+        text = (REPO / "gateway" / "lib" / "github.mjs").read_text()
+        block = text[text.index("export const ENGINEER_SURFACE"):]
+        block = block[:block.index("tests:")]
+        surface = re.findall(r"'([^']+\.py)'", block)
+        self.assertIn("league/sailbox.py", surface)
+        self.assertIn("league/data_job.py", surface)
+        pattern = re.compile(r"league\.deep\b|league/deep\b|equity-deep|from \.\.deep|from \.deep\b")
+        hits = [f"{name}:{number}" for name in surface for number, line in
+                enumerate((REPO / name).read_text().splitlines(), 1) if pattern.search(line)]
+        self.assertEqual(hits, [])
+
+    def test_only_the_gate_and_the_probe_mint_the_deep_gates_capability(self):
+        """The review of Oct 17: any league/ops module could call `mint_deep_gate_capability`; two do."""
+        found = set()
+        for path in sorted((REPO / "league").rglob("*.py")):
+            rel = path.relative_to(REPO).as_posix()
+            if rel.startswith("league/tests/"):
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                name = node.attr if isinstance(node, ast.Attribute) else node.id if isinstance(node, ast.Name) else None
+                if name == "mint_deep_gate_capability":
+                    found.add(rel)
+        self.assertEqual(found, {"league/deep/gate.py", "league/ops/contam_probe.py"})
 
     def test_only_ops_and_tests_import_league_deep(self):
         hits = []

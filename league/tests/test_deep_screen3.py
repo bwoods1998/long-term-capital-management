@@ -118,6 +118,27 @@ class TheRules(unittest.TestCase):
         self.assertGreater((b_back + b_scored)[start], dt.date(2005, 11, 1), "GLD from late 2005")
         self.assertGreaterEqual(gld["scored"], config.MIN_SCORED_SESSIONS)
 
+    def test_a_segment_with_a_needs_funds_gap_is_not_scored(self):
+        full = screen3.layout(["SPY", "QQQ"], 40, self.FIRST, {})
+        gap_b = screen3.layout(["SPY", "QQQ"], 40, self.FIRST, {}, {"QQQ": {"dval": 1}})
+        self.assertEqual((gap_b["segments"]["A"], gap_b["segments"]["B"]), (None, None), "dval feeds both segments")
+        self.assertIn("gaps", gap_b["why"]["B"])
+        history_gap = screen3.layout(["SPY", "QQQ"], 40, self.FIRST, {}, {"SPY": {"history": 2}})
+        self.assertIsNone(history_gap["segments"]["A"], "A's look-back is the history span")
+        self.assertEqual(history_gap["segments"]["B"], full["segments"]["B"], "B reads dval alone")
+        other = screen3.layout(["SPY", "QQQ"], 40, self.FIRST, {}, {"XLK": {"dval": 3}, "QQQ": {"traind": 1}})
+        self.assertEqual(other["scored"], full["scored"], "another fund's gap, or a TRAIN-D one, unscores nothing")
+        out = self.rules(gaps={"QQQ": {"dval": 1}})
+        self.assertEqual((out["eligible"], out["why"]), (False, "fewer than 750 scored DVAL sessions"))
+
+    def test_the_first_decision_holds_history_plus_one_bars(self):
+        """Review 1's note 10: `i0 + history + 1` is the engine's rule (league/equity/store.py `_slice` hands a run
+        history + 1 sessions before its first: its first decision's whole ctx), so at history 504 segment B scores
+        1,006 sessions; the census counts one session looser."""
+        b = screen3.layout(["SPY"], 504, self.FIRST, {})["segments"]["B"]
+        self.assertEqual((b["start"], b["sessions"]), (505, 1006))
+        self.assertEqual(screen3.layout(["SPY"], 503, self.FIRST, {})["segments"]["B"]["sessions"], 1007)
+
     def test_turnover_and_the_overnight_share(self):
         lots = [{"exit_day": "2016-02-01", "entry_at": "close", "exit_at": "open", "held_sessions": 1}] * 3 + \
                [{"exit_day": "2016-02-01", "entry_at": "open", "exit_at": "open", "held_sessions": 4}] + \

@@ -1,6 +1,8 @@
 """THE DEEP STORE'S DATA JOB (HISTORY-PLAN.md section 5.3, "equity_deep: the audit fails closed; the receipt carries no
-decimals"; league/ops/equity_deep.py): what is asked of the gateway, the staging, the audit's every check failing
-closed (a failed audit writes nothing), the sealed tree as written, and a receipt of counts and verdicts only.
+decimals"; league/ops/equity_deep.py): what is asked of the gateway, the staging (DVAL inside a marked owner-only
+folder), the audit's every check failing closed (a failed audit writes nothing, and the next runs wait for refetch),
+a gap of a DVAL fund failing it, a run that stops at an answer that will not change tonight, the sealed tree as
+written, and a receipt of counts and verdicts only.
 
 The gateway here is a stand-in serving synthetic bars on the deep calendar (league/tests/deep_fakes.py `gbm`) and, for
 2016-19, the synthetic SIP store's own raw bars: no market row, no token."""
@@ -42,8 +44,9 @@ def floats(value, path=""):
 class Gateway:
     """The Tiingo route's stand-in: {"symbol", "rows"} for /v1/tiingo/daily/<SYM>/prices, from synthetic series."""
 
-    def __init__(self, sip_root: Path, *, break_with=None):
+    def __init__(self, sip_root: Path, *, break_with=None, refuse=None):
         self.calls: list[tuple[str, dict]] = []
+        self.refuse = refuse
         self.break_with = break_with or (lambda sym, rows: rows)
         days = calendar.deep_sessions()
         self.series = {}
@@ -75,6 +78,8 @@ class Gateway:
 
     def get(self, path: str, params=None):
         self.calls.append((path, dict(params or {})))
+        if self.refuse is not None:
+            raise self.refuse(path)
         sym = re.fullmatch(r"/v1/tiingo/daily/([A-Z]+)/prices", path).group(1)
         rows = self.rows(sym, params["startDate"], params["endDate"])
         return {"symbol": sym, "rows": self.break_with(sym, rows)}
@@ -149,10 +154,20 @@ class Job(unittest.TestCase):
         self.assertEqual(len(gw.calls), len(equity_deep.plan()), "no request is asked twice")
 
     def failing(self, break_with) -> dict:
-        out = equity_deep.run(self.ctx(Gateway(self.root / "equity-daily", break_with=break_with)))
+        gw = Gateway(self.root / "equity-daily", break_with=break_with)
+        out = equity_deep.run(self.ctx(gw))
         self.assertEqual(out.get("status"), "failed", out)
         self.assertNothingWritten()
         self.assertEqual(floats(out), [])
+        marker = self.deep / config.AUDIT_FAILED
+        self.assertTrue(marker.is_file(), "a failed audit leaves its marker")
+        self.assertEqual(floats(json.loads(marker.read_text())), [], "counts and verdicts only")
+        asked = len(gw.calls)
+        again = equity_deep.run(self.ctx(gw))
+        self.assertEqual(again["status"], "skipped", "a deterministic failure is not fetched again every night")
+        self.assertIn("refetch", again["why"])
+        self.assertEqual(len(gw.calls), asked, "no request")
+        marker.unlink()
         return out
 
     def test_the_audit_fails_closed(self):
@@ -174,13 +189,63 @@ class Job(unittest.TestCase):
         def sip_off(sym, rows):
             return [{**r, "close": r["close"] * 1.01} if sym == "IWM" and r["date"] >= "2016-01-04" else r for r in rows]
 
+        def qqq_gap(sym, rows):   # one missing session of a DVAL fund in dval: S3's look would fail on the data
+            return [r for r in rows if not (sym == "QQQ" and r["date"] == "2006-06-06")]
+
+        def xlk_stops(sym, rows):   # a DVAL fund whose traind bars stop a session early: a gap too
+            return rows[:-1] if sym == "XLK" and rows and rows[-1]["date"] == "2015-12-31" else rows
+
         cases = {"SPY's dval sessions are not the calendar's": spy_missing, "bars off the calendar": off_calendar,
                  "fail the OHLC sanity check": insane, "factor steps with no listed event": unexplained,
-                 "do not agree with the House's SIP store": sip_off}
+                 "do not agree with the House's SIP store": sip_off, "QQQ dval: 1 sessions missing": qqq_gap,
+                 "XLK traind: 1 sessions missing": xlk_stops}
         for why, broken in cases.items():
             with self.subTest(why):
                 out = self.failing(broken)
                 self.assertIn(why, out["error"])
+
+    def test_a_look_back_gap_is_kept_and_unscores_segment_a_only(self):
+        def history_gap(sym, rows):
+            return [r for r in rows if not (sym == "XLF" and r["date"] == "2000-03-01")]
+
+        out = equity_deep.run(self.ctx(Gateway(self.root / "equity-daily", break_with=history_gap)))
+        self.assertTrue(out.get("written"), out.get("error"))
+        self.assertEqual(out["audit"]["gaps"], {"history": {"XLF": 1}})
+        self.assertEqual((equity_deep.gap_max("XLF", "history"), equity_deep.gap_max("XLF", "dval"),
+                          equity_deep.gap_max("XLRE", "traind")), (equity_deep.GAP_MAX, 0, equity_deep.GAP_MAX))
+        from league.deep import gate, screen3
+
+        gaps = gate._gaps(blocks.DeepStore(self.deep))
+        self.assertEqual(gaps, {"XLF": {"history": 1}})
+        first = {s: dt.date(1999, 1, 4) for s in config.DEEP_UNIVERSE}
+        laid = screen3.layout(["SPY", "XLF"], 20, first, {}, gaps)
+        self.assertEqual((laid["segments"]["A"], bool(laid["segments"]["B"])), (None, True))
+
+    def test_dval_is_staged_inside_a_marked_owner_only_folder(self):
+        gw = Gateway(self.root / "equity-daily")
+        equity_deep.run(self.ctx(gw, max_requests=4))   # SPY: history, dval, traind, overlap
+        sealed = self.deep / config.STAGING_DIR / config.SEALED_DIR
+        self.assertTrue((sealed / "dval" / "SPY.npz").is_file())
+        self.assertFalse((self.deep / config.STAGING_DIR / "dval").exists(), "never beside the open spans")
+        self.assertTrue((sealed / config.GATE_MARK).is_file())
+        for path in (sealed, sealed / "dval"):
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o700)
+        self.assertTrue(equity_deep.run(self.ctx(gw)).get("written"))
+        self.assertFalse((self.deep / config.STAGING_DIR).exists())
+
+    def test_a_run_stops_at_an_answer_that_will_not_change_tonight(self):
+        from league.ops.context import GatewayError
+
+        for status in (503, 403, 401):
+            gw = Gateway(self.root / "equity-daily", refuse=lambda path, status=status: GatewayError(
+                f"GET {path}: HTTP {status} {{\"cap\": \"setup\"}}", status=status))
+            out = equity_deep.run(self.ctx(gw))
+            self.assertEqual((out["status"], len(gw.calls)), ("failed", 1), status)
+            self.assertIn(f"HTTP {status}", out["error"])
+        gw = Gateway(self.root / "equity-daily", refuse=lambda path: GatewayError(f"GET {path}: HTTP 502", status=502))
+        out = equity_deep.run(self.ctx(gw))
+        self.assertEqual(len(gw.calls), equity_deep.CONSECUTIVE_MAX, "a passing upstream fault: three in a row")
+        self.assertIn("in a row", out["error"])
 
     def test_no_sip_store_fails_closed(self):
         gw = Gateway(self.root / "equity-daily")

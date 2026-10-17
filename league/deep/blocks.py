@@ -14,6 +14,7 @@ LAYOUT (`<state>/equity-deep/`, 0700):
     open/traind/<SYM>.npz       2009-01-02..2015-12-31 (2009 look-back + TRAIN-D)
     sealed/                     0700, carries the DEEP_GATE mark
     sealed/dval/<SYM>.npz       2001-04-09..2008-12-31 (THE DEEP KEY)
+    sealed/.looks/deep-*/       a look's temporary stores (`looks_dir`), removed by the look, swept after a kill
     ledger.json, report.json    league/deep/gate.py's and report.py's (0600)
 
 A BLOCK (`block_bytes`) is a deflated zip of numpy arrays with fixed timestamps (the same data, the same sha): days
@@ -291,6 +292,78 @@ class DeepStore:
         return read_block(data)
 
 
+# ------------------------------------------------------------------------------------------- the looks' temporary stores
+def looks_dir(root: str | Path, *, make: bool = False) -> Path:
+    """`<root>/sealed/.looks/` (`config.LOOKS_DIR`): where every look's temporary stores are written, inside the sealed
+    tree (0700, the DEEP_GATE mark). `make`: created (0700) when the sealed tree is there (DeepMissing otherwise)."""
+    path = Path(root) / config.SEALED_DIR / config.LOOKS_DIR
+    if make:
+        if not (Path(root) / config.SEALED_DIR).is_dir():
+            raise DeepMissing(f"no sealed tree at {root}: a look's stores are written inside it")
+        path.mkdir(mode=0o700, exist_ok=True)
+        os.chmod(path, 0o700)
+    return path
+
+
+def temp_prefix(name: str) -> str:
+    """The prefix of a look's temporary directory: `deep-<name>-p<pid>-` (`sweep` reads the pid back)."""
+    return f"{config.TEMP_PREFIX}{name}-p{os.getpid()}-"
+
+
+def _alive(pid: int) -> bool:
+    """Whether process `pid` is running (a zombie is not; one of another user is)."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as handle:
+            state = handle.read().rsplit(b")", 1)[-1].split()[:1]
+        return state != [b"Z"]
+    except OSError:
+        return True
+
+
+def sweep(parent: str | Path, *, now: float | None = None) -> int:
+    """THE SWEEP: remove every `deep-*` directory under `parent` that a process left behind (`config.LOOKS_DIR`): one
+    whose process (`-p<pid>-` in its name) is gone, whose name names none, or that is older than `config.TEMP_STALE_S`.
+    A look's own block removes its directory; this is for the look whose process was killed (the wall's SIGKILL, a CPU
+    or memory limit, a box restart) before its `finally` ran, so no relabeled DVAL store outlives its look. The number
+    removed (0 when `parent` is not a directory)."""
+    import re
+    import time
+
+    parent = Path(parent)
+    if not parent.is_dir():
+        return 0
+    clock = time.time() if now is None else float(now)
+    removed = 0
+    for entry in sorted(parent.iterdir()):
+        if not entry.name.startswith(config.TEMP_PREFIX) or entry.is_symlink() or not entry.is_dir():
+            continue
+        found = re.search(r"-p(\d+)-", entry.name)
+        try:
+            age = clock - entry.stat().st_mtime
+        except OSError:
+            continue
+        if found is None or not _alive(int(found.group(1))) or age > config.TEMP_STALE_S:
+            shutil.rmtree(entry, ignore_errors=True)
+            removed += int(not entry.exists())
+    return removed
+
+
+def sweep_store(root: str | Path) -> int:
+    """`sweep` of the deep store at `root`: its looks' directory, and its own top (where the first R1 build wrote
+    them). Nothing is created; a root that is not there sweeps nothing."""
+    return sweep(looks_dir(root)) + sweep(root)
+
+
 def as_of_closes(store: DeepStore, symbol: str, spans: Sequence[str]) -> dict[str, float]:
     """{ISO day: adjustment=all close} of `symbol` over `spans` joined (one as-of chain: a ratio of two of these is
     the total return between them). A sealed span needs the gate (DeepRefused)."""
@@ -303,5 +376,5 @@ def as_of_closes(store: DeepStore, symbol: str, spans: Sequence[str]) -> dict[st
 
 
 __all__ = ["COLUMNS", "VENDOR", "ALL_PLACES", "DeepRefused", "DeepMissing", "ordinal", "from_ordinal", "block_bytes",
-           "read_block", "rows_to_columns", "factors", "adjusted", "concat", "write_store", "DeepStore",
-           "as_of_closes"]
+           "read_block", "rows_to_columns", "factors", "adjusted", "concat", "write_store", "DeepStore", "looks_dir",
+           "temp_prefix", "sweep", "sweep_store", "as_of_closes"]

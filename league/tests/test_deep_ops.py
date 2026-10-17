@@ -1,7 +1,9 @@
 """THE DEEP KEY'S HOUSE JOBS (release R1; league/ops/deep_report.py, registry.py): report-only S3 looks in idle hours
 with the verdicts sealed in the ledger and counts to the captain (births see nothing: the job's receipt names no
-pass), the recent key pending until the owner's D2 and read once when it is "judged"; the current versions as the
-item-8 census reads them; the registry rows; the contamination probe's deep eras and the strong-recall reading.
+pass); D2 judged: both keys in every look, and with the reserve sealed no look at all; one version's error of the
+House's never stops the next and spends no look; the wall's room; a damaged ledger fails closed; the current versions
+as the item-8 census reads them, with their seat and source; the registry rows; the contamination probe's deep eras
+(a sealed era's cell keeps no DVAL figure beyond the reading's) and the strong-recall reading.
 
 Synthetic stores and invented versions only (league/tests/deep_fakes.py)."""
 
@@ -9,11 +11,13 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from league.deep import config, gate
+from league.equity.runner import RunFailed, RunLost
 from league.ops import contam_probe, deep_report, registry
 from league.ops.context import Context
 from league.tests import deep_fakes as F
@@ -111,6 +115,22 @@ class CurrentVersions(unittest.TestCase):
         self.assertEqual([(r["fid"], r["n"]) for r in rows], [("a", 1), ("a", 2)], "no panel family")
         self.assertEqual(rows[0]["route"], "sail:r")
         self.assertEqual(rows[0]["cell"], "equity/trend/index+sectors")
+        self.assertEqual((rows[0]["seated"], rows[0]["source"]), (False, "born"))
+
+    def test_the_seat_and_the_source(self):
+        self.assertEqual(deep_report.source_of({"origin": "seed", "spec": {}}), "seed")
+        self.assertEqual(deep_report.source_of({"origin": "born", "spec": {"seeded": True}}), "seed")
+        self.assertEqual(deep_report.source_of({"origin": "fork", "lineage": "seed-reversal-index", "spec": {}}), "seed",
+                         "a family of a seed's lineage carries its mechanism")
+        self.assertEqual(deep_report.source_of({"origin": "born", "lineage": "f12", "spec": {}}), "born")
+
+    def test_a_family_with_no_route(self):
+        row = {"fid": "s", "n": 1, "code": "x", "params": {}, "cell": "c", "route": None}
+        seed = deep_report._version({**row, "source": "seed"}, {"routes": {}})
+        self.assertEqual((seed.strong_recall, seed.route_known, seed.source), (False, True, "seed"),
+                         "a captain's seed has no generator's recall to read: measured, not waiting forever")
+        born = deep_report._version({**row, "source": "born"}, {"routes": {}})
+        self.assertEqual((born.strong_recall, born.route_known), (None, False), "the gate refuses it")
 
 
 class Report(unittest.TestCase):
@@ -123,39 +143,129 @@ class Report(unittest.TestCase):
         (self.root / contam_probe.FILE).write_text(json.dumps(contamination("r", m=0.0, p=0.5)))
         self.rows = [{"fid": f"f{i}", "n": 1, "code": F.blind_program(("SPY", "QQQ", "IWM")[: 2 + i % 2], look=24 + i),
                       "params": {}, "cell": f"equity/momentum/c{i}", "route": "r"} for i in range(4)]
+        self.ctx_last = None
 
     def ctx(self, when=NIGHT):
         return Context("deep_report", root=self.root, due_at=when, clock=lambda: when, config={}, settings_value={})
 
-    def run_job(self, when=NIGHT, rows=None):
+    def run_job(self, when=NIGHT, rows=None, runs=None, clock=None):
+        self.ctx_last = self.ctx(when)
+        kw = {"clock": clock} if clock is not None else {}
         with mock.patch("league.ops.deep_report.current_versions", return_value=rows or self.rows), \
                 mock.patch("league.ops.equity_deep.complete", return_value=True):
-            return deep_report.report_run(self.ctx(when), runs=F.InlineRuns(self.root / "equity-daily"), worlds=1500)
+            return deep_report.report_run(self.ctx_last, runs=runs or F.InlineRuns(self.root / "equity-daily"),
+                                          worlds=1500, **kw)
 
-    def test_report_mode_looks_seals_the_verdicts_and_reports_counts(self):
+    def ledger(self):
+        return gate.Ledger(self.root / config.STORE_DIR)
+
+    def test_report_mode_looks_on_both_keys_seals_the_verdicts_and_reports_counts(self):
         out = self.run_job()
         self.assertEqual(out["looked"], 3, "looks_per_run")
         self.assertEqual(out["statuses"], {"looked": 3})
         self.assertNotIn("passed", json.dumps(out), "the receipt names no pass")
-        ledger = gate.Ledger(self.root / config.STORE_DIR)
+        ledger = self.ledger()
         self.assertEqual(len(ledger.real()), 3)
-        self.assertEqual(len(ledger.pending()), 3, "D2 is not judged: every recent key waits")
+        for row in ledger.real():
+            self.assertTrue(all(isinstance(row["verdict"][k], bool) for k in ("passed", "deep", "recent")),
+                            "D2 judged: every look read both keys")
         report = json.loads((self.root / config.STORE_DIR / config.REPORT).read_text())
-        self.assertEqual((report["looked"], report["mode"], report["screen"], report["recent_pending"]),
-                         (3, "report", "S3", 3))
+        self.assertEqual((report["looked"], report["mode"], report["screen"], report["ledger"]), (3, "report", "S3", "ok"))
+        self.assertNotIn("recent_pending", report)
         again = self.run_job()
         self.assertEqual(again["looked"], 1, "the fourth version; no version is looked at twice")
-        self.assertEqual(len(gate.Ledger(self.root / config.STORE_DIR).real()), 4)
+        self.assertEqual(len(self.ledger().real()), 4)
 
-    def test_when_d2_is_judged_the_pending_recent_keys_are_read_once(self):
-        self.run_job()
-        (self.root / "swarm.json").write_text(json.dumps({"elane": {"deep": {"mode": "report", "looks_per_run": 3,
-                                                                             "reserve": "judged"}}}))
+    def test_with_the_reserve_sealed_no_look_is_made(self):
+        self.assertEqual(config.cfg({"elane": {"deep": {}}})["reserve"], "judged", "D2 is decided: judged")
+        policy = json.loads((Path(deep_report.__file__).resolve().parents[1] / "swarm" / "policy.json").read_text())
+        self.assertEqual(policy["elane"]["deep"]["reserve"], "judged")
+        (self.root / "swarm.json").write_text(json.dumps({"elane": {"deep": {"mode": "report", "reserve": "sealed"}}}))
+        runs = F.InlineRuns(self.root / "equity-daily")
+        out = self.run_job(runs=runs)
+        self.assertEqual(out["status"], "skipped")
+        self.assertIn("both keys or not at all", out["why"])
+        self.assertEqual((runs.calls, self.ledger().looks), ([], []), "no DVAL, no reserve, nothing spent")
+
+    def failing_runs(self, code, error, *, where="segments"):
+        runs = F.InlineRuns(self.root / "equity-daily")
+        real_segments, real_on_store = runs.segments, runs.on_store
+
+        def segments(c, params):
+            if where == "segments" and c == code:
+                raise error
+            return real_segments(c, params)
+
+        def on_store(root, c, params, start, end, k):
+            if where == "dval" and c == code and ("deep-A-" in str(root) or "deep-B-" in str(root)):
+                raise error
+            return real_on_store(root, c, params, start, end, k)
+
+        runs.segments, runs.on_store = segments, on_store
+        return runs
+
+    def test_one_failing_version_never_stops_the_next_and_spends_no_look(self):
+        bad = self.rows[0]["code"]
+        key = gate.version_key(bad, {})
+        for night in (1, 2, 3):
+            out = self.run_job(runs=self.failing_runs(bad, RunFailed("the decider child failed the run: OSError")))
+            ledger = self.ledger()
+            self.assertEqual(out["house_errors"], 1, night)
+            self.assertIsNone(ledger.row(key), "its look is not spent")
+            self.assertEqual(ledger.errors[key]["count"], night)
+            self.assertEqual(ledger.errors[key]["error"], "RunFailed", "the error's class, never its text")
+            self.assertTrue(any("not spent" in a["text"] and a["level"] == "warning" for a in self.ctx_last.alerts))
+            if night == 1:
+                self.assertEqual(out["looked"], 3, "the later versions were looked at")
+        self.assertIn(key, ledger.refused, "three errors under one identity: refused, no look spent")
+        self.assertTrue(ledger.refused[key]["why"].startswith("the House could not run its look 3 times"))
+        self.assertEqual(json.loads((self.root / config.STORE_DIR / config.REPORT).read_text())["house_errors"],
+                         {"versions": 1, "refused": 1})
+        self.assertEqual(self.run_job()["house_errors"], 0, "a refused version is not tried again")
+
+    def test_a_data_error_inside_the_look_spends_nothing(self):
+        bad = self.rows[0]["code"]
+        out = self.run_job(runs=self.failing_runs(bad, ValueError("no price"), where="dval"))
+        self.assertEqual((out["house_errors"], out["looked"]), (1, 3))
+        self.assertIsNone(self.ledger().row(gate.version_key(bad, {})))
+        self.assertEqual(os.listdir(self.root / config.STORE_DIR / config.SEALED_DIR / config.LOOKS_DIR), [])
         out = self.run_job()
-        self.assertEqual((out["recent_keys_read"], out["looked"]), (3, 0), "the budget went to the pending keys")
-        self.assertEqual(gate.Ledger(self.root / config.STORE_DIR).pending(), [])
-        out = self.run_job()
-        self.assertEqual((out["recent_keys_read"], out["looked"]), (0, 1))
+        self.assertEqual(out["looked"], 1, "owed: the version's look is still its own")
+
+    def test_a_sealed_run_that_does_not_return_is_warned_and_owed_once(self):
+        bad = self.rows[0]["code"]
+        out = self.run_job(runs=self.failing_runs(bad, RunLost("the decider did not answer in time"), where="dval"))
+        self.assertEqual(out["statuses"].get("lost"), 1)
+        self.assertTrue(any("owed once more" in a["text"] for a in self.ctx_last.alerts))
+        self.assertEqual(self.ledger().row(gate.version_key(bad, {}))["attempts"], 1)
+
+    def test_no_version_is_begun_without_room_on_the_wall(self):
+        ticks = iter([0.0, config.JOB_WALL_S - config.LOOK_ROOM_S + 1.0])
+        out = self.run_job(clock=lambda: next(ticks, 10_000.0))
+        self.assertEqual((out["looked"], out.get("stopped")), (0, "time"))
+        self.assertEqual(self.ledger().looks, [])
+        self.assertEqual(registry.by_name()["deep_report"].wall, config.JOB_WALL_S)
+
+    def test_a_damaged_ledger_fails_closed(self):
+        path = self.root / config.STORE_DIR / config.LEDGER
+        path.write_text("{broken")
+        runs = F.InlineRuns(self.root / "equity-daily")
+        out = self.run_job(runs=runs)
+        self.assertEqual(out["status"], "failed")
+        self.assertEqual(runs.calls, [])
+        self.assertEqual(path.read_text(), "{broken", "nothing written over it")
+        self.assertTrue(any("damaged" in a["text"] for a in self.ctx_last.alerts))
+        report = json.loads((self.root / config.STORE_DIR / config.REPORT).read_text())
+        self.assertEqual(report["ledger"], "damaged")
+
+    def test_a_seed_with_no_route_is_looked_at_and_any_other_route_less_version_refused(self):
+        rows = [{**self.rows[0], "route": None, "source": "seed", "seated": True},
+                {**self.rows[1], "route": None, "source": "born"}]
+        out = self.run_job(rows=rows)
+        self.assertEqual(out["statuses"], {"looked": 1, "refused": 1})
+        report = json.loads((self.root / config.STORE_DIR / config.REPORT).read_text())
+        self.assertEqual((report["by_source"]["seed"]["looked"], report["by_seat"]["seated"]["looked"]), (1, 1))
+        self.assertIn("no route is named: its 2001-08 recall cannot be read", report["refused"])
 
     def test_it_runs_in_report_mode_in_idle_hours_with_a_deep_store_only(self):
         self.assertEqual(self.run_job(SESSION)["status"], "skipped")
@@ -174,10 +284,6 @@ class Report(unittest.TestCase):
         for name in ("equity_deep", "deep_report"):
             self.assertEqual(jobs[name].owner, "deep key")
         self.assertEqual([t.kind for t in jobs["equity_deep"].triggers], ["daily"], "no at-start fetch")
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 from league.tests import test_contam_probe as TP  # noqa: E402  (the probe's own harness, reused)
@@ -209,8 +315,18 @@ class TheProbeWithADeepStore(TP.Jobs):
         for stratum in ("S1", "S2", "S4"):
             self.assertEqual(set(row["cells"][stratum]), {*contam_probe.ERAS, *contam_probe.DEEP_ERAS})
             for era in contam_probe.DEEP_ERAS:
-                self.assertEqual(set(row["cells"][stratum][era]), set(contam_probe.CELL_KEYS))
+                keys = contam_probe.SEALED_CELL_KEYS if era in contam_probe.SEALED_ERAS else contam_probe.CELL_KEYS
+                self.assertEqual(set(row["cells"][stratum][era]), set(keys))
                 self.assertGreater(row["cells"][stratum][era]["n"], 0, "the deep store gave truths")
+        self.assertEqual(contam_probe.SEALED_ERAS, ("2001-08",))
+        for name in ("acc", "base", "lo", "hi", "correct", "ties"):   # the review of Oct 17: no DVAL figure beyond
+            self.assertNotIn(name, contam_probe.SEALED_CELL_KEYS)
+        self.assertTrue({"m", "p_perm", "readable"} <= set(contam_probe.SEALED_CELL_KEYS), "what strong_recall reads")
+        doc = json.loads((self.root / contam_probe.FILE).read_text())
+        for entry in doc["history"]:
+            for stratum, eras in entry["cells"].items():
+                if "2001-08" in eras:
+                    self.assertEqual(set(eras["2001-08"]), set(contam_probe.SEALED_CELL_KEYS), "the history too")
         self.assertEqual(set(row["cells"]["S3"]), set(contam_probe.ERAS), "the stocks have no deep cell")
         self.assertIn(deep_report.strong_recall({"routes": {"sail:pro_asap": row}}, "sail:pro_asap"), (True, False))
 
@@ -220,3 +336,7 @@ class TheProbeWithADeepStore(TP.Jobs):
         self.assertEqual(self.run_probe(None)["status"], "skipped", "E3's probe: not due for 28 days")
         again = self.run_probe(self.deep_truth())
         self.assertTrue(again["finished"], again)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -12,7 +12,8 @@ bar at 15% zero-edge FP alone, the program's own floor + 0.05), in whole grid st
 
 THE RECENT KEY (`recent_key`): the pooled t of the lane's S2 variant (r at k 1.0) over R + V + H >= c_R, with
 sum_H > 0. c_R = max(the receipt's bar at 12% alone, own floor + 0.05). The receipt calibrates it with the reserve in
-it, so while the owner's D2 is not "judged" the recent key is PENDING (league/deep/gate.py): no R, V or H run is made.
+it; D2 is "judged" (A58), so every real look reads both keys, and with the reserve sealed no look is made at all
+(league/deep/gate.py: both keys or neither).
 
 PASS = both keys (`verdict`). A canary is judged on the deep key alone.
 
@@ -30,7 +31,9 @@ int(version sha256[:8], 16)]).
 
 THE RULES (`layout`, `rules`): ETF only (DVAL's 15); at most 50 round trips a year and at most 25% close-to-next-open
 lots on the Train-era runs; segment A only for the liquid core, a late SPDR in B only when its stale-close audit is
-clean; at least 750 scored DVAL sessions after inception and look-back; never a strong-recall route.
+clean; no segment where a NEEDS symbol misses a session after its first bar (the data audit's gaps: a lot held through
+a missing session has no price, and the look would fail on the data, not the program); at least 750 scored DVAL
+sessions after inception and look-back; never a strong-recall route.
 """
 
 from __future__ import annotations
@@ -299,14 +302,18 @@ def overnight_share(lots: Sequence[Mapping[str, Any]]) -> float:
 
 
 def layout(symbols: Sequence[str], history: int, first_days: Mapping[str, dt.date | None],
-           late_clean: Mapping[str, bool]) -> dict[str, Any]:
+           late_clean: Mapping[str, bool], gaps: Mapping[str, Mapping[str, int]] | None = None) -> dict[str, Any]:
     """THE SCORED LAYOUT of a program over DVAL: {"segments": {name: {"start": the first scored session (an index
     into the segment's sessions, look-back first), "sessions": scored sessions} | None}, "scored", "masked"
     (sessions outside the mask), "why": None or why a segment is not scored}. A segment is scored from the first
-    session at which every NEEDS symbol has `history` bars before the decision close (its first bar is
-    `first_days[sym]`); A only for the liquid core; B with a late SPDR only when `late_clean[sym]`."""
+    session at which every NEEDS symbol has `history` bars before the first decision's close, so history + 1 at that
+    decision (the engine's ctx: league/equity/store.py `_slice` gives a run history + 1 sessions before its first; its
+    first bar is `first_days[sym]`); A only for the liquid core; B with a late SPDR only when `late_clean[sym]`;
+    neither where a NEEDS symbol has a gap (`gaps[sym][span]` > 0, the audit's count of sessions missing after its
+    first bar) in a span the segment reads (`config.SEGMENT_SPANS`)."""
     names = [str(s).upper() for s in symbols]
     masked = set(calendar.mask())
+    gaps = gaps or {}
     out: dict[str, Any] = {"segments": {}, "scored": 0, "masked": 0, "why": {}}
     for name in config.DVAL_SEGMENTS:
         back, scored = calendar.segment(name)
@@ -318,6 +325,10 @@ def layout(symbols: Sequence[str], history: int, first_days: Mapping[str, dt.dat
         if name == "B" and any(s in config.LATE_SPDRS and not late_clean.get(s) for s in names):
             out["segments"][name] = None
             out["why"][name] = "a late SPDR's stale-close audit is not clean"
+            continue
+        if any(int((gaps.get(s) or {}).get(span) or 0) > 0 for s in names for span in config.SEGMENT_SPANS[name]):
+            out["segments"][name] = None
+            out["why"][name] = "a NEEDS symbol misses a session of the segment (the data audit's gaps)"
             continue
         start = len(back)
         for s in names:
@@ -340,11 +351,12 @@ def layout(symbols: Sequence[str], history: int, first_days: Mapping[str, dt.dat
 
 def rules(*, symbols: Sequence[str], history: int, first_days: Mapping[str, dt.date | None],
           late_clean: Mapping[str, bool], round_trips: float, overnight: float, strong_recall: bool | None,
-          blind: bool) -> dict[str, Any]:
+          blind: bool, gaps: Mapping[str, Mapping[str, int]] | None = None) -> dict[str, Any]:
     """PREREG-H's eligibility, in order: {"eligible", "why" (the first rule failed, None), "wait", "layout"}. A route
     whose 2001-08 recall the probe has not measured yet (`strong_recall` None) is no refusal: the look WAITS
-    (`wait` True) until it is measured, so no look is spent on a route the probe may yet find remembers the era."""
-    plan = layout(symbols, history, first_days, late_clean) if etf_only(symbols) else None
+    (`wait` True) until it is measured, so no look is spent on a route the probe may yet find remembers the era.
+    `gaps`: the data audit's gaps by symbol and span (`layout`)."""
+    plan = layout(symbols, history, first_days, late_clean, gaps) if etf_only(symbols) else None
     checks = (
         (etf_only(symbols), "not ETF only (DVAL's 15)"),
         (bool(blind), "not calendar-blind"),

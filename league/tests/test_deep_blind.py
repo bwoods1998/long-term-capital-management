@@ -1,5 +1,7 @@
 """THE DETECTOR (HISTORY-PLAN.md section 5.3; league/deep/blind.py): every calendar reader is flagged by the scan AND by
 the behavioural test; a getattr-string reader is caught by behaviour on its own; calendar-blind programs pass both.
+THE LEVEL TEST (report-only, the review of Oct 17): a program keyed on price or volume levels is told apart; a
+level-blind one is not.
 
 Synthetic stores only (league/equity/synth.py), run in the in-process decider."""
 
@@ -41,11 +43,11 @@ class Detector(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
-    def behaves(self, code: str) -> dict:
+    def behaves(self, code: str, *, level: bool = False) -> dict:
         def run(store_root, start, end):
             return Isolated(self.decider, store_root).train(code, {}, name="b", start=start, end=end, k=1.0).result
 
-        return blind.behaviour(code, {}, run, symbols=("SPY", "QQQ"), history=30, parent=self.root)
+        return blind.behaviour(code, {}, run, symbols=("SPY", "QQQ"), history=30, parent=self.root, level=level)
 
     def test_the_fields_are_prereg_hs_five(self):
         self.assertEqual(set(config.CALENDAR_FIELDS), {"weekday", "session_of_month", "sessions_to_month_end",
@@ -70,16 +72,37 @@ class Detector(unittest.TestCase):
     def test_calendar_blind_programs_pass_both(self):
         for code in (BASE, F.blind_program(("SPY", "QQQ"), history=30, entry_at="close", exit_at="close")):
             self.assertEqual(blind.scan(code), [])
-            self.assertEqual(self.behaves(code), {"blind": True, "why": None})
+            self.assertEqual(self.behaves(code), {"blind": True, "why": None, "level": None})
+            self.assertEqual(self.behaves(code, level=True), {"blind": True, "why": None, "level": True},
+                             "momentum on returns reads no level")
+
+    def test_a_level_reader_is_told_apart_and_still_judged_blind(self):
+        # the synthetic store's SPY trades about 100-290 and 1-50 million shares a day; times 2.5 and 0.4 it does not
+        price = reader('    if ctx.bars["SPY"].close[-1] > 300.0:\n        return out\n')
+        volume = reader('    if ctx.bars["SPY"].volume[-1] < 15000000.0:\n        return out\n')
+        for code in (price, volume):
+            seen = self.behaves(code, level=True)
+            self.assertEqual((seen["blind"], seen["level"]), (True, False), "counted as a level reader, not refused")
+        self.assertEqual(self.behaves(price)["level"], None, "the level test runs when asked")
 
     def test_the_scan_reads_any_object_and_refuses_what_does_not_parse(self):
         self.assertTrue(blind.scan("def decide(c):\n    return c.events_next\n"))
         self.assertEqual(blind.scan("def decide(c):\n    return c.events_count\n"), [])
         self.assertEqual(blind.scan("def decide(:"), ["the program does not parse"])
 
-    def test_the_behavioural_stores_are_removed(self):
-        self.behaves(BASE)
+    def test_the_behavioural_stores_are_removed_and_name_their_process(self):
+        import os
+
+        self.behaves(BASE, level=True)
         self.assertEqual([p for p in self.root.iterdir() if p.name.startswith("deep-blind-")], [])
+        dead = self.root / "deep-blind-p999999999-x"
+        dead.mkdir()
+        mine = self.root / f"deep-blind-p{os.getpid()}-y"
+        mine.mkdir()
+        self.behaves(BASE)
+        self.assertFalse(dead.exists(), "a dead process's stores are swept before the test's are made")
+        self.assertTrue(mine.exists(), "a live process's are not")
+        mine.rmdir()
 
     def test_the_two_labelings_differ_in_their_calendar(self):
         from league.equity import store as estore

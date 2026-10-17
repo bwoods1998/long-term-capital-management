@@ -15,7 +15,8 @@ they are found (`blind`: an AST scan AND a behavioural test on two relabelings) 
 THE SEAL. DVAL rows never touch the desktop: the House fetches them through the gateway's Tiingo route
 (league/ops/equity_deep.py) into `<state>/equity-deep/sealed/` (0700, the `DEEP_GATE` mark). Sealed blocks open only
 with a `gate.DeepGateCapability` (minted on a store carrying the mark, for a named reason), only inside a look, and
-only into a temporary store that is removed when the look ends, even on failure (`relabel.relabeled`). TRAIN-D
+only into a temporary store inside the sealed tree that is removed when the look ends, even on failure
+(`relabel.relabeled`), and swept when a killed look could not remove it (`blocks.sweep`). TRAIN-D
 (2010-15) is open and never opens `sealed/`. Outputs are verdicts and counts only (`report`): no DVAL figure beyond
 pass or fail, nothing derived from vendor data is committed, and births see nothing (this package imports nothing of
 league.swarm, league.live or league.ops; league/swarm never names it).

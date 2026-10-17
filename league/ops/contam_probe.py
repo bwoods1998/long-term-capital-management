@@ -85,6 +85,10 @@ dropped with them, as E3's are. The partial keeps `deep_qset` beside `qset` (a d
 the deep cells and nothing else); a route whose published result lacks a deep era while the store is there is due
 at once, as a route that lacks a panel stratum is. S3's eligibility reads a route's 2001-08 cells from the file
 (league/ops/deep_report.py `strong_recall`, which imports nothing of this module: the forward record's seal).
+A SEALED ERA'S CELL KEEPS NO DVAL FIGURE BEYOND WHAT THAT READING NEEDS (`SEALED_ERAS`, `SEALED_CELL_KEYS`): of a
+2001-08 cell the file keeps n, skipped, periods, symbols, m, p_perm, readable and recalled, never acc, base, lo, hi,
+correct or ties (base is the majority direction's share of DVAL months or weeks). And every run first sweeps what a
+killed deep look left in the deep store (league/deep/blocks.py `sweep_store`), whatever the switch says.
 
 THE JOB (`run`): skipped when the mode is "off", no route is due (`due`), or E2's day leaves it no dollar
 (`elane_yield.room(store, settings, now)`: THE BOUND below). One route a run: `router =
@@ -199,6 +203,9 @@ DEEP_ERAS: dict[str, tuple[dt.date, dt.date]] = {
     "2010-15": (dt.date(2010, 1, 4), dt.date(2015, 12, 31)),
 }
 DEEP_STRATA = ("S1", "S2", "S4")
+#: The deep eras whose truths are the sealed era's, and what of their cells is kept (THE DEEP ERAS).
+SEALED_ERAS = ("2001-08",)
+SEALED_CELL_KEYS = ("n", "skipped", "periods", "symbols", "m", "p_perm", "readable", "recalled")
 #: The reason the job mints its `DeepGateCapability` with (the 2001-08 truths read the sealed era).
 DEEP_GATE_REASON = "contamination-probe"
 #: THE PANEL STRATA (release E4): asked only with a plan (`probe(ctx, panel=...)`), after E3's own.
@@ -1061,6 +1068,8 @@ class Probe:
             scored = cell(batch_of)
             if scored is None:
                 break
+            if era in SEALED_ERAS:  # a sealed era's cell keeps what S3's reading needs and no other DVAL figure
+                scored = {name: scored.get(name) for name in SEALED_CELL_KEYS}
             cells.setdefault(stratum, {})[era] = scored
             state["scored"] += 1
             row["idle"] = 0
@@ -1136,6 +1145,10 @@ def probe(ctx: Any, *, panel: Callable[..., Any] | None = None) -> dict[str, Any
     from . import equity_data
 
     root = Path(ctx.root)
+    from ..deep import blocks as deep_blocks
+    from ..deep import config as deep_config
+
+    deep_blocks.sweep_store(root / deep_config.STORE_DIR)   # a killed deep look's stores go first, whatever the switch
     settings = settings_mod.load(root, config=ctx.config)
     if mode(settings) == "off":
         return {"status": "skipped", "why": "elane.contam.mode is off"}
@@ -1148,8 +1161,6 @@ def probe(ctx: Any, *, panel: Callable[..., Any] | None = None) -> dict[str, Any
     except (MissingData, StoreRefused) as exc:
         return {"status": "failed", "error": f"the equity store cannot be read ({type(exc).__name__}): {str(exc)[:200]}"}
     deep = None
-    from ..deep import blocks as deep_blocks
-    from ..deep import config as deep_config
     from ..deep import gate as deep_gate
 
     try:  # THE DEEP ERAS only with a deep store whose audit passed (league/ops/equity_deep.py); else E3's probe
@@ -1192,6 +1203,6 @@ __all__ = ["FILE", "VERSION", "GATE_REASON", "ERAS", "STRATA", "PANEL_STRATA", "
            "RECALL", "RECALL_MONTHS", "ROLE", "SYMBOLS_PER_CELL",
            "PERMUTATIONS", "ASK_SECONDS", "READABLE_ANSWERED", "READABLE_PERIODS", "ALPHA", "HISTORY", "MODES",
            "DEFAULTS", "BOUNDS", "SYSTEM", "KEY_PREFIX", "AGAINST", "WORDS", "RECALL_ERA", "IDLE_ALARM", "JUDGED_ERAS", "CELL_KEYS",
-           "RECALL_KEYS", "DEEP_ERAS", "DEEP_STRATA", "DEEP_GATE_REASON", "cfg", "mode", "periods", "stratum_symbols",
+           "RECALL_KEYS", "DEEP_ERAS", "DEEP_STRATA", "SEALED_ERAS", "SEALED_CELL_KEYS", "DEEP_GATE_REASON", "cfg", "mode", "periods", "stratum_symbols",
            "grid", "questions", "panel_questions", "deep_questions", "recall_questions", "qset", "truth", "prompt", "parse", "wilson", "perm_p", "score", "read", "due", "Probe",
            "run", "probe"]

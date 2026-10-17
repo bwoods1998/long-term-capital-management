@@ -25,7 +25,20 @@ STAGING_DIR = ".staging"
 GATE_MARK = "DEEP_GATE"
 MANIFEST = "manifest.json"
 LEDGER = "ledger.json"
+#: The ledger as it stood before its last save (`gate.Ledger.save`): what the captain restores a damaged ledger from.
+LEDGER_PREV = "ledger.json.prev"
 REPORT = "report.json"
+#: The data job's marker of a failed audit (counts and verdicts only): no request is made again until the job setting
+#: `refetch` asks for it (league/ops/equity_deep.py).
+AUDIT_FAILED = "audit-failed.json"
+#: THE LOOKS' TEMPORARY STORES (`blocks.looks_dir`): `<state>/equity-deep/sealed/.looks/`, inside the sealed tree (0700,
+#: the DEEP_GATE mark). Every relabeled segment, TRAIN-D's and the behavioural test's stores included, is written into
+#: a `deep-*` directory there that names its process (`TEMP_PREFIX`, `-p<pid>-`); a look's own block removes it, and a
+#: directory a killed process left is SWEPT (`blocks.sweep`) at the start of every deep_report, equity_deep and
+#: contamination-probe run and before every new one is made: its process is gone, or it is older than `TEMP_STALE_S`.
+LOOKS_DIR = ".looks"
+TEMP_PREFIX = "deep-"
+TEMP_STALE_S = 2 * 3600
 #: The block spans the data job writes: two open, one sealed. The 2016-19 overlap is fetched for the SIP audit only
 #: and never kept (`AUDIT_SPAN`).
 SPANS: dict[str, tuple[dt.date, dt.date]] = {
@@ -130,8 +143,8 @@ JOINT_FP_MAX = 0.025
 WORST_NO_EDGE_NOW_MAX = 0.12
 #: The c grid: k / 100 for k = 0..500 (league/equity/screen.py GRID); a bar past it is INELIGIBLE.
 GRID_MAX_K = 500
-#: The recent key's windows (the receipt's geometry, H last): R (2020-21, read only when the owner's D2 is "judged"),
-#: V (2025), H (the look's 194 sessions). Without D2 the recent key waits (`gate`: a look's recent key is "pending").
+#: The recent key's windows (the receipt's geometry, H last): R (2020-21, read only inside a begun look: D2 "judged"),
+#: V (2025), H (the look's 194 sessions). With `elane.deep.reserve` "sealed" no look is made at all (`gate.look`).
 RESERVE = (D(2020, 1, 2), D(2021, 12, 31))
 RECENT_LENGTHS = {"R": 505, "V": 250, "H": 194}
 #: The recent world's crash-stress positions: R's sessions 2020-02-20..2020-03-23 (the receipt's CRASH set).
@@ -164,8 +177,18 @@ CANARY_SLOT_SEED = (20261017, 3, 8)
 CANARY_SEED = (20261017, 3, 9)
 #: The canary's schedule covers this many decisions a run (the longest run it takes: TRAIN-D's 1,510 + its look-back).
 CANARY_STEPS = 2_048
-#: A look the House could not finish is owed again once; the second time it is spent and failed.
+#: A look begun whose sealed run was sent and did not return (league/equity/runner.py `RunLost`), or whose process was
+#: killed, is owed again once; the second time it is spent and failed (league/swarm/elane.py `LOOK_SENDS`'s rule).
 LOOK_ATTEMPTS = 2
+#: A version whose look the House could not make (an error of the House's, before or after the look was begun: the
+#: look is never spent by it) is tried again on later nights; after this many errors under one deep identity it is
+#: refused (no look spent) with a House warning, until a release moves the identity.
+HOUSE_ERRORS_MAX = 3
+#: The canaries' REPORT-ONLY alarm (not a halt; the review of Oct 17): the receipt's own synthetic canary deep-key pass
+#: rate, its largest over D1-D5 (docs/benchmarks/equity_screen_3.json canary.synthetic_canary_deep_pass_raw_k2, D4).
+#: The alarm fires when the canaries' deep passes exceed the upper end of the central 95% band at THIS rate; the
+#: pre-registered halt stays at 15% (PREREG-H), which only gross breakage reaches (`LIMITS`).
+CANARY_REFERENCE = 0.00778
 
 # -------------------------------------------------------------------------------------------------------- the receipt
 #: The candidate receipt: history-1017 item 5's synthetic S3 receipt, copied VERBATIM from the captain's scratch
@@ -185,8 +208,21 @@ LEGACY_IDS = {"equity": "78022ca6", "options": "b60410ad"}
 # ------------------------------------------------------------------------------------------------------------ settings
 MODES = ("off", "report")
 RESERVE_MODES = ("sealed", "judged")
-DEFAULTS: dict[str, Any] = {"mode": "off", "reserve": "sealed", "looks_per_run": 2}
+#: THE OWNER'S D2 IS DECIDED (the captain's A58, by the owner's delegation): the 2020-21 reserve IS judged, inside S3
+#: beside the deep key and never alone. "judged" is the default; "sealed" is the switch back, under which NO look is
+#: made at all (a version is judged on both keys or not at all: `gate.look`).
+DEFAULTS: dict[str, Any] = {"mode": "off", "reserve": "judged", "looks_per_run": 2}
 LOOKS_PER_RUN_BOUNDS = (0, 10)
+#: The deep_report job's wall (league/ops/registry.py, held equal by a test) and the room a look needs: no version is
+#: begun with less than `LOOK_ROOM_S` of the wall left, so the wall's SIGKILL does not land inside a look.
+JOB_WALL_S = 3300
+LOOK_ROOM_S = 1200
+#: THE LEVEL TEST (report-only; the review of Oct 17): the behavioural test's store run again with every price times
+#: `LEVEL_PRICE` and every volume times `LEVEL_VOLUME`. A program whose entries and exits move is a LEVEL READER (it
+#: reads price or volume levels, which tell 2001-08 from 2016-24): counted in the report beside the verdicts, never a
+#: refusal (PREREG-H names no such rule; an amendment would make it one).
+LEVEL_PRICE = 2.5
+LEVEL_VOLUME = 0.4
 
 #: THE READINGS: where PREREG-H's words (and the receipt's floor and canary specification) leave a choice, the choice
 #: made (league/deep/DEEP.md points here; the captain's report carries their count).
@@ -197,16 +233,41 @@ READINGS = (
     "the scored sessions of a segment start once every NEEDS symbol has NEEDS history bars; a segment a symbol is "
     "not allowed in (a non-core fund before 2005, a late SPDR whose stale-close audit failed) is not scored",
     "round trips and the close-to-next-open share are measured on the version's Train-era runs, before the look",
-    "the recent key is S2's r at k 1.0 pooled over R+V+H (the receipt's calibration): while the owner's D2 is not "
-    "'judged' it is PENDING (the deep key is read, the verdict waits; no R, V or H run is made) and it is read once, "
-    "when D2 is",
+    "the recent key is S2's r at k 1.0 pooled over R+V+H, raw (no drift removed: the S2 variant); the receipt "
+    "computed its recent null at k 2.0 with the true drift removed, and under N0 the null rate does not depend on k, "
+    "so c_R holds at k 1.0",
+    "D2 is 'judged' (A58): a real look reads BOTH keys or neither; with elane.deep.reserve 'sealed' no look is made "
+    "(no DVAL and no reserve run); the reserve's runs are made only inside a begun look, after the deep key's",
+    "the scored sessions of a segment start once every NEEDS symbol has history + 1 bars at the first decision (the "
+    "engine's ctx, league/equity/store.py `_slice`): at history 504 segment B scores 1,006 sessions, not the plan's "
+    "1,007 (the census counts history bars before the first scored session: one session looser, an upper bound)",
+    "a segment where a NEEDS symbol misses a session after its first bar (the audit's gaps) is not scored, so no "
+    "look is spent on a gap; the audit itself fails closed on any gap of a DVAL fund in dval and traind",
+    "a family with no route named: a captain's seed (or its lineage) has no generator's recall to read and is "
+    "measured as not strong-recall, counted apart by source; any other is refused (its recall cannot be read)",
     "the deep floor's worlds take the program's own scored layout (1,944 sessions and the mask's positions when it is "
     "scored on all of DVAL); the pool is the Train-era and TRAIN-D runs' lots re-costed at the key's k",
     "a canary halt fires when the canaries' deep-key passes exceed the upper end of the central 95% binomial band "
     "at 15% (its 97.5% quantile); a canary slot before the block's first real look moves to the next slot",
     "strong recall is read on contam_probe's 2001-08 cells; a route not yet measured there waits (no look spent)",
-    "a sealed or recent-window run the program's own errors ended ('disqualified') is a look spent and failed; a run "
-    "the House could not make is owed once, then spent and failed",
+    "a sealed or recent-window run the program's own errors ended ('disqualified') is a look spent and failed; one "
+    "sent whole and not answered (RunLost), or a look whose process was killed, is owed once, then spent and failed; "
+    "any other error of the House's spends nothing (the attempt is withdrawn) and, three under one identity, refuses",
+)
+
+#: THE LIMITS the receipt does not state (both reviews of Oct 17), carried in the captain's report beside the counts;
+#: each is for a re-pinned receipt builder or a PREREG amendment before H-lite gates a seat.
+LIMITS = (
+    "the canary halt at 15% catches gross breakage only: synthetic canaries pass the deep key 0.4-0.8%, so a bug that "
+    "lifts that tenfold halts by the 15th canary about 1.8% of the time; the report-only alarm reads the receipt's "
+    "own rate (CANARY_REFERENCE)",
+    "x2's t divides by the sd of x2, which carries the variance of simply holding positions: invested programs' "
+    "zero-edge rates collapse, and the receipt's power, PPV and Sharpe-for-50% figures are in units of x2's sd, not "
+    "the program's return Sharpe",
+    "the recent key re-reads Validation and the holdout, which S2 used to seat a version: a seated version's recent "
+    "pass overstates the evidence, so the report counts seated versions apart",
+    "the relabel hides dates, not price or volume levels: the level test counts level readers, refusing none",
+    "seeds carry mechanisms published in 2008 whose discovery samples overlap DVAL: the report counts by source",
 )
 
 
@@ -217,8 +278,9 @@ def _num(value: Any) -> float | None:
 
 
 def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
-    """`elane.deep` of the swarm's settings: `mode` ("off" | "report"), `reserve` ("sealed" | "judged": the owner's
-    D2), `looks_per_run` (0-10). A malformed value is its default; an unreadable block is `DEFAULTS` (mode off)."""
+    """`elane.deep` of the swarm's settings: `mode` ("off" | "report"), `reserve` ("judged", the owner's D2 as
+    decided, | "sealed", the switch back: no look at all), `looks_per_run` (0-10). A malformed value is its default;
+    an unreadable block is `DEFAULTS` (mode off)."""
     out = dict(DEFAULTS)
     lane = settings.get("elane") if isinstance(settings, Mapping) else None
     block = lane.get("deep") if isinstance(lane, Mapping) else None

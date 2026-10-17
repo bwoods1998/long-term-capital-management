@@ -1,9 +1,10 @@
 """THE SEAL AND THE LOOK (HISTORY-PLAN.md section 5.3, "Seal", and section 6; league/deep/gate.py, blocks.py,
 report.py): `sealed/` is unreadable without the DeepGate; the capability cannot be forged or moved to another store;
 a look returns booleans and the ledger keeps no figure (no researcher-visible result from a DVAL run); every
-temporary store is removed, after a failure too; one look a version, three a cell, 150 in all; a look the House could
-not finish is owed once; the canaries are matched, calendar-blind and judged on the deep key alone; the report is
-counts only.
+temporary store is removed, after a failure too; one look a version, three a cell, 150 in all; a sealed run sent and
+not answered is owed once, an error of the House's spends nothing; the ledger fails closed; D2: both keys or neither,
+and the reserve is run only inside a begun look, after the deep key; the canaries are matched, calendar-blind and
+judged on the deep key alone; the report is counts only.
 
 Synthetic deep and equity stores only (league/tests/deep_fakes.py), run in the in-process decider."""
 
@@ -17,6 +18,7 @@ from pathlib import Path
 
 from league.deep import blind, blocks, config, gate, report
 from league.equity.program import load_program
+from league.equity.runner import RunFailed, RunLost
 from league.tests import deep_fakes as F
 
 WORLDS = 1500
@@ -105,38 +107,41 @@ class TheLook(unittest.TestCase):
         self.assertEqual(set(out), {"status", "passed", "deep", "recent"})
         self.assertTrue(all(isinstance(out[k], bool) for k in ("passed", "deep", "recent")))
         self.assertEqual(os.listdir(self.parent), [], "every temporary store is gone")
+        looks = blocks.looks_dir(self.deep)
+        self.assertEqual(os.listdir(looks), [], "the DVAL segments' stores, inside the sealed tree, are gone too")
         stored = json.loads((self.deep / config.LEDGER).read_text())
         self.assertEqual(numbers(stored), [], "the ledger keeps no figure")
         self.assertEqual(stat.S_IMODE(os.stat(self.deep / config.LEDGER).st_mode), 0o600)
         row = stored["looks"][0]
         self.assertEqual((row["kind"], row["attempts"], row["identity"], row["receipt"]),
                          ("look", 1, "deepid", config.RECEIPT_SHA256[:12]))
-        roots = {str(r) for kind, r in self.runs.calls if kind == "on_store"}
-        self.assertFalse(any(r.startswith(str(self.deep)) for r in roots), "no run reads the deep store itself")
+        self.assertEqual((row["seated"], row["source"]), (False, "born"))
+        self.assertIsInstance(row["level"], bool, "the level test's answer, report-only")
+        roots = [Path(r) for kind, r in self.runs.calls if kind == "on_store"]
+        for r in roots:
+            self.assertTrue(r.is_relative_to(looks) or r.is_relative_to(self.parent), r)
+            self.assertNotEqual(r, self.deep, "no run reads the deep store itself")
+        dval = [r for r in roots if r.is_relative_to(looks) and r.relative_to(looks).parts[0].startswith(("deep-A-", "deep-B-"))]
+        self.assertEqual(len(dval), 2, "each DVAL segment is written inside sealed/.looks/")
         self.assertEqual([k for k, _ in self.runs.calls].count("recent"), 1)
         self.assertEqual(self.look(self.version())["status"], "already", "one look a version")
         again = gate.Version(fid="f2", n=7, code=F.blind_program(("SPY", "QQQ")), params={}, cell="x",
                              strong_recall=False)
         self.assertEqual(self.look(again)["status"], "already", "the same program in another family is that version")
 
-    def test_without_d2_the_recent_key_is_pending_and_is_read_once_when_d2_is_judged(self):
+    def test_d2_both_keys_or_neither(self):
         v = self.version()
-        out = self.look(v)
-        self.assertEqual((out["status"], out["passed"], out["recent"]), ("looked", None, None))
-        self.assertIsInstance(out["deep"], bool)
-        self.assertNotIn("recent", [k for k, _ in self.runs.calls], "no R, V or H run is made before D2")
-        self.assertEqual(len(self.ledger.pending()), 1)
-        self.runs.calls.clear()
-        done = gate.recent_look(self.deep, v, self.runs, ledger=self.ledger, worlds=WORLDS, parent=self.parent)
-        self.assertEqual(done["status"], "looked")
-        self.assertIsInstance(done["recent"], bool)
-        self.assertEqual(done["deep"], out["deep"], "the deep key's verdict stands")
-        roots = [str(r) for kind, r in self.runs.calls if kind == "on_store"]
-        self.assertFalse(any("deep-A-" in r or "deep-B-" in r for r in roots), "DVAL is not read again")
-        self.assertEqual([k for k, _ in self.runs.calls].count("recent"), 1)
-        self.assertEqual(self.ledger.pending(), [])
-        self.assertEqual(gate.recent_look(self.deep, v, self.runs, ledger=self.ledger, worlds=WORLDS)["status"], "none")
+        out = self.look(v, reserve=False)
+        self.assertEqual(out["status"], "waits", "elane.deep.reserve sealed: no look at all")
+        self.assertEqual((self.runs.calls, self.ledger.spent(), self.ledger.refused), ([], [], {}),
+                         "no run, no DVAL, no reserve, nothing spent")
         self.assertEqual(os.listdir(self.parent), [])
+        done = self.look(v)
+        self.assertEqual(done["status"], "looked", "D2 judged (the default): the look reads both keys")
+        self.assertTrue(all(isinstance(done[k], bool) for k in ("passed", "deep", "recent")))
+        self.assertEqual(done["passed"], done["deep"] and done["recent"], "pass = both keys")
+        self.assertEqual([k for k, _ in self.runs.calls].count("recent"), 1)
+        self.assertEqual(self.look(v)["status"], "already")
 
     def test_refusals_spend_no_look_and_an_unmeasured_route_waits(self):
         weekday = F.blind_program(("SPY", "QQQ")).replace("    held = {p", "    if ctx.weekday == 1:\n        return out\n    held = {p")
@@ -149,31 +154,83 @@ class TheLook(unittest.TestCase):
         self.assertEqual(broken["status"], "refused")
         self.assertTrue(broken["why"].startswith("the program does not load"), broken["why"])
         self.assertEqual(len(self.ledger.refused), 4)
+        self.runs.calls.clear()
         waits = self.look(self.version(F.blind_program(("SPY", "QQQ"), look=12), recall=None))
         self.assertEqual(waits["status"], "waits")
         self.assertEqual((len(self.ledger.spent()), len(self.ledger.refused)), (0, 4), "a wait records nothing")
+        self.assertEqual([k for k, _ in self.runs.calls], [], "a wait is read before any run is made")
+        self.assertEqual(os.listdir(self.parent), [])
+        strong = self.look(self.version(F.blind_program(("SPY", "QQQ"), look=13), recall=True))
+        self.assertEqual(strong["why"], "a strong-recall route on contam_probe's 2001-08 cells")
+        self.assertEqual([k for k, _ in self.runs.calls], [], "so is a strong-recall route")
+        nameless = gate.Version(fid="f9", n=1, code=F.blind_program(("SPY", "QQQ"), look=15), params={},
+                                cell="equity/momentum/index", strong_recall=None, route_known=False)
+        self.assertEqual(self.look(nameless)["why"], "no route is named: its 2001-08 recall cannot be read")
+        self.assertEqual(len(self.ledger.spent()), 0)
 
-    def test_a_look_the_house_cannot_finish_is_owed_once_then_spent_and_failed(self):
+    def broken_dval(self, error):
         real = self.runs.on_store
         calls = {"dval": 0}
 
         def broken(root, code, params, start, end, k):
             if "deep-A-" in str(root) or "deep-B-" in str(root):
                 calls["dval"] += 1
-                raise RuntimeError("the child died")
+                raise error
             return real(root, code, params, start, end, k)
 
         self.runs.on_store = broken
+        return calls
+
+    def test_an_error_of_the_houses_spends_no_look(self):
+        calls = self.broken_dval(RunFailed("the decider child failed the run: BrokenPipeError"))
         v = self.version()
-        for attempt in (1, 2):
-            with self.assertRaises(RuntimeError):
+        for _ in range(3):
+            with self.assertRaises(RunFailed):
                 self.look(v)
-            self.assertEqual(self.ledger.row(v.key)["attempts"], attempt)
-            self.assertIsNone(self.ledger.row(v.key)["verdict"])
-            self.assertEqual(os.listdir(self.parent), [], "removed after the failure too")
-        self.assertEqual(self.look(v)["status"], "failed")
-        self.assertEqual(self.ledger.row(v.key)["verdict"], "failed")
+            self.assertIsNone(self.ledger.row(v.key), "the attempt is withdrawn: no look spent")
+            self.assertEqual(self.ledger.spent(), [])
+            self.assertEqual(os.listdir(self.parent), [])
+            self.assertEqual(os.listdir(blocks.looks_dir(self.deep)), [], "removed after the failure too")
+        self.assertEqual(calls["dval"], 3)
+        for error in (ValueError("no price"), RuntimeError("the DVAL run did not finish (no_data)")):
+            self.broken_dval(error)
+            with self.assertRaises(type(error)):
+                self.look(v)
+            self.assertIsNone(self.ledger.row(v.key))
+        self.runs.on_store = F.InlineRuns(self.root / "equity-daily").on_store
+        self.assertEqual(self.look(v)["status"], "looked", "the look is still the version's to take")
+
+    def test_a_sealed_run_that_does_not_return_is_owed_once_then_spent_and_failed(self):
+        self.broken_dval(RunLost("the decider did not answer in time"))
+        v = self.version()
+        out = self.look(v)
+        self.assertEqual(out["status"], "lost")
+        self.assertEqual((self.ledger.row(v.key)["attempts"], self.ledger.row(v.key)["verdict"]), (1, None))
+        self.assertEqual(os.listdir(blocks.looks_dir(self.deep)), [])
+        self.assertEqual(self.look(v)["status"], "failed", "the second time: spent and failed")
+        self.assertEqual((self.ledger.row(v.key)["attempts"], self.ledger.row(v.key)["verdict"]), (2, "failed"))
         self.assertEqual(self.look(v)["status"], "already")
+
+    def test_a_look_whose_process_was_killed_is_owed_once_then_spent_and_failed(self):
+        v = self.version()
+        self.ledger.begin({"key": v.key, "fid": "f1", "n": 1, "cell": v.cell, "kind": "look", "at": "t"})
+        self.assertEqual(self.look(v)["status"], "looked", "the first kill: owed once more")
+        self.assertEqual(self.ledger.row(v.key)["attempts"], 2)
+        w = self.version(F.blind_program(("SPY", "QQQ"), look=16), cell="equity/other/index")
+        for _ in range(2):
+            self.ledger.begin({"key": w.key, "fid": "f1", "n": 1, "cell": w.cell, "kind": "look", "at": "t"})
+        self.assertEqual(self.look(w)["status"], "failed", "killed twice: spent and failed, nothing run")
+        self.assertEqual(self.ledger.row(w.key)["verdict"], "failed")
+
+    def test_an_open_data_run_that_does_not_return_is_a_refusal_before_anything_sealed(self):
+        def lost(code, params):
+            raise RunLost("the decider exited")
+
+        self.runs.segments = lost
+        out = self.look(self.version())
+        self.assertEqual(out["status"], "refused")
+        self.assertIn("did not return", out["why"])
+        self.assertEqual(self.ledger.spent(), [])
 
     def test_a_sealed_run_the_program_ended_is_spent_and_failed(self):
         real = self.runs.on_store
@@ -278,11 +335,174 @@ class TheLook(unittest.TestCase):
         self.assertEqual((out["eligible"], out["looked"], out["waiting"]), (3, 1, 2))
         self.assertEqual(sorted(path for path, _ in numbers(out)),
                          [".prediction.deep_zero_edge_passes", ".prediction.deep_zero_edge_rate",
+                          ".prediction.recent_zero_edge_passes", ".prediction.recent_zero_edge_rate",
                           ".prediction.zero_edge_passes", ".prediction.zero_edge_rate"],
                          "the receipt's synthetic rates and its predictions are the only figures")
-        self.assertEqual((out["recent_pending"], out["passed"]), (1, 0))
+        self.assertEqual(out["ledger"], "ok")
+        self.assertEqual(out["by_seat"]["unseated"]["looked"], 1)
+        self.assertEqual(out["by_seat"]["seated"]["looked"], 0)
+        self.assertEqual((out["by_source"]["born"]["looked"], out["by_source"]["seed"]["looked"]), (1, 0))
+        self.assertEqual(out["limits"], list(config.LIMITS))
+        self.assertIn("alarm", out["canaries"])
         path = report.write(self.deep, out)
         self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+
+    def test_a_seated_seed_is_counted_apart(self):
+        v = gate.Version(fid="seed-reversal-index", n=1, code=F.blind_program(("SPY", "QQQ")), params={},
+                         cell="beta/reversal/index", strong_recall=False, seated=True, source="seed")
+        self.assertEqual(self.look(v)["status"], "looked")
+        out = report.summary(self.ledger)
+        self.assertEqual((out["by_seat"]["seated"]["looked"], out["by_source"]["seed"]["looked"]), (1, 1))
+        self.assertEqual(out["by_source"]["born"]["looked"], 0)
+
+
+class TheLedgerFailsClosed(unittest.TestCase):
+    """The review of Oct 17: a damaged ledger, or one of another version, loaded as empty, so every version could be
+    looked at on DVAL again and the budget, the cells and the canaries reset unseen. It refuses every look now."""
+
+    def setUp(self):
+        self.root = F.tmpdir(self)
+        self.deep = F.deep_store(self.root / "equity-deep", ("SPY", "QQQ"))
+        self.runs = F.InlineRuns(F.equity_store(self.root / "equity-daily", ("SPY", "QQQ")))
+
+    def test_a_missing_ledger_is_empty_and_a_save_keeps_the_one_before(self):
+        ledger = gate.Ledger(self.deep)
+        self.assertFalse(ledger.damaged)
+        ledger.refuse("k1", "why", identity="i", at="t")
+        self.assertFalse((self.deep / config.LEDGER_PREV).exists(), "nothing stood before the first save")
+        ledger.refuse("k2", "why", identity="i", at="t")
+        prev = json.loads((self.deep / config.LEDGER_PREV).read_text())
+        self.assertEqual(set(prev["refused"]), {"k1"}, "the file as it stood before the last save")
+        self.assertEqual(stat.S_IMODE(os.stat(self.deep / config.LEDGER_PREV).st_mode), 0o600)
+
+    def test_a_damaged_or_foreign_ledger_refuses_every_look_and_is_never_written_over(self):
+        v = gate.Version(fid="f", n=1, code=F.blind_program(("SPY", "QQQ")), params={}, cell="c", strong_recall=False)
+        for body in (b"{not json", json.dumps({"version": "deep-ledger-2", "looks": []}).encode(), b"[]",
+                     json.dumps({"version": gate.LEDGER_VERSION, "looks": {"a": 1}}).encode()):
+            with self.subTest(body[:20]):
+                (self.deep / config.LEDGER).write_bytes(body)
+                ledger = gate.Ledger(self.deep)
+                self.assertTrue(ledger.damaged)
+                out = gate.look(self.deep, v, self.runs, ledger=ledger, identity="i", now="t", worlds=WORLDS)
+                self.assertEqual(out["status"], "ledger")
+                self.assertEqual(self.runs.calls, [], "nothing is run")
+                with self.assertRaises(gate.LedgerDamaged):
+                    ledger.save()
+                self.assertEqual((self.deep / config.LEDGER).read_bytes(), body, "nothing written over it")
+                self.assertEqual(report.summary(ledger)["ledger"], "damaged")
+
+
+class TheReserveStaysSealed(unittest.TestCase):
+    """D2 (A58): the 2020-21 reserve is judged inside S3 beside the deep key and never alone. Its one run (`recent`) is
+    made only inside a begun look, after the deep key's DVAL runs; never for a refusal, a wait, a canary or with
+    the reserve sealed."""
+
+    def setUp(self):
+        self.root = F.tmpdir(self)
+        self.deep = F.deep_store(self.root / "equity-deep", ("SPY", "QQQ"))
+        F.equity_store(self.root / "equity-daily", ("SPY", "QQQ"))
+        self.runs = F.InlineRuns(self.root / "equity-daily")
+        self.ledger = gate.Ledger(self.deep)
+        self.seen: list[tuple] = []
+        real_recent, real_on_store = self.runs.recent, self.runs.on_store
+
+        def recent(code, params):
+            row = self.ledger.row(gate.version_key(code, params))
+            dval = sum(1 for kind, r in self.runs.calls if kind == "on_store" and ("deep-A-" in str(r) or "deep-B-" in str(r)))
+            self.seen.append(("recent", None if row is None else (row["attempts"], row["verdict"]), dval))
+            return real_recent(code, params)
+
+        def on_store(root, code, params, start, end, k):
+            if start.year in (2020, 2021) and not ("deep-A-" in str(root) or "deep-B-" in str(root)):
+                self.seen.append(("reserve-dated open run", str(root)))
+            return real_on_store(root, code, params, start, end, k)
+
+        self.runs.recent, self.runs.on_store = recent, on_store
+
+    def look(self, v, **kw):
+        return gate.look(self.deep, v, self.runs, ledger=self.ledger, identity="i", now="t", worlds=WORLDS, **kw)
+
+    def version(self, **kw):
+        base = dict(fid="f", n=1, code=F.blind_program(("SPY", "QQQ")), params={}, cell="c", strong_recall=False)
+        return gate.Version(**{**base, **kw})
+
+    def test_the_reserve_is_run_once_inside_the_begun_look_after_the_deep_key(self):
+        self.assertEqual(self.look(self.version())["status"], "looked")
+        self.assertEqual(self.seen, [("recent", (1, None), 2)],
+                         "once, with the look begun and under way, after both DVAL segments' runs")
+
+    def test_never_for_a_refusal_a_wait_a_canary_or_with_the_reserve_sealed(self):
+        self.look(self.version(code=F.blind_program(("SPY", "XLRE"))))
+        self.look(self.version(code=F.blind_program(("SPY", "QQQ"), look=12), strong_recall=None))
+        self.look(self.version(code=F.blind_program(("SPY", "QQQ"), look=13)), reserve=False)
+        weekday = F.blind_program(("SPY", "QQQ"), look=14).replace("    held = {p", "    if ctx.weekday == 1:\n        return out\n    held = {p")
+        self.look(self.version(code=weekday))
+        v = self.version()
+        self.look(v)
+        self.seen.clear()
+        while not self.ledger.canary_due():
+            self.ledger.looks.append({"key": f"p{len(self.ledger.looks)}", "kind": "look", "cell": "x", "verdict": None})
+        canary = gate.canary_for(self.ledger, {v.key: v}, self.runs)
+        self.assertEqual(self.look(canary, kind="canary")["status"], "looked")
+        self.assertEqual(self.seen, [], "no reserve run but the real look's own")
+
+    def test_only_the_gate_calls_the_reserves_run_and_only_the_house_runs_names_it(self):
+        import ast
+
+        repo = Path(__file__).resolve().parents[2]
+        callers = []
+        for path in sorted((repo / "league").rglob("*.py")):
+            if path.is_relative_to(repo / "league" / "tests"):
+                continue
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    for inner in ast.walk(node):
+                        if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute) and \
+                                inner.func.attr == "recent" and isinstance(inner.func.value, ast.Name) and \
+                                inner.func.value.id == "runs":
+                            callers.append(f"{path.relative_to(repo).as_posix()}:{node.name}")
+        self.assertEqual(sorted(set(callers)), ["league/deep/gate.py:_recent_key"])
+        readers = [*sorted((repo / "league" / "deep").glob("*.py")),
+                   *(repo / "league" / "ops" / f"{name}.py" for name in ("deep_report", "equity_deep", "contam_probe"))]
+        named = sorted(path.relative_to(repo).as_posix() for path in readers if "config.RESERVE" in path.read_text())
+        self.assertEqual(named, ["league/deep/screen3.py", "league/ops/deep_report.py"],
+                         "the House's runs make the reserve's run; screen3 reads its dates for the CRASH positions")
+
+
+class TheCanaryAlarm(unittest.TestCase):
+    def test_the_report_only_alarm_reads_the_receipts_own_rate_and_never_halts(self):
+        ledger = gate.Ledger(F.tmpdir(self))
+        ledger.looks.append({"key": "c0", "kind": "canary", "verdict": {"passed": True, "deep": True, "recent": None}})
+        self.assertEqual(gate.band_upper(1, config.CANARY_REFERENCE), 0)
+        self.assertTrue(ledger.canary_alarm(), "one deep pass of one canary is past the band at 0.78%")
+        self.assertFalse(ledger.halted(), "the pre-registered halt is at 15%: it does not fire")
+        receipt = json.loads((Path(__file__).resolve().parents[2] / config.RECEIPT_PATH).read_text())
+        self.assertEqual(config.CANARY_REFERENCE,
+                         max(receipt["canary"]["synthetic_canary_deep_pass_raw_k2"].values()))
+        for _ in range(30):
+            ledger.looks.append({"key": f"c{len(ledger.looks)}", "kind": "canary",
+                                 "verdict": {"passed": False, "deep": False, "recent": None}})
+        self.assertFalse(ledger.canary_alarm())
+
+
+class ASegmentWithAGap(unittest.TestCase):
+    """The review of Oct 17: one missing session of a NEEDS fund made the look fail on the data. Such a segment is not
+    scored, so no look is spent on it."""
+
+    def test_the_audits_gaps_unscore_the_segment_before_any_look(self):
+        root = F.tmpdir(self)
+        deep = F.deep_store(root / "equity-deep", ("SPY", "QQQ"))
+        manifest = json.loads((deep / config.MANIFEST).read_text())
+        manifest["audit"]["gaps"] = {"dval": {"QQQ": 1}}
+        (deep / config.MANIFEST).write_text(json.dumps(manifest))
+        runs = F.InlineRuns(F.equity_store(root / "equity-daily", ("SPY", "QQQ")))
+        ledger = gate.Ledger(deep)
+        v = gate.Version(fid="f", n=1, code=F.blind_program(("SPY", "QQQ")), params={}, cell="c", strong_recall=False)
+        out = gate.look(deep, v, runs, ledger=ledger, identity="i", now="t", worlds=WORLDS)
+        self.assertEqual((out["status"], out["why"]), ("refused", "fewer than 750 scored DVAL sessions"))
+        self.assertEqual(ledger.spent(), [], "no look is spent on a gap")
+        self.assertFalse(any("deep-A-" in str(r) or "deep-B-" in str(r) for k, r in runs.calls if k == "on_store"))
 
 
 class TheSeeds(unittest.TestCase):

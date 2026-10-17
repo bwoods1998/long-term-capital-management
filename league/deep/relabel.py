@@ -14,9 +14,13 @@ and there is no 2016 seam to splice. A symbol with no bar before its inception h
 on the true dates). The store carries no GATE mark: nothing of it is a sealed window of league/equity.
 
 THE SEAL (`relabeled`): a DVAL segment (A, B) is written only from a store opened with the deep gate's capability,
-into a temporary directory (0700) made for one look, and that directory is REMOVED when the block ends, whether the
-look finished or failed. TRAIN-D reads its open span alone: `SEGMENT_SPANS["traind"]` names no sealed span, so its
-code never opens `sealed/`. Pseudo-dates reach into 2020-21: the run path has no reserve guard, and nothing of a
+into a temporary directory (0700) made for one look INSIDE THE SEALED TREE (`blocks.looks_dir`:
+`<state>/equity-deep/sealed/.looks/deep-<segment>-p<pid>-*`, whatever `parent` says), and that directory is REMOVED
+when the block ends, whether the look finished or failed. A process killed inside the block (the ops runner's wall
+SIGKILL, a CPU or memory limit, a box restart) runs no `finally`: its directory is SWEPT (`blocks.sweep`: its process
+is gone) before the next one is made here, and at the start of every deep_report, equity_deep and contamination-probe
+run. TRAIN-D reads its open span alone: `SEGMENT_SPANS["traind"]` names no sealed span, so its code never opens
+`sealed/`. Pseudo-dates reach into 2020-21: the run path has no reserve guard, and nothing of a
 relabeled run is ever routed to swarm reporting (this package imports nothing of league.swarm).
 
 `copy_onto` writes a true-date store's arrays onto other pseudo-dates (the behavioural test's second labeling and the
@@ -130,9 +134,16 @@ def write_segment(root: str | Path, store: blocks.DeepStore, name: str, symbols:
 @contextmanager
 def relabeled(store: blocks.DeepStore, name: str, symbols: Sequence[str], *,
               parent: str | Path | None = None) -> Iterator[Relabeled]:
-    """THE ONE WAY A SEGMENT IS RUN: written into a fresh temporary directory (0700, under `parent` when given), and
-    that directory removed when the block ends, on success and on failure alike."""
-    tmp = Path(tempfile.mkdtemp(prefix=f"deep-{name}-", dir=None if parent is None else str(parent)))
+    """THE ONE WAY A SEGMENT IS RUN: written into a fresh temporary directory (0700) and that directory removed when
+    the block ends, on success and on failure alike. A DVAL segment's directory is always in the deep store's looks
+    directory (`blocks.looks_dir`, inside `sealed/`); an open segment's under `parent` (default: the same). Before the
+    directory is made, what a killed process left there is swept (`blocks.sweep`)."""
+    if name in config.DVAL_SEGMENTS and not store.gate:
+        raise blocks.DeepRefused(f"segment {name} is the sealed era: it is written only inside a look")
+    where = blocks.looks_dir(store.root, make=True) if (name in config.DVAL_SEGMENTS or parent is None) \
+        else Path(parent)
+    blocks.sweep(where)
+    tmp = Path(tempfile.mkdtemp(prefix=blocks.temp_prefix(name), dir=str(where)))
     try:
         os.chmod(tmp, 0o700)
         yield write_segment(tmp / STORE, store, name, symbols)
@@ -141,10 +152,11 @@ def relabeled(store: blocks.DeepStore, name: str, symbols: Sequence[str], *,
 
 
 def copy_onto(src_root: str | Path, dst_root: str | Path, first: dt.date, *,
-              symbols: Sequence[str] | None = None) -> Relabeled:
+              symbols: Sequence[str] | None = None, price: float = 1.0, volume: float = 1.0) -> Relabeled:
     """A true-date equity store's Train sessions (synthetic: league/equity/synth.py) written session for session onto
-    the NYSE sessions from `first` (`store.nyse_sessions`), raw and `all` arrays exactly as they are. Returns the
-    mapping as a `Relabeled` (`lookback` 0)."""
+    the NYSE sessions from `first` (`store.nyse_sessions`), raw and `all` arrays exactly as they are (`price`, `volume`:
+    every price, raw and `all`, and every volume times these: the level test's store, league/deep/blind.py). Returns
+    the mapping as a `Relabeled` (`lookback` 0)."""
     src = estore.EquityStore(src_root)
     classes = src.symbols()
     names = sorted(symbols or classes)
@@ -157,9 +169,12 @@ def copy_onto(src_root: str | Path, dst_root: str | Path, first: dt.date, *,
     for sym in names:
         raw, adj = bars.raw[sym], bars.adj[sym]
         ok = np.isfinite(raw[:, 3])
+        scale = [float(volume) if name == estore.RAW_COLUMNS[4] else float(price) for name in estore.RAW_COLUMNS]
         series[sym] = {"days": [rows[i][0] for i in np.flatnonzero(ok)],
-                       **{name: [float(x) for x in raw[ok, k]] for k, name in enumerate(estore.RAW_COLUMNS)},
-                       **{name: [float(x) for x in adj[ok, k]] for k, name in enumerate(estore.ALL_COLUMNS)}}
+                       **{name: [float(x) * scale[k] if scale[k] != 1.0 else float(x) for x in raw[ok, k]]
+                          for k, name in enumerate(estore.RAW_COLUMNS)},
+                       **{name: [float(x) * float(price) if price != 1.0 else float(x) for x in adj[ok, k]]
+                          for k, name in enumerate(estore.ALL_COLUMNS)}}
     estore.write_store(dst_root, calendar=rows, series=series, classes={s: classes[s] for s in series},
                        fetched_through=rows[-1][0], source=SOURCE, gate=False)
     return Relabeled(root=Path(dst_root), segment="copy", true_days=tuple(true_days),

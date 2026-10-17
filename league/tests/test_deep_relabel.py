@@ -377,17 +377,24 @@ class TheDeepSegments(unittest.TestCase):
 
     def test_the_temporary_store_is_removed_after_the_look_and_after_a_failure(self):
         sealed = blocks.DeepStore(self.deep, gate=self.cap)
+        looks = blocks.looks_dir(self.deep)
         with relabel.relabeled(sealed, "A", ("SPY",), parent=self.root) as rl:
             held = rl.root.parent
             self.assertTrue(held.is_dir())
+            self.assertEqual(held.parent, looks, "a DVAL segment is written inside the sealed tree, whatever parent says")
+            self.assertTrue(held.name.startswith(f"deep-A-p{os.getpid()}-"), "its directory names its process")
             self.assertEqual(os.stat(held).st_mode & 0o777, 0o700)
+            self.assertEqual(os.stat(looks).st_mode & 0o777, 0o700)
         self.assertFalse(held.exists())
         with self.assertRaises(RuntimeError):
             with relabel.relabeled(sealed, "B", ("SPY",), parent=self.root) as rl:
                 held = rl.root.parent
                 raise RuntimeError("a look that fails")
         self.assertFalse(held.exists())
+        self.assertEqual(os.listdir(looks), [])
         self.assertEqual([p for p in os.listdir(self.root) if p.startswith("deep-")], [])
+        with relabel.relabeled(blocks.DeepStore(self.deep), "traind", ("SPY",), parent=self.root) as rl:
+            self.assertEqual(rl.root.parent.parent, self.root, "an open segment goes where it is asked")
 
     def test_traind_never_opens_the_sealed_span_and_dval_needs_the_gate(self):
         open_store = blocks.DeepStore(self.deep)
@@ -408,6 +415,108 @@ class TheDeepSegments(unittest.TestCase):
                 with relabel.relabeled(open_store, name, ("SPY",), parent=self.root):
                     pass
         self.assertEqual(config.SEGMENT_SPANS["traind"], ("traind",))
+
+
+KILLED_CHILD = """
+import os, sys, time
+from pathlib import Path
+from league.deep import blocks, gate, relabel
+deep = Path(sys.argv[1])
+cap = gate.mint_deep_gate_capability(deep, "s3-look")
+with relabel.relabeled(blocks.DeepStore(deep, gate=cap), "A", ("SPY", "QQQ")) as rl:
+    Path(sys.argv[2]).write_text(str(rl.root))
+    time.sleep(120)
+"""
+
+
+class AKilledLook(unittest.TestCase):
+    """THE SEAL AFTER A KILL (both reviews of Oct 17): a look's process killed inside `relabeled` (the ops runner's wall
+    SIGKILL, a CPU or memory limit, a box restart) runs no `finally`, and left a plain equity store of DVAL bars on
+    pseudo-dates that read with no capability. It is swept: before the next look's store is made, and at the start
+    of every deep_report, equity_deep and contamination-probe run."""
+
+    def setUp(self):
+        self.root = F.tmpdir(self)
+        self.deep = F.deep_store(self.root / "equity-deep", ("SPY", "QQQ"))
+
+    def kill_a_child_mid_look(self) -> Path:
+        import signal
+        import subprocess
+        import sys
+        import time
+
+        ready = self.root / "ready"
+        ready.unlink(missing_ok=True)
+        repo = Path(__file__).resolve().parents[2]
+        env = {**os.environ, "PYTHONPATH": str(repo) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+        child = subprocess.Popen([sys.executable, "-c", KILLED_CHILD, str(self.deep), str(ready)], cwd=str(repo), env=env)
+        try:
+            for _ in range(600):
+                if ready.is_file() and ready.read_text():
+                    break
+                if child.poll() is not None:
+                    self.fail(f"the child ended ({child.returncode}) before its look began")
+                time.sleep(0.1)
+            else:
+                self.fail("the child's look did not begin")
+            child.send_signal(signal.SIGKILL)
+            child.wait(timeout=30)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=30)
+        left = Path(ready.read_text())
+        self.assertTrue(left.is_dir(), "the kill left the relabeled store behind")
+        self.assertEqual(left.parent.parent, blocks.looks_dir(self.deep), "inside the sealed tree")
+        bars = estore.EquityStore(left).bars(["SPY"], "train", history=0)
+        self.assertGreater(int(np.isfinite(bars.raw["SPY"][:, 3]).sum()), 1000, "readable with no capability")
+        return left.parent
+
+    def test_the_next_look_sweeps_it_before_its_own_store_is_made(self):
+        left = self.kill_a_child_mid_look()
+        mine = blocks.looks_dir(self.deep) / f"deep-B-p{os.getpid()}-live"
+        mine.mkdir()
+        sealed = blocks.DeepStore(self.deep, gate=gate.mint_deep_gate_capability(self.deep, "s3-look"))
+        with relabel.relabeled(sealed, "B", ("SPY",)):
+            self.assertFalse(left.exists(), "swept before the next look's store was made")
+            self.assertTrue(mine.exists(), "a live process's store is left alone")
+        mine.rmdir()
+
+    def test_every_deep_job_sweeps_it_first(self):
+        import json
+        from unittest import mock
+
+        from league.ops import contam_probe, deep_report, equity_deep
+        from league.ops.context import Context
+
+        (self.root / "swarm.json").write_text(json.dumps({"elane": {"deep": {"mode": "off"}, "contam": {"mode": "off"}}}))
+        for name, job in (("deep_report", deep_report.report_run), ("equity_deep", equity_deep.run),
+                          ("contam_probe", contam_probe.probe)):
+            with self.subTest(name):
+                left = self.kill_a_child_mid_look()
+                ctx = Context(name, root=self.root, due_at=0.0, clock=lambda: 0.0, config={}, settings_value={})
+                with mock.patch("league.ops.equity_deep.complete", return_value=False):
+                    out = job(ctx)
+                self.assertEqual(out["status"], "skipped", "the switch is off: the sweep comes first anyway")
+                self.assertFalse(left.exists(), f"{name} swept the killed look's store")
+        self.assertEqual(os.listdir(blocks.looks_dir(self.deep)), [])
+
+    def test_an_old_store_is_swept_whatever_its_name_and_the_sweep_touches_nothing_else(self):
+        looks = blocks.looks_dir(self.deep, make=True)
+        old = looks / f"deep-A-p{os.getpid()}-old"
+        old.mkdir()
+        os.utime(old, (0, 0))
+        nameless = looks / "deep-A-legacy"
+        nameless.mkdir()
+        legacy = self.deep / "deep-B-abc123"   # where the first R1 build wrote them (parent = the deep store)
+        legacy.mkdir()
+        other = looks / "keep-me"
+        other.mkdir()
+        self.assertEqual(blocks.sweep_store(self.deep), 3)
+        self.assertEqual(sorted(os.listdir(looks)), ["keep-me"])
+        self.assertEqual(sorted(p for p in os.listdir(self.deep) if p.startswith("deep-")), [])
+        self.assertTrue((self.deep / config.SEALED_DIR / "dval").is_dir(), "the store itself is untouched")
+        self.assertEqual(blocks.sweep(self.root / "nowhere"), 0)
 
 
 if __name__ == "__main__":

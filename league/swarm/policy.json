@@ -402,7 +402,7 @@
     },
     "deep": {
       "mode": "report",
-      "reserve": "sealed",
+      "reserve": "judged",
       "looks_per_run": 2
     }
   },

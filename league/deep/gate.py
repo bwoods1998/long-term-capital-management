@@ -6,22 +6,47 @@ reads counts: league/deep/report.py). THAT FIRST LOOK IS THE VERSION'S LOOK: it 
 
 THE CAPABILITY (`DeepGateCapability`, `mint_deep_gate_capability`): an object, not a flag, as the equity store's
 (league/equity/store.py `EquityGateCapability`). It cannot be constructed; it is minted on a deep store whose
-`sealed/` carries the `DEEP_GATE` mark, for one of `REASONS`, and only `blocks.DeepStore` reads it.
+`sealed/` carries the `DEEP_GATE` mark, for one of `REASONS`, and only `blocks.DeepStore` reads it. Two callers mint
+it, and a test holds the list (league/tests/test_deep_identity.py): this module's look and the contamination probe.
 
 THE LEDGER (`Ledger`, `<state>/equity-deep/ledger.json`, 0600): one row a look ({key, fid, n, cell, kind ("look" |
-"canary"), at, attempts, verdict ({"passed", "deep", "recent"}, "failed" or None while under way), identity, engine,
-receipt}) and the versions refused before a look ({key: {why, identity, at}}). Verdicts are booleans (and None for a
-recent key that is pending): no figure is kept. A version (`version_key`: its code and PARAMS) is looked at once
-(`config.LOOKS_PER_VERSION`); at most three real looks a mechanism cell (`config.LOOKS_PER_CELL`; the cell is the
-swarm's (lane, agenda, universe group), handed in); at most 150 looks in all before an erosion review
-(`config.LOOK_BUDGET`, canaries counted). A look the House could not finish (an exception after the look was begun) is
-owed again once; the second time it is spent and failed (`config.LOOK_ATTEMPTS`): no program can stop a look until
-DVAL suits it. A run the program's own errors ended is spent and failed at once.
+"canary"), seated, source, level, at, attempts, verdict ({"passed", "deep", "recent"}, "failed" or None while under
+way), identity, engine, receipt}), the versions refused before a look ({key: {why, identity, at}}) and the House's
+errors by version ({key: {count, identity, stage, error, at}}). Verdicts are booleans: no figure is kept. A version
+(`version_key`: its code and PARAMS) is looked at once (`config.LOOKS_PER_VERSION`); at most three real looks a
+mechanism cell (`config.LOOKS_PER_CELL`; the cell is the swarm's (lane, agenda, universe group), handed in); at most
+150 looks in all before an erosion review (`config.LOOK_BUDGET`, canaries counted).
+THE LEDGER FAILS CLOSED: a file that is there but does not parse, or is of another version, is DAMAGED: every look is
+refused (`look` "ledger") and nothing is written over it, until the captain restores it (`ledger.json.prev`, the file
+as it stood before its last save, is kept beside it) or migrates it on purpose. A missing file is an empty ledger.
 
-THE RECENT KEY WAITS ON D2. The receipt calibrates the recent key on R + V + H, the reserve in it, and PREREG-H reads
-the reserve only inside S3 when the owner's D2 is "judged". Until then a look reads the DEEP key (the sealed look,
-once) and its recent key is PENDING: no R, V or H run is made, `passed` is None. `recent_look` reads a pending recent
-key once D2 is "judged" (open and gated recent windows only: DVAL is never read again).
+WHAT SPENDS A LOOK. A look is begun (its row written, `attempts` + 1) before anything sealed is opened, and is then
+spent: its verdict is written, or it is "failed". Three things can end a begun look without a verdict:
+- the program's own errors ended a sealed run ("disqualified"): spent and failed at once (a partial series is never
+  judged);
+- a sealed run was sent whole and not answered (league/equity/runner.py `RunLost`: the program held its bars and ran
+  past its budget or exited), or the look's process was killed (nothing ran after): the attempt STANDS, so the look is
+  owed once more and the second time it is spent and failed (`config.LOOK_ATTEMPTS`; league/swarm/elane.py
+  `LOOK_SENDS`'s rule), and no program can stop answering until DVAL suits it;
+- ANY OTHER ERROR IS THE HOUSE'S (a child that could not start, a store's slice, an answer that is not a result, a
+  missing price): the attempt is WITHDRAWN (`Ledger.withdraw`), so no look is spent, and the error goes up to the job
+  (league/ops/deep_report.py), which records it (`Ledger.house_error`), raises a House warning and goes on with the
+  next version; at `config.HOUSE_ERRORS_MAX` errors under one deep identity the version is refused (no look spent)
+  until a release moves the identity.
+
+D2: THE RESERVE IS JUDGED, NEVER ALONE (the captain's A58, by the owner's delegation). The receipt calibrates the
+recent key on R + V + H, the reserve in it, and PREREG-H reads the reserve only inside S3. So a real look reads BOTH
+keys or NEITHER: with `elane.deep.reserve` "judged" (the default) each look reads the deep key and then the recent key;
+with "sealed" (the switch back) no look is made at all (`look` "waits": no DVAL and no reserve run). HOW THE RESERVE
+STAYS SEALED UNTIL THE LOOK: its bars are in the House's equity store (the Train window; the store asks no capability
+for them: the swarm's own seal keeps every reserve session unrun, league/swarm/elane_seal.py), and here the only call
+that runs one is `Runs.recent` (league/ops/deep_report.py `HouseRuns.recent`), made by `_recent_key` alone, which only
+`look` calls, for a real look (never a canary), after every eligibility rule held and both own floors were computed
+from open data only (the Train-era runs 2016-19 and 2022-24 and the relabeled TRAIN-D run: never a reserve session; R's
+dates enter the recent floor's CRASH set as positions, never as bars), after the ledger row was written (the look is
+spent) and after the deep key's DVAL runs. The R, V and H arrays live in memory inside that call; `screen3.recent_key`
+returns booleans, and the ledger keeps booleans. Tests pin the order (league/tests/test_deep_gate.py
+`TheReserveStaysSealed`).
 
 THE CANARIES (the receipt's `canary`). In each block of ten consecutive looks exactly one is a random-timing canary, at
 the block position default_rng([20261017, 3, 8, block]).integers(10) (`canary_slot`; a slot before the block's first
@@ -29,23 +54,25 @@ real look moves to the next one). It mirrors the real version looked at just bef
 universe and history, and per symbol its Train-era round trips a year, mean holding period and mean weight; per symbol
 an on/off Markov chain (P(on -> off) = 1 / mean hold, P(off -> on) set so the invested share matches), drawn from
 default_rng([20261017, 3, 9, look index]) and written into the program as a schedule (`canary_code`): it reads no
-price and no date. It is judged exactly as a version on the deep key alone, counts as a look, is never seated and
-never shown to births. When the canaries' deep-key passes exceed the upper end of the central 95% binomial band at 15%
-(`band_upper`), S3 HALTS: no further look until the captain clears it (`Ledger.halted`).
+price and no date. It is judged exactly as a version on the deep key alone (its recent key is not read), counts as a
+look, is never seated and never shown to births. When the canaries' deep-key passes exceed the upper end of the
+central 95% binomial band at 15% (`band_upper`), S3 HALTS: no further look until the captain clears it
+(`Ledger.halted`). Beside it, REPORT-ONLY, `Ledger.canary_alarm` reads the same band at the receipt's own synthetic
+canary rate (`config.CANARY_REFERENCE`): the halt at 15% sees gross breakage only (`config.LIMITS`).
 
-THE LOOK (`look`), in order, nothing sealed opened before step 4:
-1. the ledger's walls (halted, already looked, the budget, the cell);
-2. eligibility, no look spent (league/deep/screen3.py `rules`): ETF only, the calendar-blind scan and behavioural
-   test (league/deep/blind.py), turnover and the close-to-next-open share on the Train-era runs, the scored layout
-   (>= 750 DVAL sessions), the route's recall (unmeasured: the look WAITS);
-3. the own deep floor from the Train-era runs and the relabeled TRAIN-D run (open data only), and the bar c_D (no
-   floor: INELIGIBLE, no look spent);
-4. the look is begun (the ledger row written first), the deep gate's capability minted, each scored DVAL segment
-   written into a temporary store and run at k 2.0 (removed after, `relabel.relabeled`), x2 full and masked and the
-   k 3.0 sum, the deep key;
-5. the recent key (a real look, D2 "judged" only): its own floor, c_R, and the caller's R + V + H series
-   (`Runs.recent`);
-6. the verdict, written to the ledger. What `look` returns is the status and booleans.
+THE LOOK (`look`), in order, nothing sealed opened before step 5:
+1. the ledger's walls (damaged, halted, D2 sealed, already looked, the budget, the cell, the attempts);
+2. the version's NEEDS; ETF only; the route's recall (unmeasured: the look WAITS, before any run is made);
+3. the calendar-blind scan and behavioural test (league/deep/blind.py; the level test beside it, report-only), the
+   Train-era runs, turnover and the close-to-next-open share, the scored layout (>= 750 DVAL sessions, no segment
+   with a data gap): eligibility, no look spent;
+4. the own deep floor from the Train-era runs and the relabeled TRAIN-D run (open data only), c_D, and for a real look
+   the own recent floor from the same pool, c_R (no floor: INELIGIBLE, no look spent);
+5. the look is begun (the ledger row written first), the deep gate's capability minted, each scored DVAL segment
+   written into a temporary store inside `sealed/.looks/` and run at k 2.0 (removed after, `relabel.relabeled`), x2
+   full and masked and the k 3.0 sum, the deep key;
+6. the recent key (a real look): the caller's R + V + H series (`Runs.recent`) at c_R;
+7. the verdict, written to the ledger. What `look` returns is the status and booleans.
 
 `Runs` is the caller's: league/ops/deep_report.py builds one over the decider-isolated child; tests over the
 in-process decider.
@@ -65,11 +92,16 @@ from typing import Any, Mapping, Protocol, Sequence
 import numpy as np
 
 from ..equity.program import CodeRefused
+from ..equity.runner import RunLost
 from . import DEEP_ENGINE_VERSION, blind, blocks, calendar, config, relabel, screen3
 from . import stat as S
 
 REASONS = ("s3-look", "contamination-probe")
 LEDGER_VERSION = "deep-ledger-1"
+
+
+class LedgerDamaged(RuntimeError):
+    """The look ledger is there and cannot be read as this version's: nothing is written over it."""
 
 
 class DeepGateCapability:
@@ -125,25 +157,51 @@ def canary_slot(block: int) -> int:
 
 # ---------------------------------------------------------------------------------------------------------- the ledger
 class Ledger:
-    """The look ledger at `<root>/ledger.json` (the module docstring). `save` writes it atomically (0600)."""
+    """The look ledger at `<root>/ledger.json` (the module docstring). `save` writes it atomically (0600), the file
+    it replaces kept as `ledger.json.prev`. `damaged`: the file is there and not this version's (`problem` says why):
+    every look is refused and `save` raises `LedgerDamaged`."""
 
     def __init__(self, root: str | Path):
         self.path = Path(root) / config.LEDGER
-        try:
-            doc = json.loads(self.path.read_text())
-        except (OSError, ValueError):
-            doc = {}
-        if not isinstance(doc, dict) or doc.get("version") != LEDGER_VERSION:
-            doc = {}
+        self.damaged = False
+        self.problem: str | None = None
+        doc: Any = {}
+        if self.path.exists():
+            try:
+                doc = json.loads(self.path.read_text())
+            except (OSError, ValueError) as exc:
+                doc, self.damaged, self.problem = {}, True, f"it does not parse ({type(exc).__name__})"
+            else:
+                if not isinstance(doc, dict) or doc.get("version") != LEDGER_VERSION:
+                    found = doc.get("version") if isinstance(doc, dict) else type(doc).__name__
+                    doc, self.damaged = {}, True
+                    self.problem = f"it is not a {LEDGER_VERSION} ledger ({str(found)[:40]})"
+                elif not (isinstance(doc.get("looks") or [], list) and isinstance(doc.get("refused") or {}, dict)
+                          and isinstance(doc.get("errors") or {}, dict) and isinstance(doc.get("cleared") or [], list)):
+                    doc, self.damaged, self.problem = {}, True, "its looks, refusals or errors are malformed"
         self.looks: list[dict[str, Any]] = [dict(r) for r in doc.get("looks") or [] if isinstance(r, dict)]
         self.refused: dict[str, dict[str, Any]] = {str(k): dict(v) for k, v in (doc.get("refused") or {}).items()
                                                    if isinstance(v, dict)}
+        self.errors: dict[str, dict[str, Any]] = {str(k): dict(v) for k, v in (doc.get("errors") or {}).items()
+                                                  if isinstance(v, dict)}
         self.cleared: list[str] = [str(x) for x in doc.get("cleared") or []]
 
     def save(self) -> None:
+        if self.damaged:
+            raise LedgerDamaged(f"the look ledger is damaged ({self.problem}): nothing is written over it")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = json.dumps({"version": LEDGER_VERSION, "looks": self.looks, "refused": self.refused,
-                           "cleared": self.cleared}, sort_keys=True, indent=1).encode()
+                           "errors": self.errors, "cleared": self.cleared}, sort_keys=True, indent=1).encode()
+        if self.path.exists():
+            prev = self.path.with_name(config.LEDGER_PREV)
+            old = self.path.read_bytes()
+            fd = os.open(prev.with_name(f".{prev.name}.{os.getpid()}.tmp"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                         0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(old)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(prev.with_name(f".{prev.name}.{os.getpid()}.tmp"), prev)
         tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as handle:
@@ -165,10 +223,6 @@ class Ledger:
     def canaries(self) -> list[dict[str, Any]]:
         return [r for r in self.looks if r.get("kind") == "canary" and isinstance(r.get("verdict"), dict)]
 
-    def pending(self) -> list[dict[str, Any]]:
-        """Real looks whose recent key waits on D2."""
-        return [r for r in self.real() if isinstance(r.get("verdict"), dict) and r["verdict"].get("recent") is None]
-
     def cell_count(self, cell: str) -> int:
         return sum(1 for r in self.real() if r.get("cell") == cell)
 
@@ -182,12 +236,22 @@ class Ledger:
             return False
         return at >= canary_slot(block)
 
+    def _counted_canaries(self) -> list[dict[str, Any]]:
+        return [r for r in self.canaries() if r.get("key") not in self.cleared]
+
     def halted(self) -> bool:
         """The canary halt: the canaries' deep-key passes above `band_upper` of their count (cleared by the captain
         for the canaries counted at the clearing, `cleared`)."""
-        rows = [r for r in self.canaries() if r.get("key") not in self.cleared]
+        rows = self._counted_canaries()
         passes = sum(1 for r in rows if r["verdict"].get("deep"))
         return bool(rows) and passes > band_upper(len(rows))
+
+    def canary_alarm(self) -> bool:
+        """REPORT-ONLY (never a halt): the canaries' deep-key passes above the central 95% band at the receipt's own
+        synthetic canary rate (`config.CANARY_REFERENCE`)."""
+        rows = self._counted_canaries()
+        passes = sum(1 for r in rows if r["verdict"].get("deep"))
+        return bool(rows) and passes > band_upper(len(rows), config.CANARY_REFERENCE)
 
     def begin(self, row: Mapping[str, Any]) -> dict[str, Any]:
         found = self.row(str(row["key"]))
@@ -198,16 +262,38 @@ class Ledger:
         self.save()
         return found
 
+    def withdraw(self, key: str) -> None:
+        """An attempt the House could not make: it is taken back (the look is not spent); a row with no attempt left
+        is removed."""
+        found = self.row(key)
+        if found is None or found.get("verdict") is not None:
+            return
+        found["attempts"] = int(found.get("attempts") or 0) - 1
+        if found["attempts"] <= 0:
+            self.looks.remove(found)
+        self.save()
+
     def finish(self, key: str, verdict: Any) -> None:
         found = self.row(key)
         if found is None:
             raise KeyError(f"no look {key} under way")
         found["verdict"] = verdict
+        self.errors.pop(key, None)
         self.save()
 
     def refuse(self, key: str, why: str, *, identity: str, at: str) -> None:
         self.refused[key] = {"why": str(why)[:200], "identity": identity, "at": at}
         self.save()
+
+    def house_error(self, key: str, *, identity: str, at: str, stage: str, error: str) -> int:
+        """One more error of the House's for this version under `identity` (a count under another identity starts
+        again): the count. Names only: the error's class, never its text."""
+        held = self.errors.get(key) or {}
+        count = (int(held.get("count") or 0) if held.get("identity") == identity else 0) + 1
+        self.errors[key] = {"count": count, "identity": identity, "stage": str(stage)[:40], "error": str(error)[:60],
+                            "at": at}
+        self.save()
+        return count
 
 
 # ------------------------------------------------------------------------------------------------------- the canaries
@@ -278,8 +364,11 @@ def canary_code(*, symbols: Sequence[str], history: int, per_symbol: Mapping[str
 # ------------------------------------------------------------------------------------------------------------ the look
 @dataclass(frozen=True)
 class Version:
-    """What the look is told of a version: its swarm ids (`fid`, `n`), `code`, `params`, its mechanism `cell` and
-    whether its route is a strong recall of 2001-08 (`strong_recall`: None when unmeasured)."""
+    """What the look is told of a version: its swarm ids (`fid`, `n`), `code`, `params`, its mechanism `cell`, whether
+    its route is a strong recall of 2001-08 (`strong_recall`: None when unmeasured), whether its family names a route
+    at all (`route_known`: a captain's seed needs none), whether it holds a seat (`seated`: its recent key re-reads
+    the windows that seated it) and its `source` ("seed" for a captain's seed and its lineage, "born" otherwise): the
+    report counts seated versions and the sources apart."""
 
     fid: str
     n: int
@@ -287,6 +376,9 @@ class Version:
     params: Mapping[str, Any]
     cell: str
     strong_recall: bool | None
+    route_known: bool = True
+    seated: bool = False
+    source: str = "born"
 
     @property
     def key(self) -> str:
@@ -303,8 +395,8 @@ class Runs(Protocol):
     """The caller's runs (the module docstring). `needs` -> {"symbols", "history", "max_hold_sessions"}; `segments` ->
     the Train-era `runner.Run`s (2016-19, 2022-24); `on_store(root, code, params, start, end, k)` -> one `runner.Run`
     on a store root; `recent(code, params)` -> the R, V and H windows' daily r arrays at k 1.0 (H last), or None when
-    the program's own errors ended one of those runs ("disqualified": the recent key fails); a run the House could not
-    make raises (the look is owed again once)."""
+    the program's own errors ended one of those runs ("disqualified": the recent key fails). A run sent whole and not
+    answered raises `RunLost`; any other run the House could not make raises another error (the module docstring)."""
 
     def needs(self, code: str, params: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
@@ -349,6 +441,18 @@ def _late_clean(store: blocks.DeepStore) -> dict[str, bool]:
     return {sym: bool(isinstance(row, dict) and row.get("clean")) for sym, row in stale.items()}
 
 
+def _gaps(store: blocks.DeepStore) -> dict[str, dict[str, int]]:
+    """{SYMBOL: {span: sessions missing after its first bar}} from the data audit (league/ops/equity_deep.py)."""
+    audit = store.audit()
+    by_span = (audit.get("gaps") or {}) if isinstance(audit, dict) else {}
+    out: dict[str, dict[str, int]] = {}
+    for span, rows in by_span.items() if isinstance(by_span, dict) else ():
+        for sym, count in (rows.items() if isinstance(rows, dict) else ()):
+            if isinstance(count, int) and not isinstance(count, bool) and count > 0:
+                out.setdefault(str(sym), {})[str(span)] = count
+    return out
+
+
 @dataclass
 class _Prepared:
     needs: Mapping[str, Any]
@@ -356,8 +460,8 @@ class _Prepared:
     history: int
     layout: Mapping[str, Any]
     c_D: float
-    segments: Sequence[Any]
-    pool: Sequence[Mapping[str, np.ndarray]]
+    c_R: float | None
+    level: bool | None
 
 
 def _pool(store: blocks.DeepStore, code: str, params: Mapping[str, Any], runs: Runs, segments: Sequence[Any],
@@ -371,44 +475,63 @@ def _pool(store: blocks.DeepStore, code: str, params: Mapping[str, Any], runs: R
     return [S.piece(_part(r, symbols), skip=config.POOL_SKIP) for r in [*segments, traind]]
 
 
-def _prepare(store: blocks.DeepStore, code: str, params: Mapping[str, Any], runs: Runs, *, tag: int,
-             strong_recall: bool | None, check_blind: bool, worlds: int,
+def _refused(why: str) -> tuple[None, dict[str, Any]]:
+    return None, {"status": "refused", "why": why}
+
+
+def _prepare(store: blocks.DeepStore, version: Version, runs: Runs, *, kind: str, worlds: int,
              parent: Path | None) -> tuple[_Prepared | None, dict[str, Any] | None]:
-    """Steps 2 and 3: (the prepared look, None) or (None, a refusal or a wait). Opens nothing sealed."""
+    """Steps 2 to 4: (the prepared look, None) or (None, a refusal or a wait). Opens nothing sealed and runs no
+    reserve session. The route's recall is read before any run is made, so a version that waits costs none."""
+    code, params = version.code, dict(version.params)
     needs = runs.needs(code, params)
     symbols = tuple(str(s).upper() for s in needs.get("symbols") or ())
     history = int(needs.get("history") or 0)
     if not screen3.etf_only(symbols):
-        return None, {"status": "refused", "why": "not ETF only (DVAL's 15)"}
-    seen = {"blind": True}
-    if check_blind:
+        return _refused("not ETF only (DVAL's 15)")
+    real = kind == "look"
+    recall = version.strong_recall if real else False
+    if real and not version.route_known:
+        return _refused("no route is named: its 2001-08 recall cannot be read")
+    if recall is True:
+        return _refused("a strong-recall route on contam_probe's 2001-08 cells")
+    if recall is None:
+        return None, {"status": "waits", "why": "the route's 2001-08 recall is not measured yet"}
+    seen: dict[str, Any] = {"blind": True, "level": None}
+    if real:
         seen = blind.check(code, params, lambda root, start, end: runs.on_store(root, code, params, start, end,
                                                                                config.K_RECENT).result,
-                           symbols=symbols, history=history, parent=parent)
+                           symbols=symbols, history=history, parent=parent, level=True)
         if not seen["blind"]:
-            return None, {"status": "refused", "why": "not calendar-blind"}
+            return _refused("not calendar-blind")
     segments = list(runs.segments(code, params))
     if not segments or not all(_usable(r) for r in segments):
-        return None, {"status": "refused", "why": "its Train-era runs did not finish"}
+        return _refused("its Train-era runs did not finish")
     lots = [lot for r in segments for lot in r.result.get("lots") or []]
     trips = screen3.round_trips_a_year([(r.result.get("lots") or [], int(r.bars.n) - int(r.bars.first))
                                         for r in segments])
     plan = screen3.rules(symbols=symbols, history=history, first_days=_first_days(store, symbols),
                          late_clean=_late_clean(store), round_trips=trips, overnight=screen3.overnight_share(lots),
-                         strong_recall=strong_recall, blind=seen["blind"])
+                         strong_recall=recall, blind=seen["blind"], gaps=_gaps(store))
     if plan.get("wait"):
         return None, {"status": "waits", "why": plan["why"]}
     if not plan["eligible"]:
-        return None, {"status": "refused", "why": plan["why"]}
+        return _refused(plan["why"])
     pool = _pool(store, code, params, runs, segments, symbols, parent)
     if pool is None:
-        return None, {"status": "refused", "why": "its TRAIN-D run did not finish"}
-    floor_d = screen3.deep_floor(pool, _layout_keep(plan["layout"]), version_tag=tag, worlds=worlds)
-    c_D = screen3.bar(float(config.RECEIPT["c_D"]), floor_d)
+        return _refused("its TRAIN-D run did not finish")
+    c_D = screen3.bar(float(config.RECEIPT["c_D"]), screen3.deep_floor(pool, _layout_keep(plan["layout"]),
+                                                                       version_tag=version.tag, worlds=worlds))
     if c_D is None:
-        return None, {"status": "refused", "why": "no deep floor (no pool, no exposure, or past 5.00)"}
-    return _Prepared(needs=needs, symbols=symbols, history=history, layout=plan["layout"], c_D=c_D,
-                     segments=segments, pool=pool), None
+        return _refused("no deep floor (no pool, no exposure, or past 5.00)")
+    c_R = None
+    if real:
+        c_R = screen3.bar(float(config.RECEIPT["c_R"]), screen3.recent_floor(pool, version_tag=version.tag,
+                                                                             worlds=worlds))
+        if c_R is None:
+            return _refused("no recent floor (no pool, no exposure, or past 5.00)")
+    return _Prepared(needs=needs, symbols=symbols, history=history, layout=plan["layout"], c_D=c_D, c_R=c_R,
+                     level=seen.get("level")), None
 
 
 def _layout_keep(plan: Mapping[str, Any]) -> np.ndarray:
@@ -424,9 +547,9 @@ def _layout_keep(plan: Mapping[str, Any]) -> np.ndarray:
     return np.array(out, dtype=bool)
 
 
-def _deep(store_root: Path, code: str, params: Mapping[str, Any], runs: Runs, prepared: _Prepared, *,
-          parent: Path | None) -> dict[str, Any]:
-    """Step 4: the DVAL runs inside temporary stores and the deep key (booleans only)."""
+def _deep(store_root: Path, code: str, params: Mapping[str, Any], runs: Runs, prepared: _Prepared) -> dict[str, Any]:
+    """Step 5: the DVAL runs inside temporary stores in the sealed tree's looks directory and the deep key (booleans
+    only)."""
     cap = mint_deep_gate_capability(store_root, "s3-look")
     sealed = blocks.DeepStore(store_root, gate=cap)
     masked = set(calendar.mask())
@@ -434,7 +557,7 @@ def _deep(store_root: Path, code: str, params: Mapping[str, Any], runs: Runs, pr
     for name, seg in prepared.layout["segments"].items():
         if not seg:
             continue
-        with relabel.relabeled(sealed, name, prepared.symbols, parent=parent) as rl:
+        with relabel.relabeled(sealed, name, prepared.symbols) as rl:
             start = seg["start"]
             run = runs.on_store(rl.root, code, params, rl.pseudo_days[start], rl.pseudo_days[-1], config.K_JUDGED)
             if isinstance(run.result, Mapping) and run.result.get("status") == "disqualified":
@@ -454,89 +577,82 @@ def _deep(store_root: Path, code: str, params: Mapping[str, Any], runs: Runs, pr
     return screen3.deep_key(x_full, x_masked, x3, prepared.c_D)
 
 
-def _recent(version: Version, runs: Runs, pool: Sequence[Mapping[str, np.ndarray]], *,
-            worlds: int) -> dict[str, Any]:
-    """Step 5: the recent key on R + V + H at c_R = max(receipt, own floor + 0.05); a floor past the grid or a run the
-    program ended fails it (the look is spent)."""
-    floor_r = screen3.recent_floor(pool, version_tag=version.tag, worlds=worlds)
-    c_R = screen3.bar(float(config.RECEIPT["c_R"]), floor_r)
-    failed = {"passed": False, "checks": {"t": False, "sum_h": False}}
-    if c_R is None:
-        return failed
+def _recent_key(version: Version, runs: Runs, c_R: float) -> dict[str, Any]:
+    """Step 6, THE ONLY PLACE A RESERVE SESSION IS RUN (`Runs.recent`): the recent key on R + V + H at c_R (computed
+    before the look from open data); a run the program ended fails it (the look is spent)."""
     arrays = runs.recent(version.code, dict(version.params))
     if arrays is None:  # the program's own errors ended a recent window's run
-        return failed
+        return {"passed": False, "checks": {"t": False, "sum_h": False}}
     return screen3.recent_key(list(arrays), c_R)
 
 
 def look(store_root: str | Path, version: Version, runs: Runs, *, ledger: Ledger, identity: str, now: str,
-         reserve: bool = False, kind: str = "look", worlds: int = config.FLOOR_WORLDS,
+         reserve: bool = True, kind: str = "look", worlds: int = config.FLOOR_WORLDS,
          parent: str | Path | None = None) -> dict[str, Any]:
     """ONE S3 LOOK (the module docstring): {"status": "looked" | "refused" | "waits" | "halted" | "budget" | "cell" |
-    "already" | "failed", "why"?, "passed"?, "deep"?, "recent"?}. `reserve`: the owner's D2 is "judged" (the recent
-    key is read; else it is pending, `passed` None). `kind` "canary" judges the deep key alone and skips the blind
-    test (the canary is ours). Raises after a look was begun and could not finish (owed once)."""
+    "already" | "failed" | "lost" | "ledger", "why"?, "passed"?, "deep"?, "recent"?}. `reserve`: the owner's D2 is
+    "judged" (False: a real look is not made at all, "waits": both keys or neither). `kind` "canary" judges the deep
+    key alone and skips the blind test (the canary is ours). `parent`: where the open segments' and the behavioural
+    test's temporary stores go (default: the deep store's looks directory, as the DVAL segments' always). An error of
+    the House's is raised with the attempt withdrawn (no look spent); `RunLost` after the look began is "lost" (owed
+    once more)."""
     store_root = Path(store_root)
-    parent = None if parent is None else Path(parent)
     key = version.key
+    if ledger.damaged:
+        return {"status": "ledger", "why": f"the look ledger is damaged ({ledger.problem}): no look until the captain "
+                                           f"restores it"}
     if ledger.halted():
         return {"status": "halted", "why": "the canaries' deep-key passes are above their band: S3 halts"}
     found = ledger.row(key)
     if found is not None and found.get("verdict") is not None:
         return {"status": "already", "why": "one look a version"}
+    if kind == "look" and not reserve:
+        return {"status": "waits", "why": "elane.deep.reserve is sealed: a version is judged on both keys or not at all"}
     if found is None and len(ledger.spent()) >= config.LOOK_BUDGET:
         return {"status": "budget", "why": "150 looks: an erosion review first"}
     if found is None and kind == "look" and ledger.cell_count(version.cell) >= config.LOOKS_PER_CELL:
         return {"status": "cell", "why": f"three looks in cell {version.cell}"}
     if found is not None and int(found.get("attempts") or 0) >= config.LOOK_ATTEMPTS:
         ledger.finish(key, "failed")
-        return {"status": "failed", "why": "the look could not be finished twice: spent and failed"}
+        return {"status": "failed", "why": "the look was begun twice and never finished (a sealed run that did not "
+                                           "return, or its process killed): spent and failed"}
     store = blocks.DeepStore(store_root)
+    parent = blocks.looks_dir(store_root, make=True) if parent is None else Path(parent)
     try:
-        prepared, stop = _prepare(store, version.code, dict(version.params), runs, tag=version.tag,
-                                  strong_recall=version.strong_recall if kind == "look" else False,
-                                  check_blind=kind == "look", worlds=worlds, parent=parent)
+        prepared, stop = _prepare(store, version, runs, kind=kind, worlds=worlds, parent=parent)
     except CodeRefused as exc:  # the program does not load (the child's reason): a refusal, no look spent
-        prepared, stop = None, {"status": "refused", "why": f"the program does not load: {str(exc)[:120]}"}
+        prepared, stop = _refused(f"the program does not load: {str(exc)[:120]}")
+    except RunLost:  # an open-data run sent whole and not answered: the program's, before anything sealed was opened
+        prepared, stop = _refused("a run on open data was sent and did not return (past its budget, or it exited)")
     if stop is not None:
         if stop["status"] == "refused":
             ledger.refuse(key, stop["why"], identity=identity, at=now)
         return stop
     assert prepared is not None
     ledger.begin({"key": key, "fid": version.fid, "n": int(version.n), "cell": version.cell, "kind": kind, "at": now,
+                  "seated": bool(version.seated), "source": str(version.source), "level": prepared.level,
                   "identity": identity, "engine": DEEP_ENGINE_VERSION, "receipt": config.RECEIPT_SHA256[:12]})
-    deep = _deep(store_root, version.code, dict(version.params), runs, prepared, parent=parent)
-    if kind != "look":
-        verdict = screen3.verdict(deep, None)
-    elif reserve:
-        verdict = screen3.verdict(deep, _recent(version, runs, prepared.pool, worlds=worlds))
-    else:
-        verdict = {"passed": None, "deep": bool(deep.get("passed")), "recent": None}
+    try:
+        deep = _deep(store_root, version.code, dict(version.params), runs, prepared)
+        if kind != "look":
+            verdict = screen3.verdict(deep, None)
+        else:
+            assert prepared.c_R is not None
+            verdict = screen3.verdict(deep, _recent_key(version, runs, prepared.c_R))
+    except RunLost:
+        # A SEALED RUN SENT WHOLE AND NOT ANSWERED: the attempt stands; owed once more, the second time spent and failed
+        attempts = int((ledger.row(key) or {}).get("attempts") or 0)
+        if attempts >= config.LOOK_ATTEMPTS:
+            ledger.finish(key, "failed")
+            return {"status": "failed", "why": f"a sealed run was sent {attempts} times and did not return: spent and "
+                                               f"failed"}
+        return {"status": "lost", "why": f"a sealed run was sent and did not return ({attempts} of "
+                                         f"{config.LOOK_ATTEMPTS}): owed once more"}
+    except Exception:
+        ledger.withdraw(key)   # THE HOUSE'S ERROR: no look is spent; the job records it and goes on
+        raise
     ledger.finish(key, verdict)
     return {"status": "looked", **verdict}
-
-
-def recent_look(store_root: str | Path, version: Version, runs: Runs, *, ledger: Ledger,
-                worlds: int = config.FLOOR_WORLDS, parent: str | Path | None = None) -> dict[str, Any]:
-    """A PENDING RECENT KEY read once the owner's D2 is "judged": {"status": "looked", "passed", "deep", "recent"} or
-    {"status": "none"} when the version has no pending look. DVAL is not read again; the own floor's pool is rebuilt
-    from the open Train-era and TRAIN-D runs."""
-    row = ledger.row(version.key)
-    verdict = row.get("verdict") if row else None
-    if not (row and row.get("kind") == "look" and isinstance(verdict, dict) and verdict.get("recent") is None):
-        return {"status": "none"}
-    parent = None if parent is None else Path(parent)
-    store = blocks.DeepStore(Path(store_root))
-    needs = runs.needs(version.code, dict(version.params))
-    symbols = tuple(str(s).upper() for s in needs.get("symbols") or ())
-    segments = list(runs.segments(version.code, dict(version.params)))
-    pool = _pool(store, version.code, dict(version.params), runs, segments, symbols, parent) \
-        if segments and all(_usable(r) for r in segments) else None
-    recent = _recent(version, runs, pool, worlds=worlds) if pool is not None else \
-        {"passed": False, "checks": {"t": False, "sum_h": False}}
-    done = screen3.verdict({"passed": verdict.get("deep")}, recent)
-    ledger.finish(version.key, done)
-    return {"status": "looked", **done}
 
 
 def canary_for(ledger: Ledger, versions: Mapping[str, Version], runs: Runs) -> Version | None:
@@ -561,9 +677,10 @@ def canary_for(ledger: Ledger, versions: Mapping[str, Version], runs: Runs) -> V
         }
     code = canary_code(symbols=symbols, history=int(needs.get("history") or 0), per_symbol=per_symbol,
                        seed=len(ledger.looks))
-    return Version(fid=source.fid, n=int(source.n), code=code, params={}, cell="canary", strong_recall=False)
+    return Version(fid=source.fid, n=int(source.n), code=code, params={}, cell="canary", strong_recall=False,
+                   source="canary")
 
 
-__all__ = ["REASONS", "LEDGER_VERSION", "DeepGateCapability", "mint_deep_gate_capability", "version_key",
-           "band_upper", "canary_slot", "Ledger", "CANARY", "canary_plan", "canary_code", "Version", "Runs", "look",
-           "recent_look", "canary_for"]
+__all__ = ["REASONS", "LEDGER_VERSION", "LedgerDamaged", "DeepGateCapability", "mint_deep_gate_capability",
+           "version_key", "band_upper", "canary_slot", "Ledger", "CANARY", "canary_plan", "canary_code", "Version",
+           "Runs", "look", "canary_for"]

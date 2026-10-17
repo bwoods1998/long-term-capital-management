@@ -15,9 +15,16 @@ judged on scrambled dates, so it is not eligible.
     program is blind only when its lots, its daily record and its summary are the same, session for session. This
     catches what a scan cannot (a reader the scan did not foresee).
 
+(c) THE LEVEL TEST (`level`, REPORT-ONLY: the review of Oct 17): the first labeling's store again with every price
+    times `config.LEVEL_PRICE` and every volume times `config.LEVEL_VOLUME`, same days. The relabel hides dates but not
+    price or volume levels (SPY traded about $70-160 in 2001-08), and neither check above sees a program keyed on them.
+    The program is level-blind when its entries and exits (session, symbol, fill point, tag) are the same. A level
+    reader is counted in the captain's report beside the verdicts, never refused: PREREG-H names no such rule.
+
 `behaviour` runs the program through a `run(store_root, start, end)` the caller hands in: on the House the
-decider-isolated child (league/equity/runner.py `Isolated(...).train`), in tests the in-process decider. Both stores
-live in a temporary directory removed when the test ends.
+decider-isolated child (league/equity/runner.py `Isolated(...).train`), in tests the in-process decider. The stores
+live in a temporary directory (`deep-blind-p<pid>-*`, league/deep/blocks.py `temp_prefix`: swept after a kill)
+removed when the test ends.
 """
 
 from __future__ import annotations
@@ -31,7 +38,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ..equity import store as estore
 from ..equity import synth
-from . import config, relabel
+from . import blocks, config, relabel
 
 FIELDS = frozenset(config.CALENDAR_FIELDS)
 
@@ -86,11 +93,23 @@ def comparable(result: Mapping[str, Any], days: Sequence[dt.date]) -> dict[str, 
     return _days_to_index(keep, index)
 
 
+def timing(result: Mapping[str, Any], days: Sequence[dt.date]) -> list[tuple[Any, ...]]:
+    """The level test's comparison: each lot's (entry session, exit session, symbol, entry and exit fill points, tag),
+    days as session indices: what a program decided, whatever the quantities and prices it filled at."""
+    index = {d.isoformat(): i for i, d in enumerate(days)}
+    return [(index.get(str(lot.get("entry_day"))), index.get(str(lot.get("exit_day"))), lot.get("symbol"),
+             lot.get("entry_at"), lot.get("exit_at"), lot.get("tag")) for lot in result.get("lots") or ()]
+
+
 def behaviour(code: str, params: Mapping[str, Any] | None, run: Callable[[Path, dt.date, dt.date], Mapping[str, Any]],
-              *, symbols: Sequence[str], history: int, parent: str | Path | None = None) -> dict[str, Any]:
-    """THE BEHAVIOURAL TEST: {"blind": bool, "why": None | what differed}. `run(store_root, start, end)` returns the
-    program's whole result over [start, end] of that store (at k 1.0)."""
-    tmp = Path(tempfile.mkdtemp(prefix="deep-blind-", dir=None if parent is None else str(parent)))
+              *, symbols: Sequence[str], history: int, parent: str | Path | None = None,
+              level: bool = False) -> dict[str, Any]:
+    """THE BEHAVIOURAL TEST: {"blind": bool, "why": None | what differed, "level": None, or with `level` and a blind
+    program the level test's answer (True: level-blind)}. `run(store_root, start, end)` returns the program's whole
+    result over [start, end] of that store (at k 1.0). `parent`: where its directory is made (swept first)."""
+    if parent is not None:
+        blocks.sweep(parent)
+    tmp = Path(tempfile.mkdtemp(prefix=blocks.temp_prefix("blind"), dir=None if parent is None else str(parent)))
     try:
         first = _store(tmp / "A", symbols)
         second = relabel.copy_onto(tmp / "A", tmp / "B", config.BEHAVIOUR_SECOND)
@@ -99,24 +118,33 @@ def behaviour(code: str, params: Mapping[str, Any] | None, run: Callable[[Path, 
         b = run(tmp / "B", second.pseudo_days[lead], second.pseudo_days[-1])
         ca, cb = comparable(a, first), comparable(b, second.pseudo_days)
         if a.get("status") != "ok" or b.get("status") != "ok":
-            return {"blind": False, "why": f"the test runs did not finish ({a.get('status')}, {b.get('status')})"}
+            return {"blind": False, "why": f"the test runs did not finish ({a.get('status')}, {b.get('status')})",
+                    "level": None}
         for name in ca:
             if ca[name] != cb[name]:
-                return {"blind": False, "why": f"its {name} differ between two labelings of one store"}
-        return {"blind": True, "why": None}
+                return {"blind": False, "why": f"its {name} differ between two labelings of one store", "level": None}
+        seen = None
+        if level:
+            third = relabel.copy_onto(tmp / "A", tmp / "C", first[0], price=config.LEVEL_PRICE,
+                                      volume=config.LEVEL_VOLUME)
+            c = run(tmp / "C", third.pseudo_days[lead], third.pseudo_days[-1])
+            seen = c.get("status") == "ok" and timing(a, first) == timing(c, third.pseudo_days)
+        return {"blind": True, "why": None, "level": seen}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
 def check(code: str, params: Mapping[str, Any] | None, run: Callable[[Path, dt.date, dt.date], Mapping[str, Any]], *,
-          symbols: Sequence[str], history: int, parent: str | Path | None = None) -> dict[str, Any]:
-    """Both checks: {"blind", "scan" (the findings), "behaviour" (its answer, None when the scan already refused)}.
-    The behavioural test runs only for a program the scan finds blind (it costs two runs)."""
+          symbols: Sequence[str], history: int, parent: str | Path | None = None,
+          level: bool = False) -> dict[str, Any]:
+    """Both checks: {"blind", "scan" (the findings), "behaviour" (its answer, None when the scan already refused),
+    "level" (the level test's answer with `level`, else None; None too when the program is not blind)}. The
+    behavioural test runs only for a program the scan finds blind (it costs two runs; the level test a third)."""
     found = scan(code)
     if found:
-        return {"blind": False, "scan": found, "behaviour": None}
-    seen = behaviour(code, params, run, symbols=symbols, history=history, parent=parent)
-    return {"blind": bool(seen["blind"]), "scan": [], "behaviour": seen}
+        return {"blind": False, "scan": found, "behaviour": None, "level": None}
+    seen = behaviour(code, params, run, symbols=symbols, history=history, parent=parent, level=level)
+    return {"blind": bool(seen["blind"]), "scan": [], "behaviour": seen, "level": seen.get("level")}
 
 
-__all__ = ["FIELDS", "scan", "comparable", "behaviour", "check"]
+__all__ = ["FIELDS", "scan", "comparable", "timing", "behaviour", "check"]

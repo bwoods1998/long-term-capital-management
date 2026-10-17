@@ -6,21 +6,31 @@ the one ops child past the pre-open's grace, release E4's live-9); a complete st
 setting `refetch` true in `<state>/ops.json` fetches it again). With `elane.deep.mode` "off" (the code's default) nothing runs.
 
 THE SEAL. DVAL (2001-04-09..2008-12-31) is fetched BY THE HOUSE, through `GET /v1/tiingo/daily/<SYM>/prices` (the
-gateway holds the owner's token; its allowlist is the 16 ETFs and 1999-01-04..2019-12-31, never 2020 on), straight
-into `<state>/equity-deep/.staging/` (0700) and from there into `sealed/` (0700, the `DEEP_GATE` mark). It never
-touches the desktop: no desktop copy exists for a snapshot to catch.
+gateway holds the owner's token; its allowlist is the 16 ETFs and 1999-01-04..2019-12-31, never 2020 on, and the
+DVAL window is served to the House's runtime token alone), straight into `<state>/equity-deep/.staging/sealed/dval/`
+(0700, carrying the `DEEP_GATE` mark while it waits for the audit) and from there into `sealed/` (0700, the mark). It
+never touches the desktop: no desktop copy exists for a snapshot to catch. Every run first sweeps what a killed deep
+look left in the store (league/deep/blocks.py `sweep_store`).
 
 WHAT IS FETCHED (`plan`): per ETF of `config.FETCH_UNIVERSE`, one request a span: "history" (1999-01-04..2001-04-06),
 "dval", "traind" (2009-01-02..2015-12-31), and "overlap" (2016-01-04..2019-12-31, for the SIP audit only: counted,
 never kept). A span that ends before a fund's launch (`config.INCEPTION`) is not asked. The vendor's adjusted
 columns never reach the House: the gateway answers raw OHLCV, divCash, splitFactor and `factorStep` (whether the
 vendor's own adjustment factor changed that day), nothing else. Requests are paced (`PAUSE_S`: Tiingo Starter's 50
-an hour) and a run stops at `MAX_REQUESTS` or `WALL_S`; the next run goes on from what is staged.
+an hour) and a run stops at `MAX_REQUESTS` or `WALL_S`; the next run goes on from what is staged. A run STOPS at
+the first answer that will not change tonight (`STOP_STATUSES`: the route not configured, the owner's D1 not placed
+(503 "setup"), a refusal) and after `CONSECUTIVE_MAX` failures in a row, so an unconfigured route costs one request a
+night, not the ops child's hour.
 
-THE AUDIT (`audit`, once everything is staged). A FAILED AUDIT WRITES NOTHING: the staging is removed and the store is
-left as it was. It checks:
+THE AUDIT (`audit`, once everything is staged). A FAILED AUDIT WRITES NOTHING: the staging is removed, the store is
+left as it was, and a marker (`<state>/equity-deep/audit-failed.json`: the failures, counts and verdicts only) stops
+every later run from fetching again (a deterministic failure would otherwise refetch all 60 requests every two
+nights) until the job setting `refetch` asks for it. It checks:
 - the calendar: league/deep/calendar.py's rules equal the pinned fixture; SPY's sessions in each span are the
-  calendar's exactly; no fund has a bar off the calendar, or more than `GAP_MAX` missing sessions after its first;
+  calendar's exactly; no fund has a bar off the calendar; a fund of DVAL's 15 misses NO session of `dval` or
+  `traind` after its first bar, through the span's last (`DEEP_GAP_MAX` 0: a lot held through a missing session has
+  no price, and S3's look would fail on the data, not the program), any other fund or span at most `GAP_MAX` (the
+  gaps are kept by fund and span, and league/deep/screen3.py `layout` scores no segment where a NEEDS fund has one);
 - OHLC sanity: 0 < low <= min(open, close) <= max(open, close) <= high, volume >= 0, dividends >= 0, a split factor
   inside (0, 50];
 - events: every day the vendor's factor stepped carries a listed event (divCash or splitFactor); unexplained steps
@@ -51,6 +61,13 @@ PAUSE_S = 75
 MAX_REQUESTS = 40
 WALL_S = 3300
 GAP_MAX = 5
+#: A fund of DVAL's 15 misses no session of these spans (the audit FAILS CLOSED).
+DEEP_GAP_MAX = 0
+STRICT_SPANS = ("dval", "traind")
+#: The gateway's answers that stop a run at once (nothing tonight will change them: 503 is the route without the
+#: owner's TIINGO_TOKEN, "setup"), and the failures in a row that stop it too.
+STOP_STATUSES = (400, 401, 403, 404, 405, 503)
+CONSECUTIVE_MAX = 3
 CLOSE_AGREE = 0.99
 OPEN_AGREE = 0.95
 STALE_MAX_A_YEAR = 3
@@ -78,8 +95,25 @@ def plan() -> list[tuple[str, str, dt.date, dt.date]]:
     return out
 
 
+def _folder(staging: Path, span: str) -> Path:
+    """A span's staging folder: the sealed spans' inside `.staging/sealed/` (0700, the DEEP_GATE mark), the others'
+    beside it."""
+    from ..deep import config
+
+    if span in config.SEALED_SPANS:
+        return staging / config.SEALED_DIR / span
+    return staging / span
+
+
 def _staged(staging: Path, span: str, sym: str) -> Path:
-    return staging / span / f"{sym}.npz"
+    return _folder(staging, span) / f"{sym}.npz"
+
+
+def gap_max(sym: str, span: str) -> int:
+    """The missing sessions a fund may have in a span: none for a fund of DVAL's 15 in `STRICT_SPANS`."""
+    from ..deep import config
+
+    return DEEP_GAP_MAX if sym in config.DEEP_UNIVERSE and span in STRICT_SPANS else GAP_MAX
 
 
 def complete(root: Path) -> bool:
@@ -117,11 +151,19 @@ def _stage(staging: Path, span: str, sym: str, days: list[dt.date], cols: Mappin
     import io
     import os
 
-    from ..deep import blocks
+    from ..deep import blocks, config
 
-    folder = staging / span
+    folder = _folder(staging, span)
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(folder, 0o700)
+    if span in config.SEALED_SPANS:   # the sealed spans wait for the audit inside a marked, owner-only folder
+        top = staging / config.SEALED_DIR
+        os.chmod(top, 0o700)
+        mark = top / config.GATE_MARK
+        if not mark.is_file():
+            fd = os.open(mark, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(b"the House's sealed deep era, staged for its audit: only the deep gate opens it\n")
     data = blocks.block_bytes(days, cols)
     buf = io.BytesIO()
     np.save(buf, np.array(steps, dtype=bool), allow_pickle=False)
@@ -137,7 +179,7 @@ def _load(staging: Path, span: str, sym: str) -> tuple[dict[str, np.ndarray], np
     from ..deep import blocks
 
     arrays = blocks.read_block(_staged(staging, span, sym).read_bytes())
-    steps = np.load(staging / span / f"{sym}.steps.npy", allow_pickle=False)
+    steps = np.load(_folder(staging, span) / f"{sym}.steps.npy", allow_pickle=False)
     return arrays, steps
 
 
@@ -201,11 +243,11 @@ def audit(staging: Path, equity_root: Path) -> dict[str, Any]:
             out["off_calendar"].setdefault(span, {})[sym] = off
             failures.append(f"{sym} {span}: {off} bars off the calendar")
         if days:
-            held = set(days)
-            gaps = sum(1 for d in sessions if days[0] <= d <= days[-1] and d not in held)
+            held = set(days)   # missing after its first bar, through the span's last session (a fund that stops early)
+            gaps = sum(1 for d in sessions if days[0] <= d and d not in held)
             if gaps:
                 out["gaps"].setdefault(span, {})[sym] = gaps
-            if gaps > GAP_MAX:
+            if gaps > gap_max(sym, span):
                 failures.append(f"{sym} {span}: {gaps} sessions missing after its first bar")
         if sym == "SPY" and days != sessions:
             failures.append(f"SPY's {span} sessions are not the calendar's")
@@ -261,12 +303,23 @@ def run(ctx: Any) -> dict[str, Any]:
     {"ok": True, "written": True, "audit"} | {"status": "failed", "ok": False, "error", "audit"} (nothing written)."""
     from ..deep import blocks, config
     from ..swarm import settings as settings_mod
+    from . import schedule
+    from .context import GatewayError, read_json, write_json
 
     root = Path(ctx.root)
+    deep = root / config.STORE_DIR
+    blocks.sweep_store(deep)   # a killed deep look's temporary stores go first, whatever the switch says
     if config.cfg(settings_mod.load(root, config=ctx.config))["mode"] == "off":
         return {"status": "skipped", "why": "elane.deep.mode is off"}
-    deep = root / config.STORE_DIR
     own = ctx.job_settings()
+    marker = deep / config.AUDIT_FAILED
+    if marker.is_file():
+        if not own.get("refetch"):
+            held = read_json(marker, {})
+            return {"status": "skipped", "why": f"the deep store's last audit failed (at "
+                                                f"{held.get('at') if isinstance(held, dict) else None}): nothing is "
+                                                f"fetched until the job setting refetch asks ({config.AUDIT_FAILED})"}
+        marker.unlink(missing_ok=True)
     if complete(deep) and not own.get("refetch"):
         return {"status": "skipped", "why": "the deep store is complete (job setting refetch fetches it again)"}
     deep.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -274,40 +327,48 @@ def run(ctx: Any) -> dict[str, Any]:
     staging.mkdir(exist_ok=True, mode=0o700)
     pause = float(own.get("pause_s", PAUSE_S))
     began = time.monotonic()
-    fetched, problems = 0, []
+    fetched, problems, in_a_row, stopped = 0, [], 0, None
     todo = [row for row in plan() if not _staged(staging, row[1], row[0]).is_file()]
     for sym, span, first, last in todo:
         if fetched >= int(own.get("max_requests", MAX_REQUESTS)) or time.monotonic() - began > WALL_S - pause - 120:
             break
         if fetched:
             time.sleep(pause)
+        fetched += 1
         try:
             days, cols, steps = fetch(ctx, sym, first, last)
             _stage(staging, span, sym, days, cols, steps)
+            in_a_row = 0
         except Exception as exc:  # noqa: BLE001 - this request is asked again next run; the others go on
             problems.append(f"{sym} {span}: {type(exc).__name__}: {str(exc)[:160]}")
-        fetched += 1
+            in_a_row += 1
+            if isinstance(exc, GatewayError) and exc.status in STOP_STATUSES:
+                stopped = f"the gateway answered HTTP {exc.status}: nothing more is asked tonight"
+                break
+            if in_a_row >= CONSECUTIVE_MAX:
+                stopped = f"{in_a_row} requests failed in a row: nothing more is asked tonight"
+                break
     left = sum(1 for sym, span, _, _ in plan() if not _staged(staging, span, sym).is_file())
     if left:
         out: dict[str, Any] = {"ok": not problems, "fetched": fetched, "left": left}
         if problems:
-            out.update(status="failed", error="; ".join(problems)[:600])
+            out.update(status="failed", error=("; ".join(([stopped] if stopped else []) + problems))[:600])
         return out
     receipt = audit(staging, root / "equity-daily")
     if not receipt["ok"]:
-        shutil.rmtree(staging, ignore_errors=True)   # A FAILED AUDIT WRITES NOTHING
+        shutil.rmtree(staging, ignore_errors=True)   # A FAILED AUDIT WRITES NOTHING, and the next runs wait for refetch
+        write_json(marker, {"at": schedule.iso(ctx.now()), "failures": receipt["failures"][:40]})
         return {"status": "failed", "ok": False, "error": "the deep store's audit failed: " +
                 "; ".join(receipt["failures"])[:500], "audit": receipt}
     keep = {}
     for sym, span, _, _ in plan():
         if span in config.SPANS:
             keep.setdefault(span, {})[sym] = _staged(staging, span, sym).read_bytes()
-    from . import schedule
-
     blocks.write_store(deep, keep, audit=receipt, source=SOURCE, written_at=schedule.iso(ctx.now()))
     shutil.rmtree(staging, ignore_errors=True)
     return {"ok": True, "written": True, "fetched": fetched, "audit": receipt}
 
 
-__all__ = ["ROUTE", "PAUSE_S", "MAX_REQUESTS", "WALL_S", "GAP_MAX", "CLOSE_AGREE", "OPEN_AGREE", "STALE_MAX_A_YEAR",
-           "LATE_YEARS", "SOURCE", "plan", "complete", "fetch", "audit", "run"]
+__all__ = ["ROUTE", "PAUSE_S", "MAX_REQUESTS", "WALL_S", "GAP_MAX", "DEEP_GAP_MAX", "STRICT_SPANS", "STOP_STATUSES",
+           "CONSECUTIVE_MAX", "CLOSE_AGREE", "OPEN_AGREE", "STALE_MAX_A_YEAR", "LATE_YEARS", "SOURCE", "plan",
+           "gap_max", "complete", "fetch", "audit", "run"]
