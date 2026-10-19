@@ -226,10 +226,13 @@
     // record (us_equity, active, tradable, NYSE NASDAQ AMEX ARCA BATS) and its SIP daily bars (previous close >= $3, 20
     // sessions' mean dollar volume >= $1M), its limit at most 1.25 x the previous SIP close, metered at qty x limit, and
     // held book-wide to STOCK_SINGLE_EQUITY_SHARE of equity a name and never above 10% (a code ceiling), inside every cap
-    // above; the kill switch stops it. "on" admits them only while STOCK_BUYS_REAL is "on" too; "off" SHIPS: the owner
-    // turns it on with the first Probe of an event program (docs/operations.md, "The event lane's buys at the gateway"). Sales of
-    // the shares are closes like any other and go either way.
-    "STOCK_EVENT_BUYS": "off",
+    // above; the kill switch stops it. "on" admits them only while STOCK_BUYS_REAL is "on" too. Release 1019b ships it
+    // "on" (the owner's goal of Oct 19, 2026 as re-set at 05:15Z and PREREG-EVL-3: every seatable program trades real
+    // money at learning size from its first event); the House's own event switch (`equity_money.event.enabled`) and its
+    // auction paper proof's BUY stage still gate every real buy, and "off" is the instant stop of event buys
+    // (docs/operations.md, "The event lane's buys at the gateway"). Sales of the shares are closes like any other and go
+    // either way.
+    "STOCK_EVENT_BUYS": "on",
 
     // The research library (Sept 29, 2026; lib/library.mjs, GET /v1/research/*): arXiv papers posted before 2025 for the
     // swarm's agents. No secret. arXiv's API terms: "make no more than one request every three seconds, and limit

@@ -372,12 +372,14 @@ class TheService(unittest.TestCase):
             self.assertEqual(lane.gateway().url, "https://gw.example")
             self.assertEqual(lane.gateway().token(), "t" * 20)          # the House's own token source
 
-    def test_the_shipped_config_has_it_off(self):
+    def test_the_shipped_config_has_it_on_from_release_1019b_and_never_on_a_canary(self):
         from league.service import load_config
 
         cfg = load_config()
-        self.assertIs(cfg["events"]["enabled"], False)
-        self.assertFalse(H.events_enabled(cfg))
+        self.assertIs(cfg["events"]["enabled"], True, "release 1019b switches the lane on (the owner's deploy)")
+        self.assertTrue(H.events_enabled(cfg))
+        self.assertFalse(H.events_enabled(cfg, canary=True), "never on a canary")
+        self.assertFalse(H.events_enabled({**cfg, "events": {**cfg["events"], "enabled": False}}), "false is off")
         self.assertFalse(H.events_enabled({}))
         self.assertFalse(H.events_enabled({"events": {"enabled": True}}, canary=True))
         self.assertTrue(H.events_enabled({"events": {"enabled": True}}))

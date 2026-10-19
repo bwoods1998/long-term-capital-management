@@ -3,7 +3,8 @@
 // US common stock the House's eligible list names for the New York day, checked again against the venue's own asset
 // record and SIP daily bars (price >= $3, 20-session ADV >= $1M), its limit at most 1.25 x the previous SIP close,
 // metered at qty x limit, held book-wide to 10% of equity a name, inside every other stock cap, stopped by the kill
-// switch. "off" ships. Sales of the shares are closes like any other, in any time in force the venue takes.
+// switch. Release 1019b ships "on"; these tests run on a baseline with it "off" (`BASE`), so every case that admits a buy
+// says "on" itself. Sales of the shares are closes like any other, in any time in force the venue takes.
 
 import assert from 'node:assert/strict';
 import test, { beforeEach } from 'node:test';
@@ -28,16 +29,19 @@ const usd = dollars => {
   return BigInt(whole) * M + BigInt(fraction.padEnd(6, '0').slice(0, 6));
 };
 
-//: The vars as wrangler.jsonc deploys them, with the event lane's buys switched on (the owner's step at the first Probe).
+//: The vars as wrangler.jsonc deploys them (release 1019b: the event lane's buys switched on).
 const DEPLOYED = { STOCK_BUYS_REAL: 'on', STOCK_ETF_EQUITY_SHARE: '0.5', STOCK_SINGLE_EQUITY_SHARE: '0.1', STOCK_MAX_EQUITY_MULTIPLE: '1',
-  STOCK_DAY_EQUITY_MULTIPLE: '4', STOCK_EVENT_BUYS: 'off' };
+  STOCK_DAY_EQUITY_MULTIPLE: '4', STOCK_EVENT_BUYS: 'on' };
+//: The baseline these tests run on: the deployed vars with the event switch OFF, so a case that names no switch is
+//: refused as the switch off is (each case that admits a buy says ON).
+const BASE = { ...DEPLOYED, STOCK_EVENT_BUYS: 'off' };
 const ON = { STOCK_EVENT_BUYS: 'on' };
 const env = (extra = {}) => ({
   GATEWAY_TOKEN: TOKEN, ALPACA_KEY_ID: 'AK-REAL', ALPACA_SECRET_KEY: 'alpaca-real-secret',
   OPTION_STRUCTURES_REAL: 'debit_vertical,long_butterfly,long_call,long_put',
   MAX_ORDER_USD: '75', MAX_DAY_USD: '4000', MAX_DAY_USD_ALPACA: '10000', MAX_DAY_ORDERS: '300', MAX_DAY_OPEN_ORDERS: '250',
   MAX_ORDER_MAX_LOSS_USD: '1000', MAX_ORDER_EQUITY_SHARE: '0.25', MAX_DAY_EQUITY_SHARE: '1.0', CREDIT_MIN_EQUITY_USD: '2000',
-  EQUITY_CAP_MAX_AGE_MS: '120000', CAP_TIMEZONE: 'America/New_York', ...DEPLOYED, POSITIONS_CACHE_MS: '0', ...extra,
+  EQUITY_CAP_MAX_AGE_MS: '120000', CAP_TIMEZONE: 'America/New_York', ...BASE, POSITIONS_CACHE_MS: '0', ...extra,
 });
 const gateAt = (settings = {}, clock = () => NOW, store = memoryStore()) => createGate({ store, env: env(settings), now: clock });
 // Each case starts from a fresh isolate's readings: the router keeps an event buy's asset and bars for the day.
@@ -130,11 +134,12 @@ const refused = (result, status, cap, pattern, message = '', { before = 0 } = {}
 
 // ------------------------------------------------------------------------------------------------ the switch and the numbers
 
-test('the deployed event switch is "off", and only "on" (any case, trimmed) turns it on', () => {
+test('the deployed event switch is "on" (release 1019b), and only "on" (any case, trimmed) turns it on', () => {
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const lines = config.split('\n').filter(line => line.includes('"STOCK_EVENT_BUYS"'));
   assert.equal(lines.length, 1);
-  assert.equal(JSON.parse(/:\s*("(?:[^"\\]|\\.)*")/.exec(lines[0])[1]), 'off');
+  assert.equal(JSON.parse(/:\s*("(?:[^"\\]|\\.)*")/.exec(lines[0])[1]), DEPLOYED.STOCK_EVENT_BUYS);
+  assert.equal(DEPLOYED.STOCK_EVENT_BUYS, 'on');
   for (const raw of ['on', 'ON', ' On ']) assert.equal(stockEventBuysEnabled({ STOCK_EVENT_BUYS: raw }), true, raw);
   for (const raw of ['off', '', 'yes', 'true', '1', 'onn', undefined, null]) assert.equal(stockEventBuysEnabled({ STOCK_EVENT_BUYS: raw }), false, String(raw));
   assert.deepEqual(EVENT_TIFS, ['opg', 'cls']);
@@ -453,7 +458,7 @@ test('SALES OF EVENT SHARES: market and limit sales in the opening and closing a
   for (const tif of ['cls', 'opg', 'day']) {
     for (const body of [{ symbol: 'ACME', qty: '20', side: 'sell', type: 'market', time_in_force: tif },
       { symbol: 'ACME', qty: '20', side: 'sell', type: 'limit', limit_price: '30', time_in_force: tif }]) {
-      // A sale goes whatever STOCK_EVENT_BUYS says: off as deployed here.
+      // A sale goes whatever STOCK_EVENT_BUYS says: off here (the tests' baseline).
       const result = await send(body, { settings: {}, tape: held(), list: null });
       admitted(result, `${tif} ${body.type}`);
       assert.deepEqual(JSON.parse(result.tape.orders()[0].body), body);

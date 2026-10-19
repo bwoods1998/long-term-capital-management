@@ -8,7 +8,54 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## The event lane on the House (release R1, WP1, Oct 2026): `r1/lane`, not deployed
+## Release 1019b (Oct 19, 2026): real money for the event lane (learning band), the lane on the House: `rel/1019b`, not deployed
+
+One release carries the event lane onto the House (release R1 WP1, **The event lane on the House**, below), PREREG-EVL-3's
+version 2 and its bands ([events.md](events.md)), gateway G2 (**The event lane's buys at the gateway**) and the House's
+event kind (**The event lane's real money on the House (release R2)**), SWITCHED ON: `gateway/wrangler.jsonc`
+`STOCK_EVENT_BUYS` "on" with `STOCK_SINGLE_EQUITY_SHARE` "0.1" (the goal's 10% a name) and `STOCK_MAX_EQUITY_MULTIPLE`
+"1" (no margin), and `league/config.json` `events.enabled` true. What still holds every real event buy: the House's own
+`equity_money.event.enabled`, the auction paper proof's BUY stage, each program's band (the lane's: learning from
+birth), and every wall of the goal (the book-wide 10% a name, the 100% book, the loss budget with event open risk, the
+kill switch, the daily and drawdown stops, long only). The House's event book reads the lane through the lane's own
+modules (league/events/programs.py `SEATING`, league/events/bands.py `bands` and `record_fill`), and the lane's nightly
+screen runs PREREG-EVL-3's band review of the real fills (demotion, Sized). Identities: money `f4fc39ff` -> `285fa7af`,
+constitution `34bbe7a5` -> `fd38e4e1` (R2's rows; the standing grant re-ratifies at the House's start); the options
+execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract
+`397b22b7` do not move.
+
+**Deploy, in order** (each never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight;
+CI green on the exact head):
+1. THE GATEWAY from this release's head: `cd gateway && npm run check && npm test && npx --no-install wrangler@4.129.1
+   deploy`. Read `/v1/health`: `stock_buys.event_buys` {enabled: true, equity_share: "0.1"}, `max_equity_multiple` "1".
+   The running House sends no event buy (it has no event kind), so nothing it does changes until step 2. Rollback:
+   `wrangler rollback <the previous version>` (`7456e73d`, gateway G1).
+2. THE HOUSE from the same head, an owner deploy (league/constitution.py, league/ci.py, league/config.json,
+   league/ledger.py, league/equity/, league/ops/, league/events/'s judges and money files and CHANGELOG.md are
+   protected). Verify (read-only): the `grant` job's receipt ratified on `285fa7af`; health `release.live.equity.enabled`
+   false and `release.live.equity.events.enabled` true; the info alert "the event lane is switched on and waits for its
+   store" (the lane never makes its own store).
+3. ON BLAKE-DESKTOP, once the House is verified: stop the lane's timers (`systemctl --user stop 'ltcm-evl-*.timer'`,
+   then wait until `systemctl --user list-units 'ltcm-evl-*'` shows no service running); then, from `~/Work/ltcm-deploy`
+   at the merged head, `python3 scripts/evl_migrate.py --dry-run` and `python3 scripts/evl_migrate.py` (**The event lane
+   on the House**, "Switching it on", step 3: it refuses while a timer is active or when the box's store is not empty).
+   Within a minute the House says "the event lane runs on the House" and writes `/workspace/state/events/lane.json`;
+   decisions missed since the timers stopped run as backfills. Keep the desktop's store as the backup and never start
+   its timers again while the House's lane runs (one writer of the record).
+4. THE FIRST REAL BUY: the auction paper proof's practice KO buy goes in the next 09:16-09:27 ET window and its BUY
+   stage passes by 09:33 ET (kv `paper_proof_auction_buy`); real learning buys follow from that session's close decision
+   (15:46 ET: the close-entry programs), the open-entry programs from the next session's open. At the first decision
+   `eq_event_programs` holds the nine version 2 programs at the lane's bands.
+
+**Rollback**: `STOCK_EVENT_BUYS` "off" at the gateway (a gateway deploy: the instant stop of event buys; sales go on);
+or `equity_money.event.enabled` False (a constitution-only owner deploy, money `25f5eb21`, constitution `8a6a2160`:
+no event buy, every open event lot exits at its own auction); the lane alone: `touch /workspace/state/events/STOP` (no
+deploy) or `events.enabled` false. With NO event lot open, the previous House release (`20261019T034531Z-6583edd72b34`,
+main `c1c6fae7`) and the gateway's previous version (`7456e73d`) restore release 1019a exactly (money `f4fc39ff`,
+constitution `34bbe7a5`); with an event lot open, never roll the House back past this release (the release before it
+does not know an event lot's exit). The lane's store stays on the box either way; the desktop's copy is the backup.
+
+## The event lane on the House (release R1, WP1, Oct 2026): `r1/lane`, not deployed (ships in release 1019b)
 
 The lane of the owner's goal of Oct 19, 2026 ([events.md](events.md); rules in `docs/prereg/`) leaves blake-desktop's
 systemd timers and runs inside the House's process: `league/events/house.py`, attached by `league/service.py` when
@@ -36,7 +83,7 @@ verdict that gets no answer (a refusal, a failure, PAUSE, the line) is asked aga
 Market-data reads are spaced 0.5 s apart (Alpaca's Basic plan is shared with the House's own book).
 
 **Switching it on** (one owner deploy, never 12:55-20:05Z on a trading day):
-1. Ship the release with `events.enabled` true (it ships false). Until its store exists the lane records nothing: an
+1. Ship the release with `events.enabled` true (release 1019b ships it true). Until its store exists the lane records nothing: an
    info alert says it waits ("the event lane is switched on and waits for its store").
 2. On blake-desktop, after the evening's report: `systemctl --user stop 'ltcm-evl-*.timer'` and wait for any
    `ltcm-evl-*` service to end (`systemctl --user list-units 'ltcm-evl-*'`).
@@ -3430,7 +3477,7 @@ block): `stock_buys.enabled` true, the shares `0.5`, `0.2`, `2`, `day_equity_mul
 `"off"` and deploy (closes keep working), or `npx wrangler@4.129.1 rollback` to the previous version. A stock position
 bought before a rollback stays on the account and is closed by an ordinary sale (closes go either way).
 
-## The event lane's buys at the gateway (release R2, gateway G2): on `r2/gateway` (not yet deployed; `STOCK_EVENT_BUYS` ships `off`)
+## The event lane's buys at the gateway (release R2, gateway G2): on `r2/gateway` (not yet deployed; G2 alone ships `STOCK_EVENT_BUYS` `off`, release 1019b ships it `on`)
 
 The owner's goal of Oct 19, 2026 (item 4: "<= 10% of equity per name, <= 100% invested, no margin") and the frozen
 PREREG-EVL-1, section 8: an event program that passes its screen trades real money from the next session at Probe, its
@@ -3438,8 +3485,9 @@ entries limit-on-open or limit-on-close orders (`opg` / `cls`) at 1.25 x the pre
 exits at the scheduled auction (PREREG-EVL-2 adds exits at the next session's open). The names are whatever stock an
 event names, so this is a second buy branch beside `STOCK_UNIVERSE`'s (`gateway/lib/caps.mjs` "event-lane stock
 buys", `router.mjs` `realEventBuy`, `gate.mjs` `reserveStock` with `stock.event`). Deploying it changes nothing the
-floor does: `STOCK_EVENT_BUYS` ships `off`, and with it off every event buy is a `403 {cap: "stock_event_buys"}` before
-anything is read.
+floor does: G2 alone ships `STOCK_EVENT_BUYS` `off`, and with it off every event buy is a `403 {cap:
+"stock_event_buys"}` before anything is read (release 1019b ships it `on`: the running House before it sends no event
+buy, and the House release after it gates each one on its own event switch and auction paper proof).
 
 - **What an event buy is**: a real-account BUY whose `time_in_force` is `opg` or `cls`. `type` `limit` with a
   positive `limit_price` (at most four decimals), `qty` a WHOLE number of shares (1 to 999,999,999), no `notional`, no
@@ -3475,7 +3523,8 @@ anything is read.
 - **Deploy**: a gateway deploy (`npm run check && npm test && npx --no-install wrangler@4.129.1 deploy` from the
   release's head), BEFORE the House release R2 (which publishes the list and sends the orders). `STOCK_EVENT_BUYS`
   goes `on` in a later gateway deploy, the owner's step for the first real event buy (PREREG-EVL-3: learning from the
-  first event); the House's own gate holds every event buy until its auction paper proof's BUY stage has passed.
+  first event); release 1019b ships it `on` with G2 in one gateway deploy (**Release 1019b**, above). The House's own
+  gate holds every event buy until its auction paper proof's BUY stage has passed.
   Rollback: `wrangler rollback <the previous version>`; with the switch on, setting it `off` again is the instant stop
   of event buys (sales go on).
 
@@ -3510,7 +3559,7 @@ session):
 | every minute | the real fills of event lots written back to the lane (`_event_fills`) |
 
 - **The bands are the lane's** (PREREG-EVL-3 section 2; league/events/book.py `bands`, read at each session's first
-  decision from the lane store's `bands` table, league/events/store.py `bands(store)`): LEARNING from birth (a version 2
+  decision from the lane store's `bands` table by the lane's own reader, league/events/bands.py `bands(store)`): LEARNING from birth (a version 2
   program with no row is at learning), PROBE after a passed look, SIZED, RETIRED (no real money; a band the rules do not
   name reads as retired). Promotion, Sized, demotion to learning and retirement are the lane's rules, counted in settled
   events from its looks and the House's real fills. A band table that cannot be read plans no buy that decision (exits
@@ -3553,8 +3602,10 @@ session):
   version, event, issuer, band, sigma, weight) and its plan `info.evl_exit` {day, at, rung 0}.
 - **THE REAL FILLS GO BACK TO THE LANE** (`_event_fills`, league/events/book.py `write_fills`): one row a (program,
   version, event, side) in the lane store's `real_fills` {qty, price, fee, filled_at, band}: the buy once its buy has
-  ended, the sale once the lot is closed (again when the broker's posted fees change it), replaced when written again
-  (idempotent), every minute until the store takes them. A store with no `real_fills` table yet keeps them waiting.
+  ended, the sale once the lot is closed (again when the broker's posted fees change it), written by the lane's own
+  league/events/bands.py `record_fill` (idempotent; a write again changes only the fee), every minute until the store
+  takes them. A store with no `real_fills` table yet keeps them waiting. The lane's nightly screen task reviews them
+  (`bands.review`: demotion to learning, Sized).
 - **EXITS**: every lot at its program's scheduled auction (`book.exit_plan`): the CLOSE of its last session for
   PREREG-EVL-1's rows and EVL-ERN-GUIDE-O1 / EVL-INS-BUY-O1; the NEXT SESSION'S OPEN for EVL-ERN-REACT-ON,
   EVL-NEWS-READ-ON and EVL-NEWS-REACT-ON. **How an open exit is sent**: the close buy's side row carries `exit_at`
@@ -3619,7 +3670,8 @@ CI green on the exact head):
    passed; at the first decision `eq_event_programs` holds the nine version 2 programs at the lane's bands.
 3. The gateway again from the R2 head (`STOCK_SINGLE_EQUITY_SHARE` "0.1") and with `STOCK_EVENT_BUYS` `on`: the
    owner's step that lets the first real event buy go (until it, every event buy is refused at the gateway and an
-   error alert names this step once a session).
+   error alert names this step once a session). Release 1019b folds steps 1 and 3 into one gateway deploy before the
+   House (**Release 1019b**, above).
 
 **Rollback**: `equity_money.event.enabled` False, a constitution-only owner deploy (money `25f5eb21`, constitution
 `8a6a2160`): no event buy, every open event lot exits at its own auction. Or `STOCK_EVENT_BUYS` `off` at the gateway
@@ -7948,7 +8000,7 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
 | `STOCK_BUYS_REAL` | `gateway/wrangler.jsonc` | `on` on `feat/gateway-stock-opens` (not deployed; production admits stock closes only) | long-only buys of `STOCK_UNIVERSE` on the real account; anything but `on` admits none (closes go either way) | gateway deploy |
 | `STOCK_ETF_EQUITY_SHARE`, `STOCK_SINGLE_EQUITY_SHARE`, `STOCK_MAX_EQUITY_MULTIPLE`, `STOCK_DAY_EQUITY_MULTIPLE` | `gateway/wrangler.jsonc` | 0.5, 0.1, 1, 4 on this tree (release R2, not yet deployed: the single-stock share 0.2 -> 0.1 with `equity_money.position_share.stock`, the multiple 2 -> 1); the code's ceilings 0.5, 0.2, 2, 4 | an ETF position, a single-stock position, the whole long book as a margin line (x min(this, the account's multiplier), long options counted at that multiple; at 1, no margin), the day's stock buys, as shares or multiples of the gateway's own equity reading; a value can only lower them | gateway deploy |
-| `STOCK_EVENT_BUYS` | `gateway/wrangler.jsonc` | `off` (release R2, not yet deployed) | the event lane's whole-share `opg` / `cls` limit buys of a name on the House's eligible list (**The event lane's buys at the gateway**); `on` admits them only while `STOCK_BUYS_REAL` is `on`; sales go either way | gateway deploy (the owner's step for the first real event buy) |
+| `STOCK_EVENT_BUYS` | `gateway/wrangler.jsonc` | `on` (release 1019b, not yet deployed; G2 alone ships `off`) | the event lane's whole-share `opg` / `cls` limit buys of a name on the House's eligible list (**The event lane's buys at the gateway**); `on` admits them only while `STOCK_BUYS_REAL` is `on`; sales go either way | gateway deploy (the owner's step for the first real event buy) |
 | `LIBRARY_DAY_UPSTREAM`, the `LIBRARY` KV binding | `gateway/wrangler.jsonc` | 600; namespace `ltcm-gateway-library` (Release B) | the research library's requests to arXiv a UTC day for the whole floor (`"0"` stops them; cache hits still answer), and its cache | gateway deploy; never delete the namespace |
 | `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 (since 13:36Z Sept 29) | the practice league (the observe band) and its instance cap (default 48); read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
 | `live.observe_train`, `live.observe_roots_max`, `live.observe_read_calls` | `swarm.json` on the box | defaults: true, 24, 120 (120 from V3-A part 1; 40 before) | the Train tier; the distinct roots the league may read (1-128); the minute's data calls before observe reads stop (10-200; unset: the step's own 120, room for 24 roots at the page cap after the real phase's 20); only a read skipped for this budget sheds practice instances | edit `swarm.json` |

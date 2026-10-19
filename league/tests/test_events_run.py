@@ -131,6 +131,8 @@ class RunTest(unittest.TestCase):
                                           "EVL-ERN-GUIDE-O1": 1, "EVL-ERN-READ3-O1": 1,
                                           "EVL-ERN-READ-O1@v2": 1, "EVL-ERN-GUIDE-O1@v2": 1})  # and PREREG-EVL-3's
         self.assertEqual(out["EVL-CTRL-ERN-ALL-O1"]["planned"], 1)       # controls need no verdict
+        asked = R.decide_open(ctx, dt.date(2026, 10, 19), ask_only=True)   # the House's verdicts ahead of a decision
+        self.assertEqual(asked["pending"], out["pending"], "version 1 and version 2 of one program count apart")
         status = self.st.db.execute("SELECT status FROM receipts WHERE job='decide-open:2026-10-19'").fetchone()[0]
         self.assertEqual(status, "pending")
         self.assertIsNone(self.st.db.execute("SELECT 1 FROM intents WHERE program='EVL-ERN-READ-O1' AND version=1").fetchone())

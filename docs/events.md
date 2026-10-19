@@ -76,9 +76,10 @@ proof).
 Until release R1 moves the lane onto the House, it runs on the captain's workstation as systemd user timers
 (`ltcm-evl-record` every 2 minutes; `ltcm-evl-tickers` 07:00 ET; `ltcm-evl-decide` at 09:16 and 15:47 ET plus an
 hourly catchup; `ltcm-evl-equity`; `ltcm-evl-score` 20:30 and 08:30 ET; `ltcm-evl-screen` 20:50 ET; `ltcm-evl-report`
-21:05 ET), reading Alpaca and Claude through the LTCM gateway. Nothing in shadow sends an order. Real money waits for a
-program's screen pass and release R2 (the gateway's event-buy branch, the equity book's event kind, the auction order
-types, the paper proof).
+21:05 ET), reading Alpaca and Claude through the LTCM gateway. Nothing in shadow sends an order. Real money (PREREG-EVL-3:
+learning size from the first event) comes with release 1019b: the lane on the House, the gateway's event-buy branch,
+the equity book's event kind, the auction order types and the paper proof; then the desktop's timers stop and its
+store moves to the House (`scripts/evl_migrate.py`).
 
 ## On the House (release R1)
 
@@ -107,7 +108,7 @@ section 4 lets it. The lane writes a receipt for every task in the store and its
 How to switch it on, migrate the desktop's store (`scripts/evl_migrate.py`) and stop it:
 [operations](operations.md), "The event lane on the House".
 
-## Real money (release R2; not yet deployed)
+## Real money (release R2, shipped switched on in release 1019b; not yet deployed)
 
 [PREREG-EVL-3](prereg/PREREG-EVL-3.md) (the owner's goal as re-set at 05:15Z Oct 19, 2026): VERSION 2 of each of the
 nine seatable programs trades real money from its first event at LEARNING size, with the full-size shadow beside it;
@@ -122,6 +123,8 @@ value x max(0.10, 1.65 x sigma60 x sqrt(h)) in the one loss budget ($400 net in 
 ROOM in the order Sized, Probe, learning, then the tables' order. The real-money decision reads the lane's store, and
 only events stored and verdicts answered before its decision time (PREREG-EVL-1 section 3). The old lanes'
 `equity_money.enabled` stays False; nothing goes until the gateway's `STOCK_EVENT_BUYS` is on and the auction paper
-proof on the practice account has passed its BUY stage. How it runs, is read, is deployed and is rolled back:
+proof on the practice account has passed its BUY stage (release 1019b ships the gateway's switch `on` and the lane's
+`events.enabled` true; deploy order: the gateway, then the House, then the migration with the desktop's timers
+stopped). How it runs, is read, is deployed and is rolled back:
 [operations.md](operations.md), **The event lane's real money on the House (release R2)**. Each real fill is set beside
 the shadow's own auction price, per side (league/ops/twins.py `event_twin`).

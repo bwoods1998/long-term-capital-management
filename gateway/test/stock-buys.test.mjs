@@ -36,8 +36,8 @@ const usd = dollars => {
 const STOCK_VARS = { STOCK_BUYS_REAL: 'on', STOCK_ETF_EQUITY_SHARE: '0.5', STOCK_SINGLE_EQUITY_SHARE: '0.2', STOCK_MAX_EQUITY_MULTIPLE: '2',
   STOCK_DAY_EQUITY_MULTIPLE: '4' };
 //: The stock vars exactly as wrangler.jsonc deploys them (release R2: a single stock at 10% of equity, the book at 1x
-//: equity, the event lane's buys off).
-const DEPLOYED = { ...STOCK_VARS, STOCK_SINGLE_EQUITY_SHARE: '0.1', STOCK_MAX_EQUITY_MULTIPLE: '1', STOCK_EVENT_BUYS: 'off' };
+//: equity; release 1019b: the event lane's buys on).
+const DEPLOYED = { ...STOCK_VARS, STOCK_SINGLE_EQUITY_SHARE: '0.1', STOCK_MAX_EQUITY_MULTIPLE: '1', STOCK_EVENT_BUYS: 'on' };
 const env = (extra = {}) => ({
   GATEWAY_TOKEN: TOKEN, ALPACA_KEY_ID: 'AK-REAL', ALPACA_SECRET_KEY: 'alpaca-real-secret',
   OPTION_STRUCTURES_REAL: 'debit_vertical,long_butterfly,long_call,long_put',
