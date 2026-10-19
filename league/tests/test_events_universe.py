@@ -104,6 +104,21 @@ class UniverseTest(unittest.TestCase):
         self.assertIsNone(U.eligible(self.st, "0000000004", day, tickers=tickers, assets=assets, operating_ok=True))  # OTC
         self.assertIsNone(U.eligible(self.st, "0000000001", day, tickers=tickers, assets=assets, operating_ok=False))
 
+    def test_backfilled_days_take_the_listing_exchange_from_the_previous_closing_print(self):
+        day = dt.date(2026, 10, 19)
+        prior = C.previous(self.st, day, 20)
+        U.fetch_daily_bars(self.st, self.gw, ["BIG"], prior[0].day, prior[-1].day, now=self.now)
+        assets = {"BIG": {"symbol": "BIG", "status": "inactive", "tradable": False, "class": "us_equity", "exchange": "OTC"}}
+        tickers = {"0000000001": [("BIG", "Big Co")]}
+        # delisted since and now OTC in Alpaca's record: a live day refuses it; a backfilled day reads the print
+        self.assertIsNone(U.eligible(self.st, "0000000001", day, tickers=tickers, assets=assets, operating_ok=True))
+        assets["BIG"] = dict(assets["BIG"], exchange="NASDAQ")
+        row = U.eligible(self.st, "0000000001", day, tickers=tickers, assets=assets, operating_ok=True, live=False,
+                         listing=lambda sym: "NYSE")
+        self.assertEqual(row["exchange"], "NYSE")
+        self.assertIsNone(U.eligible(self.st, "0000000001", dt.date(2026, 10, 20), tickers=tickers, assets=assets,
+                                     operating_ok=True, live=False, listing=lambda sym: None))
+
     def test_operating_company_test(self):
         feeds = {("0000000009", "10-"): sec_feed("3571", "10-Q", "2026-08-01"),
                  ("0000000008", "10-"): sec_feed("6221", "10-K", "2026-03-01"),

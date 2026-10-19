@@ -153,9 +153,27 @@ def operating(store: S.Store, get_sec: Callable[[str], bytes], cik: str, day: dt
     return any(cutoff <= dt.date.fromisoformat(d) < day for d in str(row["periodic_at"]).split(","))
 
 
+#: SIP listing-exchange codes and Alpaca's exchange names (PREREG-EVL-1 section 5; verified on the Oct 16, 2026 tape).
+EXCHANGE_CODES = {"NYSE": "N", "NASDAQ": "Q", "AMEX": "A", "ARCA": "P", "BATS": "Z"}
+CODE_EXCHANGES = {v: k for k, v in EXCHANGE_CODES.items()}
+
+
+def closing_print_exchange(gw: Any, symbol: str, session: Any) -> str | None:
+    """The exchange name whose condition-`6` closing print `symbol` had on `session` (the first one), or None."""
+    page = gw.get_json(f"/v1/alpaca/v2/stocks/{symbol}/trades", {
+        "start": S.iso(session.close_at - dt.timedelta(seconds=5)), "end": S.iso(session.close_at + dt.timedelta(minutes=5)),
+        "feed": "sip", "limit": 10000})
+    for t in (page or {}).get("trades") or []:
+        if "6" in (t.get("c") or []) and t.get("x") in CODE_EXCHANGES:
+            return CODE_EXCHANGES[t["x"]]
+    return None
+
+
 def eligible(store: S.Store, cik: str, day: dt.date, *, tickers: Mapping[str, list[tuple[str, str]]],
              assets: Mapping[str, Mapping[str, Any]], operating_ok: bool, now: dt.datetime | None = None,
-             live: bool = True) -> dict[str, Any] | None:
+             live: bool = True, listing: Callable[[str], str | None] | None = None) -> dict[str, Any] | None:
+    """`listing(symbol)` -> the listing exchange name for a BACKFILLED day (the previous session's closing-print
+    exchange: PREREG section 2); a live day reads the Alpaca asset's exchange."""
     """The universe row for (cik, entry session `day`), or None. Needs the 20 sessions' raw bars already fetched."""
     prior = C.previous(store, day, ADV_SESSIONS)
     if len(prior) < ADV_SESSIONS or not operating_ok:
@@ -173,10 +191,13 @@ def eligible(store: S.Store, cik: str, day: dt.date, *, tickers: Mapping[str, li
         prev_close = closes[-1]
         if prev_close < MIN_PRICE or adv < MIN_ADV:
             continue
-        if best is None or adv > best["adv20"]:
-            best = {"day": day.isoformat(), "symbol": symbol, "cik": cik, "name": title,
-                    "exchange": assets[symbol].get("exchange"), "prev_close": prev_close, "adv20": adv,
-                    "bench": "IWM" if adv < BENCH_SPLIT else "SPY"}
+        if best is not None and adv <= best["adv20"]:
+            continue
+        exchange = assets[symbol].get("exchange") if live or listing is None else listing(symbol)
+        if exchange not in EXCHANGES:
+            continue  # a backfilled name with no closing print on a listed exchange the session before D
+        best = {"day": day.isoformat(), "symbol": symbol, "cik": cik, "name": title, "exchange": exchange,
+                "prev_close": prev_close, "adv20": adv, "bench": "IWM" if adv < BENCH_SPLIT else "SPY"}
     if best is not None:
         store.db.execute("INSERT OR REPLACE INTO universe(day, symbol, cik, name, exchange, prev_close, adv20, bench, sigma60) "
                          "VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL)",
@@ -185,4 +206,5 @@ def eligible(store: S.Store, cik: str, day: dt.date, *, tickers: Mapping[str, li
     return best
 
 
-__all__ = ["sip_end", "fetch_daily_bars", "bars", "sec_tickers", "alpaca_assets", "operating", "eligible", "EXCHANGES"]
+__all__ = ["sip_end", "fetch_daily_bars", "bars", "sec_tickers", "alpaca_assets", "operating", "eligible", "EXCHANGES",
+           "EXCHANGE_CODES", "CODE_EXCHANGES", "closing_print_exchange"]

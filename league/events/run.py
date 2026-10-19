@@ -173,7 +173,9 @@ def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str], *, live: bool =
             out[cik] = cached[cik]
             continue
         ok = U.operating(st, ctx.sec, cik, day, now=ctx.now()) if tickers.get(cik) else False
-        out[cik] = U.eligible(st, cik, day, tickers=tickers, assets=assets, operating_ok=ok, now=ctx.now(), live=live)
+        listing = None if live else (lambda sym, before=prior[-1]: U.closing_print_exchange(ctx.gw, sym, before))
+        out[cik] = U.eligible(st, cik, day, tickers=tickers, assets=assets, operating_ok=ok, now=ctx.now(), live=live,
+                              listing=listing)
     return out
 
 
