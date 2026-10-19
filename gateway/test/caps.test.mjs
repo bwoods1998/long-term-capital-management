@@ -159,6 +159,13 @@ test('an option order is one leg, a limit order, in whole contracts', () => {
   assert.match(notional('alpaca', option({ qty: undefined, notional: '50' })).error, /contracts, not dollars/);
 });
 
+test('the gateway signs GET reads of Alpaca news (the event lane), and nothing else under news', () => {
+  assert.ok(allowedVenuePath('alpaca', 'GET', 'v1beta1/news'));
+  assert.ok(allowedVenuePath('alpaca', 'GET', 'v1beta1/news?symbols=AAPL&limit=50'));
+  for (const [method, path] of [['POST', 'v1beta1/news'], ['DELETE', 'v1beta1/news'], ['GET', 'v1beta1/news/123'], ['GET', 'v1beta1/news/../v2/account']])
+    assert.ok(!allowedVenuePath('alpaca', method, path), `${method} ${path}`);
+});
+
 test('only an OCC symbol is an option', () => {
   for (const yes of [CALL, 'F260925P00012000', 'BRKB261016C00500000']) assert.ok(isOptionSymbol(yes), yes);
   for (const no of ['SPY', 'BTC/USD', 'SPY261016X00740000', 'spy261016c00740000', '', null, 'SPY261016C0074000']) assert.ok(!isOptionSymbol(no), String(no));

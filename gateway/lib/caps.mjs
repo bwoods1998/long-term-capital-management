@@ -68,6 +68,9 @@ export const VENUE_PATHS = {
     // Alpaca has no historical option QUOTES endpoint, so there is nothing else to allow.
     ['GET', /^v1beta1\/options\/trades$/],
     ['GET', /^v1beta1\/options\/snapshots\/[A-Za-z0-9.]{1,12}$/],
+    // News (Oct 19, 2026; the event lane EVL-1), read only: Alpaca's Benzinga articles, the ENEWS events of
+    // PREREG-EVL-1 (headline, summary, symbols, created_at, updated_at). One path, GET only.
+    ['GET', /^v1beta1\/news$/],
   ],
 };
 

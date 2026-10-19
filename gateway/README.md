@@ -159,8 +159,10 @@ from Sept 29). It is not a month:
 nothing resets it, so it is raised only by what the owner adds, and raising it is a gateway deploy.
 `CLAUDE_MODELS` is the price table and the allowlist, dollars per million tokens: Claude Opus 5.5
 ($4 input, $5 five-minute write, $0.20 hit, $20 output), Claude Sonnet 5 and Claude Sonnet 5.5 ($2,
-$2.50, $0.20, $10; Sonnet 5.5 added 03:59Z Sept 29, 2026, version `7eaede72`). Since PR #417 every row
-carries `geo: {"us": 1.1}`: Claude 4.6 and later bill US-only inference at 1.1x every rate, and a
+$2.50, $0.20, $10; Sonnet 5.5 added 03:59Z Sept 29, 2026, version `7eaede72`), and Claude Haiku 4.5
+(`claude-haiku-4-5-20251001`: $1, $1.25, $0.10, $5; added Oct 19, 2026 for the event lane's verdicts, PREREG-EVL-1).
+Since PR #417 every Claude 4.6-and-later row carries `geo: {"us": 1.1}` (Haiku 4.5 has none): Claude 4.6 and later
+bill US-only inference at 1.1x every rate, and a
 workspace whose default inference geography is "us" is billed so without asking for it. A model not in
 the table is a `403`.
 
