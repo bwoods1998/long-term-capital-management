@@ -15,6 +15,15 @@ every minute from its event step (league/equity/live.py `_auction_step`):
   (`sell_witness`) and the practice position is back at its baseline (`recon_witness`). A sale that ends its session
   unfilled FAILS the stage (an error alert with the owner's step): new real event buys stop until it passes; real event
   sales never wait on it (an exit is never blocked); the next `cls` window sells again.
+- THE PRACTICE ACCOUNT DOES NOT SIMULATE AUCTIONS (captain's amendment A68, Oct 19, 2026): Alpaca's paper venue
+  treats on-open and on-close orders as plain orders at the bid or ask and never enters an auction (Alpaca's staff on
+  its forum, 2021), and on Oct 19 a practice limit-on-open buy of one Ford share at 1.25 x its previous close EXPIRED
+  unfilled. So each stage also passes on the venue's ACCEPTANCE of the shape: the order was taken (a venue id, never
+  rejected or lost), it ended at its auction `expired` or `canceled` with nothing filled, and the practice position
+  shows no stray fill (`mode` "accepted"; a fill still passes as before, `mode` "filled"). A buy that passed accepted
+  holds no share, so its SELL stage is "n/a" (passed: nothing to sell). A REJECTED or lost order still fails as
+  before: the buy tries again the next session; a sale's failure stops new real event buys. The real calibration is
+  the real fills beside the tape (the goal's 15 bp), never the practice venue's.
 - THE GAP (a report, never a gate): once the tape is 16 minutes old, each fill is set beside the listing exchange's
   auction print on the SIP tape (the `O` print at the open, the `6` print at the close; PREREG-EVL-1 section 5) as
   `gap_bp`, signed, positive when the practice fill was worse. Paper fills are the venue's simulation: they prove the
@@ -50,6 +59,9 @@ TAPE_DELAY_S = 16 * 60
 #: How long after the auction an order still working is waited for (the venue ends an auction order at its auction).
 SETTLE_S = 300
 BUY_WITNESSES = ("buy_witness", "hold_witness")
+#: The ends of an order the venue took and ended at its auction with nothing filled (A68: the practice venue
+#: simulates no auction): the shape was accepted.
+UNFILLED_ENDS = ("expired", "canceled", "done_for_day")
 #: The gaps beside the tape's prints are read at most this many minutes after both stages passed (a report).
 GAP_TRIES = 240
 SELL_WITNESSES = ("sell_witness", "recon_witness")
@@ -252,6 +264,22 @@ class AuctionProof:
                     self.account.cancel(work["id"])
                 return row
             bought = self._filled(row, "buy")
+            if bought == 0 and self._accepted(work):
+                # A68: the venue took the limit-on-open shape and ended it at its auction unfilled (the practice venue
+                # simulates no auction): the BUY stage passes on the shape, with no share held and no SELL to make.
+                held = self._held()
+                row["buy_witness"] = True
+                row["hold_witness"] = held == Decimal(row["baseline"])
+                if not row["hold_witness"]:
+                    row.update(status="waiting", why=f"the practice buy ended {work.get('status')} unfilled but the "
+                                                     f"practice {SYMBOL} is not its baseline: the next opg window tries again")
+                    return row
+                self._pass_buy(row, today, mode="accepted")
+                self._pass_sell_na(row, today)
+                row.update(status="passed", why=f"the venue accepted a limit-on-open buy of one {SYMBOL} share and "
+                                                f"ended it {work.get('status')} unfilled at the open (the practice venue "
+                                                "simulates no auction: A68); nothing to sell")
+                return row
             if bought != 1 or work.get("avg") in (None, ""):
                 row.update(status="waiting", why=f"the limit-on-open practice buy ended {work.get('status')} with "
                                                  f"{bought} filled: the next session's opg window tries again")
@@ -288,6 +316,15 @@ class AuctionProof:
                     self.account.cancel(work["id"])
                 return row
             sold = self._filled(row, "sell")
+            if sold == 0 and self._accepted(work) and self._held() == Decimal(row["baseline"]) + 1:
+                # A68: the venue took the market-on-close shape and ended it at its auction unfilled (no auction is
+                # simulated); the practice share stays held, which no real figure reads.
+                row["sell_witness"] = True
+                row["recon_witness"] = True
+                self._pass_sell(row, today, mode="accepted")
+                row.update(status="passed", why=f"a limit-on-open buy of one {SYMBOL} share filled; the venue accepted "
+                                                "its market-on-close sale and ended it unfilled (A68)")
+                return row
             if sold != 1:
                 self._fail_sell(row, today, f"the market-on-close practice sale ended {work.get('status')} with {sold} "
                                             "filled")
@@ -311,24 +348,47 @@ class AuctionProof:
             return row
         return row
 
-    def _pass_buy(self, row: dict, today: dt.date) -> None:
+    @staticmethod
+    def _accepted(work: Mapping[str, Any] | None) -> bool:
+        """The venue took the order (a venue id; never rejected or lost) and ended it at its auction with nothing
+        filled (A68)."""
+        return bool(work) and bool(work.get("id")) and not work.get("rejected") and not work.get("lost") \
+            and work.get("terminal") is True and str(work.get("status") or "") in UNFILLED_ENDS \
+            and (_dec(work.get("filled")) or Decimal(0)) == 0
+
+    def _pass_buy(self, row: dict, today: dt.date, *, mode: str = "filled") -> None:
         if self.buy_passed():
             return
         work = next(w for w in row["orders"] if w["action"] == "buy")
         self.state.put(BUY_KEY, {"schema": 1, "status": "passed", "passed_at": self.clock(), "day": today.isoformat(),
-                                 "attempt": row.get("attempt"), "fill": work.get("avg"),
+                                 "attempt": row.get("attempt"), "fill": work.get("avg"), "mode": mode,
+                                 "venue_status": work.get("status"),
                                  **{k: row.get(k) is True for k in BUY_WITNESSES}})
-        self._event("buy_passed", {"day": today.isoformat(), "attempt": row.get("attempt")})
-        self.record("live.paper_proof", {"status": "passed", "stage": "buy", "day": today.isoformat(), "kind": "auction"})
+        self._event("buy_passed", {"day": today.isoformat(), "attempt": row.get("attempt"), "mode": mode})
+        self.record("live.paper_proof", {"status": "passed", "stage": "buy", "day": today.isoformat(), "kind": "auction",
+                                         "mode": mode})
 
-    def _pass_sell(self, row: dict, today: dt.date) -> None:
+    def _pass_sell(self, row: dict, today: dt.date, *, mode: str = "filled") -> None:
         work = [w for w in row["orders"] if w["action"] == "sell"][-1]
         self.state.put(SELL_KEY, {"schema": 1, "status": "passed", "passed_at": self.clock(), "day": today.isoformat(),
-                                  "attempt": row.get("attempt"), "fill": work.get("avg"),
+                                  "attempt": row.get("attempt"), "fill": work.get("avg"), "mode": mode,
+                                  "venue_status": work.get("status"),
                                   "failures": int(self._stage(SELL_KEY).get("failures") or 0),
                                   **{k: row.get(k) is True for k in SELL_WITNESSES}})
-        self._event("sell_passed", {"day": today.isoformat(), "attempt": row.get("attempt")})
-        self.record("live.paper_proof", {"status": "passed", "stage": "sell", "day": today.isoformat(), "kind": "auction"})
+        self._event("sell_passed", {"day": today.isoformat(), "attempt": row.get("attempt"), "mode": mode})
+        self.record("live.paper_proof", {"status": "passed", "stage": "sell", "day": today.isoformat(), "kind": "auction",
+                                         "mode": mode})
+
+    def _pass_sell_na(self, row: dict, today: dt.date) -> None:
+        """A68: the BUY stage passed on the venue's acceptance and holds no share: the SELL stage has nothing to sell."""
+        self.state.put(SELL_KEY, {"schema": 1, "status": "passed", "passed_at": self.clock(), "day": today.isoformat(),
+                                  "attempt": row.get("attempt"), "fill": None, "mode": "n/a",
+                                  "why": "no practice share to sell: the buy was accepted and ended unfilled (A68)",
+                                  "failures": int(self._stage(SELL_KEY).get("failures") or 0),
+                                  **{k: True for k in SELL_WITNESSES}})
+        self._event("sell_passed", {"day": today.isoformat(), "attempt": row.get("attempt"), "mode": "n/a"})
+        self.record("live.paper_proof", {"status": "passed", "stage": "sell", "day": today.isoformat(), "kind": "auction",
+                                         "mode": "n/a"})
 
     def _fail_sell(self, row: dict, today: dt.date, why: str) -> None:
         before = self._stage(SELL_KEY)

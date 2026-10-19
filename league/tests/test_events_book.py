@@ -1232,12 +1232,18 @@ class Paper:
     def __init__(self, clock, *, held="0"):
         self.clock, self.held, self.orders, self.px = clock, D(held), [], {"open": D("70.00"), "close": D("71.00")}
         self.fill = True
+        self.reject = False      # the venue refuses the shape (A68: a rejection still fails)
+        self.end = "canceled"    # how an unfilled auction order ends ("expired" on Alpaca's practice venue, Oct 19)
 
     def positions(self):
         self._advance()
         return [{"symbol": PR.SYMBOL, "qty": str(self.held), "side": "long"}] if self.held else []
 
     def submit(self, body, *, exit):
+        if self.reject:
+            self.orders.append({**body, "status": "rejected", "filled_qty": "0", "id": None,
+                                "_day": dt.datetime.fromtimestamp(self.clock(), NY).date()})
+            return Submitted(False, None, "422 the venue refused the order", status=422)
         self.orders.append({**body, "status": "new", "filled_qty": "0", "id": str(uuid.uuid4()),
                             "_day": dt.datetime.fromtimestamp(self.clock(), NY).date()})
         return Submitted(True, {"id": self.orders[-1]["id"], "status": "new"}, "", status=200)
@@ -1261,7 +1267,7 @@ class Paper:
             if self.clock() < (m.open_at if kind == "open" else m.close_at):
                 continue
             if not self.fill:
-                o["status"] = "canceled"
+                o["status"] = self.end
                 continue
             o.update(status="filled", filled_qty=o["qty"], filled_avg_price=str(self.px[kind]))
             self.held += D(o["qty"]) if o["side"] == "buy" else -D(o["qty"])
@@ -1316,35 +1322,79 @@ class TheAuctionProof(unittest.TestCase):
         self.assertTrue(self.proof.passed())
         self.assertEqual(self.proof.status()["stages"]["sell"]["status"], "passed")
 
-    def test_an_unfilled_sale_fails_the_stage_and_new_buys_stop_until_it_passes(self):
+    def test_a_rejected_sale_fails_the_stage_and_new_buys_stop_until_it_passes(self):
         self.minute(DAY, 9, 16)
         self.minute(DAY, 9, 31)
         self.minute(DAY, 9, 32)
         self.assertTrue(self.proof.buy_passed())
-        self.paper.fill = False
+        self.paper.reject = True
         self.minute(DAY, 15, 47)
         self.minute(DAY, 16, 1)
         self.minute(DAY, 16, 2)
         self.assertIn("SELL stage failed", self.proof.sell_failed())
         self.assertTrue(any(level == "error" for level, _ in self.alerts))
-        self.paper.fill = True
+        self.paper.reject = False
         self.minute(NEXT, 15, 47)
         self.minute(NEXT, 16, 1)
         self.minute(NEXT, 16, 2)
         self.assertEqual(self.proof.sell_failed(), "")
         self.assertTrue(self.proof.passed())
+        self.assertEqual(self.proof.status()["stages"]["sell"]["mode"], "filled")
 
-    def test_an_unfilled_open_buy_tries_again_the_next_session(self):
-        self.paper.fill = False
+    def test_a_sale_the_venue_accepted_and_ended_unfilled_passes_on_its_shape_A68(self):
+        self.minute(DAY, 9, 16)
+        self.minute(DAY, 9, 31)
+        self.minute(DAY, 9, 32)
+        self.assertEqual(self.proof.status()["stages"]["buy"]["mode"], "filled")
+        self.paper.fill, self.paper.end = False, "expired"
+        self.minute(DAY, 15, 47)
+        self.minute(DAY, 16, 1)
+        self.minute(DAY, 16, 2)
+        self.assertEqual(self.proof.sell_failed(), "")
+        self.assertTrue(self.proof.passed())
+        sell = self.proof.status()["stages"]["sell"]
+        self.assertEqual((sell["mode"], sell["venue_status"]), ("accepted", "expired"))
+        self.assertEqual(self.paper.held, D(1), "the practice share stays held: no real figure reads it")
+        self.assertEqual(self.alerts, [])
+
+    def test_a_buy_the_venue_accepted_and_ended_unfilled_passes_on_its_shape_with_nothing_to_sell_A68(self):
+        # Oct 19, 2026: Alpaca's practice venue let a limit-on-open buy of one F share at 1.25 x its previous close
+        # expire unfilled (the practice venue simulates no auction).
+        self.paper.fill, self.paper.end = False, "expired"
+        self.minute(DAY, 9, 16)
+        self.minute(DAY, 9, 31)
+        self.minute(DAY, 9, 32)
+        self.assertTrue(self.proof.buy_passed())
+        self.assertTrue(self.proof.passed())
+        stages = self.proof.status()["stages"]
+        self.assertEqual((stages["buy"]["mode"], stages["buy"]["venue_status"]), ("accepted", "expired"))
+        self.assertEqual(stages["sell"]["mode"], "n/a")
+        self.assertEqual(self.proof.sell_failed(), "")
+        self.minute(DAY, 15, 47)
+        self.assertEqual([o["side"] for o in self.paper.orders], ["buy"], "nothing to sell: no sale is sent")
+        self.assertEqual(self.paper.held, D(0))
+
+    def test_a_rejected_open_buy_tries_again_the_next_session(self):
+        self.paper.reject = True
         self.minute(DAY, 9, 16)
         self.minute(DAY, 9, 31)
         self.minute(DAY, 9, 40)
         self.assertEqual(self.proof._row()["status"], "waiting")
-        self.paper.fill = True
+        self.assertFalse(self.proof.buy_passed())
+        self.paper.reject = False
         self.minute(NEXT, 9, 16)
         self.minute(NEXT, 9, 31)
         self.minute(NEXT, 9, 32)
         self.assertTrue(self.proof.buy_passed())
+
+    def test_an_unfilled_buy_with_a_stray_practice_position_does_not_pass(self):
+        self.paper.fill, self.paper.end = False, "expired"
+        self.minute(DAY, 9, 16)
+        self.paper.held = D(3)     # the practice position moved under the proof (someone traded the practice account)
+        self.minute(DAY, 9, 31)
+        self.minute(DAY, 9, 32)
+        self.assertFalse(self.proof.buy_passed())
+        self.assertEqual(self.proof._row()["status"], "waiting")
 
 
 if __name__ == "__main__":

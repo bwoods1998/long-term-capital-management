@@ -66,6 +66,11 @@ until release 1019b (below) brings it onto the House.
   share, limit-on-open, on the practice account), the program's band, and every wall: the book-wide 10% a name, the
   100% book, the loss budget ($400 net in any 20 sessions, $800 net in total, realized plus open risk, an event lot at
   value x max(0.10, 1.65 x sigma60 x sqrt(h))), the kill switch, the daily and drawdown stops, long only, Alpaca only.
+- **The auction paper proof passes on the venue's acceptance** (captain's amendment A68): Alpaca's practice venue
+  simulates no auction (on-open and on-close orders are plain orders at the bid or ask there; a practice limit-on-open
+  buy of one F share at 1.25 x its previous close expired unfilled on Oct 19), so a stage whose order the venue took
+  and ended at its auction unfilled passes on its shape (`mode` "accepted"; a buy so passed holds no share and its SELL
+  stage is "n/a"); a rejected or lost order still fails (league/events/proof.py; test_events_book.py TheAuctionProof).
 - **The three reviews' fixes** (money, House, judges; each held by a test that fails on the integrated head
   `a2c0c794`, league/tests/test_events_review_1019b.py). THE MONEY PATH: two programs' lots of one name due at one
   auction are both sold in its cross (`_symbol_busy(auction_sale=...)`: the book's own working sales of the symbol at

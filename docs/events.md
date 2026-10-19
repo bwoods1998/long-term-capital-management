@@ -138,7 +138,8 @@ value x max(0.10, 1.65 x sigma60 x sqrt(h)) in the one loss budget ($400 net in 
 ROOM in the order Sized, Probe, learning, then the tables' order. The real-money decision reads the lane's store, and
 only events stored and verdicts answered before its decision time (PREREG-EVL-1 section 3). The old lanes'
 `equity_money.enabled` stays False; nothing goes until the gateway's `STOCK_EVENT_BUYS` is on and the auction paper
-proof on the practice account has passed its BUY stage (release 1019b ships the gateway's switch `on` and the lane's
+proof on the practice account has passed its BUY stage (filled, or accepted and ended unfilled at the open: the
+practice venue simulates no auction, amendment A68) (release 1019b ships the gateway's switch `on` and the lane's
 `events.enabled` true; deploy order: the gateway, then the House, then the migration with the desktop's timers
 stopped). How it runs, is read, is deployed and is rolled back:
 [operations.md](operations.md), **The event lane's real money on the House (release R2)**. Each real fill is set beside

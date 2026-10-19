@@ -43,7 +43,7 @@ CI green on the exact head):
    decisions missed since the timers stopped run as backfills. Keep the desktop's store as the backup and never start
    its timers again while the House's lane runs (one writer of the record).
 4. THE FIRST REAL BUY: the auction paper proof's practice KO buy goes in the next 09:16-09:27 ET window and its BUY
-   stage passes by 09:33 ET (kv `paper_proof_auction_buy`); real learning buys follow from that session's close decision
+   stage passes by 09:33 ET (kv `paper_proof_auction_buy`; filled, or accepted and ended unfilled at the open: A68); real learning buys follow from that session's close decision
    (15:46 ET: the close-entry programs), the open-entry programs from the next session's open. At the first decision
    `eq_event_programs` holds the nine version 2 programs at the lane's bands.
 
@@ -3641,7 +3641,14 @@ session):
   window. Each fill is set beside the listing exchange's `O` / `6` print on the SIP tape once 16 minutes old (`gaps`, a
   report). One attempt a session (kv `paper_proof_auction`). It starts at the House release's first session: deployed
   after a session's close, its BUY stage passes at the next open, and real event buys may go from that session's close
-  decision.
+  decision. THE PRACTICE VENUE SIMULATES NO AUCTION (captain's amendment A68, Oct 19, 2026: Alpaca's paper venue treats
+  on-open and on-close orders as plain orders at the bid or ask, and a practice limit-on-open buy of one F share at
+  1.25 x its previous close expired unfilled that morning), so each stage also passes on the venue's ACCEPTANCE of its
+  shape: the order was taken (a venue id, never rejected or lost) and ended at its auction `expired` or `canceled` with
+  nothing filled, the practice position showing no stray fill (`mode` "accepted"; a fill passes as before, `mode`
+  "filled"). A buy passed on acceptance holds no share: its SELL stage is `mode` "n/a". A rejected or lost order still
+  fails: the buy tries again the next session, a sale's failure stops new real event buys. The fills' calibration is
+  the real fills beside the tape (the twins' 15 bp), never the practice venue's.
 - **The twins** (league/ops/twins.py `event_twin`, the `equity_twins` job): a closed event lot beside the shadow's own
   auction prices (the lane's `marks`): `entry_gap_bp` and `exit_gap_bp`, signed, positive when the real fill was
   worse (PREREG-EVL-3 section 5's "real fills within 15 bp of the shadow auction prices"). The swarm's readers leave
