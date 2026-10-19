@@ -46,6 +46,39 @@ the captain's workstation from branch `feat/evl-shadow` until release R1 brings 
   `real_fills` tables (additive); the report shows each version's band and next look; the CLI's `bands`.
 - **Tests.** league/tests/test_events_v2.py (7) and the lane suite (105 on 3.14 and 3.11).
 
+### The event lane on the House (release R1, WP1), on `r1/lane` (unreleased; part of release R1, an owner deploy: `league/config.json` gains a key and `league/ci.py` changes; cut from `base/r1` `de6b192f`; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `f4fc39ff`, the constitution digest `34bbe7a5` and the gate contract are the base's; ships switched off)
+
+- **Why.** EVL-DESIGN's phase 2 and R1-SPEC WP1: the House is the lane's system of record before the first possible
+  screen look (about Oct 30), so the desktop's timers move into the House's process.
+- **What.** `league/events/house.py`: the lane's scheduler (`EventLane`), one bounded task a turn, never raising into
+  the tick (a failure is a warning at most once an hour per task, so the House's repeat rule never makes it an error):
+  the decisions first (09:15 ET open, close - 14 minutes; live within 10 minutes of their time, a backfill after; then
+  pending ones, then the hourly re-decision of the last three sessions after the record pass), verdicts for a decision
+  within 30 minutes or pending, the record pass every 2 minutes (at most 90 s, resumable: a new filing is stored
+  `listed` at once and fetched in order), the equity after the close, the score at 20:30 ET with the screen and the
+  report after it, the ticker snapshot at 07:00 ET, verdicts from 07:30 ET (`decide_open` / `decide_close` with the new
+  `ask_only`: the decision's own code, no intent, no receipt), and the daily-index backfill. Verdicts wait while the
+  House is paused (`PAUSE`) and above the lane's own line, `events.verdict_usd_day` ($5 a New York day). Each task
+  writes a receipt (`record`, `decide-open:<day>`, `decide-close:<day>`, `verdicts` with its call counts, `universe`,
+  `equity`, `score`, `screen`, `report`, `tickers`, `backfill`), and `<state>/events/lane.json` holds its health.
+- **The hook.** Not `House.feeds` (a non-None `feeds` wakes the House's legacy feed paths, and research_capabilities
+  answers differently for any non-None one: shown by a test): `league/service.py` wraps `house.publisher` when
+  `config.json` `events.enabled` is true, in the House's own loop on its box (never a canary), and each publish (60 s)
+  runs the original publisher as before and then starts the lane's turn on the feeds lane (`feeds:evl`).
+- **Off until it has a store.** The lane never makes `<state>/events/`: `scripts/evl_migrate.py` copies the desktop's
+  store there once (chunks with their SHA-256 read back, every file and table checked on the box, one rename; refused
+  while the desktop's timers run or when the target is not empty), and the lane starts within a minute.
+- **Judges behind the wall.** `league/ci.py` FORBIDDEN gains `league/events/programs.py`, `verdicts.py`, `score.py`,
+  `screen.py` and `docs/prereg/` (in `PENDING_GATEWAY` until the gateway's merge list follows): no role changes them and
+  the in-box updater never ships one.
+- **Tests.** league/tests/test_events_house.py (34: the hook and the House's tick, the order and bounds of tasks,
+  verdicts before the decision, the resumable record pass, nightly, backfill, PAUSE and the line, failures as
+  warnings, `house.feeds` None), league/tests/test_evl_migrate.py (9), test_ci and test_e3_identities (the wall).
+- **Deploy.** Ships with `events.enabled` false (the owner flips it in `config.json`, an owner deploy); with it true the
+  lane waits, recording nothing, until the migration lands. Order: deploy, stop the desktop timers, migrate, watch
+  `lane.json` and the receipts. Rollback: the previous release (the store stays on disk, unread); or, with no deploy,
+  `touch <state>/events/STOP` and the lane idles after the turn in hand.
+
 ### The event lane (EVL), shadow, on `feat/evl-shadow` (not on the House; runs on the captain's workstation until release R1)
 
 - **Why.** The owner's goal of Oct 19, 2026: one event-driven single-stock lane, judged by pre-registered screens.

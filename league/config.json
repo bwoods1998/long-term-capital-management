@@ -56,5 +56,10 @@
   "swarm": {
     "_about": "The swarm (Wave 4, league/swarm/): 48 researcher families in the Gym, the hourly tournament and bandit, the architect, the gate. Its own process beside the House (python -m league.swarm run), kept alive by the House's swarm step. Every key here (league/swarm/settings.py DEFAULTS) can be overridden without a deploy in <state>/swarm.json, including enabled and the gym block's image_checkpoint/gate_checkpoint; a change of enabled takes a House restart (it decides births and the old research at build). Enabled, the House seats no agent of its own and builds no old research or Merton.",
     "enabled": false
+  },
+  "events": {
+    "_about": "THE EVENT LANE ON THE HOUSE (release R1, the goal of Oct 19, 2026; league/events/house.py, docs/events.md): enabled runs the lane's scheduler beside the House's tick, on the House box's own loop only (never a canary), with its store at <state>/events/ (events.sqlite and docs/), the House's gateway token and its SEC contact. A missing key or false is OFF. Switched on, the lane waits (records nothing) until its store exists: scripts/evl_migrate.py copies blake-desktop's there once, and refuses a store that is not empty. verdict_usd_day: the lane's own line on its Claude verdicts a New York day (USD); over it a READ event waits for the next day's verdicts (PREREG-EVL-1 section 4), as for any call that gets no answer.",
+    "enabled": false,
+    "verdict_usd_day": 5.0
   }
 }

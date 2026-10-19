@@ -8,6 +8,65 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The event lane on the House (release R1, WP1, Oct 2026): `r1/lane`, not deployed
+
+The lane of the owner's goal of Oct 19, 2026 ([events.md](events.md); rules in `docs/prereg/`) leaves blake-desktop's
+systemd timers and runs inside the House's process: `league/events/house.py`, attached by `league/service.py` when
+`league/config.json` `events.enabled` is true, in the House's own loop on its box only (never a canary, never a `tick`
+or `status` beside the loop). Its store is `<state>/events/` (`/workspace/state/events/` on the box: `events.sqlite`,
+`docs/`, `reports/`, `lane.json`). Gateway calls carry the House's own token; SEC reads carry `ltcm.data`'s contact
+User-Agent (www.sec.gov is on the box's allowlist). Nothing the lane does sends an order.
+
+**How it runs.** The House's tick publishes the site every `publish_seconds` (60 s); the publisher is wrapped, so each
+publish runs the original publisher exactly as before and then, when a task is due, starts the lane's turn on the
+House's one-slot feeds lane (`_background("feeds:evl", ...)`; each turn is an `ops.job` row pair in the ledger).
+`house.feeds` stays None: the House's old feed paths (agents' `ctx["feeds"]`, replay tapes, research capabilities,
+tool-request fulfilment) behave as they do with no feeds, which a test pins. A turn does the single most urgent due task
+(events.md has the order and bounds): decisions first, at their times; verdicts for a decision within 30 minutes or
+pending; the record pass every 2 minutes; the hourly re-decision; nightly the equity, score, screen and report; the
+07:00 ET ticker snapshot; early verdicts from 07:30 ET; the daily-index backfill. A turn never raises into the tick: a
+task's failure is a House warning at most once an hour per task (never ten in 30 minutes, so the House's repeat rule
+never makes it an error alert, and a release watch never rolls back for it), and the failed task waits 10 minutes.
+
+**Paid work.** The only paid calls are Claude Haiku 4.5 verdicts (PREREG-EVL-1 section 4), through the gateway's funded
+Claude total. None is asked while `<state>/PAUSE` exists, nor over the lane's own line, `events.verdict_usd_day` in
+`config.json` ($5 a New York day; the gateway's settled cost per call, $0.01 when it states none): a READ event then
+waits for its verdict (no event is lost; the decision is made when the verdict is stored, as a backfill if late). A
+verdict that gets no answer (a refusal, a failure, PAUSE, the line) is asked again after 10 minutes, not every turn.
+Market-data reads are spaced 0.5 s apart (Alpaca's Basic plan is shared with the House's own book).
+
+**Switching it on** (one owner deploy, never 12:55-20:05Z on a trading day):
+1. Ship the release with `events.enabled` true (it ships false). Until its store exists the lane records nothing: an
+   info alert says it waits ("the event lane is switched on and waits for its store").
+2. On blake-desktop, after the evening's report: `systemctl --user stop 'ltcm-evl-*.timer'` and wait for any
+   `ltcm-evl-*` service to end (`systemctl --user list-units 'ltcm-evl-*'`).
+3. From `~/Work/ltcm-deploy` (the box id comes from `.data/ltcm/box.json`, as for `floor_box.py`):
+   `python3 scripts/evl_migrate.py --dry-run` (everything here, nothing sent), then `python3 scripts/evl_migrate.py`.
+   It refuses while a desktop timer is active, when `/workspace/state/events` is not empty, when a document is missing
+   or does not match its SHA-256 name, or when the box lacks three times the bundle's size free. It uploads 8 MiB chunks,
+   reads each one's SHA-256 back from the box (a differing chunk is sent again, twice at most), joins and checks the
+   bundle, extracts it into `/workspace/state/.events-incoming-<id>/`, checks every file against its manifest and every
+   table's row count, and puts it in place with one rename. It prints one JSON summary (files, rows per table).
+4. Within a minute the House says "the event lane runs on the House" (info) and the first turn writes
+   `/workspace/state/events/lane.json`. Missed decisions since the desktop stopped run as backfills, oldest first.
+
+**Watching it** (read-only, through `scratch/weekend/ops/boxrun.py` or `floor_box.py logs`): `lane.json` (each task's
+last run, status and seconds, the next look, the day's verdict dollars, the warnings); the store's `receipts` (one per
+task: `record`, `decide-open:<day>`, `decide-close:<day>`, `verdicts` with `asked`, `answered`, `refused`, `failed` and
+`cut_deadline`/`cut_paused`/`cut_cap`, `universe`, `equity`, `score` (`partial` until the night's pass has tried every
+due intent), `screen`, `report`, `tickers`, `backfill`); the daily report at `reports/<day>.txt`; and the House's
+`ops.alert` rows whose text starts "the event lane's".
+
+**Stopping it.** Without a deploy: `touch /workspace/state/events/STOP` on the box; the turn in hand finishes, then the
+lane idles (an info alert says so, `lane.json` shows `"stopped": true`); remove the file to resume (missed decisions then
+run as backfills). With a deploy: `events.enabled` false. A rollback to a release without the lane leaves the store on
+disk, unread. PAUSE holds only its paid verdicts; recording, decisions and scoring go on (they cost nothing).
+
+**What is protected.** `league/events/programs.py`, `verdicts.py`, `score.py`, `screen.py` and `docs/prereg/` are in
+`league/ci.py` FORBIDDEN (through `PENDING_GATEWAY` until the gateway's merge list gains them): no role may change them
+and the in-box updater never ships one. `league/events/house.py`, the recorders, `run.py`, `league/service.py` and
+`scripts/evl_migrate.py` are not: a fix to them can ship through the updater. `config.json` is the owner's.
+
 ## The old lanes are exits only (Oct 19, 2026): `equity_money.enabled` False: `fix/equity-opens-off`, deployed 03:46Z Oct 19 (release 1019a)
 
 The owner's goal of Oct 19, 2026 and the frozen pre-registration PREREG-EVL-1, section 8 (registration
