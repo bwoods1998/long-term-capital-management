@@ -30,6 +30,8 @@ PERIODIC = ("10-K", "10-Q", "20-F", "40-F", "10-K/A", "10-Q/A", "20-F/A", "40-F/
 OPERATING_MONTHS = 15
 CIK_TTL = dt.timedelta(days=30)
 COMMODITY_SIC = "6221"
+BLANK_CHECK_SIC = "6770"
+EXCLUDED_SIC = frozenset({COMMODITY_SIC, BLANK_CHECK_SIC})
 SIP_DELAY = dt.timedelta(minutes=16)
 SYMBOLS_PER_REQUEST = 200
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -93,14 +95,22 @@ def sec_tickers(get_sec: Callable[[str], bytes]) -> dict[str, list[tuple[str, st
     return out
 
 
-def alpaca_assets(gw: Any) -> dict[str, Mapping[str, Any]]:
-    rows = gw.get_json("/v1/alpaca/v2/assets", {"status": "active", "asset_class": "us_equity"})
-    return {str(a.get("symbol", "")).upper(): a for a in rows or []}
+def alpaca_assets(gw: Any, status: str = "active") -> dict[str, Mapping[str, Any]]:
+    """Alpaca's us_equity assets: `status` "active" for live decisions, "all" for backfilled ones (PREREG draft 2
+    section 2: a name delisted since cannot drop out of a backfilled day)."""
+    rows = gw.get_json("/v1/alpaca/v2/assets", {"status": status, "asset_class": "us_equity"})
+    out: dict[str, Mapping[str, Any]] = {}
+    for a in rows or []:
+        sym = str(a.get("symbol", "")).upper()
+        if sym not in out or a.get("status") == "active":   # a reused symbol: the active record wins
+            out[sym] = a
+    return out
 
 
-def _listed(asset: Mapping[str, Any] | None) -> bool:
-    return bool(asset) and asset.get("status") == "active" and bool(asset.get("tradable")) \
-        and asset.get("class") == "us_equity" and asset.get("exchange") in EXCHANGES
+def _listed(asset: Mapping[str, Any] | None, live: bool = True) -> bool:
+    if not asset or asset.get("class") != "us_equity" or asset.get("exchange") not in EXCHANGES:
+        return False
+    return (asset.get("status") == "active" and bool(asset.get("tradable"))) if live else True
 
 
 def company_feed_url(cik: str, form_prefix: str) -> str:
@@ -133,7 +143,7 @@ def operating(store: S.Store, get_sec: Callable[[str], bytes], cik: str, day: dt
                          "periodic_form, periodic_at=excluded.periodic_at, checked_at=excluded.checked_at",
                          (cik, sic, best_form, best_date, S.iso(now)))
         row = store.db.execute("SELECT * FROM cik_info WHERE cik=?", (cik,)).fetchone()
-    if row["sic"] == COMMODITY_SIC or not row["periodic_at"]:
+    if row["sic"] in EXCLUDED_SIC or not row["periodic_at"]:
         return False
     periodic = dt.date.fromisoformat(row["periodic_at"])
     cutoff_month = day.month - OPERATING_MONTHS
@@ -143,15 +153,15 @@ def operating(store: S.Store, get_sec: Callable[[str], bytes], cik: str, day: dt
 
 
 def eligible(store: S.Store, cik: str, day: dt.date, *, tickers: Mapping[str, list[tuple[str, str]]],
-             assets: Mapping[str, Mapping[str, Any]], operating_ok: bool, now: dt.datetime | None = None
-             ) -> dict[str, Any] | None:
+             assets: Mapping[str, Mapping[str, Any]], operating_ok: bool, now: dt.datetime | None = None,
+             live: bool = True) -> dict[str, Any] | None:
     """The universe row for (cik, entry session `day`), or None. Needs the 20 sessions' raw bars already fetched."""
     prior = C.previous(store, day, ADV_SESSIONS)
     if len(prior) < ADV_SESSIONS or not operating_ok:
         return None
     best = None
     for symbol, title in tickers.get(cik, []):
-        if not _listed(assets.get(symbol)):
+        if not _listed(assets.get(symbol), live):
             continue
         got = bars(store, symbol, [s.day for s in prior], "raw")
         if len(got) < ADV_SESSIONS or any(got[s.day.isoformat()].get("c") is None for s in prior):

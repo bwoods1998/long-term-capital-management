@@ -54,10 +54,10 @@ class Program:
 
 PROGRAMS = (
     Program("EVL-ERN-READ-O1", 1, True, "ern", "open", 1, True),
-    Program("EVL-ERN-READ-O3", 1, True, "ern", "open", 3, True),
+    Program("EVL-ERN-READ-O3", 1, False, "ern", "open", 3, True),        # a record (overlapping holds)
     Program("EVL-ERN-REACT-C1", 1, True, "ern-react", "close", 1, False),
     Program("EVL-8K-READ-O1", 1, True, "8k", "open", 1, True),
-    Program("EVL-INS-CLUSTER-O5", 1, True, "ins", "open", 5, False),
+    Program("EVL-INS-CLUSTER-O5", 1, False, "ins", "open", 5, False),    # a record (too few events)
     Program("EVL-NEWS-READ-O1", 1, True, "news", "open", 1, True),
     Program("EVL-CTRL-ERN-ALL-O1", 1, False, "ern", "open", 1, False),
     Program("EVL-CTRL-8K-ALL-O1", 1, False, "8k", "open", 1, False),
@@ -94,7 +94,7 @@ def news_window(store: S.Store, day: dt.date) -> tuple[dt.datetime, dt.datetime]
     prior = C.previous(store, day, 1)
     if d is None or not prior:
         raise LookupError(f"no session {day} or none before it")
-    return prior[0].close_at, d.open_cutoff  # after P's 16:00 ET (its close) and before D's 09:00 ET
+    return prior[0].close_at, d.open_cutoff  # knowable after P's close and by D's 09:00 ET
 
 
 # ---------------------------------------------------------------------------------------------------- events
@@ -114,8 +114,9 @@ def items_of(row: Mapping[str, Any]) -> set[str]:
 
 
 def news_in(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
-    """Single-symbol articles created in (lo, hi), knowable after the registration time, oldest first."""
-    rows = store.db.execute("SELECT * FROM news WHERE created_at>? AND created_at<? ORDER BY created_at, id",
+    """Single-symbol articles KNOWABLE in (lo, hi] and after the registration time, oldest first (PREREG draft 2:
+    knowable after the previous session's close and by 09:00 ET of D)."""
+    rows = store.db.execute("SELECT * FROM news WHERE knowable_at>? AND knowable_at<=? ORDER BY knowable_at, id",
                             (S.iso(lo), S.iso(hi)))
     out = []
     for r in rows:
@@ -134,57 +135,68 @@ def news_in(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[st
 
 
 def ins_triggers(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
-    """Form 4 filings knowable in [lo, hi) that FIRST complete an insider cluster (PREREG section 6, INS-CLUSTER).
+    """Form 4 filings knowable in [lo, hi) that trigger EVL-INS-CLUSTER-O5 (a record; PREREG draft 2 section 6).
 
-    The cluster at a filing F of issuer X: open-market purchases (code P, acquired A) by >= 2 distinct reporting owners
-    who are directors or officers of X, in Form 4s of X accepted within the 10 calendar days ending at F's acceptance,
-    total shares x price >= $50,000. F triggers when the cluster holds at F and held at no earlier Form 4 of X in that
-    window."""
+    The cluster at a filing F of issuer X: open-market purchases (code P, acquired A) whose transaction dates fall in
+    the window, by >= 2 distinct reporting owners who are directors or officers of X, in >= 2 different filings, all
+    filed within the 10 calendar days ending at F's acceptance, total shares x price >= $50,000. F triggers when the
+    cluster holds at F, held at no earlier Form 4 of X inside F's window, and X has no trigger in the 10 calendar days
+    before F."""
     out = []
     for f in filings_in(store, "4", lo, hi):
         accepted = S.parse_iso(f["accepted_at"])
         holds, value = _cluster(store, f["cik"], accepted)
         if not holds:
             continue
-        earlier = store.db.execute("SELECT accession, accepted_at FROM filings WHERE form='4' AND status='fetched' AND cik=? "
-                                   "AND accepted_at>=? AND accepted_at<? ORDER BY accepted_at",
-                                   (f["cik"], S.iso(accepted - INS_WINDOW), S.iso(accepted))).fetchall()
-        if any(_cluster(store, f["cik"], S.parse_iso(e["accepted_at"]))[0] for e in earlier):
+        if _earlier_trigger(store, f["cik"], accepted):
             continue
         out.append(dict(f) | {"cluster_value": value})
     return out
 
 
+def _issuer_filings(store: S.Store, cik: str, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
+    return [dict(r) for r in store.db.execute(
+        "SELECT accession, accepted_at FROM filings WHERE form='4' AND status='fetched' AND cik=? AND accepted_at>=? "
+        "AND accepted_at<? ORDER BY accepted_at, accession", (cik, S.iso(lo), S.iso(hi)))]
+
+
+def _earlier_trigger(store: S.Store, cik: str, at: dt.datetime) -> bool:
+    """True when an earlier Form 4 of `cik` inside the 10 days before `at` already held a cluster. That one condition
+    is both rules: the filing at `at` is not the first to meet the cluster, and any trigger less than 10 days before it
+    (itself a filing that held one) falls inside the same 10 days."""
+    for g in _issuer_filings(store, cik, at - INS_WINDOW, at):
+        if _cluster(store, cik, S.parse_iso(g["accepted_at"]))[0]:
+            return True
+    return False
+
+
 def _cluster(store: S.Store, cik: str, at: dt.datetime) -> tuple[bool, float]:
+    start = at - INS_WINDOW
+    first_day = start.astimezone(C.NY).date().isoformat()
+    last_day = at.astimezone(C.NY).date().isoformat()
     rows = store.db.execute(
-        "SELECT f.accession, f.accepted_at, o.owner_cik, o.is_director, o.is_officer, t.code, t.acquired, t.shares, t.price "
-        "FROM filings f JOIN form4_owners o ON o.accession=f.accession JOIN form4_tx t ON t.accession=f.accession "
+        "SELECT f.accession, o.owner_cik, o.is_director, o.is_officer, t.seq, t.tx_date, t.code, t.acquired, t.shares, "
+        "t.price FROM filings f JOIN form4_owners o ON o.accession=f.accession JOIN form4_tx t ON t.accession=f.accession "
         "WHERE f.form='4' AND f.status='fetched' AND f.cik=? AND f.accepted_at>? AND f.accepted_at<=?",
-        (cik, S.iso(at - INS_WINDOW), S.iso(at))).fetchall()
+        (cik, S.iso(start), S.iso(at))).fetchall()
     owners: set[str] = set()
+    filings: set[str] = set()
+    counted: set[tuple[str, int]] = set()
     value = 0.0
-    per_filing_owners: dict[str, set[str]] = {}
     for r in rows:
         if not (r["is_director"] or r["is_officer"]):
             continue
         if r["code"] != "P" or r["acquired"] != "A" or r["shares"] is None or r["price"] is None:
             continue
-        per_filing_owners.setdefault(r["accession"], set()).add(r["owner_cik"])
-    # a filing's purchases count once per transaction (a joint filing's owners share its transactions)
-    seen_tx: set[tuple[str, float, float]] = set()
-    for r in rows:
-        if r["accession"] not in per_filing_owners or r["code"] != "P" or r["acquired"] != "A":
+        if not r["tx_date"] or not first_day <= str(r["tx_date"])[:10] <= last_day:
             continue
-        if r["shares"] is None or r["price"] is None:
-            continue
-        tx = (r["accession"], float(r["shares"]), float(r["price"]))
-        if tx in seen_tx:
-            continue
-        seen_tx.add(tx)
-        value += float(r["shares"]) * float(r["price"])
-    for who in per_filing_owners.values():
-        owners |= who
-    return len(owners) >= INS_MIN_OWNERS and value >= INS_MIN_VALUE, value
+        owners.add(r["owner_cik"])
+        filings.add(r["accession"])
+        if (r["accession"], r["seq"]) not in counted:   # a joint filing's owners share its transactions: count once
+            counted.add((r["accession"], r["seq"]))
+            value += float(r["shares"]) * float(r["price"])
+    holds = len(owners) >= INS_MIN_OWNERS and len(filings) >= 2 and value >= INS_MIN_VALUE
+    return holds, value
 
 
 # ---------------------------------------------------------------------------------------------------- decisions

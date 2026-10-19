@@ -56,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         d.add_argument("--day", type=_day, required=True)
         d.add_argument("--backfill", action="store_true")
     sub.add_parser("catchup")
+    sub.add_parser("tickers")
     args = ap.parse_args(argv)
     with S.Store(args.state) as st:
         gw = G.Gateway(G.token_from_env(), min_interval=0.05)
@@ -70,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
             out = R.decide_open(ctx, args.day, backfill_run=args.backfill)
         elif args.cmd == "decide-close":
             out = R.decide_close(ctx, args.day, backfill_run=args.backfill)
+        elif args.cmd == "tickers":
+            out = {"snapshot": ctx.snapshot_tickers()}
         else:
             out = catchup(ctx)
     json.dump(out, sys.stdout, default=str, sort_keys=True)

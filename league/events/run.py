@@ -26,26 +26,54 @@ class Context:
 
     def __init__(self, store: S.Store, gw: Any, sec: Callable[[str], bytes], *, now: Callable[[], dt.datetime] = S.utc_now):
         self.store, self.gw, self.sec, self.now = store, gw, sec, now
-        self._tickers: dict[str, list[tuple[str, str]]] | None = None
-        self._by_ticker: dict[str, str] | None = None
-        self._assets: dict[str, Mapping[str, Any]] | None = None
+        self._tickers_by_sha: dict[str, dict[str, list[tuple[str, str]]]] = {}
+        self._assets: dict[str, dict[str, Mapping[str, Any]]] = {}
+
+    # SEC's company_tickers.json is snapshotted into the store with its fetch time (meta `tickers@<iso>` = document
+    # sha); a decision for entry session D reads the latest snapshot fetched before 07:30 ET of D (PREREG draft 2
+    # section 2), or, when the lane holds none that early, its earliest snapshot.
+    def snapshot_tickers(self) -> str:
+        raw = self.sec(U.TICKERS_URL)
+        sha = self.store.put_document(raw, "company_tickers", now=self.now())
+        self.store.set_meta(f"tickers@{S.iso(self.now())}", sha)
+        return sha
+
+    def _snapshots(self) -> list[tuple[dt.datetime, str]]:
+        rows = self.store.db.execute("SELECT key, value FROM meta WHERE key LIKE 'tickers@%' ORDER BY key").fetchall()
+        return [(S.parse_iso(k.split("@", 1)[1]), v) for k, v in rows]
+
+    def _parsed(self, sha: str) -> dict[str, list[tuple[str, str]]]:
+        if sha not in self._tickers_by_sha:
+            data = self.store.get_document(sha)
+            self._tickers_by_sha[sha] = U.sec_tickers(lambda url: data)
+        return self._tickers_by_sha[sha]
+
+    def tickers_for(self, day: dt.date | None = None) -> dict[str, list[tuple[str, str]]]:
+        snaps = self._snapshots()
+        if not snaps:
+            self.snapshot_tickers()
+            snaps = self._snapshots()
+        if day is None:
+            return self._parsed(snaps[-1][1])
+        cutoff = dt.datetime.combine(day, dt.time(7, 30), tzinfo=C.NY).astimezone(dt.timezone.utc)
+        before = [sha for at, sha in snaps if at < cutoff]
+        return self._parsed(before[-1] if before else snaps[0][1])
 
     @property
     def tickers(self) -> dict[str, list[tuple[str, str]]]:
-        if self._tickers is None:
-            self._tickers = U.sec_tickers(self.sec)
-            self._by_ticker = {t: cik for cik, rows in self._tickers.items() for t, _ in rows}
-        return self._tickers
+        return self.tickers_for(None)
 
-    def cik_of_ticker(self, ticker: str) -> str | None:
-        _ = self.tickers
-        return (self._by_ticker or {}).get(ticker.upper())
+    def cik_of_ticker(self, ticker: str, day: dt.date | None = None) -> str | None:
+        for cik, rows in self.tickers_for(day).items():
+            if any(t == ticker.upper() for t, _ in rows):
+                return cik
+        return None
 
-    @property
-    def assets(self) -> dict[str, Mapping[str, Any]]:
-        if self._assets is None:
-            self._assets = U.alpaca_assets(self.gw)
-        return self._assets
+    def assets(self, live: bool = True) -> dict[str, Mapping[str, Any]]:
+        key = "active" if live else "all"
+        if key not in self._assets:
+            self._assets[key] = U.alpaca_assets(self.gw, key)
+        return self._assets[key]
 
 
 # ---------------------------------------------------------------------------------------------------- recording
@@ -122,7 +150,7 @@ def backfill(ctx: Context, first: dt.date, last: dt.date, *, forms: Iterable[str
 
 
 # ---------------------------------------------------------------------------------------------------- eligibility
-def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str]) -> dict[str, Mapping[str, Any] | None]:
+def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str], *, live: bool = True) -> dict[str, Mapping[str, Any] | None]:
     """The universe row (or None) of each CIK for entry session `day`, fetching what it needs."""
     st = ctx.store
     want = sorted({c for c in ciks if c})
@@ -132,7 +160,9 @@ def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str]) -> dict[str, Ma
         return {c: None for c in want}
     cached = {r["cik"]: dict(r) for r in st.db.execute("SELECT * FROM universe WHERE day=?", (day.isoformat(),))}
     todo = [c for c in want if c not in cached]
-    symbols = sorted({t for c in todo for t, _ in ctx.tickers.get(c, []) if U._listed(ctx.assets.get(t))})
+    assets = ctx.assets(live)
+    tickers = ctx.tickers_for(day)
+    symbols = sorted({t for c in todo for t, _ in tickers.get(c, []) if U._listed(assets.get(t), live)})
     have = {r[0] for r in st.db.execute(
         "SELECT symbol FROM bars WHERE adj='raw' AND day=? GROUP BY symbol", (prior[-1].day.isoformat(),))}
     missing = [s for s in symbols if s not in have]
@@ -142,8 +172,8 @@ def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str]) -> dict[str, Ma
         if cik in cached:
             out[cik] = cached[cik]
             continue
-        ok = U.operating(st, ctx.sec, cik, day, now=ctx.now()) if ctx.tickers.get(cik) else False
-        out[cik] = U.eligible(st, cik, day, tickers=ctx.tickers, assets=ctx.assets, operating_ok=ok, now=ctx.now())
+        ok = U.operating(st, ctx.sec, cik, day, now=ctx.now()) if tickers.get(cik) else False
+        out[cik] = U.eligible(st, cik, day, tickers=tickers, assets=assets, operating_ok=ok, now=ctx.now(), live=live)
     return out
 
 
@@ -178,8 +208,10 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
     e8k = P.filings_in(st, "8-K", lo, hi)
     ins = P.ins_triggers(st, lo, hi)
     nlo, nhi = P.news_window(st, day)
-    articles = [a | {"cik": ctx.cik_of_ticker(a["symbol"])} for a in P.news_in(st, nlo, nhi)]
-    elig = eligibility(ctx, day, [r["cik"] for r in e8k] + [r["cik"] for r in ins] + [a["cik"] for a in articles if a["cik"]])
+    by_ticker = {t: cik for cik, rows in ctx.tickers_for(day).items() for t, _ in rows}
+    articles = [a | {"cik": by_ticker.get(a["symbol"])} for a in P.news_in(st, nlo, nhi)]
+    elig = eligibility(ctx, day, [r["cik"] for r in e8k] + [r["cik"] for r in ins] + [a["cik"] for a in articles if a["cik"]],
+                       live=not backfill_run)
     scores: dict[str, int | None] = {}
 
     def verdict(row: Mapping[str, Any]) -> int | None:
@@ -250,7 +282,7 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> d
     rid = st.start_receipt(f"decide-close:{day}", now=ctx.now())
     lo, hi = P.close_window(st, day)
     e8k = P.filings_in(st, "8-K", lo, hi)
-    elig = eligibility(ctx, day, [r["cik"] for r in e8k if "2.02" in P.items_of(r)])
+    elig = eligibility(ctx, day, [r["cik"] for r in e8k if "2.02" in P.items_of(r)], live=not backfill_run)
 
     def reaction(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
         base = _last_close_before(ctx, uni["symbol"], S.parse_iso(row["accepted_at"]))

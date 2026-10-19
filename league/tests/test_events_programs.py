@@ -105,6 +105,30 @@ class ProgramsTest(unittest.TestCase):
         self.assertEqual([r["accession"] for r in got], ["f2"])
         self.assertAlmostEqual(got[0]["cluster_value"], 60000.0)
 
+    def test_insider_cluster_needs_two_filings_and_dates_in_the_window(self):
+        t0 = dt.datetime(2026, 10, 19, 14, 0, tzinfo=UTC)
+        # one joint filing with two directors: one filing only, no cluster
+        add_f4(self.st, "j1", "0000000003", t0, "0000000301", shares=2000, price=30.0)
+        self.st.db.execute("INSERT INTO form4_owners(accession, owner_cik, owner_name, is_director, is_officer, officer_title, "
+                           "is_ten_pct) VALUES('j1', '0000000302', 'Y', 1, 0, NULL, 0)")
+        # a purchase dated three weeks before the filing does not count
+        add_filing(self.st, "old", "4", "0000000003", t0 + dt.timedelta(hours=1))
+        self.st.db.execute("INSERT INTO form4_owners VALUES('old', '0000000303', 'Z', 1, 0, NULL, 0)")
+        self.st.db.execute("INSERT INTO form4_tx VALUES('old', 0, 'Common', '2026-09-28', 'P', 5000, 30.0, 'A', 0)")
+        lo, hi = dt.datetime(2026, 10, 19, tzinfo=UTC), dt.datetime(2026, 10, 25, tzinfo=UTC)
+        self.assertEqual(P.ins_triggers(self.st, lo, hi), [])
+        # a second filing by another director, dated inside the window, completes it
+        add_f4(self.st, "j2", "0000000003", t0 + dt.timedelta(days=1), "0000000304", shares=100, price=30.0)
+        self.assertEqual([r["accession"] for r in P.ins_triggers(self.st, lo, hi)], ["j2"])
+        # and 12 days later a fresh cluster may trigger again
+        t1 = t0 + dt.timedelta(days=13)
+        add_f4(self.st, "k1", "0000000003", t1, "0000000305", shares=1000, price=30.0)
+        add_f4(self.st, "k2", "0000000003", t1 + dt.timedelta(hours=2), "0000000306", shares=1000, price=30.0)
+        for acc, day in (("k1", "2026-11-01"), ("k2", "2026-11-01")):
+            self.st.db.execute("UPDATE form4_tx SET tx_date=? WHERE accession=?", (day, acc))
+        later = P.ins_triggers(self.st, dt.datetime(2026, 10, 31, tzinfo=UTC), dt.datetime(2026, 11, 5, tzinfo=UTC))
+        self.assertEqual([r["accession"] for r in later], ["k2"])
+
     def test_news_one_per_issuer_highest_score_then_earliest(self):
         rows = [{"id": "n1", "cik": "0000000001", "symbol": "AAA", "knowable_at": "2026-10-19T11:00:00Z"},
                 {"id": "n2", "cik": "0000000001", "symbol": "AAA", "knowable_at": "2026-10-19T11:05:00Z"},
