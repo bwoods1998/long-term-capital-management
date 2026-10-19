@@ -68,6 +68,13 @@ CREATE TABLE IF NOT EXISTS marks(symbol TEXT NOT NULL, day TEXT NOT NULL, label 
   source TEXT NOT NULL, fetched_at TEXT NOT NULL, PRIMARY KEY(symbol, day, label));
 CREATE TABLE IF NOT EXISTS receipts(id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT NOT NULL, started_at TEXT NOT NULL,
   finished_at TEXT, status TEXT, summary TEXT);
+CREATE TABLE IF NOT EXISTS bands(program TEXT NOT NULL, version INTEGER NOT NULL, band TEXT NOT NULL, since TEXT NOT NULL,
+  why TEXT, PRIMARY KEY(program, version));
+CREATE TABLE IF NOT EXISTS band_history(id INTEGER PRIMARY KEY AUTOINCREMENT, program TEXT NOT NULL,
+  version INTEGER NOT NULL, band TEXT NOT NULL, since TEXT NOT NULL, why TEXT, written_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS real_fills(program TEXT NOT NULL, version INTEGER NOT NULL, event TEXT NOT NULL,
+  side TEXT NOT NULL, qty REAL NOT NULL, price REAL NOT NULL, fee REAL NOT NULL DEFAULT 0, filled_at TEXT NOT NULL,
+  band TEXT NOT NULL, PRIMARY KEY(program, version, event, side));
 """
 
 #: The forward-only order of an intent's status (a `skipped:<why>` is terminal like `exited`).

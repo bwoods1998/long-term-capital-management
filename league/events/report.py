@@ -143,11 +143,15 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date) -> 
         last_out = {k: last[k] for k in ("k", "held", "passed", "p", "alpha", "fp_check", "n", "issuers", "blocks", "why")}
         last_out["issuer"] = detail.get("issuer")
         last_out["control"] = detail.get("control")
+    from .bands import bands as _bands
+
+    v2 = SC._seating(program, version)
     return {
         "program": program, "version": version, "seatable": program in SC.SEATABLE,
+        "band": _bands(store).get((program, int(version))) if v2 else None,
         "intents_today": today, "intents_all": every, "settled": settled,
         "settled_today": sum(1 for r in rows if r["exit_day"] == day),
-        "next_look": SC.next_look(store, program, version, day),
+        "next_look": SC.next_look_v2(store, program, version, day) if v2 else SC.next_look(store, program, version, day),
         "last_look": last_out, "held_looks": sum(1 for r in looks if r["held"]),
     }
 
@@ -242,10 +246,17 @@ def render(report: Mapping[str, Any]) -> str:
         line = (f"{p['program']} v{p['version']}{'' if p['seatable'] else ' (record)'}: today p/e/s/x {today}; settled "
                 f"n {st['n']} (tradable {st['n_tradable']}), issuers {st['issuers']}, sessions {st['sessions']}, "
                 f"r {_pct(st['mean_r'])}, a {_pct(st['mean_a'])}, a tradable {_pct(st['mean_a_tradable'])}")
+        if p.get("band"):
+            line += f"; band {p['band']}"
         if p["seatable"]:
             nl, ll = p["next_look"], p["last_look"]
-            nxt = ("all written" if nl.get("k") is None else
-                   f"look {nl['k']} at session {nl['at_sessions']} (now {nl.get('sessions', 0)}, {nl['status']})")
+            if nl.get("k") is None:
+                nxt = "all written"
+            elif "events_needed" in nl:
+                nxt = (f"look {nl['k']} at {nl['events_needed']} events (now {nl['events']}, issuers {nl['issuers']}, "
+                       f"blocks {nl['blocks']})")
+            else:
+                nxt = f"look {nl['k']} at session {nl['at_sessions']} (now {nl.get('sessions', 0)}, {nl['status']})"
             if ll is None:
                 last = "none"
             else:

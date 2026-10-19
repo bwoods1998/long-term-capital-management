@@ -12,6 +12,10 @@ they are and how the code runs them. When this page and a pre-registration disag
   and costs, the four first seatable programs, THE SCREEN (the judge for every program), real money, Done and Kill.
 - [PREREG-EVL-2](prereg/PREREG-EVL-2.md), registered 2026-10-19T03:04:07Z (tag `prereg-evl-2`): the second wave, five
   seatable programs, three records and one control, judged by PREREG-EVL-1's screen unchanged.
+- [PREREG-EVL-3](prereg/PREREG-EVL-3.md), registered 2026-10-19T05:23:06Z (tag `prereg-evl-3`, under the owner's goal
+  of 05:15Z Oct 19): VERSION 2 of the nine seatable programs (the same events and rules, the limit at entry for all
+  nine) trades REAL money at learning size from its first event; promotion, demotion and retirement by looks counted
+  in settled events. Version 1 of every program stays a shadow record and never trades.
 - An event counts for a program only when it is knowable after that program's own registration time. A change to a
   registered program is a new version with a new registration time. Expected false passes over both files: 0.9
   (0.10 x 9 seatable versions).
@@ -34,6 +38,22 @@ Records (never seated): EVL-ERN-READ-O3, EVL-INS-CLUSTER-O5 (file 1); EVL-INS-BU
 EVL-ERN-READ3-O1 (file 2). Controls (what the verdicts add): EVL-CTRL-ERN-ALL-O1, EVL-CTRL-8K-ALL-O1,
 EVL-CTRL-NEWS-ALL-O1 (file 1), EVL-CTRL-NEWS-DAY-ON (file 2). File 2's programs are not filled when the entry auction is
 above 1.25 x the previous close (real money's limit).
+
+## Bands (version 2: real money)
+
+| band | size | how a program gets there |
+|---|---|---|
+| learning | 2% of equity a position (whole shares; one share up to 5%), at most 8 open | from its first event |
+| probe | 5%, at most 6 open | the first decision after a passed look |
+| sized | 10%, at most 8 open | >= 150 settled real-money events at Probe size or above, 80% session-block lower bound > 0 |
+| retired | none (shadow only) | a held look with mean a < 0 and the reversed sign-flip p <= 0.05 |
+
+Back to learning from probe or sized: the last 50 Probe+ events lost more than $150 net, or the last 100 have a
+negative mean. LOOKS (version 2): at 60, 90, 135, 200, 300, 450, 675, 1000, 1500 and 2250 settled TRADABLE events,
+each needing at least 40 issuers and 8 session blocks; thresholds first reached at the same close are one look; the
+skew check starts and caps at 0.018 (A65). Room when short: Sized, then Probe, then learning. The lane writes the
+bands (`league/events/bands.py`, tables `bands` and `band_history`, CLI `bands`); the House's event book reads them
+and writes every real fill to `real_fills`, from which demotion and Sized are computed.
 
 ## The code
 

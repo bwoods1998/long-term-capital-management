@@ -147,7 +147,7 @@ class Wave2Test(unittest.TestCase):
         self.assertEqual(out["EVL-ERN-READ-O1"]["planned"], 1)          # AAA's first filing (PREREG-EVL-1)
         self.assertEqual(out["EVL-ERN-GUIDE-O1"]["planned"], 1)         # AAA's third filing only (raised, score 3)
         self.assertEqual(out["EVL-ERN-READ3-O1"]["planned"], 1)
-        events = {r["program"]: r["event"] for r in self.st.db.execute("SELECT program, event FROM intents WHERE status='planned'")}
+        events = {r["program"]: r["event"] for r in self.st.db.execute("SELECT program, event FROM intents WHERE status='planned' AND version=1")}
         self.assertEqual(events["EVL-ERN-GUIDE-O1"], "8k:0000000001-26-000003")
         self.assertEqual(events["EVL-ERN-READ-O1"], "8k:0000000001-26-000001")
         P.REGISTERED_AT_2 = "2026-10-19T03:04:07Z"

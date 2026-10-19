@@ -75,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("equity")
     sub.add_parser("score")
     sub.add_parser("screen")
+    sub.add_parser("bands")
     rp = sub.add_parser("report")
     rp.add_argument("--day", type=_day, default=None)
     args = ap.parse_args(argv)
@@ -99,6 +100,11 @@ def main(argv: list[str] | None = None) -> int:
             out = SC.settle(st, gw, now=ctx.now())
         elif args.cmd == "screen":
             out = SN.run(st, ctx.now().astimezone(C.NY).date(), now=ctx.now())
+        elif args.cmd == "bands":
+            from . import bands as BA
+
+            out = {"bands": {f"{p}@v{v}": b for (p, v), b in sorted(BA.bands(st).items())},
+                   "review": BA.review(st, now=ctx.now())}
         elif args.cmd == "report":
             day = args.day or ctx.now().astimezone(C.NY).date()
             rep = RP.build(st, day, now=ctx.now())

@@ -281,9 +281,9 @@ def _above_limit(intent: Mapping[str, Any], uni: Mapping[str, Any], stock_in: fl
     """PREREG-EVL-2's LIMIT AT ENTRY, for that file's programs only: an entry auction above 1.25 x the raw SIP close of
     the session before the entry session is not filled (real money's limit, PREREG-EVL-1 section 8). With no such
     close on the universe row the event is not filled either (the reading that trades less)."""
-    from .programs import BY_ID
+    from .programs import BY_KEY
 
-    program = BY_ID.get(str(intent["program"]))
+    program = BY_KEY.get((str(intent["program"]), int(intent.get("version") or 1)))
     if program is None or program.prereg < 2:
         return False
     prev = uni.get("prev_close")

@@ -67,6 +67,12 @@ SKEW_CAP = 0.024
 SKEW_STEP = 0.002
 SKEW_FLOOR = 0.002
 FALSE_PASS_RATE = 0.10  # expected false passes = 0.10 x every seatable version ever registered
+#: PREREG-EVL-3 section 3: version 2's looks are counted in settled TRADABLE events, each with >= 40 issuers and
+#: >= 8 session blocks; the skew check starts (and caps, the stricter reading of the frozen text: A65) at 0.018.
+V2_NS: tuple[int, ...] = (60, 90, 135, 200, 300, 450, 675, 1000, 1500, 2250)
+V2_MIN_ISSUERS = 40
+V2_MIN_BLOCKS = 8
+V2_ALPHA = 0.018
 
 SEATABLE = ("EVL-ERN-READ-O1", "EVL-ERN-REACT-C1", "EVL-8K-READ-O1", "EVL-NEWS-READ-O1",
             # PREREG-EVL-2 (registered 2026-10-19T03:04:07Z), judged by this screen unchanged
@@ -181,15 +187,17 @@ def look_number(sessions_count: int) -> int | None:
     return None
 
 
-def minimums(n_tradable: int, issuers: int, n_blocks: int) -> tuple[bool, str]:
-    """(held, why): >= 60 settled TRADABLE events, >= 40 distinct issuers among them, >= 10 blocks."""
+def minimums(n_tradable: int, issuers: int, n_blocks: int, *, mins: tuple[int, int, int] | None = None) -> tuple[bool, str]:
+    """(held, why): >= 60 settled TRADABLE events, >= 40 distinct issuers among them, >= 10 blocks (version 1);
+    `mins` = (events, issuers, blocks) for another version's look (PREREG-EVL-3: (N_k, 40, 8))."""
+    min_events, min_issuers, min_blocks = mins or (MIN_EVENTS, MIN_ISSUERS, MIN_BLOCKS)
     short = []
-    if n_tradable < MIN_EVENTS:
-        short.append(f"tradable events {n_tradable} < {MIN_EVENTS}")
-    if issuers < MIN_ISSUERS:
-        short.append(f"issuers {issuers} < {MIN_ISSUERS}")
-    if n_blocks < MIN_BLOCKS:
-        short.append(f"blocks {n_blocks} < {MIN_BLOCKS}")
+    if n_tradable < min_events:
+        short.append(f"tradable events {n_tradable} < {min_events}")
+    if issuers < min_issuers:
+        short.append(f"issuers {issuers} < {min_issuers}")
+    if n_blocks < min_blocks:
+        short.append(f"blocks {n_blocks} < {min_blocks}")
     return (not short, "held" if not short else "skipped: " + "; ".join(short))
 
 
@@ -292,12 +300,13 @@ def skew_check(values: Sequence[float], seed_text: str, *, alpha: float = ALPHA,
 
 
 # ------------------------------------------------------------------------------------------------------- judge look
-def look_figures(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any]) -> dict[str, Any]:
+def look_figures(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any], *,
+                 mins: tuple[int, int, int] | None = None) -> dict[str, Any]:
     """Everything a look reads from its covered settled events `rows` (tradable or not), no test."""
     trad = [r for r in rows if _tradable(r)]
     blk = blocks(rows, sessions, 1)
     iss = issuer_values(rows)
-    held, why = minimums(len(trad), len(iss), len(blk))
+    held, why = minimums(len(trad), len(iss), len(blk), mins=mins)
     bench = [float(r["b"]) for r in trad if r.get("b") is not None]
     stress = [float(r["stress_r"]) for r in trad if r.get("stress_r") is not None]
     late = [r["late"] for r in rows if r.get("late") is not None]
@@ -336,7 +345,9 @@ LOOK_COLUMNS = ("program", "version", "k", "at", "sessions", "n", "issuers", "bl
 def judge_look(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any], k: int, *, program: str, version: int,
                at: Any, control_rows: Sequence[Mapping[str, Any]] | None = None,
                alphas: Mapping[str, Any] | None = None, record: Callable[[dict[str, Any]], None] | None = None,
-               draws: int = B, beside: bool = True) -> dict[str, Any]:
+               draws: int = B, beside: bool = True, alpha: float = ALPHA,
+               mins: tuple[int, int, int] | None = None, sessions_at: int | None = None,
+               retire: bool = False) -> dict[str, Any]:
     """Look k of (program, version) on its covered settled events `rows` (all of them; the rule reads the TRADABLE
     ones), `sessions` the program's session dates from its first entry session through the as-of session.
 
@@ -345,13 +356,14 @@ def judge_look(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any], k: in
     row carries the judged (TRADABLE) figures and the
     session-block test (so mean_a_tradable equals mean_a); the issuer-block test, the control comparison, the checks
     and the figures beside the look are under `issuer`, `control`, `skew` and `beside`."""
-    f = look_figures(rows, sessions)
+    f = look_figures(rows, sessions, mins=mins)
     look: dict[str, Any] = {
         "program": program, "version": int(version), "k": int(k),
-        "at": S.iso(at) if isinstance(at, dt.datetime) else str(at), "sessions": dict(LOOKS)[int(k)],
+        "at": S.iso(at) if isinstance(at, dt.datetime) else str(at),
+        "sessions": dict(LOOKS)[int(k)] if sessions_at is None else int(sessions_at),
         "n": f["n"], "issuers": f["issuers"], "blocks": f["blocks"], "mean_a": f["mean_a"], "mean_r": f["mean_r"],
-        "mean_a_tradable": f["mean_a"], "p": None, "alpha": ALPHA, "fp_check": None, "held": int(f["held"]),
-        "passed": 0, "why": f["why"], "issuer": None, "control": None, "skew": None,
+        "mean_a_tradable": f["mean_a"], "p": None, "alpha": alpha, "fp_check": None, "held": int(f["held"]),
+        "passed": 0, "why": f["why"], "issuer": None, "control": None, "skew": None, "retirement": None,
     }
     extra: dict[str, Any] = {"all": f["all"], "block_mean": f["block_mean"], "mean_b": f["mean_b"],
                              "market_share": f["market_share"], "n_stress": f["n_stress"],
@@ -365,14 +377,15 @@ def judge_look(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any], k: in
     fresh = alphas is None or any((alphas.get(t) or {}).get("values_sha") != values_sha(v)
                                   for t, v in (("session", session_values), ("issuer", issuer_vals)))
     if fresh:
-        checks = {"session": skew_check(session_values, text), "issuer": skew_check(issuer_vals, text + "|issuer")}
+        checks = {"session": skew_check(session_values, text, alpha=alpha, cap=min(SKEW_CAP, alpha)),
+                  "issuer": skew_check(issuer_vals, text + "|issuer", alpha=alpha, cap=min(SKEW_CAP, alpha))}
         if record is not None:
             record(checks)  # f and alpha are on record before any p is computed
     else:
         checks = {"session": dict(alphas["session"]), "issuer": dict(alphas["issuer"])}
     a_s, a_i = float(checks["session"]["alpha"]), float(checks["issuer"]["alpha"])
-    if a_s > ALPHA or a_i > ALPHA:
-        raise ValueError(f"the threshold is {ALPHA} or lower (the skew check only tightens)")
+    if a_s > alpha or a_i > alpha:
+        raise ValueError(f"the threshold is {alpha} or lower (the skew check only tightens)")
     p_s = signflip_p(session_values, seed_of(text), draws)
     p_i = signflip_p(issuer_vals, seed_of(text + "|issuer"), draws)
     fails = []
@@ -396,6 +409,10 @@ def judge_look(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any], k: in
     look.update(p=p_s, alpha=a_s, fp_check=float(checks["session"]["f"]), passed=int(not fails),
                 why="pass" if not fails else "fail: " + "; ".join(fails), skew=checks,
                 issuer={"p": p_i, "alpha": a_i, "f": float(checks["issuer"]["f"]), "values": len(issuer_vals)})
+    if retire:
+        from .bands import retire_test
+
+        look["retirement"] = retire_test(session_values, f["mean_a"], text, draws)
     if beside:
         extra["p_r"] = signflip_p([b.mean_r for b in f["block_list"]], seed_of(text), draws)
     return look
@@ -409,7 +426,8 @@ def write_look(store: S.Store, look: Mapping[str, Any]) -> bool:
                          tuple(look[c] for c in LOOK_COLUMNS))
         if cur.rowcount != 1:
             return False
-        detail = {c: look[c] for c in LOOK_COLUMNS} | {x: look.get(x) for x in ("issuer", "control", "skew", "beside")}
+        detail = {c: look[c] for c in LOOK_COLUMNS} | {x: look.get(x) for x in ("issuer", "control", "skew", "beside",
+                                                                              "retirement")}
         db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
                    (f"look:{look['program']}:{look['version']}:{look['k']}", json.dumps(detail, sort_keys=True, default=str)))
     return True
@@ -700,6 +718,13 @@ def run(store: S.Store, today: dt.date, *, programs: Sequence[tuple[str, int]] |
     for program, version in programs or program_versions(store):
         if program not in SEATABLE:
             continue
+        if _seating(program, version):
+            out = _run_v2(store, program, version, today, now=now, draws=draws)
+            written += out["written"]
+            waiting += out["waiting"]
+            continue
+        if version != 1:
+            continue
         rows = settled_rows(store, program, version)
         anchor = min((r["exited"] for r in rows), default=None)
         if anchor is None:
@@ -735,12 +760,110 @@ def run(store: S.Store, today: dt.date, *, programs: Sequence[tuple[str, int]] |
 
 
 def expected_false_passes(store: S.Store) -> dict[str, Any]:
-    """0.10 x every seatable version ever registered (version 1 of the four by this prereg, plus any later one seen)."""
-    versions = {(p, 1) for p in SEATABLE} | {(p, v) for p, v in program_versions(store) if p in SEATABLE}
+    """0.10 x every version that can seat (PREREG-EVL-3 section 4: the nine version 2 programs; version 1 never seats),
+    plus any later version of a seatable program seen in the store."""
+    from .programs import SEATING
+
+    versions = {(p.id, p.version) for p in SEATING} | {(p, v) for p, v in program_versions(store)
+                                                       if p in SEATABLE and v > 2}
     return {"versions": len(versions), "expected": round(FALSE_PASS_RATE * len(versions), 3)}
 
 
-__all__ = ["ALPHA", "B", "TIE", "LOOKS", "SEATABLE", "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
+# ------------------------------------------------------------------------------------------- version 2: PREREG-EVL-3
+def _seating(program: str, version: int) -> bool:
+    from .programs import BY_KEY
+
+    p = BY_KEY.get((program, int(version)))
+    return bool(p is not None and p.can_seat)
+
+
+def v2_schedule(store: S.Store, rows: Sequence[Mapping[str, Any]], today: dt.date,
+                pending: Sequence[tuple[dt.date, dt.date]] = ()) -> dict[str, Any]:
+    """PREREG-EVL-3's looks of one program from its settled rows: [(k, as_of day, merged ks)] in order, and where the
+    scan stopped. Look k is at the first session close with >= V2_NS[k-1] settled TRADABLE events, >= 40 issuers among
+    them and >= 8 session blocks (covered: scheduled exits at or before that close); thresholds first reached at the
+    same close are one look (the lowest k; the others merged into it). The scan stops at the first close by which an
+    intent scheduled to exit has not settled (`pending`), so no look reads an incomplete record."""
+    if not rows:
+        return {"looks": [], "stopped": None}
+    first_entry = min(_day(r["entry_day"]) for r in rows)
+    looks: list[tuple[int, dt.date, list[int]]] = []
+    j = 0
+    stopped = None
+    for s in C.sessions(store, first_entry, today):
+        if any(x <= s.day for _, x in pending):
+            stopped = s.day
+            break
+        if j >= len(V2_NS):
+            break
+        cov = covered(rows, s.day)
+        trad = [r for r in cov if _tradable(r)]
+        n = len(trad)
+        if n < V2_NS[j]:
+            continue
+        iss = len({str(r["issuer"]) for r in trad})
+        blk = len({_day(r["entry_day"]) for r in trad})
+        if iss < V2_MIN_ISSUERS or blk < V2_MIN_BLOCKS:
+            continue
+        reached = [i for i in range(j, len(V2_NS)) if n >= V2_NS[i]]
+        looks.append((reached[0] + 1, s.day, [i + 1 for i in reached[1:]]))
+        j = reached[-1] + 1
+    return {"looks": looks, "stopped": stopped}
+
+
+def _run_v2(store: S.Store, program: str, version: int, today: dt.date, *, now: dt.datetime,
+            draws: int = B) -> dict[str, Any]:
+    from . import bands as BA
+
+    written, waiting = [], []
+    rows = settled_rows(store, program, version)
+    if not rows:
+        return {"written": written, "waiting": waiting}
+    done = {r["k"] for r in look_rows(store, program, version)}
+    control = CONTROLS.get(program)
+    pending = _pending(store, program, version) + (_pending(store, control, 1) if control else [])
+    plan = v2_schedule(store, rows, today, pending)
+    if plan["stopped"] is not None:
+        waiting.append({"program": program, "version": version, "k": None,
+                        "why": f"an intent scheduled to exit by {plan['stopped']} has not settled"})
+    for k, as_of, merged in plan["looks"]:
+        if k in done:
+            continue
+        session = C.session(store, as_of)
+        look_set = covered(rows, as_of)
+        first_entry = min(_day(r["entry_day"]) for r in rows)
+        days = [x.day for x in C.sessions(store, first_entry, as_of)]
+        ctl_rows = covered(settled_rows(store, control, 1), as_of) if control else None
+        have = skew_records(store, program, version, k)
+
+        def record(checks: dict[str, Any], k: int = k) -> None:
+            store.set_meta(f"skew:{program}:{version}:{k}", json.dumps(checks | {"at": S.iso(now)}, sort_keys=True))
+        look = judge_look(look_set, days, k, program=program, version=version, at=session.close_at,
+                          control_rows=ctl_rows, alphas=have, record=record, draws=draws, alpha=V2_ALPHA,
+                          mins=(V2_NS[k - 1], V2_MIN_ISSUERS, V2_MIN_BLOCKS), sessions_at=len(days), retire=True)
+        look["merged"] = merged
+        if write_look(store, look):
+            moved = BA.on_look(store, look, now=now)
+            written.append({c: look[c] for c in ("program", "version", "k", "held", "passed", "p", "alpha", "why")}
+                           | {"band": moved, "merged": merged})
+    return {"written": written, "waiting": waiting}
+
+
+def next_look_v2(store: S.Store, program: str, version: int, today: dt.date) -> dict[str, Any]:
+    """Version 2's next unwritten look: {k, events_needed, events, issuers, blocks, status}."""
+    done = {r["k"] for r in look_rows(store, program, version)}
+    rows = settled_rows(store, program, version)
+    trad = [r for r in rows if _tradable(r)]
+    nxt = next((i + 1 for i in range(len(V2_NS)) if i + 1 not in done and not any(
+        k in done for k in range(i + 2, len(V2_NS) + 1))), None)
+    if nxt is None:
+        return {"k": None, "status": "all looks written"}
+    return {"k": nxt, "events_needed": V2_NS[nxt - 1], "events": len(trad),
+            "issuers": len({str(r["issuer"]) for r in trad}), "blocks": len({_day(r["entry_day"]) for r in trad}),
+            "status": "upcoming"}
+
+
+__all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "B", "TIE", "LOOKS", "SEATABLE", "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
            "look_schedule", "look_number", "minimums", "seed_string", "seed_of", "look_seed", "values_sha", "signflip_p",
            "skew_check", "look_figures", "control_mean", "judge_look", "write_look", "look_detail", "bootstrap_bounds",
            "bounds_seed", "done_bounds", "kill_bounds", "sized_bound", "calibration", "program_versions",

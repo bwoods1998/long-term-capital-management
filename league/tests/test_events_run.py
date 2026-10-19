@@ -111,7 +111,7 @@ class RunTest(unittest.TestCase):
         self.assertEqual((o1["entry_day"], o1["entry_at"], o1["exit_day"], o1["mode"]), ("2026-10-19", "open", "2026-10-19", "shadow"))
         self.assertEqual(o1["decided_at"], "2026-10-19T13:15:00Z")
         # two AAA filings: one position per issuer (the second is skipped); each event was read once
-        skipped = self.st.db.execute("SELECT count(*) FROM intents WHERE program='EVL-ERN-READ-O1' AND status LIKE 'skipped%'").fetchone()[0]
+        skipped = self.st.db.execute("SELECT count(*) FROM intents WHERE program='EVL-ERN-READ-O1' AND version=1 AND status LIKE 'skipped%'").fetchone()[0]
         self.assertEqual(skipped, 1)
         self.assertEqual(len(self.gw.claude_calls), 3)
         self.assertTrue(all(c["model"] == "claude-haiku-4-5-20251001" and c["temperature"] == 0 for c in self.gw.claude_calls))
@@ -128,11 +128,12 @@ class RunTest(unittest.TestCase):
         ctx = R.Context(self.st, refusing, sec_pages, now=lambda: self.now)
         out = R.decide_open(ctx, dt.date(2026, 10, 19))
         self.assertEqual(out["pending"], {"EVL-ERN-READ-O1": 1, "EVL-ERN-READ-O3": 1,  # PREREG-EVL-2's two READ rows too
-                                          "EVL-ERN-GUIDE-O1": 1, "EVL-ERN-READ3-O1": 1})
+                                          "EVL-ERN-GUIDE-O1": 1, "EVL-ERN-READ3-O1": 1,
+                                          "EVL-ERN-READ-O1@v2": 1, "EVL-ERN-GUIDE-O1@v2": 1})  # and PREREG-EVL-3's
         self.assertEqual(out["EVL-CTRL-ERN-ALL-O1"]["planned"], 1)       # controls need no verdict
         status = self.st.db.execute("SELECT status FROM receipts WHERE job='decide-open:2026-10-19'").fetchone()[0]
         self.assertEqual(status, "pending")
-        self.assertIsNone(self.st.db.execute("SELECT 1 FROM intents WHERE program='EVL-ERN-READ-O1'").fetchone())
+        self.assertIsNone(self.st.db.execute("SELECT 1 FROM intents WHERE program='EVL-ERN-READ-O1' AND version=1").fetchone())
         later = R.decide_open(self.ctx, dt.date(2026, 10, 19))          # the gateway admits it now
         self.assertEqual(later["pending"], {})
         self.assertEqual(later["EVL-ERN-READ-O1"]["planned"], 1)
