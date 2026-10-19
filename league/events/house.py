@@ -23,7 +23,8 @@ once an hour per task, so the House's repeat rule never turns it into an error),
 3. the RECORD pass every 2 minutes: EDGAR's current feeds and the news, at most 90 s, resumable (a new filing is stored
    `listed` at once and fetched in order, so a pass cut short loses nothing), then today's verdicts with the time
    left (its open decision's, then its close decision's: PREREG-EVL-2's day news is read through the session);
-4. NIGHTLY: the account equity after the close, the score at 20:30 ET, the screen and the report after it;
+4. NIGHTLY: the account equity after the close, the score at 20:30 ET, the screen (with PREREG-EVL-3's band review
+   of the real fills: demotion and Sized, league/events/bands.py `review`) and the report after it;
 5. the TICKER snapshot at 07:00 ET;
 6. EARLY VERDICTS from 07:30 ET (the session's universe is fixed then: its tickers copy is the latest before 07:30 ET),
    for its open decision and then its close decision;
@@ -51,6 +52,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
+from . import bands as BA
 from . import calendar as C
 from . import edgar as E
 from . import gw as G
@@ -989,10 +991,20 @@ class EventLane:
         return summary | {"_status": "ok" if complete else "partial"}
 
     def _screen(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
+        """The screen (league.events.screen.run: the looks, and the band moves a look makes: Probe, retired), then
+        PREREG-EVL-3's review of the real fills the House's book wrote back (league.events.bands.review: demotion to
+        learning, Sized). A review that fails is a warning and the screen's receipt says so; it runs again next night."""
         now = ctx.now()
         out = SN.run(ctx.store, now.astimezone(C.NY).date(), now=now)
-        summary = {"day": now.astimezone(C.NY).date().isoformat(), "written": len(out.get("written") or []),
-                   "waiting": len(out.get("waiting") or [])}
+        summary: dict[str, Any] = {"day": now.astimezone(C.NY).date().isoformat(),
+                                   "written": len(out.get("written") or []), "waiting": len(out.get("waiting") or [])}
+        try:
+            moved = BA.review(ctx.store, now=now)
+        except Exception as exc:  # noqa: BLE001 - the looks are written; the review is read again next night
+            summary["review"] = f"failed: {type(exc).__name__}: {str(exc)[:160]}"
+            self.warn("bands", exc)
+        else:
+            summary["review"] = [{k: c.get(k) for k in ("program", "version", "band")} for c in moved]
         self._receipted(ctx.store, "screen", "ok", summary)
         return summary
 

@@ -100,6 +100,8 @@ R0_PENDING = ("league/data_plan.py",)
 #: them.
 R1_PENDING = ("league/events/programs.py", "league/events/verdicts.py", "league/events/score.py",
               "league/events/screen.py", "docs/prereg/")
+#: PREREG-EVL-3's band rules (league/events/bands.py, release 1019b), beside them.
+V2_PENDING = ("league/events/bands.py",)
 #: Release R2's event kind (league/events/book.py, the rules; league/events/proof.py, the auction paper proof), beside
 #: them.
 R2_PENDING = ("league/events/book.py", "league/events/proof.py")
@@ -363,7 +365,8 @@ class TheWiringIsWhole(unittest.TestCase):
         self.assertIn(ci.PENDING_GATEWAY, ((), E4_PENDING, E4_PENDING + FWD1_PENDING,
                                            E4_PENDING + FWD1_PENDING + R0_PENDING,
                                            E4_PENDING + FWD1_PENDING + R0_PENDING + R1_PENDING,
-                                           E4_PENDING + FWD1_PENDING + R0_PENDING + R1_PENDING + R2_PENDING),
+                                           E4_PENDING + FWD1_PENDING + R0_PENDING + R1_PENDING + V2_PENDING
+                                           + R2_PENDING),
                       "nothing of E2's or E3's waits for the gateway")
         self.assertFalse(set(ci.PENDING_GATEWAY) & {*E2_PENDING, *E3_SWARM})
         self.assertEqual(set(ci.FORBIDDEN) - gateway, set(ci.PENDING_GATEWAY), "beyond the gateway's list: what waits")

@@ -64,8 +64,11 @@ disk, unread. PAUSE holds only its paid verdicts; recording, decisions and scori
 
 **What is protected.** `league/events/programs.py`, `verdicts.py`, `score.py`, `screen.py` and `docs/prereg/` are in
 `league/ci.py` FORBIDDEN (through `PENDING_GATEWAY` until the gateway's merge list gains them): no role may change them
-and the in-box updater never ships one. `league/events/house.py`, the recorders, `run.py`, `league/service.py` and
-`scripts/evl_migrate.py` are not: a fix to them can ship through the updater. `config.json` is the owner's.
+and the in-box updater never ships one. Release 1019b adds `league/events/bands.py` (PREREG-EVL-3's band rules: Probe
+at a passed look, Sized, demotion, retirement, the bands' reader and the real fills' writer) and release R2's
+`league/events/book.py` and `proof.py` (the event kind's money rules and the auction paper proof).
+`league/events/house.py`, the recorders, `run.py`, `league/service.py` and `scripts/evl_migrate.py` are not: a fix to
+them can ship through the updater. `config.json` is the owner's.
 
 ## The old lanes are exits only (Oct 19, 2026): `equity_money.enabled` False: `fix/equity-opens-off`, deployed 03:46Z Oct 19 (release 1019a)
 

@@ -18,7 +18,6 @@ program buys while an event program does."""
 
 from __future__ import annotations
 
-import dataclasses
 import datetime as dt
 import hashlib
 import json
@@ -34,6 +33,7 @@ from zoneinfo import ZoneInfo
 from league.constitution import CONSTITUTION
 from league.equity import live as L
 from league.equity import schedule as ES
+from league.events import bands as BA
 from league.events import book as EB
 from league.events import programs as P
 from league.events import proof as PR
@@ -49,23 +49,6 @@ NY = ZoneInfo("America/New_York")
 UTC = dt.timezone.utc
 PRIOR, DAY, NEXT = dt.date(2026, 11, 3), dt.date(2026, 11, 4), dt.date(2026, 11, 5)
 CIK, CIK2, CIK3 = "0000000001", "0000000002", "0000000003"
-
-#: PREREG-EVL-3's version 2 rows of the nine seatable programs. The lane's league/events/programs.py carries them (its
-#: branch feat/evl-v2); on a tree that does not yet, this module adds the same rows for its own tests: each seatable row
-#: of version 1 at version 2, PREREG-EVL-3's.
-_PATCHES: list = []
-
-
-def setUpModule():
-    if not any(p.seatable and p.version == 2 for p in P.PROGRAMS):
-        extra = tuple(dataclasses.replace(p, version=2, prereg=3) for p in P.PROGRAMS if p.seatable and p.version == 1)
-        _PATCHES.append(mock.patch.object(P, "PROGRAMS", P.PROGRAMS + extra))
-        _PATCHES[-1].start()
-
-
-def tearDownModule():
-    while _PATCHES:
-        _PATCHES.pop().stop()
 
 
 def V2(program: str) -> P.Program:
@@ -87,19 +70,12 @@ def iso(day: dt.date, hh: int, mm: int) -> str:
     return LS.iso(dt.datetime(day.year, day.month, day.day, hh, mm, tzinfo=NY))
 
 
-#: The lane's band table and the House's fills table as PREREG-EVL-3's lane writes them (league/events/store.py on
-#: feat/evl-v2; created here when the tree's store does not).
-BANDS_DDL = ("CREATE TABLE IF NOT EXISTS bands(program TEXT NOT NULL, version INTEGER NOT NULL, band TEXT NOT NULL, "
-             "since TEXT, why TEXT, PRIMARY KEY(program, version))")
-FILLS_DDL = ("CREATE TABLE IF NOT EXISTS real_fills(program TEXT NOT NULL, version INTEGER NOT NULL, event TEXT NOT NULL, "
-             "side TEXT NOT NULL, qty REAL, price REAL, fee REAL, filled_at TEXT, band TEXT, "
-             "PRIMARY KEY(program, version, event, side))")
-
-
 # ----------------------------------------------------------------------------------------------------- the lane store
 class Lane:
-    """An invented lane store (`<root>/events/events.sqlite`): the book's NYSE sessions, 8-K and Form 4 filings, news,
-    verdicts, universe rows, the lane's bands, intents and decision receipts, and the real fills table."""
+    """THE LANE'S REAL STORE (league/events/store.py `Store` at `<root>/events/events.sqlite`, its own schema: the
+    `bands`, `band_history` and `real_fills` tables of PREREG-EVL-3 among them) holding invented rows: the book's NYSE
+    sessions, 8-K and Form 4 filings, news, verdicts, universe rows, the lane's bands, intents and decision receipts.
+    `fills` False: a store from before PREREG-EVL-3 (no `real_fills` table)."""
 
     def __init__(self, root: Path, *, fills: bool = True):
         self.st = LS.Store(root / "events")
@@ -112,9 +88,8 @@ class Lane:
                                (d.isoformat(), LS.iso(dt.datetime.fromtimestamp(m.open_at, UTC)),
                                 LS.iso(dt.datetime.fromtimestamp(m.close_at, UTC)), int(m.early)))
                 d += dt.timedelta(days=1)
-            db.execute(BANDS_DDL)
-            if fills:
-                db.execute(FILLS_DDL)
+            if not fills:
+                db.execute("DROP TABLE real_fills")
 
     def filing(self, accession: str, cik: str, *, accepted: str, received: str | None = None, items=("2.02",),
                form: str = "8-K") -> None:
@@ -150,7 +125,13 @@ class Lane:
                            (day.isoformat(), symbol, cik, prev_close, adv20))
 
     def band(self, program: str, band: str, *, version: int = 2, why: str = "invented") -> None:
-        """The lane's band of a program (PREREG-EVL-3 section 2), as its own rules would write it."""
+        """The lane's band of a program (PREREG-EVL-3 section 2): league/events/bands.py `set_band` for a seating version
+        and a band of the rules (as the lane's own rules write it); a raw row otherwise (a version or a band the rules do
+        not name, which the book must refuse)."""
+        if (program, version) in BA.seating() and band in BA.BANDS:
+            self.st.db.execute("DELETE FROM bands WHERE program=? AND version=?", (program, version))
+            BA.set_band(self.st, program, version, band, since=iso(PRIOR, 20, 0), why=why)
+            return
         self.st.db.execute("INSERT OR REPLACE INTO bands(program, version, band, since, why) VALUES(?, ?, ?, ?, ?)",
                            (program, version, band, iso(PRIOR, 20, 0), why))
 
@@ -968,7 +949,7 @@ class TheFills(EventTest):
         for hh, mm in ((9, 15), (9, 16), (9, 31), (9, 33), (9, 35)):
             out = h.tick(hh, mm)
         self.assertIn("no real_fills table yet", out.get("event_fills", ""))
-        h.lane.st.db.execute(FILLS_DDL)
+        h.lane.st.db.executescript(LS.SCHEMA)                   # the lane's own schema makes the table again
         h.tick(9, 36)
         self.assertEqual([f["side"] for f in h.lane.fills()], ["buy"])
         for hh, mm in ((15, 46), (15, 47), (16, 1), (16, 3)):
@@ -981,6 +962,139 @@ class TheFills(EventTest):
         h.tick(16, 10)
         sell = [f for f in h.lane.fills() if f["side"] == "sell"][0]
         self.assertEqual((sell["fee"], len(h.lane.fills())), (float(lot.fees), 2))
+
+
+# ------------------------------------------------------------------------------------------------------- the real lane
+class LaneGateway:
+    """The gateway as the LANE's own code reads it (league/events/universe.py, verdicts.py): Alpaca's assets, SIP daily
+    bars (an invented $20 close, 1,000,000 shares a session, stamped 05:00Z so the New York day is the bar's own in
+    summer and winter time alike), and Claude's verdicts (`scores` by ticker). No figure here is a market's."""
+
+    def __init__(self, scores: dict):
+        self.scores, self.claude_calls, self.last_headers = scores, [], {}
+
+    def get_json(self, path, params=None):
+        if path.endswith("/v2/assets"):
+            return [{"symbol": sym, "status": "active", "tradable": True, "class": "us_equity", "exchange": "NASDAQ"}
+                    for sym in ("AAA", "BBB")]
+        if path.endswith("/v2/stocks/bars"):
+            end = LS.parse_iso(params["end"])
+            d, rows = dt.date.fromisoformat(params["start"]), []
+            while dt.datetime.combine(d, dt.time(0, 0), tzinfo=NY) < end:     # a daily bar starts at 00:00 ET
+                if ES.is_session(d):
+                    rows.append({"t": f"{d}T05:00:00Z", "o": 20, "h": 20, "l": 20, "c": 20, "v": 1_000_000})
+                d += dt.timedelta(days=1)
+            return {"bars": {sym: list(rows) for sym in params["symbols"].split(",")}, "next_page_token": None}
+        raise AssertionError(path)
+
+    def post_json(self, path, body, headers=None):
+        self.claude_calls.append(body)
+        text = body["messages"][0]["content"]
+        score = next(v for k, v in self.scores.items() if f"ticker {k}" in text)
+        self.last_headers = {"x-ltcm-cost-usd": "0.002"}
+        return 200, {"content": [{"type": "text", "text": json.dumps({"score": score, "guidance": "raised",
+                                                                       "reasons": []})}], "stop_reason": "end_turn"}
+
+
+class TheRealLane(EventTest):
+    """THE LANE INTERFACE, END TO END (release 1019b): the lane's OWN code (league/events/edgar.py records an invented
+    8-K; league/events/run.py asks its verdict from 07:30 ET and decides DAY's open at 09:15 ET) writes its VERSION 2
+    intents, and version 1's beside them, into its real store; the House's book decides on that store through the
+    lane's own `programs.SEATING` / `BY_KEY` and `bands.bands`, trades version 2 only, and hands its fills back through
+    `bands.record_fill`, which the lane's `real_events` (demotion, Sized) reads."""
+
+    ACC = "0000000001-26-000101"
+
+    def sec(self, url: str) -> bytes:
+        if url.endswith("company_tickers.json"):
+            return json.dumps({"0": {"cik_str": 1, "ticker": "AAA", "title": "Alpha Inc."},
+                               "1": {"cik_str": 2, "ticker": "BBB", "title": "Beta Inc."}}).encode()
+        if "action=getcompany" in url:
+            return (b"<feed><company-info><assigned-sic>3571</assigned-sic></company-info><entry><filing-type>10-Q"
+                    b"</filing-type><filing-date>2026-08-01</filing-date></entry></feed>")
+        if url.endswith("-index.htm"):
+            return (f'<div class="infoHead">Accepted</div><div class="info">2026-11-03 16:30:00</div>'
+                    f'<div class="infoHead">Items</div><div class="info">Item 2.02: Results</div>'
+                    f'<table><tr><td>1</td><td>press release</td><td><a href="/Archives/x/{self.ACC}/ex99.htm">ex99.htm'
+                    f'</a></td><td>EX-99.1</td><td>100</td></tr></table>').encode()
+        if url.endswith("ex99.htm"):
+            return ("<html><body>" + "Quarterly results were strong and guidance was raised. " * 10
+                    + "</body></html>").encode()
+        raise AssertionError(url)
+
+    def test_the_lanes_seating_rows_and_band_reader_are_the_books(self):
+        self.assertEqual(EB.seatable(), P.SEATING, "the book trades exactly the lane's SEATING rows, in their order")
+        for p in P.PROGRAMS:
+            self.assertIs(EB.program_of(p.id, p.version), P.BY_KEY[(p.id, p.version)] if p.can_seat else None,
+                          (p.id, p.version))
+        h = self.harness()
+        BA.set_band(h.lane.st, "EVL-8K-READ-O1", 2, "probe", since="2026-11-03T21:00:00Z", why="look 1 passed")
+        BA.set_band(h.lane.st, "EVL-INS-BUY-O1", 2, "retired", since="2026-11-03T21:00:00Z", why="look 1: retired")
+        lane = EB.open_lane(self.root)
+        self.addCleanup(lane.close)
+        self.assertEqual({k: v["band"] for k, v in EB.lane_bands(lane).items()}, BA.bands(h.lane.st))
+        got = {b.program: b for b in EB.bands(lane)}
+        self.assertEqual((got["EVL-8K-READ-O1"].band, got["EVL-8K-READ-O1"].why), ("probe", "look 1 passed"))
+        self.assertEqual(got["EVL-INS-BUY-O1"].band, "retired")
+        self.assertIn("learning from birth", got["EVL-ERN-READ-O1"].why)
+
+    def test_the_book_trades_the_lanes_own_version_2_intents_and_hands_the_fills_back(self):
+        from league.events import edgar as E
+        from league.events import run as R
+
+        h = self.harness()
+        st = h.lane.st
+        st.set_meta("tickers@2026-11-04T12:00:00Z", st.put_document(self.sec("x/company_tickers.json"), "t"))
+        gw = LaneGateway({"AAA": 3, "BBB": 1})
+        clock = {"now": dt.datetime(2026, 11, 3, 21, 35, tzinfo=UTC)}           # 16:35 ET: the 8-K is recorded
+        ctx = R.Context(st, gw, self.sec, now=lambda: clock["now"])
+        url = f"https://www.sec.gov/Archives/edgar/data/1/{self.ACC.replace('-', '')}/{self.ACC}-index.htm"
+        entry = {"form": "8-K", "cik": CIK, "accession": self.ACC, "company": "Alpha Inc.", "items": ["2.02"],
+                 "accepted_at": None, "index_url": url}
+        self.assertEqual(E.record_filing(st, self.sec, entry, source="current", now=clock["now"]), "fetched")
+        clock["now"] = dt.datetime(2026, 11, 4, 12, 31, tzinfo=UTC)               # 07:31 ET: the verdicts, asked early
+        self.assertEqual(R.decide_open(ctx, DAY, ask_only=True)["pending"], {})
+        self.assertEqual(len(gw.claude_calls), 1)
+        clock["now"] = dt.datetime(2026, 11, 4, 14, 15, tzinfo=UTC)               # 09:15 ET: the lane's own decision
+        out = R.decide_open(ctx, DAY)
+        self.assertEqual((out["EVL-ERN-READ-O1@v2"]["planned"], out["EVL-ERN-READ-O1"]["planned"]), (1, 1),
+                         "version 2 decided beside version 1's shadow record")
+        self.assertEqual(len(gw.claude_calls), 1, "the 09:15 decision read the stored verdict")
+        event = f"8k:{self.ACC}"
+        lane_intents = {(r["program"], r["version"]) for r in st.db.execute(
+            "SELECT program, version FROM intents WHERE event=? AND status='planned'", (event,))}
+        self.assertTrue({("EVL-ERN-READ-O1", 2), ("EVL-ERN-GUIDE-O1", 2), ("EVL-ERN-READ-O1", 1)} <= lane_intents)
+        h.symbol("AAA", last=21.0)
+        h.venue.prints[("AAA", DAY.isoformat(), "open")] = D("21.00")
+        h.venue.prints[("AAA", DAY.isoformat(), "close")] = D("21.50")
+        h.lane.decided(DAY, "close")
+        h.day(DAY)
+        buys = h.event_intents("buy")
+        self.assertEqual([(b["program"], b["version"], b["event"], b["band"], b["tif"], b["otype"], b["limit_px"])
+                          for b in buys],
+                         [("EVL-ERN-READ-O1", 2, event, "learning", "opg", "limit", "25.00")],
+                         "version 2 only; one name an auction: ERN-READ-O1's row before ERN-GUIDE-O1's; the limit "
+                         "1.25 x the lane's previous close")
+        [body] = [b for b in h.bodies() if b["side"] == "buy"]
+        self.assertEqual((body["symbol"], body["qty"], body["type"], body["time_in_force"]), ("AAA", "1", "limit", "opg"))
+        fills = {f["side"]: f for f in h.lane.fills()}
+        self.assertEqual({k: (f["program"], f["version"], f["event"], f["band"], f["qty"], f["price"])
+                          for k, f in fills.items()},
+                         {"buy": ("EVL-ERN-READ-O1", 2, event, "learning", 1.0, 21.0),
+                          "sell": ("EVL-ERN-READ-O1", 2, event, "learning", 1.0, 21.5)})
+        [real] = BA.real_events(st, "EVL-ERN-READ-O1", 2, at=("learning",))
+        self.assertEqual((real["event"], real["entry_day"], real["band"]), (event, DAY.isoformat(), "learning"))
+        self.assertAlmostEqual(real["pnl"], 0.5 - fills["sell"]["fee"])
+        self.assertEqual(BA.real_events(st, "EVL-ERN-READ-O1", 2), [], "a learning event never counts at Probe or above")
+        self.assertEqual(BA.review(st), [], "nothing at Probe: no demotion, no Sized")
+        self.assertFalse(BA.record_fill(st, program="EVL-ERN-READ-O1", version=2, event=event, side="buy", qty=2,
+                                        price=1.0, fee=0.0, filled_at="z", band="learning"), "a fill is written once")
+        self.assertTrue(BA.record_fill(st, program="EVL-ERN-READ-O1", version=2, event=event, side="sell", qty=1,
+                                       price=21.5, fee=fills["sell"]["fee"] + 0.01, filled_at="z", band="learning"),
+                        "a posted fee changes the sale's row")
+        row = dict(st.db.execute("SELECT * FROM real_fills WHERE side='sell'").fetchone())
+        self.assertEqual((row["qty"], row["price"], row["filled_at"]), (1.0, 21.5, fills["sell"]["filled_at"]),
+                         "only the fee moves")
 
 
 # ------------------------------------------------------------------------------------------------------- the twins

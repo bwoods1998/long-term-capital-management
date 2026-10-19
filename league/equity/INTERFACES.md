@@ -1520,12 +1520,18 @@ path.
   `decided(lane, day, at)`, `eligible(lane, day)`, `lane_bands(lane)`, `bands(lane, s=None) -> [Band] | None`,
   `picks(lane, program, day, *, decided_at, reaction=None, held=None)`, `held_recently`, `one_name_an_auction(picks,
   band_of)`, `reaction_reader`, `limit_price`, `sigma`, `weight`, `exit_plan(program, day) -> (day, "open" | "close")`,
-  `publish(client, day, symbols)`, `write_fills(root, rows) -> int | None`; constants `LANE` "event", `TAG`,
-  `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late", `REAL_VERSION` 2, `BANDS`, `LIVE_BANDS`, `DEFAULT_BAND` "learning",
-  `PRIORITY`, `LADDER_CLOSES` 5, `ZERO_AFTER` 20, `ISSUER_GAP_SESSIONS` 5, `STRICT_WEIGHT` 0.40, `FILLS_TABLE`,
-  `FILL_COLUMNS`. THE LANE'S NAMES IT READS AND WRITES (release R1's `feat/evl-v2`): programs.py's version 2 rows; the
-  store's `bands(program, version, band, since, why)` (and `store.bands(store) -> {(program, version): band}` when the
-  module has it) and `real_fills(program, version, event, side, qty, price, fee, filled_at, band)`.
+  `publish(client, day, symbols)`, `FillWriter(path)`, `write_fills(root, rows) -> int | None` (the rows new or
+  changed); constants `LANE` "event", `TAG`, `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late", `REAL_VERSION` 2, `BANDS`,
+  `LIVE_BANDS`, `DEFAULT_BAND` "learning", `PRIORITY`, `LADDER_CLOSES` 5, `ZERO_AFTER` 20, `ISSUER_GAP_SESSIONS` 5,
+  `STRICT_WEIGHT` 0.40, `FILLS_TABLE`, `FILL_COLUMNS`. THE LANE'S OWN MODULES IT USES (release 1019b; no stand-in in
+  the book or its tests): league/events/programs.py `SEATING`, `BY_KEY` and `Program.can_seat` (`seatable()` is
+  `SEATING` at `REAL_VERSION`, `program_of` reads `BY_KEY`); league/events/bands.py `bands(store)` (the band reader:
+  {(program, version): band} for every seating version, no row = learning; the book reads each row's `since` and `why`
+  beside) and `record_fill(store, ...)` (the fill write-back, one row a (program, version, event, side), a write again
+  changing only its fee), on a `FillWriter` (the existing store file only, a 5 s busy timeout); the store's tables
+  `bands(program, version, band, since, why)` and `real_fills(program, version, event, side, qty, price, fee,
+  filled_at, band)` as league/events/store.py's schema makes them. league/tests/test_events_book.py `TheRealLane` runs
+  the lane's own decision (edgar, run, programs) into a real store and the book on it.
 - **The auction paper proof** (league/events/proof.py): `AuctionProof(state, account, market, *, clock, record,
   alert)`: `step(now, moments)`, `buy_passed()`, `sell_failed()`, `passed()`, `status()`; built by the book on the
   stock proof's practice account (`_auction_proof`).

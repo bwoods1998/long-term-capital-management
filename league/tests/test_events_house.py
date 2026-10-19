@@ -722,6 +722,33 @@ class Nightly(LaneCase):
         self.mark_recorded()
         self.assertNotIn(self.turn().get("task"), ("score", "screen", "report", "equity"))
 
+    def test_the_screen_task_runs_the_band_review_of_the_real_fills(self):
+        """PREREG-EVL-3 section 2 on the House: after the night's looks, the screen task reviews the real fills the
+        House's book wrote back (league/events/bands.py `review`): a Probe program whose last 50 real-money events lost
+        more than $150 net is back at learning, and the screen's receipt says so."""
+        from league.events import bands as BA
+
+        with self.store() as st:
+            for kind, t in (("open", "09:15"), ("close", "15:46")):
+                rid = st.start_receipt(f"decide-{kind}:2026-10-20", now=et("2026-10-20", t))
+                st.finish_receipt(rid, "ok", {}, now=et("2026-10-20", t))
+            st.set_meta(SC.equity_key(dt.date(2026, 10, 20)), repr(2000.0))
+            BA.set_band(st, "EVL-ERN-READ-O1", 2, "probe", since="2026-10-19T20:00:00Z", why="look 1 passed")
+            for i in range(50):                       # $3.50 lost on each of the last 50: -$175, past -$150
+                for side, price, t in (("buy", 10.0, "13:30"), ("sell", 9.65, "20:00")):
+                    BA.record_fill(st, program="EVL-ERN-READ-O1", version=2, event=f"8k:invented-{i}", side=side,
+                                   qty=10, price=price, fee=0.0, filled_at=f"2026-10-20T{t}:{i:02d}Z", band="probe")
+        self.lane._redecide_next = et("2026-10-21", "00:00")
+        self.at(et("2026-10-20", "20:31"))
+        self.mark_recorded()
+        self.assertEqual(self.turn()["task"], "score")
+        self.mark_recorded()
+        self.assertEqual(self.turn()["task"], "screen")
+        with self.store() as st:
+            self.assertEqual(BA.bands(st)[("EVL-ERN-READ-O1", 2)], "learning")
+        summary = json.loads(self.receipts("screen")[-1]["summary"])
+        self.assertEqual(summary["review"], [{"program": "EVL-ERN-READ-O1", "version": 2, "band": "learning"}])
+
     def test_the_score_pass_is_bounded_and_resumable(self):
         intents = [{"program": "EVL-ERN-READ-O1", "version": 1, "event": f"8k:{n}"} for n in range(5)]
         settled = []

@@ -113,6 +113,8 @@ the captain's workstation from branch `feat/evl-shadow` until release R1 brings 
 - **Needs from the lane (release R1's, `feat/evl-v2`)**: the version 2 rows in league/events/programs.py, and in its
   store the `bands` table (with `bands(store)`) and the `real_fills` table; the book reads and writes them by these
   names (league/tests/test_events_book.py adds the same rows and tables when the tree does not carry them yet).
+  Release 1019b reconciles it: the book uses the lane's own `programs.SEATING` / `BY_KEY`, `bands.bands` and
+  `bands.record_fill`, and the tests' stand-ins are gone.
 - **Not here.** The site's positions panel admits no stock row yet: the site's schema (`capital/schema.js`) and the
   House's rows of event lots (league/trading_profit.py, league/publish.py) ship together with the site's PR; the agents
   roster's EVL programs are release R1's (WP4).

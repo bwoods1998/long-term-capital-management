@@ -53,7 +53,9 @@ negative mean. LOOKS (version 2): at 60, 90, 135, 200, 300, 450, 675, 1000, 1500
 each needing at least 40 issuers and 8 session blocks; thresholds first reached at the same close are one look; the
 skew check starts and caps at 0.018 (A65). Room when short: Sized, then Probe, then learning. The lane writes the
 bands (`league/events/bands.py`, tables `bands` and `band_history`, CLI `bands`); the House's event book reads them
-and writes every real fill to `real_fills`, from which demotion and Sized are computed.
+with the same module's `bands(store)` and writes every real fill to `real_fills` with its `record_fill` (a posted fee
+updates its row); on the House the lane reviews the real fills after each night's screen (`bands.review`: demotion and
+Sized).
 
 ## The code
 
@@ -92,7 +94,7 @@ turn, the most urgent due first.
 | 2 | verdicts a decision will read | its decision within 30 min, or pending | 90 s |
 | 3 | the record pass: EDGAR's current feeds, the news, then today's verdicts with the time left | every 2 min, 24/7 | 90 s, resumable |
 | - | the hourly re-decision of the last three sessions (late events) | hourly, after the record pass | 150 s |
-| 4 | nightly: the account equity, the score, the screen, the report | close + 3 min; 20:30 ET | the score 120 s, resumable |
+| 4 | nightly: the account equity, the score, the screen (then the band review of the real fills), the report | close + 3 min; 20:30 ET | the score 120 s, resumable |
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
 | 7 | the backfill of a weekday's EDGAR daily index | from 05:00 ET the next day | 90 s, resumable |

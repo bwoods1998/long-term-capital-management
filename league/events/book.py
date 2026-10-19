@@ -10,15 +10,17 @@ module of league/events but through league/equity/kinds.py `BOOKS["event"]`.
 
 THE RULES ARE THE FROZEN ONES: docs/prereg/PREREG-EVL-3.md section 2 (the owner's goal as re-set at 05:15Z Oct 19,
 2026), with PREREG-EVL-1 sections 3, 5 and 8 and PREREG-EVL-2 for everything it does not change:
-- THE PROGRAMS are VERSION 2 of the nine seatable rows of league/events/programs.py (`REAL_VERSION`, `seatable()`), in
-  the tables' order (PREREG-EVL-1's four, then PREREG-EVL-2's five). Version 1 of each is a shadow record and NEVER
-  trades: no real event order is ever for anything but a version 2 intent. A program is a pre-registered rule, never a
-  swarm family and never code a program wrote.
-- THE BANDS are the lane's (its store's `bands` table, league/events/store.py `bands(store)`; the lane computes
-  promotion at a passed look, Sized, demotion and retirement from its looks and the House's real fills,
-  `write_fills`): LEARNING from birth (a version 2 program with no row is at learning), PROBE, SIZED, RETIRED (no real
-  money). The book reads them at each session's first decision; a store whose band table cannot be read trades
-  nothing that decision (fail closed), one with no band table yet is every version 2 program at learning.
+- THE PROGRAMS are the lane's own `SEATING` rows of league/events/programs.py (`Program.can_seat`: VERSION 2 of the
+  nine seatable programs, `REAL_VERSION`; `seatable()`, `program_of()` by `BY_KEY`), in the tables' order
+  (PREREG-EVL-1's four, then PREREG-EVL-2's five). Version 1 of each is a shadow record and NEVER trades: no real event
+  order is ever for anything but a version 2 intent. A program is a pre-registered rule, never a swarm family and never
+  code a program wrote.
+- THE BANDS are the lane's, read by the lane's own reader (league/events/bands.py `bands(store)` over its store's
+  `bands` table; the lane computes promotion at a passed look, Sized, demotion and retirement from its looks and the
+  House's real fills, `write_fills` through `bands.record_fill`): LEARNING from birth (a version 2 program with no row
+  is at learning), PROBE, SIZED, RETIRED (no real money). The book reads them at each session's first decision; a store
+  whose band table cannot be read trades nothing that decision (fail closed), one with no band table yet is every
+  version 2 program at learning.
 - A REAL-MONEY DECISION (PREREG-EVL-1 section 3) is the shadow rule over the same events and windows, which may in
   addition use only events STORED, and verdicts ANSWERED, before its decision time (`decided_at`, 09:15 ET or the
   close - 14 minutes): a filing or an article the recorder stored later, or a verdict answered later, is not read. It
@@ -59,6 +61,7 @@ Standard library only.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import datetime as dt
 import gzip
@@ -72,6 +75,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from ..equity import schedule as ES
+from . import bands as BA
 from . import calendar as C
 from . import programs as P
 from . import store as S
@@ -115,14 +119,16 @@ CENT = Decimal("0.01")
 
 
 def seatable() -> tuple[P.Program, ...]:
-    """The programs real money trades (PREREG-EVL-3 section 1): version 2 of each seatable row, in the tables' order.
-    Read from league/events/programs.py at each call (its version 2 rows are the lane's)."""
-    return tuple(p for p in P.PROGRAMS if p.seatable and int(p.version) == REAL_VERSION)
+    """The programs real money trades (PREREG-EVL-3 section 1): the lane's `programs.SEATING` (the versions that may
+    ever trade, `Program.can_seat`) at `REAL_VERSION`, in the tables' order. Read at each call."""
+    return tuple(p for p in P.SEATING if p.can_seat and int(p.version) == REAL_VERSION)
 
 
 def program_of(program: str, version: int) -> P.Program | None:
-    """The version 2 program `program` (None for any other version: version 1 never trades)."""
-    return next((p for p in seatable() if p.id == program and int(p.version) == int(version)), None)
+    """The version 2 program `program` (the lane's `programs.BY_KEY` row when it may seat; None for any other version:
+    version 1 never trades)."""
+    p = P.BY_KEY.get((str(program), int(version)))
+    return p if p is not None and p.can_seat and int(p.version) == REAL_VERSION else None
 
 
 def order_of(program: str) -> int:
@@ -315,28 +321,24 @@ class Band:
 
 
 def lane_bands(lane: Lane | None) -> dict[tuple[str, int], dict[str, Any]] | None:
-    """THE LANE'S BAND TABLE ({(program, version): {band, since, why}}): league/events/store.py `bands(store)` when the
-    store module has it (the band alone), else the `bands` table read directly; {} when the store holds no band table
-    yet or there is no lane (every version 2 program is then at learning); None when the table is there and cannot be
-    read (no real event money this decision)."""
+    """THE LANE'S BANDS AS THE LANE READS THEM: league/events/bands.py `bands(store)` ({(program, version): band} for
+    every seating version, no row = learning), each with its row's since and why beside ({band, since, why, row}, `row`
+    whether the lane's table holds one); {} when there is no lane or its store holds no band table yet (a store from
+    before PREREG-EVL-3: every version 2 program is then at learning); None when the table is there and cannot be read
+    (no real event money this decision)."""
     if lane is None:
         return {}
     try:
         tables = {r[0] for r in lane.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "bands" not in tables:
             return {}
-        columns = {r[1] for r in lane.db.execute("PRAGMA table_info(bands)")}
+        rows = {(str(r["program"]), int(r["version"])): dict(r) for r in lane.db.execute("SELECT * FROM bands")}
         out: dict[tuple[str, int], dict[str, Any]] = {}
-        for r in lane.db.execute("SELECT * FROM bands"):
-            row = dict(r)
-            out[(str(row["program"]), int(row["version"]))] = {
-                "band": str(row["band"]), "since": row.get("since") if "since" in columns else None,
-                "why": row.get("why") if "why" in columns else None}
-        reader = getattr(S, "bands", None)
-        if callable(reader):
-            for key, band in dict(reader(lane)).items():
-                program, version = key
-                out.setdefault((str(program), int(version)), {"since": None, "why": None})["band"] = str(band)
+        for (program, version), band in dict(BA.bands(lane)).items():
+            key = (str(program), int(version))
+            row = rows.get(key)
+            out[key] = {"band": str(band), "since": None if row is None else row.get("since"),
+                        "why": None if row is None else row.get("why"), "row": row is not None}
         return out
     except (sqlite3.Error, KeyError, TypeError, ValueError):
         return None
@@ -352,8 +354,8 @@ def bands(lane: Lane | None, s: Settings | None = None) -> list[Band] | None:
     out = []
     for program in seatable():
         row = table.get((program.id, int(program.version)))
-        if row is None:
-            out.append(Band(program.id, int(program.version), DEFAULT_BAND, None,
+        if row is None or not row.get("row"):
+            out.append(Band(program.id, int(program.version), str((row or {}).get("band") or DEFAULT_BAND), None,
                             "no row in the lane's band table: learning from birth (PREREG-EVL-3 section 2)"))
             continue
         band = str(row.get("band") or "")
@@ -373,35 +375,62 @@ def sessions_back(day: dt.date, n: int) -> dt.date:
 
 
 # ----------------------------------------------------------------------------------------------------------- the fills
+class FillWriter:
+    """The lane's store opened for the book's one write, `real_fills`, in the shape league/events/bands.py
+    `record_fill` takes a store (`.db`, `.tx()`): an EXISTING file only (never created here, nor any table: the lane's
+    store is made by the lane or its migration), with a short busy timeout (the House's minute never waits long on the
+    lane's own writer)."""
+
+    def __init__(self, path: str | Path, *, timeout: float = 5.0):
+        self.path = Path(path)
+        self.db = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=rw", uri=True, timeout=timeout,
+                                  isolation_level=None)
+        self.db.row_factory = sqlite3.Row
+
+    def close(self) -> None:
+        self.db.close()
+
+    @contextlib.contextmanager
+    def tx(self) -> Any:
+        """One transaction (BEGIN IMMEDIATE ... COMMIT, rolled back on any exception), as league/events/store.py's."""
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            yield self.db
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+        self.db.execute("COMMIT")
+
+
 def write_fills(root: str | Path | None, rows: Sequence[Mapping[str, Any]]) -> int | None:
     """THE REAL FILLS HANDED BACK TO THE LANE (PREREG-EVL-3: the lane computes Sized and demotion from them): each of
-    `rows` ({program, version, event, side, qty, price, fee, filled_at, band}) written into the lane's `real_fills`, ONE
-    ROW PER (program, version, event, side), replaced when written again (idempotent), in one short transaction of a
-    connection of its own. None when there is no lane store or it holds no `real_fills` table yet (nothing written: the
-    book writes them once it does). Raises `sqlite3.Error` when the store cannot be written (asked again next minute)."""
+    `rows` ({program, version, event, side, qty, price, fee, filled_at, band}) written into the lane's `real_fills` by
+    the lane's own league/events/bands.py `record_fill`: ONE ROW PER (program, version, event, side), idempotent; a
+    write again changes only its fee (the broker's posted fee). Returns how many rows were new or changed; None when
+    there is no lane store or it holds no `real_fills` table yet (nothing written: the book writes them once it does).
+    Raises `sqlite3.Error` when the store cannot be written (asked again next minute)."""
     if root is None:
         return None
     path = lane_path(root)
     if not path.is_file():
         return None
-    db = sqlite3.connect(str(path), timeout=5.0)
+    store = FillWriter(path)
     try:
-        columns = {r[1] for r in db.execute(f"PRAGMA table_info({FILLS_TABLE})")}
+        columns = {r[1] for r in store.db.execute(f"PRAGMA table_info({FILLS_TABLE})")}
         if not columns:
             return None
         missing = [c for c in FILL_COLUMNS if c not in columns]
         if missing:
             raise sqlite3.OperationalError(f"{FILLS_TABLE} lacks {', '.join(missing)}")
-        marks = ", ".join("?" * len(FILL_COLUMNS))
-        with db:
-            for row in rows:
-                key = (str(row["program"]), int(row["version"]), str(row["event"]), str(row["side"]))
-                db.execute(f"DELETE FROM {FILLS_TABLE} WHERE program=? AND version=? AND event=? AND side=?", key)
-                db.execute(f"INSERT INTO {FILLS_TABLE}({', '.join(FILL_COLUMNS)}) VALUES({marks})",
-                           tuple(row[c] for c in FILL_COLUMNS))
-        return len(rows)
+        changed = 0
+        for row in rows:
+            changed += bool(BA.record_fill(store, program=str(row["program"]), version=int(row["version"]),
+                                           event=str(row["event"]), side=str(row["side"]), qty=float(row["qty"]),
+                                           price=float(row["price"]), fee=float(row["fee"] or 0),
+                                           filled_at=str(row["filled_at"]), band=str(row["band"])))
+        return changed
     finally:
-        db.close()
+        store.close()
 
 
 # ----------------------------------------------------------------------------------------------------------- the picks
@@ -677,6 +706,6 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "PRIORITY", "STRICT_WEIGHT", "LADDER_CLOSES", "ZERO_AFTER", "ISSUER_GAP_SESSIONS", "LANE_DIR", "FILLS_TABLE",
            "FILL_COLUMNS", "seatable", "program_of", "order_of", "room_key", "SCHEMA", "Settings", "FALLBACK",
            "settings", "Lane", "lane_path", "open_lane", "decided", "eligible", "universe_rows", "Band", "lane_bands",
-           "bands", "sessions_back", "write_fills", "Pick", "rows_for", "held_recently", "picks", "one_name_an_auction",
+           "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "held_recently", "picks", "one_name_an_auction",
            "t29", "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
            "publish"]

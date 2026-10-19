@@ -214,6 +214,11 @@ PENDING_GATEWAY += ("league/data_plan.py",)
 #: They wait here for the gateway's merge-list follow-up, as release E4's and R0's do.
 PENDING_GATEWAY += ("league/events/programs.py", "league/events/verdicts.py", "league/events/score.py",
                     "league/events/screen.py", "docs/prereg/")
+#: PREREG-EVL-3'S BAND RULES (release 1019b, Oct 2026; frozen 05:23:06Z Oct 19): league/events/bands.py applies the
+#: pre-registered moves of every version 2 program (promotion to Probe at a passed look, Sized, demotion, retirement)
+#: and is the House's one reader of the bands and writer of the real fills: a judge, behind the wall beside the screen.
+#: It waits here for the gateway's merge-list follow-up, as R1's judges do.
+PENDING_GATEWAY += ("league/events/bands.py",)
 #: THE EVENT LANE'S REAL MONEY (release R2, Oct 2026): the event kind's rules (league/events/book.py: the money rows'
 #: reader, the bands and seats, the real-money picks, the limit, the size target, the open-risk weight, the exit plan,
 #: the eligible list) and the auction paper proof that gates its first real buy (league/events/proof.py): money movers

@@ -10,9 +10,10 @@
 - RETIRED, for good: a held look whose mean after-cost abnormal return is below zero and whose one-sided sign-flip p
   for a mean below zero (the session-block test with every value's sign reversed) is at most 0.05 (`on_look`).
 
-The lane writes `bands` and `band_history`; the House's event book reads `bands(store)` and writes `real_fills` (one
-row a fill, idempotent per (program, version, event, side)). Nothing here reads a price after an event other than the
-real fills the House reports and the screen's own looks.
+The lane writes `bands` and `band_history`; the House's event book (league/events/book.py) reads `bands(store)` and
+writes `real_fills` through `record_fill` (one row a fill, idempotent per (program, version, event, side); a posted fee
+updates its row). The House's lane (league/events/house.py) runs `review` after each night's screen. Nothing here reads
+a price after an event other than the real fills the House reports and the screen's own looks.
 """
 
 from __future__ import annotations
@@ -150,13 +151,20 @@ def review(store: S.Store, *, now: Any = None) -> list[dict[str, Any]]:
 
 def record_fill(store: S.Store, *, program: str, version: int, event: str, side: str, qty: float, price: float,
                 fee: float, filled_at: str, band: str) -> bool:
-    """The House's write of one real fill (idempotent per (program, version, event, side)). Returns whether it was new."""
+    """The House's write of one real fill (league/events/book.py `write_fills`), idempotent per (program, version,
+    event, side): the first write sets the row; a later write of the same key changes ONLY its fee (the broker posts a
+    sale's regulatory fees after the fill, and demotion's net reads the posted fee), never its quantity, price, time or
+    band. Returns whether the row is new or its fee changed."""
     if side not in ("buy", "sell") or band not in BANDS[:3]:
         raise ValueError("side buy|sell, band learning|probe|sized")
     with store.tx() as db:
         cur = db.execute("INSERT OR IGNORE INTO real_fills(program, version, event, side, qty, price, fee, filled_at, band) "
                          "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
                          (program, int(version), event, side, float(qty), float(price), float(fee), filled_at, band))
+        if cur.rowcount == 1:
+            return True
+        cur = db.execute("UPDATE real_fills SET fee=? WHERE program=? AND version=? AND event=? AND side=? AND fee IS NOT ?",
+                         (float(fee), program, int(version), event, side, float(fee)))
         return cur.rowcount == 1
 
 
