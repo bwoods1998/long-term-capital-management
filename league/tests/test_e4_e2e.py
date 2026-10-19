@@ -97,6 +97,7 @@ if HAVE:
     from league.swarm.store import SwarmStore
     from league.swarm.tournament import Tournament
     from league.tests import REAL_POLICY_PATH
+    from league.tests import elane_e2_fakes
     from league.tests.elane_e2_fakes import FakeRouter, answer, review_answer
     from league.tests.test_equity_book import Clock, Market, Venue, at, iso
     from league.tests.test_xs_book import as_the_client
@@ -109,6 +110,18 @@ if HAVE:
     from league.xs import synth
 
 NY = ZoneInfo("America/New_York")
+
+
+def setUpModule() -> None:
+    """E2's figures here were set on the budget floor of before release 1019c (league/tests/elane_e2_fakes.py
+    `PRE_1019C_FLOOR_USD_DAY`): the module's House keeps it."""
+    if not HAVE:
+        return
+    patch = elane_e2_fakes.pre_1019c_floor()
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
+
+
 SLUG = "rev-week"
 SUNDAY = dt.date(2026, 10, 11)
 #: The store's last session, then the six invented ones: a week, and the Monday and Tuesday after it.

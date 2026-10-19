@@ -660,7 +660,7 @@ class TheStallJobReadsTheReceipts(unittest.TestCase):
         out = self.run_at(now)
         self.assertEqual(out["receipts"], {"declared": ["fake-births"], "read": [], "unread": [], "errors": []})
         self.assertEqual(set(out) - {"receipts"}, {"stalled", "cleared", "warned", "notice", "checks", "ceiling", "errors",
-                                                   "warning"})
+                                                   "warning", "report"})   # "report": release 1019c's daily mail
         later = self.run_at(now + 3600.0)
         self.assertEqual([r["id"] for r in later["receipts"]["read"]], ["fake-births"])
         self.assertIn(later["receipts"]["read"][0]["verdict"], release_receipts.VERDICTS)

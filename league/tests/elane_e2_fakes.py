@@ -23,6 +23,21 @@ _N = itertools.count(1)
 
 UNIVERSE = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE", "TLT", "GLD"]
 
+#: THE FLOOR E2'S TESTS WERE WRITTEN ON (release 1019c). These tests run the swarm with no budget.json, the budget at its
+#: floor, and their invented dollars (E2's paces, days and spends) were set against the floor of before release 1019c:
+#: $4.00 of Sail research and $1.00 of the Claude roles a day. From release 1019c the floor is budget rule 3's own lines
+#: at no profit (league/ops/budget.py `floor_lines`, held by test_ops_budget), far lower; the modules built on the old
+#: figures keep them as their House's setting (`pre_1019c_floor`, from their setUpModule), never as the rule.
+PRE_1019C_FLOOR_USD_DAY = {"sail": 4.0, "claude": 1.0}
+
+
+def pre_1019c_floor() -> Any:
+    """A patch of the budget's floor (league/ops/budget.py `floor_usd_day`, which every floor line reads: the settings'
+    floor block, a stale file's cap, the Sail guard's research at the floor) to `PRE_1019C_FLOOR_USD_DAY`."""
+    from league.ops import budget
+
+    return mock.patch.object(budget, "floor_usd_day", lambda meter: PRE_1019C_FLOOR_USD_DAY[meter])
+
 
 def lane_block(**e2: Any) -> dict[str, Any]:
     """The settings' `elane` block with the lanes on at a quarter of births, and `e2` keys."""
