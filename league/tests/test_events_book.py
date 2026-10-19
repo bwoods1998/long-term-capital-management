@@ -98,6 +98,10 @@ class Lane:
                            "received_at, source, text_sha, text_len, status) VALUES(?, ?, ?, 'Invented Co', ?, ?, ?, ?, "
                            "'current', 'x', 5000, 'fetched')",
                            (accession, form, cik, json.dumps(list(items)), accepted, knowable, received or accepted))
+        # The filings' one placeholder text document, stored long before any of them (book._stored_before reads a
+        # filing's document time: release 1019b's fourth round), so each filing reads as stored at its received time.
+        self.st.db.execute("INSERT OR IGNORE INTO documents(sha, kind, bytes, path, stored_at) VALUES('x', 'text', 5000, "
+                           "'x', '2000-01-01T00:00:00Z')")
 
     def verdict(self, accession: str, score: int, *, answered: str, guidance: str = "none", status: str = "ok",
                 news: bool = False) -> None:

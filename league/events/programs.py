@@ -293,11 +293,17 @@ class Candidate:
 
 
 def _held_recently(store: S.Store, program: Program, cik: str, day: dt.date) -> bool:
+    """PREREG-EVL-1 section 5's ONE POSITION PER ISSUER: the program holds the issuer, or held it within the last
+    ISSUER_GAP_SESSIONS sessions, OR (the reading that trades less, amendment A72, fixed before any event settled) holds
+    a written intent of it entering within the ISSUER_GAP_SESSIONS sessions after `day`: so an event decided late for an
+    earlier session never adds a second position beside a later one already written, whatever the order of arrival."""
     back = C.previous(store, day, ISSUER_GAP_SESSIONS)
     since = back[0].day if back else day
+    ahead = C.nth(store, day, ISSUER_GAP_SESSIONS + 1)
+    until = ahead.day.isoformat() if ahead is not None else "9999-12-31"
     row = store.db.execute("SELECT 1 FROM intents WHERE program=? AND version=? AND cik=? AND status NOT LIKE 'skipped%' "
                            "AND exit_day>=? AND entry_day<=? LIMIT 1",
-                           (program.id, program.version, cik, since.isoformat(), day.isoformat())).fetchone()
+                           (program.id, program.version, cik, since.isoformat(), until)).fetchone()
     return row is not None
 
 

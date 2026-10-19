@@ -466,12 +466,31 @@ class Pick:
     knowable_at: str
 
 
-def _stored_before(row: Mapping[str, Any], decided_at: dt.datetime) -> bool:
-    """PREREG-EVL-1 section 3: a real-money decision reads only an event STORED before its decision time."""
+def _stored_before(row: Mapping[str, Any], decided_at: dt.datetime, lane: Any = None) -> bool:
+    """PREREG-EVL-1 section 3: a real-money decision reads only an event STORED before its decision time. A news article
+    is stored whole when it is read (`received_at`); a FILING is stored when its documents are fetched (the latest
+    `documents.stored_at` of its `raw_sha` and `text_sha`, never before its listing time `received_at`), as
+    run.py `_first_fetched` reads it (release 1019b's third review: `received_at` is a filing's LISTING time, and its
+    content (the Form 4's transactions, the 8-K's items and text) comes only at the fetch). Fail closed: a filing that
+    names a document whose time cannot be read is not stored before; a filing row naming no document at all (none the
+    House's record pass writes: every fetched filing keeps its raw document) is read by its `received_at`."""
     try:
-        return S.parse_iso(row["received_at"]) <= decided_at
+        when = S.parse_iso(row["received_at"])
     except (KeyError, TypeError, ValueError):
         return False
+    shas = [str(row[k]) for k in ("raw_sha", "text_sha") if row.get(k)] if row.get("accession") else []
+    if shas:
+        if lane is None:
+            return False
+        try:
+            for sha in shas:
+                doc = lane.db.execute("SELECT stored_at FROM documents WHERE sha=?", (sha,)).fetchone()
+                if doc is None or not doc["stored_at"]:
+                    return False
+                when = max(when, S.parse_iso(str(doc["stored_at"])))
+        except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+            return False
+    return when <= decided_at
 
 
 def _answered(lane: Lane, event: str, prompt: Any, decided_at: dt.datetime) -> Mapping[str, Any] | None:
@@ -512,7 +531,7 @@ def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.dateti
         by_symbol = {str(r["symbol"]).upper(): str(r["cik"]) for r in universe_rows(lane, day).values()}
         rows = [dict(r) | {"cik": by_symbol.get(str(r.get("symbol") or "").upper())} for r in rows]
     since = program.registered_at
-    return [r for r in rows if _stored_before(r, decided_at) and S.parse_iso(r["knowable_at"]) > since]
+    return [r for r in rows if _stored_before(r, decided_at, lane) and S.parse_iso(r["knowable_at"]) > since]
 
 
 def held_recently(lane: Lane, program: P.Program, cik: str, day: dt.date) -> bool:
