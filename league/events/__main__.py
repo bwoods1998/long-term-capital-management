@@ -50,6 +50,25 @@ def catchup(ctx: R.Context) -> dict:
     return out
 
 
+def record_equity(ctx: R.Context) -> dict:
+    """The account equity at a session's close (meta `equity:<day>`), for PREREG section 5's TRADABLE rule and the fee
+    notional. Run just after the close; it refuses before the close or on a day with no session, and never overwrites."""
+    st = ctx.store
+    now = ctx.now()
+    day = now.astimezone(C.NY).date()
+    s = C.session(st, day)
+    if s is None or now < s.close_at:
+        return {"skipped": f"no closed session on {day}"}
+    key = f"equity:{day.isoformat()}"
+    if st.meta(key) is not None:
+        return {"kept": st.meta(key)}
+    account = ctx.gw.get_json("/v1/alpaca/v2/account")
+    equity = str(account.get("equity"))
+    st.set_meta(key, equity)
+    st.set_meta(key + ":at", S.iso(now))
+    return {"day": day.isoformat(), "equity_recorded": True}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m league.events")
     ap.add_argument("--state", required=True)
@@ -69,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         d.add_argument("--backfill", action="store_true")
     sub.add_parser("catchup")
     sub.add_parser("tickers")
+    sub.add_parser("equity")
     args = ap.parse_args(argv)
     with S.Store(args.state) as st:
         gw = G.Gateway(G.token_from_env(), min_interval=0.05)
@@ -85,6 +105,8 @@ def main(argv: list[str] | None = None) -> int:
             out = R.decide_close(ctx, args.day, backfill_run=args.backfill)
         elif args.cmd == "tickers":
             out = {"snapshot": ctx.snapshot_tickers()}
+        elif args.cmd == "equity":
+            out = record_equity(ctx)
         else:
             out = catchup(ctx)
     json.dump(out, sys.stdout, default=str, sort_keys=True)
