@@ -336,6 +336,32 @@ class Verdicts(Lane):
         self.assertIn("the lane's verdict line for the day is reached", check["what"])
 
 
+class TheStallJobsLine(Lane):
+    """The verdict line the stall job states (`verdict_line`) is the House's own (league/events/house.py `verdict_line`
+    and `_spend_today`): the lower of `events.verdict_usd_day` (the House's own default when the key is unset) and the
+    budget's allowance, and the New York day's verdict dollars, a verdict with no stated cost at the House's figure."""
+
+    def test_the_line_and_the_days_dollars_are_the_houses(self):
+        from league.events import house as H
+        from league.ops import budget as B
+
+        now = et(TUE, "12:00")
+        bare = {"config": {"events": {"enabled": True}}}
+        line = EV.verdict_line(bare, self.root, now)
+        self.assertEqual(line["line_usd"], min(H.VERDICT_USD_DAY, B.floor_lane_usd_day()), "no budget.json: the floor")
+        self.assertEqual(line["spent_usd"], 0.0)
+        low = EV.verdict_line({"config": {"events": {"enabled": True, "verdict_usd_day": 0.5}}}, self.root, now)
+        self.assertEqual(low["line_usd"], 0.5, "a config below the allowance holds")
+        for event, at, usd in (("e1", et(MON, "23:59"), 0.25),    # Tuesday in UTC, Monday in New York: not Tuesday's
+                               ("e2", et(TUE, "00:01"), 0.002),
+                               ("e3", et(TUE, "11:00"), None),     # no stated cost: the House's figure
+                               ("e4", et(WED, "00:00"), 0.5)):     # Wednesday's
+            self.st.db.execute("INSERT INTO verdicts(event, prompt_sha, model, asked_at, answered_at, status, usd) "
+                               "VALUES(?, 'p', 'm', ?, ?, 'ok', ?)", (event, iso(at), iso(at), usd))
+        self.assertAlmostEqual(EV.verdict_line(bare, self.root, now)["spent_usd"], 0.002 + H.VERDICT_USD_UNKNOWN,
+                               places=9)
+
+
 class CloseDecisionTally(unittest.TestCase):
     """The review of r1/alarms, its major 3, end to end: the close decision's needed and unanswered verdict sets, of
     PREREG-EVL-2's close-entry reading program (NEWS-READ-ON, versions 1 and 2), written by league/events/run.py's own

@@ -600,11 +600,12 @@ def verdict_line(ctx: Any, root: str | Path, now: float) -> dict[str, Any] | Non
     budget's allowance, league/ops/budget.py `lane_allowance`) and the day's verdict dollars so far: {line_usd,
     spent_usd, source}, or None when the store cannot be read."""
     from . import budget as B
+    from ..events.house import VERDICT_USD_DAY   # the House's own default: one figure, read where it is set
 
     config = _get(ctx, "config")
     block = config.get("events") if isinstance(config, Mapping) else None
     configured = _num((block or {}).get("verdict_usd_day")) if isinstance(block, Mapping) else None
-    configured = 5.0 if configured is None else configured
+    configured = float(VERDICT_USD_DAY) if configured is None else configured
     allowance = B.lane_allowance(root, now)
     line = min(configured, float(allowance["usd_day"]))
     path = Path(root) / STORE

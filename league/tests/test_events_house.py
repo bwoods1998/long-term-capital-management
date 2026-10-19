@@ -665,7 +665,7 @@ class TheBudgetsLine(LaneCase):
         self.budget(4.0)
         self.assertEqual(self.lane.verdict_line(self.clock_dt()), {"usd_day": 0.003, "source": "events.verdict_usd_day"})
         (self.root.parent / "budget.json").unlink()
-        self.lane = self.new_lane()
+        self.lane = self.new_lane(verdict_usd_day=5.0)                   # a config above the floor, whatever the default
         line = self.lane.verdict_line(self.clock_dt())
         self.assertEqual(line["usd_day"], 3.0, "no budget.json: the rule's own no-profit lane line, never the config's $5")
         self.assertIn("the floor (no budget.json yet)", line["source"])
