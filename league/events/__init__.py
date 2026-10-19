@@ -22,7 +22,11 @@ never its status alone (a pass that says `ok` and read nothing is no progress). 
 - `decide-open:<day>` and `decide-close:<day>` (run.decide_open, run.decide_close; none under `ask_only`): one a
   decision run, `ok`, `pending` while a reading program waits for a verdict, `cut` (the House's bound) or `failed`. The
   summary carries `verdicts: {needed, answered}`, the distinct (event, prompt) verdicts the decision's reading programs
-  need, open-entry and close-entry alike, and how many have a stored answer (also returned under `ask_only`).
+  need, open-entry and close-entry alike, and how many have a stored answer (also returned under `ask_only`); and
+  `kept` (release 1019c, run._scope: the programs the run left as they were, a written look of their group or a
+  session outside the re-decision window, each with why and the events left out of its record, `events` and
+  `unjudged`), which league/events/report.py `kept_out` counts. A kept program is asked no verdict, so its events
+  are not in the tally.
   `evl_decide` counts a decision made when a receipt that started within 10 minutes of its time finished `ok` or
   `pending`; `evl_verdicts` reads the latest receipt's tally (a receipt from before it, its `pending` counts).
 - `score` (house.py `_score`): one a nightly pass, bounded and resumable: `ok` once every intent due that night was

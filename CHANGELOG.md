@@ -26,15 +26,60 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261019T034531Z-6583edd72b34` (release 1019a, main `c1c6fae7`, PR #568, deployed 03:46Z
-Oct 19, 2026, below); before it, `20261016T204140Z-99e7c39c780a` (release 1017r, main `4893d0f8`, deployed 20:41Z Oct 16
-by the captain's record in `goal-2026-10-10/NEXT-AGENT.md`; its entry below was written before it shipped and still
-reads unreleased). The gateway is `7456e73d` (03:56Z Oct 19, gateway G1; before it `a6026308`, 20:54Z Oct 15), and the
-box's updater is on. What is built and not deployed is on branches. The owner's goal of Oct 19, 2026 funds one lane,
-the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PREREG-EVL-1.md),
+The running House release is `20261019T205943Z-90834d01c78d` (release 1019b, main `3230a884`, PR #574, deployed 21:00Z
+Oct 19, 2026, below); before it, `20261019T034531Z-6583edd72b34` (release 1019a, main `c1c6fae7`, PR #568, 03:46Z Oct
+19) and `20261016T204140Z-99e7c39c780a` (release 1017r, main `4893d0f8`, deployed 20:41Z Oct 16 by the captain's record
+in `goal-2026-10-10/NEXT-AGENT.md`; its entry below was written before it shipped and still reads unreleased). The
+gateway is `29ed37e1` (20:13Z Oct 19, release 1019b's gateway G2 with `STOCK_EVENT_BUYS` on; before it `7456e73d`, 03:56Z
+Oct 19, gateway G1), and the box's updater is on. What is built and not deployed is on branches. The owner's goal of
+Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PREREG-EVL-1.md),
 [PREREG-EVL-2.md](docs/prereg/PREREG-EVL-2.md) and [PREREG-EVL-3.md](docs/prereg/PREREG-EVL-3.md), its page is
-[docs/events.md](docs/events.md); its code runs in shadow on the captain's workstation from branch `feat/evl-shadow`
-until release 1019b (below) brings it onto the House.
+[docs/events.md](docs/events.md). It runs on the House since release 1019b (the desktop's store migrated there at 21:11Z
+Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
+programs trades real money at learning size.
+
+### Release 1019c: alarms and the daily report, the lane's fast finality and order line, on `rel/1019c` (unreleased; main `3230a884`, release 1019b as deployed, and two merges; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, before 12:55Z Tue Oct 20; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the lane's one row, `equity_money.event.max_orders_day` 150), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
+
+- **What it carries** (main `3230a884` and two merges, in this order, each `--no-ff`): `r3/lane-1019c` `6f53eeca`
+  (#578: A69's fast path to a final record, A66's owed re-decision scope and the look-group freeze, the event kind's
+  own day order count; the captain's A74; it already contains `3230a884`); `r2/alarms` `48741d3f` (#575: budget rule 3,
+  the event lane's progress alarms with `evl_fills`, `cap_breach` and its hold, the daily one-screen report by mail;
+  A76). Their two entries follow, as their branches wrote them; this entry is the release. PREREG-EVL-4's programs
+  (`feat/evl-4`, #579, A71 and A75) are not in this head: they join after their own review, with
+  `docs/prereg/PREREG-EVL-4.md` byte for byte from the tag `prereg-evl-4` (SHA-256 `33ca39ca`; `docs/prereg/` is
+  behind the wall already). `docs/prereg/` holds PREREG-EVL-1, -2 and -3, each byte for byte its tag's.
+- **The merge, both sides kept.** THE VERDICT LINE: `r2/alarms` was written on `18824bca`, where the line's default was
+  $5; release 1019b made it $3. The lane's line is r2/alarms' (held on the UTC day, the lower of
+  `events.verdict_usd_day` and budget rule 3's `lane_allowance`) with release 1019b's $3: `league/config.json`
+  `events.verdict_usd_day` 3.0 and `league/events/house.py` `VERDICT_USD_DAY` 3.0 (which the stall job's
+  `evl_health.verdict_line` reads), and the texts that said "$5" (house.py's docstring, `events._about`,
+  docs/events.md, docs/operations.md's **Paid work**). THE DECISION RECEIPTS carry both: the lane's `kept` (the
+  programs a re-decision or a written look left as they were, with the events left out) and the alarms' verdict tally
+  `verdicts: {needed, answered}`; a kept program is asked no verdict, so its events are not in the tally and
+  `evl_verdicts` never waits on them (league/events/__init__.py's receipts contract names `kept` now). The two
+  release entries here and in docs/operations.md stand side by side, with this release's deploy above them.
+- **Known issue, fixed in release 1019d** (A76): budget rule 3 at the UTC day boundary when the cap FALLS (until the
+  budget job's first run of a UTC day the guard holds the previous day's research lines against counters reset at
+  00:00 UTC, and `metered.observe` credits a cap to the day it was read as well as computed, keeping the higher). The
+  cap moves only with realized profit; at no realized profit it is a constant $5, so it cannot bite before the lane's
+  first profitable week.
+- **Tests.** On the second merge `9108c508`: the full league suite on 3.14, 461 modules, 12,597 OK (33 skipped; one
+  process a module; `test_gym_batch_isolation` again under a short `TMPDIR`, its worker sockets' path too long under the
+  runner's: 10 OK); the gateway 495/495 (`npm run -s check && node --test test/*.test.mjs`); the identities as above on
+  both Pythons. The runs on the release's head follow in its own commit.
+- **Deploy** ([docs/operations.md](docs/operations.md), **Release 1019c**): 1. THE GATEWAY from this head (`gateway/`
+  changes only the notices: `lib/email.mjs` composes the `report` kind and words `cap_breach` and the four `evl_`
+  causes, `lib/router.mjs` keys a report by its day; no order path, cap or `wrangler.jsonc` change); 2. THE HOUSE from
+  the same head by the captain's ship script (verify the grant on `055e5313`, `budget.json` `rule_version` 3,
+  `lane.json` `verdict_line_usd` 3.0, the next `stall` receipt and, at the next open, no event kind's day order count
+  refusal); 3. on the box, the research switch `ops.json` `stall.research` false (r2/alarms' step 3).
+- **Rollback.** `STOCK_EVENT_BUYS` "off" at the gateway (the instant stop of event buys; sales go on), or
+  `equity_money.event.enabled` False (a constitution-only owner deploy: money `1b7a5c22`, constitution `50e951c9`).
+  The previous House release `20261019T205943Z-90834d01c78d` (release 1019b, main `3230a884`: money `285fa7af`,
+  constitution `fd38e4e1`) knows an event lot's exit, so it may run with event lots open; it reads budget.json schema
+  3 as no file (its own floor until its own job runs) and ignores `metered.json` and `cap-hold.json`; then the gateway,
+  after the House, by `wrangler rollback 29ed37e1-896e-4d7a-b753-51a0c448af17` (or never: its composer still reads
+  1019b's stall notices). A look the fast path wrote stands.
 
 ### Release 1019c: the fast path to a final record (A69), the owed re-decision rule (A66), the event kind's own day order count, on `r3/lane-1019c` (unreleased; cut from `rel/1019b` `cd3d1505`, with release 1019b's final head `3230a884` (fix round 3, the proof's tightening `30558c43` and round 4, A72) merged in, and deployed after it, overnight Oct 19-20, before 12:55Z Tue; an owner deploy of the House alone, no gateway change; never 12:55-20:05Z on a trading day, never with an order in flight; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the one new row), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
@@ -186,7 +231,27 @@ until release 1019b (below) brings it onto the House.
   Docs: docs/operations.md (**Release 1019c, alarms and costs**, the stall table, the budget rule), docs/events.md
   (**Alarms and the daily report**), docs/design.md, README.md.
 
-### Release 1019b: real money for the event lane (learning band), the lane on the House, on `rel/1019b` (unreleased; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, then `scripts/evl_migrate.py` with the desktop's timers stopped; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1` (release R2's rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
+### 21:00Z Oct 19, 2026: release 1019b (#574: `base/r1`, `feat/evl-v2`, `r1/lane` #570, `r2/gateway` #569, `r2/house` #573, its three fix rounds, the proof's tightening and round 4), House `20261019T205943Z-90834d01c78d`, main `3230a884`; gateway `29ed37e1`
+
+- The gateway first: version `29ed37e1` deployed 20:13:42Z from `rel/1019b` `3230a884` (its gateway tree is the CI-green
+  `8458ab42`'s; suite 489/489), `STOCK_EVENT_BUYS` "on", `STOCK_SINGLE_EQUITY_SHARE` "0.1", `STOCK_MAX_EQUITY_MULTIPLE`
+  "1" (rollback `7456e73d`).
+- The House: promoted 21:00:28Z (previous `20261019T034531Z-6583edd72b34`), main `1a2eb20f` -> `3230a884`, CI green on
+  the exact head, no order in flight. Verified 21:10:43Z: real money true, no failures, the options execution
+  fingerprint `b60410ad`, the constitution `fd38e4e1`, the money digest `285fa7af`, the gate contract `397b22b7`; no
+  real-money block, no stop tripped; the old lanes exits only (`equity.enabled` false), `equity.events.enabled` true
+  (learning 0.02, Probe 0.05, Sized 0.10).
+- The lane migrated 21:11:45Z (`scripts/evl_migrate.py`, the desktop's timers stopped at 21:11:23Z, none running): its
+  filings, news, verdicts, intents, receipts and the desktop's live-refusal markers (A67) on the House; the first House
+  record pass 21:12Z `ok`, `lane.json` ready with the verdict line at $3.00 and no warning. The desktop's store is the
+  backup; its timers stay stopped (one writer).
+- The first real buys: Tue Oct 20 at 09:17-09:27 ET (the open-entry programs, once the auction paper proof's BUY stage
+  holds, A68 bis) and at the 15:46 ET close decision (the close-entry programs).
+- Rollback: `STOCK_EVENT_BUYS` "off" at the gateway, or `equity_money.event.enabled` False (money `25f5eb21`,
+  constitution `8a6a2160`); with no event lot open, `scripts/floor_box.py rollback` to main `c1c6fae7` (release 1019a)
+  and the gateway by `wrangler rollback 7456e73d-af22-4e98-8643-798fd3a85c64`.
+
+### Release 1019b: real money for the event lane (learning band), the lane on the House, on `rel/1019b` (DEPLOYED 21:00Z Oct 19 in #574, the gateway first at 20:13Z; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, then `scripts/evl_migrate.py` with the desktop's timers stopped; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1` (release R2's rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **Why.** The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3: every seatable
   program trades REAL money at learning size from its first event (whole shares, about 2% of equity a position, never
@@ -333,7 +398,7 @@ until release 1019b (below) brings it onto the House.
   previous House release (`20261019T034531Z-6583edd72b34`, main `c1c6fae7`) and gateway (`7456e73d`) restore 1019a
   exactly; never roll the House back past this release while an event lot is open.
 
-### The event lane's version 2 (PREREG-EVL-3): learning bands from birth, looks counted in events, on `feat/evl-v2` (not deployed; ships with the House release that carries the event lane's real-money path)
+### The event lane's version 2 (PREREG-EVL-3): learning bands from birth, looks counted in events, on `feat/evl-v2` (DEPLOYED 21:00Z Oct 19 in #574, release 1019b, the House release that carries the event lane's real-money path)
 
 - **Why.** The owner's goal of 05:15Z Oct 19, 2026 (no waiting periods; every seatable program trades real money at
   learning size from its first event) and the frozen PREREG-EVL-3 (registered 05:23:06Z).
@@ -344,7 +409,7 @@ until release 1019b (below) brings it onto the House.
   `real_fills` tables (additive); the report shows each version's band and next look; the CLI's `bands`.
 - **Tests.** league/tests/test_events_v2.py (7) and the lane suite (105 on 3.14 and 3.11).
 
-### The event lane on the House (release R1, WP1), on `r1/lane` (unreleased; part of release R1, an owner deploy: `league/config.json` gains a key and `league/ci.py` changes; cut from `base/r1` `de6b192f`; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `f4fc39ff`, the constitution digest `34bbe7a5` and the gate contract are the base's; ships switched off)
+### The event lane on the House (release R1, WP1), on `r1/lane` (DEPLOYED 21:00Z Oct 19 in #574, release 1019b, which switched it on; the lane migrated 21:11Z; part of release R1, an owner deploy: `league/config.json` gains a key and `league/ci.py` changes; cut from `base/r1` `de6b192f`; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `f4fc39ff`, the constitution digest `34bbe7a5` and the gate contract are the base's; ships switched off)
 
 - **Why.** EVL-DESIGN's phase 2 and R1-SPEC WP1: the House is the lane's system of record before the first possible
   screen look (about Oct 30), so the desktop's timers move into the House's process.
@@ -377,7 +442,7 @@ until release 1019b (below) brings it onto the House.
   `lane.json` and the receipts. Rollback: the previous release (the store stays on disk, unread); or, with no deploy,
   `touch <state>/events/STOP` and the lane idles after the turn in hand.
 
-### Release R2: the event lane's real money on the House, on `r2/house` (unreleased; stacked on `r2/gateway`; an owner deploy after gateway G2, never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; VERSION 2 OF THE NINE SEATABLE PROGRAMS TRADES REAL MONEY AT LEARNING SIZE FROM ITS FIRST EVENT (PREREG-EVL-3) once the gateway's `STOCK_EVENT_BUYS` is on and the auction paper proof's BUY stage has passed; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1`, the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
+### Release R2: the event lane's real money on the House, on `r2/house` (DEPLOYED 21:00Z Oct 19 in #574, release 1019b; stacked on `r2/gateway`; an owner deploy after gateway G2, never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; VERSION 2 OF THE NINE SEATABLE PROGRAMS TRADES REAL MONEY AT LEARNING SIZE FROM ITS FIRST EVENT (PREREG-EVL-3) once the gateway's `STOCK_EVENT_BUYS` is on and the auction paper proof's BUY stage has passed; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1`, the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **Why.** The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3 section 2 (with
   PREREG-EVL-1 sections 3, 5 and 8 and PREREG-EVL-2): every seatable program trades real money at learning size from
@@ -426,7 +491,7 @@ until release 1019b (below) brings it onto the House.
   the House (release R2)**. Rollback: `equity_money.event.enabled` False (money `25f5eb21`, constitution `8a6a2160`) or
   `STOCK_EVENT_BUYS` off; with no event lot open, the previous House release and gateway version.
 
-### Gateway G2: the event lane's real buys, on `r2/gateway` (release R2; unreleased; a gateway deploy, before the House release R2; `STOCK_EVENT_BUYS` ships `off`, so it changes nothing the floor does)
+### Gateway G2: the event lane's real buys, on `r2/gateway` (release R2; DEPLOYED 20:13Z Oct 19 in #574, gateway `29ed37e1`, with release 1019b's `STOCK_EVENT_BUYS` "on"; a gateway deploy, before the House release R2; `STOCK_EVENT_BUYS` ships `off`, so it changes nothing the floor does)
 
 - **Why.** The owner's goal of Oct 19, 2026 (item 4) and PREREG-EVL-1 section 8: an event program that passes its
   screen trades real money at Probe, its entries whole-share limit-on-open / limit-on-close orders at 1.25 x the
@@ -451,7 +516,7 @@ until release 1019b (below) brings it onto the House.
   release's head, never 12:55-20:05Z on a trading day (12:55-21:05Z from Nov 2), with no order in flight; rollback
   `wrangler rollback <the previous version>`.
 
-### The event lane (EVL), shadow, on `feat/evl-shadow` (not on the House; runs on the captain's workstation until release R1)
+### The event lane (EVL), shadow, on `feat/evl-shadow` (on the House since release 1019b, DEPLOYED 21:00Z Oct 19 in #574, its store migrated 21:11Z; it ran on the captain's workstation until then)
 
 - **Why.** The owner's goal of Oct 19, 2026: one event-driven single-stock lane, judged by pre-registered screens.
 - **Rules.** [PREREG-EVL-1](docs/prereg/PREREG-EVL-1.md) (registered 01:08:38Z Oct 19) and

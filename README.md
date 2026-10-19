@@ -136,7 +136,7 @@ The plan put the inputs at about $565-740 a month at its steady-state budgets, a
 OpenAI on Sept 29 and not yet re-derived ([design.md](docs/design.md)). The bar falls as the account grows, and compute
 drops to its floor whenever the forward record does not pay for it: in V3-A part 1 that is the budget rule, in code.
 A change that cannot say how it raises Net does not ship. Under the owner's goal of Oct 19, 2026 (release 1019c, on
-`r2/alarms`, not deployed) the budget rule's version 3 is the goal's cost rule: every metered compute dollar of a day
+`rel/1019c`, not deployed) the budget rule's version 3 is the goal's cost rule: every metered compute dollar of a day
 (Sail models and boxes, Claude, OpenAI, data, Cloudflare) at most $5 plus half the trailing week's realized net profit
 of every real book (the last 5 sessions' net, its half spread over the week's 7 days), never above $25, the fixed costs
 inside it and the event lane's verdicts first on the Claude line, held there by the lane itself; a cheap day is never a
@@ -249,7 +249,7 @@ As it will stand after the prune (#375, still a draft); until it merges the lega
 | `league/live/` | the live path: the shadow and observe books, the real book, the paper route proofs, the D3 calibration round trips, the House live test |
 | `league/gym/` | the Gym: the store reader, the engine, fills, the venue's rules, greeks, the batch runner, the sealed-box driver; the program contract in `PROGRAM.md` |
 | `league/swarm/` | the swarm: researchers, the tournament and the allocation, the architect, the family cards, the diagnostician, the gate, the model router, the Sail guard, the funding-cliff alerts, the Gym pool, the evaluator record; `policy.json`, the research settings as code (V3-A; a protected file) |
-| `league/events/` | the event lane (the owner's goal of Oct 19, 2026; [docs/events.md](docs/events.md)): the EDGAR and news recorders, the recorded verdicts, the pre-registered programs and their screen; `book.py` and `proof.py` (release R2, not deployed) its real money through the equity book's event kind and the auction paper proof |
+| `league/events/` | the event lane (the owner's goal of Oct 19, 2026; [docs/events.md](docs/events.md)): the EDGAR and news recorders, the recorded verdicts, the pre-registered programs and their screen; `book.py` and `proof.py` (release R2, deployed 21:00Z Oct 19, 2026 in release 1019b) its real money through the equity book's event kind and the auction paper proof |
 | `league/ops/` | the House's jobs (V3-A; the whole tree is protected): the scheduler on the NYSE calendar, the runner and receipts, the pre-open checks, the close economics, hygiene, the venue clock, the scoreboard, the budget rule, the standing grant and the drills |
 | `league/events/` | the event lane of the goal of Oct 19, 2026 ([docs/events.md](docs/events.md); rules in `docs/prereg/`): EDGAR and news recorders, the recorded Haiku verdicts, the pre-registered programs, the decisions, settlement, the screen, the daily report, and `house.py`, its scheduler on the House (release R1; `config.json` `events.enabled`); its judges are protected |
 | `league/CONTRACT.md` | the options strategy contract every researcher reads (about 32 KB) |

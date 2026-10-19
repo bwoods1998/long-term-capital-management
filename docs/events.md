@@ -150,13 +150,15 @@ schema); `house.py`, `gw.py` and `report.py` stay outside, so their fixes can sh
 
 ## Where it runs (shadow)
 
-Until release R1 moves the lane onto the House, it runs on the captain's workstation as systemd user timers
+Until release 1019b moved the lane onto the House (deployed 21:00Z Oct 19, 2026; the store migrated at 21:11Z), it
+ran on the captain's workstation as systemd user timers
 (`ltcm-evl-record` every 2 minutes; `ltcm-evl-tickers` 07:00 ET; `ltcm-evl-decide` at 09:16 and 15:47 ET plus an
 hourly catchup; `ltcm-evl-equity`; `ltcm-evl-score` 20:30 and 08:30 ET; `ltcm-evl-screen` 20:50 ET; `ltcm-evl-report`
 21:05 ET), reading Alpaca and Claude through the LTCM gateway. Nothing in shadow sends an order. Real money (PREREG-EVL-3:
-learning size from the first event) comes with release 1019b: the lane on the House, the gateway's event-buy branch,
-the equity book's event kind, the auction order types and the paper proof; then the desktop's timers stop and its
-store moves to the House (`scripts/evl_migrate.py`).
+learning size from the first event) came with release 1019b: the lane on the House, the gateway's event-buy branch,
+the equity book's event kind, the auction order types and the paper proof; the desktop's timers are stopped and its
+store, copied to the House (`scripts/evl_migrate.py`), stays on the desktop as the backup (one writer: never
+restart its timers while the House lane runs).
 
 ## On the House (release R1)
 
@@ -226,7 +228,7 @@ market-direction share and benchmark mean and its same-risk buy-and-hold ("n/a u
 controls in one line, the expected false passes and the alarms open. Figures only: no headline, document text, symbol
 or price leaves the House. How to read it: [operations](operations.md), **THE DAILY ONE-SCREEN REPORT BY MAIL**.
 
-## Real money (release R2, shipped switched on in release 1019b; not yet deployed)
+## Real money (release R2, shipped switched on in release 1019b; deployed 21:00Z Oct 19, 2026)
 
 [PREREG-EVL-3](prereg/PREREG-EVL-3.md) (the owner's goal as re-set at 05:15Z Oct 19, 2026): VERSION 2 of each of the
 nine seatable programs trades real money from its first event at LEARNING size, with the full-size shadow beside it;
@@ -242,9 +244,9 @@ ROOM in the order Sized, Probe, learning, then the tables' order. The real-money
 only events stored and verdicts answered before its decision time (PREREG-EVL-1 section 3). The old lanes'
 `equity_money.enabled` stays False; nothing goes until the gateway's `STOCK_EVENT_BUYS` is on and the auction paper
 proof on the practice account has passed its BUY stage (filled, or accepted and ended unfilled at the open: the
-practice venue simulates no auction, amendment A68) (release 1019b ships the gateway's switch `on` and the lane's
-`events.enabled` true; deploy order: the gateway, then the House, then the migration with the desktop's timers
-stopped). How it runs, is read, is deployed and is rolled back:
+practice venue simulates no auction, amendment A68) (release 1019b, deployed 21:00Z Oct 19, 2026, shipped the
+gateway's switch `on` and the lane's `events.enabled` true; it was deployed in that order: the gateway, then the
+House, then the migration with the desktop's timers stopped). How it runs, is read, is deployed and is rolled back:
 [operations.md](operations.md), **The event lane's real money on the House (release R2)**. Each real fill is set beside
 the shadow's own auction price, per side (league/ops/twins.py `event_twin`).
 
