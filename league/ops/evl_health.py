@@ -7,7 +7,8 @@ open `mode=ro`, inside `guard.readonly()`), on the House's NYSE calendar (`ltcm.
 own calendar is empty is judged all the same), with no recursion into a judge (no program is run here, no verdict asked,
 no outcome computed):
 
-- `evl_record`: no record pass (a receipt `record`, finished `ok`) in the last `RECORD_MINUTES` (30). The recorder runs
+- `evl_record`: no record pass (a receipt `record`, finished and not failed: `ok`, or a bounded pass's other finished
+  status) in the last `RECORD_MINUTES` (30). The recorder runs
   round the clock (PREREG-EVL-1 section 3: LIVE news is stored within 10 minutes of its creation), so this is judged at
   every hour. The numbers say how many passes of the last 30 minutes failed or carried a news error.
 - `evl_decide`: a scheduled decision not done `DECIDE_GRACE_MINUTES` (10) after its time: the open decision (09:15 ET)
@@ -21,7 +22,7 @@ no outcome computed):
   programs need and how many are stored). PREREG-EVL-1 section 4 stores an answer only (ok, unparsed or refused), so
   a verdict asked and not answered by then is exactly one with nothing stored.
 - `evl_score`: a session not scored by 23:00 ET (`SCORE_BY`): the latest session whose 23:00 ET has passed has no `score`
-  receipt finished `ok` that started after its close + 16 minutes (the SIP tape's delay, league/events/score.py
+  receipt finished and not failed that started after its close + 16 minutes (the SIP tape's delay, league/events/score.py
   `TAPE_DELAY`), while an intent due by that session is still unsettled (planned or entered). A night with nothing due is
   no stall.
 
@@ -138,6 +139,14 @@ def _num(value: Any) -> float | None:
     return out if math.isfinite(out) else None
 
 
+def _good(row: Mapping[str, Any]) -> bool:
+    """A pass that finished and did not fail (`ok`, or any other finished status a bounded pass may write, such as
+    `partial`): what `evl_record` and `evl_score` count. A decision is done only when `ok` (`pending` waits)."""
+    status = str(row.get("status") or "")
+    return row.get("finished_at") is not None and status not in ("", "running", "pending") \
+        and not status.startswith(("fail", "error"))
+
+
 def _loads(text: Any) -> Any:
     try:
         return json.loads(text) if isinstance(text, str) and text else None
@@ -223,11 +232,11 @@ def facts(root: str | Path, now: float) -> dict[str, Any]:
 # ---------------------------------------------------------------------------------------------- the causes
 def _record(now: float, f: Mapping[str, Any]) -> dict[str, Any]:
     window = now - RECORD_MINUTES * 60
-    ok = [r for r in f["record"] if r["status"] == "ok" and S.epoch(r["finished_at"]) is not None]
+    ok = [r for r in f["record"] if _good(r) and S.epoch(r["finished_at"]) is not None]
     last = max((S.epoch(r["finished_at"]) for r in ok), default=None)
     recent = [r for r in f["record"] if (S.epoch(r["started_at"]) or 0.0) >= window]
-    failed = [r for r in recent if r["finished_at"] is not None and r["status"] != "ok"]
-    news = sum(1 for r in recent if r["status"] == "ok" and isinstance((_loads(r["summary"]) or {}).get("news"), Mapping)
+    failed = [r for r in recent if r["finished_at"] is not None and not _good(r)]
+    news = sum(1 for r in recent if _good(r) and isinstance((_loads(r["summary"]) or {}).get("news"), Mapping)
                and (_loads(r["summary"]) or {})["news"].get("error"))
     stalled = last is None or last < window
     if last is None:
@@ -242,7 +251,7 @@ def _record(now: float, f: Mapping[str, Any]) -> dict[str, Any]:
     return {"stalled": stalled, "judged": True, "what": what,
             "numbers": {"last_record_at": None if last is None else S.iso(last),
                         "minutes_since_record": None if last is None else round((now - last) / 60.0, 1),
-                        f"passes_{RECORD_MINUTES}m": sum(1 for r in recent if r["status"] == "ok"),
+                        f"passes_{RECORD_MINUTES}m": sum(1 for r in recent if _good(r)),
                         f"failed_passes_{RECORD_MINUTES}m": len(failed), f"news_errors_{RECORD_MINUTES}m": news},
             "doing": DOING["evl_record"], "owner_step": None, "onset": last}
 
@@ -322,7 +331,7 @@ def _score(now: float, f: Mapping[str, Any]) -> dict[str, Any]:
         return _not_judged("no session in the last 10 days has passed its 23:00 ET")
     after = latest["close_at"] + TAPE_DELAY.total_seconds()
     runs = [r for r in f["score"] if (S.epoch(r["started_at"]) or 0.0) >= after]
-    scored = any(r["status"] == "ok" for r in runs)
+    scored = any(_good(r) for r in runs)
     day = latest["day"].isoformat()
     unsettled = sum(n for exit_day, n in f["due"] if exit_day is not None and str(exit_day) <= day)
     last = f["score"][-1] if f["score"] else None

@@ -2,10 +2,8 @@
 `evl_record`, `evl_decide`, `evl_verdicts`, `evl_score`), the stall job's research switch (ops.json `stall.research`), the
 cheap-day rule (budget rule 3: no `underspend`) and the daily one-screen report riding the stall notice. Synthetic stores
 only: every event, verdict, intent and outcome here is invented, and no market price is read."""
-import copy
 import datetime as dt
 import json
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -117,10 +115,14 @@ class Record(Lane):
         self.receipt("record", now - 20 * 60, status="running", finished=None)
         self.receipt("record", now - 10 * 60, status="failed")
         self.assertTrue(self.check("evl_record", now)["stalled"], "a pass that failed or never finished is none")
+        self.receipt("record", now - 8 * 60, status="error: TimeoutError")
         self.receipt("record", now - 5 * 60, summary={"8-K": {"new": 3}, "news": {"error": "GatewayError: HTTP 403"}})
         check = self.check("evl_record", now)
         self.assertFalse(check["stalled"])
-        self.assertEqual((check["numbers"]["failed_passes_30m"], check["numbers"]["news_errors_30m"]), (1, 1))
+        self.assertEqual((check["numbers"]["failed_passes_30m"], check["numbers"]["news_errors_30m"]), (2, 1))
+        self.receipt("record", now + 60, status="partial")  # a bounded pass that stopped at its 90 s finished all the same
+        self.assertEqual(self.check("evl_record", now + 26 * 60)["numbers"]["passes_30m"], 1)
+        self.assertFalse(self.check("evl_record", now + 26 * 60)["stalled"])
         self.assertIn("1 of the last 30 minutes' passes could not read the news", check["what"])
 
 
