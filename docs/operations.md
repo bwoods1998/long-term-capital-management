@@ -8,6 +8,58 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release R1, alarms and costs (Oct 19, 2026): budget rule 3, the event lane's alarms and daily report: `r1/alarms`, not deployed
+
+The owner's goal of Oct 19, 2026, items 5 and 7. One owner deploy of the House (`league/ops/budget.py`,
+`league/ops/stall.py` and the new `league/ops/evl_health.py` are protected: the updater refuses them) after the gateway.
+NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity
+`2f0083bc`, the money digest `f4fc39ff`, the constitution digest `34bbe7a5` and the gate contract `397b22b772b3` are the
+base's (release 1019a's). No money row, no order path, no judge (league/events/programs.py, screen.py and verdicts.py
+are untouched).
+
+- **Budget rule 3** (**The budget rule (D4)**, below): every metered compute dollar of a day under $5 plus half the
+  trailing week's realized net profit of every real book (the last 7 sessions' net over 7), never above $25; the fixed
+  costs inside it; the event lane's verdicts first on the Claude line (at least $3, or their measured spend); the old
+  research roles share the remainder. `budget.json` moves to schema 3: until the House's start has run the refresh
+  (which runs the full job on another rule's file), readers fall to the floor ($4 Sail, $1 Claude roles), never above.
+- **The event lane's four causes and its daily one-screen report** (**The stall alarm and the funnel**, below): judged
+  and sent only while `league/config.json` `events.enabled` is true (release R1's switch, WP1), so this release changes
+  nothing in the mail until the lane runs on the House.
+- **The research switch** (`ops.json` `stall.research`): the old lanes' research causes and the direction lane's research
+  alarms not judged, and pre-open check 5 says the Gym off and a population under its floor instead of failing on them;
+  **no underspend under rule 3** (a cheap day is never a failed day).
+- **The lane's receipts** (league/events/run.py, score.py; not protected): the decision's `verdicts: {needed,
+  answered}` tally and a `score` receipt each pass, which the four causes read (`league/events/__init__.py`, THE EVENT
+  LANE'S RECEIPTS).
+- **The cost end dates** (ThetaData and Algo Trader Plus stop accruing in the site's costs from Oct 19, past costs
+  stay; `league/publish.py` `SUBSCRIPTIONS_ENDED_AT`) were already on the base (`fix/subs-end`): verified, not redone.
+
+**Deploy, in order** (never 12:55-20:05Z on a trading day):
+
+1. The gateway first: `cd gateway && npm run check && npm test && npx --no-install wrangler@4.129.1 deploy` (from a tree
+   at this release's gateway). It words the four `evl_` causes and composes the report; a House naming an `evl_` cause
+   or sending a report to an older gateway gets a 400 for the whole notice and mails nothing (the receipt's `errors`
+   say "stall notice not sent" at every run). Rollback: `wrangler rollback <the version it replaced>` (the old composer
+   ignores a `report` only when causes ride with it).
+2. The House (the owner deploy of **Deploy**, below; this branch merges into the R1 release, `rel/1021a`).
+3. On the box, the operator: while the old lanes' research is off (A60), set the research switch, merging it into the
+   owner's private file:
+   `python3 -c 'import json,pathlib; p=pathlib.Path("/workspace/state/ops.json"); d=json.loads(p.read_text()) if p.exists() else {}; d.setdefault("stall",{})["research"]=False; p.write_text(json.dumps(d,indent=1,sort_keys=True)+"\n")'`
+   (a command on the box; `scratch/weekend/ops/boxrun.py` runs one). Undo: the same with `True`, or delete the key.
+
+**Verify:** the first `budget` receipt after the start says `rule_version` 3 in `budget.json` and a `cap` block
+(`cap_usd_day` 5.00 with no trailing profit); the next `stall` receipt reads `births`, `gym_runs`, `validations`,
+`braked` and `birth_yield` "Not judged: research is switched off" and `underspend` "Not judged: budget rule 3: a
+cheap day is never a failed day"; the next pre-open receipt's check 5 passes with "the Gym OFF ... (not judged: research
+is switched off ...)"; the four `evl_` causes read "Not judged: the event lane does not run on the House"
+until WP1's `events.enabled` is set, then judged; at the first stall run from 22:00 ET of a session day with the lane
+on, the owner's mail carries "The event lane, <day>" (alone, "LTCM: daily report <day>: nothing stalled", when nothing
+stands) and `stall.json` `report.day` is that day.
+
+**Rollback:** the House by `floor_box.py rollback` + repoint (budget.json schema 3 reads as no file to rule 2: the floor
+until rule 2's job runs at the start); the research switch can stay (rule 2's stall ignores it); the gateway after the
+House, or never (its composer still reads rule 2's House's notices).
+
 ## The old lanes are exits only (Oct 19, 2026): `equity_money.enabled` False: `fix/equity-opens-off`, not deployed
 
 The owner's goal of Oct 19, 2026 and the frozen pre-registration PREREG-EVL-1, section 8 (registration
@@ -5591,6 +5643,11 @@ economics' declared external costs (`economics.external`) and `hygiene.end_retir
 `<state>/ops/logs/<job>.log`; the economics' own output is `<state>/economics/<YYYYMMDD>-close/` (`summary.json`,
 `summary.md`, receipts), the clock's `<state>/calendar.json`, the scoreboard's local copy `<state>/scoreboard/<day>.md`.
 
+**The pre-open check 5 (swarm) and the research switch** (release R1). While `ops.json` `stall.research` is false (the
+old lanes' research off by settings, A60), the Gym off and a population under its floor are said in check 5 ("not
+judged: research is switched off"), never its FAIL, so no `preopen` mail comes of research being off; the swarm.json
+live block, the heartbeat and the Sail guard are judged as before.
+
 **The pre-open check 5 (swarm) and the budget's day.** Under the budget rule the Sail guard brakes the swarm for the
 rest of each UTC day once the day's research dollars are spent, so a braked guard an hour before the open is the
 ordinary case. The guard names its brake's causes (`causes` in its record and in the heartbeat), and the check reads
@@ -5695,18 +5752,57 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `paused` | a maintenance pause (`<state>/PAUSE`) or a stopped swarm (`<state>/swarm.stop`) has stood 6 h or more (by the file's time). While either stands, `births`, `gym_runs`, `validations` and `braked` are not raised: a pause stops research by design | "lift the maintenance pause once its work is done (`scripts/floor_box.py maintenance off`)", or "remove state/swarm.stop" |
 | `grant_refused` | the standing grant refused to re-ratify since the `grant` job's last `ok` run (its receipts: `standing grant refused`; a failure to read the account is no refusal) | "ratify the grant by hand on the box (`python3 scripts/live_trading.py --ratify`)", with the grant's own reason |
 | `kill_on` | the gateway's kill switch is on (`/v1/health` `kill_switch`; since its latest `kill` in `admin_log`): no real order, no Claude call, no merge. An unreadable health is no cause | "lift the gateway's kill switch once its cause is fixed (`python3 scripts/gateway_admin.py unkill`, your admin token)" |
-| `dlane` (weekend fixes) | `<state>/dlane-report.json` carries a warning-level alarm (A1-A7, DC1, PL1, PT1, K5, and the forward record's warnings it carries: FW, FX, RR1, CP2, MM1), or it is older than 30 h while the lane is on. The mail names the first 4 warnings, K5 and DC1 before the rest (the `dlane` job stopped). With `dlane.mode` "off" the report is not read at all (the job writes none, so the last one would otherwise be mailed for good) | K5 holding: "the direction lane reads shadow while K5 holds ...: read its losses, then clear it"; K5 disarmed: "take dlane.k5_clear out of swarm.json"; none for the rest |
+| `dlane` (weekend fixes) | `<state>/dlane-report.json` carries a warning-level alarm (A1-A7, DC1, PL1, PT1, K5, and the forward record's warnings it carries: FW, FX, RR1, CP2, MM1), or it is older than 30 h while the lane is on. The mail names the first 4 warnings, K5 and DC1 before the rest (the `dlane` job stopped). With `dlane.mode` "off" the report is not read at all (the job writes none, so the last one would otherwise be mailed for good). Under THE RESEARCH SWITCH (release R1) the research alarms A1, A2, A3, A6 and A7 are not judged (named in the numbers' `not_judged`) | K5 holding: "the direction lane reads shadow while K5 holds ...: read its losses, then clear it"; K5 disarmed: "take dlane.k5_clear out of swarm.json"; none for the rest |
 | `done` (weekend fixes) | a FINAL Done checkpoint holds (the report's `done.<meter>.checkpoints`, final and holding: frozen from report to report) that no SENT notice has told yet (`stall.json` `done_told`, added to only when the gateway says it sent the notice). Not read with the lane off. Until the review of the weekend fixes it read the report's A8, which one report says once, so a House start or a failed notice before the next stall run lost the claim | an owner LINE, told at once: "Done holds at a FINAL checkpoint ...: read the claim in dlane-report.json". News, never an owner step waiting: the Done meter's item 7 does not count it |
 | `preopen` (weekend fixes) | the latest pre-open receipt (`ops.sqlite`, at most 24 h old) failed a check, or the job failed or was missed | none: each FAIL is a House warning, and the checks run again before the next open |
 | `births`, the jam (no-captain, Oct 10) | no birth for 6 h while at least 4 architect passes wanted births (asked a model, found no cell, or failed; a pass at the ceiling wants none), the population under its ceiling | at once when a setting or an agenda clears the main way they bore nothing: "the architect wanted births in N passes over the last 6 h and none was born:" and its lever (incomplete cards and the fields they lack, the rebirth rule's refuted cells, a spent lineage, a cap, no open cell, cut answers); none (INFO) for failed calls, an empty answer or another refusal |
 | `birth_yield` (no-captain) | over the last 3 h at least 4 passes asked a model and bore at most 1, or the card checks refused 80% of their proposals; or no birth in 2 h while 3 passes wanted one (from the `swarm.architect` events) | none (INFO); the jam above is the owner's step |
 | `swarm_alerts` (no-captain) | an owner kind whose condition stands now (`stall.alert_states`, from the swarm's settings and store, whatever its alert's age), or a `swarm.status` alert (`alert` true) in the last 12 h whose condition is not read or cleared, but the self-healing ones (`sail_window_stall`, `funding_alert`) alone | for `reader_cut`, `agenda_guard`, `policy_layer`, `train_span_pending`, `train_span_mismatch`, `gate_missing_data`, `gate_coverage`, `game_waits` while their condition stands, and `look_failed_three_times` on the UTC day it fired: the setting or fix each names (`stall.ALERT_STEPS`); none for the rest |
-| `underspend` (no-captain) | Sail's booked research today under 70% of what its day's figure buys by now at an even pace (from 6 h into the day, the guard braked under 2 h of it; Claude's reading is said, never a cause), or two settings that cannot both hold while they bind (`settings_binds` conflicts: the class cap once a direction card met it in the last 6 h); the settings that bind research are named either way | none (INFO): the settings named are the owner's to change |
+| `underspend` (no-captain) | under budget rule 2 only: Sail's booked research today under 70% of what its day's figure buys by now at an even pace (from 6 h into the day, the guard braked under 2 h of it; Claude's reading is said, never a cause), or two settings that cannot both hold while they bind (`settings_binds` conflicts: the class cap once a direction card met it in the last 6 h); the settings that bind research are named either way. NEVER JUDGED under budget rule 3 (release R1: a cheap day is never a failed day; `stall.CHEAP_DAY_RULE`) | none (INFO): the settings named are the owner's to change |
+| `evl_record` (release R1) | the event lane on the House (`config.json` `events.enabled`): no record pass (a `record` receipt finished `ok` in `<state>/events/events.sqlite`) in the last 30 minutes, round the clock (the news recorder never sleeps: LIVE news is stored within 10 minutes of its creation); the numbers count the last 30 minutes' failed passes and news errors | none (INFO): the House's to fix; the shadow record decides every event by its knowable time whenever it was stored |
+| `evl_decide` (release R1) | a scheduled decision (09:15 ET open, close - 14 minutes close, every session of the House's NYSE calendar, for each entry kind a registered program uses) of the last 24 h has no `decide-<open\|close>:<day>` receipt finished `ok` 10 minutes after its time; one still `pending` (a reading program waits on verdicts) is named so | none (INFO): the lane's catch-up decides a missed one at its scheduled time from what was knowable then |
+| `evl_verdicts` (release R1) | more than 20% of the verdicts the latest session's decisions needed have no answer 10 minutes after the decision (the decisions' own tally, `verdicts: {needed, answered}`; the prereg stores answers only) | none (INFO): a Claude meter run dry is `runway_claude`'s step, the kill switch `kill_on`'s |
+| `evl_score` (release R1) | the latest session whose 23:00 ET has passed has no `score` receipt finished `ok` that started after its close + 16 minutes, while an intent due by it is still unsettled (a night with nothing due is no stall) | none (INFO): the next night's run scores what this one missed |
 | `elane_dq` (release E2.4) | the equity lanes on and judged: more than half of the equity versions scored in the last 6 h (6 at least, since the running release started; fewer in the 6 h: the last 6 scored; before the sixth: 4 that could not be judged) could not be judged for a fault of their own program (disqualified, refused at load, failed by the decider child), in at least two families; once it stood under a release, until versions scored after are judged by the bar in two families or the release changes | "the equity generators misread the program contract, mostly <the class> (<what it most often is>): fix the text they read (league/equity/EQUITY.md "Reading ctx", elane_review.READING_CTX) or the static rule that should refuse it, in a release" |
 | `elane_births` (release E2.4) | the last 3 equity passes that asked a model (in the last 12 h, since the running release started) bore no family | none for 6 h (each pass tells the next its refusals); then, when a setting clears the main way they bore nothing: widening `elane.universe` or `elane.structures` (your decision), `elane.e2.births_max_output_tokens` or `elane.e2.max_per_pass` for answers cut short, a release for a pass that raises; at once for a setting every route refuses the request for; none for the rest |
 | `elane_idle` (release E2.4) | a BROKEN lane only. Whatever E2's lines hold: more than half of the program questions the Train rounds asked in the last 6 h (8 at least, since the running release started; fewer in the 6 h: the last 8 asked; before the eighth: 5 lost) were lost to a fault (the answer held no program, or no route answered for 3 h while the lanes kept asking), idle or not; or families in Train research or births wanted, no equity version scored for 3 h (the swarm's running time, kept per release), and the lane's own record shows two rounds that raised, two Train steps failed on the House's side or two step errors; and once either stood under a release, until a version is scored after it, the release changes or no work is owed. Else, idle so, only when no hold of E2's was seen in those 3 h. NEVER for a lane held by its own pace, its day's dollars or the House's Sail day: that reads judged clear and says the steps it cost | "the equity lanes pay for answers that hold no program (<the routes>): raise elane.e2.train_max_output_tokens if they are cut short, or take a route out of elane.e2.routes ...", "no model route answers the equity lanes' program questions (<the routes>): check the routes at the model provider, or name routes that answer in elane.e2.routes ...", "the equity lanes' rounds raise ...", "... Train runs fail on the House's side: check the equity_data job's receipt and the swarm's equity-decider.log", "... Train steps fail with errors", "... rounds run and judge nothing" or "... start no round"; none for lost answers too few to be most, programs refused before a run or barren passes |
 | `elane_refused` (release E2.4) | more than half of the programs the equity generators wrote in the last 6 h (8 at least, since the running release started; fewer in the 6 h: the last 8 written; before the eighth: 5 refused by one rule) were refused before a run by one static rule | "the equity generators are not being taught <the rule>: teach it where they read it (league/equity/EQUITY.md, the researcher's system prompt, elane_review.READING_CTX), in a release" |
 | `forward` (weekend fixes) | the nightly's ready file (`gym-forward.json`) does not carry the last session before today once the UTC day is 10 h in; `data/nightly.json` has carried an error 6 h or more (from the first run that saw it, kept in `stall.json`); or `data/nightly.stop` has stood 2 h or more. Since the source gap (Oct 14): the controller has retried the same day 6 h or more (`nightly.json` `retrying`, or the stall's own first sight of the error for that same day when that is older: `stall.json` `nightly_error` keeps its day, and a record naming another day starts the count again), named with its short roots and their coverage ("SLV: SIP 389/390, minute 826 (13:46 ET) missing"); or the day the nightly owes has been due 36 h or more (from 02:00 ET the morning after it) with no day completed in as long | for a stop: "remove /workspace/state/data/nightly.stop ... the nightly forward replay, and with it the Done meter's replay twins, waits while it stands"; for a day owed 36 h: "the nightly owes DAY and has completed no day in N h: read data/nightly.json (error, retrying) and data/images.json forward_days. The House hands off only a small SIP source gap by itself, so this needs a fix it cannot make (ROOTS)" (a gap wider than 5 minutes or 2 roots, or empty or invalid bars, schedules no hand-off and reaches it), held back while the nightly has a hand-off scheduled (`retrying.handoff_at`) until an hour past it, or while the record has an error and no `retrying` (the release before wrote it: a deploy's window before the first new try), and never once the day has been owed 72 h; never while a nightly stop stands (the stop is the step); none for the rest |
+
+**The event lane's own causes** (release R1, the owner's goal of Oct 19, 2026, item 7; the four `evl_` rows;
+`league/ops/evl_health.py`, which the stall job calls once). Judged only while the lane runs on the House
+(`league/config.json` `events.enabled` true, release R1's switch) and `<state>/ops.json` `stall.evl` is not false
+(`{"stall": {"evl": false}}` switches the four off and leaves the rest of the alarm as it is); else "Not judged" with the
+reason. Each reads the lane's own receipts read-only (every open `mode=ro` inside `guard.readonly()`), on the House's
+NYSE calendar (`ltcm.data.us_equity_session`), so a lane whose own calendar is empty is judged all the same; a store
+that cannot be read is "Not judged" and an entry of the receipt's `errors`. The decisions judged follow the programs'
+own rows (`league/events/programs.py` `PROGRAMS`: each row's `entry_at`), so a new wave of programs needs no House
+code. The receipts they read are the lane's contract with the House (`league/events/__init__.py`, THE EVENT LANE'S RECEIPTS):
+`record`, `decide-open:<day>` and `decide-close:<day>` (with `verdicts: {needed, answered}`) and `score`. The four are
+`stall.CAUSES` before the equity lanes' four; the gateway words each (deploy it first).
+
+**THE DAILY ONE-SCREEN REPORT** (release R1, goal item 7). On each session day, at the first stall run from 22:00 ET
+(after the lane's nightly score, screen and report) and no later than 08:00 ET the next morning, `league/events/report.py`
+`build`'s figures for the day ride the stall notice as one more section of the same mail (`notice_facts` `report`,
+`evl_health.report_facts`): the events read by family (8-K with item 2.02, other 8-K, Form 4, news) and the filings that
+failed to fetch; the day's verdicts by status and their cost; each program's intents today, settled events (to date,
+TRADABLE, today), shadow P&L at a $100 notional an event with its mean after-cost and abnormal returns in basis points,
+its real fills (none before release R2), its next look and last look; the expected false passes; the day's metered
+costs from `budget.json` (the cap, the fixed costs, the lane's part, research, the meters' trailing burn); the lane's
+missed passes are the four causes' own. With no cause standing the notice is the report alone (`LTCM: daily report <day>: nothing
+stalled`). Counts and figures only: the gateway (`email.mjs` `stallReport`) echoes the programs' own `EVL-...` ids and
+numbers and nothing else (a headline, a symbol, a price or any text where a figure goes reads "unknown" or is left out).
+It is told once a day: `stall.json` `report` keeps the day told (a SENT answer, or a `duplicate` for this very notice,
+whose key names the day). The figures are in the mail only: the receipt and `stall.json` carry the day and whether it
+rode, never a figure, so the operator's receipt reads see no outcome. A report that would take the notice past 30 KiB
+goes without (an `errors` entry). No new channel and no new cap: the same `stall` notice, inside `NOTIFY_MAX_PER_DAY`.
+
+**THE RESEARCH SWITCH** (release R1). `<state>/ops.json` `{"stall": {"research": false}}` marks the old lanes' research
+causes (`stall.RESEARCH_CAUSES`: `births`, `birth_yield`, `gym_runs`, `validations`, `braked`, `underspend`) "Not
+judged" and drops the direction lane's research alarms (A1 no birth, A2 a cleared best with no Validation try or look,
+A3 Validation or gate waits, A6 the birth yield, A7 the unit: `stall.RESEARCH_ALARMS`) from `dlane`, so no mail and no
+owner step comes of research being off (A60). No pause file: `PAUSE` holds new entries and becomes an owner step after
+6 h. Absent, the switch is true; the money alarms (A4, A5, PL1, PT1, K5, DC1, the forward record's) stand either way.
 
 **The equity lanes' own causes** (release E2.4; the four `elane_` rows; `league/ops/elane_health.py`, which the
 stall job calls once): judged only while the lanes are on and not paused, on evidence since the running release first
@@ -5716,7 +5812,7 @@ entry and a House warning every 12 h when the lanes could not be read; `elane_id
 version is scored), and a lane starved by a setting is read in the check's numbers and the research funnel, never in
 the mail;
 **The equity lanes' own alarms**, at the top, says how to read each and what to do. They are the last four of
-`stall.CAUSES`, causes like any other (`stall.json`, the House's warnings, the daily page's standing causes, the
+`stall.CAUSES` (the event lane's four come just before them), causes like any other (`stall.json`, the House's warnings, the daily page's standing causes, the
 receipt's `checks`, the notice), and Done's item 7, which reads the receipts' checks, counts an owner step of theirs
 like any other's. The gateway words each (`STALL_CAUSES`, which its own test holds equal to `stall.CAUSES`; an
 unknown cause is a 400 for the whole notice: the gateway deploys first), so in the mail each is an entry of its own,
@@ -5736,7 +5832,8 @@ the budget's taper, the updater keeping the running release, the grant job askin
 
 The gateway holds the same pace by its own record, whatever id the House sends: it keys an owner notice on its owner
 causes (`stall:owner:<causes, sorted, joined by +>`, 12 hours) and one with none on `stall:info` (24 hours), inside
-`NOTIFY_MAX_PER_DAY`. A notice counts as told only when the gateway says it SENT it: a `duplicate` answer or a failure is
+`NOTIFY_MAX_PER_DAY`; a notice carrying the event lane's daily report adds `:report:<day>` (`stall:info:report:<day>`
+with no cause), so each day's report is mailed once, never held behind the causes it rides with. A notice counts as told only when the gateway says it SENT it: a `duplicate` answer or a failure is
 tried at the next run. Each cause standing is also one House warning (`stall: <cause>: ...`, its dollar figures
 scrubbed) every 12 hours. `<state>/stall.json` (private) keeps each cause (since when it stands, when it was last warned
 of, when it cleared) and the notices (when the last owner notice and the last other notice were sent, which owner causes
@@ -5819,36 +5916,59 @@ process died after the promotion is recovered by the House it left running (`dri
 
 ### The budget rule (D4)
 
-`league/ops/budget.py`, protected; constants changed only by an owner deploy (rule version 2 since Oct 3; the module
-docstring is the rule). For each meter m in {sail, claude}: `balance_m` (Sail: the guard's last good provider reading,
-at most 6 hours old; Claude: the gateway's funded total left), `fixed_m` (Sail: the House and data boxes' own billing a
-day over the trailing 7 days, never below `guard.house_burn_usd_day`; Claude: 0), `reserve_m` (Sail: the Sail guard's
-own release line, $37 at the configured burn, never under $10; Claude $5); and `p30`, the trailing 30-day realized
-options P&L, fees in, every real route. Marks never fund research.
+`league/ops/budget.py`, protected; constants changed only by an owner deploy (rule version 3 from release R1, the owner's
+goal of Oct 19, 2026, item 5; rule version 2 from Oct 3; the module docstring is the rule). THE COST RULE first, every
+metered dollar of a day together:
 
 ```
-ceiling_m  = $25/day × split_m              split: sail 0.8, claude 0.2 = $20 and $5 (0.6 and 0.4, $15 and $10, before)
+net7    = the realized net of every real book closed from 00:00 New York of the first of the last 7 sessions
+          closed, to now: the options book's closed positions (fees in, the broker's posted fee corrections; unknown
+          while a position is closed but unpriced, an order pending or unknown, reconciliation frozen, a blocking
+          account reading) plus the equity book's closed ":r" lots (fees and dividends in; the event lane's real lots
+          live there from release R2)
+earned  = 0.5 × max(0, net7) / 7            "the trailing week" = the last 7 sessions' realized net divided by 7, a day;
+                                            a losing week lifts nothing and takes nothing from the $5
+cap     = min($25, $5 + earned)             every metered dollar: Sail models and boxes, Claude, OpenAI, data, Cloudflare
+fixed   = Sail's House and data boxes (billing a day over 7 days, never under guard.house_burn_usd_day)
+          + Cloudflare $0.1644 ($5 a month) + market data $0 (ThetaData and Algo Trader Plus cancelled Oct 18, 2026)
+room    = max(0, cap − fixed)
+lane    = min(room, max($3, the lane's measured verdict spend a day over the last 7 days))
+rest    = room − lane                       split: sail 0.8, claude 0.2 (the old research roles' remainder)
+line    = sail: 0.8 × rest;  claude: lane + 0.2 × rest
+```
+
+Then for each meter m in {sail, claude}: `balance_m` (Sail: the guard's last good provider reading, at most 6 hours old;
+Claude: the gateway's funded total left), `fixed_m` (Sail: as above; Claude: 0), `reserve_m` (Sail: the Sail guard's own
+release line, $37 at the configured burn, never under $10; Claude $5). Marks never fund research.
+
+```
 runway_m   = max(0, balance_m − reserve_m − 5·fixed_m) / 5
-research_m = min(ceiling_m, runway_m)       set once a UTC day by its first run, from the balance as the day began;
-                                            raised (never lowered) by a later run whose reading sets more (a top-up)
-earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lifts no meter
+research_m = min(line_m, runway_m)          Claude: the lane first, min(lane, runway_m); the roles get
+                                            min(0.2 × rest, runway_m − that) (`research_usd_day`, `lane_usd_day`)
+                                            set once a UTC day by its first run, from the balance as the day began;
+                                            raised (never lowered) by a later run whose reading sets more (a top-up,
+                                            or a close whose profit lifted the cap)
 ```
 
-- **The split** is Sail 0.8 and Claude 0.2 from the budget-split release (**The budget split**, top of this page; not
-  deployed: production still runs 0.6 and 0.4). The owner's ceiling stays $25 a day.
-- **`p30` is the live book's own read first.** The rule reads the closed real positions and the broker's posted fee
-  corrections itself. The close economics can only cut that number: its `p30` is used when its summary is the latest
-  close and its number is smaller, never when it is larger. Unknown stays unknown: while a position is closed but not
-  priced, an order is pending or unknown, reconciliation is frozen or the account reading names an event the book has
-  not settled, `p30` is unknown from either read, `earned` is 0 and the job raises a warning. With no fresh close
-  summary (none yet, a stale one, one that cannot be read) the book's read stands alone and each run says so in a
-  warning.
-- **The no-forward-edge stop:** once 60 sessions have closed since Oct 5, 2026 (or since the day after the last
-  promotion to Probe: the forward ladder's, or the Money table's move after a passed holdout look) with no such
-  promotion, `earned` is 0 and the state says "no forward edge". `earned` sits inside the ceiling, so today the stop
-  cuts no research.
+- **At the $5 cap with no profit** (Sail's fixed $1.50 a day, the lane at its $3): fixed $1.66, the lane $3.00, research
+  $0.34 a day (Sail $0.27, the Claude roles $0.07). Every $14 of net over the last 7 sessions lifts the cap $1; at $280
+  it is $25, never more. Research is off for the old lanes (A60), so the remainder is mostly unspent: a cheap day is
+  never a failed day (the stall job raises no `underspend` under rule 3, and no Done item reads spend).
+- **The Claude line carries the lane's verdicts.** The lane's calls (league/events/verdicts.py, Haiku 4.5 through the
+  gateway's Claude route) are gated by no budget: the prereg asks a verdict of every eligible event. Their measured
+  spend (`<state>/events/events.sqlite` `verdicts.usd`, the gateway's settled cost) sizes the lane's part the next run;
+  the settings' `budget` block hands the router only the roles' Claude line (`claude_usd_day`), so no role can spend the
+  lane's part. A day the lane costs more than its part, the excess is over the cap that day and the next runs give the
+  roles the remainder of the larger figure (`budget.json` `cap.lane_measured_usd_day`). The day's first run adds the
+  lane's verdicts of the day back as Claude paid.
+- **Rule 2's figures, kept for the record:** `p30` (the options-only 30-day profit, cut by the close economics) and the
+  no-forward-edge stop are still gathered into `budget.json` `inputs` and read by nothing: rule 3's cap follows realized
+  profit whatever promoted it.
+- **The split** is Sail 0.8 and Claude 0.2 of the remainder. The walls stay Sail $20 and the Claude roles $5 (the $25's
+  split): no budget.json, setting or block lifts a meter over them.
 - **Unknown is never money:** an unreadable balance, fixed cost or reserve gives its meter no research; an unreadable
-  `p30` earns nothing; a rule that cannot run at all is no research on either meter.
+  net7 earns nothing (the cap is the $5); an unreadable lane store sizes the lane's part at $3; a rule that cannot run
+  at all is no research on either meter.
 - **The wait for the guard's next reading** (L4, on `fix/budget-guard-wait`, not deployed). A `budget` run that finds
   no fresh Sail guard reading waits for the guard's next one. It looks at the guard's record every 20 s, for at most
   270 s from its start, inside the job's 600 s wall. When a reading comes, the run takes a new time after it and reads
@@ -5863,10 +5983,13 @@ earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lif
   that takes more than about 4 minutes to reach its loop: that run still writes `unreadable`. `budget.json` and the
   receipt say `guard_wait` (the first read's seconds, the seconds waited after it, looks, whether it read) when the
   run found no fresh reading.
-- **Output:** `<state>/budget.json` (private): the inputs, each meter's research $/day and the day's figure, the knobs,
-  the direction against the last file (`cut`, `raise`, `same`), each meter's runway at the rate the rule holds it to,
-  its days of research left at the ceiling and its card date (when those days fall to 5: the day the taper starts),
-  the amount that buys 7 more days, and why.
+- **Output:** `<state>/budget.json` (private, schema 3): the inputs, THE COST RULE's figures (`cap`: net7 and its window,
+  earned, the cap, each fixed line, the room, the lane's part and its measured spend, the remainder), each meter's
+  research $/day and the day's figure (the Claude meter's `lane_usd_day` and `line_usd_day` beside), the knobs, the
+  direction against the last file (`cut`, `raise`, `same`), each meter's runway at the rate the rule holds it to, its
+  days at its share of the cap and its card date (when those days fall to 5: the day the taper starts), the amount that
+  buys 7 more days, and why. A release on either side of rule 3 reads the other's file as the floor until its own job
+  has run (the House's start runs the refresh, which runs the full job on another rule's file).
 - **Enforcement, tighten-only** (the last step of `settings.load`): min() against `researcher.sail_usd_per_hour`
   (Sail research × 0.4 / 24), `gym.max_boxes` (Sail research × 0.6 over $0.20 an hour × 8 busy hours, at least 1),
   every `claude.role_usd_day` line and `population.ceiling` (a family a dollar a day, at least 8 and never below
@@ -5904,7 +6027,7 @@ earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lif
   the runway at its burn and its days of research left at the ceiling, less the 5-day runway term; at the ceiling the
   7-day card line), the House posts one `POST /v1/notify` kind `funding` with the meter, the balance, both rates (the
   wanted one and the current one, each with its runway), the amount that buys 7 more days and the card date. It goes
-  at most once a day per meter (a day less an hour since the last; `funding:<meter>:<UTC day>:r2`, which the gateway
+  at most once a day per meter (a day less an hour since the last; `funding:<meter>:<UTC day>:r3` under rule 3, which the gateway
   dedupes); before D-1b it was once a week. The mail names both rates: the rate the rule holds the meter to now (its fixed cost
   plus the day's research budget; a ceiling, not a metered spend) and the rate the rule wants for it. A meter spent
   faster than the rule holds it states its burn as the "now" rate, and its card date is the day research runs out at

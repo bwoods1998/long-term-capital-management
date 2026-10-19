@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 
 import { route } from '../lib/router.mjs';
 import { createGate, STALL_NOTICE_MS, STALL_INFO_MS } from '../lib/gate.mjs';
-import { composeNotice, NOTICE_KINDS, STALL_CAUSES, stallKey, FLOOR, CONSOLE } from '../lib/email.mjs';
+import { composeNotice, NOTICE_KINDS, STALL_CAUSES, stallKey, stallReport, REPORT_PROGRAMS, FLOOR, CONSOLE } from '../lib/email.mjs';
 import { memoryStore, TOKEN } from './helpers.mjs';
 
 const NOW = Date.parse('2026-10-07T10:20:00Z');
@@ -36,7 +36,10 @@ const RUNWAY = {
   since: '2026-10-07T04:20:00Z', hours: '6.0', doing: 'The budget rule tapers research on Sail to what it holds.',
   owner_step: 'top up Sail: about $112.00 buys 7 more days of research at the ceiling (the taper starts 2026-10-05)',
 };
-const notice = (...causes) => ({ kind: 'stall', notice_id: 'stall:x', causes, at: '2026-10-07T10:20:00Z' });
+const notice = (...causes) => ({ kind: 'stall', notice_id: 'stall:x', causes, at: '2026-10-07T10:20:00Z', report: null });
+//: The event lane's daily report as league/ops/evl_health.py `report_facts` writes it (invented figures; the House's own
+//: test holds its keys equal to this file's).
+const { _note: _ignored, ...REPORT } = JSON.parse(readFileSync(new URL('../../league/tests/fixtures/stall_report.json', import.meta.url), 'utf8'));
 const NONE_NEEDED = 'Nothing here needs you: the House keeps working around it, and says so again in 24 hours if it still stands.';
 const END = ['', FLOOR, CONSOLE, ''];
 
@@ -112,7 +115,7 @@ test('the composer reads every fact the House writes, and no fact it does not wr
   composeNotice(spy({ ...notice(spy({ ...RUNWAY }, 'cause.')) }, ''));
   // `notice_id` is the router's (it keys a stall by its owner causes); `desk_name` is read for every kind.
   const seen = [...read].filter(key => !['desk_name', 'notice_id'].includes(key) && !key.startsWith('cause.then'));
-  assert.deepEqual(seen.filter(key => !key.startsWith('cause.')).sort(), ['at', 'causes', 'kind']);
+  assert.deepEqual(seen.filter(key => !key.startsWith('cause.')).sort(), ['at', 'causes', 'kind', 'report']);
   assert.deepEqual(seen.filter(key => key.startsWith('cause.')).map(key => key.slice(6)).sort(), keys);
 });
 
@@ -259,4 +262,106 @@ test('the causes of Oct 11, 2026: each equity cause has its own words and keys i
   assert.equal((await (await post(notice(dq), NOW + 3 * HOUR)).json()).duplicate, true, 'the same owner cause inside 12 hours');
   assert.equal((await (await post(notice(alerts), NOW + 3 * HOUR)).json()).duplicate, true);
   assert.equal(sent.length, 3);
+});
+
+test('the causes of Oct 19, 2026: the event lane\'s own four have their words, need nothing from the owner and key their own notice', () => {
+  // league/ops/evl_health.py (release R1): from the lane's receipts while it runs on the House (invented figures).
+  const record = { ...BIRTHS, cause: 'evl_record', what: 'The event lane finished no record pass in the last 30 minutes.',
+    numbers: { last_record_at: '2026-10-20T13:02:00Z', minutes_since_record: 41.5, passes_30m: 0, failed_passes_30m: 3 } };
+  const decide = { ...BIRTHS, cause: 'evl_decide', numbers: { decisions_due: 2, missed: 1, first_missed: 'open:2026-10-20' } };
+  const verdicts = { ...BIRTHS, cause: 'evl_verdicts', numbers: { needed: 40, answered: 25, unanswered_share: 0.375 } };
+  const score = { ...BIRTHS, cause: 'evl_score', numbers: { day: '2026-10-20', scored: false, unsettled_due: 12 } };
+  assert.equal(composeNotice(notice(record)).subject, 'LTCM: stalled: the event lane recorded nothing for 30 minutes');
+  assert.equal(composeNotice(notice(decide)).subject, 'LTCM: stalled: an event-lane decision was missed');
+  assert.equal(composeNotice(notice(verdicts)).subject, 'LTCM: stalled: event-lane verdicts went unanswered');
+  assert.equal(composeNotice(notice(score)).subject, 'LTCM: stalled: an event-lane session was not scored');
+  const all = composeNotice(notice(record, decide, verdicts, score));
+  for (const line of ['- minutes_since_record: 41.5', '- first_missed: open:2026-10-20', '- unanswered_share: 0.375',
+    '- unsettled_due: 12', 'Stalled: an event-lane session was not scored.']) assert.ok(all.text.split('\n').includes(line), line);
+  assert.equal(stallKey(notice(record, score)), 'stall:info:evl_record+evl_score');
+});
+
+test('the event lane\'s daily report rides the stall notice as one more section: counts and figures only', () => {
+  const both = composeNotice({ ...notice(BIRTHS), report: REPORT });
+  assert.equal(both.subject, 'LTCM: stalled: no births', 'the causes keep the subject');
+  const lines = both.text.split('\n');
+  const at = lines.indexOf('The event lane, 2026-10-20 (the day\'s figures; no headline, text or price is ever mailed):');
+  assert.ok(at > lines.indexOf('Stalled: no births.'), 'after the causes');
+  assert.deepEqual(lines.slice(at + 1, at + 8), [
+    '- Events read: 212 8-K with item 2.02, 403 other 8-K, 1688 Form 4, 2410 news articles; 3 filings failed to fetch.',
+    '- Verdicts answered: 640 ok, 4 unparsed, 1 refused; they cost $2.71.',
+    '- Metered compute: about $4.12 a day, under a cap of $5.00 a day (fixed $1.66, the lane\'s verdicts $3.00, research $0.34).',
+    '- Expected false passes: 0.9 (0.10 x 9 seatable versions).',
+    'By program (shadow P&L at $100 an event, after costs; r the after-cost return, a beyond the benchmark):',
+    '- EVL-ERN-READ-O1 v1: today 9 intents (2 skipped); settled 41 (38 tradable, 7 today), shadow +$12.34 (r +30.1 bp, a +12.5 bp); no real fills yet; next look 1 at session 10 (now 6); last look none; 0 held.',
+    '- EVL-CTRL-ERN-ALL-O1 v1: today 31 intents (4 skipped); settled 140 (120 tradable, 25 today), shadow -$18.50 (r -13.2 bp, a -2.0 bp); no real fills yet; a record: never screened.',
+  ]);
+  assert.ok(lines.indexOf('At: 2026-10-07T10:20:00Z.') > at, 'the time last');
+  // With no cause standing the notice is the report alone, under its own subject.
+  const alone = composeNotice({ kind: 'stall', causes: [], at: '2026-10-21T02:20:00Z', report: REPORT });
+  assert.equal(alone.subject, 'LTCM: daily report 2026-10-20: nothing stalled');
+  assert.equal(alone.text.split('\n')[0], 'Nothing stalled and nothing needs you: the event lane\'s daily report.');
+  assert.equal(alone.text.includes('Stalled:'), false);
+  // Real fills (release R2) are said with their count and dollars.
+  const filled = stallReport({ report: { ...REPORT, programs: [{ ...REPORT.programs[0], real_n: 3, real_pnl_usd: -1.25 }] } });
+  assert.ok(filled.lines.at(-1).includes('3 real fills, -$1.25;'));
+});
+
+test('the composer reads every report fact the House writes; a figure is echoed only as a figure and a program only by its id', () => {
+  const read = new Set();
+  const spy = (value, prefix) => (value && typeof value === 'object'
+    ? new Proxy(value, { get: (target, key) => (typeof key === 'string' && read.add(`${prefix}${key}`), spy(target[key], `${prefix}${String(key)}.`)) })
+    : value);
+  // The fixture's programs, and one on real money (release R2's real fills), each read whole.
+  const filled = { ...REPORT.programs[0], real_n: 2, real_pnl_usd: 1.5 };
+  stallReport({ report: spy({ ...REPORT, programs: [...REPORT.programs, filled] }, '') });
+  const want = new Set();
+  const walk = (value, prefix) => {
+    for (const [key, inner] of Object.entries(value)) {
+      want.add(`${prefix}${key}`);
+      if (Array.isArray(inner)) inner.forEach(item => walk(item, `${prefix}${key}.*.`));
+      else if (inner && typeof inner === 'object') walk(inner, `${prefix}${key}.`);
+    }
+  };
+  walk(REPORT, '');
+  const seen = new Set([...read].map(key => key.replace(/\.\d+\./g, '.*.')));
+  const missed = [...want].filter(key => !seen.has(key));
+  assert.deepEqual(missed, [], 'every fact the House writes is read');
+  // Text where a figure goes is never echoed; a program whose id is not one is left out; no figure is no section.
+  const odd = stallReport({ report: { ...REPORT, events: { '8k_202': 'Apple beats', news: -1, form4: 1.5 }, verdicts: { usd: 'lots' },
+    programs: [{ ...REPORT.programs[0], id: 'Apple Inc beats estimates' }, { ...REPORT.programs[0], id: 'EVL-OK', shadow_pnl_usd: 'AAPL 182.50',
+      mean_r_bp: Infinity, last_look: 'passed', next_look_session: '10' }] } });
+  const text = odd.lines.join('\n');
+  for (const banned of ['Apple', 'AAPL', '182.50', 'lots', 'Infinity', 'passed']) assert.equal(text.includes(banned), false, banned);
+  assert.ok(text.includes('- Events read: unknown 8-K with item 2.02'));
+  assert.ok(text.includes('- EVL-OK v1:') && text.includes('shadow n/a (r n/a') && text.includes('last look unknown'));
+  assert.equal(odd.lines.filter(line => line.startsWith('- EVL-')).length, 1);
+  for (const report of [undefined, null, 'report', [REPORT], { ...REPORT, day: 'yesterday' }, { ...REPORT, day: undefined }]) {
+    assert.equal(stallReport({ report }), null, JSON.stringify(report)?.slice(0, 40));
+    assert.equal(composeNotice({ kind: 'stall', causes: [], report }), null, 'no cause and no report: nothing to compose');
+  }
+  const many = stallReport({ report: { ...REPORT, programs: Array.from({ length: 40 }, (_, i) => ({ ...REPORT.programs[0], id: `EVL-P${i}` })) } });
+  assert.equal(many.lines.filter(line => line.startsWith('- EVL-P')).length, REPORT_PROGRAMS);
+});
+
+test('a report\'s key names its day: each day\'s report is mailed once, never held behind the causes it rides with', async () => {
+  assert.equal(stallKey({ ...notice(BIRTHS), report: REPORT }), 'stall:info:births:report:2026-10-20');
+  assert.equal(stallKey({ ...notice(RUNWAY, BIRTHS), report: REPORT }), 'stall:owner:runway_sail:report:2026-10-20');
+  assert.equal(stallKey({ kind: 'stall', causes: [], report: REPORT }), 'stall:info:report:2026-10-20');
+  const gate = createGate({ store: memoryStore(), env: env(), now: () => NOW });
+  const sent = [];
+  const post = (facts, at) => route(new Request(`${GATEWAY}/v1/notify`, {
+    method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(facts),
+  }), env(), { gate, now: () => at, mailer: async message => void sent.push(message) });
+  assert.equal((await (await post(notice(BIRTHS), NOW)).json()).sent, true);
+  // The same cause two hours on, with the day's report: mailed (the report's own key), and once only.
+  assert.equal((await (await post({ ...notice(BIRTHS), report: REPORT }, NOW + 2 * HOUR)).json()).sent, true);
+  assert.equal((await (await post({ ...notice(BIRTHS), report: REPORT }, NOW + 3 * HOUR)).json()).duplicate, true);
+  // Nothing standing: the report alone; the next day's report is its own.
+  assert.equal((await (await post({ kind: 'stall', causes: [], report: REPORT }, NOW + 4 * HOUR)).json()).sent, true);
+  assert.equal((await (await post({ kind: 'stall', causes: [], report: { ...REPORT, day: '2026-10-21' } }, NOW + 5 * HOUR)).json()).sent, true);
+  assert.equal(sent.length, 4);
+  // A report-only notice with no report is refused before anything is counted or mailed.
+  assert.equal((await post({ kind: 'stall', causes: [] }, NOW + 6 * HOUR)).status, 400);
+  assert.equal(sent.length, 4);
 });

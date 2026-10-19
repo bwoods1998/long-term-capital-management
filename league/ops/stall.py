@@ -121,6 +121,22 @@ is deployed before this release), so each is an entry of its own in the notice a
 running release has run and what they keep under it (`stall.json` `elane`: {release, since} and
 `elane_health.KEPT`; `elane_health.release_since`), so a restart that fixes nothing resets no evidence.
 
+THE EVENT LANE'S OWN CAUSES AND ITS DAILY REPORT (release R1, the owner's goal of Oct 19, 2026, item 7;
+league/ops/evl_health.py, which judges them): `evl_record` (no record pass in 30 minutes), `evl_decide` (a scheduled
+decision not done 10 minutes after its time), `evl_verdicts` (over 20% of a session's needed verdicts unanswered) and
+`evl_score` (a session not scored by 23:00 ET), from the lane's own receipts in `<state>/events/events.sqlite`, judged
+only while the lane runs on the House (config.json `events.enabled`) and `ops.json` `stall.evl` is not false; INFO, the
+four before the equity lanes' four in `CAUSES`, worded by the gateway. From 22:00 ET of each session day the lane's
+DAILY ONE-SCREEN REPORT (`evl_health.report_due`: league/events/report.py's figures for the day, counts and figures
+only) rides the notice once (`notice_facts` `report`; with no cause standing the notice carries it alone), told when
+the gateway sends it or answers that it mailed that very notice (its key names the day: `stall.json` `report`). The
+receipt and stall.json carry the report's day, never a figure.
+
+THE RESEARCH SWITCH (release R1): `<state>/ops.json` `stall.research` false marks `RESEARCH_CAUSES` "not judged" and
+drops the direction lane's research alarms (`RESEARCH_ALARMS`) from `dlane`, so no mail and no owner step comes of the
+old lanes' research being off (A60, by settings); no pause file (`PAUSE` holds entries and is an owner step after 6 h).
+A CHEAP DAY IS NEVER A FAILED DAY (budget rule 3, `CHEAP_DAY_RULE`): `underspend` is never judged under it.
+
 THE NOTICE: one `POST /v1/notify` kind `stall` a run at most, listing EVERY cause standing (`cause_facts` each: the
 cause, the numbers, how long, what the House is doing about it, the owner step when one is needed), owner steps first,
 through the same gateway client the budget's funding notice uses (`budget._notifier`). It is mailed:
@@ -166,6 +182,7 @@ from typing import Any, Callable, Mapping
 
 from . import budget as B
 from . import elane_health as EH
+from . import evl_health as EV
 from . import funnel as F
 from . import guard
 from . import schedule as S
@@ -294,6 +311,7 @@ PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its wor
 #: EQUITY LANES' OWN (release E2.4; league/ops/elane_health.py `CAUSES`, which judges them; a test holds the two equal).
 CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy",
           "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend",
+          "evl_record", "evl_decide", "evl_verdicts", "evl_score",
           "elane_dq", "elane_births", "elane_idle", "elane_refused")
 #: THE EQUITY LANES (release E2): their births (a `swarm.born` whose payload's lane is "beta" or "equity"), their families
 #: (structure "etf", "stock" or, since release E4, "panel": league/swarm/store.py `OPTIONS_ONLY_SQL`, held equal by
@@ -305,8 +323,20 @@ OPTIONS_RUNS = "family NOT IN (SELECT id FROM families WHERE structure IN ('etf'
 #: The same structures for a row read in Python (`validation`'s awaiting list), spelled as the store's own
 #: `EQUITY_STRUCTURES` (league/tests/test_e4_integration.py holds the two equal).
 EQUITY_STRUCTURES = ("etf", "stock", "panel")
-#: The causes a pause stops by design: not raised while the floor is paused.
+#: The causes a pause stops by design: not raised while the floor is paused, nor while research is switched off
+#: (`RESEARCH_SWITCH`).
 RESEARCH_CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "underspend")
+#: THE RESEARCH SWITCH (release R1, the goal of Oct 19, 2026; A60 turned the old lanes' research off by settings):
+#: `<state>/ops.json` `stall.research` false marks `RESEARCH_CAUSES` "not judged" and drops the direction lane's research
+#: alarms (`RESEARCH_ALARMS`: no birth, a cleared best with no Validation try or look, Validation or gate waits, the
+#: birth yield, the unit) from the `dlane` cause, so no mail and no owner step comes of research being off. No pause file:
+#: `PAUSE` holds new entries and becomes an owner step after 6 h. Absent, it is true (the release ships it so); the
+#: House sets it false while the old lanes' research is off. The money alarms (A4, A5, PL1, PT1, K5, DC1) stand either way.
+RESEARCH_SWITCH = "research"
+RESEARCH_ALARMS = ("A1", "A2", "A3", "A6", "A7")
+#: A CHEAP DAY IS NEVER A FAILED DAY (budget rule 3, the goal of Oct 19, 2026, item 5): from this rule version on,
+#: `underspend` is never judged (the cap is what may be spent, never what must be).
+CHEAP_DAY_RULE = 3
 #: The causes that are news to the owner, not a stall nor a step WAITING (Oct 10, 2026): a Done checkpoint that holds is
 #: mailed at once as an owner line, never counted against DONE-RULE item 7 (`dlane_report.NEWS_CAUSES`, held equal by a
 #: test) nor listed among the stalls on the daily page (`scoreboard.funnel_lines`).
@@ -327,6 +357,9 @@ GUARD_DOING = {
     "no_reading": "the guard releases on its first good reading",
 }
 _OWNER_DEPLOY = re.compile(r"owner's (?:own )?deploy")
+#: The most a notice's facts may weigh (the gateway reads at most 32 KiB of a /v1/notify body): a daily report that would
+#: take it past this rides no notice (the causes go on without it).
+NOTICE_BYTES = 30 * 1024
 #: The grant job's error for a refusal (league/ops/grant.py `failed` after `LiveGrant.standing` answered `refused`).
 _GRANT_REFUSED = "standing grant refused"
 #: THE LEARNING GAME's children's origin (league/swarm/game.py `ORIGIN`; this job imports nothing of the swarm).
@@ -1271,8 +1304,13 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
            preopen: Mapping[str, Any] | None = None, forward: Mapping[str, Any] | None = None,
            nightly_error_since: float | None = None, nightly_error_day: str | None = None, done_told: Any = (),
            binds: list[Mapping[str, str]] | None = None,
-           alert_states: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
-    """Every cause's check: {stalled, what, numbers, doing, owner_step, onset (epoch or None)}. Pure."""
+           alert_states: Mapping[str, Mapping[str, Any]] | None = None, research_on: bool = True,
+           cheap_day: bool | None = None) -> dict[str, dict[str, Any]]:
+    """Every cause's check: {stalled, what, numbers, doing, owner_step, onset (epoch or None)}. Pure. `research_on` False
+    (THE RESEARCH SWITCH, ops.json `stall.research`) marks `RESEARCH_CAUSES` not judged and drops `RESEARCH_ALARMS`
+    from `dlane`; `cheap_day` (None: the running budget rule's, `B.RULE_VERSION` >= `CHEAP_DAY_RULE`) never judges
+    `underspend`. The event lane's and the equity lanes' own causes are `run`'s (league/ops/evl_health.py,
+    league/ops/elane_health.py)."""
     out: dict[str, dict[str, Any]] = {}
     guard_now = swarm.get("guard") or {}
     killed = bool(kill and kill.get("on") is True)
@@ -1400,7 +1438,7 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
         short = days is not None and days < RUNWAY_DAYS
         out[f"runway_{meter}"] = {
             "stalled": short,
-            "what": f"{word} holds {'unknown' if days is None else f'{days:.1f}'} days of research at the ceiling above its "
+            "what": f"{word} holds {'unknown' if days is None else f'{days:.1f}'} days of its share of the day's cap above its "
                     f"reserve (under {RUNWAY_DAYS:g}).",
             "numbers": {"runway_days_at_ceiling": days, "runway_days_held": _finite(row.get("runway_days")),
                         "research_usd_day": research, "ceiling_usd_day": ceiling_m, "topup_usd": topup,
@@ -1477,15 +1515,37 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
                     "killed_at": None if not kill or kill.get("since") is None else S.iso(kill["since"])},
         "doing": "Research that calls no Claude model goes on; Claude research, real entries and the engineer's merges wait.",
         "owner_step": KILL_STEP if killed else None, "onset": (kill or {}).get("since")}
-    out.update(_lane_checks(now, dlane, lane_on, done_told))
+    out.update(_lane_checks(now, dlane, lane_on, done_told, research_on=research_on))
     out["preopen"] = _preopen_check(now, preopen)
     out["forward"] = _forward_check(now, forward, nightly_error_since, nightly_error_day)
     out["swarm_alerts"] = _alerts_check(now, swarm.get("alerts"), alert_states)
     out["underspend"] = _underspend_check(now, swarm, budget, binds)
+    if (B.RULE_VERSION >= CHEAP_DAY_RULE) if cheap_day is None else cheap_day:
+        out["underspend"] = _not_judged(f"budget rule {B.RULE_VERSION}: a cheap day is never a failed day (the goal of Oct "
+                                        "19, 2026, item 5)", out["underspend"])
     if since is not None:  # the pause stops research by design: none of its causes is raised while it stands
         for cause in RESEARCH_CAUSES:
             out[cause].update(stalled=False, paused=True)
+    if not research_on:  # THE RESEARCH SWITCH: research is off by setting, so none of its causes is judged
+        for cause in RESEARCH_CAUSES:
+            if out[cause].get("judged") is not False:
+                out[cause] = _not_judged(f"research is switched off (ops.json stall.{RESEARCH_SWITCH} is false)", out[cause])
     return out
+
+
+def _not_judged(why: str, check: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """A cause not judged (THE RESEARCH SWITCH, the cheap-day rule): never stalled, no owner step; the numbers it read
+    are kept for the receipt."""
+    numbers = dict((check or {}).get("numbers") or {})
+    return {"stalled": False, "judged": False, "what": f"Not judged: {why}.", "numbers": {**numbers, "judged": False},
+            "doing": "Nothing: the cause is not judged while it reads so.", "owner_step": None, "onset": None}
+
+
+def research_judged(ctx: Any) -> bool:
+    """THE RESEARCH SWITCH (`<state>/ops.json` `stall.research`): False only when it is false."""
+    settings = _get(ctx, "settings")
+    block = settings.get("stall") if isinstance(settings, Mapping) else None
+    return not (isinstance(block, Mapping) and block.get(RESEARCH_SWITCH) is False)
 
 
 def _yield_check(now: float, swarm: Mapping[str, Any], ceiling: int | None) -> dict[str, Any]:
@@ -1722,13 +1782,16 @@ def done_key(meter: Any, at_close: Any) -> str:
 
 
 def _lane_checks(now: float, dlane: Mapping[str, Any] | None, lane_on: bool | None,
-                 done_told: Any = ()) -> dict[str, dict[str, Any]]:
+                 done_told: Any = (), *, research_on: bool = True) -> dict[str, dict[str, Any]]:
     """`dlane` and `done` (the module docstring), from the direction lane's report (`dlane_facts`) and the Done checkpoints
     already told (`done_told`, stall.json). Pure.
 
     THE LANE OFF (the review of the weekend fixes, Oct 10, 2026): with `dlane.mode` "off" the dlane job writes no report,
     so the last one stays on disk for good; reading its alarms raised `dlane` (K5's owner step for a lane that is off)
     and `done` at every run until someone deleted the file. While the lane is off neither cause reads the report.
+
+    THE RESEARCH SWITCH (release R1): with `research_on` False the research pipeline's alarms (`RESEARCH_ALARMS`) are not
+    judged (named in the numbers' `not_judged`); every other warning stands as before.
 
     THE DONE CLAIM, KEPT UNTIL TOLD (same review): the `done` cause read the report's A8, which one report says once (it
     is deduplicated against the previous report), so a House start or a failed notice before the next stall run lost the
@@ -1741,6 +1804,8 @@ def _lane_checks(now: float, dlane: Mapping[str, Any] | None, lane_on: bool | No
     stale = bool(report) and not off and (age is None or age > DLANE_STALE_HOURS * 3600)
     alarms = [] if off else report.get("alarms") or []
     warnings = [a for a in alarms if a.get("level") == "warning"]
+    unjudged = [] if research_on else [a for a in warnings if a.get("id") in RESEARCH_ALARMS]
+    warnings = [a for a in warnings if a not in unjudged]
     k5_alarm = next((a for a in warnings if a.get("id") == "K5"), None)
     k5 = {} if off else report.get("k5") or {}
     step = None
@@ -1767,7 +1832,8 @@ def _lane_checks(now: float, dlane: Mapping[str, Any] | None, lane_on: bool | No
                     "report_at": None if at is None else S.iso(at),
                     "report_age_hours": None if age is None else round(age / 3600.0, 1),
                     "k5": "off" if off else "tripped" if k5.get("tripped") else "disarmed" if k5.get("cleared") else "armed",
-                    "lane_mode": "off" if off else str(report.get("mode") or "unknown")[:20]},
+                    "lane_mode": "off" if off else str(report.get("mode") or "unknown")[:20],
+                    **({"not_judged": ",".join(str(a.get("id")).lower() for a in unjudged)[:80]} if unjudged else {})},
         "doing": ("The dlane job writes the report at the House's start, daily at 01:30Z and 30 minutes before each open, "
                   "each alarm a House warning. It moves no money: K5 and the program loss line (PL1, DONE-RULE-A1 A1.3) "
                   "only tighten, and exits go on. With the lane off it writes no report and still holds the program loss "
@@ -1973,22 +2039,30 @@ def cause_facts(cause: str, check: Mapping[str, Any], since: float | None, now: 
             "doing": str(check.get("doing") or ""), "owner_step": check.get("owner_step") or None}
 
 
-def notice_id(owner: list[str], causes: list[str] | None = None) -> str:
+def notice_id(owner: list[str], causes: list[str] | None = None, report_day: str | None = None) -> str:
     """The gateway's own dedupe key for the notice (gateway/lib/email.mjs `stallKey` keys it the same way, whatever id
     comes): the owner causes it tells, or, when none needs the owner, `stall:info:` and every cause it tells (since the
     review of the no-captain build, Oct 10, 2026: a new cause needing nothing is mailed at once, so the gateway's 24-hour
-    key is the set told, not one key for every such notice)."""
+    key is the set told, not one key for every such notice). A notice carrying the event lane's daily report (release
+    R1) adds `:report:<day>`, so each day's report is mailed once whatever the causes told before it; with no cause
+    standing it is `stall:info:report:<day>`."""
     if owner:
-        return "stall:owner:" + "+".join(sorted(owner))
-    return "stall:info:" + "+".join(sorted(causes or [])) if causes else "stall:info"
+        base = "stall:owner:" + "+".join(sorted(owner))
+    else:
+        base = "stall:info:" + "+".join(sorted(causes or [])) if causes else "stall:info"
+    if report_day:
+        return f"{base}:report:{report_day}" if (owner or causes) else f"stall:info:report:{report_day}"
+    return base
 
 
-def notice_facts(entries: list[dict[str, Any]], now: float) -> dict[str, Any]:
-    """The `stall` notice's facts: every standing cause (`cause_facts`), owner steps first."""
+def notice_facts(entries: list[dict[str, Any]], now: float, report: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The `stall` notice's facts: every standing cause (`cause_facts`), owner steps first, and the event lane's daily
+    report when one rides (`report`, league/ops/evl_health.py `report_facts`; None otherwise)."""
     ordered = [e for e in entries if e.get("owner_step")] + [e for e in entries if not e.get("owner_step")]
     return {"kind": "stall", "notice_id": notice_id([e["cause"] for e in entries if e.get("owner_step")],
-                                                    [e["cause"] for e in entries]),
-            "causes": ordered, "at": S.iso(now)}
+                                                    [e["cause"] for e in entries],
+                                                    None if report is None else str(report.get("day"))),
+            "causes": ordered, "at": S.iso(now), "report": None if report is None else dict(report)}
 
 
 def _sent(answer: Any) -> tuple[bool, str]:
@@ -2124,12 +2198,19 @@ def run(ctx: Any) -> dict[str, Any]:
                    preopen=preopen, forward=forward,
                    nightly_error_since=None if nightly_error is None else S.epoch(nightly_error["since"]),
                    nightly_error_day=None if nightly_error is None else nightly_error.get("day"),
-                   done_told=done_told, binds=binds, alert_states=states)
+                   done_told=done_told, binds=binds, alert_states=states, research_on=research_judged(ctx))
     # THE EQUITY LANES' OWN CAUSES (release E2.4): judged in league/ops/elane_health.py and raised from here on like any
     # other. Their evidence counts from the first start of the RUNNING RELEASE (kept in stall.json: `EH.release_since`).
     running = EH.release_since(state.get(EH.STATE_KEEP), root, now)
     found.update(EH.checks(ctx, root, now, loaded, errors=errors, since=running.get("since"), kept=running,
                            paused=found["paused"]["numbers"]["paused_since"] is not None))
+    # THE EVENT LANE'S OWN CAUSES (release R1; league/ops/evl_health.py): from the lane's receipts, read-only, while the
+    # lane runs on the House.
+    found.update(EV.checks(ctx, root, now, errors=errors))
+    # THE DAILY ONE-SCREEN REPORT (release R1, the goal of Oct 19, item 7): the day's report rides the notice once a day.
+    told_report = state.get("report") if isinstance(state.get("report"), dict) else {}
+    report = EV.report_due(ctx, root, now, told=told_report, budget=budget if isinstance(budget, Mapping) else None,
+                           errors=errors)
 
     told = state.get("causes") if isinstance(state.get("causes"), dict) else {}
     mail = dict(state.get("mail")) if isinstance(state.get("mail"), dict) else {}
@@ -2157,24 +2238,41 @@ def run(ctx: Any) -> dict[str, Any]:
 
     owner = [e["cause"] for e in entries if e["owner_step"]]
     kind = due_notice(stalled, owner, mail, now)
-    notice: dict[str, Any] = {"sent": False, "causes": stalled}
+    if kind is None and report is not None:  # the day's report makes a notice due, the standing causes in it as they are
+        kind = "owner" if owner else "info"
+    notice: dict[str, Any] = {"sent": False, "causes": stalled, "report": None if report is None else report["day"]}
     if kind is None:
         notice["why"] = ("nothing stands" if not stalled else
                          f"told at {mail.get('owner_at') or mail.get('info_at')}: the owner causes at most every 12 h, the "
                          "rest at most every 24 h")
     else:
-        facts = notice_facts(EH.mailed(entries, found), now)  # the equity causes' entries as the gateway prints them
+        facts = notice_facts(EH.mailed(entries, found), now, report=report)  # the equity causes as the gateway prints them
+        if report is not None and len(json.dumps(facts, default=str)) > NOTICE_BYTES:
+            errors.append(f"the event lane's daily report of {report['day']} does not fit the notice: sent without it")
+            report = None
+            notice["report"] = None
+            facts = notice_facts(EH.mailed(entries, found), now)
+            if not entries:
+                kind = None
         notice["notice_id"] = facts["notice_id"]
-        notify = _notifier(ctx)
-        if notify is None:
+        notify = _notifier(ctx) if kind is not None else None
+        if kind is None:
+            notice["why"] = "nothing stands"
+        elif notify is None:
             notice["why"] = "no gateway to notify through"
             errors.append("stall notice not sent: no gateway")
         else:
+            answer: Any = None
             try:
-                ok, words = _sent(notify(facts))
+                answer = notify(facts)
+                ok, words = _sent(answer)
             except Exception as exc:  # noqa: BLE001 - not told: the next run tries again
                 ok, words = False, f"the notice failed ({type(exc).__name__} {getattr(exc, 'code', '') or ''})".replace(" )", ")")
             notice.update(sent=ok, why=words)
+            # The day's report is told once the gateway SENT it, or answered that it mailed this very notice already (its
+            # key names the report's day).
+            if report is not None and (ok or (isinstance(answer, Mapping) and answer.get("duplicate") is True)):
+                told_report = {"day": report["day"], "at": S.iso(now)}
             if ok and "done" in stalled:
                 done_told = sorted(set(done_told) | set(found["done"].get("keys") or []))
             if ok:
@@ -2206,7 +2304,8 @@ def run(ctx: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - the stall alarm goes on without it
         receipts = {"errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
     write_json(root / STATE_FILE, {"schema": 2, "at": S.iso(now), "causes": told, "mail": mail,
-                                   "nightly_error": nightly_error, "done_told": done_told, EH.STATE_KEEP: running})
+                                   "nightly_error": nightly_error, "done_told": done_told, EH.STATE_KEEP: running,
+                                   "report": told_report})
     return {"stalled": stalled, "cleared": cleared, "warned": warned, "notice": notice,
             "checks": {c: {k: found[c].get(k) for k in ("stalled", "what", "numbers", "doing", "owner_step")} for c in CAUSES},
             "ceiling": ceiling, "errors": errors, "warning": bool(stalled or errors), "receipts": receipts}

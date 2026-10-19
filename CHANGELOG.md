@@ -32,6 +32,49 @@ reads unreleased; before it, `20261016T024305Z-e90d75adb36b`, main `d6bcf0cd`, P
 02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
+### Release R1 WP2, alarms and costs: budget rule 3, the event lane's four stall causes and its daily one-screen report, the research switch, on `r1/alarms` (unreleased; merges into the R1 release `rel/1021a`; THE GATEWAY DEPLOYS FIRST, then one owner deploy of the House, never 12:55-20:05Z on a trading day; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `f4fc39ff`, the constitution `34bbe7a5` and the gate contract `397b22b772b3` are release 1019a's; budget.json moves to schema 3)
+
+- **Why.** The owner's goal of Oct 19, 2026: item 5 ("Cost follows profit: metered compute <= $5 a day plus half the
+  trailing week's realized net profit, never above $25; a cheap day is never a failed day") and item 7 ("alarms on
+  stalls, missed events, ...; a daily one-screen report (events, intents, fills, settled n, P&L by program, costs,
+  evidence)"); A60 (research off for the old lanes by settings) left the stall job mailing its research causes.
+- **Budget rule 3** (`league/ops/budget.py`, RULE_VERSION and SCHEMA 2 -> 3): every metered dollar a day (Sail models
+  and boxes, Claude, OpenAI, data, Cloudflare) <= min($25, $5 + 0.5 x max(0, net7) / 7), net7 the realized net of every
+  real book (options positions and the equity book's real lots, which hold the event lane's from R2) since 00:00 New
+  York of the first of the last 7 sessions closed ("trailing week" = the last 7 sessions' net divided by 7, a day; a
+  losing week lifts nothing and takes nothing from the $5); the fixed costs (Sail's boxes, Cloudflare $5 a month, data
+  $0) inside it; the event lane's verdicts first on the Claude line (at least $3, or their measured spend over 7 days);
+  the old research roles share the remainder 0.8 Sail / 0.2 Claude, and the router reads the roles' line only. Rule 2's
+  options-only p30 and its no-forward-edge stop are recorded, never read. At the $5 cap with no profit: fixed $1.66,
+  the lane $3.00, research $0.34 a day.
+- **The stall job** (`league/ops/stall.py`, new `league/ops/evl_health.py`): `evl_record` (no record pass in 30
+  minutes), `evl_decide` (a scheduled decision not done 10 minutes after its time), `evl_verdicts` (over 20% of a
+  session's needed verdicts unanswered), `evl_score` (a session not scored by 23:00 ET), each from the lane's receipts
+  in `<state>/events/events.sqlite`, judged only while `config.json` `events.enabled` is true, INFO; ops.json
+  `stall.research` false marks the old lanes' research causes and the direction lane's research alarms (A1, A2, A3,
+  A6, A7) not judged (no pause file), and pre-open check 5 (`league/ops/preopen.py`) says the Gym off and a population
+  under its floor instead of failing on them; `underspend` is never judged under rule 3; THE DAILY ONE-SCREEN REPORT rides the
+  stall notice once a session day from 22:00 ET (counts and figures only; alone when nothing stands; the receipt and
+  stall.json carry its day, never a figure).
+- **The gateway** (`gateway/lib/email.mjs`): `STALL_CAUSES` gains the four; `stallReport` composes the report (the
+  programs' `EVL-...` ids and figures only); a report-only stall notice is composed; the dedupe key names the report's
+  day. A House on this release talking to an older gateway gets a 400 for any notice that names an `evl_` cause or
+  carries the report alone.
+- **The lane's receipts** (`league/events/run.py`, `score.py`): each decision tallies `verdicts: {needed, answered}`;
+  every score pass writes a `score` receipt. No outcome, intent, verdict or look is written differently.
+- **The cost end dates** (ThetaData and Algo Trader Plus end in the site's costs from Oct 19, 2026; past costs stay;
+  `league/publish.py` `SUBSCRIPTIONS_ENDED_AT`, on the base from `fix/subs-end`): verified, not redone; the site's
+  contract fixtures are unchanged by it (their snapshot predates the end).
+- **Tests.** league/tests/test_evl_health.py (new, 20), test_ops_budget (CostRule and the new readers; the unchanged
+  runway mechanics at rule 2's shares), test_ops_stall (rule 2's underspend kept for a rollback), test_events_run and
+  test_events_score (the receipts), test_ops_jobs (check 5 under the switch), gateway stall-notice (13; suite 469/469), the shared fixture
+  league/tests/fixtures/stall_report.json.
+- **Operator step after the deploy:** `ops.json` `{"stall": {"research": false}}` on the box while the old lanes'
+  research is off ([docs/operations.md](docs/operations.md), **Release R1, alarms and costs**, has the command, the
+  verification and the rollback).
+- **Rollback:** the House by `floor_box.py rollback` + repoint (budget.json schema 3 is no file to rule 2: the floor
+  until its job runs); the gateway after the House or never.
+
 ### Gateway G1: Claude Haiku 4.5 priced and Alpaca news readable, for the event lane (the goal of Oct 19, 2026; PREREG-EVL-1), on `feat/g1-haiku-news` (unreleased; a gateway deploy only, no House code, no money rule, no order path)
 
 - `CLAUDE_MODELS` gains `claude-haiku-4-5-20251001` at the list prices ($1 input, $1.25 five-minute write, $0.10 hit,
