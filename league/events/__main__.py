@@ -23,18 +23,30 @@ def _day(text: str) -> dt.date:
     return dt.date.fromisoformat(text)
 
 
+#: Sessions re-decided on every catchup (idempotent: known events are skipped and stored verdicts reused), so an event
+#: that reached the store late (a recorder outage, news backfilled after the gateway could read it) still gets its
+#: shadow decision (PREREG-EVL-1 section 3: an outage removes nothing from the shadow record).
+REDECIDE_SESSIONS = 3
+
+
 def catchup(ctx: R.Context) -> dict:
-    """Every scheduled decision from the registration time to now that has no receipt yet, oldest first."""
+    """Every scheduled decision from the registration time to now without an ok receipt, oldest first, and the last
+    REDECIDE_SESSIONS due sessions again. A decision run at its scheduled minute (within 10 minutes) is live; any other
+    is a backfill."""
     st = ctx.store
     now = ctx.now()
     start = P.registered().astimezone(C.NY).date()
     done = {r[0] for r in st.db.execute("SELECT job FROM receipts WHERE status='ok' AND job LIKE 'decide-%'")}
+    due = [s for s in C.sessions(st, start, now.astimezone(C.NY).date()) if s.open_decide <= now]
+    recent = {s.day for s in due[-REDECIDE_SESSIONS:]}
     out = {}
-    for s in C.sessions(st, start, now.astimezone(C.NY).date()):
-        if s.open_decide <= now and f"decide-open:{s.day}" not in done:
-            out[f"open:{s.day}"] = R.decide_open(ctx, s.day, backfill_run=True)
-        if s.close_decide + dt.timedelta(minutes=1) <= now and f"decide-close:{s.day}" not in done:
-            out[f"close:{s.day}"] = R.decide_close(ctx, s.day, backfill_run=True)
+    for s in due:
+        live_open = now - s.open_decide <= dt.timedelta(minutes=10)
+        if f"decide-open:{s.day}" not in done or s.day in recent:
+            out[f"open:{s.day}"] = R.decide_open(ctx, s.day, backfill_run=not live_open)
+        if s.close_decide + dt.timedelta(minutes=1) <= now and (f"decide-close:{s.day}" not in done or s.day in recent):
+            live_close = now - s.close_decide <= dt.timedelta(minutes=10)
+            out[f"close:{s.day}"] = R.decide_close(ctx, s.day, backfill_run=not live_close)
     return out
 
 
