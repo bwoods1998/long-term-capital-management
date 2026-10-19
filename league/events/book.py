@@ -44,8 +44,10 @@ THE RULES ARE THE FROZEN ONES: docs/prereg/PREREG-EVL-3.md section 2 (the owner'
   (`per_name_share`), the 100% book, the cash and the loss budget are `league.equity.sizing.size_entry`'s own caps (the
   book calls it; nothing here re-implements it). At most `max_open` positions a program (learning 8, Probe 6, Sized 8).
 - THE DAY'S ORDERS (release 1019c): the kind's auction orders count against its own line, `max_orders_day` (150), never
-  the old lanes' 60 (league/equity/live.py `_count_refusal`): an entry leaves room for the exit of every event lot not
-  yet sold that day, and an exit is never stopped by it; both lines stay under the House-wide one.
+  the old lanes' 60 (league/equity/live.py `_count_refusal`): an entry leaves room for its own exit and for the exit of
+  every event lot not yet sold that day and of every event buy still working that is sold the same day, and at the
+  House-wide line room for every equity exit beside the options book's; an exit is never stopped by a lane's line;
+  both lines stay under the House-wide one.
 - OPEN RISK (the goal's own rule, PREREG-EVL-1 section 8, PREREG-EVL-3 section 2): value x max(`open_risk.floor`,
   `open_risk.z` x sigma x sqrt(h)), sigma the daily return sd of the `sigma_sessions` sessions before entry (adjusted
   closes), h the sessions in the hold; `STRICT_WEIGHT` (the House's old 0.40) when sigma cannot be read, and for a lot
