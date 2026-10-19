@@ -153,7 +153,9 @@ def shares_text(value: Decimal) -> str:
 # ----------------------------------------------------------------------------------------------- the lane's store
 def open_store(state_root: str | Path) -> Any:
     """The lane's store, read-only (league/events/book.py `open_lane`: `.db` and `.meta`, as league/events reads them),
-    or None when this House keeps none."""
+    or None when this House keeps none (then nothing of league/events is even imported)."""
+    if not (Path(state_root) / LANE_DIR / LANE_DB).is_file():
+        return None
     from .events.book import open_lane
 
     return open_lane(state_root)
@@ -178,7 +180,7 @@ def read_verdict_usd(state_root: str | Path) -> Decimal | None:
     if lane is None:
         if (Path(state_root) / LANE_DIR / LANE_DB).exists():
             raise RuntimeError("the lane's store exists and cannot be opened")
-        return ZERO
+        return ZERO     # no lane on this House: no verdict was ever paid for
     try:
         return verdict_usd(lane)
     finally:
