@@ -3614,7 +3614,10 @@ buy, and the House release after it gates each one on its own event switch and a
 The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3 (section 2), with PREREG-EVL-1
 sections 3, 5 and 8 and PREREG-EVL-2: VERSION 2 of each of the nine seatable programs of league/events/programs.py trades
 REAL money from its first event, at the band the event lane's store gives it, in whole shares, entered and exited in the
-listing exchange's auctions. Version 1 of each is a shadow record and never trades. The House side is THE EQUITY BOOK'S
+listing exchange's auctions. Version 1 of each is a shadow record and never trades. From release 1019c, PREREG-EVL-4's
+three programs (EVL-8K-REACT-ON, EVL-8K-READ-ON, EVL-NEWSPM-READ-ON) trade the same way at their VERSION 1, after the
+nine in ROOM's order, and `eq_event_programs` holds twelve rows ([docs/events.md](events.md), "PREREG-EVL-4"; their
+controls never trade). The House side is THE EQUITY BOOK'S
 EVENT KIND: league/equity/live.py (`_event_step` and the methods after it), its adapter league/events/book.py
 (`BOOKS["event"]`, on league/xs/book.py's precedent; the rules), the auction paper proof league/events/proof.py, and the
 money rows `equity_money.event` (league/constitution.py). The lane itself (its store, its shadow decisions, its screen,

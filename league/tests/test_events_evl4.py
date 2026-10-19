@@ -306,9 +306,14 @@ class TheWindows(WorldCase):
         self.assertEqual(out["pending"], {})
         for pid in ("EVL-CTRL-8K-ON", "EVL-8K-READ-ON"):
             self.assertEqual(self.taken(pid, day), ["CCC", "EEE"], pid)
-        self.assertEqual({r["event"] for r in self.st.db.execute("SELECT event FROM intents WHERE program IN (?, ?)",
-                                                                    ("EVL-CTRL-8K-ON", "EVL-8K-READ-ON"))},
-                         {"8k:0000000003-26-000201", "8k:0000000005-26-000201"}, "nothing of AAA, BBB or DDD")
+        self.assertEqual(self.taken("EVL-8K-REACT-ON", day), ["CCC"], "AAA rose 5% too, but is EXCLUDED; EEE has no bar")
+        events = {r["event"] for r in self.st.db.execute("SELECT event FROM intents WHERE program IN (?, ?, ?)",
+                                                         ("EVL-CTRL-8K-ON", "EVL-8K-READ-ON", "EVL-8K-REACT-ON"))}
+        self.assertEqual(events, {"8k:0000000003-26-000201", "8k:0000000005-26-000201"}, "nothing of AAA, BBB or DDD")
+        articles = [dict(a, cik=W.CIK[a["symbol"]]) for a in P.news_rows(self.st, *P.day_news_window(self.st, day))]
+        skip = P.excluded(P.filings_window(self.st, "8-K", *P.close_window(self.st, day)), articles,
+                          lambda cik: {W.CIK["BBB"]: "BBB"}.get(cik))
+        self.assertEqual(skip, {W.CIK["AAA"], W.CIK["BBB"]}, "the sets every row of the file skips, PM's included")
         self.assertEqual(out["events"]["excluded"], 2)
 
 
@@ -649,8 +654,9 @@ class TheProof(unittest.TestCase):
             ("EVL-8K-REACT-ON", "III", "planned"),
             ("EVL-8K-READ-ON", "BBB", "planned"), ("EVL-8K-READ-ON", "CCC", "planned"),
             ("EVL-8K-READ-ON", "HHH", "skipped:excluded"), ("EVL-8K-READ-ON", "III", "planned"),
-            ("EVL-CTRL-8K-ON", "BBB", "planned"), ("EVL-CTRL-8K-ON", "CCC", "planned"), ("EVL-CTRL-8K-ON", "FFF", "planned"),
-            ("EVL-CTRL-8K-ON", "HHH", "skipped:excluded"), ("EVL-CTRL-8K-ON", "III", "planned"),
+            ("EVL-CTRL-8K-ON", "BBB", "planned"), ("EVL-CTRL-8K-ON", "CCC", "planned"),
+            ("EVL-CTRL-8K-ON", "FFF", "planned"), ("EVL-CTRL-8K-ON", "HHH", "skipped:excluded"),
+            ("EVL-CTRL-8K-ON", "III", "planned"),
             ("EVL-NEWSPM-READ-ON", "EEE", "planned"), ("EVL-NEWSPM-READ-ON", "JJJ", "planned"),
             ("EVL-CTRL-NEWSPM-ON", "EEE", "planned"), ("EVL-CTRL-NEWSPM-ON", "JJJ", "planned")},
             "AAA (ERN), DDD (DAY) excluded; FFF's news skipped for its 8-K; HHH excluded by its late earnings 8-K")
