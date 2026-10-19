@@ -3368,6 +3368,54 @@ block): `stock_buys.enabled` true, the shares `0.5`, `0.2`, `2`, `day_equity_mul
 `"off"` and deploy (closes keep working), or `npx wrangler@4.129.1 rollback` to the previous version. A stock position
 bought before a rollback stays on the account and is closed by an ordinary sale (closes go either way).
 
+## The event lane's buys at the gateway (release R2, gateway G2): on `r2/gateway` (not yet deployed; `STOCK_EVENT_BUYS` ships `off`)
+
+The owner's goal of Oct 19, 2026 (item 4: "<= 10% of equity per name, <= 100% invested, no margin") and the frozen
+PREREG-EVL-1, section 8: an event program that passes its screen trades real money from the next session at Probe, its
+entries limit-on-open or limit-on-close orders (`opg` / `cls`) at 1.25 x the previous SIP close, in whole shares, its
+exits at the scheduled auction (PREREG-EVL-2 adds exits at the next session's open). The names are whatever stock an
+event names, so this is a second buy branch beside `STOCK_UNIVERSE`'s (`gateway/lib/caps.mjs` "event-lane stock
+buys", `router.mjs` `realEventBuy`, `gate.mjs` `reserveStock` with `stock.event`). Deploying it changes nothing the
+floor does: `STOCK_EVENT_BUYS` ships `off`, and with it off every event buy is a `403 {cap: "stock_event_buys"}` before
+anything is read.
+
+- **What an event buy is**: a real-account BUY whose `time_in_force` is `opg` or `cls`. `type` `limit` with a
+  positive `limit_price` (at most four decimals), `qty` a WHOLE number of shares (1 to 999,999,999), no `notional`, no
+  `position_intent`, never extended hours, a US stock ticker that `STOCK_UNIVERSE` does not mark an ETF. Anything else
+  of that shape is a `400`.
+- **What it must pass, in order, each refusal before anything is sent**: both switches (`STOCK_BUYS_REAL` and
+  `STOCK_EVENT_BUYS` `on`: `403 stock_event_buys`, nothing read); the House's eligible list of the New York day names
+  it (`403 stock_eligible`, nothing read); the venue's asset record (`GET v2/assets/<symbol>`, the real keys): class
+  `us_equity`, `active`, `tradable`, on NYSE, NASDAQ, AMEX, ARCA or BATS (`403 stock_asset`); its SIP daily bars of the
+  sessions before today (`GET v2/stocks/<symbol>/bars`, 1Day, raw, `feed=sip`, the end 16 minutes back for the Basic
+  plan): previous close at least $3.00 (`403 stock_price`), at least 20 sessions and their mean close x volume at least
+  $1,000,000 (`403 stock_adv`); the limit at most 1.25 x that previous close, exactly (`403 stock_limit`). A reading
+  that could not be made is `424 {cap: "asset"}` or `{cap: "bars"}`: nothing sent, the House sends it again. The asset
+  and the bars are read once a New York day a symbol in each isolate (a verdict is kept, a failed reading is not).
+- **Its caps**: every stock cap of the section above, with ONE share for the name: the single-stock share and never
+  above 10% of equity (`STOCK_EVENT_SHARE_MAX`, a code ceiling whatever `STOCK_SINGLE_EQUITY_SHARE` says), BOOK-WIDE: the
+  name's long market value + its resting buys + buys in flight + this order (`stock_order`, `stock_position`); the
+  whole book at most equity x min(`STOCK_MAX_EQUITY_MULTIPLE`, the multiplier), which release R2 sets to `1`: NO MARGIN
+  as a gateway wall (`stock_total`); buying power; the day's buys (`stock_day`); the day's open-order count. The Gate
+  checks the eligible list again in the step that reserves. Metered at `qty x limit_price`; the kill switch stops it
+  (`423`). A buy of a symbol held short is refused as an open: it never covers.
+- **The House's eligible list** (`POST /v1/stock/eligible` with the runtime token, body `{day, symbols}`): the names the
+  House's universe test admitted for one New York session (PREREG-EVL-1 section 2), that day or up to a week ahead, at
+  most 5,000 tickers, none an ETF of `STOCK_UNIVERSE`, none twice. The Gate keeps ONE list and answers `{ok, day, count,
+  sha, at}`, the sha the SHA-256 of `<day>:<the symbols sorted, joined by ",">`, so the House checks the gateway holds
+  exactly what it sent; a list of an earlier day than the one held is a `409`. `GET /v1/stock/eligible` and `/v1/health`
+  (`stock_buys.event_buys`) show its day, count, sha and time, never its names. The gateway cannot tell an ETF or an ETN
+  from a common stock by the venue's asset record, so an event buy goes only for a name on the House's list AND passing
+  the gateway's own checks.
+- **Sales of event shares** are closes like any other (`realStockClose`, read fresh and serialized in the Gate): a
+  `market` or `limit` sale of shares held, in any `time_in_force` the venue takes, `opg` and `cls` among them (the
+  lane's exits at the next open and at the close), at most what is held. `gateway/test/event-buys.test.mjs` pins them.
+- **Deploy**: a gateway deploy (`npm run check && npm test && npx --no-install wrangler@4.129.1 deploy` from the
+  release's head), BEFORE the House release R2 (which publishes the list and sends the orders). `STOCK_EVENT_BUYS`
+  goes `on` in a later gateway deploy, the owner's step at the first Probe of an event program, after the House
+  release R2's auction paper proof has passed its BUY stage. Rollback: `wrangler rollback <the
+  previous version>`; with the switch on, setting it `off` again is the instant stop of event buys (sales go on).
+
 ## The no-captain automations (Oct 10, 2026): deployed 21:42Z Oct 10 (House `20261010T214125Z-d4667186f969`, gateway `e3f310ee`, #533)
 
 Built on `feat/no-captain` and deployed 21:42Z Oct 10: one gateway deploy, then one owner deploy (`league/ops/budget.py`,
@@ -7682,7 +7730,8 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE`, `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_ORDERS`, `MAX_DAY_OPEN_ORDERS` | `gateway/wrangler.jsonc` | $1,000, 0.25, 1.0, 300, 250 | the real account's caps by maximum loss; equal to the constitution's `options_money.gateway` | gateway deploy with the matching House deploy |
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
 | `STOCK_BUYS_REAL` | `gateway/wrangler.jsonc` | `on` on `feat/gateway-stock-opens` (not deployed; production admits stock closes only) | long-only buys of `STOCK_UNIVERSE` on the real account; anything but `on` admits none (closes go either way) | gateway deploy |
-| `STOCK_ETF_EQUITY_SHARE`, `STOCK_SINGLE_EQUITY_SHARE`, `STOCK_MAX_EQUITY_MULTIPLE`, `STOCK_DAY_EQUITY_MULTIPLE` | `gateway/wrangler.jsonc` | 0.5, 0.2, 2, 4 (the code's ceilings) | an ETF position, a single-stock position, the whole long book as a margin line (x min(this, the account's multiplier), long options counted at that multiple), the day's stock buys, as shares or multiples of the gateway's own equity reading; a value can only lower them | gateway deploy |
+| `STOCK_ETF_EQUITY_SHARE`, `STOCK_SINGLE_EQUITY_SHARE`, `STOCK_MAX_EQUITY_MULTIPLE`, `STOCK_DAY_EQUITY_MULTIPLE` | `gateway/wrangler.jsonc` | 0.5, 0.2, 2, 4 (the code's ceilings); release R2 (not yet deployed) sets the multiple to 1 | an ETF position, a single-stock position, the whole long book as a margin line (x min(this, the account's multiplier), long options counted at that multiple; at 1, no margin), the day's stock buys, as shares or multiples of the gateway's own equity reading; a value can only lower them | gateway deploy |
+| `STOCK_EVENT_BUYS` | `gateway/wrangler.jsonc` | `off` (release R2, not yet deployed) | the event lane's whole-share `opg` / `cls` limit buys of a name on the House's eligible list (**The event lane's buys at the gateway**); `on` admits them only while `STOCK_BUYS_REAL` is `on`; sales go either way | gateway deploy (the owner's step at the first Probe) |
 | `LIBRARY_DAY_UPSTREAM`, the `LIBRARY` KV binding | `gateway/wrangler.jsonc` | 600; namespace `ltcm-gateway-library` (Release B) | the research library's requests to arXiv a UTC day for the whole floor (`"0"` stops them; cache hits still answer), and its cache | gateway deploy; never delete the namespace |
 | `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 (since 13:36Z Sept 29) | the practice league (the observe band) and its instance cap (default 48); read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
 | `live.observe_train`, `live.observe_roots_max`, `live.observe_read_calls` | `swarm.json` on the box | defaults: true, 24, 120 (120 from V3-A part 1; 40 before) | the Train tier; the distinct roots the league may read (1-128); the minute's data calls before observe reads stop (10-200; unset: the step's own 120, room for 24 roots at the page cap after the real phase's 20); only a read skipped for this budget sheds practice instances | edit `swarm.json` |

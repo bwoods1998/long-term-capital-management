@@ -62,6 +62,10 @@ export class Gate extends DurableObject {
   stockSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.stockSettle(request)); }
   // Which held stock orders a check should read the status of (read-only; the follow-up of Oct 10, 2026).
   stockAsk(request) { return this.gate.stockAsk(request); }
+  // The House's eligible list for the event lane's buys (release R2): stored in one step, read without a write.
+  stockEligibleSet(request) { return this.ctx.storage.transactionSync(() => this.gate.stockEligibleSet(request)); }
+  stockEligibleStatus() { return this.gate.stockEligibleStatus(); }
+  stockEligibleHas(request) { return this.gate.stockEligibleHas(request); }
   frontierReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierReserve(request)); }
   frontierSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierSettle(request)); }
   claudeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.claudeReserve(request)); }

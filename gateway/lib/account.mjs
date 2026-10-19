@@ -130,6 +130,10 @@ export const STOCK_MULTIPLE_MAX = 2n * MILLION;
 //: of Oct 10, 2026): a gateway backstop under the House's daily and drawdown stops, which live only in House code. Four
 //: is two full turnovers of a book at its 2x line; a var may lower it ("0" closes the route), never raise it.
 export const STOCK_DAY_MULTIPLE_MAX = 4n * MILLION;
+//: THE GOAL'S LINE FOR ONE NAME (the owner's goal of Oct 19, 2026, item 4: "<= 10% of equity per name"; release R2): an
+//: EVENT buy's name (`caps.isEventBuy`) is held, book-wide, to the single-stock share and never above this ceiling, in
+//: millionths, whatever STOCK_SINGLE_EQUITY_SHARE says: a code wall, as the other ceilings are.
+export const STOCK_EVENT_SHARE_MAX = 100000n;
 
 /** A share or multiple in millionths from 0 to `max`; `max` when unset or malformed, `max` when above it. */
 function capped(raw, max) {
@@ -157,9 +161,17 @@ export function stockDayCapMicro(limits, equityMicro) {
   return equityMicro > 0n ? equityMicro * limits.dayMultiple / MILLION : 0n;
 }
 
-/** One symbol's cap: its kind's share of equity (an "etf" the ETF share, anything else the single-stock share), rounded down. */
+/** An event buy's share of equity for its name (release R2): the single-stock share, never above `STOCK_EVENT_SHARE_MAX`. */
+export function stockEventShare(limits) {
+  return limits.stockShare < STOCK_EVENT_SHARE_MAX ? limits.stockShare : STOCK_EVENT_SHARE_MAX;
+}
+
+/**
+ * One symbol's cap: its kind's share of equity (an "etf" the ETF share, an "event" name `stockEventShare`, anything
+ * else the single-stock share), rounded down.
+ */
 export function stockSymbolCapMicro(limits, kind, equityMicro) {
-  return ofEquity(equityMicro, kind === 'etf' ? limits.etfShare : limits.stockShare);
+  return ofEquity(equityMicro, kind === 'etf' ? limits.etfShare : kind === 'event' ? stockEventShare(limits) : limits.stockShare);
 }
 
 /**

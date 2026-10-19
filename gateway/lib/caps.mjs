@@ -948,6 +948,203 @@ export function stockExposure(symbol, positions, orders, { ordersLimit = 500 } =
   return { symbolMicro, totalMicro, optionsMicro, openBuys };
 }
 
+// --- event-lane stock buys on the real account (release R2, gateway G2; PREREG-EVL-1 section 8) -----------------------
+// The owner's goal of Oct 19, 2026: one lane, event-driven single US common stocks, long only, at most 10% of equity in
+// any one name, at most 100% invested, no margin. The frozen pre-registration (docs/prereg/PREREG-EVL-1.md, section 8)
+// says how its real entries go: limit-on-open or limit-on-close orders (`opg` / `cls`) at 1.25 x the previous SIP close,
+// in WHOLE shares. Such a name is mostly NOT on STOCK_UNIVERSE (the lane trades whatever stock an event names), so while
+// STOCK_EVENT_BUYS is "on" (and STOCK_BUYS_REAL with it: that switch stops every real stock buy) the real account admits
+// one more kind of buy beside the list's: AN EVENT BUY, known by its own shape (`isEventBuy`: a buy whose time_in_force
+// is `opg` or `cls`; the list's buys are day orders) and judged by its own rules before any of the list's caps:
+// - its shape (`eventBuyOrder`): a US stock ticker that STOCK_UNIVERSE does not mark an ETF, a LIMIT order, `opg` or
+//   `cls`, a whole number of shares, a positive limit_price of at most four decimals; never notional, never extended
+//   hours, never a position_intent. Metered at qty x limit_price, rounded up, as every real stock buy is;
+// - THE HOUSE'S ELIGIBLE LIST for the New York day (POST /v1/stock/eligible with the House's runtime token; lib/gate.mjs
+//   `stockEligibleSet`): the names the House's universe test admitted for that session (PREREG-EVL-1 section 2: an
+//   operating company's common stock, listed, $3 and up, $1M of ADV). The gateway cannot tell an ETF or an ETN from a
+//   common stock by the venue's asset record, so only a name on the House's list goes, and only on the list's own day;
+//   it is checked when the buy arrives and again in the step that reserves it;
+// - ITS OWN CHECKS, read by this gateway with the real account's keys (`eventAssetError`, `eventBarFacts`), cached per
+//   symbol per New York day: `v2/assets/<symbol>` says class us_equity, status active, tradable, on NYSE, NASDAQ, AMEX,
+//   ARCA or BATS (never OTC); the SIP daily bars of the sessions before today put the previous close at $3 or more and
+//   the mean close x volume of the last 20 sessions at $1,000,000 or more;
+// - the limit at most 1.25 x that previous SIP close (`eventLimitError`): what the pre-registration's orders ask, never
+//   a chase past it;
+// - then every cap a real stock buy meets (`gate.reserveStock`), with ONE share for the name: the single-stock share of
+//   equity, never above the goal's 10% (`account.STOCK_EVENT_SHARE_MAX`, a code ceiling whatever
+//   STOCK_SINGLE_EQUITY_SHARE says), BOOK-WIDE: the name's long market value, its open buy orders, the buys this gateway
+//   admitted and the venue does not show yet, and this order; the whole book at most equity x min(STOCK_MAX_EQUITY_MULTIPLE,
+//   the account's multiplier); the account's buying power; the day's buys and order counts. The kill switch stops it
+//   as it stops every order.
+// A SALE of event shares is a close like any other (`realStockClose`, read fresh and serialized in the Gate): a market or
+// limit sale of shares held long, with any time_in_force the venue takes (`opg`, `cls` and `day` alike), never a short
+// sale. Nothing here is ever a short sale, a margin buy or a buy of a name the House did not list.
+
+//: The time_in_force values of an event buy: the opening and the closing auction. A buy with any other is not one.
+export const EVENT_TIFS = Object.freeze(['opg', 'cls']);
+//: The listing exchanges an event buy's asset may name (PREREG-EVL-1 section 2; never OTC).
+export const EVENT_EXCHANGES = Object.freeze(['NYSE', 'NASDAQ', 'AMEX', 'ARCA', 'BATS']);
+//: The previous SIP close an event buy's name needs ($3.00) and the mean close x volume of its last sessions ($1,000,000).
+export const EVENT_MIN_PRICE_PICO = 3n * PICO;
+export const EVENT_MIN_ADV_PICO = 1000000n * PICO;
+export const EVENT_ADV_SESSIONS = 20;
+//: An event buy's limit is at most 5/4 (1.25 x) of the previous SIP close.
+export const EVENT_LIMIT_NUM = 5n;
+export const EVENT_LIMIT_DEN = 4n;
+//: The most names one eligible list may carry (the lane's universe is computed for the issuers with events: tens a day).
+export const EVENT_LIST_MAX = 5000;
+//: An eligible list is for the New York day it is published on, or a session within this many days after it.
+export const EVENT_LIST_DAYS_AHEAD = 7;
+//: A whole share count as the venue takes it: 1 to 999,999,999, no decimals.
+const WHOLE_SHARES = /^[1-9]\d{0,8}$/;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** True when STOCK_EVENT_BUYS is "on": anything else, unset or a typo, admits no event buy (sales go either way). */
+export const stockEventBuysEnabled = (env = {}) => String(env.STOCK_EVENT_BUYS ?? '').trim().toLowerCase() === 'on';
+
+/** True when `body` is an event buy's shape: a buy whose time_in_force is one of the auctions' (`EVENT_TIFS`). */
+export const isEventBuy = body => Boolean(body) && typeof body === 'object' && body.side === 'buy'
+  && EVENT_TIFS.includes(body.time_in_force);
+
+/** The New York calendar day of an instant (`YYYY-MM-DD`): the day an eligible list and a cached reading belong to. */
+export function nyDay(at) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit',
+      day: '2-digit' }).format(new Date(at));
+  } catch {
+    return new Date(at).toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * A real-account EVENT BUY read as the auction order it must be (release R2): `{ symbol, qty, limit, micro, tif }` (`qty`
+ * whole shares in picounits, `limit` picodollars, `micro` qty x limit_price rounded up) or `{ error }`. `body` has passed
+ * `alpacaShapeError` and `realStockClose`; nothing of the account or the venue is read until this passes.
+ */
+export function eventBuyOrder(body) {
+  if (!isEventBuy(body)) return { error: 'An event buy is a buy in the opening or the closing auction (time_in_force "opg" or "cls").' };
+  const symbol = String(body.symbol || '');
+  if (!STOCK_SYMBOL.test(symbol)) return { error: 'An event buy names a US stock ticker (AAPL, BRK.B).' };
+  if (stockKind(symbol) === 'etf') {
+    return { error: `${symbol} is an ETF: the event lane buys common stocks only (an ETF is bought, if ever, as a day order on the list).` };
+  }
+  if (present(body, 'notional')) return { error: 'An event buy is sized in whole shares (qty), never in dollars (notional).' };
+  if (present(body, 'position_intent')) return { error: 'A stock order carries no position_intent: that field is an option order\'s.' };
+  if (body.type !== 'limit') {
+    return { error: 'An event buy is a limit order (limit-on-open or limit-on-close): a market order has no price of its own to meter it by.' };
+  }
+  if (present(body, 'extended_hours') && body.extended_hours !== false) {
+    return { error: 'An event buy goes in the exchange\'s auction, never in extended hours.' };
+  }
+  if (present(body, 'order_class') && body.order_class !== 'simple') return { error: 'An event buy is a simple order.' };
+  const rawQty = typeof body.qty === 'number' && Number.isSafeInteger(body.qty) ? String(body.qty) : body.qty;
+  if (typeof rawQty !== 'string' || !WHOLE_SHARES.test(rawQty)) {
+    return { error: 'An event buy\'s qty is a whole number of shares (the auctions take no fractional share).' };
+  }
+  const qty = parsePico(rawQty);
+  const rawLimit = plain(body.limit_price);
+  const limit = typeof rawLimit === 'string' && STOCK_LIMIT.test(rawLimit) ? parsePico(rawLimit) : null;
+  if (limit === null || limit <= 0n) return { error: 'An event buy needs a positive limit_price, at most four decimal places.' };
+  return { symbol, qty, limit, micro: picoToMicro(mulPico(qty, limit)), tif: body.time_in_force };
+}
+
+/**
+ * Why the venue's asset record does not admit an event buy of `symbol`, or null (PREREG-EVL-1 section 2): class
+ * us_equity, status active, tradable, listed on one of `EVENT_EXCHANGES`.
+ */
+export function eventAssetError(asset, symbol) {
+  if (!asset || typeof asset !== 'object' || Array.isArray(asset)) return `the venue has no asset record for ${symbol}`;
+  if (String(asset.symbol || '') !== symbol) return `the venue's asset record is not ${symbol}'s`;
+  if (asset.class !== 'us_equity') return `${symbol} is not a US equity (class ${JSON.stringify(String(asset.class ?? '')).slice(0, 24)})`;
+  if (asset.status !== 'active' || asset.tradable !== true) return `${symbol} is not active and tradable at the venue`;
+  if (!EVENT_EXCHANGES.includes(asset.exchange)) {
+    return `${symbol} is listed on ${JSON.stringify(String(asset.exchange ?? '')).slice(0, 24)}, not on ${EVENT_EXCHANGES.join(', ')}`;
+  }
+  return null;
+}
+
+/**
+ * What the SIP daily bars of `symbol` say for an event buy on New York day `today`: `{ prevClose, adv, sessions, last }`
+ * (picodollars: the last completed session's close and the mean close x volume of its last `EVENT_ADV_SESSIONS`
+ * sessions, rounded down) or `{ error, cap }` (`stock_price`, `stock_adv`: a definite refusal; `bars`: the reading is
+ * not one). Bars on `today` or later (a session still trading) are left out. Fails closed: a close or a volume that is
+ * not a number, two bars on one day, or fewer than `EVENT_ADV_SESSIONS` sessions refuse.
+ */
+export function eventBarFacts(bars, today, symbol) {
+  if (!Array.isArray(bars)) return { error: `the venue's daily bars of ${symbol} were not a list`, cap: 'bars' };
+  const rows = [];
+  const days = new Set();
+  for (const bar of bars) {
+    const at = Date.parse(String(bar?.t ?? ''));
+    if (!Number.isFinite(at)) return { error: `a daily bar of ${symbol} has no time`, cap: 'bars' };
+    const day = nyDay(at);
+    if (day >= today) continue;
+    if (days.has(day)) return { error: `the venue gave two daily bars of ${symbol} on ${day}`, cap: 'bars' };
+    days.add(day);
+    const close = parsePico(bar.c);
+    const volume = parsePico(bar.v);
+    if (close === null || close <= 0n || volume === null || volume < 0n) {
+      return { error: `the daily bar of ${symbol} on ${day} has no readable close or volume`, cap: 'bars' };
+    }
+    rows.push({ day, close, volume });
+  }
+  rows.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+  if (rows.length < EVENT_ADV_SESSIONS) {
+    return { error: `${symbol} has ${rows.length} SIP daily bars before ${today}: an event buy needs ${EVENT_ADV_SESSIONS} sessions of them`, cap: 'stock_adv' };
+  }
+  const last = rows.slice(-EVENT_ADV_SESSIONS);
+  const prevClose = last[last.length - 1].close;
+  // Close x volume exactly (picodollars x picounits / PICO), summed, then the mean rounded DOWN: never above what it is.
+  const adv = last.reduce((sum, row) => sum + (row.close * row.volume) / PICO, 0n) / BigInt(EVENT_ADV_SESSIONS);
+  if (prevClose < EVENT_MIN_PRICE_PICO) {
+    return { error: `${symbol}'s previous SIP close of $${picoUnits(prevClose)} is under the event lane's $3.00`, cap: 'stock_price' };
+  }
+  if (adv < EVENT_MIN_ADV_PICO) {
+    return { error: `${symbol}'s ${EVENT_ADV_SESSIONS}-session SIP dollar volume of $${adv / PICO} a day is under the event lane's $1,000,000`, cap: 'stock_adv' };
+  }
+  return { prevClose, adv, sessions: rows.length, last: last[last.length - 1].day };
+}
+
+/** Why an event buy's limit (picodollars) is above 1.25 x the previous SIP close (picodollars), or null. */
+export function eventLimitError(limit, prevClose, symbol = 'it') {
+  if (typeof limit !== 'bigint' || typeof prevClose !== 'bigint' || prevClose <= 0n) return `no previous SIP close of ${symbol} to bound the limit by`;
+  if (limit * EVENT_LIMIT_DEN > prevClose * EVENT_LIMIT_NUM) {
+    return `an event buy of ${symbol} at $${picoUnits(limit)} is above 1.25 x its previous SIP close of $${picoUnits(prevClose)} ` +
+           `($${picoUnits(prevClose * EVENT_LIMIT_NUM / EVENT_LIMIT_DEN)}): the pre-registered limit is never chased past`;
+  }
+  return null;
+}
+
+/**
+ * THE HOUSE'S ELIGIBLE LIST as POSTed (`{ day, symbols }`), read against the New York day `today`: `{ day, symbols }`
+ * (the symbols sorted, each once) or `{ error }`. The day is `today` or a later one within `EVENT_LIST_DAYS_AHEAD`; at
+ * most `EVENT_LIST_MAX` names, each a US stock ticker that STOCK_UNIVERSE does not mark an ETF; no name twice.
+ */
+export function eligibleList(body, today) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'An eligible list is a JSON object {day, symbols}.' };
+  const unknown = Object.keys(body).find(key => key !== 'day' && key !== 'symbols');
+  if (unknown !== undefined) return { error: `An eligible list carries only day and symbols, not ${JSON.stringify(unknown.slice(0, 40))}.` };
+  const { day, symbols } = body;
+  if (typeof day !== 'string' || !ISO_DAY.test(day) || Number.isNaN(Date.parse(`${day}T12:00:00Z`))) {
+    return { error: 'An eligible list names its New York day as YYYY-MM-DD.' };
+  }
+  const ahead = new Date(Date.parse(`${today}T12:00:00Z`) + EVENT_LIST_DAYS_AHEAD * 86400000).toISOString().slice(0, 10);
+  if (day < today || day > ahead) return { error: `An eligible list is for ${today} or a day up to ${ahead}, not ${day}.` };
+  if (!Array.isArray(symbols) || symbols.length > EVENT_LIST_MAX) {
+    return { error: `An eligible list's symbols are a list of at most ${EVENT_LIST_MAX} tickers.` };
+  }
+  const seen = new Set();
+  for (const symbol of symbols) {
+    if (typeof symbol !== 'string' || !STOCK_SYMBOL.test(symbol)) {
+      return { error: `${JSON.stringify(String(symbol).slice(0, 12))} is not a US stock ticker.` };
+    }
+    if (stockKind(symbol) === 'etf') return { error: `${symbol} is an ETF: the event lane lists common stocks only.` };
+    if (seen.has(symbol)) return { error: `${symbol} is listed twice.` };
+    seen.add(symbol);
+  }
+  return { day, symbols: [...seen].sort() };
+}
+
 // --- the practice account ------------------------------------------------------------------------
 // `alpaca-paper` is never metered (no money is behind it), but since Sept 25, 2026 its OPTION orders
 // are held to the same defined-risk shapes: until then an order to the practice account was signed
