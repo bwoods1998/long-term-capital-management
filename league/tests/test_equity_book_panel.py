@@ -309,7 +309,7 @@ class PanelCase(unittest.TestCase):
 @unittest.skipUnless(APPLIED, "package H's patch 12 is not applied to league/equity (league/swarm/e4_patches/H.md)")
 class ThePatchIsWhole(unittest.TestCase):
     def test_no_panel_path_without_b8_and_b9(self):
-        self.assertEqual(K.BOOKS, {"panel": "league.xs.book"})
+        self.assertEqual(K.BOOKS, {"panel": "league.xs.book", "event": "league.events.book"})
         self.assertIs(K.book_for("panel"), adapter)
         self.assertIsNone(K.book_for("equity"))
         self.assertIsNone(K.book_for(None))

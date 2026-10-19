@@ -49,35 +49,45 @@ def differences(a, b, path=()):
 
 class TheRow(unittest.TestCase):
     def test_the_row_is_off_and_it_alone_moved(self):
+        """(Release R2 came after it and moved its own rows, the event block and the stock share, both set back by
+        `X.before_r2`; the stop is read on that table, and R2 left the row False.)"""
         self.assertIs(CONSTITUTION["equity_money"]["enabled"], False)
         self.assertEqual(equity_money_problems(), [], "False is inside its choices: the stop is a constitution-only change")
         self.assertIs(M.Table.from_constitution().equity.enabled, False)
-        before = X.opens_on()
-        self.assertEqual(differences(CONSTITUTION, before), [("equity_money", "enabled")])
+        stop, before = X.before_r2(), X.opens_on()
+        self.assertEqual(differences(stop, before), [("equity_money", "enabled")])
         self.assertEqual((money_digest(before), digest(before)), ON,
                          "with the row set back the constitution is the one before, to the last hex")
-        self.assertEqual((money_digest(), digest()), OFF)
+        self.assertEqual((money_digest(stop), digest(stop)), OFF)
         self.assertEqual(digest(), PINNED_DIGEST)
+        self.assertEqual(sorted(differences(CONSTITUTION, stop)),
+                         [("equity_money", "event"), ("equity_money", "position_share", "stock")],
+                         "R2 moved its own two rows and nothing else of the stop's table")
 
     def test_every_pair_moved_once_and_the_older_pins_hold_with_the_row_set_back(self):
         self.assertEqual((money_digest(), PINNED_DIGEST), X.DIGESTS[X.in_force()])
         self.assertEqual(X.DIGESTS_OPENS_ON[X.in_force()], ON)
+        self.assertEqual(X.DIGESTS_STOP[X.in_force()], OFF, "the stop's own pins, R2's rows set back")
         for pair in X.CANDIDATES:
             at = X.constitution_at(*pair)
             self.assertIs(at["equity_money"]["enabled"], False)
             self.assertEqual((money_digest(at), digest(at)), X.DIGESTS[pair], pair)
+            stop = X.before_r2(at)
+            self.assertEqual((money_digest(stop), digest(stop)), X.DIGESTS_STOP[pair], f"{pair}: before R2")
             back = X.opens_on(at)
             self.assertEqual((money_digest(back), digest(back)), X.DIGESTS_OPENS_ON[pair], f"{pair}: before the row")
             # Every older table's helper sets the row back too: E4's step two is on its own pins as before.
             self.assertIs(X.before_opf1(at)["equity_money"]["enabled"], X.ENABLED_BEFORE)
-        self.assertEqual(set(X.DIGESTS.values()) & set(X.DIGESTS_OPENS_ON.values()), set(), "every pin moved with the row")
+        self.assertEqual(set(X.DIGESTS_STOP.values()) & set(X.DIGESTS_OPENS_ON.values()), set(), "every pin moved with the row")
+        self.assertEqual(set(X.DIGESTS.values()) & set(X.DIGESTS_STOP.values()), set(), "and again with R2's")
         self.assertEqual(len({money for money, _ in X.DIGESTS.values()}), len(X.CANDIDATES), "every pair is its own")
         # The constitution in force is untouched by the helpers (each works on a copy).
         self.assertIs(CONSTITUTION["equity_money"]["enabled"], False)
 
     def test_the_documents_name_the_digests_in_force(self):
         line = X.block("operations")[-1]
-        self.assertIn(f"Money digest `{OFF[0][:8]}`, full digest `{OFF[1][:8]}`", line)
+        money, full = X.DIGESTS[X.in_force()]
+        self.assertIn(f"Money digest `{money[:8]}`, full digest `{full[:8]}`", line, "the table in force: R2's")
         self.assertIn(f"`{X.DIGESTS[X.REFERENCE][0][:8]}` / `{X.DIGESTS[X.REFERENCE][1][:8]}`", line,
                       "the pair's rollback under the stop is the grid's own pin")
         for kind in X.BLOCKS:
@@ -88,6 +98,13 @@ class TheGrant(StandingCase):
     """The stop is a money rule (no row of `equity_money` is in `RISK_FREE`): a grant ratified on the table before it
     holds nothing after the owner's deploy until the standing grant re-ratifies it at the House's start, on the owner's
     release change only; the rollback (True) is the digest before, ratified the same way."""
+
+    def setUp(self):
+        super().setUp()
+        # The stop as it shipped: release R2's rows set back for every test of this class (`X.r2_back`).
+        back = X.r2_back()
+        back.__enter__()
+        self.addCleanup(back.__exit__, None, None, None)
 
     def pinned_on(self):
         with patch.dict(CONSTITUTION["equity_money"], enabled=True):

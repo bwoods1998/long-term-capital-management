@@ -83,6 +83,22 @@ the re-fetch found different (`audit` "mismatch") is a twin `note` (the book rai
 swarm store's kv `equity_twins` ({key: record}, `EQUITY_TWINS_KEY`); the `equity_twins` House job (league/ops/registry.py)
 judges every closed lot without a final record, reading the live book read-only. Nothing here moves a band, a forward
 record, a trial count or money.
+
+THE EVENT TWINS (release R2; PREREG-EVL-1 section 5, the R2 spec's "Replay and Done"; `event_twin`). An EVENT lot (lane
+"event": a real-money position of a pre-registered event program, league/events/book.py) is set beside THE SHADOW'S
+OWN AUCTION PRICES, never E1's closed-form model: the event lane's store (`<state>/events/events.sqlite`, read-only)
+keeps, in `marks`, the listing exchange's opening (`open`) or closing (`close`) cross print the shadow fills at, and the
+first trade of a session (`first`) for the ladder's late sale (league/events/score.py `tape_print`). Its record (same
+key `eq:<lid>`, `kind` "event") carries the GAP PER SIDE, signed, POSITIVE WHEN THE REAL FILL WAS WORSE than the
+shadow's price: `entry_gap_bp` = (real entry / shadow entry - 1) x 10,000 and `exit_gap_bp` = (1 - real exit / shadow
+exit) x 10,000 (also as `entry_slip_bp` and `exit_slip_bp`, the prints being an event lot's official prices), the
+prints themselves (`entry_print`, `exit_print`, their `*_source`), and `gap_bp` in E1's sense (the live net return
+minus the shadow's at the same shares, fees and dividends, over two: a side, negative when real money did worse). The
+Done reader of the event lane (PREREG-EVL-1 section 9: real fills within 15 bp of the shadow's auction prices, the
+signed mean per side) reads `entry_gap_bp` and `exit_gap_bp`. A print the store does not hold yet waits (the lane
+reads the tape 16 minutes after each auction and settles its intents at 20:30 ET); once the exit day is
+`EQUITY_SETTLE_SESSIONS` sessions past a missing one is final "no_bar" (the shadow printed no price at that auction, or
+the real lot sold at another one), with why.
 """
 
 from __future__ import annotations
@@ -818,6 +834,132 @@ def equity_twin(lot: Mapping[str, Any], bars: Mapping[str, Mapping[str, Any]], *
     return rec
 
 
+#: RELEASE R2: an event lot's lane (league/events/book.py `LANE`; a test holds them equal) and the lane's store under the
+#: House's state root (release R1), whose `marks` hold the shadow's auction prices.
+EVENT_LANE = "event"
+EVENT_DB = Path("events") / "events.sqlite"
+#: The ladder's late sale (league/events/book.py `LATE_TAG`, a lot's `reason`): set beside the session's first trade.
+EVENT_LATE = "evl_late"
+
+
+def event_twin(lot: Mapping[str, Any], marks: Mapping[tuple[str, str], Mapping[str, Any]] | None, *,
+               settled: bool = True, at: float | None = None) -> dict[str, Any]:
+    """THE EVENT TWIN of one closed event lot (the module docstring's THE EVENT TWINS). `lot`: its `eq_lots` row.
+    `marks`: {(ISO day, label): the lane's `marks` row of the lot's symbol ({px, source})}, label "open", "close" or
+    "first"; None when there is no event lane store to read. `settled`: the exit day is `EQUITY_SETTLE_SESSIONS`
+    sessions past (a missing print is then final "no_bar"). Pure."""
+    lid = lot.get("lid")
+    symbol = str(lot.get("symbol") or "")
+    version = lot.get("version")
+    entry_at, exit_at = lot.get("entry_at"), lot.get("exit_at")
+    rec: dict[str, Any] = {
+        "key": equity_key(lid) if str(lid).lstrip("-").isdigit() else None, "kind": "event", "lid": lid,
+        "family": lot.get("family"), "instance": lot.get("instance"),
+        "version": int(version) if str(version).isdigit() else None, "lane": lot.get("lane"), "symbol": symbol,
+        "class": lot.get("class"), "opened_day": lot.get("opened_day"),
+        "exit_day": lot.get("exit_day") or ny_day(lot.get("closed_at")), "entry_at": entry_at, "exit_at": exit_at,
+        "exit_label": "first" if str(lot.get("reason") or "") == EVENT_LATE else exit_at, "k": None, "hs_bp": None,
+        "status": None, "final": False, "why": None, "note": None,
+        "judged_at": None if at is None else dt.datetime.fromtimestamp(float(at), dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
+        "live_return": None, "twin_return": None, "gap_bp": None, "entry_official": None, "exit_official": None,
+        "entry_print": None, "exit_print": None, "entry_print_source": None, "exit_print_source": None,
+        "entry_gap_bp": None, "exit_gap_bp": None, "entry_slip_bp": None, "exit_slip_bp": None, "live": None,
+        "twin": None, "bh": None, "exit_agrees": None,
+        "basis": "the event lane's shadow auction prices (league/events/score.py `tape_print`, the lane's marks)"}
+
+    def unpriceable(why: str, *, final: bool = True) -> dict[str, Any]:
+        return {**rec, "status": "unpriceable", "final": final, "why": why}
+
+    if rec["key"] is None:
+        return unpriceable("the lot has no id")
+    if str(lot.get("status") or "") != "closed":
+        return unpriceable("the lot is not closed", final=False)
+    try:
+        info = json.loads(lot.get("info") or "{}") if not isinstance(lot.get("info"), Mapping) else dict(lot["info"])
+    except (TypeError, ValueError):
+        info = {}
+    info = info if isinstance(info, Mapping) else {}
+    notional, cash = _dec(lot.get("entry_notional")), _dec(lot.get("cash"))
+    opened_qty = _dec(lot.get("opened_qty"))
+    sold = _dec(info.get("exit_qty")) if info.get("exit_qty") is not None else opened_qty
+    fees, div = _dec(lot.get("fees") or "0"), _dec(lot.get("div") or "0")
+    entry_px, exit_px = _dec(lot.get("entry_px")), _dec(lot.get("exit_px"))
+    opened_day, exit_day = str(rec["opened_day"] or ""), str(rec["exit_day"] or "")
+    if entry_at not in FILL_POINTS or exit_at not in FILL_POINTS:
+        return unpriceable(f"its fill points ({entry_at}, {exit_at}) are not the open or the close")
+    if None in (notional, cash, opened_qty, sold, fees, div, entry_px, exit_px) or notional <= 0 or opened_qty <= 0 \
+            or sold <= 0 or entry_px <= 0 or exit_px <= 0:
+        return unpriceable("the lot's notional, quantities, cash, fees, dividends or prices cannot be read")
+    live_return = cash / notional
+    rec["live_return"] = _round(live_return, 6)
+    rec["live"] = {"pnl": _round(cash, 2), "max_loss": _round(notional, 2), "r": _round(live_return, 6),
+                   "entry_px": _round(entry_px, 6), "exit_px": _round(exit_px, 6), "fees": _round(fees, 2),
+                   "div": _round(div, 2), "exit": exit_at}
+    if marks is None:
+        return {**rec, "status": "no_bar", "final": bool(settled),
+                "why": "no event lane store holds the shadow's auction prices"}
+    sides = {}
+    for side, day, label in (("entry", opened_day, entry_at), ("exit", exit_day, rec["exit_label"])):
+        row = marks.get((day, str(label)))
+        px = _dec((row or {}).get("px"))
+        sides[side] = (px if px is not None and px > 0 else None, row, f"{day} ({label})")
+    missing = [where for px, row, where in sides.values() if px is None]
+    if missing:
+        none = [where for px, row, where in sides.values() if px is None and row is not None]
+        why = (f"the shadow printed no auction price of {symbol} on {', '.join(none)}" if none and len(none) == len(missing)
+               else f"no shadow auction price of {symbol} in the event lane's store on {', '.join(missing)}")
+        return {**rec, "status": "no_bar", "final": bool(settled or len(none) == len(missing)), "why": why}
+    (p_in, row_in, _), (p_out, row_out, _) = sides["entry"], sides["exit"]
+    entry_gap = (entry_px / p_in - 1) * Decimal(10_000)
+    exit_gap = (1 - exit_px / p_out) * Decimal(10_000)
+    cost = opened_qty * p_in
+    twin_net = sold * p_out - fees + div - cost
+    twin_return = twin_net / cost
+    gap_bp = (live_return - twin_return) / 2 * Decimal(10_000)
+    bh_net = notional / p_in * (sold / opened_qty) * p_out + div - notional
+    return {**rec, "status": "priced", "final": True, "why": None, "twin_return": _round(twin_return, 6),
+            "gap_bp": _round(gap_bp, 2), "entry_official": float(p_in), "exit_official": float(p_out),
+            "entry_print": float(p_in), "exit_print": float(p_out),
+            "entry_print_source": str((row_in or {}).get("source") or ""),
+            "exit_print_source": str((row_out or {}).get("source") or ""),
+            "entry_gap_bp": _round(entry_gap, 2), "exit_gap_bp": _round(exit_gap, 2),
+            "entry_slip_bp": _round(entry_gap, 2), "exit_slip_bp": _round(exit_gap, 2), "exit_agrees": True,
+            "twin": {"pnl": _round(twin_net, 2), "max_loss": _round(cost, 2), "r": _round(twin_return, 6),
+                     "entry_px": float(p_in), "exit_px": float(p_out), "shares": str(opened_qty),
+                     "fees": _round(fees, 2), "div": _round(div, 2), "exit": exit_at},
+            "bh": {"usd": _round(bh_net, 2), "return": _round(bh_net / notional, 6),
+                   "basis": "the entry notional held from the shadow's entry print to its exit print, cost-free"}}
+
+
+def read_event_marks(root: str | Path, lots: Sequence[Mapping[str, Any]]) -> dict[str, dict[tuple[str, str], dict]] | None:
+    """{symbol: {(day, label): {px, source}}} of the event lane's `marks` for the closed event lots' symbols on their
+    entry and exit days, read-only; None when the House holds no event lane store. Raises `sqlite3.Error` when the store
+    cannot be read (the lots wait)."""
+    path = Path(root) / EVENT_DB
+    if not path.is_file():
+        return None
+    wanted: dict[str, set[str]] = {}
+    for lot in lots:
+        if str(lot.get("lane") or "") != EVENT_LANE:
+            continue
+        days = wanted.setdefault(str(lot.get("symbol") or "").upper(), set())
+        days.update(d for d in (lot.get("opened_day"), lot.get("exit_day") or ny_day(lot.get("closed_at"))) if d)
+    out: dict[str, dict[tuple[str, str], dict]] = {}
+    db = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
+    db.row_factory = sqlite3.Row
+    try:
+        for symbol, days in wanted.items():
+            days_ = sorted(days)
+            marks = ",".join("?" * len(days_))
+            for r in db.execute(f"SELECT symbol, day, label, px, source FROM marks WHERE symbol=? AND day IN ({marks})",
+                                (symbol, *days_)):
+                out.setdefault(symbol, {})[(str(r["day"]), str(r["label"]))] = {"px": r["px"], "source": r["source"]}
+    finally:
+        db.close()
+    return out
+
+
 def equity_records(store: Any) -> dict[str, dict[str, Any]]:
     """Every equity twin record ({"eq:<lid>": record}); {} when none or unreadable."""
     try:
@@ -908,6 +1050,16 @@ def equity_round(root: str | Path, *, now: float, store: Any, k: float = 1.0,
     panel_hs = panel_reader(root)
     judged: dict[str, dict[str, Any]] = {}
     pending: dict[str, int] = {}
+    # RELEASE R2: the event lots' shadow prints, read once (only when one is waiting for a record).
+    waiting = [lot for lot in book.get("lots") or [] if str(lot.get("lane") or "") == EVENT_LANE
+               and str(lot.get("lid", "")).isdigit() and (known.get(equity_key(lot["lid"])) or {}).get("final") is not True]
+    marks: dict[str, Any] | None = None
+    unread = ""
+    if waiting:
+        try:
+            marks = read_event_marks(root, waiting)
+        except sqlite3.Error as exc:
+            unread = f"the event lane's store cannot be read ({type(exc).__name__})"
     for lot in book.get("lots") or []:
         try:
             key = equity_key(lot["lid"])
@@ -916,8 +1068,15 @@ def equity_round(root: str | Path, *, now: float, store: Any, k: float = 1.0,
         if (known.get(key) or {}).get("final") is True:
             continue
         exit_day = lot.get("exit_day") or ny_day(lot.get("closed_at"))
-        rec = equity_twin(lot, (book.get("bars") or {}).get(str(lot.get("symbol") or ""), {}), k=k,
-                          settled=settled_after(exit_day, now), at=now, panel_hs=panel_hs)
+        if str(lot.get("lane") or "") == EVENT_LANE:
+            if unread:
+                pending[unread] = pending.get(unread, 0) + 1
+                continue
+            rec = event_twin(lot, None if marks is None else marks.get(str(lot.get("symbol") or "").upper(), {}),
+                             settled=settled_after(exit_day, now), at=now)
+        else:
+            rec = equity_twin(lot, (book.get("bars") or {}).get(str(lot.get("symbol") or ""), {}), k=k,
+                              settled=settled_after(exit_day, now), at=now, panel_hs=panel_hs)
         if rec["final"]:
             judged[key] = rec
         else:
@@ -967,4 +1126,5 @@ def run(ctx: Any) -> dict[str, Any]:
 __all__ = ["Twins", "PUPPET", "PUPPET_SHA", "TWINS_KEY", "ATTEMPT_KEY", "GATE_REASON", "FINAL", "plan", "judge", "job_for",
            "read_live", "records", "cfg", "twin_exit", "live_exit", "expiry_close", "sessions", "agent",
            "EQUITY_TWINS_KEY", "EQUITY_STATUSES", "EQUITY_SETTLE_SESSIONS", "EQUITY_BH_BASIS", "equity_key",
-           "equity_twin", "equity_records", "read_equity", "settled_after", "equity_round", "run", "panel_reader"]
+           "equity_twin", "equity_records", "read_equity", "settled_after", "equity_round", "run", "panel_reader",
+           "EVENT_LANE", "EVENT_DB", "EVENT_LATE", "event_twin", "read_event_marks"]

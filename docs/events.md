@@ -64,7 +64,10 @@ and writes every real fill to `real_fills`, from which demotion and Sized are co
 `screen.py` (the judge), `report.py` (the daily one-screen report), `house.py` (the lane on the House: its scheduler),
 `__main__.py` (the CLI: `record`, `backfill`, `decide-open`, `decide-close`, `catchup`, `tickers`, `equity`, `score`,
 `screen`, `report`). The judges (`programs.py`, `verdicts.py`, `score.py`, `screen.py`) and `docs/prereg/` are behind
-`league/ci.py`'s FORBIDDEN wall from release R1: no role changes them and the House's updater never ships one.
+`league/ci.py`'s FORBIDDEN wall from release R1: no role changes them and the House's updater never ships one. Release
+R2's real-money side: `book.py` (the equity book's event kind's rules: the money rows, the bands, the real-money picks,
+the limit, the size target, the open-risk weight, the exit plan, the eligible list) and `proof.py` (the auction paper
+proof).
 
 ## Where it runs (shadow)
 
@@ -101,3 +104,22 @@ over the lane's own line (`events.verdict_usd_day`, $5 a New York day): a READ e
 section 4 lets it. The lane writes a receipt for every task in the store and its health to `<state>/events/lane.json`.
 How to switch it on, migrate the desktop's store (`scripts/evl_migrate.py`) and stop it:
 [operations](operations.md), "The event lane on the House".
+
+## Real money (release R2; not yet deployed)
+
+[PREREG-EVL-3](prereg/PREREG-EVL-3.md) (the owner's goal as re-set at 05:15Z Oct 19, 2026): VERSION 2 of each of the
+nine seatable programs trades real money from its first event at LEARNING size, with the full-size shadow beside it;
+version 1 is a shadow record and never trades. The bands are the lane's (its store's `bands` table: learning from birth,
+Probe after a passed look, Sized, retired), counted in settled events from its looks and the real fills the House writes
+back (`real_fills`). The House trades them through its EquityBook (its event kind: league/equity/live.py `_event_step`,
+the rules in `book.py`), on the money rows `equity_money.event` of league/constitution.py: learning 2% of equity a
+position (one share at most 5%), Probe 5%, Sized 10%, at most 8 open a learning program (Probe 6, Sized 8), the
+book-wide 10% a name, whole shares, entries limit-on-open / limit-on-close at 1.25 x the previous SIP close, exits
+market-on-close (market-on-open for the three overnight rows) with PREREG-EVL-1 section 5's fallback ladder, open risk
+value x max(0.10, 1.65 x sigma60 x sqrt(h)) in the one loss budget ($400 net in any 20 sessions, $800 net in total),
+ROOM in the order Sized, Probe, learning, then the tables' order. The real-money decision reads the lane's store, and
+only events stored and verdicts answered before its decision time (PREREG-EVL-1 section 3). The old lanes'
+`equity_money.enabled` stays False; nothing goes until the gateway's `STOCK_EVENT_BUYS` is on and the auction paper
+proof on the practice account has passed its BUY stage. How it runs, is read, is deployed and is rolled back:
+[operations.md](operations.md), **The event lane's real money on the House (release R2)**. Each real fill is set beside
+the shadow's own auction price, per side (league/ops/twins.py `event_twin`).

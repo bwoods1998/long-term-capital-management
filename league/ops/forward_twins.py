@@ -595,7 +595,9 @@ def read_book(live_path: str | Path) -> dict[str, Any]:
     {instance: [its `eq_lots` rows by lid]}, "intents": {instance: [its buy, sell and cancel rows by iid, each with
     its lot's symbol and day]}, "exits": {instance: [the House's own planned exits, its "house_exit" rows by iid]},
     "decision_day": the day of the book's `eq_decision`, "since": {instance: the day its band was last set, the
-    book's `eq_band_since` (a revival sets it)}}. A book from before E1 (no `eq_instances`) is empty."""
+    book's `eq_band_since` (a revival sets it)}}. A book from before E1 (no `eq_instances`) is empty. An EVENT program's
+    instance and lots (release R2: lane "event") are left out: no forward replay is made of a pre-registered event rule
+    (its shadow is the event lane's own)."""
     from . import guard
 
     def read(db: sqlite3.Connection) -> dict[str, Any]:
@@ -605,16 +607,20 @@ def read_book(live_path: str | Path) -> dict[str, Any]:
         if "eq_instances" not in tables:
             return out
         out["instances"] = guard.rows(db, "SELECT id, family, version, lane, run_sha, band, last_decided_day, "
-                                          "created_at, retired_at FROM eq_instances ORDER BY id")
+                                          "created_at, retired_at FROM eq_instances WHERE COALESCE(lane, '')<>'event' "
+                                          "ORDER BY id")
+        known = {str(row["id"]) for row in out["instances"]}
         if "eq_lots" in tables:
             for lot in guard.rows(db, "SELECT lid, instance, symbol, entry_at, opened_day, status, exit_at, exit_day, "
-                                      "iid, tag FROM eq_lots ORDER BY lid"):
+                                      "iid, tag FROM eq_lots WHERE COALESCE(lane, '')<>'event' ORDER BY lid"):
                 out["lots"].setdefault(str(lot["instance"]), []).append(lot)
             if "eq_intents" in tables:
                 for row in guard.rows(db, _INTENTS_SQL.format(where="")):
-                    out["intents"].setdefault(str(row["instance"]), []).append(row)
+                    if str(row["instance"]) in known:
+                        out["intents"].setdefault(str(row["instance"]), []).append(row)
                 for row in guard.rows(db, _EXITS_SQL):
-                    out["exits"].setdefault(str(row["instance"]), []).append(row)
+                    if str(row["instance"]) in known:
+                        out["exits"].setdefault(str(row["instance"]), []).append(row)
         if "kv" in tables:
             decision = _kv(db, "eq_decision")
             out["decision_day"] = str(decision.get("day")) if isinstance(decision, Mapping) and decision.get("day") \

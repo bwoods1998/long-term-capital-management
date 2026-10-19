@@ -851,6 +851,18 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
   opening order; exits always go on.
 - **Capital flows are the owner's.** The publisher and the scoreboard read the account's funding
   activities and net out deposits and withdrawals; the daily stop and the drawdown peak do the same.
+- **The event lane's real money** (the owner's goal as re-set at 05:15Z Oct 19, 2026; PREREG-EVL-3; release R2, built
+  on `r2/gateway` and `r2/house`, not deployed; [events.md](events.md)). Version 2 of each pre-registered event program
+  (never a swarm family; version 1 never trades) trades real money from its first event through the EquityBook's EVENT
+  KIND, at the band the lane's store gives it: learning (2% of equity a position, one share at most 5%), Probe (5%),
+  Sized (10%), retired (none); whole shares, limit-on-open / limit-on-close buys at 1.25 x the previous SIP close,
+  market-on-close (or next-open) sales with the pre-registered fallback ladder; at most 10% of equity a name book-wide,
+  the book at most 100% invested, no margin; open risk value x max(0.10, 1.65 x sigma60 x sqrt(h)) inside the one loss
+  budget; ROOM in the order Sized, Probe, learning. Promotion, Sized, demotion and retirement are the lane's, from its
+  looks and the real fills the House writes back. Its own switch (`equity_money.event.enabled`) leaves the old lanes
+  exits only, an auction paper proof on the practice account gates its first buy, and the gateway admits a name only
+  from the House's eligible list of the day and its own checks (`STOCK_EVENT_BUYS`, the owner's step). The rules are the
+  pre-registrations'; [operations.md](operations.md) has the rest.
 
 ## Compute
 

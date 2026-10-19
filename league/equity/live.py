@@ -274,6 +274,10 @@ MAX_EXIT_REFUSALS = 3
 #: its window's cut-off: never an entry's end, never one of the `MAX_EXIT_REFUSALS` that carry an exit to the next
 #: session (the owner is told once a day a lot when an exit met `MAX_EXIT_REFUSALS` of them).
 RETRY_CAPS = ("positions", "orders", "equity", "stock_close")
+#: ... and an EVENT buy's own (release R2, gateway G2): its asset or its bars could not be read (424 `asset`, `bars`),
+#: or the gateway holds no eligible list of the day yet (403 `stock_eligible`: the book publishes it again). Nothing was
+#: sent; it goes again next minute until its auction's cut-off.
+EVENT_RETRY_CAPS = RETRY_CAPS + ("asset", "bars", "stock_eligible")
 #: THE CLOSE WINDOW's wait (A2: close exits, then close entries, sized on the cash after the exits): its entries wait
 #: this long after `close_send` for the window's exits to fill, then go on the cash there is (the open window's
 #: `exit_wait_s` is 120 s of fifteen minutes; this is one House minute of the close's four and a half).
@@ -291,6 +295,23 @@ DECIDE_MAX_ERRORS = 25
 #: RELEASE E4. The book's own decider kind (league/equity/child.py); an instance of another kind is asked through its
 #: parent-side adapter (`kinds.BOOKS`).
 EQUITY_KIND = "equity"
+#: The panel kind (release E4: league/xs/book.py) and THE EVENT KIND (release R2: league/events/book.py). Every dispatch
+#: that once read "not the book's own kind" as the panel names its kind now (the map of R2: `_decide`, `_seat_step`,
+#: `_sleeve_share`, the pools, `_cut_waits`, `_decide_counts`, `_seat_block`): an event instance is never the panel's.
+PANEL_KIND = "panel"
+EVENT_KIND = "event"
+#: An event lot's lane (league/events/book.py `LANE`; a test holds them equal, so this module names it without importing
+#: league/events) and the weight a lot of it counts at when its own cannot be read or it is held past its scheduled exit
+#: (`book.STRICT_WEIGHT`: the House's stock floor before release R2).
+EVENT_LANE = "event"
+EVENT_STRICT_WEIGHT = Decimal("0.40")
+#: The bands an event program trades in (league/events/book.py `LIVE_BANDS`, PREREG-EVL-3 section 2; a test holds them
+#: equal): learning from birth, Probe, Sized.
+EVENT_LIVE_BANDS = ("learning", "probe", "sized")
+#: `eq_orders.tif` and `eq_orders.otype` (release R2: an auction order's time in force, `opg` or `cls`, and a market
+#: sale's type), added to a state from before it by these statements, guarded by PRAGMA table_info as `kind` is.
+ORDER_COLUMNS_DDL = {"tif": "ALTER TABLE eq_orders ADD COLUMN tif TEXT NOT NULL DEFAULT 'day'",
+                     "otype": "ALTER TABLE eq_orders ADD COLUMN otype TEXT NOT NULL DEFAULT 'limit'"}
 #: `eq_instances.kind`, added to a state from before release E4 by this statement, guarded by PRAGMA table_info and
 #: by reading another first open's "duplicate column name" as done (league/xs/book.py `INSTANCE_KIND_DDL` says the same
 #: words; a test holds the two equal).
@@ -464,25 +485,59 @@ def probe_figures(rows: Callable[..., list], *, weights: Mapping[str, Decimal]) 
     programs: set[str] = set()
     closes: list[tuple[float, str | None, Decimal]] = []
     risk = ZERO
-    for r in rows("SELECT family, class, qty, entry_px, mark, status, cash, exit_day, closed_at, probe FROM eq_lots "
-                  "WHERE substr(instance, -2)=?", (REAL_SUFFIX,)):
+    for r in rows("SELECT family, class, qty, entry_px, mark, status, cash, exit_day, closed_at, probe, lane, info FROM "
+                  "eq_lots WHERE substr(instance, -2)=?", (REAL_SUFFIX,)):
         if r["status"] == LOT_CLOSED:
-            if int(r["probe"] or 0) == 1:
+            # (Release R2: an EVENT lot's close counts whatever its band was, Probe or Sized: the goal's loss budget is
+            # every real event's, PREREG-EVL-1 section 8.)
+            if int(r["probe"] or 0) == 1 or r["lane"] == EVENT_LANE:
                 closes.append((float(r["closed_at"] or 0.0), r["exit_day"] or None, D(r["cash"], ZERO)))
             continue
         qty = D(r["qty"], ZERO)
         if qty <= 0:
             continue
-        risk += _weight(weights, r["class"]) * qty * _price(r)
+        weight = event_lot_weight(r) if r["lane"] == EVENT_LANE else _weight(weights, r["class"])
+        risk += weight * qty * _price(r)
         programs.add(str(r["family"]))
     if _has_table(rows, "eq_orders"):
-        for r in rows("SELECT family, class, qty, filled_qty, limit_px FROM eq_orders WHERE side='buy' "
+        events = _has_table(rows, "eq_event_intents")
+        for r in rows("SELECT family, class, qty, filled_qty, limit_px, iid FROM eq_orders WHERE side='buy' "
                       "AND substr(instance, -2)=? AND status IN ('pending', 'working', 'unknown')", (REAL_SUFFIX,)):
             remaining = max(ZERO, D(r["qty"], ZERO) - D(r["filled_qty"], ZERO))
-            risk += _weight(weights, r["class"]) * remaining * D(r["limit_px"], ZERO)
+            weight = _weight(weights, r["class"])
+            if events and r["iid"] is not None:
+                side = rows("SELECT weight FROM eq_event_intents WHERE iid=?", (int(r["iid"]),))
+                if side:
+                    weight = _event_weight_of(side[0]["weight"])
+            risk += weight * remaining * D(r["limit_px"], ZERO)
             programs.add(str(r["family"]))
     closes.sort(key=lambda c: c[0])
     return ProbeFigures(len(programs), tuple((day, cash) for _, day, cash in closes), risk)
+
+
+def _event_weight_of(value: Any) -> Decimal:
+    """An event lot's or buy's own open-risk weight (league/events/book.py `weight`): a Decimal in (0, 1], else the
+    stricter `EVENT_STRICT_WEIGHT` (fail closed: a weight that cannot be read never counts less)."""
+    weight = A.dec(value)
+    return weight if weight is not None and Decimal(0) < weight <= 1 else EVENT_STRICT_WEIGHT
+
+
+def event_lot_weight(row: Mapping[str, Any]) -> Decimal:
+    """THE GOAL'S OPEN-RISK RULE for an open EVENT lot (release R2; PREREG-EVL-1 section 8): its own weight, max(0.10,
+    1.65 x sigma60 x sqrt(h)) as its buy recorded it (`info.evl.weight`), or `EVENT_STRICT_WEIGHT` when it cannot be read
+    or the lot is held past its scheduled exit (`info.evl_exit.rung` >= 1: an auction printed nothing for its sale, so
+    its hold is no longer the one its weight was computed for); its WHOLE value (1) once the ladder's 20th session after
+    its planned exit closed with the lot still held (`info.evl_exit.zero`: PREREG-EVL-1 section 5's "at 0 after 20
+    sessions", read by the loss budget as a total loss while the shares are still offered for sale)."""
+    info = loads(row.get("info"), {}) if not isinstance(row.get("info"), Mapping) else row.get("info")
+    info = info if isinstance(info, Mapping) else {}
+    plan = info.get("evl_exit") if isinstance(info.get("evl_exit"), Mapping) else {}
+    if plan.get("zero"):
+        return Decimal(1)
+    if int(plan.get("rung") or 0) >= 1:
+        return EVENT_STRICT_WEIGHT
+    evl = info.get("evl") if isinstance(info.get("evl"), Mapping) else {}
+    return _event_weight_of(evl.get("weight"))
 
 
 def expected_shares_rows(rows: Callable[..., list]) -> dict[str, Decimal]:
@@ -636,10 +691,20 @@ class Order:
     answer: dict = field(default_factory=dict)
     updated_at: float = 0.0
     attempts: int = 0
+    #: Release R2: the order's time in force ("day"; an event order's auction, "opg" or "cls") and type ("limit"; an
+    #: event sale's "market").
+    tif: str = "day"
+    otype: str = "limit"
 
     @property
     def working(self) -> bool:
         return self.status in WORKING
+
+    @property
+    def auction(self) -> bool:
+        """An order of the opening or the closing auction (an event order): never re-priced, never cancelled for a
+        re-price, never ended by `_end_stale` on its own session."""
+        return self.tif in ("opg", "cls")
 
     @property
     def remaining(self) -> Decimal:
@@ -662,7 +727,8 @@ class Order:
                 "collar_bp": int(self.collar_bp), "status": self.status, "placed_at": self.placed_at, "day": self.day,
                 "filled_qty": text(self.filled_qty), "avg_px": None if self.avg_px is None else text(self.avg_px),
                 "fees_est": text(self.fees_est), "replaces": self.replaces, "probe": int(self.probe),
-                "why": self.why, "answer": dumps(self.answer), "updated_at": self.updated_at, "attempts": self.attempts}
+                "why": self.why, "answer": dumps(self.answer), "updated_at": self.updated_at, "attempts": self.attempts,
+                "tif": self.tif, "otype": self.otype}
 
     @classmethod
     def of(cls, r: Mapping[str, Any]) -> "Order":
@@ -670,7 +736,8 @@ class Order:
                    r["at"], D(r["qty"], ZERO), D(r["limit_px"], ZERO), int(r["collar_bp"]), r["status"],
                    float(r["placed_at"]), r["day"], r["venue_id"], r["lid"], r["iid"], D(r["filled_qty"], ZERO),
                    A.dec(r["avg_px"]), D(r["fees_est"], ZERO), r["replaces"], bool(r["probe"]), r["why"] or "",
-                   loads(r["answer"], {}) or {}, float(r["updated_at"]), int(r["attempts"] or 0))
+                   loads(r["answer"], {}) or {}, float(r["updated_at"]), int(r["attempts"] or 0),
+                   str(r.get("tif") or "day"), str(r.get("otype") or "limit"))
 
 
 @dataclass
@@ -732,6 +799,8 @@ class Instance:
 
     @property
     def live(self) -> bool:
+        if self.kind == EVENT_KIND:     # (release R2: an event program trades from learning, PREREG-EVL-3 section 2)
+            return self.retired_at is None and self.band in EVENT_LIVE_BANDS
         return self.retired_at is None and self.band in LIVE_BANDS
 
     def row(self) -> dict:
@@ -761,9 +830,14 @@ def instance_key(family: str, version: int) -> str:
 
 def order_body(order: Order) -> dict[str, Any]:
     """The venue's body: a simple limit day order in shares, never notional, never extended hours (the gateway's
-    `stockBuyOrder` and `realStockClose` read exactly these fields)."""
-    return {"symbol": order.symbol, "qty": qty_text(order.qty), "side": order.side, "type": "limit",
-            "limit_price": text(order.limit_px), "time_in_force": "day", "client_order_id": order.client_id}
+    `stockBuyOrder` and `realStockClose` read exactly these fields). RELEASE R2: an event order carries its own type
+    and time in force (`order.tif`, `order.otype`): a whole-share limit-on-open or limit-on-close buy (the gateway's
+    `eventBuyOrder`), a market-on-open or market-on-close sale (no limit price; `realStockClose`)."""
+    body = {"symbol": order.symbol, "qty": qty_text(order.qty), "side": order.side, "type": order.otype or "limit",
+            "limit_price": text(order.limit_px), "time_in_force": order.tif or "day", "client_order_id": order.client_id}
+    if body["type"] == "market":
+        del body["limit_price"]
+    return body
 
 
 def _sha(value: Any) -> str:
@@ -777,6 +851,11 @@ def _bar_day(row: Mapping[str, Any]) -> str | None:
 
 def _iso(t: float) -> str:
     return dt.datetime.fromtimestamp(float(t), dt.timezone.utc).isoformat()
+
+
+def _lane_iso(t: float) -> str:
+    """An instant as the event lane's store writes one (league/events/store.py `iso`: UTC to the second, a `Z`)."""
+    return dt.datetime.fromtimestamp(float(t), dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class _NoYield(Exception):
@@ -820,6 +899,16 @@ class EquityBook:
                     # league/ops/forward_db.py `_migrate` since release E3.1). Anything else is raised.
                     if "duplicate column name" not in str(exc).lower() or not self._has_instance_kind():
                         raise
+            # RELEASE R2: an order's time in force and type (an event order's auction). A state from before it gains
+            # the two columns; every row reads a day limit order, as it was.
+            for column, ddl in ORDER_COLUMNS_DDL.items():
+                if column in self._order_columns():
+                    continue
+                try:
+                    self.state.execute(ddl)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower() or column not in self._order_columns():
+                        raise
         #: RELEASE E4: the parent-side adapters by kind (`_adapter`: None for one that cannot be imported), and the
         #: panel's own memory in this process: the day's columns and fetch (`_panel_bars`), the morning's re-read
         #: (`_panel_audit`).
@@ -828,6 +917,10 @@ class EquityBook:
         self._panel_again: dict[str, Any] = {}
         for kind in K.BOOKS:
             self._adapter(kind)
+        #: RELEASE R2: the event kind's memory in this process (the auction proof, built on first use), and whether the
+        #: event adapter's table is in this state (the windows of the old lanes leave its intents to `_event_step`).
+        self._auction: Any = None
+        self._event_lane: Any = None
         #: instance -> (code sha, params) loaded in the decider child this process; its NEEDS as the child read them.
         self._loaded: dict[str, tuple[str, str]] = {}
         self._needs: dict[str, dict[str, Any]] = {}
@@ -854,6 +947,10 @@ class EquityBook:
     def _has_instance_kind(self) -> bool:
         """Whether the state's `eq_instances` holds the column `kind` (PRAGMA table_info, read afresh each call)."""
         return INSTANCE_KIND in {str(r["name"]) for r in self.state.rows("PRAGMA table_info(eq_instances)")}
+
+    def _order_columns(self) -> set[str]:
+        """The columns of the state's `eq_orders` (PRAGMA table_info, read afresh each call)."""
+        return {str(r["name"]) for r in self.state.rows("PRAGMA table_info(eq_orders)")}
 
     def record(self, kind: str, payload: Mapping[str, Any], agent: str | None = None) -> None:
         if self._record is None:
@@ -1070,7 +1167,30 @@ class EquityBook:
                              for i in self._instances() if i.retired_at is None or held.get(i.id)],
                 "last_decide": self.state.get("eq_decide"), "last_bars": (self.state.get("eq_decision") or {}).get("day"),
                 "recon": {k: v for k, v in (self.state.get("eq_recon", {}) or {}).items() if k != "problems"},
-                "freeze": self.state.get("eq_freeze"), "seats": self.seats()}
+                "freeze": self.state.get("eq_freeze"), "seats": self.seats(), "events": self._event_health()}
+
+    def _event_health(self) -> dict[str, Any] | None:
+        """THE EVENT KIND'S LINE (release R2): its switch and the bands' target shares, each version 2 program's band as
+        the book last read it from the lane (`eq_event_programs`),
+        the auction paper proof's stages, the eligible list at the gateway, the last decisions (counts only). None when
+        the event adapter cannot be imported."""
+        adapter = self._event_adapter()
+        if adapter is None:
+            return None
+        try:
+            s = adapter.settings()
+            proof = self._auction_proof()
+            stages = proof.status().get("stages") if proof is not None else None
+            return {"enabled": bool(s.enabled),
+                    "shares": {band: text(s.share(band)) for band in EVENT_LIVE_BANDS},
+                    "programs": [{k: r[k] for k in ("program", "version", "band", "since", "why")}
+                                 for r in self.state.rows("SELECT * FROM eq_event_programs ORDER BY program")],
+                    "proof": {name: (stage or {}).get("status") for name, stage in (stages or {}).items()} or None,
+                    "list": self.state.get("eq_event_list"),
+                    "decisions": [{"day": r["day"], "at": r["at"], **(loads(r["summary"], {}) or {})} for r in
+                                  self.state.rows("SELECT * FROM eq_event_decisions ORDER BY day DESC, at LIMIT 4")]}
+        except Exception as exc:  # noqa: BLE001 - a health line, never the health page's end
+            return {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
 
     def seats(self) -> dict[str, Any] | None:
         """THE SEAT PLAN as the last band sync wrote it (`SEAT_KEY`; THE SEAT RULE, the module docstring): {rule, seats,
@@ -1169,6 +1289,9 @@ class EquityBook:
                 ("reconcile", lambda: self._reconcile_step(now, m, out)),
                 ("audit", lambda: self._audit(now, m, out)),
                 ("decide", lambda: self._decide_step(now, out)),
+                # RELEASE R2: the event kind's auctions (09:15-09:27 ET and the close - 14 to - 11 minutes), and its
+                # auction paper proof.
+                ("events", lambda: self._event_step(now, m, out, real_block, killed)),
                 # The stock proof before the windows (A10.1): in its SELL stage's window the practice sale goes first.
                 ("proof", lambda: self._proof_step(now, m, out)),
                 ("windows", lambda: self._windows(now, m, out, real_block, killed)),
@@ -1277,6 +1400,9 @@ class EquityBook:
         again in today's window)."""
         today = S.ny_day(now).isoformat()
         for order in self._orders(("working",)):
+            # (RELEASE R2: an auction order, `opg` or `cls`, is queued for its own session's auction; one of today, sent
+            # before the open, is never ended here. Its auction ends it at the venue; one still working a day later is
+            # cancelled like any other.)
             if order.day >= today or not order.venue_id:
                 continue
             if "cancel_sent" not in order.answer:
@@ -1362,6 +1488,16 @@ class EquityBook:
                           order.symbol, order.klass, qty=dq, opened_qty=dq, entry_px=px, entry_notional=dq * px,
                           entry_at=order.at, opened_at=now, opened_day=order.day, status=LOT_OPEN, cash=-(dq * px),
                           probe=order.probe, tag=(intent.tag if intent else "")[:120], iid=order.iid)
+                side = self._event_row(order.iid) if order.auction else None
+                if side is not None:
+                    # RELEASE R2: an event lot keeps its program's plan from its buy (league/events/book.py's side row):
+                    # the event, the issuer, its open-risk weight and its scheduled exit (rung 0 of the ladder).
+                    lot.lane = EVENT_LANE
+                    lot.info["evl"] = {"program": side["program"], "version": int(side["version"]), "event": side["event"],
+                                       "cik": side["cik"], "weight": side["weight"], "sigma": side["sigma"],
+                                       "prev_close": side["prev_close"], "limit": side["limit_px"],
+                                       "band": side.get("band")}
+                    lot.info["evl_exit"] = {"day": side["exit_day"], "at": side["exit_at"], "rung": 0}
                 if intent is not None:
                     intent.lid = lot.lid
                     self._save_intent(intent)
@@ -1428,7 +1564,8 @@ class EquityBook:
     # ------------------------------------------------------------------ sending
     def _send(self, intent: Intent, *, side: str, symbol: str, klass: str, qty: Decimal, limit: Decimal, collar: int,
               day: str, lid: int | None, replaces: int | None, probe: bool, why: str, at: str | None = None,
-              tick: float | None = None, until: float | None = None) -> Order | None:
+              tick: float | None = None, until: float | None = None, tif: str = "day",
+              otype: str = "limit") -> Order | None:
         """Write the order `pending` (the intent `sent`, a sold lot `closing`) BEFORE the POST; then POST it once. `at`
         is the window it goes in (the fill point a lot's `entry_at` / `exit_at` and its twin read), the intent's by
         default. `tick` is the minute's `now` the send belongs to, kept as the order's `answer.tick` (a re-price is due
@@ -1450,7 +1587,8 @@ class EquityBook:
             eid = self._next("eq_orders", "eid")
             order = Order(eid, client_id(eid, intent.family, nonce=getattr(self.state, "nonce", "")), intent.instance,
                           intent.family, side, symbol, klass, at or intent.at, qty, limit, int(collar), "pending", now, day,
-                          lid=lid, iid=intent.iid, replaces=replaces, probe=probe, why=why[:300], answer=dict(stamp))
+                          lid=lid, iid=intent.iid, replaces=replaces, probe=probe, why=why[:300], answer=dict(stamp),
+                          tif=tif, otype=otype)
             if exit_:
                 try:
                     order.fees_est = config.sell_fees(qty * limit, qty)
@@ -1487,7 +1625,7 @@ class EquityBook:
                 order.status = "refused" if gateway else "rejected"
                 order.answer = {"error": result.error, "status": result.status, "gateway": gateway,
                                 "cap": payload.get("cap")}
-                if gateway and payload.get("cap") in RETRY_CAPS:
+                if gateway and payload.get("cap") in (EVENT_RETRY_CAPS if order.auction else RETRY_CAPS):
                     order.answer["retry"] = True     # nothing was sent, and nothing judged: again next minute
         order.answer = {**stamp, **order.answer}
         self._save_order(order)
@@ -1593,25 +1731,36 @@ class EquityBook:
         et = self._et()
         if et is None:
             return "the equity money table (equity_money) cannot be read"
-        if not et.enabled:
+        event = inst is not None and inst.kind == EVENT_KIND
+        if event:
+            # RELEASE R2: THE EVENT KIND'S OWN SWITCH (`equity_money.event.enabled`; `equity_money.enabled` stays the
+            # old lanes', False) and THE AUCTION PAPER PROOF (league/events/proof.py: a practice limit-on-open buy and a
+            # market-on-close sale) in place of the SPY day-order proof, whose route an event order never takes.
+            why = self._event_open_block()
+            if why:
+                return why
+        elif not et.enabled:
             return "equity_money.enabled is false: exits only"
         if self.stock_proof is None:
             return "no stock paper proof: no paper account"
-        try:
-            if not self.stock_proof.buy_passed():
-                return "the stock paper proof's BUY stage (paper_proof_stock_buy) has not passed"
-            failed = self.stock_proof.sell_failed()
-            if failed:
-                return f"{failed}: new real equity buys stop until it passes"
-        except Exception as exc:  # noqa: BLE001
-            return f"the stock paper proof could not be read ({type(exc).__name__})"
+        if not event:
+            try:
+                if not self.stock_proof.buy_passed():
+                    return "the stock paper proof's BUY stage (paper_proof_stock_buy) has not passed"
+                failed = self.stock_proof.sell_failed()
+                if failed:
+                    return f"{failed}: new real equity buys stop until it passes"
+            except Exception as exc:  # noqa: BLE001
+                return f"the stock paper proof could not be read ({type(exc).__name__})"
         frozen = self.frozen
         if frozen:
             return f"equity reconciliation: {frozen}"
         if inst is None or not inst.live:
             return "the program is not at Probe or Sized"
-        if inst.kind != EQUITY_KIND:
+        if inst.kind == PANEL_KIND:
             return self._seat_block(inst)
+        if event:
+            return self._event_seat_block(inst)
         return None
 
     def _seat_block(self, inst: Instance) -> str | None:
@@ -1701,13 +1850,18 @@ class EquityBook:
         return self._quotes[symbol]
 
     # ------------------------------------------------------------------ the windows
+    def _not_event(self) -> str:
+        """The SQL that leaves an event intent out of the old lanes' windows (release R2: `_event_step` works an event
+        intent, at its own auction); "" in a state without the event adapter's table."""
+        return " AND iid NOT IN (SELECT iid FROM eq_event_intents)" if _has_table(self.state.rows, "eq_event_intents") else ""
+
     def _windows(self, now: float, m: S.Moments | None, out: dict, real_block: Callable[..., str | None],
                  killed: Callable[[], bool]) -> None:
         if m is None or now < m.open_send:
             return
         today = m.day.isoformat()
-        rows = self.state.rows("SELECT * FROM eq_intents WHERE status IN ('planned', 'sent') AND exec_day<=? "
-                               "ORDER BY iid", (today,))
+        rows = self.state.rows("SELECT * FROM eq_intents WHERE status IN ('planned', 'sent') AND exec_day<=?"
+                               + self._not_event() + " ORDER BY iid", (today,))
         intents = [Intent.of(r) for r in rows]
         for intent in intents:
             if intent.kind == "buy" and intent.exec_day < today:
@@ -1729,7 +1883,7 @@ class EquityBook:
         off = self._offsets()
         open_exits = self.state.rows("SELECT iid FROM eq_intents WHERE status IN ('planned', 'sent') AND exec_day<=? "
                                      "AND at='open' AND kind IN ('sell', 'house_exit') AND lid IN "
-                                     "(SELECT lid FROM eq_lots WHERE opened_day<?)", (today, today))
+                                     "(SELECT lid FROM eq_lots WHERE opened_day<?)" + self._not_event(), (today, today))
         entries = [i for i in intents if i.kind == "buy" and i.exec_day == today]
         if entries:
             out["entries"] = len(entries)
@@ -1765,8 +1919,8 @@ class EquityBook:
         its program's sleeve, the House-wide cash, the invested cap and the loss budget's room."""
         rows = self.state.rows("SELECT iid, instance, at, exec_day FROM eq_intents WHERE status IN ('planned', 'sent') "
                                "AND exec_day<=? AND kind IN ('sell', 'house_exit') AND lid IN "
-                               "(SELECT lid FROM eq_lots WHERE opened_day<? AND status IN ('open', 'closing'))",
-                               (today, today))
+                               "(SELECT lid FROM eq_lots WHERE opened_day<? AND status IN ('open', 'closing'))"
+                               + self._not_event(), (today, today))
         return [r for r in rows if not (r["at"] == "close" and r["exec_day"] == today and now < m.close_send)]
 
     def _finish(self, intent: Intent, status: str, why: str) -> None:
@@ -1803,7 +1957,9 @@ class EquityBook:
         if now >= m.close_until:
             self._carry(intent, lot, today, "the session's windows ended with the lot still held")
             return
-        if lot.opened_day >= today:
+        if lot.opened_day >= today and lot.lane != EVENT_LANE:
+            # (Release R2: an EVENT lot sells in its own session when its rule says so: PREREG-EVL-1's open entries
+            # exit at that session's close, and the owner's flatten or the ladder's day sale may come the same day.)
             if intent.why != "min hold":
                 intent.why = "min hold"
                 self._save_intent(intent)
@@ -2111,7 +2267,7 @@ class EquityBook:
         are read: a share program's cut buy goes at the cut size, as on main, order for order
         (league/tests/test_equity_etf_orders.py holds it to weeks recorded on main). Whether E1's rule should change
         for share programs too is a decision of its own, with a rehearsal of its own."""
-        return inst.kind != EQUITY_KIND
+        return inst.kind == PANEL_KIND
 
     # ------------------------------------------------------------------ sizing
     def _size(self, intent: Intent, inst: Instance, symbol: str, klass: str, limit: Decimal, usd: Decimal | None,
@@ -2192,8 +2348,12 @@ class EquityBook:
         .sleeve_share`, league/equity/bands.py `panel_settings`) in every band: it never sizes from the Probe sleeve
         and is never sized up (the step is parked, A21; a row that cannot be read is no sleeve: it opens nothing)."""
         et = self._et()
-        if inst.kind != EQUITY_KIND:
+        if inst.kind == PANEL_KIND:
             return Decimal(str(B.panel_settings().sleeve_share))
+        if inst.kind == EVENT_KIND:
+            # (release R2: an event position's own target share of E, Probe 0.05, Sized 0.10; the event kind sizes
+            # one position at a time, `_size_event`, and holds no sleeve of its own)
+            return self._event_settings().share(inst.band)
         probe = Decimal(str(et.probe_sleeve_share))
         if inst.band != "sized":
             return probe
@@ -2282,17 +2442,19 @@ class EquityBook:
         et = self._et()
         if et is None:
             return
-        if not et.enabled and not self._lots():
+        # (Release R2: the event kind's lots and instances are the event step's, `_event_step`: they never wake, wait
+        # or join the 16:30 decide, so with the old lanes off and only event lots held the day is idle as before.)
+        if not et.enabled and not [lot for lot in self._lots() if lot.lane != EVENT_LANE]:
             self.state.put("eq_decide", {"day": day, "status": "idle", "at": now, "why": "the lane is off and holds nothing"})
             return
         if (self.state.get("eq_synced") or "") != day and self._sync_instances(now, t, out):
             self.state.put("eq_synced", day)
-        live = [i for i in self._instances(alive=True) if i.live]
+        live = [i for i in self._instances(alive=True) if i.live and i.kind != EVENT_KIND]
         bars = self._day_bars(now, t, mt, live, live, out)
         # B3 (release E4): the panel instances' own bars, read beside the book's from 16:20. While their fetch is
         # being read, or read again for a missing bar inside the grace, they are not asked in this pass (the seating
         # pass asks them for the same close once it is whole); the book's own programs do not wait for it.
-        panel = self._panel_bars(now, t, mt, mn, [i for i in live if i.kind != EQUITY_KIND], out)
+        panel = self._panel_bars(now, t, mt, mn, [i for i in live if i.kind == PANEL_KIND], out)
         if bars is None:
             return
         if (self.state.get("eq_synced") or "") != day and self._unconfirmed_day != day:
@@ -2332,7 +2494,7 @@ class EquityBook:
         if et is None or not et.enabled:
             return
         self._sync_instances(now, t, out, late=True)
-        live = [i for i in self._instances(alive=True) if i.live]
+        live = [i for i in self._instances(alive=True) if i.live and i.kind != EVENT_KIND]
         day = t.isoformat()
         counted = self.state.get("eq_failed", {}) or {}
         # (A17: a hold day the House could not ask is tried again on the same clock, though it is counted nowhere.)
@@ -2349,7 +2511,7 @@ class EquityBook:
         # decision, a catch-up after a restart) it waits for the next close's own 16:20 read. Its 28 calls for 500
         # columns ran here ahead of that minute's exits and entries, the open and close windows' minutes included,
         # for a decision that could not be executed that session anyway.
-        panel = self._panel_bars(now, t, mt, mn, [i for i in fresh if i.kind != EQUITY_KIND], out, fetch=again)
+        panel = self._panel_bars(now, t, mt, mn, [i for i in fresh if i.kind == PANEL_KIND], out, fetch=again)
         if bars is None:
             return
         if (panel or {}).get("wait"):
@@ -2362,7 +2524,7 @@ class EquityBook:
         # not whole is always recorded by this pass (the day's decision went ahead without it while it waited), and the
         # House's exit rules ran with that decision, before the count. Its lots exit AT THE NEXT OPEN, as the alert
         # says and as the Gym does, not a session late: the rules are run again for the instances just counted.
-        others = [i for i in fresh if i.kind != EQUITY_KIND]        # (none: nothing more is read or planned)
+        others = [i for i in fresh if i.kind == PANEL_KIND]        # (none: nothing more is read or planned)
         if others:
             counted_now = self.state.get("eq_failed", {}) or {}
             failed_exit = self._holds()[3]
@@ -2384,8 +2546,8 @@ class EquityBook:
         live program still needs them (a retired or demoted program's last lot is priced on its exit day's bar: its
         twin, league/ops/twins.py, and the buy-and-hold beside it)."""
         return {str(r["symbol"]) for r in self.state.rows(
-            "SELECT DISTINCT symbol FROM eq_lots WHERE status IN ('open', 'closing') OR opened_day=? OR exit_day=?",
-            (day, day))}
+            "SELECT DISTINCT symbol FROM eq_lots WHERE (status IN ('open', 'closing') OR opened_day=? OR exit_day=?) "
+            "AND lane!=?", (day, day, EVENT_LANE))}
 
     def _day_bars(self, now: float, t: dt.date, mt: S.Moments, live: Sequence[Instance], asked: Sequence[Instance],
                   out: dict, *, held: bool = True) -> Mapping[str, Any] | None:
@@ -2563,7 +2725,7 @@ class EquityBook:
         by_family = {str(r["family"]): r for r in rows}
         unconfirmed, held = [], []
         for inst in self._instances(alive=True):
-            if inst.id in wanted:
+            if inst.id in wanted or inst.kind == EVENT_KIND:     # (an event program is no swarm family: `_event_sync`)
                 continue
             row = by_family.get(inst.family)
             if row is None:
@@ -2640,7 +2802,7 @@ class EquityBook:
         if pool == POOL_ETF:
             return []
         shown = {str(r["family"]) for r in rows}
-        return sorted({i.family for i in self._instances(alive=True) if i.kind != EQUITY_KIND and i.family not in shown})
+        return sorted({i.family for i in self._instances(alive=True) if i.kind == PANEL_KIND and i.family not in shown})
 
     def _pool_of_key(self, key: str) -> str:
         """The pool of an instance key: the panel pool's when its instance is of another kind than the book's own,
@@ -2652,7 +2814,7 @@ class EquityBook:
             inst = self._instance(key)
         except Exception:  # noqa: BLE001 - a row that cannot be read is main's
             return POOL_ETF
-        return POOL_ETF if inst is None or inst.kind == EQUITY_KIND else POOL_PANEL
+        return POOL_PANEL if inst is not None and inst.kind == PANEL_KIND else POOL_ETF
 
     def _pool_seats(self, et: Any, pool: str) -> int:
         """A pool's seats: the ETF pool's `_seat_count`, the panel pool's `_panel_seat_count`."""
@@ -2664,7 +2826,7 @@ class EquityBook:
         reader's order, so a move the rule makes in a pool is the sync's own. The panel pool is left out while it has
         no row and no plan was ever written for it: a book of ETF programs alone runs main's rule, to the line."""
         etf = [r for r in rows if K.kind_of(r.get("structure")) == EQUITY_KIND]
-        panel = [r for r in rows if K.kind_of(r.get("structure")) != EQUITY_KIND]
+        panel = [r for r in rows if K.kind_of(r.get("structure")) == PANEL_KIND]
         self._panel_families = {str(r["family"]) for r in panel}
         out = [(POOL_ETF, etf)]
         if panel or self._pool_plan(POOL_PANEL) is not None:
@@ -3099,7 +3261,10 @@ class EquityBook:
             pass
 
     def _ensure_loaded(self, inst: Instance) -> bool:
-        """The instance's program loaded in the decider child (its NEEDS read there: the House never executes it)."""
+        """The instance's program loaded in the decider child (its NEEDS read there: the House never executes it). An
+        event instance has no program code to load (release R2): False, and nothing is asked of the decider."""
+        if inst.kind == EVENT_KIND:
+            return False
         sig = (hashlib.sha256(inst.code.encode()).hexdigest(), dumps(inst.params))
         if self._loaded.get(inst.id) == sig:
             return True
@@ -3221,7 +3386,7 @@ class EquityBook:
                 failed[inst.id] = inst.why or "the program did not load"
                 continue
             needs = self._needs[inst.id]
-            if inst.kind != EQUITY_KIND:
+            if inst.kind == PANEL_KIND:
                 try:
                     job, meta[inst.id] = self._panel_job(inst, t, needs, panel, now)
                 except Exception as exc:  # noqa: BLE001 - its bars, its columns or its ctx: the House could not ask
@@ -3271,7 +3436,7 @@ class EquityBook:
                     said = result.get("why") or "it raised, ran past its limit or is disqualified"
                     spent[inst.id] = f"its own decide failed: {str(said)[:200]}"
             why = failed.get(inst.id) or spent.get(inst.id)
-            other = inst.kind != EQUITY_KIND
+            other = inst.kind == PANEL_KIND
             if why is not None:
                 counts = self._decide_counts(inst, t)
                 with self.state.transaction():
@@ -3469,6 +3634,8 @@ class EquityBook:
             for lot in self._lots():
                 if only is not None and lot.instance not in only:
                     continue
+                if lot.lane == EVENT_LANE:
+                    continue        # (release R2: an event lot exits at its scheduled auction, `_event_exits`)
                 pending = [Intent.of(r) for r in self.state.rows(
                     "SELECT * FROM eq_intents WHERE lid=? AND kind IN ('sell', 'house_exit') AND status IN "
                     "('planned', 'sent') ORDER BY iid", (int(lot.lid),))]
@@ -3972,7 +4139,7 @@ class EquityBook:
             self._panel_again = {}
             return
         inst = self._instance(rows[0]["instance"])
-        adapter = self._adapter(inst.kind if inst is not None and inst.kind != EQUITY_KIND else next(iter(K.BOOKS)))
+        adapter = self._adapter(PANEL_KIND)
 
         def unread(some: Sequence[Mapping[str, Any]], why: str) -> None:
             for r in some:
@@ -4037,7 +4204,7 @@ class EquityBook:
         no exit."""
         day, key = str(row["decided_day"]), str(row["instance"])
         inst = self._instance(key)
-        adapter = self._adapter(inst.kind if inst is not None and inst.kind != EQUITY_KIND else next(iter(K.BOOKS)))
+        adapter = self._adapter(PANEL_KIND)
         names = f"{', '.join(list(bad)[:5])}{', ...' if len(bad) > 5 else ''}"
         with self.state.transaction():
             self.state.execute("UPDATE eq_rebalances SET audit='mismatch' WHERE rid=?", (row["rid"],))
@@ -4512,8 +4679,11 @@ class EquityBook:
 
     # ------------------------------------------------------------------ exports
     def _export(self, out: dict) -> None:
-        rows = self.state.rows("SELECT * FROM eq_lots WHERE status='closed' AND substr(instance, -2)=? AND lid NOT IN "
-                               "(SELECT lid FROM eq_exports) ORDER BY lid LIMIT ?", (REAL_SUFFIX, EXPORT_LIMIT))
+        # (Release R2: an event lot is no swarm family's: it reaches no forward record; the lane's own record, the twins
+        # and the Done reader read it in eq_lots.)
+        rows = self.state.rows("SELECT * FROM eq_lots WHERE status='closed' AND substr(instance, -2)=? AND lane!=? AND "
+                               "lid NOT IN (SELECT lid FROM eq_exports) ORDER BY lid LIMIT ?",
+                               (REAL_SUFFIX, EVENT_LANE, EXPORT_LIMIT))
         n = 0
         for r in rows:
             lot = Lot.of(r)
@@ -4556,7 +4726,7 @@ class EquityBook:
             "SELECT * FROM eq_lots WHERE instance=? AND status='closed' ORDER BY closed_at, lid", (key,))]
         inst = self._instance(key)
         kind = inst.kind if inst is not None else K.kind_of((row or {}).get("structure"))
-        if kind != EQUITY_KIND:
+        if kind == PANEL_KIND:
             # B10 (release E4): a panel program's record is read ONE OBSERVATION A CLOSE DATE.
             return self._panel_record_of(kind, key, lots, row, refetch)
         returns = tuple(float(lot.cash / lot.entry_notional) for lot in lots if lot.entry_notional > 0)
@@ -4634,6 +4804,734 @@ class EquityBook:
             return {}
         return {d: A.dec(r.get("c")) for r in (fetched or {}).get(symbol) or []
                 for d in (_bar_day(r),) if d in (first, last)}
+    # ------------------------------------------------------------------ THE EVENT KIND (release R2)
+    # PREREG-EVL-1 section 8 (with PREREG-EVL-2): a program whose held look passed trades real money from the next
+    # session, its entries whole-share limit-on-open / limit-on-close orders at 1.25 x the previous SIP close, its exits
+    # market sales at its scheduled auction. The rules are league/events/book.py's (the adapter, `BOOKS["event"]`); here
+    # they meet E1's order path: the windows of the auctions (`schedule.event_moments`), the write-before-POST and
+    # client-id discipline (`_send`), one working order a symbol, the day's order count, `size_entry`, the walls.
+    #: Seconds after a decision's moment the book waits for the lane's own (shadow) decision of the same auction before
+    #: it decides on the store as it stands (the universe rows of the day's issuers are written by it).
+    EVENT_DECIDE_WAIT_S = {"open": 240.0, "close": 60.0}
+    #: Seconds after an auction its orders' end is waited for before an unfilled one is judged (the venue ends an
+    #: auction order at its auction; its last status takes a reading or two to arrive).
+    EVENT_SETTLE_S = 120.0
+
+    def _event_adapter(self) -> Any:
+        return self._adapter(EVENT_KIND)
+
+    def _event_settings(self) -> Any:
+        adapter = self._event_adapter()
+        if adapter is None:
+            raise RuntimeError("the event adapter (league/events/book.py) cannot be imported")
+        return adapter.settings()
+
+    def _event_row(self, iid: Any) -> dict | None:
+        """The event side row of an intent (`eq_event_intents`), or None (no such row, or no such table)."""
+        if iid is None or not _has_table(self.state.rows, "eq_event_intents"):
+            return None
+        rows = self.state.rows("SELECT * FROM eq_event_intents WHERE iid=?", (int(iid),))
+        return dict(rows[0]) if rows else None
+
+    def _event_lane_store(self) -> Any:
+        """The lane's store, read-only (`<root>/events/events.sqlite`), opened once it exists; None without it."""
+        if self._event_lane is None:
+            adapter = self._event_adapter()
+            self._event_lane = adapter.open_lane(self.root) if adapter is not None else None
+        return self._event_lane
+
+    def _auction_proof(self) -> Any:
+        """THE AUCTION PAPER PROOF (league/events/proof.py) on the practice account the stock proof holds; None with no
+        paper account (then no event buy, ever)."""
+        if self._auction is None and self.stock_proof is not None and getattr(self.stock_proof, "account", None) is not None:
+            from ..events.proof import AuctionProof
+
+            self._auction = AuctionProof(self.state, self.stock_proof.account, self.market, clock=self.clock,
+                                         record=lambda kind, payload: self.record(kind, payload), alert=self.alert)
+        return self._auction
+
+    def _event_open_block(self) -> str | None:
+        """Why no EVENT buy may go now beside the House's own gates (`_open_block`): the event kind's switch and the
+        auction paper proof's BUY stage (its SELL stage failed stops new buys too), or None."""
+        try:
+            s = self._event_settings()
+        except Exception as exc:  # noqa: BLE001 - fail closed
+            return f"the event kind's settings cannot be read ({type(exc).__name__})"
+        if not s.enabled:
+            return "equity_money.event.enabled is false: no event buy"
+        proof = self._auction_proof()
+        if proof is None:
+            return "no auction paper proof: no paper account"
+        try:
+            if not proof.buy_passed():
+                return "the auction paper proof's BUY stage (paper_proof_auction_buy) has not passed"
+            failed = proof.sell_failed()
+            if failed:
+                return f"{failed}: new event buys stop until it passes"
+        except Exception as exc:  # noqa: BLE001
+            return f"the auction paper proof could not be read ({type(exc).__name__})"
+        return None
+
+    def _event_seat_block(self, inst: Instance) -> str | None:
+        """Why this event program may open nothing now: its band in the book's own table (`eq_event_programs`, written by
+        the day's band sync), read at every send: a demotion or retirement stops its next buy at once."""
+        rows = self.state.rows("SELECT band, why FROM eq_event_programs WHERE program=? AND version=?",
+                               (inst.family, int(inst.version)))
+        band = rows[0]["band"] if rows else None
+        if band not in EVENT_LIVE_BANDS:
+            return f"its band is {band or 'unknown'}: exits only ({(rows[0]['why'] if rows else '') or ''})"[:300]
+        return None
+
+    def _event_step(self, now: float, m: S.Moments | None, out: dict, real_block: Callable[..., str | None],
+                    killed: Callable[[], bool]) -> None:
+        """THE EVENT KIND'S MINUTE (release R2): the auction paper proof; the ends of the auctions passed (fills are
+        booked by `_sync_orders`; an unfilled buy is missed, an unfilled sale climbs the fallback ladder); the decision
+        of each auction at its moment (exits first, then the passing programs' picks); the sends in its window."""
+        adapter = self._event_adapter()
+        if adapter is None:
+            return
+        s = adapter.settings()
+        em = S.event_moments(S.ny_day(now), s.offsets)
+        try:
+            proof = self._auction_proof()
+            if proof is not None:
+                proof.step(now, em)     # (its row is kv `paper_proof_auction` and the health page's `events.proof`)
+        except Exception as exc:  # noqa: BLE001 - never the event step's end
+            self._error("auction proof", exc, out)
+        if em is not None:
+            self._event_finish(now, em, adapter, out)
+            for at, decide, until in (("open", em.open_decide, em.open_until),
+                                      ("close", em.close_decide, em.close_until)):
+                if decide <= now < until:
+                    self._event_decide(now, em, at, s, adapter, out)
+            for at, send, until in (("open", em.open_send, em.open_until), ("close", em.close_send, em.close_until)):
+                if send <= now < until:
+                    self._event_send(now, em, at, s, adapter, real_block, killed, out)
+        try:
+            self._event_fills(adapter, out)     # (the real fills handed back to the lane, PREREG-EVL-3; any day)
+        except Exception as exc:  # noqa: BLE001 - written again next minute
+            self._error("event fills", exc, out)
+
+    # ---------------------------------------------------------------- the band sync
+    def _event_sync(self, now: float, day: dt.date, s: Any, adapter: Any, lane: Any) -> list[Any] | None:
+        """THE EVENT KIND'S BAND SYNC, once a session, at its first decision: each version 2 program's band AS THE LANE'S
+        STORE SAYS IT (league/events/book.py `bands`: learning from birth, Probe, Sized, retired; PREREG-EVL-3 section
+        2) written to `eq_event_programs`, and its instance (`<program>@<version>:r`, kind "event", lane "event") made,
+        updated or retired. A program that leaves the live bands decides no more; its open lots exit at their own
+        scheduled auctions (nothing is sold by a band move). None when the lane's band table cannot be read: nothing is
+        written, no buy is planned this decision, and the next decision reads it again."""
+        bands = adapter.bands(lane, s)
+        if bands is None:
+            return None
+        held = {(r["program"], int(r["version"])): dict(r) for r in self.state.rows("SELECT * FROM eq_event_programs")}
+        born: list[str] = []
+        with self.state.transaction():
+            for b in bands:
+                was = held.get((b.program, b.version)) or {}
+                self.state.upsert("eq_event_programs", {"program": b.program, "version": b.version, "band": b.band,
+                                                        "since": b.since, "why": b.why[:400], "updated_at": now},
+                                  "program, version")
+                key = instance_key(b.program, b.version)
+                inst = self._instance(key)
+                program = adapter.program_of(b.program, b.version)
+                if b.live and program is not None:
+                    if inst is None:
+                        inst = Instance(key, b.program, b.version, EVENT_LANE, "", "", {}, b.band, False, program.hold,
+                                        created_at=now, kind=EVENT_KIND)
+                        self.record("equity.instance", {"instance": key, "band": b.band, "lane": EVENT_LANE},
+                                    agent=b.program)
+                        born.append(b.program)
+                    inst.band, inst.retired_at, inst.why = b.band, None, ""
+                    self._save_instance(inst)
+                elif inst is not None and inst.retired_at is None:
+                    inst.retired_at, inst.why, inst.band = now, f"{b.band}: {b.why}"[:400], b.band
+                    self._save_instance(inst)
+                    self.record("equity.instance", {"instance": key, "retired": True, "why": inst.why}, agent=b.program)
+                if was.get("band") != b.band:
+                    self.record("equity.band", {"family": b.program, "version": b.version, "from": was.get("band"),
+                                                "to": b.band, "why": b.why[:300], "lane": EVENT_LANE}, agent=b.program)
+                    if was.get("band") is not None:
+                        self.alert("warning", f"equity: event program {b.program} v{b.version} is now {b.band}: "
+                                              f"{b.why[:200]}")
+            self.state.put("eq_event_synced", day.isoformat())
+        if born:
+            self.alert("warning", f"equity: {len(born)} event program(s) trade real money from {day.isoformat()} at "
+                                  f"their lane's bands ({', '.join(born)[:300]}); every buy waits on the gateway's "
+                                  "STOCK_EVENT_BUYS and the auction paper proof's BUY stage")
+        return bands
+
+    # ---------------------------------------------------------------- the decision
+    def _event_decide(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any, out: dict) -> None:
+        """ONE DECISION A SESSION AND AUCTION (`eq_event_decisions`): the lots due to exit at this auction planned
+        first (`_event_exits`, whatever the switch says: an exit never waits on it), then, while the event kind is on,
+        each live program of this auction's entries asked for its real-money picks (`book.picks`), ranked, held to its
+        room (`max_open` less what it holds and has on order) and to one name an auction across programs
+        (`book.one_name_an_auction`), and recorded as buy intents with their side rows (the limit, sigma, the weight,
+        the exit plan). It waits a few minutes for the lane's own decision of the same auction (`EVENT_DECIDE_WAIT_S`),
+        then decides on the store as it stands; with no lane on this House it plans the exits alone."""
+        day = em.day.isoformat()
+        if self.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE day=? AND at=?", (day, at)):
+            return
+        decided_at = em.open_decide if at == "open" else em.close_decide
+        lane = self._event_lane_store()
+        if lane is not None and not adapter.decided(lane, em.day, at) and now < decided_at + self.EVENT_DECIDE_WAIT_S[at]:
+            out["event_decide"] = f"waiting for the lane's own {at} decision of {day}"
+            return
+        exits = self._event_exits(em, at, adapter)
+        readable = True
+        if lane is not None and (self.state.get("eq_event_synced") or "") != day:
+            readable = self._event_sync(now, em.day, s, adapter, lane) is not None
+        summary: dict[str, Any] = {"exits": exits, "lane": lane is not None, "enabled": bool(s.enabled), "programs": {},
+                                   "bands": readable}
+        planned: list[tuple[Any, Any, Any]] = []
+        sigmas: dict[str, float | None] = {}
+        if not readable:
+            out["event_bands"] = "the lane's band table cannot be read: no event buy is planned this decision"
+        if lane is not None and s.enabled and readable:
+            moment = dt.datetime.fromtimestamp(decided_at, dt.timezone.utc)
+            reaction = adapter.reaction_reader(lane, em.day, daily=self._event_daily_close,
+                                               minutes=self._event_minute_close)
+            wanted: dict[str, list[Any]] = {}
+            insts = {}
+            for inst in self._instances(alive=True):
+                program = adapter.program_of(inst.family, inst.version) if inst.kind == EVENT_KIND else None
+                if program is None or not inst.live or program.entry_at != at:
+                    continue
+                room = s.max_open(inst.band) - self._event_open_count(inst.id)
+                held = self._event_held(inst, em.day, adapter)
+                try:
+                    got = adapter.picks(lane, program, em.day, decided_at=moment, reaction=reaction,
+                                        held=lambda cik, held=held: cik in held)
+                except Exception as exc:  # noqa: BLE001 - that program plans nothing this auction; the others go on
+                    self._error(f"event picks {inst.family}", exc, out)
+                    summary["programs"][inst.family] = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+                    continue
+                wanted[inst.family] = got[:max(0, room)]
+                insts[inst.family] = (inst, program)
+                summary["programs"][inst.family] = {"picks": len(got), "room": max(0, room)}
+            chosen = adapter.one_name_an_auction(wanted, {family: insts[family][0].band for family in wanted})
+            symbols = sorted({p.symbol for picks in chosen.values() for p in picks})
+            sigmas = self._event_sigmas(symbols, em.day, s) if symbols else {}
+            for family, picks in chosen.items():
+                inst, program = insts[family]
+                for pick in picks:
+                    planned.append((inst, program, pick))
+                summary["programs"][family]["planned"] = len(picks)
+        with self.state.transaction():
+            for inst, program, pick in planned:
+                self._event_plan_buy(inst, program, pick, em, at, s, adapter, sigmas.get(pick.symbol), now)
+            self.state.upsert("eq_event_decisions", {"day": day, "at": at, "decided_at": _iso(decided_at),
+                                                     "status": "done", "summary": dumps(summary), "created_at": now},
+                              "day, at")
+        if lane is None and not exits:
+            return      # (no lane on this House and no event lot: nothing was read or planned, and nothing is said)
+        out["event_decide"] = f"{at} {day}: {exits} exits, {len(planned)} buys planned"
+        if lane is not None and planned:
+            # (The day's eligible list goes to the gateway when a buy is planned, and again before each buy is sent if
+            # the lane's universe grew since: with every program in shadow the gateway is never asked.)
+            self._event_publish(em.day, adapter, lane, out)
+        self.record("equity.event_decide", {"day": day, "at": at, "exits": exits, "buys": len(planned),
+                                            "programs": {k: v.get("planned", 0) for k, v in summary["programs"].items()}})
+
+    def _event_plan_buy(self, inst: Instance, program: Any, pick: Any, em: S.EventMoments, at: str, s: Any,
+                        adapter: Any, sd: float | None, now: float) -> None:
+        """One buy intent of an event pick and its side row (inside the decision's transaction)."""
+        iid = self._next("eq_intents", "iid")
+        day = em.day.isoformat()
+        limit = adapter.limit_price(pick.prev_close, s.limit_ratio)
+        exit_day, exit_at = adapter.exit_plan(program, em.day)
+        weight = adapter.weight(sd, program.hold, s)
+        intent = Intent(iid, inst.id, inst.family, inst.version, day, day, at, "buy", "planned", symbol=pick.symbol,
+                        share=s.share(inst.band), tag=f"{adapter.TAG}:{pick.event}"[:120],
+                        why=f"event {pick.event}: rank {pick.rank}, limit {limit}"[:400], created_at=now, updated_at=now)
+        self._save_intent(intent)
+        self.state.upsert("eq_event_intents", {
+            "iid": iid, "program": program.id, "version": program.version, "event": pick.event, "side": "buy",
+            "band": inst.band, "tif": "opg" if at == "open" else "cls", "otype": "limit", "symbol": pick.symbol,
+            "cik": pick.cik,
+            "day": day, "at": at, "rank_key": pick.rank, "adv20": pick.adv20, "prev_close": text(pick.prev_close),
+            "limit_px": text(limit), "sigma": sd, "hold": program.hold, "weight": text(weight), "exit_day": exit_day,
+            "exit_at": exit_at, "lid": None, "rung": 0,
+            "decided_at": _iso(em.open_decide if at == "open" else em.close_decide), "why": None, "created_at": now},
+            "iid")
+
+    def _event_open_count(self, key: str) -> int:
+        """What an event program holds and has on order: its open lots, and its buy intents still to execute."""
+        lots = self.state.rows("SELECT COUNT(*) AS n FROM eq_lots WHERE instance=? AND status IN ('open', 'closing')",
+                               (key,))[0]["n"]
+        buys = self.state.rows("SELECT COUNT(*) AS n FROM eq_intents WHERE instance=? AND kind='buy' AND status IN "
+                               "('planned', 'sent')", (key,))[0]["n"]
+        return int(lots) + int(buys)
+
+    def _event_held(self, inst: Instance, day: dt.date, adapter: Any) -> set[str]:
+        """THE ISSUERS real money holds for this program (PREREG-EVL-1 section 5: one position per issuer per program):
+        its lots open, or closed within the last `ISSUER_GAP_SESSIONS` sessions, and its buys still to execute."""
+        since = adapter.sessions_back(day, adapter.ISSUER_GAP_SESSIONS).isoformat()
+        out: set[str] = set()
+        for r in self.state.rows("SELECT status, exit_day, info FROM eq_lots WHERE instance=?", (inst.id,)):
+            info = loads(r["info"], {}) or {}
+            cik = str(((info.get("evl") or {}) if isinstance(info, Mapping) else {}).get("cik") or "")
+            if cik and (r["status"] != LOT_CLOSED or str(r["exit_day"] or "") >= since):
+                out.add(cik)
+        for r in self.state.rows("SELECT e.cik FROM eq_event_intents e JOIN eq_intents i ON i.iid=e.iid WHERE "
+                                 "i.instance=? AND e.side='buy' AND i.status IN ('planned', 'sent')", (inst.id,)):
+            if r["cik"]:
+                out.add(str(r["cik"]))
+        return out
+
+    def _event_sigmas(self, symbols: Sequence[str], day: dt.date, s: Any) -> dict[str, float | None]:
+        """{symbol: the daily return sd of the `sigma_sessions` sessions before `day`} from the adjusted SIP daily bars
+        (one read for every pick of an auction); None for a symbol whose bars cannot be read (its lot then weighs the
+        stricter `EVENT_STRICT_WEIGHT`)."""
+        adapter = self._event_adapter()
+        start = (day - dt.timedelta(days=int(s.sigma_sessions * 2) + 14)).isoformat()
+        try:
+            got = self.market.bars(list(symbols), timeframe="1Day", start=start, adjustment="all") or {}
+        except Exception:  # noqa: BLE001 - unread: the stricter weight
+            return {symbol: None for symbol in symbols}
+        out = {}
+        for symbol in symbols:
+            rows = sorted((r for r in got.get(symbol) or [] if (_bar_day(r) or "9999") < day.isoformat()),
+                          key=lambda r: _bar_day(r) or "")
+            closes = [float(A.dec(r.get("c")) or 0) for r in rows]
+            out[symbol] = adapter.sigma(closes, s.sigma_sessions)
+        return out
+
+    def _event_daily_close(self, symbol: str, day: dt.date) -> float | None:
+        """The raw SIP daily close of `symbol` on session `day` (a REACT row's base, when the lane holds no bar of it)."""
+        try:
+            got = self.market.bars([symbol], timeframe="1Day", start=day.isoformat(),
+                                   end=(day + dt.timedelta(days=1)).isoformat(), adjustment="raw") or {}
+        except Exception:  # noqa: BLE001
+            return None
+        for r in got.get(symbol) or []:
+            if _bar_day(r) == day.isoformat():
+                close = A.dec(r.get("c"))
+                return float(close) if close is not None and close > 0 else None
+        return None
+
+    def _event_minute_close(self, symbol: str, session: Any) -> float | None:
+        """The T29 minute close of `symbol` in `session` (a REACT row's reaction, when the lane stored no mark): the SIP
+        1-minute bars of the session to T29's end, read through the plan's SIP window."""
+        adapter = self._event_adapter()
+        start = session.open_at.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        end = (adapter.t29(session) + dt.timedelta(minutes=1)).astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            got = self.market.bars([symbol], timeframe="1Min", start=start, end=end, adjustment="raw") or {}
+        except Exception:  # noqa: BLE001
+            return None
+        return adapter.minute_close(got.get(symbol) or [], session)
+
+    def _event_publish(self, day: dt.date, adapter: Any, lane: Any, out: dict) -> bool:
+        """THE ELIGIBLE LIST of `day` at the gateway (`book.publish`), sent when the gateway's copy is not today's or the
+        lane's universe of the day has grown since; kept in kv `eq_event_list` {day, sha, count, at}. False when it
+        could not be sent (the buys wait; the next minute sends it again)."""
+        symbols = adapter.eligible(lane, day)
+        sha = hashlib.sha256(f"{day.isoformat()}:{','.join(symbols)}".encode()).hexdigest()
+        held = self.state.get("eq_event_list") or {}
+        if held.get("day") == day.isoformat() and held.get("sha") == sha:
+            return True
+        client = getattr(self.account, "client", None)
+        answer = adapter.publish(client, day, symbols) if client is not None else {"ok": False, "error": "no client"}
+        if answer.get("ok"):
+            self.state.put("eq_event_list", {"day": day.isoformat(), "sha": sha, "count": len(symbols),
+                                             "at": self.clock()})
+            return True
+        out["event_list"] = str(answer.get("error"))[:200]
+        return False
+
+    # ---------------------------------------------------------------- the exits and their ladder
+    def _event_exits(self, em: S.EventMoments, at: str, adapter: Any) -> int:
+        """THE EXITS DUE AT THIS AUCTION: every open event lot whose plan (`info.evl_exit`: day, at, rung) names it, and
+        that has no exit planned or working, gets a sale intent (a house_exit tagged `book.EXIT_TAG`) with its side row:
+        a market-on-open or market-on-close sale of what it holds. Returns how many."""
+        day = em.day.isoformat()
+        n = 0
+        with self.state.transaction():
+            for lot in self._lots():
+                if lot.lane != EVENT_LANE or self._exit_pending(lot.lid):
+                    continue
+                plan = lot.info.get("evl_exit") if isinstance(lot.info.get("evl_exit"), Mapping) else None
+                if plan is None:
+                    plan = {"day": day, "at": "close", "rung": 0}   # a lot with no plan of its own: out at this close
+                    lot.info["evl_exit"] = plan
+                    self._save_lot(lot)
+                if plan.get("day") != day or plan.get("at") != at:
+                    continue
+                evl = lot.info.get("evl") if isinstance(lot.info.get("evl"), Mapping) else {}
+                iid = self._next("eq_intents", "iid")
+                now = self.clock()
+                rung = int(plan.get("rung") or 0)
+                intent = Intent(iid, lot.instance, lot.family, lot.version, day, day, at, "house_exit", "planned",
+                                symbol=lot.symbol, lid=lot.lid, tag=adapter.EXIT_TAG,
+                                why=f"the event lot's scheduled exit at the {at} (rung {rung} of the ladder)",
+                                created_at=now, updated_at=now)
+                self._save_intent(intent)
+                self.state.upsert("eq_event_intents", {
+                    "iid": iid, "program": lot.family, "version": lot.version, "event": str(evl.get("event") or ""),
+                    "side": "sell", "band": evl.get("band"), "tif": "opg" if at == "open" else "cls", "otype": "market",
+                    "symbol": lot.symbol,
+                    "cik": evl.get("cik"), "day": day, "at": at, "rank_key": None, "adv20": None, "prev_close": None,
+                    "limit_px": "0", "sigma": None, "hold": None, "weight": str(evl.get("weight") or EVENT_STRICT_WEIGHT),
+                    "exit_day": None, "exit_at": None, "lid": lot.lid, "rung": rung,
+                    "decided_at": _iso(em.open_decide if at == "open" else em.close_decide), "why": None,
+                    "created_at": now}, "iid")
+                n += 1
+        return n
+
+    def _event_ladder(self, lot: Lot, why: str, adapter: Any) -> None:
+        """THE FALLBACK LADDER (PREREG-EVL-1 section 5, PREREG-EVL-2's open exits alike): a sale its auction did not
+        fill (no print, a halt, a refusal, or no sale sent at all) goes at the closing cross of the next session, and of
+        each next one, `book.LADDER_CLOSES` in all; then at the first trade of the next session: a day sale in the open
+        window by the normal exit path (`LATE_TAG`, carried each session after until it fills). Never written down:
+        alarmed (a warning on the first rung, an error on the late one)."""
+        plan = dict(lot.info.get("evl_exit") or {})
+        rung = int(plan.get("rung") or 0) + 1
+        base = dt.date.fromisoformat(str(plan.get("day") or S.ny_day(self.clock()).isoformat()))
+        first = str(plan.get("first") or base.isoformat())      # (the planned exit's session: the ladder counts from it)
+        nxt = S.next_session(base)
+        if rung <= adapter.LADDER_CLOSES:
+            lot.info["evl_exit"] = {"day": nxt.isoformat(), "at": "close", "rung": rung, "first": first, "why": why[:200]}
+            self._save_lot(lot)
+            self.alert("warning", f"equity: event lot {lot.lid} ({lot.symbol}) was not sold at its auction ({why[:160]}): "
+                                  f"it goes at the closing cross of {nxt.isoformat()} (rung {rung} of the ladder)")
+            return
+        lot.info["evl_exit"] = {"day": nxt.isoformat(), "at": "late", "rung": rung, "first": first, "why": why[:200]}
+        self._save_lot(lot)
+        self._plan_exit(lot, exec_day=nxt.isoformat(), at="open", reason=adapter.LATE_TAG,
+                        why=f"no closing cross sold it in {adapter.LADDER_CLOSES} sessions: a day sale in the open window "
+                            f"(PREREG-EVL-1 section 5: the first trade of the next session)", decided_day=base.isoformat())
+        self.alert("error", f"equity: event lot {lot.lid} ({lot.symbol}) found no closing cross in "
+                            f"{adapter.LADDER_CLOSES} sessions: it is sold by a day order in the open window of "
+                            f"{nxt.isoformat()} and each session after until it fills; look at the name")
+
+    def _event_finish(self, now: float, em: S.EventMoments, adapter: Any, out: dict) -> None:
+        """THE AUCTIONS' ENDS: every event intent of an auction that has passed (and `EVENT_SETTLE_S` more), its orders
+        no longer working, is finished: a buy "done" when it filled, "missed" when not (an auction order does not fill
+        above its limit, nor with no print); a sale "done" when its lot is sold, else "missed" and the lot climbs the
+        ladder (`_event_ladder`). A lot whose planned auction passed with no sale planned at all climbs it too."""
+        today = em.day.isoformat()
+
+        def passed(day: str, at: str) -> bool:
+            if day < today:
+                return True
+            if day > today:
+                return False
+            return now >= (em.open_at if at == "open" else em.close_at) + self.EVENT_SETTLE_S
+
+        if not _has_table(self.state.rows, "eq_event_intents"):
+            return
+        rows = self.state.rows("SELECT i.*, e.side AS e_side, e.day AS e_day, e.at AS e_at, e.lid AS e_lid FROM "
+                               "eq_intents i JOIN eq_event_intents e ON e.iid=i.iid WHERE i.status IN ('planned', 'sent') "
+                               "ORDER BY i.iid")
+        for r in rows:
+            if not passed(str(r["e_day"]), str(r["e_at"])):
+                continue
+            intent = Intent.of(r)
+            orders = self._intent_orders(intent.iid)
+            if any(o.working for o in orders):
+                continue    # the venue ends an auction order at its auction: its last status is a reading away
+            filled = sum((o.filled_qty for o in orders), ZERO)
+            if r["e_side"] == "buy":
+                last = orders[-1] if orders else None
+                cause = (last.answer.get("reject_reason") or last.answer.get("error") or "") if last is not None else ""
+                self._finish(intent, "done" if filled > 0 else "missed",
+                             f"filled {qty_text(filled)} shares at the {r['e_at']}" if filled > 0 else
+                             f"not filled at the {r['e_at']} auction ({last.status if last is not None else 'never sent'}"
+                             f"{': ' + str(cause)[:160] if cause else ''}"
+                             f"{': ' + intent.why if intent.why and last is None else ''})")
+                continue
+            lot = self._lot(r["e_lid"])
+            if lot is None or lot.status == LOT_CLOSED or lot.qty <= 0:
+                self._finish(intent, "done", "the lot is sold")
+                continue
+            why = (f"the {r['e_at']} auction sold {qty_text(filled)} of it" if orders else
+                   f"no sale was sent ({intent.why or 'the window passed'})")
+            with self.state.transaction():
+                self._finish(intent, "missed", why)
+                self._event_ladder(lot, why, adapter)
+        for lot in self._lots():
+            if lot.lane != EVENT_LANE:
+                continue
+            plan = lot.info.get("evl_exit") if isinstance(lot.info.get("evl_exit"), Mapping) else None
+            if plan is not None and plan.get("at") == "late":
+                self._event_zero(lot, plan, now, em, adapter)
+                continue
+            # A lot whose planned auction passed with no sale planned at all (the House was down at its decision).
+            if plan is None or self._exit_pending(lot.lid) or not passed(str(plan.get("day")), str(plan.get("at"))):
+                continue
+            with self.state.transaction():
+                self._event_ladder(lot, "no sale was planned at its auction (the House missed its decision)", adapter)
+
+    def _event_zero(self, lot: Lot, plan: Mapping[str, Any], now: float, em: S.EventMoments, adapter: Any) -> None:
+        """PREREG-EVL-1 section 5's LAST RUNG: a lot still held when the `book.ZERO_AFTER`th session after its planned
+        exit has closed is AT 0 for the loss budget (`event_lot_weight` 1: its whole value counts as lost), once, with an
+        error alert; its day sale goes on each session (real shares are never written off the account)."""
+        if plan.get("zero"):
+            return
+        try:
+            gone = S.sessions_between(str(plan.get("first") or plan.get("day")), em.day)
+        except (TypeError, ValueError):
+            return
+        if gone < adapter.ZERO_AFTER or (gone == adapter.ZERO_AFTER and now < em.close_at):
+            return
+        with self.state.transaction():
+            lot.info["evl_exit"] = {**dict(plan), "zero": em.day.isoformat()}
+            self._save_lot(lot)
+        self.record("equity.alert", {"what": f"event lot {lot.lid} is at 0 for the loss budget: unsold "
+                                             f"{adapter.ZERO_AFTER} sessions after its planned exit", "lots": [lot.lid]})
+        self.alert("error", f"equity: event lot {lot.lid} ({lot.symbol}) is still held {adapter.ZERO_AFTER} sessions after "
+                            "its planned exit: the loss budget now counts its whole value as lost (PREREG-EVL-1 section "
+                            "5, at 0 after 20 sessions); its day sale goes on each session. Look at the name.")
+
+    # ---------------------------------------------------------------- the sends
+    def _event_send(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any,
+                    real_block: Callable[..., str | None], killed: Callable[[], bool], out: dict) -> None:
+        """THE AUCTION'S SENDS, every minute of its window: the sales first, then the buys in the tables' order and
+        each program's rank; a send refused by a reading the gateway could not make goes again next minute; nothing goes
+        at or after the window's cut-off (`_send`'s wall clock)."""
+        day = em.day.isoformat()
+        rows = self.state.rows("SELECT i.*, e.side AS e_side, e.band AS e_band FROM eq_intents i JOIN eq_event_intents e "
+                               "ON e.iid=i.iid WHERE i.status IN ('planned', 'sent') AND e.day=? AND e.at=? ORDER BY i.iid",
+                               (day, at))
+        sells = [r for r in rows if r["e_side"] == "sell"]
+        # ROOM (PREREG-EVL-3 section 2): Sized programs' buys first, then Probe's, then learning's; within a band the
+        # tables' order; within a program its own ranking (the decision planned them in it).
+        buys = sorted((r for r in rows if r["e_side"] == "buy"),
+                      key=lambda r: (*adapter.room_key(r["family"], r["e_band"]), int(r["iid"])))
+        until = em.open_until if at == "open" else em.close_until
+        for r in sells + buys:
+            try:
+                side = self._event_row(r["iid"])
+                if r["e_side"] == "sell":
+                    self._event_work_exit(Intent.of(r), side, now, day, at, until, killed)
+                else:
+                    self._event_work_entry(Intent.of(r), side, now, day, at, until, s, adapter, real_block, killed, out)
+            except Exception as exc:  # noqa: BLE001 - the next intent goes on
+                self._error(f"event {r['e_side']} {r['iid']}", exc, out)
+
+    def _event_last(self, intent: Intent) -> tuple[Order | None, bool]:
+        """(the intent's last order, whether a new one may go now): none yet, or the last one refused with nothing sent
+        (`again`); never while one may still fill or after a final answer."""
+        orders = self._intent_orders(intent.iid)
+        current = orders[-1] if orders else None
+        if current is None:
+            return None, True
+        if current.working or current.status in ("filled", "canceled", "expired"):
+            return current, False
+        return current, current.again
+
+    def _event_work_exit(self, intent: Intent, side: Mapping[str, Any] | None, now: float, day: str, at: str,
+                         until: float, killed: Callable[[], bool]) -> None:
+        """One event SALE at its auction: a market-on-open or market-on-close sale of what the lot holds. Exits wait on
+        the kill switch alone (the gateway stops sales too), one working order a symbol and the House-wide order count;
+        never on the switch of the kind, a seat, a proof or the minimum hold."""
+        lot = self._lot((side or {}).get("lid") or intent.lid)
+        if lot is None or lot.status == LOT_CLOSED or lot.qty <= 0:
+            self._finish(intent, "done", "the lot is sold")
+            return
+        current, may = self._event_last(intent)
+        if not may:
+            return
+        try:
+            stopped = bool(killed())
+        except Exception:  # noqa: BLE001 - unreadable counts as engaged
+            stopped = True
+        if stopped:
+            intent.why = "the gateway's kill switch is engaged (it blocks sells too)"
+            self._save_intent(intent)
+            return
+        why = self._symbol_busy(lot.symbol) or self._count_refusal(day, exit_=True)
+        if why:
+            intent.why = why
+            self._save_intent(intent)
+            return
+        qty = lot.qty.to_integral_value(rounding=ROUND_DOWN) if lot.qty >= 1 else lot.qty
+        self._send(intent, side="sell", symbol=lot.symbol, klass=lot.klass, qty=qty, limit=ZERO, collar=0, day=day,
+                   lid=lot.lid, replaces=current.eid if current is not None else None, probe=lot.probe,
+                   why=f"event exit at the {at} (market-on-{at}, rung {int((side or {}).get('rung') or 0)})",
+                   at=at, tick=now, until=until, tif="opg" if at == "open" else "cls", otype="market")
+
+    def _event_work_entry(self, intent: Intent, side: Mapping[str, Any] | None, now: float, day: str, at: str,
+                          until: float, s: Any, adapter: Any, real_block: Callable[..., str | None],
+                          killed: Callable[[], bool], out: dict) -> None:
+        """One event BUY at its auction: every gate of a real equity open (`_open_block`: the House's, the kind's switch,
+        the auction proof, the freezes, the program's band), the day's eligible list at the gateway, one working order a
+        symbol, the day's order count, the program's room, then `_size_event`'s whole shares at the limit."""
+        if side is None:
+            self._finish(intent, "refused", "an event buy with no side row")
+            return
+        current, may = self._event_last(intent)
+        if not may:
+            self._event_final(intent, current)
+            return
+        inst = self._instance(intent.instance)
+        why = self._open_block(real_block, inst, killed)
+        if why is None:
+            lane = self._event_lane_store()
+            if lane is None or not self._event_publish(dt.date.fromisoformat(day), adapter, lane, out):
+                why = "the day's eligible list is not at the gateway yet"
+        if why is None:
+            why = self._symbol_busy(str(intent.symbol)) or self._count_refusal(day, exit_=False)
+        if why is None and self._event_open_count(intent.instance) > s.max_open(inst.band):
+            why = f"the program holds and has on order more than its {s.max_open(inst.band)} positions"
+        if why:
+            if intent.why != why:
+                intent.why = why
+                self._save_intent(intent)
+            return
+        limit = D(side["limit_px"], ZERO)
+        if limit <= 0:
+            self._finish(intent, "refused", "no limit price")
+            return
+        sized = self._size_event(intent, inst, side, limit, day, s)
+        if sized is None:
+            return
+        qty, why = sized
+        if qty < 1:
+            self._finish(intent, "refused", f"sizing: {why}")
+            return
+        order = self._send(intent, side="buy", symbol=str(intent.symbol), klass=config.STOCK, qty=qty, limit=limit,
+                           collar=0, day=day, lid=None, replaces=current.eid if current is not None else None,
+                           probe=inst.band != "sized", why=f"event entry at the {at} ({why})"[:300], at=at, tick=now,
+                           until=until, tif="opg" if at == "open" else "cls", otype="limit")
+        self._event_final(intent, order)
+
+    def _event_final(self, intent: Intent, current: Order | None) -> bool:
+        """Whether an event buy's last order has its FINAL answer short of a fill (the venue rejected it, it was lost,
+        or the gateway refused it for a cap that is no reading it could not make): the intent ends at once in the
+        answer's words, as `_work_entry`'s does, not at the auction's end."""
+        if current is None:
+            return False
+        if not (current.status in ("rejected", "lost") or (current.status == "refused" and not current.again)):
+            return False
+        cause = current.answer.get("reject_reason") or current.answer.get("error") or current.answer.get("lookup")
+        self._finish(intent, "refused" if current.status == "refused" else "missed", f"the {current.status} buy: {cause}")
+        if current.answer.get("cap") == "stock_event_buys" and self.state.get("eq_event_off_said") != intent.exec_day:
+            # The gateway's own switch is the owner's step at the first Probe (operations.md): said once a session.
+            self.state.put("eq_event_off_said", intent.exec_day)
+            self.alert("error", f"equity: the gateway refused the real event buy of {intent.family} ({intent.symbol}): "
+                                "STOCK_EVENT_BUYS is off. Owner step: set it on in gateway/wrangler.jsonc and deploy the "
+                                "gateway, or set equity_money.event.enabled False to stop the House asking")
+        return True
+
+    def _size_event(self, intent: Intent, inst: Instance, side: Mapping[str, Any], limit: Decimal, day: str,
+                    s: Any) -> tuple[Decimal, str] | None:
+        """THE EVENT ENTRY'S SIZE (PREREG-EVL-3 section 2, PREREG-EVL-1 section 8), by `sizing.size_entry` (the one
+        sizing function): a target of the band's `position_share` x E at the limit (learning 0.02, Probe 0.05, Sized
+        0.10), E the account equity at the previous close (`last_equity`, never above the House's sizing equity), every
+        wall a cap (the name's book-wide 10%, `per_name_share`; the 100% book; the House-wide cash; the loss budget at
+        the lot's own weight), then WHOLE shares (floored); when that rounds to none, ONE share when one share passes
+        every cap and, at learning, one share at the limit is at most `one_share_max.learning` x E; (0, why) otherwise
+        (skipped: the shadow keeps the event). None (the intent's why) when a figure cannot be read this minute (asked
+        again next minute until the cut-off)."""
+        et = self._et()
+
+        def wait(why: str) -> None:
+            intent.why = why
+            self._save_intent(intent)
+
+        E = self.sizing_equity()
+        if E is None or E <= 0:
+            wait("no sizing equity (the grant or the account)")
+            return None
+        account = self._read_account()
+        positions = self._read_positions()
+        if account is None or positions is None:
+            wait("the account or its positions could not be read this minute")
+            return None
+        last = A.dec(account.get("last_equity"))
+        if last is not None and last > 0:
+            E = min(E, last)      # the equity at the previous close (PREREG-EVL-3 section 2); never above the House's
+        try:
+            cash = D(account.get("cash"))
+            options_loss = self._options_open_loss(day)
+            reserved = Decimal(str(self.options_book.reserved())) if self.options_book is not None else ZERO
+            available = M.available_cash(account, working_buys_worst=working_buys_worst(self.state.rows), reserved=reserved,
+                                         reserve_usd=et.cash_reserve)
+            budget_room = self._budget_room(day)
+        except Exception as exc:  # noqa: BLE001 - fail closed
+            wait(f"a sizing figure could not be read ({type(exc).__name__}: {str(exc)[:120]})")
+            return None
+        symbol = str(intent.symbol)
+        any_short = False
+        account_symbol = ZERO
+        for r in positions:
+            if str(r.get("asset_class") or "") != "us_equity":
+                continue
+            qty = A.dec(r.get("qty")) or ZERO
+            if str(r.get("side") or "") == "short" or qty < 0:
+                any_short = True
+            if str(r.get("symbol") or "").upper() == symbol:
+                account_symbol = abs(A.dec(r.get("market_value")) or qty * limit)
+        book_symbol = sum((lot.value for lot in self._lots(symbol=symbol)), ZERO)
+        buys = [o for o in self._orders(WORKING) if o.side == "buy"]
+        all_buys_symbol = sum((o.remaining * o.limit_px for o in buys if o.symbol == symbol), ZERO)
+        own_symbol = sum((lot.value for lot in self._lots(instance=inst.id, symbol=symbol)), ZERO)
+        weight = _event_weight_of(side.get("weight"))
+        x = Z.SizingInputs(symbol=symbol, klass=config.STOCK, share=None, usd=s.share(inst.band) * E, limit_price=limit,
+                           E=E, sleeve_equity=E, sleeve_free_cash=max(ZERO, available), sleeve_symbol_value=own_symbol,
+                           position_share=s.per_name, account_symbol_value=max(book_symbol, account_symbol) + all_buys_symbol,
+                           invested_now=invested(self.state.rows) + options_loss,
+                           invested_share=Decimal(str(et.invested_share)), available_cash=available, cash=cash,
+                           any_short=any_short, budget_room=budget_room, weight=weight,
+                           min_order_usd=Decimal(str(et.min_order_usd)))
+        sized = Z.size_entry(x)
+        whole = sized.qty.to_integral_value(rounding=ROUND_DOWN)
+        if whole >= 1:
+            return whole, f"{whole} shares at {inst.band} ({sized.binding}): {sized.reason}"
+        cap = s.one_share_cap(inst.band)
+        if cap is not None and limit > cap * E:
+            return ZERO, (f"no whole share fits: the {inst.band} target rounds to none and one share at ${limit} is above "
+                          f"{cap} x E (${(cap * E).quantize(Decimal('0.01'))})")
+        one = Z.size_entry(replace(x, usd=limit))
+        if one.qty >= 1:
+            return Decimal(1), (f"one share at {inst.band}: the target's whole shares round to none and one share fits "
+                                f"every wall ({one.reason})")
+        return ZERO, f"no whole share fits ({one.binding}): {one.reason}"
+
+    # ---------------------------------------------------------------- the fills handed back to the lane
+    def _event_fills(self, adapter: Any, out: dict) -> None:
+        """THE REAL FILLS HANDED BACK TO THE LANE (PREREG-EVL-3: the lane computes Sized, demotion and retirement from
+        them; league/events/book.py `write_fills`): each real event lot's buy, once its buy has ended, and its sale, once
+        the lot is closed (again when the broker's posted fees change it), one row a (program, version, event, side),
+        written every minute until the lane's store takes them (a lot's `info.evl_fills` keeps what was written)."""
+        rows: list[dict[str, Any]] = []
+        marks: list[tuple[Lot, dict[str, Any]]] = []
+        for r in self.state.rows("SELECT * FROM eq_lots WHERE lane=? AND substr(instance, -2)=? ORDER BY lid",
+                                 (EVENT_LANE, REAL_SUFFIX)):
+            lot = Lot.of(r)
+            evl = lot.info.get("evl") if isinstance(lot.info.get("evl"), Mapping) else None
+            if not evl or not evl.get("event"):
+                continue
+            written = dict(lot.info.get("evl_fills") or {})
+            want = dict(written)
+            base = {"program": lot.family, "version": int(lot.version), "event": str(evl["event"]),
+                    "band": str(evl.get("band") or "learning")}
+            buy = self._intent(lot.iid) if lot.iid is not None else None
+            if not written.get("buy") and (lot.status != LOT_OPEN or buy is None or buy.status not in INTENT_LIVE):
+                rows.append({**base, "side": "buy", "qty": float(lot.opened_qty), "price": float(lot.entry_px), "fee": 0.0,
+                             "filled_at": _lane_iso(lot.opened_at)})
+                want["buy"] = True
+            if lot.status == LOT_CLOSED and lot.exit_px is not None and written.get("sell") != text(lot.fees):
+                sold = D(lot.info.get("exit_qty"), lot.opened_qty)
+                rows.append({**base, "side": "sell", "qty": float(sold), "price": float(lot.exit_px),
+                             "fee": float(lot.fees), "filled_at": _lane_iso(lot.closed_at or self.clock())})
+                want["sell"] = text(lot.fees)
+            if want != written:
+                marks.append((lot, want))
+        if not rows:
+            return
+        n = adapter.write_fills(self.root, rows)
+        if n is None:
+            out["event_fills"] = f"{len(rows)} real fill(s) wait: the lane's store holds no real_fills table yet"
+            return
+        with self.state.transaction():
+            for lot, want in marks:
+                lot.info["evl_fills"] = want
+                self._save_lot(lot)
+        out["event_fills"] = f"{n} real fill(s) written to the lane"
+
 
 
 def export_row(lot: Lot) -> dict[str, Any]:

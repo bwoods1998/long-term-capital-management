@@ -51,6 +51,13 @@ DEFAULTS: dict[str, int] = {"preopen_before_open_s": 300, "open_send_after_open_
                             "audit_before_open_s": 3600}
 PHASES = ("closed", "audit", "preopen", "open_window", "session", "close_window", "after_close", "bars", "decide",
           "night")
+#: THE EVENT LANE'S AUCTION MOMENTS (release R2; the constitution's `equity_money.event.order_path`, read by
+#: league/events/book.py `settings`): seconds before the session's own open or close. PREREG-EVL-1 section 5 fixes the
+#: two decisions (09:15 ET; the close - 14 minutes) and the last send of each (09:27 ET; the close - 11 minutes, inside
+#: the venue's own cut-offs, 09:28 ET for `opg` and the close - 10 minutes for `cls`).
+EVENT_DEFAULTS: dict[str, int] = {"open_decide_before_open_s": 900, "open_send_before_open_s": 840,
+                                  "open_until_before_open_s": 180, "close_decide_before_close_s": 840,
+                                  "close_send_before_close_s": 780, "close_until_before_close_s": 660}
 #: How long after `decide_at` the phase reads "decide" (a decide that could not run yet is retried meanwhile).
 DECIDE_PHASE_S = 3600
 #: The calendar's search horizon for the next or previous session (the longest NYSE closure is a few days).
@@ -133,6 +140,43 @@ def moments(day: dt.date | str, offsets: Mapping[str, int] | None = None) -> Mom
                    audit_at=open_at - off["audit_before_open_s"])
 
 
+@dataclass(frozen=True)
+class EventMoments:
+    """One session's auction moments for the event lane (`event_moments`), epoch seconds: the open's decision, its
+    `opg` sends' first and last instants; the close's decision, its `cls` sends' first and last instants; the session's
+    own open and close."""
+
+    day: dt.date
+    open_at: float
+    close_at: float
+    open_decide: float
+    open_send: float
+    open_until: float
+    close_decide: float
+    close_send: float
+    close_until: float
+
+
+def event_moments(day: dt.date | str, offsets: Mapping[str, int] | None = None) -> EventMoments | None:
+    """The event lane's auction moments of session `day` (`EVENT_DEFAULTS` with `offsets` over them), None when `day`
+    is not a session. Every moment is an offset from the session's own open or close, so a 13:00 close moves the close's
+    three with it."""
+    m = moments(day)
+    if m is None:
+        return None
+    off = dict(EVENT_DEFAULTS)
+    for key, value in (offsets or {}).items():
+        if key in off:
+            off[key] = int(value)
+    return EventMoments(day=m.day, open_at=m.open_at, close_at=m.close_at,
+                        open_decide=m.open_at - off["open_decide_before_open_s"],
+                        open_send=m.open_at - off["open_send_before_open_s"],
+                        open_until=m.open_at - off["open_until_before_open_s"],
+                        close_decide=m.close_at - off["close_decide_before_close_s"],
+                        close_send=m.close_at - off["close_send_before_close_s"],
+                        close_until=m.close_at - off["close_until_before_close_s"])
+
+
 def next_session(day: dt.date | str) -> dt.date:
     """The first session after `day` (the execution day of a decision taken at `day`'s close). ValueError when the
     calendar does not reach one."""
@@ -186,4 +230,4 @@ def phase(now: float, offsets: Mapping[str, int] | None = None) -> tuple[str, dt
 
 
 __all__ = ["DEFAULTS", "PHASES", "DECIDE_PHASE_S", "Moments", "offsets_of", "is_session", "moments", "next_session",
-           "previous_session", "sessions_between", "ny_day", "phase"]
+           "previous_session", "sessions_between", "ny_day", "phase", "EVENT_DEFAULTS", "EventMoments", "event_moments"]

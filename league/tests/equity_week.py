@@ -1362,17 +1362,35 @@ def a14_as_main(reading: Any) -> Any:
     return out
 
 
+#: WHAT RELEASE R2 ADDS TO THE STATE OF A BOOK THAT HOLDS NO EVENT PROGRAM, and nothing else: the columns
+#: `eq_orders.tif` and `eq_orders.otype` (league/equity/live.py `ORDER_COLUMNS_DDL`: "day" and "limit" on every share
+#: program's order), the event adapter's tables (league/events/book.py `SCHEMA`) and the book's `eq_event_*` keys (the
+#: day of its band sync). The event kind's step runs every minute, and with no lane on the House and no event lot it
+#: reads, sends and says nothing (its auction paper proof reads the practice account, never in this harness's prices).
+R2_COLUMNS = {"tif": "day", "otype": "limit"}
+R2_TABLES = ("eq_event_decisions", "eq_event_intents", "eq_event_programs")
+
+
 def main_shape(snap: dict[str, Any]) -> dict[str, Any]:
     """A snapshot of a tree that carries release E4, as main's book would have left it: `E4_COLUMN` and `E4_TABLE`
     taken out, and (A50) each A14 reading as main read it (`a14_as_main`), EACH HELD FIRST to what it must be for a
-    book of share programs (ValueError otherwise). A snapshot of main is returned as it is."""
+    book of share programs (ValueError otherwise). Release R2's columns, tables and keys (`R2_COLUMNS`, `R2_TABLES`)
+    are taken out the same way, each held first. A snapshot of main is returned as it is."""
     kinds = {row.get(E4_COLUMN, "equity") for row in snap["instances"]}
     if kinds - {"equity"}:
         raise ValueError(f"a share program's instance row reads kind {sorted(kinds)}")
     if snap["rebalances"]:
         raise ValueError(f"{len(snap['rebalances'])} rebalance row(s) in a book of share programs")
+    for column, value in R2_COLUMNS.items():
+        if any(row.get(column, value) != value for row in snap["orders"]):
+            raise ValueError(f"a share program's order reads {column} other than {value!r}")
+    events = [k for k in snap["kv"] if k.startswith("eq_event_") and k != "eq_event_synced"]
+    if events:
+        raise ValueError(f"the event kind left keys in a book of share programs: {events}")
     out = {**snap, "instances": [{k: v for k, v in row.items() if k != E4_COLUMN} for row in snap["instances"]],
-           "tables": [t for t in snap["tables"] if t != E4_TABLE]}
+           "orders": [{k: v for k, v in row.items() if k not in R2_COLUMNS} for row in snap["orders"]],
+           "kv": {k: v for k, v in snap["kv"].items() if not k.startswith("eq_event_")},
+           "tables": [t for t in snap["tables"] if t != E4_TABLE and t not in R2_TABLES]}
     if "a14" in snap:
         out["a14"] = [[key, a14_as_main(reading)] for key, reading in snap["a14"]]
     return out

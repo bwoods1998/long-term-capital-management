@@ -991,7 +991,9 @@ CONSTITUTION: dict[str, Any] = {
     #   inverse ETF: they hold borrowing or short exposure inside them.
     # - `position_share`: one instrument's cap, the account's holding of it plus every open buy of it across all programs,
     #   as a share of E: 0.50 an ETF, 0.20 a stock (the owner's lines). A program's own position is held to the same
-    #   share of its SLEEVE, as the Gym holds it.
+    #   share of its SLEEVE, as the Gym holds it. A STOCK AT 0.10 SINCE RELEASE R2 (the owner's goal of Oct 19, 2026,
+    #   item 4: "<= 10% of equity per name"; the gateway's STOCK_SINGLE_EQUITY_SHARE "0.1" with it): a tightening, the
+    #   old lanes being exits only; `config.POSITION_SHARE`'s 0.20 stays the code ceiling (an evidence constant).
     # - `invested_share`: CASH ONLY, BY CHOICE (the captain's A1): equity long value + open equity buys + the options' open
     #   maximum loss at most this share of E, 1.00. The goal allows margin where the account offers it (the overnight
     #   2x); E1 does not use it, because margin interest is not metered yet (the goal forbids hidden costs) and the loss
@@ -1106,7 +1108,7 @@ CONSTITUTION: dict[str, Any] = {
                              "XLV", "XLY", "TLT", "GLD"],
                      "stock": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK.B", "JPM", "V", "UNH", "XOM", "JNJ",
                                "PG", "MA", "HD", "AVGO", "LLY", "COST"]},
-        "position_share": {"etf": "0.50", "stock": "0.20"},
+        "position_share": {"etf": "0.50", "stock": "0.10"},
         "invested_share": "1.00",
         "cash_reserve_usd": "50",
         "open_risk_weight": {"etf": "0.20", "stock": "0.40"},
@@ -1199,6 +1201,64 @@ CONSTITUTION["equity_money"]["probe"]["seat"] = {"rule": "activity-1-free", "k_f
 # league/equity/bands.py `panel_settings` (league/live/money.py's `EquityTable`, inside the options execution
 # fingerprint, reads its rows by name and does not read this one).
 CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
+
+# ---- THE EVENT LANE'S REAL MONEY (`equity_money.event`; release R2, Oct 2026; the owner's goal as he re-set it at
+# 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3 section 2, with PREREG-EVL-1 section 8 and PREREG-EVL-2). VERSION 2 of
+# each of the nine seatable programs of league/events/programs.py (a pre-registered rule over EDGAR filings and Alpaca
+# news, never a swarm family; version 1 never trades) trades REAL money from its first event, at the band the event
+# lane's store gives it (learning from birth; Probe after a passed look; Sized; retired: no real money), through the
+# EquityBook's event kind (league/events/book.py), in whole shares, entered and exited in the listing exchange's
+# auctions: limit-on-open / limit-on-close buys at `limit_ratio` x the previous SIP close, market-on-close (or, for
+# PREREG-EVL-2's overnight rows, market-on-open) sales. Its rows, every one a money rule:
+# - `enabled`: THE EVENT KIND'S OWN SWITCH, ON. `equity_money.enabled` STAYS FALSE (the old lanes are exits only,
+#   PREREG-EVL-1 section 8): set back to True it would reopen the seated ETF programs' buys (a seat is never taken away
+#   by a smaller count), which the frozen rule closed. This row opens only the event kind's buys, and nothing else of
+#   the book. With it on, no event order goes until the gateway's STOCK_EVENT_BUYS is on (a gateway deploy) and the
+#   auction paper proof's BUY stage has passed. False is the instant stop of every event buy (a constitution-only
+#   change; exits never wait on it).
+# - `position_share`: a position's target share of E, the account equity at the previous close (learning 0.02, Probe
+#   0.05, Sized 0.10: PREREG-EVL-3 section 2), sized in whole shares at the limit; when that rounds to none, one share
+#   when it fits every wall and, at learning, when one share at the limit is at most `one_share_max.learning` (0.05) of
+#   E; otherwise the event is skipped (the shadow keeps it).
+# - `max_open`: open positions a program may hold (learning 8, Probe 6, Sized 8).
+# - `per_name_share`: THE GOAL'S 10% A NAME, BOOK-WIDE: every lot of the name on the book, every working buy of it and
+#   the account's own position, all programs and lanes together, plus this entry, at most 0.10 x E (`size_entry`'s
+#   instrument cap; the gateway holds the same 10% of its own equity reading as a code ceiling).
+# - `limit_ratio`: the entry's limit over the previous SIP close (1.25: the pre-registered limit, never chased).
+# - `open_risk`: what an event lot counts in the shared loss budget (the goal's own rule, PREREG-EVL-1 section 8):
+#   value x max(`floor`, `z` x sigma x sqrt(h)), sigma the stock's daily return sd over the `sigma_sessions` before
+#   entry, h the sessions in its hold. THE 0.40 FLOOR OF `open_risk_weight.stock` IS LOWERED FOR THIS CLASS ONLY: an
+#   ETF lot, an old-lane stock lot and an options position weigh as before. A lot whose sigma cannot be read, or one
+#   held past its scheduled exit (no auction print), weighs the stricter 0.40.
+# - `order_path`: THE AUCTIONS' MOMENTS (league/equity/schedule.py `event_moments`), seconds from the session's own open
+#   or close: the open decision at 09:15 ET (`open_decide_before_open_s` 900, pre-registered), its `opg` sends from
+#   09:16 to 09:27 (840, 180); the close decision at close - 14 min (840, pre-registered), its `cls` sends from close -
+#   13 to close - 11 min (780, 660). Early closes move with the session.
+# PROMOTION, SIZED, DEMOTION AND RETIREMENT are the lane's (PREREG-EVL-3 sections 2 and 3, counted in settled events):
+# it writes each program's band in its store, from its looks and the real fills the book writes back (`real_fills`);
+# the book reads the band at each session's first decision. ROOM: Sized programs first, then Probe, then learning;
+# within a band the tables' order. THE LOSS BUDGET STAYS ONE: no slice of `options_money.probe`'s $400 net in any 20
+# sessions and $800 net in total is reserved; every event entry is cut to the room the window and the total leave, open
+# risk counted (`size_entry`'s budget cap at the lot's own weight), and every event lot's close counts in it whatever
+# its band. The kill switch, the daily and drawdown stops, long only, no shorts, no margin (`invested_share` 1.00 and the
+# gateway's 1x book) bind as they bind every lot. ITS COST, PLAINLY: nine programs on real money from their first event
+# at about 2% a position, at zero edge about the round-trip cost (11-21 bp a position, PREREG-EVL-3 section 4), each lot
+# entered at an auction whose print it cannot see first. Rollback: `enabled` False (one money-digest move; no lot is
+# sold by it: every open event lot exits at its own scheduled auction). Its reader is league/events/book.py `settings`
+# (league/live/money.py's `EquityTable`, inside the options execution fingerprint, reads its rows by name and does not
+# read this one).
+CONSTITUTION["equity_money"]["event"] = {
+    "enabled": True,
+    "position_share": {"learning": "0.02", "probe": "0.05", "sized": "0.10"},
+    "one_share_max": {"learning": "0.05"},
+    "max_open": {"learning": 8, "probe": 6, "sized": 8},
+    "per_name_share": "0.10",
+    "limit_ratio": "1.25",
+    "open_risk": {"floor": "0.10", "z": "1.65", "sigma_sessions": 60},
+    "order_path": {"open_decide_before_open_s": 900, "open_send_before_open_s": 840, "open_until_before_open_s": 180,
+                   "close_decide_before_close_s": 840, "close_send_before_close_s": 780,
+                   "close_until_before_close_s": 660},
+}
 
 
 def digest(constitution: dict[str, Any] | None = None) -> str:
@@ -1422,6 +1482,27 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # (`equity_money_problems`' order rule). Two baskets at 0.10 x E are 0.08 x E of open risk beside the ETF lane's.
     "panel.seats": ("0", "2"),
     "panel.sleeve_share": ("0", "0.25"),
+    # THE EVENT LANE'S REAL MONEY (release R2; the comment under the table; PREREG-EVL-3 section 2). The pre-registered
+    # values are the loose end of each row (a lower share, a lower one-share cap, fewer open positions, a lower limit, a
+    # stricter floor or z may only trade less); the moments the rules fix are exact.
+    "event.position_share.learning": ("0", "0.02"),
+    "event.position_share.probe": ("0", "0.05"),
+    "event.position_share.sized": ("0", "0.10"),
+    "event.one_share_max.learning": ("0", "0.05"),
+    "event.max_open.learning": ("0", "8"),
+    "event.max_open.probe": ("0", "6"),
+    "event.max_open.sized": ("0", "8"),
+    "event.per_name_share": ("0", "0.10"),
+    "event.limit_ratio": ("1.00", "1.25"),
+    "event.open_risk.floor": ("0.10", "1.00"),
+    "event.open_risk.z": ("1.65", "5"),
+    "event.open_risk.sigma_sessions": ("60", "60"),
+    "event.order_path.open_decide_before_open_s": ("900", "900"),
+    "event.order_path.open_send_before_open_s": ("600", "899"),
+    "event.order_path.open_until_before_open_s": ("180", "599"),
+    "event.order_path.close_decide_before_close_s": ("840", "840"),
+    "event.order_path.close_send_before_close_s": ("661", "839"),
+    "event.order_path.close_until_before_close_s": ("660", "780"),
     # The pre-registered sizing-up rule (the design's section 5): at least 20 closes, an 80% bound, quarter Kelly, half
     # of E at most (the loose end of the Probe sleeve's own bound, and a Sized sleeve is never below the Probe's: the
     # constitution's `sized` comment), five Probe sessions. THE STEP IS PARKED at the count's tight end (the row in
@@ -1469,7 +1550,8 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "order_path.audit_before_open_s": ("60", "14400"),
 }
 #: The rows whose low end is EXCLUSIVE: a share of zero is no setting (the lane stops by `enabled` False).
-EQUITY_MONEY_ABOVE_LOW = ("position_share.etf", "position_share.stock", "invested_share")
+EQUITY_MONEY_ABOVE_LOW = ("position_share.etf", "position_share.stock", "invested_share", "event.per_name_share",
+                          "event.limit_ratio")
 #: The rows that are EXACTLY one of their values, compared by type and value (1 is not True, "EDM1" is not "edm1").
 EQUITY_MONEY_CHOICES: dict[str, tuple[Any, ...]] = {
     "enabled": (False, True),
@@ -1478,7 +1560,12 @@ EQUITY_MONEY_CHOICES: dict[str, tuple[Any, ...]] = {
     # THE SEAT RULE (A24): the value in force, and the rollback ("first-come": release E5-S's behaviour exactly).
     # Outranking ("activity-1") is NOT a value here: it is not adopted, and adding it is the owner's line to write.
     "probe.seat.rule": ("activity-1-free", "first-come"),
+    # The event kind's own switch (release R2): `equity_money.enabled` stays the old lanes' (False).
+    "event.enabled": (False, True),
 }
+#: The event lane's moments (`league/equity/schedule.py` `EVENT_DEFAULTS`' keys), read by league/events/book.py.
+EVENT_ORDER_OFFSETS = ("open_decide_before_open_s", "open_send_before_open_s", "open_until_before_open_s",
+                       "close_decide_before_close_s", "close_send_before_close_s", "close_until_before_close_s")
 #: The schedule's offsets (`league/equity/schedule.py` DEFAULTS' keys), read by `league/live/money.py` `EquityTable`.
 EQUITY_ORDER_OFFSETS = ("preopen_before_open_s", "open_send_after_open_s", "exit_wait_s", "entry_until_after_open_s",
                         "exit_until_before_close_s", "close_send_before_close_s", "close_until_before_close_s",
@@ -1491,7 +1578,9 @@ _EQUITY_COUNTS = ("probe.max_programs", "probe.seat.idle_sessions", "panel.seats
                   "demotion.twin_min_closes", "holds.min_hold_sessions", "holds.default_max_hold_sessions",
                   "holds.max_hold_sessions", "holds.failed_decides_exit", "order_path.entry_collar_bp.etf",
                   "order_path.entry_collar_bp.stock", "order_path.max_collar_bp.etf", "order_path.max_collar_bp.stock",
-                  "order_path.max_orders_day", *(f"order_path.{name}" for name in EQUITY_ORDER_OFFSETS))
+                  "order_path.max_orders_day", *(f"order_path.{name}" for name in EQUITY_ORDER_OFFSETS),
+                  "event.max_open.learning", "event.max_open.probe", "event.max_open.sized",
+                  "event.open_risk.sigma_sessions", *(f"event.order_path.{name}" for name in EVENT_ORDER_OFFSETS))
 EQUITY_CLASSES = ("etf", "stock")
 #: A ticker as the venue and the gateway's STOCK_UNIVERSE write it (a share class after a dot: BRK.B).
 _TICKER = re.compile(r"[A-Z]{1,5}(\.[A-Z])?")
@@ -1519,7 +1608,14 @@ def equity_money_problems(constitution: dict[str, Any] | None = None) -> list[st
         return ["equity_money: the table is missing"]
     problems: list[str] = []
     values: dict[str, Decimal] = {}
+    # THE EVENT BLOCK IS OPTIONAL (release R2): a table without `event` is the table before R2 (its rollback), which
+    # opens no event buy (league/events/book.py `settings` reads it as FALLBACK); with it, every row of it is checked.
+    evented = isinstance(table.get("event"), dict)
+    if "event" in table and not evented:
+        problems.append("equity_money.event is not a table")
     for path, (low, high) in EQUITY_MONEY_BOUNDS.items():
+        if path.startswith("event.") and not evented:
+            continue
         node = _at(table, path)
         if isinstance(node, bool) or node is None:
             problems.append(f"equity_money.{path} is missing")
@@ -1538,6 +1634,8 @@ def equity_money_problems(constitution: dict[str, Any] | None = None) -> list[st
         else:
             values[path] = value
     for path, allowed in EQUITY_MONEY_CHOICES.items():
+        if path.startswith("event.") and not evented:
+            continue
         node = _at(table, path)
         if not any(type(node) is type(choice) and node == choice for choice in allowed):
             problems.append(f"equity_money.{path} = {node!r} is not exactly one of {list(allowed)}")
@@ -1577,6 +1675,25 @@ def equity_money_problems(constitution: dict[str, Any] | None = None) -> list[st
           "the close window is sent before its cut-off")
     order("order_path.bars_after_close_s", "order_path.decide_after_close_s", "programs decide on the day's bars")
     order("order_path.preopen_before_open_s", "order_path.audit_before_open_s", "the bars' audit comes before the pre-open")
+    # The event lane's rows (release R2): a learning position never larger than a Probe one, a Probe one never larger
+    # than a Sized one, nor any than the name's own wall (the one-share cap neither); each auction's sends start after
+    # its decision and end before the venue's cut-off.
+    order_eq = (("event.position_share.learning", "event.position_share.probe",
+                 "a learning position is never larger than a Probe one"),
+                ("event.position_share.probe", "event.position_share.sized", "a Probe position is never larger than a Sized one"),
+                ("event.position_share.sized", "event.per_name_share", "a position is never larger than the name's wall"),
+                ("event.one_share_max.learning", "event.per_name_share", "one share is never above the name's wall"))
+    for first, second, why in order_eq:
+        if first in values and second in values and values[first] > values[second]:
+            problems.append(f"equity_money.{first} ({values[first]}) is above {second} ({values[second]}): {why}")
+    order("event.order_path.open_send_before_open_s", "event.order_path.open_decide_before_open_s",
+          "the open's sends start after its decision")
+    order("event.order_path.open_until_before_open_s", "event.order_path.open_send_before_open_s",
+          "the open's sends end after they start")
+    order("event.order_path.close_send_before_close_s", "event.order_path.close_decide_before_close_s",
+          "the close's sends start after its decision")
+    order("event.order_path.close_until_before_close_s", "event.order_path.close_send_before_close_s",
+          "the close's sends end after they start")
     return problems
 
 
@@ -1601,4 +1718,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '34bbe7a594468a6b3ea12d3e96c4a8a6ed8f320936faa1a87d8cf4e66f31beeb'
+PINNED_DIGEST = 'fd38e4e1fe9f9485bc1554045a7c03fb945a278313320aeccce45c4f2ccf6232'
