@@ -36,7 +36,7 @@ the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PR
 [docs/events.md](docs/events.md); its code runs in shadow on the captain's workstation from branch `feat/evl-shadow`
 until release 1019b (below) brings it onto the House.
 
-### PREREG-EVL-4: three overnight event programs and two controls (the captain's births), seatable at version 1 from birth, on `feat/evl-4` (unreleased; for release 1019c; cut from `rel/1019b` `8458ab42`; an owner deploy: league/events/programs.py, run.py, screen.py, book.py and docs/prereg/ are behind league/ci.py's wall, and league/equity/ is protected; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `285fa7af`, the constitution digest `fd38e4e1` and the gate contract `397b22b7` are the base's, read with the tree's own functions; no setting, no money row, no gateway change)
+### PREREG-EVL-4: three overnight event programs and two controls (the captain's births), seatable at version 1 from birth, on `feat/evl-4` (unreleased; for release 1019c; cut from `rel/1019b` `8458ab42`, with its round 4 `3230a884` merged in; an owner deploy: league/events/programs.py, run.py, screen.py, book.py and docs/prereg/ are behind league/ci.py's wall, and league/equity/ is protected; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `285fa7af`, the constitution digest `fd38e4e1` and the gate contract `397b22b7` are the base's, read with the tree's own functions; no setting, no money row, no gateway change)
 
 - **Why.** The owner's goal V2 (item 2: "Births come from your architect agents and from you ... rationed by an
   expected-false-pass budget you state") and the frozen [PREREG-EVL-4](docs/prereg/PREREG-EVL-4.md) (registered
@@ -62,7 +62,8 @@ until release 1019b (below) brings it onto the House.
   (12 seatable versions) of the stated lifetime budget 3.0 (`LANE_BUDGET`; the report prints both).
 - **Real money** (league/events/book.py): `seatable()` and `program_of()` read `can_seat` alone (`REAL_VERSION` is no
   longer a gate), so the three seat at learning after the nine in ROOM's order; their rows are those stored before the
-  decision time, EXCLUDED read from them (`rows_4`); section 1.3's guard (`next_open_event`, `NEXT_OPEN_GUARD`): the two
+  decision time (a filing when its documents were fetched: round 4's `_stored_before`), EXCLUDED read from them
+  (`rows_4`); section 1.3's guard (`next_open_event`, `NEXT_OPEN_GUARD`): the two
   8-K rows never buy for a filing knowable at or after 09:00 ET of D whose verdict is `ok` with score >= 2, or not yet
   answered, at the decision time. league/equity/live.py counts an earlier row's buy lost to a later row's sale at the
   same auction (`sale_to_later` in the decision's summary and record); the lane's report counts the shadow's

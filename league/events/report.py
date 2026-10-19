@@ -111,9 +111,11 @@ def _programs(store: S.Store) -> list[tuple[str, int]]:
 
 
 def _stored_at(store: S.Store, event: str) -> dt.datetime | None:
-    """When the lane STORED an event's row (PREREG-EVL-1 section 3, the time a real-money decision reads it by): a news
-    article when it was read (`received_at`); a filing when its documents were fetched (the latest `documents.stored_at`
-    of its raw and text documents, never before its listing, `received_at`). None when the row is not found."""
+    """When the lane STORED an event's row (PREREG-EVL-1 section 3, the time a real-money decision reads it by, as
+    league/events/book.py `_stored_before` reads it): a news article when it was read (`received_at`); a filing when its
+    documents were fetched (the latest `documents.stored_at` of its raw and text documents, never before its listing,
+    `received_at`), and never (the latest time there is: real money fails closed) when a document it names has no time
+    on record. None when the row is not found."""
     kind, _, ident = str(event).partition(":")
     try:
         if kind == "news":
@@ -126,9 +128,12 @@ def _stored_at(store: S.Store, event: str) -> dt.datetime | None:
                 return None
             when = S.parse_iso(row["received_at"])
             for sha in (row["raw_sha"], row["text_sha"]):
-                doc = store.db.execute("SELECT stored_at FROM documents WHERE sha=?", (sha,)).fetchone() if sha else None
-                if doc is not None and doc["stored_at"]:
-                    when = max(when, S.parse_iso(doc["stored_at"]))
+                if not sha:
+                    continue
+                doc = store.db.execute("SELECT stored_at FROM documents WHERE sha=?", (sha,)).fetchone()
+                if doc is None or not doc["stored_at"]:
+                    return dt.datetime.max.replace(tzinfo=dt.timezone.utc)
+                when = max(when, S.parse_iso(doc["stored_at"]))
             return when
     except (TypeError, ValueError):
         return None
