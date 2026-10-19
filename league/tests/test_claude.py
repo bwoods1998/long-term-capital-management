@@ -369,9 +369,15 @@ class GatewayPrices(unittest.TestCase):
                 geo = Decimal(str(max([1, *(row.get("geo") or {}).values()])))
                 self.assertGreaterEqual(input_rate, geo * Decimal(str(max(row["input"], row["cache_write"]))))
                 self.assertGreaterEqual(output_rate, geo * Decimal(str(row["output"])))
-                # Claude 4.6 and later bill US-only inference at 1.1x ("Data residency pricing", Sept 29, 2026).
-                self.assertEqual(row.get("geo"), {"us": 1.1})
+                # Claude 4.6 and later bill US-only inference at 1.1x ("Data residency pricing", Sept 29, 2026); Claude
+                # Haiku 4.5 (the event lane's verdicts, Oct 19, 2026) is older and carries no multiplier.
+                if model.startswith("claude-haiku-4-5"):
+                    self.assertIsNone(row.get("geo"))
+                else:
+                    self.assertEqual(row.get("geo"), {"us": 1.1})
         self.assertEqual(MODEL_CEILINGS["claude-sonnet-5-5"], (Decimal("2.75"), Decimal("11")))
+        self.assertEqual(MODEL_CEILINGS["claude-haiku-4-5-20251001"], (Decimal("1.25"), Decimal("5")))
+        self.assertEqual(prices["claude-haiku-4-5-20251001"], {"input": 1, "cache_write": 1.25, "cache_read": 0.1, "output": 5})
         self.assertEqual(prices["claude-sonnet-5-5"], {"input": 2, "cache_write": 2.5, "cache_read": 0.2, "output": 10, "geo": {"us": 1.1}})
 
     def test_the_swarms_model_and_the_house_default_are_priced_in_both(self):

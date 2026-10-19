@@ -79,6 +79,9 @@ MODEL_CEILINGS = {
     "claude-opus-5-5": (Decimal("5.50"), Decimal("22")),
     "claude-sonnet-5": (Decimal("2.75"), Decimal("11")),
     "claude-sonnet-5-5": (Decimal("2.75"), Decimal("11")),
+    # Oct 19, 2026 (the event lane's verdicts, PREREG-EVL-1): Claude Haiku 4.5 at its list prices, a $1.25 5-minute write
+    # and $5 output; no data-residency multiplier (Claude 4.6 and later only), as the gateway's row carries none.
+    "claude-haiku-4-5-20251001": (Decimal("1.25"), Decimal("5")),
 }
 _SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _REQUEST_ID = re.compile(r"[A-Za-z0-9:._-]{1,160}")
