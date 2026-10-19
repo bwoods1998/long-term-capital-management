@@ -19,6 +19,9 @@ they are and how the code runs them. When this page and a pre-registration disag
 - An event counts for a program only when it is knowable after that program's own registration time. A change to a
   registered program is a new version with a new registration time. Expected false passes over both files: 0.9
   (0.10 x 9 seatable versions).
+- [R3's births](#births-r3-not-yet-deployed) (goal-2026-10-19/R3-SPEC.md): programs born from outcome-free facts by
+  the architect (Claude Haiku 4.5) or the captain, each registered as one line of `docs/births/<night>.jsonl`, judged
+  by PREREG-EVL-3's screen unchanged, rationed by a stated false-pass budget (0.10 a seatable birth, 2.0 in all).
 
 ## The programs
 
@@ -94,15 +97,18 @@ run as that run found it, ineligible.
 `verdicts.py` (the recorded Haiku verdicts), `programs.py` (the programs as data rows and their selection rules),
 `run.py` (the open and close decisions, backfill), `score.py` (settlement at the auction prints and the exit ladder),
 `screen.py` (the judge), `report.py` (the daily one-screen report), `house.py` (the lane on the House: its scheduler),
-`__main__.py` (the CLI: `record`, `backfill`, `decide-open`, `decide-close`, `catchup`, `tickers`, `equity`, `score`,
-`screen`, `report`). The judges (`programs.py`, `verdicts.py`, `score.py`, `screen.py`) and `docs/prereg/` are behind
+`births.py` (R3: the births' grammar, the outcome-free facts, the validator and its budget, the proposer, the
+registration), `__main__.py` (the CLI: `record`, `backfill`, `decide-open`, `decide-close`, `catchup`, `tickers`,
+`equity`, `score`, `screen`, `report`, `births`, `facts`). The judges (`programs.py`, `verdicts.py`, `score.py`, `screen.py`) and `docs/prereg/` are behind
 `league/ci.py`'s FORBIDDEN wall from release R1: no role changes them and the House's updater never ships one. Release
 R2's real-money side: `book.py` (the equity book's event kind's rules: the money rows, the bands, the real-money picks,
 the limit, the size target, the open-risk weight, the exit plan, the eligible list) and `proof.py` (the auction paper
 proof). Release 1019b adds `bands.py` and the modules holding the rules' inputs: `universe.py` (eligibility, the
 benchmark), `calendar.py` (the windows and decision times), `edgar.py` and `news.py` (the knowable lag, the TEXT a
 verdict reads), `run.py` (which program gets which rows, the shadow's 15:30 reaction) and `store.py` (the record's
-schema); `house.py`, `gw.py` and `report.py` stay outside, so their fixes can ship through the updater.
+schema); `house.py`, `gw.py` and `report.py` stay outside, so their fixes can ship through the updater. R3 adds
+`births.py` behind the wall (the grammar a seated birth's rule is read by, the validator's budget, the facts' wall); the
+registered lines under `docs/births/` are data the House appends, never read back from the tree, and stay outside.
 
 ## Where it runs (shadow)
 
@@ -128,7 +134,7 @@ turn, the most urgent due first.
 | 2 | verdicts a decision will read | its decision within 30 min, or pending | 90 s |
 | 3 | the record pass: EDGAR's current feeds, the news, then today's verdicts with the time left | every 2 min, 24/7 | 90 s, resumable |
 | - | the hourly re-decision of the last three sessions (late events) | hourly, after the record pass | 150 s |
-| 4 | nightly: the account equity, the score, the screen (then the band review of the real fills), the report | close + 3 min; 20:30 ET | the score 120 s, resumable |
+| 4 | nightly: the account equity, the score, the screen (then the band review of the real fills), the report; then R3's births job (`events.births`) | close + 3 min; 20:30 ET; births 21:15 ET, a session night, once | the score 120 s, resumable; births 240 s |
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
 | 7 | the backfill of a weekday's EDGAR daily index | from 05:00 ET the next day | 90 s, resumable |
@@ -193,3 +199,72 @@ close decision's batched T29 read sends a failed request again once; when the re
 the 15:49 cut-off). Still as before: the equity day's order count (60 sends and cancels) binds entries at about 30 open
 lots sold the same day, and a program's room counts its lots being sold in the same cross (both readings trade less;
 the count moves in a later release).
+
+## Births (R3; not yet deployed)
+
+The owner's goal V2 item 2: "Births come from your architect agents and from you, using outcome-free facts, rationed by
+an expected-false-pass budget you state". The spec is `goal-2026-10-19/R3-SPEC.md`; the code is
+`league/events/births.py` (behind league/ci.py's wall); the tests are `league/tests/test_events_births.py` and
+`gateway/test/births.test.mjs`. PREREG-EVL-1/2/3 are the captain's hand births; R3 makes births continuous and cheap
+with the judges untouched.
+
+**A birth is data, never code.** A spec is a JSON object of exactly these fields: `id` (`EVL-B-...`, new), `version`
+(1), `family` (one the lane already reads: `ern`, `ern-react`, `8k` with an item set, `ins`, `ins-buy` with value and
+role filters, `news`, `news-day`, `news-react`), `rule` (the family's own fields only: `items`; `score_min` /
+`score_max` on the STORED PROMPT-DOC or PROMPT-NEWS score and `guidance` on the stored PROMPT-DOC guidance, never a new
+prompt; `react_min` / `react_max`; `value_min` (>= $50,000) and `roles` (director | officer); `sources` and `hours`, the
+news windows), `entry` (the family's: open or close), `exit` (close of session h, or a close entry's next open), `hold`
+(1..5; ONE for a seatable birth, whose screen blocks are one-session blocks, as every seatable PREREG program's), `rank`
+(score, reaction, value or none) and `seatable`. Anything else is refused. Its canonical form (sorted keys, no spaces)
+and that form's sha256 name it. A READ birth (a verdict threshold, a guidance filter or a score ranking) carries a
+CONTROL derived from it, `<id>-CTRL` (its rule with every verdict condition removed, a record), registered with it, so
+PREREG-EVL-1 section 7's "a READ program beats its control" holds for births too. A READ birth of the `8k` family names
+only items whose verdicts the lane asks (1.01, 2.01, 7.01, 8.01), so its verdicts are stored before its decision.
+
+**Born from outcome-free facts.** Each night the lane builds the facts of the last 20 sessions (`births.Facts`): event
+counts by family, 8-K item, news source and knowable hour; the stored verdict scores and guidance; which families and
+items no program selects; every registered program's selection count; a candidate rule's selection count, each through
+the lane's own `select` over the same windows (registration set aside: what a rule WOULD have selected). A SQLite
+authorizer refuses the facts every read of `bars`, `marks`, `outcomes`, `looks`, `bands`, `band_history`, `real_fills`,
+`universe` and `meta` for the whole build, so no price after an event, return, P&L, look's p or band reaches the
+architect. A react family's reaction is a price after the event: never read, so its counts are upper bounds.
+
+**The architect and the validator.** One gateway call a night (`births.propose`): claude-haiku-4-5-20251001, temperature
+0, max_tokens 3,000, its prompt's sha256 and its answer stored in `birth_calls` like a verdict (a night's answer is read
+again, never asked again), at most 6 specs a night, under a cost cap of $0.25 a night (the call's worst case must fit).
+The validator is code (`births.validate`): the grammar; a new id and sha; at least 3 selected events a session over the
+last 20 sessions by selection count; Jaccard < 0.8 of the last 20 sessions' selected events against every registered
+program (records, controls and births included: stricter than "every live program", and it reads no band) and against
+every birth accepted before it that night; and THE FALSE-PASS BUDGET, stated: each seatable birth adds 0.10 expected
+false passes (the measured zero-edge pass rate of PREREG-EVL-3's screen is at most 8.4%; 0.10 is the stated charge), at
+most 2.0 over every seatable version ever registered in the lane (PREREG-EVL-3's nine use 0.9, so at most eleven
+seatable births ever), at most 3 seatable births a night; records are free. The captain's births go through the same
+validator and registration with no model call: `python -m league.events --state DIR births --specs FILE` (a JSON list
+of `{spec, why}`; `--dry-run` validates only); `facts` prints the night's facts.
+
+**Registration.** The accepted specs' canonical lines are appended to `docs/births/<night>.jsonl` on main through the
+gateway's docs route (`POST /v1/github/docs`, gateway/lib/desk.mjs: that path pattern only, appends of JSON lines only,
+at most 12 lines of 8 KB a post and a 256 KB file, no credential, the runtime token, one of the day's six docs
+commits). A birth's REGISTRATION TIME is the later of GitHub's commit time (the answer's `committed_at`) and the
+House's receipt of the answer, kept in the store's `births` table; it counts only events knowable after it. An answer
+that never came leaves the night `unknown`, posted again with the same lines the next night: the route then answers
+`unchanged` with the file's latest commit, whose time is no earlier than the true one.
+
+**In the lane.** One loader (league/events/programs.py `load_births`, at every turn of the House's lane, every CLI
+command and every opening of the lane by the House's event book) adds each registered birth as a Program row with its
+own registration time and PREREG-EVL-3's learning band, screen and minimums (prereg 3: the limit at entry too), AFTER
+every PREREG program; no PREREG program's selection, judge or constant moves (a test decides a week of invented events
+with and without births and finds every PREREG program's intents identical). The lane decides a birth like any program
+(its rows are the family's), the score settles it, the screen judges a seatable birth by PREREG-EVL-3's looks unchanged
+(events counted, alpha 0.018, >= 40 issuers and 8 session blocks; a record or a control is never screened), its band
+moves by PREREG-EVL-3's rules, and the House's event book (which reads `SEATING` and `BY_KEY`) trades a seated birth at
+learning size from its first event at its own version 1, like any version 2 program. When room is short, every PREREG
+program goes first (Sized, Probe, learning, then the tables' order) and the births after them, in registration order
+(R3-SPEC section 4). Expected false passes in the report count every seatable birth.
+
+**On the House.** `league/config.json` `events.births` true runs the job on a session night at 21:15 ET after the
+report (league/events/house.py), once a night, its Claude call through the lane's gateway (refused while the House is
+paused or over the day's verdict line). It ships false: switching it on needs the gateway release with the births
+route. The switch stops new births only; registered births trade whatever it says. Not built here: R3-SPEC's Sonnet
+fallback after two failing nights of Haiku proposals, and a ranking of learning room by look statistics (a later,
+pre-registered version).

@@ -397,7 +397,7 @@ def judge_look(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any], k: in
         fails.append("mean a <= 0")
     if not (f["mean_r"] is not None and f["mean_r"] > 0):
         fails.append("mean r <= 0")
-    control = CONTROLS.get(program)
+    control = control_of(program)
     if control is not None:
         c_mean, c_blocks = control_mean(control_rows or [], [b.day for b in f["block_list"]])
         look["control"] = {"program": control, "mean_block": c_mean, "blocks": c_blocks,
@@ -814,17 +814,22 @@ def run(store: S.Store, today: dt.date, *, programs: Sequence[tuple[str, int]] |
         now: dt.datetime | None = None, draws: int = B) -> dict[str, Any]:
     """The screen job: every seatable program's looks whose as-of session is on or before `today` and not yet written,
     each read from the record as of its session, once that close is FINAL for the program (`final_until`) and every
-    intent (the control's too) scheduled to exit by then has settled. At a held look the skew checks go to meta
+    intent (the control's too) scheduled to exit by then has settled. A registered SEATABLE birth (R3, loaded by
+    league/events/programs.py `load_births`) is judged by PREREG-EVL-3's looks unchanged (`_run_v2`); a birth that is
+    a record, and a birth's control, are never screened. At a held look the skew checks go to meta
     `skew:<program>:<version>:<k>` before p is computed. One program's failure is its own (release 1019b's review):
     it is in `errors` and the others' looks go on. Returns {written, waiting, errors}."""
     now = now or S.utc_now()
     written, waiting, errors = [], [], []
     for program, version in programs or program_versions(store):
-        if program not in SEATABLE:
+        born = _born(program, version)
+        if program not in SEATABLE and born is None:
             continue
         try:
             if _seating(program, version):
                 out = _run_v2(store, program, version, today, now=now, draws=draws)
+            elif born is not None:
+                continue        # (R3: a birth that is a record, or a birth's control, is never screened)
             elif version == 1:
                 out = _run_v1(store, program, version, today, now=now, draws=draws)
             else:
@@ -885,12 +890,35 @@ def _run_v1(store: S.Store, program: str, version: int, today: dt.date, *, now: 
 
 def expected_false_passes(store: S.Store) -> dict[str, Any]:
     """0.10 x every version that can seat (PREREG-EVL-3 section 4: the nine version 2 programs; version 1 never seats),
-    plus any later version of a seatable program seen in the store."""
+    plus any later version of a seatable program seen in the store; and (R3) every seatable birth registered, through
+    SEATING once league/events/programs.py `load_births` has loaded them (R3-SPEC section 3: at most 2.0 in all)."""
     from .programs import SEATING
 
     versions = {(p.id, p.version) for p in SEATING} | {(p, v) for p, v in program_versions(store)
                                                        if p in SEATABLE and v > 2}
     return {"versions": len(versions), "expected": round(FALSE_PASS_RATE * len(versions), 3)}
+
+
+def _born(program: str, version: int) -> Any:
+    """The registered birth (R3) of this key, or None (every PREREG program)."""
+    from .programs import BY_KEY
+
+    p = BY_KEY.get((program, int(version)))
+    return p if p is not None and p.spec is not None else None
+
+
+def control_of(program: str) -> str | None:
+    """A READ program's control (PREREG-EVL-1 section 7: its mean block value must exceed the control's): PREREG's own
+    table (`CONTROLS`), or a registered READ birth's derived control (R3, league/events/births.py `control_spec`: its
+    rule with every verdict condition removed, registered with it). Every PREREG program's answer is its table's."""
+    if program in CONTROLS:
+        return CONTROLS[program]
+    born = _born(program, 1)
+    if born is None or not born.reads:
+        return None
+    from .births import control_id
+
+    return control_id(program)
 
 
 # ------------------------------------------------------------------------------------------- version 2: PREREG-EVL-3
@@ -978,7 +1006,7 @@ def _run_v2(store: S.Store, program: str, version: int, today: dt.date, *, now: 
     if on_record["done"] and on_record["next"] is None:
         return {"written": written, "waiting": waiting}
     after = (on_record["last"], on_record["next"] - 1) if on_record["done"] else None
-    control = CONTROLS.get(program)
+    control = control_of(program)
     pending = _pending(store, program, version) + (_pending(store, control, 1) if control else [])
     plan = v2_schedule(store, rows, today, pending, after=after, final=final_until(store, program, version, today, now))
     if plan["stopped"] is not None:
@@ -1028,4 +1056,4 @@ __all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_
            "skew_check", "look_figures", "control_mean", "judge_look", "write_look", "look_detail", "bootstrap_bounds",
            "bounds_seed", "done_bounds", "kill_bounds", "sized_bound", "calibration", "program_versions",
            "exit_overrides", "settled_rows", "first_settled_exit", "covered", "skew_records", "look_rows", "next_look",
-           "run", "expected_false_passes"]
+           "run", "expected_false_passes", "control_of"]

@@ -2,7 +2,9 @@
 
 Commands: sessions --from D --to D | record | backfill --from D --to D | decide-open --day D [--backfill] |
 decide-close --day D [--backfill] | catchup (every past decision from the registration time not yet made, as a
-backfill). Prints one JSON summary.
+backfill) | births [--day D] [--specs FILE] [--dry-run] (R3's births job: the architect's one call, or the captain's own
+specs from FILE, a JSON list of {spec, why}, with no call; validated and registered through the gateway's docs route,
+`--dry-run` validated only) | facts [--day D] (R3's outcome-free facts). Prints one JSON summary.
 """
 
 from __future__ import annotations
@@ -79,8 +81,15 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("bands")
     rp = sub.add_parser("report")
     rp.add_argument("--day", type=_day, default=None)
+    bi = sub.add_parser("births")
+    bi.add_argument("--day", type=_day, default=None)
+    bi.add_argument("--specs", default=None)
+    bi.add_argument("--dry-run", action="store_true")
+    fa = sub.add_parser("facts")
+    fa.add_argument("--day", type=_day, default=None)
     args = ap.parse_args(argv)
     with S.Store(args.state) as st:
+        P.load_births(st)       # (R3: the registered births, after every PREREG program)
         gw = G.Gateway(G.token_from_env(), min_interval=0.05)
         ctx = R.Context(st, gw, G.sec_getter())
         if args.cmd == "sessions":
@@ -106,6 +115,20 @@ def main(argv: list[str] | None = None) -> int:
 
             out = {"bands": {f"{p}@v{v}": b for (p, v), b in sorted(BA.bands(st).items())},
                    "review": BA.review(st, now=ctx.now())}
+        elif args.cmd in ("births", "facts"):
+            from . import births as BI
+
+            day = args.day or ctx.now().astimezone(C.NY).date()
+            if args.cmd == "facts":
+                out = BI.Facts(st, day).facts()
+            else:
+                specs = None
+                if args.specs:
+                    with open(args.specs, encoding="utf-8") as fh:
+                        specs = json.load(fh)
+                    if not isinstance(specs, list):
+                        raise SystemExit("--specs: a JSON list of {spec, why}")
+                out = BI.night(st, gw, today=day, now=ctx.now, proposals=specs, dry_run=args.dry_run)
         elif args.cmd == "report":
             day = args.day or ctx.now().astimezone(C.NY).date()
             rep = RP.build(st, day, now=ctx.now())

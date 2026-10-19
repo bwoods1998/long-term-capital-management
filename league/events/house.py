@@ -24,7 +24,10 @@ once an hour per task, so the House's repeat rule never turns it into an error),
    `listed` at once and fetched in order, so a pass cut short loses nothing), then today's verdicts with the time
    left (its open decision's, then its close decision's: PREREG-EVL-2's day news is read through the session);
 4. NIGHTLY: the account equity after the close, the score at 20:30 ET, the screen (with PREREG-EVL-3's band review
-   of the real fills: demotion and Sized, league/events/bands.py `review`) and the report after it;
+   of the real fills: demotion and Sized, league/events/bands.py `review`) and the report after it; then, on a session
+   night with `events.births` on, R3's BIRTHS job at 21:15 ET (league/events/births.py `night`: the outcome-free facts,
+   the architect's one Haiku call under $0.25 a night, the validator, the registration through the gateway's docs
+   route), once a night;
 5. the TICKER snapshot at 07:00 ET;
 6. EARLY VERDICTS from 07:30 ET (the session's universe is fixed then: its tickers copy is the latest before 07:30 ET),
    for its open decision and then its close decision;
@@ -106,6 +109,9 @@ TICKERS_AT = dt.time(7, 0)
 TICKERS_RETRY = dt.timedelta(minutes=5)
 SCORE_AT = dt.time(20, 30)
 REPORT_AT = dt.time(21, 5)                    # a day with no session: its report at this time
+#: R3's births job (R3-SPEC section 5: "nightly after the report (20:30 ET + 45 min)"), on a session night, once.
+BIRTHS_AT = dt.time(21, 15)
+BIRTHS_BUDGET = 240.0
 EQUITY_AFTER = dt.timedelta(minutes=3)
 EQUITY_RETRY = dt.timedelta(minutes=10)
 BACKFILL_WEEKDAYS = SN.FINAL_BACKFILL_WEEKDAYS
@@ -237,6 +243,8 @@ class EventLane:
         self.root = Path(root)
         self.settings = dict(settings or {})
         self.verdict_usd_day = float(self.settings.get("verdict_usd_day", VERDICT_USD_DAY))
+        #: R3's births job: `events.births` true in league/config.json (a missing key or false is off).
+        self.births_on = self.settings.get("births") is True
         self._gateway = gateway
         self._sec_base = sec
         self._mono = monotonic
@@ -439,6 +447,7 @@ class EventLane:
             if not self.ready():
                 return
             with S.Store(self.root) as st:
+                P.load_births(st)       # (R3: the registered births, after every PREREG program, for every task)
                 if not self._started_told:
                     self._started_told = True
                     self._info(f"the event lane runs on the House: store {self.root} (league/events/house.py)")
@@ -984,6 +993,13 @@ class EventLane:
                 not (st.root / "reports" / f"{today.isoformat()}.txt").exists() and \
                 not self._quiet("report", now, soon):
             return Task("report", self._report, None)
+        if self.births_on and session is not None:
+            births_at = _wall(today, BIRTHS_AT)
+            if now < births_at:
+                soon.append(births_at)
+            elif (st.root / "reports" / f"{today.isoformat()}.txt").exists() and \
+                    not self._receipt_since(st, "births", births_at) and not self._quiet("births", now, soon):
+                return Task("births", self._births, BIRTHS_BUDGET)
         return None
 
     def _retry_ok(self, what: str, now: dt.datetime, every: dt.timedelta, soon: list[dt.datetime]) -> bool:
@@ -1070,6 +1086,22 @@ class EventLane:
             summary["review"] = [{k: c.get(k) for k in ("program", "version", "band")} for c in moved]
         self._receipted(ctx.store, "screen", status, summary)
         return summary | {"_status": status}
+
+    def _births(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
+        """R3's births job of the night (league/events/births.py `night`, its own receipt `births`): its Claude call goes
+        through the lane's gateway (refused while the House is paused or over the day's line, and counted)."""
+        from . import births as BI
+
+        now = ctx.now()
+        out = BI.night(ctx.store, ctx.gw, today=now.astimezone(C.NY).date(), now=ctx.now)
+        status = str(out.pop("_status", "ok"))
+        if status != "ok":
+            self.warn("births", f"the births job of {out.get('night')} ended {status}: "
+                                f"{out.get('error') or out.get('registration') or ''}"[:300])
+        brief = {k: v for k, v in out.items() if isinstance(v, (int, float, str, bool)) or v is None}
+        brief["accepted"] = len(out.get("accepted") or [])
+        brief["proposed"] = int(out.get("proposed") or 0)
+        return brief | {"_status": status}
 
     def _report(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
         """The daily one-screen report into `<root>/reports/<day>.txt` and `.json`, as the CLI's `report` writes it."""

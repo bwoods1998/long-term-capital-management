@@ -7,8 +7,16 @@ SHA-256 of the uncompressed bytes, so a verdict can cite exactly what it read.
 
 The schema is pinned in goal-2026-10-19/EVL-DESIGN.md ("The store"); `SCHEMA_VERSION` moves with any change to it that
 an older release could not read. A new table is additive (the older release never reads it, and a rollback opens the
-store as before): PREREG-EVL-3's `bands`, `band_history` and `real_fills`, and release 1019b's `eligibility` (below),
-leave it at 1.
+store as before): PREREG-EVL-3's `bands`, `band_history` and `real_fills`, release 1019b's `eligibility` (below) and R3's
+`births`, `birth_calls` and `birth_candidates` leave it at 1.
+
+R3'S BIRTHS (goal-2026-10-19/R3-SPEC.md; league/events/births.py): `births` holds one row a REGISTERED birth, filled only
+from the gateway's receipt of its registration (`POST /v1/github/docs` appending its canonical line to
+`docs/births/<night>.jsonl` on main): the spec's canonical JSON and sha256, the commit, GitHub's commit time
+(`committed_at`), the House's receipt of the answer (`received_at`) and the registration time, the later of the two
+(`registered_at`: a birth counts only events knowable after it). Never rewritten. `birth_calls` keeps the architect's
+one model call a night (its prompt sha, the facts' sha and the answer, as `verdicts` keeps a verdict); `birth_candidates`
+every spec proposed a night with the validator's verdict (`accepted`, `refused`, `registered`, `unknown`).
 
 ELIGIBILITY ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (release 1019b's second review; PREREG-EVL-1
 section 2: a LIVE decision reads Alpaca's `status=active` and `tradable: true`, a BACKFILLED one `status=all` and the
@@ -95,6 +103,16 @@ CREATE TABLE IF NOT EXISTS real_fills(program TEXT NOT NULL, version INTEGER NOT
   band TEXT NOT NULL, PRIMARY KEY(program, version, event, side));
 CREATE TABLE IF NOT EXISTS eligibility(day TEXT NOT NULL, cik TEXT NOT NULL, rule TEXT NOT NULL, eligible INTEGER NOT NULL,
   symbol TEXT, decided_at TEXT NOT NULL, PRIMARY KEY(day, cik, rule));
+CREATE TABLE IF NOT EXISTS births(id TEXT NOT NULL, version INTEGER NOT NULL, sha TEXT NOT NULL, spec TEXT NOT NULL,
+  seatable INTEGER NOT NULL, registered_at TEXT NOT NULL, committed_at TEXT, received_at TEXT NOT NULL, path TEXT NOT NULL,
+  commit_sha TEXT, seq INTEGER NOT NULL, line TEXT NOT NULL, why TEXT, by TEXT, night TEXT NOT NULL,
+  PRIMARY KEY(id, version));
+CREATE UNIQUE INDEX IF NOT EXISTS births_sha ON births(sha);
+CREATE TABLE IF NOT EXISTS birth_calls(night TEXT NOT NULL, prompt_sha TEXT NOT NULL, model TEXT NOT NULL,
+  request_id TEXT, asked_at TEXT, answered_at TEXT, status TEXT NOT NULL, user_sha TEXT, facts_sha TEXT, answer TEXT,
+  usd REAL, PRIMARY KEY(night, prompt_sha, model));
+CREATE TABLE IF NOT EXISTS birth_candidates(night TEXT NOT NULL, seq INTEGER NOT NULL, sha TEXT, id TEXT, spec TEXT,
+  why TEXT, by TEXT, status TEXT NOT NULL, reasons TEXT, line TEXT, at TEXT NOT NULL, PRIMARY KEY(night, seq));
 """
 
 #: The two rules of PREREG-EVL-1 section 2 an eligibility result is made by (the `eligibility` table's `rule`).

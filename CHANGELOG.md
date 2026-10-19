@@ -36,6 +36,46 @@ the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PR
 [docs/events.md](docs/events.md); its code runs in shadow on the captain's workstation from branch `feat/evl-shadow`
 until release 1019b (below) brings it onto the House.
 
+### R3: births, the event lane's generator, on `feat/evl-births` (unreleased; built on `rel/1019b` `5cad27f2`; an owner deploy: THE GATEWAY FIRST, then the House with `events.births` switched on)
+
+- **Why.** The owner's goal V2 item 2: "Births come from your architect agents and from you, using outcome-free facts,
+  rationed by an expected-false-pass budget you state" (goal-2026-10-19/R3-SPEC.md). PREREG-EVL-1/2/3 were hand births;
+  R3 makes births continuous and cheap, the judges untouched.
+- **What it carries.** `league/events/births.py` (new, behind `league/ci.py`'s wall in `PENDING_GATEWAY`): the GRAMMAR
+  (R3-SPEC section 1's fields only, every family the lane reads, verdict thresholds on stored PROMPT-DOC / PROMPT-NEWS
+  scores and guidance only; a READ birth carries its derived control), the canonical JSON and sha256, the OUTCOME-FREE
+  FACTS (a SQLite authorizer refuses bars, marks, outcomes, looks, bands, band_history, real_fills, universe and meta),
+  the VALIDATOR (>= 3 selected events a session over the last 20 sessions, Jaccard < 0.8 against every registered
+  program, the stated budget: 0.10 a seatable birth, at most 2.0 over every seatable version ever registered with
+  PREREG's 0.9 included, at most 3 seatable births a night, records free), the PROPOSER (one claude-haiku-4-5-20251001
+  call a night at temperature 0, its prompt sha and answer stored in `birth_calls`, at most 6 specs, $0.25 a night cap)
+  and the REGISTRATION (canonical lines appended to `docs/births/<night>.jsonl` through `POST /v1/github/docs`; the
+  later of GitHub's commit time and the House's receipt is the registration time, kept in the store's new `births`
+  table; an answer that never came is posted again the next night). `league/events/programs.py` `load_births` adds each
+  registered birth as a Program row (its own registration time, PREREG-EVL-3's learning band, screen, minimums and limit
+  at entry) AFTER every PREREG program; `select` hands a birth to its own rule. `league/events/screen.py` judges a
+  seatable birth by PREREG-EVL-3's looks (`control_of` finds a READ birth's control) and never a record or a control;
+  `expected_false_passes` counts each seatable birth. `league/events/book.py` seats a registered seatable birth at its
+  version 1 and puts every birth after every PREREG program in ROOM's order (`BIRTH_ROOM`); it loads the births when it
+  opens the lane and at each session's first decision. `league/events/house.py` loads them every turn and runs the
+  births job at 21:15 ET on a session night after the report when `events.births` is true (`league/config.json` ships it
+  false). The store gains `births`, `birth_calls` and `birth_candidates` (additive: schema 1). The CLI gains `births`
+  (`--specs FILE` for the captain's own specs, `--dry-run`) and `facts`; the daily report a births line.
+- **The gateway** (`gateway/lib/desk.mjs`, its router entry): the docs route admits `docs/births/<YYYY-MM-DD>.jsonl`
+  APPENDS of JSON lines (1 to 12 lines of one JSON object each, at most 8 KB a line, a 256 KB file, no credential, the
+  runtime token, the desk's six commits a New York day shared) and nothing else there; its answer carries GitHub's
+  `committed_at`; lines all standing already commit nothing and answer `unchanged` with the file's latest commit. The
+  desk pages' answers are unchanged. Tests: `gateway/test/births.test.mjs` (8); the suite 497.
+- **No PREREG program moves.** league/tests/test_events_births.py decides an invented week through the lane's own
+  `decide_open` / `decide_close` with and without five registered births: every PREREG program's intents are identical;
+  the births take only events knowable after their own registration. No identity moves (money, constitution, equity,
+  xs, gate contract, options execution fingerprint).
+- **Not built.** R3-SPEC's Sonnet fallback after two failing nights of Haiku proposals; ranking learning room by look
+  statistics (a later pre-registered version).
+- **Deploy.** The gateway (the births append) first, then the House release with `events.births` true; until both,
+  no birth is registered and nothing else changes. Rollback: the release before it (the births tables are additive and
+  ignored by it; a registered birth then stops deciding and trading, its open lots exit by their own plans).
+
 ### Release 1019b: real money for the event lane (learning band), the lane on the House, on `rel/1019b` (unreleased; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, then `scripts/evl_migrate.py` with the desktop's timers stopped; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1` (release R2's rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **Why.** The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3: every seatable

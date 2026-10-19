@@ -718,7 +718,8 @@ class TheWallHoldsTheLanesRuleInputs(unittest.TestCase):
         from league import ci
 
         for path in ("league/events/universe.py", "league/events/calendar.py", "league/events/edgar.py",
-                     "league/events/news.py", "league/events/run.py", "league/events/store.py"):
+                     "league/events/news.py", "league/events/run.py", "league/events/store.py",
+                     "league/events/births.py"):
             self.assertTrue(ci.guard([path], None), path)
         for path in ("league/events/house.py", "league/events/gw.py", "league/events/report.py"):
             self.assertEqual(ci.guard([path], None), [], path)

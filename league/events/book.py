@@ -123,29 +123,47 @@ ZERO = Decimal(0)
 CENT = Decimal("0.01")
 
 
+def _trades(p: P.Program) -> bool:
+    """A version real money may trade: version 2 of a PREREG seatable program, or (R3, league/events/births.py) a
+    registered seatable birth at its own version 1. A PREREG version 1 never trades."""
+    return p.can_seat and (int(p.version) == REAL_VERSION or p.spec is not None)
+
+
 def seatable() -> tuple[P.Program, ...]:
     """The programs real money trades (PREREG-EVL-3 section 1): the lane's `programs.SEATING` (the versions that may
-    ever trade, `Program.can_seat`) at `REAL_VERSION`, in the tables' order. Read at each call."""
-    return tuple(p for p in P.SEATING if p.can_seat and int(p.version) == REAL_VERSION)
+    ever trade, `Program.can_seat`) at `REAL_VERSION`, in the tables' order; then (R3) the registered seatable births
+    the lane's loader added after them (league/events/programs.py `load_births`), in registration order. Read at each
+    call."""
+    return tuple(p for p in P.SEATING if _trades(p))
 
 
 def program_of(program: str, version: int) -> P.Program | None:
     """The version 2 program `program` (the lane's `programs.BY_KEY` row when it may seat; None for any other version:
-    version 1 never trades)."""
+    version 1 never trades), or a registered seatable birth at its version 1 (R3)."""
     p = P.BY_KEY.get((str(program), int(version)))
-    return p if p is not None and p.can_seat and int(p.version) == REAL_VERSION else None
+    return p if p is not None and _trades(p) else None
 
 
 def order_of(program: str) -> int:
-    """The tables' order of a seatable program (PREREG-EVL-1's rows, then PREREG-EVL-2's)."""
+    """The tables' order of a seatable program (PREREG-EVL-1's rows, then PREREG-EVL-2's; then the births in
+    registration order)."""
     for i, p in enumerate(seatable()):
         if p.id == program:
             return i
     return 10 ** 6
 
 
+#: R3-SPEC section 4: "when room is short, PREREG-EVL-3's order (Sized > Probe > learning; table order) holds for the
+#: PREREG programs; births come after them in registration order": a birth's ROOM tier, after every PREREG band's.
+BIRTH_ROOM = 10
+
+
 def room_key(program: str, band: str | None) -> tuple[int, int]:
-    """ROOM's order (PREREG-EVL-3 section 2): Sized, then Probe, then learning; then the tables' order."""
+    """ROOM's order (PREREG-EVL-3 section 2): Sized, then Probe, then learning; then the tables' order. A registered
+    birth (R3) comes after every PREREG program, whatever the bands, in registration order (R3-SPEC section 4)."""
+    found = next((p for p in seatable() if p.id == program), None)
+    if found is not None and found.spec is not None:
+        return (BIRTH_ROOM, order_of(program))
     return (PRIORITY.get(str(band), 9), order_of(program))
 
 
@@ -277,9 +295,10 @@ def open_lane(root: str | Path | None) -> Lane | None:
     try:
         lane = Lane(path)
         lane.db.execute("SELECT 1 FROM sessions LIMIT 1")
-        return lane
     except sqlite3.Error:
         return None
+    P.load_births(lane)     # (R3: the registered births, after every PREREG program; none when the store has none)
+    return lane
 
 
 def decided(lane: Lane, day: dt.date, at: str) -> bool:
@@ -364,6 +383,8 @@ def bands(lane: Lane | None, s: Settings | None = None) -> list[Band] | None:
     """Every version 2 program's band at a decision, in the tables' order (`lane_bands`; a program with no row is at
     learning, `DEFAULT_BAND`; a band the rules do not name trades nothing, read as retired and said so). None when the
     lane's band table cannot be read."""
+    if lane is not None:
+        P.load_births(lane)     # (R3: a birth registered since the last decision seats from this one, at learning)
     table = lane_bands(lane)
     if table is None:
         return None
@@ -779,7 +800,7 @@ def publish(client: Any, day: dt.date, symbols: Sequence[str], *, timeout: float
 
 __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS", "LIVE_BANDS", "DEFAULT_BAND",
            "PRIORITY", "STRICT_WEIGHT", "LADDER_CLOSES", "ZERO_AFTER", "ISSUER_GAP_SESSIONS", "LANE_DIR", "FILLS_TABLE",
-           "FILL_COLUMNS", "seatable", "program_of", "order_of", "room_key", "SCHEMA", "Settings", "FALLBACK",
+           "FILL_COLUMNS", "seatable", "program_of", "order_of", "room_key", "BIRTH_ROOM", "SCHEMA", "Settings", "FALLBACK",
            "settings", "Lane", "lane_path", "open_lane", "decided", "LIVE_ROWS", "eligible", "universe_rows", "Band",
            "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "held_recently",
            "picks", "allocate", "one_name_an_auction", "t29", "minute_close", "last_session_before", "reaction_reader",
