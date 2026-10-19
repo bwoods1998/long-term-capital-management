@@ -34,9 +34,11 @@ decision goes before it. A task ends early when a decision falls due; a decision
 stop at their bound and the next turn goes on from what was stored (universe rows, cik_info, bars and verdicts are kept
 as they are read). `<state>/events/STOP` idles the lane without a deploy.
 
-Paid work: a verdict is asked only while the House is not paused (`PAUSE`), and only under the lane's own line of
-`events.verdict_usd_day` dollars a New York day (default $5): over it, READ events wait (PREREG-EVL-1 section 4), as
-they do for any call with no answer. Market-data reads are spaced `DATA_INTERVAL` apart (Alpaca's Basic plan is shared
+Paid work: a verdict is asked only while the House is not paused (`PAUSE`), and only under THE LANE'S LINE of a New
+York day: the lower of `events.verdict_usd_day` (default $5) and the budget rule's allowance for the lane's verdicts
+(league/ops/budget.py `lane_allowance`: the Claude meter's lane part in `<state>/budget.json`, its no-profit floor
+when the file is not usable), so the verdicts and every other metered dollar stay under the day's cap (budget rule 3;
+release 1019c). Over it, READ events wait (PREREG-EVL-1 section 4), as they do for any call with no answer. Market-data reads are spaced `DATA_INTERVAL` apart (Alpaca's Basic plan is shared
 with the House's own book).
 """
 
@@ -226,6 +228,7 @@ class EventLane:
         self.root = Path(root)
         self.settings = dict(settings or {})
         self.verdict_usd_day = float(self.settings.get("verdict_usd_day", VERDICT_USD_DAY))
+        self._line = {"usd_day": 0.0, "source": "not read yet"}   # THE LANE'S LINE (`_spend_today`): none before it is read
         self._gateway = gateway
         self._sec_base = sec
         self._mono = monotonic
@@ -297,6 +300,7 @@ class EventLane:
                     "next_look": _iso_epoch(self._next_look), "last": dict(self._last) if self._last else None,
                     "tasks": {k: dict(v) for k, v in sorted(self._tasks.items())},
                     "verdict_usd_today": round(float(self._usd["usd"]), 4), "verdict_usd_day": self.verdict_usd_day,
+                    "verdict_line_usd": round(float(self._line["usd_day"]), 4), "verdict_line_source": self._line["source"],
                     "warnings": self._warnings}
 
     def ready(self) -> bool:
@@ -330,7 +334,7 @@ class EventLane:
             return "deadline"
         if self._paused:
             return "paused"
-        if self._usd["usd"] >= self.verdict_usd_day:
+        if self._usd["usd"] >= self._line["usd_day"]:
             return "cap"
         return None
 
@@ -348,6 +352,22 @@ class EventLane:
         row = st.db.execute("SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(usd IS NULL), 0) FROM verdicts WHERE "
                             "answered_at>=? AND answered_at<?", (lo, hi)).fetchone()
         self._usd = {"day": day, "usd": float(row[0]) + VERDICT_USD_UNKNOWN * int(row[1])}
+        self._line = self.verdict_line(now)
+
+    def verdict_line(self, now: dt.datetime) -> dict[str, Any]:
+        """THE LANE'S LINE (the module docstring): {usd_day, source}, the lower of `events.verdict_usd_day` and the budget
+        rule's allowance (league/ops/budget.py `lane_allowance`, which never raises and falls back to the rule's own
+        no-profit line). Anything else that goes wrong is no line at all: no paid call (FAIL CLOSED)."""
+        try:
+            from ..ops import budget as B
+
+            got = B.lane_allowance(self.root.parent, now.timestamp())
+            allowance, source = max(0.0, float(got["usd_day"])), str(got.get("source") or "budget.json")
+        except Exception as exc:  # noqa: BLE001 - no allowance read is no paid verdict
+            return {"usd_day": 0.0, "source": f"the budget's allowance could not be read ({type(exc).__name__})"}
+        if self.verdict_usd_day <= allowance:
+            return {"usd_day": self.verdict_usd_day, "source": "events.verdict_usd_day"}
+        return {"usd_day": allowance, "source": f"the budget's allowance: {source}"}
 
     def assets(self, gw: Any, key: str) -> dict[str, Mapping[str, Any]]:
         have = self._asset_cache.get(key)
@@ -779,8 +799,8 @@ class EventLane:
         stored = self._stored_verdicts(ctx.store) - before
         stalled = self._look(key, missing, stored, gw)
         if gw.counts.get("cut_cap"):
-            self.warn("verdict line", f"the day's ${self.verdict_usd_day:.2f} line for verdicts is reached; READ events "
-                                      "wait for the next day's (events.verdict_usd_day)")
+            self.warn("verdict line", f"the day's ${self._line['usd_day']:.2f} line for verdicts is reached "
+                                      f"({self._line['source']}); READ events wait for the next day's")
         if day not in self._universe_told and isinstance(out.get("events"), Mapping):
             self._universe_told.add(day)
             self._receipted(ctx.store, "universe", "ok", {"day": day.isoformat(), "decision": kind,

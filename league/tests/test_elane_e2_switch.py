@@ -520,8 +520,16 @@ class TheLoop(LoopCase):
         # role, so the audit's first candidate came back from the reviewer's own model, was discarded, glm_balanced was
         # never asked, and the same key was re-read every round (booked again each time; empty once the router had
         # blanked it; three empty reads failed the version at REVIEW).
+        import time
+
+        from league.ops import budget
         from league.swarm import models
 
+        # The routes, not the budget: a day of $4 of Sail research and $1 of the Claude roles (budget rule 2's floor, the
+        # figures this case was written on; rule 3's own floor is its no-profit $0.34, under one review and one audit).
+        (self.root / "budget.json").write_text(json.dumps({
+            "schema": budget.SCHEMA, "rule_version": budget.RULE_VERSION, "at": time.time(),
+            "meters": {"sail": {"research_usd_day": 4.0, "fixed_usd_day": 1.0}, "claude": {"research_usd_day": 1.0}}}))
         self.sail.script = lambda body: {"text": json.dumps({"verdict": "pass", "reasons": ["invented"], "findings": []})}
         names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
         self.assertEqual(sw.router.sail_fallback("k3_balanced", role=elane_yield.ROLE), ("balanced", "pro_asap"))
