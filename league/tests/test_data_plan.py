@@ -4,7 +4,6 @@ measurements): SIP snapshots refused, a SIP read ending inside the last 15 minut
 end of that New York day), OPRA refused, a start after its end a 400. The invented prices are the tests' own."""
 
 import copy
-import dataclasses
 import datetime as dt
 import io
 import json
@@ -492,7 +491,6 @@ class Opener:
     def open(self, request, timeout=None):
         self.urls.append(request.full_url)
         parts = urllib.parse.urlsplit(request.full_url)
-        q = dict(urllib.parse.parse_qsl(parts.query))
         plan = BasicPlan(self.clock, bar_rows={"raw": self.bars, "all": self.bars, "split": self.bars})
         status, body = plan.request("GET", "https://data.alpaca.markets" + parts.path.replace("/v1/alpaca", "", 1)
                                     + "?" + parts.query)
