@@ -49,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("backfill")
     b.add_argument("--from", dest="first", type=_day, required=True)
     b.add_argument("--to", dest="last", type=_day, required=True)
+    b.add_argument("--forms", default="8-K,4")
+    b.add_argument("--no-news", action="store_true")
     for name in ("decide-open", "decide-close"):
         d = sub.add_parser(name)
         d.add_argument("--day", type=_day, required=True)
@@ -63,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "record":
             out = R.record_pass(ctx)
         elif args.cmd == "backfill":
-            out = R.backfill(ctx, args.first, args.last)
+            out = R.backfill(ctx, args.first, args.last, forms=tuple(args.forms.split(",")), news=not args.no_news)
         elif args.cmd == "decide-open":
             out = R.decide_open(ctx, args.day, backfill_run=args.backfill)
         elif args.cmd == "decide-close":

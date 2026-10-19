@@ -80,7 +80,7 @@ def record_pass(ctx: Context) -> dict[str, Any]:
     return out
 
 
-def backfill(ctx: Context, first: dt.date, last: dt.date) -> dict[str, Any]:
+def backfill(ctx: Context, first: dt.date, last: dt.date, *, forms: Iterable[str] = E.FORMS, news: bool = True) -> dict[str, Any]:
     """Every 8-K and Form 4 of EDGAR's daily indexes from `first` to `last` (listed issuers fetched), and the news of
     the span. Days whose index is not published yet are left to the current-feed passes."""
     st = ctx.store
@@ -91,7 +91,7 @@ def backfill(ctx: Context, first: dt.date, last: dt.date) -> dict[str, Any]:
     while day <= last:
         if day.weekday() < 5:
             try:
-                rows = E.parse_daily_index(ctx.sec(E.daily_index_url(day)))
+                rows = E.parse_daily_index(ctx.sec(E.daily_index_url(day)), forms)
             except Exception as exc:  # noqa: BLE001 - an unpublished index is a later pass's
                 out["days"][day.isoformat()] = f"no index ({type(exc).__name__})"
                 day += dt.timedelta(days=1)
@@ -110,6 +110,8 @@ def backfill(ctx: Context, first: dt.date, last: dt.date) -> dict[str, Any]:
             out["days"][day.isoformat()] = n
         day += dt.timedelta(days=1)
     try:
+        if not news:
+            raise LookupError("news not asked")
         lo = dt.datetime.combine(first, dt.time(0, 0), tzinfo=dt.timezone.utc)
         hi = dt.datetime.combine(last + dt.timedelta(days=1), dt.time(0, 0), tzinfo=dt.timezone.utc)
         out["news"] = N.record(st, ctx.gw, lo, hi, now=ctx.now())
