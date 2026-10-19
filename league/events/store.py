@@ -16,7 +16,8 @@ from the gateway's receipt of its registration (`POST /v1/github/docs` appending
 (`committed_at`), the House's receipt of the answer (`received_at`) and the registration time, the later of the two
 (`registered_at`: a birth counts only events knowable after it). Never rewritten. `birth_calls` keeps the architect's
 one model call a night (its prompt sha, the facts' sha and the answer, as `verdicts` keeps a verdict); `birth_candidates`
-every spec proposed a night with the validator's verdict (`accepted`, `refused`, `registered`, `unknown`).
+every spec proposed a night with the validator's verdict (`accepted`, `refused`, `registered`, `unknown`) and its
+outcome-free figures (its selection count over the last 20 sessions, the highest Jaccard and with whom).
 
 ELIGIBILITY ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (release 1019b's second review; PREREG-EVL-1
 section 2: a LIVE decision reads Alpaca's `status=active` and `tradable: true`, a BACKFILLED one `status=all` and the
@@ -112,7 +113,8 @@ CREATE TABLE IF NOT EXISTS birth_calls(night TEXT NOT NULL, prompt_sha TEXT NOT 
   request_id TEXT, asked_at TEXT, answered_at TEXT, status TEXT NOT NULL, user_sha TEXT, facts_sha TEXT, answer TEXT,
   usd REAL, PRIMARY KEY(night, prompt_sha, model));
 CREATE TABLE IF NOT EXISTS birth_candidates(night TEXT NOT NULL, seq INTEGER NOT NULL, sha TEXT, id TEXT, spec TEXT,
-  why TEXT, by TEXT, status TEXT NOT NULL, reasons TEXT, line TEXT, at TEXT NOT NULL, PRIMARY KEY(night, seq));
+  why TEXT, by TEXT, status TEXT NOT NULL, reasons TEXT, figures TEXT, line TEXT, at TEXT NOT NULL,
+  PRIMARY KEY(night, seq));
 """
 
 #: The two rules of PREREG-EVL-1 section 2 an eligibility result is made by (the `eligibility` table's `rule`).

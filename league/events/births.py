@@ -634,6 +634,25 @@ class Facts:
     def count(self, prog: P.Program) -> int:
         return sum(len(v) for v in self.selected(prog).values())
 
+    def candidates(self, specs: Iterable[Any]) -> dict[str, dict[str, Any]]:
+        """PER-CANDIDATE SELECTION COUNTS (outcome-free): {id: {selected, per_session, by_session (one count a session,
+        oldest first), upper_bound (a react family: the reaction is never read)}} of each spec the grammar parses, or
+        {id or "?": {refused: reasons}}."""
+        out: dict[str, dict[str, Any]] = {}
+        for raw in specs:
+            try:
+                sp = parse(raw)
+            except SpecError as exc:
+                ident = raw.get("id") if isinstance(raw, Mapping) and isinstance(raw.get("id"), str) else "?"
+                out[ident] = {"refused": exc.reasons}
+                continue
+            by = self.selected(program(sp, born_at=S.iso(EPOCH)))
+            total = sum(len(v) for v in by.values())
+            out[sp["id"]] = {"selected": total, "per_session": round(total / len(self.days), 2) if self.days else 0.0,
+                             "by_session": [len(by[d]) for d in self.days],
+                             "upper_bound": sp["family"] in REACT_FAMILIES}
+        return out
+
     def facts(self, programs: Sequence[P.Program] | None = None) -> dict[str, Any]:
         """The architect's facts (JSON-ready; counts only): the module docstring's list."""
         progs = list(P.PROGRAMS if programs is None else programs)
@@ -647,7 +666,14 @@ class Facts:
         values = {"50k-100k": 0, "100k-250k": 0, "250k-1m": 0, "1m+": 0}
         roles = {"director": 0, "officer": 0, "both": 0}
         seen: set[tuple[str, str]] = set()
+        forms: dict[str, set[str]] = {"8-K": set(), "4": set()}
         with outcome_free(self.store.db):
+            for day in self.days:
+                for family in ("ern", "ern-react", "ins", "ins-buy"):
+                    for row in self.rows[day].get(family, []):
+                        forms["8-K" if family.startswith("ern") else "4"].add(str(row.get("accession")))
+                for row in self.rows[day].get("8k", []):
+                    forms["8-K"].add(str(row.get("accession")))
             for day in self.days:
                 for family, rows in self.rows[day].items():
                     slot = fam.setdefault(family, {"events": 0, "eligible": 0})
@@ -713,6 +739,7 @@ class Facts:
             "first": self.days[0].isoformat() if self.days else None,
             "last": self.days[-1].isoformat() if self.days else None,
             "families": {f: fam.get(f, {"events": 0, "eligible": 0, "per_session": 0.0}) for f in FAMILIES},
+            "forms": {"8-K": len(forms["8-K"]), "4-buys": len(forms["4"])},
             "items_8k": dict(sorted(items.items())),
             "news_sources": dict(sorted(sources.items(), key=lambda kv: (-kv[1], kv[0]))[:15]),
             "hours": {k: dict(sorted(v.items(), key=lambda kv: int(kv[0]))) for k, v in hours.items()},
@@ -1103,6 +1130,8 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
             proposals = [dict(p) | {"by": (p.get("by") or "captain")} for p in proposals]
             psha = None
         checked = validate(store, facts, proposals, night=today)
+        out["counts"] = {c["id"] or f"#{c['seq']}": {"selected": c["selected"], "per_session": c["per_session"],
+                                                      "jaccard": c["jaccard"]} for c in checked}
         first = int(store.db.execute("SELECT COALESCE(MAX(seq) + 1, 0) FROM birth_candidates WHERE night=?",
                                      (today.isoformat(),)).fetchone()[0])
         for c in checked:
@@ -1110,10 +1139,13 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
             c["line"] = line_of(c, night=today, facts_sha=fsha, prompt=psha) if c["ok"] else None
         with store.tx() as db:
             for c in checked:
-                db.execute("INSERT INTO birth_candidates(night, seq, sha, id, spec, why, by, status, reasons, line, at) "
-                           "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                figures = {"selected": c["selected"], "per_session": c["per_session"], "jaccard": c["jaccard"],
+                           "charge": c["charge"]}
+                db.execute("INSERT INTO birth_candidates(night, seq, sha, id, spec, why, by, status, reasons, figures, line, "
+                           "at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                            (today.isoformat(), c["seq"], c["sha"], c["id"], c["spec"], c["why"], c["by"],
-                            "accepted" if c["ok"] else "refused", json.dumps(c["reasons"]), c["line"], S.iso(now())))
+                            "accepted" if c["ok"] else "refused", json.dumps(c["reasons"]),
+                            json.dumps(figures, sort_keys=True), c["line"], S.iso(now())))
         accepted = [c for c in checked if c["ok"]]
         out["proposed"] = len(checked)
         out["accepted"] = [c["id"] for c in accepted]

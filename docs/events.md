@@ -240,7 +240,9 @@ false passes (the measured zero-edge pass rate of PREREG-EVL-3's screen is at mo
 most 2.0 over every seatable version ever registered in the lane (PREREG-EVL-3's nine use 0.9, so at most eleven
 seatable births ever), at most 3 seatable births a night; records are free. The captain's births go through the same
 validator and registration with no model call: `python -m league.events --state DIR births --specs FILE` (a JSON list
-of `{spec, why}`; `--dry-run` validates only); `facts` prints the night's facts.
+of `{spec, why}`; `--dry-run` validates only); `facts [--specs FILE]` prints the night's facts, with each spec's
+selection count by session. Every candidate's verdict and figures (its count, its highest Jaccard and with whom) are
+kept in `birth_candidates`.
 
 **Registration.** The accepted specs' canonical lines are appended to `docs/births/<night>.jsonl` on main through the
 gateway's docs route (`POST /v1/github/docs`, gateway/lib/desk.mjs: that path pattern only, appends of JSON lines only,

@@ -427,7 +427,15 @@ class Validation(unittest.TestCase):
             st.db.execute(f"DELETE FROM {table}")
         self.assertEqual(BI.Facts(st, self.AS_OF).facts(), sheet)
         self.assertEqual(sheet["sessions"], 20)
+        self.assertEqual(sheet["forms"], {"8-K": 420, "4-buys": 0})
         self.assertEqual(sheet["items_8k"], {"1.02": 80, "1.05": 40, "2.03": 80, "3.01": 80, "5.02": 80})
+        counts = facts.candidates([self.candidate("EVL-B-8K-102", ["1.02"])["spec"],
+                                   spec("EVL-B-R", "ern-react", {"react_min": 1.05}, exit_="open"), {"id": "EVL-B-BAD"}])
+        self.assertEqual(counts["EVL-B-8K-102"], {"selected": 80, "per_session": 4.0, "by_session": [4] * 20,
+                                                  "upper_bound": False})
+        self.assertEqual((counts["EVL-B-R"]["selected"], counts["EVL-B-R"]["upper_bound"]), (60, True),
+                         "a react rule's count: every earnings 8-K, the reaction never read")
+        self.assertIn("missing fields", counts["EVL-B-BAD"]["refused"][0])
         self.assertEqual(sheet["families"]["ern"]["eligible"], 60)
         self.assertEqual(sheet["scores"]["ern"], {"1": 20, "2": 20, "3": 20})
         self.assertEqual(sheet["guidance_ern"], {"none": 40, "raised": 20})
@@ -592,6 +600,10 @@ class Registration(Validation):
         statuses = {r["id"]: r["status"] for r in st.db.execute("SELECT id, status FROM birth_candidates")}
         self.assertEqual(statuses, {"EVL-B-8K-102": "registered", "EVL-B-8K-105": "refused",
                                     "EVL-B-8K-203": "registered"})
+        figures = json.loads(st.db.execute("SELECT figures FROM birth_candidates WHERE id='EVL-B-8K-105'").fetchone()[0])
+        self.assertEqual((figures["selected"], figures["per_session"], figures["charge"]), (40, 2.0, 0),
+                         "each candidate's outcome-free figures kept beside its verdict")
+        self.assertEqual(out["counts"]["EVL-B-8K-102"]["selected"], 80)
         receipt = st.db.execute("SELECT status FROM receipts WHERE job='births'").fetchone()
         self.assertEqual(receipt[0], "ok")
         # The House's own receipt is later than GitHub's time: the later one is the registration.

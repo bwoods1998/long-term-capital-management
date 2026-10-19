@@ -4,7 +4,8 @@ Commands: sessions --from D --to D | record | backfill --from D --to D | decide-
 decide-close --day D [--backfill] | catchup (every past decision from the registration time not yet made, as a
 backfill) | births [--day D] [--specs FILE] [--dry-run] (R3's births job: the architect's one call, or the captain's own
 specs from FILE, a JSON list of {spec, why}, with no call; validated and registered through the gateway's docs route,
-`--dry-run` validated only) | facts [--day D] (R3's outcome-free facts). Prints one JSON summary.
+`--dry-run` validated only) | facts [--day D] [--specs FILE] (R3's outcome-free facts, with each spec's selection
+counts). Prints one JSON summary.
 """
 
 from __future__ import annotations
@@ -87,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     bi.add_argument("--dry-run", action="store_true")
     fa = sub.add_parser("facts")
     fa.add_argument("--day", type=_day, default=None)
+    fa.add_argument("--specs", default=None)
     args = ap.parse_args(argv)
     with S.Store(args.state) as st:
         P.load_births(st)       # (R3: the registered births, after every PREREG program)
@@ -120,7 +122,13 @@ def main(argv: list[str] | None = None) -> int:
 
             day = args.day or ctx.now().astimezone(C.NY).date()
             if args.cmd == "facts":
-                out = BI.Facts(st, day).facts()
+                facts = BI.Facts(st, day)
+                out = facts.facts()
+                if args.specs:
+                    with open(args.specs, encoding="utf-8") as fh:
+                        listed = json.load(fh)
+                    out["candidates"] = facts.candidates([x.get("spec") if isinstance(x, dict) and "spec" in x else x
+                                                          for x in listed])
             else:
                 specs = None
                 if args.specs:
