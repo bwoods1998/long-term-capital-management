@@ -20,6 +20,10 @@ activity. The lane's page is [docs/events.md](docs/events.md).
 - **Judges**: each program is pre-registered before its first event ([docs/prereg/](docs/prereg/PREREG-EVL-1.md)) and
   screened after at least 60 shadow events over at least 10 sessions, at a false-positive rate of at most 15%, with the
   expected false passes stated (0.9 over the nine seatable programs registered on Oct 19).
+- **Births** (R3, built, not deployed): new programs born each night from outcome-free facts by the architect (Claude
+  Haiku 4.5, one call, at most $0.25 a night) or the captain, validated by code and registered as lines of
+  `docs/births/`, judged by the same screen and rationed by a stated budget: 0.10 expected false pass a seatable birth,
+  at most 2.0 in all ([docs/events.md](docs/events.md), "Births").
 - **Money**: at most 10% of equity in one name, at most 100% invested, no margin; a loss budget of $400 net in any 20
   sessions and $800 net in total; the kill switch, the daily stop and the drawdown stop are never weakened.
 - **Cost follows profit**: metered compute at most $5 a day plus half the trailing week's realized net profit, never
@@ -242,7 +246,7 @@ As it will stand after the prune (#375, still a draft); until it merges the lega
 | `league/swarm/` | the swarm: researchers, the tournament and the allocation, the architect, the family cards, the diagnostician, the gate, the model router, the Sail guard, the funding-cliff alerts, the Gym pool, the evaluator record; `policy.json`, the research settings as code (V3-A; a protected file) |
 | `league/events/` | the event lane (the owner's goal of Oct 19, 2026; [docs/events.md](docs/events.md)): the EDGAR and news recorders, the recorded verdicts, the pre-registered programs and their screen; `book.py` and `proof.py` (release R2, not deployed) its real money through the equity book's event kind and the auction paper proof |
 | `league/ops/` | the House's jobs (V3-A; the whole tree is protected): the scheduler on the NYSE calendar, the runner and receipts, the pre-open checks, the close economics, hygiene, the venue clock, the scoreboard, the budget rule, the standing grant and the drills |
-| `league/events/` | the event lane of the goal of Oct 19, 2026 ([docs/events.md](docs/events.md); rules in `docs/prereg/`): EDGAR and news recorders, the recorded Haiku verdicts, the pre-registered programs, the decisions, settlement, the screen, the daily report, and `house.py`, its scheduler on the House (release R1; `config.json` `events.enabled`); its judges are protected |
+| `league/events/` | the event lane of the goal of Oct 19, 2026 ([docs/events.md](docs/events.md); rules in `docs/prereg/`): EDGAR and news recorders, the recorded Haiku verdicts, the pre-registered programs, the decisions, settlement, the screen, the daily report, and `house.py`, its scheduler on the House (release R1; `config.json` `events.enabled`); `births.py` (R3, not deployed: the births' grammar, outcome-free facts, validator and budget, proposer and registration; `events.births`); its judges are protected |
 | `league/CONTRACT.md` | the options strategy contract every researcher reads (about 32 KB) |
 | `league/tests/` | the tests |
 | `gateway/` | the Worker ([its README](gateway/README.md)) |

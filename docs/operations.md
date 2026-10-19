@@ -150,7 +150,19 @@ Release 1019b's review adds the modules that hold the rules' inputs: `league/eve
 `edgar.py`, `news.py`, `run.py` and `store.py` (eligibility and the benchmark, the windows and decision times, the
 knowable lag, which program gets which rows, the record's schema). `league/events/house.py`, `gw.py`, `report.py`,
 `league/service.py` and `scripts/evl_migrate.py` are not: a fix to them can ship through the updater. `config.json` is
-the owner's.
+the owner's. R3 adds `league/events/births.py` (the births' grammar, validator and budget, the facts' wall).
+
+**Births (R3, on `feat/evl-births`, not deployed; [events.md](events.md), "Births").** Deploy THE GATEWAY FIRST (its
+docs route admits `docs/births/<YYYY-MM-DD>.jsonl` appends), then the House release with `league/config.json`
+`events.births` true: the lane then runs the births job once a session night at 21:15 ET after the report (receipt
+`births`; the architect's one Haiku call, at most $0.25 a night, inside the lane's verdict line and refused under
+PAUSE; the night's facts, candidates and verdicts in `birth_calls` and `birth_candidates`; registered births in
+`births`, each with its GitHub commit). The captain's own births, with no model call: `python3 -m league.events --state
+/workspace/state/events births --specs FILE` on the box (FILE a JSON list of `{spec, why}`; `--dry-run` validates and
+records only); the facts alone: `facts`. Watching: the daily report's "Births" line and "Expected false passes" (0.10 a
+seatable birth, at most 2.0 in all). Stopping: `events.births` false stops new births (a deploy); the registered
+births go on trading at their bands, as any program (a new version is the only change; retirement is the screen's).
+A night whose registration got no answer reads `unknown` and is posted again the next night.
 
 ## The old lanes are exits only (Oct 19, 2026): `equity_money.enabled` False: `fix/equity-opens-off`, deployed 03:46Z Oct 19 (release 1019a)
 

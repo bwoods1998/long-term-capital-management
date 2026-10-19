@@ -222,6 +222,24 @@ def _key(prog: P.Program) -> str:
     return prog.id if prog.version == 1 else f"{prog.id}@v{prog.version}"
 
 
+#: R3: the decision summary's map of the registered births whose own part of a decision raised ({key: why}).
+BIRTHS_FAILED = "births_failed"
+
+
+def _decide_one(prog: P.Program, one: Callable[[P.Program], None], out: dict[str, Any]) -> None:
+    """One program's part of a decision. A PREREG program's failure fails the decision, as before; a registered
+    birth's (R3, league/events/births.py) is its own: kept in the summary's `births_failed` (league/events/screen.py
+    `final_until` then holds that birth's looks until a later pass decides it), never the PREREG programs' decision,
+    whose receipt and finality stay as they were. The hourly re-decision tries it again."""
+    if prog.spec is None:
+        one(prog)
+        return
+    try:
+        one(prog)
+    except Exception as exc:  # noqa: BLE001 - a birth's failure is its own
+        out.setdefault(BIRTHS_FAILED, {})[_key(prog)] = f"{type(exc).__name__}: {str(exc)[:160]}"
+
+
 # ---------------------------------------------------------------------------------------------------- verdicts
 def doc_verdict(ctx: Context, row: Mapping[str, Any], uni: Mapping[str, Any]) -> int | None:
     st = ctx.store
@@ -310,21 +328,25 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
 
     out: dict[str, Any] = {"pending": {}}
     why = "backfill" if backfill_run else None
-    for prog in P.PROGRAMS:
-        if prog.entry_at != "open":
-            continue
+
+    def one(prog: P.Program) -> None:
         rows = {"ern": e8k, "8k": e8k, "ins": ins, "ins-buy": buys, "news": articles}.get(prog.family, [])
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
         waiting = pending(prog, rows)
         if ask_only:
             if waiting:
                 out["pending"][_key(prog)] = waiting   # version 1 and version 2 of one id count apart
-            continue
+            return
         if waiting:
             out["pending"][_key(prog)] = waiting   # decided by a later pass, once every verdict is stored
-            continue
+            return
         cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, guidance=guidance)
         out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
+
+    for prog in P.PROGRAMS:
+        if prog.entry_at != "open":
+            continue
+        _decide_one(prog, one, out)
     out["events"] = {"8-K": len(e8k), "f4_triggers": len(ins), "f4_buys": len(buys), "news": len(articles),
                      "eligible": sum(1 for v in elig.values() if v)}
     if rid is not None:
@@ -429,21 +451,25 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
 
     out: dict[str, Any] = {"pending": {}}
     why = "backfill" if backfill_run else None
-    for prog in P.PROGRAMS:
-        if prog.entry_at != "close":
-            continue
+
+    def one(prog: P.Program) -> None:
         rows = {"ern-react": e8k, "news-day": articles, "news-react": articles}.get(prog.family, [])
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
         waiting = pending(prog, rows)
         if ask_only:
             if waiting:
                 out["pending"][_key(prog)] = waiting   # version 1 and version 2 of one id count apart
-            continue
+            return
         if waiting:
             out["pending"][_key(prog)] = waiting   # decided by a later pass, once every verdict is stored
-            continue
+            return
         cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, reaction=reaction)
         out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
+
+    for prog in P.PROGRAMS:
+        if prog.entry_at != "close":
+            continue
+        _decide_one(prog, one, out)
     out["events"] = {"8-K": len(e8k), "day_news": len(articles), "eligible": sum(1 for v in elig.values() if v)}
     if rid is not None:
         st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())

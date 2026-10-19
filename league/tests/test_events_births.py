@@ -1,0 +1,805 @@
+"""R3: BIRTHS, THE SWARM'S GENERATOR (goal-2026-10-19/R3-SPEC.md; league/events/births.py), on synthetic data only.
+
+Held here: the GRAMMAR (its fields and only those, every family the lane reads, verdict thresholds on stored scores
+only) and the canonical sha; the VALIDATOR's refusals (rate, duplicate, id, budget, three a night) and its budget
+arithmetic (0.10 a seatable birth, 2.0 over every seatable version, PREREG's 0.9 included, records free); the FACTS
+never reading bars, marks, outcomes, looks, bands (nor band_history, real_fills, the universe or meta); the PROPOSER
+through a fake gateway (one Haiku call at temperature 0, its prompt sha and answer stored, never asked twice, the
+night's $0.25 cap); REGISTRATION through a fake docs route (the later of GitHub's commit time and the House's receipt;
+an answer that never came posted again); the LOADER (births after every PREREG program, counted by the screen's
+expected false passes); EVERY PREREG PROGRAM'S INTENTS IDENTICAL WITH AND WITHOUT BIRTHS while the births take their own
+events after their own registration; the screen judging a seatable birth (and never a record or a control); the
+House's event book trading a seated birth at learning size, after every PREREG program in ROOM's order; and the House's
+lane running the births job after the night's report."""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import re
+import sqlite3
+import tempfile
+import unittest
+from decimal import Decimal as D
+from pathlib import Path
+from unittest import mock
+
+from league.events import births as BI
+from league.events import calendar as C
+from league.events import programs as P
+from league.events import run as R
+from league.events import screen as SN
+from league.events import store as S
+from league.events import verdicts as V
+from league.tests import test_events_house as TH
+
+UTC = dt.timezone.utc
+NY = C.NY
+ISSUERS = {f"{i:010d}": chr(64 + i) * 3 for i in range(1, 27)}     # AAA .. ZZZ
+CIK = {sym: cik for cik, sym in ISSUERS.items()}
+TEXT = ("The company announced results and a change in its management today, with guidance for the year. " * 4).encode()
+
+
+def et(day: dt.date, hh: int, mm: int = 0) -> dt.datetime:
+    return dt.datetime.combine(day, dt.time(hh, mm), tzinfo=NY).astimezone(UTC)
+
+
+def spec(ident: str, family: str, rule: dict, *, rank: str = "none", seatable: bool = True, hold: int = 1,
+         exit_: str | None = None) -> dict:
+    entry = BI.ENTRY[family]
+    return {"id": ident, "version": 1, "family": family, "rule": rule, "entry": entry,
+            "exit": exit_ or "close", "hold": hold, "rank": rank, "seatable": seatable}
+
+
+def unload() -> None:
+    P.load_births(None)
+
+
+class Synth:
+    """A lane store of invented events: the calendar (weekdays), a ticker snapshot, eligibility results kept as the
+    lane's decisions keep them, 8-K and Form 4 filings with their documents, news, and stored verdicts."""
+
+    def __init__(self, root: Path):
+        self.st = S.Store(root)
+        C.refresh(self.st, TH.FakeGateway(), dt.date(2026, 8, 3), dt.date(2026, 12, 31))
+        tickers = {str(i): {"cik_str": int(cik), "ticker": sym, "title": f"{sym} Inc."}
+                   for i, (cik, sym) in enumerate(ISSUERS.items())}
+        self.st.set_meta("tickers@2026-10-01T11:00:05Z", self.st.put_document(json.dumps(tickers).encode(),
+                                                                             "company_tickers"))
+        self.text_sha = self.st.put_document(TEXT, "ex99")
+        self.n = 0
+
+    def eligible(self, day: dt.date, sym: str, ok: bool = True) -> None:
+        self.st.db.execute("INSERT OR REPLACE INTO universe(day, symbol, cik, name, exchange, prev_close, adv20, bench, "
+                           "sigma60) VALUES(?, ?, ?, ?, 'NASDAQ', 20.0, 5e6, 'IWM', 0.02)",
+                           (day.isoformat(), sym, CIK[sym], f"{sym} Inc."))
+        self.st.db.execute("INSERT OR REPLACE INTO eligibility(day, cik, rule, eligible, symbol, decided_at) VALUES(?, ?, "
+                           "'live', ?, ?, 'x')", (day.isoformat(), CIK[sym], int(ok), sym if ok else None))
+
+    def bar(self, day: dt.date, sym: str, close: float = 20.0) -> None:
+        """A raw SIP daily bar (the reaction's base: the last close before the event)."""
+        self.st.db.execute("INSERT OR REPLACE INTO bars(symbol, day, adj, o, h, l, c, v, fetched_at) VALUES(?, ?, 'raw', ?, ?, "
+                           "?, ?, 1e6, 'x')", (sym, day.isoformat(), close, close, close, close))
+
+    def filing(self, sym: str, accepted: dt.datetime, items=("2.02",), *, form: str = "8-K") -> str:
+        self.n += 1
+        acc = f"00{self.n:08d}-26-{self.n:06d}"
+        knowable = accepted + dt.timedelta(minutes=10)
+        self.st.db.execute("INSERT INTO filings(accession, form, cik, company, items, accepted_at, knowable_at, "
+                           "received_at, source, text_sha, text_len, status) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'current', ?, ?, "
+                           "'fetched')", (acc, form, CIK[sym], f"{sym} Inc.", json.dumps(list(items)), S.iso(accepted),
+                                          S.iso(knowable), S.iso(accepted + dt.timedelta(minutes=2)),
+                                          self.text_sha if form == "8-K" else None, len(TEXT) if form == "8-K" else None))
+        return acc
+
+    def doc_verdict(self, acc: str, score: int, guidance: str = "none") -> None:
+        self._verdict(f"8k:{acc}", V.PROMPTS["doc"], score, guidance)
+
+    def news_verdict(self, ident: str, score: int) -> None:
+        self._verdict(f"news:{ident}", V.PROMPTS["news"], score, None)
+
+    def _verdict(self, event: str, prompt: V.Prompt, score: int, guidance: str | None) -> None:
+        self.st.db.execute("INSERT INTO verdicts(event, prompt_sha, model, request_id, asked_at, answered_at, status, "
+                           "score, guidance, answer, usd) VALUES(?, ?, ?, 'r', '2026-10-01T00:00:00Z', "
+                           "'2026-10-01T00:00:01Z', 'ok', ?, ?, '{}', 0.001)", (event, prompt.sha, V.MODEL, score, guidance))
+
+    def article(self, sym: str, created: dt.datetime, source: str = "benzinga") -> str:
+        self.n += 1
+        ident = f"n{self.n}"
+        self.st.db.execute("INSERT INTO news(id, created_at, updated_at, received_at, knowable_at, source, headline, "
+                           "summary, symbols, live) VALUES(?, ?, NULL, ?, ?, ?, 'h', 's', ?, 1)",
+                           (ident, S.iso(created), S.iso(created + dt.timedelta(minutes=1)),
+                            S.iso(created + dt.timedelta(minutes=2)), source, json.dumps([sym])))
+        return ident
+
+    def insider(self, sym: str, accepted: dt.datetime, usd: float, *, director: bool = True, officer: bool = False) -> str:
+        acc = self.filing(sym, accepted, (), form="4")
+        self.st.db.execute("INSERT INTO form4_owners(accession, owner_cik, owner_name, is_director, is_officer, "
+                           "officer_title, is_ten_pct) VALUES(?, '99', 'Owner', ?, ?, NULL, 0)",
+                           (acc, int(director), int(officer)))
+        self.st.db.execute("INSERT INTO form4_tx(accession, seq, security, tx_date, code, shares, price, acquired, "
+                           "owned_after) VALUES(?, 1, 'Common', ?, 'P', ?, 10.0, 'A', 1)",
+                           (acc, accepted.astimezone(NY).date().isoformat(), usd / 10.0))
+        return acc
+
+    def register(self, sp: dict, at: str, *, night: str = "2026-11-02", seq: int = 0, why: str = "invented") -> None:
+        """A registered birth as `births.register` writes it from the gateway's receipt."""
+        text = BI.canonical(sp)
+        line = json.dumps({"spec": json.loads(text), "sha": BI.sha(sp)}, sort_keys=True, separators=(",", ":"))
+        self.st.db.execute("INSERT INTO births(id, version, sha, spec, seatable, registered_at, committed_at, received_at, "
+                           "path, commit_sha, seq, line, why, by, night) VALUES(?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                           "'captain', ?)", (sp["id"], BI.sha(sp), text, int(sp["seatable"]), at, at, at,
+                                             f"docs/births/{night}.jsonl", "c" * 40, seq, line, why, night))
+
+
+def sessions_between(st: S.Store, first: dt.date, last: dt.date) -> list[dt.date]:
+    return [s.day for s in C.sessions(st, first, last)]
+
+
+# ======================================================================================================== the grammar
+class TheGrammar(unittest.TestCase):
+    def test_every_family_the_lane_reads_parses_with_its_own_fields(self):
+        good = [spec("EVL-B-ERN-TOP", "ern", {"score_min": 3, "guidance": ["raised"]}, rank="score"),
+                spec("EVL-B-ERNREACT-DIP", "ern-react", {"react_max": 0.97, "score_min": 1}, rank="reaction",
+                     exit_="open"),
+                spec("EVL-B-8K-502", "8k", {"items": ["5.02", "1.02"]}),
+                spec("EVL-B-8K-READ", "8k", {"items": ["8.01"], "score_min": 2}, rank="score"),
+                spec("EVL-B-INS-BIG", "ins", {"value_min": 200000}, rank="value"),
+                spec("EVL-B-INS-DIR", "ins-buy", {"value_min": 100000, "roles": "director"}, rank="value"),
+                spec("EVL-B-NEWS-BZ", "news", {"sources": ["Benzinga"], "hours": [7, 8], "score_min": 2}, rank="score"),
+                spec("EVL-B-NEWSDAY", "news-day", {"score_max": -2}, exit_="open"),
+                spec("EVL-B-NEWSREACT", "news-react", {"react_min": 1.05, "sources": ["benzinga"]}, rank="reaction",
+                     exit_="close"),
+                spec("EVL-B-ERN-O3", "ern", {}, hold=3, seatable=False)]
+        for sp in good:
+            parsed = BI.parse(sp)
+            self.assertEqual(set(parsed), set(BI.FIELDS), sp["id"])
+        self.assertEqual(BI.parse(good[2])["rule"]["items"], ["1.02", "5.02"], "lists are sorted")
+        self.assertEqual(BI.parse(good[6])["rule"]["sources"], ["benzinga"], "sources lower-cased")
+        self.assertTrue(BI.reads(BI.parse(good[0])) and BI.reads(BI.parse(good[3])))
+        self.assertFalse(BI.reads(BI.parse(good[2])) or BI.reads(BI.parse(good[4])))
+
+    def test_anything_outside_the_grammar_is_refused_with_its_reasons(self):
+        base = spec("EVL-B-8K-502", "8k", {"items": ["5.02"]})
+        cases = {
+            "fields outside the grammar": base | {"code": "import os"},
+            "missing fields": {k: v for k, v in base.items() if k != "rank"},
+            "rule fields outside": base | {"rule": {"items": ["5.02"], "react_min": 1.05}},
+            "version must be 1": base | {"version": 2},
+            "the 8k family enters at the open": base | {"entry": "close"},
+            "an open entry exits at a close": base | {"exit": "open"},
+            "hold must be an integer": base | {"hold": 6},
+            "a seatable birth holds one session": base | {"hold": 2},
+            "seatable must be true or false": base | {"seatable": 1},
+            "rank must be one of": base | {"rank": "reaction"},
+            "id must match": base | {"id": "EVL-ERN-READ-O1"},
+            "family must be one of": base | {"family": "options"},
+            "items must be a list of 8-K items": base | {"rule": {"items": ["2.02"]}},
+            "the 8k family names its item set": base | {"rule": {}},
+            "a READ birth of the 8k family names only items": base | {"rule": {"items": ["5.02"], "score_min": 2}},
+            "a react family names react_min or react_max": spec("EVL-B-R", "ern-react", {}, exit_="open"),
+            "react_min and react_max together": spec("EVL-B-R", "ern-react", {"react_min": 1.05, "react_max": 0.95}),
+            "react_min must be a ratio": spec("EVL-B-R", "ern-react", {"react_min": 1.5}),
+            "score_min must be an integer -3..3": spec("EVL-B-E", "ern", {"score_min": 4}),
+            "score_min is above score_max": spec("EVL-B-E", "ern", {"score_min": 2, "score_max": 1}),
+            "guidance must be a proper subset": spec("EVL-B-E", "ern", {"guidance": list(V.GUIDANCE)}),
+            "value_min must be whole dollars": spec("EVL-B-I", "ins-buy", {"value_min": 10000}),
+            "roles must be director or officer": spec("EVL-B-I", "ins-buy", {"roles": "ten_pct"}),
+            "hours must be 1..23 distinct": spec("EVL-B-N", "news", {"hours": [25]}),
+            "a source name": spec("EVL-B-N", "news", {"sources": ["bad;source"]}),
+        }
+        for want, bad in cases.items():
+            with self.assertRaises(BI.SpecError, msg=want) as caught:
+                BI.parse(bad)
+            self.assertTrue(any(want in r for r in caught.exception.reasons), (want, caught.exception.reasons))
+        for bad in ("not json", "[1, 2]", 5, None, {"id": "EVL-B-X"}):
+            with self.assertRaises(BI.SpecError):
+                BI.parse(bad)
+        with self.assertRaises(BI.SpecError, msg="a control's id is never proposed"):
+            BI.parse(base | {"id": "EVL-B-8K-502-CTRL"})
+        with self.assertRaises(BI.SpecError, msg="no free code in the rule either"):
+            BI.parse(base | {"rule": {"items": ["5.02"], "lambda": "x"}})
+
+    def test_the_canonical_form_and_its_sha_ignore_order_and_spacing_and_name_the_rule(self):
+        a = spec("EVL-B-8K-502", "8k", {"items": ["5.02", "1.02"]})
+        b = json.loads(json.dumps(dict(reversed(list(a.items())))))
+        b["rule"] = {"items": ["1.02", "5.02"]}
+        self.assertEqual(BI.canonical(a), BI.canonical(json.dumps(b, indent=2)))
+        self.assertEqual(BI.sha(a), BI.sha(b))
+        self.assertEqual(BI.canonical(a), '{"entry":"open","exit":"close","family":"8k","hold":1,"id":"EVL-B-8K-502",'
+                                          '"rank":"none","rule":{"items":["1.02","5.02"]},"seatable":true,"version":1}')
+        self.assertEqual(BI.sha(a), "%s" % __import__("hashlib").sha256(BI.canonical(a).encode()).hexdigest())
+        self.assertNotEqual(BI.sha(a), BI.sha(a | {"seatable": False}))
+        self.assertNotEqual(BI.sha(a), BI.sha(a | {"rule": {"items": ["5.02"]}}))
+
+    def test_a_read_birth_carries_its_control_and_a_birth_is_a_program_row_of_prereg_3(self):
+        sp = BI.parse(spec("EVL-B-ERN-TOP", "ern", {"score_min": 3}, rank="score"))
+        ctl = BI.control_spec(sp)
+        self.assertEqual((ctl["id"], ctl["rule"], ctl["rank"], ctl["seatable"]), ("EVL-B-ERN-TOP-CTRL", {}, "none", False))
+        prog = BI.program(sp, born_at="2026-11-03T01:00:00Z")
+        self.assertEqual((prog.id, prog.version, prog.family, prog.entry_at, prog.exit_at, prog.hold, prog.prereg),
+                         ("EVL-B-ERN-TOP", 1, "ern", "open", "close", 1, 3))
+        self.assertTrue(prog.can_seat and prog.reads and prog.born)
+        self.assertEqual(prog.registered_at, dt.datetime(2026, 11, 3, 1, 0, tzinfo=UTC))
+        self.assertFalse(BI.program(ctl, born_at="2026-11-03T01:00:00Z").can_seat)
+
+
+# ======================================================================================================== the loader
+class TheLoader(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(unload)
+        self.s = Synth(Path(self.tmp.name))
+        self.addCleanup(self.s.st.close)
+
+    def test_births_come_after_every_prereg_program_and_the_screen_counts_each_seatable_one(self):
+        self.assertEqual(SN.expected_false_passes(self.s.st), {"versions": 9, "expected": 0.9})
+        self.s.register(spec("EVL-B-ERN-TOP", "ern", {"score_min": 3}, rank="score"), "2026-11-03T01:00:00Z", seq=1)
+        self.s.register(spec("EVL-B-8K-502", "8k", {"items": ["5.02"]}), "2026-11-03T01:00:00Z", seq=0)
+        self.s.register(spec("EVL-B-NEWSDAY", "news-day", {"sources": ["benzinga"]}, seatable=False, exit_="open"),
+                        "2026-11-04T01:00:00Z", night="2026-11-03")
+        born = P.load_births(self.s.st)
+        self.assertEqual([p.id for p in born], ["EVL-B-8K-502", "EVL-B-ERN-TOP", "EVL-B-ERN-TOP-CTRL", "EVL-B-NEWSDAY"],
+                         "registration order (time, then the line), a READ birth followed by its control")
+        self.assertEqual(P.PROGRAMS[:len(P.PREREG_PROGRAMS)], P.PREREG_PROGRAMS, "the PREREG rows first and unchanged")
+        self.assertEqual(P.SEATING[:9], P.PREREG_SEATING)
+        self.assertEqual([p.id for p in P.SEATING[9:]], ["EVL-B-8K-502", "EVL-B-ERN-TOP"], "records and controls never seat")
+        self.assertIs(P.BY_KEY[("EVL-B-ERN-TOP-CTRL", 1)], born[2])
+        self.assertEqual(SN.expected_false_passes(self.s.st), {"versions": 11, "expected": 1.1})
+        self.assertEqual(SN.control_of("EVL-B-ERN-TOP"), "EVL-B-ERN-TOP-CTRL")
+        self.assertIsNone(SN.control_of("EVL-B-8K-502"))
+        for prog in ("EVL-ERN-READ-O1", "EVL-ERN-GUIDE-O1", "EVL-NEWS-READ-ON", "EVL-INS-BUY-O1"):
+            self.assertEqual(SN.control_of(prog), SN.CONTROLS.get(prog), "every PREREG answer is its table's")
+        self.assertEqual(P.load_births(self.s.st), born, "idempotent")
+        unload()
+        self.assertEqual((P.PROGRAMS, P.SEATING, len(P.BIRTHS)), (P.PREREG_PROGRAMS, P.PREREG_SEATING, 0))
+
+    def test_a_store_without_the_table_or_a_row_that_no_longer_parses_seats_nothing(self):
+        self.s.register(spec("EVL-B-8K-502", "8k", {"items": ["5.02"]}), "2026-11-03T01:00:00Z")
+        self.s.st.db.execute("UPDATE births SET sha='0' WHERE id='EVL-B-8K-502'")
+        self.assertEqual(P.load_births(self.s.st), ())
+        self.s.st.db.execute("DROP TABLE births")
+        self.assertEqual(P.load_births(self.s.st), ())
+        self.assertEqual(P.PROGRAMS, P.PREREG_PROGRAMS)
+
+
+# ======================================================================================================== decisions
+class PreregIntentsAreUnchanged(unittest.TestCase):
+    """The same invented week decided twice, without births and with five registered, through the lane's own
+    decide_open and decide_close: every PREREG program's intents are identical; the births take only their own
+    events, knowable after their own registration."""
+
+    DAYS = (dt.date(2026, 11, 2), dt.date(2026, 11, 3), dt.date(2026, 11, 4), dt.date(2026, 11, 5), dt.date(2026, 11, 6))
+    BORN_AT = "2026-11-03T01:00:00Z"     # Mon Nov 2, 20:00 ET
+    SPECS = (spec("EVL-B-8K-502", "8k", {"items": ["5.02"]}),
+             spec("EVL-B-ERN-TOP", "ern", {"score_min": 3}, rank="score"),
+             spec("EVL-B-NEWSDAY-BZ", "news-day", {"sources": ["benzinga"]}, seatable=False, exit_="open"),
+             spec("EVL-B-ERNREACT-ON", "ern-react", {"react_min": 1.02}, rank="reaction", exit_="open"),
+             spec("EVL-B-INS-DIR", "ins-buy", {"value_min": 100000, "roles": "director"}, rank="value"))
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(unload)
+
+    def week(self, root: Path, births: bool, *, keep: bool = False):
+        s = Synth(root)
+        for day in self.DAYS:
+            prior = C.previous(s.st, day, 1)[0].day
+            for sym in ISSUERS.values():
+                s.eligible(day, sym)
+                s.bar(prior, sym)
+                s.bar(day, sym)
+            a = s.filing("AAA", et(prior, 16, 30))
+            s.doc_verdict(a, 3, "raised")
+            b = s.filing("BBB", et(prior, 16, 35))
+            s.doc_verdict(b, 1)
+            s.filing("CCC", et(prior, 17), ("5.02",))
+            d = s.filing("DDD", et(prior, 17, 10), ("8.01",))
+            s.doc_verdict(d, 2)
+            s.insider("EEE", et(prior, 18), 120_000, director=True)
+            s.insider("FFF", et(prior, 18, 5), 60_000, director=False, officer=True)
+            s.news_verdict(s.article("AAA", et(prior, 19)), 2)
+            s.news_verdict(s.article("GGG", et(day, 7), "globenewswire"), 3)
+            h = s.filing("HHH", et(day, 12))
+            s.doc_verdict(h, 2)
+            s.news_verdict(s.article("BBB", et(day, 11)), 3)
+            s.news_verdict(s.article("III", et(day, 13), "prnewswire"), -1)
+        if births:
+            for i, sp in enumerate(self.SPECS):
+                s.register(sp, self.BORN_AT, seq=i)
+            self.assertEqual(len(P.load_births(s.st)), 6)
+        else:
+            unload()
+        gw = TH.FakeGateway()
+        ctx = R.Context(s.st, gw, lambda url: b"", now=lambda: dt.datetime(2026, 11, 7, 1, 0, tzinfo=UTC))
+        for day in self.DAYS:
+            R.decide_open(ctx, day)
+            R.decide_close(ctx, day)
+        self.assertEqual(gw.claude_calls, [], "every verdict read was stored: none asked")
+        rows = [dict(r) for r in s.st.db.execute("SELECT * FROM intents ORDER BY program, version, event")]
+        if keep:
+            self.addCleanup(s.st.close)
+            return rows, s.st
+        s.st.close()
+        return rows
+
+    def test_every_prereg_programs_intents_are_identical_with_and_without_births(self):
+        without = self.week(Path(self.tmp.name) / "a", births=False)
+        with_births = self.week(Path(self.tmp.name) / "b", births=True)
+        prereg = {p.id for p in P.PREREG_PROGRAMS}
+        mine = [r for r in with_births if r["program"] in prereg]
+        self.assertGreater(len(without), 60)
+        self.assertEqual(mine, without, "no PREREG program's selection moves")
+        born = [r for r in with_births if r["program"] not in prereg]
+        by = {}
+        for r in born:
+            by.setdefault(r["program"], []).append(r)
+        self.assertEqual(sorted(by), ["EVL-B-8K-502", "EVL-B-ERN-TOP", "EVL-B-ERN-TOP-CTRL", "EVL-B-ERNREACT-ON",
+                                      "EVL-B-INS-DIR", "EVL-B-NEWSDAY-BZ"])
+        filings = {}
+        db = sqlite3.connect(str(Path(self.tmp.name) / "b" / S.DB_NAME))
+        db.row_factory = sqlite3.Row
+        for row in db.execute("SELECT accession, cik, knowable_at FROM filings"):
+            filings[f"8k:{row['accession']}"] = filings[f"f4:{row['accession']}"] = dict(row)
+        for row in db.execute("SELECT id, knowable_at FROM news"):
+            filings[f"news:{row['id']}"] = dict(row)
+        db.close()
+        for r in born:
+            self.assertGreater(filings[r["event"]]["knowable_at"], self.BORN_AT, "only events after its registration")
+            self.assertEqual(r["version"], 1)
+        self.assertEqual({r["symbol"] for r in by["EVL-B-8K-502"]}, {"CCC"})
+        self.assertEqual({r["symbol"] for r in by["EVL-B-ERN-TOP"]}, {"AAA"}, "score 3 only")
+        self.assertEqual({r["symbol"] for r in by["EVL-B-ERN-TOP-CTRL"]}, {"AAA", "BBB", "HHH"},
+                         "its control: any verdict (HHH's mid-session 8-K is the next open's event too)")
+        self.assertEqual({r["symbol"] for r in by["EVL-B-INS-DIR"]}, {"EEE"}, "the director's $120,000, not the officer's")
+        self.assertEqual({r["symbol"] for r in by["EVL-B-NEWSDAY-BZ"]}, {"BBB"}, "benzinga's day article")
+        self.assertEqual({(r["entry_at"], r["exit_at"]) for r in by["EVL-B-NEWSDAY-BZ"]}, {("close", "open")})
+        self.assertEqual({r["symbol"] for r in by["EVL-B-ERNREACT-ON"]}, {"AAA", "BBB", "HHH"}, "reaction 1.05 >= 1.02")
+        self.assertEqual(sorted({r["entry_day"] for r in by["EVL-B-8K-502"]}), ["2026-11-04", "2026-11-05", "2026-11-06"],
+                         "Monday evening's 8-K (17:10 ET, before 20:00 ET) is not the birth's")
+
+    def test_a_birth_that_raises_fails_only_itself(self):
+        """A registered birth whose rule raises (a bug) never fails the decision: every PREREG program's intents and
+        receipts are as without births, the failure is in the summary's `births_failed`, and the screen holds only
+        that birth's looks (league/events/screen.py `final_until`)."""
+        from league.events import births as births_module
+
+        real = births_module.select
+
+        def broken(program, rows, **kw):
+            if program.id == "EVL-B-8K-502":
+                raise KeyError("invented bug")
+            return real(program, rows, **kw)
+        without = self.week(Path(self.tmp.name) / "a", births=False)
+        with mock.patch.object(births_module, "select", side_effect=broken):
+            rows, st = self.week(Path(self.tmp.name) / "b", births=True, keep=True)
+        prereg = {p.id for p in P.PREREG_PROGRAMS}
+        self.assertEqual([r for r in rows if r["program"] in prereg], without)
+        self.assertNotIn("EVL-B-8K-502", {r["program"] for r in rows})
+        self.assertIn("EVL-B-INS-DIR", {r["program"] for r in rows}, "the other births decide")
+        opens = [dict(r) for r in st.db.execute("SELECT status, summary FROM receipts WHERE job LIKE 'decide-open:%'")]
+        self.assertEqual({r["status"] for r in opens}, {"ok"}, "the decision is made, for every PREREG program")
+        failed = [json.loads(r["summary"]).get("births_failed") for r in opens]
+        self.assertTrue(all(f == {"EVL-B-8K-502": "KeyError: 'invented bug'"} for f in failed), failed)
+        now = dt.datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
+        later = sessions_between(st, dt.date(2026, 11, 9), dt.date(2026, 11, 12))
+        earlier = sessions_between(st, dt.date(2026, 10, 19), dt.date(2026, 10, 30))   # PREREG-EVL-3's sessions before
+        for day in earlier + later:
+            for kind in ("open", "close"):
+                rid = st.start_receipt(f"decide-{kind}:{day}", now=now)
+                st.finish_receipt(rid, "ok", {}, now=now)
+        for day in ("2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10",
+                    "2026-11-11", "2026-11-12"):
+            st.set_meta(f"evl:backfill:{day}", "done")
+        horizon, why = SN.final_until(st, "EVL-B-8K-502", 1, dt.date(2026, 11, 13), now)
+        self.assertIn("the open decision of 2026-11-02 is failed", why)
+        self.assertIsNone(horizon, "no close of it is final: its looks wait for a pass that decides it")
+        other, _ = SN.final_until(st, "EVL-B-INS-DIR", 1, dt.date(2026, 11, 13), now)
+        prereg_horizon, _ = SN.final_until(st, "EVL-8K-READ-O1", 2, dt.date(2026, 11, 13), now)
+        self.assertEqual((other, prereg_horizon), (dt.date(2026, 11, 9), dt.date(2026, 11, 9)),
+                         "every other program's closes are final as before")
+
+
+# ======================================================================================================== the facts
+class Validation(unittest.TestCase):
+    """Twenty invented sessions (Oct 12 to Nov 6): four 8-Ks a session of each of items 5.02, 1.02, 2.03 and 3.01, two of
+    1.05, three earnings 8-Ks with their verdicts, and bars, marks, outcomes, looks and bands the facts must not read."""
+
+    AS_OF = dt.date(2026, 11, 6)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(unload)
+        self.s = Synth(Path(self.tmp.name))
+        self.addCleanup(self.s.st.close)
+        st = self.s.st
+        self.days = [x.day for x in C.previous(st, self.AS_OF + dt.timedelta(days=1), 20)]
+        self.assertEqual((self.days[0], len(self.days)), (dt.date(2026, 10, 12), 20))
+        syms = list(ISSUERS.values())
+        for sym in syms:
+            self.s.eligible(self.days[0], sym)       # one kept result an issuer: the nearest reads for every session
+        for day in self.days:
+            prior = C.previous(st, day, 1)[0].day
+            k = 0
+            for item, count in (("5.02", 4), ("1.02", 4), ("2.03", 4), ("3.01", 4), ("1.05", 2)):
+                for _ in range(count):
+                    self.s.filing(syms[k], et(prior, 17, k), (item,))
+                    k += 1
+            for score in (3, 2, 1):
+                acc = self.s.filing(syms[k], et(prior, 16, 30 + score))
+                self.s.doc_verdict(acc, score, "raised" if score == 3 else "none")
+                k += 1
+        st.db.execute("INSERT INTO bars(symbol, day, adj, o, h, l, c, v, fetched_at) VALUES('AAA', '2026-11-05', 'raw', "
+                      "1, 1, 1, 1, 1, 'x')")
+        st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('AAA', '2026-11-05', 'open', "
+                      "1, 'x', 'x', 'x')")
+        st.db.execute("INSERT INTO outcomes(program, version, event, r, a, settled_at, status) VALUES('EVL-ERN-READ-O1', 2, "
+                      "'8k:x', 0.5, 0.5, 'x', 'settled')")
+        st.db.execute("INSERT INTO looks(program, version, k, at, held, passed) VALUES('EVL-ERN-READ-O1', 2, 1, 'x', 1, 1)")
+        st.db.execute("INSERT INTO bands(program, version, band, since, why) VALUES('EVL-ERN-READ-O1', 2, 'probe', 'x', 'x')")
+        st.set_meta("look:EVL-ERN-READ-O1:2:1", json.dumps({"p": 0.001}))
+
+    def candidate(self, ident: str, items, *, seatable: bool = True, **kw) -> dict:
+        return {"spec": spec(ident, "8k", {"items": list(items)}, seatable=seatable, **kw), "why": f"{ident} in one line"}
+
+    def test_the_facts_never_read_a_price_after_an_event_a_return_a_look_or_a_band(self):
+        st = self.s.st
+        said: list[str] = []
+        st.db.set_trace_callback(said.append)
+        self.addCleanup(st.db.set_trace_callback, None)
+        facts = BI.Facts(st, self.AS_OF)
+        sheet = facts.facts()
+        facts.count(BI.program(BI.parse(self.candidate("EVL-B-X", ["5.02"])["spec"]), born_at="2026-11-07T00:00:00Z"))
+        st.db.set_trace_callback(None)
+        self.assertGreater(len(said), 100)
+        refused = re.compile(r"\b(bars|marks|outcomes|looks|bands|band_history|real_fills|universe|meta)\b", re.I)
+        self.assertEqual([q for q in said if refused.search(q)], [], "no statement names a refused table")
+        with BI.outcome_free(st.db):
+            for table in sorted(BI.FACTS_DENY):
+                with self.assertRaises(sqlite3.DatabaseError, msg=table):
+                    st.db.execute(f"SELECT * FROM {table}").fetchall()
+            with BI.outcome_free(st.db):
+                pass
+            with self.assertRaises(sqlite3.DatabaseError, msg="an inner block's end keeps the outer wall up"):
+                st.db.execute("SELECT c FROM bars").fetchall()
+        self.assertEqual(st.db.execute("SELECT c FROM bars").fetchone()[0], 1, "and the store reads as before after")
+        # The refused tables' contents change nothing the facts say.
+        for table in ("bars", "marks", "outcomes", "looks", "bands"):
+            st.db.execute(f"DELETE FROM {table}")
+        self.assertEqual(BI.Facts(st, self.AS_OF).facts(), sheet)
+        self.assertEqual(sheet["sessions"], 20)
+        self.assertEqual(sheet["forms"], {"8-K": 420, "4-buys": 0})
+        self.assertEqual(sheet["items_8k"], {"1.02": 80, "1.05": 40, "2.03": 80, "3.01": 80, "5.02": 80})
+        counts = facts.candidates([self.candidate("EVL-B-8K-102", ["1.02"])["spec"],
+                                   spec("EVL-B-R", "ern-react", {"react_min": 1.05}, exit_="open"), {"id": "EVL-B-BAD"}])
+        self.assertEqual(counts["EVL-B-8K-102"], {"selected": 80, "per_session": 4.0, "by_session": [4] * 20,
+                                                  "upper_bound": False})
+        self.assertEqual((counts["EVL-B-R"]["selected"], counts["EVL-B-R"]["upper_bound"]), (60, True),
+                         "a react rule's count: every earnings 8-K, the reaction never read")
+        self.assertIn("missing fields", counts["EVL-B-BAD"]["refused"][0])
+        self.assertEqual(sheet["families"]["ern"]["eligible"], 60)
+        self.assertEqual(sheet["scores"]["ern"], {"1": 20, "2": 20, "3": 20})
+        self.assertEqual(sheet["guidance_ern"], {"none": 40, "raised": 20})
+        self.assertEqual(sheet["unprogrammed"]["items_8k"], ["1.02", "1.05", "2.03", "3.01", "5.02"])
+        self.assertIn("news-react", [p["family"] for p in sheet["programs"]])
+        self.assertNotIn("p", json.dumps(sheet["programs"][0]).replace('"per_session"', ""), "no look's p")
+
+    def test_the_validator_refuses_by_rate_duplicate_id_and_grammar_and_accepts_the_rest(self):
+        st = self.s.st
+        self.s.register(spec("EVL-B-8K-502", "8k", {"items": ["5.02"]}), "2026-10-01T00:00:00Z")
+        P.load_births(st)
+        facts = BI.Facts(st, self.AS_OF)
+        out = BI.validate(st, facts, [
+            self.candidate("EVL-B-8K-102", ["1.02"]),                              # 80: accepted
+            self.candidate("EVL-B-8K-105", ["1.05"]),                              # 40 < 60: the rate
+            self.candidate("EVL-B-8K-502-AGAIN", ["5.02"], seatable=False, hold=2),  # the registered birth's events
+            self.candidate("EVL-B-8K-102-TWIN", ["1.02"]),                         # tonight's first one's events
+            self.candidate("EVL-B-8K-502", ["2.03"]),                              # the id is registered
+            {"spec": {"id": "EVL-B-CODE", "exec": "rm -rf /"}, "why": "free code"},
+            self.candidate("EVL-B-8K-102-502", ["1.02", "5.02"]),                  # Jaccard 0.5 with each: accepted
+        ], night=self.AS_OF)
+        self.assertEqual([c["ok"] for c in out], [True, False, False, False, False, False, True])
+        self.assertEqual((out[0]["selected"], out[0]["per_session"], out[0]["charge"]), (80, 4.0, 1))
+        self.assertIn("40 selected events over the last 20 sessions: under 3 a session", out[1]["reasons"][0])
+        self.assertEqual(out[2]["jaccard"], {"max": 1.0, "with": "EVL-B-8K-502"})
+        self.assertIn("a duplicate of EVL-B-8K-502", out[2]["reasons"][0])
+        self.assertIn("a duplicate of EVL-B-8K-102", out[3]["reasons"][0])
+        self.assertIn("registered already", out[4]["reasons"][0])
+        self.assertIn("fields outside the grammar", out[5]["reasons"][0])
+        self.assertEqual(out[6]["jaccard"]["max"], 0.5)
+
+    def test_the_budget_charges_a_tenth_a_seatable_birth_to_two_and_three_a_night_records_free(self):
+        st = self.s.st
+        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 0.9, "limit": 2.0, "left": 1.1,
+                                                     "seatable_left_tonight": 3, "charge": 0.1})
+        four = [self.candidate(f"EVL-B-8K-{i}", [item]) for i, item in enumerate(("5.02", "1.02", "2.03", "3.01"))]
+        out = BI.validate(st, BI.Facts(st, self.AS_OF), four, night=self.AS_OF)
+        self.assertEqual([c["ok"] for c in out], [True, True, True, False])
+        self.assertIn("3 seatable births a night at most", out[3]["reasons"][0])
+        record = self.candidate("EVL-B-8K-REC", ["3.01"], seatable=False)
+        self.assertTrue(BI.validate(st, BI.Facts(st, self.AS_OF), four[:3] + [record], night=self.AS_OF)[3]["ok"],
+                        "records are free")
+        for i in range(10):     # ten seatable births registered on earlier nights: 0.9 + 1.0 = 1.9
+            self.s.register(spec(f"EVL-B-OLD-{i}", "8k", {"items": ["9.01"]}), "2026-10-01T00:00:00Z",
+                            night=f"2026-09-{10 + i}", seq=i)
+        P.load_births(st)
+        self.assertEqual(SN.expected_false_passes(st)["versions"], 19)
+        self.assertAlmostEqual(BI.budget(st, self.AS_OF)["left"], 0.1)
+        out = BI.validate(st, BI.Facts(st, self.AS_OF), four[:2] + [record], night=self.AS_OF)
+        self.assertEqual([c["ok"] for c in out], [True, False, True])
+        self.assertIn("the false-pass budget: 2.0 of 2.0 used", out[1]["reasons"][0])
+        self.assertEqual([c["charge"] for c in out], [1, 0, 0])
+
+    def test_twenty_sessions_or_no_rate(self):
+        st = self.s.st
+        out = BI.validate(st, BI.Facts(st, self.AS_OF, sessions=10), [self.candidate("EVL-B-8K-102", ["1.02"])])
+        self.assertFalse(out[0]["ok"])
+        self.assertIn("not the 20 the rate is read over", out[0]["reasons"][0])
+
+
+# ======================================================================================================== the proposer
+class FakeArchitect:
+    """The gateway as the births job meets it: Claude's answer (`answer`) with a stated cost, and the docs route
+    (`docs`: a function of the body returning (status, answer))."""
+
+    def __init__(self, answer: str, *, status: int = 200, cost: str | None = "0.0042", docs=None):
+        self.answer, self.status, self.cost, self.docs = answer, status, cost, docs
+        self.calls: list[tuple[str, dict, dict | None]] = []
+        self.last_headers: dict = {}
+
+    def post_json(self, path, body, headers=None):
+        self.calls.append((path, body, headers))
+        if path == V.PATH:
+            self.last_headers = {V.COST_HEADER: self.cost} if self.cost else {}
+            if self.status != 200:
+                return self.status, {"error": "no"}
+            return 200, {"content": [{"type": "text", "text": self.answer}], "stop_reason": "end_turn"}
+        if path == BI.DOCS_ROUTE and self.docs is not None:
+            return self.docs(body)
+        raise AssertionError(path)
+
+
+class TheProposer(Validation):
+    def test_one_haiku_call_at_temperature_0_its_prompt_and_answer_stored_and_never_asked_twice(self):
+        st = self.s.st
+        answer = json.dumps({"specs": [self.candidate(f"EVL-B-P{i}", ["1.02"]) for i in range(9)]})
+        gw = FakeArchitect(answer)
+        sheet = BI.Facts(st, self.AS_OF).facts()
+        now = lambda: dt.datetime(2026, 11, 7, 2, 15, tzinfo=UTC)  # noqa: E731
+        got = BI.propose(st, gw, sheet, night=self.AS_OF, now=now)
+        self.assertEqual((got["status"], len(got["proposals"]), got["offered"], got["usd"]), ("ok", BI.K, 9, 0.0042),
+                         "at most K specs a night")
+        [(path, body, headers)] = gw.calls
+        self.assertEqual((path, body["model"], body["temperature"], body["max_tokens"], body["system"]),
+                         (V.PATH, "claude-haiku-4-5-20251001", 0, BI.MAX_TOKENS, BI.SYSTEM))
+        self.assertTrue(headers[V.REQUEST_HEADER].startswith("evl-births:2026-11-06:"))
+        user = body["messages"][0]["content"]
+        self.assertIn(json.dumps(sheet, sort_keys=True, separators=(",", ":")), user, "the facts, whole")
+        self.assertIn("0.9 of 2.0 used", user)
+        row = dict(st.db.execute("SELECT * FROM birth_calls").fetchone())
+        self.assertEqual((row["prompt_sha"], row["model"], row["status"], row["answer"], row["usd"]),
+                         (BI.prompt_sha(), BI.MODEL, "ok", answer, 0.0042))
+        again = BI.propose(st, gw, sheet, night=self.AS_OF, now=now)
+        self.assertEqual((again["status"], len(again["proposals"])), ("stored:ok", BI.K))
+        self.assertEqual(len(gw.calls), 1, "a night's stored answer is read again, never asked again")
+
+    def test_the_nights_cap_holds_the_call_and_a_refusal_stores_nothing(self):
+        st = self.s.st
+        sheet = BI.Facts(st, self.AS_OF).facts()
+        now = lambda: dt.datetime(2026, 11, 7, 2, 15, tzinfo=UTC)  # noqa: E731
+        gw = FakeArchitect("{}")
+        capped = BI.propose(st, gw, sheet, night=self.AS_OF, now=now, cap=0.001)
+        self.assertEqual((capped["status"], gw.calls), ("cap", []))
+        self.assertLess(BI.worst_usd(BI.render(sheet, BI.budget(st))), BI.NIGHT_USD, "a real night fits the $0.25 cap")
+        refused = FakeArchitect("{}", status=403)
+        self.assertEqual(BI.propose(st, refused, sheet, night=self.AS_OF, now=now)["status"], "no answer")
+        self.assertEqual(len(refused.calls), 1, "a 4xx is not asked again")
+        self.assertIsNone(st.db.execute("SELECT 1 FROM birth_calls").fetchone(), "no answer, nothing stored")
+        self.assertEqual(BI.parse_answer("```json\n[{\"spec\": {\"id\": 1}}]\n```")[1], 1)
+        self.assertEqual(BI.parse_answer("not json"), ([], 0))
+
+
+# ======================================================================================================== registration
+class Registration(Validation):
+    def docs_route(self, *, committed_at="2026-11-07T02:15:09Z", status=200, refused=None):
+        posted = []
+
+        def answer(body):
+            posted.append(body)
+            if status != 200:
+                return status, {"error": "no", "refused": refused}
+            return 200, {"ok": True, "committed": True, "path": body["path"], "commit": "d" * 40,
+                         "committed_at": committed_at, "lines": len(body["lines"]), "docs_today": 1}
+        return answer, posted
+
+    def test_the_night_registers_through_the_docs_route_at_the_later_of_githubs_time_and_the_receipt(self):
+        st = self.s.st
+        route, posted = self.docs_route()
+        specs = [self.candidate("EVL-B-8K-102", ["1.02"]), self.candidate("EVL-B-8K-105", ["1.05"]),
+                 self.candidate("EVL-B-8K-203", ["2.03"], seatable=False)]
+        gw = FakeArchitect(json.dumps({"specs": specs}), docs=route)
+        clock = [dt.datetime(2026, 11, 7, 2, 15, 3, tzinfo=UTC)]
+        out = BI.night(st, gw, today=self.AS_OF, now=lambda: clock[0])
+        self.assertEqual(out["_status"], "ok", out)
+        self.assertEqual((out["accepted"], out["proposed"]), (["EVL-B-8K-102", "EVL-B-8K-203"], 3))
+        [body] = posted
+        self.assertEqual(body["path"], "docs/births/2026-11-06.jsonl")
+        lines = [json.loads(x) for x in body["lines"]]
+        self.assertEqual([x["spec"]["id"] for x in lines], ["EVL-B-8K-102", "EVL-B-8K-203"])
+        self.assertEqual(lines[0]["sha"], BI.sha(specs[0]["spec"]))
+        self.assertEqual((lines[0]["why"], lines[0]["by"], lines[0]["prompt_sha"]),
+                         ("EVL-B-8K-102 in one line", f"architect:{BI.MODEL}", BI.prompt_sha()))
+        self.assertEqual(body["lines"][0], json.dumps(lines[0], sort_keys=True, separators=(",", ":")), "canonical lines")
+        rows = [dict(r) for r in st.db.execute("SELECT * FROM births ORDER BY seq")]
+        self.assertEqual([(r["id"], r["registered_at"], r["committed_at"], r["received_at"], r["commit_sha"])
+                          for r in rows],
+                         [("EVL-B-8K-102", "2026-11-07T02:15:09Z", "2026-11-07T02:15:09Z", "2026-11-07T02:15:03Z", "d" * 40),
+                          ("EVL-B-8K-203", "2026-11-07T02:15:09Z", "2026-11-07T02:15:09Z", "2026-11-07T02:15:03Z", "d" * 40)],
+                         "GitHub's commit time, later than the House's receipt here")
+        self.assertEqual([p.id for p in P.BIRTHS], ["EVL-B-8K-102", "EVL-B-8K-203"])
+        self.assertEqual(out["budget"]["used"], 1.0)
+        statuses = {r["id"]: r["status"] for r in st.db.execute("SELECT id, status FROM birth_candidates")}
+        self.assertEqual(statuses, {"EVL-B-8K-102": "registered", "EVL-B-8K-105": "refused",
+                                    "EVL-B-8K-203": "registered"})
+        figures = json.loads(st.db.execute("SELECT figures FROM birth_candidates WHERE id='EVL-B-8K-105'").fetchone()[0])
+        self.assertEqual((figures["selected"], figures["per_session"], figures["charge"]), (40, 2.0, 0),
+                         "each candidate's outcome-free figures kept beside its verdict")
+        self.assertEqual(out["counts"]["EVL-B-8K-102"]["selected"], 80)
+        receipt = st.db.execute("SELECT status FROM receipts WHERE job='births'").fetchone()
+        self.assertEqual(receipt[0], "ok")
+        # The House's own receipt is later than GitHub's time: the later one is the registration.
+        clock[0] = dt.datetime(2026, 11, 8, 2, 20, tzinfo=UTC)
+        later = BI.register(st, gw, [{"spec": BI.canonical(spec("EVL-B-LATE", "8k", {"items": ["3.01"]})),
+                                      "sha": BI.sha(spec("EVL-B-LATE", "8k", {"items": ["3.01"]})), "line": "{}"}],
+                            night=dt.date(2026, 11, 7), now=lambda: clock[0])
+        self.assertEqual(later["registered_at"], "2026-11-08T02:20:00Z")
+
+    def test_an_answer_that_never_came_is_posted_again_and_registered_when_it_stands(self):
+        st = self.s.st
+        lost, posted = self.docs_route(status=502, refused="no_answer")
+        gw = FakeArchitect(json.dumps({"specs": [self.candidate("EVL-B-8K-102", ["1.02"])]}), docs=lost)
+        out = BI.night(st, gw, today=self.AS_OF, now=lambda: dt.datetime(2026, 11, 7, 2, 15, tzinfo=UTC))
+        self.assertEqual((out["_status"], out["registration"]["status"]), ("partial", "unknown"))
+        self.assertIsNone(st.db.execute("SELECT 1 FROM births").fetchone(), "not registered without a receipt")
+        self.assertEqual(st.db.execute("SELECT status FROM birth_candidates").fetchone()[0], "unknown")
+
+        def standing(body):
+            posted.append(body)
+            return 200, {"ok": True, "committed": False, "unchanged": True, "path": body["path"], "commit": "e" * 40,
+                         "committed_at": "2026-11-08T01:00:00Z", "lines": len(body["lines"])}
+        gw.docs = standing
+        nxt = BI.night(st, gw, today=dt.date(2026, 11, 9), now=lambda: dt.datetime(2026, 11, 10, 2, 15, tzinfo=UTC),
+                       proposals=[])
+        self.assertEqual(nxt["reconciled"][0]["status"], "unchanged")
+        self.assertEqual(posted[1]["lines"], posted[0]["lines"], "the very same lines, to the same night's file")
+        self.assertEqual(posted[1]["path"], "docs/births/2026-11-06.jsonl")
+        row = dict(st.db.execute("SELECT * FROM births").fetchone())
+        self.assertEqual((row["id"], row["registered_at"], row["commit_sha"]),
+                         ("EVL-B-8K-102", "2026-11-10T02:15:00Z", "e" * 40),
+                         "the later of the file's latest commit and this receipt: never earlier than the true time")
+        self.assertEqual(st.db.execute("SELECT status FROM birth_candidates WHERE night='2026-11-06'").fetchone()[0],
+                         "registered")
+
+    def test_a_refusal_registers_nothing_and_a_dry_run_posts_nothing(self):
+        st = self.s.st
+        no, posted = self.docs_route(status=403, refused="path")
+        gw = FakeArchitect(json.dumps({"specs": [self.candidate("EVL-B-8K-102", ["1.02"])]}), docs=no)
+        out = BI.night(st, gw, today=self.AS_OF, now=lambda: dt.datetime(2026, 11, 7, 2, 15, tzinfo=UTC))
+        self.assertEqual(out["registration"]["status"], "refused")
+        self.assertIsNone(st.db.execute("SELECT 1 FROM births").fetchone())
+        dry = BI.night(st, gw, today=dt.date(2026, 11, 9), now=lambda: dt.datetime(2026, 11, 10, 2, tzinfo=UTC),
+                       proposals=[{"spec": spec("EVL-B-8K-203", "8k", {"items": ["2.03"]}), "why": "the captain's"}],
+                       dry_run=True)
+        self.assertEqual((dry["accepted"], len(posted)), (["EVL-B-8K-203"], 1), "validated, never posted")
+        self.assertEqual(st.db.execute("SELECT by FROM birth_candidates WHERE id='EVL-B-8K-203'").fetchone()[0], "captain")
+
+
+# ======================================================================================================== the screen
+class TheScreen(unittest.TestCase):
+    def test_a_seatable_birth_is_judged_by_prereg_evl_3s_looks_and_a_record_or_control_never(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(unload)
+        s = Synth(Path(tmp.name))
+        self.addCleanup(s.st.close)
+        s.register(spec("EVL-B-ERN-TOP", "ern", {"score_min": 3}, rank="score"), "2026-11-03T01:00:00Z")
+        s.register(spec("EVL-B-REC", "8k", {"items": ["5.02"]}, seatable=False), "2026-11-03T01:00:00Z", seq=1)
+        P.load_births(s.st)
+        keys = [("EVL-B-ERN-TOP", 1), ("EVL-B-ERN-TOP-CTRL", 1), ("EVL-B-REC", 1), ("EVL-ERN-READ-O1", 2)]
+        with mock.patch.object(SN, "_run_v2", return_value={"written": [], "waiting": []}) as v2, \
+                mock.patch.object(SN, "_run_v1", return_value={"written": [], "waiting": []}) as v1:
+            SN.run(s.st, dt.date(2026, 11, 20), programs=keys, now=dt.datetime(2026, 11, 21, tzinfo=UTC))
+        self.assertEqual([c.args[1:3] for c in v2.call_args_list], [("EVL-B-ERN-TOP", 1), ("EVL-ERN-READ-O1", 2)])
+        self.assertEqual(v1.call_args_list, [])
+        self.assertEqual(SN.V2_ALPHA, 0.018, "the judge is PREREG-EVL-3's, unchanged")
+
+
+# ======================================================================================================== the House's book
+class TheBook(unittest.TestCase):
+    def test_a_seated_birth_buys_at_learning_size_after_every_prereg_program_in_rooms_order(self):
+        from league.equity import live as L
+        from league.events import book as EB
+        from league.tests import test_events_book as TB
+
+        case = TB.EventTest("run")
+        case.setUp()
+        self.addCleanup(case.tmp.cleanup)
+        self.addCleanup(unload)
+        h = case.harness()
+        self.addCleanup(h.state.close)
+        self.addCleanup(h.lane.st.close)
+        sp = spec("EVL-B-8K-502", "8k", {"items": ["5.02"]})
+        text = BI.canonical(sp)
+        h.lane.st.db.execute("INSERT INTO births(id, version, sha, spec, seatable, registered_at, committed_at, "
+                             "received_at, path, commit_sha, seq, line, why, by, night) VALUES(?, 1, ?, ?, 1, ?, ?, ?, "
+                             "'docs/births/2026-11-02.jsonl', ?, 0, '{}', 'x', 'captain', '2026-11-02')",
+                             (sp["id"], BI.sha(sp), text, "2026-11-03T01:00:00Z", "2026-11-03T01:00:00Z",
+                              "2026-11-03T01:00:00Z", "c" * 40))
+        TB.earnings(h.lane, "b-1", TB.CIK2, "BRTH", items=("5.02",))      # 5.02: no PREREG program reads it
+        birth = P.load_births(h.lane.st)[0]
+        self.assertIs(EB.program_of(sp["id"], 1), birth)
+        self.assertIsNone(EB.program_of("EVL-ERN-READ-O1", 1), "a PREREG version 1 still never trades")
+        h.lane.intent(birth, "8k:b-1", "BRTH", TB.CIK2, TB.DAY, TB.DAY)
+        case.ready(h)
+        h.symbol("BRTH", last=17.0, sd=0.02)
+        h.venue.prints[("BRTH", TB.DAY.isoformat(), "open")] = D("17.00")
+        h.tick(9, 15)
+        [buy] = h.event_intents("buy")
+        self.assertEqual((buy["program"], buy["version"], buy["band"], buy["tif"], buy["limit_px"], buy["exit_at"]),
+                         (sp["id"], 1, "learning", "opg", "20.00", "close"))
+        inst = h.book._instance(L.instance_key(sp["id"], 1))
+        self.assertEqual((inst.kind, inst.band, inst.live), ("event", "learning", True))
+        self.assertEqual(len([i for i in h.book._instances() if i.kind == "event"]), 10, "the nine and the birth")
+        h.tick(9, 16)
+        [body] = h.bodies()
+        self.assertEqual((body["symbol"], body["qty"], body["time_in_force"]), ("BRTH", "2", "opg"),
+                         "2% of E=$2,000 at the $20.00 limit: two whole shares, like any version 2 program")
+        h.tick(9, 31)
+        h.tick(9, 33)
+        self.assertEqual([(f["program"], f["version"], f["side"], f["band"]) for f in h.lane.fills()],
+                         [(sp["id"], 1, "buy", "learning")], "its fill handed back to the lane at its own version")
+        self.assertGreater(EB.room_key(sp["id"], "sized"), EB.room_key("EVL-NEWS-REACT-ON", "learning"),
+                           "a birth comes after every PREREG program, whatever the bands (R3-SPEC section 4)")
+        self.assertEqual(EB.room_key("EVL-NEWS-REACT-ON", "sized"), (0, 8), "the PREREG keys are as before")
+
+
+# ======================================================================================================== the House's lane
+class TheNight(TH.LaneCase):
+    def night(self, **settings) -> list:
+        self.lane = self.new_lane(**settings)
+        self.at(TH.et("2026-10-20", "20:31"))
+        with self.store() as st:
+            for kind, t in (("open", "09:15"), ("close", "15:46")):
+                rid = st.start_receipt(f"decide-{kind}:2026-10-20", now=TH.et("2026-10-20", t))
+                st.finish_receipt(rid, "ok", {}, now=TH.et("2026-10-20", t))
+            st.set_meta(TH.SC.equity_key(dt.date(2026, 10, 20)), repr(2000.0))
+        self.lane._redecide_next = TH.et("2026-10-21", "00:00")
+        tasks = []
+        for when in ("20:31", "20:32", "20:33", "21:10", "21:16", "21:17"):
+            self.at(TH.et("2026-10-20", when))
+            self.mark_recorded()
+            tasks.append(self.turn().get("task"))
+        return tasks
+
+    def test_the_births_job_runs_once_after_the_report_at_2115_when_switched_on(self):
+        self.addCleanup(unload)
+        tasks = self.night(births=True)
+        self.assertEqual(tasks[:3], ["score", "screen", "report"])
+        self.assertEqual(tasks[4], "births")
+        self.assertNotEqual(tasks[3], "births", "not before 21:15 ET")
+        [receipt] = self.receipts("births")      # once a night (the turn after it ran no births task)
+        self.assertEqual(receipt["status"], "ok")
+        self.assertEqual(json.loads(receipt["summary"])["night"], "2026-10-20")
+        [call] = [c for c in self.gw.claude_calls if c.get("system") == BI.SYSTEM]
+        self.assertEqual((call["model"], call["temperature"]), (BI.MODEL, 0))
+
+    def test_off_by_default(self):
+        self.assertNotIn("births", self.night())
+        self.assertEqual(self.receipts("births"), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

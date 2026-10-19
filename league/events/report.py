@@ -147,7 +147,7 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date) -> 
 
     v2 = SC._seating(program, version)
     return {
-        "program": program, "version": version, "seatable": program in SC.SEATABLE,
+        "program": program, "version": version, "seatable": program in SC.SEATABLE or bool(v2),
         "band": _bands(store).get((program, int(version))) if v2 else None,
         "intents_today": today, "intents_all": every, "settled": settled,
         "settled_today": sum(1 for r in rows if r["exit_day"] == day),
@@ -222,8 +222,18 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
         "events": events(store, day), "verdicts": verdicts(store, day), "programs": programs,
         "registered_without_intents": [p for p in SC.SEATABLE + SC.RECORDS if p not in with_rows],
         "gaps": gaps(store, day), "expected_false_passes": SC.expected_false_passes(store),
-        "jobs": jobs(store, day, now),
+        "births": _births(store), "jobs": jobs(store, day, now),
     }
+
+
+def _births(store: S.Store) -> dict[str, Any]:
+    """R3's births (league/events/births.py `summary`): registered (seatable, records) and the last night's candidates."""
+    from . import births as BI
+
+    try:
+        return BI.summary(store)
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
 
 
 def _pct(x: float | None) -> str:
@@ -275,6 +285,13 @@ def render(report: Mapping[str, Any]) -> str:
         for side, g in gp.items()))
     efp = report["expected_false_passes"]
     lines.append(f"Expected false passes: {efp['expected']:.1f} (0.10 x {efp['versions']} seatable versions)")
+    bi = report.get("births") or {}
+    if bi.get("registered") or bi.get("last_night"):
+        night = bi.get("last_night") or {}
+        lines.append(f"Births: {bi.get('registered', 0)} registered ({bi.get('seatable', 0)} seatable, "
+                     f"{bi.get('records', 0)} records); last night {night.get('night') or 'none'}: "
+                     + ", ".join(f"{k} {v}" for k, v in sorted(night.items()) if k not in ("night", "usd"))
+                     + f"; model ${float(night.get('usd') or 0):.2f}")
     jb = report["jobs"]
     failed = ", ".join(f"{f['job']} {S.parse_iso(f['started_at']).astimezone(C.NY):%H:%M} ET ({f['status']})"
                        for f in jb["failed"]) or "none"
