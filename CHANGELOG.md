@@ -36,6 +36,83 @@ the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PR
 [docs/events.md](docs/events.md); its code runs in shadow on the captain's workstation from branch `feat/evl-shadow`
 until release 1019b (below) brings it onto the House.
 
+### Release 1019c: the fast path to a final record (A69), the owed re-decision rule (A66), the event kind's own day order count, on `r3/lane-1019c` (unreleased; cut from `rel/1019b` `cd3d1505`, with release 1019b's final head `3230a884` (fix round 3, the proof's tightening `30558c43` and round 4, A72) merged in, and deployed after it, overnight Oct 19-20, before 12:55Z Tue; an owner deploy of the House alone, no gateway change; never 12:55-20:05Z on a trading day, never with an order in flight; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the one new row), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
+
+- **Why.** The owner's goal of Oct 19, 2026 (speed is settled events and iterations, never calendar time) and the
+  captain's amendments A66 and A69: a look waited three sessions for late data even when the
+  record proved there was none, a re-decision outside the window could still write a late event under a look already
+  written (owed by A66), and the equity book's one day count of 60 stopped the event kind's entries at about 30
+  open-entry lots sold the same day.
+- **A69, the fast path** (league/events/screen.py `final_until`, `_fast_until`; behind the wall): a close X is final
+  for a program once the session after X has had its open decision (made: `ok` or `pending`) when (i) every record
+  pass from 09:00 ET of the session before X (never before the program's registration) through that decision finished
+  `ok` with its 8-K, Form 4 and news reads whole (no `error` in any part, the news read not `cut`, the tickers copy
+  read) and the passes ran at most 15 minutes apart (`FAST_RECORD_GAP`); (ii) no filing knowable in X's windows (to
+  X's close decision; a daily-index row stored since their start) that the lane would fetch is still listed or failed
+  (a failed one, a listed Form 4, a listed 8-K of a filer in X's tickers copy); (iii) the daily-index backfill of every
+  weekday from the session before X through X has run; (iv) every decision of the program's entry kind through X is
+  made (A66's second rule). Otherwise A66's rules apply unchanged, and finality stays contiguous. The receipts the
+  House writes prove (i) (`_record`'s summary names a failed feed read `error`, a cut news read `cut`; a pass that
+  raised is `failed`, one that never finished `running`): no new record. A clean record is final one session after
+  its close.
+- **A66's owed rule** (league/events/run.py `_scope`; behind the wall): a re-decision of a session outside the
+  re-decision window (`screen.outside_window`, the judge's reach) writes intents only for the programs its last
+  finished receipt (`ok` or `pending`) was pending on (an `ok` one: none); and no decision writes an intent under a
+  look already written: a look freezes its whole group (every version of the program's id, its control, every version
+  of every READ program of that control; `_group`) over the sessions it covers, inside the window too (A69 can make a
+  close final while the House still decides it again hourly), pending or not. The receipt's `kept` names each program
+  left as it was, why, the freezing look, and the events left out of its record (`_left_out`: `events` its rule takes
+  on stored verdicts and prices, `unjudged` ones it would take on a verdict or price not stored; nothing asked or
+  fetched); league/events/report.py counts them per program ("kept out n (+m unjudged)"); a look's detail records
+  when it was written (`written_at`, league/events/screen.py `write_look`). Cost: an event stored after
+  its session became final for a program (an outage of days), or after a look of its group, stays out of its record,
+  listed and counted.
+- **The event kind's own day order count**: `equity_money.event.max_orders_day` 150 (league/constitution.py, a money
+  row; bounds 0-300; `equity_money_problems` holds it under the gateway's day line, `options_money.gateway.
+  max_day_orders` 300, and with the old lanes' `order_path.max_orders_day` 60 under the House-wide line,
+  `options_money.order_path.max_orders_day` 250); 150 = 2 x the sum of `max_open` over the live bands (44), at least
+  150 (nine programs at learning: 72 lots, a buy and a sale each, 144 orders a day). league/equity/live.py
+  `_count_refusal`: an event entry meets the event kind's own orders (`event_orders_today`) with one order kept for its
+  own exit and for each of its lots not yet sold that day and each of its buys still working that is sold the same day
+  (`_exit_reserve`: an auction buy is no lot until its cross); an old lane's entry meets the old lanes' orders against
+  60; an exit is never stopped by a lane's line; every order meets the House-wide count, and every entry meets it with
+  room left for the options book's exits and every equity exit (its own included). league/events/book.py
+  `Settings.max_orders_day` reads the row (0 in `FALLBACK`).
+- **Fix round** (the money and judges reviews of `8a4eba68`): (1) BLOCKER: release 1019b's final head `3230a884` (fix
+  round 3, the proof's tightening `30558c43`, round 4 and A72) merged in, so deploying 1019c no longer rolls them back;
+  deploy only a head that contains 1019b's deployed head. (2) The event line bounded entries and the exits of LOTS only:
+  the open window's 150 buys passed and 50 of their close sales were then refused at the House-wide line; now 75 buys
+  and all 75 sales (the working buys' exits and each entry's own are kept, and every entry keeps every equity exit's
+  room at the House-wide line). (3) The look guard froze unevenly (version 2 but not version 1; the control but not
+  GUIDE-O1) and left no trace: now the whole group, with the left-out event ids in the receipt and counted in the
+  report. The guard and 1019c's other non-literal readings of A69 go to the captain for an amendment before the first
+  version 2 event settles (00:30Z Oct 20).
+- **Tests.** league/tests/test_events_1019c.py (38; each fails on `cd3d1505`, the fix round's on `8a4eba68`): a clean record final after one
+  session; a news error, a cut news read, an 8-K or Form 4 feed error, an unread tickers copy, a failed or unfinished
+  pass, a gap in the passes, a failed filing, a listed 8-K of a listed filer, a missing backfill, a decision pending on
+  the program's own verdicts and an unmade next open each keep A66; a re-decision outside the window decides only the
+  programs it was pending on (the control's late event never lands, and its receipt names it; inside the window it
+  does); a look freezes its whole group from either side (both versions, the control, GUIDE-O1), only over the
+  sessions it covers, a pending program of the group included (its session then made), and the records outside the
+  group decide as before; a kept program is asked no verdict and fetched no price; the report counts each left-out
+  event once; 40 open-entry learning lots and a Probe close entry on one day all send (81 orders, 150 the line); the
+  open window stops at 75 buys and all 75 sales go; with 120 options orders 65 buys and all 65 sales go; each lane meets
+  its own line and the House-wide one; the row's bounds and its digests.
+  Digest pins: league/tests/equity_design.py `DIGESTS` regenerated with the tree's own functions, release 1019b's kept
+  as `DIGESTS_R2` (`before_1019c`); the design blocks' digest lines rewritten by `write_block`. On `f0f287df` (the
+  build as first pushed): the full league suite on 3.14, 12,482 OK (33 skipped); the events, equity, live, ci and
+  constitution modules on 3.11, 2,109 OK. On `61950ae7` (the fix round's code and tests, 1019b's `3230a884` merged
+  in): the full league suite on 3.14, 457 modules, 12,515 OK (33 skipped); the events, equity, live, ci and
+  constitution modules on 3.11, 82 modules, 2,125 OK; `python -m league.ci --base origin/main --branch r3/lane-1019c
+  --no-tests` passed; the identities, computed with the tree's own functions on both Pythons, as above (options
+  execution `b60410ad`, equity `78022ca6`, xs `2f0083bc`, gate `397b22b7`, money `055e5313`, constitution `a8d4cbd9`;
+  with `equity_money.event.enabled` False `1b7a5c22` / `50e951c9`).
+- **Deploy** ([docs/operations.md](docs/operations.md), **Release 1019c**): the House from this head, after release
+  1019b is live and verified; verify the grant on `055e5313`.
+- **Rollback.** `equity_money.event.enabled` False (a constitution-only owner deploy: money `1b7a5c22`, constitution
+  `50e951c9`), or the previous House release (release 1019b's: money `285fa7af`, constitution `fd38e4e1`; it knows an
+  event lot's exit, so it may run with event lots open). A look the fast path wrote stands.
+
 ### Release 1019b: real money for the event lane (learning band), the lane on the House, on `rel/1019b` (unreleased; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, then `scripts/evl_migrate.py` with the desktop's timers stopped; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1` (release R2's rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **Why.** The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3: every seatable
@@ -2019,7 +2096,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `285fa7af`, full digest `fd38e4e1` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `13b226ee` / `9c0ca64d`.
+Money digest `055e5313`, full digest `a8d4cbd9` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8581de70` / `c9515d5f`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

@@ -419,12 +419,14 @@ def judge_look(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any], k: in
 
 
 def write_look(store: S.Store, look: Mapping[str, Any], *,
-               apply: Callable[[Any], None] | None = None) -> bool:
+               apply: Callable[[Any], None] | None = None, now: dt.datetime | None = None) -> bool:
     """Write one look (one row per (program, version, k), never rewritten): False when it exists. The issuer-block
-    test, the control comparison, the skew checks, the figures beside, the retirement test and (version 2) the looks
-    merged into it go to meta `look:<program>:<version>:<k>`. `apply(db)` runs INSIDE the same transaction once the
-    look is new (release 1019b's review: the band move a version 2 look makes, league/events/bands.py `on_look`, is
-    written with the look or not at all, so a look on record has always moved its band)."""
+    test, the control comparison, the skew checks, the figures beside, the retirement test, (version 2) the looks
+    merged into it and WHEN IT WAS WRITTEN (`written_at`, `now`: from then on a look freezes its group's records over
+    the sessions it covers, league/events/run.py `_scope`; release 1019c's judges review) go to meta
+    `look:<program>:<version>:<k>`. `apply(db)` runs INSIDE the same transaction once the look is new (release 1019b's
+    review: the band move a version 2 look makes, league/events/bands.py `on_look`, is written with the look or not at
+    all, so a look on record has always moved its band)."""
     with store.tx() as db:
         cur = db.execute(f"INSERT OR IGNORE INTO looks({', '.join(LOOK_COLUMNS)}) VALUES({', '.join('?' * len(LOOK_COLUMNS))})",
                          tuple(look[c] for c in LOOK_COLUMNS))
@@ -432,6 +434,7 @@ def write_look(store: S.Store, look: Mapping[str, Any], *,
             return False
         detail = {c: look[c] for c in LOOK_COLUMNS} | {x: look.get(x) for x in ("issuer", "control", "skew", "beside",
                                                                               "retirement")}
+        detail["written_at"] = S.iso(now or S.utc_now())
         if look.get("merged") is not None:
             detail["merged"] = [int(k) for k in look["merged"]]
         db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
@@ -737,6 +740,31 @@ def next_look(store: S.Store, program: str, version: int, today: dt.date) -> dic
 FINAL_SESSIONS = 3
 FINAL_LOOKBACK = dt.timedelta(days=45)
 FINAL_BACKFILL_WEEKDAYS = 3
+#: A69 (the captain's amendment of 14:25Z Oct 19, 2026; release 1019c): THE FAST PATH TO A FINAL RECORD. The three
+#: sessions' wait above is for late data; when there is provably none, a close X is final for a program once the
+#: session after X has had its open decision AND
+#: (i) every record pass of the lane from the start of the earliest window that feeds X's decisions (09:00 ET of the
+#:     session before X: the open window's start; never before the program's registration time, before which no event
+#:     counts) through that open decision ran without a feed error: its receipt
+#:     (league/events/house.py `_record`, league/events/run.py `record_pass`) finished `ok` with its 8-K and Form 4
+#:     reads and its news read whole (no `error` in any, the news read not cut, the tickers copy read), the passes
+#:     no more than FAST_RECORD_GAP apart from before that start through that decision (a pass that never ran proves
+#:     nothing: the reading that waits);
+#: (ii) no filing knowable in those windows (from that start to X's close decision, or a daily-index row stored since
+#:     that start) is still listed or failed: a failed one, a listed Form 4, or a listed 8-K whose filer is in X's
+#:     tickers copy (an unlisted filer's 8-K is never fetched, and never an event of X);
+#: (iii) the daily-index backfill of every weekday from the session before X through X has run (meta
+#:     `evl:backfill:<day>` = done: the days whose indexes hold filings of X's windows; the reading that waits);
+#: (iv) every decision of the program's entry kind through X is made as A66's second rule reads it, and the session
+#:     after X's open decision is made (its receipt `ok` or `pending`).
+#: Otherwise A66's rules apply unchanged. Finality stays contiguous: X is final by the fast path only when every session
+#: before it is final (by A66 or by the fast path). It only moves the computation earlier when no late event can
+#: exist; the as-of date, the record and the look are the same (a re-decision never writes an intent under a look
+#: already written: league/events/run.py `_scope`).
+FAST_RECORD_GAP = dt.timedelta(minutes=15)
+#: The record pass's receipt, and the reads in it whose failure is a feed error.
+RECORD_JOB = "record"
+RECORD_FORMS = ("8-K", "4")
 
 
 def _reach() -> tuple[int, dt.timedelta, int]:
@@ -754,10 +782,34 @@ def _reach() -> tuple[int, dt.timedelta, int]:
     return sessions, lookback, weekdays
 
 
+def outside_window(store: S.Store, day: dt.date, now: dt.datetime) -> bool:
+    """Whether the House decides session `day` again no more at `now`: the reach's sessions after it (`_reach`) have had
+    their open decision (`final_until`'s first rule, at the same reach). league/events/run.py restricts a re-decision
+    of such a session to the programs its last receipt was pending on (A66, owed; release 1019c)."""
+    reach = _reach()[0]
+    later = [s for s in C.sessions(store, day + dt.timedelta(days=1), now.astimezone(C.NY).date()) if s.open_decide <= now]
+    return len(later) >= reach
+
+
+def _waits_on(status: str, summary: Any, key: str) -> bool:
+    """Whether a decision receipt (`status`, `summary`) leaves the decision unmade for the program keyed `key` (A66's
+    second rule): anything but `ok`, or `pending` on this program's own verdicts (an unreadable summary waits)."""
+    if status == "ok":
+        return False
+    if status != "pending":
+        return True
+    try:
+        body = json.loads(summary or "{}")
+        waits = dict(body.get("pending") or {}) if isinstance(body, dict) else {key: None}
+    except (TypeError, ValueError):
+        waits = {key: None}     # (unreadable: read as waiting on this program, the reading that waits)
+    return key in waits
+
+
 def final_until(store: S.Store, program: str, version: int, today: dt.date,
                 now: dt.datetime) -> tuple[dt.date | None, str]:
     """(the last session close that is final for (program, version) at `now`, None when none is; why the next one is
-    not), by the three rules above."""
+    not), by A66's three rules above, then A69's fast path (`_fast_until`) from the first session they leave open."""
     from .programs import BY_KEY
 
     prog = BY_KEY.get((str(program), int(version)))
@@ -765,11 +817,6 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
         return None, f"{program} v{version} is no registered program"
     first = prog.registered_at.astimezone(C.NY).date()
     reach_sessions, reach_lookback, reach_weekdays = _reach()
-    decided = [x for x in C.sessions(store, first, today) if x.open_decide <= now]
-    if len(decided) <= reach_sessions:
-        return None, f"the re-decision window still reaches every session ({len(decided)} decided)"
-    horizon: dt.date | None = decided[-(reach_sessions + 1)].day
-    why = f"the re-decision window reaches {decided[-reach_sessions].day.isoformat()}"
     kind = prog.entry_at
     key = prog.id if prog.version == 1 else f"{prog.id}@v{prog.version}"
     latest: dict[str, tuple[str, Any]] = {}
@@ -777,37 +824,184 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
                                 (f"decide-{kind}:", f"decide-{kind};")):
         latest[str(row["job"])] = (str(row["status"] or ""), row["summary"])
     since = max(first, (now - reach_lookback).astimezone(C.NY).date())
-    for x in C.sessions(store, since, horizon):
+    # A66's second rule and A69's (iv): the first session from the look-back on whose decision is not made for it.
+    unmade: tuple[dt.date, str] | None = None
+    for x in C.sessions(store, since, today):
         status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", ("", None))
-        if status == "ok":
-            continue
-        if status == "pending":
-            try:
-                body = json.loads(summary or "{}")
-                waits = dict(body.get("pending") or {}) if isinstance(body, dict) else {key: None}
-            except (TypeError, ValueError):
-                waits = {key: None}     # (unreadable: read as waiting on this program, the reading that waits)
-            if key not in waits:
-                continue
-        before = [y for y in C.previous(store, x.day, 1) if y.day >= first]
-        horizon = before[-1].day if before else None
-        why = f"the {kind} decision of {x.day.isoformat()} is {status or 'not made'}"
-        break
-    reach, day = [], today
-    while len(reach) < reach_weekdays:
-        day -= dt.timedelta(days=1)
-        if day.weekday() < 5:
-            reach.append(day)
-    for day in sorted(reach):
-        if horizon is None:
+        if _waits_on(status, summary, key):
+            unmade = (x.day, f"the {kind} decision of {x.day.isoformat()} is {status or 'not made'}")
             break
-        if day < first or day > horizon or store.meta(f"evl:backfill:{day.isoformat()}") == "done":
+    decided = [x for x in C.sessions(store, first, today) if x.open_decide <= now]
+    horizon: dt.date | None = None
+    if len(decided) <= reach_sessions:
+        why = f"the re-decision window still reaches every session ({len(decided)} decided)"
+    else:
+        horizon = decided[-(reach_sessions + 1)].day
+        why = f"the re-decision window reaches {decided[-reach_sessions].day.isoformat()}"
+        if unmade is not None and unmade[0] <= horizon:
+            before = [y for y in C.previous(store, unmade[0], 1) if y.day >= first]
+            horizon = before[-1].day if before else None
+            why = unmade[1]
+        reach, day = [], today
+        while len(reach) < reach_weekdays:
+            day -= dt.timedelta(days=1)
+            if day.weekday() < 5:
+                reach.append(day)
+        for day in sorted(reach):
+            if horizon is None:
+                break
+            if day < first or day > horizon or store.meta(f"evl:backfill:{day.isoformat()}") == "done":
+                continue
+            before = [y for y in C.previous(store, day, 1) if y.day >= first]
+            horizon = before[-1].day if before else None
+            why = f"the daily-index backfill of {day.isoformat()} has not run"
+            break
+    return _fast_until(store, prog, first, horizon, why, unmade, today, now)
+
+
+def _fast_until(store: S.Store, prog: Any, first: dt.date, horizon: dt.date | None, why: str,
+                unmade: tuple[dt.date, str] | None, today: dt.date, now: dt.datetime) -> tuple[dt.date | None, str]:
+    """A69: from the first session after A66's `horizon` (`why` its reason), each next close X that meets the fast
+    path's four conditions (`_fast_block`) is final too, in order, until the first that does not."""
+    moved = False
+    cache: dict[str, Any] = {}
+    for x in C.sessions(store, first, today):
+        if horizon is not None and x.day <= horizon:
             continue
-        before = [y for y in C.previous(store, day, 1) if y.day >= first]
-        horizon = before[-1].day if before else None
-        why = f"the daily-index backfill of {day.isoformat()} has not run"
-        break
-    return horizon, why
+        block = _fast_block(store, prog, first, x, unmade, now, cache)
+        if block is not None:
+            return horizon, (f"the fast path (A69) stops at {x.day.isoformat()}: {block}" if moved else
+                             f"{why}; the fast path (A69) stops at {x.day.isoformat()}: {block}")
+        horizon, moved = x.day, True
+    return horizon, why if not moved else f"the fast path (A69) reaches {horizon}"
+
+
+def _fast_block(store: S.Store, prog: Any, first: dt.date, x: C.Session, unmade: tuple[dt.date, str] | None,
+                now: dt.datetime, cache: dict[str, Any]) -> str | None:
+    """Why close `x` is not final for `prog` by A69's fast path (the comment above FAST_RECORD_GAP), None when it is."""
+    after = C.nth(store, x.day, 2)
+    if after is None:
+        return "no session after it in the calendar"
+    if after.open_decide > now:
+        return f"the session after it ({after.day.isoformat()}) has not had its open decision"
+    row = store.db.execute("SELECT started_at FROM receipts WHERE job=? AND status IN ('ok', 'pending') ORDER BY id "
+                           "LIMIT 1", (f"decide-open:{after.day.isoformat()}",)).fetchone()
+    if row is None:
+        return f"the open decision of {after.day.isoformat()} is not made"
+    if unmade is not None and unmade[0] <= x.day:
+        return unmade[1]
+    before = C.previous(store, x.day, 1)
+    if not before:
+        return "no session before it in the calendar"
+    prior = before[-1]
+    day = max(prior.day, first)
+    while day <= x.day:
+        if day.weekday() < 5 and store.meta(f"evl:backfill:{day.isoformat()}") != "done":
+            return f"the daily-index backfill of {day.isoformat()} has not run"
+        day += dt.timedelta(days=1)
+    start = max(prior.open_cutoff, prog.registered_at)     # (no event before its registration counts)
+    end = max(after.open_decide, S.parse_iso(row["started_at"]))
+    stuck = _fast_filings(store, x, start, x.close_decide, now, cache)
+    if stuck is not None:
+        return stuck
+    return _fast_passes(store, start, end, cache)
+
+
+def _fast_filings(store: S.Store, x: C.Session, start: dt.datetime, end: dt.datetime, now: dt.datetime,
+                  cache: dict[str, Any]) -> str | None:
+    """A69 (ii): a filing knowable in [start, end) (or a daily-index row stored since `start`) still listed or failed
+    that the lane would fetch: a failed one, a listed Form 4, a listed 8-K of a filer in `x`'s tickers copy."""
+    rows = store.db.execute(
+        "SELECT accession, form, cik, status FROM filings WHERE (status='listed' OR status LIKE 'failed%') AND "
+        "((knowable_at>=? AND knowable_at<?) OR (source='daily-index' AND received_at>=? AND received_at<=?)) "
+        "ORDER BY knowable_at, accession", (S.iso(start), S.iso(end), S.iso(start), S.iso(now))).fetchall()
+    listed: set[str] | None = None
+    for r in rows:
+        status = str(r["status"])
+        if status.startswith("failed"):
+            return f"filing {r['accession']} ({r['form']}) is {status[:80]}"
+        if r["form"] != "8-K":
+            return f"filing {r['accession']} ({r['form']}) is still listed"
+        if listed is None:
+            listed = _listed_ciks(store, x.day, x.at(dt.time(7, 30)), cache)
+        if listed is None or str(r["cik"]) in listed:
+            return f"filing {r['accession']} (8-K) of a listed filer is still listed"
+    return None
+
+
+def _listed_ciks(store: S.Store, day: dt.date, cutoff: dt.datetime, cache: dict[str, Any]) -> set[str] | None:
+    """The CIKs of the tickers copy a decision of entry session `day` reads (league/events/run.py `Context.tickers_for`:
+    the latest snapshot fetched before 07:30 ET of the day, else the earliest), or None when the store holds none."""
+    from . import universe as U
+
+    snaps = [(S.parse_iso(str(r["key"]).split("@", 1)[1]), str(r["value"])) for r in
+             store.db.execute("SELECT key, value FROM meta WHERE key LIKE 'tickers@%' ORDER BY key")]
+    if not snaps:
+        return None
+    chosen = [sha for at, sha in snaps if at < cutoff]
+    sha = chosen[-1] if chosen else snaps[0][1]
+    if f"tickers:{sha}" not in cache:
+        data = store.get_document(sha)
+        cache[f"tickers:{sha}"] = set(U.sec_tickers(lambda url: data))
+    return cache[f"tickers:{sha}"]
+
+
+def _fast_passes(store: S.Store, start: dt.datetime, end: dt.datetime, cache: dict[str, Any]) -> str | None:
+    """A69 (i): why the record passes from `start` through `end` do not prove the feeds whole, or None: a pass not
+    finished `ok`, a feed error in one (an 8-K or Form 4 read, the news read, the tickers copy), a news read cut short,
+    or two passes (or the span's ends and the passes) more than FAST_RECORD_GAP apart."""
+    span = f"passes:{S.iso(start)}:{S.iso(end)}"
+    if span in cache:
+        return cache[span]
+    rows = store.db.execute("SELECT started_at, status, summary FROM receipts WHERE job=? AND started_at>=? AND "
+                            "started_at<=? ORDER BY started_at, id",
+                            (RECORD_JOB, S.iso(start - FAST_RECORD_GAP), S.iso(end))).fetchall()
+    out: str | None = None
+    marks = [S.parse_iso(str(r["started_at"])) for r in rows]
+    if not marks or marks[0] > start:
+        out = f"no record pass ran from {S.iso(start - FAST_RECORD_GAP)} to {S.iso(marks[0] if marks else end)}"
+    else:
+        for a, b in zip(marks + [end], marks[1:] + [end]):
+            if b - a > FAST_RECORD_GAP:
+                out = f"no record pass ran from {S.iso(a)} to {S.iso(b)}"
+                break
+    if out is None:
+        for r, at in zip(rows, marks):
+            problem = _pass_problem(str(r["status"] or ""), r["summary"])
+            if problem is not None:
+                out = f"the record pass of {S.iso(at)} {problem}"
+                break
+    cache[span] = out
+    return out
+
+
+def _pass_problem(status: str, summary: Any) -> str | None:
+    """Why one record pass's receipt does not show its feeds read whole (A69 (i)), or None."""
+    if status != "ok":
+        return f"is {status or 'unfinished'}"
+    try:
+        body = json.loads(summary or "{}")
+    except (TypeError, ValueError):
+        return "has an unreadable summary"
+    if not isinstance(body, dict):
+        return "has an unreadable summary"
+    for form in RECORD_FORMS:
+        part = body.get(form)
+        if not isinstance(part, dict):
+            return f"has no {form} read"
+        if "error" in part:
+            return f"had a {form} feed error ({str(part['error'])[:80]})"
+    news = body.get("news")
+    if not isinstance(news, dict):
+        return "has no news read"
+    if "error" in news:
+        return f"had a news error ({str(news['error'])[:80]})"
+    if news.get("cut"):
+        return "cut its news read short"
+    tickers = body.get("tickers")
+    if isinstance(tickers, dict) and "error" in tickers:
+        return "could not read the tickers copy (its 8-Ks waited)"
+    return None
 
 
 def run(store: S.Store, today: dt.date, *, programs: Sequence[tuple[str, int]] | None = None,
@@ -878,7 +1072,7 @@ def _run_v1(store: S.Store, program: str, version: int, today: dt.date, *, now: 
             store.set_meta(f"skew:{program}:{version}:{k}", json.dumps(checks | {"at": S.iso(now)}, sort_keys=True))
         look = judge_look(look_set, days, k, program=program, version=version, at=session.close_at,
                           control_rows=ctl_rows, alphas=have, record=record, draws=draws)
-        if write_look(store, look):
+        if write_look(store, look, now=now):
             written.append({c: look[c] for c in ("program", "version", "k", "held", "passed", "p", "alpha", "why")})
     return {"written": written, "waiting": waiting}
 
@@ -1003,7 +1197,7 @@ def _run_v2(store: S.Store, program: str, version: int, today: dt.date, *, now: 
 
         def apply(db: Any, look: dict[str, Any] = look) -> None:
             moved[0] = BA.on_look(store, look, now=now, db=db)   # in the look's own transaction
-        if write_look(store, look, apply=apply):
+        if write_look(store, look, apply=apply, now=now):
             written.append({c: look[c] for c in ("program", "version", "k", "held", "passed", "p", "alpha", "why")}
                            | {"band": moved[0], "merged": merged})
     return {"written": written, "waiting": waiting}
@@ -1023,7 +1217,7 @@ def next_look_v2(store: S.Store, program: str, version: int, today: dt.date) -> 
 
 
 __all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "written_v2",
-           "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "B", "TIE", "LOOKS", "SEATABLE", "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
+           "final_until", "outside_window", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "FAST_RECORD_GAP", "B", "TIE", "LOOKS", "SEATABLE", "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
            "look_schedule", "look_number", "minimums", "seed_string", "seed_of", "look_seed", "values_sha", "signflip_p",
            "skew_check", "look_figures", "control_mean", "judge_look", "write_look", "look_detail", "bootstrap_bounds",
            "bounds_seed", "done_bounds", "kill_bounds", "sized_bound", "calibration", "program_versions",
