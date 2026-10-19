@@ -195,6 +195,10 @@ FLOWS_FRESH_SECONDS = 600
 #: Options Standard at $80, and the market-data subscription at about $1,000 a year. `performance`
 #: `subscriptions_monthly_usd` overrides either.
 SUBSCRIPTIONS_MONTHLY_USD = {"thetadata_usd": Decimal("80"), "market_data_usd": Decimal("1000") / 12}
+#: Oct 18, 2026: the owner cancelled ThetaData and Alpaca's Algo Trader Plus (the goal of Oct 19, 2026: the account is
+#: on Alpaca's free Basic plan from then). Their pro-rata stops accruing at the end of that day (UTC); what accrued
+#: before stays in the costs.
+SUBSCRIPTIONS_ENDED_AT = {"thetadata_usd": "2026-10-19T00:00:00Z", "market_data_usd": "2026-10-19T00:00:00Z"}
 MONTH_SECONDS = Decimal(365.25 * 86400) / 12
 COMPUTE_PARTS = ("sail_usd", "claude_usd", "openai_usd", "thetadata_usd", "market_data_usd", "other_usd")
 
@@ -1617,11 +1621,12 @@ class Publisher:
                                "openai_usd": None, "thetadata_usd": None, "market_data_usd": None, "other_usd": ZERO}
         start, end = _epoch(self.performance.get("start_at")), _epoch(now)
         if start is not None and end is not None:
-            months = Decimal(str(max(end - start, 0.0))) / MONTH_SECONDS
             rates = {**SUBSCRIPTIONS_MONTHLY_USD, **{k: Decimal(str(v)) for k, v in (self.performance.get("subscriptions_monthly_usd") or {}).items()
                                                       if k in SUBSCRIPTIONS_MONTHLY_USD}}
             for part, rate in rates.items():
-                out[part] = rate * months
+                ended = _epoch(SUBSCRIPTIONS_ENDED_AT.get(part)) if SUBSCRIPTIONS_ENDED_AT.get(part) else None
+                stop = end if ended is None else min(end, ended)
+                out[part] = rate * Decimal(str(max(stop - start, 0.0))) / MONTH_SECONDS
         return out
 
     @staticmethod

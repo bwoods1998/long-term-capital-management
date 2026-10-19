@@ -719,6 +719,20 @@ class PublisherTest(LedgerCase):
         self.assertNotIn("bid", body["compute"])
         self.assertEqual(body["gym"]["trials"], 9)
 
+    def test_cancelled_subscriptions_stop_accruing_at_their_end(self):
+        from league.publish import MONTH_SECONDS, SUBSCRIPTIONS_ENDED_AT, _epoch
+        publisher = self.publisher()
+        house = FakeHouse(self.ledger)
+        ended = _epoch(SUBSCRIPTIONS_ENDED_AT["thetadata_usd"])
+        start = _epoch(publisher.performance["start_at"])
+        months = (ended - start) / float(MONTH_SECONDS)
+        self.clock.now = ended + 5 * 86400  # five days after the owner's cancellation
+        compute = publisher.checkpoint(house)["compute"]
+        self.assertAlmostEqual(float(compute["thetadata_usd"]), 80 * months, places=2)
+        self.assertAlmostEqual(float(compute["market_data_usd"]), 1000 / 12 * months, places=2)
+        self.clock.now = ended + 30 * 86400
+        self.assertEqual(publisher.checkpoint(house)["compute"]["thetadata_usd"], compute["thetadata_usd"], "frozen after the end")
+
     def test_a_site_that_predates_the_practice_block_still_gets_the_checkpoint_and_is_asked_again_later(self):
         import urllib.error
 
