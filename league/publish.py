@@ -197,7 +197,7 @@ LANE_BANDS = ("shadow", "learning", "probe", "sized", "retired")
 LANE_BAND_RANK = {"sized": 0, "probe": 1, "learning": 2, "shadow": 3, "retired": 4}
 #: The band a lot was bought at (an event lot's; an older equity lane's lot: its program's probe or sized).
 LANE_ROUTES = ("learning", "probe", "sized")
-#: Whose lot: an event program's (`program`, its id on the page) or an older equity lane's agent (`agent`).
+#: Whose lot (`source`): an event program's (`owner` its id on the page) or an older equity lane's agent's (`owner` its id).
 LOT_SOURCES = ("program", "agent")
 LANE_FUNNEL_KEYS = ("since", "shadow", "learning", "probe", "sized", "retired")
 #: Each chain only narrows (a program counts on a step when it reached it or a higher one); only a seating program
@@ -969,10 +969,10 @@ def site_lane_funnel(value: Any) -> dict[str, Any] | None:
 def site_lot(value: Any, programs: set[str], published_at: str) -> dict[str, Any] | None:
     """One lot of the equity book (the site's `validLot`): exactly {id, source, owner, symbol, route, shares, open_shares,
     status, opened_at, closed_at, pnl_usd}: which lot (`lot:<lid>`), whose (`source` "program" and `owner` an event
-    program the view lists, or "agent" and an older lane's agent's id), what it held (the symbol, the shares it bought, the shares it still holds: at least some
-    when open, none when closed), the band it was bought at, when (to the minute; a closed one closed no earlier than it
-    opened) and its P&L (its trades, and its shares at the book's own value while open). None when it cannot be
-    described in these (it then folds into the block's `earlier` line, so the sum still holds)."""
+    program the view lists, or "agent" and an older lane's agent's id), what it held (the symbol, the shares it bought,
+    the shares it still holds: some when open, none when closed), the band it was bought at, when (to the minute; a
+    closed one closed no earlier than it opened) and its P&L (its trades, and its shares at the book's own value while
+    open). None when it cannot be described in these (it then folds into the block's `earlier` line, so the sum holds)."""
     if not isinstance(value, Mapping) or value.get("describable") is False:
         return None
     lid, source = str(value.get("id") or ""), value.get("source")
