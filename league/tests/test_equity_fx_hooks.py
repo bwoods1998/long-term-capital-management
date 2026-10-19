@@ -447,6 +447,13 @@ class TheRace(LiveCase):
         rows = self.venue.activity_rows
         self.venue = LateVenue(self.market, equity="5481.65", last_equity="481.65")
         self.venue.activity_rows = rows
+        # The equity opens on (A10.2; the old lanes' stop's rollback, the row alone): the race's entries are the
+        # machinery the stop leaves idle (league/tests/test_equity_opens_off.py holds the stop on the table in force).
+        from league.tests.equity_design import opens
+
+        on = opens()
+        on.__enter__()
+        self.addCleanup(on.__exit__, None, None, None)
 
     def house(self):
         live = self.make([])

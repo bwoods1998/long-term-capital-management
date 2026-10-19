@@ -690,8 +690,11 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
             state.put(key, {"schema": 1, "status": "passed", **{k: True for k in witnesses}})   # its own tests prove it
         real = M.Table.from_constitution()
         self.assertFalse(self.tickers & set(real.equity.universe), "no made-up ticker is the constitution's")
+        # The equity opens on (A10.2; the old lanes' stop's rollback, the row alone): the seat and its buys below are
+        # the machinery the stop leaves idle (league/tests/test_equity_opens_off.py holds the stop on the table in force).
+        self.assertFalse(real.equity.enabled, "the old lanes are exits only (PREREG-EVL-1 section 8)")
         table = dataclasses.replace(real, equity=dataclasses.replace(
-            real.equity, universe={**real.equity.universe, **{s: "stock" for s in sorted(self.tickers)}}))
+            real.equity, enabled=True, universe={**real.equity.universe, **{s: "stock" for s in sorted(self.tickers)}}))
         # THE SEATS AND THE SLEEVE ARE TWO NUMBERS (release E5-S): the pair in force is read, never assumed, and every
         # size below is computed from the table's rows.
         self.assertEqual((table.equity.position_share["stock"], table.equity.open_risk_weight["stock"]),

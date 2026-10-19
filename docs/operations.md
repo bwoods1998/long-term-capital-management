@@ -8,6 +8,66 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The old lanes are exits only (Oct 19, 2026): `equity_money.enabled` False: `fix/equity-opens-off`, not deployed
+
+The owner's goal of Oct 19, 2026 and the frozen pre-registration PREREG-EVL-1, section 8 (registration
+2026-10-19T01:08:38Z): "the index ETF and options programs take no new entries from the first House release after the
+registration time (it switches equity opens off; options reads are already off); their open lots exit by their own
+rules". The branch stacks on release R0 (`fix/basic-data-plan`, PR #567) and ships with R0's deploy or as the one after
+it: either is the first House release after the registration time.
+
+**What changes**: `league/constitution.py` `equity_money.enabled` True -> False, the stop the captain's A10.2 wrote into
+the row ("the instant stop of every equity open, a constitution-only change"), and nothing else: the constitution with
+the row set back hashes to release R0's digests to the last hex (league/tests/test_equity_opens_off.py). No code changes.
+
+**What the House does with it** (league/equity/live.py, read on this tree):
+- **No real equity buy goes.** Every entry, the ETF and the panel programs' alike, at the open or at the close, asks
+  `_open_block` first (`_work_entry`, `live.py:2039`), which answers "equity_money.enabled is false: exits only"
+  (`live.py:1596`) before any order is written; the intent keeps that reason and is recorded missed at its cut-off.
+  `_send` (`live.py:1429`) is the equity book's one POST, and its one buy is `_work_entry`'s (`live.py:2101`).
+- **Every exit goes as before.** `_work_exit` (`live.py:1779`), `_carry` (`live.py:1988`), `flatten` (`live.py:1085`) and
+  the House's exit rules (`_house_exits`, `live.py:3453`) never read the row: a program's own sells, the maximum hold,
+  the failed-decides rule, a retired or demoted program's lots, a carried exit, the owner's flatten and the close window
+  (15:55 to 15:59:30). Nothing else they wait on moves: the minimum hold, the kill switch, one order a symbol, the
+  House-wide day count, and the stock proof's SELL stage until 09:45 (A28).
+- **The decide still runs while the book holds a lot** (`live.py:2285`: it rests only when the lane is off AND holds
+  nothing): the 16:20 bars, every live program asked at 16:30, its sells planned, the House's exit rules run. Once
+  nothing is held the day's record is "idle" ("the lane is off and holds nothing") and no program is asked.
+- **No band moves and no seating pass** while the row is False (`live.py:2332`, `:2458`, `:2469`): nobody new is seated,
+  and EDM1 (a band move) does not run, so a program it would have demoted keeps its lots to its own sells and the
+  House's rules above. The open note (A30 (2)) records each session as refused by the House, so no idle clock runs.
+- **Unchanged**: the stock paper proof (it steps until both stages have passed), reconciliation (every minute; a freeze
+  still blocks options opens too), the options path (no row of `options_money` moves, and R0 turned options reads off),
+  the gateway (STOCK_BUYS_REAL stays "on": `league.ci` `stock_agreement` allows the row False beside it, and the
+  pre-open's check 10 passes a block that is off with the gateway on or off), the site publisher (it reads no equity
+  switch; health's `release.live.equity.enabled` reads false), and the swarm's equity research (births, Train and
+  looks read no equity switch: they go on until the captain's `elane` settings stop them; a passed look waits as a
+  Candidate).
+
+**What it costs, plainly**: the live ETF programs stay seated and keep deciding while a lot is held, and each buy they
+plan is refused; the forward record's twin never misses one (league/ops/forward_twins.py compares the programs'
+intents session by session, `:1306`-`:1312`, and a session with no live decision is compared too: only "split" and
+"retired" are unreadable, `:175`). So from a program's first refused buy its live and twin intents differ nearly every
+session, while it is not retired: FW9 (b) raises a warning for each such row in the forward reports of the next 24 hours
+(league/ops/forward_report.py `_twin_disagreed`, `:1423`), each one a House warning (`:1800`), and FW6 once 20 sessions
+are under the A14 bound; they ride the dlane report's alarms (league/ops/dlane_report.py `:3771`), so the stall job's
+`dlane` cause stands and mails (league/ops/stall.py `:1743`-`:1764`). Only the captain's settings quiet it:
+`elane.forward.twins` false (no twin row is made, so FW9 and FW6 go quiet), or the old programs retired swarm-side
+(their lots then leave at the next open by the House's rule for a retired program, not by their own).
+
+**Identities**: money digest `5ea6f99f` -> `f4fc39ff`, constitution digest `82a9a5a4` -> `34bbe7a5` (`PINNED_DIGEST`);
+the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate
+contract `397b22b7` do not move. The standing grant re-ratifies at the House's start on the owner's deploy (the updater
+alone never does); until it has, every real open is held, and no exit waits on it.
+
+**Deploy**: one owner deploy (`league/constitution.py` and `CHANGELOG.md` are protected), never 12:55-20:05Z on a
+trading day; with R0's or after it, before Monday's open (13:30Z Oct 19, 2026) for the stop to hold that session.
+**Verify after it** (read-only): health `release.live.equity.enabled` false; the `grant` job's receipt ratified on
+`f4fc39ff`; the pre-open's check 10 passing; at 09:31 ET the open's exits sent and every entry's why "equity_money.enabled
+is false: exits only"; no equity order with side "buy" in `eq_orders` from the deploy on. **Rollback**:
+`equity_money.enabled` True (one owner deploy; both digests back to `5ea6f99f` / `82a9a5a4` exactly; the standing
+grant re-ratifies the same way).
+
 ## Release R0 (Oct 19, 2026): the Basic data plan: `fix/basic-data-plan`, not deployed
 
 The owner cancelled Alpaca's Algo Trader Plus on Oct 18, 2026 (evening Pacific); the account has been on the free
@@ -2366,6 +2426,8 @@ confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the Ho
   at the House's start). E1 shipped True on Oct 11 (money digest `7e41909a` at A20's design, three seats at a sleeve
   of 0.50 x E; the digest of the seats and the sleeve in force is in **The seats and the sleeve** below); False
   (`23f17a14` at A20's design) is the stop: the book keeps its tables, runs its exits and reconciles; no equity open.
+  THE STOP IS IN FORCE from the old lanes' release (PREREG-EVL-1 section 8: money digest `f4fc39ff`; **The old lanes
+  are exits only**, at the top).
 - `elane.mode` (league/swarm/policy.json, swarm.json over it): "off" (the rollback: no seeded birth, no equity look) or
   "gate".
 - `STOCK_BUYS_REAL` (gateway/wrangler.jsonc): deployed "on" with PR #532; while the House's `equity_money.enabled` is
@@ -2500,7 +2562,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `5ea6f99f`, full digest `82a9a5a4` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `440d5572` / `c1370f46`.
+Money digest `f4fc39ff`, full digest `34bbe7a5` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `07d5b40b` / `93bf3250`.
 <!-- equity-design:end -->
 
 - **Its source.** The pair is the captain's to set, before Monday's open, from the verdict of the pre-registered

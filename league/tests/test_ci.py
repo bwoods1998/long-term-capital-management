@@ -246,7 +246,10 @@ class TheEquityLane(unittest.TestCase):
     files as OPTION_STRUCTURES_REAL is (`check_equity`)."""
 
     SWITCH_LINE = '"STOCK_BUYS_REAL": "on",'
-    ENABLED_LINE = '        "enabled": True,\n        "universe": {"etf"'
+    #: The House's switch as the tree holds it: OFF since the old lanes' stop (PREREG-EVL-1 section 8, exits only), the
+    #: gateway still on. `ON` is the rollback (the block as E1 deployed it, A10.2).
+    ENABLED_LINE = '        "enabled": False,\n        "universe": {"etf"'
+    ON = {ENABLED_LINE: ENABLED_LINE.replace("False", "True")}
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -384,12 +387,13 @@ class TheEquityLane(unittest.TestCase):
         self.assertEqual(self.tree(), [])
 
     def test_the_switch_is_the_houses_and_the_gateway_may_be_on_while_it_is_off(self):
-        off = {self.ENABLED_LINE: self.ENABLED_LINE.replace("True", "False")}
-        self.assertEqual(self.tree(constitution=off), [], "gateway on, enabled False: the House's row is the switch (A8)")
+        off = {}
+        self.assertEqual(self.tree(constitution=off), [], "gateway on, enabled False (the tree as it stands: the old "
+                                                          "lanes' stop): the House's row is the switch (A8)")
         self.assertEqual(self.tree(constitution=off, wrangler={self.SWITCH_LINE: '"STOCK_BUYS_REAL": "off",'}), [],
                          "both off")
-        on = {}
-        self.assertEqual(self.tree(constitution=on), [], "both on: the block as E1 deploys it (A10.2)")
+        on = self.ON
+        self.assertEqual(self.tree(constitution=on), [], "both on: the block as E1 deploys it (A10.2), the rollback")
         self.assertEqual(self.tree(constitution=on, wrangler={self.SWITCH_LINE: '"STOCK_BUYS_REAL": " On ",'}), [],
                          "the gateway's own reading: trimmed, any case")
         for value in ("off", "", "yes", "onn"):
@@ -493,7 +497,7 @@ class TheEquityLane(unittest.TestCase):
         self.assertIn("equity_money.cash_reserve_usd = '25' is outside [50, 200]", " ".join(refused))
         refused = self.tree(constitution={'"rule": "edm1",': '"rule": "EDM1",'})
         self.assertIn("equity_money.demotion.rule = 'EDM1' is not exactly one of ['edm1']", " ".join(refused))
-        refused = self.tree(constitution={self.ENABLED_LINE: self.ENABLED_LINE.replace("True", "1")})
+        refused = self.tree(constitution={self.ENABLED_LINE: self.ENABLED_LINE.replace("False", "1")})
         self.assertIn("equity_money.enabled = 1 is not exactly one of [False, True]", " ".join(refused))
 
     @property

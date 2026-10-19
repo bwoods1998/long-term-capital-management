@@ -619,9 +619,23 @@ def store_families(root: Path, programs: list[dict], clock: Clock, panel: str, *
     return EquityFamilies(root)
 
 
+def opens_on() -> dict[str, Any]:
+    """The constitution in force WITH THE EQUITY OPENS ON (`equity_money.enabled` True): the old lanes' stop
+    (PREREG-EVL-1 section 8) leaves this week's ETF path idle, and the week is what that path does, order for order, when
+    its switch is on (the stop's rollback, the row alone; on a tree from before the stop the row is True already). The
+    stop itself is held on the table in force in league/tests/test_equity_opens_off.py."""
+    import copy
+
+    from league.constitution import CONSTITUTION
+
+    rules = copy.deepcopy(CONSTITUTION)
+    rules["equity_money"]["enabled"] = True
+    return rules
+
+
 class House:
     """The House's equity lane as `equity_hook.build_book` wires it: the REAL `EquityBook` over the REAL
-    `StockPaperProof` (the practice account `paper`), the money table in force (`Table.from_constitution()`), the real
+    `StockPaperProof` (the practice account `paper`), the money table in force with its switch on (`opens_on`), the real
     decider kind (`InlineDecider`: the child's own code in this process) and the swarm's rows through `reader`
     ("memory" | "store": `store_families`). `lag`: seconds into the House minute the equity tick runs (it follows the
     options minute)."""
@@ -636,7 +650,7 @@ class House:
         self.paper = Venue(self.market, self.clock, cash="100000", name="paper")
         self.starts = 0
         self.state = self.new_state()
-        self.table = M.Table.from_constitution()
+        self.table = M.Table.from_constitution(opens_on())
         self.families = (store_families(self.root, programs, self.clock, panel, forced=forced) if reader == "store"
                          else MemoryEquityFamilies(programs))
         self.decider = InlineDecider()

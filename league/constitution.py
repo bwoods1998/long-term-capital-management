@@ -977,6 +977,16 @@ CONSTITUTION: dict[str, Any] = {
     #   open, a constitution-only change that moves the money digest again. Exits never wait on it. True requires the
     #   gateway's STOCK_BUYS_REAL "on" (`league.ci`); the gateway may read "on" while this is False: this row is the
     #   switch.
+    #   THE OLD LANES ARE EXITS ONLY: False (the owner's goal of Oct 19, 2026 and the frozen pre-registration
+    #   PREREG-EVL-1, section 8: "the index ETF and options programs take no new entries from the first House release
+    #   after the registration time (it switches equity opens off; options reads are already off); their open lots exit
+    #   by their own rules"). This row alone moved. No real equity buy goes, the ETF and the panel programs' alike
+    #   (league/equity/live.py `_open_block`: "equity_money.enabled is false: exits only"); every exit goes as before (a
+    #   program's own sells, the maximum hold, the failed-decides rule, a retired program's lots, a carried exit, the
+    #   owner's flatten, the close window), and the decide still runs while the book holds a lot, so a program's sells
+    #   are planned. No band moves and nobody is seated while it is False. Money digest 5ea6f99f -> f4fc39ff,
+    #   constitution 82a9a5a4 -> 34bbe7a5; the standing grant re-ratifies at the House's start on the owner's deploy.
+    #   Rollback: True (one owner deploy; both digests back to 5ea6f99f / 82a9a5a4 exactly).
     # - `universe`: the symbols a program may trade, by class: the gateway's STOCK_UNIVERSE exactly. No leveraged or
     #   inverse ETF: they hold borrowing or short exposure inside them.
     # - `position_share`: one instrument's cap, the account's holding of it plus every open buy of it across all programs,
@@ -1091,7 +1101,7 @@ CONSTITUTION: dict[str, Any] = {
     #   window (09:25 pre-open, 09:30:30 sends, entries until 09:45, exits until 15:55), THE CLOSE WINDOW (A2: 15:55:00
     #   sends, re-priced every 30 s until 15:59:30, then missed), the 16:20 bars, the 16:30 decisions and the 08:30 audit.
     "equity_money": {
-        "enabled": True,
+        "enabled": False,
         "universe": {"etf": ["SPY", "QQQ", "IWM", "DIA", "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU",
                              "XLV", "XLY", "TLT", "GLD"],
                      "stock": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK.B", "JPM", "V", "UNH", "XOM", "JNJ",
@@ -1591,4 +1601,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '82a9a5a4d5feab292ea0fb72a0382db4d5d893be93695c905897f6939feb219b'
+PINNED_DIGEST = '34bbe7a594468a6b3ea12d3e96c4a8a6ed8f320936faa1a87d8cf4e66f31beeb'

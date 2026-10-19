@@ -148,8 +148,14 @@ class ConstitutionTest(unittest.TestCase):
         never deployed; A20's rollback, the sleeve alone back at 0.25, is 3a7c52d5 / 6d19fddd. Every row of the
         block is a money rule (none is in `RISK_FREE`), so each moves the money digest and the standing grant
         re-ratifies on the owner's deploy (league/tests/test_equity_money.py). THE SWITCH SHIPS ON (the captain's
-        A10.2): `enabled` True is the block as deployed; its stop, `enabled` False, is a digest of its own (23f17a14),
-        ratified the same way; the rollback to a release before E1 brings fdf2ac7c back.
+        A10.2): `enabled` True is the block as deployed; its stop, `enabled` False, is a digest of its own (23f17a14 at
+        E1's table), ratified the same way; the rollback to a release before E1 brings fdf2ac7c back.
+
+        THE OLD LANES ARE EXITS ONLY (the owner's goal of Oct 19, 2026; PREREG-EVL-1, section 8): `enabled` False is in
+        force, the stop above at today's table, and it moved every pair's digests once, by itself. So each pair WITH THE
+        ROW SET BACK to True is still on its pin before it (`DIGESTS_OPENS_ON`, `opens_on`), and every older figure here
+        is read with it set back (`e1`, `without_seat`); the rollback is that row alone
+        (league/tests/test_equity_opens_off.py).
 
         SINCE RELEASE E5-S THE SEATS AND THE SLEEVE ARE TWO NUMBERS (`set_design SEATS SLEEVE`): every figure above
         is A20's design's (three seats at 0.50), read here with the two rows at that design (`reference`) whatever
@@ -238,8 +244,9 @@ class ConstitutionTest(unittest.TestCase):
         # The block as E1 deploys it (INTERFACES 7.1, the captain's amendments A1, A5, A8, A10.2: the switch ships on;
         # nothing trades until a look passes with `elane.mode` "gate" and the stock proof's BUY stage passes), with the
         # two numbers of release E5-S in its `probe` row and no other row moved: the owner's lines are the same strings.
+        # The switch itself is OFF since the old lanes' stop (PREREG-EVL-1, section 8): exits only.
         em = CONSTITUTION["equity_money"]
-        self.assertIs(em["enabled"], True)
+        self.assertIs(em["enabled"], False, "the old lanes are exits only (PREREG-EVL-1 section 8)")
         self.assertEqual((em["invested_share"], em["cash_reserve_usd"]), ("1.00", "50"))
         self.assertEqual(em["probe"], {"sleeve_share": sleeve, "max_programs": seats, "min_order_usd": "10",
                                        # THE SEAT RULE (release E5-A, the captain's A24): its three rows, as registered.
