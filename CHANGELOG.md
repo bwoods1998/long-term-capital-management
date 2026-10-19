@@ -57,7 +57,7 @@ is on branches.
 - **Judges behind the wall.** `league/ci.py` FORBIDDEN gains `league/events/programs.py`, `verdicts.py`, `score.py`,
   `screen.py` and `docs/prereg/` (in `PENDING_GATEWAY` until the gateway's merge list follows): no role changes them and
   the in-box updater never ships one.
-- **Tests.** league/tests/test_events_house.py (31: the hook and the House's tick, the order and bounds of tasks,
+- **Tests.** league/tests/test_events_house.py (34: the hook and the House's tick, the order and bounds of tasks,
   verdicts before the decision, the resumable record pass, nightly, backfill, PAUSE and the line, failures as
   warnings, `house.feeds` None), league/tests/test_evl_migrate.py (9), test_ci and test_e3_identities (the wall).
 - **Deploy.** Ships with `events.enabled` false (the owner flips it in `config.json`, an owner deploy); with it true the

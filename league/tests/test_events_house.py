@@ -654,6 +654,29 @@ class TheRecordPass(LaneCase):
         self.assertEqual(status["0000000009-26-000309"], "listed")
         self.assertEqual(self.receipts("record")[-1]["status"], "ok")
 
+    def test_no_tickers_copy_holds_the_8ks_not_the_news_or_the_form_4s(self):
+        with self.store() as st:
+            st.db.execute("DELETE FROM meta WHERE key LIKE 'tickers@%'")
+        self.sec.add("0000000001-26-000301", "0000000001", "2026-10-20 06:51:00")
+        self.gw.news = [{"id": 78, "created_at": "2026-10-20T10:55:00Z", "updated_at": None, "headline": "h",
+                         "summary": "s", "source": "benzinga", "symbols": ["AAA"]}]
+        real = self.sec.__call__
+
+        def no_tickers(url):
+            if url.endswith("company_tickers.json"):
+                raise OSError("sec down")
+            return real(url)
+        self.lane._sec_base = no_tickers
+        self.at(et("2026-10-20", "07:01"))
+        last = self.turn()
+        self.assertEqual((last["task"], last["status"]), ("record", "ok"))
+        with self.store() as st:
+            self.assertEqual(st.db.execute("SELECT status FROM filings").fetchone()[0], "listed")   # waits, not lost
+            self.assertEqual(st.db.execute("SELECT count(*) FROM news").fetchone()[0], 1)
+        summary = json.loads(self.receipts("record")[-1]["summary"])
+        self.assertIn("error", summary["tickers"])
+        self.assertEqual(summary["8-K"]["waiting"], 1)
+
     def test_every_two_minutes(self):
         self.at(et("2026-10-20", "07:01"))
         self.assertEqual(self.turn()["task"], "record")

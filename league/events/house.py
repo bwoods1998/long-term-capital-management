@@ -809,7 +809,11 @@ class EventLane:
         st = ctx.store
         now = ctx.now()
         out: dict[str, Any] = {}
-        listed = set(ctx.tickers)
+        try:
+            listed: set[str] | None = set(ctx.tickers)
+        except Exception as exc:  # noqa: BLE001 - no tickers copy at all (an empty store, SEC down): 8-Ks wait, the rest goes on
+            listed = None
+            out["tickers"] = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
         new = 0
         for form in E.FORMS:
             known = [r[0] for r in st.db.execute("SELECT accession FROM filings WHERE form=? ORDER BY accepted_at DESC "
@@ -833,8 +837,9 @@ class EventLane:
                              "accession", (S.iso(now - FETCH_WINDOW),)).fetchall()
         for row in rows:
             counts = out.setdefault(str(row["form"]), {"new": 0, "fetched": 0, "failed": 0, "unlisted": 0})
-            if row["form"] == "8-K" and row["cik"] not in listed:
-                counts["unlisted"] += 1
+            if row["form"] == "8-K" and (listed is None or row["cik"] not in listed):
+                counts["unlisted" if listed is not None else "waiting"] = counts.get(
+                    "unlisted" if listed is not None else "waiting", 0) + 1
                 continue
             if self.late(deadline):
                 cut = True
