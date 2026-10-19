@@ -697,8 +697,9 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
             real.equity, enabled=True, universe={**real.equity.universe, **{s: "stock" for s in sorted(self.tickers)}}))
         # THE SEATS AND THE SLEEVE ARE TWO NUMBERS (release E5-S): the pair in force is read, never assumed, and every
         # size below is computed from the table's rows.
+        # (Release R2: the goal's 10% a name, `position_share.stock` 0.20 -> 0.10; a basket's names sit far under it.)
         self.assertEqual((table.equity.position_share["stock"], table.equity.open_risk_weight["stock"]),
-                         (D("0.20"), D("0.40")), "the constitution's own")
+                         (D("0.10"), D("0.40")), "the constitution's own")
         from league.tests.equity_design import in_force
 
         self.assertEqual(table.equity.probe_sleeve_share, D(in_force()[1]))
@@ -782,9 +783,12 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
 
         # ---------------------------------------------------------------------------- 7. a live week
         # Monday's open: five limit buys through E1's order path, sized by money's own rules. FIVE WHOLE LOTS, each a
-        # fifth of the decision's budget, and none is cut: together they are the budget's open risk at a stock's 0.40
-        # (the whole panel sleeve's, $89.16 of a $222.90 sleeve; the whole $400 window at A20's Probe sleeve, where
-        # before the fix four lots of $222.90 were bought and the fifth cut to $108.40 by the budget).
+        # fifth of the decision's budget held to the name's cap, and none is cut by the budget: together they are the
+        # budget's open risk at a stock's 0.40 (before release R2 the whole panel sleeve's, $89.16 of a $222.90 sleeve; the
+        # whole $400 window at A20's Probe sleeve, where before the fix four lots of $222.90 were bought and the fifth cut
+        # to $108.40 by the budget). SINCE RELEASE R2 a stock's name cap is `position_share.stock` 0.10 (the goal's 10% a
+        # name; 0.20 before it), of E and of the program's own sleeve as the Gym holds it: each fifth ($44.58) is cut to a
+        # tenth of the sleeve ($22.29), half the sleeve's open risk.
         market.extend(WEEK[0], lambda symbol: 0.001)
         tick(WEEK[0], 8, 31)
         self.assertEqual((rebalance(FRIDAY)["audit"], venue.sent), ("ok", []))
@@ -810,11 +814,13 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertEqual({(b["side"], b["type"], b["time_in_force"]) for b in venue.sent}, {("buy", "limit", "day")})
         self.assertEqual({(lot.status, lot.entry_at, lot.opened_day, lot.probe, lot.klass, lot.tag) for lot in bought},
                          {("open", "open", WEEK[0].isoformat(), True, "stock", xbook.TAG)})
-        name = D("0.2") * budget
+        cap = table.equity.position_share["stock"]
+        name = min(D("0.2") * budget, cap * sleeve)
+        self.assertEqual(name, cap * sleeve, "the name's cap binds a fifth of the budget (release R2)")
         for lot in bought:
             self.assertLessEqual(lot.entry_notional, name)
-            self.assertLessEqual(lot.entry_notional, D("0.2") * sleeve, "the sleeve's own name cap")
-            self.assertLessEqual(lot.entry_notional, table.equity.position_share["stock"] * E, "a stock: 20% of equity")
+            self.assertLessEqual(lot.entry_notional, cap * sleeve, "the sleeve's own name cap")
+            self.assertLessEqual(lot.entry_notional, cap * E, "a stock: 10% of equity")
             self.assertEqual(lot.entry_px, market.quote(lot.symbol)[1], "a marketable limit filled at the ask")
         whole = [lot for lot in bought if lot.entry_notional > name - 1]
         self.assertEqual(len(whole), 5, [str(lot.entry_notional) for lot in bought])
@@ -822,8 +828,8 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         invested = sum((lot.qty * lot.entry_px for lot in bought), D(0))
         self.assertEqual(at_risk, table.equity.open_risk_weight["stock"] * invested, "one budget, stocks at 0.40")
         self.assertLessEqual(at_risk, window)
-        self.assertGreater(at_risk, table.equity.open_risk_weight["stock"] * budget - 2,
-                           "the whole basket is the budget's open risk, a fifth a name")
+        self.assertGreater(at_risk, table.equity.open_risk_weight["stock"] * 5 * name - 2,
+                           "the whole basket is the budget's open risk, the name's cap a name")
         self.assertLessEqual(invested, table.equity.invested_share * E)
         self.assertEqual([o for o in state.rows("SELECT why FROM eq_orders") if "budget" in (o["why"] or "")], [],
                          "no order was cut by the budget")

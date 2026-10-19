@@ -287,9 +287,11 @@ class TheEquityLane(unittest.TestCase):
         # effects and the memory tables: secrecy rules and a Train-bar input) since the release itself. Release E4's
         # two (the panel's swarm lane and the universe generator) wait here for the gateway's next follow-up.
         self.assertEqual(ci.PENDING_GATEWAY, ("league/swarm/elane_xs.py", "scripts/gen_universe.py",
-                                              "league/swarm/elane_forward.py", "league/data_plan.py"),
+                                              "league/swarm/elane_forward.py", "league/data_plan.py",
+                                              "league/events/book.py", "league/events/proof.py"),
                          "the gateway's merge list holds E2's five since its follow-up of Oct 11 and E3's three with "
-                         "the release; E4's two, FWD1-R's seat path and R0's data plan wait for its next one")
+                         "the release; E4's two, FWD1-R's seat path, R0's data plan and R2's event kind wait for its "
+                         "next one")
         for entry in ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py",
                       "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
                       "league/swarm/elane_seal.py", "league/swarm/elane_review.py", "league/swarm/elane_folds.py",
@@ -482,13 +484,22 @@ class TheEquityLane(unittest.TestCase):
         self.assertIn(" and 510 more (520 in all); constitution only: none)", refused[0])
 
     def test_the_position_shares_stay_within_the_gateways(self):
-        self.assertEqual(self.tree(constitution={'"position_share": {"etf": "0.50", "stock": "0.20"}':
-                                                 '"position_share": {"etf": "0.40", "stock": "0.10"}'}), [], "tighter")
+        self.assertEqual(self.tree(constitution={'"position_share": {"etf": "0.50", "stock": "0.10"}':
+                                                 '"position_share": {"etf": "0.40", "stock": "0.05"}'}), [], "tighter")
         refused = self.tree(wrangler={'"STOCK_ETF_EQUITY_SHARE": "0.5",': '"STOCK_ETF_EQUITY_SHARE": "0.4",'})
         self.assertIn("equity_money.position_share.etf '0.50' is not within the gateway's STOCK_ETF_EQUITY_SHARE '0.4'",
                       " ".join(refused))
-        refused = self.tree(wrangler={'"STOCK_SINGLE_EQUITY_SHARE": "0.2",': '"STOCK_SINGLE_EQUITY_SHARE": "x",'})
+        refused = self.tree(wrangler={'"STOCK_SINGLE_EQUITY_SHARE": "0.1",': '"STOCK_SINGLE_EQUITY_SHARE": "x",'})
         self.assertIn("position_share.stock", " ".join(refused))
+        # RELEASE R2 (the goal's 10% a name): the House's stock row at 0.10 needs the gateway's single-stock share at 0.1
+        # or more; the gateway at 0.05 refuses the tree, and so does the House's row back at 0.20 beside the gateway's 0.1.
+        refused = self.tree(wrangler={'"STOCK_SINGLE_EQUITY_SHARE": "0.1",': '"STOCK_SINGLE_EQUITY_SHARE": "0.05",'})
+        self.assertIn("equity_money.position_share.stock '0.10' is not within the gateway's STOCK_SINGLE_EQUITY_SHARE "
+                      "'0.05'", " ".join(refused))
+        refused = self.tree(constitution={'"position_share": {"etf": "0.50", "stock": "0.10"}':
+                                          '"position_share": {"etf": "0.50", "stock": "0.20"}'})
+        self.assertIn("equity_money.position_share.stock '0.20' is not within the gateway's STOCK_SINGLE_EQUITY_SHARE "
+                      "'0.1'", " ".join(refused))
 
     def test_a_row_outside_its_bounds_is_refused_before_any_comparison(self):
         refused = self.tree(constitution={'"invested_share": "1.00",': '"invested_share": "2.00",'})

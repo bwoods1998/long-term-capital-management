@@ -211,10 +211,13 @@
     // NO MARGIN AS A GATEWAY WALL (release R2, gateway G2; the owner's goal of Oct 19, 2026, item 4: "<= 100% invested,
     // no margin"): STOCK_MAX_EQUITY_MULTIPLE "1", so every long position + every resting stock buy + this one is at most
     // 1 x equity whatever the account's multiplier (it was "2", the venue's overnight line; the House never asked for
-    // more than its own 1.00 x E, so nothing it sends changes).
+    // more than its own 1.00 x E, so nothing it sends changes). THE GOAL'S 10% A NAME (item 4, "<= 10% of equity per
+    // name"; the House release R2): STOCK_SINGLE_EQUITY_SHARE "0.1" (it was "0.2"), with the constitution's
+    // `equity_money.position_share.stock` 0.10 beside it (league.ci holds the House's row within this var); an event
+    // buy's name is held to it, never above 10%, by a code ceiling either way.
     "STOCK_BUYS_REAL": "on",
     "STOCK_ETF_EQUITY_SHARE": "0.5",
-    "STOCK_SINGLE_EQUITY_SHARE": "0.2",
+    "STOCK_SINGLE_EQUITY_SHARE": "0.1",
     "STOCK_MAX_EQUITY_MULTIPLE": "1",
     "STOCK_DAY_EQUITY_MULTIPLE": "4",
     // THE EVENT LANE'S BUYS (release R2, gateway G2; PREREG-EVL-1 section 8; lib/caps.mjs "event-lane stock buys"): a

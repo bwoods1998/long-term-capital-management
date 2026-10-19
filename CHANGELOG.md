@@ -32,6 +32,46 @@ reads unreleased; before it, `20261016T024305Z-e90d75adb36b`, main `d6bcf0cd`, P
 02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
+### Release R2: the event lane's real money on the House, on `r2/house` (unreleased; stacked on `r2/gateway`; an owner deploy after gateway G2, never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; EVERY EVENT PROGRAM SHIPS AT SHADOW, so it changes no money behaviour by itself; THE MONEY DIGEST MOVES `f4fc39ff` -> `1142ae87` and the constitution `34bbe7a5` -> `bd1ff4f6`, the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
+
+- **Why.** The owner's goal of Oct 19, 2026 (item 4) and the frozen PREREG-EVL-1 section 8, with PREREG-EVL-2: a
+  program that passes its screen trades real money from the next session, in whole shares, in the listing exchange's
+  auctions, inside the goal's walls.
+- **What.** THE EQUITY BOOK'S EVENT KIND (league/equity/live.py `_event_step` and after; the rules in the new adapter
+  league/events/book.py, `BOOKS["event"]`): the open decision at 09:15 ET and the close decision at close - 14 minutes
+  on the lane's store read-only, only events stored and verdicts answered before them; whole-share limit-on-open /
+  limit-on-close buys at 1.25 x the previous SIP close (`opg` sends 09:16-09:27, `cls` close - 13 to - 11), sized by
+  `size_entry` (Probe 5% of E, Sized 10%, the book-wide 10% a name, the 100% book, the cash, the loss budget at the
+  lot's own weight; one share when the target rounds to none and it fits); market-on-close sales at the last session
+  and MARKET-ON-OPEN sales at the next session's open for EVL-ERN-REACT-ON, EVL-NEWS-READ-ON and EVL-NEWS-REACT-ON;
+  PREREG-EVL-1 section 5's fallback ladder (5 closing crosses, then a day sale each session, at 0 for the budget after
+  20 sessions); bands shadow / Probe / Sized / demoted (-$150 over 20 sessions) / retired, at most 9 live, one name an
+  auction in table order; the House's eligible list sent to the gateway when a buy is planned. The money rows
+  `equity_money.event` (its own switch `enabled`; `equity_money.enabled` STAYS False: the old lanes are exits only) and
+  `position_share.stock` 0.20 -> 0.10 with the gateway's `STOCK_SINGLE_EQUITY_SHARE` "0.2" -> "0.1" (also the old
+  lanes' name cap of a program's own sleeve: a panel basket's fifths would be cut to a tenth of its sleeve were that
+  lane reopened; test_e4_e2e says so). Open risk of an
+  event lot value x max(0.10, 1.65 x sigma60 x sqrt(h)) (0.40 when sigma is unknown or the lot is past its exit; ETF,
+  stock and options weights unchanged), and every closed event lot in the budget whatever its band. THE AUCTION PAPER
+  PROOF (league/events/proof.py: one KO share, a limit-on-open buy and a market-on-close sale on the practice account;
+  its BUY stage gates every real event buy, a failed SELL stage stops them). THE EVENT TWINS (league/ops/twins.py
+  `event_twin`: each real fill beside the shadow's own auction print, `entry_gap_bp` / `exit_gap_bp`). The forward
+  register, the forward twins, FW7, FW9 and the old Done meter leave event programs out. An error alert, once a
+  session, when the gateway refuses an event buy for `STOCK_EVENT_BUYS` off (the owner's step). league/events/book.py
+  and proof.py are behind the owner's wall (`league.ci` `PENDING_GATEWAY`).
+- **Not here.** The site's positions panel admits no stock row yet: the site's schema (`capital/schema.js`) and the
+  House's rows of event lots (league/trading_profit.py, league/publish.py) ship together with the site's PR; the agents
+  roster's EVL programs are release R1's (WP4).
+- **Tests.** league/tests/test_events_book.py (new, 35, through the real book and the real `size_entry`); the
+  changed pins in test_constitution, test_ci, test_e3_identities, test_e4_e2e, test_equity_money,
+  test_equity_opens_off, test_equity_design, test_equity_seats and test_equity_book_panel; the golden ETF week (test_equity_etf_orders) unchanged order for
+  order. Gateway suite 489/489.
+- **Deploy and rollback.** Gateway G2 first (`r2/gateway`), then this House release, then the gateway again from its
+  head (`STOCK_SINGLE_EQUITY_SHARE` "0.1"); the owner sets `STOCK_EVENT_BUYS` `on` at the first Probe.
+  [docs/operations.md](docs/operations.md), **The event lane's real money on the House (release R2)**. Rollback:
+  `equity_money.event.enabled` False (money `c5c83fc8`, constitution `643d0d00`); with no event lot open, the previous
+  House release and gateway version.
+
 ### Gateway G2: the event lane's real buys, on `r2/gateway` (release R2; unreleased; a gateway deploy, before the House release R2; `STOCK_EVENT_BUYS` ships `off`, so it changes nothing the floor does)
 
 - **Why.** The owner's goal of Oct 19, 2026 (item 4) and PREREG-EVL-1 section 8: an event program that passes its
@@ -1762,7 +1802,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `f4fc39ff`, full digest `34bbe7a5` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `07d5b40b` / `93bf3250`.
+Money digest `1142ae87`, full digest `bd1ff4f6` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `e421fef9` / `81d73cd8`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

@@ -1235,7 +1235,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `f4fc39ff`, full digest `34bbe7a5` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `07d5b40b` / `93bf3250`.
+Money digest `1142ae87`, full digest `bd1ff4f6` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `e421fef9` / `81d73cd8`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of
@@ -1457,3 +1457,79 @@ at 0.10 x E.
   seats order for order beside a panel Candidate, Probe and Sized program, the pool, the held seat, the swarm's
   reader, the report); the changed pins in test_equity_money, test_equity_design and test_constitution;
   test_equity_book_panel reads its own table's Probe sleeve as the panel row (its module docstring).
+
+## 20. The event kind (release R2, Oct 2026; the owner's goal of Oct 19, 2026, PREREG-EVL-1 section 8 and PREREG-EVL-2; money, book, hooks and ops; CHANGES 5.1, 5.2, 5.3, 6.3, 7.1, 10, as built)
+
+A pre-registered event program (a seatable row of league/events/programs.py; never a swarm family, never program code)
+trades real money through this book once a held look of the event lane's screen passed. Its rules live in the adapter
+league/events/book.py; the book meets them with E1's order path. Every program ships at shadow.
+
+- **7.1** (CHANGES; money): `equity_money.position_share.stock` "0.20" -> "0.10" (the goal's 10% a name; the gateway's
+  `STOCK_SINGLE_EQUITY_SHARE` "0.1" with it, `league.ci`), and `equity_money.event` = {`enabled` True, `seats` 9,
+  `position_share` {probe "0.05", sized "0.10"}, `max_open` {probe 6, sized 8}, `per_name_share` "0.10", `limit_ratio`
+  "1.25", `open_risk` {floor "0.10", z "1.65", sigma_sessions 60}, `sized` {min_events 150, confidence "0.80"},
+  `demotion` {program_loss_usd "-150", loss_sessions 20, shadow_sessions 20, retire_events 100}, `order_path` {the six
+  auction offsets, `EVENT_ORDER_OFFSETS`}}, added below the table's literal. `EQUITY_MONEY_BOUNDS` gains the `event.*`
+  rows (the pre-registered value at each loose end; the moments the rules fix exact), `EQUITY_MONEY_CHOICES`
+  `event.enabled`, `EQUITY_MONEY_ABOVE_LOW` `event.per_name_share` and `event.limit_ratio`; `equity_money_problems`
+  checks the block only when it is there (a table without it, R2's rollback, is valid and opens no event buy) and
+  orders Probe <= Sized <= the name's wall, each auction's sends after its decision. `equity_money.enabled` STAYS
+  False: the old lanes are exits only. `EquityTable` (league/live/money.py, inside the options execution fingerprint)
+  is NOT edited and reads nothing of the block; its reader is `book.settings(constitution=None) -> Settings`
+  (`FALLBACK`, off with no seat, when the block is absent or out of bounds).
+- **6.3** (CHANGES; hooks): league/equity/kinds.py `BOOKS["event"] = "league.events.book"`, and `kind_of` reads a
+  family row's structure "event" as the event kind. NO `KINDS["event"]` row and no child: an event program has no
+  code to load, so the decider is never asked for it (`_ensure_loaded` answers False for an event instance), and
+  league/events/ is no runtime path of the decider child.
+- **5.3** (CHANGES; book, league/equity/schedule.py): `EVENT_DEFAULTS`, `EventMoments(day, open_at, close_at,
+  open_decide, open_send, open_until, close_decide, close_send, close_until)`, `event_moments(day, offsets=None) ->
+  EventMoments | None` (None on a day with no session): 09:15 / 09:16-09:27 ET and close - 14 / - 13 to - 11 minutes.
+- **5.1** (CHANGES; book, tables): `eq_orders` gains `tif` ("day"; "opg" | "cls" for an auction order) and `otype`
+  ("limit"; "market" for an event sale), migrated in place; `book.SCHEMA` adds `eq_event_programs` (one row a seatable
+  program: band, since_day, until_day, look, why), `eq_event_intents` (one row an event intent, keyed by
+  `eq_intents.iid`: program, version, event, side, tif, otype, symbol, cik, day, at, rank_key, adv20, prev_close,
+  limit_px, sigma, hold, weight, exit_day, exit_at, lid, rung, decided_at) and `eq_event_decisions` (one row a session
+  and auction: counts only). kv `eq_event_synced`, `eq_event_list` {day, sha, count, at}, `eq_event_off_said`,
+  `paper_proof_auction`, `paper_proof_auction_buy`, `paper_proof_auction_sell`.
+- **5.2** (CHANGES; book, league/equity/live.py): `Order.tif`, `Order.otype`, `Order.auction`; `order_body` carries
+  `type` and `time_in_force` and drops `limit_price` for a market order; `_send(..., tif="day", otype="limit")`. The
+  tick's step "events" (`_event_step`: the auction proof, `_event_finish`, `_event_decide` at each decision, `_event_send`
+  in each window). EVERY DISPATCH THAT READ "every kind but the book's own is the panel" now names the panel
+  (`PANEL_KIND`), and the old lanes' windows leave an event intent out (`_not_event`); an event lot never wakes, waits
+  or joins the 16:30 decide, is never a swarm family's (no forward record export) and is never sold by the House's
+  rules for the old lanes (`_house_exits` skips it); it may sell in the session it was bought (the minimum hold is the
+  old lanes'). `_open_block` asks an event instance the kind's switch and the auction proof (`_event_open_block`) and
+  its band (`_event_seat_block`) in place of `equity_money.enabled` and the SPY day-order proof. `_size_event` calls
+  `size_entry` with `usd` = `position_share` x E, `position_share` = `per_name_share` (the name's book-wide value as
+  `account_symbol_value`), `weight` = the lot's own; whole shares; one share by `size_entry` at `usd` = the limit.
+  `probe_figures` weighs an open event lot by `event_lot_weight` (its `info.evl.weight`; 0.40 from the ladder's first
+  rung or when unreadable; 1 once at 0) and a working event buy by its side row's weight, and counts every closed
+  event lot in `closes` whatever its band.
+- **The adapter** (league/events/book.py; standard library only; plumbing, in no identity): `settings`, `Lane`
+  (read-only), `open_lane(root)`, `decided(lane, day, at)`, `eligible(lane, day)`, `bands(lane, held, closes, today,
+  s)`, `band_of`, `picks(lane, program, day, *, decided_at, reaction=None, held=None)`, `one_name_an_auction`,
+  `reaction_reader`, `limit_price`, `sigma`, `weight`, `exit_plan(program, day) -> (day, "open" | "close")`,
+  `publish(client, day, symbols)`; constants `LANE` "event", `TAG`, `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late",
+  `LADDER_CLOSES` 5, `ZERO_AFTER` 20, `ISSUER_GAP_SESSIONS` 5, `STRICT_WEIGHT` 0.40, `SEATABLE`, `ORDER`, `BY_ID`.
+- **The auction paper proof** (league/events/proof.py): `AuctionProof(state, account, market, *, clock, record,
+  alert)`: `step(now, moments)`, `buy_passed()`, `sell_failed()`, `passed()`, `status()`; built by the book on the
+  stock proof's practice account (`_auction_proof`).
+- **10** (CHANGES; ops): league/ops/twins.py `event_twin(lot, marks, *, settled, at)` and `read_event_marks(root,
+  lots)`: an event lot's record in kv `equity_twins` (`kind` "event"; `entry_gap_bp`, `exit_gap_bp` against the event
+  lane's own auction prints, positive when the real fill was worse; `gap_bp` in E1's sense); `equity_round` judges an
+  event lot so. The swarm's readers leave event programs out: league/ops/forward_register.py `live_instances`,
+  league/ops/forward_twins.py `read_book`, league/ops/forward_report.py FW7 and FW9, league/ops/dlane_report.py
+  `equity_closes`.
+- **7.2** (CHANGES; league/ci.py): `PENDING_GATEWAY` gains league/events/book.py and league/events/proof.py (money
+  movers behind the owner's wall; the gateway's `MERGE_FORBIDDEN` names them in its next follow-up).
+- **Identities**: money `f4fc39ff` -> `1142ae87`, constitution `34bbe7a5` -> `bd1ff4f6`; the options execution
+  fingerprint, the equity identity, the xs identity and the gate contract do not move.
+- **Rollback**: `event.enabled` False (one owner deploy, one money-digest move: `c5c83fc8` / `643d0d00`); no lot is sold
+  by it.
+- **Tests**: league/tests/test_events_book.py (the rows, the bands, the picks, the day through the real book and the
+  real `size_entry`: order bodies, whole shares and the one-share rule, the 10% wall, the kill switch, the kind's
+  switch, the proof and the gateway stopping buys never sales, exits at the close and at the next open, the ladder and
+  the 0 after 20 sessions, the old lanes exits only beside an event buy, the eligible list, the budget's weights, the
+  twins, the readers left out, the auction proof's stages); the changed pins in test_constitution, test_ci,
+  test_equity_money, test_equity_opens_off, test_equity_design, test_equity_seats and test_equity_book_panel;
+  league/tests/equity_week.py's golden ETF week normalizes R2's new columns and tables (no ETF order moves).

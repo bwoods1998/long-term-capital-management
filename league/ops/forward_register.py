@@ -57,7 +57,8 @@ every run was never stopped and a program the child cannot finish was never tagg
 left out.
 
 THE IDENTITY WATCH: `evaluator.equity_fingerprint()` against kv `equity_sha`; a move while `eq_instances` holds a live
-row is an `identity_moved` event (once a new value) and a `ctx.alert("warning", ...)`; the kv is then updated.
+row is an `identity_moved` event (once a new value) and a `ctx.alert("warning", ...)`; the kv is then updated. (An
+event program's instance, release R2's lane "event", is no row of either: `live_instances`.)
 
 WHOSE FAILURE. A store that cannot be read is the House's, never a version's: a swarm store or a live book under a
 lock is a `skipped` entry under its file's name (no event, nothing refused), the rest of the run goes on (the stop
@@ -293,7 +294,9 @@ def seed_versions(store: Any) -> list[dict[str, Any]]:
 def live_instances(live_path: str | Path) -> list[dict[str, Any]]:
     """The live book's `eq_instances` rows (read-only; [] when the book or the table is absent): id, family, version,
     lane, run_sha, code, params, created_at, retired_at. An instance's registry key is its id less ":r"; one not yet
-    registered is registered with reason "live" from the row's own code and params."""
+    registered is registered with reason "live" from the row's own code and params. AN EVENT PROGRAM'S INSTANCE (release
+    R2: lane "event", a pre-registered rule of league/events/programs.py with no program code) is never one: the forward
+    record and its identity watch are the swarm's programs'."""
     from . import guard
 
     path = Path(live_path)
@@ -304,7 +307,7 @@ def live_instances(live_path: str | Path) -> list[dict[str, Any]]:
         if "eq_instances" not in set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'")):
             return []
         return guard.rows(db, "SELECT id, family, version, lane, run_sha, code, params, created_at, retired_at FROM "
-                              "eq_instances ORDER BY id")
+                              "eq_instances WHERE COALESCE(lane, '')<>'event' ORDER BY id")
 
     out = []
     for row in guard.read(path, read):

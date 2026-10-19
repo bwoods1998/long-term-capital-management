@@ -59,7 +59,8 @@ class TheTable(unittest.TestCase):
         seats, sleeve = in_force()
         self.assertIn((seats, sleeve), CANDIDATES, "the two numbers of release E5-S are one of the grid's pairs")
         self.assertEqual((e.probe_sleeve_share, e.probe_max_programs), (D(sleeve), seats))
-        self.assertEqual(dict(e.position_share), {"etf": D("0.50"), "stock": D("0.20")})
+        # A stock at 0.10 since release R2 (the goal of Oct 19, 2026: "<= 10% of equity per name"), under the code's 0.20.
+        self.assertEqual(dict(e.position_share), {"etf": D("0.50"), "stock": D("0.10")})
         self.assertEqual(dict(e.open_risk_weight), {"etf": D("0.20"), "stock": D("0.40")})
         self.assertEqual((e.sized_min_trades, e.sized_confidence, e.sized_kelly_fraction, e.sized_sleeve_share,
                           e.sized_beat_bh, e.sized_min_probe_sessions), (1000, 0.80, 0.25, D("0.50"), True, 5),

@@ -29,7 +29,7 @@ const usd = dollars => {
 };
 
 //: The vars as wrangler.jsonc deploys them, with the event lane's buys switched on (the owner's step at the first Probe).
-const DEPLOYED = { STOCK_BUYS_REAL: 'on', STOCK_ETF_EQUITY_SHARE: '0.5', STOCK_SINGLE_EQUITY_SHARE: '0.2', STOCK_MAX_EQUITY_MULTIPLE: '1',
+const DEPLOYED = { STOCK_BUYS_REAL: 'on', STOCK_ETF_EQUITY_SHARE: '0.5', STOCK_SINGLE_EQUITY_SHARE: '0.1', STOCK_MAX_EQUITY_MULTIPLE: '1',
   STOCK_DAY_EQUITY_MULTIPLE: '4', STOCK_EVENT_BUYS: 'off' };
 const ON = { STOCK_EVENT_BUYS: 'on' };
 const env = (extra = {}) => ({
@@ -144,12 +144,13 @@ test('the deployed event switch is "off", and only "on" (any case, trimmed) turn
 
 test('an event name\'s share is the single-stock share and never above the goal\'s 10% of equity, whatever the var says', () => {
   assert.equal(STOCK_EVENT_SHARE_MAX, 100000n);
-  assert.equal(stockEventShare(stockCaps(DEPLOYED)), 100000n, 'STOCK_SINGLE_EQUITY_SHARE 0.2: still 10%');
-  assert.equal(stockEventShare(stockCaps({ STOCK_SINGLE_EQUITY_SHARE: '0.1' })), 100000n);
+  assert.equal(stockEventShare(stockCaps(DEPLOYED)), 100000n, 'STOCK_SINGLE_EQUITY_SHARE 0.1, as deployed');
+  assert.equal(stockEventShare(stockCaps({ STOCK_SINGLE_EQUITY_SHARE: '0.2' })), 100000n, 'at 0.2: still 10% (the ceiling)');
   assert.equal(stockEventShare(stockCaps({ STOCK_SINGLE_EQUITY_SHARE: '0.05' })), 50000n, 'a lower var lowers it');
   assert.equal(stockEventShare(stockCaps({ STOCK_SINGLE_EQUITY_SHARE: '0' })), 0n, 'zero closes it');
   assert.equal(stockSymbolCapMicro(stockCaps(DEPLOYED), 'event', usd('10000')), usd('1000'));
-  assert.equal(stockSymbolCapMicro(stockCaps(DEPLOYED), 'stock', usd('10000')), usd('2000'), 'the list\'s stocks keep their share');
+  assert.equal(stockSymbolCapMicro(stockCaps(DEPLOYED), 'stock', usd('10000')), usd('1000'), 'the list\'s stocks at the var, 10%');
+  assert.equal(stockSymbolCapMicro(stockCaps({ STOCK_SINGLE_EQUITY_SHARE: '0.2' }), 'stock', usd('10000')), usd('2000'));
   assert.equal(stockSymbolCapMicro(stockCaps(DEPLOYED), 'event', usd('1884.15')), usd('188.415'));
 });
 
@@ -399,9 +400,11 @@ test('a name\'s asset and bars are read once a New York day; a verdict is kept, 
 // ------------------------------------------------------------------------------------------------ the caps
 
 test('THE GOAL\'S 10% A NAME, BOOK-WIDE: held + resting buys + buys in flight + this one, at most 10% of equity', async () => {
-  // $10,000 equity: at most $1,000 of ACME, whatever STOCK_SINGLE_EQUITY_SHARE (0.2 deployed) allows a list stock.
-  admitted(await send(opg('ACME', '20', '50')), '$1,000.00: exactly 10%');
-  refused(await send(opg('ACME', '21', '47.62')), 403, 'stock_order', /exceeds the cap for an event-lane stock \(book-wide\) of \$1000\.00 \(10% of \$10000\.00 equity\)/);
+  // $10,000 equity: at most $1,000 of ACME, whatever STOCK_SINGLE_EQUITY_SHARE allows a list stock (here 0.2: the
+  // code ceiling holds the event name at 10%; 0.1 deployed).
+  admitted(await send(opg('ACME', '20', '50'), { settings: { ...ON, STOCK_SINGLE_EQUITY_SHARE: '0.2' } }), '$1,000.00: exactly 10%');
+  refused(await send(opg('ACME', '21', '47.62'), { settings: { ...ON, STOCK_SINGLE_EQUITY_SHARE: '0.2' } }), 403, 'stock_order',
+    /exceeds the cap for an event-lane stock \(book-wide\) of \$1000\.00 \(10% of \$10000\.00 equity\)/);
   const held = good('ACME', { positions: [long('ACME', '20', '900.00')] });
   admitted(await send(opg('ACME', '2', '50'), { tape: held }), '$900 held + $100 = 10%');
   refused(await send(opg('ACME', '3', '50'), { tape: good('ACME', { positions: [long('ACME', '20', '900.00')] }) }), 403, 'stock_position',

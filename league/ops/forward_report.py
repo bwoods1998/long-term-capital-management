@@ -133,7 +133,9 @@ still raises RR, CP and MM, and `alarms` still hands them to the dlane report.
 - FW7 (warning): while `eq_instances` holds a live row: the live book's kv `eq_decide` for the last session is status
   "failed", or status "done" with no `why` and `at` later than that session's `close_at` + 2,400 s while an instance
   the record names (every living one when it names none) was in the book by then: a catch-up decide with nobody
-  seated, whose record the seating pass wrote again without its `why`, kept nobody waiting.
+  seated, whose record the seating pass wrote again without its `why`, kept nobody waiting. (Release R2: an EVENT
+  program's instance, lane "event", is not read by FW7 or FW9: it never joins the 16:30 decide and the forward record
+  makes no shadow twin of a pre-registered event rule.)
 - FW8 (warning): the equity fingerprint moved while a lineage is live (`identity_moved`).
 - FW9 (warning; the rehearsal of Oct 15, 2026): THE ETF LANE'S TWINS FROM THE FIRST SESSION, as FX1 and FX2 are the
   panel lane's. FW6 reads an instance's agreement from 20 sessions, and the first Done checkpoint comes sooner (the
@@ -1328,9 +1330,12 @@ def _book_instances(root: Path) -> tuple[list[dict[str, Any]], dict[str, list[di
             return [], {}
         lots: dict[str, list[dict[str, Any]]] = {}
         if "eq_lots" in tables:
-            for lot in _rows(db, "SELECT instance, status, exit_day, closed_at FROM eq_lots ORDER BY lid"):
+            for lot in _rows(db, "SELECT instance, status, exit_day, closed_at FROM eq_lots WHERE "
+                                 "COALESCE(lane, '')<>'event' ORDER BY lid"):
                 lots.setdefault(str(lot["instance"]), []).append(lot)
-        return _rows(db, "SELECT id, created_at, retired_at FROM eq_instances ORDER BY id"), lots
+        # (Release R2: an EVENT program's instance, lane "event", has no shadow twin of the forward record to miss.)
+        return _rows(db, "SELECT id, created_at, retired_at FROM eq_instances WHERE COALESCE(lane, '')<>'event' "
+                         "ORDER BY id"), lots
 
     return guard.read(path, read)
 
@@ -1490,9 +1495,11 @@ def _decide_alarm(root: Path) -> list[dict[str, Any]]:
         tables = set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'"))
         if not {"eq_instances", "kv"} <= tables:
             return 0, None, []
-        return (int(_one(db, "SELECT count(*) FROM eq_instances WHERE retired_at IS NULL") or 0),
+        # (Release R2: an EVENT program's instance, lane "event", never joins the 16:30 decide.)
+        return (int(_one(db, "SELECT count(*) FROM eq_instances WHERE retired_at IS NULL AND "
+                             "COALESCE(lane, '')<>'event'") or 0),
                 _one(db, "SELECT value FROM kv WHERE key='eq_decide'"),
-                _rows(db, "SELECT id, created_at, retired_at FROM eq_instances"))
+                _rows(db, "SELECT id, created_at, retired_at FROM eq_instances WHERE COALESCE(lane, '')<>'event'"))
 
     live, raw, instances = guard.read(path, read)
     try:

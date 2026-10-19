@@ -206,6 +206,11 @@ PENDING_GATEWAY += ("league/swarm/elane_forward.py",)
 #: Basic plan (league/data_plan.py: the SIP window, the snapshot feed, options off), read by the live path's market data
 #: and league/ops/context.py's gateway, both behind the wall. It waits here for the gateway's merge-list follow-up.
 PENDING_GATEWAY += ("league/data_plan.py",)
+#: THE EVENT LANE'S REAL MONEY (release R2, Oct 2026): the event kind's rules (league/events/book.py: the money rows'
+#: reader, the bands and seats, the real-money picks, the limit, the size target, the open-risk weight, the exit plan,
+#: the eligible list) and the auction paper proof that gates its first real buy (league/events/proof.py): money movers
+#: like league/equity/. They wait here for the gateway's merge-list follow-up, as R0's data plan does.
+PENDING_GATEWAY += ("league/events/book.py", "league/events/proof.py")
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

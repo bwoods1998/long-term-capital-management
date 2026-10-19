@@ -42,7 +42,9 @@ above 1.25 x the previous close (real money's limit).
 `verdicts.py` (the recorded Haiku verdicts), `programs.py` (the programs as data rows and their selection rules),
 `run.py` (the open and close decisions, backfill), `score.py` (settlement at the auction prints and the exit ladder),
 `screen.py` (the judge), `report.py` (the daily one-screen report), `__main__.py` (the CLI: `record`, `backfill`,
-`decide-open`, `decide-close`, `catchup`, `tickers`, `equity`, `score`, `screen`, `report`).
+`decide-open`, `decide-close`, `catchup`, `tickers`, `equity`, `score`, `screen`, `report`). Release R2's real-money
+side: `book.py` (the equity book's event kind's rules: the money rows, the bands, the real-money picks, the limit, the
+size target, the open-risk weight, the exit plan, the eligible list) and `proof.py` (the auction paper proof).
 
 ## Where it runs (shadow)
 
@@ -52,3 +54,19 @@ hourly catchup; `ltcm-evl-equity`; `ltcm-evl-score` 20:30 and 08:30 ET; `ltcm-ev
 21:05 ET), reading Alpaca and Claude through the LTCM gateway. Nothing in shadow sends an order. Real money waits for a
 program's screen pass and release R2 (the gateway's event-buy branch, the equity book's event kind, the auction order
 types, the paper proof).
+
+## Real money (release R2; not yet deployed)
+
+A program whose held look PASSED trades real money from the next session, through the House's EquityBook (its event
+kind: league/equity/live.py `_event_step`, the rules in `book.py`), on the money rows `equity_money.event` of
+league/constitution.py: Probe 5% of equity a position (Sized 10% after 150 settled real events and the 80% lower bound
+above zero), at most 6 open (Sized 8), the book-wide 10% a name, whole shares, entries limit-on-open / limit-on-close at
+1.25 x the previous SIP close, exits market-on-close (market-on-open for the three overnight rows) with PREREG-EVL-1
+section 5's fallback ladder, open risk value x max(0.10, 1.65 x sigma60 x sqrt(h)) in the one loss budget ($400 net in
+any 20 sessions, $800 net in total), demotion at -$150 over 20 sessions, at most 9 programs live. The real-money
+decision reads the lane's store read-only, and only events stored and verdicts answered before its decision time
+(PREREG-EVL-1 section 3). Every program ships at shadow; the event kind has its own switch (`equity_money.event.enabled`;
+the old lanes' `equity_money.enabled` stays False); the auction paper proof on the practice account comes first; the
+gateway's `STOCK_EVENT_BUYS` is the owner's step at the first Probe. How it runs, is read, is deployed and is rolled
+back: [operations.md](operations.md), **The event lane's real money on the House (release R2)**. Each real fill is set
+beside the shadow's own auction price, per side (league/ops/twins.py `event_twin`).

@@ -1360,6 +1360,10 @@ class FirstCome(SeatCase):
         # and left out of the comparison (as league/tests/equity_week.py `main_shape` does for the recorded weeks).
         for row in got["tables"]["eq_instances"]:
             self.assertEqual(row.pop("kind"), "equity", row["id"])
+        # RELEASE R2's TWO COLUMNS ON THE ORDERS (`eq_orders.tif` and `.otype`, league/equity/live.py
+        # `ORDER_COLUMNS_DDL`): "day" and "limit" on every share program's order, left out the same way.
+        for row in got["tables"]["eq_orders"]:
+            self.assertEqual((row.pop("tif"), row.pop("otype")), ("day", "limit"), row.get("eid"))
         for part in want:
             self.assertEqual(got[part], want[part], part)
         self.assertEqual(got["errors"], [])

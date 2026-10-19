@@ -292,6 +292,8 @@ ZERO_EDGE_LABEL = "P(Done | zero edge), simulation"
 DONE_FROM = "2026-10-10T04:00:00Z"
 #: An equity close's key: `eq:<lid>` (league/ops/twins.py `equity_key`, the book's export `twin_key`).
 EQUITY_PREFIX = "eq:"
+#: An event lot's lane (league/events/book.py `LANE`; release R2): no close of these meters.
+EVENT_LANE = "event"
 #: RELEASE E4, THE PANEL LANE: a panel program's lots carry the panel decision's tag (league/xs/book.py `TAG`), its
 #: instance the kind "panel" (`eq_instances.kind`), and every figure of it the label `PANEL_LABEL` (that module's `LABEL`;
 #: a test holds the three equal, so this module imports nothing of league/xs to say them).
@@ -984,12 +986,16 @@ def equity_closes(lots: Sequence[Mapping[str, Any]], *, since: float, seeded: It
     "equity_lot", entry_at, exit_at, max_loss_usd (its entry notional: a long lot loses at most what it paid),
     notional, fees_usd, div_usd, cash_usd, pnl_usd (its net cash, fees and dividends included; None when it cannot be
     read), return (net cash / notional), fee_basis ("broker" once the book marks the venue's fees posted, the lot's
-    `info.fee_basis`; else "estimate"), fees_posted, probe, priced}."""
+    `info.fee_basis`; else "estimate"), fees_posted, probe, priced}. AN EVENT LOT (release R2: lane "event", a
+    pre-registered event program's real position, league/events/book.py) is none of these meters' closes: the event
+    lane's own Done reader counts its events (PREREG-EVL-1 section 9), never this one."""
     seeded = set(seeded or ())
     out = []
     for lot in lots:
         closed_at = _num(lot.get("closed_at"))
         if str(lot.get("status") or "") != "closed" or closed_at is None or closed_at < since:
+            continue
+        if str(lot.get("lane") or "") == EVENT_LANE:
             continue
         try:
             lid = int(lot["lid"])

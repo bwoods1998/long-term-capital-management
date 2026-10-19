@@ -251,7 +251,9 @@ class ConstitutionTest(unittest.TestCase):
         self.assertEqual(em["probe"], {"sleeve_share": sleeve, "max_programs": seats, "min_order_usd": "10",
                                        # THE SEAT RULE (release E5-A, the captain's A24): its three rows, as registered.
                                        "seat": {"rule": "activity-1-free", "k_floor": "0.25", "idle_sessions": 10}})
-        self.assertEqual(em["position_share"], {"etf": "0.50", "stock": "0.20"})
+        # A STOCK AT 0.10 SINCE RELEASE R2 (the goal of Oct 19, 2026, item 4: "<= 10% of equity per name"): a tightening;
+        # every older figure here is read with it set back (`before_r2`, which `opens_on` and `e1` apply).
+        self.assertEqual(em["position_share"], {"etf": "0.50", "stock": "0.10"})
         self.assertEqual(em["open_risk_weight"], {"etf": "0.20", "stock": "0.40"})
         self.assertEqual(em["sized"]["sleeve_share"], "0.50", "left as pre-registered at every design: never under the Probe's")
         self.assertEqual(em["sized"], {"min_trades": 1000, "confidence": "0.80", "kelly_fraction": "0.25",

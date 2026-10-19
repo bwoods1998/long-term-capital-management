@@ -21,6 +21,13 @@ THE PARENT SIDE (release E4): `BOOKS` names, for a kind the EquityBook does not 
 on the House's side for that kind's columns, bars, decide jobs, intents and live record (league/equity/live.py
 `_adapter`; "panel" -> league/xs/book.py). It is imported by the book alone, never by the decider or its child, and
 only by name from here: league/equity names no module of league/xs. `kind_of` reads a family's structure as its kind.
+
+THE EVENT KIND (release R2; PREREG-EVL-1 section 8): `BOOKS["event"]` = `league.events.book` on the parent side, which
+hands the book a passing program's real-money picks at each auction. It has NO ROW IN `KINDS` and nothing in the child's
+`RUNTIME`: an event program is one of the pre-registered rules the House reads itself (league/events/programs.py), never
+code a program wrote, so the decider is never asked for it (league/equity/live.py `_ensure_loaded` refuses it) and the
+child's sealed runtime and its protected files are what they were. An event program is never a swarm family, so
+`kind_of` gives "event" only to a structure named so.
 """
 
 from __future__ import annotations
@@ -46,7 +53,7 @@ RUNTIME: tuple[str, ...] = ("league/__init__.py", "league/safety.py", "league/st
 
 #: kind -> the importable module of its PARENT side (`book_for`): what the EquityBook asks for a kind that is not its
 #: own. The "equity" kind has none: the book runs it itself.
-BOOKS: dict[str, str] = {"panel": "league.xs.book"}
+BOOKS: dict[str, str] = {"panel": "league.xs.book", "event": "league.events.book"}
 
 
 def book_for(kind: str) -> ModuleType | None:
@@ -58,8 +65,9 @@ def book_for(kind: str) -> ModuleType | None:
 
 def kind_of(structure: Any) -> str:
     """The decider kind that runs a family of `structure` (league/swarm/store.py `EQUITY_STRUCTURES`): "panel" for
-    "panel", else "equity"."""
-    return "panel" if structure == "panel" else "equity"
+    "panel", "event" for "event" (release R2: no swarm family has it; the book makes event instances itself), else
+    "equity"."""
+    return structure if structure in ("panel", "event") else "equity"
 
 
 def module_for(kind: str) -> ModuleType:

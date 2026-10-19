@@ -1,0 +1,682 @@
+"""THE EVENT KIND'S PARENT SIDE (release R2): how the event lane's programs trade real money through E1's EquityBook.
+
+Owner: R2. The book (league/equity/live.py) asks this module, and no other of league/events, for everything the event
+kind needs: the rows of the constitution's `equity_money.event` (`settings`), which programs trade and at what band
+(`bands`, read from the LANE's band table), the day's real-money picks of a program (`picks`), an entry's limit, size
+target and open-risk weight (`limit_price`, `weight`, `sigma`), an exit's session (`exit_plan`), the eligible list the
+gateway checks every event buy against (`eligible`, `publish`), the real fills it hands back to the lane
+(`write_fills`), and its own tables in live.sqlite (`SCHEMA`). Plumbing: no identity hashes it. league/equity names no
+module of league/events but through league/equity/kinds.py `BOOKS["event"]`.
+
+THE RULES ARE THE FROZEN ONES: docs/prereg/PREREG-EVL-3.md section 2 (the owner's goal as re-set at 05:15Z Oct 19,
+2026), with PREREG-EVL-1 sections 3, 5 and 8 and PREREG-EVL-2 for everything it does not change:
+- THE PROGRAMS are VERSION 2 of the nine seatable rows of league/events/programs.py (`REAL_VERSION`, `seatable()`), in
+  the tables' order (PREREG-EVL-1's four, then PREREG-EVL-2's five). Version 1 of each is a shadow record and NEVER
+  trades: no real event order is ever for anything but a version 2 intent. A program is a pre-registered rule, never a
+  swarm family and never code a program wrote.
+- THE BANDS are the lane's (its store's `bands` table, league/events/store.py `bands(store)`; the lane computes
+  promotion at a passed look, Sized, demotion and retirement from its looks and the House's real fills,
+  `write_fills`): LEARNING from birth (a version 2 program with no row is at learning), PROBE, SIZED, RETIRED (no real
+  money). The book reads them at each session's first decision; a store whose band table cannot be read trades
+  nothing that decision (fail closed), one with no band table yet is every version 2 program at learning.
+- A REAL-MONEY DECISION (PREREG-EVL-1 section 3) is the shadow rule over the same events and windows, which may in
+  addition use only events STORED, and verdicts ANSWERED, before its decision time (`decided_at`, 09:15 ET or the
+  close - 14 minutes): a filing or an article the recorder stored later, or a verdict answered later, is not read. It
+  reads the lane's store READ-ONLY (`Lane`), never asks a verdict, never fetches a filing; the one thing it writes
+  there is `real_fills`. Eligibility is the lane's universe row for the entry session; an issuer with no row there is
+  not traded. One position per issuer per program: an issuer the program holds, or held within the last 5 sessions,
+  real money's lots or the shadow's intents of earlier decisions alike, is skipped. Ranking when there is less room
+  than events: by the program's own rank (verdict score; a reaction for the REACT rows; the purchase value for
+  INS-BUY), higher first, then ADV.
+- ROOM (PREREG-EVL-3 section 2): Sized programs first, then Probe, then learning; within a band the tables' order;
+  within a program its own ranking. One name at one auction goes to the first program in that order.
+- SIZE: a target of the band's `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at
+  the previous close, at the limit, `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares;
+  when that rounds to none, one share when one share fits every wall (and, at learning, one share at the limit is at
+  most `one_share_max.learning`, 5%, of E); else skipped (the shadow keeps the event). The book-wide 10% a name
+  (`per_name_share`), the 100% book, the cash and the loss budget are `league.equity.sizing.size_entry`'s own caps (the
+  book calls it; nothing here re-implements it). At most `max_open` positions a program (learning 8, Probe 6, Sized 8).
+- OPEN RISK (the goal's own rule, PREREG-EVL-1 section 8, PREREG-EVL-3 section 2): value x max(`open_risk.floor`,
+  `open_risk.z` x sigma x sqrt(h)), sigma the daily return sd of the `sigma_sessions` sessions before entry (adjusted
+  closes), h the sessions in the hold; `STRICT_WEIGHT` (the House's old 0.40) when sigma cannot be read, and for a lot
+  held past its scheduled exit (an auction with no print).
+- EXITS: every position exits at its program's scheduled auction (`exit_plan`): the CLOSE of its last session, or for
+  PREREG-EVL-2's overnight rows the next session's OPEN, by a market-on-close (market-on-open) sale. THE FALLBACK
+  LADDER when the auction printed none for it (PREREG-EVL-1 section 5): the next session's closing cross, again for up
+  to `LADDER_CLOSES` sessions; then a day sale in the open window (the first SIP trade of the next session any venue
+  prints) each session after; and once `ZERO_AFTER` sessions after the planned exit have closed with the lot still
+  held, the loss budget counts it AT 0 (its whole value as lost) while its day sale goes on: every rung alarmed.
+
+THE TABLES (`SCHEMA`, created in live.sqlite beside E1's by the book): `eq_event_programs`, the band of each version 2
+program as the book last read it from the lane (with since and why), one row each; `eq_event_intents`, ONE ROW PER
+EVENT INTENT of the book (`eq_intents.iid`): which program and event, its band, the auction (`tif` opg | cls) and the
+order type, the symbol and issuer, the rank, the previous close and the limit, sigma and the weight, the exit plan of a
+buy, the ladder's rung of a sale, the lot it opened or sells; `eq_event_decisions`, one row a session and auction the
+book decided (what it read and planned, counts only).
+
+Standard library only.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import datetime as dt
+import gzip
+import hashlib
+import json
+import math
+import sqlite3
+import statistics
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation
+from pathlib import Path
+from typing import Any, Callable, Iterable, Mapping, Sequence
+
+from ..equity import schedule as ES
+from . import calendar as C
+from . import programs as P
+from . import store as S
+from . import verdicts as V
+
+KIND = "event"
+#: An event lot's `lane` (eq_lots.lane, eq_instances.lane): the event lane's, never "beta" or "equity".
+LANE = "event"
+#: An event BUY intent's tag starts so: "evl:<event id>" (the lot keeps it).
+TAG = "evl"
+#: The House's exit of an event lot at its scheduled auction (a house_exit intent's tag; the closed lot's reason).
+EXIT_TAG = "evl_exit"
+#: The fallback ladder's last rung: a day sale in the open window (no side row: the book's normal exit path sends it).
+LATE_TAG = "evl_late"
+#: PREREG-EVL-3 section 1: the version of the seatable programs that trades real money (version 1 never does).
+REAL_VERSION = 2
+#: PREREG-EVL-3 section 2's bands, and the ones that trade.
+BANDS = ("learning", "probe", "sized", "retired")
+LIVE_BANDS = ("learning", "probe", "sized")
+DEFAULT_BAND = "learning"
+#: ROOM: Sized programs first, then Probe, then learning.
+PRIORITY = {"sized": 0, "probe": 1, "learning": 2}
+#: The weight of a lot whose sigma cannot be read, or held past its exit: the House's stock floor before this release.
+STRICT_WEIGHT = Decimal("0.40")
+#: THE FALLBACK LADDER (PREREG-EVL-1 section 5): a sale the scheduled auction did not fill goes at the closing cross of
+#: each next session, this many in all; then a day sale in each next session's open window.
+LADDER_CLOSES = 5
+#: ... and a lot still held when this many sessions after its planned exit have closed is AT 0 for the loss budget
+#: (PREREG-EVL-1 section 5; league/events/score.py `ZERO_AFTER`, the shadow's, held equal by a test).
+ZERO_AFTER = 20
+#: The sessions an issuer stays "held" after its lot closed (PREREG-EVL-1 section 5: one position per issuer per program).
+ISSUER_GAP_SESSIONS = 5
+#: The lane's store under the House's state root (release R1 keeps it there).
+LANE_DIR = "events"
+#: The lane's table of the House's real fills (PREREG-EVL-3: the lane computes Sized and demotion from it), one row per
+#: (program, version, event, side), and its columns.
+FILLS_TABLE = "real_fills"
+FILL_COLUMNS = ("program", "version", "event", "side", "qty", "price", "fee", "filled_at", "band")
+ZERO = Decimal(0)
+CENT = Decimal("0.01")
+
+
+def seatable() -> tuple[P.Program, ...]:
+    """The programs real money trades (PREREG-EVL-3 section 1): version 2 of each seatable row, in the tables' order.
+    Read from league/events/programs.py at each call (its version 2 rows are the lane's)."""
+    return tuple(p for p in P.PROGRAMS if p.seatable and int(p.version) == REAL_VERSION)
+
+
+def program_of(program: str, version: int) -> P.Program | None:
+    """The version 2 program `program` (None for any other version: version 1 never trades)."""
+    return next((p for p in seatable() if p.id == program and int(p.version) == int(version)), None)
+
+
+def order_of(program: str) -> int:
+    """The tables' order of a seatable program (PREREG-EVL-1's rows, then PREREG-EVL-2's)."""
+    for i, p in enumerate(seatable()):
+        if p.id == program:
+            return i
+    return 10 ** 6
+
+
+def room_key(program: str, band: str | None) -> tuple[int, int]:
+    """ROOM's order (PREREG-EVL-3 section 2): Sized, then Probe, then learning; then the tables' order."""
+    return (PRIORITY.get(str(band), 9), order_of(program))
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS eq_event_programs (
+    program TEXT NOT NULL, version INTEGER NOT NULL, band TEXT NOT NULL, since TEXT, why TEXT, updated_at REAL NOT NULL,
+    PRIMARY KEY (program, version));
+CREATE TABLE IF NOT EXISTS eq_event_intents (
+    iid INTEGER PRIMARY KEY, program TEXT NOT NULL, version INTEGER NOT NULL, event TEXT NOT NULL,
+    side TEXT NOT NULL,                 -- buy | sell
+    band TEXT,                          -- the program's band when the intent was made
+    tif TEXT NOT NULL,                  -- opg | cls (an auction order); a sale's last rung has no row here
+    otype TEXT NOT NULL,                -- limit (a buy) | market (a sale)
+    symbol TEXT NOT NULL, cik TEXT, day TEXT NOT NULL, at TEXT NOT NULL,       -- the auction's session and point
+    rank_key REAL, adv20 REAL, prev_close TEXT, limit_px TEXT, sigma REAL, hold INTEGER, weight TEXT NOT NULL,
+    exit_day TEXT, exit_at TEXT,        -- a buy's exit plan
+    lid INTEGER, rung INTEGER NOT NULL DEFAULT 0,                              -- a sale's lot and its ladder rung
+    decided_at TEXT NOT NULL, why TEXT, created_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS eq_event_intents_lid ON eq_event_intents(lid);
+CREATE TABLE IF NOT EXISTS eq_event_decisions (
+    day TEXT NOT NULL, at TEXT NOT NULL, decided_at TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL,
+    created_at REAL NOT NULL, PRIMARY KEY (day, at));
+"""
+
+
+# ----------------------------------------------------------------------------------------------------------- settings
+@dataclasses.dataclass(frozen=True)
+class Settings:
+    """`equity_money.event` as the book reads it (the constitution's comment under the table)."""
+
+    enabled: bool
+    shares: Mapping[str, Decimal]
+    max_opens: Mapping[str, int]
+    one_share_max: Mapping[str, Decimal]
+    per_name: Decimal
+    limit_ratio: Decimal
+    risk_floor: Decimal
+    risk_z: Decimal
+    sigma_sessions: int
+    offsets: Mapping[str, int]
+
+    def share(self, band: str) -> Decimal:
+        return Decimal(self.shares.get(str(band), ZERO))
+
+    def max_open(self, band: str) -> int:
+        return int(self.max_opens.get(str(band), 0))
+
+    def one_share_cap(self, band: str) -> Decimal | None:
+        """The band's one-share rule's own cap (a share of E: one share at the limit at most this), None for none."""
+        cap = self.one_share_max.get(str(band))
+        return None if cap is None else Decimal(cap)
+
+
+#: What a table with no readable event block is read as: OFF, no share (fail closed: nothing opens on rows nobody reads).
+FALLBACK = Settings(False, {}, {}, {}, ZERO, Decimal(1), Decimal(1), Decimal("1.65"), 60, dict(ES.EVENT_DEFAULTS))
+
+
+def settings(constitution: Mapping[str, Any] | None = None) -> Settings:
+    """THE EVENT ROW, `equity_money.event` of `constitution` (None: the one in force), read here so that
+    league/live/money.py (inside the options execution fingerprint) never has to learn it. `FALLBACK` when the block is
+    absent, a row cannot be read, or the table is outside its bounds (`equity_money_problems`)."""
+    from ..constitution import CONSTITUTION, EVENT_ORDER_OFFSETS, equity_money_problems
+
+    rules = CONSTITUTION if constitution is None else constitution
+    try:
+        if equity_money_problems(dict(rules)):
+            return FALLBACK
+        e = rules["equity_money"]["event"]
+        return Settings(
+            enabled=e["enabled"] is True,
+            shares={band: Decimal(str(e["position_share"][band])) for band in LIVE_BANDS},
+            max_opens={band: int(e["max_open"][band]) for band in LIVE_BANDS},
+            one_share_max={band: Decimal(str(v)) for band, v in dict(e["one_share_max"]).items()},
+            per_name=Decimal(str(e["per_name_share"])), limit_ratio=Decimal(str(e["limit_ratio"])),
+            risk_floor=Decimal(str(e["open_risk"]["floor"])), risk_z=Decimal(str(e["open_risk"]["z"])),
+            sigma_sessions=int(e["open_risk"]["sigma_sessions"]),
+            offsets={name: int(e["order_path"][name]) for name in EVENT_ORDER_OFFSETS})
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        return FALLBACK
+
+
+# ----------------------------------------------------------------------------------------------------------- the lane
+class Lane:
+    """THE LANE'S STORE, READ-ONLY (`<root>/events/events.sqlite`, opened `mode=ro`): the `store` every function of
+    league/events/programs.py, calendar.py and verdicts.py reads through `.db`, and the documents. Never written here
+    (the real fills go through `write_fills`, a connection of their own)."""
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+        self.root = self.path.parent
+        self.db = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
+        self.db.row_factory = sqlite3.Row
+
+    def close(self) -> None:
+        self.db.close()
+
+    def __enter__(self) -> "Lane":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def meta(self, key: str) -> str | None:
+        row = self.db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        return None if row is None else str(row[0])
+
+    def get_document(self, digest: str) -> bytes:
+        row = self.db.execute("SELECT path FROM documents WHERE sha=?", (digest,)).fetchone()
+        if row is None:
+            raise KeyError(digest)
+        with gzip.open(self.root / row["path"], "rb") as src:
+            data = src.read()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise RuntimeError(f"document {digest} does not match its digest")
+        return data
+
+
+def lane_path(root: str | Path) -> Path:
+    return Path(root) / LANE_DIR / S.DB_NAME
+
+
+def open_lane(root: str | Path | None) -> Lane | None:
+    """The lane's store under `root`, read-only, or None when there is none (no lane on this House: nothing to decide)."""
+    if root is None:
+        return None
+    path = lane_path(root)
+    if not path.is_file():
+        return None
+    try:
+        lane = Lane(path)
+        lane.db.execute("SELECT 1 FROM sessions LIMIT 1")
+        return lane
+    except sqlite3.Error:
+        return None
+
+
+def decided(lane: Lane, day: dt.date, at: str) -> bool:
+    """Whether the lane's own (shadow) decision of `day` at `at` ("open" | "close") has run: its receipt is finished.
+    The book's real-money decision waits for it a few minutes (its universe rows are then written), never longer."""
+    job = f"decide-{at}:{day.isoformat()}"
+    return lane.db.execute("SELECT 1 FROM receipts WHERE job=? AND finished_at IS NOT NULL LIMIT 1", (job,)).fetchone() \
+        is not None
+
+
+def eligible(lane: Lane, day: dt.date) -> list[str]:
+    """THE ELIGIBLE LIST of entry session `day`: every universe row the lane wrote for it (PREREG-EVL-1 section 2, the
+    issuers with events), its symbols sorted. The gateway admits an event buy only for a name on it."""
+    return sorted({str(r["symbol"]).upper() for r in lane.db.execute("SELECT symbol FROM universe WHERE day=?",
+                                                                      (day.isoformat(),))})
+
+
+def universe_rows(lane: Lane, day: dt.date) -> dict[str, dict[str, Any]]:
+    """{cik: the universe row of entry session `day`} (the highest ADV when a CIK has two)."""
+    out: dict[str, dict[str, Any]] = {}
+    for r in lane.db.execute("SELECT * FROM universe WHERE day=?", (day.isoformat(),)):
+        row = dict(r)
+        have = out.get(str(row["cik"]))
+        if have is None or float(row.get("adv20") or 0) > float(have.get("adv20") or 0):
+            out[str(row["cik"])] = row
+    return out
+
+
+# ----------------------------------------------------------------------------------------------------------- the bands
+@dataclasses.dataclass(frozen=True)
+class Band:
+    """One version 2 program's band as the lane's table says it (PREREG-EVL-3 section 2): `band` (one of `BANDS`),
+    `since` (the lane's), why."""
+
+    program: str
+    version: int
+    band: str
+    since: str | None = None
+    why: str = ""
+
+    @property
+    def live(self) -> bool:
+        return self.band in LIVE_BANDS
+
+
+def lane_bands(lane: Lane | None) -> dict[tuple[str, int], dict[str, Any]] | None:
+    """THE LANE'S BAND TABLE ({(program, version): {band, since, why}}): league/events/store.py `bands(store)` when the
+    store module has it (the band alone), else the `bands` table read directly; {} when the store holds no band table
+    yet or there is no lane (every version 2 program is then at learning); None when the table is there and cannot be
+    read (no real event money this decision)."""
+    if lane is None:
+        return {}
+    try:
+        tables = {r[0] for r in lane.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "bands" not in tables:
+            return {}
+        columns = {r[1] for r in lane.db.execute("PRAGMA table_info(bands)")}
+        out: dict[tuple[str, int], dict[str, Any]] = {}
+        for r in lane.db.execute("SELECT * FROM bands"):
+            row = dict(r)
+            out[(str(row["program"]), int(row["version"]))] = {
+                "band": str(row["band"]), "since": row.get("since") if "since" in columns else None,
+                "why": row.get("why") if "why" in columns else None}
+        reader = getattr(S, "bands", None)
+        if callable(reader):
+            for key, band in dict(reader(lane)).items():
+                program, version = key
+                out.setdefault((str(program), int(version)), {"since": None, "why": None})["band"] = str(band)
+        return out
+    except (sqlite3.Error, KeyError, TypeError, ValueError):
+        return None
+
+
+def bands(lane: Lane | None, s: Settings | None = None) -> list[Band] | None:
+    """Every version 2 program's band at a decision, in the tables' order (`lane_bands`; a program with no row is at
+    learning, `DEFAULT_BAND`; a band the rules do not name trades nothing, read as retired and said so). None when the
+    lane's band table cannot be read."""
+    table = lane_bands(lane)
+    if table is None:
+        return None
+    out = []
+    for program in seatable():
+        row = table.get((program.id, int(program.version)))
+        if row is None:
+            out.append(Band(program.id, int(program.version), DEFAULT_BAND, None,
+                            "no row in the lane's band table: learning from birth (PREREG-EVL-3 section 2)"))
+            continue
+        band = str(row.get("band") or "")
+        why = str(row.get("why") or f"the lane's band table says {band}")
+        if band not in BANDS:
+            band, why = "retired", f"the lane's band table names {row.get('band')!r}, no band of PREREG-EVL-3: no real money"
+        out.append(Band(program.id, int(program.version), band, row.get("since"), why[:400]))
+    return out
+
+
+def sessions_back(day: dt.date, n: int) -> dt.date:
+    """The session `n` sessions before `day` (the book's NYSE calendar)."""
+    d = day
+    for _ in range(int(n)):
+        d = ES.previous_session(d)
+    return d
+
+
+# ----------------------------------------------------------------------------------------------------------- the fills
+def write_fills(root: str | Path | None, rows: Sequence[Mapping[str, Any]]) -> int | None:
+    """THE REAL FILLS HANDED BACK TO THE LANE (PREREG-EVL-3: the lane computes Sized and demotion from them): each of
+    `rows` ({program, version, event, side, qty, price, fee, filled_at, band}) written into the lane's `real_fills`, ONE
+    ROW PER (program, version, event, side), replaced when written again (idempotent), in one short transaction of a
+    connection of its own. None when there is no lane store or it holds no `real_fills` table yet (nothing written: the
+    book writes them once it does). Raises `sqlite3.Error` when the store cannot be written (asked again next minute)."""
+    if root is None:
+        return None
+    path = lane_path(root)
+    if not path.is_file():
+        return None
+    db = sqlite3.connect(str(path), timeout=5.0)
+    try:
+        columns = {r[1] for r in db.execute(f"PRAGMA table_info({FILLS_TABLE})")}
+        if not columns:
+            return None
+        missing = [c for c in FILL_COLUMNS if c not in columns]
+        if missing:
+            raise sqlite3.OperationalError(f"{FILLS_TABLE} lacks {', '.join(missing)}")
+        marks = ", ".join("?" * len(FILL_COLUMNS))
+        with db:
+            for row in rows:
+                key = (str(row["program"]), int(row["version"]), str(row["event"]), str(row["side"]))
+                db.execute(f"DELETE FROM {FILLS_TABLE} WHERE program=? AND version=? AND event=? AND side=?", key)
+                db.execute(f"INSERT INTO {FILLS_TABLE}({', '.join(FILL_COLUMNS)}) VALUES({marks})",
+                           tuple(row[c] for c in FILL_COLUMNS))
+        return len(rows)
+    finally:
+        db.close()
+
+
+# ----------------------------------------------------------------------------------------------------------- the picks
+@dataclasses.dataclass(frozen=True)
+class Pick:
+    """One real-money pick of a program at one auction: its event, symbol, issuer, rank, ADV and previous close (the
+    universe row of the entry session)."""
+
+    program: str
+    version: int
+    event: str
+    symbol: str
+    cik: str
+    rank: float | None
+    adv20: float
+    prev_close: Decimal
+    knowable_at: str
+
+
+def _stored_before(row: Mapping[str, Any], decided_at: dt.datetime) -> bool:
+    """PREREG-EVL-1 section 3: a real-money decision reads only an event STORED before its decision time."""
+    try:
+        return S.parse_iso(row["received_at"]) <= decided_at
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _answered(lane: Lane, event: str, prompt: Any, decided_at: dt.datetime) -> Mapping[str, Any] | None:
+    """The stored verdict of `event` when it is `ok` and was ANSWERED before the decision time (PREREG-EVL-1 section 3),
+    else None."""
+    got = V.stored(lane, event, prompt)
+    if not got or got.get("status") != "ok" or not got.get("answered_at"):
+        return None
+    try:
+        return got if S.parse_iso(got["answered_at"]) <= decided_at else None
+    except ValueError:
+        return None
+
+
+def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.datetime) -> list[Mapping[str, Any]]:
+    """The events `program`'s decision of entry session `day` reads (league/events/run.py's windows), STORED before
+    `decided_at` and knowable after the program's own registration time. News rows carry their eligible issuer's CIK
+    (the universe row whose symbol is the article's)."""
+    family = program.family
+    if program.entry_at == "open":
+        lo, hi = P.open_window(lane, day)
+        if family in ("ern", "8k"):
+            rows = P.filings_in(lane, "8-K", lo, hi)
+        elif family == "ins-buy":
+            rows = P.ins_buys(lane, lo, hi)
+        elif family == "news":
+            rows = P.news_in(lane, *P.news_window(lane, day))
+        else:
+            rows = []
+    else:
+        if family == "ern-react":
+            rows = [r for r in P.filings_in(lane, "8-K", *P.close_window(lane, day)) if "2.02" in P.items_of(r)]
+        elif family in ("news-day", "news-react"):
+            rows = P.news_in(lane, *P.day_news_window(lane, day))
+        else:
+            rows = []
+    if family in P.NEWS_FAMILIES:
+        by_symbol = {str(r["symbol"]).upper(): str(r["cik"]) for r in universe_rows(lane, day).values()}
+        rows = [dict(r) | {"cik": by_symbol.get(str(r.get("symbol") or "").upper())} for r in rows]
+    since = program.registered_at
+    return [r for r in rows if _stored_before(r, decided_at) and S.parse_iso(r["knowable_at"]) > since]
+
+
+def held_recently(lane: Lane, program: P.Program, cik: str, day: dt.date) -> bool:
+    """PREREG-EVL-1 section 5's ONE POSITION PER ISSUER PER PROGRAM as the shadow keeps it, for a real-money decision of
+    session `day`: an intent of the program on the issuer from an EARLIER decision (entered before `day`, not skipped)
+    that exits within the last `ISSUER_GAP_SESSIONS` sessions or later. The lane's own decision of `day`, which the
+    book waits for, has already written today's intents: they are this same decision's picks, never a holding (the
+    shadow's `programs._held_recently` reads them as one, rightly for the shadow, which asks before it writes)."""
+    back = C.previous(lane, day, ISSUER_GAP_SESSIONS)
+    since = back[0].day if back else day
+    row = lane.db.execute("SELECT 1 FROM intents WHERE program=? AND version=? AND cik=? AND status NOT LIKE 'skipped%' "
+                          "AND exit_day>=? AND entry_day<? LIMIT 1",
+                          (program.id, program.version, str(cik), since.isoformat(), day.isoformat())).fetchone()
+    return row is not None
+
+
+def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.datetime,
+          reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None,
+          held: Callable[[str], bool] | None = None) -> list[Pick]:
+    """THE REAL-MONEY PICKS of `program` for entry session `day` (the module docstring): the shadow rule
+    (league/events/programs.py `select`) over the events stored before `decided_at`, with the verdicts answered before
+    it; one per issuer (the earliest knowable, after `select`'s own order for the news rows); an issuer the program holds
+    or held within `ISSUER_GAP_SESSIONS` sessions (the shadow's intents of earlier decisions in the lane,
+    `held_recently`, and `held(cik)` for real money's own lots and buys) skipped; ranked higher first, then ADV.
+    `reaction(row, universe_row)`: the REACT rows' ratio (the book's reading of the SIP bars), None when a price is
+    missing."""
+    uni = universe_rows(lane, day)
+    news = program.family in P.NEWS_FAMILIES
+
+    def verdict(row: Mapping[str, Any]) -> int | None:
+        if news:
+            got = _answered(lane, f"news:{row['id']}", V.PROMPTS["news"], decided_at)
+        else:
+            got = _answered(lane, f"8k:{row['accession']}", V.PROMPTS["doc"], decided_at)
+        return None if got is None else got.get("score")
+
+    def guidance(row: Mapping[str, Any]) -> str | None:
+        got = _answered(lane, f"8k:{row['accession']}", V.PROMPTS["doc"], decided_at) if row.get("accession") else None
+        return None if got is None else got.get("guidance")
+
+    chosen = P.select(program, rows_for(lane, program, day, decided_at), eligible=lambda cik: uni.get(str(cik)),
+                      verdict=verdict, reaction=reaction, guidance=guidance)
+    out: list[Pick] = []
+    taken: set[str] = set()
+    for c in sorted(chosen, key=lambda c: (c.knowable_at, c.event)):
+        if c.cik in taken:
+            continue
+        taken.add(c.cik)
+        if held_recently(lane, program, c.cik, day) or (held is not None and held(str(c.cik))):
+            continue
+        row = uni[str(c.cik)]
+        try:
+            prev = Decimal(str(row["prev_close"]))
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        if not prev.is_finite() or prev <= 0:
+            continue
+        out.append(Pick(program.id, program.version, c.event, str(c.symbol).upper(), str(c.cik), c.rank_key,
+                        float(row.get("adv20") or 0.0), prev, S.iso(c.knowable_at)))
+    return sorted(out, key=lambda p: (-(p.rank if p.rank is not None else float("-inf")), -p.adv20, p.event))
+
+
+def one_name_an_auction(picks_by_program: Mapping[str, Sequence[Pick]],
+                        band_of: Mapping[str, str] | None = None) -> dict[str, list[Pick]]:
+    """ONE NAME AT ONE AUCTION (PREREG-EVL-1 section 8; PREREG-EVL-3 section 2's ROOM): when two programs want the same
+    name at one auction, the first in ROOM's order takes it (Sized, then Probe, then learning, `band_of` {program:
+    band}; within a band the earlier row of the tables); the later program's pick of that name is skipped (one order a
+    symbol)."""
+    bands_ = dict(band_of or {})
+    seen: set[str] = set()
+    out: dict[str, list[Pick]] = {}
+    for program in sorted(picks_by_program, key=lambda p: room_key(p, bands_.get(p, DEFAULT_BAND))):
+        mine = []
+        for pick in picks_by_program[program]:
+            if pick.symbol in seen:
+                continue
+            seen.add(pick.symbol)
+            mine.append(pick)
+        out[program] = mine
+    return out
+
+
+# ----------------------------------------------------------------------------------------------------------- reaction
+def t29(session: C.Session) -> dt.datetime:
+    """PREREG-EVL-2's T29: the start of the regular-session SIP 1-minute bar 31 minutes before the close."""
+    return session.close_at - P.T29_BEFORE_CLOSE
+
+
+def minute_close(rows: Iterable[Mapping[str, Any]], session: C.Session) -> float | None:
+    """The close of the regular-session SIP 1-minute bar starting at T29 of `session`, or, when that minute had no
+    trade, the last earlier regular-session minute bar of the session (PREREG-EVL-1 C1, PREREG-EVL-2 section 2); None
+    when there is none."""
+    best = None
+    for bar in rows:
+        try:
+            start = S.parse_iso(str(bar["t"]))
+            close = float(bar["c"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if session.open_at <= start <= t29(session) and math.isfinite(close) and close > 0:
+            if best is None or start > best[0]:
+                best = (start, close)
+    return None if best is None else best[1]
+
+
+def last_session_before(lane: Lane, moment: dt.datetime) -> dt.date | None:
+    """The last session whose close came before `moment` (the lane's calendar)."""
+    row = lane.db.execute("SELECT day FROM sessions WHERE close_at<? ORDER BY day DESC LIMIT 1", (S.iso(moment),)).fetchone()
+    return None if row is None else dt.date.fromisoformat(row["day"])
+
+
+def reaction_reader(lane: Lane, day: dt.date, *, daily: Callable[[str, dt.date], float | None],
+                    minutes: Callable[[str, C.Session], float | None]
+                    ) -> Callable[[Mapping[str, Any], Mapping[str, Any]], float | None]:
+    """The REACT rows' ratio for decisions of `day`: the T29 minute close of `day` (the lane's own mark when it stored
+    one, else `minutes(symbol, session)`) over the raw SIP daily close of the last session that closed before the event
+    (an 8-K's acceptance, an article's knowable time; the lane's bars, else `daily(symbol, that day)`)."""
+    session = C.session(lane, day)
+
+    def ratio(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
+        if session is None:
+            return None
+        symbol = str(uni["symbol"]).upper()
+        since = row.get("accepted_at") if row.get("accession") else row.get("knowable_at")
+        try:
+            before = last_session_before(lane, S.parse_iso(str(since)))
+        except (TypeError, ValueError):
+            return None
+        if before is None:
+            return None
+        got = lane.db.execute("SELECT c FROM bars WHERE symbol=? AND day=? AND adj='raw'", (symbol, before.isoformat())
+                              ).fetchone()
+        base = float(got["c"]) if got is not None and got["c"] else daily(symbol, before)
+        mark = lane.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label='1530'", (symbol, day.isoformat())
+                               ).fetchone()
+        now = float(mark["px"]) if mark is not None and mark["px"] else minutes(symbol, session)
+        if not base or not now or base <= 0:
+            return None
+        return float(now) / float(base)
+
+    return ratio
+
+
+# ----------------------------------------------------------------------------------------------------------- sizes
+def limit_price(prev_close: Decimal, ratio: Decimal) -> Decimal:
+    """The entry's limit: `ratio` x the previous SIP close, ROUNDED DOWN to the cent (never above the pre-registered
+    limit, never above what the gateway admits)."""
+    return (Decimal(prev_close) * Decimal(ratio)).quantize(CENT, rounding=ROUND_FLOOR)
+
+
+def sigma(closes: Sequence[float], sessions: int = 60) -> float | None:
+    """The daily return sd (sample) of the last `sessions` returns of `closes` (adjusted, oldest first), or None when
+    there are fewer than `sessions` + 1 positive closes."""
+    xs = [float(c) for c in closes if c is not None and math.isfinite(float(c)) and float(c) > 0]
+    if len(xs) < sessions + 1:
+        return None
+    xs = xs[-(sessions + 1):]
+    returns = [xs[i] / xs[i - 1] - 1.0 for i in range(1, len(xs))]
+    return statistics.stdev(returns)
+
+
+def weight(sd: float | None, hold: int, s: Settings) -> Decimal:
+    """THE GOAL'S OPEN-RISK RULE for an event lot: max(floor, z x sigma x sqrt(h)), as a Decimal to six places, rounded
+    up; `STRICT_WEIGHT` when sigma is unknown. Never below the floor, never above 1."""
+    if sd is None or not math.isfinite(sd) or sd < 0:
+        return STRICT_WEIGHT
+    raw = Decimal(repr(float(s.risk_z) * sd * math.sqrt(max(1, int(hold)))))
+    out = max(s.risk_floor, raw.quantize(Decimal("0.000001"), rounding=ROUND_CEILING))
+    return min(out, Decimal(1))
+
+
+def exit_plan(program: P.Program, day: dt.date) -> tuple[str, str]:
+    """(exit day, "open" | "close") of `program`'s entry on session `day` (the book's NYSE calendar): an OPEN entry
+    exits at its `hold`-th session's CLOSE (the entry session is the first); a CLOSE entry at the session `hold` after
+    it, at its `exit_at` (PREREG-EVL-2's overnight rows: the next session's OPEN)."""
+    d = day
+    steps = program.hold - 1 if program.entry_at == "open" else program.hold
+    for _ in range(max(0, steps)):
+        d = ES.next_session(d)
+    return d.isoformat(), (program.exit_at if program.entry_at == "close" else "close")
+
+
+# ----------------------------------------------------------------------------------------------------------- the gateway
+def publish(client: Any, day: dt.date, symbols: Sequence[str], *, timeout: float = 20.0) -> dict[str, Any]:
+    """THE ELIGIBLE LIST published to the gateway (`POST /v1/stock/eligible`, the House's runtime token through the real
+    account's gateway client): {ok, day, count, sha, at} as the gateway answers, its sha checked against our own of
+    what was sent, or {ok: False, error}. Never raises."""
+    names = sorted({str(s).upper() for s in symbols})
+    want = hashlib.sha256(f"{day.isoformat()}:{','.join(names)}".encode()).hexdigest()
+    try:
+        url = str(client.gateway_url).rstrip("/") + "/v1/stock/eligible"
+        headers = {"Accept": "application/json", "Content-Type": "application/json", **dict(client.gateway.headers())}
+        body = json.dumps({"day": day.isoformat(), "symbols": names}).encode("utf-8")
+        status, _, raw = client.transport.request("POST", url, headers=headers, body=body, timeout=timeout)
+        answer = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw or "{}"))
+    except Exception as exc:  # noqa: BLE001 - the book tries again next minute
+        return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+    if not 200 <= int(status) < 300 or not isinstance(answer, Mapping) or answer.get("ok") is not True:
+        why = answer.get("error") if isinstance(answer, Mapping) else None
+        return {"ok": False, "error": f"HTTP {status}: {str(why or answer)[:200]}"}
+    if answer.get("sha") != want or int(answer.get("count") or -1) != len(names) or answer.get("day") != day.isoformat():
+        return {"ok": False, "error": "the gateway holds another list than the one sent (sha, count or day differ)"}
+    return dict(answer)
+
+
+__all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS", "LIVE_BANDS", "DEFAULT_BAND",
+           "PRIORITY", "STRICT_WEIGHT", "LADDER_CLOSES", "ZERO_AFTER", "ISSUER_GAP_SESSIONS", "LANE_DIR", "FILLS_TABLE",
+           "FILL_COLUMNS", "seatable", "program_of", "order_of", "room_key", "SCHEMA", "Settings", "FALLBACK",
+           "settings", "Lane", "lane_path", "open_lane", "decided", "eligible", "universe_rows", "Band", "lane_bands",
+           "bands", "sessions_back", "write_fills", "Pick", "rows_for", "held_recently", "picks", "one_name_an_auction",
+           "t29", "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
+           "publish"]

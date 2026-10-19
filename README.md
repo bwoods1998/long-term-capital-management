@@ -218,6 +218,7 @@ As it will stand after the prune (#375, still a draft); until it merges the lega
 | `league/live/` | the live path: the shadow and observe books, the real book, the paper route proofs, the D3 calibration round trips, the House live test |
 | `league/gym/` | the Gym: the store reader, the engine, fills, the venue's rules, greeks, the batch runner, the sealed-box driver; the program contract in `PROGRAM.md` |
 | `league/swarm/` | the swarm: researchers, the tournament and the allocation, the architect, the family cards, the diagnostician, the gate, the model router, the Sail guard, the funding-cliff alerts, the Gym pool, the evaluator record; `policy.json`, the research settings as code (V3-A; a protected file) |
+| `league/events/` | the event lane (the owner's goal of Oct 19, 2026; [docs/events.md](docs/events.md)): the EDGAR and news recorders, the recorded verdicts, the pre-registered programs and their screen; `book.py` and `proof.py` (release R2, not deployed) its real money through the equity book's event kind and the auction paper proof |
 | `league/ops/` | the House's jobs (V3-A; the whole tree is protected): the scheduler on the NYSE calendar, the runner and receipts, the pre-open checks, the close economics, hygiene, the venue clock, the scoreboard, the budget rule, the standing grant and the drills |
 | `league/CONTRACT.md` | the options strategy contract every researcher reads (about 32 KB) |
 | `league/tests/` | the tests |
