@@ -597,7 +597,8 @@ class TheWallHoldsTheLanesRuleInputs(unittest.TestCase):
         for path in ("league/events/universe.py", "league/events/calendar.py", "league/events/edgar.py",
                      "league/events/news.py", "league/events/run.py", "league/events/store.py"):
             self.assertTrue(ci.guard([path], None), path)
-        for path in ("league/events/house.py", "league/events/gw.py", "league/events/report.py"):
+        # Release 1019c: the scheduler holds the lane's verdicts to the budget's allowance, so it joined the wall (D4).
+        for path in ("league/events/gw.py", "league/events/report.py"):
             self.assertEqual(ci.guard([path], None), [], path)
 
 

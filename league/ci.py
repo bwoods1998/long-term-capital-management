@@ -210,7 +210,8 @@ PENDING_GATEWAY += ("league/data_plan.py",)
 #: (league/events/programs.py: which events qualify and what each program takes), the verdicts' fixed prompts, model and
 #: parsing (verdicts.py), the settlement every screen number is made of (score.py: the auction prices, the cost
 #: allowance, r, b, a and TRADABLE), the screen itself (screen.py) and the pre-registrations (docs/prereg/). The
-#: lane's recorders and its House scheduler (league/events/house.py) stay outside, so the updater can ship their fixes.
+#: lane's recorders and its House scheduler (league/events/house.py) stayed outside, so the updater could ship their
+#: fixes (the scheduler joined the wall in release 1019c: below).
 #: They wait here for the gateway's merge-list follow-up, as release E4's and R0's do.
 PENDING_GATEWAY += ("league/events/programs.py", "league/events/verdicts.py", "league/events/score.py",
                     "league/events/screen.py", "docs/prereg/")
@@ -230,11 +231,17 @@ PENDING_GATEWAY += ("league/events/book.py", "league/events/proof.py")
 #: prev_close for the limit, ADV, the benchmark that makes TRADABLE, the cost allowance's inputs), calendar.py (the
 #: 09:00 cut-off and the decision times), edgar.py and news.py (KNOWABLE_LAG: the registration gating and every window;
 #: the EX-99 TEXT a verdict reads), run.py (which program gets which rows, the shadow's 15:30 reaction) and store.py
-#: (the record's schema and its forward-only statuses). The lane's House scheduler (league/events/house.py), its gateway
-#: client (gw.py) and its report stay outside, so their fixes can ship. They wait here for the gateway's merge-list
-#: follow-up, as R1's judges do.
+#: (the record's schema and its forward-only statuses). The lane's gateway client (gw.py) and its report stay outside,
+#: so their fixes can ship (its House scheduler, league/events/house.py, joined the wall in release 1019c: below). They
+#: wait here for the gateway's merge-list follow-up, as R1's judges do.
 PENDING_GATEWAY += ("league/events/universe.py", "league/events/calendar.py", "league/events/edgar.py",
                     "league/events/news.py", "league/events/run.py", "league/events/store.py")
+#: THE LANE'S VERDICT LINE (release 1019c, the review of r1/alarms, its major 1; the owner's D4: what applies the
+#: budget changes only by the owner's deploy): the House's lane scheduler (league/events/house.py) holds the lane's paid
+#: verdicts to the budget rule's allowance (league/ops/budget.py `lane_allowance`), so it applies the budget rule and
+#: joins the wall; its gateway client (gw.py) and its report stay outside. It waits here for the gateway's merge-list
+#: follow-up.
+PENDING_GATEWAY += ("league/events/house.py",)
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

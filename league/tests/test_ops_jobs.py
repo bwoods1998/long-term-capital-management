@@ -774,13 +774,16 @@ class PreopenBrake(Base):
         g.check()
         beat()
         self.assertEqual(self.collected(), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked False"))
-        store.add_spend("sail_model", 4.0)  # the floor's Sail research dollars a day ($5 x 0.8)
+        from league.ops import budget as B
+
+        floor = B.floor_usd_day("sail")  # the floor's Sail research a day (budget rule 3: its no-profit $0.27)
+        store.add_spend("sail_model", 4.0)  # over it
         self.now += 180
         self.assertEqual(g.check()["causes"], ["research_budget"])
         beat()
         self.assertEqual(self.collected(), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked by the day's research "
-                                                  "budget alone, as designed (today's Sail research budget is spent (4.00 of 4.00; "
-                                                  "floor))"))
+                                                  f"budget alone, as designed (today's Sail research budget is spent (4.00 of "
+                                                  f"{floor:.2f}; floor))"))
         # The swarm goes on beating while its guard stops checking: the heartbeat is fresh, the reading in it is not.
         self.now += 599
         beat()
@@ -805,8 +808,11 @@ class PreopenBrake(Base):
         beat()
         ok, line = self.collected()
         self.assertTrue(ok, line)
+        from league.ops import budget as B
+
         self.assertIn("braked by the day's account budget alone: Sail's own meter is at the day's cap for the whole account "
-                      "(today's Sail budget is spent by Sail's meter (5.00 of 5.00 for the account", line)
+                      f"(today's Sail budget is spent by Sail's meter (5.00 of {B.floor_usd_day('sail') + 1.0:.2f} for the "
+                      "account", line)
         self.assertNotIn("as designed", line)
 
     def test_a_guard_check_between_the_jobs_now_and_the_heartbeats_read_is_a_fresh_reading(self):
