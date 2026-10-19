@@ -78,7 +78,10 @@ until release 1019b (below) brings it onto the House.
   program's and its control's records; 40 open-entry learning lots and a Probe close entry on one day all send (81
   orders, 150 the line); each lane meets its own line and the House-wide one; the row's bounds and its digests.
   Digest pins: league/tests/equity_design.py `DIGESTS` regenerated with the tree's own functions, release 1019b's kept
-  as `DIGESTS_R2` (`before_1019c`); the design blocks' digest lines rewritten by `write_block`. RUNS: see the PR.
+  as `DIGESTS_R2` (`before_1019c`); the design blocks' digest lines rewritten by `write_block`. On `f0f287df` (the
+  code and tests as pushed): the full league suite on 3.14, 12,482 OK (33 skipped); the events, equity, live, ci and
+  constitution modules on 3.11, 2,109 OK; `python -m league.ci --base origin/main --branch r3/lane-1019c --no-tests`
+  passed; the identities, computed with the tree's own functions on both Pythons, as above.
 - **Deploy** ([docs/operations.md](docs/operations.md), **Release 1019c**): the House from this head, after release
   1019b is live and verified; verify the grant on `055e5313`.
 - **Rollback.** `equity_money.event.enabled` False (a constitution-only owner deploy: money `1b7a5c22`, constitution
