@@ -416,4 +416,19 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
             performance=performance_of(config), real_brokers=readers,
             gateway_url=gateway_url, gateway_token=token,
         )
+    attach_event_lane(house, root, config, token=token, jobs=jobs, canary=canary)
     return house
+
+
+def attach_event_lane(house: House, root: Path, config: dict[str, Any], *, token: Callable[[], str], jobs: bool,
+                      canary: bool, on_box: bool | None = None) -> Any:
+    """The event lane on the House (release R1; league/events/house.py), or None: only when `config.json`
+    `events.enabled` is true (a missing key is off), in the House's own loop (`jobs`, as the House's jobs), on the House
+    box, never on a canary. Its store is `<state>/events/` and it runs on the tick's publish (the publisher is wrapped):
+    `house.feeds` stays None, so none of the House's legacy feed paths wakes."""
+    from .events.house import attach, events_enabled
+
+    on_box = REPO.parent.name == "releases" if on_box is None else on_box
+    if not (jobs and on_box and events_enabled(config, canary=canary)):
+        return None
+    return attach(house, root, config, token=token)

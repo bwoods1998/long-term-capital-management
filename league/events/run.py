@@ -199,13 +199,18 @@ def news_verdict(ctx: Context, row: Mapping[str, Any]) -> int | None:
 
 
 # ---------------------------------------------------------------------------------------------------- decisions
-def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> dict[str, Any]:
-    """Shadow intents for every open-entry program at session `day`'s open."""
+def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_only: bool = False) -> dict[str, Any]:
+    """Shadow intents for every open-entry program at session `day`'s open.
+
+    `ask_only`: the decision's own windows, eligibility and verdict asks, and nothing else: no intent and no receipt is
+    written, and `pending` counts each reading program's eligible events still without a stored verdict. The House's
+    event lane (league/events/house.py) asks a session's verdicts this way from 07:30 ET, so the decision finds them
+    stored; the verdicts and universe rows it stores are the very ones the decision reads."""
     st = ctx.store
     session = C.session(st, day)
     if session is None:
         return {"skipped": "no session"}
-    rid = st.start_receipt(f"decide-open:{day}", now=ctx.now())
+    rid = None if ask_only else st.start_receipt(f"decide-open:{day}", now=ctx.now())
     lo, hi = P.open_window(st, day)
     e8k = P.filings_in(st, "8-K", lo, hi)
     ins = P.ins_triggers(st, lo, hi)
@@ -267,6 +272,10 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
         rows = {"ern": e8k, "8k": e8k, "ins": ins, "ins-buy": buys, "news": articles}.get(prog.family, [])
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
         waiting = pending(prog, rows)
+        if ask_only:
+            if waiting:
+                out["pending"][prog.id] = waiting
+            continue
         if waiting:
             out["pending"][prog.id] = waiting   # decided by a later pass, once every verdict is stored
             continue
@@ -274,7 +283,8 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
         out[prog.id] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
     out["events"] = {"8-K": len(e8k), "f4_triggers": len(ins), "f4_buys": len(buys), "news": len(articles),
                      "eligible": sum(1 for v in elig.values() if v)}
-    st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
+    if rid is not None:
+        st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
     return out
 
 
@@ -315,14 +325,17 @@ def _mark_1530(ctx: Context, symbol: str, day: dt.date) -> float | None:
     return float(last["c"])
 
 
-def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> dict[str, Any]:
+def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_only: bool = False) -> dict[str, Any]:
     """Shadow intents for every close-entry program at session `day`'s close: C1 (PREREG-EVL-1) and PREREG-EVL-2's
-    REACT-ON, REACT-READ-C1 and the day-news programs (NEWS-READ-ON, its control, NEWS-REACT-ON)."""
+    REACT-ON, REACT-READ-C1 and the day-news programs (NEWS-READ-ON, its control, NEWS-REACT-ON).
+
+    `ask_only`: as decide_open's (the verdicts the close decision will read, asked during the session: no intent, no
+    receipt, and no reaction, whose 15:29 bar is not on the tape before the decision)."""
     st = ctx.store
     session = C.session(st, day)
     if session is None:
         return {"skipped": "no session"}
-    rid = st.start_receipt(f"decide-close:{day}", now=ctx.now())
+    rid = None if ask_only else st.start_receipt(f"decide-close:{day}", now=ctx.now())
     lo, hi = P.close_window(st, day)
     e8k = [r for r in P.filings_in(st, "8-K", lo, hi) if "2.02" in P.items_of(r)]
     dlo, dhi = P.day_news_window(st, day)
@@ -378,13 +391,18 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> d
         rows = {"ern-react": e8k, "news-day": articles, "news-react": articles}.get(prog.family, [])
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
         waiting = pending(prog, rows)
+        if ask_only:
+            if waiting:
+                out["pending"][prog.id] = waiting
+            continue
         if waiting:
             out["pending"][prog.id] = waiting   # decided by a later pass, once every verdict is stored
             continue
         cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, reaction=reaction)
         out[prog.id] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
     out["events"] = {"8-K": len(e8k), "day_news": len(articles), "eligible": sum(1 for v in elig.values() if v)}
-    st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
+    if rid is not None:
+        st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
     return out
 
 

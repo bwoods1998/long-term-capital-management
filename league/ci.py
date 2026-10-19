@@ -206,6 +206,14 @@ PENDING_GATEWAY += ("league/swarm/elane_forward.py",)
 #: Basic plan (league/data_plan.py: the SIP window, the snapshot feed, options off), read by the live path's market data
 #: and league/ops/context.py's gateway, both behind the wall. It waits here for the gateway's merge-list follow-up.
 PENDING_GATEWAY += ("league/data_plan.py",)
+#: THE EVENT LANE'S JUDGES (release R1, Oct 2026; PREREG-EVL-1 and PREREG-EVL-2, frozen): the programs as registered
+#: (league/events/programs.py: which events qualify and what each program takes), the verdicts' fixed prompts, model and
+#: parsing (verdicts.py), the settlement every screen number is made of (score.py: the auction prices, the cost
+#: allowance, r, b, a and TRADABLE), the screen itself (screen.py) and the pre-registrations (docs/prereg/). The
+#: lane's recorders and its House scheduler (league/events/house.py) stay outside, so the updater can ship their fixes.
+#: They wait here for the gateway's merge-list follow-up, as release E4's and R0's do.
+PENDING_GATEWAY += ("league/events/programs.py", "league/events/verdicts.py", "league/events/score.py",
+                    "league/events/screen.py", "docs/prereg/")
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

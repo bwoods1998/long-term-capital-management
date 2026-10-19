@@ -287,9 +287,12 @@ class TheEquityLane(unittest.TestCase):
         # effects and the memory tables: secrecy rules and a Train-bar input) since the release itself. Release E4's
         # two (the panel's swarm lane and the universe generator) wait here for the gateway's next follow-up.
         self.assertEqual(ci.PENDING_GATEWAY, ("league/swarm/elane_xs.py", "scripts/gen_universe.py",
-                                              "league/swarm/elane_forward.py", "league/data_plan.py"),
+                                              "league/swarm/elane_forward.py", "league/data_plan.py",
+                                              "league/events/programs.py", "league/events/verdicts.py",
+                                              "league/events/score.py", "league/events/screen.py", "docs/prereg/"),
                          "the gateway's merge list holds E2's five since its follow-up of Oct 11 and E3's three with "
-                         "the release; E4's two, FWD1-R's seat path and R0's data plan wait for its next one")
+                         "the release; E4's two, FWD1-R's seat path, R0's data plan and R1's event-lane judges wait for "
+                         "its next one")
         for entry in ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py",
                       "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
                       "league/swarm/elane_seal.py", "league/swarm/elane_review.py", "league/swarm/elane_folds.py",
@@ -328,6 +331,38 @@ class TheEquityLane(unittest.TestCase):
             self.assertTrue(ci.guard([path], None), path)
             for role in ci.ROLE_PATHS:
                 self.assertTrue(ci.guard([path], role), (path, role))
+
+    def test_the_event_lanes_judges_are_protected(self):
+        """Release R1 (R1-SPEC WP1): the event lane's judges join the wall: the programs as pre-registered, the verdicts'
+        prompts, model and parsing, the settlement the screen's numbers are made of, the screen, and the
+        pre-registrations. No role may change one and the in-box updater never ships one; the lane's recorders, its
+        decisions' plumbing and its House scheduler stay outside, so their fixes can ship."""
+        from league.updater import protected_changes
+
+        judges = ("league/events/programs.py", "league/events/verdicts.py", "league/events/score.py",
+                  "league/events/screen.py", "docs/prereg/")
+        for entry in judges:
+            self.assertIn(entry, ci.FORBIDDEN)
+            self.assertIn(entry, ci.PENDING_GATEWAY)
+        for path in ("league/events/programs.py", "League/Events/Programs.py", "league/events/verdicts.py",
+                     "league/events/score.py", "league/events/screen.py", "docs/prereg/PREREG-EVL-1.md",
+                     "docs/prereg/PREREG-EVL-2.md", "docs/prereg/PREREG-EVL-3.md"):
+            self.assertTrue(ci.guard([path], None), path)
+            for role in ci.ROLE_PATHS:
+                self.assertTrue(ci.guard([path], role), (path, role))
+        for path in ("league/events/house.py", "league/events/run.py", "league/events/edgar.py",
+                     "league/events/news.py", "league/service.py"):
+            self.assertEqual(ci.guard([path], None), [], path)
+        with tempfile.TemporaryDirectory() as tmp:
+            running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
+            for root, text in ((running, "X = 1\n"), (incoming, "X = 2\n")):
+                for rel in ("league/events/programs.py", "league/events/verdicts.py", "league/events/score.py",
+                            "league/events/screen.py", "league/events/house.py", "league/events/run.py"):
+                    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (root / rel).write_text(text)
+            self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
+                             ["league/events/programs.py", "league/events/score.py", "league/events/screen.py",
+                              "league/events/verdicts.py"])
 
     def test_the_panel_lane_and_the_universe_generator_are_protected(self):
         """Release E4 (E4-SPEC 2.5, the fixed judges it adds): the panel's evidence and its screen XS1 (league/xs/), its

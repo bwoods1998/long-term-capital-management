@@ -41,8 +41,10 @@ above 1.25 x the previous close (real money's limit).
 `edgar.py` and `news.py` (the recorders), `calendar.py` (sessions and decision moments), `universe.py` (eligibility),
 `verdicts.py` (the recorded Haiku verdicts), `programs.py` (the programs as data rows and their selection rules),
 `run.py` (the open and close decisions, backfill), `score.py` (settlement at the auction prints and the exit ladder),
-`screen.py` (the judge), `report.py` (the daily one-screen report), `__main__.py` (the CLI: `record`, `backfill`,
-`decide-open`, `decide-close`, `catchup`, `tickers`, `equity`, `score`, `screen`, `report`).
+`screen.py` (the judge), `report.py` (the daily one-screen report), `house.py` (the lane on the House: its scheduler),
+`__main__.py` (the CLI: `record`, `backfill`, `decide-open`, `decide-close`, `catchup`, `tickers`, `equity`, `score`,
+`screen`, `report`). The judges (`programs.py`, `verdicts.py`, `score.py`, `screen.py`) and `docs/prereg/` are behind
+`league/ci.py`'s FORBIDDEN wall from release R1: no role changes them and the House's updater never ships one.
 
 ## Where it runs (shadow)
 
@@ -52,3 +54,30 @@ hourly catchup; `ltcm-evl-equity`; `ltcm-evl-score` 20:30 and 08:30 ET; `ltcm-ev
 21:05 ET), reading Alpaca and Claude through the LTCM gateway. Nothing in shadow sends an order. Real money waits for a
 program's screen pass and release R2 (the gateway's event-buy branch, the equity book's event kind, the auction order
 types, the paper proof).
+
+## On the House (release R1)
+
+With `league/config.json` `events.enabled` true, the same functions run inside the House's process
+(`league/events/house.py`), on its state root (`<state>/events/`, the same store), with the House's gateway token and
+SEC contact; the desktop's timers stop. The House's tick publishes the site every minute, and the lane's turn rides on
+it (the publisher is wrapped; `house.feeds` stays None so none of the House's old feed paths wakes): one bounded task a
+turn, the most urgent due first.
+
+| order | task | when | bound |
+|---|---|---|---|
+| 1 | a decision: the open, C1's close (a minute after its time), then one pending on verdicts | 09:15 ET; close - 14 min; pending every 5 min | 150 s, then the next turn goes on |
+| 2 | verdicts a decision will read | its decision within 30 min, or pending | 90 s |
+| 3 | the record pass: EDGAR's current feeds, the news, then today's verdicts with the time left | every 2 min, 24/7 | 90 s, resumable |
+| - | the hourly re-decision of the last three sessions (late events) | hourly, after the record pass | 150 s |
+| 4 | nightly: the account equity, the score, the screen, the report | close + 3 min; 20:30 ET | the score 120 s, resumable |
+| 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
+| 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
+| 7 | the backfill of a weekday's EDGAR daily index | from 05:00 ET the next day | 90 s, resumable |
+
+A task ends before a decision falls due. Verdicts are asked from 07:30 ET because a session's universe is fixed then
+(its tickers copy is the latest before 07:30 ET), with the decision's own code (`decide_open` / `decide_close`
+`ask_only`), so the 09:15 decision finds them stored and asks none. Verdicts wait while the House is paused (`PAUSE`) and
+over the lane's own line (`events.verdict_usd_day`, $5 a New York day): a READ event then waits, as PREREG-EVL-1
+section 4 lets it. The lane writes a receipt for every task in the store and its health to `<state>/events/lane.json`.
+How to switch it on, migrate the desktop's store (`scripts/evl_migrate.py`) and stop it:
+[operations](operations.md), "The event lane on the House".

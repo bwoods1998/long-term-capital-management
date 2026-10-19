@@ -188,7 +188,7 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
 
 | Piece | What | Where |
 |---|---|---|
-| The House | the loop, the ledger, the books, the tournament, the gate, the live tick, the publisher; from V3-A part 1 its own jobs, the budget rule and the in-box updater | one Sailbox (size s) |
+| The House | the loop, the ledger, the books, the tournament, the gate, the live tick, the publisher; from V3-A part 1 its own jobs, the budget rule and the in-box updater; from release R1 the event lane's scheduler (`league/events/house.py`, when `events.enabled`), whose shadow ran on blake-desktop's timers until then | one Sailbox (size s) |
 | The gateway | the account's, OpenAI's, Anthropic's and GitHub's keys, caps by order, the OpenAI month, Claude's funded total, the kill switch, an outside watchdog; from V3-A part 1 the desk's daily page to `main`, the funding notices, an admin log, and the walled routes for an engineer's pull requests | a Cloudflare Worker |
 | The data box | ThetaData downloads into the Gym store; the nightly forward day | one Sailbox (size l), asleep when idle |
 | The Gym | sealed forks of the Gym image (Train and Validation only), 4-8 at a time by default (2-6 on the live settings from Release A; 1 in `policy.json` since Oct 2, and the budget's count when lower) | Sailboxes (size l) |
@@ -219,10 +219,11 @@ As it will stand after the prune (#375, still a draft); until it merges the lega
 | `league/gym/` | the Gym: the store reader, the engine, fills, the venue's rules, greeks, the batch runner, the sealed-box driver; the program contract in `PROGRAM.md` |
 | `league/swarm/` | the swarm: researchers, the tournament and the allocation, the architect, the family cards, the diagnostician, the gate, the model router, the Sail guard, the funding-cliff alerts, the Gym pool, the evaluator record; `policy.json`, the research settings as code (V3-A; a protected file) |
 | `league/ops/` | the House's jobs (V3-A; the whole tree is protected): the scheduler on the NYSE calendar, the runner and receipts, the pre-open checks, the close economics, hygiene, the venue clock, the scoreboard, the budget rule, the standing grant and the drills |
+| `league/events/` | the event lane of the goal of Oct 19, 2026 ([docs/events.md](docs/events.md); rules in `docs/prereg/`): EDGAR and news recorders, the recorded Haiku verdicts, the pre-registered programs, the decisions, settlement, the screen, the daily report, and `house.py`, its scheduler on the House (release R1; `config.json` `events.enabled`); its judges are protected |
 | `league/CONTRACT.md` | the options strategy contract every researcher reads (about 32 KB) |
 | `league/tests/` | the tests |
 | `gateway/` | the Worker ([its README](gateway/README.md)) |
-| `scripts/` | `floor_box.py` (the House's box), `gateway_admin.py` (the kill switch), `live_trading.py` (the grant), `desk_receipts.py` (the House's receipts, read without exec; V3-A), `settings_migrate.py` (swarm.json to policy.json; V3-A), `scripts/data/` (the data box, the backfill, the images, the nightly job, the store checks) |
+| `scripts/` | `floor_box.py` (the House's box), `gateway_admin.py` (the kill switch), `live_trading.py` (the grant), `desk_receipts.py` (the House's receipts, read without exec; V3-A), `settings_migrate.py` (swarm.json to policy.json; V3-A), `evl_migrate.py` (the event lane's desktop store onto the House box, once; R1), `scripts/data/` (the data box, the backfill, the images, the nightly job, the store checks) |
 | `deploy/` | [how the House runs on its box](deploy/README.md) |
 | `docs/` | [design.md](docs/design.md), [operations.md](docs/operations.md), `goals/` (the run's plan and the sprint that amends it); `runs/` (the Oct 2 unattended-desk record and its daily scoreboard in `runs/desk/`, the Sept 30 continuous-learning run record; the Sept 26 run's record is on branch `run/options-swarm-2026-09-26`) |
 | `archive/` | the history and the documents of earlier generations |
@@ -266,6 +267,7 @@ python3 scripts/gateway_admin.py status | kill             # the gateway; `unkil
 python3 scripts/live_trading.py [--enable | --ratify | --disable]   # the grant, on the box
 python3 scripts/data/box.py status                         # the data box and the backfill
 python3 scripts/desk_receipts.py [YYYY-MM-DD]              # the House's job receipts, read without an exec (V3-A part 1)
+python3 scripts/evl_migrate.py [--dry-run]                 # the event lane's desktop store onto the House box, once (R1)
 ```
 
 **V3-A part 1 is live (since Oct 3, 2026), so a merge to main is a deploy.** Before it every release was the owner's

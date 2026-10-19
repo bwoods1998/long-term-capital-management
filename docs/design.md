@@ -21,11 +21,43 @@ disagree, the code is right and this page is fixed. How to operate it is in
 | The learning game v1 (Oct 8, 2026) | `release/learning-game` | deployed Oct 8 (House release `20261008T190618Z`, main `7b71cb1a`; T0 22:17Z, gate mode): from T0 no agent sees 2020-21; private hidden-year looks decide which game-arm programs reproduce and reach Validation, a concurrent control arm on the same seen years (2022-2024), the architect and the strategist blind to the game arm, practice feedback off, a daily operator-only report. No `league/gym/`, `league/live/` or constitution change: the fingerprint and the money digest do not move; the span switch to 2022-2024 is its one evidence reset (**The learning game v1**, below) |
 | The incubator cap (Oct 8, 2026) | `feat/incubator-cap-75` | deployed Oct 8 (House release `20261008T225723Z`, main `a5ff6f9e`): `options_money.incubator.max_loss_usd` $50 -> $75 and nothing else (week $150, 4 open, one lot unchanged; at most two $75 units open), so lot-priced single-name cohorts can open; a loosening, its cost in the CHANGELOG. Money digest `da5c7542` -> `1665c385` (constitution `5edc8956` -> `5698a2f9`): the standing grant re-ratifies at the House's start on the owner's deploy; the execution fingerprint is unchanged, so no evidence reset |
 | Release L-D (Oct 9, 2026) | `release/ld-net-budget` | deployed 09:04Z Oct 9 (House release `20261009T090334Z`, main `40c39435`; the one evidence reset of Oct 9): the Probe loss budget read NET from inception (`probe.loss_basis` "net"; a Probe gain offsets Probe losses, a Sized gain never does), 8 Probe slots inside the $400 envelope (`probe.max_open`), the budget's $400 over any rolling 20 sessions beside $400 in total (the owner's goal of Oct 9 allows $800 in total; the operator set $400; `probe.loss_window_sessions`, `probe.loss_total_usd`; a Probe open fits both; under NET the window's figure is its worst net stretch, so the $400 holds over every 20-session window), the Probe room the other routes keep capped at the $400, and DM1 demotion for Probe and Sized families (`probe.demotion` "dm1": 10+ real trades summing below -1.645 sigma sqrt(n); D5's loss leg and the negative record off for them, the replay gap and the real_bad hold kept; sigma read from the swarm's state by `league/live/families.py`, its writer in release D-1). The marketable natural limit `{"natural": k}` (L5) was dropped on Oct 9: it moved the Gym bundle, which would have re-run every stored Train and Validation result and cleared the extension holds; it waits for a planned Gym release. Money digest `1665c385` -> `0310779c` (constitution `5698a2f9` -> `ca89ff8a`); the execution fingerprint `b4c34031` -> `31a7e921` (every practice cohort completes); the Gym bundle unchanged (`e1c896f8d304`). Rollback: `loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400", `loss_window_sessions` 2000, a constitution-only deploy with no fingerprint move (money digest `320899d6`; operations.md, **Release L-D**) |
+| The event lane (the goal of Oct 19, 2026) | `league/events/`, `docs/prereg/`, [events.md](events.md) | shadow on blake-desktop since Oct 19 (PREREG-EVL-1 and -2: nine seatable programs, no order path); release R1 (`r1/lane`, not deployed) runs it on the House beside the tick (**The event lane on the House**, below), switched off until `events.enabled` |
 | The public page | blakewoods.us/capital | the owner's (`personal-site`, revamped by the owner on Oct 2); the House's publisher feeds it |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
 general paper environment and exposure-aware allocation are still to build. The incubator and its swarm-side facts (B2)
 shipped in Release B; it has been on since Oct 1. The repository README's "Current state" has the rest.
+
+## The event lane on the House (release R1)
+
+The lane's rules are its pre-registrations (`docs/prereg/`) and its code `league/events/` ([events.md](events.md));
+release R1 moves its passes from the desktop's timers into the House's process (`league/events/house.py`), so the House
+is the lane's system of record before its first screen look. The design choices:
+
+- **The hook is the publisher, not `House.feeds`.** A non-None `feeds` wakes the House's legacy feed paths (agents'
+  `ctx["feeds"]`, replay tapes, research capabilities, tool requests), and research capabilities answer differently for
+  any non-None one. `league/service.py` instead wraps `house.publisher`: each publish (60 s) runs the original
+  publisher as before, then starts the lane's turn on the House's one-slot feeds lane. `house.py` is untouched.
+- **One bounded task a turn, the most urgent first:** a decision at its time (09:15 ET; the close - 14 minutes, a
+  minute later for C1's 15:30 bar), verdicts for a decision within 30 minutes or pending, the record pass every 2
+  minutes (90 s, resumable), the hourly re-decision of the last three sessions, the nightly equity, score, screen and
+  report, the 07:00 ET ticker snapshot, early verdicts from 07:30 ET, the daily-index backfill. No task runs into a
+  decision; a decision's and a verdict task's network reads stop at their bound and the next turn goes on from what
+  was stored.
+- **Verdicts before the decision, by the decision's own code.** A session's universe is fixed at 07:30 ET (its tickers
+  copy is the latest before then; its bars are final), so from 07:30 ET the lane runs `decide_open` / `decide_close`
+  with `ask_only` (no intent, no receipt): the verdicts and universe rows stored are the very ones the decision reads,
+  and the 09:15 decision asks none. Verdicts are never asked earlier, which would read another day's tickers copy.
+- **Paid work follows the House's walls:** no verdict while the House is paused, none over the lane's own line
+  (`events.verdict_usd_day`), none retried every minute when it gets no answer; a READ event waits (PREREG-EVL-1
+  section 4). The rest is free: recording, decisions and scoring go on while paused.
+- **Never an error from the lane:** a failed task is a warning at most once an hour per task, below the House's repeat
+  rule (ten in 30 minutes), so a release watch never rolls back for the lane, and the task waits 10 minutes.
+- **The judges are behind the wall:** the programs, the verdicts' prompts, the settlement and the screen, and the
+  pre-registrations are FORBIDDEN to every role and to the updater; the scheduler and recorders are not, so their
+  fixes ship through the updater.
+- **One store, moved once:** the lane never makes its root; `scripts/evl_migrate.py` copies the desktop's there, checked
+  file by file and table by table, and the lane starts when it lands.
 
 ## v3: the unattended desk
 
