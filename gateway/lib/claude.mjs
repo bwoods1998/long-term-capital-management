@@ -289,10 +289,16 @@ export function admit(body, env = {}) {
   if (!row) return { error: `No price is configured for model "${model}"; an unpriced call is refused.`, status: 403 };
   if (body.stream !== undefined && typeof body.stream !== 'boolean') return { error: 'stream is true or false.', status: 400 };
   const stream = body.stream === true;
-  const allowed = new Set(['model', 'max_tokens', 'system', 'messages', 'thinking', 'output_config', 'stream', 'tools', 'tool_choice']);
+  const allowed = new Set(['model', 'max_tokens', 'system', 'messages', 'thinking', 'output_config', 'stream', 'tools', 'tool_choice',
+    'temperature']);
   const extra = Object.keys(body).filter(key => !allowed.has(key));
   if (extra.length) {
     return { error: `Only inline text, the House's own tools and adaptive thinking are priced by this gateway; refused: ${extra.slice(0, 4).join(', ')}.`, status: 400 };
+  }
+  // Oct 19, 2026 (the event lane, PREREG-EVL-1): `temperature` exactly 0, for deterministic verdicts, and nothing else;
+  // it bills nothing beyond the body. Models without sampling parameters answer it with Anthropic's own 400 (unbilled).
+  if (body.temperature !== undefined && body.temperature !== 0) {
+    return { error: 'temperature may only be 0 (deterministic answers); other sampling is refused.', status: 400 };
   }
   let marks = 0;
   if (body.system !== undefined) {

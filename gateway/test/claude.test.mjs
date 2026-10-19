@@ -109,6 +109,9 @@ test('admission: inline text, adaptive thinking, an effort and a JSON-schema for
   assert.equal(admit(body({ messages: [{ role: 'user', content: [{ type: 'text', text: 'a', cache_control: { type: 'ephemeral', ttl: '5m' } }] }] }), env).model,
     'claude-opus-5-5');
   assert.equal(admit(body({ model: 'claude-opus-5' }), env).status, 403, 'unpriced');
+  // temperature exactly 0 is admitted (the event lane's deterministic verdicts); any other value is refused below.
+  assert.equal(admit(body({ temperature: 0 }), env).model, 'claude-opus-5-5');
+  for (const t of [0.0001, -0, '0', null, 1]) if (!Object.is(t, -0)) assert.equal(admit(body({ temperature: t }), env).status, 400, String(t));
   assert.equal(admit(body({ model: 'gpt-6-astra' }), env).status, 403);
   const mark = { type: 'ephemeral' };
   for (const change of [

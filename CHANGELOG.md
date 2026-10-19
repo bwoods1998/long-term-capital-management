@@ -32,7 +32,10 @@ any other deploy.
   $5 output; no `geo` row): the model PREREG-EVL-1 pins for its verdicts on EDGAR filings and news headlines.
 - `VENUE_PATHS.alpaca` admits `GET v1beta1/news` (read only; routed to data.alpaca.markets by the existing
   `v1beta1/` data prefix): the ENEWS events. Nothing else under news is signed.
-- Tests: claude.test.mjs pins the new row and its cost; caps.test.mjs pins the one news path. Gateway suite 465/465.
+- `/v1/claude/messages` admits `temperature` when it is exactly 0 (PREREG-EVL-1's deterministic verdicts); any other
+  value, and every other sampling field, is still refused.
+- Tests: claude.test.mjs pins the new row, its cost and the temperature rule; caps.test.mjs pins the one news path.
+  Gateway suite 465/465.
 
 The running House release is `20261016T024305Z-e90d75adb36b` (main `d6bcf0cd`, PR #562: release 1016a, L5 and C1,
 02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
