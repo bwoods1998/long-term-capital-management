@@ -36,6 +36,25 @@ the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PR
 [docs/events.md](docs/events.md); its code runs in shadow on the captain's workstation from branch `feat/evl-shadow`
 until release 1019b (below) brings it onto the House.
 
+### WP4: the public site follows the event lane, on `feat/site-events` (unreleased; with personal-site branch `capital/event-lane`, either repository may deploy first; no identity, digest or money row moves)
+
+- **Why.** The owner's goal of Oct 19, 2026: "Website and repo docs stay current with every change: evolve the design,
+  no redesign". The capital page keeps its five sections; its Agents board and Positions follow the lane.
+- **What the House publishes.** One new VERSIONED key, `lane_v1` (`league/site_lane.py` reads it read-only;
+  `league/publish.py` `site_lane` allowlists it): each program (version 2 of the nine seatable ones, the records and
+  controls as "shadow") with a plain name, its band, its settled events real and shadow and its next look's events to go;
+  the funnel of the lane's steps; the goal's checkpoint (settled real-money events at Probe size or above, next reading
+  every 100: 0 until a program is at Probe); the verdicts' spend; and the equity book's lots (the event lane's and the
+  older index-fund lane's) as positions: each lot's trades, at the book's own value while open, adding up with the
+  options rows, Other and Unreconciled to the account's Profit to the cent (their fees and dividends are already in
+  Other). `compute.claude_usd` now holds the lane's verdicts (null while the lane's store cannot be read). Every older
+  block is byte for byte what it was; a site that refuses the key gets the checkpoint without it and is offered it
+  again half an hour later. Contract: `league/tests/fixtures/site_contract.md`; fixture `site_checkpoint_lane.json`;
+  tests `league/tests/test_site_lane.py` (17, both Pythons); `site_schema.js` refreshed from the site's branch.
+- **What the page draws** (the site's PR): the Agents board as Shadow, Learning, Probe and Sized with the gold "Real
+  money" line under Learning; the lots among the positions; "0 / 100 events" beside the Agents heading. Read
+  `...&window=1&lane=1`; every older read unchanged.
+
 ### Release 1019b: real money for the event lane (learning band), the lane on the House, on `rel/1019b` (unreleased; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, then `scripts/evl_migrate.py` with the desktop's timers stopped; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1` (release R2's rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **Why.** The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3: every seatable
