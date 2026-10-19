@@ -8,7 +8,7 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## The old lanes are exits only (Oct 19, 2026): `equity_money.enabled` False: `fix/equity-opens-off`, not deployed
+## The old lanes are exits only (Oct 19, 2026): `equity_money.enabled` False: `fix/equity-opens-off`, deployed 03:46Z Oct 19 (release 1019a)
 
 The owner's goal of Oct 19, 2026 and the frozen pre-registration PREREG-EVL-1, section 8 (registration
 2026-10-19T01:08:38Z): "the index ETF and options programs take no new entries from the first House release after the
@@ -68,7 +68,7 @@ is false: exits only"; no equity order with side "buy" in `eq_orders` from the d
 `equity_money.enabled` True (one owner deploy; both digests back to `5ea6f99f` / `82a9a5a4` exactly; the standing
 grant re-ratifies the same way).
 
-## Release R0 (Oct 19, 2026): the Basic data plan: `fix/basic-data-plan`, not deployed
+## Release R0 (Oct 19, 2026): the Basic data plan: `fix/basic-data-plan`, deployed 03:46Z Oct 19 (release 1019a)
 
 The owner cancelled Alpaca's Algo Trader Plus on Oct 18, 2026 (evening Pacific); the account has been on the free
 **Basic** data plan since: IEX in real time, SIP history up to 15 minutes ago, no OPRA, 200 market-data requests a

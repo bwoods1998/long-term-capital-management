@@ -1,13 +1,35 @@
 # Long-Term Capital Management
 
-**Building a swarm of AI agents that researches and trades options, trained around the clock in
-a Gym of real recorded quotes, judged by the live market.** Public page:
-[blakewoods.us/capital](https://blakewoods.us/capital/).
+**A swarm of AI agent programs that read company news the moment it is published (SEC filings, insider
+purchases, headlines) and trade US stocks on the owner's Alpaca account, each judged by a pre-registered test
+before it gets real money.** Public page: [blakewoods.us/capital](https://blakewoods.us/capital/).
 
-The project narrowed to this one goal on September 26, 2026. How it got here (a paper portfolio, chat
-desks on Kalshi and Coinbase, a league of strategy programs) is in [archive/](archive/README.md).
+The project narrowed to this lane on October 19, 2026. From September 26 to October 18 the swarm researched index
+ETF timing and options; that work found no after-cost edge, and both are closed to new programs (their open positions
+exit by their own rules). How it got there (a paper portfolio, chat desks on Kalshi and Coinbase, a league of
+strategy programs) is in [archive/](archive/README.md).
 
-## The goal
+## The goal (October 19, 2026)
+
+Make LTCM a profitable swarm of agent programs trading US stocks with real money, judged by evidence per dollar, not
+activity. The lane's page is [docs/events.md](docs/events.md).
+
+- **One lane**: event-driven single stocks, long only, held 1-5 sessions, from EDGAR 8-K filings, Form 4 insider
+  purchases and Alpaca news; US common stocks at $3 or more with at least $1M of daily dollar volume. Every program is
+  shadow-traded on every event from its registration, and model verdicts are stored once and replayed exactly.
+- **Judges**: each program is pre-registered before its first event ([docs/prereg/](docs/prereg/PREREG-EVL-1.md)) and
+  screened after at least 60 shadow events over at least 10 sessions, at a false-positive rate of at most 15%, with the
+  expected false passes stated (0.9 over the nine seatable programs registered on Oct 19).
+- **Money**: at most 10% of equity in one name, at most 100% invested, no margin; a loss budget of $400 net in any 20
+  sessions and $800 net in total; the kill switch, the daily stop and the drawdown stop are never weakened.
+- **Cost follows profit**: metered compute at most $5 a day plus half the trailing week's realized net profit, never
+  above $25 a day.
+- **Done**: at least 300 settled real-money events from at least 3 programs (50 each), realized after-fee profit, the
+  95% lower bound of the per-event after-cost return above zero, four weeks' profit at least the metered cost, fills
+  within 15 bp of the shadow prices, and 14 days without a captain. **Kill**: at 400 events, if the 95% upper bound is
+  below zero, the lane is retired and all spend stops.
+
+## The goal of September 26, 2026 (closed to new programs on October 19, 2026)
 
 A swarm of AI agents trading anything available with level-3 options on the owner's Alpaca account
 (the "Brokerage Account" on the public page), profitably: **options returns greater than every

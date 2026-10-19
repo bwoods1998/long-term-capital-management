@@ -26,13 +26,29 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261016T204140Z-99e7c39c780a` (release 1017r, main `4893d0f8`, deployed 20:41Z Oct 16
+The running House release is `20261019T034531Z-6583edd72b34` (release 1019a, main `c1c6fae7`, PR #568, deployed 03:46Z
+Oct 19, 2026, below); before it, `20261016T204140Z-99e7c39c780a` (release 1017r, main `4893d0f8`, deployed 20:41Z Oct 16
 by the captain's record in `goal-2026-10-10/NEXT-AGENT.md`; its entry below was written before it shipped and still
-reads unreleased; before it, `20261016T024305Z-e90d75adb36b`, main `d6bcf0cd`, PR #562: release 1016a, L5 and C1,
-02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
-is on branches.
+reads unreleased). The gateway is `7456e73d` (03:56Z Oct 19, gateway G1; before it `a6026308`, 20:54Z Oct 15), and the
+box's updater is on. What is built and not deployed is on branches. The owner's goal of Oct 19, 2026 funds one lane,
+the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PREREG-EVL-1.md) and
+[PREREG-EVL-2.md](docs/prereg/PREREG-EVL-2.md), its page is [docs/events.md](docs/events.md); its code runs in shadow on
+the captain's workstation from branch `feat/evl-shadow` until release R1 brings it onto the House.
 
-### Gateway G1: Claude Haiku 4.5 priced and Alpaca news readable, for the event lane (the goal of Oct 19, 2026; PREREG-EVL-1), on `feat/g1-haiku-news` (unreleased; a gateway deploy only, no House code, no money rule, no order path)
+### 03:46Z Oct 19, 2026: release 1019a (#568: R0 #567, the old lanes exits only, the cancelled subscriptions' end dates, gateway G1 #566), House `20261019T034531Z-6583edd72b34`, main `c1c6fae7`; gateway `7456e73d`
+
+- Verified 03:56Z: real money true, no failures, the options execution fingerprint `b60410ad`, the equity identity
+  `78022ca6`, the money digest `f4fc39ff`, the constitution `34bbe7a5`, the gate contract `397b22b7`; the equity lane
+  enabled false (exits only) with its 6 ETF lots held; the gateway's suite 465/465; one Claude Haiku 4.5 call through
+  the new gateway answered; Alpaca news read through it.
+- The cancelled subscriptions (`fix/subs-end`): `league/publish.py` `SUBSCRIPTIONS_ENDED_AT` stops ThetaData's and
+  Algo Trader Plus's pro-rata costs on the site from 2026-10-19T00:00:00Z; past costs stay.
+- The captain's setting `elane.forward.twins` false (03:16Z): the old ETF programs' refused buys would otherwise read as
+  twin disagreements (FW9, FW6) and mail the owner each day.
+- Rollback: `scripts/floor_box.py rollback` and the previous main `62fd070e` (release 1017r); the gateway by `wrangler
+  rollback a6026308-26f8-42c9-8aca-f173b326b5ba`.
+
+### Gateway G1: Claude Haiku 4.5 priced and Alpaca news readable, for the event lane (the goal of Oct 19, 2026; PREREG-EVL-1), on `feat/g1-haiku-news` (DEPLOYED 03:56Z Oct 19 in #568, gateway `7456e73d`; a gateway deploy only, no House code, no money rule, no order path)
 
 - `CLAUDE_MODELS` gains `claude-haiku-4-5-20251001` at the list prices ($1 input, $1.25 five-minute write, $0.10 hit,
   $5 output; no `geo` row): the model PREREG-EVL-1 pins for its verdicts on EDGAR filings and news headlines.
@@ -43,7 +59,7 @@ is on branches.
 - Tests: claude.test.mjs pins the new row, its cost and the temperature rule; caps.test.mjs pins the one news path.
   Gateway suite 465/465.
 
-### The old lanes are exits only: `equity_money.enabled` False (PREREG-EVL-1 section 8), on `fix/equity-opens-off` (unreleased; stacks on release R0, PR #567, and ships with its deploy or the one after it; one owner deploy, never 12:55-20:05Z on a trading day; THE MONEY DIGEST MOVES `5ea6f99f` -> `f4fc39ff` and the constitution `82a9a5a4` -> `34bbe7a5`, the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
+### The old lanes are exits only: `equity_money.enabled` False (PREREG-EVL-1 section 8), on `fix/equity-opens-off` (DEPLOYED 03:46Z Oct 19 in #568 with release R0; one owner deploy, never 12:55-20:05Z on a trading day; THE MONEY DIGEST MOVES `5ea6f99f` -> `f4fc39ff` and the constitution `82a9a5a4` -> `34bbe7a5`, the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **Why.** The owner's goal of Oct 19, 2026 and the frozen pre-registration PREREG-EVL-1, section 8 (registration
   2026-10-19T01:08:38Z): "the index ETF and options programs take no new entries from the first House release after
@@ -70,7 +86,7 @@ is on branches.
 - **Rollback:** `equity_money.enabled` True (one owner deploy; the digests back to `5ea6f99f` / `82a9a5a4`; the standing
   grant re-ratifies the same way).
 
-### Release R0: the Basic data plan, on `fix/basic-data-plan` (unreleased; one owner deploy, never 12:55-20:05Z on a trading day, live before Mon Oct 19 13:30Z; built on main `62fd070e`, release 1017r's code; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `5ea6f99f`, the constitution digest `82a9a5a4` and the gate contract `397b22b7` are the base's; no setting, no gateway change)
+### Release R0: the Basic data plan, on `fix/basic-data-plan` (DEPLOYED 03:46Z Oct 19 in #568; one owner deploy, never 12:55-20:05Z on a trading day, live before Mon Oct 19 13:30Z; built on main `62fd070e`, release 1017r's code; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `5ea6f99f`, the constitution digest `82a9a5a4` and the gate contract `397b22b7` are the base's; no setting, no gateway change)
 
 - **Why.** The owner cancelled Alpaca's Algo Trader Plus on Oct 18, 2026; the account is on the free Basic plan: IEX
   in real time, SIP history up to 15 minutes ago, no OPRA. Read through the gateway on Oct 19: SIP snapshots and latest
