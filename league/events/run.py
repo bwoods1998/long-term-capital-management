@@ -209,11 +209,12 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
     lo, hi = P.open_window(st, day)
     e8k = P.filings_in(st, "8-K", lo, hi)
     ins = P.ins_triggers(st, lo, hi)
+    buys = P.ins_buys(st, lo, hi)
     nlo, nhi = P.news_window(st, day)
     by_ticker = {t: cik for cik, rows in ctx.tickers_for(day).items() for t, _ in rows}
     articles = [a | {"cik": by_ticker.get(a["symbol"])} for a in P.news_in(st, nlo, nhi)]
-    elig = eligibility(ctx, day, [r["cik"] for r in e8k] + [r["cik"] for r in ins] + [a["cik"] for a in articles if a["cik"]],
-                       live=not backfill_run)
+    elig = eligibility(ctx, day, [r["cik"] for r in e8k] + [r["cik"] for r in ins] + [r["cik"] for r in buys]
+                       + [a["cik"] for a in articles if a["cik"]], live=not backfill_run)
     scores: dict[str, int | None] = {}
 
     def verdict(row: Mapping[str, Any]) -> int | None:
@@ -223,6 +224,10 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
             scores[key] = None if uni is None else (
                 news_verdict(ctx, row) if "id" in row and "accession" not in row else doc_verdict(ctx, row, uni))
         return scores[key]
+
+    def guidance(row: Mapping[str, Any]) -> str | None:
+        got = V.stored(st, f"8k:{row['accession']}", V.PROMPTS["doc"]) if row.get("accession") else None
+        return got["guidance"] if got and got["status"] == "ok" else None
 
     def needs_verdict(prog: P.Program, row: Mapping[str, Any]) -> bool:
         """An eligible event of `prog`'s family that a verdict could exist for (an 8-K with TEXT >= 200 characters, or a
@@ -259,14 +264,15 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
     for prog in P.PROGRAMS:
         if prog.entry_at != "open":
             continue
-        rows = {"ern": e8k, "8k": e8k, "ins": ins, "news": articles}.get(prog.family, [])
+        rows = {"ern": e8k, "8k": e8k, "ins": ins, "ins-buy": buys, "news": articles}.get(prog.family, [])
+        rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
         waiting = pending(prog, rows)
         if waiting:
             out["pending"][prog.id] = waiting   # decided by a later pass, once every verdict is stored
             continue
-        cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict)
+        cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, guidance=guidance)
         out[prog.id] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
-    out["events"] = {"8-K": len(e8k), "f4_triggers": len(ins), "news": len(articles),
+    out["events"] = {"8-K": len(e8k), "f4_triggers": len(ins), "f4_buys": len(buys), "news": len(articles),
                      "eligible": sum(1 for v in elig.values() if v)}
     st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
     return out
@@ -310,27 +316,75 @@ def _mark_1530(ctx: Context, symbol: str, day: dt.date) -> float | None:
 
 
 def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> dict[str, Any]:
-    """Shadow intents for C1 at session `day`'s close."""
+    """Shadow intents for every close-entry program at session `day`'s close: C1 (PREREG-EVL-1) and PREREG-EVL-2's
+    REACT-ON, REACT-READ-C1 and the day-news programs (NEWS-READ-ON, its control, NEWS-REACT-ON)."""
     st = ctx.store
     session = C.session(st, day)
     if session is None:
         return {"skipped": "no session"}
     rid = st.start_receipt(f"decide-close:{day}", now=ctx.now())
     lo, hi = P.close_window(st, day)
-    e8k = P.filings_in(st, "8-K", lo, hi)
-    elig = eligibility(ctx, day, [r["cik"] for r in e8k if "2.02" in P.items_of(r)], live=not backfill_run)
+    e8k = [r for r in P.filings_in(st, "8-K", lo, hi) if "2.02" in P.items_of(r)]
+    dlo, dhi = P.day_news_window(st, day)
+    by_ticker = {t: cik for cik, rows in ctx.tickers_for(day).items() for t, _ in rows}
+    articles = [a | {"cik": by_ticker.get(a["symbol"])} for a in P.news_in(st, dlo, dhi)
+                if S.parse_iso(a["knowable_at"]) > S.parse_iso(P.REGISTERED_AT_2)]
+    elig = eligibility(ctx, day, [r["cik"] for r in e8k] + [a["cik"] for a in articles if a["cik"]],
+                       live=not backfill_run)
+    scores: dict[str, int | None] = {}
+
+    def verdict(row: Mapping[str, Any]) -> int | None:
+        key = row.get("accession") or f"news:{row.get('id')}"
+        if key not in scores:
+            uni = elig.get(row.get("cik"))
+            scores[key] = None if uni is None else (
+                news_verdict(ctx, row) if "accession" not in row else doc_verdict(ctx, row, uni))
+        return scores[key]
 
     def reaction(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
-        base = _last_close_before(ctx, uni["symbol"], S.parse_iso(row["accepted_at"]))
+        # an 8-K's base is C1's (the last close before the acceptance time); an article's, before its knowable time
+        since = row["accepted_at"] if row.get("accession") else row["knowable_at"]
+        base = _last_close_before(ctx, uni["symbol"], S.parse_iso(since))
         mark = _mark_1530(ctx, uni["symbol"], day)
         return None if not base or mark is None else mark / base
 
-    prog = P.BY_ID["EVL-ERN-REACT-C1"]
-    cands = P.select(prog, e8k, eligible=lambda c: elig.get(c), verdict=lambda r: None, reaction=reaction)
-    out = {prog.id: P.write_intents(st, prog, day, cands, decided_at=session.close_decide,
-                                    why="backfill" if backfill_run else None),
-           "events": {"8-K": len(e8k), "eligible": sum(1 for v in elig.values() if v)}}
-    st.finish_receipt(rid, "ok", out, now=ctx.now())
+    def pending(prog: P.Program, rows: list[Mapping[str, Any]]) -> int:
+        """How many of `prog`'s eligible events still have no stored verdict (PREREG-EVL-1 section 4: READ events
+        wait), counted only for programs that read or rank by a verdict."""
+        if not (prog.reads or prog.family == "news-day"):
+            return 0
+        news = prog.family == "news-day"
+        prompt = V.PROMPTS["news" if news else "doc"]
+        missing = 0
+        for row in rows:
+            uni = elig.get(row.get("cik"))
+            if uni is None:
+                continue
+            if news and uni["symbol"] != row.get("symbol"):
+                continue
+            if not news and not (row.get("text_sha") and (row.get("text_len") or 0) >= 200):
+                continue
+            verdict(row)
+            event = f"news:{row['id']}" if news else f"8k:{row['accession']}"
+            if V.stored(st, event, prompt) is None:
+                missing += 1
+        return missing
+
+    out: dict[str, Any] = {"pending": {}}
+    why = "backfill" if backfill_run else None
+    for prog in P.PROGRAMS:
+        if prog.entry_at != "close":
+            continue
+        rows = {"ern-react": e8k, "news-day": articles, "news-react": articles}.get(prog.family, [])
+        rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
+        waiting = pending(prog, rows)
+        if waiting:
+            out["pending"][prog.id] = waiting   # decided by a later pass, once every verdict is stored
+            continue
+        cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, reaction=reaction)
+        out[prog.id] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
+    out["events"] = {"8-K": len(e8k), "day_news": len(articles), "eligible": sum(1 for v in elig.values() if v)}
+    st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
     return out
 
 

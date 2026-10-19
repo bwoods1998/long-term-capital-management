@@ -68,16 +68,24 @@ SKEW_STEP = 0.002
 SKEW_FLOOR = 0.002
 FALSE_PASS_RATE = 0.10  # expected false passes = 0.10 x every seatable version ever registered
 
-SEATABLE = ("EVL-ERN-READ-O1", "EVL-ERN-REACT-C1", "EVL-8K-READ-O1", "EVL-NEWS-READ-O1")
-RECORDS = ("EVL-ERN-READ-O3", "EVL-INS-CLUSTER-O5", "EVL-CTRL-ERN-ALL-O1", "EVL-CTRL-8K-ALL-O1", "EVL-CTRL-NEWS-ALL-O1")
+SEATABLE = ("EVL-ERN-READ-O1", "EVL-ERN-REACT-C1", "EVL-8K-READ-O1", "EVL-NEWS-READ-O1",
+            # PREREG-EVL-2 (registered 2026-10-19T03:04:07Z), judged by this screen unchanged
+            "EVL-ERN-REACT-ON", "EVL-ERN-GUIDE-O1", "EVL-INS-BUY-O1", "EVL-NEWS-READ-ON", "EVL-NEWS-REACT-ON")
+RECORDS = ("EVL-ERN-READ-O3", "EVL-INS-CLUSTER-O5", "EVL-CTRL-ERN-ALL-O1", "EVL-CTRL-8K-ALL-O1", "EVL-CTRL-NEWS-ALL-O1",
+           "EVL-INS-BUY-O5", "EVL-ERN-REACT-READ-C1", "EVL-ERN-READ3-O1", "EVL-CTRL-NEWS-DAY-ON")
 #: A READ program's control (its mean block value must exceed the control's over the same sessions).
 CONTROLS: dict[str, str] = {"EVL-ERN-READ-O1": "EVL-CTRL-ERN-ALL-O1", "EVL-8K-READ-O1": "EVL-CTRL-8K-ALL-O1",
-                            "EVL-NEWS-READ-O1": "EVL-CTRL-NEWS-ALL-O1"}
-#: Sessions held as the prereg counts them (C1, close to next close, holds one). The screen judges only the seatable
-#: programs, every one a one-session hold, so each of their blocks is one entry session.
+                            "EVL-NEWS-READ-O1": "EVL-CTRL-NEWS-ALL-O1",
+                            "EVL-ERN-GUIDE-O1": "EVL-CTRL-ERN-ALL-O1", "EVL-NEWS-READ-ON": "EVL-CTRL-NEWS-DAY-ON"}
+#: Sessions held as the prereg counts them (C1, close to next close, holds one; PREREG-EVL-2's close-to-next-open
+#: programs hold one). The screen judges only the seatable programs, every one a one-session hold, so each of their
+#: blocks is one entry session.
 HOLDS: dict[str, int] = {"EVL-ERN-READ-O1": 1, "EVL-ERN-REACT-C1": 1, "EVL-8K-READ-O1": 1, "EVL-NEWS-READ-O1": 1,
                          "EVL-ERN-READ-O3": 3, "EVL-INS-CLUSTER-O5": 5, "EVL-CTRL-ERN-ALL-O1": 1, "EVL-CTRL-8K-ALL-O1": 1,
-                         "EVL-CTRL-NEWS-ALL-O1": 1}
+                         "EVL-CTRL-NEWS-ALL-O1": 1,
+                         "EVL-ERN-REACT-ON": 1, "EVL-ERN-GUIDE-O1": 1, "EVL-INS-BUY-O1": 1, "EVL-NEWS-READ-ON": 1,
+                         "EVL-NEWS-REACT-ON": 1, "EVL-INS-BUY-O5": 5, "EVL-ERN-REACT-READ-C1": 1, "EVL-ERN-READ3-O1": 1,
+                         "EVL-CTRL-NEWS-DAY-ON": 1}
 
 
 # ----------------------------------------------------------------------------------------------------------- basics

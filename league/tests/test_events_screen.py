@@ -456,12 +456,12 @@ class ScreenJobTest(unittest.TestCase):
         self.assertEqual(SC.next_look(self.st, "EVL-ERN-READ-O3", 1, self.days[45])["k"], None)
 
     def test_expected_false_passes_count_every_seatable_version(self):
-        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 4, "expected": 0.4})
+        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 9, "expected": 0.9})
         with self.st.tx() as db:
             db.execute("INSERT INTO intents(program, version, event, symbol, decided_at, entry_day, entry_at, exit_day, "
                        "exit_at, mode, status) VALUES('EVL-8K-READ-O1', 2, 'x', 'S', 'z', '2026-10-19', 'open', "
                        "'2026-10-19', 'close', 'shadow', 'planned')")
-        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 5)
+        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 10)
 
 
 if __name__ == "__main__":
