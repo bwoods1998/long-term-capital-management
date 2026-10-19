@@ -116,7 +116,7 @@ class UniverseTest(unittest.TestCase):
             cik = url.split("CIK=")[1].split("&")[0]
             prefix = url.split("type=")[1].split("&")[0]
             calls.append((cik, prefix))
-            return feeds[(cik, prefix)]
+            return feeds.get((cik, prefix), b"<feed></feed>")
         day = dt.date(2026, 10, 19)
         self.assertTrue(U.operating(self.st, get, "0000000009", day, now=self.now))
         self.assertFalse(U.operating(self.st, get, "0000000008", day, now=self.now))  # commodity trust SIC
@@ -125,6 +125,16 @@ class UniverseTest(unittest.TestCase):
         n = len(calls)
         self.assertTrue(U.operating(self.st, get, "0000000009", day, now=self.now))   # cached
         self.assertEqual(len(calls), n)
+        # a backfilled day is judged on the filings BEFORE it: the 10-Q of Aug 1 does not make Jul 15 operating,
+        # but an older 10-K inside 15 months does
+        feeds[("0000000005", "10-")] = (b"<feed><company-info><assigned-sic>3571</assigned-sic></company-info>"
+                                        b"<entry><filing-type>10-Q</filing-type><filing-date>2026-08-01</filing-date></entry>"
+                                        b"<entry><filing-type>10-K</filing-type><filing-date>2026-03-01</filing-date></entry></feed>")
+        self.assertTrue(U.operating(self.st, get, "0000000005", dt.date(2026, 7, 15), now=self.now))
+        feeds[("0000000004", "10-")] = sec_feed("3571", "10-Q", "2026-08-01")
+        feeds[("0000000004", "20-F")] = b"<feed></feed>"
+        feeds[("0000000004", "40-F")] = b"<feed></feed>"
+        self.assertFalse(U.operating(self.st, get, "0000000004", dt.date(2026, 7, 15), now=self.now))
 
 
 if __name__ == "__main__":

@@ -120,11 +120,14 @@ def company_feed_url(cik: str, form_prefix: str) -> str:
 
 def operating(store: S.Store, get_sec: Callable[[str], bytes], cik: str, day: dt.date, *,
               now: dt.datetime | None = None) -> bool:
-    """The operating-company test for `cik` as of entry session `day` (cached in cik_info for 30 days)."""
+    """The operating-company test for `cik` as of entry session `day`: a 10-K, 10-Q, 20-F or 40-F (or amendment) filed
+    in the 15 months before `day`, and an SIC that is neither 6221 nor 6770. EDGAR's company feed is read per form
+    family (newest first, up to 10 each) and every periodic filing date is cached (cik_info.periodic_at, comma
+    separated) for 30 days, so a backfilled `day` is judged on the filings before it, not on the newest one."""
     now = now or S.utc_now()
     row = store.db.execute("SELECT * FROM cik_info WHERE cik=?", (cik,)).fetchone()
     if row is None or now - S.parse_iso(row["checked_at"]) > CIK_TTL:
-        sic, best_form, best_date = None, None, None
+        sic, dates, forms = None, set(), set()
         for prefix in ("10-", "20-F", "40-F"):
             body = get_sec(company_feed_url(cik, prefix)).decode("latin-1")
             m = re.search(r"<assigned-sic>(\d+)</assigned-sic>", body)
@@ -133,23 +136,21 @@ def operating(store: S.Store, get_sec: Callable[[str], bytes], cik: str, day: dt
                 ft = re.search(r"<filing-type>(.*?)</filing-type>", entry)
                 fd = re.search(r"<filing-date>(\d{4}-\d{2}-\d{2})</filing-date>", entry)
                 if ft and fd and ft.group(1).strip() in PERIODIC:
-                    if best_date is None or fd.group(1) > best_date:
-                        best_form, best_date = ft.group(1).strip(), fd.group(1)
-                    break
-            if best_date is not None:
-                break
+                    dates.add(fd.group(1))
+                    forms.add(ft.group(1).strip())
+            if dates:
+                break  # a domestic filer's 10-K/10-Q history (or a foreign one's): the other families add nothing
         store.db.execute("INSERT INTO cik_info(cik, sic, periodic_form, periodic_at, operating, checked_at) VALUES(?, ?, "
                          "?, ?, NULL, ?) ON CONFLICT(cik) DO UPDATE SET sic=excluded.sic, periodic_form=excluded."
                          "periodic_form, periodic_at=excluded.periodic_at, checked_at=excluded.checked_at",
-                         (cik, sic, best_form, best_date, S.iso(now)))
+                         (cik, sic, ",".join(sorted(forms)) or None, ",".join(sorted(dates)) or None, S.iso(now)))
         row = store.db.execute("SELECT * FROM cik_info WHERE cik=?", (cik,)).fetchone()
     if row["sic"] in EXCLUDED_SIC or not row["periodic_at"]:
         return False
-    periodic = dt.date.fromisoformat(row["periodic_at"])
     cutoff_month = day.month - OPERATING_MONTHS
     year, month = day.year + (cutoff_month - 1) // 12, (cutoff_month - 1) % 12 + 1
     cutoff = dt.date(year, month, min(day.day, 28))
-    return cutoff <= periodic < day
+    return any(cutoff <= dt.date.fromisoformat(d) < day for d in str(row["periodic_at"]).split(","))
 
 
 def eligible(store: S.Store, cik: str, day: dt.date, *, tickers: Mapping[str, list[tuple[str, str]]],
