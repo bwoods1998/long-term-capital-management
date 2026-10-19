@@ -48,6 +48,7 @@ class Gateway:
         self.min_interval = float(min_interval)
         self._last = 0.0
         self._sleep = sleep
+        self.last_headers: dict[str, str] = {}
 
     def token(self) -> str:
         return self._token() if callable(self._token) else self._token
@@ -69,13 +70,14 @@ class Gateway:
         req = urllib.request.Request(url, data=data, headers=sent, method=method)
         try:
             with self._open(req, timeout=self.timeout) as resp:
-                status, raw = int(resp.status), resp.read()
+                status, raw, hdrs = int(resp.status), resp.read(), dict(resp.headers.items())
         except urllib.error.HTTPError as err:
-            status, raw = int(err.code), err.read()
+            status, raw, hdrs = int(err.code), err.read(), dict(err.headers.items()) if err.headers else {}
         try:
             payload = json.loads(raw.decode("utf-8")) if raw else None
         except ValueError:
             payload = raw.decode("utf-8", "replace")
+        self.last_headers = {k.lower(): v for k, v in hdrs.items()}
         return status, payload
 
     def get_json(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
@@ -94,7 +96,10 @@ def sec_getter(transport: Any = None) -> Callable[[str], bytes]:
     from ltcm.data import CONTACT_USER_AGENT, HttpTransport
     from ltcm.data.edgar import MIN_INTERVAL
 
-    transport = transport or HttpTransport(user_agent=CONTACT_USER_AGENT, min_interval=MIN_INTERVAL)
+    # 30 MB, not the transport's 4 MB default: an 8-K's exhibit can be a large HTML file, and dropping those would make
+    # the event set depend on document size (PREREG TEXT reads only the first 16,000 characters of it).
+    transport = transport or HttpTransport(user_agent=CONTACT_USER_AGENT, min_interval=MIN_INTERVAL,
+                                           max_bytes=30 * 1024 * 1024)
 
     def get(url: str) -> bytes:
         if not url.startswith("https://www.sec.gov/"):
