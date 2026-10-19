@@ -66,7 +66,7 @@ BUY_WITNESSES = ("buy_witness", "hold_witness")
 UNFILLED_ENDS = ("expired", "canceled", "done_for_day")
 #: A working order's states once the venue holds it (A68 bis: the BUY stage passes when the venue holds exactly the
 #: shape sent, so the same opg window's real buys may go).
-WORKING = ("new", "accepted", "pending_new", "accepted_for_bidding")
+WORKING = ("new", "accepted", "accepted_for_bidding")   # (never pending_new: not yet accepted by the venue)
 #: The fields of the venue's answer that must echo the body sent, for a working order to prove its shape.
 SHAPE = ("symbol", "side", "type", "time_in_force", "qty", "limit_price")
 #: The gaps beside the tape's prints are read at most this many minutes after both stages passed (a report).
@@ -372,14 +372,10 @@ class AuctionProof:
         return row
 
     @staticmethod
-    def _holds_shape(work: Mapping[str, Any]) -> bool:
-        """A68 bis: the venue holds the order (a venue id, a working state, nothing filled) and its answer echoes every
-        field of the body sent (symbol, side, type, time in force, quantity, limit; numbers compared as decimals)."""
+    def _echoes(work: Mapping[str, Any]) -> bool:
+        """The venue's answer echoes every field of the body sent (symbol, side, type, time in force, quantity, limit;
+        numbers compared as decimals)."""
         echo, body = work.get("echo") or {}, work.get("body") or {}
-        if not work.get("id") or str(work.get("status") or "") not in WORKING or work.get("rejected") or work.get("lost"):
-            return False
-        if (_dec(work.get("filled")) or Decimal(0)) != 0:
-            return False
         for k in SHAPE:
             want, got = body.get(k), echo.get(k)
             if want is None:
@@ -392,13 +388,24 @@ class AuctionProof:
                 return False
         return True
 
-    @staticmethod
-    def _accepted(work: Mapping[str, Any] | None) -> bool:
-        """The venue took the order (a venue id; never rejected or lost) and ended it at its auction with nothing
-        filled (A68)."""
+    @classmethod
+    def _holds_shape(cls, work: Mapping[str, Any]) -> bool:
+        """A68 bis: the venue holds the order (a venue id, a working state the venue accepted, nothing filled) and its
+        answer echoes every field of the body sent."""
+        if not work.get("id") or str(work.get("status") or "") not in WORKING or work.get("rejected") or work.get("lost"):
+            return False
+        if (_dec(work.get("filled")) or Decimal(0)) != 0:
+            return False
+        return cls._echoes(work)
+
+    @classmethod
+    def _accepted(cls, work: Mapping[str, Any] | None) -> bool:
+        """The venue took the order (a venue id; never rejected or lost), its answer echoes the body sent, and the
+        VENUE ended it at its auction with nothing filled (A68): an order the proof cancelled itself proves nothing."""
         return bool(work) and bool(work.get("id")) and not work.get("rejected") and not work.get("lost") \
-            and work.get("terminal") is True and str(work.get("status") or "") in UNFILLED_ENDS \
-            and (_dec(work.get("filled")) or Decimal(0)) == 0
+            and not work.get("cancel_at") and work.get("terminal") is True \
+            and str(work.get("status") or "") in UNFILLED_ENDS \
+            and (_dec(work.get("filled")) or Decimal(0)) == 0 and cls._echoes(work)
 
     def _pass_buy(self, row: dict, today: dt.date, *, mode: str = "filled") -> None:
         if self.buy_passed():

@@ -1411,6 +1411,45 @@ class TheAuctionProof(unittest.TestCase):
         self.minute(DAY, 9, 17)
         self.assertFalse(self.proof.buy_passed(), "a working order of another shape proves nothing")
 
+    def test_an_order_the_proof_cancelled_itself_proves_nothing(self):
+        # The venue never ends the practice order at its auction: it stays working past open + SETTLE_S, the proof
+        # cancels it, and that cancel (the proof's own end) must not pass the stage.
+        real = self.paper.order_by_client_id
+
+        def stays_pending(cid):
+            o = real(cid)
+            if o is None:
+                return None
+            for x in self.paper.orders:
+                if x["client_order_id"] == cid and x.get("_cancelled"):
+                    return {**o, "status": "canceled"}
+            return {**o, "status": "pending_new"}      # never accepted by the venue: no shape pass either
+
+        def cancel(venue_id):
+            for x in self.paper.orders:
+                if x["id"] == venue_id:
+                    x["_cancelled"] = True
+            return True, ""
+
+        self.paper.order_by_client_id, self.paper.cancel = stays_pending, cancel
+        self.paper.fill = False
+        self.paper.end = "new"                          # the fake never ends it at the auction
+        self.minute(DAY, 9, 16)
+        self.minute(DAY, 9, 17)
+        self.assertFalse(self.proof.buy_passed(), "pending_new is not the venue's acceptance")
+        self.minute(DAY, 9, 36)                         # open + SETTLE_S passed: the proof cancels its own order
+        self.minute(DAY, 9, 37)
+        self.assertFalse(self.proof.buy_passed(), "an order the proof cancelled itself proves nothing")
+
+    def test_an_order_ended_unfilled_whose_echo_differs_does_not_pass(self):
+        real = self.paper.order_by_client_id
+        self.paper.order_by_client_id = lambda cid: (lambda o: None if o is None else {**o, "limit_price": "99.99"})(real(cid))
+        self.paper.fill, self.paper.end = False, "expired"
+        self.minute(DAY, 9, 16)
+        self.minute(DAY, 9, 31)
+        self.minute(DAY, 9, 32)
+        self.assertFalse(self.proof.buy_passed(), "the venue ended another order than the one sent")
+
     def test_a_rejected_open_buy_tries_again_the_next_session(self):
         self.paper.reject = True
         self.minute(DAY, 9, 16)
