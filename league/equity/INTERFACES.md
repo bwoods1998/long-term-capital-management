@@ -1559,3 +1559,26 @@ path.
   test_e4_e2e, test_equity_money, test_equity_opens_off, test_equity_design, test_equity_seats and
   test_equity_book_panel; league/tests/equity_week.py's golden ETF week normalizes R2's new columns and tables (no ETF
   order moves).
+
+## 21. The event kind's own day order count (release 1019c, Oct 2026; the captain's run under the owner's goal of Oct 19, 2026; money and book; CHANGES 7.1, 8.3, as built)
+
+- **The row** (money; league/constitution.py): `equity_money.event.max_orders_day` 150, a whole count in [0, 300] (the
+  gateway's day line's own loose end); `equity_money_problems` also holds it under `options_money.gateway.
+  max_day_orders` in force (300) and, with `order_path.max_orders_day` (60, the old lanes'), under the House-wide line,
+  `options_money.order_path.max_orders_day` (250). 150 = 2 x the sum of `max_open` over the live bands (44), at least
+  150 (nine programs at learning hold at most 72 lots: a buy and a sale each in one day, 144 orders).
+- **The reader**: league/events/book.py `Settings.max_orders_day` (`FALLBACK` 0). league/live/money.py `EquityTable`
+  (inside the options execution fingerprint) does not read it.
+- **The count** (book; league/equity/live.py): `event_orders_today(rows, day)` counts the orders of an event instance
+  (`eq_instances.lane` "event") as `orders_today` counts every lane's; `orders_today` stays every lane's together (the
+  House-wide count's equity part, league/live/real.py `house_count`). `_count_refusal(day, exit_=False,
+  event_line=s.max_orders_day)` for an event entry: the event kind's orders plus one plus `_exit_reserve(day,
+  event=True)` (one order for each event lot not yet sold that day) within the line; an old lane's entry
+  (`event_line` None): the old lanes' orders plus one plus `_exit_reserve(day, event=False)` (two for each of their
+  lots) within `order_path.max_orders_day`; an exit meets no lane's line; every order meets the House-wide count.
+- **Identities**: money `285fa7af` -> `055e5313`, constitution `fd38e4e1` -> `a8d4cbd9`; the options execution
+  fingerprint, the equity identity, the xs identity and the gate contract do not move.
+- **Rollback**: `event.enabled` False (money `1b7a5c22`, constitution `50e951c9`), or release 1019b's House.
+- **Tests**: league/tests/test_events_1019c.py `TheEventKindsOwnDayCount` (40 open-entry learning lots and a Probe
+  close entry on one day all send; each lane meets its own line and the House-wide one; the row, its bounds and its
+  digests); league/tests/equity_design.py `DIGESTS` regenerated, release 1019b's kept as `DIGESTS_R2`.

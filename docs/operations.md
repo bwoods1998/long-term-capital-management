@@ -8,6 +8,47 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019c (Oct 19-20, 2026): the fast path to a final record, the owed re-decision rule, the event kind's own day order count: `r3/lane-1019c`, not deployed
+
+Cut from `rel/1019b` (`cd3d1505`) and deployed AFTER it: an owner deploy of the House alone (league/constitution.py,
+league/events/screen.py and run.py behind the wall, league/equity/, CHANGELOG.md); no gateway change, no config change.
+
+- **A69, THE FAST PATH TO A FINAL RECORD** (league/events/screen.py `final_until`; [events.md](events.md) has the four
+  conditions): a look's close X is final for its program once the next session has had its open decision when the
+  record passes from 09:00 ET of the session before X through that decision read their feeds whole (receipts `ok`, no
+  feed `error`, the news read not cut, passes at most 15 minutes apart), no filing of X's windows the lane would fetch
+  is still listed or failed, the daily-index backfills of the days of X's windows have run and every decision of the
+  program's entry kind through X is made; otherwise A66's three sessions. The screen's waiting line says where the fast
+  path stopped and why ("the fast path (A69) stops at <day>: ..."). The record receipts the House writes already prove
+  the first condition: no new record.
+- **A66'S OWED RULE** (league/events/run.py `_scope`): a re-decision of a session outside the re-decision window (a
+  decision pending on verdicts inside the 45-day look-back, or the CLI's catchup) writes intents only for the programs
+  its last finished receipt was pending on; and no decision writes an intent under a look already written of the program
+  (or of a program it is the control of), inside the window too. The decision's receipt names the programs it left as
+  they were (`kept`, with why).
+- **THE EVENT KIND'S OWN DAY ORDER COUNT**: `equity_money.event.max_orders_day` 150 (a new money row, bounds 0-300;
+  `equity_money_problems` holds it under the gateway's day line, 300, and with the old lanes' 60 under the House-wide
+  line, 250). league/equity/live.py `_count_refusal` counts the event kind's orders (`event_orders_today`: the orders of
+  an event instance) against it and the old lanes' against their 60; an exit is never stopped by a lane's line; every
+  order still meets the House-wide count and the gateway's. A day of 40 open-entry learning lots and a Probe close entry
+  sends all 81 orders (under release 1019b's one 60 the close entry was refused).
+
+**Identities**: money `285fa7af` -> `055e5313`, constitution `fd38e4e1` -> `a8d4cbd9` (`PINNED_DIGEST`; the one row
+moved them, `league/tests/equity_design.py` `DIGESTS`, with release 1019b's kept as `DIGESTS_R2`); the standing grant
+re-ratifies at the House's start. The options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs
+identity `2f0083bc` and the gate contract `397b22b7` do not move.
+
+**Deploy** (never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight; CI green on the
+exact head; after release 1019b is live and verified, and before 12:55Z Tue Oct 20): the House from this release's head.
+Verify (read-only): the `grant` job's receipt ratified on `055e5313`; health `release.live.equity.events.enabled` true;
+the lane's next screen receipt (`screen`) `ok`; at the next open, the event buys in the 09:17-09:27 ET window and no
+"the equity day's order count" refusal on an event buy (`eq_intents.why`).
+
+**Rollback**: `equity_money.event.enabled` False (a constitution-only owner deploy, money `1b7a5c22`, constitution
+`50e951c9`: no event buy, every open event lot exits at its own auction); or the previous House release (release
+1019b's, money `285fa7af`, constitution `fd38e4e1`), which knows an event lot's exit, so it may be rolled back to with
+event lots open; a look written by the fast path stands (looks are never rewritten).
+
 ## Release 1019b (Oct 19, 2026): real money for the event lane (learning band), the lane on the House: `rel/1019b`, not deployed
 
 One release carries the event lane onto the House (release R1 WP1, **The event lane on the House**, below), PREREG-EVL-3's
@@ -47,7 +88,7 @@ execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identit
   tried again 2, 4, 8, 16 and 32 minutes after its first failure (six tries in all); `events.verdict_usd_day` $3.00 (the
   goal's cost rule until budget rule 3 ships: the box's about $1.29 a day and the verdicts inside the $5 base).
 - Left as readings that trade less (the captain records them): the equity day's order count stays 60 (entries stop at
-  about 30 open-entry lots sold the same day); a program's room counts its lots sold in the same cross; a session
+  about 30 open-entry lots sold the same day; release 1019c, above, gives the event kind its own line); a program's room counts its lots sold in the same cross; a session
   pending only on another program's verdicts is final for this one; the one-position-per-issuer rule reads the
   intents of the sessions up to the entry session only (programs.py, unchanged).
 
@@ -2895,7 +2936,8 @@ by the same offsets from the 13:00 close):
   widens no collar. A replacement goes only once the old order is terminal (A8.4), and one buy intent is one lot
   whatever a re-price finds. The book's ENTRIES stop at 60 orders a day (sends and cancels, exits' included, with
   room kept for every open lot's exit), an exit is never stopped by that count, and nothing is sent while the
-  House-wide day count would leave less than the options book's exit reserve (A8.3).
+  House-wide day count would leave less than the options book's exit reserve (A8.3). (Since release 1019c the 60 is
+  the old lanes' own: the event kind's orders count against their own line, `equity_money.event.max_orders_day`.)
 - **The send times are effective, not nominal**: 09:30:30 and 15:55:00 are the earliest moments, never the send
   times. The House's minute starts 3 s past the wall minute and the equity book runs after the options minute, so the
   open window's first send is the 09:31 minute's (09:31:03 plus the options minute) and the close window's the 15:55
@@ -3622,7 +3664,10 @@ session):
   switch, the event kind's switch, the auction proof's BUY stage and no failed SELL stage, the freezes, the program's
   band), then the day's ELIGIBLE LIST at the gateway (`POST /v1/stock/eligible`, sent when a buy is planned and again
   whenever the lane's universe of the day grew; kv `eq_event_list`), no sale of the name planned or working at its
-  auction (an exit never waits on an entry), one working order a symbol, the House-wide day count, the program's room.
+  auction (an exit never waits on an entry), one working order a symbol, THE EVENT KIND'S OWN DAY COUNT (release 1019c:
+  its orders of the day against `equity_money.event.max_orders_day`, 150, with one order kept for the exit of each event
+  lot not yet sold that day; before it, the equity book's one 60 for every lane) and the House-wide day count, the
+  program's room.
   Its size is `size_entry`'s, the one sizing function: a target of the band's
   `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at the previous close
   (`last_equity`, never above the House's sizing equity), at the limit, capped by the name's BOOK-WIDE 10%
