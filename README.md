@@ -195,8 +195,10 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
 | The gate | a sealed fork with the holdout and forward days | one Sailbox, used by the gate only |
 | The site | the public page | `personal-site`, a Cloudflare Worker |
 
-Vendors: **Alpaca** (the account, level 3; live OPRA quotes and SIP bars through Algo Trader Plus; a paper account for
-the multi-leg route), **ThetaData** Options Standard (historical option quotes), **Sail** (the boxes, and open models
+Vendors: **Alpaca** (the account, level 3; since Oct 18, 2026 the free Basic data plan: IEX quotes in real time, SIP bars
+up to 15 minutes ago, no OPRA, read under `league/data_plan.py`'s rules since release R0; Algo Trader Plus, with live
+OPRA quotes, was cancelled that day; a paper account for the multi-leg route), **ThetaData** Options Standard
+(historical option quotes; cancelled by the owner on Oct 18, 2026), **Sail** (the boxes, and open models
 for the researchers and the roles' fallbacks: DeepSeek, Kimi), **Anthropic** through the gateway (Claude answers first
 for the roles the live settings give it. Since Sept 30's spend cut those are the gate's program review (Sonnet 5.5,
 `claude-sonnet-5-5`), its audit (Opus 5.5) and the strategist. The architect's Claude line is $0, so its births run on

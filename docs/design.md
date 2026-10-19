@@ -169,16 +169,20 @@ One account at Alpaca, approved for level 3. The facts the design is built on (v
 
 ## The data
 
-- **ThetaData Options Standard**: every OPRA NBBO since 2016 at any interval (one minute for
-  multi-day requests), trades with the NBBO at each trade, historical implied vol and first-order
-  greeks, open interest, EOD, for equity and index options. Its greeks history carries the
-  underlying's price every minute; the index and stock price endpoints are separate subscriptions
-  the project does not hold. Four concurrent requests and **one session per account**. The license
-  is personal and non-professional and forbids publishing the data or anything derived from it.
-  The project's store holds the core five from 2020 and the added names from 2022; a longer-history
-  fetch (#413) is in progress, and which roots the vendor serves from which day stays private.
+- **ThetaData Options Standard** (cancelled by the owner on Oct 18, 2026): every OPRA NBBO since
+  2016 at any interval (one minute for multi-day requests), trades with the NBBO at each trade,
+  historical implied vol and first-order greeks, open interest, EOD, for equity and index options.
+  Its greeks history carries the underlying's price every minute; the index and stock price
+  endpoints are separate subscriptions the project does not hold. Four concurrent requests and **one
+  session per account**. The license is personal and non-professional and forbids publishing the
+  data or anything derived from it. The project's store holds the core five from 2020 and the added
+  names from 2022; a longer-history fetch (#413) is in progress, and which roots the vendor serves
+  from which day stays private.
 - **Alpaca Algo Trader Plus**: live OPRA NBBO (up to 1,000 symbols on one WebSocket), chain
   snapshots with greeks, SIP stock bars and quotes since 2016. No historical option quotes.
+  Cancelled by the owner on Oct 18, 2026: the account is on Alpaca's free Basic plan since (IEX in
+  real time, SIP history up to 15 minutes ago, no OPRA; the House's reads follow
+  `league/data_plan.py`, release R0 in [operations.md](operations.md)).
 - **The SPX level** for XSP and SPXW comes from put-call parity on the at-the-money options, the same
   way in the Gym and live (ThetaData's underlying price is the check).
 
