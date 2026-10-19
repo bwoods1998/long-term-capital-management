@@ -20,7 +20,9 @@ once an hour per task, so the House's repeat rule never turns it into an error),
    bar); live within 10 minutes of its time, a backfill after (the judge's rule: league/events/run.py `live_run`); then
    a missed one, then a pending
    one again (the hourly re-decision of the last three sessions, as the desktop's catchup, waits for the record pass);
-2. VERDICTS for a decision within 30 minutes (today's open or close), or for a decision that is pending;
+2. VERDICTS for a decision within 30 minutes (today's open or close), or for a decision that is pending (a close
+   decision waiting on verdicts only its session's OPEN decision asks, PREREG-EVL-4's PM rows, has those asked by the
+   open decision's own code; a wait no call of the pass could answer backs off like one the gateway refused);
 3. the RECORD pass every 2 minutes: EDGAR's current feeds and the news, at most 90 s, resumable (a new filing is stored
    `listed` at once and fetched in order, so a pass cut short loses nothing), then today's verdicts with the time
    left (its open decision's, then its close decision's: PREREG-EVL-2's day news is read through the session);
@@ -789,13 +791,22 @@ class EventLane:
 
     def _verdicts(self, ctx: LaneContext, kind: str, day: dt.date, live: bool) -> dict[str, Any]:
         """Every verdict the `kind` decision of session `day` will read, asked now: league.events.run's own decision
-        code with `ask_only` (no intent, no receipt), so what is stored is what the decision reads."""
+        code with `ask_only` (no intent, no receipt), so what is stored is what the decision reads. A close decision
+        that waits on verdicts only the session's OPEN decision asks (PREREG-EVL-4's EVL-NEWSPM-READ-ON and its control
+        read EVL-NEWS-READ-O1's PROMPT-NEWS verdicts and ask none of their own: `run.waits_on_open`) has that open
+        decision's own asks made now (`decide_open` with `ask_only`), then is counted again: such a wait is never left
+        to the hourly re-decision."""
         key = (kind, day)
         before = self._stored_verdicts(ctx.store)
         gw = ctx.gw
         decide = R.decide_open if kind == "open" else R.decide_close
         try:
             out = decide(ctx, day, backfill_run=not live, ask_only=True)
+            if kind == "close" and R.waits_on_open(out):
+                session = C.session(ctx.store, day)
+                opened = R.live_run(session.open_decide, ctx.now()) if session is not None else False
+                R.decide_open(ctx, day, backfill_run=not opened, ask_only=True)
+                out = decide(ctx, day, backfill_run=not live, ask_only=True)
         except LaneDeadline:
             had = self._looks.get(key)
             self._looks[key] = VerdictLook(self.now(), max(1, had.missing if had else 1), False)
@@ -818,12 +829,15 @@ class EventLane:
 
     def _look(self, key: tuple[str, dt.date], missing: int, stored: int, gw: LaneGateway) -> bool:
         """Note what a decision's verdicts look like now; True (stalled) when some are missing, none was stored and
-        the calls got no answer (refused, failed, the House paused, the day's line) rather than running out of time:
-        then neither the verdict task nor the pending decision asks again for VERDICT_BACKOFF."""
+        the calls got no answer (refused, failed, the House paused, the day's line) rather than running out of time,
+        or no call was made at all (every missing verdict is one this pass does not ask: PREREG-EVL-4's PM rows wait on
+        the open decision's asks), so the same pass would only find them missing again: then neither the verdict task
+        nor the pending decision asks again for VERDICT_BACKOFF."""
         cut_time = gw.counts.get("cut_deadline", 0) + gw.counts.get("cut_closed", 0)
         no_answer = (gw.counts.get("refused", 0) + gw.counts.get("failed", 0) + gw.counts.get("cut_paused", 0)
                      + gw.counts.get("cut_cap", 0))
-        stalled = missing > 0 and stored == 0 and cut_time == 0 and no_answer > 0
+        asked = gw.counts.get("asked", 0) + sum(n for k, n in gw.counts.items() if str(k).startswith("cut_"))
+        stalled = missing > 0 and stored == 0 and cut_time == 0 and (no_answer > 0 or asked == 0)
         self._looks[key] = VerdictLook(self.now(), missing, stalled)
         return stalled
 

@@ -5129,8 +5129,15 @@ class EquityBook:
                                                              "created_at": now}, "day, at")
                 out["event_decide"] = f"{at} {day}: not decided ({unreadable[:160]}); decided again next minute"
                 return
+            lost: list[tuple[str, str]] = []
+
+            def skip(family: str, pick: Any) -> str | None:
+                why = gate(insts[family][0].band, pick)
+                if why == "sale":
+                    lost.append((family, str(pick.symbol).upper()))
+                return why
             given, passed = adapter.allocate(wanted, rooms, {family: insts[family][0].band for family in wanted},
-                                             (lambda family, pick: gate(insts[family][0].band, pick)) if gate else None)
+                                             skip if gate else None)
             symbols = sorted({p.symbol for picks in given.values() for p in picks})
             sigmas = self._event_sigmas(symbols, em.day, s) if symbols else {}
             for family, picks in given.items():     # (ROOM's order: the sends go in it)
@@ -5140,6 +5147,9 @@ class EquityBook:
                 summary["programs"][family]["planned"] = len(picks)
                 if passed.get(family):
                     summary["programs"][family]["skipped"] = dict(passed[family])
+            taken = self._event_sale_takers(day, at, lost, adapter) if lost else {}
+            if taken:
+                summary["sale_to_later"] = taken
         with self.state.transaction():
             for inst, program, pick in planned:
                 self._event_plan_buy(inst, program, pick, em, at, s, adapter, sigmas.get(pick.symbol), now)
@@ -5154,7 +5164,9 @@ class EquityBook:
             # the lane's universe grew since: with every program in shadow the gateway is never asked.)
             self._event_publish(em.day, adapter, lane, out)
         self.record("equity.event_decide", {"day": day, "at": at, "exits": exits, "buys": len(planned),
-                                            "programs": {k: v.get("planned", 0) for k, v in summary["programs"].items()}})
+                                            "programs": {k: v.get("planned", 0) for k, v in summary["programs"].items()},
+                                            **({"sale_to_later": summary["sale_to_later"]}
+                                               if summary.get("sale_to_later") else {})})
 
     def _event_plan_buy(self, inst: Instance, program: Any, pick: Any, em: S.EventMoments, at: str, s: Any,
                         adapter: Any, sd: float | None, now: float) -> None:
@@ -5273,6 +5285,26 @@ class EquityBook:
                 return "one_share"
             return None
         return skip, ""
+
+    def _event_sale_takers(self, day: str, at: str, lost: Sequence[tuple[str, str]], adapter: Any
+                           ) -> dict[str, dict[str, int]]:
+        """THE CASES PREREG-EVL-4 SECTION 1.3 STATES AND COUNTS (it never prevents them): of the picks the sale gate
+        skipped at this auction (`lost`: (program, symbol)), those whose name a LATER row's lot sells there, in the
+        tables' order (`book.order_of`: an earlier row's real-money buy lost to a later row's sale, for instance
+        EVL-8K-READ-O1 at the next open after an overnight row of PREREG-EVL-4 bought the name at the close): {skipped
+        program: {selling program: n}}, in the decision's summary (`sale_to_later`) and its ledger record."""
+        sellers: dict[str, set[str]] = {}
+        for r in self.state.rows("SELECT DISTINCT e.symbol, e.program FROM eq_event_intents e JOIN eq_intents i ON "
+                                 "i.iid=e.iid WHERE e.side='sell' AND e.day=? AND e.at=? AND i.status IN ('planned', "
+                                 "'sent')", (day, at)):
+            sellers.setdefault(str(r["symbol"]).upper(), set()).add(str(r["program"]))
+        out: dict[str, dict[str, int]] = {}
+        for family, symbol in lost:
+            for seller in sorted(sellers.get(symbol, ())):
+                if seller != family and adapter.order_of(seller) > adapter.order_of(family):
+                    row = out.setdefault(family, {})
+                    row[seller] = row.get(seller, 0) + 1
+        return out
 
     def _event_sales_at(self, day: str, at: str, symbol: str | None = None) -> set[str]:
         """The symbols an event lot's SALE is planned or working for at this auction (its intent not finished)."""
