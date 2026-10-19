@@ -6,7 +6,8 @@ scheduled time (filings by knowable time, the universe from the sessions before 
 last daily close before the acceptance). Verdicts are asked only for eligible events of the reading programs.
 A decision made again (release 1019c, `_scope`): outside the House's re-decision window it writes intents only for the
 programs its last receipt was pending on (A66, owed), and never for a program whose own look already stands over the
-session (A69); the summary's `kept` names each program it left as it was.
+session, nor for a control under a look that read its record (A69); the summary's `kept` names each program it left as
+it was.
 """
 
 from __future__ import annotations

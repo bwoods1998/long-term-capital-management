@@ -39,7 +39,7 @@ until release 1019b (below) brings it onto the House.
 ### Release 1019c: the fast path to a final record (A69), the owed re-decision rule (A66), the event kind's own day order count, on `r3/lane-1019c` (unreleased; cut from `rel/1019b` `cd3d1505` and deployed after it, overnight Oct 19-20, before 12:55Z Tue; an owner deploy of the House alone, no gateway change; never 12:55-20:05Z on a trading day, never with an order in flight; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the one new row), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **Why.** The owner's goal of Oct 19, 2026 (speed is settled events and iterations, never calendar time) and the
-  captain's amendments A66 and A69 (CAPTAIN-AMENDMENTS.md): a look waited three sessions for late data even when the
+  captain's amendments A66 and A69: a look waited three sessions for late data even when the
   record proved there was none, a re-decision outside the window could still write a late event under a look already
   written (owed by A66), and the equity book's one day count of 60 stopped the event kind's entries at about 30
   open-entry lots sold the same day.

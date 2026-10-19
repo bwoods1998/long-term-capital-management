@@ -1560,7 +1560,7 @@ path.
   test_equity_book_panel; league/tests/equity_week.py's golden ETF week normalizes R2's new columns and tables (no ETF
   order moves).
 
-## 21. The event kind's own day order count (release 1019c, Oct 2026; the captain's run under the owner's goal of Oct 19, 2026; money and book; CHANGES 7.1, 8.3, as built)
+## 21. The event kind's own day order count (release 1019c, Oct 2026; under the owner's goal of Oct 19, 2026; money and book, as built)
 
 - **The row** (money; league/constitution.py): `equity_money.event.max_orders_day` 150, a whole count in [0, 300] (the
   gateway's day line's own loose end); `equity_money_problems` also holds it under `options_money.gateway.
