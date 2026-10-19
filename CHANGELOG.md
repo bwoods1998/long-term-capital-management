@@ -35,6 +35,17 @@ the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PR
 [PREREG-EVL-2.md](docs/prereg/PREREG-EVL-2.md), its page is [docs/events.md](docs/events.md); its code runs in shadow on
 the captain's workstation from branch `feat/evl-shadow` until release R1 brings it onto the House.
 
+### The event lane's version 2 (PREREG-EVL-3): learning bands from birth, looks counted in events, on `feat/evl-v2` (not deployed; ships with the House release that carries the event lane's real-money path)
+
+- **Why.** The owner's goal of 05:15Z Oct 19, 2026 (no waiting periods; every seatable program trades real money at
+  learning size from its first event) and the frozen PREREG-EVL-3 (registered 05:23:06Z).
+- **What.** `league/events/programs.py` version 2 rows of the nine seatable programs (`SEATING`; version 1 never seats;
+  lookups by (id, version)); `league/events/screen.py` version 2 looks by settled events with the 40-issuer and
+  8-block minimums, merged looks, alpha 0.018, the retirement test; `league/events/bands.py` (new: the bands, their
+  history, the House's real fills, promotion, demotion, Sized, retirement); the store's `bands`, `band_history` and
+  `real_fills` tables (additive); the report shows each version's band and next look; the CLI's `bands`.
+- **Tests.** league/tests/test_events_v2.py (7) and the lane suite (105 on 3.14 and 3.11).
+
 ### The event lane (EVL), shadow, on `feat/evl-shadow` (not on the House; runs on the captain's workstation until release R1)
 
 - **Why.** The owner's goal of Oct 19, 2026: one event-driven single-stock lane, judged by pre-registered screens.

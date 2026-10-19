@@ -179,6 +179,11 @@ def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str], *, live: bool =
     return out
 
 
+def _key(prog: P.Program) -> str:
+    """A decision summary's key: the id for version 1 (unchanged), `id@vN` for a later version (PREREG-EVL-3)."""
+    return prog.id if prog.version == 1 else f"{prog.id}@v{prog.version}"
+
+
 # ---------------------------------------------------------------------------------------------------- verdicts
 def doc_verdict(ctx: Context, row: Mapping[str, Any], uni: Mapping[str, Any]) -> int | None:
     st = ctx.store
@@ -268,10 +273,10 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
         waiting = pending(prog, rows)
         if waiting:
-            out["pending"][prog.id] = waiting   # decided by a later pass, once every verdict is stored
+            out["pending"][_key(prog)] = waiting   # decided by a later pass, once every verdict is stored
             continue
         cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, guidance=guidance)
-        out[prog.id] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
+        out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
     out["events"] = {"8-K": len(e8k), "f4_triggers": len(ins), "f4_buys": len(buys), "news": len(articles),
                      "eligible": sum(1 for v in elig.values() if v)}
     st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
@@ -379,10 +384,10 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> d
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
         waiting = pending(prog, rows)
         if waiting:
-            out["pending"][prog.id] = waiting   # decided by a later pass, once every verdict is stored
+            out["pending"][_key(prog)] = waiting   # decided by a later pass, once every verdict is stored
             continue
         cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, reaction=reaction)
-        out[prog.id] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
+        out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
     out["events"] = {"8-K": len(e8k), "day_news": len(articles), "eligible": sum(1 for v in elig.values() if v)}
     st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
     return out

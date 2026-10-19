@@ -30,6 +30,8 @@ from . import store as S
 REGISTERED_AT: str | None = "2026-10-19T01:08:38Z"  # A61: tag prereg-evl-1, commit 3d6194dd
 #: PREREG-EVL-2's registration time (its second wave counts only events knowable after it).
 REGISTERED_AT_2: str = "2026-10-19T03:04:07Z"  # A63: tag prereg-evl-2, commit 93cd4877
+#: PREREG-EVL-3's registration time: version 2 of the nine seatable programs, real money at learning size from birth.
+REGISTERED_AT_3: str = "2026-10-19T05:23:06Z"  # A64: tag prereg-evl-3, commit 6d3fa8d1
 
 ERN_ITEMS = frozenset({"2.02"})
 OTHER_ITEMS = frozenset({"1.01", "2.01", "7.01", "8.01"})
@@ -65,7 +67,15 @@ class Program:
 
     @property
     def registered_at(self) -> dt.datetime:
-        return registered() if self.prereg == 1 else S.parse_iso(REGISTERED_AT_2)
+        if self.prereg == 1:
+            return registered()
+        return S.parse_iso(REGISTERED_AT_2 if self.prereg == 2 else REGISTERED_AT_3)
+
+    @property
+    def can_seat(self) -> bool:
+        """Whether this version may ever trade real money: PREREG-EVL-3 section 1, version 2 of the nine seatable
+        programs (prereg 3) only. Version 1 of every program stays a shadow record with its own screen, never seated."""
+        return self.seatable and self.prereg >= 3
 
 
 PROGRAMS = (
@@ -89,7 +99,15 @@ PROGRAMS = (
     Program("EVL-ERN-READ3-O1", 1, False, "ern", "open", 1, True, rule="top", prereg=2),           # a record
     Program("EVL-CTRL-NEWS-DAY-ON", 1, False, "news-day", "close", 1, False, exit_at="open", rule="none", prereg=2),
 )
-BY_ID = {p.id: p for p in PROGRAMS}
+#: PREREG-EVL-3 (registered 2026-10-19T05:23:06Z): version 2 of every seatable program, the same events and rules as
+#: its version 1 (PREREG-EVL-2's limit at entry for all nine: prereg >= 2), real money at learning size from birth.
+PROGRAMS = PROGRAMS + tuple(dataclasses.replace(p, version=2, prereg=3) for p in PROGRAMS if p.seatable)
+#: Every program version by (id, version).
+BY_KEY = {(p.id, p.version): p for p in PROGRAMS}
+#: Version 1 of every program by id (the records and controls exist at version 1 only).
+BY_ID = {p.id: p for p in PROGRAMS if p.version == 1}
+#: The versions that may ever trade real money (PREREG-EVL-3 section 1).
+SEATING = tuple(p for p in PROGRAMS if p.can_seat)
 
 
 def registered() -> dt.datetime:
@@ -389,6 +407,6 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
     return out
 
 
-__all__ = ["PROGRAMS", "BY_ID", "Program", "Candidate", "REGISTERED_AT", "REGISTERED_AT_2", "registered", "open_window",
+__all__ = ["PROGRAMS", "BY_ID", "BY_KEY", "SEATING", "REGISTERED_AT_3", "Program", "Candidate", "REGISTERED_AT", "REGISTERED_AT_2", "registered", "open_window",
            "close_window", "news_window", "day_news_window", "filings_in", "news_in", "ins_triggers", "ins_buys", "select",
            "write_intents", "items_of", "NEWS_FAMILIES"]
