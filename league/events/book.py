@@ -24,10 +24,10 @@ docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
   every such event.
 - THE BANDS are the lane's, read by the lane's own reader (league/events/bands.py `bands(store)` over its store's
   `bands` table; the lane computes promotion at a passed look, Sized, demotion and retirement from its looks and the
-  House's real fills, `write_fills` through `bands.record_fill`): LEARNING from birth (a version 2 program with no row
+  House's real fills, `write_fills` through `bands.record_fill`): LEARNING from birth (a seating version with no row
   is at learning), PROBE, SIZED, RETIRED (no real money). The book reads them at each session's first decision; a store
   whose band table cannot be read trades nothing that decision (fail closed), one with no band table yet is every
-  version 2 program at learning.
+  seating version at learning.
 - A REAL-MONEY DECISION (PREREG-EVL-1 section 3) is the shadow rule over the same events and windows, which may in
   addition use only events STORED, and verdicts ANSWERED, before its decision time (`decided_at`, 09:15 ET or the
   close - 14 minutes): a filing or an article the recorder stored later, or a verdict answered later, is not read. It
@@ -61,7 +61,7 @@ docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
   prints) each session after; and once `ZERO_AFTER` sessions after the planned exit have closed with the lot still
   held, the loss budget counts it AT 0 (its whole value as lost) while its day sale goes on: every rung alarmed.
 
-THE TABLES (`SCHEMA`, created in live.sqlite beside E1's by the book): `eq_event_programs`, the band of each version 2
+THE TABLES (`SCHEMA`, created in live.sqlite beside E1's by the book): `eq_event_programs`, the band of each seating
 program as the book last read it from the lane (with since and why), one row each; `eq_event_intents`, ONE ROW PER
 EVENT INTENT of the book (`eq_intents.iid`): which program and event, its band, the auction (`tif` opg | cls) and the
 order type, the symbol and issuer, the rank, the previous close and the limit, sigma and the weight, the exit plan of a
@@ -337,7 +337,7 @@ def universe_rows(lane: Lane, day: dt.date) -> dict[str, dict[str, Any]]:
 # ----------------------------------------------------------------------------------------------------------- the bands
 @dataclasses.dataclass(frozen=True)
 class Band:
-    """One version 2 program's band as the lane's table says it (PREREG-EVL-3 section 2): `band` (one of `BANDS`),
+    """One seating version's band as the lane's table says it (PREREG-EVL-3 section 2): `band` (one of `BANDS`),
     `since` (the lane's), why."""
 
     program: str
@@ -355,7 +355,7 @@ def lane_bands(lane: Lane | None) -> dict[tuple[str, int], dict[str, Any]] | Non
     """THE LANE'S BANDS AS THE LANE READS THEM: league/events/bands.py `bands(store)` ({(program, version): band} for
     every seating version, no row = learning), each with its row's since and why beside ({band, since, why, row}, `row`
     whether the lane's table holds one); {} when there is no lane or its store holds no band table yet (a store from
-    before PREREG-EVL-3: every version 2 program is then at learning); None when the table is there and cannot be read
+    before PREREG-EVL-3: every seating version is then at learning); None when the table is there and cannot be read
     (no real event money this decision)."""
     if lane is None:
         return {}
@@ -376,7 +376,7 @@ def lane_bands(lane: Lane | None) -> dict[tuple[str, int], dict[str, Any]] | Non
 
 
 def bands(lane: Lane | None, s: Settings | None = None) -> list[Band] | None:
-    """Every version 2 program's band at a decision, in the tables' order (`lane_bands`; a program with no row is at
+    """Every seating version's band at a decision, in the tables' order (`lane_bands`; a program with no row is at
     learning, `DEFAULT_BAND`; a band the rules do not name trades nothing, read as retired and said so). None when the
     lane's band table cannot be read."""
     table = lane_bands(lane)

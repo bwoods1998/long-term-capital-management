@@ -1185,7 +1185,7 @@ class EquityBook:
                 "freeze": self.state.get("eq_freeze"), "seats": self.seats(), "events": self._event_health()}
 
     def _event_health(self) -> dict[str, Any] | None:
-        """THE EVENT KIND'S LINE (release R2): its switch and the bands' target shares, each version 2 program's band as
+        """THE EVENT KIND'S LINE (release R2): its switch and the bands' target shares, each seating version's band as
         the book last read it from the lane (`eq_event_programs`),
         the auction paper proof's stages, the eligible list at the gateway, the last decisions (counts only). None when
         the event adapter cannot be imported."""
@@ -4989,7 +4989,7 @@ class EquityBook:
 
     # ---------------------------------------------------------------- the band sync
     def _event_sync(self, now: float, day: dt.date, s: Any, adapter: Any, lane: Any) -> list[Any] | None:
-        """THE EVENT KIND'S BAND SYNC, once a session, at its first decision: each version 2 program's band AS THE LANE'S
+        """THE EVENT KIND'S BAND SYNC, once a session, at its first decision: each seating version's band AS THE LANE'S
         STORE SAYS IT (league/events/book.py `bands`: learning from birth, Probe, Sized, retired; PREREG-EVL-3 section
         2) written to `eq_event_programs`, and its instance (`<program>@<version>:r`, kind "event", lane "event") made,
         updated or retired. A program that leaves the live bands decides no more; its open lots exit at their own
