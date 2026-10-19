@@ -371,21 +371,31 @@ def _settle(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetime
 
 def settle(store: S.Store, gw: Any, *, now: dt.datetime | None = None) -> dict[str, Any]:
     """The score job: every due intent settled, skipped (no entry print) or left waiting. Returns counts and the
-    failures (an intent's failure is its own; the job goes on)."""
+    failures (an intent's failure is its own; the job goes on). Writes a `score` receipt (release R1: the House's stall
+    job reads it, `evl_score`): `ok` unless every due intent failed (`failed`), its summary the counts alone."""
     now = now or S.utc_now()
+    rid = store.start_receipt("score", now=now)
     summary: dict[str, Any] = {"due": 0, "settled": 0, "skipped": 0, "waiting": 0, "errors": [], "waits": []}
-    for intent in due(store, now):
-        summary["due"] += 1
-        try:
-            status = settle_one(store, gw, intent, now=now)
-        except Exception as exc:  # noqa: BLE001 - one intent's failure is reported, never the job's
-            summary["errors"].append(f"{intent['program']}:{intent['event']}: {type(exc).__name__}: {str(exc)[:160]}")
-            summary["waiting"] += 1
-            continue
-        key = status.split(":")[0]
-        summary[key] += 1
-        if key == "waiting":
-            summary["waits"].append(f"{intent['program']}:{intent['event']}: {status[len('waiting:'):]}")
+    try:
+        for intent in due(store, now):
+            summary["due"] += 1
+            try:
+                status = settle_one(store, gw, intent, now=now)
+            except Exception as exc:  # noqa: BLE001 - one intent's failure is reported, never the job's
+                summary["errors"].append(f"{intent['program']}:{intent['event']}: {type(exc).__name__}: {str(exc)[:160]}")
+                summary["waiting"] += 1
+                continue
+            key = status.split(":")[0]
+            summary[key] += 1
+            if key == "waiting":
+                summary["waits"].append(f"{intent['program']}:{intent['event']}: {status[len('waiting:'):]}")
+    except BaseException as exc:
+        store.finish_receipt(rid, "failed", {"error": type(exc).__name__}, now=now)
+        raise
+    failed = bool(summary["errors"]) and len(summary["errors"]) >= summary["due"]
+    store.finish_receipt(rid, "failed" if failed else "ok",
+                         {k: summary[k] for k in ("due", "settled", "skipped", "waiting")} | {"errors": len(summary["errors"])},
+                         now=now)
     return summary
 
 

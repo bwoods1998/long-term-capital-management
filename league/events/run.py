@@ -1,6 +1,9 @@
 """The event lane's passes: record, backfill, decide at the open, decide at the close (shadow).
 
-Each pass writes a receipt. Decisions are recorded at their SCHEDULED time (09:15 ET open, close - 14 min) whether
+Each pass writes a receipt (the House's stall job reads them: league/ops/evl_health.py): `record`, `backfill`,
+`decide-open:<day>` and `decide-close:<day>` (status `ok`, or `pending` while a reading program waits for a verdict; the
+summary carries `verdicts: {needed, answered}`, the distinct verdicts the decision needs and how many are stored).
+Decisions are recorded at their SCHEDULED time (09:15 ET open, close - 14 min) whether
 they ran live or as a backfill (`why` says which): a backfilled decision uses only data that was knowable at the
 scheduled time (filings by knowable time, the universe from the sessions before D, C1's 15:30 minute bar and the
 last daily close before the acceptance). Verdicts are asked only for eligible events of the reading programs.
@@ -239,6 +242,9 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
             return False
         return bool(row.get("text_sha")) and (row.get("text_len") or 0) >= 200
 
+    needed: set[tuple[str, str]] = set()      # (event, prompt sha): the verdicts this decision needs, every program's
+    unanswered: set[tuple[str, str]] = set()  # those with no stored answer (PREREG section 4 stores answers only)
+
     def pending(prog: P.Program, rows: list[Mapping[str, Any]]) -> int:
         """How many of `prog`'s eligible events still have no stored verdict (PREREG section 4: READ events wait)."""
         if not (prog.reads or prog.family == "news"):
@@ -250,8 +256,10 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
                 continue
             verdict(row)
             event = f"news:{row['id']}" if prog.family == "news" else f"8k:{row['accession']}"
+            needed.add((event, prompt.sha))
             if V.stored(st, event, prompt) is None:
                 missing += 1
+                unanswered.add((event, prompt.sha))
         return missing
 
     out: dict[str, Any] = {"pending": {}}
@@ -268,6 +276,9 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
         out[prog.id] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
     out["events"] = {"8-K": len(e8k), "f4_triggers": len(ins), "news": len(articles),
                      "eligible": sum(1 for v in elig.values() if v)}
+    # THE VERDICT TALLY (release R1, the stall job's `evl_verdicts`): the distinct verdicts this decision needed (an
+    # eligible READ event of any program, each asked once whatever programs read it) and how many have an answer stored.
+    out["verdicts"] = {"needed": len(needed), "answered": len(needed - unanswered)}
     st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
     return out
 
@@ -329,7 +340,9 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> d
     cands = P.select(prog, e8k, eligible=lambda c: elig.get(c), verdict=lambda r: None, reaction=reaction)
     out = {prog.id: P.write_intents(st, prog, day, cands, decided_at=session.close_decide,
                                     why="backfill" if backfill_run else None),
-           "events": {"8-K": len(e8k), "eligible": sum(1 for v in elig.values() if v)}}
+           "events": {"8-K": len(e8k), "eligible": sum(1 for v in elig.values() if v)},
+           # No close-entry program of PREREG-EVL-1 reads a verdict; one that does tallies its own as decide_open does.
+           "verdicts": {"needed": 0, "answered": 0}}
     st.finish_receipt(rid, "ok", out, now=ctx.now())
     return out
 

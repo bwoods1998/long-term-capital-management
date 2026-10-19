@@ -308,6 +308,25 @@ class ScoreTest(unittest.TestCase):
         self.assertEqual(out["waiting"], 1)
         self.assertIn("GatewayError", out["errors"][0])
         self.assertEqual(self.status(ev)["status"], "planned")
+        # Release R1: every pass writes a `score` receipt (the House's stall job reads it, `evl_score`), counts only;
+        # a pass where every due intent failed is `failed`.
+        row = self.st.db.execute("SELECT status, summary FROM receipts WHERE job='score' ORDER BY id DESC").fetchone()
+        self.assertEqual((row["status"], json.loads(row["summary"])),
+                         ("failed", {"due": 1, "settled": 0, "skipped": 0, "waiting": 1, "errors": 1}))
+
+    def test_every_pass_writes_its_score_receipt(self):
+        self.equity(dt.date(2026, 10, 19), 20000.0)
+        self.tape(self.d0, "XYZ", "N", 50.0, 51.0)
+        self.spy(self.d0)
+        self.intent()
+        SCO.settle(self.st, self.gw, now=self.after(self.d0))
+        SCO.settle(self.st, self.gw, now=self.after(self.d0, 60))  # nothing left due: still a pass, still ok
+        rows = [dict(r) for r in self.st.db.execute("SELECT job, started_at, finished_at, status, summary FROM receipts "
+                                                     "WHERE job='score' ORDER BY id")]
+        self.assertEqual([(r["status"], json.loads(r["summary"])["due"], json.loads(r["summary"])["settled"]) for r in rows],
+                         [("ok", 1, 1), ("ok", 0, 0)])
+        self.assertEqual(rows[0]["started_at"], S.iso(self.after(self.d0)))
+        self.assertTrue(all(r["finished_at"] for r in rows))
 
     def test_an_intent_without_its_universe_row_is_skipped(self):
         ev = self.intent(universe=False)
