@@ -52,7 +52,8 @@ is on branches.
   session's needed verdicts unanswered), `evl_score` (a session not scored by 23:00 ET), each from the lane's receipts
   in `<state>/events/events.sqlite`, judged only while `config.json` `events.enabled` is true, INFO; ops.json
   `stall.research` false marks the old lanes' research causes and the direction lane's research alarms (A1, A2, A3,
-  A6, A7) not judged (no pause file); `underspend` is never judged under rule 3; THE DAILY ONE-SCREEN REPORT rides the
+  A6, A7) not judged (no pause file), and pre-open check 5 (`league/ops/preopen.py`) says the Gym off and a population
+  under its floor instead of failing on them; `underspend` is never judged under rule 3; THE DAILY ONE-SCREEN REPORT rides the
   stall notice once a session day from 22:00 ET (counts and figures only; alone when nothing stands; the receipt and
   stall.json carry its day, never a figure).
 - **The gateway** (`gateway/lib/email.mjs`): `STALL_CAUSES` gains the four; `stallReport` composes the report (the
@@ -66,7 +67,7 @@ is on branches.
   contract fixtures are unchanged by it (their snapshot predates the end).
 - **Tests.** league/tests/test_evl_health.py (new, 20), test_ops_budget (CostRule and the new readers; the unchanged
   runway mechanics at rule 2's shares), test_ops_stall (rule 2's underspend kept for a rollback), test_events_run and
-  test_events_score (the receipts), gateway stall-notice (13; suite 469/469), the shared fixture
+  test_events_score (the receipts), test_ops_jobs (check 5 under the switch), gateway stall-notice (13; suite 469/469), the shared fixture
   league/tests/fixtures/stall_report.json.
 - **Operator step after the deploy:** `ops.json` `{"stall": {"research": false}}` on the box while the old lanes'
   research is off ([docs/operations.md](docs/operations.md), **Release R1, alarms and costs**, has the command, the

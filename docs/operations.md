@@ -25,8 +25,9 @@ are untouched).
 - **The event lane's four causes and its daily one-screen report** (**The stall alarm and the funnel**, below): judged
   and sent only while `league/config.json` `events.enabled` is true (release R1's switch, WP1), so this release changes
   nothing in the mail until the lane runs on the House.
-- **The research switch** (`ops.json` `stall.research`) and **no underspend under rule 3** (a cheap day is never a
-  failed day).
+- **The research switch** (`ops.json` `stall.research`): the old lanes' research causes and the direction lane's research
+  alarms not judged, and pre-open check 5 says the Gym off and a population under its floor instead of failing on them;
+  **no underspend under rule 3** (a cheap day is never a failed day).
 - **The lane's receipts** (league/events/run.py, score.py; not protected): the decision's `verdicts: {needed,
   answered}` tally and a `score` receipt each pass, which the four causes read (`league/events/__init__.py`, THE EVENT
   LANE'S RECEIPTS).
@@ -49,7 +50,8 @@ are untouched).
 **Verify:** the first `budget` receipt after the start says `rule_version` 3 in `budget.json` and a `cap` block
 (`cap_usd_day` 5.00 with no trailing profit); the next `stall` receipt reads `births`, `gym_runs`, `validations`,
 `braked` and `birth_yield` "Not judged: research is switched off" and `underspend` "Not judged: budget rule 3: a
-cheap day is never a failed day"; the four `evl_` causes read "Not judged: the event lane does not run on the House"
+cheap day is never a failed day"; the next pre-open receipt's check 5 passes with "the Gym OFF ... (not judged: research
+is switched off ...)"; the four `evl_` causes read "Not judged: the event lane does not run on the House"
 until WP1's `events.enabled` is set, then judged; at the first stall run from 22:00 ET of a session day with the lane
 on, the owner's mail carries "The event lane, <day>" (alone, "LTCM: daily report <day>: nothing stalled", when nothing
 stands) and `stall.json` `report.day` is that day.
@@ -5640,6 +5642,11 @@ economics' declared external costs (`economics.external`) and `hygiene.end_retir
 `ops` block (the day's occurrences: due, late, failed, missed, and the job running now). The jobs' logs are
 `<state>/ops/logs/<job>.log`; the economics' own output is `<state>/economics/<YYYYMMDD>-close/` (`summary.json`,
 `summary.md`, receipts), the clock's `<state>/calendar.json`, the scoreboard's local copy `<state>/scoreboard/<day>.md`.
+
+**The pre-open check 5 (swarm) and the research switch** (release R1). While `ops.json` `stall.research` is false (the
+old lanes' research off by settings, A60), the Gym off and a population under its floor are said in check 5 ("not
+judged: research is switched off"), never its FAIL, so no `preopen` mail comes of research being off; the swarm.json
+live block, the heartbeat and the Sail guard are judged as before.
 
 **The pre-open check 5 (swarm) and the budget's day.** Under the budget rule the Sail guard brakes the swarm for the
 rest of each UTC day once the day's research dollars are spent, so a braked guard an hour before the open is the
