@@ -191,6 +191,14 @@ export const STALL_CAUSES = {
   elane_births: 'the equity passes bear no family',
   elane_idle: 'the equity lanes are idle or starved',
   elane_refused: 'most equity programs refused before a run by one rule',
+  // Oct 19, 2026 (release R1, the goal of Oct 19, item 7): the event lane's own causes (league/ops/evl_health.py), read
+  // from its receipts while it runs on the House: no record pass in 30 minutes, a scheduled decision not done 10 minutes
+  // after its time, over 20% of a session's verdicts with no answer, a session not scored by 23:00 ET. Deploy the
+  // gateway first, as above.
+  evl_record: 'the event lane recorded nothing for 30 minutes',
+  evl_decide: 'an event-lane decision was missed',
+  evl_verdicts: 'event-lane verdicts went unanswered',
+  evl_score: 'an event-lane session was not scored',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;
@@ -227,14 +235,62 @@ const figure = value => {
 };
 const price = value => (typeof value === 'string' && value ? `$${value}` : 'unknown');
 
+//: THE EVENT LANE'S DAILY REPORT (release R1; league/ops/evl_health.py `report_facts`), which rides the stall notice: at
+//: most this many programs, each named by its own id (the pre-registered `EVL-...` ids, nothing else), and every figure a
+//: count, a dollar figure or a basis-point figure the House computed: no headline, no document text, no symbol, no price.
+export const REPORT_PROGRAMS = 32;
+const PROGRAM_ID = /^EVL-[A-Z0-9][A-Z0-9-]{0,47}$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const LOOKS = ['none', 'pass', 'fail', 'skipped'];
+const plain = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+const whole = value => (Number.isInteger(value) && value >= 0 && value <= 1e9 ? String(value) : 'unknown');
+const real = value => (typeof value === 'number' && Number.isFinite(value) && Math.abs(value) < 1e9 ? value : null);
+const usd = value => (real(value) === null ? 'unknown' : `$${real(value).toFixed(2)}`);
+const signedUsd = value => (real(value) === null ? 'n/a' : `${real(value) < 0 ? '-' : '+'}$${Math.abs(real(value)).toFixed(2)}`);
+const bp = value => (real(value) === null ? 'n/a' : `${real(value) < 0 ? '' : '+'}${real(value).toFixed(1)} bp`);
+
+/**
+ * The daily report's section of a stall notice, `{ day, lines }`, or null when the notice carries none or one that is
+ * not a report (not an object, or no day): an unreadable figure reads "unknown", a program whose id is not one is left
+ * out, and nothing the House sent is echoed but the figures and the ids.
+ */
+export function stallReport(facts = {}) {
+  const report = facts?.report;
+  if (!report || typeof report !== 'object' || Array.isArray(report)) return null;
+  if (typeof report.day !== 'string' || !DAY.test(report.day)) return null;
+  const events = plain(report.events), verdicts = plain(report.verdicts), costs = plain(report.costs), jobs = plain(report.jobs);
+  const lines = [
+    `The event lane, ${report.day} (the day's figures; no headline, text or price is ever mailed):`,
+    `- Events read: ${whole(events['8k_202'])} 8-K with item 2.02, ${whole(events['8k_other'])} other 8-K, ${whole(events.form4)} Form 4, ${whole(events.news)} news articles; ${whole(events.failed)} filings failed to fetch.`,
+    `- Verdicts answered: ${whole(verdicts.ok)} ok, ${whole(verdicts.unparsed)} unparsed, ${whole(verdicts.refused)} refused; they cost ${usd(verdicts.usd)}.`,
+    `- Metered compute: about ${usd(costs.metered_usd_day)} a day, under a cap of ${usd(costs.cap_usd_day)} a day (fixed ${usd(costs.fixed_usd_day)}, the lane's verdicts ${usd(costs.lane_usd_day)}, research ${usd(costs.research_usd_day)}).`,
+    `- Expected false passes: ${real(report.expected_false_passes) === null ? 'unknown' : real(report.expected_false_passes).toFixed(1)} (0.10 x ${whole(report.seatable_versions)} seatable versions). The lane's jobs today: ${whole(jobs.missed)} missed, ${whole(jobs.failed)} failed.`,
+  ];
+  const programs = (Array.isArray(report.programs) ? report.programs : []).slice(0, REPORT_PROGRAMS)
+    .filter(p => p && typeof p === 'object' && typeof p.id === 'string' && PROGRAM_ID.test(p.id));
+  if (programs.length) lines.push('By program (shadow P&L at $100 an event, after costs; r the after-cost return, a beyond the benchmark):');
+  for (const p of programs) {
+    const version = Number.isInteger(p.version) && p.version > 0 && p.version < 1000 ? p.version : 1;
+    const fills = p.real_n === null || p.real_n === undefined ? 'no real fills yet'
+      : `${whole(p.real_n)} real fills, ${signedUsd(p.real_pnl_usd)}`;
+    const last = LOOKS.includes(p.last_look) ? p.last_look : 'unknown';
+    const look = p.seatable !== true ? 'a record: never screened'
+      : `${Number.isInteger(p.next_look) ? `next look ${p.next_look} at session ${whole(p.next_look_session)} (now ${whole(p.sessions ?? 0)})` : 'every look written'}; last look ${last}; ${whole(p.held_looks)} held`;
+    lines.push(`- ${p.id} v${version}: today ${whole(p.intents)} intents (${whole(p.skipped)} skipped); settled ${whole(p.settled)} (${whole(p.tradable)} tradable, ${whole(p.settled_today)} today), shadow ${signedUsd(p.shadow_pnl_usd)} (r ${bp(p.mean_r_bp)}, a ${bp(p.mean_a_bp)}); ${fills}; ${look}.`);
+  }
+  return { day: report.day, lines };
+}
+
 /**
  * A stall notice's causes (league/ops/stall.py `notice_facts`: `causes`, each `cause_facts`), each with its owner step
- * cut to one line (`step`, '' when none), or null when the list is not one to compose: not a list, empty, longer than
- * STALL_CAUSES, an entry that is not an object, a cause STALL_CAUSES does not name, or a cause named twice.
+ * cut to one line (`step`, '' when none), or null when the list is not one to compose: not a list, empty (unless the
+ * event lane's daily report rides it: `stallReport`), longer than STALL_CAUSES, an entry that is not an object, a cause
+ * STALL_CAUSES does not name, or a cause named twice.
  */
 export function stallEntries(facts = {}) {
   const causes = facts?.causes;
-  if (!Array.isArray(causes) || causes.length < 1 || causes.length > Object.keys(STALL_CAUSES).length) return null;
+  if (!Array.isArray(causes) || causes.length > Object.keys(STALL_CAUSES).length) return null;
+  if (causes.length < 1 && !stallReport(facts)) return null;
   const seen = new Set();
   const out = [];
   for (const entry of causes) {
@@ -258,7 +314,13 @@ export function stallKey(facts = {}) {
   const entries = stallEntries(facts);
   if (!entries) return null;
   const owner = entries.filter(item => item.step).map(item => item.cause).sort();
-  return owner.length ? `stall:owner:${owner.join('+')}` : `stall:info:${entries.map(item => item.cause).sort().join('+')}`;
+  const base = owner.length ? `stall:owner:${owner.join('+')}`
+    : entries.length ? `stall:info:${entries.map(item => item.cause).sort().join('+')}` : null;
+  // A notice carrying the event lane's daily report (release R1) is that day's: its key names the day, so each day's
+  // report is mailed once whatever the causes told before it (league/ops/stall.py `notice_id` keys it the same way).
+  const report = stallReport(facts);
+  if (report) return base ? `${base}:report:${report.day}` : `stall:info:report:${report.day}`;
+  return base;
 }
 
 /**
@@ -394,17 +456,22 @@ export function composeNotice(facts = {}) {
       // House's sentence for it, its figures (each name a lower-case word, each value a decimal, a date or time, yes or
       // no or a short token, else unknown), how long, what the House is doing about it, and its owner step. The router
       // keys the dedupe on the owner causes (`stallKey`), whatever id the House sends.
+      // THE EVENT LANE'S DAILY REPORT (release R1) rides it as one more section, after the causes; with no cause standing
+      // the notice is the report alone ("nothing stalled").
       const entries = stallEntries(facts);
       if (!entries) return null;
+      const report = stallReport(facts);
       const owner = entries.filter(item => item.step);
       const named = list => {
         const words = list.map(item => STALL_CAUSES[item.cause]);
         return words.length > 3 ? `${words.slice(0, 3).join(', ')} and ${words.length - 3} more` : words.join(', ');
       };
-      subject = owner.length ? `LTCM: needs you: ${named(owner)}` : `LTCM: stalled: ${named(entries)}`;
+      subject = owner.length ? `LTCM: needs you: ${named(owner)}`
+        : entries.length ? `LTCM: stalled: ${named(entries)}` : `LTCM: daily report ${report.day}: nothing stalled`;
       lines.push(...(owner.length
         ? ['Only you can do this; the House keeps working around it meanwhile:', ...owner.map(item => `- ${item.step.replace(/\.$/, '')}.`)]
-        : ['Nothing here needs you: the House keeps working around it, and says so again in 24 hours if it still stands.']), '');
+        : entries.length ? ['Nothing here needs you: the House keeps working around it, and says so again in 24 hours if it still stands.']
+          : ['Nothing stalled and nothing needs you: the event lane\'s daily report.']), '');
       for (const { entry, cause, step } of entries) {
         const numbers = entry.numbers && typeof entry.numbers === 'object' && !Array.isArray(entry.numbers)
           ? Object.entries(entry.numbers).filter(([name]) => FIGURE_NAME.test(name)).slice(0, STALL_NUMBERS) : [];
@@ -420,6 +487,7 @@ export function composeNotice(facts = {}) {
           '',
         );
       }
+      if (report) lines.push(...report.lines, '');
       lines.push(`At: ${clip(facts.at, 40) || 'an unknown time'}.`);
       break;
     }

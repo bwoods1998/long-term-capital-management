@@ -82,8 +82,10 @@ JOBS: tuple[Job, ...] = (
         what="the stall alarm: births (and the architect's jam and yield), Gym runs, Validations, the guard's brake, the "
              "budget's runway, research under budget, the swarm's alerts, an owner deploy, a "
              "pause, a refused grant or the kill switch waiting; the equity lanes' own causes (league/ops/elane_health.py: "
-             "disqualified versions, barren equity passes, broken lanes, programs refused by one rule); one stall "
-             "notice listing them all, an owner step's at once and every 12 h, the rest every 24 h"),
+             "disqualified versions, barren equity passes, broken lanes, programs refused by one rule); the event lane's "
+             "own (league/ops/evl_health.py: no record pass, a missed decision, unanswered verdicts, an unscored "
+             "session) and its daily one-screen report; one stall notice listing them all, an owner step's at once and "
+             "every 12 h, the rest every 24 h, the report once a session day"),
     # Twice: 15:00Z runs the drills and requests the rollback drill last (the updater launches it); 17:00Z checks its verdict (and runs any drill
     # the first could not reach). A drill done this month is never run again (`league/ops/drills.py`).
     Job("drills", "league.ops.drills", (S.monthly_first(5, 15, 0), S.monthly_first(5, 17, 0)), grace=6 * HOUR, cpu=1800, wall=3600, owner="WP1/WP3",
