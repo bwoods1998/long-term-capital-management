@@ -321,6 +321,15 @@ class Reserve(GuardCase):
     def setUp(self):
         super().setUp()
         self.settings["guard"]["pace_day"] = False  # the reserve alone (EVEN PACING has its own tests, `Pace`)
+        # The budget job's runs below are the runway's mechanics at budget rule 2's shares ($20 Sail, $5 Claude), the
+        # figures they were pinned on: budget rule 3's cost rule sets the shares (league/tests/test_ops_budget.py CostRule).
+        from unittest import mock
+
+        from league.tests.test_ops_budget import rule2_shares
+
+        patcher = mock.patch.object(B, "cost_rule", rule2_shares)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def budget(self, sail, fixed=None):
         self.settings["budget"] = {"source": "budget.json", "sail_usd_day": sail, "claude_usd_day": 2.0,
