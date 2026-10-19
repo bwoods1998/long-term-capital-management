@@ -55,7 +55,8 @@ identity `2f0083bc` and the gate contract `397b22b7` do not move.
 exact head; after release 1019b is live and verified, and before 12:55Z Tue Oct 20): the House from this release's head.
 Verify (read-only): the `grant` job's receipt ratified on `055e5313`; health `release.live.equity.events.enabled` true;
 the lane's next screen receipt (`screen`) `ok`; at the next open, the event buys in the 09:17-09:27 ET window and no
-"the equity day's order count" refusal on an event buy (`eq_intents.why`).
+"the event kind's day order count" or "the House's day order count" refusal on an event buy (`eq_intents.why`); a
+decision receipt's `kept` entries carry `events` and `unjudged` lists.
 
 **Rollback**: `equity_money.event.enabled` False (a constitution-only owner deploy, money `1b7a5c22`, constitution
 `50e951c9`: no event buy, every open event lot exits at its own auction); or the previous House release (release
