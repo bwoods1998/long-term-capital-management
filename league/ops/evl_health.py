@@ -28,6 +28,11 @@ inside `guard.readonly()`), on the House's NYSE calendar (`ltcm.data.us_equity_s
   the night's score passes left them open. An intent whose exit print the tape showed absent (a `marks` row with no
   price at or after its exit day: PREREG-EVL-1 section 5's ladder waits on a later session) is waiting by design and is
   counted apart. A night with nothing due is no stall.
+- `evl_fills` (the goal's "fill gaps"): the lane's real fills set beside the shadow's own auction prices (the House's
+  EVENT TWINS, league/ops/twins.py `event_twin`, in the swarm store's kv `equity_twins`: `entry_gap_bp` and
+  `exit_gap_bp`, signed, positive when the real fill was worse): over the last `FILL_LOOK` (20) priced twins with a
+  figure on a side, the signed mean of that side worse than `FILL_GAP_BP` (15 bp, the goal's Done item "fills within 15
+  bp of replay"), with at least `FILL_MIN` (5) of them. Not judged before the first real fill is priced.
 
 IDLE BY DESIGN: while `<state>/events/STOP` stands (the lane records, decides and asks nothing) the four are not judged,
 nor for `RESUME_MINUTES` after it goes (the lane's first passes); a decision whose window fell inside it is excused for
@@ -50,7 +55,7 @@ from zoneinfo import ZoneInfo
 from . import guard
 from . import schedule as S
 
-CAUSES = ("evl_record", "evl_decide", "evl_verdicts", "evl_score")
+CAUSES = ("evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills")
 #: The stall job's key in `<state>/ops.json` that switches these four off: `{"stall": {"evl": false}}`.
 SWITCH = "evl"
 #: The lane's state under the House's state root (league/events/store.py `DB_NAME`), its idle switch and the House's pause.
@@ -67,6 +72,12 @@ RESUME_MINUTES = 30
 OPEN_DECIDE = dt.time(9, 15)
 CLOSE_DECIDE_BEFORE = dt.timedelta(minutes=14)
 SCORE_BY = dt.time(23, 0)
+#: THE FILL GAP (`evl_fills`): the priced event twins read, the most a side's signed mean may be worse than the shadow's
+#: auction prices (the goal's Done item: "fills within 15 bp of replay"), and the fewest that judge it.
+FILL_LOOK = 20
+FILL_GAP_BP = 15.0
+FILL_MIN = 5
+TWINS_KEY = "equity_twins"
 #: The record pass's three reads (league/events/house.py `_record_steps`: the summary's blocks), and their names here.
 FEEDS = (("8-K", "8k"), ("4", "form4"), ("news", "news"))
 #: The idle windows the stall job keeps (`idle_windows`): this many of each kind, none older than this.
@@ -91,6 +102,11 @@ DOING = {
     "evl_score": ("The lane's nightly score settles every due intent at the listing exchange's auction prints once the tape "
                   "is 16 minutes old (league/events/score.py), resumable pass by pass; the next night's passes try again "
                   "what this one left. The screen's looks wait for every block they cover (PREREG-EVL-1 section 7)."),
+    "evl_fills": ("Each real event lot buys at the opening or closing auction with a limit-on-open or limit-on-close order "
+                  "and sells at its own auction; the House sets every closed lot beside the shadow's auction print (the "
+                  "equity_twins job, daily and before each open). Once real fills exist PREREG-EVL-1 section 5 checks the "
+                  "cost allowance against the signed mean gap per side (raised, never lowered, when the fills are worse); "
+                  "the goal's Done asks fills within 15 bp of replay."),
 }
 
 
@@ -265,7 +281,54 @@ def facts(root: str | Path, now: float, score_day: str | None) -> dict[str, Any]
     return guard.read(Path(root) / STORE, read)
 
 
+def event_twins(root: str | Path) -> list[dict[str, Any]]:
+    """The House's PRICED event twins (league/ops/twins.py `event_twin`; the swarm store's kv `equity_twins`, read-only),
+    oldest exit first; [] with no swarm store or no such record."""
+    path = Path(root) / "swarm.sqlite"
+    if not path.exists():
+        return []
+
+    def read(db: Any) -> Any:
+        row = db.execute("SELECT value FROM kv WHERE key=?", (TWINS_KEY,)).fetchone()
+        return None if row is None else row[0]
+    raw = guard.read(path, read)
+    records = _loads(raw) if isinstance(raw, str) else None
+    rows = [dict(r) for r in (records or {}).values() if isinstance(r, Mapping) and r.get("kind") == "event"
+            and r.get("status") == "priced"] if isinstance(records, Mapping) else []
+    return sorted(rows, key=lambda r: (str(r.get("exit_day") or ""), str(r.get("judged_at") or ""), str(r.get("key"))))
+
+
+def fill_gaps(twins: list[Mapping[str, Any]], look: int = FILL_LOOK) -> dict[str, Any]:
+    """The signed mean gap per side (bp, positive when the real fill was worse than the shadow's auction print) over the
+    last `look` priced event twins with a figure on that side: {entry_n, entry_mean_bp, exit_n, exit_mean_bp}."""
+    out: dict[str, Any] = {}
+    for side in ("entry", "exit"):
+        values = [v for v in (_num(t.get(f"{side}_gap_bp")) for t in twins) if v is not None][-look:]
+        out[f"{side}_n"] = len(values)
+        out[f"{side}_mean_bp"] = None if not values else round(math.fsum(values) / len(values), 2)
+    return out
+
+
 # ---------------------------------------------------------------------------------------------- the causes
+def _fills(now: float, twins: list[Mapping[str, Any]]) -> dict[str, Any]:
+    if not twins:
+        return _not_judged("no real fill of the event lane is priced beside its auction yet (the equity_twins job)")
+    gaps = fill_gaps(twins)
+    worse = [side for side in ("entry", "exit") if gaps[f"{side}_n"] >= FILL_MIN
+             and (gaps[f"{side}_mean_bp"] or 0.0) > FILL_GAP_BP]
+
+    def said(side: str) -> str:
+        mean = gaps[f"{side}_mean_bp"]
+        return f"{side} {'n/a' if mean is None else f'{mean:+.1f} bp'} over {gaps[side + '_n']}"
+    what = (f"The event lane's real fills are worse than the shadow's auction prices: the signed mean gap "
+            f"{', '.join(said(s) for s in worse)} (over {FILL_GAP_BP:g} bp, the last {FILL_LOOK} priced fills)."
+            if worse else f"The event lane's real fills against the shadow's auction prices: {said('entry')}, "
+                          f"{said('exit')} (within {FILL_GAP_BP:g} bp, or too few to judge).")
+    return {"stalled": bool(worse), "judged": True, "what": what,
+            "numbers": {**gaps, "worse": ",".join(worse) or "none", "last_exit_day": twins[-1].get("exit_day")},
+            "doing": DOING["evl_fills"], "owner_step": None, "onset": None}
+
+
 def _failing(row: Mapping[str, Any]) -> list[str]:
     """The feeds a finished record pass did not read cleanly (`FEEDS`' names), [] for a clean pass."""
     summary = _loads(row.get("summary"))
@@ -524,6 +587,7 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
             out["evl_verdicts"] = _verdicts(now, f, kinds, idle, line)
         out["evl_score"] = (_not_judged("no session in the last 10 days has passed its 23:00 ET") if latest is None
                             else _score(now, f, latest))
+        out["evl_fills"] = _fills(now, event_twins(root))
         return out
     except Exception as exc:  # noqa: BLE001 - an alarm that cannot see says so, and the rest of the job goes on
         if errors is not None:
@@ -560,6 +624,7 @@ def verdict_line(ctx: Any, root: str | Path, now: float) -> dict[str, Any] | Non
 
 
 __all__ = ["CAUSES", "SWITCH", "STORE", "STOP", "PAUSE", "checks", "facts", "switched_off", "lane_on", "decisions",
-           "entry_kinds", "sessions", "idle_windows", "made", "tally", "score_session", "verdict_line",
+           "entry_kinds", "sessions", "idle_windows", "made", "tally", "score_session", "verdict_line", "event_twins",
+           "fill_gaps", "FILL_LOOK", "FILL_GAP_BP", "FILL_MIN",
            "RECORD_MINUTES", "DECIDE_GRACE_MINUTES", "DECIDE_LOOKBACK_HOURS", "VERDICT_GRACE_MINUTES", "RESUME_MINUTES",
            "SCORE_BY", "FEEDS"]

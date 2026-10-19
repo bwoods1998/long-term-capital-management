@@ -278,4 +278,7 @@ test('the causes of Oct 19, 2026 (release 1019c): the measured cap breach and th
   for (const line of ['- spent_usd: 6.36', '- failing: 8k,form4,news', '- first_state: cut', '- at_line: yes', '- open_due: 12',
     NONE_NEEDED]) assert.ok(all.text.split('\n').includes(line), line);
   assert.equal(stallKey(notice(cap, score)), 'stall:info:cap_breach+evl_score');
+  const fills = { ...BIRTHS, cause: 'evl_fills', numbers: { entry_n: 20, entry_mean_bp: 18, worse: 'entry' } };
+  assert.equal(composeNotice(notice(fills)).subject, 'LTCM: stalled: event-lane fills strayed from the auction prices');
+  assert.ok(composeNotice(notice(fills)).text.split('\n').includes('- entry_mean_bp: 18'));
 });

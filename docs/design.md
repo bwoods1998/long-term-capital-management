@@ -90,8 +90,8 @@ operations are House jobs; one funding action a year, not one a week; an honest 
   validations, looks, the bands, real orders and closes by route, research spend, braked hours, for the last 24 hours
   and since the release. From release 1019c (the goal of Oct 19, 2026, item 5) it also judges the event lane's own four
   causes by PROGRESS while the lane runs on the House (`league/ops/evl_health.py`: no clean record pass in 30 minutes, a
-  decision not made in its window, verdicts unanswered past their decision, intents left open after the night's score;
-  quiet while the lane's STOP stands), `cap_breach` (the day's MEASURED metered compute over its cap,
+  decision not made in its window, verdicts unanswered past their decision, intents left open after the night's score,
+  real fills worse than the shadow's auction prints by more than 15 bp; quiet while the lane's STOP stands), `cap_breach` (the day's MEASURED metered compute over its cap,
   `league/ops/metered.py`), and mails the lane's DAILY ONE-SCREEN REPORT once a New York day after the lane's report job
   (`league/ops/daily_report.py`: account-shown profit first, Net after costs beside it, by program and band; costs
   measured against the cap; events, intents, fills, settled n, evidence; figures only). `ops.json` `stall.research`

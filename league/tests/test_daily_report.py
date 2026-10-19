@@ -160,7 +160,9 @@ class DailyReport(StallHarness):
         # program's average invested dollars (one session: 100 + 40 at +1%).
         self.assertEqual(read["buy_hold_usd"], round((100.0 + 40.0) * (101.0 / 100.0 - 1), 2))
         self.assertEqual(programs["EVL-8K-READ-O1"]["buy_hold_why"], "n/a until real fills")
-        self.assertEqual(facts["fills"], {"buys": 4, "sells": 3, "fees_usd": 0.06})
+        self.assertEqual(facts["fills"], {"buys": 4, "sells": 3, "fees_usd": 0.06,
+                                          "gap": {"entry_n": 0, "entry_mean_bp": None, "exit_n": 0, "exit_mean_bp": None}},
+                         "no event twin priced yet in this store: no gap")
         self.assertEqual(facts["events"], {"8k_202": 1, "8k_other": 1, "form4": 1, "news": 1, "failed": 0})
         self.assertEqual(facts["verdicts"], {"ok": 2, "unparsed": 1, "refused": 0, "usd": 0.01})
         self.assertIn({"id": "EVL-ERN-READ-O1", "version": 1, "n": 3, "skipped": 0}, facts["intents"])
@@ -240,6 +242,15 @@ class DailyReport(StallHarness):
         trimmed = {**facts, "programs": facts["programs"][:1], "intents": facts["intents"][:1]}
         self.assertEqual(shape(trimmed), shape({**fixture, "programs": fixture["programs"][:1],
                                                 "intents": fixture["intents"][:1]}))
+
+    def test_the_fill_gap_against_the_auction_prints_rides_the_report(self):
+        """The goal's "fill gaps": the last 20 priced event twins' signed mean per side (the House's equity_twins job)."""
+        self.store.put("equity_twins", {f"eq:{i}": {"key": f"eq:{i}", "kind": "event", "status": "priced",
+                                                    "exit_day": "2026-10-20", "judged_at": f"2026-10-21T01:0{i}:00Z",
+                                                    "entry_gap_bp": 2.0 + i, "exit_gap_bp": -1.0} for i in range(3)})
+        ST.run(self.ctx())
+        [facts] = self.reports()
+        self.assertEqual(facts["fills"]["gap"], {"entry_n": 3, "entry_mean_bp": 3.0, "exit_n": 3, "exit_mean_bp": -1.0})
 
     def test_the_floors_allowance_when_budget_json_is_not_usable(self):
         (self.root / "budget.json").write_text("{not json")

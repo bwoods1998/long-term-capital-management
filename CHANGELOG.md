@@ -57,8 +57,10 @@ until release 1019b (below) brings it onto the House.
   pass in 30 minutes: the 8-K, Form 4 and news reads without error; the failing feeds named), `evl_decide` (a decision
   not made in its 10-minute window: missing, failed, cut, unfinished or late; decided later still stands),
   `evl_verdicts` (needed verdicts unanswered 15 minutes past their decision), `evl_score` (intents due by the latest
-  session still open at 23:00 ET; an exit the tape showed absent waits by design). Quiet while `events/STOP` stands
-  (and 30 minutes after) and, for verdicts, under the House's `PAUSE`; `stall.json` `evl_idle` keeps the windows.
+  session still open at 23:00 ET; an exit the tape showed absent waits by design), and `evl_fills` (the goal's "fill
+  gaps": the real fills worse than the shadow's auction prints by more than 15 bp, the signed mean of a side over the
+  last 20 priced event twins). Quiet while `events/STOP` stands (and 30 minutes after) and, for verdicts, under the
+  House's `PAUSE`; `stall.json` `evl_idle` keeps the windows.
 - **The close decision's tally** (`league/events/run.py`, the smallest change): `decide_open` and `decide_close` write
   `verdicts: {needed, answered}` (the distinct (event, prompt) verdicts of every reading program, wave 2's close-entry
   NEWS-READ-ON included) into their receipts; `league/events/__init__.py` states the receipts' contract.

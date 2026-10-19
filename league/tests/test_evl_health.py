@@ -100,7 +100,7 @@ class WhenJudged(Lane):
             switched = self.check(cause, now, settings={"stall": {"evl": False}})
             self.assertIn("switched off (ops.json stall.evl is false)", switched["what"])
         self.assertEqual(EV.checks({}, self.root, now)["evl_record"]["judged"], False, "no config: the lane is off")
-        self.assertEqual(ST.CAUSES[-8:-4], EV.CAUSES, "the four, before the equity lanes' own four")
+        self.assertEqual(ST.CAUSES[-9:-4], EV.CAUSES, "the five, before the equity lanes' own four")
 
     def test_a_lane_switched_on_with_no_store_has_recorded_nothing(self):
         empty = Path(self.tmp.name) / "bare"
@@ -426,6 +426,43 @@ class Score(Lane):
         self.intent("8k:c", TUE, status="exited")
         check = self.check("evl_score", et(TUE, "23:30"))
         self.assertEqual((check["stalled"], check["numbers"]["open_due"]), (False, 0))
+
+
+class Fills(Lane):
+    """The goal's "fill gaps": the lane's real fills beside the shadow's own auction prices (the House's event twins in the
+    swarm store's kv `equity_twins`; league/ops/twins.py `event_twin`), the signed mean of a side over the last 20."""
+
+    def twins(self, gaps):
+        from league.swarm.store import SwarmStore
+
+        store = SwarmStore(self.root)
+        records = {f"eq:{i}": {"key": f"eq:{i}", "kind": "event", "status": "priced", "final": True,
+                               "exit_day": f"2026-10-{10 + i // 5:02d}", "judged_at": f"2026-10-21T01:{i:02d}:00Z",
+                               "entry_gap_bp": entry, "exit_gap_bp": exit_}
+                   for i, (entry, exit_) in enumerate(gaps)}
+        records["eq:999"] = {"key": "eq:999", "kind": "equity", "status": "priced", "entry_gap_bp": 900.0}  # not the lane's
+        store.put("equity_twins", records)
+        store.close()
+
+    def test_not_judged_before_the_first_real_fill_is_priced(self):
+        check = self.check("evl_fills", et(TUE, "12:00"))
+        self.assertEqual((check["stalled"], check["judged"]), (False, False))
+        self.assertIn("no real fill of the event lane is priced", check["what"])
+
+    def test_a_side_worse_than_15_bp_over_the_last_20_stands(self):
+        self.twins([(40.0, 0.0)] * 10 + [(18.0, 1.0)] * 20)   # the last 20 entries average 18 bp worse than the print
+        check = self.check("evl_fills", et(TUE, "12:00"))
+        self.assertTrue(check["stalled"])
+        self.assertEqual((check["numbers"]["entry_n"], check["numbers"]["entry_mean_bp"], check["numbers"]["worse"]),
+                         (20, 18.0, "entry"))
+        self.assertIn("the signed mean gap entry +18.0 bp over 20 (over 15 bp", check["what"])
+        self.twins([(14.0, -3.0)] * 20 + [(None, 2.0)] * 4)
+        quiet = self.check("evl_fills", et(TUE, "12:00"))
+        self.assertFalse(quiet["stalled"])
+        self.assertEqual((quiet["numbers"]["entry_n"], quiet["numbers"]["exit_n"]), (20, 20))
+        self.twins([(90.0, 90.0)] * 4)                        # too few to judge
+        self.assertFalse(self.check("evl_fills", et(TUE, "12:00"))["stalled"])
+        self.assertEqual(EV.fill_gaps([]), {"entry_n": 0, "entry_mean_bp": None, "exit_n": 0, "exit_mean_bp": None})
 
 
 class StallHarness(StallBase):

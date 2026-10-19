@@ -203,6 +203,9 @@ export const STALL_CAUSES = {
   evl_decide: 'an event-lane decision missed its window',
   evl_verdicts: 'event-lane verdicts went unanswered',
   evl_score: 'event-lane intents were left unsettled',
+  // The goal's "fill gaps": the lane's real fills worse than the shadow's own auction prints by more than 15 bp (the
+  // signed mean of a side over the last 20 priced fills: the House's event twins).
+  evl_fills: 'event-lane fills strayed from the auction prices',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;
@@ -395,6 +398,11 @@ export function composeReport(facts = {}) {
   add(`Verdicts: ${count(verdicts.ok)} ok, ${count(verdicts.unparsed)} unparsed, ${count(verdicts.refused)} refused, `
     + `${usd(verdicts.usd)}`);
   add(`Real fills: ${count(fills.buys)} buys, ${count(fills.sells)} sells, fees ${usd(fills.fees_usd)}`);
+  const gap = plain(fills.gap);
+  if (Number.isInteger(gap.entry_n) && Number.isInteger(gap.exit_n) && gap.entry_n + gap.exit_n > 0) {
+    add(` Fill gap vs the auction (worse +): entry ${bp(gap.entry_mean_bp)} (${count(gap.entry_n)}), exit `
+      + `${bp(gap.exit_mean_bp)} (${count(gap.exit_n)})`, '   ');
+  }
   const byId = new Map();
   let skipped = 0;
   for (const row of list(facts.intents)) {

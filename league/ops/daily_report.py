@@ -26,7 +26,9 @@ THE FACTS (`facts`), each read-only (the lane's store through a read-only store,
   budget.json gave), "over" when above it; the ALLOWANCE (the cap and its lines: fixed, the lane's verdicts, research) as
   budget.json set it, labelled as such (its floor when budget.json is not usable); yesterday's whole day beside it.
 - `events` by family, `verdicts` by status and their dollars, the day's shadow `intents` by program and version, the
-  day's real `fills` (buys, sells, fees).
+  day's real `fills` (buys, sells, fees) and THE FILL GAP: the signed mean per side over the last 20 priced fills
+  against the shadow's own auction prints (positive when real money did worse; league/ops/evl_health.py `fill_gaps`,
+  the goal's Done item "fills within 15 bp of replay").
 - `programs`: each program that may trade real money (version 2 of the nine, PREREG-EVL-3), in the tables' order: its
   band, settled n (shadow TRADABLE, and real), account-shown and Net by band (metered compute shared over the settled
   real events, so the programs' Nets add up to the lane's), its next look and the TRADABLE events to go, the
@@ -281,6 +283,12 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
             holds = {key: buy_and_hold(store, [e for e in real if (e["program"], e["version"]) == key]) for key in seating}
         finally:
             store.close()
+    from . import evl_health as EV
+
+    try:   # THE FILL GAP (the goal's "fill gaps"): the last 20 priced event twins, per side
+        gap = EV.fill_gaps(EV.event_twins(root))
+    except Exception:  # noqa: BLE001 - no twins read: no gap said
+        gap = EV.fill_gaps([])
     verdicts_usd = sum(_num(v.get("usd")) or 0.0 for v in vd.values() if isinstance(v, Mapping))
     costs = _costs(ledger, on, now, verdicts_usd, budget)
     # ACCOUNT-SHOWN FIRST, NET AFTER COSTS BESIDE IT: the day's realized real P&L against the day's measured spend, and to
@@ -345,7 +353,7 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
                     | {"usd": round(verdicts_usd, 2)},
         "intents": [row for row in intents if row["n"] or row["skipped"]],
         "fills": {"buys": by_side.get("buy", (0, 0.0))[0], "sells": by_side.get("sell", (0, 0.0))[0],
-                  "fees_usd": round(sum(f for _, f in by_side.values()), 2)},
+                  "fees_usd": round(sum(f for _, f in by_side.values()), 2), "gap": gap},
         "programs": programs,
         "records": {"versions": len(others),
                     "intents": sum(sum(int(v or 0) for c, v in (s.get("intents_today") or {}).items() if c != "skipped")

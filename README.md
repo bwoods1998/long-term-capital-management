@@ -141,9 +141,9 @@ A change that cannot say how it raises Net does not ship. Under the owner's goal
 of every real book (the last 5 sessions' net, its half spread over the week's 7 days), never above $25, the fixed costs
 inside it and the event lane's verdicts first on the Claude line, held there by the lane itself; a cheap day is never a
 failed day. The stall alarm then also watches the event lane by its progress (a clean record pass, each decision made
-in its window, its verdicts, the nightly settling) and the day's measured spend against the cap (`cap_breach`), and the
-owner gets the lane's daily one-screen report by mail ([operations](docs/operations.md), **Release 1019c, alarms and
-costs**).
+in its window, its verdicts, the nightly settling, its real fills against the auction prints) and the day's measured
+spend against the cap (`cap_breach`), and the owner gets the lane's daily one-screen report by mail
+([operations](docs/operations.md), **Release 1019c, alarms and costs**).
 
 ## The game
 

@@ -47,6 +47,8 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
     '   $0.34',
     ' Yesterday: $4.10 of $5.00',
     'Real fills: 4 buys, 3 sells, fees $0.06',
+    ' Fill gap vs the auction (worse +): entry +2.1 bp (3), exit',
+    '   -0.5 bp (3)',
     ' ERN-READ-O1 v2 learning: 38 | 2; +$1.47 | -$0.75',
     '  look 1 in 22; market 35%, bench +4.1 bp; b&h +$0.42',
     ' INS-BUY-O1 v2 probe: 61 | 1; +$1.47 | +$0.36',

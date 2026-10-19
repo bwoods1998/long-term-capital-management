@@ -138,6 +138,7 @@ mail at its pace:
 | `evl_decide` | a session's open or close decision not made in its 10-minute window (missing, failed, cut, unfinished or finished late); one decided later still stands, its auction missed |
 | `evl_verdicts` | verdicts a decision needs (its receipt's tally `verdicts: {needed, answered}`, the close decision's reading programs included) unanswered 15 minutes past it; the day's verdict dollars and the lane's line in the numbers |
 | `evl_score` | intents due by the latest session still `planned` or `entered` at 23:00 ET (an exit the tape showed absent waits by design and is counted apart) |
+| `evl_fills` | the real fills worse than the shadow's own auction prints by more than 15 bp, the signed mean of a side over the last 20 priced fills (the House's event twins) |
 | `cap_breach` | today's measured metered compute so far, or yesterday's, over that day's cap (league/ops/metered.py: the meters themselves), or a meter unread for 6 hours (the cap cannot be judged) |
 
 None is judged while `<state>/events/STOP` stands, nor for 30 minutes after it goes; `evl_verdicts` is not judged while
@@ -147,7 +148,7 @@ THE DAILY ONE-SCREEN REPORT goes to the owner by mail once a New York day, after
 (league/ops/daily_report.py, the gateway's `report` notice): account-shown profit first and Net after the measured
 metered costs beside it, by program and band; the day's measured costs against the cap with its lines labelled the
 allowance; the events by family, the verdicts, the shadow intents by program and version, the real fills (buys, sells,
-fees); for each version 2 program its band, settled n (shadow TRADABLE and real), next look and events to go, its
+fees, the fill gap against the auction prints); for each version 2 program its band, settled n (shadow TRADABLE and real), next look and events to go, its
 market-direction share and benchmark mean and its same-risk buy-and-hold ("n/a until real fills"); the records and
 controls in one line, the expected false passes and the alarms open. Figures only: no headline, document text, symbol
 or price leaves the House. How to read it: [operations](operations.md), **THE DAILY ONE-SCREEN REPORT BY MAIL**.
