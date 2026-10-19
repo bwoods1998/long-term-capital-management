@@ -1,5 +1,5 @@
 {
- "_note": "The event lane's daily one-screen report as league/ops/daily_report.py `facts` writes it (release 1019c), shared by the House's test (league/tests/test_daily_report.py: the House writes exactly these keys) and the gateway's (gateway/test/report-notice.test.mjs: what it composes). Every figure here is invented; none is a market price.",
+ "_note": "The event lane's daily one-screen report as league/ops/daily_report.py `facts` writes it (release 1019c), shared by the House's test (league/tests/test_daily_report.py: the House writes exactly these keys) and the gateway's (gateway/test/report-notice.test.mjs: what it composes). Every figure here is invented; none is a market price. The costs are the UTC day of the report's date (HH:MM in UTC), the costs to date as far as metered.json covers them (costs_from, partial, missing).",
  "kind": "report",
  "notice_id": "report:2026-10-20",
  "day": "2026-10-20",
@@ -15,7 +15,10 @@
    "shown_usd": 2.94,
    "net_usd": -0.39,
    "metered_usd": 3.33,
-   "events": 3
+   "events": 3,
+   "costs_from": "2026-10-20",
+   "partial": false,
+   "missing": []
   }
  },
  "costs": {
@@ -27,8 +30,8 @@
   "openai_usd": 0.0,
   "cloudflare_usd": 0.16,
   "data_usd": 0.0,
-  "from": "00:00",
-  "to": "22:20",
+  "from": "04:00",
+  "to": "24:00",
   "whole": false,
   "cap_usd": 5.0,
   "over": false,

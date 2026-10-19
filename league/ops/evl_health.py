@@ -21,9 +21,9 @@ inside `guard.readonly()`), on the House's NYSE calendar (`ltcm.data.us_equity_s
 - `evl_verdicts`: verdicts a decision needs that stay UNANSWERED PAST THE DECISION: a decision whose time has passed and
   whose latest receipt (its tally, run.py's `verdicts: {needed, answered}`, the close decision's included; a receipt from
   before the tally, its `pending` counts) still lacks an answer `VERDICT_GRACE_MINUTES` (15) after the later of the
-  decision's time and the start of its run of receipts that lacked one. The numbers say the day's verdict dollars and
-  the lane's line (league/events/house.py: the lower of `events.verdict_usd_day` and the budget's allowance), which
-  holds READ events over it by design: the alarm stands all the same, as their decisions wait.
+  decision's time and the start of its run of receipts that lacked one. The numbers say the UTC day's verdict dollars
+  and the lane's line (league/events/house.py: the lower of `events.verdict_usd_day` and the budget's allowance, held on
+  the UTC day), which holds READ events over it by design: the alarm stands all the same, as their decisions wait.
 - `evl_score`: intents due by the latest session whose 23:00 ET has passed (`SCORE_BY`) still `planned` or `entered`:
   the night's score passes left them open. An intent whose exit print the tape showed absent (a `marks` row with no
   price at or after its exit day: PREREG-EVL-1 section 5's ladder waits on a later session) is waiting by design and is
@@ -31,8 +31,11 @@ inside `guard.readonly()`), on the House's NYSE calendar (`ltcm.data.us_equity_s
 - `evl_fills` (the goal's "fill gaps"): the lane's real fills set beside the shadow's own auction prices (the House's
   EVENT TWINS, league/ops/twins.py `event_twin`, in the swarm store's kv `equity_twins`: `entry_gap_bp` and
   `exit_gap_bp`, signed, positive when the real fill was worse): over the last `FILL_LOOK` (20) priced twins with a
-  figure on a side, the signed mean of that side worse than `FILL_GAP_BP` (15 bp, the goal's Done item "fills within 15
-  bp of replay"), with at least `FILL_MIN` (5) of them. Not judged before the first real fill is priced.
+  figure on a side, the signed mean of that side more than `FILL_GAP_BP` (15 bp) from the prints IN EITHER DIRECTION
+  (the goal's Done item "fills within 15 bp of replay", PREREG-EVL-3 section 5's signed mean per side, A50's size of
+  the mean gap; the review of r2/alarms, its major 3: a gap either way means the fills or the shadow's prices, the
+  evidence the screen judges, are mis-measured), with at least `FILL_MIN` (5) of them; the text says which way. Not
+  judged before the first real fill is priced.
 
 IDLE BY DESIGN: while `<state>/events/STOP` stands (the lane records, decides and asks nothing) the four are not judged,
 nor for `RESUME_MINUTES` after it goes (the lane's first passes); a decision whose window fell inside it is excused for
@@ -97,8 +100,8 @@ DOING = {
     "evl_verdicts": ("The lane asks each verdict as soon as its event is recorded and eligible, and again before each "
                      "decision, at most 3 calls a pass; a call with no answer stores nothing and is asked again "
                      "(PREREG-EVL-1 section 4). Reading programs wait (pending) until every verdict they need is stored, "
-                     "then decide by the shadow rule; over the lane's daily line (the budget's allowance) they wait for "
-                     "the next day's."),
+                     "then decide by the shadow rule; over the lane's daily line (the budget's allowance, held on the UTC "
+                     "day) they wait for the next UTC day's."),
     "evl_score": ("The lane's nightly score settles every due intent at the listing exchange's auction prints once the tape "
                   "is 16 minutes old (league/events/score.py), resumable pass by pass; the next night's passes try again "
                   "what this one left. The screen's looks wait for every block they cover (PREREG-EVL-1 section 7)."),
@@ -106,7 +109,8 @@ DOING = {
                   "and sells at its own auction; the House sets every closed lot beside the shadow's auction print (the "
                   "equity_twins job, daily and before each open). Once real fills exist PREREG-EVL-1 section 5 checks the "
                   "cost allowance against the signed mean gap per side (raised, never lowered, when the fills are worse); "
-                  "the goal's Done asks fills within 15 bp of replay."),
+                  "the goal's Done asks fills within 15 bp of replay either way, so a gap either way is the House's to "
+                  "explain: the fills or the shadow's auction prices are mis-measured."),
 }
 
 
@@ -311,21 +315,41 @@ def fill_gaps(twins: list[Mapping[str, Any]], look: int = FILL_LOOK) -> dict[str
 
 # ---------------------------------------------------------------------------------------------- the causes
 def _fills(now: float, twins: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """`evl_fills` (the module docstring): a side whose signed mean gap is more than `FILL_GAP_BP` from the shadow's
+    auction prints IN EITHER DIRECTION (the review of r2/alarms, its major 3: the Done item and PREREG-EVL-3 section 5 ask
+    fills WITHIN 15 bp, the signed mean per side, and A50 reads the SIZE of the mean gap; a gap either way says the fills
+    or the shadow's prices, the evidence the screen judges, are mis-measured), with at least `FILL_MIN` twins on it."""
     if not twins:
         return _not_judged("no real fill of the event lane is priced beside its auction yet (the equity_twins job)")
     gaps = fill_gaps(twins)
-    worse = [side for side in ("entry", "exit") if gaps[f"{side}_n"] >= FILL_MIN
-             and (gaps[f"{side}_mean_bp"] or 0.0) > FILL_GAP_BP]
+
+    def mean(side: str) -> float | None:
+        return gaps[f"{side}_mean_bp"] if gaps[f"{side}_n"] >= FILL_MIN else None
+    off = [side for side in ("entry", "exit") if mean(side) is not None and abs(mean(side)) > FILL_GAP_BP]
 
     def said(side: str) -> str:
-        mean = gaps[f"{side}_mean_bp"]
-        return f"{side} {'n/a' if mean is None else f'{mean:+.1f} bp'} over {gaps[side + '_n']}"
-    what = (f"The event lane's real fills are worse than the shadow's auction prices: the signed mean gap "
-            f"{', '.join(said(s) for s in worse)} (over {FILL_GAP_BP:g} bp, the last {FILL_LOOK} priced fills)."
-            if worse else f"The event lane's real fills against the shadow's auction prices: {said('entry')}, "
-                          f"{said('exit')} (within {FILL_GAP_BP:g} bp, or too few to judge).")
-    return {"stalled": bool(worse), "judged": True, "what": what,
-            "numbers": {**gaps, "worse": ",".join(worse) or "none", "last_exit_day": twins[-1].get("exit_day")},
+        value, n = gaps[f"{side}_mean_bp"], gaps[f"{side}_n"]
+        if value is None:
+            return f"{side} n/a (no priced fill)"
+        if n < FILL_MIN:
+            return f"{side} {value:+.1f} bp over {n} (too few to judge: {FILL_MIN} at least)"
+        if abs(value) <= FILL_GAP_BP:
+            return f"{side} {value:+.1f} bp over {n} (within {FILL_GAP_BP:g} bp)"
+        return f"{side} {value:+.1f} bp over {n} ({'worse' if value > 0 else 'better'} than the prints by more than " \
+               f"{FILL_GAP_BP:g} bp)"
+    if off:
+        what = (f"The event lane's real fills strayed from the shadow's auction prices: the signed mean gap "
+                f"{', '.join(said(s) for s in off)}, over the last {FILL_LOOK} priced fills (the Done item asks within "
+                f"{FILL_GAP_BP:g} bp a side, either way)"
+                + "".join(f"; {said(s)}" for s in ("entry", "exit") if s not in off) + ".")
+    else:
+        what = (f"The event lane's real fills against the shadow's auction prices, the signed mean gap over the last "
+                f"{FILL_LOOK} priced fills: {said('entry')}; {said('exit')}.")
+    worse = [s for s in off if (mean(s) or 0.0) > 0]
+    better = [s for s in off if (mean(s) or 0.0) < 0]
+    return {"stalled": bool(off), "judged": True, "what": what,
+            "numbers": {**gaps, "off": ",".join(off) or "none", "worse": ",".join(worse) or "none",
+                        "better": ",".join(better) or "none", "last_exit_day": twins[-1].get("exit_day")},
             "doing": DOING["evl_fills"], "owner_step": None, "onset": None}
 
 
@@ -596,11 +620,11 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
 
 
 def verdict_line(ctx: Any, root: str | Path, now: float) -> dict[str, Any] | None:
-    """The lane's verdict line of the New York day (league/events/house.py: the lower of `events.verdict_usd_day` and the
-    budget's allowance, league/ops/budget.py `lane_allowance`) and the day's verdict dollars so far: {line_usd,
-    spent_usd, source}, or None when the store cannot be read."""
+    """The lane's verdict line of the UTC day (league/events/house.py: the lower of `events.verdict_usd_day` and the
+    budget's allowance, league/ops/budget.py `lane_allowance`, held on the UTC day: `verdict_day`) and the day's verdict
+    dollars so far: {line_usd, spent_usd, source}, or None when the store cannot be read."""
     from . import budget as B
-    from ..events.house import VERDICT_USD_DAY   # the House's own default: one figure, read where it is set
+    from ..events.house import VERDICT_USD_DAY, verdict_day   # the House's own default and day: read where they are set
 
     config = _get(ctx, "config")
     block = config.get("events") if isinstance(config, Mapping) else None
@@ -611,9 +635,7 @@ def verdict_line(ctx: Any, root: str | Path, now: float) -> dict[str, Any] | Non
     path = Path(root) / STORE
     if not path.exists():
         return {"line_usd": line, "spent_usd": 0.0, "source": allowance["source"]}
-    day = dt.datetime.fromtimestamp(now, NY).date()
-    lo = S.iso(_ny(day, dt.time(0, 0)))
-    hi = S.iso(_ny(day + dt.timedelta(days=1), dt.time(0, 0)))
+    _, (lo, hi) = verdict_day(dt.datetime.fromtimestamp(now, dt.timezone.utc))
     try:
         with guard.readonly():
             row = guard.read(path, lambda db: db.execute(

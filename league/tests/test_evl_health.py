@@ -339,7 +339,8 @@ class Verdicts(Lane):
 class TheStallJobsLine(Lane):
     """The verdict line the stall job states (`verdict_line`) is the House's own (league/events/house.py `verdict_line`
     and `_spend_today`): the lower of `events.verdict_usd_day` (the House's own default when the key is unset) and the
-    budget's allowance, and the New York day's verdict dollars, a verdict with no stated cost at the House's figure."""
+    budget's allowance, and the UTC day's verdict dollars (the day every line is held on), a verdict with no stated cost
+    at the House's figure."""
 
     def test_the_line_and_the_days_dollars_are_the_houses(self):
         from league.events import house as H
@@ -352,14 +353,18 @@ class TheStallJobsLine(Lane):
         self.assertEqual(line["spent_usd"], 0.0)
         low = EV.verdict_line({"config": {"events": {"enabled": True, "verdict_usd_day": 0.5}}}, self.root, now)
         self.assertEqual(low["line_usd"], 0.5, "a config below the allowance holds")
-        for event, at, usd in (("e1", et(MON, "23:59"), 0.25),    # Tuesday in UTC, Monday in New York: not Tuesday's
+        for event, at, usd in (("e0", et(MON, "19:59"), 4.0),     # Monday in UTC (23:59Z): not Tuesday's
+                               ("e1", et(MON, "23:59"), 0.25),    # Tuesday in UTC (03:59Z), Monday in New York: Tuesday's
                                ("e2", et(TUE, "00:01"), 0.002),
                                ("e3", et(TUE, "11:00"), None),     # no stated cost: the House's figure
-                               ("e4", et(WED, "00:00"), 0.5)):     # Wednesday's
+                               ("e4", et(TUE, "20:00"), 0.5)):     # 00:00Z Wednesday: Wednesday's
             self.st.db.execute("INSERT INTO verdicts(event, prompt_sha, model, asked_at, answered_at, status, usd) "
                                "VALUES(?, 'p', 'm', ?, ?, 'ok', ?)", (event, iso(at), iso(at), usd))
-        self.assertAlmostEqual(EV.verdict_line(bare, self.root, now)["spent_usd"], 0.002 + H.VERDICT_USD_UNKNOWN,
+        self.assertAlmostEqual(EV.verdict_line(bare, self.root, now)["spent_usd"], 0.25 + 0.002 + H.VERDICT_USD_UNKNOWN,
                                places=9)
+        # The House's lane counts the same day (league/events/house.py `verdict_day`).
+        day, (lo, hi) = H.verdict_day(dt.datetime.fromtimestamp(now, UTC))
+        self.assertEqual((day, lo, hi), (TUE, "2026-10-20T00:00:00Z", "2026-10-21T00:00:00Z"))
 
 
 class CloseDecisionTally(unittest.TestCase):
@@ -479,16 +484,40 @@ class Fills(Lane):
         self.twins([(40.0, 0.0)] * 10 + [(18.0, 1.0)] * 20)   # the last 20 entries average 18 bp worse than the print
         check = self.check("evl_fills", et(TUE, "12:00"))
         self.assertTrue(check["stalled"])
-        self.assertEqual((check["numbers"]["entry_n"], check["numbers"]["entry_mean_bp"], check["numbers"]["worse"]),
-                         (20, 18.0, "entry"))
-        self.assertIn("the signed mean gap entry +18.0 bp over 20 (over 15 bp", check["what"])
+        self.assertEqual((check["numbers"]["entry_n"], check["numbers"]["entry_mean_bp"], check["numbers"]["worse"],
+                          check["numbers"]["off"], check["numbers"]["better"]), (20, 18.0, "entry", "entry", "none"))
+        self.assertIn("the signed mean gap entry +18.0 bp over 20 (worse than the prints by more than 15 bp)", check["what"])
+        self.assertIn("exit +1.0 bp over 20 (within 15 bp)", check["what"])
         self.twins([(14.0, -3.0)] * 20 + [(None, 2.0)] * 4)
         quiet = self.check("evl_fills", et(TUE, "12:00"))
         self.assertFalse(quiet["stalled"])
         self.assertEqual((quiet["numbers"]["entry_n"], quiet["numbers"]["exit_n"]), (20, 20))
+        self.assertIn("entry +14.0 bp over 20 (within 15 bp); exit -2.0 bp over 20 (within 15 bp)", quiet["what"])
         self.twins([(90.0, 90.0)] * 4)                        # too few to judge
-        self.assertFalse(self.check("evl_fills", et(TUE, "12:00"))["stalled"])
+        few = self.check("evl_fills", et(TUE, "12:00"))
+        self.assertFalse(few["stalled"])
+        self.assertIn("entry +90.0 bp over 4 (too few to judge: 5 at least)", few["what"])
+        self.assertNotIn("within", few["what"], "never 'within 15 bp' of a gap it could not judge")
         self.assertEqual(EV.fill_gaps([]), {"entry_n": 0, "entry_mean_bp": None, "exit_n": 0, "exit_mean_bp": None})
+
+    def test_a_side_better_than_15_bp_stands_too_and_says_so(self):
+        """The review of r2/alarms, its major 3: the Done item and PREREG-EVL-3 section 5 ask fills WITHIN 15 bp of the
+        auction prints, the signed mean per side, either way (A50: the size of the mean gap). Fills 40 bp better than the
+        shadow's prints say the fills or the shadow's prices are mis-measured: the cause stands and names the direction."""
+        self.twins([(-40.0, -40.0)] * 20)
+        check = self.check("evl_fills", et(TUE, "12:00"))
+        self.assertTrue(check["stalled"])
+        self.assertEqual((check["numbers"]["off"], check["numbers"]["better"], check["numbers"]["worse"]),
+                         ("entry,exit", "entry,exit", "none"))
+        self.assertIn("strayed from the shadow's auction prices", check["what"])
+        self.assertIn("entry -40.0 bp over 20 (better than the prints by more than 15 bp)", check["what"])
+        self.assertIn("exit -40.0 bp over 20 (better than the prints by more than 15 bp)", check["what"])
+        self.assertNotIn("within", check["what"].replace("asks within 15 bp", ""))
+        self.twins([(-16.0, 30.0)] * 20)                      # one side each way
+        both = self.check("evl_fills", et(TUE, "12:00"))
+        self.assertEqual((both["numbers"]["better"], both["numbers"]["worse"]), ("entry", "exit"))
+        self.twins([(-15.0, 15.0)] * 20)                      # at the bound: within
+        self.assertFalse(self.check("evl_fills", et(TUE, "12:00"))["stalled"])
 
 
 class StallHarness(StallBase):

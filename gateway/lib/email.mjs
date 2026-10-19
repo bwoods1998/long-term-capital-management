@@ -203,8 +203,8 @@ export const STALL_CAUSES = {
   evl_decide: 'an event-lane decision missed its window',
   evl_verdicts: 'event-lane verdicts went unanswered',
   evl_score: 'event-lane intents were left unsettled',
-  // The goal's "fill gaps": the lane's real fills worse than the shadow's own auction prints by more than 15 bp (the
-  // signed mean of a side over the last 20 priced fills: the House's event twins).
+  // The goal's "fill gaps": the lane's real fills off the shadow's own auction prints by more than 15 bp either way (the
+  // signed mean of a side over the last 20 priced fills: the House's event twins; worse or better, the House says).
   evl_fills: 'event-lane fills strayed from the auction prices',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
@@ -278,7 +278,7 @@ export function stallKey(facts = {}) {
 
 //: THE DAILY ONE-SCREEN REPORT (release 1019c; league/ops/daily_report.py `facts`): one screen on a phone, so no line is
 //: longer than REPORT_WIDTH characters. The House sends FIGURES ONLY and this composes every word: a count, a dollar,
-//: basis-point or percent figure, a New York day or HH:MM, a program's own pre-registered `EVL-...` id (shown without
+//: basis-point or percent figure, a day (YYYY-MM-DD) or HH:MM, a program's own pre-registered `EVL-...` id (shown without
 //: its EVL- prefix), a band's name, a stall cause's id (worded by STALL_CAUSES). No headline, no document text, no
 //: symbol, no price is ever echoed: anything else where a figure goes reads "unknown" or "n/a", and a program whose id
 //: is not one is left out.
@@ -343,8 +343,10 @@ export function reportKey(facts = {}) {
 
 /**
  * The daily report's `{ subject, lines }` (league/ops/daily_report.py `facts`), or null when the notice is not one: no
- * New York day. Account-shown profit first, Net after costs beside it; the day's MEASURED metered compute against its
- * cap ("OVER the cap" when above it), the cap and its lines labelled the allowance; then the events, verdicts, real
+ * New York day. Account-shown profit first, Net after costs beside it (to date as far as the House's meters cover it:
+ * "since <day>, partly measured" when they start after the first fill or a day's reading falls short); the MEASURED
+ * metered compute of the UTC day of the same date against its cap ("OVER the cap" when above it), the cap and its lines
+ * labelled the allowance; then the events, verdicts, real
  * fills and shadow intents of the day, each real-money program's band, settled n, P&L by band and evidence, the
  * records, the same-risk buy-and-hold, the expected false passes and the alarms open.
  */
@@ -360,8 +362,14 @@ export function composeReport(facts = {}) {
   const known = real(costs.spent_usd), least = real(costs.at_least_usd);
   const spent = known !== null ? known : least;   // a meter with no reading: what the others show, at least
   const over = costs.over === true;
+  // COSTS TO DATE as far as the House's meters cover them (league/ops/metered.py `since`): from `costs_from` (a ledger
+  // begun after the first fill measures from its own first day), `partial` when that or a day's reading falls short.
+  const partly = traded && toDate.partial === true && real(toDate.metered_usd) !== null;
+  const costsFrom = typeof toDate.costs_from === 'string' && DAY.test(toDate.costs_from) ? toDate.costs_from : null;
+  const unread = list(toDate.missing).filter(item => typeof item === 'string' && DAY.test(item)).slice(0, 5);
   const subject = `LTCM daily ${day}: `
-    + (traded ? `shown ${signedUsd(toDate.shown_usd)}, net ${signedUsd(toDate.net_usd)}` : `no real fills yet; costs ${usd(spent)}`)
+    + (traded ? `shown ${signedUsd(toDate.shown_usd)}, net ${signedUsd(toDate.net_usd)}${partly ? ' (costs partial)' : ''}`
+      : `no real fills yet; costs ${usd(spent)}`)
     + (over ? ' (over the cap)' : '') + (alarms.length ? `; ${alarms.length} alarm${alarms.length === 1 ? '' : 's'}` : '');
   const out = [];
   const add = (text, indent = '  ') => out.push(...wrap(text, REPORT_WIDTH, indent));
@@ -372,14 +380,19 @@ export function composeReport(facts = {}) {
   if (traded) {
     add(` to date: ${signedUsd(toDate.shown_usd)} | ${signedUsd(toDate.net_usd)}`);
     add(`  since ${typeof toDate.since === 'string' && DAY.test(toDate.since) ? toDate.since : 'unknown'}, `
-      + `${count(toDate.events)} settled; costs ${usd(toDate.metered_usd)}`, '   ');
+      + `${count(toDate.events)} settled; costs ${usd(toDate.metered_usd)}`
+      + (partly ? `${costsFrom ? ` since ${costsFrom}` : ''}, partly measured` : ''), '   ');
+    if (partly && unread.length) add(`  a meter unread on ${unread.join(', ')}`, '   ');
   } else {
     add(' to date: n/a until real fills');
   }
   out.push('');
+  // The costs are THE UTC DAY of the report's date (budget rule 3's day, on which every line is held and the cap
+  // breach is judged; it ends at 20:00 ET, 19:00 ET in winter, so it is whole by the report's time), HH:MM in UTC.
   const read = typeof costs.from === 'string' && HHMM.test(costs.from) && typeof costs.to === 'string' && HHMM.test(costs.to);
-  const whole = costs.whole === true ? 'the whole day' : read ? `${costs.from}-${costs.to} ET` : 'with no meter read yet';
-  add(`Costs, measured ${whole}: ${usd(spent)}${known === null ? ' at least' : ''}`);
+  const span = costs.whole === true ? 'measured the whole day' : read ? `measured ${costs.from}-${costs.to} UTC`
+    : 'no meter read yet';
+  add(`Costs, UTC day, ${span}: ${usd(spent)}${known === null ? ' at least' : ''}`);
   add(over ? ` OVER the day's cap of ${usd(costs.cap_usd)}` : ` under the day's cap of ${usd(costs.cap_usd)}`);
   add(` Sail ${usd(costs.sail_usd)}, Claude ${usd(costs.claude_usd)} (verdicts ${usd(costs.verdicts_usd)})`);
   add(` Cloudflare ${usd(costs.cloudflare_usd)}, data ${usd(costs.data_usd)}`

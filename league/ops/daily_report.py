@@ -19,12 +19,18 @@ THE FACTS (`facts`), each read-only (the lane's store through a read-only store,
 - `profit`: ACCOUNT-SHOWN FIRST, NET AFTER COSTS BESIDE IT. Account-shown is the event lane's realized real-money P&L as
   the account booked it: each settled real event's sale proceeds less its buy cost, at the broker's fill prices and its
   posted fees (league/events/bands.py `real_events`, from the `real_fills` the House's book writes back). Net is that
-  less the MEASURED metered compute over the same span (metered.py: every meter, not the budget's lines): the day's
-  (the day's sales against the day's spend) and to date (from the lane's first real fill; "n/a until real fills").
-- `costs`: the day's MEASURED metered spend (Sail's meter, the gateway's Claude meter with the day's verdict dollars
-  named inside it, OpenAI's, Cloudflare and data), the span its readings cover, against the day's cap (the lowest
-  budget.json gave), "over" when above it; the ALLOWANCE (the cap and its lines: fixed, the lane's verdicts, research) as
-  budget.json set it, labelled as such (its floor when budget.json is not usable); yesterday's whole day beside it.
+  less the MEASURED metered compute (metered.py: every meter, not the budget's lines): the day's (the New York day's
+  sales against the spend of the UTC day of the same date, the cost rule's day, which ends at 20:00 ET or 19:00 ET and
+  so is whole by the report's time) and to date (from the lane's first real fill; "n/a until real fills"). COSTS TO
+  DATE are measured over the days metered.json covers (metered.py `since`; the review of r2/alarms, its major 2): from
+  the later of the first fill's day and the first day the ledger read both meters, so a ledger begun after the first
+  fill (a release that started it later, a lost metered.json) never leaves Net unknown for good; `costs_from`, `partial`
+  and `missing` say what the figure covers, and the mail prints them ("costs since <day>, partly measured").
+- `costs`: the UTC day's MEASURED metered spend (Sail's meter, the gateway's Claude meter with the UTC day's verdict
+  dollars named inside it, OpenAI's, Cloudflare and data; the UTC day of the report's date, the day budget rule 3 holds
+  every line on and `cap_breach` judges), the span its readings cover (HH:MM UTC), against the cap the rule set for that
+  day, "over" when above it; the ALLOWANCE (the cap and its lines: fixed, the lane's verdicts, research) as budget.json
+  set it, labelled as such (its floor when budget.json is not usable); yesterday's whole day beside it.
 - `events` by family, `verdicts` by status and their dollars, the day's shadow `intents` by program and version, the
   day's real `fills` (buys, sells, fees) and THE FILL GAP: the signed mean per side over the last 20 priced fills
   against the shadow's own auction prints (positive when real money did worse; league/ops/evl_health.py `fill_gaps`,
@@ -228,16 +234,29 @@ def _allowance(budget: Mapping[str, Any] | None) -> dict[str, Any]:
             "lane_usd": _round(lines["lane_usd_day"]), "research_usd": _round(lines["rest_usd_day"]), "source": "floor"}
 
 
-def _hhmm(text: Any) -> str | None:
+def _utc_hhmm(text: Any, day: dt.date) -> str | None:
+    """HH:MM UTC of an ISO time on the UTC day `day` (24:00 for its end), or None."""
     try:
         at = dt.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return None
-    return at.astimezone(NY).strftime("%H:%M")
+    at = (at if at.tzinfo is not None else at.replace(tzinfo=dt.timezone.utc)).astimezone(dt.timezone.utc)
+    return "24:00" if at.date() > day else at.strftime("%H:%M")
+
+
+def _utc_day_of(text: Any) -> dt.date | None:
+    try:
+        at = dt.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return (at if at.tzinfo is not None else at.replace(tzinfo=dt.timezone.utc)).astimezone(dt.timezone.utc).date()
 
 
 def _costs(ledger: Mapping[str, Any], day: dt.date, now: float, verdicts_usd: float | None,
            budget: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The UTC day `day`'s measured costs (metered.py `day_figure`: the cost rule's day, `cap_breach`'s), the span its
+    readings cover in HH:MM UTC, against the cap the rule set for it; `verdicts_usd` the lane's verdict dollars of that
+    UTC day (inside Claude's figure); the allowance; yesterday's."""
     figure = MT.day_figure(ledger, day, now)
     kept = (ledger.get("days") or {}).get((day - dt.timedelta(days=1)).isoformat())
     yesterday = kept if isinstance(kept, Mapping) else MT.day_figure(ledger, day - dt.timedelta(days=1), now)
@@ -245,7 +264,7 @@ def _costs(ledger: Mapping[str, Any], day: dt.date, now: float, verdicts_usd: fl
             "sail_usd": _round(figure["sail"]), "claude_usd": _round(figure["claude"]),
             "verdicts_usd": _round(verdicts_usd), "openai_usd": _round(figure["openai"]),
             "cloudflare_usd": _round(figure["cloudflare"]), "data_usd": _round(figure["data"]),
-            "from": _hhmm(figure["from"]), "to": _hhmm(figure["to"]), "whole": bool(figure["whole"]),
+            "from": _utc_hhmm(figure["from"], day), "to": _utc_hhmm(figure["to"], day), "whole": bool(figure["whole"]),
             "cap_usd": _round(figure["cap"]), "over": bool(figure["over"]), "allowance": _allowance(budget),
             "yesterday": {"day": str(yesterday.get("day")), "spent_usd": _round(yesterday.get("spent")),
                           "at_least_usd": _round(yesterday.get("at_least")), "cap_usd": _round(yesterday.get("cap")),
@@ -274,6 +293,12 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
                 statuses[(program, version)] = RP.program_status(store, program, version, on)
             real = _real(store)
             lo, hi = RP.day_bounds(on)
+            # The UTC day of the same date (the cost rule's day): the lane's verdict dollars inside its Claude figure,
+            # each at its settled cost (one with none stated at the lane's own figure, as its line counts it).
+            ulo, uhi = (MT._iso(t) for t in MT.day_bounds(on))
+            cost_verdicts = float(store.db.execute(
+                f"SELECT COALESCE(SUM(COALESCE(usd, {B.VERDICT_USD_UNKNOWN})), 0) FROM verdicts WHERE answered_at>=? "
+                "AND answered_at<?", (ulo, uhi)).fetchone()[0] or 0.0)
             fills, first_fill = [], None
             if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='real_fills'").fetchone():
                 fills = store.db.execute("SELECT side, COUNT(*) AS n, COALESCE(SUM(fee), 0) AS fees FROM real_fills "
@@ -290,20 +315,22 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
     except Exception:  # noqa: BLE001 - no twins read: no gap said
         gap = EV.fill_gaps([])
     verdicts_usd = sum(_num(v.get("usd")) or 0.0 for v in vd.values() if isinstance(v, Mapping))
-    costs = _costs(ledger, on, now, verdicts_usd, budget)
+    costs = _costs(ledger, on, now, cost_verdicts, budget)
     # ACCOUNT-SHOWN FIRST, NET AFTER COSTS BESIDE IT: the day's realized real P&L against the day's measured spend, and to
-    # date from the lane's first real fill against the measured spend since.
+    # date from the lane's first real fill against the measured spend since (as far as metered.json covers it).
     day_spend = _num(costs["spent_usd"])
     shown_day = round(sum(e["pnl"] for e in real if _ny_day_of(e["sold_at"]) == day), 2)
     first_day = _ny_day_of(first_fill) if first_fill else None
     to_date: dict[str, Any] = {"since": first_day, "shown_usd": None, "net_usd": None, "metered_usd": None,
-                               "events": len(real)}
+                               "events": len(real), "costs_from": None, "partial": False, "missing": []}
     per_event = None
-    if first_day is not None:
-        span = MT.since(ledger, dt.date.fromisoformat(first_day), now)
+    first_utc = _utc_day_of(first_fill) if first_fill else None
+    if first_day is not None and first_utc is not None:
+        span = MT.since(ledger, first_utc, now)
         shown = round(sum(e["pnl"] for e in real), 2)
         to_date.update(shown_usd=shown, metered_usd=_round(span["usd"]),
-                       net_usd=None if span["usd"] is None else round(shown - span["usd"], 2))
+                       net_usd=None if span["usd"] is None else round(shown - span["usd"], 2),
+                       costs_from=span["from"], partial=bool(span["partial"]), missing=list(span["missing"]))
         if span["usd"] is not None and real:
             per_event = float(span["usd"]) / len(real)  # THE PROGRAMS' NET: metered compute shared per settled real event
     profit = {"day": {"shown_usd": shown_day, "net_usd": None if day_spend is None else round(shown_day - day_spend, 2)},

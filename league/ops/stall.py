@@ -129,16 +129,19 @@ their decision, the close decision's reading programs included) and `evl_score` 
 open at 23:00 ET), from the lane's own store, judged only while the lane runs on the House (config.json
 `events.enabled`) and `ops.json` `stall.evl` is not false, and never while the lane's `events/STOP` stands (nor for 30
 minutes after it goes) nor, for `evl_verdicts`, while the House's `PAUSE` stands (the windows the job saw are kept:
-`stall.json` `evl_idle`); and `evl_fills` (the goal's "fill gaps": the lane's real fills worse than the shadow's auction
-prints by more than 15 bp, the signed mean of a side over the last 20 priced event twins); INFO, before the equity
+`stall.json` `evl_idle`); and `evl_fills` (the goal's "fill gaps": the lane's real fills off the shadow's auction prints
+by more than 15 bp either way, the signed mean of a side over the last 20 priced event twins); INFO, before the equity
 lanes' four in `CAUSES`, worded by the gateway.
 
 THE CAP BREACH (release 1019c, the goal of Oct 19, 2026, items 4 and 5: "alarms on ... cap breaches";
 league/ops/metered.py): every run reads the meters themselves (the Sail guard's meter, the gateway's Claude and OpenAI
 meters, at `/v1/health`) into `<state>/metered.json`, and `cap_breach` stands while today's MEASURED metered spend so far,
-or yesterday's whole day, is over that day's cap (the lowest budget.json gave; its no-profit $5 when none could be read),
-and while Sail's or Claude's meter has gone 6 hours unread (the cap cannot be judged: it fails closed). INFO: the budget
-holds every line it can, and a fixed cost it cannot.
+or yesterday's whole day, is over that day's cap, and while Sail's or Claude's meter has gone 6 hours unread (the cap
+cannot be judged: it fails closed). THE DAY is the UTC day, the day budget rule 3 holds every line on, and its cap is
+the cap the rule set for it (the highest a usable budget.json gave while it ran; its no-profit $5 when none could be
+read). INFO: the budget holds every line it can, and a fixed cost it cannot; and while TODAY is over its cap for
+certain (what the readings put inside the day) the job writes THE CAP BREACH HOLD (`<state>/cap-hold.json`, below),
+which holds the lane's verdict line, Sail research and the Claude roles at 0 until 00:00 UTC.
 
 THE DAILY ONE-SCREEN REPORT (release 1019c, the goal's item 5; league/ops/daily_report.py): once a New York day, at the
 first run after the lane's own nightly report job (from 23:45 ET when that has not run), its own `POST /v1/notify` kind
@@ -177,10 +180,15 @@ HOW LONG: from the record when it says (the last birth, the last Validation verd
 first refusal of the owner's deploy or of the grant, the pause file, the kill), else from when this job first saw the
 cause standing.
 
-NEVER ACTS. The job reads (every SQLite open `mode=ro`, inside `guard.readonly()`; the gateway's `/v1/health`, a GET),
+NEVER ACTS, BUT FOR THE CAP BREACH HOLD (below). The job reads (every SQLite open `mode=ro`, inside
+`guard.readonly()`; the gateway's `/v1/health`, a GET), keeps the meters' ledger (`metered.json`) and the hold
+(`cap-hold.json`), and otherwise
 writes only `stall.json` and the release receipts' own store (below), and posts only the notice: it moves no money,
 changes no setting, starts and stops nothing. It runs in a maintenance pause too (read-only, like `preopen` and
 `clock`), so a pause left on is itself reported.
+THE CAP BREACH HOLD (release 1019c; the review of r2/alarms, its major 1) is its one act: `cap-hold.json`, written while
+today's measured metered spend is over today's cap for certain and removed once it is not, is read by every line budget
+rule 3 holds (league/ops/budget.py `cap_hold`), so the cap holds after a leak; it names its UTC day and lapses with it.
 
 RELEASE RECEIPTS (release E3; league/ops/release_receipts.py `step`): each run declares the running release's receipts
 (`league/ops/release_receipts.json`: the funnel metric a deploy expects to move) the first time it sees them and
@@ -2254,12 +2262,13 @@ def run(ctx: Any) -> dict[str, Any]:
     found.update(EH.checks(ctx, root, now, loaded, errors=errors, since=running.get("since"), kept=running,
                            paused=found["paused"]["numbers"]["paused_since"] is not None))
     # THE CAP BREACH (release 1019c; league/ops/metered.py): this run's readings of the meters themselves into
-    # metered.json, and the day's measured spend against its cap. budget.json's cap counts only from this rule's file.
+    # metered.json, the UTC day's measured spend against the cap the rule set for it, and THE CAP BREACH HOLD
+    # (cap-hold.json) written while today is over it. budget.json's cap counts only from this rule's file.
     rule_budget = budget if isinstance(budget, Mapping) and budget.get("schema") == B.SCHEMA else None
     ledger = None
     try:
         ledger = MT.update(root, now, health=health, budget=rule_budget)
-        found[MT.CAUSE] = MT.cap_check(ledger, now)
+        found[MT.CAUSE] = MT.cap_check(ledger, now, hold=ledger.get("hold"))
     except Exception as exc:  # noqa: BLE001 - the stall alarm goes on without the meters
         errors.append(f"the meters could not be read into metered.json ({type(exc).__name__}): cap_breach is not judged")
         found[MT.CAUSE] = _not_judged(f"the meters could not be read ({type(exc).__name__})")

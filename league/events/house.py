@@ -34,11 +34,14 @@ decision goes before it. A task ends early when a decision falls due; a decision
 stop at their bound and the next turn goes on from what was stored (universe rows, cik_info, bars and verdicts are kept
 as they are read). `<state>/events/STOP` idles the lane without a deploy.
 
-Paid work: a verdict is asked only while the House is not paused (`PAUSE`), and only under THE LANE'S LINE of a New
-York day: the lower of `events.verdict_usd_day` (default $5) and the budget rule's allowance for the lane's verdicts
-(league/ops/budget.py `lane_allowance`: the Claude meter's lane part in `<state>/budget.json`, its no-profit floor
-when the file is not usable), so the verdicts and every other metered dollar stay under the day's cap (budget rule 3;
-release 1019c). Over it, READ events wait (PREREG-EVL-1 section 4), as they do for any call with no answer.
+Paid work: a verdict is asked only while the House is not paused (`PAUSE`), and only under THE LANE'S LINE of a UTC
+day (00:00-24:00 UTC: budget rule 3's day, on which the Sail guard, the router and the cap breach judge theirs; the
+review of r2/alarms, its major 1: held on New York days, the lane could spend one day's line after 20:00 ET and the next
+day's from 00:00 ET, two lines in one UTC day): the lower of `events.verdict_usd_day` (default $5) and the budget rule's
+allowance for the lane's verdicts (league/ops/budget.py `lane_allowance`: the Claude meter's lane part in
+`<state>/budget.json`, its no-profit floor when the file is not usable, 0 under the cap breach hold), so the verdicts and
+every other metered dollar stay under the day's cap (budget rule 3; release 1019c). Over it, READ events wait
+(PREREG-EVL-1 section 4), as they do for any call with no answer.
 Market-data reads are spaced `DATA_INTERVAL` apart (Alpaca's Basic plan is shared
 with the House's own book).
 """
@@ -347,9 +350,9 @@ class EventLane:
         self._usd["usd"] += max(0.0, usd)
 
     def _spend_today(self, st: S.Store, now: dt.datetime) -> None:
-        """The day's verdict dollars so far (New York day), from the store: the line the next call is held to."""
-        day = now.astimezone(C.NY).date()
-        lo, hi = RP.day_bounds(day)
+        """The day's verdict dollars so far, from the store, and the line the next call is held to (`verdict_line`). THE
+        DAY is the UTC day (`verdict_day`: budget rule 3's, every other line's and the cap breach's)."""
+        day, (lo, hi) = verdict_day(now)
         row = st.db.execute("SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(usd IS NULL), 0) FROM verdicts WHERE "
                             "answered_at>=? AND answered_at<?", (lo, hi)).fetchone()
         self._usd = {"day": day, "usd": float(row[0]) + VERDICT_USD_UNKNOWN * int(row[1])}
@@ -1229,5 +1232,14 @@ def _iso_epoch(value: float) -> str | None:
         return None
 
 
+def verdict_day(now: dt.datetime) -> tuple[dt.date, tuple[str, str]]:
+    """THE DAY THE LANE'S LINE IS HELD ON (the module docstring): the UTC day of `now` and its [00:00, 24:00) UTC as the
+    store's strings, the day budget rule 3 holds every line on and the cap breach is judged on (league/ops/metered.py
+    `day_bounds`)."""
+    day = now.astimezone(UTC).date()
+    start = dt.datetime.combine(day, dt.time(0, 0), tzinfo=UTC)
+    return day, (S.iso(start), S.iso(start + dt.timedelta(days=1)))
+
+
 __all__ = ["EventLane", "LanePublisher", "LaneGateway", "LaneContext", "LaneCut", "LaneDeadline", "attach",
-           "events_enabled", "ROOT_NAME", "BACKGROUND_KEY"]
+           "events_enabled", "verdict_day", "ROOT_NAME", "BACKGROUND_KEY"]

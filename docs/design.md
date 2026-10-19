@@ -91,8 +91,9 @@ operations are House jobs; one funding action a year, not one a week; an honest 
   and since the release. From release 1019c (the goal of Oct 19, 2026, item 5) it also judges the event lane's own four
   causes by PROGRESS while the lane runs on the House (`league/ops/evl_health.py`: no clean record pass in 30 minutes, a
   decision not made in its window, verdicts unanswered past their decision, intents left open after the night's score,
-  real fills worse than the shadow's auction prints by more than 15 bp; quiet while the lane's STOP stands), `cap_breach` (the day's MEASURED metered compute over its cap,
-  `league/ops/metered.py`), and mails the lane's DAILY ONE-SCREEN REPORT once a New York day after the lane's report job
+  real fills off the shadow's auction prints by more than 15 bp either way; quiet while the lane's STOP stands),
+  `cap_breach` (the UTC day's MEASURED metered compute over the cap the rule set for it, `league/ops/metered.py`; while
+  today is over it the cap breach hold holds every line at 0 until 00:00 UTC), and mails the lane's DAILY ONE-SCREEN REPORT once a New York day after the lane's report job
   (`league/ops/daily_report.py`: account-shown profit first, Net after costs beside it, by program and band; costs
   measured against the cap; events, intents, fills, settled n, evidence; figures only). `ops.json` `stall.research`
   false stops the old lanes' research causes and research alarms from being judged while their research is off, and
@@ -102,8 +103,9 @@ operations are House jobs; one funding action a year, not one a week; an honest 
   trailing week's realized net profit / 7): the trailing week is the last 5 sessions' realized net of every real book
   (options and equity lots alike, the event lane's among them), and its half is spread over the 7 days a week of compute
   runs. The fixed costs count inside it, the event lane's verdicts ride the Claude line first (at least $3 a day) and the
-  old research roles share the remainder (Sail 0.8, Claude 0.2). Every line is held: research by the Sail guard and the
-  router, the lane's verdicts by the House's lane itself (its allowance in budget.json). A cheap day is never a failed
+  old research roles share the remainder (Sail 0.8, Claude 0.2). Every line is held, all on the UTC day the cap is judged
+  on: research by the Sail guard and the router, the lane's verdicts by the House's lane itself (its allowance in
+  budget.json); a measured breach holds them all at 0 for the rest of the day. A cheap day is never a failed
   day. Each prefunded meter still tapers by itself as its balance falls; unknown earns nothing; no usable budget.json is
   the rule's own no-profit lines (fails closed); applied last and tighten-only to the spend knobs; OpenAI is closed. One
   `funding` mail per meter two days before research on it runs out, with the exact amount. (**Compute**, below; the

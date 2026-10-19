@@ -43,7 +43,8 @@ until release 1019b (below) brings it onto the House.
   one-screen report (events, intents, fills, settled n, P&L by program and band, costs, evidence)" and "Report
   account-shown profit first, Net after costs beside it"; PREREG-EVL-1 section 9's reporting. Built again on
   `rel/1019b` (18824bca) from the first build `r1/alarms` (#572, which release 1019b left out), its league/ops and
-  gateway part only, with its review's four majors and its minors fixed, each with a test.
+  gateway part only, with its review's four majors and its minors fixed, each with a test; then its own review's three
+  majors (**The fix round**, below).
 - **Budget rule 3** (`league/ops/budget.py`, schema 3): cap = min($25, $5 + 0.5 x max(0, the realized net of every real
   book over the last 5 closed sessions) / 7) a day: the trailing week is one trading week, its half spread over the 7
   days a week of compute runs (r1 read 7 sessions). Every line is held: Sail research (the Sail guard), the Claude roles
@@ -58,17 +59,18 @@ until release 1019b (below) brings it onto the House.
   not made in its 10-minute window: missing, failed, cut, unfinished or late; decided later still stands),
   `evl_verdicts` (needed verdicts unanswered 15 minutes past their decision), `evl_score` (intents due by the latest
   session still open at 23:00 ET; an exit the tape showed absent waits by design), and `evl_fills` (the goal's "fill
-  gaps": the real fills worse than the shadow's auction prints by more than 15 bp, the signed mean of a side over the
-  last 20 priced event twins). Quiet while `events/STOP` stands (and 30 minutes after) and, for verdicts, under the
+  gaps": the real fills off the shadow's auction prints by more than 15 bp either way, the signed mean of a side over
+  the last 20 priced event twins, the direction said). Quiet while `events/STOP` stands (and 30 minutes after) and, for verdicts, under the
   House's `PAUSE`; `stall.json` `evl_idle` keeps the windows.
 - **The close decision's tally** (`league/events/run.py`, the smallest change): `decide_open` and `decide_close` write
   `verdicts: {needed, answered}` (the distinct (event, prompt) verdicts of every reading program, wave 2's close-entry
   NEWS-READ-ON included) into their receipts; `league/events/__init__.py` states the receipts' contract.
 - **`cap_breach` and the meters** (new `league/ops/metered.py`): every stall run reads the Sail guard's meter and the
   gateway's Claude and OpenAI meters into `<state>/metered.json`; the cause stands while today's MEASURED spend so far,
-  or yesterday's whole day, is over that day's lowest cap (the no-profit $5 with no usable budget.json), and while a
-  meter has had no reading for 6 hours (the cap cannot be judged). INFO, worded in the gateway's `STALL_CAUSES` with the
-  event lane's four.
+  or yesterday's whole day, is over the cap the rule set for that UTC day (the no-profit $5 with no usable budget.json),
+  and while a meter has had no reading for 6 hours (the cap cannot be judged). INFO, worded in the gateway's
+  `STALL_CAUSES` with the event lane's four; while today is over its cap for certain, THE CAP BREACH HOLD holds every
+  line at 0 until 00:00 UTC (below).
 - **The daily one-screen report by mail** (new `league/ops/daily_report.py`; the gateway's new notice kind `report`,
   keyed `report:<day>`, composed in `gateway/lib/email.mjs` `composeReport`: one phone screen, no line over 60
   characters): once a New York day after the lane's nightly report job (from 23:45 ET without it): account-shown profit
@@ -78,10 +80,30 @@ until release 1019b (below) brings it onto the House.
   to go, market-direction share and benchmark mean, the same-risk buy-and-hold ("n/a until real fills"), the expected
   false passes and the alarms open. Figures only; the receipt and stall.json carry the day, never a figure. r1's report
   riding the stall notice is gone.
+- **The fix round** (the review of `r2/alarms`, its three majors, each held by a test that fails without its fix):
+  EVERY LINE ON ONE DAY: the lane's verdict line held New York days while the Sail guard and the router held UTC days
+  and `cap_breach` judged New York days, so the lines added up past the cap on any one day (at a $25 cap a New York day
+  could measure $32.59, a UTC day spend $28.00); the lane now holds its line on the UTC day (league/events/house.py
+  `verdict_day`), metered.py judges UTC days and the report's costs are the UTC day of its date
+  (league/tests/test_cost_day.py has every holder spend all its line on its own code for two days and adds up what each
+  spent in the judged day). THE CAP THE RULE SET FOR THE DAY, not the lowest seen (a profitable close that raised the
+  cap and research mid-day read as a breach). THE CAP BREACH HOLD: while what the readings put inside today for certain
+  is over today's cap, the stall job writes `<state>/cap-hold.json` and budget.py's `cap_hold` holds the lane's
+  allowance, Sail research (`sail_caps`) and the settings' `budget` block every swarm step loads (`effective`: the
+  router's Claude roles, the knobs) at 0 until 00:00 UTC; the stall job's one act. COSTS TO DATE as far as the meters
+  cover them: Net to date (and every program's) went unknown for good when the first real fill came before
+  `metered.json` began, and a ledger begun mid-day left costs out of Net with no label; `metered.since` now measures
+  from the later of the first fill's day and the ledger's first, and the report says `costs_from`, `partial` and
+  `missing` ("costs $X since <day>, partly measured", "(costs partial)" in the subject). `evl_fills` EITHER WAY: a side
+  more than 15 bp BETTER than the prints stands too (the Done item and PREREG-EVL-3 section 5 ask within 15 bp, the
+  signed mean per side), and the text says which way. `metered.json` moves to schema 2 (a release-r1 ledger reads as
+  none).
 - **Tests:** league/tests/test_evl_health.py (the four causes, STOP and PAUSE, the close decision's tally end to end),
   test_ops_metered.py, test_daily_report.py (through the stall job with a fake gateway), the CostRule, LaneAllowance and
   Job tests of test_ops_budget.py, test_events_house.py `TheBudgetsLine`, test_events_run.py and test_events_wave2.py's
-  tallies; gateway/test/report-notice.test.mjs and stall-notice.test.mjs. Release E2's health replays and the E4 panel
+  tallies; the fix round's test_cost_day.py, test_ops_metered.py `CostsToDate` and `TheHold`, test_ops_budget.py
+  `CapBreachHold`, test_daily_report.py `CostsToDate` and test_evl_health.py's fills either way;
+  gateway/test/report-notice.test.mjs and stall-notice.test.mjs. Release E2's health replays and the E4 panel
   lane's end-to-end test were written on the old floor ($4 + $1 of research with no budget.json): they keep it as their
   House's setting (league/tests/elane_e2_fakes.py `pre_1019c_floor`), the rule's own floor held by test_ops_budget.
   Docs: docs/operations.md (**Release 1019c, alarms and costs**, the stall table, the budget rule), docs/events.md

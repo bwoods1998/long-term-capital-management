@@ -142,7 +142,8 @@ of every real book (the last 5 sessions' net, its half spread over the week's 7 
 inside it and the event lane's verdicts first on the Claude line, held there by the lane itself; a cheap day is never a
 failed day. The stall alarm then also watches the event lane by its progress (a clean record pass, each decision made
 in its window, its verdicts, the nightly settling, its real fills against the auction prints) and the day's measured
-spend against the cap (`cap_breach`), and the owner gets the lane's daily one-screen report by mail
+spend against the cap (`cap_breach`; every line is held on the UTC day the cap is judged on, and a day measured over its
+cap holds every line at 0 until 00:00 UTC), and the owner gets the lane's daily one-screen report by mail
 ([operations](docs/operations.md), **Release 1019c, alarms and costs**).
 
 ## The game

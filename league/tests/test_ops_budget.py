@@ -717,6 +717,64 @@ class LaneAllowance(unittest.TestCase):
         self.assertIn("the lane's part would fall from 2.8356 to 2.6000", why)
 
 
+class CapBreachHold(unittest.TestCase):
+    """THE CAP BREACH HOLD (release 1019c; the review of r2/alarms, its major 1): while the stall job's `cap-hold.json`
+    names today's UTC day (league/ops/metered.py writes it while today's measured metered spend is over today's cap),
+    every line the rule holds is 0: the lane's allowance, Sail research at the guard's own check, and the settings'
+    `budget` block (the router's Claude roles, the knobs) that every swarm step loads. A new day has no hold."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.root = Path(self.dir.name)
+        self.doc = B.compute(inputs(week_net=280.0, sail=5000.0, claude=5000.0), now=NOW - 600)
+        (self.root / B.BUDGET_FILE).write_text(json.dumps(self.doc))
+
+    def hold(self, day="2026-10-20"):
+        (self.root / B.HOLD_FILE).write_text(json.dumps({"schema": B.HOLD_SCHEMA, "day": day, "at": "2026-10-20T21:20:00Z",
+                                                         "since": "2026-10-20T21:20:00Z", "spent_usd": 26.4,
+                                                         "cap_usd": 25.0}))
+
+    def test_every_line_is_zero_while_it_stands_and_back_the_next_utc_day(self):
+        before = (B.effective(self.root, NOW), B.lane_allowance(self.root, NOW))
+        self.assertGreater(before[0]["sail_usd_day"], 0.0)
+        self.assertGreater(before[1]["usd_day"], 0.0)
+        self.hold()
+        block = B.effective(self.root, NOW)
+        self.assertEqual((block["sail_usd_day"], block["claude_usd_day"], block["source"]),
+                         (0.0, 0.0, f"the cap breach hold ({B.HOLD_FILE})"))
+        self.assertIn("is over its cap $25.00", block["why"])
+        self.assertEqual(block["fixed_sail_usd_day"], before[0]["fixed_sail_usd_day"], "the fixed cost as it was")
+        lane = B.lane_allowance(self.root, NOW)
+        self.assertEqual(lane["usd_day"], 0.0)
+        self.assertTrue(lane["source"].startswith("the cap breach hold (cap-hold.json): the UTC day 2026-10-20"), lane)
+        caps = B.sail_caps({"budget": before[0]}, self.root, NOW)
+        self.assertEqual((caps["research"], caps["gate_reserve"], caps["read"]), (0.0, 0.0, True),
+                         "at the guard's own check, whatever block it was handed: the budget's own stop")
+        self.assertTrue(caps["source"].startswith("the cap breach hold"), caps)
+        self.assertEqual(B.sail_caps({"budget": before[0]})["research"], before[0]["sail_usd_day"],
+                         "with no root the guard cannot see it: the next swarm step's block carries it")
+        settings = copy.deepcopy(S.DEFAULTS)
+        B.overlay(settings, self.root, now=NOW)
+        self.assertEqual((settings["budget"]["sail_usd_day"], settings["budget"]["claude_usd_day"]), (0.0, 0.0))
+        self.assertEqual(settings["budget"]["knobs"]["claude.role_usd_day"], 0.0)
+        self.assertTrue(all(v == 0.0 for v in settings["claude"]["role_usd_day"].values()))
+        self.assertEqual(B.paid_model_room(settings["budget"], 0.0, 0.0), 0.0, "the router admits no role")
+        # 00:00 UTC: the file names another day, and every line is back.
+        tomorrow = at(2026, 10, 21, 0, 5)
+        self.assertIsNone(B.cap_hold(self.root, tomorrow))
+        self.assertEqual(B.effective(self.root, tomorrow)["sail_usd_day"], before[0]["sail_usd_day"])
+        self.assertEqual(B.lane_allowance(self.root, tomorrow)["usd_day"], before[1]["usd_day"])
+
+    def test_a_hold_over_no_usable_budget_json_holds_the_floor_too(self):
+        (self.root / B.BUDGET_FILE).unlink()
+        self.hold()
+        block = B.effective(self.root, NOW)
+        self.assertEqual((block["sail_usd_day"], block["claude_usd_day"]), (0.0, 0.0))
+        self.assertEqual(B.lane_allowance(self.root, NOW)["usd_day"], 0.0)
+        self.assertEqual(B.sail_caps({}, self.root, NOW)["research"], 0.0)
+
+
 class Knobs(unittest.TestCase):
     #: The dollars a day (both meters together, split 0.8 and 0.2 since the operator's decision of Oct 9, 2026; 0.6 and
     #: 0.4 before) and what they buy: the Sail model pace an hour, the Gym's boxes, the Claude line, the population

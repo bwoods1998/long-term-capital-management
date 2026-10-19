@@ -682,6 +682,49 @@ class TheBudgetsLine(LaneCase):
         self.turn()
         self.assertEqual(self.gw.claude_calls, [])
 
+    def test_the_line_is_held_on_the_utc_day(self):
+        """The review of r2/alarms, its major 1: the lane holds its line on the UTC day, the day every other line is held
+        and the cap judged on. Verdict dollars answered at 20:30 ET Monday (00:30 UTC Tuesday) are Tuesday's: with them at
+        the line, Tuesday's READ events wait, at 07:31 ET as at 00:00 ET; the next UTC day, from 20:00 ET Tuesday, asks
+        again. (Held on New York days, Monday's evening and Tuesday's morning were two lines in one UTC day.)"""
+        self.three_filings()
+        self.budget(0.003, at=et("2026-10-19", "19:00").timestamp())   # the budget job's run before Tuesday (UTC)
+        at = S.iso(et("2026-10-19", "20:30"))
+        with self.store() as st:
+            st.db.execute("INSERT INTO verdicts(event, prompt_sha, model, asked_at, answered_at, status, usd) VALUES("
+                          "'8k:evening', 'p', 'claude-haiku-4-5-20251001', ?, ?, 'ok', 0.003)", (at, at))
+        self.at(et("2026-10-20", "07:31"))
+        self.mark_recorded()
+        self.turn()
+        self.assertEqual(self.gw.claude_calls, [], "Tuesday's UTC line was spent at 20:30 ET Monday")
+        self.assertEqual(self.lane.health()["verdict_usd_today"], 0.003)
+        with self.store() as st:
+            self.lane._spend_today(st, et("2026-10-20", "00:05"))     # 00:05 ET: still Tuesday's UTC day
+            self.assertEqual(self.lane.claude_refusal(None), "cap")
+            self.lane._spend_today(st, et("2026-10-20", "20:05"))     # 00:05 UTC Wednesday: its own line
+            self.assertIsNone(self.lane.claude_refusal(None))
+            self.assertEqual(self.lane._usd["usd"], 0.0)
+
+    def test_the_cap_breach_hold_asks_nothing_until_00_00_utc(self):
+        """THE CAP BREACH HOLD (league/ops/metered.py writes it while today's measured metered spend is over today's cap):
+        the lane's line is 0 for the rest of the UTC day, whatever budget.json says."""
+        from league.ops import budget as B
+
+        self.lane = self.new_lane(verdict_usd_day=5.0)                   # the budget's allowance binds, whatever the default
+        self.three_filings()
+        self.budget(4.0)
+        (self.root.parent / B.HOLD_FILE).write_text(json.dumps({"schema": B.HOLD_SCHEMA, "day": "2026-10-20",
+                                                                "since": "2026-10-20T10:20:00Z", "spent_usd": 6.2,
+                                                                "cap_usd": 5.0}))
+        self.at(et("2026-10-20", "07:31"))
+        self.mark_recorded()
+        self.turn()
+        self.assertEqual(self.gw.claude_calls, [])
+        health = self.lane.health()
+        self.assertEqual(health["verdict_line_usd"], 0.0)
+        self.assertIn("the cap breach hold (cap-hold.json)", health["verdict_line_source"])
+        self.assertEqual(self.lane.verdict_line(et("2026-10-20", "20:05"))["usd_day"], 4.0, "a new UTC day: no hold")
+
 
 class TheRecordPass(LaneCase):
     def test_bounded_and_resumable(self):

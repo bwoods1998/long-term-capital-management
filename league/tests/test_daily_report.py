@@ -20,7 +20,7 @@ from league.ops import stall as ST
 from league.tests.test_evl_health import CLEAN, StallHarness, et, iso
 from league.tests.test_ops_budget import inputs as budget_inputs
 
-MON, TUE = dt.date(2026, 10, 19), dt.date(2026, 10, 20)
+MON, TUE, WED, THU = dt.date(2026, 10, 19), dt.date(2026, 10, 20), dt.date(2026, 10, 21), dt.date(2026, 10, 22)
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "daily_report.json"
 
 
@@ -102,27 +102,43 @@ def synthetic_lane(root: Path, day: dt.date = TUE) -> None:
         st.close()
 
 
-class DailyReport(StallHarness):
+class ReportCase(StallHarness):
+    """A House state root with the lane's invented Tuesday, budget.json and the meters read across Tuesday's UTC day."""
+
+    #: Claude's meter at 00:00 UTC Wednesday (20:00 ET Tuesday): Tuesday's UTC day spent $1.97 of Claude.
+    end_claude = 51.97
+
     def setUp(self):
         super().setUp()
         synthetic_lane(self.root)
         self.now_ = et(TUE, "22:20")
-        # The day's cap and its lines (budget rule 3 at no profit, Sail's fixed $1.50): budget.json, fresh.
-        doc = B.compute(budget_inputs(), now=self.now_ - 600)
+        # The day's cap and its lines (budget rule 3 at no profit, Sail's fixed $1.50): budget.json, fresh, written by the
+        # budget job's run before Tuesday's UTC day began.
+        doc = B.compute(budget_inputs(), now=et(MON, "19:50"))
         (self.root / "budget.json").write_text(json.dumps(doc))
-        self.meters(et(TUE, "00:00"), sail=100.0, claude=50.0)
+        # The meters read at 00:00 UTC Tuesday (20:00 ET Monday), by a stall run at 00:00 ET Tuesday (which mails Monday's
+        # report) and at 00:00 UTC Wednesday (20:00 ET Tuesday): Tuesday's UTC day read whole.
+        self.meters(et(MON, "20:00"), sail=100.0, claude=50.0, run=False)
+        self.meters(et(TUE, "00:00"), sail=100.2, claude=50.3)
+        self.meters(et(TUE, "20:00"), sail=101.2, claude=self.end_claude, run=False)
 
-    def meters(self, at, *, sail, claude):
+    def meters(self, at, *, sail, claude, run=True):
         """The Sail guard's meter (its kv, as league/swarm/guard.py keeps it) and the gateway's Claude meter at `at`, read
-        by a stall run then."""
+        by a stall run then (`run`), or by its meters alone (league/ops/metered.py `update`, as the run reads them)."""
         self.store.put("guard", {"last": {"balance": 400.0, "metered_spent": sail, "at": at},
                                  "last_good": {"balance": 400.0, "at": at}})
         self.health = {"kill_switch": False, "claude": {"settled_usd": f"{claude:.6f}"}}
-        ST.run(self.ctx(now=at))
-        self.notify.calls.clear()
+        if run:
+            ST.run(self.ctx(now=at))
+            self.notify.calls.clear()
+        else:
+            MT.update(self.root, at, health=self.health, budget=json.loads((self.root / "budget.json").read_text()))
 
     def reports(self):
         return [c for c in self.notify.calls if c.get("kind") == "report"]
+
+
+class DailyReport(ReportCase):
 
     def test_once_a_day_after_the_lanes_report_job_figures_only(self):
         self.store.put("guard", {"last": {"balance": 400.0, "metered_spent": 101.2, "at": self.now_},
@@ -135,18 +151,22 @@ class DailyReport(StallHarness):
         self.assertEqual((facts["kind"], facts["notice_id"], facts["day"], facts["lane_report"]),
                          ("report", "report:2026-10-20", "2026-10-20", True))
         # ACCOUNT-SHOWN FIRST, NET AFTER THE MEASURED COSTS BESIDE IT: 1.98 - 0.51 + 1.47 = 2.94 from the fills and fees.
+        # The costs are the UTC day of the report's date (the cost rule's day), whole by 22:20 ET.
         costs = facts["costs"]
         self.assertEqual((costs["sail_usd"], costs["claude_usd"], costs["cloudflare_usd"]), (1.2, 1.97, 0.16))
-        self.assertEqual((costs["spent_usd"], costs["from"], costs["to"], costs["whole"]), (3.33, "00:00", "22:20", False))
+        self.assertEqual((costs["spent_usd"], costs["from"], costs["to"], costs["whole"]), (3.33, "00:00", "24:00", True))
         self.assertEqual((costs["cap_usd"], costs["over"]), (5.0, False))
-        self.assertEqual(costs["verdicts_usd"], 0.01, "the day's verdict dollars, inside Claude's")
+        self.assertEqual(costs["verdicts_usd"], 0.01, "the UTC day's verdict dollars, inside Claude's")
         self.assertEqual(costs["allowance"], {"cap_usd": 5.0, "fixed_usd": 1.66, "lane_usd": 3.0, "research_usd": 0.34,
                                               "source": "budget"})
         profit = facts["profit"]
         self.assertEqual(profit["day"], {"shown_usd": 2.94, "net_usd": round(2.94 - 3.3344, 2)})
-        self.assertEqual((profit["to_date"]["since"], profit["to_date"]["shown_usd"], profit["to_date"]["events"]),
-                         ("2026-10-20", 2.94, 3))
-        self.assertEqual(profit["to_date"]["net_usd"], round(2.94 - profit["to_date"]["metered_usd"], 2))
+        to_date = profit["to_date"]
+        self.assertEqual((to_date["since"], to_date["shown_usd"], to_date["events"]), ("2026-10-20", 2.94, 3))
+        self.assertEqual((to_date["costs_from"], to_date["partial"], to_date["missing"]), ("2026-10-20", False, []),
+                         "metered.json covers the first fill's day whole")
+        self.assertEqual(to_date["metered_usd"], round(3.3344 + B.CLOUDFLARE_USD_DAY, 2), "Tuesday and Wednesday so far")
+        self.assertEqual(to_date["net_usd"], round(2.94 - to_date["metered_usd"], 2))
         # By program and band: the Nets share the measured compute per settled real event and add up to the lane's.
         programs = {p["id"]: p for p in facts["programs"]}
         self.assertEqual(len(facts["programs"]), 9, "the nine version 2 programs, in the tables' order")
@@ -181,21 +201,6 @@ class DailyReport(StallHarness):
         later = ST.run(self.ctx(now=self.now_ + 1800))
         self.assertEqual((later["report"]["day"], later["report"]["sent"]), (None, False))
         self.assertEqual(len(self.reports()), 1)
-
-    def test_over_the_cap_the_report_says_so_and_cap_breach_stands(self):
-        self.store.put("guard", {"last": {"balance": 400.0, "metered_spent": 101.2, "at": self.now_},
-                                 "last_good": {"balance": 400.0, "at": self.now_}})
-        self.health = {"kill_switch": False, "claude": {"settled_usd": "55.000000"}}   # $5 of Claude today
-        out = ST.run(self.ctx())
-        self.assertIn("cap_breach", out["stalled"])
-        check = out["checks"]["cap_breach"]
-        self.assertIn("Metered compute on 2026-10-20 is $6.36 so far, over that day's cap of $5.00", check["what"])
-        self.assertIsNone(check["owner_step"])
-        [facts] = self.reports()
-        self.assertEqual((facts["costs"]["spent_usd"], facts["costs"]["over"]), (6.36, True))
-        self.assertEqual(facts["alarms"], ["cap_breach"])
-        stall = [c for c in self.notify.calls if c.get("kind") == "stall"]
-        self.assertEqual([c["cause"] for c in stall[0]["causes"]], ["cap_breach"], "the cause keys its own stall notice")
 
     def test_not_before_the_lanes_report_job_and_from_2345_without_it(self):
         st = ES.Store(self.root / "events")
@@ -260,6 +265,98 @@ class DailyReport(StallHarness):
         self.assertEqual(facts["costs"]["allowance"]["research_usd"], 0.34)
         self.assertEqual(facts["costs"]["cap_usd"], B.BASE_USD_DAY, "the day's cap with no usable budget.json")
         self.assertTrue(out["report"]["sent"])
+
+
+class OverTheCap(ReportCase):
+    """Tuesday's UTC day spent $5.00 of Claude: over its $5 cap, said by the report and by `cap_breach`."""
+
+    end_claude = 55.0
+
+    def test_over_the_cap_the_report_says_so_and_cap_breach_stands(self):
+        self.store.put("guard", {"last": {"balance": 400.0, "metered_spent": 101.2, "at": self.now_},
+                                 "last_good": {"balance": 400.0, "at": self.now_}})
+        self.health = {"kill_switch": False, "claude": {"settled_usd": "55.000000"}}
+        out = ST.run(self.ctx())
+        self.assertIn("cap_breach", out["stalled"])
+        check = out["checks"]["cap_breach"]
+        self.assertIn("Metered compute on the UTC day 2026-10-20 was $6.36, over that day's cap of $5.00", check["what"])
+        self.assertIsNone(check["owner_step"])
+        self.assertIs(check["numbers"]["held"], False, "a day that has ended holds nothing: Wednesday is under its cap")
+        self.assertFalse((self.root / B.HOLD_FILE).exists())
+        [facts] = self.reports()
+        self.assertEqual((facts["costs"]["spent_usd"], facts["costs"]["over"]), (6.36, True))
+        self.assertEqual(facts["alarms"], ["cap_breach"])
+        stall = [c for c in self.notify.calls if c.get("kind") == "stall"]
+        self.assertEqual([c["cause"] for c in stall[0]["causes"]], ["cap_breach"], "the cause keys its own stall notice")
+
+
+class CostsToDate(StallHarness):
+    """COSTS TO DATE AS FAR AS THE METERS COVER THEM (the review of r2/alarms, its major 2): release 1019b trades real money
+    before release 1019c, which starts metered.json, can be deployed. Net to date and every program's Net are measured
+    over the days metered.json covers, from the later of the first fill's day and the ledger's first, and the report says
+    so: never unknown for good, never a silent figure."""
+
+    def setUp(self):
+        super().setUp()
+        synthetic_lane(self.root)             # the lane's first real fills: Tuesday Oct 20, from 09:30 ET
+
+    def reading(self, at: float, *, sail: float, claude: float) -> None:
+        """The meters as a stall run reads them at `at` (metered.py `update`), under a fresh budget.json."""
+        (self.root / "budget.json").write_text(json.dumps(B.compute(budget_inputs(), now=at - 600)))
+        self.store.put("guard", {"last": {"balance": 400.0, "metered_spent": sail, "at": at},
+                                 "last_good": {"balance": 400.0, "at": at}})
+        self.health = {"kill_switch": False, "claude": {"settled_usd": f"{claude:.6f}"}}
+        MT.update(self.root, at, health=self.health, budget=json.loads((self.root / "budget.json").read_text()))
+
+    def report(self, day: dt.date, at: float) -> dict:
+        st = ES.Store(self.root / "events")
+        st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES('report', ?, ?, 'ok', ?)",
+                      (iso(et(day, "21:05")), iso(et(day, "21:05")), json.dumps({"day": day.isoformat()})))
+        st.close()
+        self.reading(at, sail=float(self.store.get("guard")["last"]["metered_spent"]) + 0.1,
+                     claude=float(self.health["claude"]["settled_usd"]) + 0.1)
+        out = ST.run(self.ctx(now=at))
+        self.assertTrue(out["report"]["sent"], out["report"])
+        [facts] = [c for c in self.notify.calls if c.get("kind") == "report" and c["day"] == day.isoformat()]
+        return facts
+
+    def test_a_ledger_that_starts_a_day_after_the_first_fill(self):
+        """metered.json from 01:00 ET Wednesday (release 1019c deployed then): Thursday's report measures the costs since
+        Wednesday, says so, and keeps Net to date and each program's Net known."""
+        self.reading(et(WED, "01:00"), sail=100.0, claude=50.0)
+        self.reading(et(WED, "12:00"), sail=100.6, claude=50.9)
+        self.reading(et(THU, "00:30"), sail=101.3, claude=51.8)
+        facts = self.report(THU, et(THU, "22:20"))
+        to_date = facts["profit"]["to_date"]
+        self.assertEqual((to_date["since"], to_date["costs_from"], to_date["partial"]), ("2026-10-20", "2026-10-21", True))
+        self.assertIsNotNone(to_date["metered_usd"])
+        self.assertEqual(to_date["net_usd"], round(to_date["shown_usd"] - to_date["metered_usd"], 2))
+        ledger = MT.load(self.root)
+        span = MT.since(ledger, TUE, et(THU, "22:20"))
+        self.assertEqual(to_date["metered_usd"], round(span["usd"], 2))
+        for row in facts["programs"]:
+            if row["real"]:
+                self.assertIsNotNone(row["net_usd"], row["id"])
+        self.assertEqual(to_date["missing"], [])
+
+    def test_a_ledger_that_starts_mid_day_on_the_first_fills_day(self):
+        """metered.json from 02:00 ET Tuesday (release 1019c deployed on time, the night before the first fill): the first
+        fill's day is measured from then, and the report says partly."""
+        self.reading(et(TUE, "02:00"), sail=100.0, claude=50.0)
+        self.reading(et(TUE, "12:00"), sail=100.6, claude=50.9)
+        facts = DR.facts(self.ctx(now=et(TUE, "22:20")), self.root, et(TUE, "22:20"), "2026-10-20")
+        to_date = facts["profit"]["to_date"]
+        self.assertEqual((to_date["costs_from"], to_date["partial"]), ("2026-10-20", True))
+        self.assertIsNotNone(to_date["net_usd"])
+        self.assertFalse(facts["costs"]["whole"], "Tuesday's UTC day was read from 06:00 UTC")
+        self.assertEqual(facts["costs"]["from"], "06:00")
+
+    def test_no_reading_at_all_is_unknown_and_never_a_guess(self):
+        facts = DR.facts(self.ctx(now=et(TUE, "22:20")), self.root, et(TUE, "22:20"), "2026-10-20")
+        to_date = facts["profit"]["to_date"]
+        self.assertEqual((to_date["metered_usd"], to_date["net_usd"], to_date["costs_from"], to_date["partial"]),
+                         (None, None, None, True))
+        self.assertEqual(to_date["shown_usd"], 2.94, "account-shown profit is the account's, whatever the meters say")
 
 
 class BuyAndHold(unittest.TestCase):

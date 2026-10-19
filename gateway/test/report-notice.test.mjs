@@ -39,7 +39,7 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
     '  since 2026-10-20, 3 settled; costs $3.33', '',
   ]);
   for (const line of [
-    'Costs, measured 00:00-22:20 ET: $3.33',
+    'Costs, UTC day, measured 04:00-24:00 UTC: $3.33',
     ' under the day\'s cap of $5.00',
     ' Sail $1.20, Claude $1.97 (verdicts $1.85)',
     ' Cloudflare $0.16, data $0.00',
@@ -57,7 +57,7 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
     'Expected false passes: 0.9 (0.10 x 9 versions)',
   ]) assert.ok(text.includes(line), line);
   // Account-shown profit first; the costs (with the allowance labelled as such) after it; the alarms worded at the end.
-  assert.ok(text.indexOf(' today:   +$2.94 | -$0.39') < text.findIndex(line => line.startsWith('Costs, measured')));
+  assert.ok(text.indexOf(' today:   +$2.94 | -$0.39') < text.findIndex(line => line.startsWith('Costs, UTC day')));
   const alarms = text.findIndex(line => line.startsWith('Alarms open:'));
   const said = text.slice(alarms).join(' ').replace(/\s+/g, ' ');
   assert.ok(alarms > 0 && said.includes(STALL_CAUSES.cap_breach) && said.includes(STALL_CAUSES.evl_verdicts), said);
@@ -87,13 +87,28 @@ test('over the cap the report says so in its subject and its costs; with no real
   const partial = { ...REPORT, costs: { ...REPORT.costs, spent_usd: null, at_least_usd: 1.2, sail_usd: null, whole: true,
     allowance: { ...REPORT.costs.allowance, source: 'floor' } } };
   const words = lines(partial);
-  assert.ok(words.includes('Costs, measured the whole day: $1.20 at least'));
+  assert.ok(words.includes('Costs, UTC day, measured the whole day: $1.20 at least'));
   assert.ok(words.includes(' Sail unknown, Claude $1.97 (verdicts $1.85)'));
   assert.ok(words.some(line => line.startsWith(' Allowance (the floor): cap $5.00')));
   // The first run after a deploy: no meter read yet in the day.
   const unread = lines({ ...REPORT, costs: { ...REPORT.costs, from: null, to: null, spent_usd: null, at_least_usd: 0.16,
     sail_usd: null, claude_usd: null } });
-  assert.ok(unread.includes('Costs, measured with no meter read yet: $0.16 at least'));
+  assert.ok(unread.includes('Costs, UTC day, no meter read yet: $0.16 at least'));
+  // COSTS TO DATE AS FAR AS THE METERS COVER THEM (the review of r2/alarms, its major 2): a ledger begun a day after the
+  // first fill, and a day a meter missed, are said in the body and the subject; never a silent Net.
+  const late = { ...REPORT, profit: { ...REPORT.profit, to_date: { ...REPORT.profit.to_date, costs_from: '2026-10-21',
+    partial: true, missing: ['2026-10-22', 'last week'] } } };
+  const lateMail = composeNotice(late);
+  assert.equal(lateMail.subject, 'LTCM daily 2026-10-20: shown +$2.94, net -$0.39 (costs partial); 2 alarms');
+  const lateText = lateMail.text.split('\n');
+  for (const line of lateText) assert.ok(line.length <= REPORT_WIDTH, line);
+  const lateWords = lateText.join(' ').replace(/\s+/g, ' ');
+  assert.ok(lateWords.includes('since 2026-10-20, 3 settled; costs $3.33 since 2026-10-21, partly measured'), lateWords);
+  assert.ok(lateWords.includes('a meter unread on 2026-10-22') && !lateWords.includes('last week'));
+  const partlySame = lines({ ...REPORT, profit: { ...REPORT.profit, to_date: { ...REPORT.profit.to_date, partial: true } } });
+  assert.ok(partlySame.includes('  since 2026-10-20, 3 settled; costs $3.33 since 2026-10-20,')
+    && partlySame.includes('   partly measured'), partlySame.join('|'));
+  assert.ok(!lines(REPORT).join(' ').includes('partly'), 'a ledger that covers it all: no label');
   // The lane's own report job did not run: said.
   assert.ok(lines({ ...REPORT, lane_report: false }).includes('The lane\'s own report job did not run for this day.'));
   // A program on real money in two bands has a line for each.

@@ -36,13 +36,20 @@ $5 together; THE FLOOR below is exactly these lines.
 EVERY LINE IS HELD, so every metered dollar stays under the cap (the review of r1/alarms, its major 1): Sail research by
 the Sail guard (`sail_caps`: the day's research and Sail's own meter), the Claude roles by the router (the settings'
 `budget` block hands it the ROLES' line only, `claude_usd_day`: 0.2 x rest, so no role can spend the lane's part), and
-THE LANE'S VERDICTS by the House's event lane itself (league/events/house.py: a New York day's verdicts at most the lower
-of `events.verdict_usd_day` and `lane_allowance`, the Claude meter's lane part after its taper; over it a READ event
-waits, PREREG-EVL-1 section 4). The fixed costs are measured (Sail's box billing over a week) and cannot be held; a day
-whose MEASURED spend goes over its cap anyway (a fixed cost that rose, a line that leaked) is the stall job's
-`cap_breach` (league/ops/metered.py measures each day's spend from the meters themselves). A CHEAP DAY IS NEVER A FAILED
-DAY: the cap is what may be spent, never what must be (the stall job raises no `underspend` under this rule, and no
-Done item reads spend). PREPAID CREDIT FIRST: the runway taper below spends each meter's prefund at most one part in
+THE LANE'S VERDICTS by the House's event lane itself (league/events/house.py: a UTC day's verdicts at most the lower of
+`events.verdict_usd_day` and `lane_allowance`, the Claude meter's lane part after its taper; over it a READ event waits,
+PREREG-EVL-1 section 4). EVERY LINE ON ONE DAY (the review of r2/alarms, its major 1): each holder holds its line on the
+UTC day, 00:00-24:00 UTC (the guard and the router from `now - now % 86400`, the lane from 00:00 UTC, this rule's day's
+figure, `lane_spend`'s heaviest day), and the cap is judged on that same day (league/ops/metered.py), so the lines and
+the fixed costs add up to the cap on the day judged; held on two days (the lane once held New York days), one day could
+see two of a line. The fixed costs are measured (Sail's box billing over a week) and cannot be held; a day whose MEASURED
+spend goes over its cap anyway (a fixed cost that rose, a line that leaked) is the stall job's `cap_breach`
+(league/ops/metered.py measures each day's spend from the meters themselves), and THE CAP BREACH HOLD then holds every
+line at 0 for the rest of that UTC day (`cap_hold`: the stall job writes `<state>/cap-hold.json` while what the
+readings put inside today for certain is over today's cap; `lane_allowance`, `sail_caps` and `effective`, which the
+settings' `budget` block of every swarm step comes from, each read it), so the cap holds after a leak instead of only
+raising an alarm. A CHEAP DAY IS NEVER A FAILED DAY: the cap is what may be spent, never what must be (the stall job
+raises no `underspend` under this rule, and no Done item reads spend). PREPAID CREDIT FIRST: the runway taper below spends each meter's prefund at most one part in
 `RUNWAY_DAYS` a day, and nothing here buys anything.
 
 What RULE_VERSION 2 read and this rule does not: the options-only trailing-30-day p30 (`book_p30` over 30 days, cut by
@@ -405,6 +412,11 @@ ARCHITECT_IDLE_SECONDS = 86400
 
 BUDGET_FILE = "budget.json"
 NOTICES_FILE = "budget-notices.json"
+#: THE CAP BREACH HOLD (release 1019c; the review of r2/alarms, its major 1): the stall job's measured breach of today's
+#: cap (league/ops/metered.py `write_hold`: {schema, day, at, since, spent_usd, cap_usd}), read by every line this rule
+#: holds (`cap_hold`).
+HOLD_FILE = "cap-hold.json"
+HOLD_SCHEMA = 1
 EPSILON = 0.005
 #: THE TOP-UP RAISE: the raises of a day a day's figure keeps (`raises`; the refresh runs hourly, so a day has at most 25).
 RAISES_KEPT = 32
@@ -894,9 +906,46 @@ def stale_block(meters: Any, at: float | None, why: str) -> dict[str, Any]:
             "fixed_sail_usd_day": _amount(sail.get("fixed_usd_day")), "warning": True}
 
 
+def cap_hold(root: str | Path | None, now: float | None = None) -> dict[str, Any] | None:
+    """THE CAP BREACH HOLD (the module docstring, EVERY LINE IS HELD): `<root>/cap-hold.json` (the stall job writes it
+    while today's MEASURED metered spend is over today's cap for certain, league/ops/metered.py) when it names the
+    current UTC day: {schema, day, at, since, spent_usd, cap_usd}. None with no root, no file, one that does not read, or
+    another day's (a new UTC day has no hold). Never raises."""
+    import time
+
+    if root is None:
+        return None
+    try:
+        now = time.time() if now is None else float(now)
+        data = json.loads((Path(root) / HOLD_FILE).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - no file (the usual case), or one that does not read: no hold
+        return None
+    if not isinstance(data, Mapping) or data.get("schema") != HOLD_SCHEMA or data.get("day") != _day(now).isoformat():
+        return None
+    return dict(data)
+
+
+def _hold_words(hold: Mapping[str, Any]) -> str:
+    def usd(value: Any) -> str:
+        number = _finite(value)
+        return "unknown" if number is None else f"${number:.2f}"
+    return (f"the cap breach hold ({HOLD_FILE}): the UTC day {hold.get('day')}'s measured metered spend "
+            f"{usd(hold.get('spent_usd'))} is over its cap {usd(hold.get('cap_usd'))}")
+
+
+def held_block(block: Mapping[str, Any], hold: Mapping[str, Any]) -> dict[str, Any]:
+    """The settings' `budget` block under THE CAP BREACH HOLD: no research on either meter (the Sail guard's research, the
+    router's Claude roles) for the rest of the UTC day; the rest of `block` as it was (its fixed cost, its warning)."""
+    return {**block, "source": f"the cap breach hold ({HOLD_FILE})", "why": _hold_words(hold),
+            "state": "no research: today's measured metered spend is over its cap (the cap breach hold, until 00:00 UTC)",
+            "sail_usd_day": 0.0, "claude_usd_day": 0.0, "hold": {"day": hold.get("day"), "since": hold.get("since")}}
+
+
 def effective(root: str | Path, now: float | None = None) -> dict[str, Any]:
-    """The budget block `<root>/budget.json` gives now (`read`; the floor when it gives none): what the Sail guard and the
-    router read for themselves, whatever settings they were handed."""
+    """The budget block `<root>/budget.json` gives now (`read`; the floor when it gives none), under THE CAP BREACH HOLD
+    when one stands today (`cap_hold`: no research on either meter): what the Sail guard and the router read for
+    themselves, whatever settings they were handed, and what every `settings.load` with a state root hands them
+    (`overlay`)."""
     import time
 
     now = time.time() if now is None else float(now)
@@ -904,7 +953,9 @@ def effective(root: str | Path, now: float | None = None) -> dict[str, Any]:
         block, why = read(root, now)
     except Exception as exc:  # noqa: BLE001 - anything unexpected is the floor
         block, why = None, f"budget.json could not be read ({type(exc).__name__})"
-    return block if block is not None else floor_block(why or "no budget.json")
+    block = block if block is not None else floor_block(why or "no budget.json")
+    hold = cap_hold(root, now)
+    return block if hold is None else held_block(block, hold)
 
 
 def read(root: str | Path, now: float) -> tuple[dict[str, Any] | None, str | None]:
@@ -1014,7 +1065,8 @@ def sail_caps(settings: Mapping[str, Any], root: str | Path | None = None, now: 
     names that brake apart from the budget's own daily stop. NEVER ABOVE THE CEILING: a block that says more research
     than Sail's share of it, however it came, is read as that share. `gate_reserve` is THE GATE'S RESERVE inside the day
     (`gate_reserve`): researcher cycles, births and the architect stop that far under either cap; the tournament's
-    validation round, the gate round and the nightly forward go on to the caps themselves."""
+    validation round, the gate round and the nightly forward go on to the caps themselves. THE CAP BREACH HOLD
+    (`cap_hold`, with `root`): no research while it stands today, whatever the block says."""
     guard = settings.get("guard") if isinstance(settings.get("guard"), Mapping) else {}
     house = _amount(guard.get("house_burn_usd_day"))
     house = 1.0 if house is None else house
@@ -1033,6 +1085,11 @@ def sail_caps(settings: Mapping[str, Any], root: str | Path | None = None, now: 
         fixed = max(house, measured) if measured is not None else house
         source = str(block.get("source") or "budget")
         read = block.get("read", True) is True  # the rule's own blocks say nothing; one that says anything else is unread
+    hold = cap_hold(root, now) if root is not None else None
+    if hold is not None and research > 0:
+        # THE CAP BREACH HOLD, at the guard's own check: whatever block it was handed, no Sail research for the rest of
+        # the UTC day (the settings of the next swarm step carry it too: `effective`).
+        research, source = 0.0, f"the cap breach hold ({HOLD_FILE}, over {source})"
     return {"research": round(research, 4), "fixed": round(fixed, 4), "account": round(research + fixed, 4), "source": source,
             "read": read, "gate_reserve": gate_reserve(research)}
 
@@ -1237,10 +1294,15 @@ def lane_allowance(root: str | Path, now: float | None = None) -> dict[str, Any]
     the Claude meter's lane part after its taper (`meters.claude.lane_usd_day`: the rule's own figure, 0 when the rule
     could not read the meter, FAIL CLOSED). With no usable budget.json (none, unreadable, malformed, another rule's, dated
     in the future) it is THE FLOOR's (`floor_lane_usd_day`: the rule's own lane line at no profit); a STALE one gives the
-    lower of the floor and what it said. Never above `CEILING_USD_DAY`. {usd_day, source, at}. Never raises."""
+    lower of the floor and what it said. Never above `CEILING_USD_DAY`. Under THE CAP BREACH HOLD (`cap_hold`: today's
+    measured metered spend over today's cap) it is 0 until 00:00 UTC, whatever budget.json says. The lane holds it on the
+    UTC day, as every other line (EVERY LINE ON ONE DAY). {usd_day, source, at}. Never raises."""
     import time
 
     now = time.time() if now is None else float(now)
+    hold = cap_hold(root, now)
+    if hold is not None:
+        return {"usd_day": 0.0, "source": _hold_words(hold), "at": None, "hold": True}
     floor = floor_lane_usd_day()
     try:
         data = json.loads((Path(root) / BUDGET_FILE).read_text(encoding="utf-8"))
@@ -2194,4 +2256,5 @@ __all__ = ["compute", "knobs", "overlay", "read", "effective", "stale_block", "f
            "SPLIT", "RUNWAY_DAYS", "NOTICE_DAYS", "TOPUP_DAYS", "GATE_RESERVE_SHARE", "GATE_RESERVE_MIN_USD",
            "GATE_HOLDS_USD", "GATE_STAGES", "FLOOR_SAIL_FIXED_USD_DAY", "floor_lines", "floor_lane_usd_day",
            "lane_allowance", "LANE_HEADROOM", "PROFIT_DAYS", "PROFIT_SHARE", "RESERVE_USD", "EDGE_START", "EDGE_SESSIONS",
-           "STALE_SECONDS", "BUDGET_FILE", "NOTICES_FILE", "LADDER_MARK", "LOOK_BAND", "P30_FRESH_SECONDS"]
+           "STALE_SECONDS", "BUDGET_FILE", "NOTICES_FILE", "LADDER_MARK", "LOOK_BAND", "P30_FRESH_SECONDS",
+           "cap_hold", "held_block", "HOLD_FILE", "HOLD_SCHEMA"]

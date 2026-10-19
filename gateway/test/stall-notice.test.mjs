@@ -281,4 +281,11 @@ test('the causes of Oct 19, 2026 (release 1019c): the measured cap breach and th
   const fills = { ...BIRTHS, cause: 'evl_fills', numbers: { entry_n: 20, entry_mean_bp: 18, worse: 'entry' } };
   assert.equal(composeNotice(notice(fills)).subject, 'LTCM: stalled: event-lane fills strayed from the auction prices');
   assert.ok(composeNotice(notice(fills)).text.split('\n').includes('- entry_mean_bp: 18'));
+  // Either way (the review of r2/alarms, its major 3): fills BETTER than the prints by more than 15 bp stand too.
+  const better = { ...BIRTHS, cause: 'evl_fills', numbers: { entry_mean_bp: -40, exit_mean_bp: -40, off: 'entry,exit',
+    worse: 'none', better: 'entry,exit' } };
+  const betterText = composeNotice(notice(better)).text.split('\n');
+  for (const line of ['- entry_mean_bp: -40', '- off: entry,exit', '- better: entry,exit']) assert.ok(betterText.includes(line), line);
+  // The cap breach hold (the review's major 1) is a yes or no among the cause's figures.
+  assert.ok(composeNotice(notice({ ...cap, numbers: { ...cap.numbers, held: true } })).text.split('\n').includes('- held: yes'));
 });

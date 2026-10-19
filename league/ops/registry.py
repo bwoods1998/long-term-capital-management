@@ -84,9 +84,10 @@ JOBS: tuple[Job, ...] = (
              "pause, a refused grant or the kill switch waiting; the equity lanes' own causes (league/ops/elane_health.py: "
              "disqualified versions, barren equity passes, broken lanes, programs refused by one rule); the event lane's "
              "own, by progress (league/ops/evl_health.py: no clean record pass, a decision missed in its window, "
-             "verdicts unanswered past their decision, intents left unsettled, real fills worse than the auction "
-             "prints); the day's measured metered spend over "
-             "its cap (league/ops/metered.py); one stall notice listing them all, an owner step's at once and every "
+             "verdicts unanswered past their decision, intents left unsettled, real fills off the auction prints by "
+             "more than 15 bp either way); the UTC day's measured metered spend over its cap, and the cap breach hold "
+             "that keeps every line at 0 for the rest of the day (league/ops/metered.py); one stall notice listing "
+             "them all, an owner step's at once and every "
              "12 h, the rest every 24 h; and the event lane's daily one-screen report by mail once a New York day "
              "(league/ops/daily_report.py)"),
     # Twice: 15:00Z runs the drills and requests the rollback drill last (the updater launches it); 17:00Z checks its verdict (and runs any drill
