@@ -5,9 +5,10 @@ they ran live or as a backfill (`why` says which): a backfilled decision uses on
 scheduled time (filings by knowable time, the universe from the sessions before D, C1's 15:30 minute bar and the
 last daily close before the acceptance). Verdicts are asked only for eligible events of the reading programs.
 A decision made again (release 1019c, `_scope`): outside the House's re-decision window it writes intents only for the
-programs its last receipt was pending on (A66, owed), and never for a program whose own look already stands over the
-session, nor for a control under a look that read its record (A69); the summary's `kept` names each program it left as
-it was.
+programs its last receipt was pending on (A66, owed), and, inside the window too, never for a program of a GROUP over
+whose session a look of the group is written (the group: every version of a program's id, its control, and every
+version of every READ program of that control); the summary's `kept` names each program it left as it was, why, and
+the events it left out of that program's record (`_left_out`), which the daily report counts.
 """
 
 from __future__ import annotations
@@ -252,9 +253,22 @@ def _key(prog: P.Program) -> str:
 
 
 # ---------------------------------------------------------------------------------------------------- re-decisions
-def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[P.Program], str | None]:
+def _group(program: str) -> frozenset[str]:
+    """THE IDS A WRITTEN LOOK FREEZES TOGETHER (release 1019c's judges review): the look's id (every version: a version 2
+    takes its version 1's events word for word, PREREG-EVL-3 section 1), its control (the look read the control's
+    record), and every READ program of that control (so each one's comparison with the control stays even); a control
+    likewise, from its side. An id with no control and none of its own is its own group."""
+    from . import screen as SN
+
+    control = SN.CONTROLS.get(program) or (program if program in SN.CONTROLS.values() else None)
+    if control is None:
+        return frozenset({program})
+    return frozenset({control, *(read for read, of in SN.CONTROLS.items() if of == control)})
+
+
+def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[P.Program], dict[str, Any] | None]:
     """WHAT A DECISION OF SESSION `day` MAY WRITE AGAIN (release 1019c): `kept(prog)` is why it writes (and asks)
-    nothing for `prog`, None when it decides it as before.
+    nothing for `prog` ({"why", and "look" when a look keeps it}), None when it decides it as before.
 
     - A66, OWED (the captain's amendment of 13:00Z Oct 19, 2026): a re-decision of a session OUTSIDE the re-decision
       window (league/events/screen.py `outside_window`: the House decides it again no more; what reaches it is a
@@ -262,13 +276,19 @@ def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[
       programs its last finished receipt (`ok` or `pending`) was pending on: that session is final for every other
       program (A66's second rule), so a look may stand over it, and a late-stored event must never land under a look
       already written. A last receipt `ok` was pending on none; an unreadable one is read as pending on none (the
-      reading that writes nothing). A session with no finished receipt is decided whole (no look can stand over it).
-    - A69 and A66 alike: a program whose own look is written as of the exit of this session's intents or later (for a
-      control, a look of a program it is the control of: that look read its record) is decided again for nothing,
-      inside the window too (A69's fast path can make a close final while the House still decides it again every
-      hour): the as-of date, the record and the look stay the same.
-    Every program a decision keeps is in its summary's `kept` with why; the shadow's earlier intents stand."""
+      reading that writes nothing). A session with no finished receipt is decided whole.
+    - A WRITTEN LOOK FREEZES ITS GROUP (A66's "a late-stored event can never land under a look already written", which
+      A69's fast path reaches inside the window: it can make a close final while the House still decides it again
+      every hour; the reading recorded with release 1019c's other readings of A69): once a look of any version of a
+      program of the group (`_group`) is written as of the exit of this session's intents of that program or later,
+      every program of the group is decided again for nothing, inside the window and out, pending or not (a kept run
+      writes no `pending` for it, so its session is made, A66's second rule). The as-of date, the record a look read
+      and the look stay the same; v1 and v2 keep the same events, and every READ program's control the same blocks.
+    Every program a decision keeps is in its summary's `kept`, with why and the events left out of its record
+    (`_left_out`, written by the decision: PREREG-EVL-1 section 3's late share, which league/events/report.py counts);
+    the shadow's earlier intents stand."""
     from . import screen as SN
+    from .programs import BY_KEY
 
     last = st.db.execute("SELECT started_at, status, summary FROM receipts WHERE job=? AND status IN ('ok', 'pending') "
                          "ORDER BY id DESC LIMIT 1", (f"decide-{kind}:{day.isoformat()}",)).fetchone()
@@ -281,32 +301,81 @@ def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[
                 pending = {str(k) for k in (body.get("pending") or {})} if isinstance(body, dict) else set()
             except (TypeError, ValueError, AttributeError):
                 pending = set()
-    looked: dict[tuple[str, int], dt.date | None] = {}
-    for program, version, at in st.db.execute("SELECT program, version, MAX(at) FROM looks GROUP BY program, version"):
-        try:
-            looked[(str(program), int(version))] = S.parse_iso(str(at)).astimezone(C.NY).date()
-        except (TypeError, ValueError):
-            looked[(str(program), int(version))] = None     # (an unreadable as-of: read as over every session)
     exits: dict[int, dt.date] = {}
+    frozen: dict[str, str] = {}     # program id -> the written look that freezes its group over `day`
+    for row in st.db.execute("SELECT program, version, k, at FROM looks ORDER BY program, version, k"):
+        program, version = str(row["program"]), int(row["version"])
+        try:
+            as_of: dt.date | None = S.parse_iso(str(row["at"])).astimezone(C.NY).date()
+        except (TypeError, ValueError):
+            as_of = None     # (an unreadable as-of: read as over every session)
+        looked = BY_KEY.get((program, version))
+        if as_of is not None:
+            if looked is None:
+                continue     # (no registered program: no group to freeze)
+            sessions = looked.hold if looked.entry_at == "open" else looked.hold + 1
+            if sessions not in exits:
+                out = C.nth(st, day, sessions)
+                exits[sessions] = out.day if out is not None else day
+            if exits[sessions] > as_of:
+                continue     # this session's intents exit after the look's close: it does not cover them
+        name = (f"{program if version == 1 else f'{program}@v{version}'} look {row['k']} as of "
+                f"{as_of.isoformat() if as_of else 'an unreadable close'}")
+        for member in _group(program):
+            frozen.setdefault(member, name)
 
-    def kept(prog: P.Program) -> str | None:
+    def kept(prog: P.Program) -> dict[str, Any] | None:
         if pending is not None and _key(prog) not in pending:
-            return (f"outside the re-decision window: decided by its run of {last['started_at']}, which was not "
-                    "pending on it")
-        # its own looks, and a control's the looks of every program it is the control of (they read its record)
-        marks = [as_of for (program, version), as_of in looked.items()
-                 if (program, version) == (prog.id, prog.version) or SN.CONTROLS.get(program) == prog.id]
-        if not marks:
-            return None
-        as_of = None if any(m is None for m in marks) else max(m for m in marks if m is not None)
-        sessions = prog.hold if prog.entry_at == "open" else prog.hold + 1
-        if sessions not in exits:
-            out = C.nth(st, day, sessions)
-            exits[sessions] = out.day if out is not None else day
-        if as_of is None or exits[sessions] <= as_of:
-            return f"its look as of {as_of.isoformat() if as_of else 'an unreadable close'} is written over this session"
+            return {"why": f"outside the re-decision window: decided by its run of {last['started_at']}, which was not "
+                           "pending on it"}
+        look = frozen.get(prog.id)
+        if look is not None:
+            return {"why": f"a look of its group is written over this session ({look})", "look": look}
         return None
     return kept
+
+
+def _left_out(st: S.Store, prog: P.Program, rows: list[Mapping[str, Any]], *,
+              eligible: Callable[[str], Mapping[str, Any] | None],
+              guidance: Callable[[Mapping[str, Any]], str | None] | None = None,
+              reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None) -> dict[str, list[str]]:
+    """WHAT A DECISION THAT KEEPS `prog` LEAVES OUT OF ITS RECORD (release 1019c's judges review; PREREG-EVL-1 section
+    3: an outage removes nothing, the late share is reported): `events`, the events of the decision's windows its rule
+    takes on the verdicts and prices already stored and its record does not hold (no intent, planned or skipped);
+    `unjudged`, those it would take only on a verdict or a price no one has stored yet (a kept program is never asked a
+    verdict and never fetched a price: `reaction` reads stored prices only). `rows` are the windows' rows after its
+    registration; nothing is written. The daily report counts both (league/events/report.py `kept_out`)."""
+    def answer(row: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        news = "accession" not in row
+        return V.stored(st, f"news:{row['id']}" if news else f"8k:{row['accession']}", V.PROMPTS["news" if news else "doc"])
+
+    def open_(row: Mapping[str, Any]) -> bool:
+        """No verdict stored, and one can still come (a doc verdict is asked only of a TEXT of >= 200 characters)."""
+        return answer(row) is None and ("accession" not in row or (bool(row.get("text_sha"))
+                                                                 and (row.get("text_len") or 0) >= 200))
+
+    def score(row: Mapping[str, Any]) -> int | None:
+        got = answer(row)
+        return got["score"] if got and got["status"] == "ok" else None
+
+    def hoped(row: Mapping[str, Any]) -> int | None:
+        return P.TOP_SCORE if open_(row) else score(row)
+
+    def hoped_guidance(row: Mapping[str, Any]) -> str | None:
+        return "raised" if open_(row) else (guidance(row) if guidance is not None else None)
+
+    def hoped_reaction(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
+        got = reaction(row, uni) if reaction is not None else None
+        return P.REACT_RATIO if got is None else got
+
+    def held(event: str) -> bool:
+        return st.db.execute("SELECT 1 FROM intents WHERE program=? AND version=? AND event=?",
+                             (prog.id, prog.version, event)).fetchone() is not None
+
+    taken = {c.event for c in P.select(prog, rows, eligible=eligible, verdict=score, reaction=reaction, guidance=guidance)}
+    maybe = {c.event for c in P.select(prog, rows, eligible=eligible, verdict=hoped, reaction=hoped_reaction,
+                                       guidance=hoped_guidance)}
+    return {"events": sorted(e for e in taken if not held(e)), "unjudged": sorted(e for e in maybe - taken if not held(e))}
 
 
 # ---------------------------------------------------------------------------------------------------- verdicts
@@ -398,15 +467,17 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
     out: dict[str, Any] = {"pending": {}}
     why = "backfill" if backfill_run else None
     kept = _scope(st, "open", day, ctx.now())
+    later: list[tuple[P.Program, list[Mapping[str, Any]]]] = []
     for prog in P.PROGRAMS:
         if prog.entry_at != "open":
             continue
-        reason = kept(prog)
-        if reason is not None:
-            out.setdefault("kept", {})[_key(prog)] = reason     # (A66 owed, A69: its earlier intents stand)
-            continue
         rows = {"ern": e8k, "8k": e8k, "ins": ins, "ins-buy": buys, "news": articles}.get(prog.family, [])
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
+        frozen = kept(prog)
+        if frozen is not None:     # (A66 owed, a look of its group: its earlier intents stand)
+            out.setdefault("kept", {})[_key(prog)] = frozen
+            later.append((prog, rows))
+            continue
         waiting = pending(prog, rows)
         if ask_only:
             if waiting:
@@ -417,6 +488,8 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
             continue
         cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, guidance=guidance)
         out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
+    for prog, rows in [] if ask_only else later:     # (what each kept program leaves out, once this run's asks are in)
+        out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: elig.get(c), guidance=guidance)
     out["events"] = {"8-K": len(e8k), "f4_triggers": len(ins), "f4_buys": len(buys), "news": len(articles),
                      "eligible": sum(1 for v in elig.values() if v)}
     if rid is not None:
@@ -424,7 +497,8 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
     return out
 
 
-def _last_close_before(ctx: Context, symbol: str, accepted: dt.datetime) -> float | None:
+def _last_close_before(ctx: Context, symbol: str, accepted: dt.datetime, *, fetch: bool = True) -> float | None:
+    """The raw SIP daily close of the last session closed before `accepted`; `fetch` False: only as stored."""
     st = ctx.store
     rows = st.db.execute("SELECT day, close_at FROM sessions WHERE close_at<? ORDER BY day DESC LIMIT 1", (S.iso(accepted),))
     row = rows.fetchone()
@@ -432,18 +506,22 @@ def _last_close_before(ctx: Context, symbol: str, accepted: dt.datetime) -> floa
         return None
     day = dt.date.fromisoformat(row["day"])
     got = U.bars(st, symbol, [day], "raw")
-    if day.isoformat() not in got:
+    if day.isoformat() not in got and fetch:
         U.fetch_daily_bars(st, ctx.gw, [symbol], day, day, now=ctx.now())
         got = U.bars(st, symbol, [day], "raw")
     bar = got.get(day.isoformat())
     return float(bar["c"]) if bar and bar.get("c") else None
 
 
-def _mark_1530(ctx: Context, symbol: str, day: dt.date) -> float | None:
+def _mark_1530(ctx: Context, symbol: str, day: dt.date, *, fetch: bool = True) -> float | None:
+    """C1's 15:30 mark of `symbol` on `day` (the close of the last SIP minute bar ending at or before 15:30 ET), stored
+    once read; `fetch` False: only as stored."""
     st = ctx.store
     have = st.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label='1530'", (symbol, day.isoformat())).fetchone()
     if have is not None:
         return have["px"]
+    if not fetch:
+        return None
     session = C.session(st, day)
     start = session.open_at
     end = session.at(dt.time(15, 30)) if not session.early else session.close_at - dt.timedelta(minutes=30)
@@ -490,11 +568,11 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
                 news_verdict(ctx, row) if "accession" not in row else doc_verdict(ctx, row, uni))
         return scores[key]
 
-    def reaction(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
+    def reaction(row: Mapping[str, Any], uni: Mapping[str, Any], fetch: bool = True) -> float | None:
         # an 8-K's base is C1's (the last close before the acceptance time); an article's, before its knowable time
         since = row["accepted_at"] if row.get("accession") else row["knowable_at"]
-        base = _last_close_before(ctx, uni["symbol"], S.parse_iso(since))
-        mark = _mark_1530(ctx, uni["symbol"], day)
+        base = _last_close_before(ctx, uni["symbol"], S.parse_iso(since), fetch=fetch)
+        mark = _mark_1530(ctx, uni["symbol"], day, fetch=fetch)
         return None if not base or mark is None else mark / base
 
     def pending(prog: P.Program, rows: list[Mapping[str, Any]]) -> int:
@@ -522,15 +600,17 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     out: dict[str, Any] = {"pending": {}}
     why = "backfill" if backfill_run else None
     kept = _scope(st, "close", day, ctx.now())
+    later: list[tuple[P.Program, list[Mapping[str, Any]]]] = []
     for prog in P.PROGRAMS:
         if prog.entry_at != "close":
             continue
-        reason = kept(prog)
-        if reason is not None:
-            out.setdefault("kept", {})[_key(prog)] = reason     # (A66 owed, A69: its earlier intents stand)
-            continue
         rows = {"ern-react": e8k, "news-day": articles, "news-react": articles}.get(prog.family, [])
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
+        frozen = kept(prog)
+        if frozen is not None:     # (A66 owed, a look of its group: its earlier intents stand)
+            out.setdefault("kept", {})[_key(prog)] = frozen
+            later.append((prog, rows))
+            continue
         waiting = pending(prog, rows)
         if ask_only:
             if waiting:
@@ -541,6 +621,9 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
             continue
         cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, reaction=reaction)
         out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
+    for prog, rows in [] if ask_only else later:     # (what each kept program leaves out, once this run's asks are in)
+        out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: elig.get(c),
+                                             reaction=lambda r, u: reaction(r, u, fetch=False))
     out["events"] = {"8-K": len(e8k), "day_news": len(articles), "eligible": sum(1 for v in elig.values() if v)}
     if rid is not None:
         st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())

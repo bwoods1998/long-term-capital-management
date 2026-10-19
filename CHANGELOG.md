@@ -58,25 +58,46 @@ until release 1019b (below) brings it onto the House.
 - **A66's owed rule** (league/events/run.py `_scope`; behind the wall): a re-decision of a session outside the
   re-decision window (`screen.outside_window`, the judge's reach) writes intents only for the programs its last
   finished receipt (`ok` or `pending`) was pending on (an `ok` one: none); and no decision writes an intent under a
-  look already written of the program, or of a program it is the control of, inside the window too (A69 can make a
-  close final while the House still decides it again hourly). The receipt's `kept` names each program left as it was.
-  Cost: an event stored after its session became final for a program (an outage of days) stays out of its record.
+  look already written: a look freezes its whole group (every version of the program's id, its control, every version
+  of every READ program of that control; `_group`) over the sessions it covers, inside the window too (A69 can make a
+  close final while the House still decides it again hourly), pending or not. The receipt's `kept` names each program
+  left as it was, why, the freezing look, and the events left out of its record (`_left_out`: `events` its rule takes
+  on stored verdicts and prices, `unjudged` ones it would take on a verdict or price not stored; nothing asked or
+  fetched); league/events/report.py counts them per program ("kept out n (+m unjudged)"); a look's detail records
+  when it was written (`written_at`, league/events/screen.py `write_look`). Cost: an event stored after
+  its session became final for a program (an outage of days), or after a look of its group, stays out of its record,
+  listed and counted.
 - **The event kind's own day order count**: `equity_money.event.max_orders_day` 150 (league/constitution.py, a money
   row; bounds 0-300; `equity_money_problems` holds it under the gateway's day line, `options_money.gateway.
   max_day_orders` 300, and with the old lanes' `order_path.max_orders_day` 60 under the House-wide line,
   `options_money.order_path.max_orders_day` 250); 150 = 2 x the sum of `max_open` over the live bands (44), at least
   150 (nine programs at learning: 72 lots, a buy and a sale each, 144 orders a day). league/equity/live.py
-  `_count_refusal`: an event entry meets the event kind's own orders (`event_orders_today`) with one order kept for each
-  of its lots not yet sold that day; an old lane's entry meets the old lanes' orders against 60; an exit is never
-  stopped by a lane's line; every order meets the House-wide count. league/events/book.py `Settings.max_orders_day`
-  reads the row (0 in `FALLBACK`).
-- **Tests.** league/tests/test_events_1019c.py (31; each fails on `cd3d1505`): a clean record final after one
+  `_count_refusal`: an event entry meets the event kind's own orders (`event_orders_today`) with one order kept for its
+  own exit and for each of its lots not yet sold that day and each of its buys still working that is sold the same day
+  (`_exit_reserve`: an auction buy is no lot until its cross); an old lane's entry meets the old lanes' orders against
+  60; an exit is never stopped by a lane's line; every order meets the House-wide count, and every entry meets it with
+  room left for the options book's exits and every equity exit (its own included). league/events/book.py
+  `Settings.max_orders_day` reads the row (0 in `FALLBACK`).
+- **Fix round** (the money and judges reviews of `8a4eba68`): (1) BLOCKER: release 1019b's final head `3230a884` (fix
+  round 3, the proof's tightening `30558c43`, round 4 and A72) merged in, so deploying 1019c no longer rolls them back;
+  deploy only a head that contains 1019b's deployed head. (2) The event line bounded entries and the exits of LOTS only:
+  the open window's 150 buys passed and 50 of their close sales were then refused at the House-wide line; now 75 buys
+  and all 75 sales (the working buys' exits and each entry's own are kept, and every entry keeps every equity exit's
+  room at the House-wide line). (3) The look guard froze unevenly (version 2 but not version 1; the control but not
+  GUIDE-O1) and left no trace: now the whole group, with the left-out event ids in the receipt and counted in the
+  report. The guard and 1019c's other non-literal readings of A69 go to the captain for an amendment before the first
+  version 2 event settles (00:30Z Oct 20).
+- **Tests.** league/tests/test_events_1019c.py (38; each fails on `cd3d1505`, the fix round's on `8a4eba68`): a clean record final after one
   session; a news error, a cut news read, an 8-K or Form 4 feed error, an unread tickers copy, a failed or unfinished
   pass, a gap in the passes, a failed filing, a listed 8-K of a listed filer, a missing backfill, a decision pending on
   the program's own verdicts and an unmade next open each keep A66; a re-decision outside the window decides only the
-  programs it was pending on (the control's late event never lands; inside the window it does); a look freezes its
-  program's and its control's records; 40 open-entry learning lots and a Probe close entry on one day all send (81
-  orders, 150 the line); each lane meets its own line and the House-wide one; the row's bounds and its digests.
+  programs it was pending on (the control's late event never lands, and its receipt names it; inside the window it
+  does); a look freezes its whole group from either side (both versions, the control, GUIDE-O1), only over the
+  sessions it covers, a pending program of the group included (its session then made), and the records outside the
+  group decide as before; a kept program is asked no verdict and fetched no price; the report counts each left-out
+  event once; 40 open-entry learning lots and a Probe close entry on one day all send (81 orders, 150 the line); the
+  open window stops at 75 buys and all 75 sales go; with 120 options orders 65 buys and all 65 sales go; each lane meets
+  its own line and the House-wide one; the row's bounds and its digests.
   Digest pins: league/tests/equity_design.py `DIGESTS` regenerated with the tree's own functions, release 1019b's kept
   as `DIGESTS_R2` (`before_1019c`); the design blocks' digest lines rewritten by `write_block`. On `f0f287df` (the
   code and tests as pushed): the full league suite on 3.14, 12,482 OK (33 skipped); the events, equity, live, ci and

@@ -214,8 +214,10 @@ class TheFastPath(unittest.TestCase):
 # ================================================================================ A66 owed: what a re-decision writes
 class ARedecisionWritesOnlyWhatIsOpen(unittest.TestCase):
     """A66 (owed): a re-decision of a session OUTSIDE the re-decision window writes intents only for the programs its
-    own receipt was pending on; and (A69) never for a program whose own look already stands over the session, so a
-    late-stored event can never land under a look already written."""
+    own receipt was pending on; and never for a program of a GROUP (every version of an id, its control, and every
+    READ program of that control) a look of which stands over the session, so a late-stored event can never land
+    under a look already written, and the group's records stay even (release 1019c's judges review). Each kept
+    program's entry lists the events left out of its record, and the daily report counts them."""
 
     MONDAY = dt.date(2026, 10, 19)
     AAA = ("0000000001-26-000001", "0000000001")       # accepted 07:05 ET Monday (sec_pages); verdict score 3
@@ -273,7 +275,10 @@ class ARedecisionWritesOnlyWhatIsOpen(unittest.TestCase):
         self.assertEqual(self.symbols("EVL-ERN-GUIDE-O1", 2), ["AAA", "BBB"], "the late event too, for that program")
         self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["AAA"],
                          "the control was not pending: its session is final, the late event never lands in it")
-        self.assertIn("outside the re-decision window", out["kept"]["EVL-CTRL-ERN-ALL-O1"])
+        self.assertIn("outside the re-decision window", out["kept"]["EVL-CTRL-ERN-ALL-O1"]["why"])
+        self.assertEqual(out["kept"]["EVL-CTRL-ERN-ALL-O1"]["events"], [f"8k:{self.BBB[0]}"],
+                         "the late event the control's record leaves out is named in its receipt")
+        self.assertEqual(out["kept"]["EVL-CTRL-ERN-ALL-O1"]["unjudged"], [])
         self.assertEqual(set(out["kept"]) & set(first["pending"]), set())
         receipt = self.st.db.execute("SELECT status FROM receipts WHERE job='decide-open:2026-10-19' ORDER BY id DESC "
                                      "LIMIT 1").fetchone()[0]
@@ -298,21 +303,132 @@ class ARedecisionWritesOnlyWhatIsOpen(unittest.TestCase):
         self.assertIn("EVL-CTRL-ERN-ALL-O1", out["kept"])
         self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["AAA"])
 
-    def test_a_program_whose_look_stands_over_the_session_gets_no_late_event_inside_the_window(self):
+    GROUP = (("EVL-ERN-READ-O1", 1), ("EVL-ERN-READ-O1", 2), ("EVL-ERN-GUIDE-O1", 1), ("EVL-ERN-GUIDE-O1", 2),
+             ("EVL-CTRL-ERN-ALL-O1", 1))
+
+    def look(self, program: str, version: int, day: dt.date | None = None) -> None:
+        self.st.db.execute("INSERT INTO looks(program, version, k, at, held, passed) VALUES(?, ?, 1, ?, 1, 0)",
+                           (program, version, S.iso(C.session(self.st, day or self.MONDAY).close_at)))
+
+    def test_a_look_freezes_its_whole_group_inside_the_window(self):
+        """The judges review's case: a look of READ-O1 version 2 over Monday freezes BOTH versions of READ-O1 (version
+        2 takes version 1's events word for word), its control, and both versions of GUIDE-O1 (which reads the same
+        control): the late AAA lands in none of them, and each receipt names it. The records outside the group
+        (READ-O3, READ3-O1) take it."""
         self.store(self.BBB)
         first = self.decide(self.now)
         self.assertEqual(first["pending"], {})
+        before = {k: self.symbols(*k) for k in self.GROUP}
+        self.assertEqual(before[("EVL-CTRL-ERN-ALL-O1", 1)], ["BBB"])
+        self.assertEqual(before[("EVL-ERN-GUIDE-O1", 2)], ["BBB"])
         self.store(self.AAA)                 # stored late
-        self.st.db.execute("INSERT INTO looks(program, version, k, at, held, passed) VALUES('EVL-ERN-READ-O1', 2, 1, ?, "
-                           "1, 0)", (S.iso(C.session(self.st, self.MONDAY).close_at),))
+        self.look("EVL-ERN-READ-O1", 2)
         out = self.decide(dt.datetime(2026, 10, 20, 14, 0, tzinfo=UTC))
-        self.assertIn("is written over this session", out["kept"]["EVL-ERN-READ-O1@v2"])
-        self.assertEqual(self.symbols("EVL-ERN-READ-O1", 2), [], "under its written look: nothing lands")
-        self.assertEqual(self.symbols("EVL-ERN-READ-O1"), ["AAA"], "version 1 has no look: it takes the late event")
-        self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["BBB"],
-                         "READ-O1's control: the written look read its record, so it is frozen with it")
-        self.assertIn("is written over this session", out["kept"]["EVL-CTRL-ERN-ALL-O1"])
-        self.assertEqual(self.symbols("EVL-ERN-GUIDE-O1", 2), ["AAA", "BBB"], "no look of its own: the late event lands")
+        for program, version in self.GROUP:
+            key = program if version == 1 else f"{program}@v{version}"
+            entry = out["kept"][key]
+            self.assertIn("a look of its group is written over this session (EVL-ERN-READ-O1@v2 look 1 as of "
+                          "2026-10-19)", entry["why"], key)
+            self.assertEqual(self.symbols(program, version), before[(program, version)], f"{key}: nothing lands")
+            self.assertEqual(entry["events"] + entry["unjudged"], [f"8k:{self.AAA[0]}"],
+                             f"{key}: the late AAA its rule takes is named as left out")
+        self.assertEqual(out["kept"]["EVL-ERN-READ-O1"]["events"], [f"8k:{self.AAA[0]}"],
+                         "the verdict the records outside the group asked in this run is read: AAA is taken (score 3)")
+        self.assertEqual(self.symbols("EVL-ERN-READ-O1"), self.symbols("EVL-ERN-READ-O1", 2), "v1 and v2 stay even")
+        self.assertEqual(self.symbols("EVL-ERN-READ-O3"), ["AAA"], "a record outside the group is decided as before")
+        self.assertNotIn("EVL-ERN-READ-O3", out["kept"])
+        self.assertNotIn("EVL-8K-READ-O1", out.get("kept", {}), "another group is not frozen")
+
+    def test_a_control_look_side_freezes_the_same_group(self):
+        """A look of GUIDE-O1 version 1 freezes the same group (GUIDE, READ-O1 and their control) from the other side."""
+        self.store(self.BBB)
+        self.decide(self.now)
+        self.store(self.AAA)
+        self.look("EVL-ERN-GUIDE-O1", 1)
+        out = self.decide(dt.datetime(2026, 10, 20, 14, 0, tzinfo=UTC))
+        self.assertEqual(sorted(out["kept"]), sorted(p if v == 1 else f"{p}@v{v}" for p, v in self.GROUP))
+        self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["BBB"])
+
+    def test_a_look_that_does_not_cover_the_session_freezes_nothing(self):
+        self.store(self.BBB)
+        self.decide(self.now)
+        self.store(self.AAA)
+        self.look("EVL-ERN-READ-O1", 2, dt.date(2026, 10, 16))     # as of the Friday before
+        out = self.decide(dt.datetime(2026, 10, 20, 14, 0, tzinfo=UTC))
+        self.assertNotIn("kept", out)
+        self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["AAA", "BBB"], "inside the window the late event lands")
+
+    def test_a_pending_program_under_its_groups_look_is_kept_and_its_session_made(self):
+        """A program pending on its own verdicts when a look of its group stands over the session is kept too (the
+        group stays even); the kept run's receipt no longer waits on it, so its session is made (A66's second rule)
+        and its next look is not held back by it."""
+        self.pending_monday()
+        self.look("EVL-ERN-READ-O1", 2)
+        out = self.decide(dt.datetime(2026, 10, 20, 14, 0, tzinfo=UTC))
+        self.assertEqual(out["pending"], {})
+        self.assertIn("a look of its group", out["kept"]["EVL-ERN-GUIDE-O1@v2"]["why"])
+        self.assertEqual(self.symbols("EVL-ERN-GUIDE-O1", 2), [], "nothing lands under its group's look")
+        self.assertIn(f"8k:{self.AAA[0]}", out["kept"]["EVL-ERN-GUIDE-O1@v2"]["events"] +
+                      out["kept"]["EVL-ERN-GUIDE-O1@v2"]["unjudged"])
+        status, summary = self.st.db.execute("SELECT status, summary FROM receipts WHERE job='decide-open:2026-10-19' "
+                                             "ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(status, "ok")
+        self.assertFalse(SC._waits_on(status, summary, "EVL-ERN-GUIDE-O1@v2"), "its Monday decision is made")
+
+    def test_the_report_counts_what_each_decision_kept_out(self):
+        from league.events import report as RP
+
+        self.store(self.BBB)
+        self.decide(self.now)
+        self.store(self.AAA)
+        self.look("EVL-ERN-READ-O1", 2)
+        self.decide(dt.datetime(2026, 10, 20, 14, 0, tzinfo=UTC))
+        self.decide(dt.datetime(2026, 10, 20, 15, 0, tzinfo=UTC))     # the next hour's re-decision: the same event
+        status = RP.program_status(self.st, "EVL-CTRL-ERN-ALL-O1", 1, self.MONDAY)
+        self.assertEqual(status["kept_out"], {"events": 1, "unjudged": 0}, "each event once")
+        self.assertEqual(RP.program_status(self.st, "EVL-ERN-READ-O3", 1, self.MONDAY)["kept_out"],
+                         {"events": 0, "unjudged": 0})
+        text = RP.render(RP.build(self.st, self.MONDAY, now=dt.datetime(2026, 10, 20, 16, 0, tzinfo=UTC)))
+        self.assertIn("EVL-CTRL-ERN-ALL-O1 v1 (record): today p/e/s/x", text)
+        self.assertIn("; kept out 1", text)
+
+    def test_a_look_records_when_it_was_written(self):
+        """From its written time on a look freezes its group (`_scope`): the time is in its detail (`written_at`)."""
+        at = dt.datetime(2026, 10, 20, 1, 0, tzinfo=UTC)
+        look = {c: None for c in SC.LOOK_COLUMNS} | {"program": "EVL-ERN-READ-O1", "version": 2, "k": 1,
+                                                     "at": S.iso(C.session(self.st, self.MONDAY).close_at),
+                                                     "held": 0, "passed": 0, "why": "skipped: invented"}
+        self.assertTrue(SC.write_look(self.st, look, now=at))
+        self.assertEqual(SC.look_detail(self.st, "EVL-ERN-READ-O1", 2, 1)["written_at"], S.iso(at))
+        self.assertFalse(SC.write_look(self.st, look, now=at + dt.timedelta(hours=1)), "never rewritten")
+        self.assertEqual(SC.look_detail(self.st, "EVL-ERN-READ-O1", 2, 1)["written_at"], S.iso(at))
+
+    def test_a_kept_program_is_asked_no_verdict_and_fetched_no_price(self):
+        """`_left_out` reads only what is stored: a REACT row with no stored price, or a READ row with no stored verdict,
+        is `unjudged`; a stored reaction below 1.04 is not taken; the prices are read without the gateway."""
+        class NoGateway:
+            def get_json(self, *a, **k):
+                raise AssertionError("a kept program fetched a price")
+
+            def post_json(self, *a, **k):
+                raise AssertionError("a kept program asked a verdict")
+
+        ctx = R.Context(self.st, NoGateway(), sec_pages, now=lambda: dt.datetime(2026, 10, 20, 21, 0, tzinfo=UTC))
+        at = dt.datetime(2026, 10, 19, 11, 5, tzinfo=UTC)
+        self.assertIsNone(R._mark_1530(ctx, "AAA", self.MONDAY, fetch=False))
+        self.assertIsNone(R._last_close_before(ctx, "AAA", at, fetch=False))
+        self.store(self.AAA)
+        row = dict(self.st.db.execute("SELECT * FROM filings WHERE accession=?", (self.AAA[0],)).fetchone())
+        uni = {"symbol": "AAA", "cik": self.AAA[1]}
+        c1 = EB.program_of("EVL-ERN-REACT-C1", 2)
+        for ratio, want in ((None, {"events": [], "unjudged": [f"8k:{self.AAA[0]}"]}),
+                            (1.01, {"events": [], "unjudged": []}),
+                            (1.05, {"events": [f"8k:{self.AAA[0]}"], "unjudged": []})):
+            got = R._left_out(self.st, c1, [row], eligible=lambda c: uni, reaction=lambda r, u, x=ratio: x)
+            self.assertEqual(got, want, ratio)
+        read = EB.program_of("EVL-ERN-READ-O1", 2)
+        self.assertEqual(R._left_out(self.st, read, [row], eligible=lambda c: uni),
+                         {"events": [], "unjudged": [f"8k:{self.AAA[0]}"]}, "no verdict stored: unjudged, never asked")
 
     def test_a_close_entry_look_freezes_only_the_sessions_it_covers(self):
         c1 = EB.program_of("EVL-ERN-REACT-C1", 2)
@@ -322,7 +438,12 @@ class ARedecisionWritesOnlyWhatIsOpen(unittest.TestCase):
         self.assertIsNone(R._scope(self.st, "close", self.MONDAY, tuesday)(c1),
                           "Monday's C1 entries exit Tuesday's close: a look as of Monday does not cover them")
         friday = dt.date(2026, 10, 16)
-        self.assertIn("is written over this session", R._scope(self.st, "close", friday, tuesday)(c1))
+        self.assertIn("a look of its group is written over this session", R._scope(self.st, "close", friday,
+                                                                                    tuesday)(c1)["why"])
+        self.assertIn("a look of its group", R._scope(self.st, "close", friday, tuesday)(P.BY_KEY[
+            ("EVL-ERN-REACT-C1", 1)])["why"], "version 1 of the id too")
+        self.assertIsNone(R._scope(self.st, "close", friday, tuesday)(EB.program_of("EVL-ERN-REACT-ON", 2)),
+                          "another id with no control is its own group")
 
 
 # ======================================================================== the event kind's own day order count

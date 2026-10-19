@@ -26,9 +26,14 @@ Deploy only a head that contains release 1019b's DEPLOYED head (`git merge-base 
   the first condition: no new record.
 - **A66'S OWED RULE** (league/events/run.py `_scope`): a re-decision of a session outside the re-decision window (a
   decision pending on verdicts inside the 45-day look-back, or the CLI's catchup) writes intents only for the programs
-  its last finished receipt was pending on; and no decision writes an intent under a look already written of the program
-  (or of a program it is the control of), inside the window too. The decision's receipt names the programs it left as
-  they were (`kept`, with why).
+  its last finished receipt was pending on; and no decision writes an intent under a look already written: A LOOK
+  FREEZES ITS WHOLE GROUP over the sessions it covers (every version of the program's id, its control, and every
+  version of every READ program of that control; `_group`), inside the window too, pending or not (the judges
+  review: freezing only the look's own version and its control left version 1 and GUIDE-O1 taking late events their
+  version 2 and control did not). The decision's receipt names each program it left as it was (`kept`: why, the
+  freezing look, and the event ids left out of its record, `events` and `unjudged`; `_left_out` asks no verdict and
+  fetches no price), and the daily report counts them per program ("kept out n (+m unjudged)"); a look's detail
+  records when it was written (`written_at`).
 - **THE EVENT KIND'S OWN DAY ORDER COUNT**: `equity_money.event.max_orders_day` 150 (a new money row, bounds 0-300;
   `equity_money_problems` holds it under the gateway's day line, 300, and with the old lanes' 60 under the House-wide
   line, 250). league/equity/live.py `_count_refusal` counts the event kind's orders (`event_orders_today`: the orders of

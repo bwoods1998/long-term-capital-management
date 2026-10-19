@@ -419,12 +419,14 @@ def judge_look(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any], k: in
 
 
 def write_look(store: S.Store, look: Mapping[str, Any], *,
-               apply: Callable[[Any], None] | None = None) -> bool:
+               apply: Callable[[Any], None] | None = None, now: dt.datetime | None = None) -> bool:
     """Write one look (one row per (program, version, k), never rewritten): False when it exists. The issuer-block
-    test, the control comparison, the skew checks, the figures beside, the retirement test and (version 2) the looks
-    merged into it go to meta `look:<program>:<version>:<k>`. `apply(db)` runs INSIDE the same transaction once the
-    look is new (release 1019b's review: the band move a version 2 look makes, league/events/bands.py `on_look`, is
-    written with the look or not at all, so a look on record has always moved its band)."""
+    test, the control comparison, the skew checks, the figures beside, the retirement test, (version 2) the looks
+    merged into it and WHEN IT WAS WRITTEN (`written_at`, `now`: from then on a look freezes its group's records over
+    the sessions it covers, league/events/run.py `_scope`; release 1019c's judges review) go to meta
+    `look:<program>:<version>:<k>`. `apply(db)` runs INSIDE the same transaction once the look is new (release 1019b's
+    review: the band move a version 2 look makes, league/events/bands.py `on_look`, is written with the look or not at
+    all, so a look on record has always moved its band)."""
     with store.tx() as db:
         cur = db.execute(f"INSERT OR IGNORE INTO looks({', '.join(LOOK_COLUMNS)}) VALUES({', '.join('?' * len(LOOK_COLUMNS))})",
                          tuple(look[c] for c in LOOK_COLUMNS))
@@ -432,6 +434,7 @@ def write_look(store: S.Store, look: Mapping[str, Any], *,
             return False
         detail = {c: look[c] for c in LOOK_COLUMNS} | {x: look.get(x) for x in ("issuer", "control", "skew", "beside",
                                                                               "retirement")}
+        detail["written_at"] = S.iso(now or S.utc_now())
         if look.get("merged") is not None:
             detail["merged"] = [int(k) for k in look["merged"]]
         db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
@@ -1069,7 +1072,7 @@ def _run_v1(store: S.Store, program: str, version: int, today: dt.date, *, now: 
             store.set_meta(f"skew:{program}:{version}:{k}", json.dumps(checks | {"at": S.iso(now)}, sort_keys=True))
         look = judge_look(look_set, days, k, program=program, version=version, at=session.close_at,
                           control_rows=ctl_rows, alphas=have, record=record, draws=draws)
-        if write_look(store, look):
+        if write_look(store, look, now=now):
             written.append({c: look[c] for c in ("program", "version", "k", "held", "passed", "p", "alpha", "why")})
     return {"written": written, "waiting": waiting}
 
@@ -1194,7 +1197,7 @@ def _run_v2(store: S.Store, program: str, version: int, today: dt.date, *, now: 
 
         def apply(db: Any, look: dict[str, Any] = look) -> None:
             moved[0] = BA.on_look(store, look, now=now, db=db)   # in the look's own transaction
-        if write_look(store, look, apply=apply):
+        if write_look(store, look, apply=apply, now=now):
             written.append({c: look[c] for c in ("program", "version", "k", "held", "passed", "p", "alpha", "why")}
                            | {"band": moved[0], "merged": merged})
     return {"written": written, "waiting": waiting}

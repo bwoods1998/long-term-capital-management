@@ -96,11 +96,21 @@ WHAT A RE-DECISION WRITES (A66's owed rule and A69; release 1019c, `run._scope`)
 OUTSIDE the House's re-decision window (`screen.outside_window`: three later sessions have had their open decision; what
 reaches it is a decision pending on verdicts inside the House's 45-day look-back, or the CLI's catchup) writes intents
 only for the programs its last finished receipt was pending on: the session is final for every other program, so a
-look may stand over it. And no decision ever writes an intent under a look already written: a program whose own look
-is as of the exit of the session's intents or later (for a control, a look of a program it is the control of) is left
-as it was, inside the window too, where A69 can make a close final while the House still decides it again every hour.
-The summary's `kept` names each program a decision left as it was, with why. The cost: an event stored after its
-session became final for a program (an SEC or news outage of days) is not added to that program's record.
+look may stand over it. And no decision ever writes an intent under a look already written, and A LOOK FREEZES ITS
+WHOLE GROUP (release 1019c's judges review; `run._group`): once a look of any version of a program is written as of
+the exit of the session's intents or later, every version of that program's id, its control, and every version of
+every READ program of that control are left as they were, inside the window too (where A69 can make a close final
+while the House still decides it again every hour) and pending or not, so version 2 keeps taking version 1's events
+word for word (PREREG-EVL-3 section 1) and every READ program's control comparison stays even (READ-O1 and GUIDE-O1
+share CTRL-ERN-ALL-O1). A kept run writes no `pending` for a kept program, so its session is made (A66's second rule).
+THE LATE SHARE IS RECORDED (PREREG-EVL-1 section 3: an outage removes nothing, the late share is reported): the
+summary's `kept` names each program a decision left as it was, with why (and the look that froze it), the `events` its
+rule takes on the verdicts and prices already stored that its record does not hold, and the `unjudged` ones it would
+take only on a verdict or price no one has stored (a kept program is never asked a verdict and never fetched a price;
+`run._left_out`); the daily report counts both for each program, each event once ("kept out n (+m unjudged)"); and a
+look's detail records when it was written (`written_at`, meta `look:<program>:<version>:<k>`). The
+cost: an event stored after its session became final for a program (an SEC or news outage of days), or after a look
+of its group was written, is not added to that program's record; it is listed and counted instead.
 
 ELIGIBILITY IS DECIDED ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (release 1019b's second review;
 PREREG-EVL-1 section 2: a live decision reads Alpaca's `status=active` and `tradable: true`, a backfilled one
