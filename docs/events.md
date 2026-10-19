@@ -76,6 +76,42 @@ takes its own from there (`house.py` imports them; release 1019b's second review
 itself can use the reach but not widen it, and a wider one would only delay a look (`screen._reach` waits out the
 larger).
 
+THE FAST PATH TO A FINAL RECORD (the captain's amendment A69; release 1019c, not yet deployed): the three sessions' wait
+is for late data, so when there is provably none a close X is final for a program as soon as the session after X has
+had its open decision, if (i) every record pass from the start of the earliest window that feeds X's decisions (09:00 ET
+of the session before X, never before the program's registration) through that open decision finished `ok` with its
+8-K, Form 4 and news reads whole (no `error` in any, the news read not cut, the tickers copy read) and the passes ran
+at most 15 minutes apart (`screen.FAST_RECORD_GAP`: a pass that never ran proves nothing); (ii) no filing knowable in
+those windows that the lane would fetch is still `listed` or `failed` (a failed one, a listed Form 4, a listed 8-K of a
+filer in X's tickers copy; an unlisted filer's 8-K is never fetched and never an event of X); (iii) the daily-index
+backfill of every weekday from the session before X through X has run; and (iv) every decision of the program's entry
+kind through X is made (`ok`, or `pending` only on another program's verdicts) and the next session's open decision is
+made. Otherwise A66's rules apply unchanged, and finality stays contiguous: X is final by the fast path only when every
+session before it is final. The record receipts the House already writes prove (i) (league/events/house.py `_record`:
+a failed feed read is an `error` in its part of the summary, a news read cut short is `cut`, a pass that raised is
+`failed`, one that never finished stays `running`), so no new record was added. A clean record is final one session
+after its close, about two sessions sooner than A66's; the as-of date, the record and the look are the same.
+
+WHAT A RE-DECISION WRITES (A66's owed rule and A69; release 1019c, `run._scope`): a decision made again of a session
+OUTSIDE the House's re-decision window (`screen.outside_window`: three later sessions have had their open decision; what
+reaches it is a decision pending on verdicts inside the House's 45-day look-back, or the CLI's catchup) writes intents
+only for the programs its last finished receipt was pending on: the session is final for every other program, so a
+look may stand over it. And no decision ever writes an intent under a look already written, and A LOOK FREEZES ITS
+WHOLE GROUP (release 1019c's judges review; `run._group`): once a look of any version of a program is written as of
+the exit of the session's intents or later, every version of that program's id, its control, and every version of
+every READ program of that control are left as they were, inside the window too (where A69 can make a close final
+while the House still decides it again every hour) and pending or not, so version 2 keeps taking version 1's events
+word for word (PREREG-EVL-3 section 1) and every READ program's control comparison stays even (READ-O1 and GUIDE-O1
+share CTRL-ERN-ALL-O1). A kept run writes no `pending` for a kept program, so its session is made (A66's second rule).
+THE LATE SHARE IS RECORDED (PREREG-EVL-1 section 3: an outage removes nothing, the late share is reported): the
+summary's `kept` names each program a decision left as it was, with why (and the look that froze it), the `events` its
+rule takes on the verdicts and prices already stored that its record does not hold, and the `unjudged` ones it would
+take only on a verdict or price no one has stored (a kept program is never asked a verdict and never fetched a price;
+`run._left_out`); the daily report counts both for each program, each event once ("kept out n (+m unjudged)"); and a
+look's detail records when it was written (`written_at`, meta `look:<program>:<version>:<k>`). The
+cost: an event stored after its session became final for a program (an SEC or news outage of days), or after a look
+of its group was written, is not added to that program's record; it is listed and counted instead.
+
 ELIGIBILITY IS DECIDED ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (release 1019b's second review;
 PREREG-EVL-1 section 2: a live decision reads Alpaca's `status=active` and `tradable: true`, a backfilled one
 `status=all` and the previous session's closing-print exchange). Every result, eligible or not, is kept in the store's
@@ -222,3 +258,19 @@ STOPPING IT: `<state>/events/STOP` idles the LANE only (no record pass, decision
 still decides each auction on the store as it stands, so buys from events and verdicts already stored can still go.
 The instant stop of event buys is the gateway's `STOCK_EVENT_BUYS` off or `equity_money.event.enabled` False
 ([operations.md](operations.md), **Release 1019b**, Rollback).
+
+THE EVENT KIND'S OWN DAY ORDER COUNT (release 1019c, not yet deployed): the kind's auction orders of a day count against
+their own line, `equity_money.event.max_orders_day` (150: 2 x the open positions of the live bands, at least 150; nine
+programs at learning hold at most 72 lots, a buy and a sale each in one day, 144 orders), and no longer against the
+equity book's 60, which the old lanes keep (`order_path.max_orders_day`). An event entry goes only while it and its own
+exit leave room for the exit of every event lot not yet sold that day and of every event buy still working that is
+sold the same day (an auction buy is no lot until its cross: the open window's buys of an open-entry program are sold
+at that day's close), so the line bounds the kind's whole day; an exit is never stopped by a lane's line, only by
+the House-wide one (`options_money.order_path.max_orders_day`, 250, every book's orders together), and every ENTRY
+meets that one with room left for the options book's exits and every equity exit, its own included (the money
+review: without it the open window's buys and their sales could reach the House-wide line together and the close's
+sales be refused there). The constitution holds the two equity lines' sum under the House-wide line and the event
+line under the gateway's day line (300). Under
+release 1019b's one count of 60, entries stopped at about 30 open-entry lots sold the same day: a day of 40 open-entry
+learning lots left that day's close entries no room (league/tests/test_events_1019c.py sends all 40 and a Probe close
+entry). The row moves the money digest (`285fa7af` -> `055e5313`) and the constitution's (`fd38e4e1` -> `a8d4cbd9`).

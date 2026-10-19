@@ -5,8 +5,10 @@ failed counts; the verdicts by status and their cost; each program's intents (pl
 entering that day and to date; its settled outcomes to date (n, issuers, sessions, mean r, mean a, mean a of the
 TRADABLE events, the market direction); for a seatable program its next look and its last look's result; the gap
 between the auction prints and the daily bars of the day's settled events; the expected false passes (0.10 x every
-seatable version registered); and the receipts of the day's jobs, the missed and failed ones listed. `build` returns
-the report as JSON-ready data, `render` as a few lines of plain text.
+seatable version registered); the events its decisions KEPT OUT of each program's record (release 1019c: a session a
+look of its group stands over, or outside the re-decision window, is decided again for nothing, and its decision
+receipt lists what it left out; PREREG-EVL-1 section 3's late share); and the receipts of the day's jobs, the missed
+and failed ones listed. `build` returns the report as JSON-ready data, `render` as a few lines of plain text.
 
 Licensing: Alpaca's data and Benzinga's headlines are not redistributed. Neither form carries a price, a headline, a
 symbol or a document's text: only counts and summary statistics (means of returns, gaps in basis points).
@@ -108,7 +110,32 @@ def _programs(store: S.Store) -> list[tuple[str, int]]:
     return sorted(seen)
 
 
-def program_status(store: S.Store, program: str, version: int, day: dt.date) -> dict[str, Any]:
+def kept_out(store: S.Store, day: dt.date) -> dict[str, dict[str, set[str]]]:
+    """{decision key (`id`, or `id@vN` for a later version): {"events", "unjudged"}}: the event ids the finished decisions
+    of the entry sessions through `day` left out of each program's record (their summaries' `kept` entries, written by
+    league/events/run.py `_left_out`), each event once; an event listed unjudged by one run and taken on a stored verdict
+    by a later one counts as left out (`events`) only."""
+    events: dict[str, set[str]] = {}
+    unjudged: dict[str, set[str]] = {}
+    for row in store.db.execute("SELECT job, summary FROM receipts WHERE (job LIKE 'decide-open:%' OR job LIKE "
+                                "'decide-close:%') AND status IN ('ok', 'pending')"):
+        if str(row["job"]).split(":", 1)[1] > day.isoformat():
+            continue
+        try:
+            body = json.loads(row["summary"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        kept = body.get("kept") if isinstance(body, dict) else None
+        for key, entry in (kept.items() if isinstance(kept, dict) else ()):
+            if isinstance(entry, dict):
+                events.setdefault(str(key), set()).update(str(e) for e in entry.get("events") or [])
+                unjudged.setdefault(str(key), set()).update(str(e) for e in entry.get("unjudged") or [])
+    return {key: {"events": events.get(key, set()), "unjudged": unjudged.get(key, set()) - events.get(key, set())}
+            for key in set(events) | set(unjudged)}
+
+
+def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
+                   left: Mapping[str, Mapping[str, set[str]]] | None = None) -> dict[str, Any]:
     today = {c: 0 for c in INTENT_CLASSES}
     every = {c: 0 for c in INTENT_CLASSES}
     for row in store.db.execute("SELECT status, entry_day FROM intents WHERE program=? AND version=? AND entry_day<=?",
@@ -146,10 +173,16 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date) -> 
     from .bands import bands as _bands
 
     v2 = SC._seating(program, version)
+    left = kept_out(store, day) if left is None else left
+    mine = left.get(program if int(version) == 1 else f"{program}@v{int(version)}") or {}
+    held = {str(r[0]) for r in store.db.execute("SELECT event FROM intents WHERE program=? AND version=?",
+                                                (program, version))}
+    out_events = set(mine.get("events") or ()) - held
     return {
         "program": program, "version": version, "seatable": program in SC.SEATABLE,
         "band": _bands(store).get((program, int(version))) if v2 else None,
         "intents_today": today, "intents_all": every, "settled": settled,
+        "kept_out": {"events": len(out_events), "unjudged": len(set(mine.get("unjudged") or ()) - held - out_events)},
         "settled_today": sum(1 for r in rows if r["exit_day"] == day),
         "next_look": SC.next_look_v2(store, program, version, day) if v2 else SC.next_look(store, program, version, day),
         "last_look": last_out, "held_looks": sum(1 for r in looks if r["held"]),
@@ -215,7 +248,8 @@ def jobs(store: S.Store, day: dt.date, now: dt.datetime) -> dict[str, Any]:
 def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> dict[str, Any]:
     """The day's report as data (no prices, headlines or symbols)."""
     now = now or S.utc_now()
-    programs = [program_status(store, p, v, day) for p, v in _programs(store)]
+    left = kept_out(store, day)
+    programs = [program_status(store, p, v, day, left=left) for p, v in _programs(store)]
     with_rows = {p["program"] for p in programs}
     return {
         "day": day.isoformat(), "generated_at": S.iso(now), "session": C.session(store, day) is not None,
@@ -248,6 +282,9 @@ def render(report: Mapping[str, Any]) -> str:
                 f"r {_pct(st['mean_r'])}, a {_pct(st['mean_a'])}, a tradable {_pct(st['mean_a_tradable'])}")
         if p.get("band"):
             line += f"; band {p['band']}"
+        ko = p.get("kept_out") or {}
+        if ko.get("events") or ko.get("unjudged"):
+            line += f"; kept out {ko.get('events', 0)}" + (f" (+{ko['unjudged']} unjudged)" if ko.get("unjudged") else "")
         if p["seatable"]:
             nl, ll = p["next_look"], p["last_look"]
             if nl.get("k") is None:
@@ -282,5 +319,5 @@ def render(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["build", "render", "events", "verdicts", "program_status", "gaps", "jobs", "day_bounds", "FAMILIES",
+__all__ = ["build", "render", "events", "verdicts", "program_status", "kept_out", "gaps", "jobs", "day_bounds", "FAMILIES",
            "VERDICT_STATUSES", "SESSION_JOBS", "WEEKDAY_JOBS"]

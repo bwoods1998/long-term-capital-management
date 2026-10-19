@@ -1097,9 +1097,10 @@ CONSTITUTION: dict[str, Any] = {
     #   `failed_decides_exit` sessions of failed decides its lots exit at the next open. Pre-registered program rules,
     #   identical in the Gym.
     # - `order_path`: marketable limit day orders whose collar starts at `entry_collar_bp` and widens to `max_collar_bp`
-    #   (basis points, by class); `max_orders_day` equity orders a day, sends and cancels, before an ENTRY is refused
-    #   (an exit is never stopped by it, only by the House-wide count; A8.3: the gateway's day order count is shared
-    #   with the options book); and the schedule's offsets in seconds (`league/equity/schedule.py`): the open
+    #   (basis points, by class); `max_orders_day` THE OLD LANES' orders a day, sends and cancels, before an ENTRY of
+    #   theirs is refused (an exit is never stopped by it, only by the House-wide count; A8.3: the gateway's day order
+    #   count is shared with the options book; since release 1019c the event kind's orders count against its own line,
+    #   `event.max_orders_day`, below); and the schedule's offsets in seconds (`league/equity/schedule.py`): the open
     #   window (09:25 pre-open, 09:30:30 sends, entries until 09:45, exits until 15:55), THE CLOSE WINDOW (A2: 15:55:00
     #   sends, re-priced every 30 s until 15:59:30, then missed), the 16:20 bars, the 16:30 decisions and the 08:30 audit.
     "equity_money": {
@@ -1234,6 +1235,17 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   or close: the open decision at 09:15 ET (`open_decide_before_open_s` 900, pre-registered), its `opg` sends from
 #   09:16 to 09:27 (840, 180); the close decision at close - 14 min (840, pre-registered), its `cls` sends from close -
 #   13 to close - 11 min (780, 660). Early closes move with the session.
+# - `max_orders_day` (release 1019c): THE EVENT KIND'S OWN DAY ORDER COUNT. Its auction orders of a New York day (sends,
+#   and the cancels of its fallback ladder's day sales, as `order_path.max_orders_day` counts the old lanes') count
+#   against this line and no other lane's: an event ENTRY goes only while one more order leaves room for the exit of
+#   every event lot not yet sold that day; AN EXIT IS NEVER STOPPED BY IT (A28). The old lanes keep the equity book's
+#   own 60 (`order_path.max_orders_day`), and both stay under the House-wide line (`options_money.order_path.
+#   max_orders_day`, 250, both books' orders together) and the gateway's (`options_money.gateway.max_day_orders`,
+#   300): `equity_money_problems` holds the two equity lines' sum under the first and this line under the second. 150 =
+#   2 x the sum of `max_open` over the live bands (2 x (8 + 6 + 8) = 44), at least 150: nine programs at learning hold at
+#   most 9 x 8 = 72 lots, a buy and a sale each in one day, 144 orders. Under the equity book's shared 60 (release
+#   1019b), the event kind's entries stopped at about 30 open-entry lots sold the same day (a day of 40 open-entry lots
+#   left that day's close entries no room).
 # PROMOTION, SIZED, DEMOTION AND RETIREMENT are the lane's (PREREG-EVL-3 sections 2 and 3, counted in settled events):
 # it writes each program's band in its store, from its looks and the real fills the book writes back (`real_fills`);
 # the book reads the band at each session's first decision. ROOM: Sized programs first, then Probe, then learning;
@@ -1258,6 +1270,7 @@ CONSTITUTION["equity_money"]["event"] = {
     "order_path": {"open_decide_before_open_s": 900, "open_send_before_open_s": 840, "open_until_before_open_s": 180,
                    "close_decide_before_close_s": 840, "close_send_before_close_s": 780,
                    "close_until_before_close_s": 660},
+    "max_orders_day": 150,
 }
 
 
@@ -1503,6 +1516,11 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "event.order_path.close_decide_before_close_s": ("840", "840"),
     "event.order_path.close_send_before_close_s": ("661", "839"),
     "event.order_path.close_until_before_close_s": ("660", "780"),
+    # THE EVENT KIND'S OWN DAY ORDER COUNT (release 1019c; the comment under the table): 0 stops the kind's entries
+    # (never an exit); its loose end is the gateway's day line's own (`options_money.gateway.max_day_orders`, at most
+    # 300), and `equity_money_problems` holds it under the gateway's line in force and, with the old lanes' 60, under
+    # the House-wide line in force.
+    "event.max_orders_day": ("0", "300"),
     # The pre-registered sizing-up rule (the design's section 5): at least 20 closes, an 80% bound, quarter Kelly, half
     # of E at most (the loose end of the Probe sleeve's own bound, and a Sized sleeve is never below the Probe's: the
     # constitution's `sized` comment), five Probe sessions. THE STEP IS PARKED at the count's tight end (the row in
@@ -1580,7 +1598,8 @@ _EQUITY_COUNTS = ("probe.max_programs", "probe.seat.idle_sessions", "panel.seats
                   "order_path.entry_collar_bp.stock", "order_path.max_collar_bp.etf", "order_path.max_collar_bp.stock",
                   "order_path.max_orders_day", *(f"order_path.{name}" for name in EQUITY_ORDER_OFFSETS),
                   "event.max_open.learning", "event.max_open.probe", "event.max_open.sized",
-                  "event.open_risk.sigma_sessions", *(f"event.order_path.{name}" for name in EVENT_ORDER_OFFSETS))
+                  "event.open_risk.sigma_sessions", *(f"event.order_path.{name}" for name in EVENT_ORDER_OFFSETS),
+                  "event.max_orders_day")
 EQUITY_CLASSES = ("etf", "stock")
 #: A ticker as the venue and the gateway's STOCK_UNIVERSE write it (a share class after a dot: BRK.B).
 _TICKER = re.compile(r"[A-Z]{1,5}(\.[A-Z])?")
@@ -1694,6 +1713,25 @@ def equity_money_problems(constitution: dict[str, Any] | None = None) -> list[st
           "the close's sends start after its decision")
     order("event.order_path.close_until_before_close_s", "event.order_path.close_send_before_close_s",
           "the close's sends end after they start")
+    # THE TWO EQUITY DAY ORDER LINES (release 1019c): the event kind's own (`event.max_orders_day`) never above the
+    # gateway's day line in force, and with the old lanes' (`order_path.max_orders_day`) never above the House-wide line
+    # in force (`options_money.order_path.max_orders_day`: both books' orders together). An options table that cannot
+    # be read here is `options_money_problems`' to refuse.
+    lines = (constitution or CONSTITUTION).get("options_money")
+    lines = lines if isinstance(lines, dict) else {}
+    try:
+        house = Decimal(str((lines.get("order_path") or {})["max_orders_day"]))
+        gateway = Decimal(str((lines.get("gateway") or {})["max_day_orders"]))
+    except (KeyError, TypeError, InvalidOperation, ValueError, AttributeError):
+        house = gateway = None
+    event_line, old_line = values.get("event.max_orders_day"), values.get("order_path.max_orders_day")
+    if event_line is not None and gateway is not None and gateway.is_finite() and event_line > gateway:
+        problems.append(f"equity_money.event.max_orders_day ({event_line}) is above the gateway's day line "
+                        f"(options_money.gateway.max_day_orders, {gateway})")
+    if event_line is not None and old_line is not None and house is not None and house.is_finite() and \
+            event_line + old_line > house:
+        problems.append(f"equity_money.event.max_orders_day ({event_line}) and order_path.max_orders_day ({old_line}) "
+                        f"are above the House-wide line together (options_money.order_path.max_orders_day, {house})")
     return problems
 
 
@@ -1718,4 +1756,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'fd38e4e1fe9f9485bc1554045a7c03fb945a278313320aeccce45c4f2ccf6232'
+PINNED_DIGEST = 'a8d4cbd908b7730daf11294ddd9e1db7dbf0eb5c787ef44b72193a740291cd86'

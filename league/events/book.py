@@ -43,6 +43,11 @@ THE RULES ARE THE FROZEN ONES: docs/prereg/PREREG-EVL-3.md section 2 (the owner'
   most `one_share_max.learning`, 5%, of E); else skipped (the shadow keeps the event). The book-wide 10% a name
   (`per_name_share`), the 100% book, the cash and the loss budget are `league.equity.sizing.size_entry`'s own caps (the
   book calls it; nothing here re-implements it). At most `max_open` positions a program (learning 8, Probe 6, Sized 8).
+- THE DAY'S ORDERS (release 1019c): the kind's auction orders count against its own line, `max_orders_day` (150), never
+  the old lanes' 60 (league/equity/live.py `_count_refusal`): an entry leaves room for its own exit and for the exit of
+  every event lot not yet sold that day and of every event buy still working that is sold the same day, and at the
+  House-wide line room for every equity exit beside the options book's; an exit is never stopped by a lane's line;
+  both lines stay under the House-wide one.
 - OPEN RISK (the goal's own rule, PREREG-EVL-1 section 8, PREREG-EVL-3 section 2): value x max(`open_risk.floor`,
   `open_risk.z` x sigma x sqrt(h)), sigma the daily return sd of the `sigma_sessions` sessions before entry (adjusted
   closes), h the sessions in the hold; `STRICT_WEIGHT` (the House's old 0.40) when sigma cannot be read, and for a lot
@@ -186,6 +191,9 @@ class Settings:
     risk_z: Decimal
     sigma_sessions: int
     offsets: Mapping[str, int]
+    #: THE EVENT KIND'S OWN DAY ORDER COUNT (`event.max_orders_day`, release 1019c): its auction orders of a day count
+    #: against this line, never the old lanes' 60 (league/equity/live.py `_count_refusal`). 0 when unread: no entry.
+    max_orders_day: int = 0
 
     def share(self, band: str) -> Decimal:
         return Decimal(self.shares.get(str(band), ZERO))
@@ -222,7 +230,8 @@ def settings(constitution: Mapping[str, Any] | None = None) -> Settings:
             per_name=Decimal(str(e["per_name_share"])), limit_ratio=Decimal(str(e["limit_ratio"])),
             risk_floor=Decimal(str(e["open_risk"]["floor"])), risk_z=Decimal(str(e["open_risk"]["z"])),
             sigma_sessions=int(e["open_risk"]["sigma_sessions"]),
-            offsets={name: int(e["order_path"][name]) for name in EVENT_ORDER_OFFSETS})
+            offsets={name: int(e["order_path"][name]) for name in EVENT_ORDER_OFFSETS},
+            max_orders_day=int(e["max_orders_day"]))
     except (KeyError, TypeError, ValueError, InvalidOperation):
         return FALLBACK
 
