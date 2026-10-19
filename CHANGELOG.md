@@ -63,10 +63,17 @@ programs trades real money at learning size.
   00:00 UTC, and `metered.observe` credits a cap to the day it was read as well as computed, keeping the higher). The
   cap moves only with realized profit; at no realized profit it is a constant $5, so it cannot bite before the lane's
   first profitable week.
-- **Tests.** On the second merge `9108c508`: the full league suite on 3.14, 461 modules, 12,597 OK (33 skipped; one
-  process a module; `test_gym_batch_isolation` again under a short `TMPDIR`, its worker sockets' path too long under the
-  runner's: 10 OK); the gateway 495/495 (`npm run -s check && node --test test/*.test.mjs`); the identities as above on
-  both Pythons. The runs on the release's head follow in its own commit.
+- **Tests.** league/tests/test_events_1019c_merge.py (1), the merge's own: while Claude refuses, EVL-8K-READ-O1 waits
+  on an invented 8.01 8-K's verdict (tally 1 needed, 0 answered); a look of version 2 over that session freezes the
+  group, and the re-decision keeps both versions and the control, asks nothing, finishes `ok` and writes the tally 0/0,
+  so `evl_verdicts` never waits on a frozen group (it fails on either parent: `r3/lane-1019c` writes no tally,
+  `r2/alarms` stays pending). On `4010bc20`, the head this record follows: the full league suite on 3.14 by
+  `python -m unittest discover -s league/tests -t .`, 12,598 OK (33 skipped), and one process a module, 462 modules,
+  12,598 OK (33 skipped); the events, equity, live, ci, constitution, publish, ops and budget modules on 3.11 (with
+  test_cost_day, test_daily_report, test_evl_health, test_evl_migrate and the merge's test), 101 modules, 2,634 OK
+  (1 skipped); the gateway 495/495 (`npm run -s check && node --test test/*.test.mjs`); `python -m league.ci --base
+  origin/main --branch rel/1019c --no-tests` passed; the identities as above, on both Pythons. Before it, on the
+  second merge `9108c508`: 461 modules, 12,597 OK (33 skipped) on 3.14, the gateway 495/495.
 - **Deploy** ([docs/operations.md](docs/operations.md), **Release 1019c**): 1. THE GATEWAY from this head (`gateway/`
   changes only the notices: `lib/email.mjs` composes the `report` kind and words `cap_breach` and the four `evl_`
   causes, `lib/router.mjs` keys a report by its day; no order path, cap or `wrangler.jsonc` change); 2. THE HOUSE from
