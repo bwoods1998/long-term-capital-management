@@ -5,8 +5,10 @@
   "site_tape": null,
   "agent_image_checkpoint": "sbcp_e47dddfa-f362-4ef8-8ae7-70c9d1bbd7b8",
   "sail_app": "ltcm",
+  "_about_alpaca_feeds": "THE DATA PLAN (release R0, Oct 19, 2026; league/data_plan.py): the owner cancelled Algo Trader Plus on Oct 18, 2026 and the account is on Alpaca's free Basic plan: IEX in real time, SIP history up to 15 minutes ago, no OPRA. alpaca_feed: the bars and history (SIP; a read's end is kept 16 minutes back, a date-only end being the end of that New York day). alpaca_snapshot_feed: the live path's real-time stock snapshots, their latest quote and trade (IEX: the equity book's limits, the paper proofs, the options path's underlying price); an IEX snapshot's bars are dropped, never a store's. alpaca_option_feed: \"off\" refuses every option read at once with no request (opra on a plan that includes it; never indicative, which is derived and delayed).",
   "alpaca_feed": "sip",
-  "alpaca_option_feed": "opra",
+  "alpaca_snapshot_feed": "iex",
+  "alpaca_option_feed": "off",
   "options_structures": {
     "_about": "Which book the options desk's structures trade on (the House reads `book`): options-shadow, the House's own practice account over live OPRA quotes (league/options_shadow.py), or alpaca-paper, the Alpaca practice account's multi-leg route. The shadow account's starting_cash matters only when options-shadow.json does not exist yet: 20 structure agents' practice stakes of $200 are $4,000.",
     "book": "options-shadow",

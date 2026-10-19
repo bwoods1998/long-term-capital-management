@@ -428,6 +428,12 @@ def _weight(weights: Mapping[str, Decimal], klass: Any) -> Decimal:
         return Decimal(1)
 
 
+def _side(value: Any) -> Decimal | None:
+    """One side of a venue quote (or a trade's price) as a price: a finite Decimal above zero, else None (no side)."""
+    price = A.dec(value)
+    return price if price is not None and price > 0 else None
+
+
 def _price(row: Mapping[str, Any]) -> Decimal:
     """A lot's mark a share, its entry price while it was never marked."""
     mark = A.dec(row.get("mark"))
@@ -1674,6 +1680,11 @@ class EquityBook:
         return refused_days(self.state.get(OPEN_NOTE_KEY, {}))
 
     def _quote(self, symbol: str) -> dict[str, Any]:
+        """The symbol's touch this pass, read once (`market.stocks`: IEX's snapshot since release R0, Oct 19, 2026,
+        league/data_plan.py): the latest quote's bid and ask and its time, the latest trade's price and time. A SIDE
+        AT ZERO OR BELOW IS NO SIDE (None): IEX quotes a side it has no order on as 0, and a 0 must never become a limit
+        nor read as a quote moved through one (`_reprice_due`). An entry needs both sides, uncrossed, from this session
+        and inside `MAX_ENTRY_SPREAD`; an exit needs the bid from this session, else this session's trade."""
         if symbol not in self._quotes:
             try:
                 rows = self.market.stocks([symbol]) or {}
@@ -1684,8 +1695,8 @@ class EquityBook:
             row = rows.get(symbol) or {}
             quote = row.get("latestQuote") or {}
             trade = row.get("latestTrade") or {}
-            self._quotes[symbol] = {"bid": A.dec(quote.get("bp")), "ask": A.dec(quote.get("ap")),
-                                    "t": parse_time(quote.get("t")), "trade": A.dec(trade.get("p")),
+            self._quotes[symbol] = {"bid": _side(quote.get("bp")), "ask": _side(quote.get("ap")),
+                                    "t": parse_time(quote.get("t")), "trade": _side(trade.get("p")),
                                     "trade_t": parse_time(trade.get("t"))}
         return self._quotes[symbol]
 

@@ -34,18 +34,29 @@ class GatewayError(RuntimeError):
 
 class Gateway:
     """The gateway, bounded and without retries. The token is read at each call and never logged or returned; an
-    error's text carries the gateway's answer (cut short), never the request's headers."""
+    error's text carries the gateway's answer (cut short), never the request's headers.
 
-    def __init__(self, url: str, token: Callable[[], str], *, timeout: float = 45.0, opener: Any = None):
+    THE DATA PLAN's SIP window (release R0, Oct 19, 2026; league/data_plan.py rule 1): a GET of an Alpaca stock history
+    route (bars, quotes, trades) with `feed=sip` whose `end` lies inside the last 16 minutes, or names a New York day not
+    yet over, is sent with `end` 16 minutes back (`data_plan.sip_params`), so every job's read is one Alpaca's Basic plan
+    serves; the window's past is the one the job asked for."""
+
+    def __init__(self, url: str, token: Callable[[], str], *, timeout: float = 45.0, opener: Any = None,
+                 clock: Callable[[], float] = time.time):
         if not url:
             raise GatewayError("no gateway_url in league/config.json")
         self.url = str(url).rstrip("/")
         self.token = token
         self.timeout = float(timeout)
         self.opener = opener or urllib.request.build_opener()
+        self.clock = clock
         self.calls: list[str] = []
 
     def _call(self, method: str, path: str, params: Mapping[str, Any] | None = None, body: Any = None) -> Any:
+        if method == "GET" and params:
+            from ..data_plan import sip_params
+
+            params = sip_params(path, params, now=float(self.clock()))
         query = "?" + urllib.parse.urlencode({k: v for k, v in (params or {}).items() if v is not None}) if params else ""
         data = None if body is None else json.dumps(body).encode("utf-8")
         headers = {"Authorization": "Bearer " + self.token(), "User-Agent": USER_AGENT}
@@ -145,7 +156,7 @@ class Context:
     @property
     def gateway(self) -> Any:
         if self._gateway is None:
-            self._gateway = Gateway(str(self.config.get("gateway_url") or ""), token_from_env)
+            self._gateway = Gateway(str(self.config.get("gateway_url") or ""), token_from_env, clock=self.clock)
         return self._gateway
 
     @property

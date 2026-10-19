@@ -202,6 +202,10 @@ PENDING_GATEWAY: tuple[str, ...] = ("league/swarm/elane_xs.py", "scripts/gen_uni
 #: money mover like bands.py. Its judge is behind the wall already (league/ops/, docs/benchmarks/, policy.json). It
 #: waits here for the gateway's merge-list follow-up, as release E4's two do.
 PENDING_GATEWAY += ("league/swarm/elane_forward.py",)
+#: THE DATA PLAN (release R0, Oct 19, 2026): what every live-path and House-job market-data read may ask of Alpaca's
+#: Basic plan (league/data_plan.py: the SIP window, the snapshot feed, options off), read by the live path's market data
+#: and league/ops/context.py's gateway, both behind the wall. It waits here for the gateway's merge-list follow-up.
+PENDING_GATEWAY += ("league/data_plan.py",)
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

@@ -164,8 +164,11 @@ class TheLivePath(BuildCase):
         self.assertEqual({kw["venue"] for _, kw in client.call_args_list}, {"alpaca", "alpaca-paper"})
         self.assertTrue(all(isinstance(kw.get("gateway").headers(), dict) for _, kw in client.call_args_list if kw.get("gateway")))
         self.assertEqual(house.options_live.market.stocks(["SPY"]), {})
+        # Release R0 (Oct 19, 2026; league/data_plan.py): Alpaca's Basic plan refuses SIP snapshots, so the live path's
+        # snapshots read `alpaca_snapshot_feed` (IEX) while its bars keep `alpaca_feed` (SIP); options are off.
         house.options_live.market.client.request.assert_called_once_with(
-            "GET", "https://data.alpaca.markets/v2/stocks/snapshots?symbols=SPY&feed=sip", what="stock snapshots")
+            "GET", "https://data.alpaca.markets/v2/stocks/snapshots?symbols=SPY&feed=iex", what="stock snapshots")
+        self.assertEqual((house.options_live.market.stock_feed, house.options_live.market.option_feed), ("sip", "off"))
         house.options_live.paper.client.request.assert_not_called()
 
     def test_with_real_money_it_trades_the_brokerage_account_and_reads_through_it(self):

@@ -26,9 +26,35 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261016T024305Z-e90d75adb36b` (main `d6bcf0cd`, PR #562: release 1016a, L5 and C1,
+The running House release is `20261016T204140Z-99e7c39c780a` (release 1017r, main `4893d0f8`, deployed 20:41Z Oct 16
+by the captain's record in `goal-2026-10-10/NEXT-AGENT.md`; its entry below was written before it shipped and still
+reads unreleased; before it, `20261016T024305Z-e90d75adb36b`, main `d6bcf0cd`, PR #562: release 1016a, L5 and C1,
 02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
+
+### Release R0: the Basic data plan, on `fix/basic-data-plan` (unreleased; one owner deploy, never 12:55-20:05Z on a trading day, live before Mon Oct 19 13:30Z; built on main `62fd070e`, release 1017r's code; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `5ea6f99f`, the constitution digest `82a9a5a4` and the gate contract `397b22b7` are the base's; no setting, no gateway change)
+
+- **Why.** The owner cancelled Alpaca's Algo Trader Plus on Oct 18, 2026; the account is on the free Basic plan: IEX
+  in real time, SIP history up to 15 minutes ago, no OPRA. Read through the gateway on Oct 19: SIP snapshots and latest
+  quotes are refused (HTTP 403), as is any SIP read whose `end` is inside the last 15 minutes or names a New York day
+  not yet over (a date-only `end` is the end of that New York day); OPRA is refused. The release before read SIP
+  snapshots for every equity limit (each entry "no usable quote", each exit "no usable bid" and carried, day after day)
+  and asked its 16:20 ET bars through the next day (refused: no bars, no decide), and the `direction`, `equity_data`
+  (22:30Z) and `equity_panel` jobs asked through days not yet over.
+- **What.** `league/data_plan.py` (new; protected through `league/ci.py` `PENDING_GATEWAY`): THE SIP WINDOW (an `end`
+  later than now - 16 minutes is sent as now - 16 minutes; the window's past unchanged; the 16:20 read ends at 16:04 ET,
+  after the close, and holds the day's bar), THE SNAPSHOT FEED (`league/config.json` `alpaca_snapshot_feed` "iex", new;
+  an IEX snapshot's bars dropped; `alpaca_feed` stays "sip" for every bar and store) and OPTIONS OFF
+  (`alpaca_option_feed` "off": every option read refused at once with no request; no options position of any kind
+  opens, House routes included, and nothing is alerted or told; no real options position is open). `league/service.py`
+  builds the live path's market data on it; `league/ops/context.py` `Gateway` applies the SIP window to every job's SIP
+  history read. `league/equity/live.py` `_quote`: a quote side at zero or below is no side (IEX's 0 never becomes a
+  limit nor cancels a working sale at the widest collar). Nothing under `league/live/`, `league/gym/` or
+  `league/constitution.py` changes. Tests: `league/tests/test_data_plan.py` (the plan as measured, the equity book's
+  16:20 read, audit and limits on it, the jobs' gateway, the options path off); `test_options_house` reads IEX snapshots.
+- **Deploy and verify:** [docs/operations.md](docs/operations.md), **Release R0**. **Rollback:** the release before,
+  `20261016T204140Z-99e7c39c780a` (1017r); nothing is migrated. **Owner follow-up:** `league/data_plan.py` joins the
+  gateway's `MERGE_FORBIDDEN` at its next deploy.
 
 ### Release 1017r: the owner's new Done (A50), the ETF Probe sleeve 0.25 x E (A51) and the births' one-session ask, on `rel/1017r` (unreleased; one House deploy by the captain, never 12:55-20:05Z on a trading day and never inside an entry window; live before Mon Oct 19 13:30Z; THE MONEY DIGEST MOVES `cfcc94b1` -> `5ea6f99f` and the constitution `60796aed` -> `82a9a5a4` (A51's row alone), the standing grant re-ratifies at start; the options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move)
 
