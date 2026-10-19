@@ -9,7 +9,10 @@
   last 100 such events have a negative mean after-cost return (`review`); back to Probe at the next passed look. The
   two windows count the program's CURRENT Probe stay (release 1019b's second review): the events whose buy came after
   its latest move to Probe (`probe_since`, from `band_history`), so a program the next passed look returns to Probe
-  is not demoted again on the events that demoted it. Sized counts every Probe+ event.
+  is not demoted again on the events that demoted it. SIZED counts the current Probe stay too (release 1019b's third
+  review, the reading that trades less): its >= 150 events and its 80% bound are over the Probe+ events bought after
+  the latest move to Probe, so a program demoted from Sized and returned to Probe earns Sized again on its new stay,
+  never at once on the events of the stay that was demoted.
 - RETIRED, for good: a held look whose mean after-cost abnormal return is below zero and whose one-sided sign-flip p
   for a mean below zero (the session-block test with every value's sign reversed) is at most 0.05 (`on_look`).
 
@@ -161,8 +164,8 @@ def _after(event: Mapping[str, Any], since: Any) -> bool:
 
 def review(store: S.Store, *, now: Any = None) -> list[dict[str, Any]]:
     """Demotion and Sized from the real fills (PREREG-EVL-3 section 2), for every probe or sized program. The demotion
-    windows count the current Probe stay (`probe_since`: its events bought after the latest move to Probe); Sized
-    counts every Probe+ event."""
+    windows and Sized's count and bound are over the current Probe stay (`probe_since`: its Probe+ events bought after
+    the latest move to Probe; release 1019b's second and third reviews)."""
     changes = []
     when = S.iso(now or S.utc_now())
     for (program, version), band in bands(store).items():
@@ -183,11 +186,11 @@ def review(store: S.Store, *, now: Any = None) -> list[dict[str, Any]]:
             if set_band(store, program, version, "learning", since=when, why=why, now=now):
                 changes.append({"program": program, "version": version, "band": "learning", "why": why})
             continue
-        if band == "probe" and len(events) >= SIZED_MIN:
-            bound = SC.sized_bound(events)
+        if band == "probe" and len(stay) >= SIZED_MIN:
+            bound = SC.sized_bound(stay)
             if bound["ok"] and set_band(store, program, version, "sized", since=when, now=now,
-                                        why=f"{len(events)} Probe+ events, 80% session-block lower bound "
-                                            f"{bound['session']['lower']:.5f} > 0"):
+                                        why=f"{len(stay)} Probe+ events of the current Probe stay, 80% session-block "
+                                            f"lower bound {bound['session']['lower']:.5f} > 0"):
                 changes.append({"program": program, "version": version, "band": "sized", "why": "sized"})
     return changes
 

@@ -14,11 +14,13 @@ from decimal import Decimal as D
 from pathlib import Path
 from unittest import mock
 
+from league.equity import live as L
 from league.equity import schedule as ES
 from league.events import bands as BA
 from league.events import book as EB
 from league.events import calendar as C
 from league.events import house as H
+from league.events import run as R
 from league.events import screen as SC
 from league.events import store as S
 from league.events import universe as U
@@ -224,8 +226,9 @@ class TheCloseDecisionReadsEachNameOnce(EventTest):
         self.assertTrue(planned, "17.00 / 16.00 = 1.0625 >= 1.04: NEWS-REACT-ON takes the names")
 
     def test_a_failed_batch_is_read_again_once_never_name_by_name(self):
-        """(Release 1019b's second review: a failed request is sent again once; one that fails twice leaves the close
-        decision unmade, `failed` with why, so the next minute of its window decides again.)"""
+        """(Release 1019b's second review: a failed request is sent again once. The third review: one that fails twice
+        leaves its names unread, and the decision is made with what was read: no REACT row of those names is taken,
+        and the summary and the minute's `errors` say why.)"""
         h = self.harness()
         self.articles(h)
         calls = self.minute_market(h, fail=True)
@@ -238,7 +241,7 @@ class TheCloseDecisionReadsEachNameOnce(EventTest):
         self.assertEqual([r for r in h.event_intents("buy") if r["program"] == "EVL-NEWS-REACT-ON"], [])
         [row] = h.state.rows("SELECT status, summary FROM eq_event_decisions WHERE day=? AND at='close'",
                              (DAY.isoformat(),))
-        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["status"], "done")
         self.assertIn("HTTP 429", json.loads(row["summary"])["errors"][0])
         self.assertTrue(any("T29 minutes" in e for e in out.get("errors", [])), out)
 
@@ -933,8 +936,9 @@ class AnExitNeverWaitsOnAnEntry(EventTest):
 
 
 class TheCloseDecisionIsMadeAgainAfterAFailedRead(EventTest):
-    """The close decision's batched T29 read: a failed request is sent again once; when the retry fails too, the
-    decision is written `failed` with why and made again the next minute of its window, which takes the picks."""
+    """The close decision's batched T29 read: a failed request is sent again once (the second review); when the retry
+    fails too, the names stay unread and the decision is made with what was read: only the REACT rows of the unread
+    names are dropped (the third review)."""
 
     def news_day(self, h, *, fails: int) -> dict:
         for i in range(5):
@@ -969,7 +973,10 @@ class TheCloseDecisionIsMadeAgainAfterAFailedRead(EventTest):
         took = [r["symbol"] for r in h.event_intents("buy") if r["program"] == "EVL-NEWS-REACT-ON"]
         self.assertEqual(len(took), 5, "17.00 / 16.00 = 1.0625 >= 1.04: all five taken at 15:47")
 
-    def test_a_read_that_fails_twice_leaves_the_decision_to_the_next_minute_which_takes_the_picks(self):
+    def test_a_read_that_fails_twice_drops_only_the_react_rows_and_the_decision_is_made(self):
+        """(Release 1019b's third review: A T29 BATCH FAILURE DROPS ONLY THE REACT ROWS' PICKS. The request and its one
+        retry fail: the decision is made at once with what was read, NEWS-REACT-ON takes nothing it could not read,
+        and the decision is not made again.)"""
         h = self.harness()
         state = self.news_day(h, fails=2)
         for hh, mm in ((9, 15), (9, 16), (15, 46)):
@@ -979,16 +986,14 @@ class TheCloseDecisionIsMadeAgainAfterAFailedRead(EventTest):
         self.assertEqual([r for r in h.event_intents("buy") if r["program"] == "EVL-NEWS-REACT-ON"], [])
         [row] = h.state.rows("SELECT status, summary FROM eq_event_decisions WHERE day=? AND at='close'",
                              (DAY.isoformat(),))
-        self.assertEqual(row["status"], "failed")
-        self.assertIn("HTTP 429", json.loads(row["summary"])["errors"][0])
-        self.assertTrue(any("event decide close" in e and "T29" in e for e in out.get("errors", [])), out)
-        h.tick(15, 48)                                                   # still inside close_until (15:49)
-        took = [r for r in h.event_intents("buy") if r["program"] == "EVL-NEWS-REACT-ON"]
-        self.assertEqual(len(took), 5, "the next minute decides again and takes them")
-        [row] = h.state.rows("SELECT status FROM eq_event_decisions WHERE day=? AND at='close'", (DAY.isoformat(),))
         self.assertEqual(row["status"], "done")
-        sent = [b for b in h.bodies() if b["side"] == "buy" and b["time_in_force"] == "cls"]
-        self.assertEqual(len(sent), 5, "sent at 15:48, before the cut-off")
+        summary = json.loads(row["summary"])
+        self.assertIn("HTTP 429", summary["errors"][0])
+        self.assertIn("REACT row", summary["t29"])
+        self.assertTrue(any("event decide close" in e and "T29" in e for e in out.get("errors", [])), out)
+        h.tick(15, 48)
+        self.assertEqual(state["n"], 2, "made once: nothing is read again")
+        self.assertEqual([r for r in h.event_intents("buy") if r["program"] == "EVL-NEWS-REACT-ON"], [])
 
 
 
@@ -1291,7 +1296,7 @@ class TheReachIsTheJudges(unittest.TestCase):
 
 class ADemotedProgramReturnsToProbe(unittest.TestCase):
     """PREREG-EVL-3 section 2: a demoted program "returns to Probe at its next passed look". The demotion windows count
-    the current Probe stay (its events bought after its latest move to Probe); Sized counts every Probe+ event."""
+    the current Probe stay (its events bought after its latest move to Probe); so does Sized (the third review)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -1334,17 +1339,585 @@ class ADemotedProgramReturnsToProbe(unittest.TestCase):
         moved = BA.review(self.st, now=dt.datetime(2026, 11, 6, 1, 0, tzinfo=utc))
         self.assertEqual([c["band"] for c in moved], ["learning"], "its own stay's events demote it")
 
-    def test_sized_counts_every_probe_event(self):
+    def test_sized_counts_the_current_probe_stay(self):
+        """(Release 1019b's third review: Sized's count and bound are over the current Probe stay, as demotion's are.)"""
         p = "EVL-INS-BUY-O1"
         utc = dt.timezone.utc
         BA.set_band(self.st, p, 2, "probe", since="2026-10-20T20:00:00Z", why="look", now=dt.datetime(2026, 10, 21, tzinfo=utc))
         self.fills(p, dt.date(2026, 10, 22), 10, 10.05)
+        seen = []
         with mock.patch.object(BA, "probe_since", return_value=dt.datetime(2030, 1, 1, tzinfo=utc)), \
                 mock.patch.object(BA, "SIZED_MIN", 10), \
-                mock.patch.object(SC, "sized_bound", side_effect=lambda events: {"ok": len(events) == 10,
-                                                                                 "session": {"lower": 0.001}}):
+                mock.patch.object(SC, "sized_bound", side_effect=lambda events: seen.append(len(events)) or {
+                    "ok": True, "session": {"lower": 0.001}}):
             moved = BA.review(self.st, now=dt.datetime(2026, 10, 23, tzinfo=utc))
-        self.assertEqual([c["band"] for c in moved], ["sized"], "every Probe+ event, outside the stay too")
+        self.assertEqual(moved, [], "no event of the current stay: not Sized")
+        self.assertEqual(seen, [])
+        with mock.patch.object(BA, "SIZED_MIN", 10), \
+                mock.patch.object(SC, "sized_bound", side_effect=lambda events: seen.append(len(events)) or {
+                    "ok": True, "session": {"lower": 0.001}}):
+            moved = BA.review(self.st, now=dt.datetime(2026, 10, 23, tzinfo=utc))
+        self.assertEqual([c["band"] for c in moved], ["sized"], "the stay's own 10 events")
+        self.assertEqual(seen, [10])
+
+
+
+# ============================================================================================ the third review: the House
+def _minute_at(h, hh: int, mm: int, ss: int = 3) -> dict:
+    """The House's minute hh:mm:ss, or later when the one before ran past it (the House's clock never goes back)."""
+    h.clock.set(max(TB.at(DAY, hh, mm, ss), h.clock()))
+    return h.book.tick(h.clock(), account_row=h.venue.account(), positions=None, open_orders=None,
+                       real_block=lambda opening=True: h.blocked, killed=lambda: h.kill)
+
+
+def _close_day(h, *, names: int) -> None:
+    """DAY with: a READ-O1 (version 2) lot bought at the open and due out at the close (market-on-close); a score-3
+    day-news article of NEWS (EVL-NEWS-READ-ON's pick at the close: it reads no T29 minute); a day-news article of S00X
+    (EVL-NEWS-REACT-ON's, which reads its T29 minute); and `names` live names in the day's universe in all."""
+    earnings(h.lane, "a-1", CIK, "ACME")
+    h.lane.intent(TB.V2("EVL-ERN-READ-O1"), "8k:a-1", "ACME", CIK, DAY, DAY)
+    h.lane.decided(DAY, "open")
+    h.symbol("ACME", last=17.0, sd=0.02)
+    h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("17.00")
+    h.venue.prints[("ACME", DAY.isoformat(), "close")] = D("17.50")
+    h.lane.universe(DAY, "NEWS", "0000000700", 16.0)
+    h.symbol("NEWS", last=16.5)
+    h.lane.article("n-read", "NEWS", knowable=iso(DAY, 10, 5))
+    h.lane.verdict("n-read", 3, answered=iso(DAY, 10, 6), news=True)
+    h.lane.universe(DAY, "S00X", "0000000900", 16.0)
+    h.lane.st.db.execute("INSERT INTO bars(symbol, day, adj, o, h, l, c, v, fetched_at) VALUES('S00X', ?, 'raw', 16, 16, "
+                         "16, 16.0, 1e6, 'x')", (PRIOR.isoformat(),))
+    h.symbol("S00X", last=17.0)
+    h.lane.article("n-react", "S00X", knowable=iso(DAY, 10, 5))
+    for i in range(names - 3):
+        h.lane.universe(DAY, f"N{i:03d}", f"{5000 + i:010d}", 16.0)
+
+
+def _hanging_minutes(h, seconds: float = 20.0) -> list[tuple[float, int]]:
+    """Alpaca's 1Min bars hang: each request runs `seconds` into the client's timeout, then raises."""
+    calls: list[tuple[float, int]] = []
+    real = h.market.bars
+
+    def bars(symbols, *, timeframe, start, end=None, adjustment="raw"):
+        if timeframe != "1Min":
+            return real(symbols, timeframe=timeframe, start=start, end=end, adjustment=adjustment)
+        calls.append((h.clock(), len(list(symbols))))
+        h.clock.set(h.clock() + seconds)
+        raise TimeoutError("market data bars 1Min: timed out")
+    h.market.bars = bars
+    return calls
+
+
+def _sent_at(h) -> list[tuple[float, str, str, str]]:
+    """(wall clock, side, symbol, time in force) of every order the venue was sent, as it was sent."""
+    log: list[tuple[float, str, str, str]] = []
+    real = h.venue.submit
+
+    def submit(body, *, exit):
+        log.append((h.clock(), body["side"], body["symbol"], body["time_in_force"]))
+        return real(body, exit=exit)
+    h.venue.submit = submit
+    return log
+
+
+class TheSalesGoBeforeTheDecision(EventTest):
+    """Release 1019b's third review (House, major): the close decision reads every live name's T29 minute, 200 names a
+    request, and `_send` judges the 15:49 cut-off on the wall clock. With 450 live names and Alpaca's 1Min bars hanging
+    to the client's timeout, the sales of the auction went only after the decision returned, past the cut-off: every
+    event lot due out at that close missed its market-on-close sale. Now each auction's SALES go first, then its
+    decision, then its BUYS; and the T29 reads are bounded by the window (never again after a timeout, none started in
+    its last minute)."""
+
+    def open_then_close(self, h, *, names: int = 450) -> list[tuple[float, int]]:
+        _close_day(h, names=names)
+        for hh, mm in ((9, 15), (9, 16), (9, 31), (9, 33), (15, 46)):
+            h.tick(hh, mm)
+        [lot] = [lot for lot in h.lots() if lot.status != "closed"]
+        self.assertEqual(lot.info["evl_exit"], {"day": DAY.isoformat(), "at": "close", "rung": 0})
+        self.assertEqual([r["status"] for r in h.event_intents("sell")], ["planned"], "planned at 15:46")
+        h.lane.decided(DAY, "close")
+        return _hanging_minutes(h)
+
+    def test_450_names_hanging_every_due_sale_is_sent_before_the_cut_off(self):
+        h = self.harness()
+        calls = self.open_then_close(h)
+        sent = _sent_at(h)
+        _minute_at(h, 15, 47)
+        cut = TB.at(DAY, 15, 49, 0)
+        sales = [(t, sym) for t, side, sym, tif in sent if side == "sell"]
+        self.assertEqual([sym for _, sym in sales], ["ACME"], "the market-on-close sale of the lot due out")
+        self.assertLess(sales[0][0], calls[0][0] + 1e-6, "sent before the decision's first T29 request")
+        self.assertLess(sales[0][0], cut)
+        self.assertEqual([n for _, n in calls], [200, 200, 50], "three chunks, none sent again after its timeout")
+        self.assertTrue(all(t < TB.at(DAY, 15, 48, 0) for t, _ in calls), "every request before the last minute")
+        [row] = h.state.rows("SELECT status, summary FROM eq_event_decisions WHERE day=? AND at='close'",
+                             (DAY.isoformat(),))
+        self.assertEqual(row["status"], "done", "made with what was read")
+        self.assertIn("TimeoutError", json.loads(row["summary"])["errors"][0])
+        buys = [(t, sym, tif) for t, side, sym, tif in sent if side == "buy"]
+        self.assertEqual([(sym, tif) for _, sym, tif in buys], [("NEWS", "cls")], "NEWS-READ-ON's buy goes; no REACT row")
+        self.assertLess(buys[0][0], cut, "before the cut-off")
+        self.assertEqual([r["status"] for r in h.event_intents("sell")], ["sent"])
+
+    def test_a_150_name_day_reads_one_chunk_and_sends_the_sale_first_too(self):
+        h = self.harness()
+        calls = self.open_then_close(h, names=150)
+        sent = _sent_at(h)
+        _minute_at(h, 15, 47)
+        self.assertEqual([n for _, n in calls], [150])
+        self.assertEqual([(side, sym) for _, side, sym, _ in sent], [("sell", "ACME"), ("buy", "NEWS")])
+
+    def test_no_t29_request_starts_in_the_windows_last_minute(self):
+        """A decision whose reads begin at 15:47:30: the first two chunks run to 15:48:10, and the third is never
+        started (the window's last minute began at 15:48:00); the decision is made with what was read at 15:48:10 and
+        NEWS-READ-ON's buy goes before 15:49."""
+        h = self.harness()
+        calls = self.open_then_close(h)
+        sent = _sent_at(h)
+        _minute_at(h, 15, 47, 30)
+        self.assertEqual([n for _, n in calls], [200, 200])
+        [row] = h.state.rows("SELECT status, summary FROM eq_event_decisions WHERE day=? AND at='close'",
+                             (DAY.isoformat(),))
+        self.assertEqual(row["status"], "done")
+        self.assertTrue(any("last minute" in e for e in json.loads(row["summary"])["errors"]), row["summary"])
+        self.assertEqual([(side, sym) for _, side, sym, _ in sent], [("sell", "ACME"), ("buy", "NEWS")])
+        self.assertTrue(all(t < TB.at(DAY, 15, 49, 0) for t, *_ in sent))
+
+    def test_a_decision_first_made_in_the_last_minute_reads_no_t29_minute(self):
+        """The House's first minute inside the close window is 15:48 (it was down at 15:46 and 15:47): the exits due are
+        planned and sold first, the decision reads no T29 minute (the window's last minute), and takes every pick that
+        needs none."""
+        h = self.harness()
+        _close_day(h, names=10)
+        for hh, mm in ((9, 15), (9, 16), (9, 31), (9, 33)):
+            h.tick(hh, mm)
+        h.lane.decided(DAY, "close")
+        calls = _hanging_minutes(h)
+        sent = _sent_at(h)
+        _minute_at(h, 15, 48)
+        self.assertEqual(calls, [])
+        self.assertEqual([(side, sym) for _, side, sym, _ in sent], [("sell", "ACME"), ("buy", "NEWS")])
+
+    def test_a_request_that_did_not_time_out_is_sent_again_once_before_the_last_minute(self):
+        h = self.harness()
+        _close_day(h, names=10)
+        for hh, mm in ((9, 15), (9, 16), (9, 31), (9, 33), (15, 46)):
+            h.tick(hh, mm)
+        h.lane.decided(DAY, "close")
+        calls: list[float] = []
+        real = h.market.bars
+
+        def bars(symbols, *, timeframe, start, end=None, adjustment="raw"):
+            if timeframe != "1Min":
+                return real(symbols, timeframe=timeframe, start=start, end=end, adjustment=adjustment)
+            calls.append(h.clock())
+            raise RuntimeError("market data bars 1Min: HTTP 503")
+        h.market.bars = bars
+        _minute_at(h, 15, 47)
+        self.assertEqual(len(calls), 2, "a 503 is sent again once")
+        self.assertFalse(L._timed_out(RuntimeError("HTTP 503")))
+        self.assertTrue(L._timed_out(TimeoutError("x")))
+        wrapped = RuntimeError("GET bars failed")
+        wrapped.__cause__ = OSError("The read operation timed out")
+        self.assertTrue(L._timed_out(wrapped), "a timeout a transport error wraps")
+
+
+class AT29FailureDropsOnlyTheReactRows(EventTest):
+    """Release 1019b's third review (money and House, minor): when the batched T29 read fails, the decision is made with
+    what was read: a REACT row of an unread name is not taken, every other close-entry program's picks go
+    (EVL-NEWS-READ-ON reads no T29 minute), and the summary says why."""
+
+    def test_news_read_on_buys_with_the_t29_minutes_down(self):
+        h = self.harness()
+        _close_day(h, names=5)
+        h.lane.decided(DAY, "open")
+        real = h.market.bars
+
+        def bars(symbols, *, timeframe, start, end=None, adjustment="raw"):
+            if timeframe != "1Min":
+                return real(symbols, timeframe=timeframe, start=start, end=end, adjustment=adjustment)
+            raise RuntimeError("market data bars 1Min: HTTP 503")
+        h.market.bars = bars
+        self.ready(h)
+        for hh, mm in ((9, 15), (9, 16), (9, 31), (9, 33), (15, 46), (15, 47)):
+            h.tick(hh, mm)
+        took = [(r["program"], r["symbol"]) for r in h.event_intents("buy") if r["at"] == "close"]
+        self.assertEqual(took, [("EVL-NEWS-READ-ON", "NEWS")])
+        [row] = h.state.rows("SELECT status, summary FROM eq_event_decisions WHERE day=? AND at='close'",
+                             (DAY.isoformat(),))
+        self.assertEqual(row["status"], "done")
+        summary = json.loads(row["summary"])
+        self.assertIn("HTTP 503", summary["errors"][0])
+        self.assertEqual(summary["programs"]["EVL-NEWS-REACT-ON"].get("planned", 0), 0)
+        sent = [(b["symbol"], b["side"], b["time_in_force"]) for b in h.bodies() if b["time_in_force"] == "cls"]
+        self.assertIn(("NEWS", "buy", "cls"), sent)
+        self.assertIn(("ACME", "sell", "cls"), sent)
+
+
+
+# =========================================================================================== the third review: the judges
+class DemotedFromSizedEarnsSizedAgainOnItsNewStay(unittest.TestCase):
+    """Release 1019b's third review (judges, minor): Sized counted every Probe+ event while demotion counted the current
+    Probe stay, so a Sized program demoted on its last 50 events and returned to Probe at its next passed look was moved
+    straight back to SIZED (10% a position) by the same night's review, on the events of the stay that got it demoted.
+    Sized now counts the current Probe stay too (the reading that trades less)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = S.Store(self.tmp.name)
+        C.refresh(self.st, CalendarGateway({}), dt.date(2026, 10, 1), dt.date(2027, 6, 30))
+        self.days = [s.day for s in C.sessions(self.st, dt.date(2026, 10, 20), dt.date(2027, 6, 30))]
+        self.n = 0
+
+    def tearDown(self):
+        self.st.close()
+        self.tmp.cleanup()
+
+    def fills(self, program, day, n, sell_px, band):
+        for _ in range(n):
+            ev = f"real:{self.n}"
+            self.n += 1
+            self.st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
+                               "exit_day, exit_at, rank_key, mode, status, why) VALUES(?, 2, ?, 'S', ?, 'z', ?, 'open', ?, "
+                               "'close', NULL, 'shadow', 'exited', NULL)",
+                               (program, ev, f"{self.n:010d}", day.isoformat(), day.isoformat()))
+            BA.record_fill(self.st, program=program, version=2, event=ev, side="buy", qty=10, price=10.0, fee=0.0,
+                           filled_at=f"{day.isoformat()}T13:30:00Z", band=band)
+            BA.record_fill(self.st, program=program, version=2, event=ev, side="sell", qty=10, price=sell_px, fee=0.0,
+                           filled_at=f"{day.isoformat()}T20:00:00Z", band=band)
+
+    def test_returned_to_probe_it_stays_probe_until_its_new_stay_earns_sized(self):
+        p, utc = "EVL-INS-BUY-O1", dt.timezone.utc
+        BA.set_band(self.st, p, 2, "probe", since="2026-10-20T20:00:00Z", why="look 1",
+                    now=dt.datetime(2026, 10, 21, tzinfo=utc))
+        for i, d in enumerate(self.days[2:42]):                              # 200 Probe events over 40 sessions
+            self.fills(p, d, 5, 10.20 if i % 5 else 9.95, "probe")
+        moved = BA.review(self.st, now=dt.datetime(2026, 12, 20, tzinfo=utc))
+        self.assertEqual([c["band"] for c in moved], ["sized"])
+        for d in self.days[42:52]:                                           # 50 Sized events, -$3.50 each: -$175
+            self.fills(p, d, 5, 9.65, "sized")
+        moved = BA.review(self.st, now=dt.datetime(2027, 1, 10, tzinfo=utc))
+        self.assertEqual([c["band"] for c in moved], ["learning"])
+        BA.on_look(self.st, {"program": p, "version": 2, "k": 5, "held": 1, "passed": 1, "at": "2027-01-20T21:00:00Z",
+                             "retirement": {"retire": False}}, now=dt.datetime(2027, 1, 25, 1, 0, tzinfo=utc))
+        self.assertEqual(BA.bands(self.st)[(p, 2)], "probe")
+        moved = BA.review(self.st, now=dt.datetime(2027, 1, 25, 1, 5, tzinfo=utc))   # the same night's review
+        self.assertEqual(moved, [], "Probe: the demoted stay's events never make it Sized again")
+        self.assertEqual(BA.bands(self.st)[(p, 2)], "probe")
+        later = [d for d in self.days if d > dt.date(2027, 1, 25)]
+        for i, d in enumerate(later[:40]):                                   # its new stay: 200 Probe events
+            self.fills(p, d, 5, 10.20 if i % 5 else 9.95, "probe")
+        moved = BA.review(self.st, now=dt.datetime(2027, 4, 1, tzinfo=utc))
+        self.assertEqual([c["band"] for c in moved], ["sized"], "its new stay earns Sized")
+
+
+class MarkedStore(unittest.TestCase):
+    """The desktop's store (from before `eligibility`) migrated at the House's first open of it. Monday Oct 19 was
+    decided LIVE on the desktop (open 13:16:05Z, close 19:46:30Z), whose A67 hotfix marks each CIK the live rule refused
+    as meta `elig-no:<day>:<cik>` = "live". AAA is listed on NASDAQ, active, `tradable: false` (the live rule refuses it,
+    the backfill rule takes it); BBB is tradable."""
+
+    DAY = dt.date(2026, 10, 19)
+
+    def setUp(self):
+        from league.events import programs as P
+        from league.tests import test_events_run as TR
+
+        self.TR, self.P = TR, P
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = S.Store(self.tmp.name)
+        self.gw = Untradable({"AAA": 3, "BBB": 3})
+        C.refresh(self.st, self.gw, dt.date(2026, 8, 1), dt.date(2026, 12, 31))
+        self.st.set_meta("tickers@2026-10-19T01:05:00Z", self.st.put_document(TR.sec_pages("x/company_tickers.json"), "t"))
+        self._pinned = P.REGISTERED_AT
+        P.REGISTERED_AT = "2026-10-19T01:00:00Z"
+        self.fail_index: set[str] = set()
+        self.accepted: dict[str, tuple[str, str]] = {}
+
+    def tearDown(self):
+        self.P.REGISTERED_AT = self._pinned
+        self.st.close()
+        self.tmp.cleanup()
+
+    def sec(self, url):
+        if url.endswith("-index.htm"):
+            acc = url.rsplit("/", 1)[1].replace("-index.htm", "")
+            if acc in self.fail_index:
+                raise RuntimeError("HTTP 503: SEC")
+            if acc in self.accepted:
+                accepted, items = self.accepted[acc]
+                return (f'<div class="infoHead">Accepted</div><div class="info">{accepted}</div>'
+                        f'<div class="infoHead">Items</div><div class="info">{items}</div>'
+                        f'<table><tr><td>1</td><td>press release</td><td><a href="/Archives/x/{acc}/ex99.htm">ex99.htm'
+                        f'</a></td><td>EX-99.1</td><td>100</td></tr></table>').encode()
+        if url.endswith("ex99.htm"):        # (each filing's own document, as on EDGAR: documents are kept by content)
+            return self.TR.sec_pages(url).replace(b"</body>", f"<p>{url}</p></body>".encode())
+        return self.TR.sec_pages(url)
+
+    def ctx(self, when):
+        return R.Context(self.st, self.gw, self.sec, now=lambda: S.parse_iso(when))
+
+    def file(self, acc, cik, accepted_et, items, when):
+        from league.events import edgar as E
+
+        self.accepted[acc] = (accepted_et, items)
+        entry = {"form": "8-K", "cik": cik, "accession": acc, "company": "Co", "items": [], "accepted_at": None,
+                 "index_url": f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc.replace('-', '')}/{acc}-index.htm"}
+        return E.record_filing(self.st, self.sec, entry, source="current", now=S.parse_iso(when))
+
+    def migrate(self, markers=()):
+        """The desktop's store as evl_migrate.py copies it: no `eligibility` rows, no `ELIGIBILITY_FROM`, the A67
+        markers; then the House's first open of it (`_migrate`)."""
+        self.st.db.execute("DELETE FROM eligibility")
+        self.st.db.execute("DELETE FROM meta WHERE key=?", (S.ELIGIBILITY_FROM,))
+        for cik in markers:
+            self.st.set_meta(f"elig-no:{self.DAY.isoformat()}:{cik}", "live")
+        self.st.close()
+        self.st = S.Store(self.tmp.name)
+        self.assertEqual(self.st.meta(S.ELIGIBILITY_FROM), "2026-10-20")
+
+    def results(self, cik):
+        return {r["rule"]: r["eligible"] for r in self.st.db.execute(
+            "SELECT rule, eligible FROM eligibility WHERE day=? AND cik=?", (self.DAY.isoformat(), cik))}
+
+    def planned(self, symbol, at):
+        return sorted((r["program"], r["version"], r["why"]) for r in self.st.db.execute(
+            "SELECT * FROM intents WHERE entry_day=? AND symbol=? AND entry_at=? AND status='planned'",
+            (self.DAY.isoformat(), symbol, at)))
+
+
+class TheDesktopsLiveRefusalsSurviveTheMigration(MarkedStore):
+    """Release 1019b's third review (judges, major): the migration keeps each marker as a live refusal, so a refusal of
+    the desktop's live OPEN holds at a backfill re-decision of either kind (A67: "a CIK the live rule rejected for an
+    entry session stays rejected for that session")."""
+
+    def test_the_migration_keeps_each_marker_as_a_live_refusal(self):
+        self.st.db.execute("INSERT INTO universe(day, symbol, cik, name, exchange, prev_close, adv20, bench) VALUES("
+                           "'2026-10-19', 'BBB', '0000000002', 'x', 'NASDAQ', 20, 2e7, 'IWM')")
+        self.st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES("
+                           "'decide-open:2026-10-19', '2026-10-19T13:24:51Z', '2026-10-19T13:27:01Z', 'ok', '{}')")
+        self.st.set_meta("elig-no:2026-10-19:0000000009", "something else")      # not the hotfix's mark: not kept
+        self.st.set_meta("elig-no:not-a-day:0000000008", "live")
+        self.migrate(markers=["0000000001", "0000000003"])
+        got = sorted(tuple(r) for r in self.st.db.execute("SELECT day, cik, rule, eligible, symbol, decided_at FROM "
+                                                          "eligibility"))
+        self.assertEqual(got, [("2026-10-19", "0000000001", "live", 0, None, "migrated"),
+                               ("2026-10-19", "0000000002", "live", 1, "BBB", "migrated"),
+                               ("2026-10-19", "0000000003", "live", 0, None, "migrated")])
+        self.assertTrue(S.has_markers(self.st.db, "2026-10-19"))
+        self.assertFalse(S.has_markers(self.st.db, "2026-10-16"))
+
+    def test_a_marker_refuses_at_a_close_redecision(self):
+        """AAA (tradable: false) was refused by Monday's live open (its marker). Its earnings 8-K of 12:00 ET and a
+        day-news article are stored on Tuesday (the daily-index backfill): the hourly re-decision of Monday's CLOSE
+        (a backfill) never admits it."""
+        self.assertEqual(self.file("0000000001-26-000011", "0000000001", "2026-10-19 07:05:00", "Item 8.01: Other",
+                                   "2026-10-19T11:06:00Z"), "fetched")
+        R.decide_open(self.ctx("2026-10-19T13:16:05Z"), self.DAY)
+        R.decide_close(self.ctx("2026-10-19T19:46:30Z"), self.DAY)
+        self.migrate(markers=["0000000001"])
+        self.assertEqual(self.results("0000000001"), {"live": 0})
+        self.assertEqual(self.file("0000000001-26-000012", "0000000001", "2026-10-19 12:00:00", "Item 2.02: Results",
+                                   "2026-10-20T11:10:00Z"), "fetched")
+        self.st.db.execute("INSERT INTO news(id, created_at, updated_at, received_at, knowable_at, source, headline, "
+                           "summary, symbols, live) VALUES('n1', '2026-10-19T17:00:00Z', NULL, '2026-10-20T11:12:00Z', "
+                           "'2026-10-19T17:02:00Z', 'x', 'AAA news', 's', '[\"AAA\"]', 0)")
+        R.decide_close(self.ctx("2026-10-20T14:20:00Z"), self.DAY, backfill_run=True)
+        self.assertEqual((self.results("0000000001"), self.planned("AAA", "close")), ({"live": 0}, []))
+
+    def test_a_marker_refuses_at_an_open_redecision(self):
+        """A marked CIK whose open-window 8-K is first stored after the live open (BBB, tradable, so either rule would
+        take it): the hourly re-decision of the OPEN keeps the desktop's live refusal."""
+        R.decide_open(self.ctx("2026-10-19T13:16:05Z"), self.DAY)
+        R.decide_close(self.ctx("2026-10-19T19:46:30Z"), self.DAY)
+        self.migrate(markers=["0000000002"])
+        self.assertEqual(self.file("0000000002-26-000021", "0000000002", "2026-10-19 07:10:00", "Item 2.02: Results",
+                                   "2026-10-20T11:12:00Z"), "fetched")
+        R.decide_open(self.ctx("2026-10-20T14:20:00Z"), self.DAY, backfill_run=True)
+        self.assertEqual((self.results("0000000002"), self.planned("BBB", "open")), ({"live": 0}, []))
+
+    def test_a_day_with_markers_reads_nothing_more_from_seen_live(self):
+        """BBB's 8-K was LISTED before the live open (11:12Z) but its fetch failed (an SEC 503) and it was fetched on
+        Tuesday: the live run never saw it, and Monday's markers (another CIK's) are its exact refusals, so the
+        re-decision judges BBB by the backfill rule and the shadow keeps its event."""
+        self.fail_index.add("0000000002-26-000031")
+        got = self.file("0000000002-26-000031", "0000000002", "2026-10-19 07:10:00", "Item 2.02: Results",
+                        "2026-10-19T11:12:00Z")
+        self.assertTrue(got.startswith("failed:"), got)
+        self.fail_index.clear()
+        R.decide_open(self.ctx("2026-10-19T13:16:05Z"), self.DAY)
+        R.decide_close(self.ctx("2026-10-19T19:46:30Z"), self.DAY)
+        self.migrate(markers=["0000000009"])
+        self.assertEqual(self.file("0000000002-26-000031", "0000000002", "2026-10-19 07:10:00", "Item 2.02: Results",
+                                   "2026-10-20T11:12:00Z"), "fetched")
+        self.assertEqual(U.seen_live(self.st, self.DAY, "open", {"0000000002": "2026-10-19T11:12:00Z"}), set(),
+                         "a day with markers: they are its refusals")
+        R.decide_open(self.ctx("2026-10-20T14:20:00Z"), self.DAY, backfill_run=True)
+        self.assertEqual(self.results("0000000002"), {"backfill": 1})
+        self.assertIn(("EVL-CTRL-ERN-ALL-O1", 1, "backfill"), self.planned("BBB", "open"))
+
+
+class AMarkerlessLegacyDay(MarkedStore):
+    """A session from before the table WITHOUT markers (decided live before the hotfix): `seen_live` reads a CIK with
+    no result as a live refusal when this decision's first event of it was FETCHED before the session's first finished
+    live decision of either kind; a filing only LISTED before it was never seen by it."""
+
+    def test_fetched_before_the_live_run_is_its_refusal_listed_before_and_fetched_after_is_not(self):
+        self.fail_index.add("0000000002-26-000041")
+        self.assertTrue(self.file("0000000002-26-000041", "0000000002", "2026-10-19 07:10:00", "Item 2.02: Results",
+                                  "2026-10-19T11:12:00Z").startswith("failed:"))
+        self.fail_index.clear()
+        self.assertEqual(self.file("0000000001-26-000042", "0000000001", "2026-10-19 07:05:00", "Item 2.02: Results",
+                                   "2026-10-19T11:06:00Z"), "fetched")
+        R.decide_open(self.ctx("2026-10-19T13:16:05Z"), self.DAY)                    # LIVE open: AAA refused
+        self.migrate(markers=[])
+        self.assertEqual(self.results("0000000001"), {}, "no marker: the refusal was never kept")
+        self.assertEqual(self.file("0000000002-26-000041", "0000000002", "2026-10-19 07:10:00", "Item 2.02: Results",
+                                   "2026-10-20T11:12:00Z"), "fetched")
+        row = self.st.db.execute("SELECT received_at FROM filings WHERE accession='0000000002-26-000041'").fetchone()
+        self.assertEqual(row["received_at"], "2026-10-19T11:12:00Z", "the listing time")
+        self.assertEqual(R._first_fetched(self.st, [dict(r) for r in self.st.db.execute(
+            "SELECT * FROM filings WHERE accession='0000000002-26-000041'")]), {"0000000002": "2026-10-20T11:12:00Z"})
+        R.decide_open(self.ctx("2026-10-20T14:20:00Z"), self.DAY, backfill_run=True)
+        self.assertEqual(self.results("0000000001"), {"live": 0}, "fetched before the live open: as it found")
+        self.assertEqual(self.planned("AAA", "open"), [])
+        self.assertEqual(self.results("0000000002"), {"backfill": 1}, "fetched after it: judged as a late event")
+        self.assertIn(("EVL-CTRL-ERN-ALL-O1", 1, "backfill"), self.planned("BBB", "open"))
+
+    def test_the_first_finished_live_run_of_either_kind(self):
+        self.st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES("
+                           "'decide-close:2026-10-19', '2026-10-19T19:47:02Z', '2026-10-19T19:48:00Z', 'ok', '{}')")
+        self.st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES("
+                           "'decide-open:2026-10-19', '2026-10-19T13:20:00Z', '2026-10-19T13:21:00Z', 'failed', '{}')")
+        self.migrate(markers=[])
+        seen = {"0000000003": "2026-10-19T17:00:00Z", "0000000004": "2026-10-19T19:50:00Z"}
+        self.assertEqual(U.seen_live(self.st, self.DAY, "open", seen), {"0000000003"}, "the live close: the only one")
+        self.st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES("
+                           "'decide-open:2026-10-19', '2026-10-19T13:24:51Z', '2026-10-19T13:27:01Z', 'ok', '{}')")
+        self.assertEqual(U.seen_live(self.st, self.DAY, "close", seen), set(), "the live open is the first: 13:24:51Z")
+        self.assertEqual(U.seen_live(self.st, self.DAY, "close", {"0000000005": "2026-10-19T13:00:00Z"}),
+                         {"0000000005"})
+
+
+class TheHousesLiveRuleIsTheJudges(unittest.TestCase):
+    """Release 1019b's third review (judges, minor): each run's live-or-backfill rule fixes its session's eligibility
+    for good, so the choice is the protected judge's (league/events/run.py `LIVE_WITHIN`, `live_run`, behind
+    league/ci.py's wall), and the House's lane and the CLI take it from there."""
+
+    def test_one_definition_in_the_judge(self):
+        from league import ci
+        from league.events import __main__ as CLI
+
+        self.assertIs(H.LIVE_WITHIN, R.LIVE_WITHIN)
+        self.assertEqual(R.LIVE_WITHIN, dt.timedelta(minutes=10))
+        self.assertTrue(ci.guard(["league/events/run.py"], None))
+        source = (REPO / "league" / "events" / "house.py").read_text(encoding="utf-8")
+        self.assertEqual([line for line in source.splitlines() if line.startswith("LIVE_WITHIN =")],
+                         ["LIVE_WITHIN = R.LIVE_WITHIN"])
+        self.assertNotIn("+ LIVE_WITHIN", source)
+        self.assertNotIn("<= LIVE_WITHIN", source)
+        self.assertIn("R.live_run(", (REPO / "league" / "events" / "__main__.py").read_text(encoding="utf-8"))
+        self.assertTrue(CLI.R is R)
+        t = dt.datetime(2026, 10, 20, 13, 15, tzinfo=dt.timezone.utc)
+        self.assertTrue(R.live_run(t, t - dt.timedelta(hours=2)), "verdicts asked ahead read the live rule")
+        self.assertTrue(R.live_run(t, t + dt.timedelta(minutes=10)))
+        self.assertFalse(R.live_run(t, t + dt.timedelta(minutes=10, seconds=1)))
+
+
+
+# ======================================================================================= the third review: House minors
+class AnEmptyAssetListIsNeverKept(LaneCase):
+    """Release 1019b's third review (House and judges, minor): `run.eligibility` decides nothing on an empty asset list
+    (it raises), but the lane kept whatever Alpaca answered for ASSETS_TTL (30 minutes): one empty answer failed every
+    live open run of the session until LIVE_WITHIN was gone, and the open was then decided as a BACKFILL (no live
+    result: no real open entry that session). An empty answer is never kept: the next turn asks again."""
+
+    def test_one_empty_answer_and_the_open_is_still_decided_live(self):
+        self.fetched_8k("0000000002-26-000102", "0000000002", "2026-10-20 07:06:00")   # BBB, open window of Tue
+        real = self.gw.get_json
+        answers = {"n": 0}
+
+        def get_json(path, params=None):
+            if path.endswith("/v2/assets") and (params or {}).get("status") == "active":
+                answers["n"] += 1
+                if answers["n"] == 1:
+                    return []                                   # one empty answer (a transient)
+            return real(path, params)
+        self.gw.get_json = get_json
+        statuses = []
+        for minute in range(16, 31):
+            self.at(et("2026-10-20", f"09:{minute:02d}"))
+            self.mark_recorded()
+            last = self.turn()
+            if last.get("task") == "decide-open":
+                statuses.append((minute, last.get("status")))
+        self.assertEqual(statuses[0], (16, "failed"), "the empty answer: nothing decided on it")
+        self.assertEqual(statuses[1], (17, "ok"), "asked again a minute later, and decided live")
+        self.assertGreaterEqual(answers["n"], 2)
+        with self.store() as st:
+            rules = sorted({r[0] for r in st.db.execute("SELECT rule FROM eligibility WHERE day='2026-10-20'")})
+            whys = {r[0] for r in st.db.execute("SELECT why FROM intents WHERE entry_day='2026-10-20'")}
+        self.assertEqual(rules, ["live"])
+        self.assertEqual(whys, {None}, "live decisions (a backfill's intents say 'backfill')")
+
+    def test_a_list_is_kept_for_its_ttl(self):
+        calls = []
+        real = self.gw.get_json
+
+        def get_json(path, params=None):
+            if path.endswith("/v2/assets"):
+                calls.append(dict(params or {}))
+            return real(path, params)
+        self.gw.get_json = get_json
+        self.lane.assets(self.gw, "active")
+        self.lane.assets(self.gw, "active")
+        self.assertEqual(len(calls), 1, "a list with names is kept")
+        self.gw.get_json = lambda path, params=None: [] if path.endswith("/v2/assets") else real(path, params)
+        self.lane._asset_cache.clear()
+        self.assertEqual(self.lane.assets(self.gw, "active"), {})
+        self.assertNotIn("active", self.lane._asset_cache, "an empty answer is never kept")
+
+
+class TheVerdictStepNeverFailsTheRecordPass(LaneCase):
+    """Release 1019b's third review (House, minor): the record pass's verdict step caught only LaneDeadline, so an Alpaca
+    outage in the eligibility it reads (or an empty asset list) failed the whole record pass, and FAIL_BACKOFF then cut
+    EDGAR's and the news' polling from every 2 minutes to every 10. The step now catches any failure (a warning), the
+    pass ends ok, and the decision's verdicts wait out VERDICT_BACKOFF by themselves."""
+
+    def run_morning(self, *, assets_empty: bool):
+        self.fetched_8k("0000000001-26-000101", "0000000001", "2026-10-20 06:30:00")
+        real = self.gw.get_json
+
+        def get_json(path, params=None):
+            if path.endswith("/v2/assets") and assets_empty:
+                return []
+            if path.endswith("/v2/stocks/bars") and not assets_empty:
+                from league.events.gw import GatewayError
+                raise GatewayError(500, "bars down")
+            return real(path, params)
+        self.gw.get_json = get_json
+        with self.store() as st:
+            for d in ("2026-10-15", "2026-10-16", "2026-10-19"):
+                st.set_meta(f"evl:backfill:{d}", "done")
+        self.at(et("2026-10-20", "08:00"))
+        while self.clock_dt() < et("2026-10-20", "08:30"):
+            self.turn()
+            self.clock.advance(60)
+            self.mono.advance(60)
+        return [(r["started_at"][11:16], r["status"], json.loads(r["summary"] or "{}")) for r in self.receipts("record")]
+
+    def test_bars_down(self):
+        recs = self.run_morning(assets_empty=False)
+        self.assertGreaterEqual(len(recs), 14, "a record pass every 2 minutes")
+        self.assertEqual({status for _, status, _ in recs}, {"ok"})
+        steps = [v for _, _, summary in recs for v in summary.get("verdicts") or []]
+        self.assertTrue(any("GatewayError" in str(v.get("error")) for v in steps), steps[:3])
+        self.assertTrue(any("verdict step" in text for level, text in self.house.alerts if level == "warning"))
+
+    def test_assets_empty(self):
+        recs = self.run_morning(assets_empty=True)
+        self.assertGreaterEqual(len(recs), 14, "a record pass every 2 minutes")
+        self.assertEqual({status for _, status, _ in recs}, {"ok"})
 
 
 if __name__ == "__main__":

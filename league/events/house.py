@@ -17,7 +17,8 @@ so every legacy path behaves as it does today.
 ONE TURN, ONE TASK, BOUNDED. `run()` does the single most urgent due task, never raises (a failure is a warning at most
 once an hour per task, so the House's repeat rule never turns it into an error), and keeps its time:
 1. a DECISION due: the open at 09:15 ET, the close's at the close - 14 minutes (a minute later, for the 15:30 minute
-   bar); live within 10 minutes of its time, a backfill after (league/events/run.py); then a missed one, then a pending
+   bar); live within 10 minutes of its time, a backfill after (the judge's rule: league/events/run.py `live_run`); then
+   a missed one, then a pending
    one again (the hourly re-decision of the last three sessions, as the desktop's catchup, waits for the record pass);
 2. VERDICTS for a decision within 30 minutes (today's open or close), or for a decision that is pending;
 3. the RECORD pass every 2 minutes: EDGAR's current feeds and the news, at most 90 s, resumable (a new filing is stored
@@ -32,7 +33,9 @@ once an hour per task, so the House's repeat rule never turns it into an error),
 A backlog (missed decisions, a long verdict queue) never holds the record pass past a second cadence: then only a live
 decision goes before it. A task ends early when a decision falls due; a decision's and a verdict task's network reads
 stop at their bound and the next turn goes on from what was stored (universe rows, cik_info, bars and verdicts are kept
-as they are read). `<state>/events/STOP` idles the lane without a deploy.
+as they are read). `<state>/events/STOP` idles the lane without a deploy: the lane only, never the House's event book,
+which still decides each auction on the store as it stands (the instant stop of event buys is the gateway's
+`STOCK_EVENT_BUYS` off or `equity_money.event.enabled` False: docs/operations.md, release 1019b's Rollback).
 
 Paid work: a verdict is asked only while the House is not paused (`PAUSE`), and only under the lane's own line of
 `events.verdict_usd_day` dollars a New York day ($3, the default too: the goal's cost rule, the House box's about $1.29
@@ -85,7 +88,10 @@ DECISION_MARGIN = 5.0
 #: The verdict step of a record pass starts only with this much of its bound left.
 VERDICT_STEP_MIN = 10.0
 
-LIVE_WITHIN = dt.timedelta(minutes=10)        # a decision run this soon after its time is live (league.events.__main__)
+#: A decision run this soon after its time is live: THE JUDGE'S (release 1019b's third review: each run's rule fixes its
+#: session's eligibility for good), defined once in league/events/run.py behind the wall; every live-or-backfill choice
+#: here is `R.live_run`'s.
+LIVE_WITHIN = R.LIVE_WITHIN
 CLOSE_GRACE = dt.timedelta(minutes=1)         # C1 runs a minute after its time: the 15:30 bar is on the tape at 15:46
 PENDING_RETRY = dt.timedelta(minutes=5)       # a decision waiting on verdicts is tried again this often
 STALE_RETRY = dt.timedelta(minutes=10)        # a decision whose run never finished, when it is not this lane's
@@ -362,13 +368,20 @@ class EventLane:
         self._usd = {"day": day, "usd": float(row[0]) + VERDICT_USD_UNKNOWN * int(row[1])}
 
     def assets(self, gw: Any, key: str) -> dict[str, Mapping[str, Any]]:
+        """Alpaca's asset list (`key` "active" for the live rule, "all" for the backfill rule), kept ASSETS_TTL. An
+        EMPTY answer is never kept (release 1019b's third review): league/events/run.py `eligibility` decides nothing on
+        it, so the next turn asks Alpaca again, inside the live decision's window, instead of failing on it for half an
+        hour."""
         have = self._asset_cache.get(key)
         if have is not None and self._mono() - have[0] < ASSETS_TTL:
             return have[1]
         rows = U.alpaca_assets(gw, key)
         keep = ("symbol", "class", "exchange", "status", "tradable")
         slim = {sym: {k: a.get(k) for k in keep} for sym, a in rows.items()}
-        self._asset_cache[key] = (self._mono(), slim)
+        if slim:
+            self._asset_cache[key] = (self._mono(), slim)
+        else:
+            self._asset_cache.pop(key, None)
         return slim
 
     def gateway(self) -> Any:
@@ -656,7 +669,7 @@ class EventLane:
                 continue
             key = (kind, s.day)
             status, last = latest.get(f"decide-{kind}:{s.day.isoformat()}", (None, None))
-            live = now - scheduled <= LIVE_WITHIN
+            live = R.live_run(scheduled, now)
             # (Release 1019b's second review: the receipt's own status first, then this lane's cut: a decision cut once
             # and failing since waits as a failed one does, never every turn.)
             if status is None:
@@ -748,7 +761,7 @@ class EventLane:
                     continue
                 if not self._verdicts_due((kind, today), now, soon, fresh=True):
                     continue
-                live = now <= decide_at + LIVE_WITHIN
+                live = R.live_run(decide_at, now)
                 if status == "pending" or now >= decide_at - URGENT_BEFORE:
                     urgent = urgent or (kind, today, live)
                 else:
@@ -947,10 +960,17 @@ class EventLane:
             step = LaneGateway(ctx.gw.inner, self, deadline, cut=True)
             bounded = LaneContext(self, ctx.store, step, self._sec_for(deadline, True), self.now)
             try:
-                out.append(self._verdicts(bounded, kind, today, now <= decide_at + LIVE_WITHIN))
+                out.append(self._verdicts(bounded, kind, today, R.live_run(decide_at, now)))
             except LaneDeadline:
                 out.append({"decision": kind, "cut": True})
                 break
+            except Exception as exc:  # noqa: BLE001 - the record pass is the feeds': its verdict step never fails it
+                # (Release 1019b's third review: an Alpaca outage in the eligibility it reads, or an empty asset list,
+                # failed the whole record pass, and FAIL_BACKOFF then cut EDGAR's and the news' polling from every 2
+                # minutes to every 10. `_verdicts` marks the decision's verdicts stalled, so they wait VERDICT_BACKOFF by
+                # themselves; the pass goes on to the other decision and ends ok.)
+                out.append({"decision": kind, "error": f"{type(exc).__name__}: {str(exc)[:160]}"})
+                self.warn("record pass's verdict step", exc)
             finally:
                 ctx.gw.counts.update(step.counts)
         return out

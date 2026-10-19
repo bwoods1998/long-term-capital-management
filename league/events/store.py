@@ -20,9 +20,13 @@ each universe row gets the result "eligible" under the rule of the decision that
 first decision receipt of its entry session (`decide-open:<day>` or `decide-close:<day>`, the lowest id): "live" when
 that run started within `LEGACY_LIVE_WITHIN` (10 minutes) of its scheduled time (09:15 ET, or the close less 14
 minutes), as the House's lane and the CLI's `catchup` judge a run live, else "backfill" (no receipt: "backfill"); the
-receipts do not say which of a session's runs wrote which row, so the first run's rule is every row's. The sessions
-whose decisions ran before the table kept no ineligible result: meta `ELIGIBILITY_FROM` is the first entry session
-after the last one with a decision receipt then, and league/events/universe.py `seen_live` reads a session before it.
+receipts do not say which of a session's runs wrote which row, so the first run's rule is every row's. BEFORE THAT,
+the desktop's live refusals (amendment A67: meta `elig-no:<day>:<cik>` = "live", its hotfix's mark of a CIK the live
+rule refused for that session) are kept as live results, ineligible (release 1019b's third review), so a re-decision
+of either kind never admits such a CIK, and a universe row of it is not labelled. The sessions whose decisions ran
+before the table kept no other ineligible result: meta `ELIGIBILITY_FROM` is the first entry session after the last
+one with a decision receipt then, and league/events/universe.py `seen_live` reads a session before it that has no
+markers.
 """
 
 from __future__ import annotations
@@ -102,8 +106,12 @@ LIVE_RULE = "live"
 BACKFILL_RULE = "backfill"
 #: meta: the first entry session whose every eligibility result is in `eligibility` (the module docstring).
 ELIGIBILITY_FROM = "evl:eligibility:from"
-#: A decision run this soon after its scheduled time was live (league/events/house.py LIVE_WITHIN; the CLI's catchup).
+#: A decision run this soon after its scheduled time was live (league/events/run.py LIVE_WITHIN, the House's lane and the
+#: CLI's catchup take theirs from there).
 LEGACY_LIVE_WITHIN = dt.timedelta(minutes=10)
+#: meta `elig-no:<day>:<cik>` = "live": the desktop lane's mark of a CIK the live rule refused for entry session <day>
+#: (amendment A67's hotfix, written there from Oct 19); the migration keeps each as a live refusal (`_migrate`).
+MARKER_PREFIX = "elig-no:"
 _NY = ZoneInfo("America/New_York")
 
 #: The forward-only order of an intent's status (a `skipped:<why>` is terminal like `exited`).
@@ -159,6 +167,16 @@ class Store:
         with self.tx() as db:
             if db.execute("SELECT 1 FROM meta WHERE key=?", (ELIGIBILITY_FROM,)).fetchone() is not None:
                 return
+            # THE DESKTOP'S LIVE REFUSALS FIRST (amendment A67; release 1019b's third review): each meta
+            # `elig-no:<day>:<cik>` = "live" is the live rule's refusal of that CIK for that entry session, kept as its
+            # live result (ineligible), so no later decision of the session admits it under either rule; a universe row
+            # of the same (day, cik) is then not labelled (the refusal stands: the reading that trades less).
+            for row in db.execute("SELECT key FROM meta WHERE key LIKE ? AND value=?", (f"{MARKER_PREFIX}%", LIVE_RULE)
+                                  ).fetchall():
+                marked = _marker(str(row["key"]))
+                if marked is not None:
+                    db.execute("INSERT OR IGNORE INTO eligibility(day, cik, rule, eligible, symbol, decided_at) VALUES(?, ?, "
+                               "?, 0, NULL, 'migrated')", (marked[0], marked[1], LIVE_RULE))
             rules: dict[str, str] = {}
             for row in db.execute("SELECT u.day, u.symbol, u.cik FROM universe u WHERE NOT EXISTS (SELECT 1 FROM "
                                   "eligibility e WHERE e.day=u.day AND e.cik=u.cik) ORDER BY u.day, u.cik, "
@@ -256,6 +274,25 @@ class Store:
         return True
 
 
+def _marker(key: str) -> tuple[str, str] | None:
+    """(day, cik) of a meta key `elig-no:<day>:<cik>`, or None when the key is not one (a day that is not a date)."""
+    rest = key[len(MARKER_PREFIX):] if key.startswith(MARKER_PREFIX) else ""
+    day, _, cik = rest.partition(":")
+    try:
+        dt.date.fromisoformat(day)
+    except ValueError:
+        return None
+    return (day, cik) if cik else None
+
+
+def has_markers(db: sqlite3.Connection, day: str) -> bool:
+    """Whether entry session `day` has the desktop's live refusals (meta `elig-no:<day>:<cik>` = "live", A67): then
+    they are that session's exact live refusals, both kinds, and the migration kept each (league/events/universe.py
+    `seen_live` reads nothing more for it)."""
+    return db.execute("SELECT 1 FROM meta WHERE key LIKE ? AND value=? LIMIT 1",
+                      (f"{MARKER_PREFIX}{day}:%", LIVE_RULE)).fetchone() is not None
+
+
 def _legacy_rule(db: sqlite3.Connection, day: str) -> str:
     """The rule a universe row of entry session `day` from before `eligibility` was made by (the module docstring):
     "live" when the session's first decision receipt started within LEGACY_LIVE_WITHIN of its scheduled time."""
@@ -277,4 +314,4 @@ def _legacy_rule(db: sqlite3.Connection, day: str) -> str:
 
 
 __all__ = ["Store", "SCHEMA", "SCHEMA_VERSION", "iso", "parse_iso", "sha256", "utc_now", "INTENT_ORDER", "LIVE_RULE",
-           "BACKFILL_RULE", "ELIGIBILITY_FROM", "LEGACY_LIVE_WITHIN"]
+           "BACKFILL_RULE", "ELIGIBILITY_FROM", "LEGACY_LIVE_WITHIN", "MARKER_PREFIX", "has_markers"]

@@ -517,6 +517,21 @@ def probe_figures(rows: Callable[..., list], *, weights: Mapping[str, Decimal]) 
     return ProbeFigures(len(programs), tuple((day, cash) for _, day, cash in closes), risk)
 
 
+def _timed_out(exc: BaseException | None) -> bool:
+    """Whether a read failed by running into a timeout: the exception, or one it wraps (`reason`, `__cause__`,
+    `__context__`), is a TimeoutError (socket.timeout included) or says "timed out" or "timeout" (a gateway's 504 too)
+    (release 1019b's third review: a T29 request that timed out is never sent again in the same minute)."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen and len(seen) < 8:
+        seen.add(id(exc))
+        text = str(exc).lower()
+        if isinstance(exc, TimeoutError) or "timed out" in text or "timeout" in text:
+            return True
+        reason = getattr(exc, "reason", None)
+        exc = reason if isinstance(reason, BaseException) else (exc.__cause__ or exc.__context__)
+    return False
+
+
 def _event_weight_of(value: Any) -> Decimal:
     """An event lot's or buy's own open-risk weight (league/events/book.py `weight`): a Decimal in (0, 1], else the
     stricter `EVENT_STRICT_WEIGHT` (fail closed: a weight that cannot be read never counts less)."""
@@ -4956,8 +4971,9 @@ class EquityBook:
     def _event_step(self, now: float, m: S.Moments | None, out: dict, real_block: Callable[..., str | None],
                     killed: Callable[[], bool]) -> None:
         """THE EVENT KIND'S MINUTE (release R2): the auction paper proof; the ends of the auctions passed (fills are
-        booked by `_sync_orders`; an unfilled buy is missed, an unfilled sale climbs the fallback ladder); the decision
-        of each auction at its moment (exits first, then the passing programs' picks); the sends in its window."""
+        booked by `_sync_orders`; an unfilled buy is missed, an unfilled sale climbs the fallback ladder); then each
+        auction in its window: its exits planned, its SALES sent, its decision (the passing programs' picks), its
+        BUYS sent."""
         adapter = self._event_adapter()
         if adapter is None:
             return
@@ -4971,22 +4987,33 @@ class EquityBook:
             self._error("auction proof", exc, out)
         if em is not None:
             # (Release 1019b's review: a failure of the auctions' ends or of a decision, a lane store that cannot be read
-            # included, never stops the minute's sends: the decision plans its exits before it reads the lane, and the
-            # sends go sales first.)
+            # included, never stops the minute's sends.)
             try:
                 self._event_finish(now, em, adapter, out)
             except Exception as exc:  # noqa: BLE001 - finished again next minute
                 self._error("event finish", exc, out)
-            for at, decide, until in (("open", em.open_decide, em.open_until),
-                                      ("close", em.close_decide, em.close_until)):
-                if decide <= now < until:
-                    try:
-                        self._event_decide(now, em, at, s, adapter, out)
-                    except Exception as exc:  # noqa: BLE001 - its exits were planned first; decided again next minute
-                        self._error(f"event decide {at}", exc, out)
-            for at, send, until in (("open", em.open_send, em.open_until), ("close", em.close_send, em.close_until)):
-                if send <= now < until:
-                    self._event_send(now, em, at, s, adapter, real_block, killed, out)
+            # THE SALES BEFORE THE DECISION (release 1019b's third review: AN EXIT NEVER WAITS ON AN ENTRY'S DECISION).
+            # The decision reads (the lane, the close's T29 minutes) for as long as its reads take, and `_send` judges the
+            # window's cut-off on the wall clock: a sale sent after it could miss its cross. So, for each auction inside
+            # its window: the exits due at it planned (from the decision's first minute, `_event_due_exits`), its sales
+            # sent (inside its send window), then its decision, then its buys.
+            for at, decide, send, until in (("open", em.open_decide, em.open_send, em.open_until),
+                                            ("close", em.close_decide, em.close_send, em.close_until)):
+                if not decide <= now < until:
+                    continue
+                sending = send <= now
+                try:
+                    self._event_due_exits(em, at, adapter)
+                except Exception as exc:  # noqa: BLE001 - the decision plans them again
+                    self._error(f"event exits {at}", exc, out)
+                if sending:
+                    self._event_send(now, em, at, s, adapter, real_block, killed, out, sides=("sell",))
+                try:
+                    self._event_decide(now, em, at, s, adapter, out)
+                except Exception as exc:  # noqa: BLE001 - its exits were planned first; decided again next minute
+                    self._error(f"event decide {at}", exc, out)
+                if sending:
+                    self._event_send(now, em, at, s, adapter, real_block, killed, out, sides=("buy",))
         try:
             self._event_fills(adapter, out)     # (the real fills handed back to the lane, PREREG-EVL-3; any day)
         except Exception as exc:  # noqa: BLE001 - written again next minute
@@ -5051,16 +5078,18 @@ class EquityBook:
         name is sold at this auction), until its room, `max_open` less what it holds and has on order, is full), and
         recorded as buy intents with their side rows (the limit, sigma, the weight, the exit plan). It waits a few
         minutes for the lane's own decision of the same auction (`EVENT_DECIDE_WAIT_S`), then decides on the store as it
-        stands; with no lane on this House it plans the exits alone. A decision that cannot read what it decides on (the
-        close's T29 minutes after a retry, or E) is written `failed` with its errors and made again the next minute of
-        its window."""
+        stands; with no lane on this House it plans the exits alone. A decision that cannot read E is written `failed`
+        with its errors and made again the next minute of its window; a T29 minute it cannot read (`_event_minute_closes`,
+        bounded by the window) drops only the REACT rows of that name (release 1019b's third review: every other pick
+        goes, and the summary says why)."""
         day = em.day.isoformat()
-        if self.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE day=? AND at=? AND status='done'", (day, at)):
+        if self._event_decided(day, at):
             return
         decided_at = em.open_decide if at == "open" else em.close_decide
+        until = em.open_until if at == "open" else em.close_until
         # THE EXITS FIRST, before anything of the lane is read (release 1019b's review: an exit never waits on the lane):
         # planned at the decision's first minute and again each minute until the decision is made (a lot whose sale is
-        # planned or working is passed over, so this plans each sale once).
+        # planned or working is passed over, so this plans each sale once; `_event_step` plans them before it too).
         self._event_exits(em, at, adapter)
         lane = self._event_lane_store()
         if lane is not None and not adapter.decided(lane, em.day, at) and now < decided_at + self.EVENT_DECIDE_WAIT_S[at]:
@@ -5079,9 +5108,11 @@ class EquityBook:
         if lane is not None and s.enabled and readable:
             moment = dt.datetime.fromtimestamp(decided_at, dt.timezone.utc)
             unread: list[str] = []
+            # (The T29 reads end before the window's last minute: release 1019b's third review, `EVENT_MINUTE_STOP_S`.)
             reaction = adapter.reaction_reader(
-                lane, em.day, daily=self._event_daily_close, minutes=self._event_minute_close,
-                minutes_many=lambda names, session: self._event_minute_closes(names, session, failed=unread))
+                lane, em.day, daily=self._event_daily_close,
+                minutes=lambda symbol, session: self._event_minute_close(symbol, session, until=until),
+                minutes_many=lambda names, session: self._event_minute_closes(names, session, failed=unread, until=until))
             wanted: dict[str, list[Any]] = {}
             rooms: dict[str, int] = {}
             insts = {}
@@ -5108,18 +5139,27 @@ class EquityBook:
                 insts[inst.family] = (inst, program)
                 summary["programs"][inst.family] = {"picks": len(got), "room": room}
             gate, unreadable = self._event_gate(day, at, s, adapter) if any(wanted.values()) else (None, "")
-            if unread or unreadable:
-                # (Release 1019b's second review: the close's T29 minutes could not be read, a failed request read again
-                # once, or E could not be: no pick is decided on a reading that is missing. The decision is written
-                # `failed` with why, and made again the next minute of its window; its exits are planned already.)
-                summary["errors"] = (unread + ([unreadable] if unreadable else []))[:5]
+            if unread:
+                # (Release 1019b's third review: A T29 BATCH FAILURE DROPS ONLY THE REACT ROWS' PICKS. A name whose T29
+                # minute could not be read has no reaction, so a REACT row of it is not taken (programs.select); every
+                # other close-entry program's picks go, NEWS-READ-ON's included, and the decision is made with what was
+                # read, its errors in the summary and the minute's `errors`. A lane mark (its own 15:30 minute) still
+                # serves its name.)
+                summary["errors"] = unread[:5]
+                summary["t29"] = "unread: a REACT row of a name whose T29 minute was not read is not taken"
                 for why in summary["errors"]:
                     out.setdefault("errors", []).append(f"event decide {at}: {why}"[:300])
+            if unreadable:
+                # (Release 1019b's second review: E could not be read: no pick is decided on a reading that is missing.
+                # The decision is written `failed` with why, and made again the next minute of its window; its exits
+                # are planned already. None is made at or after the cut-off: that auction's events are not entered.)
+                summary["errors"] = (unread + [unreadable])[:5]
+                out.setdefault("errors", []).append(f"event decide {at}: {unreadable}"[:300])
                 with self.state.transaction():
                     self.state.upsert("eq_event_decisions", {"day": day, "at": at, "decided_at": _iso(decided_at),
                                                              "status": "failed", "summary": dumps(summary),
                                                              "created_at": now}, "day, at")
-                out["event_decide"] = f"{at} {day}: not decided ({summary['errors'][0][:160]}); decided again next minute"
+                out["event_decide"] = f"{at} {day}: not decided ({unreadable[:160]}); decided again next minute"
                 return
             given, passed = adapter.allocate(wanted, rooms, {family: insts[family][0].band for family in wanted},
                                              (lambda family, pick: gate(insts[family][0].band, pick)) if gate else None)
@@ -5169,6 +5209,19 @@ class EquityBook:
             "exit_at": exit_at, "lid": None, "rung": 0,
             "decided_at": _iso(em.open_decide if at == "open" else em.close_decide), "why": None, "created_at": now},
             "iid")
+
+    def _event_decided(self, day: str, at: str) -> bool:
+        """Whether the decision of this session and auction is made (`eq_event_decisions` status `done`)."""
+        return bool(self.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE day=? AND at=? AND status='done'",
+                                    (day, at)))
+
+    def _event_due_exits(self, em: S.EventMoments, at: str, adapter: Any) -> int:
+        """THE EXITS DUE AT THIS AUCTION planned (`_event_exits`) while its decision is not made, from the decision's
+        first minute: `_event_step` plans them before it sends the auction's sales, and sends those before the decision
+        reads anything (release 1019b's third review). Returns how many were planned now."""
+        if self._event_decided(em.day.isoformat(), at):
+            return 0
+        return self._event_exits(em, at, adapter)
 
     def _event_sales(self, day: str, at: str) -> int:
         """The event lots' sales planned at this auction (its exits, `_event_exits`)."""
@@ -5294,9 +5347,12 @@ class EquityBook:
                 return float(close) if close is not None and close > 0 else None
         return None
 
-    def _event_minute_close(self, symbol: str, session: Any) -> float | None:
+    def _event_minute_close(self, symbol: str, session: Any, *, until: float | None = None) -> float | None:
         """The T29 minute close of `symbol` in `session` (a REACT row's reaction, when the lane stored no mark): the SIP
-        1-minute bars of the session to T29's end, read through the plan's SIP window."""
+        1-minute bars of the session to T29's end, read through the plan's SIP window; None, unread, at or after the
+        window's last minute (`until` less `EVENT_MINUTE_STOP_S`, release 1019b's third review)."""
+        if self._event_minute_late(until):
+            return None
         adapter = self._event_adapter()
         start = session.open_at.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         end = (adapter.t29(session) + dt.timedelta(minutes=1)).astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -5311,14 +5367,24 @@ class EquityBook:
     #: read again over its whole session, together too. Its close is the same as one read of its whole session gives.
     EVENT_MINUTE_BATCH = 200
     EVENT_MINUTE_SPAN_S = 1800
+    #: THE T29 READS END BEFORE THE WINDOW'S LAST MINUTE (release 1019b's third review): no T29 request is started, and
+    #: none is sent again, once the wall clock is within this many seconds of the window's cut-off (`until`, 15:49 ET
+    #: at a full day's close), and a request that ran into its timeout is never sent again; what is not read by then is
+    #: unread (a REACT row of it is not taken). The decision, then the auction's buys, keep the last minute.
+    EVENT_MINUTE_STOP_S = 60.0
 
-    def _event_minute_closes(self, symbols: Sequence[str], session: Any, *,
-                             failed: list[str] | None = None) -> dict[str, float | None]:
+    def _event_minute_late(self, until: float | None) -> bool:
+        """Whether the T29 reads of a decision whose window ends at `until` are over (`EVENT_MINUTE_STOP_S`)."""
+        return until is not None and self.clock() >= float(until) - self.EVENT_MINUTE_STOP_S
+
+    def _event_minute_closes(self, symbols: Sequence[str], session: Any, *, failed: list[str] | None = None,
+                             until: float | None = None) -> dict[str, float | None]:
         """{symbol: the T29 minute close in `session`} for many names at once (`book.reaction_reader`'s
         `minutes_many`): SIP 1-minute bars, `EVENT_MINUTE_BATCH` names a request; None for a name with no bar, or whose
         read failed (nothing is read again name by name). A request that fails is sent again once (release 1019b's
-        second review); one that fails twice says why in `failed`, and the decision that asked is not made this minute
-        (`_event_decide`: made again the next minute of its window)."""
+        second review), never after a timeout and never in the window's last minute; no request starts in that minute
+        (`until`, release 1019b's third review). A chunk not read says why in `failed`: the decision that asked then
+        takes no REACT row of those names (`_event_decide`: every other pick goes)."""
         adapter = self._event_adapter()
         names = sorted({str(x).upper() for x in symbols if x})
         t29 = adapter.t29(session)
@@ -5328,8 +5394,15 @@ class EquityBook:
         out: dict[str, float | None] = {}
 
         def read(chunk: list[str], start: dt.datetime) -> Mapping[str, Any] | None:
+            if self._event_minute_late(until):
+                if failed is not None:
+                    failed.append(f"the T29 minutes of {len(chunk)} names were not read: the close window's last "
+                                  f"minute had begun")
+                return None
             error: BaseException | None = None
-            for _ in range(2):
+            for attempt in range(2):
+                if attempt and (_timed_out(error) or self._event_minute_late(until)):
+                    break   # (never again after a timeout, nor in the window's last minute)
                 try:
                     return self.market.bars(chunk, timeframe="1Min", start=stamp(start), end=end, adjustment="raw") or {}
                 except Exception as exc:  # noqa: BLE001 - read again once, then unread (said in `failed`)
@@ -5520,19 +5593,21 @@ class EquityBook:
 
     # ---------------------------------------------------------------- the sends
     def _event_send(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any,
-                    real_block: Callable[..., str | None], killed: Callable[[], bool], out: dict) -> None:
+                    real_block: Callable[..., str | None], killed: Callable[[], bool], out: dict,
+                    sides: Sequence[str] = ("sell", "buy")) -> None:
         """THE AUCTION'S SENDS, every minute of its window: the sales first, then the buys in the tables' order and
         each program's rank; a send refused by a reading the gateway could not make goes again next minute; nothing goes
-        at or after the window's cut-off (`_send`'s wall clock)."""
+        at or after the window's cut-off (`_send`'s wall clock). `sides`: the sales alone (sent before the auction's
+        decision, `_event_step`), the buys alone (after it), or both."""
         day = em.day.isoformat()
         rows = self.state.rows("SELECT i.*, e.side AS e_side, e.band AS e_band FROM eq_intents i JOIN eq_event_intents e "
                                "ON e.iid=i.iid WHERE i.status IN ('planned', 'sent') AND e.day=? AND e.at=? ORDER BY i.iid",
                                (day, at))
-        sells = [r for r in rows if r["e_side"] == "sell"]
+        sells = [r for r in rows if r["e_side"] == "sell"] if "sell" in sides else []
         # ROOM (PREREG-EVL-3 section 2): Sized programs' buys first, then Probe's, then learning's; within a band the
         # tables' order; within a program its own ranking (the decision planned them in it).
         buys = sorted((r for r in rows if r["e_side"] == "buy"),
-                      key=lambda r: (*adapter.room_key(r["family"], r["e_band"]), int(r["iid"])))
+                      key=lambda r: (*adapter.room_key(r["family"], r["e_band"]), int(r["iid"]))) if "buy" in sides else []
         until = em.open_until if at == "open" else em.close_until
         for r in sells + buys:
             try:

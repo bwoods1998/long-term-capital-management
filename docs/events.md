@@ -51,7 +51,9 @@ above 1.25 x the previous close (real money's limit).
 Back to learning from probe or sized: the last 50 Probe+ events lost more than $150 net, or the last 100 have a
 negative mean, both counted over the program's CURRENT Probe stay (its events bought after its latest move to Probe in
 `band_history`; release 1019b's second review), so a program the next passed look returns to Probe is not demoted again
-on the events that demoted it; Sized counts every Probe+ event. LOOKS (version 2): at 60, 90, 135, 200, 300, 450, 675,
+on the events that demoted it; Sized's 150 events and its bound count the current Probe stay too (release 1019b's third
+review, the reading that trades less), so a program demoted from Sized earns Sized again only on its new stay. LOOKS
+(version 2): at 60, 90, 135, 200, 300, 450, 675,
 1000, 1500 and 2250 settled TRADABLE events, each needing at least 40 issuers and 8 session blocks; thresholds first
 reached at the same close are one look; the skew check starts and caps at 0.018 (A65). Room when short: Sized, then
 Probe, then learning (how the book gives it out: "Real money" below). The lane writes the
@@ -108,10 +110,16 @@ the live rule a CIK that has none; a backfill decision (the House's hourly re-de
 them) reads whatever result the session has, eligible only when none is ineligible, and checks under the backfill rule
 only a CIK no decision has judged (a late event). So the re-decision of a live session never admits a name the live
 decision refused (a `tradable: false` one, say), and a row only the backfill rule made never serves a live decision,
-real money's picks or the eligible list the gateway checks. A store from before the table (the desktop's, migrated)
-labels each universe row with the rule of its session's first decision run (live when it started within 10 minutes of
-its time, else backfill); for those sessions a re-decision reads a CIK whose event was stored before the session's live
-run as that run found it, ineligible.
+real money's picks or the eligible list the gateway checks. A run is live when it runs within 10 minutes of its
+scheduled time, else a backfill: the judge's rule (`run.py` `LIVE_WITHIN`, `live_run`, behind the wall), which the
+House's lane and the CLI's catchup call. A store from before the table (the desktop's, migrated) first keeps the
+desktop's live refusals (amendment A67: each meta `elig-no:<day>:<cik>` = "live" becomes that CIK's live result,
+ineligible, for that session; release 1019b's third review), then labels each universe row with the rule of its
+session's first decision run (live when it started within 10 minutes of its time, else backfill). So a re-decision of
+either kind never admits a CIK the desktop's live rule refused. For a session from before the table WITHOUT markers, a
+re-decision reads a CIK with no result as the live rule found it, ineligible, when this decision's first event of it
+was FETCHED before the session's first finished live decision of either kind (a filing only listed before it was never
+seen by it, and is judged as a late event is).
 
 ## The code
 
@@ -197,7 +205,10 @@ stopped). How it runs, is read, is deployed and is rolled back:
 the shadow's own auction price, per side (league/ops/twins.py `event_twin`).
 
 How the book meets the auctions (release 1019b's review): each decision plans its EXITS before it reads anything of the
-lane, and a failing decision never stops that minute's sends (sales first); two programs' lots of one name due at one
+lane, and a failing decision never stops that minute's sends; THE SALES GO BEFORE THE DECISION (the third review): for
+each auction inside its window the exits due are planned, its sales are sent, then its decision is made (the picks, the
+close's T29 reads), then its buys are sent, so a decision that reads for a long time never holds a sale past the
+window's cut-off; two programs' lots of one name due at one
 auction are both sold in its cross (the book's own sales at that auction do not stop each other; anything else working
 on the name does); the equity day's order count keeps one order for each event lot's exit and none once its sale is
 sent; the close decision reads each name's T29 minute once, all the day's names in batched requests, and the lane's
@@ -213,11 +224,30 @@ share of fits by price, on the figures the send sizes on (E the equity at the pr
 value): one share at the limit above the book-wide 10% a name (above 10% of E for a name held nowhere: not TRADABLE),
 or, at learning, a 2% target that buys no whole share with one share above 5% of E; and one whose name an event lot
 sells at that same auction. AN EXIT NEVER WAITS ON AN ENTRY: no buy of a name goes in the cross that sells it (a sale
-the gateway refused for a reading, a 424 or 409, goes again the next minute, never held by a buy sent in between). The
-close decision's batched T29 read sends a failed request again once; when the retry fails too, the decision is written
-`failed` with why (the minute's `errors` too) and made again the next minute of its window (15:47, then 15:48, before
-the 15:49 cut-off). Still as before: a program's room counts its lots being sold in the same cross (a reading that
-trades less).
+the gateway refused for a reading, a 424 or 409, goes again the next minute, never held by a buy sent in between). THE
+T29 READS ARE BOUNDED BY THE WINDOW (the third review): the close decision's batched T29 read sends a failed request
+again once, never after a timeout and never in the window's last minute (from 15:48 ET at a full day's close), and
+starts no request in that minute. A T29 BATCH FAILURE DROPS ONLY THE REACT ROWS' PICKS: a name whose T29 minute was not
+read has no reaction, so a REACT row of it (C1, REACT-ON, NEWS-REACT-ON) is not taken, while every other pick goes
+(NEWS-READ-ON's included) and the decision is made with what was read, its errors in its summary and the minute's
+`errors`; only an E that cannot be read leaves a decision `failed`, made again the next minute of its window and never
+at or after the cut-off.
+
+THE READINGS THAT TRADE LESS (PREREG-EVL-3 section 6; the captain's amendments A67 and A70), every one the House's code
+takes: the equity day's order count (event entries are bounded by 60 orders a day less one kept for each event lot's
+unsent exit, two for an old-lane lot; an exit is never stopped by it; release 1019c gives the lane its own line); a
+program's room counts what it is selling at that same cross; no buy of a name in the cross that sells it; a T29 batch
+failure (the REACT rows of the names not read are not taken); a decision that cannot read E (none at or after the
+cut-off: that auction's events are not entered); eligibility (a live refusal stands for its session, the desktop's
+markers included, and a backfill decision reads a CIK eligible only when no rule refused it); Sized over the current
+Probe stay; one position per issuer for real money (a lot open or closed within the last 5 sessions, a buy planned or
+sent, or an earlier decision's shadow intent of the issuer); the limit rounded down to the cent. The shadow keeps every
+event real money skips.
+
+STOPPING IT: `<state>/events/STOP` idles the LANE only (no record pass, decision or verdict ask); the House's event book
+still decides each auction on the store as it stands, so buys from events and verdicts already stored can still go.
+The instant stop of event buys is the gateway's `STOCK_EVENT_BUYS` off or `equity_money.event.enabled` False
+([operations.md](operations.md), **Release 1019b**, Rollback).
 
 THE EVENT KIND'S OWN DAY ORDER COUNT (release 1019c, not yet deployed): the kind's auction orders of a day count against
 their own line, `equity_money.event.max_orders_day` (150: 2 x the open positions of the live bands, at least 150; nine

@@ -252,24 +252,33 @@ def combined(have: Mapping[str, Mapping[str, Any] | None]) -> Mapping[str, Any] 
 
 def seen_live(store: S.Store, day: dt.date, kind: str, stored: Mapping[str, str | None]) -> set[str]:
     """THE SESSIONS DECIDED BEFORE THE `eligibility` TABLE (`day` before meta `ELIGIBILITY_FROM`; league/events/store.py)
-    kept no ineligible result. Of the issuers in `stored` ({cik: when this decision's first event of it was stored},
-    none with a result), those whose event was stored BEFORE the session's first finished live `kind` decision (its
-    receipt `ok` or `pending`, started within `LEGACY_LIVE_WITHIN` of its time) were judged by that decision under the
-    live rule, which kept every eligible one: they were ineligible, and a re-decision does not judge them again."""
+    kept no ineligible result of their own (release 1019b's third review):
+    - A session WITH THE DESKTOP'S LIVE REFUSALS (meta `elig-no:<day>:<cik>` = "live", amendment A67) holds them as its
+      live results since the migration (store.py `_migrate`): they are that session's exact live refusals, both kinds,
+      so nothing more is read here (set()).
+    - A session WITHOUT them: of the issuers in `stored` ({cik: when this decision's first event of it was FETCHED},
+      none with a result), those fetched BEFORE the session's first finished live decision of EITHER kind (its receipt
+      `ok` or `pending`, started within `LEGACY_LIVE_WITHIN` of its own time) were judged by the live rule, which kept
+      every eligible one: they were ineligible, and a re-decision does not judge them again. A filing listed before
+      that run but fetched after it was never seen by it (league/events/run.py `_first_fetched`), so its issuer is
+      judged as a late event's is. `kind` is the asking decision's; the runs of both kinds count."""
     since = store.meta(S.ELIGIBILITY_FROM)
     if not stored or since is None or day.isoformat() >= since:
+        return set()
+    if S.has_markers(store.db, day.isoformat()):
         return set()
     session = C.session(store, day)
     if session is None:
         return set()
-    scheduled = session.open_decide if kind == "open" else session.close_decide
     started = None
-    for r in store.db.execute("SELECT started_at FROM receipts WHERE job=? AND status IN ('ok', 'pending') ORDER BY id",
-                              (f"decide-{kind}:{day.isoformat()}",)):
-        at = S.parse_iso(r["started_at"])
-        if dt.timedelta(0) <= at - scheduled <= S.LEGACY_LIVE_WITHIN:
-            started = at
-            break
+    for job, scheduled in ((f"decide-open:{day.isoformat()}", session.open_decide),
+                           (f"decide-close:{day.isoformat()}", session.close_decide)):
+        for r in store.db.execute("SELECT started_at FROM receipts WHERE job=? AND status IN ('ok', 'pending') ORDER BY id",
+                                  (job,)):
+            at = S.parse_iso(r["started_at"])
+            if dt.timedelta(0) <= at - scheduled <= S.LEGACY_LIVE_WITHIN:
+                started = at if started is None else min(started, at)
+                break
     if started is None:
         return set()
     return {cik for cik, when in stored.items() if when and S.parse_iso(when) < started}
