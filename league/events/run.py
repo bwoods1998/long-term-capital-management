@@ -20,6 +20,19 @@ from . import store as S
 from . import universe as U
 from . import verdicts as V
 
+#: A DECISION RUN THIS SOON AFTER ITS SCHEDULED TIME IS LIVE (PREREG-EVL-1 section 2's live rule: Alpaca's
+#: `status=active` and `tradable: true`); later, it is a backfill (`status=all`, the previous session's closing-print
+#: exchange). Each run's rule fixes its session's eligibility results for good, so the choice is the judge's, defined
+#: once here, behind league/ci.py's wall (release 1019b's third review): the House's lane (league/events/house.py) and
+#: the CLI's catchup take it from `live_run`.
+LIVE_WITHIN = S.LEGACY_LIVE_WITHIN
+
+
+def live_run(scheduled: dt.datetime, now: dt.datetime) -> bool:
+    """Whether a decision of scheduled time `scheduled` run at `now` (or its verdicts asked ahead of it, `ask_only`,
+    from 07:30 ET) is LIVE: at most `LIVE_WITHIN` after its time; else it is a backfill (`backfill_run`)."""
+    return now <= scheduled + LIVE_WITHIN
+
 
 class Context:
     """What a pass needs from the outside world, built once per pass."""
@@ -157,9 +170,10 @@ def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str], *, live: bool =
     result and checks under the live rule (status=active, tradable) a CIK with none, a CIK the backfill rule judged
     first included; a BACKFILL decision reads any result of the session (eligible only when none is ineligible,
     `universe.combined`) and checks under the backfill rule (status=all, the previous session's closing-print exchange)
-    only a CIK no decision has judged; on a session decided before the results were kept, a CIK this decision's
-    `kind` ("open" | "close") live run already judged (`stored` {cik: when its first event here was stored},
-    `universe.seen_live`) is ineligible as it found. Every check's result is kept, eligible or not
+    only a CIK no decision has judged; on a session decided before the results were kept, the desktop's live refusals
+    (A67's markers, kept by the migration) stand, and on such a session without them a CIK the session's first live run
+    of either kind already judged (`stored` {cik: when its first event here was fetched}, `universe.seen_live`; `kind`
+    the asking decision's, "open" | "close") is ineligible as it found. Every check's result is kept, eligible or not
     (`universe.record_result`), as it is made. It fetches what it needs; an empty asset list is unreadable (raised, so
     no result is kept from it)."""
     st = ctx.store
@@ -207,13 +221,24 @@ def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str], *, live: bool =
     return out
 
 
-def _first_stored(rows: Iterable[Mapping[str, Any]]) -> dict[str, str | None]:
-    """{cik: the earliest `received_at` of its rows} (`eligibility`'s `stored`)."""
+def _first_fetched(st: S.Store, rows: Iterable[Mapping[str, Any]]) -> dict[str, str | None]:
+    """{cik: the earliest time one of its rows was FETCHED} (`eligibility`'s `stored`, read by `universe.seen_live`):
+    a news article's `received_at` (an article is stored whole when it is read); a filing's document's first store
+    time (`documents.stored_at` of its `raw_sha`), never before the filing was first listed (`received_at`), and its
+    `received_at` when no document time is kept. Release 1019b's third review: `received_at` is a filing's LISTING
+    time, so a filing listed before a live run and fetched after it read as seen by that run."""
     out: dict[str, str | None] = {}
     for row in rows:
         cik, at = row.get("cik"), row.get("received_at")
-        if cik and at and (out.get(cik) is None or S.parse_iso(str(at)) < S.parse_iso(str(out[cik]))):
-            out[str(cik)] = str(at)
+        if not cik or not at:
+            continue
+        when = S.parse_iso(str(at))
+        if row.get("accession") and row.get("raw_sha"):
+            doc = st.db.execute("SELECT stored_at FROM documents WHERE sha=?", (str(row["raw_sha"]),)).fetchone()
+            if doc is not None and doc["stored_at"]:
+                when = max(when, S.parse_iso(str(doc["stored_at"])))
+        if out.get(str(cik)) is None or when < S.parse_iso(str(out[str(cik)])):
+            out[str(cik)] = S.iso(when)
     return out
 
 
@@ -263,7 +288,7 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
     articles = [a | {"cik": by_ticker.get(a["symbol"])} for a in P.news_in(st, nlo, nhi)]
     elig = eligibility(ctx, day, [r["cik"] for r in e8k] + [r["cik"] for r in ins] + [r["cik"] for r in buys]
                        + [a["cik"] for a in articles if a["cik"]], live=not backfill_run, kind="open",
-                       stored=_first_stored([*e8k, *ins, *buys, *articles]))
+                       stored=_first_fetched(st, [*e8k, *ins, *buys, *articles]))
     scores: dict[str, int | None] = {}
 
     def verdict(row: Mapping[str, Any]) -> int | None:
@@ -387,7 +412,7 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     articles = [a | {"cik": by_ticker.get(a["symbol"])} for a in P.news_in(st, dlo, dhi)
                 if S.parse_iso(a["knowable_at"]) > S.parse_iso(P.REGISTERED_AT_2)]
     elig = eligibility(ctx, day, [r["cik"] for r in e8k] + [a["cik"] for a in articles if a["cik"]],
-                       live=not backfill_run, kind="close", stored=_first_stored([*e8k, *articles]))
+                       live=not backfill_run, kind="close", stored=_first_fetched(st, [*e8k, *articles]))
     scores: dict[str, int | None] = {}
 
     def verdict(row: Mapping[str, Any]) -> int | None:
@@ -450,4 +475,4 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     return out
 
 
-__all__ = ["Context", "record_pass", "backfill", "eligibility", "decide_open", "decide_close"]
+__all__ = ["Context", "record_pass", "backfill", "eligibility", "decide_open", "decide_close", "LIVE_WITHIN", "live_run"]

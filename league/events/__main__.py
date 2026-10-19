@@ -45,11 +45,11 @@ def catchup(ctx: R.Context) -> dict:
     recent = {s.day for s in due[-REDECIDE_SESSIONS:]}
     out = {}
     for s in due:
-        live_open = now - s.open_decide <= dt.timedelta(minutes=10)
+        live_open = R.live_run(s.open_decide, now)      # (the judge's rule: league/events/run.py LIVE_WITHIN)
         if f"decide-open:{s.day}" not in done or s.day in recent:
             out[f"open:{s.day}"] = R.decide_open(ctx, s.day, backfill_run=not live_open)
         if s.close_decide + dt.timedelta(minutes=1) <= now and (f"decide-close:{s.day}" not in done or s.day in recent):
-            live_close = now - s.close_decide <= dt.timedelta(minutes=10)
+            live_close = R.live_run(s.close_decide, now)
             out[f"close:{s.day}"] = R.decide_close(ctx, s.day, backfill_run=not live_close)
     return out
 

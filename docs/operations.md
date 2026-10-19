@@ -34,8 +34,8 @@ execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identit
   E at the previous close as the send sizes it) and one whose name an event lot sells at the same auction are skipped
   (the shadow keeps the event; the decision's summary counts them, `skipped`). AN EXIT NEVER WAITS ON AN ENTRY: a buy
   waits while a sale of its name at its auction is unfinished (`_event_work_entry`).
-- The close decision's batched T29 read sends a failed request again once; when the retry fails too, the decision is
-  written `failed` (its summary and the minute's `errors` say why) and is made again the next minute of its window.
+- The close decision's batched T29 read sends a failed request again once (the third review bounds it by the window
+  and makes the decision with what was read: below).
 - ELIGIBILITY ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (league/events/run.py `eligibility`, the store's
   new `eligibility` table): every result is kept, eligible or not, with its rule; the hourly re-decision never judges
   again a CIK the live decision judged, and only the live rule's eligible rows reach real money's picks and the
@@ -46,10 +46,49 @@ execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identit
   whose feed failed counts beside the error; a cut-then-failing decision waits as a failed one; a failed fetch is
   tried again 2, 4, 8, 16 and 32 minutes after its first failure (six tries in all); `events.verdict_usd_day` $3.00 (the
   goal's cost rule until budget rule 3 ships: the box's about $1.29 a day and the verdicts inside the $5 base).
-- Left as readings that trade less (the captain records them): the equity day's order count stays 60 (entries stop at
-  about 30 open-entry lots sold the same day); a program's room counts its lots sold in the same cross; a session
-  pending only on another program's verdicts is final for this one; the one-position-per-issuer rule reads the
-  intents of the sessions up to the entry session only (programs.py, unchanged).
+
+**The third review's fixes** (league/tests/test_events_review_1019b.py, "the third review"; each test fails on
+`30558c43`; no identity moves):
+- THE SALES BEFORE THE DECISION (league/equity/live.py `_event_step`): for each auction inside its window the book
+  plans the exits due at it (from the decision's first minute), sends its SALES, then makes its decision, then sends
+  its BUYS, so a decision that reads for a long time never holds a market-on-close sale past the 15:49 ET cut-off. THE
+  T29 READS ARE BOUNDED BY THE WINDOW (`_event_minute_closes`, `EVENT_MINUTE_STOP_S`): a failed request is sent again
+  once, never after a timeout and never in the window's last minute, and no request starts in that minute (15:48 ET at
+  a full day's close). With 450 live names and Alpaca's 1Min bars hanging to the client's timeout, the lot due out at
+  the close is sold at 15:47 and NEWS-READ-ON's buy goes at 15:48.
+- A T29 BATCH FAILURE DROPS ONLY THE REACT ROWS' PICKS (`_event_decide`): a name whose T29 minute could not be read
+  has no reaction, so a REACT row of it (C1, REACT-ON, NEWS-REACT-ON) is not taken; every other close-entry program's
+  picks go (NEWS-READ-ON's included) and the decision is made with what was read, its errors in its summary (`t29`)
+  and the minute's `errors`. Only an E that cannot be read leaves the decision `failed` for the next minute.
+- THE DESKTOP'S LIVE REFUSALS SURVIVE THE MIGRATION (league/events/store.py `_migrate`): each meta
+  `elig-no:<day>:<cik>` = "live" (amendment A67's markers: 75 for Monday's open, and any Monday's live close wrote)
+  becomes the live result "ineligible" of that (day, CIK) before the universe rows are labelled, so no re-decision of
+  either kind admits a CIK the desktop's live rule refused. `universe.seen_live` reads nothing more for a day with
+  markers; for a legacy day without them it takes the day's first finished live decision of either kind and counts
+  only events FETCHED before it (league/events/run.py `_first_fetched`: a filing listed before it and fetched after
+  it was never seen by it).
+- THE HOUSE: an EMPTY Alpaca asset list is never kept (league/events/house.py `EventLane.assets`: the next turn asks
+  again, so one empty answer no longer turns the session's live open decision into a backfill); the record pass's
+  verdict step catches any failure (a warning; the pass ends ok and EDGAR and the news keep their 2-minute polling);
+  the live-or-backfill rule of a run is the judge's (league/events/run.py `LIVE_WITHIN` and `live_run`, behind the
+  wall), and the House's lane and the CLI's catchup call it.
+- SIZED COUNTS THE CURRENT PROBE STAY (league/events/bands.py `review`): its 150 events and its 80% bound are over the
+  Probe+ events bought after the latest move to Probe, as demotion's windows are, so a program demoted from Sized and
+  returned to Probe earns Sized again on its new stay (the reading that trades less).
+- READINGS THAT TRADE LESS (PREREG-EVL-3 section 6; recorded in the captain's amendments A67 and A70), every one this
+  release's code takes: THE DAY ORDER COUNT (event entries are bounded by the equity book's 60 orders a day less one
+  order kept for each event lot's unsent exit, two for an old-lane lot; an exit is never stopped by it; an entry past
+  it is not sent; release 1019c gives the lane its own line); A PROGRAM'S ROOM COUNTS WHAT IT IS SELLING at that same
+  cross; NO BUY OF A NAME IN THE CROSS THAT SELLS IT (skipped at the decision, `skipped` "sale"; a buy planned before
+  such a sale waits while the sale is unfinished); A T29 BATCH FAILURE (the REACT rows of the names not read are not
+  taken); A DECISION THAT CANNOT READ E (made at the next minute of its window, none at or after the cut-off: that
+  auction's events are not entered); ELIGIBILITY (a live refusal stands for its session, the desktop's markers
+  included, and a backfill decision reads a CIK eligible only when no rule refused it; real money reads the live
+  rule's eligible rows only); SIZED OVER THE CURRENT PROBE STAY; ONE POSITION PER ISSUER for real money (a lot open or
+  closed within the last 5 sessions, a buy planned or sent, or an earlier decision's shadow intent of the issuer); THE
+  LIMIT ROUNDED DOWN to the cent. The shadow keeps every event real money skips. Recorded beside them: a session
+  pending only on another program's verdicts is final for this one (A66), and the shadow's one-position-per-issuer
+  rule as programs.py reads it (A70).
 
 **Deploy, in order** (each never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight;
 CI green on the exact head):
@@ -75,10 +114,14 @@ CI green on the exact head):
    at that session's 15:46 ET close decision. At the first decision `eq_event_programs` holds the nine version 2
    programs at the lane's bands.
 
-**Rollback**: `STOCK_EVENT_BUYS` "off" at the gateway (a gateway deploy: the instant stop of event buys; sales go on);
-or `equity_money.event.enabled` False (a constitution-only owner deploy, money `25f5eb21`, constitution `8a6a2160`:
-no event buy, every open event lot exits at its own auction); the lane alone: `touch /workspace/state/events/STOP` (no
-deploy) or `events.enabled` false. With NO event lot open, the previous House release (`20261019T034531Z-6583edd72b34`,
+**Rollback**: THE INSTANT STOP OF EVENT BUYS is `STOCK_EVENT_BUYS` "off" at the gateway (a gateway deploy; sales go
+on) or `equity_money.event.enabled` False (a constitution-only owner deploy, money `25f5eb21`, constitution
+`8a6a2160`: no event buy, every open event lot exits at its own auction). `touch /workspace/state/events/STOP` (no
+deploy) IDLES THE LANE ONLY (no record pass, decision or verdict ask): it does NOT stop event buys, since the House's
+event book still decides each auction on the lane's store as it stands, so events, verdicts and live eligibility rows
+stored before the STOP (the 07:30 ET verdict step's, say) can still buy real money; `events.enabled` false (a deploy)
+detaches the lane the same way. The gateway's kill switch stops sales too; `<state>/PAUSE` stops entries alone. With
+NO event lot open, the previous House release (`20261019T034531Z-6583edd72b34`,
 main `c1c6fae7`) and the gateway's previous version (`7456e73d`) restore release 1019a exactly (money `f4fc39ff`,
 constitution `34bbe7a5`); with an event lot open, never roll the House back past this release (the release before it
 does not know an event lot's exit). The lane's store stays on the box either way; the desktop's copy is the backup.
@@ -139,7 +182,10 @@ due intent), `screen`, `report`, `tickers`, `backfill`); the daily report at `re
 **Stopping it.** Without a deploy: `touch /workspace/state/events/STOP` on the box; the turn in hand finishes, then the
 lane idles (an info alert says so, `lane.json` shows `"stopped": true`); remove the file to resume (missed decisions then
 run as backfills). With a deploy: `events.enabled` false. A rollback to a release without the lane leaves the store on
-disk, unread. PAUSE holds only its paid verdicts; recording, decisions and scoring go on (they cost nothing).
+disk, unread. PAUSE holds only its paid verdicts; recording, decisions and scoring go on (they cost nothing). STOP
+idles the LANE, never the House's event book: buys from events and verdicts already stored can still go (release
+1019b's third review); the instant stop of event buys is `STOCK_EVENT_BUYS` off at the gateway or
+`equity_money.event.enabled` False (**Release 1019b**, Rollback).
 
 **What is protected.** `league/events/programs.py`, `verdicts.py`, `score.py`, `screen.py` and `docs/prereg/` are in
 `league/ci.py` FORBIDDEN (through `PENDING_GATEWAY` until the gateway's merge list gains them): no role may change them
@@ -3586,10 +3632,10 @@ session):
 
 | moment (full day) | what the book does |
 |---|---|
-| 09:15 ET | THE OPEN DECISION (`_event_decide`), once (`eq_event_decisions` status `done`; one that cannot read its figures is `failed` and made again the next minute): it waits up to 4 minutes for the lane's own `decide-open:<day>` receipt, then decides on the store as it stands. First the exits due at this open (below), then the band sync (once a session), then each live program whose entries are at the open |
-| 09:16-09:27 ET | the `opg` sends (`_event_send`): sales first, then buys in ROOM's order |
-| close - 14 min (15:46) | THE CLOSE DECISION, the same way (it waits up to 1 minute for `decide-close:<day>`; a T29 read that fails twice leaves it `failed`, made again at 15:47 or 15:48) |
-| close - 13 to - 11 min (15:47-15:49) | the `cls` sends |
+| 09:15 ET | THE OPEN DECISION (`_event_decide`), once (`eq_event_decisions` status `done`; one that cannot read E is `failed` and made again the next minute): it waits up to 4 minutes for the lane's own `decide-open:<day>` receipt, then decides on the store as it stands. First the exits due at this open (below), then the band sync (once a session), then each live program whose entries are at the open |
+| 09:16-09:27 ET | the `opg` sends (`_event_send`), each minute in this order: the exits due planned, the SALES sent, the decision (while not made), then the BUYS in ROOM's order (release 1019b's third review: a decision never holds a sale) |
+| close - 14 min (15:46) | THE CLOSE DECISION, the same way (it waits up to 1 minute for `decide-close:<day>`; its T29 reads are bounded by the window: a failed request is sent again once, never after a timeout, and none starts in the window's last minute; a REACT row of a name not read is not taken and every other pick goes) |
+| close - 13 to - 11 min (15:47-15:49) | the `cls` sends, the sales before the decision and the buys after it |
 | auction + 2 min | the auction's end (`_event_finish`): a buy done or missed; a sale not filled climbs the ladder |
 | every minute | the real fills of event lots written back to the lane (`_event_fills`) |
 
