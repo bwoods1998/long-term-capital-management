@@ -1572,13 +1572,21 @@ path.
 - **The count** (book; league/equity/live.py): `event_orders_today(rows, day)` counts the orders of an event instance
   (`eq_instances.lane` "event") as `orders_today` counts every lane's; `orders_today` stays every lane's together (the
   House-wide count's equity part, league/live/real.py `house_count`). `_count_refusal(day, exit_=False,
-  event_line=s.max_orders_day)` for an event entry: the event kind's orders plus one plus `_exit_reserve(day,
-  event=True)` (one order for each event lot not yet sold that day) within the line; an old lane's entry
-  (`event_line` None): the old lanes' orders plus one plus `_exit_reserve(day, event=False)` (two for each of their
-  lots) within `order_path.max_orders_day`; an exit meets no lane's line; every order meets the House-wide count.
+  event_line=s.max_orders_day)` for an event entry: the event kind's orders plus one plus its own exit plus
+  `_exit_reserve(day, event=True)` (one order for each event lot not yet sold that day, and one for each event buy
+  still working, `eq_orders` joined to `eq_event_intents`, whose planned exit is that day: an auction buy is no lot
+  until its cross) within the line; an old lane's entry (`event_line` None): the old lanes' orders plus one plus
+  `_exit_reserve(day, event=False)` (two for each of their lots) within `order_path.max_orders_day`; an exit meets no
+  lane's line; every order meets the House-wide count, and EVERY ENTRY meets it with room left for the options book's
+  `exit_reserve()` AND `_exit_reserve(day)` (both lanes) and, for an event entry, its own exit (the money review of
+  release 1019c: a lane's line bounds that lane's day only; without the exits' room at the House-wide line the open
+  window's buys, about 2 x 150 event orders with their sales, could reach it and the close's sales be refused there).
 - **Identities**: money `285fa7af` -> `055e5313`, constitution `fd38e4e1` -> `a8d4cbd9`; the options execution
   fingerprint, the equity identity, the xs identity and the gate contract do not move.
 - **Rollback**: `event.enabled` False (money `1b7a5c22`, constitution `50e951c9`), or release 1019b's House.
 - **Tests**: league/tests/test_events_1019c.py `TheEventKindsOwnDayCount` (40 open-entry learning lots and a Probe
-  close entry on one day all send; each lane meets its own line and the House-wide one; the row, its bounds and its
-  digests); league/tests/equity_design.py `DIGESTS` regenerated, release 1019b's kept as `DIGESTS_R2`.
+  close entry on one day all send; each lane meets its own line and the House-wide one; the open window's buys keep
+  their close sales' room: 75 buys and all 75 sales, the line's 150 (before the money review: 150 buys, then 50 of
+  their sales refused at the House-wide line); with 120 options orders, 65 buys and all 65 sales, the House-wide line
+  exactly full (before: 130 buys and all 130 sales refused); the row, its bounds and its digests);
+  league/tests/equity_design.py `DIGESTS` regenerated, release 1019b's kept as `DIGESTS_R2`.

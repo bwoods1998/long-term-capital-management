@@ -452,15 +452,89 @@ class TheEventKindsOwnDayCount(EventTest):
         orders(old.id, 1, 2000)
         self.assertIn("the equity day's order count: 60 of 60 sent", book._count_refusal(day, exit_=False) or "")
         self.assertIsNone(book._count_refusal(day, exit_=False, event_line=150), "the event kind's own line is apart")
-        orders(event.id, 49, 3000)
-        self.assertIsNone(book._count_refusal(day, exit_=False, event_line=150), "149 + 1 of 150")
+        orders(event.id, 48, 3000)
+        self.assertIsNone(book._count_refusal(day, exit_=False, event_line=150), "148 + 1 and its own exit of 150")
         orders(event.id, 1, 4000)
+        self.assertIn("the event kind's day order count: 149 of 150 sent, 1 kept",
+                      book._count_refusal(day, exit_=False, event_line=150) or "",
+                      "the entry's own exit (the money review): 149 + 1 + 1 is above the line")
+        orders(event.id, 1, 5000)
         self.assertIn("the event kind's day order count: 150 of 150 sent",
                       book._count_refusal(day, exit_=False, event_line=150) or "")
         self.assertIsNone(book._count_refusal(day, exit_=True), "an exit is never stopped by a lane's line")
         h.options.count = 40                   # 40 + 210 = 250: the House-wide line is full
         self.assertIn("the House's day order count: 250 sent of 250",
                       book._count_refusal(day, exit_=True) or "", "the House-wide line binds every order")
+
+    # ---------------------------------------------------------------- release 1019c's money review: the exits' room
+    def _open_window_then_close(self, h, options: int = 0) -> tuple[int, str, int, int, int]:
+        """The open window's event buys of an open-entry program (each sold at that day's close) sent one by one while
+        the count lets them, then the cross (each becomes an event lot) and the close's sales of every lot (EXITS: no
+        lane's line may stop them). (buys sent, why the next was refused, sales sent, sales refused, the day's
+        equity orders)."""
+        from league.equity import live as L
+
+        book, day = h.book, DAY.isoformat()
+        event = h.instance("EVL-INS-BUY-O1", 2, lane="event")
+        h.options.count = options
+
+        def order(eid: int, side: str, status: str, iid: int | None = None, lid: int | None = None) -> None:
+            h.state.execute("INSERT INTO eq_orders(eid, client_id, instance, family, side, symbol, class, at, qty, "
+                            "limit_px, collar_bp, status, placed_at, day, updated_at, lid, iid) VALUES(?, ?, ?, 'f', ?, "
+                            "?, 'stock', 'open', '1', '1', 0, ?, 0, ?, 0, ?, ?)",
+                            (eid, f"c{eid}", event.id, side, f"S{eid % 100000}", status, day, lid, iid))
+
+        buys, why = 0, None
+        while buys < 400:
+            why = book._count_refusal(day, exit_=False, event_line=150)
+            if why is not None:
+                break
+            buys += 1
+            with h.state.transaction():
+                order(buys, "buy", "working", iid=buys)
+                h.state.execute("INSERT INTO eq_event_intents(iid, program, version, event, side, tif, otype, symbol, day, "
+                                "at, weight, exit_day, exit_at, decided_at, created_at) VALUES(?, 'EVL-INS-BUY-O1', 2, ?, "
+                                "'buy', 'opg', 'limit', ?, ?, 'open', '0.10', ?, 'close', ?, 0)",
+                                (buys, f"f4:e{buys}", f"S{buys}", day, day, day))
+        with h.state.transaction():
+            h.state.execute("UPDATE eq_orders SET status='filled' WHERE side='buy'")
+        lids = []
+        for i in range(buys):
+            lot = L.Lot(book._next("eq_lots", "lid"), event.id, event.family, event.version, L.EVENT_LANE, f"S{i + 1}",
+                        "stock", D("1"), D("1"), D("1"), D("1"), "open", opened_at=0, opened_day=day, cash=-D("1"),
+                        probe=True)
+            book._save_lot(lot)
+            lids.append(lot.lid)
+        sold = refused = 0
+        for lid in lids:
+            if book._count_refusal(day, exit_=True) is not None:
+                refused += 1
+                continue
+            with h.state.transaction():
+                order(200000 + lid, "sell", "working", lid=lid)
+            sold += 1
+        return buys, why or "", sold, refused, L.orders_today(h.state.rows, day)
+
+    def test_the_open_windows_buys_keep_their_close_sales_room(self):
+        """An auction buy is no lot until its cross: each open-window buy of an open-entry program keeps the exit it
+        will need at that day's close (`_exit_reserve`), so the event line bounds the kind's whole day (75 buys and
+        75 sales, 150) and no sale is refused (before the review: 150 buys, then 100 sales sent and 50 REFUSED at the
+        House-wide line)."""
+        buys, why, sold, refused, total = self._open_window_then_close(self.harness())
+        self.assertEqual(buys, 75)
+        self.assertIn("the event kind's day order count: 75 of 150 sent, 76 kept", why)
+        self.assertEqual((sold, refused, total), (75, 0, 150), "every lot's exit goes")
+
+    def test_an_entry_keeps_every_equity_exit_its_room_at_the_house_wide_line(self):
+        """With the House-wide line filling (120 options orders), an event entry leaves the House-wide room for every
+        equity exit and its own: 65 buys, and all 65 sales go, the day's line exactly full (before the review: 130
+        buys and every one of their 130 sales REFUSED at the House-wide line)."""
+        buys, why, sold, refused, total = self._open_window_then_close(self.harness(), options=120)
+        self.assertEqual(buys, 65)
+        self.assertIn("the House's day order count: 185 sent of 250", why)
+        self.assertIn("66 kept for the equity book's exits, this entry's own included", why)
+        self.assertEqual((sold, refused, total), (65, 0, 130), "every lot's exit goes")
+        self.assertEqual(120 + total, 250, "the House-wide line exactly full, never over")
 
 
 if __name__ == "__main__":

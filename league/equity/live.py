@@ -24,9 +24,11 @@ replacement can go in the same minute. ONE DAY ORDER COUNT (A8.3): the equity bo
 cancels, as the options book counts its own, exits' included) are counted against their lane's line: the old lanes'
 against `order_path.max_orders_day` (60), THE EVENT KIND'S against its own, `equity_money.event.max_orders_day` (150,
 release 1019c; `event_orders_today`): an ENTRY goes only while one more order leaves room for the exit of every open lot
-of its lane (and one cancel of an old lane's); AN EXIT IS NEVER STOPPED BY A LANE'S COUNT (A28: an exit must never be
-blocked); and no order of any kind goes while the House-wide count (every lane's orders and the options book's) would
-leave less than the options book's `exit_reserve()`.
+of its lane (and one cancel of an old lane's), an event entry for its own exit and the exit of every event buy still
+working that is sold the same day too; AN EXIT IS NEVER STOPPED BY A LANE'S COUNT (A28: an exit must never be blocked);
+no order of any kind goes while the House-wide count (every lane's orders and the options book's) would leave less than
+the options book's `exit_reserve()`, and no ENTRY while it would leave less than that and every equity exit's room
+(`_exit_reserve`, both lanes; release 1019c's money review).
 
 THE HOUSE'S MINUTE (the clock every window runs on): `tick(now)` is handed the minute's start, three seconds past the
 wall minute, and runs AFTER the whole options minute, so its sends go later by however long that took (up to most of a
@@ -1742,23 +1744,31 @@ class EquityBook:
         one cancel of it; an event lot's one auction sale, none once sent): an old lane's entry the old lanes' orders
         against `order_path.max_orders_day` (60); AN EVENT ENTRY (`event_line`, release 1019c) the event kind's orders
         (`event_orders_today`) against its own line, `equity_money.event.max_orders_day` (150; league/events/book.py
-        `Settings.max_orders_day`). AN EXIT IS NEVER STOPPED BY A LANE'S COUNT (A28: an exit must never be blocked): it
-        meets the House-wide count alone (every lane's orders together, the options book's included), which keeps the
-        options book's exits their room (`exit_reserve`) under the gateway's day lines; every entry meets it too.
-        (Under the equity count an exit was stopped once a held basket's re-priced sales had used it up: each sale that
-        climbs the collar ladder costs a send and a cancel a rung, and every lot climbs at once, so at 8 to 12 basket
-        lots and a fast open the ETF lots' sales stopped below the rung that fills and were carried to the next session;
-        the review of step two, review-live, measured it.) A lane's count still bounds its NEW risk: its entries stop
-        once its day's sends and cancels, exits' included, leave too little room. (Under release 1019b's one count of
-        60 for both, the event kind's entries stopped at about 30 open-entry lots sold the same day.)"""
+        `Settings.max_orders_day`), with room for ITS OWN EXIT too (an open-entry buy's sale is the same day's close),
+        so the line bounds the kind's whole day: its sends and cancels, the exits it keeps, and the entry's own exit.
+        AN EXIT IS NEVER STOPPED BY A LANE'S COUNT (A28: an exit must never be blocked): it meets the House-wide count
+        alone (every lane's orders together, the options book's included), which keeps the options book's exits their
+        room (`exit_reserve`) under the gateway's day lines. EVERY ENTRY meets the House-wide count too, with room left
+        for the options book's exits AND EVERY EQUITY EXIT (`_exit_reserve`, both lanes: the lots held and the event buys
+        still working that are sold the same day) and, for an event entry, its own exit (release 1019c's money review:
+        a lane's line bounds that lane's day only, so without its exits' room at the House-wide line about 2 x 150
+        event orders could reach the line together and the close's sales be refused there). (Under the equity count an
+        exit was stopped once a held basket's re-priced sales had used it up: each sale that climbs the collar ladder
+        costs a send and a cancel a rung, and every lot climbs at once, so at 8 to 12 basket lots and a fast open the ETF
+        lots' sales stopped below the rung that fills and were carried to the next session; the review of step two,
+        review-live, measured it.) A lane's count still bounds its NEW risk: its entries stop once its day's sends and
+        cancels, exits' included, leave too little room. (Under release 1019b's one count of 60 for both, the event
+        kind's entries stopped at about 30 open-entry lots sold the same day.)"""
         mine = orders_today(self.state.rows, day)
+        own = 0
         if not exit_:
             events = event_orders_today(self.state.rows, day)
             if event_line is not None:
+                own = 1     # the event entry's own exit (one auction sale; an open-entry buy's is the same day's close)
                 cap, reserve = int(event_line), self._exit_reserve(day, event=True)
-                if events + 1 + reserve > cap:
-                    return (f"the event kind's day order count: {events} of {cap} sent, {reserve} kept for exiting its "
-                            "lots held")
+                if events + 1 + own + reserve > cap:
+                    return (f"the event kind's day order count: {events} of {cap} sent, {reserve + own} kept for "
+                            "exiting its lots and buys held and this one")
             else:
                 et = self._et()
                 cap = int(getattr(et, "max_orders_day", 60) if et is not None else 60)
@@ -1769,11 +1779,13 @@ class EquityBook:
             try:
                 house = int(self.options_book.count_today(day)) + mine
                 room = int(self.table.max_orders_day) - house - int(self.options_book.exit_reserve())
+                kept = 0 if exit_ else self._exit_reserve(day) + own
             except Exception:  # noqa: BLE001
                 return "the House's day order count could not be read"
-            if room < 1:
+            if room - kept < 1:
                 return (f"the House's day order count: {house} sent of {self.table.max_orders_day}, the rest kept for "
-                        "the options book's exits")
+                        "the options book's exits" + (f"; {kept} kept for the equity book's exits, this entry's own "
+                                                      "included" if own else ""))
         return None
 
     def _exit_reserve(self, day: str, *, event: bool | None = None) -> int:
@@ -1782,8 +1794,11 @@ class EquityBook:
         (release 1019b's review: its exit is one auction order, a market-on-open or market-on-close sale, never
         re-priced or cancelled); NONE for an event lot whose sale this book has already sent on `day` (that order is in
         the count already: counted twice, a day's open-entry lots sold at the close left the close's own entries no
-        room). `event` True: the event lots' part alone (the event kind's line, release 1019c); False: the old lanes'
-        part alone (theirs); None: both."""
+        room); and ONE for each EVENT BUY STILL WORKING whose planned exit is on `day` (release 1019c's money review: an
+        auction buy is no lot until its cross, so an open-entry program's buys of the open window, sold at that day's
+        close, had no exit kept; a close entry's exit is on a later day, where it is kept as a lot held). `event` True:
+        the event kind's part alone (its own line, release 1019c); False: the old lanes' part alone (theirs); None:
+        both (the House-wide count's equity exits)."""
         sent = {int(r["lid"]) for r in self.state.rows(
             "SELECT DISTINCT lid FROM eq_orders WHERE side='sell' AND day=? AND lid IS NOT NULL AND status!='refused'",
             (day,))}
@@ -1793,6 +1808,11 @@ class EquityBook:
                 reserve += 2 if event is not True else 0
             elif lot.lid not in sent:
                 reserve += 1 if event is not False else 0
+        if event is not False and _has_table(self.state.rows, "eq_event_intents"):
+            reserve += int(self.state.rows(
+                "SELECT COUNT(*) AS n FROM eq_orders o JOIN eq_event_intents e ON e.iid=o.iid WHERE o.side='buy' AND "
+                f"e.side='buy' AND e.exit_day=? AND o.status IN ({', '.join('?' * len(WORKING))})",
+                (day, *WORKING))[0]["n"])
         return reserve
 
     def _open_block(self, real_block: Callable[..., str | None], inst: Instance | None,

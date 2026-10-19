@@ -32,9 +32,14 @@ Deploy only a head that contains release 1019b's DEPLOYED head (`git merge-base 
 - **THE EVENT KIND'S OWN DAY ORDER COUNT**: `equity_money.event.max_orders_day` 150 (a new money row, bounds 0-300;
   `equity_money_problems` holds it under the gateway's day line, 300, and with the old lanes' 60 under the House-wide
   line, 250). league/equity/live.py `_count_refusal` counts the event kind's orders (`event_orders_today`: the orders of
-  an event instance) against it and the old lanes' against their 60; an exit is never stopped by a lane's line; every
-  order still meets the House-wide count and the gateway's. A day of 40 open-entry learning lots and a Probe close entry
-  sends all 81 orders (under release 1019b's one 60 the close entry was refused).
+  an event instance) against it and the old lanes' against their 60; an event entry keeps room for its own exit and for
+  the exits of the event lots held and of the event buys still working that are sold the same day (`_exit_reserve`: the
+  open window's buys are no lots until the cross); an exit is never stopped by a lane's line; every order still meets
+  the House-wide count and the gateway's, and every entry meets the House-wide count with room left for every equity
+  exit beside the options book's (the money review: before it, 150 open-window buys passed and 50 of their close sales
+  were refused at the House-wide line). A day of 40 open-entry learning lots and a Probe close entry sends all 81 orders
+  (under release 1019b's one 60 the close entry was refused); a day the open window would fill stops at 75 buys, and
+  all 75 sales go.
 
 **Identities**: money `285fa7af` -> `055e5313`, constitution `fd38e4e1` -> `a8d4cbd9` (`PINNED_DIGEST`; the one row
 moved them, `league/tests/equity_design.py` `DIGESTS`, with release 1019b's kept as `DIGESTS_R2`); the standing grant

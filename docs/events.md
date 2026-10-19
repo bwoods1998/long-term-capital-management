@@ -252,10 +252,15 @@ The instant stop of event buys is the gateway's `STOCK_EVENT_BUYS` off or `equit
 THE EVENT KIND'S OWN DAY ORDER COUNT (release 1019c, not yet deployed): the kind's auction orders of a day count against
 their own line, `equity_money.event.max_orders_day` (150: 2 x the open positions of the live bands, at least 150; nine
 programs at learning hold at most 72 lots, a buy and a sale each in one day, 144 orders), and no longer against the
-equity book's 60, which the old lanes keep (`order_path.max_orders_day`). An event entry goes only while one more order
-leaves room for the exit of every event lot not yet sold that day; an exit is never stopped by a lane's line, only by
-the House-wide one (`options_money.order_path.max_orders_day`, 250, every book's orders together), and the
-constitution holds the two equity lines' sum under it and the event line under the gateway's day line (300). Under
+equity book's 60, which the old lanes keep (`order_path.max_orders_day`). An event entry goes only while it and its own
+exit leave room for the exit of every event lot not yet sold that day and of every event buy still working that is
+sold the same day (an auction buy is no lot until its cross: the open window's buys of an open-entry program are sold
+at that day's close), so the line bounds the kind's whole day; an exit is never stopped by a lane's line, only by
+the House-wide one (`options_money.order_path.max_orders_day`, 250, every book's orders together), and every ENTRY
+meets that one with room left for the options book's exits and every equity exit, its own included (the money
+review: without it the open window's buys and their sales could reach the House-wide line together and the close's
+sales be refused there). The constitution holds the two equity lines' sum under the House-wide line and the event
+line under the gateway's day line (300). Under
 release 1019b's one count of 60, entries stopped at about 30 open-entry lots sold the same day: a day of 40 open-entry
 learning lots left that day's close entries no room (league/tests/test_events_1019c.py sends all 40 and a Probe close
 entry). The row moves the money digest (`285fa7af` -> `055e5313`) and the constitution's (`fd38e4e1` -> `a8d4cbd9`).
