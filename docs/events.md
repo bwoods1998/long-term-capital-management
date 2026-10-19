@@ -37,7 +37,7 @@ above 1.25 x the previous close (real money's limit).
 
 ## The code
 
-`league/events/` (on branch `feat/evl-shadow` until release R1 merges it; standard library only): `store.py` (one SQLite file and a document store; the schema is pinned),
+`league/events/` (standard library only): `store.py` (one SQLite file and a document store; the schema is pinned),
 `edgar.py` and `news.py` (the recorders), `calendar.py` (sessions and decision moments), `universe.py` (eligibility),
 `verdicts.py` (the recorded Haiku verdicts), `programs.py` (the programs as data rows and their selection rules),
 `run.py` (the open and close decisions, backfill), `score.py` (settlement at the auction prints and the exit ladder),

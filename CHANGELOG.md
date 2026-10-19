@@ -35,6 +35,17 @@ the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PR
 [PREREG-EVL-2.md](docs/prereg/PREREG-EVL-2.md), its page is [docs/events.md](docs/events.md); its code runs in shadow on
 the captain's workstation from branch `feat/evl-shadow` until release R1 brings it onto the House.
 
+### The event lane (EVL), shadow, on `feat/evl-shadow` (not on the House; runs on the captain's workstation until release R1)
+
+- **Why.** The owner's goal of Oct 19, 2026: one event-driven single-stock lane, judged by pre-registered screens.
+- **Rules.** [PREREG-EVL-1](docs/prereg/PREREG-EVL-1.md) (registered 01:08:38Z Oct 19) and
+  [PREREG-EVL-2](docs/prereg/PREREG-EVL-2.md) (registered 03:04:07Z Oct 19): nine seatable programs, five records,
+  four controls; expected false passes 0.9. Each program counts only events knowable after its own registration time.
+- **What.** `league/events/` (recorders, verdicts, programs, decisions, scoring, the screen, the report) and
+  [docs/events.md](docs/events.md). PREREG-EVL-2's rows add exits at the next open, the day-news window (09:00-15:29
+  ET), the insider-buy trigger and the limit at entry. Shadow only: no order path.
+- **Tests.** league/tests/test_events_*.py (98 on 3.14 and 3.11).
+
 ### Gateway G1: Claude Haiku 4.5 priced and Alpaca news readable, for the event lane (the goal of Oct 19, 2026; PREREG-EVL-1), on `feat/g1-haiku-news` (DEPLOYED 03:56Z Oct 19 in #568, gateway `7456e73d`; a gateway deploy only, no House code, no money rule, no order path)
 
 - `CLAUDE_MODELS` gains `claude-haiku-4-5-20251001` at the list prices ($1 input, $1.25 five-minute write, $0.10 hit,
