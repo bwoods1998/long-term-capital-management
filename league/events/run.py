@@ -254,10 +254,10 @@ def _key(prog: P.Program) -> str:
 
 # ---------------------------------------------------------------------------------------------------- re-decisions
 def _group(program: str) -> frozenset[str]:
-    """THE IDS A WRITTEN LOOK FREEZES TOGETHER (release 1019c's judges review): the look's id (every version: a version 2
-    takes its version 1's events word for word, PREREG-EVL-3 section 1), its control (the look read the control's
-    record), and every READ program of that control (so each one's comparison with the control stays even); a control
-    likewise, from its side. An id with no control and none of its own is its own group."""
+    """THE IDS A WRITTEN LOOK FREEZES TOGETHER (release 1019c's judges review): the look's id (every version: a
+    version 2 takes its version 1's events word for word, PREREG-EVL-3 section 1), its control (the look read the
+    control's record), and every READ program of that control (so each one's comparison with the control stays even);
+    a control likewise, from its side. An id with no control and none of its own is its own group."""
     from . import screen as SN
 
     control = SN.CONTROLS.get(program) or (program if program in SN.CONTROLS.values() else None)
@@ -279,11 +279,12 @@ def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[
       reading that writes nothing). A session with no finished receipt is decided whole.
     - A WRITTEN LOOK FREEZES ITS GROUP (A66's "a late-stored event can never land under a look already written", which
       A69's fast path reaches inside the window: it can make a close final while the House still decides it again
-      every hour; the reading recorded with release 1019c's other readings of A69): once a look of any version of a
-      program of the group (`_group`) is written as of the exit of this session's intents of that program or later,
-      every program of the group is decided again for nothing, inside the window and out, pending or not (a kept run
-      writes no `pending` for it, so its session is made, A66's second rule). The as-of date, the record a look read
-      and the look stay the same; v1 and v2 keep the same events, and every READ program's control the same blocks.
+      every hour; a reading for the captain to record with release 1019c's other readings of A69): once a look of any
+      version of a program of the group (`_group`) is written as of the exit of this session's intents of that program
+      or later, every program of the group is decided again for nothing, inside the window and out, pending or not (a
+      kept run writes no `pending` for it, so its session is made, A66's second rule). The as-of date, the record a
+      look read and the look stay the same; v1 and v2 keep the same events, and every READ program's control the same
+      blocks.
     Every program a decision keeps is in its summary's `kept`, with why and the events left out of its record
     (`_left_out`, written by the decision: PREREG-EVL-1 section 3's late share, which league/events/report.py counts);
     the shadow's earlier intents stand."""
@@ -338,7 +339,8 @@ def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[
 def _left_out(st: S.Store, prog: P.Program, rows: list[Mapping[str, Any]], *,
               eligible: Callable[[str], Mapping[str, Any] | None],
               guidance: Callable[[Mapping[str, Any]], str | None] | None = None,
-              reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None) -> dict[str, list[str]]:
+              reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None
+              ) -> dict[str, list[str]]:
     """WHAT A DECISION THAT KEEPS `prog` LEAVES OUT OF ITS RECORD (release 1019c's judges review; PREREG-EVL-1 section
     3: an outage removes nothing, the late share is reported): `events`, the events of the decision's windows its rule
     takes on the verdicts and prices already stored and its record does not hold (no intent, planned or skipped);
@@ -347,7 +349,8 @@ def _left_out(st: S.Store, prog: P.Program, rows: list[Mapping[str, Any]], *,
     registration; nothing is written. The daily report counts both (league/events/report.py `kept_out`)."""
     def answer(row: Mapping[str, Any]) -> Mapping[str, Any] | None:
         news = "accession" not in row
-        return V.stored(st, f"news:{row['id']}" if news else f"8k:{row['accession']}", V.PROMPTS["news" if news else "doc"])
+        return V.stored(st, f"news:{row['id']}" if news else f"8k:{row['accession']}",
+                        V.PROMPTS["news" if news else "doc"])
 
     def open_(row: Mapping[str, Any]) -> bool:
         """No verdict stored, and one can still come (a doc verdict is asked only of a TEXT of >= 200 characters)."""
@@ -372,10 +375,12 @@ def _left_out(st: S.Store, prog: P.Program, rows: list[Mapping[str, Any]], *,
         return st.db.execute("SELECT 1 FROM intents WHERE program=? AND version=? AND event=?",
                              (prog.id, prog.version, event)).fetchone() is not None
 
-    taken = {c.event for c in P.select(prog, rows, eligible=eligible, verdict=score, reaction=reaction, guidance=guidance)}
+    taken = {c.event for c in P.select(prog, rows, eligible=eligible, verdict=score, reaction=reaction,
+                                       guidance=guidance)}
     maybe = {c.event for c in P.select(prog, rows, eligible=eligible, verdict=hoped, reaction=hoped_reaction,
                                        guidance=hoped_guidance)}
-    return {"events": sorted(e for e in taken if not held(e)), "unjudged": sorted(e for e in maybe - taken if not held(e))}
+    return {"events": sorted(e for e in taken if not held(e)),
+            "unjudged": sorted(e for e in maybe - taken if not held(e))}
 
 
 # ---------------------------------------------------------------------------------------------------- verdicts
