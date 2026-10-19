@@ -5789,7 +5789,7 @@ failed to fetch; the day's verdicts by status and their cost; each program's int
 TRADABLE, today), shadow P&L at a $100 notional an event with its mean after-cost and abnormal returns in basis points,
 its real fills (none before release R2), its next look and last look; the expected false passes; the day's metered
 costs from `budget.json` (the cap, the fixed costs, the lane's part, research, the meters' trailing burn); the lane's
-jobs missed and failed. With no cause standing the notice is the report alone (`LTCM: daily report <day>: nothing
+missed passes are the four causes' own. With no cause standing the notice is the report alone (`LTCM: daily report <day>: nothing
 stalled`). Counts and figures only: the gateway (`email.mjs` `stallReport`) echoes the programs' own `EVL-...` ids and
 numbers and nothing else (a headline, a symbol, a price or any text where a figure goes reads "unknown" or is left out).
 It is told once a day: `stall.json` `report` keeps the day told (a SENT answer, or a `duplicate` for this very notice,

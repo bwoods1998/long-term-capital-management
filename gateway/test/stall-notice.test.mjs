@@ -291,7 +291,7 @@ test('the event lane\'s daily report rides the stall notice as one more section:
     '- Events read: 212 8-K with item 2.02, 403 other 8-K, 1688 Form 4, 2410 news articles; 3 filings failed to fetch.',
     '- Verdicts answered: 640 ok, 4 unparsed, 1 refused; they cost $2.71.',
     '- Metered compute: about $4.12 a day, under a cap of $5.00 a day (fixed $1.66, the lane\'s verdicts $3.00, research $0.34).',
-    '- Expected false passes: 0.9 (0.10 x 9 seatable versions). The lane\'s jobs today: 0 missed, 1 failed.',
+    '- Expected false passes: 0.9 (0.10 x 9 seatable versions).',
     'By program (shadow P&L at $100 an event, after costs; r the after-cost return, a beyond the benchmark):',
     '- EVL-ERN-READ-O1 v1: today 9 intents (2 skipped); settled 41 (38 tradable, 7 today), shadow +$12.34 (r +30.1 bp, a +12.5 bp); no real fills yet; next look 1 at session 10 (now 6); last look none; 0 held.',
     '- EVL-CTRL-ERN-ALL-O1 v1: today 31 intents (4 skipped); settled 140 (120 tradable, 25 today), shadow -$18.50 (r -13.2 bp, a -2.0 bp); no real fills yet; a record: never screened.',

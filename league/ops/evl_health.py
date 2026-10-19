@@ -37,7 +37,8 @@ THE DAILY REPORT (`report_due`, `report_facts`): on each session day, at the fir
 ET, after the lane's nightly score, screen and report), league/events/report.py's figures for the day, cut to counts and
 figures (`report_facts`: events read by family, the day's verdicts and their cost, each program's intents, settled
 events, shadow P&L at a $100 notional an event, real fills (none before release R2), its evidence status and next look,
-the expected false passes, the day's metered costs from budget.json and the jobs missed or failed), ride the stall
+the expected false passes and the day's metered costs from budget.json; the lane's missed passes are the four causes'
+own), ride the stall
 notice (`report` beside its `causes`: one more section of the same mail; with no cause standing the notice carries the
 report alone). The gateway composes the words (gateway/lib/email.mjs `stallReport`) and echoes only counts, dollar and
 basis-point figures, dates and the programs' own ids: no headline, no document text, no symbol, no price. Told once a
@@ -435,7 +436,6 @@ def report_facts(report: Mapping[str, Any], budget: Mapping[str, Any] | None) ->
     burns = [_num((meters.get(m) or {}).get("burn_usd_day")) for m in ("sail", "claude")]
     usd = sum(_num(v.get("usd")) or 0.0 for v in vd.values() if isinstance(v, Mapping))
     efp = report.get("expected_false_passes") or {}
-    jobs = report.get("jobs") or {}
     return {
         "day": str(report.get("day")),
         "events": {"8k_202": total("8-K 2.02"), "8k_other": total("8-K other"), "form4": total("Form 4"),
@@ -448,7 +448,6 @@ def report_facts(report: Mapping[str, Any], budget: Mapping[str, Any] | None) ->
                   "research_usd_day": _round((budget or {}).get("research_usd_day"), 2),
                   "metered_usd_day": None if None in burns else round(sum(burns), 2)},
         "expected_false_passes": _round(efp.get("expected"), 2), "seatable_versions": int(efp.get("versions") or 0),
-        "jobs": {"missed": len(jobs.get("missed") or []), "failed": len(jobs.get("failed") or [])},
     }
 
 

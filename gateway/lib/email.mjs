@@ -258,13 +258,13 @@ export function stallReport(facts = {}) {
   const report = facts?.report;
   if (!report || typeof report !== 'object' || Array.isArray(report)) return null;
   if (typeof report.day !== 'string' || !DAY.test(report.day)) return null;
-  const events = plain(report.events), verdicts = plain(report.verdicts), costs = plain(report.costs), jobs = plain(report.jobs);
+  const events = plain(report.events), verdicts = plain(report.verdicts), costs = plain(report.costs);
   const lines = [
     `The event lane, ${report.day} (the day's figures; no headline, text or price is ever mailed):`,
     `- Events read: ${whole(events['8k_202'])} 8-K with item 2.02, ${whole(events['8k_other'])} other 8-K, ${whole(events.form4)} Form 4, ${whole(events.news)} news articles; ${whole(events.failed)} filings failed to fetch.`,
     `- Verdicts answered: ${whole(verdicts.ok)} ok, ${whole(verdicts.unparsed)} unparsed, ${whole(verdicts.refused)} refused; they cost ${usd(verdicts.usd)}.`,
     `- Metered compute: about ${usd(costs.metered_usd_day)} a day, under a cap of ${usd(costs.cap_usd_day)} a day (fixed ${usd(costs.fixed_usd_day)}, the lane's verdicts ${usd(costs.lane_usd_day)}, research ${usd(costs.research_usd_day)}).`,
-    `- Expected false passes: ${real(report.expected_false_passes) === null ? 'unknown' : real(report.expected_false_passes).toFixed(1)} (0.10 x ${whole(report.seatable_versions)} seatable versions). The lane's jobs today: ${whole(jobs.missed)} missed, ${whole(jobs.failed)} failed.`,
+    `- Expected false passes: ${real(report.expected_false_passes) === null ? 'unknown' : real(report.expected_false_passes).toFixed(1)} (0.10 x ${whole(report.seatable_versions)} seatable versions).`,
   ];
   const programs = (Array.isArray(report.programs) ? report.programs : []).slice(0, REPORT_PROGRAMS)
     .filter(p => p && typeof p === 'object' && typeof p.id === 'string' && PROGRAM_ID.test(p.id));
