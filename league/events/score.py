@@ -277,6 +277,19 @@ def exit_ladder(store: S.Store, exit_day: dt.date, exit_at: str) -> list[tuple[C
     return ladder
 
 
+def _above_limit(intent: Mapping[str, Any], uni: Mapping[str, Any], stock_in: float) -> bool:
+    """PREREG-EVL-2's LIMIT AT ENTRY, for that file's programs only: an entry auction above 1.25 x the raw SIP close of
+    the session before the entry session is not filled (real money's limit, PREREG-EVL-1 section 8). With no such
+    close on the universe row the event is not filled either (the reading that trades less)."""
+    from .programs import BY_ID
+
+    program = BY_ID.get(str(intent["program"]))
+    if program is None or program.prereg < 2:
+        return False
+    prev = uni.get("prev_close")
+    return prev is None or stock_in > LIMIT_MULTIPLE * float(prev)
+
+
 def _skip(store: S.Store, intent: Mapping[str, Any], why: str) -> str:
     with store.tx():
         store.move_intent(intent["program"], intent["version"], intent["event"], f"skipped:{why}")
@@ -313,6 +326,8 @@ def _settle(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetime
         if not known:
             raise Waiting(f"{symbol} {entry_kind} {entry_day}: tape not complete")
         return _skip(store, intent, "no-auction")
+    if _above_limit(intent, uni, stock_in):
+        return _skip(store, intent, "limit")
 
     exit_s: C.Session | None = None
     exit_kind, stock_out = "", 0.0

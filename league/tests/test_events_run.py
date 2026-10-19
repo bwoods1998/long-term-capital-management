@@ -127,7 +127,8 @@ class RunTest(unittest.TestCase):
         refusing.post_json = lambda path, body, headers=None: (400, {"error": "temperature may only be 0"})
         ctx = R.Context(self.st, refusing, sec_pages, now=lambda: self.now)
         out = R.decide_open(ctx, dt.date(2026, 10, 19))
-        self.assertEqual(out["pending"], {"EVL-ERN-READ-O1": 1, "EVL-ERN-READ-O3": 1})
+        self.assertEqual(out["pending"], {"EVL-ERN-READ-O1": 1, "EVL-ERN-READ-O3": 1,  # PREREG-EVL-2's two READ rows too
+                                          "EVL-ERN-GUIDE-O1": 1, "EVL-ERN-READ3-O1": 1})
         self.assertEqual(out["EVL-CTRL-ERN-ALL-O1"]["planned"], 1)       # controls need no verdict
         status = self.st.db.execute("SELECT status FROM receipts WHERE job='decide-open:2026-10-19'").fetchone()[0]
         self.assertEqual(status, "pending")

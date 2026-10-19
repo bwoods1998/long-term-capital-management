@@ -116,7 +116,7 @@ class ReportTest(unittest.TestCase):
         self.assertIn("EVL-NEWS-READ-O1", rep["registered_without_intents"])
         self.assertEqual(rep["gaps"]["entry"]["n"], 1)
         self.assertAlmostEqual(rep["gaps"]["entry"]["mean_bp"], (123.45 / 123.40 - 1) * 1e4, places=9)
-        self.assertEqual(rep["expected_false_passes"], {"versions": 4, "expected": 0.4})
+        self.assertEqual(rep["expected_false_passes"], {"versions": 9, "expected": 0.9})
         jb = rep["jobs"]
         self.assertEqual(jb["missed"], ["decide-close", "screen"])  # decide-open ran (and failed); score still runs
         self.assertEqual(sorted((f["job"], f["status"]) for f in jb["failed"]),
@@ -131,7 +131,7 @@ class ReportTest(unittest.TestCase):
             self.assertNotIn(banned, text)
             self.assertNotIn(banned, data)
         self.assertLessEqual(len(text.splitlines()), 14)
-        self.assertIn("Expected false passes: 0.4 (0.10 x 4 seatable versions)", text)
+        self.assertIn("Expected false passes: 0.9 (0.10 x 9 seatable versions)", text)
         self.assertIn("missed: decide-close, screen", text)
         self.assertIn("EVL-ERN-READ-O3 v1 (record)", text)
 

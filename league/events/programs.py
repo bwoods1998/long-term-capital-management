@@ -1,4 +1,5 @@
-"""The pre-registered programs of PREREG-EVL-1 section 6, and the shadow decisions that apply them.
+"""The pre-registered programs of PREREG-EVL-1 section 6 and PREREG-EVL-2 section 3, and the shadow decisions that
+apply them.
 
 Nothing here may change for a registered program: a change is a new version with its own registration time. The
 registration time is the commit time of docs/prereg/PREREG-EVL-1.md on `prereg/evl-1` (pinned below once committed);
@@ -9,6 +10,8 @@ Decision windows (league.events.calendar):
   (these are the events whose "first session whose 09:00 ET is after the knowable time" is D).
 - C1's day 0 is D for exactly the events knowable in [P's close decision, D's close decision).
 - NEWS-READ on D takes single-symbol articles created after P's 16:00 ET and before D's 09:00 ET.
+- PREREG-EVL-2's day-news programs on D take single-symbol articles knowable after D's 09:00 ET and at or before T29
+  (15:29 ET on a full day); they enter at D's close and exit at the next session's open.
 Eligibility (league.events.universe) is decided before any verdict is asked, so verdicts are paid only for eligible
 issuers; controls take every eligible event of their program's family, any verdict.
 """
@@ -25,6 +28,8 @@ from . import store as S
 
 #: The registration time (UTC): the prereg's commit time on `prereg/evl-1`. None refuses every decision.
 REGISTERED_AT: str | None = "2026-10-19T01:08:38Z"  # A61: tag prereg-evl-1, commit 3d6194dd
+#: PREREG-EVL-2's registration time (its second wave counts only events knowable after it).
+REGISTERED_AT_2: str = "2026-10-19T03:04:07Z"  # A63: tag prereg-evl-2, commit 93cd4877
 
 ERN_ITEMS = frozenset({"2.02"})
 OTHER_ITEMS = frozenset({"1.01", "2.01", "7.01", "8.01"})
@@ -35,6 +40,10 @@ INS_MIN_OWNERS = 2
 INS_MIN_VALUE = 50_000.0
 ISSUER_GAP_SESSIONS = 5
 NEWS_UPDATE_LIMIT = dt.timedelta(minutes=10)
+GUIDE_MIN_SCORE = 1          # PREREG-EVL-2: guidance "raised" and score >= 1
+TOP_SCORE = 3                # PREREG-EVL-2's READ3 record: score exactly 3
+INS_BUY_MIN_VALUE = 50_000.0  # PREREG-EVL-2: one Form 4's director/officer open-market buys
+T29_BEFORE_CLOSE = dt.timedelta(minutes=31)  # PREREG-EVL-2's T29: 15:29 ET on a full day
 
 
 @dataclasses.dataclass(frozen=True)
@@ -45,11 +54,18 @@ class Program:
     family: str          # ern | ern-react | 8k | ins | news
     entry_at: str        # open | close
     hold: int            # sessions held (block length); C1 enters at day 0's close and exits at the next close
-    reads: bool          # needs a verdict score >= READ_MIN_SCORE
+    reads: bool          # needs a verdict (its rule below reads the score)
+    exit_at: str = "close"   # PREREG-EVL-2's overnight programs exit at the next session's OPEN
+    rule: str = "min2"       # min2 (score >= 2) | guide | top (score 3) | none; ern-react adds the reaction
+    prereg: int = 1          # which pre-registration (and so which registration time) the program belongs to
 
     @property
     def key(self) -> tuple[str, int]:
         return (self.id, self.version)
+
+    @property
+    def registered_at(self) -> dt.datetime:
+        return registered() if self.prereg == 1 else S.parse_iso(REGISTERED_AT_2)
 
 
 PROGRAMS = (
@@ -62,6 +78,16 @@ PROGRAMS = (
     Program("EVL-CTRL-ERN-ALL-O1", 1, False, "ern", "open", 1, False),
     Program("EVL-CTRL-8K-ALL-O1", 1, False, "8k", "open", 1, False),
     Program("EVL-CTRL-NEWS-ALL-O1", 1, False, "news", "open", 1, False),
+    # PREREG-EVL-2 (registered 2026-10-19T03:04:07Z): five seatable programs, three records, one control.
+    Program("EVL-ERN-REACT-ON", 1, True, "ern-react", "close", 1, False, exit_at="open", rule="none", prereg=2),
+    Program("EVL-ERN-GUIDE-O1", 1, True, "ern", "open", 1, True, rule="guide", prereg=2),
+    Program("EVL-INS-BUY-O1", 1, True, "ins-buy", "open", 1, False, rule="none", prereg=2),
+    Program("EVL-NEWS-READ-ON", 1, True, "news-day", "close", 1, True, exit_at="open", prereg=2),
+    Program("EVL-NEWS-REACT-ON", 1, True, "news-react", "close", 1, False, exit_at="open", rule="none", prereg=2),
+    Program("EVL-INS-BUY-O5", 1, False, "ins-buy", "open", 5, False, rule="none", prereg=2),      # a record
+    Program("EVL-ERN-REACT-READ-C1", 1, False, "ern-react", "close", 1, True, prereg=2),           # a record
+    Program("EVL-ERN-READ3-O1", 1, False, "ern", "open", 1, True, rule="top", prereg=2),           # a record
+    Program("EVL-CTRL-NEWS-DAY-ON", 1, False, "news-day", "close", 1, False, exit_at="open", rule="none", prereg=2),
 )
 BY_ID = {p.id: p for p in PROGRAMS}
 
@@ -95,6 +121,15 @@ def news_window(store: S.Store, day: dt.date) -> tuple[dt.datetime, dt.datetime]
     if d is None or not prior:
         raise LookupError(f"no session {day} or none before it")
     return prior[0].close_at, d.open_cutoff  # knowable after P's close and by D's 09:00 ET
+
+
+def day_news_window(store: S.Store, day: dt.date) -> tuple[dt.datetime, dt.datetime]:
+    """PREREG-EVL-2's day-news window of D: knowable after 09:00 ET of D and at or before T29 of D (the start of the
+    regular-session minute bar 31 minutes before the close)."""
+    d = C.session(store, day)
+    if d is None:
+        raise LookupError(f"no session {day}")
+    return d.open_cutoff, d.close_at - T29_BEFORE_CLOSE
 
 
 # ---------------------------------------------------------------------------------------------------- events
@@ -151,6 +186,34 @@ def ins_triggers(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mappi
         if _earlier_trigger(store, f["cik"], accepted):
             continue
         out.append(dict(f) | {"cluster_value": value})
+    return out
+
+
+def ins_buys(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
+    """Form 4 filings knowable in [lo, hi) with PREREG-EVL-2's INSIDER BUY: a reporting owner who is a director or an
+    officer of the issuer, and >= $50,000 of open-market purchases (code P, acquired A) dated within the 10 calendar
+    days ending on the acceptance date (Eastern), each transaction counted once, a transaction with no price counting
+    0. Each row carries its `purchase_value`."""
+    out = []
+    for f in filings_in(store, "4", lo, hi):
+        insider = store.db.execute("SELECT 1 FROM form4_owners WHERE accession=? AND (is_director OR is_officer) LIMIT 1",
+                                   (f["accession"],)).fetchone()
+        if insider is None:
+            continue
+        accepted_day = S.parse_iso(f["accepted_at"]).astimezone(C.NY).date()
+        first_day = (accepted_day - dt.timedelta(days=9)).isoformat()
+        value = 0.0
+        for t in store.db.execute("SELECT seq, tx_date, code, acquired, shares, price FROM form4_tx WHERE accession=? "
+                                  "ORDER BY seq", (f["accession"],)):
+            if t["code"] != "P" or t["acquired"] != "A" or not t["tx_date"]:
+                continue
+            if not first_day <= str(t["tx_date"])[:10] <= accepted_day.isoformat():
+                continue
+            if t["shares"] is None or t["price"] is None:
+                continue
+            value += float(t["shares"]) * float(t["price"])
+        if value >= INS_BUY_MIN_VALUE:
+            out.append(dict(f) | {"purchase_value": value})
     return out
 
 
@@ -228,7 +291,7 @@ def write_intents(store: S.Store, program: Program, day: dt.date, candidates: It
         raise LookupError(day)
     if program.entry_at == "open":
         exit_session = C.nth(store, day, program.hold)
-    else:
+    else:  # a close entry exits `hold` sessions later, at that session's close or (PREREG-EVL-2) its open
         exit_session = C.nth(store, day, program.hold + 1)
     counts = {"planned": 0, "skipped": 0, "known": 0}
     taken: set[str] = set()
@@ -244,27 +307,38 @@ def write_intents(store: S.Store, program: Program, day: dt.date, candidates: It
         elif c.cik in taken or _held_recently(store, program, c.cik, day):
             status, reason = "skipped:issuer-held", why
         store.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
-                         "exit_day, exit_at, rank_key, mode, status, why) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'close', ?, ?, "
+                         "exit_day, exit_at, rank_key, mode, status, why) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
                          "?, ?)",
                          (program.id, program.version, c.event, c.symbol, c.cik, S.iso(decided_at), day.isoformat(),
-                          program.entry_at, (exit_session.day if exit_session else day).isoformat(), c.rank_key, mode,
-                          status, reason))
+                          program.entry_at, (exit_session.day if exit_session else day).isoformat(), program.exit_at,
+                          c.rank_key, mode, status, reason))
         counts["planned" if status == "planned" else "skipped"] += 1
         if status == "planned":
             taken.add(c.cik)
     return counts
 
 
+#: Families whose events are news articles; the first two rank by verdict score (one per issuer per D, the highest
+#: score, then the earliest), the third takes the earliest (no model).
+NEWS_FAMILIES = ("news", "news-day", "news-react")
+
+
 def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Callable[[str], Mapping[str, Any] | None],
            verdict: Callable[[Mapping[str, Any]], int | None],
-           reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None) -> list[Candidate]:
+           reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None,
+           guidance: Callable[[Mapping[str, Any]], str | None] | None = None) -> list[Candidate]:
     """The candidates `program` takes from already-windowed event rows. `eligible(cik)` -> universe row or None;
     `verdict(row)` -> the stored score (None when there is none, unparsed or refused); `reaction(row, universe_row)` ->
     C1's ratio (the close of the last SIP minute bar ending at or before 15:30 ET on day 0 over the last SIP daily close
-    before the acceptance time), None when a price is missing (the event is then not taken)."""
+    before the acceptance time), None when a price is missing (the event is then not taken); `guidance(row)` -> the
+    stored PROMPT-DOC verdict's guidance (PREREG-EVL-2's GUIDE). An event knowable at or before the program's own
+    registration time is never taken."""
     out = []
+    since = program.registered_at
     for row in rows:
         family = program.family
+        if S.parse_iso(row.get("knowable_at")) <= since:
+            continue
         if family in ("ern", "ern-react", "8k"):
             items = items_of(row)
             if family in ("ern", "ern-react") and not items & ERN_ITEMS:
@@ -272,7 +346,7 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
             if family == "8k" and (not items & OTHER_ITEMS or items & ERN_ITEMS):
                 continue
             event = f"8k:{row['accession']}"
-        elif family == "ins":
+        elif family in ("ins", "ins-buy"):
             event = f"f4:{row['accession']}"
         else:
             event = f"news:{row['id']}"
@@ -280,21 +354,30 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
         uni = eligible(cik) if cik else None
         if uni is None:
             continue
-        if family == "news" and uni["symbol"] != row.get("symbol"):
+        if family in NEWS_FAMILIES and uni["symbol"] != row.get("symbol"):
             continue
-        score = verdict(row) if (program.reads or family == "news") else None
-        if program.reads and (score is None or score < READ_MIN_SCORE):
-            continue
+        score = verdict(row) if (program.reads or family in ("news", "news-day")) else None
+        if program.reads:
+            if score is None:
+                continue
+            if program.rule == "min2" and score < READ_MIN_SCORE:
+                continue
+            if program.rule == "top" and score != TOP_SCORE:
+                continue
+            if program.rule == "guide" and (score < GUIDE_MIN_SCORE or guidance is None or guidance(row) != "raised"):
+                continue
         rank = float(score) if score is not None else None
-        if family == "ern-react":
+        if family in ("ern-react", "news-react"):
             ratio = reaction(row, uni) if reaction is not None else None
             if ratio is None or ratio < REACT_RATIO:
                 continue
             rank = ratio
         if family == "ins":
             rank = float(row.get("cluster_value") or 0.0)
+        if family == "ins-buy":
+            rank = float(row.get("purchase_value") or 0.0)
         out.append(Candidate(event, cik, uni["symbol"], S.parse_iso(row.get("knowable_at")), rank, score, row))
-    if program.family == "news":
+    if program.family in ("news", "news-day"):
         best: dict[str, Candidate] = {}
         for c in out:
             have = best.get(c.cik)
@@ -306,5 +389,6 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
     return out
 
 
-__all__ = ["PROGRAMS", "BY_ID", "Program", "Candidate", "REGISTERED_AT", "registered", "open_window", "close_window",
-           "news_window", "filings_in", "news_in", "ins_triggers", "select", "write_intents", "items_of"]
+__all__ = ["PROGRAMS", "BY_ID", "Program", "Candidate", "REGISTERED_AT", "REGISTERED_AT_2", "registered", "open_window",
+           "close_window", "news_window", "day_news_window", "filings_in", "news_in", "ins_triggers", "ins_buys", "select",
+           "write_intents", "items_of", "NEWS_FAMILIES"]
