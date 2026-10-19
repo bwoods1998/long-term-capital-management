@@ -1,8 +1,8 @@
 """`python -m league.events --state DIR <command>`: the event lane's passes (see league/events/run.py).
 
 Commands: sessions --from D --to D | record | backfill --from D --to D | decide-open --day D [--backfill] |
-decide-close --day D [--backfill] | catchup (every past decision from the registration time not yet made, as a
-backfill). Prints one JSON summary.
+decide-close --day D [--backfill] [--evl4-only] | catchup (every past decision from the registration time not yet made,
+as a backfill, and PREREG-EVL-4's rows of every older close a release without them decided). Prints one JSON summary.
 """
 
 from __future__ import annotations
@@ -36,7 +36,12 @@ REDECIDE_SESSIONS = SN.FINAL_SESSIONS
 def catchup(ctx: R.Context) -> dict:
     """Every scheduled decision from the registration time to now without an ok receipt, oldest first, and the last
     REDECIDE_SESSIONS due sessions again. A decision run at its scheduled minute (within 10 minutes) is live; any other
-    is a backfill."""
+    is a backfill.
+
+    Then PREREG-EVL-4'S ROWS (release 1019c's review): every close since its registration that a release without its
+    rows decided last (league/events/screen.py `made_without`: the closes older than the re-decision reach, which the
+    loop above leaves as they are) gets their own decision, once, as a backfill (`decide_evl4`), and the earlier rows of
+    those closes are never decided again."""
     st = ctx.store
     now = ctx.now()
     start = P.registered().astimezone(C.NY).date()
@@ -51,6 +56,19 @@ def catchup(ctx: R.Context) -> dict:
         if s.close_decide + dt.timedelta(minutes=1) <= now and (f"decide-close:{s.day}" not in done or s.day in recent):
             live_close = R.live_run(s.close_decide, now)
             out[f"close:{s.day}"] = R.decide_close(ctx, s.day, backfill_run=not live_close)
+    for day in SN.made_without(st, now.astimezone(C.NY).date()):
+        out[f"{SN.FOUR_KIND}:{day}"] = decide_evl4(ctx, day)
+    return out
+
+
+def decide_evl4(ctx: R.Context, day: dt.date) -> dict:
+    """PREREG-EVL-4's rows of the close of `day` decided by themselves, as a backfill (`decide_close` with
+    `evl4_only`); when their PM rows wait on verdicts only the session's OPEN decision asks, that decision's own asks
+    are made (`decide_open` with `ask_only`: no intent, no receipt) and the rows are decided again."""
+    out = R.decide_close(ctx, day, backfill_run=True, evl4_only=True)
+    if out.get("pending") and R.waits_on_open(out):
+        R.decide_open(ctx, day, backfill_run=True, ask_only=True)
+        out = R.decide_close(ctx, day, backfill_run=True, evl4_only=True)
     return out
 
 
@@ -71,6 +89,9 @@ def main(argv: list[str] | None = None) -> int:
         d = sub.add_parser(name)
         d.add_argument("--day", type=_day, required=True)
         d.add_argument("--backfill", action="store_true")
+        if name == "decide-close":
+            d.add_argument("--evl4-only", action="store_true",
+                           help="PREREG-EVL-4's rows alone, as a backfill (their own receipt, decide-close-evl4)")
     sub.add_parser("catchup")
     sub.add_parser("tickers")
     sub.add_parser("equity")
@@ -91,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
             out = R.backfill(ctx, args.first, args.last, forms=tuple(args.forms.split(",")), news=not args.no_news)
         elif args.cmd == "decide-open":
             out = R.decide_open(ctx, args.day, backfill_run=args.backfill)
+        elif args.cmd == "decide-close" and args.evl4_only:
+            out = decide_evl4(ctx, args.day)
         elif args.cmd == "decide-close":
             out = R.decide_close(ctx, args.day, backfill_run=args.backfill)
         elif args.cmd == "tickers":

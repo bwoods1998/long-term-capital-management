@@ -1492,7 +1492,9 @@ path.
   program: its band as last read from the lane, since, why), `eq_event_intents` (one row an event intent, keyed by
   `eq_intents.iid`: program, version, event, side, band, tif, otype, symbol, cik, day, at, rank_key, adv20, prev_close,
   limit_px, sigma, hold, weight, exit_day, exit_at, lid, rung, decided_at) and `eq_event_decisions` (one row a session
-  and auction: counts only). kv `eq_event_synced`, `eq_event_list` {day, sha, count, at}, `eq_event_off_said`,
+  and auction: counts only; `sale_to_later` {skipped program: {selling program: n}} when the sale gate skipped an
+  earlier row's pick because a later row's lot sells the name at that auction: PREREG-EVL-4 section 1.3's count,
+  `_event_sale_takers`, also in the decision's `equity.event_decide` record). kv `eq_event_synced`, `eq_event_list` {day, sha, count, at}, `eq_event_off_said`,
   `paper_proof_auction`, `paper_proof_auction_buy`, `paper_proof_auction_sell`. A lot's `info.evl` (program, version,
   event, cik, band, weight, sigma, prev_close, limit), `info.evl_exit` {day, at, rung, first, zero} and `info.evl_fills`
   (what was written back).
@@ -1519,18 +1521,24 @@ path.
   `program_of(program, version)`, `order_of`, `room_key(program, band)`, `Lane` (read-only), `open_lane(root)`,
   `decided(lane, day, at)`, `eligible(lane, day)` and `universe_rows(lane, day)` (the live rule's eligible rows only,
   `LIVE_ROWS`: release 1019b's second review), `lane_bands(lane)`, `bands(lane, s=None) -> [Band] | None`,
-  `picks(lane, program, day, *, decided_at, reaction=None, held=None)`, `held_recently`, `allocate(picks, rooms,
+  `picks(lane, program, day, *, decided_at, reaction=None, held=None)` (PREREG-EVL-4 section 1.3: for
+  `NEXT_OPEN_GUARD`'s programs an issuer's one event is not bought when `next_open_event(lane, row, session,
+  decided_at)` says it is EVL-8K-READ-O1's at the next open), `rows_for` (PREREG-EVL-4's rows by `rows_4(lane, day,
+  decided_at)`: the rows stored before the decision, EXCLUDED and the F8K(D) skip read from them), `held_recently`,
+  `allocate(picks, rooms,
   band_of, skip) -> ({program: picks given}, {program: {why passed over: n}})` (the auction's slots in ROOM's order,
   each program its own ranked picks whose name no earlier program was given, until its room is full; the book's skip
   is `EquityBook._event_gate`: no whole share by price, or the name sold at the same auction), `one_name_an_auction(picks,
   band_of)` (`allocate` with no room limit), `reaction_reader`, `limit_price`, `sigma`, `weight`, `exit_plan(program,
   day) -> (day, "open" | "close")`,
   `publish(client, day, symbols)`, `FillWriter(path)`, `write_fills(root, rows) -> int | None` (the rows new or
-  changed); constants `LANE` "event", `TAG`, `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late", `REAL_VERSION` 2, `BANDS`,
+  changed); constants `LANE` "event", `TAG`, `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late", `REAL_VERSION` 2 (PREREG-EVL-1's
+  and -2's seating version; no gate since PREREG-EVL-4, whose ids seat at version 1), `NEXT_OPEN_GUARD`, `BANDS`,
   `LIVE_BANDS`, `DEFAULT_BAND` "learning", `PRIORITY`, `LADDER_CLOSES` 5, `ZERO_AFTER` 20, `ISSUER_GAP_SESSIONS` 5,
   `STRICT_WEIGHT` 0.40, `FILLS_TABLE`, `FILL_COLUMNS`. THE LANE'S OWN MODULES IT USES (release 1019b; no stand-in in
   the book or its tests): league/events/programs.py `SEATING`, `BY_KEY` and `Program.can_seat` (`seatable()` is
-  `SEATING` at `REAL_VERSION`, `program_of` reads `BY_KEY`); league/events/bands.py `bands(store)` (the band reader:
+  `SEATING`, every version that can seat: version 2 of the nine, version 1 of PREREG-EVL-4's three, in the tables'
+  order; `program_of` reads `BY_KEY` and `can_seat`); league/events/bands.py `bands(store)` (the band reader:
   {(program, version): band} for every seating version, no row = learning; the book reads each row's `since` and `why`
   beside) and `record_fill(store, ...)` (the fill write-back, one row a (program, version, event, side), a write again
   changing only its fee), on a `FillWriter` (the existing store file only, a 5 s busy timeout); the store's tables

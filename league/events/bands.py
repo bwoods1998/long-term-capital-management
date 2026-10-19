@@ -2,7 +2,8 @@
 
 - LEARNING, the band at registration: real money at learning size from the first event (the House's event book sizes
   it: 2% of equity, whole shares, one share up to 5%).
-- PROBE from the first decision after a passed look (`on_look`, called when the screen writes a version 2 look).
+- PROBE from the first decision after a passed look (`on_look`, called when the screen writes a look of a seating
+  version: version 2 of PREREG-EVL-1's and -2's programs, version 1 of PREREG-EVL-4's).
 - SIZED: >= 150 settled real-money events at Probe size or above whose 80% session-block bootstrap lower bound of the
   per-event after-cost return is above zero (`review`).
 - DEMOTION to learning: the last 50 settled real-money events at Probe size or above lost more than $150 net, or the
@@ -93,9 +94,9 @@ def retire_test(session_values: Iterable[float], mean_a: float | None, seed_text
 
 
 def on_look(store: S.Store, look: Mapping[str, Any], *, now: Any = None, db: Any = None) -> str | None:
-    """With the screen's write of a version 2 look: retire, promote a learning program to probe, or nothing. Returns
-    the new band or None. `db`: the look's own transaction (release 1019b's review: the move is written with the look
-    or not at all, so a lost move can never leave a retired program trading)."""
+    """With the screen's write of a seating version's look: retire, promote a learning program to probe, or nothing.
+    Returns the new band or None. `db`: the look's own transaction (release 1019b's review: the move is written with
+    the look or not at all, so a lost move can never leave a retired program trading)."""
     key = (str(look["program"]), int(look["version"]))
     if key not in seating() or not int(look.get("held") or 0):
         return None

@@ -26,10 +26,20 @@ def weekdays(start, n):
     return out
 
 
+def decided_summary(kind):
+    """An `ok` decision receipt's summary as this release's code writes it: every program entering at `kind` named (its
+    counts under its key; league.events.screen `names`, release 1019c's review)."""
+    from league.events import programs as P
+
+    return {"pending": {}, **{SC.program_key(p.id, p.version): {"planned": 0, "skipped": 0, "known": 0}
+                              for p in P.PROGRAMS if p.entry_at == kind}}
+
+
 def final_record(store, through, *, wall=dt.time(23, 0)):
     """The House's record made FINAL through session `through` (league.events.screen `final_until`, release 1019b): every
-    session's open and close decisions `ok` and every weekday's daily-index backfill done. Returns the moment the screen
-    then runs at (`now`): `wall` New York time on `through`."""
+    session's open and close decisions `ok` (each receipt naming the programs it decided, as this release's code does:
+    `decided_summary`) and every weekday's daily-index backfill done. Returns the moment the screen then runs at
+    (`now`): `wall` New York time on `through`."""
     from zoneinfo import ZoneInfo
 
     days = [str(r["day"]) for r in store.db.execute("SELECT day FROM sessions WHERE day<=? ORDER BY day",
@@ -37,7 +47,7 @@ def final_record(store, through, *, wall=dt.time(23, 0)):
     for day in days:
         for kind in ("open", "close"):
             rid = store.start_receipt(f"decide-{kind}:{day}")
-            store.finish_receipt(rid, "ok", {})
+            store.finish_receipt(rid, "ok", decided_summary(kind))
     d = dt.date.fromisoformat(days[0]) if days else through
     while d <= through:
         if d.weekday() < 5:
@@ -478,12 +488,18 @@ class ScreenJobTest(unittest.TestCase):
         self.assertEqual(SC.next_look(self.st, "EVL-ERN-READ-O3", 1, self.days[45])["k"], None)
 
     def test_expected_false_passes_count_every_seatable_version(self):
-        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 9, "expected": 0.9})  # PREREG-EVL-3's nine
+        # PREREG-EVL-3's nine version 2 rows and PREREG-EVL-4's three (their version 1), of the lane's stated 3.0
+        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 12, "expected": 1.2, "budget": 3.0, "left": 1.8})
         with self.st.tx() as db:
             db.execute("INSERT INTO intents(program, version, event, symbol, decided_at, entry_day, entry_at, exit_day, "
                        "exit_at, mode, status) VALUES('EVL-8K-READ-O1', 3, 'x', 'S', 'z', '2026-10-19', 'open', "
                        "'2026-10-19', 'close', 'shadow', 'planned')")
-        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 10)
+        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 13)
+        with self.st.tx() as db:     # a later version of a PREREG-EVL-4 id is one above its seating version 1
+            db.execute("INSERT INTO intents(program, version, event, symbol, decided_at, entry_day, entry_at, exit_day, "
+                       "exit_at, mode, status) VALUES('EVL-8K-REACT-ON', 2, 'x', 'S', 'z', '2026-10-20', 'close', "
+                       "'2026-10-21', 'open', 'shadow', 'planned')")
+        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 14)
 
 
 if __name__ == "__main__":
