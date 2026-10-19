@@ -93,6 +93,16 @@ agent a real position names is pinned to the roster (alive or retired: `Publishe
 half an hour later (`WINDOW_RETRY_SECONDS`, not read meanwhile), with a warning that quotes the site's reply. Under the
 byte limit the window leaves first (`fit`).
 
+**The event lane's view** (WP4, Oct 19, 2026: the owner's goal re-set the page to the lane, "evolve the design, no
+redesign"). One VERSIONED key, `lane_v1` (`site_lane`, read by `league/site_lane.py`): the lane's programs (a plain name,
+the band, settled events real and shadow, the next look's events to go), the funnel of its steps, the goal's checkpoint
+in settled real-money events at Probe size or above, its verdict spend (also inside `compute.claude_usd`, which the swarm's
+ledger alone never held) and the equity book's lots, whose trades add up with the positions table's lines to the
+account's Profit to the cent (the lots' fees and dividends are in the table's other activity already). Every block
+before it is byte for byte what it was. A site that refuses a checkpoint carrying it gets it again without it first
+(`laneless`) and is offered it again half an hour later (`LANE_RETRY_SECONDS`), with a warning that quotes the site's
+reply; a later shape an older page could not read is a new key (`lane_v2`). The input is `SiteInputs.lane`.
+
 **No number in a mechanism** (the swarm window's safety review, Oct 1, 2026). An agent's mechanism on the roster and in
 its birth news is its whole sentences with no number at all (`public.mechanism_text`, here `site_agent` and
 `league_news`): an entry window or a threshold ("8-21 DTE", "over the next 1-3 sessions") never reaches the page.
@@ -177,6 +187,29 @@ WHY_CHARS = 80
 TAPE_WHY_CHARS = 240
 #: A site that refused the swarm window is offered it again after this long (`Publisher.publish`).
 WINDOW_RETRY_SECONDS = 1800
+#: THE EVENT LANE'S VIEW (WP4, Oct 19, 2026; `site_lane`, read by `league/site_lane.py`): a VERSIONED key. Every block
+#: before it stays byte for byte what it was; the page of Oct 19, 2026 asks the Worker for it (`&lane=1`), every older
+#: read never sees it, and a change an older page could not read is a new key (`lane_v2`) beside this one.
+LANE_KEY = "lane_v1"
+#: A program's band on the page (league/events/bands.py `BANDS`, and "shadow" for a program that never seats) and the
+#: steps it stands on, lowest first (`site_lane.STEPS`).
+LANE_BANDS = ("shadow", "learning", "probe", "sized", "retired")
+LANE_BAND_RANK = {"sized": 0, "probe": 1, "learning": 2, "shadow": 3, "retired": 4}
+#: The band a lot was bought at (an event lot's; an older equity lane's lot: its program's probe or sized).
+LANE_ROUTES = ("learning", "probe", "sized")
+#: Whose lot: an event program's (`program`, its id on the page) or an older equity lane's agent (`agent`).
+LOT_SOURCES = ("program", "agent")
+LANE_FUNNEL_KEYS = ("since", "shadow", "learning", "probe", "sized", "retired")
+#: Each chain only narrows (a program counts on a step when it reached it or a higher one); only a seating program
+#: retires.
+LANE_FUNNEL_CHAINS = (("sized", "probe", "learning", "shadow"), ("retired", "learning"))
+MAX_PROGRAMS = 64
+#: The lots the page lists; older closed lots fold into the block's `earlier` line, as the positions table's do.
+MAX_LOTS = 300
+#: The goal's Done is read every this many settled real-money events at Probe size or above.
+CHECKPOINT_EVERY = 100
+#: A site that refused the lane's view is offered it again after this long (`Publisher.publish`).
+LANE_RETRY_SECONDS = 1800
 MAX_CHECKPOINT_BYTES = 512 * 1024
 #: The rows the site's public read names (`display_name`: every agent, every agent's or the incubator's position, every
 #: practice row; personal-site `lib/capital.mjs` `readCheckpoint`), at most, and what a name adds to each at most: its key
@@ -219,6 +252,11 @@ _KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
 _SLUG = re.compile(r"^[a-z0-9-]{1,40}$")
 _UNDERLYING = re.compile(r"^[A-Z][A-Z0-9.]{0,9}$")
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+#: A program's plain name (`league/site_lane.py` `NAMES`): letters, digits, spaces, commas and hyphens, at most 40.
+_PROGRAM_NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9 ,-]{0,38}[A-Za-z0-9])?$")
+#: A share quantity: plain digits, at most six decimals (the equity book's `QTY_PLACES`).
+_SHARES = re.compile(r"^(?:0|[1-9][0-9]{0,8})(?:\.[0-9]{1,6})?$")
+_LOT_ID = re.compile(r"^lot:[0-9]{1,12}$")
 
 
 class PublishError(RuntimeError):
@@ -441,6 +479,7 @@ class SiteInputs:
     practice: Mapping[str, Any] | None = None
     levels: Mapping[str, Any] | None = None
     rationale: Mapping[str, Any] | None = None
+    lane: Mapping[str, Any] | None = None
 
     @classmethod
     def of(cls, value: "SiteInputs | Mapping[str, Any]") -> "SiteInputs":
@@ -888,6 +927,168 @@ def site_rationale(value: Any, agents: list[Mapping[str, Any]], positions: Mappi
     return {"as_of": at, "agents": theses[:MAX_AGENTS], "trades": trades[:MAX_POSITIONS]}
 
 
+# ------------------------------------------------------------------------ the event lane's view
+def site_program(value: Any) -> dict[str, Any] | None:
+    """One program of the lane (the site's `validProgram`): exactly {id, name, band, real, shadow, look}. `id` is its id
+    on the page (`site_lane.slug_of`), `name` its plain name, `band` one of `LANE_BANDS`, `real` and `shadow` its settled
+    events with real money and in shadow, `look` its next look ({need, to_go}: the look's threshold of settled events and
+    how many it still lacks) or None. A shadow-only program has no real event and no look; a retired one no look. None
+    when it cannot be described in these (it is then not drawn; the funnel still counts it)."""
+    if not isinstance(value, Mapping):
+        return None
+    pid, name, band = str(value.get("id") or ""), value.get("name"), value.get("band")
+    real, shadow = _counter(value.get("real")), _counter(value.get("shadow"))
+    look = value.get("look")
+    if look is not None:
+        need = _counter(look.get("need")) if isinstance(look, Mapping) else None
+        to_go = _counter(look.get("to_go")) if isinstance(look, Mapping) else None
+        look = {"need": need, "to_go": to_go} if need is not None and need >= 1 and to_go is not None and to_go <= need else False
+    if (not _SLUG.match(pid) or not isinstance(name, str) or not _PROGRAM_NAME.match(name) or not quote_free(name)
+            or _VENUE.search(name) or band not in LANE_BANDS or real is None or shadow is None or look is False
+            or (band == "shadow" and (real or look is not None)) or (band == "retired" and look is not None)):
+        return None
+    return {"id": pid, "name": name, "band": band, "real": real, "shadow": shadow, "look": look}
+
+
+def site_lane_funnel(value: Any) -> dict[str, Any] | None:
+    """{since, shadow, learning, probe, sized, retired}: how many programs ever stood on each step since `since` (each a
+    counter or None), every chain only narrowing (`LANE_FUNNEL_CHAINS`); None when it cannot be made so (never wrong)."""
+    if not isinstance(value, Mapping):
+        return None
+    since = site_instant(value.get("since"))
+    counts = {key: _counter(value.get(key)) for key in LANE_FUNNEL_KEYS[1:]}
+    if since is None:
+        return None
+    for chain in LANE_FUNNEL_CHAINS:
+        known = [counts[key] for key in chain if counts[key] is not None]
+        if any(a > b for a, b in zip(known, known[1:])):
+            return None
+    return {"since": since, **counts}
+
+
+def site_lot(value: Any, programs: set[str], published_at: str) -> dict[str, Any] | None:
+    """One lot of the equity book (the site's `validLot`): exactly {id, source, owner, symbol, route, shares, open_shares,
+    status, opened_at, closed_at, pnl_usd}: which lot (`lot:<lid>`), whose (`source` "program" and `owner` an event
+    program the view lists, or "agent" and an older lane's agent's id), what it held (the symbol, the shares it bought, the shares it still holds: at least some
+    when open, none when closed), the band it was bought at, when (to the minute; a closed one closed no earlier than it
+    opened) and its P&L (its trades, and its shares at the book's own value while open). None when it cannot be
+    described in these (it then folds into the block's `earlier` line, so the sum still holds)."""
+    if not isinstance(value, Mapping) or value.get("describable") is False:
+        return None
+    lid, source = str(value.get("id") or ""), value.get("source")
+    owner = value.get("owner")
+    symbol, route, status = str(value.get("symbol") or "").upper(), value.get("route"), value.get("status")
+    shares, held = str(value.get("shares") or ""), str(value.get("open_shares") or "")
+    opened, closed = _minute(site_instant(value.get("opened_at"))), _minute(site_instant(value.get("closed_at")))
+    pnl = value.get("pnl_usd")
+    pnl = None if pnl is None else _money(pnl, signed=True)
+    if (not _LOT_ID.match(lid) or source not in LOT_SOURCES or not _UNDERLYING.match(symbol)
+            or (route is not None and route not in LANE_ROUTES) or not _SHARES.match(shares) or not _SHARES.match(held)
+            or Decimal(shares) <= 0 or Decimal(held) > Decimal(shares) or status not in ("open", "closed")
+            or opened is None or not _not_after(opened, published_at) or (value.get("pnl_usd") is not None and pnl is None)):
+        return None
+    if not isinstance(owner, str) or not (owner in programs if source == "program" else _SLUG.match(owner)):
+        return None
+    if status == "closed":
+        if Decimal(held) != 0 or closed is None or not _not_after(closed, published_at) or closed < opened:
+            return None
+        held = "0"
+    else:
+        if Decimal(held) <= 0:
+            return None
+        closed = None
+    return {"id": lid, "source": source, "owner": owner, "symbol": symbol, "route": route, "shares": shares,
+            "open_shares": held, "status": status, "opened_at": opened, "closed_at": closed, "pnl_usd": pnl}
+
+
+def _lot_order(row: Mapping[str, Any]) -> int:
+    return int(str(row["id"]).split(":", 1)[1])
+
+
+def site_lots(value: Any, programs: set[str], published_at: str) -> dict[str, Any] | None:
+    """{as_of, rows, earlier, pnl_usd} (the site's `validLots`): the equity book's lots. Rows: open first (newest
+    first), then closed (the most recently closed first), at most `MAX_LOTS`; the oldest closed beyond them, and any lot
+    the fields cannot describe, fold into `earlier` {positions, pnl_usd}. `pnl_usd` is the rows and `earlier` added up,
+    exactly (each a whole number of cents), or None while any of them is unknown."""
+    if not isinstance(value, Mapping) or not isinstance(value.get("rows"), (list, tuple)):
+        return None
+    at = site_instant(value.get("as_of"))
+    if not _not_after(at, published_at):
+        return None
+    shown, folded, ids = [], [], set()
+    for raw in value["rows"]:
+        row = site_lot(raw, programs, published_at)
+        if row is None or row["id"] in ids:
+            folded.append(_money(raw.get("pnl_usd"), signed=True) if isinstance(raw, Mapping) else None)
+            continue
+        ids.add(row["id"])
+        shown.append(row)
+    live = sorted((r for r in shown if r["status"] == "open"), key=lambda r: (r["opened_at"], _lot_order(r)), reverse=True)
+    done = sorted((r for r in shown if r["status"] == "closed"), key=lambda r: (r["closed_at"], r["opened_at"], _lot_order(r)),
+                  reverse=True)
+    rows = live + done
+    while len(rows) > MAX_LOTS and rows[-1]["status"] == "closed":
+        folded.append(rows.pop()["pnl_usd"])
+    if len(rows) > MAX_LOTS:
+        folded += [row["pnl_usd"] for row in rows[MAX_LOTS:]]
+        rows = rows[:MAX_LOTS]
+    earlier = value.get("earlier")
+    if isinstance(earlier, Mapping) and _counter(earlier.get("positions")):
+        folded_before = _money(earlier.get("pnl_usd"), signed=True) if earlier.get("pnl_usd") is not None else None
+        block = {"as_of": at, "rows": rows, "earlier": {"positions": _counter(earlier.get("positions")), "pnl_usd": folded_before},
+                 "pnl_usd": None}
+    else:
+        block = {"as_of": at, "rows": rows, "earlier": None, "pnl_usd": None}
+    _fold_lots(block, folded)
+    return block
+
+
+def _fold_lots(block: dict[str, Any], amounts: list[str | None]) -> None:
+    """Add lots' P&L (money strings, or None) to `earlier`, then set `pnl_usd` to every line added up (None when one is
+    unknown): the block's own sum, exact to the cent."""
+    if amounts:
+        before = block["earlier"] or {"positions": 0, "pnl_usd": "0.00"}
+        known = before["pnl_usd"] is not None and None not in amounts
+        block["earlier"] = {"positions": before["positions"] + len(amounts),
+                            "pnl_usd": _usd(_cents(before["pnl_usd"]) + sum(_cents(a) for a in amounts)) if known else None}
+    lines = [row["pnl_usd"] for row in block["rows"]] + ([block["earlier"]["pnl_usd"]] if block["earlier"] else [])
+    block["pnl_usd"] = None if None in lines else _usd(sum(_cents(line) for line in lines))
+
+
+def site_lane(value: Any, published_at: str) -> dict[str, Any] | None:
+    """`lane_v1`, the event lane's public view (WP4, Oct 19, 2026; `league/site_lane.py` reads it), exactly {as_of,
+    programs, funnel, checkpoint, verdict_usd, lots}: the programs (`site_program`, ordered Sized, Probe, Learning,
+    Shadow, Retired, then as the lane registered them, at most `MAX_PROGRAMS`), the funnel (`site_lane_funnel`), the
+    checkpoint the goal's Done reads ({events, next}: settled real-money events at Probe size or above, and the next
+    reading, a multiple of `CHECKPOINT_EVERY`), the lane's verdict spend (also inside `compute.claude_usd`) and the
+    equity book's lots (`site_lots`). None when the view itself cannot be read."""
+    if not isinstance(value, Mapping):
+        return None
+    at = site_instant(value.get("as_of"))
+    if not _not_after(at, published_at) or not isinstance(value.get("programs"), (list, tuple)):
+        return None
+    programs, ids = [], set()
+    for raw in value["programs"]:
+        row = site_program(raw)
+        if row is not None and row["id"] not in ids:
+            ids.add(row["id"])
+            programs.append(row)
+    programs = sorted(programs, key=lambda r: LANE_BAND_RANK[r["band"]])[:MAX_PROGRAMS]
+    ids = {row["id"] for row in programs}
+    raw_point = value.get("checkpoint")
+    events = _counter(raw_point.get("events")) if isinstance(raw_point, Mapping) else None
+    checkpoint = None if events is None else {"events": events, "next": (events // CHECKPOINT_EVERY + 1) * CHECKPOINT_EVERY}
+    spend = value.get("verdict_usd")
+    lots = site_lots(value.get("lots"), ids, published_at) if value.get("lots") is not None else None
+    return {"as_of": at, "programs": programs, "funnel": site_lane_funnel(value.get("funnel")), "checkpoint": checkpoint,
+            "verdict_usd": None if spend is None else _money(spend), "lots": lots}
+
+
+def laneless(body: Mapping[str, Any]) -> dict[str, Any]:
+    """The checkpoint without the lane's view (a site before Oct 19, 2026 refuses it): every other block as it was."""
+    return {key: item for key, item in body.items() if key != LANE_KEY}
+
+
 def _prune_window(body: dict[str, Any]) -> None:
     """The window's entries for agents the page still shows and rows the table still lists, only."""
     roster = {a["id"] for a in body["agents"]}
@@ -956,6 +1157,9 @@ def build_checkpoint(inputs: "SiteInputs | Mapping[str, Any]", published_at: str
         rationale = site_rationale(given.rationale, shown, body.get("positions"), published_at)
         if levels is not None and rationale is not None:
             body["levels"], body["rationale"] = levels, rationale
+    lane = site_lane(given.lane, published_at) if given.lane is not None else None
+    if lane is not None:
+        body[LANE_KEY] = lane
     return fit(body, pinned)
 
 
@@ -965,7 +1169,9 @@ def fit(body: dict[str, Any], pinned: Any = ()) -> dict[str, Any]:
     it (`windowless`) is what fitting the windowless body alone gives. Then the oldest retired agents, then the lowest
     band's, then the shadow book's smallest structures leave, then the positions table's oldest rows fold into its
     `earlier` line, the oldest closed first (a row never simply leaves: the table must still add up to Profit; the
-    publisher alerts on an open one folded). An agent a real position names (`pinned`) leaves only after every other.
+    publisher alerts on an open one folded). The lane's view (`lane_v1`) comes after the window: its oldest closed lots
+    fold into its own `earlier` line, then the view leaves. An agent a real position names (`pinned`) leaves only after
+    every other.
     The totals the page shows are the House's, not a count."""
     size = lambda: len(canonical(body).encode("utf-8"))  # noqa: E731
     limit = MAX_CHECKPOINT_BYTES - FIT_HEADROOM_BYTES
@@ -975,6 +1181,17 @@ def fit(body: dict[str, Any], pinned: Any = ()) -> dict[str, Any]:
         body["rationale"]["agents"] = []
     if "levels" in body and size() > limit:
         body.pop("levels", None), body.pop("rationale", None)
+    lane = body.get(LANE_KEY)
+    if isinstance(lane, dict) and size() > limit:
+        lots = lane.get("lots")
+        # The lane's oldest closed lots fold into its `earlier` line (its sum unchanged), then the view leaves whole: an
+        # older page never had it, and the page of Oct 19, 2026 draws the older ladder and table without it.
+        while size() > limit and isinstance(lots, dict) and lots["rows"] and lots["rows"][-1]["status"] == "closed":
+            amounts = [lots["rows"].pop()["pnl_usd"] for _ in range(min(10, len(lots["rows"])))
+                       if lots["rows"] and lots["rows"][-1]["status"] == "closed"]
+            _fold_lots(lots, amounts)
+        if size() > limit:
+            body.pop(LANE_KEY, None)
     while size() > limit and (body["agents"] or body["structures"] or (positions and positions["rows"])):
         if body["agents"]:
             spare = [i for i, agent in enumerate(body["agents"]) if agent["id"] not in pinned]
@@ -1272,6 +1489,8 @@ class Publisher:
         self._practice_refusal: str | None = None
         self._window_refused: float | None = None
         self._window_refusal: str | None = None
+        self._lane_refused: float | None = None
+        self._lane_refusal: str | None = None
         self._activity_error: str | None = None
         self._inputs_positions: Mapping[str, Any] | None = None
 
@@ -1352,6 +1571,12 @@ class Publisher:
         tableless = lambda value: {key: ({**item, "trades": []} if key == "rationale" and isinstance(item, Mapping) else item)  # noqa: E731
                                    for key, item in value.items() if key != "positions"}
         windowed = lambda value: "levels" in value or "rationale" in value  # noqa: E731
+        # THE LANE'S VIEW (WP4, Oct 19, 2026) is the newest shape: offered first, dropped first (`laneless`); a site that
+        # takes the checkpoint without it refused the view, which is offered again half an hour later.
+        laned = lambda value: LANE_KEY in value  # noqa: E731
+        refused = self._lane_refused
+        if laned(body) and refused is not None and self.clock() - refused < LANE_RETRY_SECONDS:
+            body = laneless(body)
         refused = self._window_refused
         if windowed(body) and refused is not None and self.clock() - refused < WINDOW_RETRY_SECONDS:
             body = windowless(body)
@@ -1363,7 +1588,19 @@ class Publisher:
             body = tableless(body)
         status, reply = self.post("/checkpoint", body)
         dropped = (False, False)
-        window_dropped = False
+        window_dropped = lane_dropped = False
+        if status == 400 and laned(body):
+            plain = laneless(body)
+            retried, again = self.post("/checkpoint", plain)
+            if retried in (200, 409):
+                why = " ".join(str(reply).split())[:200]
+                if why != self._lane_refusal:
+                    self._warn(house, f"the site refused the event lane's view (lane_v1: old site, or an entry it rejects): "
+                                      f"the checkpoint went without it, and it is offered again in half an hour (the site "
+                                      f"said: {why})")
+                self._lane_refused, self._lane_refusal = self.clock(), why
+                lane_dropped = True
+            body, status, reply = plain, retried, again
         if status == 400 and windowed(body):
             plain = windowless(body)
             retried, again = self.post("/checkpoint", plain)
@@ -1403,6 +1640,8 @@ class Publisher:
                 break
         if status in (200, 409):
             # Taken with a shape: it is offered every publish again.
+            if not lane_dropped and laned(body):
+                self._lane_refused = self._lane_refusal = None
             if not window_dropped and windowed(body):
                 self._window_refused = self._window_refusal = None
             if not dropped[0] and newer(body):
@@ -1536,22 +1775,36 @@ class Publisher:
         trading, positions = self._guard(lambda: complete(record, reading, at=now), ({"as_of": now, "pnl_usd": None}, None))
         self._inputs_positions = positions
 
+        # THE EVENT LANE (WP4): its verdicts are Claude's part of the bill whatever the site takes (unknown while its store
+        # cannot be read, never understated); its view only while the site has not refused it (`publish`).
+        from .site_lane import lane_view, read_verdict_usd
+
+        compute = {**self._compute(folds, now), **{k: v for k, v in (given.get("compute") or {}).items() if k in COMPUTE_PARTS or k == "as_of"}}
+        verdicts = self._guard(lambda: read_verdict_usd(self.state_path.parent), None)
+        if compute.get("claude_usd") is not None:
+            compute["claude_usd"] = None if verdicts is None else Decimal(str(compute["claude_usd"])) + verdicts
+        lane = None
+        refused = self._lane_refused
+        if refused is None or self.clock() - refused >= LANE_RETRY_SECONDS:
+            lane = self._guard(lambda: lane_view(self.state_path.parent, at=now, start_at=self.performance.get("start_at")), None)
+
         inputs = SiteInputs(
             started_at=given["started_at"] if "started_at" in given else self._guard(lambda: self._started(house), None),
             account=given["account"] if "account" in given else self.account(house),
             performance=given["performance"] if "performance" in given else self._performance(),
-            compute={**self._compute(folds, now), **{k: v for k, v in (given.get("compute") or {}).items() if k in COMPUTE_PARTS or k == "as_of"}},
+            compute=compute,
             gym=given.get("gym"),
             agents=list(given["agents"]) if "agents" in given else self._guard(lambda: self._agents(house, folds), []),
             structures=list(given["structures"]) if "structures" in given else self._guard(lambda: self._structures(house), []),
-            trading=trading, positions=positions, practice=given.get("practice"),
+            trading=trading, positions=positions, practice=given.get("practice"), lane=lane,
         )
         swarm = getattr(house, "swarm", None)
         if getattr(swarm, "root", None) is not None:
             from .site_window import site_window
             from .swarm.progress import attach as attach_progress
 
-            inputs.agents = self._guard(lambda: self._pinned(inputs.agents, swarm.root, positions, inputs.structures), inputs.agents)
+            inputs.agents = self._guard(lambda: self._pinned(inputs.agents, swarm.root, positions, inputs.structures,
+                                                             lots=(lane or {}).get("lots")), inputs.agents)
             inputs.agents = self._guard(lambda: attach_progress(inputs.agents, swarm.root,
                 live=getattr(house, "options_live", None), account=inputs.account, now=self.clock()), inputs.agents)
             practice = inputs.practice.get("rows") if isinstance(inputs.practice, Mapping) else None
@@ -1567,11 +1820,12 @@ class Publisher:
 
     @staticmethod
     def _pinned(agents: list[Mapping[str, Any]], root: Any, positions: Mapping[str, Any] | None,
-                structures: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+                structures: list[Mapping[str, Any]], *, lots: Mapping[str, Any] | None = None) -> list[Mapping[str, Any]]:
         """The roster with every agent a real position names pinned (`pinned=True`: never the retired list's 24, and the
         last to leave the byte limit), so its card always has a name, a mechanism and a record: the families of the table's
-        rows (an agent's or the incubator's; the newest the table can list) and of the open real structures, alive or
-        retired. One the roster does not hold is read from the swarm's store (`sitefeed.agent_rows`)."""
+        rows (an agent's or the incubator's; the newest the table can list), of the open real structures and of the older
+        equity lanes' lots the lane's view lists (`lots`: the page names them from the roster), alive or retired. One the
+        roster does not hold is read from the swarm's store (`sitefeed.agent_rows`)."""
         from .swarm.sitefeed import agent_rows
 
         rows = [r for r in (positions or {}).get("rows") or [] if isinstance(r, Mapping)]
@@ -1579,6 +1833,8 @@ class Publisher:
         listed += sorted((r for r in rows if r.get("status") != "open"), key=lambda r: str(r.get("closed_at") or ""), reverse=True)
         named = {str(r.get("family") or "") for r in listed[:MAX_POSITIONS] if r.get("source") in AGENT_SOURCES}
         named |= {str(s.get("agent") or "") for s in structures or [] if isinstance(s, Mapping) and s.get("real") is True}
+        named |= {str(r.get("owner") or "") for r in (lots or {}).get("rows") or []
+                  if isinstance(r, Mapping) and r.get("source") == "agent"}
         named = {name for name in named if _SLUG.match(name)}
         have = {str(a.get("id") or "") for a in agents}
         extra = agent_rows(root, sorted(named - have)) if named - have else []
