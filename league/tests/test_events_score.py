@@ -330,12 +330,12 @@ class ScoreTest(unittest.TestCase):
         self.assertEqual(SCO.equity_on(self.st, dt.date(2026, 10, 22)), 1.0)
         self.assertIsNone(SCO.equity_on(self.st, dt.date(2026, 10, 19)))
 
-    def test_the_cli_equity_command_and_this_record_read_alike(self):
+    def test_the_cli_equity_command_is_this_record(self):
+        import inspect
         from league.events import __main__ as M
-        from league.events import run as R
-        ctx = R.Context(self.st, self.gw, lambda url: b"", now=lambda: self.after(self.d0, 270))
+        self.assertIn("SC.record_equity(st, gw", inspect.getsource(M.main))   # one recorder, the score module's
         self.gw.equity = "15000.25"
-        M.record_equity(ctx)
+        SCO.record_equity(self.st, self.gw, now=self.after(self.d0, 270))
         self.assertEqual(SCO.equity_on(self.st, self.d0.day), 15000.25)
         self.assertEqual(SCO.record_equity(self.st, self.gw, now=self.after(self.d0, 280)), {"kept": "15000.25"})
 
