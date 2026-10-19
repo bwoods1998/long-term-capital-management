@@ -35,19 +35,6 @@ the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PR
 [PREREG-EVL-2.md](docs/prereg/PREREG-EVL-2.md), its page is [docs/events.md](docs/events.md); its code runs in shadow on
 the captain's workstation from branch `feat/evl-shadow` until release R1 brings it onto the House.
 
-### 03:46Z Oct 19, 2026: release 1019a (#568: R0 #567, the old lanes exits only, the cancelled subscriptions' end dates, gateway G1 #566), House `20261019T034531Z-6583edd72b34`, main `c1c6fae7`; gateway `7456e73d`
-
-- Verified 03:56Z: real money true, no failures, the options execution fingerprint `b60410ad`, the equity identity
-  `78022ca6`, the money digest `f4fc39ff`, the constitution `34bbe7a5`, the gate contract `397b22b7`; the equity lane
-  enabled false (exits only) with its 6 ETF lots held; the gateway's suite 465/465; one Claude Haiku 4.5 call through
-  the new gateway answered; Alpaca news read through it.
-- The cancelled subscriptions (`fix/subs-end`): `league/publish.py` `SUBSCRIPTIONS_ENDED_AT` stops ThetaData's and
-  Algo Trader Plus's pro-rata costs on the site from 2026-10-19T00:00:00Z; past costs stay.
-- The captain's setting `elane.forward.twins` false (03:16Z): the old ETF programs' refused buys would otherwise read as
-  twin disagreements (FW9, FW6) and mail the owner each day.
-- Rollback: `scripts/floor_box.py rollback` and the previous main `62fd070e` (release 1017r); the gateway by `wrangler
-  rollback a6026308-26f8-42c9-8aca-f173b326b5ba`.
-
 ### Gateway G1: Claude Haiku 4.5 priced and Alpaca news readable, for the event lane (the goal of Oct 19, 2026; PREREG-EVL-1), on `feat/g1-haiku-news` (DEPLOYED 03:56Z Oct 19 in #568, gateway `7456e73d`; a gateway deploy only, no House code, no money rule, no order path)
 
 - `CLAUDE_MODELS` gains `claude-haiku-4-5-20251001` at the list prices ($1 input, $1.25 five-minute write, $0.10 hit,
@@ -410,6 +397,19 @@ money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no se
   missing close, the field frozen, the same blocked list at K=30 and K=40, no Infinity, a reader that never raises,
   and every other Done key unchanged. It also runs the script's own checks, copied, and the pinned script itself
   where `LTCM_SCALING_SCRIPT` names it.
+
+### 03:46Z Oct 19, 2026: release 1019a (#568: R0 #567, the old lanes exits only, the cancelled subscriptions' end dates, gateway G1 #566), House `20261019T034531Z-6583edd72b34`, main `c1c6fae7`; gateway `7456e73d`
+
+- Verified 03:56Z: real money true, no failures, the options execution fingerprint `b60410ad`, the equity identity
+  `78022ca6`, the money digest `f4fc39ff`, the constitution `34bbe7a5`, the gate contract `397b22b7`; the equity lane
+  enabled false (exits only) with its 6 ETF lots held; the gateway's suite 465/465; one Claude Haiku 4.5 call through
+  the new gateway answered; Alpaca news read through it.
+- The cancelled subscriptions (`fix/subs-end`): `league/publish.py` `SUBSCRIPTIONS_ENDED_AT` stops ThetaData's and
+  Algo Trader Plus's pro-rata costs on the site from 2026-10-19T00:00:00Z; past costs stay.
+- The captain's setting `elane.forward.twins` false (03:16Z): the old ETF programs' refused buys would otherwise read as
+  twin disagreements (FW9, FW6) and mail the owner each day.
+- Rollback: `scripts/floor_box.py rollback` and the previous main `62fd070e` (release 1017r); the gateway by `wrangler
+  rollback a6026308-26f8-42c9-8aca-f173b326b5ba`.
 
 ### 20:43Z Oct 15, 2026: release 1015f and FW9 (#560, carrying #559 and #558), House `20261015T204317Z-ad3c7f9653cc`, main `e136c251`; gateway `a6026308`
 
