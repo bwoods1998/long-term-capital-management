@@ -208,11 +208,25 @@
     // here: the House accounts for it. The running House sells EVERY stock position at market each pass
     // (league/live/step.py `_close_shares`): the House release that first sends a buy must limit that to assignment and
     // exercise shares (docs/operations.md), or what is bought here is sold at once.
+    // NO MARGIN AS A GATEWAY WALL (release R2, gateway G2; the owner's goal of Oct 19, 2026, item 4: "<= 100% invested,
+    // no margin"): STOCK_MAX_EQUITY_MULTIPLE "1", so every long position + every resting stock buy + this one is at most
+    // 1 x equity whatever the account's multiplier (it was "2", the venue's overnight line; the House never asked for
+    // more than its own 1.00 x E, so nothing it sends changes).
     "STOCK_BUYS_REAL": "on",
     "STOCK_ETF_EQUITY_SHARE": "0.5",
     "STOCK_SINGLE_EQUITY_SHARE": "0.2",
-    "STOCK_MAX_EQUITY_MULTIPLE": "2",
+    "STOCK_MAX_EQUITY_MULTIPLE": "1",
     "STOCK_DAY_EQUITY_MULTIPLE": "4",
+    // THE EVENT LANE'S BUYS (release R2, gateway G2; PREREG-EVL-1 section 8; lib/caps.mjs "event-lane stock buys"): a
+    // whole-share limit-on-open or limit-on-close buy (time_in_force "opg" or "cls") of a US common stock the House's
+    // eligible list names for the New York day (POST /v1/stock/eligible), checked again here against the venue's asset
+    // record (us_equity, active, tradable, NYSE NASDAQ AMEX ARCA BATS) and its SIP daily bars (previous close >= $3, 20
+    // sessions' mean dollar volume >= $1M), its limit at most 1.25 x the previous SIP close, metered at qty x limit, and
+    // held book-wide to STOCK_SINGLE_EQUITY_SHARE of equity a name and never above 10% (a code ceiling), inside every cap
+    // above; the kill switch stops it. "on" admits them only while STOCK_BUYS_REAL is "on" too; "off" SHIPS: the owner
+    // turns it on with the first Probe of an event program (docs/operations.md, "The event lane's buys at the gateway"). Sales of
+    // the shares are closes like any other and go either way.
+    "STOCK_EVENT_BUYS": "off",
 
     // The research library (Sept 29, 2026; lib/library.mjs, GET /v1/research/*): arXiv papers posted before 2025 for the
     // swarm's agents. No secret. arXiv's API terms: "make no more than one request every three seconds, and limit

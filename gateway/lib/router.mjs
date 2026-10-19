@@ -10,10 +10,16 @@
 //                                            options capped by maximum loss against the account's own equity, stock
 //                                            closes of shares it holds (`realOrder`, Sept 26, 2026), and, while
 //                                            STOCK_BUYS_REAL is "on", long-only buys of listed stocks and ETFs capped
-//                                            by the account's own reading (`realStockBuy`, Oct 10, 2026)
+//                                            by the account's own reading (`realStockBuy`, Oct 10, 2026), and, while
+//                                            STOCK_EVENT_BUYS is "on" too, the event lane's whole-share limit-on-open and
+//                                            limit-on-close buys of a name on the House's eligible list (`realEventBuy`,
+//                                            release R2)
 //   GET|POST|DELETE /v1/alpaca-paper/<path>  the practice account: same paths, simulated money, no caps;
 //                                            its option orders are held to defined-risk shapes
 //   GET             /v1/kalshi/ws-auth       handshake headers for the Kalshi WebSocket, 30 s of life
+//   GET|POST        /v1/stock/eligible       the House's eligible list for the event lane's buys: POST {day, symbols} (the
+//                                            runtime token) stores the names of one New York session; GET says which day,
+//                                            how many and their sha, never the names (release R2; lib/caps.mjs)
 //   POST            /v1/notify               one notice mailed to the owner (a trade, a stop, a funding cliff, a stall),
 //                                            capped per day; a stall at most every 12 hours for the same owner
 //                                            steps, every 24 hours when it needs nothing from the owner
@@ -72,6 +78,7 @@ import {
   admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError, closedLegRows,
   shortCloseBody, longCloseBody, singleLegOpenError, realStockClose, CREDIT_STRUCTURES,
   stockBuysEnabled, stockBuyOrder, heldShares, stockExposure, closeAvailable,
+  isEventBuy, eventBuyOrder, eventAssetError, eventBarFacts, eventLimitError, eligibleList, stockEventBuysEnabled, nyDay,
 } from './caps.mjs';
 import { parsePico, mulPico, picoToMicro } from './money.mjs';
 import * as kalshi from './kalshi.mjs';
@@ -183,6 +190,13 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       return json({ error: 'The kill switch could not be changed; it is as it was.', cap: 'setup' }, 503);
     }
     return json(await gate.status());
+  }
+
+  if (path === '/v1/stock/eligible') {
+    // The House's eligible list (release R2): it moves no money, so the kill switch does not stop it.
+    if (request.method === 'GET') return json(await gate.stockEligibleStatus());
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'GET, POST' });
+    return publishEligible(request, { gate, now });
   }
 
   if (path === '/v1/notify') {
@@ -491,6 +505,9 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
     // read: it is an exit, reserved at one micro-dollar like any real close, and a quote could only delay it.
     const close = realStockClose(parsed);
     if (close.error) return { response: fail(close.error, 400) };
+    // AN EVENT BUY (release R2): a buy in the opening or the closing auction is the event lane's, judged by its own rules
+    // (`realEventBuy`), never a cover: a buy of a symbol the account holds short is refused there as an open.
+    if (isEventBuy(parsed)) return realEventBuy(parsed, env, { gate, fetcher, now });
     const symbol = close.body.legs[0].symbol;
     // Every reading here is FRESH, never from the cache (the review of Oct 10, 2026): an isolate's cached reading may
     // still show shares another isolate has sold, or a short it has covered, and a decision taken from it could sell what
@@ -603,6 +620,136 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
 async function realStockBuy(parsed, env, { gate, fetcher, now }) {
   const order = stockBuyOrder(parsed);
   if (order.error) return { response: fail(order.error, 400) };
+  return stockBuyReads(order, parsed, env, { gate, fetcher, now });
+}
+
+/**
+ * THE EVENT LANE'S BUY (release R2, gateway G2; lib/caps.mjs "event-lane stock buys"): a whole-share limit-on-open or
+ * limit-on-close buy of a name the House listed for the day. In order, each refusal before anything is sent: its shape
+ * (`eventBuyOrder`, a 400); both switches (STOCK_BUYS_REAL and STOCK_EVENT_BUYS "on", else a 403 `stock_event_buys` with
+ * nothing read); the House's eligible list of the New York day (a 403 `stock_eligible`); the venue's asset record and the
+ * name's SIP daily bars, read with the real account's keys and kept for the day (`eventFacts`: a 403 `stock_asset`,
+ * `stock_price` or `stock_adv` for a name that does not qualify, a 424 `asset` or `bars` when a reading could not be
+ * made, which the House sends again); the limit at most 1.25 x the previous SIP close (a 403 `stock_limit`); then the
+ * reads and the caps of every real stock buy (`stockBuyReads`, `gate.reserveStock`), the name's share the event one.
+ */
+async function realEventBuy(parsed, env, { gate, fetcher, now }) {
+  const order = eventBuyOrder(parsed);
+  if (order.error) return { response: fail(order.error, 400) };
+  if (!stockBuysEnabled(env) || !stockEventBuysEnabled(env)) {
+    return {
+      response: refuse(`Event buys are off (${!stockBuysEnabled(env) ? 'STOCK_BUYS_REAL' : 'STOCK_EVENT_BUYS'} is not "on"): ` +
+        'nothing was read or sent.', 403, 'stock_event_buys'),
+    };
+  }
+  const listed = await gate.stockEligibleHas({ symbol: order.symbol, at: now() });
+  if (!listed || listed.ok !== true) {
+    return { response: refuse(String(listed?.error || 'The House\'s eligible list could not be read.'), 403, 'stock_eligible') };
+  }
+  const facts = await eventFacts(order.symbol, env, { fetcher, now });
+  if (facts.error) return { response: refuse(facts.error, facts.status, facts.cap) };
+  const above = eventLimitError(order.limit, facts.prevClose, order.symbol);
+  if (above) return { response: refuse(above, 403, 'stock_limit') };
+  return stockBuyReads({ ...order, kind: 'event' }, parsed, env, { gate, fetcher, now }, { event: true });
+}
+
+//: An event buy's asset and bars readings, kept per New York day and symbol in this isolate (`eventFacts`): a definite
+//: verdict (the name qualifies, or why not) is not read again that day; a reading that failed is not kept.
+const EVENT_FACTS_MAX = 2000;
+const eventFactsCache = new Map();
+/** Forget every kept event-buy reading (a fresh isolate's state; the tests start each case from it). */
+export function forgetEventFacts() {
+  eventFactsCache.clear();
+}
+//: The SIP daily bars an event buy reads: this many calendar days back (20 sessions and a margin for holidays).
+const EVENT_BARS_DAYS = 45;
+//: The SIP bars' end is at least this old (the Basic plan refuses SIP data newer than 15 minutes).
+const SIP_DELAY_MS = 16 * 60000;
+
+/**
+ * Whether `symbol` qualifies for an event buy by the venue's own records, read with the real account's keys and kept
+ * for the New York day (`eventFactsCache`): `{ prevClose, adv }` (picodollars) or `{ error, status, cap }`. The asset
+ * first (`GET v2/assets/<symbol>`, trading host: `caps.eventAssetError`), then the SIP daily bars of the sessions before
+ * today (`GET v2/stocks/<symbol>/bars`, timeframe 1Day, adjustment raw, feed sip, `end` 16 minutes back:
+ * `caps.eventBarFacts`). Every read is signed like the account's, never follows a redirect, and fails closed.
+ */
+async function eventFacts(symbol, env, { fetcher, now }) {
+  const at = now();
+  const today = nyDay(at);
+  const key = `${today}|${symbol}`;
+  if (eventFactsCache.has(key)) return eventFactsCache.get(key);
+  const keep = verdict => {
+    if (eventFactsCache.size >= EVENT_FACTS_MAX) eventFactsCache.clear();
+    eventFactsCache.set(key, verdict);
+    return verdict;
+  };
+  const asset = await venueRead(env, `v2/assets/${encodeURIComponent(symbol)}`, '', { fetcher, now });
+  if (asset.error) return { error: `Cannot read the venue's asset record of ${symbol}: ${asset.error}.`, status: POSITIONS_UNREAD_STATUS, cap: 'asset' };
+  const notAsset = eventAssetError(asset.body, symbol);
+  if (notAsset) return keep({ error: `An event buy is refused: ${notAsset}.`, status: 403, cap: 'stock_asset' });
+  const start = new Date(Date.parse(`${today}T12:00:00Z`) - EVENT_BARS_DAYS * 86400000).toISOString().slice(0, 10);
+  const end = new Date(at - SIP_DELAY_MS).toISOString();
+  const query = `?timeframe=1Day&start=${start}&end=${encodeURIComponent(end)}&feed=sip&adjustment=raw&limit=1000`;
+  const bars = await venueRead(env, `v2/stocks/${encodeURIComponent(symbol)}/bars`, query, { fetcher, now });
+  if (bars.error) return { error: `Cannot read the SIP daily bars of ${symbol}: ${bars.error}.`, status: POSITIONS_UNREAD_STATUS, cap: 'bars' };
+  const found = eventBarFacts(bars.body?.bars, today, symbol);
+  if (found.error) {
+    if (found.cap === 'bars') return { error: `Cannot read the SIP daily bars of ${symbol}: ${found.error}.`, status: POSITIONS_UNREAD_STATUS, cap: 'bars' };
+    return keep({ error: `An event buy is refused: ${found.error}.`, status: 403, cap: found.cap });
+  }
+  return keep({ prevClose: found.prevClose, adv: found.adv });
+}
+
+/** One signed, read-only GET of the real Alpaca venue (`path` and `query`): `{ body }` or `{ error }`; never cached here. */
+async function venueRead(env, path, query, { fetcher, now }) {
+  let answer;
+  try {
+    const signed = await sign({ venue: 'alpaca', path }, new Request(`https://x/${path}${query}`, { method: 'GET' }), env, { now: now() });
+    answer = await fetcher(signed.url, { method: 'GET', headers: signed.headers, signal: AbortSignal.timeout(8000), redirect: 'manual' });
+  } catch (error) {
+    return { error: error?.name || 'fetch failed' };
+  }
+  if (!answer.ok) return { error: `venue HTTP ${answer.status}` };
+  try {
+    return { body: await answer.json() };
+  } catch {
+    return { error: 'an unreadable venue answer' };
+  }
+}
+
+/**
+ * THE HOUSE'S ELIGIBLE LIST, published (release R2): `POST /v1/stock/eligible` with `{day, symbols}`, read by
+ * `caps.eligibleList` against the New York day and stored as the Gate's one list with its SHA-256
+ * (`<day>:<symbols, sorted, joined by ",">`). The answer `{ ok, day, count, sha, at }` lets the House check that the
+ * gateway holds exactly what it sent.
+ */
+async function publishEligible(request, { gate, now }) {
+  const body = await readBody(request, 256 * 1024);
+  if (body.error) return fail(body.error, 413);
+  let parsed;
+  try {
+    parsed = JSON.parse(body.text || '');
+  } catch {
+    return fail('An eligible list must be JSON.', 400);
+  }
+  const list = eligibleList(parsed, nyDay(now()));
+  if (list.error) return json({ error: list.error, cap: 'stock_eligible' }, 400);
+  const text = `${list.day}:${list.symbols.join(',')}`;
+  const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+  const stored = await gate.stockEligibleSet({ day: list.day, symbols: list.symbols, sha, at: now() });
+  if (!stored || stored.ok !== true) {
+    return json({ error: stored?.error || 'The eligible list could not be stored.', cap: 'stock_eligible' }, stored?.status || 503);
+  }
+  return json(stored);
+}
+
+/**
+ * The reads and the reservation of every real stock buy (`realStockBuy`, `realEventBuy`), once the order's own shape
+ * and rules have passed (`order`: its symbol and micro-dollars; `extra`: what the gate is told beside, `{ event: true }`
+ * for an event buy).
+ */
+async function stockBuyReads(order, parsed, env, { gate, fetcher, now }, extra = {}) {
   const readAt = now();
   const orders = await realOpenOrders(env, { fetcher, now });
   if (orders.error) return { response: refuse(`Cannot read the real account's open orders: ${orders.error}.`, POSITIONS_UNREAD_STATUS, 'orders') };
@@ -634,6 +781,7 @@ async function realStockBuy(parsed, env, { gate, fetcher, now }) {
       options_held_micro: String(exposure.optionsMicro), read_at: readAt,
       open_buys: exposure.openBuys.map(row => ({ client_order_id: row.client_order_id, symbol: row.symbol, micro: String(row.micro) })),
       ...(typeof parsed.client_order_id === 'string' ? { client_order_id: parsed.client_order_id } : {}), statuses,
+      ...(extra.event === true ? { event: true } : {}),
     },
   };
 }

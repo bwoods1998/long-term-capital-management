@@ -30,7 +30,8 @@ owner's `GATEWAY_ADMIN_TOKEN`; `/v1/kill` takes either (V3-A: stopping is never 
 |---|---|
 | `GET /v1/health` | the kill switch, caps and today's counters, the OpenAI month, the Claude meter (`claude`: funded total, spent, in flight, remaining, holds, overruns, the priced models, `by_role`, `by_agent`, stop reasons, geographies), Sail's balance and the House box's state; never reads a venue itself |
 | `POST /v1/kill`, `POST /v1/unkill` | engage the kill switch (either token), release it (owner only); both written to the admin log |
-| `/v1/alpaca/<path>` | the Brokerage Account (orders to `api.alpaca.markets`, market data to `data.alpaca.markets`): options under the caps by maximum loss, stock closes, and listed long-only stock and ETF buys under the stock caps (below) |
+| `/v1/alpaca/<path>` | the Brokerage Account (orders to `api.alpaca.markets`, market data to `data.alpaca.markets`): options under the caps by maximum loss, stock closes, listed long-only stock and ETF buys under the stock caps, and the event lane's whole-share auction buys (above) |
+| `POST /v1/stock/eligible`, `GET /v1/stock/eligible` | the House's eligible list for the event lane's buys (release R2): `{day, symbols}` for one New York session (that day or up to a week ahead; at most 5,000 US stock tickers, none an ETF of `STOCK_UNIVERSE`, none twice), kept as the Gate's one list with its SHA-256 of `<day>:<symbols sorted, joined by ",">` (`{ok, day, count, sha, at}`; a list of an earlier day than the one held is `409`); GET answers `{day, count, sha, at}`, never the names. The kill switch does not stop it: it moves no money |
 | `/v1/alpaca-paper/<path>` | the paper account: never metered, not stopped by the kill switch, held to the same defined-risk shapes |
 | `POST /v1/frontier/responses`, `GET /v1/frontier/models` | one metered OpenAI Responses call; the models the key reaches |
 | `POST /v1/claude/messages` | one Claude Messages call, reserved and settled against the funded total; streamed when `stream: true`; stopped by the kill switch |
@@ -67,7 +68,8 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
 | `EQUITY_CAP_MAX_AGE_MS` | 120000 | the oldest equity reading an opening order is sized against |
 | `OPTION_STRUCTURES_REAL` | `debit_vertical,long_butterfly,long_call,long_put` (V3-A part 1 leaves it so; `credit_vertical,iron_condor,iron_butterfly` join it only in the credit-types release, with the constitution's list) | the types a real OPEN may be: exactly the constitution's `options_money.real_types`; the credit types only at `CREDIT_MIN_EQUITY_USD` of the gateway's own equity reading; `off` opens none. Paper structures and closes of already held real positions go whatever it says |
 | `STOCK_BUYS_REAL` | `on` (Oct 10, 2026; not yet deployed) | long-only buys of `STOCK_UNIVERSE` on the real account; anything but `on` admits none, and closes go either way |
-| `STOCK_ETF_EQUITY_SHARE`, `STOCK_SINGLE_EQUITY_SHARE`, `STOCK_MAX_EQUITY_MULTIPLE`, `STOCK_DAY_EQUITY_MULTIPLE` | 0.5, 0.2, 2, 4 (the code's ceilings) | an ETF position at most 50% of equity, a single stock 20%, the whole long book a margin line at equity x m, m = min(2, the account's multiplier), long options counted m times; the day's stock buys (cancelled ones too) at most 4x equity; a value here can only lower them |
+| `STOCK_ETF_EQUITY_SHARE`, `STOCK_SINGLE_EQUITY_SHARE`, `STOCK_MAX_EQUITY_MULTIPLE`, `STOCK_DAY_EQUITY_MULTIPLE` | 0.5, 0.2, **1** (release R2, not yet deployed; 2 before it), 4 (the code's ceilings are 0.5, 0.2, 2, 4) | an ETF position at most 50% of equity, a single stock 20%, the whole long book a margin line at equity x m, m = min(`STOCK_MAX_EQUITY_MULTIPLE`, the account's multiplier), long options counted m times: at 1, NO MARGIN as a gateway wall (the goal of Oct 19, 2026); the day's stock buys (cancelled ones too) at most 4x equity; a value here can only lower them |
+| `STOCK_EVENT_BUYS` | `off` (release R2, not yet deployed: the owner turns it `on` with the first Probe of an event program) | the event lane's buys: whole-share limit-on-open / limit-on-close buys of a name on the House's eligible list (below); `on` admits them only while `STOCK_BUYS_REAL` is `on` too; sales go either way |
 | `CAP_TIMEZONE` | America/New_York | the calendar the day rolls on |
 | `MAX_ORDER_USD`, `MAX_ORDER_USD_KALSHI`, `MAX_DAY_USD` | 75, 75, 4000 | Kalshi only (dead until the prune removes it); the real account's orders never spend Kalshi's day |
 
@@ -113,6 +115,28 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
   No order is ever a short sale; crypto is refused. The running House sells every stock position at
   market (`_close_shares`): the House release that first buys must limit that to assignment shares
   (docs/operations.md).
+- **The event lane's buys** (release R2, gateway G2; PREREG-EVL-1 section 8; `lib/caps.mjs` "event-lane
+  stock buys", `realEventBuy` in `lib/router.mjs`). A buy whose `time_in_force` is `opg` or `cls` is an
+  EVENT BUY, judged by its own rules before the stock caps above, each refusal before anything is sent:
+  its shape (a US stock ticker that `STOCK_UNIVERSE` does not mark an ETF, `type: "limit"`, a WHOLE number
+  of shares, a `limit_price` of at most four decimals, never `notional`, never extended hours: a `400`);
+  both switches, `STOCK_BUYS_REAL` and `STOCK_EVENT_BUYS` `on` (else `403 {cap: "stock_event_buys"}`,
+  nothing read); the House's eligible list of the New York day names it (`POST /v1/stock/eligible`, below;
+  else `403 {cap: "stock_eligible"}`, nothing read); the venue's `v2/assets/<symbol>` says `us_equity`,
+  `active`, `tradable`, on NYSE, NASDAQ, AMEX, ARCA or BATS (`403 {cap: "stock_asset"}`); its SIP daily bars
+  before today (`v2/stocks/<symbol>/bars`, 1Day, raw, `feed=sip`, the end 16 minutes back for the Basic
+  plan) put the previous close at $3.00 or more and the last 20 sessions' mean close x volume at $1,000,000
+  or more (`403 {cap: "stock_price"}` or `{cap: "stock_adv"}`); a reading that could not be made is
+  `424 {cap: "asset"}` or `{cap: "bars"}` (nothing sent; the House sends it again). The asset and the bars
+  are read once a New York day a symbol in each isolate (a definite verdict is kept, a failed reading is
+  not). Then the limit at most 1.25 x that previous SIP close (`403 {cap: "stock_limit"}`), and every stock
+  cap above with ONE share for the name: the single-stock share, never above the goal's 10% of equity (a
+  code ceiling, `STOCK_EVENT_SHARE_MAX`), BOOK-WIDE (the name's long market value + its resting buys +
+  buys in flight + this order); the Gate checks the eligible list again in the step that reserves. Metered
+  at `qty x limit_price`; an open in the day's counts; the kill switch stops it. A buy of a symbol held
+  short is refused as an open (`400`): it never covers. SALES of event shares are closes like any other:
+  a `market` or `limit` sale of shares held, in any `time_in_force` the venue takes (`opg` and `cls` for the
+  lane's exits at the open and the close), at most what is held, serialized in the Gate.
 - A refusal is `403 {error, cap}`; the kill switch is `423` and stops every order-creating call on the
   real account, exits included; an order that cannot be priced is `400`. Every refusal made before
   anything is forwarded that is a `424` or a `5xx` names its `cap` (`equity`, `positions`,
@@ -127,7 +151,9 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
   opening maximum loss and its cap, `max_day_usd_alpaca`, whether opens and credit opens are admitted,
   orders today of `max_day_open_orders` and `max_day_orders`; and `stock_buys`: the switch, the three
   shares and the day's multiple, the list, today's buys, the buys in flight, the closes not yet
-  answered and whether a buy would be admitted now.
+  answered and whether a buy would be admitted now; and since release R2 its `event_buys`: both switches
+  together, the event name's share (`0.1`), the House's eligible list (its day, count, sha and time: never
+  its names) and whether an event buy would be admitted now.
 
 ## The OpenAI month
 

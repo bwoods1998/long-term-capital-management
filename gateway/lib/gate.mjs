@@ -6,7 +6,7 @@
 // this module rather than in the Durable Object class is what lets every rule below be tested
 // without a Workers runtime.
 
-import { caps, venueOrderCap, STOCK_UNIVERSE, stockBuysEnabled, picoUnits } from './caps.mjs';
+import { caps, venueOrderCap, STOCK_UNIVERSE, stockBuysEnabled, stockEventBuysEnabled, picoUnits } from './caps.mjs';
 import { monthCapMicro } from './frontier.mjs';
 import * as claude from './claude.mjs';
 import * as equity from './equity.mjs';
@@ -51,6 +51,11 @@ export const ADMIN_LOG_KEY = 'admin-log-v1';
 //: CLOSES (sales of shares held long, covers of a short) are kept in it too (`kind: "close"`; the review of Oct 10, 2026),
 //: so a second close of the same shares is refused before the venue shows the first.
 export const STOCK_PENDING_KEY = 'stock-pending-v1';
+//: THE HOUSE'S ELIGIBLE LIST (release R2, gateway G2; lib/caps.mjs "event-lane stock buys"): the names the House's
+//: universe test admitted for one New York session, POSTed with its runtime token (`stockEligibleSet`), {day, symbols,
+//: sha, count, at}. One list is kept: a later day's replaces it, the same day's is replaced by a newer publish, an
+//: earlier day's is refused. An event buy goes only for a name on the list of its own New York day.
+export const STOCK_ELIGIBLE_KEY = 'stock-eligible-v1';
 //: An admitted stock buy or close whose forward got no answer is held as if answered when this has passed (twice the
 //: forward's 30-second timeout). A reading may begin at most STOCK_READ_SKEW_MS after the gate's own clock.
 export const STOCK_PENDING_MS = 60_000;
@@ -351,6 +356,27 @@ export function createGate({ store, env = {}, now = Date.now }) {
     }
     return changed;
   };
+  /** The House's eligible list as stored (`STOCK_ELIGIBLE_KEY`), or null when there is none or it cannot be read. */
+  const eligibleRow = () => {
+    const row = read(store, STOCK_ELIGIBLE_KEY, null);
+    return row && typeof row.day === 'string' && Array.isArray(row.symbols) ? row : null;
+  };
+  /** The eligible list as /v1/health and GET /v1/stock/eligible show it: its day, count, sha and time, never its names. */
+  const eligibleStatus = () => {
+    const row = eligibleRow();
+    return row ? { day: row.day, count: row.symbols.length, sha: row.sha ?? null, at: Number.isFinite(row.at) ? iso(row.at) : null }
+      : { day: null, count: 0, sha: null, at: null };
+  };
+  /** Why an event buy of `symbol` at `at` is not on the House's eligible list of its New York day, or null. */
+  const eligibleRefusal = (symbol, at) => {
+    const today = tradingDay(at, 'America/New_York');
+    const row = eligibleRow();
+    if (!row) return 'The House has published no eligible list: an event buy goes only for a name on the list of its day.';
+    if (row.day !== today) return `The House's eligible list is for ${row.day}, not ${today}: an event buy goes only on its list's own day.`;
+    if (!row.symbols.includes(symbol)) return `${symbol} is not on the House's eligible list of ${today}: an event buy goes only for a listed name.`;
+    return null;
+  };
+
   /** Take an entry out of the ledger (a buy that never reached the venue); the entry, or null. */
   const stockTake = (id, at) => {
     const ledger = stockLedger(at);
@@ -383,7 +409,19 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return { ok: false, status: 403, cap: 'stock_buys', error: 'Real stock buys are off (STOCK_BUYS_REAL is not "on"): only closes of held shares go.' };
     }
     const symbol = String(stock?.symbol || '');
-    const kind = Object.prototype.hasOwnProperty.call(STOCK_UNIVERSE, symbol) ? STOCK_UNIVERSE[symbol] : null;
+    // AN EVENT BUY (release R2; lib/caps.mjs "event-lane stock buys"): its name is held to the event share, book-wide,
+    // and goes only while STOCK_EVENT_BUYS is "on" and the House's eligible list of this New York day names it, judged
+    // here again in the step that reserves (a list replaced since the router read it is the one that counts).
+    const event = stock?.event === true;
+    const listed = Object.prototype.hasOwnProperty.call(STOCK_UNIVERSE, symbol) ? STOCK_UNIVERSE[symbol] : null;
+    const kind = event ? (listed === 'etf' ? null : 'event') : listed;
+    if (event && !stockEventBuysEnabled(env)) {
+      return { ok: false, status: 403, cap: 'stock_event_buys', error: 'Event buys are off (STOCK_EVENT_BUYS is not "on"): nothing was sent.' };
+    }
+    if (event && kind !== null) {
+      const why = eligibleRefusal(symbol, at);
+      if (why) return { ok: false, status: 403, cap: 'stock_eligible', error: why };
+    }
     const big = value => (/^-?\d{1,20}$/.test(String(value)) ? BigInt(value) : null);
     const figures = ['equity_micro', 'buying_power_micro', 'multiplier', 'symbol_held_micro', 'total_held_micro', 'options_held_micro']
       .map(key => big(stock?.[key]));
@@ -410,8 +448,8 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return { ok: false, status: 403, cap: 'day_orders', error: `Today's order count cap of ${limits.maxDayOrders} is already reached.` };
     }
     const limitsNow = account.stockCaps(env);
-    const share = kind === 'etf' ? limitsNow.etfShare : limitsNow.stockShare;
-    const what = kind === 'etf' ? 'an ETF' : 'a single stock';
+    const share = kind === 'etf' ? limitsNow.etfShare : kind === 'event' ? account.stockEventShare(limitsNow) : limitsNow.stockShare;
+    const what = kind === 'etf' ? 'an ETF' : kind === 'event' ? 'an event-lane stock (book-wide)' : 'a single stock';
     const symbolCap = account.stockSymbolCapMicro(limitsNow, kind, equityMicro);
     const equityText = `$${account.formatUsdDown(equityMicro)} equity`;
     if (amount > symbolCap) {
@@ -566,6 +604,37 @@ export function createGate({ store, env = {}, now = Date.now }) {
     caps: limits,
 
     killSwitch: () => killed(),
+
+    /**
+     * THE HOUSE'S ELIGIBLE LIST (release R2): `{day, symbols, sha}` as the router read and checked it (`caps.eligibleList`;
+     * the sha is the router's SHA-256 of `<day>:<symbols joined by ",">`), stored as the one list. A list for an earlier
+     * New York day than the one held is refused (409, cap `stock_eligible`); one for the same day replaces it. The kill
+     * switch does not stop it: it moves no money. `{ ok, day, count, sha, at }` or a refusal.
+     */
+    stockEligibleSet({ day, symbols, sha, at = now() }) {
+      if (typeof day !== 'string' || !Array.isArray(symbols) || typeof sha !== 'string') {
+        return { ok: false, status: 400, cap: 'stock_eligible', error: 'An eligible list reaches the gate with its day, symbols and sha.' };
+      }
+      const held = eligibleRow();
+      if (held && held.day > day) {
+        return { ok: false, status: 409, cap: 'stock_eligible',
+          error: `The gateway holds the eligible list of ${held.day}: a list of the earlier day ${day} is refused.` };
+      }
+      const row = { day, symbols: [...symbols], sha, count: symbols.length, at: Number(at) };
+      write(store, STOCK_ELIGIBLE_KEY, row);
+      return { ok: true, day, count: row.count, sha, at: iso(at) };
+    },
+
+    /** The eligible list as /v1/health and GET /v1/stock/eligible show it: its day, count, sha and time, never its names. */
+    stockEligibleStatus() {
+      return eligibleStatus();
+    },
+
+    /** Whether an event buy of `symbol` at `at` is on the list of its New York day: `{ ok: true }` or `{ ok: false, error }`. */
+    stockEligibleHas({ symbol, at = now() }) {
+      const why = eligibleRefusal(String(symbol || ''), at);
+      return why ? { ok: false, error: why } : { ok: true };
+    },
 
     /**
      * Engage or release the kill switch. Returns the new state. With `who` (`{ caller, route, method }`, the router's)
@@ -831,8 +900,17 @@ export function createGate({ store, env = {}, now = Date.now }) {
       const unanswered = stockLedger(at).entries.filter(entry => entry.settled === null && entry.at > at - STOCK_PENDING_MS);
       const flight = unanswered.filter(entry => entry.kind === 'buy');
       const enabled = stockBuysEnabled(env);
+      const events = enabled && stockEventBuysEnabled(env);
       return {
         enabled,
+        // Release R2: the event lane's buys (lib/caps.mjs "event-lane stock buys"): both switches, the name's share (the
+        // single-stock share, never above 10%), and the House's eligible list (its day, count and sha; never its names).
+        event_buys: {
+          enabled: events,
+          equity_share: account.shareText(account.stockEventShare(limitsNow)),
+          eligible: eligibleStatus(),
+          admitted: events && !killed() && row.orders < openOrdersCap(),
+        },
         etf_equity_share: account.shareText(limitsNow.etfShare),
         stock_equity_share: account.shareText(limitsNow.stockShare),
         max_equity_multiple: account.shareText(limitsNow.maxMultiple),

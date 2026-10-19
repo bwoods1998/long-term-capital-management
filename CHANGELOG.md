@@ -79,6 +79,31 @@ the captain's workstation from branch `feat/evl-shadow` until release R1 brings 
   `lane.json` and the receipts. Rollback: the previous release (the store stays on disk, unread); or, with no deploy,
   `touch <state>/events/STOP` and the lane idles after the turn in hand.
 
+### Gateway G2: the event lane's real buys, on `r2/gateway` (release R2; unreleased; a gateway deploy, before the House release R2; `STOCK_EVENT_BUYS` ships `off`, so it changes nothing the floor does)
+
+- **Why.** The owner's goal of Oct 19, 2026 (item 4) and PREREG-EVL-1 section 8: an event program that passes its
+  screen trades real money at Probe, its entries whole-share limit-on-open / limit-on-close orders at 1.25 x the
+  previous SIP close, at most 10% of equity a name, no margin.
+- **What.** A second real stock buy branch (`gateway/lib/caps.mjs` "event-lane stock buys", `router.mjs`
+  `realEventBuy`, `gate.mjs`): a buy with `time_in_force` `opg` or `cls`, behind `STOCK_EVENT_BUYS` (and
+  `STOCK_BUYS_REAL`); only a name on the House's eligible list of the New York day (the new `POST|GET
+  /v1/stock/eligible`, checked again in the Gate's reserving step); the venue's asset record (us_equity, active,
+  tradable, a listed exchange) and SIP daily bars (previous close >= $3, 20-session ADV >= $1M) read by the gateway
+  itself, cached per symbol per day; the limit at most 1.25 x the previous SIP close; metered at qty x limit; every
+  stock cap, the name held BOOK-WIDE to the single-stock share and never above 10% of equity (a code ceiling);
+  `STOCK_MAX_EQUITY_MULTIPLE` "2" -> "1" (no margin as a gateway wall); the kill switch stops it. Sales of held event
+  shares at `opg` / `cls` (market or limit) are closes as before, pinned by a test. `/v1/health` shows
+  `stock_buys.event_buys` (the switches, the share, the list's day, count and sha).
+- **Not here.** `STOCK_SINGLE_EQUITY_SHARE` "0.2" -> "0.1" moves together with the constitution's
+  `equity_money.position_share.stock` (league.ci holds the House's row within the gateway's var), so it ships in the
+  House release R2 (`r2/house`); event buys are held to 10% a name by the code ceiling either way.
+- **Tests.** gateway/test/event-buys.test.mjs (new, 23: the switch, the shape, the list and its route, the asset and
+  bars checks and their cache, the limit, the 10% book-wide cap, no margin, the kill switch, sales at opg/cls, the
+  list's own buys unchanged); stock-buys.test.mjs pins the deployed vars. Gateway suite 489/489.
+- **Deploy and rollback.** `cd gateway && npm run check && npm test && npx --no-install wrangler@4.129.1 deploy` from the
+  release's head, never 12:55-20:05Z on a trading day (12:55-21:05Z from Nov 2), with no order in flight; rollback
+  `wrangler rollback <the previous version>`.
+
 ### The event lane (EVL), shadow, on `feat/evl-shadow` (not on the House; runs on the captain's workstation until release R1)
 
 - **Why.** The owner's goal of Oct 19, 2026: one event-driven single-stock lane, judged by pre-registered screens.
