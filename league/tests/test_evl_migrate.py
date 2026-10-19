@@ -127,6 +127,20 @@ class Migrate(unittest.TestCase):
         self.assertEqual(api.uploads.count("part-00001"), 2)
         self.assertEqual(api.uploads.count("part-00000"), 1)
 
+    def test_a_chunk_that_stays_damaged_refuses_and_leaves_no_upload_behind(self):
+        class AlwaysDamaged(FakeSail):
+            def upload(self, box, path, content, *, mode=0o600, timeout=300.0):
+                if Path(path).name == "part-00000":
+                    self.corrupt.add("part-00000")
+                return super().upload(box, path, content, mode=mode, timeout=timeout)
+        api = AlwaysDamaged()
+        with self.assertRaises(M.Refused) as refused:
+            self.migrate(api)
+        self.assertIn("still differ", refused.exception.why)
+        self.assertEqual(api.uploads.count("part-00000"), 1 + M.RESENDS)
+        self.assertEqual([p for p in (self.box / ".upload").iterdir()], [])
+        self.assertFalse(self.target().exists())
+
     def test_a_missing_or_corrupt_document_refuses_the_copy(self):
         db = sqlite3.connect(str(self.source / "events.sqlite"))
         try:

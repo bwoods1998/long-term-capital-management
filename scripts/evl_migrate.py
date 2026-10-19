@@ -202,8 +202,9 @@ ask = json.loads(sys.argv[1])
 updir, target, staging = ask["dir"], ask["target"], ask["staging"]
 
 def fail(why):
-    if os.path.isdir(staging):
-        shutil.rmtree(staging, ignore_errors=True)
+    for leftover in (staging, updir):
+        if os.path.isdir(leftover):
+            shutil.rmtree(leftover, ignore_errors=True)
     print(json.dumps({"ok": False, "why": why}))
     sys.exit(1)
 
@@ -342,6 +343,7 @@ def migrate(api: Any, box: str, source: Path, *, remote_root: str, python: str, 
     updir = f"{remote_root}/.upload/evl-migrate-{stamp}"
     staging = f"{os.path.dirname(target.rstrip('/'))}/.events-incoming-{stamp}"
     work = Path(tempfile.mkdtemp(prefix="evl-migrate-", dir=str(work) if work else None))
+    uploaded = False
     try:
         seen = run_snippet(api, box, python, CHECK_SNIPPET, {"target": target}, timeout=120)
         if seen.get("target") == "full":
@@ -361,6 +363,7 @@ def migrate(api: Any, box: str, source: Path, *, remote_root: str, python: str, 
         say(f"bundle {size} bytes, {len(manifest['files'])} files, sha256 {whole[:12]}; uploading in "
             f"{(size + step - 1) // step} chunks ...")
         for name, data in chunks(tarball, step):
+            uploaded = True
             api.upload(box, f"{updir}/{name}", data, mode=0o600, timeout=300)
             sent[name] = hashlib.sha256(data).hexdigest()
         for attempt in range(RESENDS + 1):
@@ -378,10 +381,16 @@ def migrate(api: Any, box: str, source: Path, *, remote_root: str, python: str, 
                                                               "parts": sorted(sent), "sha256": whole}, timeout=1800)
         if not done.get("ok"):
             raise Refused(f"the box refused the copy: {done.get('why')}")
+        uploaded = False   # the box removed its uploads with the copy in place
         return {"ok": True, "target": target, "bundle_bytes": size, "bundle_sha256": whole, "chunks": len(sent),
                 "files": done.get("files"), "counts": done.get("counts"), "schema_version": manifest["schema_version"]}
     finally:
         shutil.rmtree(work, ignore_errors=True)
+        if uploaded:   # a failed attempt leaves no chunks on the box (best effort)
+            try:
+                api.exec(box, ["rm", "-rf", updir], timeout=120, on_output=None)
+            except Exception:  # noqa: BLE001 - the refusal in hand says more than a failed cleanup
+                pass
 
 
 def box_id(explicit: str | None) -> str:
